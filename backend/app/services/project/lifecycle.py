@@ -31,6 +31,7 @@ from app.models import (
     PROJECT_NODE_FILENAME,
     AIPolicy,
     AncestorCandidate,
+    CodeFencedBody,
     DirectoryEntry,
     DirectoryListing,
     DirectoryRoot,
@@ -48,6 +49,7 @@ from app.models import (
     UpdateProjectSettingsRequest,
 )
 from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION
+from app.services.project.code_fence import unwrap_whole_body_code_fence
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import INHERITS_KEY, MANIFEST_FILENAME, LayerVisitor
 from app.services.project.node_index import IndexLayer, NodeIndex
@@ -936,7 +938,8 @@ class ProjectLifecycleMixin:
         errors.extend(scene_errors)
         warnings.extend(scene_warnings)
 
-        errors.extend(self._validate_lore_entries(node_index, metadata_schema))
+        lore_errors, code_fenced_bodies = self._validate_lore_entries(node_index, metadata_schema)
+        errors.extend(lore_errors)
 
         todo_errors, todo_warnings = self._validate_todo_anchors(scene_ids)
         errors.extend(todo_errors)
@@ -947,6 +950,7 @@ class ProjectLifecycleMixin:
             warnings=warnings,
             errors=errors,
             migrations_applied=list(self.last_migrations),
+            code_fenced_bodies=code_fenced_bodies,
         )
 
     def _validate_required_files(self, root: Path) -> list[str]:
@@ -1027,14 +1031,28 @@ class ProjectLifecycleMixin:
 
     def _validate_lore_entries(
         self, node_index: NodeIndex, metadata_schema: MetadataSchema | None
-    ) -> list[str]:
-        """Per-lore-entry front-matter + metadata checks."""
+    ) -> tuple[list[str], list[CodeFencedBody]]:
+        """Per-lore-entry front-matter + metadata checks, plus the whole-body
+        code-fence flag (#1628). Returns (errors, code_fenced): the fence flag is
+        advisory (the entry loads fine, it just renders as source), so it rides
+        its own list rather than errors/warnings and drives an unwrap offer.
+
+        One pass over the lore bodies serves both — the fence check reads the
+        very body the metadata checks already loaded."""
         errors: list[str] = []
+        code_fenced: list[CodeFencedBody] = []
+        # Only flag entries the open project OWNS: unwrapping writes through the
+        # normal lore save, which refuses to rewrite an inherited ancestor's body
+        # (it 409s to protect ancestor canon). An inherited fenced entry is fixed
+        # by opening its owning project, where it flags as local.
+        own_layer_id = self._metadata_schema_layer_id(self._require_project())
         for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "lore"), key=lambda item: item.id):
             entry_id = entry.id
             path = entry.path
             try:
-                front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
+                front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+                if entry.source_layer_id == own_layer_id and unwrap_whole_body_code_fence(body) is not None:
+                    code_fenced.append(CodeFencedBody(id=entry_id, kind="lore", title=entry.title or entry_id))
                 entry_type = front_matter.get("entry_type", "lore:note")
                 if entry_type is not None and not isinstance(entry_type, str):
                     errors.append(f"Lore Entry {entry_id} has invalid entry_type; it must be text.")
@@ -1044,7 +1062,7 @@ class ProjectLifecycleMixin:
                     errors.extend(self._validate_lore_entry_metadata(entry_id, str(entry_type or "lore:note"), metadata, metadata_schema, node_index))
             except ProjectServiceError as exc:
                 errors.append(exc.message)
-        return errors
+        return errors, code_fenced
 
     def _validate_todo_anchors(self, scene_ids: set[str]) -> tuple[list[str], list[str]]:
         """TODO/anchor integrity. Returns (errors, warnings): a dangling scene or

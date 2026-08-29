@@ -9,12 +9,21 @@ const clean: ProjectValidation = {
   errors: [],
   warnings: [],
   migrations_applied: [],
+  code_fenced_bodies: [],
 };
 const withIssues: ProjectValidation = {
   valid: false,
   errors: ["Scene 3 missing from structure"],
   warnings: ["TODO link dangles"],
   migrations_applied: [],
+  code_fenced_bodies: [],
+};
+const withCodeFence: ProjectValidation = {
+  valid: true,
+  errors: [],
+  warnings: [],
+  migrations_applied: [],
+  code_fenced_bodies: [{ id: "lore-shell", kind: "lore", title: "Shell" }],
 };
 
 const base = {
@@ -22,6 +31,7 @@ const base = {
   onClose: () => {},
   checking: false,
   onRepair: () => {},
+  onUnwrap: () => {},
 };
 
 describe("ValidateModal", () => {
@@ -66,6 +76,32 @@ describe("ValidateModal", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: "Repair TODO Links" }));
     expect(onRepair).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists a whole-body code-fenced entry and unwraps it on click", async () => {
+    const onUnwrap = vi.fn();
+    render(ValidateModal, { props: { ...base, validation: withCodeFence, onUnwrap } });
+
+    expect(screen.getByText("Bodies wrapped in a code block")).toBeTruthy();
+    expect(screen.getByText("Shell")).toBeTruthy();
+    // Advisory, not a structural error, so no Repair action is offered for it.
+    expect(screen.queryByRole("button", { name: "Repair TODO Links" })).toBeNull();
+    // And it is not mistaken for a clean project.
+    expect(
+      screen.queryByText("No structure, scene, or TODO synchronization issues found."),
+    ).toBeNull();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Unwrap…" }));
+    expect(onUnwrap).toHaveBeenCalledTimes(1);
+    expect(onUnwrap).toHaveBeenCalledWith(withCodeFence.code_fenced_bodies[0]);
+  });
+
+  it("hides the results, and the Unwrap action, while a check is in flight", () => {
+    render(ValidateModal, { props: { ...base, validation: withCodeFence, checking: true } });
+    // The body shows the spinner, not stale results — so no Unwrap can fire
+    // against a result that is being recomputed.
+    expect(screen.getByText("Checking project files…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Unwrap…" })).toBeNull();
   });
 
   it("closes via the Close button", async () => {

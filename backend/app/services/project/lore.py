@@ -30,6 +30,7 @@ from app.models import (
     SaveLoreEntryRequest,
 )
 from app.services.markdown_validation import validate_scene_markdown
+from app.services.project.code_fence import unwrap_whole_body_code_fence
 from app.services.project.errors import ProjectServiceError
 from app.services.project.overrides import LayerOverride
 
@@ -156,6 +157,29 @@ class LoreEntriesMixin:
             forked_from=self._forked_from_of(front_matter),
             overridden_fields=overridden_fields,
         )
+
+    def preview_lore_code_fence_unwrap(self, entry_id: str) -> str:
+        """The entry's body with its whole-body code fence stripped (#1628).
+
+        Read-only: the caller feeds this into the standard revision review, and
+        the write is the normal lore save when the user commits. Reads the body
+        directly (not via `read_lore_entry`) so an unrelated metadata problem
+        cannot block the unwrap. Raises 409 if the body is no longer a single
+        wrapping fence — the report is a snapshot and the entry may have moved on.
+        """
+        index = self._build_node_index()
+        index_entry = index.by_id.get(entry_id)
+        if index_entry is not None and index_entry.kind == "lore":
+            path = index_entry.path
+        else:
+            path = self._path_for_node_id(entry_id, "lore")
+        _, body = self._read_markdown_with_front_matter(path, strict=True)
+        unwrapped = unwrap_whole_body_code_fence(body)
+        if unwrapped is None:
+            raise ProjectServiceError(
+                "This entry's body is no longer a single code block; nothing to unwrap.", 409
+            )
+        return unwrapped
 
     def save_lore_entry(self, entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
         """Save a lore entry, routed by its authoring layer (#314 / ADR-0039/0042).

@@ -107,6 +107,7 @@
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
   import type {
     AssistantEntrySummary,
+    CodeFencedBody,
     Scene,
     LooseScene,
     NodePickerConfig,
@@ -696,6 +697,22 @@
     } finally {
       validating = false;
     }
+  }
+
+  // Offer to unwrap an entry whose whole body is one code fence (#1628). Fetch
+  // the fresh unwrapped body, open the entry, and propose it as a standard
+  // revision review — reusing the AI-revision surface, so the user reviews the
+  // before/after and Commits or Declines. The write is the commit, never here;
+  // declining leaves the fenced body untouched. Close the modal so the review
+  // on the entry is visible.
+  async function unwrapCodeFencedBody(fenced: CodeFencedBody) {
+    await run(async () => {
+      const { body } = await api.unwrapLoreCodeFencePreview(fenced.id);
+      validateModalOpen = false;
+      await editorPanes.openLore(fenced.id);
+      entryBrainstorm.propose(fenced.id, { body, fields: {} });
+      status = `Review the unwrap of “${fenced.title}”`;
+    });
   }
 
   async function openImportDocs() {
@@ -1315,6 +1332,7 @@
     {validation}
     checking={validating}
     onRepair={repairProject}
+    onUnwrap={unwrapCodeFencedBody}
   />
 
   <FinalizeRoleplayDialog

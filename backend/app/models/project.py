@@ -262,11 +262,32 @@ class LooseScene(BaseModel):
     filename: str
 
 
+class CodeFencedBody(BaseModel):
+    """A lore entry whose whole body is a single fenced code block (#1628) — a
+    paste artifact that renders prose as monospaced source. A *flag*, not a
+    repair: the report offers an explicit, reviewable unwrap (never on load)."""
+
+    id: str
+    kind: str
+    title: str
+
+
 class ProjectValidation(BaseModel):
     valid: bool
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     migrations_applied: list[str] = Field(default_factory=list)
+    # Advisory, not an integrity error, so it does not flip `valid`; the report
+    # surfaces it as its own actionable section (#1628).
+    code_fenced_bodies: list[CodeFencedBody] = Field(default_factory=list)
+
+
+class LoreCodeFencePreview(BaseModel):
+    """The body of a lore entry with its whole-body code fence stripped (#1628),
+    read-only — fed into the standard revision review so the user commits or
+    declines the unwrap. The write is the normal lore save on commit."""
+
+    body: str
 
 
 class ImportLooseScenesRequest(BaseModel):

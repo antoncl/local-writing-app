@@ -8,7 +8,7 @@
   // Not a permission control, so no draft/explicit-save dance (unlike
   // AIPolicyModal): validate is a read, repair is an idempotent fix the user
   // asked for by clicking it here.
-  import type { ProjectValidation } from "@/lib/types";
+  import type { CodeFencedBody, ProjectValidation } from "@/lib/types";
   import Modal from "@/components/dialogs/Modal.svelte";
 
   let {
@@ -17,12 +17,17 @@
     validation,
     checking,
     onRepair,
+    onUnwrap,
   }: {
     open: boolean;
     onClose: () => void;
     validation: ProjectValidation | null;
     checking: boolean;
     onRepair: () => void;
+    // Offer to unwrap one entry whose whole body is a code fence (#1628). Opens
+    // the entry with the unwrapped body proposed as a standard revision review —
+    // the write is the user's Commit, never this click.
+    onUnwrap: (fenced: CodeFencedBody) => void;
   } = $props();
 
   let hasIssues = $derived(
@@ -55,7 +60,16 @@
             <p>{validationWarning}</p>
           {/each}
         {/if}
-        {#if validation.errors.length === 0 && validation.warnings.length === 0}
+        {#if validation.code_fenced_bodies.length > 0}
+          <strong>Bodies wrapped in a code block</strong>
+          {#each validation.code_fenced_bodies as fenced (fenced.id)}
+            <div class="code-fenced-row">
+              <p><span class="fenced-title">{fenced.title}</span> renders as source — its whole body is one code block, likely a paste.</p>
+              <button type="button" class="unwrap" onclick={() => onUnwrap(fenced)}>Unwrap…</button>
+            </div>
+          {/each}
+        {/if}
+        {#if validation.errors.length === 0 && validation.warnings.length === 0 && validation.code_fenced_bodies.length === 0}
           <p>No structure, scene, or TODO synchronization issues found.</p>
         {/if}
       </div>
@@ -114,5 +128,41 @@
     color: var(--accent-deep);
     font-family: var(--mono);
     font-size: var(--fs-sm);
+  }
+
+  .code-fenced-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .code-fenced-row p {
+    flex: 1;
+  }
+
+  .fenced-title {
+    color: var(--text-1);
+    font-weight: 600;
+  }
+
+  .unwrap {
+    flex: none;
+    font-size: var(--fs-sm);
+    padding: 2px 8px;
+    color: var(--text-2);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .unwrap:hover:not(:disabled) {
+    color: var(--text-1);
+    border-color: var(--text-3);
+  }
+
+  .unwrap:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 </style>

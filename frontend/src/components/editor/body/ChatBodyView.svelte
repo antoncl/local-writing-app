@@ -77,6 +77,7 @@
   } from "@/components/editor/body/chat/chatInputs";
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
   import { structureNodeTitle } from "@/lib/utils/nodeTitle";
+  import { isNearBottom, NEAR_BOTTOM_PX } from "@/lib/utils/scrollAnchor";
 
   
   interface Props {
@@ -138,6 +139,10 @@
   // core confusion behind #1037. Reset on the next send or any edit.
   let chatRewound = $state(false);
   let chatScrollEl: HTMLDivElement | null = $state(null);
+  // Stick-to-bottom (#1611): true while the reader is at/near the bottom, so
+  // appends may follow the tail. Scrolling up releases it; the jump button and
+  // any send re-pin it. Recomputed from geometry on every scroll.
+  let pinnedToBottom = $state(true);
   // Holds the rendered template for a prompt-bound chat (filled by
   // renderAndLockPromptTemplate on first send) or — for legacy sessions
   // — the freeform system message that was authored before chats had
@@ -300,6 +305,8 @@
       chatSession = session;
       loadedChatId = chatId;
       applyChatSession(session);
+      await tick();
+      scrollToBottom();
     } catch (err) {
       if (scene?.id !== chatId) return;
       loadError = (err as Error).message || "Couldn't load chat.";
@@ -313,6 +320,7 @@
   function resetChatState() {
     chatHistory = [];
     chatRunning = false;
+    pinnedToBottom = true;
     chatError = null;
     chatNotice = null;
     chatInput = "";
@@ -568,6 +576,25 @@
     activeChatJournal = [...activeChatJournal, ...fresh];
   }
 
+  // Stick-to-bottom (#1611) geometry + snap helpers, shared by the scroll
+  // handler, streaming, post-send, chat-open, and the jump-to-latest button.
+  function recomputePinned(): void {
+    const el = chatScrollEl;
+    if (!el) return;
+    pinnedToBottom = isNearBottom(el.scrollTop, el.scrollHeight, el.clientHeight, NEAR_BOTTOM_PX);
+  }
+
+  // Snap the transcript to the tail and re-pin, in one synchronous step so the
+  // pinned state always matches where the view actually is. Deliberately
+  // instant, not smooth: "jump to latest" should land immediately, and a
+  // pin-then-animate gap would hide the button before the view arrives.
+  function scrollToBottom(): void {
+    const el = chatScrollEl;
+    if (!el) return;
+    pinnedToBottom = true;
+    el.scrollTop = el.scrollHeight;
+  }
+
   async function streamAssistantReply(onError: () => void): Promise<void> {
     chatHistory = [...chatHistory, { role: "assistant", content: "" }];
     const idx = chatHistory.length - 1;
@@ -577,7 +604,7 @@
       scrollPending = true;
       await tick();
       scrollPending = false;
-      if (chatScrollEl) chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
+      if (pinnedToBottom && chatScrollEl) chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
     };
     let errored = false;
     // ADR-0076 S3: one abort handle per stream, so Stop can cancel the fetch
@@ -735,6 +762,8 @@
       // "restored for retry" situation worth announcing.
       chatRewound = text.length > 0;
     };
+    await tick();
+    scrollToBottom();
     try {
       await streamAssistantReply(rewindUser);
     } catch (e) {
@@ -743,7 +772,7 @@
     } finally {
       chatRunning = false;
       await tick();
-      if (chatScrollEl) chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
+      if (pinnedToBottom && chatScrollEl) chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
     }
   }
 
@@ -1098,6 +1127,9 @@
       {chatRunning}
       assistantName={assistantSpeakerName(chatAssistantId, assistantEntries, scopedDefaultId)}
       bind:scrollEl={chatScrollEl}
+      onScroll={recomputePinned}
+      showJumpToLatest={!pinnedToBottom}
+      onJumpToLatest={() => scrollToBottom()}
     />
 
     {#if !isLocked && strippedInputs.some((i) => !i.hidden)}

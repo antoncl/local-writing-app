@@ -59,6 +59,7 @@
 
   import { untrack } from "svelte";
   import IconPicker from "@/components/widgets/IconPicker.svelte";
+  import { anchoredPopover } from "@/lib/actions/anchoredPopover";
   import NodePickerConfigEditor from "@/components/schema/NodePickerConfigEditor.svelte";
   import SelectOptionsEditor from "@/components/schema/SelectOptionsEditor.svelte";
   import DefaultValueEditor from "@/components/schema/DefaultValueEditor.svelte";
@@ -221,10 +222,12 @@
   let iconPickerOpen = $state(false);
   let iconBtnEl: HTMLButtonElement | undefined = $state();
   let typeChipEl: HTMLButtonElement | undefined = $state();
-  // Flip a popover above its trigger when there isn't room below (#1001) —
-  // otherwise, opened from a field low in a tall type editor, it runs past the
-  // fold and is clipped (and chasing the icon picker with the panel scrollbar
-  // dismisses it). Applied to BOTH this component's popovers, not just one.
+  // Flip the type-grid popover above its trigger when there isn't room below
+  // (#1001) — opened from a field low in a tall editor it would otherwise run
+  // past the fold. (The icon popover no longer needs this: it's body-portaled
+  // and viewport-anchored via `anchoredPopover` (#1573), so the pane can't clip
+  // it at all — a strictly better fix than this viewport-based estimate, which
+  // is blind to the pane's own `overflow` box.)
   function flipUp(el: HTMLElement | undefined, estHeight: number): boolean {
     if (!el) return false;
     const rect = el.getBoundingClientRect();
@@ -233,13 +236,8 @@
     // makes things worse. estHeight ≈ the popover's max height + chrome.
     return spaceBelow < estHeight && rect.top > spaceBelow;
   }
-  // The icon picker caps at 340px (IconPicker .ip-body); the type grid is
-  // shorter (2 cols × ~6 rows). Each flips off its own trigger + open flag.
-  let iconFlipUp = $state(false);
+  // The type grid caps at ~260px (2 cols × ~6 rows); flips off its own trigger.
   let typeFlipUp = $state(false);
-  $effect(() => {
-    iconFlipUp = iconPickerOpen && flipUp(iconBtnEl, 360);
-  });
   $effect(() => {
     typeFlipUp = typeMenuOpen && flipUp(typeChipEl, 260);
   });
@@ -296,7 +294,12 @@
   // mousedown but no click, so scrolling the popover no longer dismisses it.
   function handleDocumentClick(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
-    if (iconPickerOpen && !target?.closest(".sfi-icon-anchor")) iconPickerOpen = false;
+    // The icon popover is body-portaled (#1573), so a click inside it is no
+    // longer under `.sfi-icon-anchor` — allow `.sfi-icon-pop` too, or selecting
+    // an icon would dismiss the picker.
+    if (iconPickerOpen && !target?.closest(".sfi-icon-anchor") && !target?.closest(".sfi-icon-pop")) {
+      iconPickerOpen = false;
+    }
     if (typeMenuOpen && !target?.closest(".sfi-type-anchor")) typeMenuOpen = false;
   }
 
@@ -348,7 +351,7 @@
         <i class={fieldIconClass({ type, icon })} aria-hidden="true"></i>
       </button>
       {#if iconPickerOpen}
-        <div class="sfi-icon-pop" class:up={iconFlipUp}>
+        <div class="sfi-icon-pop" use:anchoredPopover={{ anchor: iconBtnEl }}>
           <IconPicker
             value={icon}
             defaultGlyph={DEFAULT_FIELD_GLYPH[type] ?? "letter-case"}
@@ -611,16 +614,12 @@
     border-color: var(--accent);
     color: var(--accent-strong);
   }
+  /* Body-portaled + viewport-anchored by `anchoredPopover` (#1573); the action
+     owns position/left/top, this carries only the portaled elevation tier (must
+     clear the modal layer, matching SwatchPicker/TagPicker — not `z-index: 60`,
+     which would open behind a dialog embedding this editor). */
   .sfi-icon-pop {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    z-index: 60;
-  }
-  /* Flipped above the tile when there's no room below (#1001). */
-  .sfi-icon-pop.up {
-    top: auto;
-    bottom: calc(100% + 6px);
+    z-index: 10000;
   }
   .sfi-name {
     flex: 1;

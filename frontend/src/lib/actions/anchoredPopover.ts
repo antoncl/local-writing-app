@@ -1,0 +1,82 @@
+// A Svelte action that turns a popover element into a body-portaled, viewport-
+// anchored layer — so it escapes any `overflow`/`transform` ancestor that would
+// otherwise clip it (#1573).
+//
+// Why this exists: an in-pane popover positioned `absolute` inside a pane's
+// `overflow: auto` box gets cut off the moment the pane is short (its lower rows
+// become unreachable). A viewport-based `flipUp` guess doesn't help — it reads
+// `window.innerHeight`, not the pane's own clip box, so with room below the fold
+// it never flips and still clips. The robust fix is to lift the popover out of
+// the pane entirely: portal it to `<body>` (via `portalToBody`) and pin it at
+// coords derived from the trigger's `getBoundingClientRect()`.
+//
+// SwatchPicker and TagPicker each already carry an inline copy of this
+// rect-anchoring logic; this generalises it so any future in-pane popover has
+// one home rather than a fourth copy.
+//
+// Contract (mirrors portalToBody's): mount this only while the popover is open
+// (behind an `{#if}`); give the popover a stable class so the caller's
+// outside-click handler can still recognise clicks inside it, since it no longer
+// lives under the trigger. The popover supplies its own visual chrome + z-index
+// in CSS; the action owns only `position: fixed` and the `left`/`top` coords.
+
+import { portalToBody } from "./portal";
+
+export interface AnchoredPopoverParams {
+  /** The trigger element the popover floats against. */
+  anchor: HTMLElement | null | undefined;
+  /** Gap in px between the trigger and the popover (default 6). */
+  gap?: number;
+}
+
+export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams) {
+  let current = params;
+  // Structural, not cosmetic: fixed positioning is what lets the portaled node
+  // resolve against the viewport instead of a clipped/transformed ancestor.
+  node.style.position = "fixed";
+  const portal = portalToBody(node);
+
+  function reposition() {
+    const anchor = current.anchor;
+    if (!anchor) return;
+    const gap = current.gap ?? 6;
+    const r = anchor.getBoundingClientRect();
+    // The node is already in the DOM (portalToBody appended it), so reading its
+    // offset size forces one sync layout and returns real dimensions — no
+    // one-frame flash at (0,0) that a deferred measure would show.
+    const w = node.offsetWidth;
+    const h = node.offsetHeight;
+    // Open below + left-aligned with the trigger; right-align under it when the
+    // left edge would overrun the viewport.
+    let left = r.left;
+    if (left + w + 8 > window.innerWidth) left = Math.max(8, r.right - w);
+    // Flip above when there isn't room below, clamping into view (8px margin)
+    // rather than refusing the flip — so a popover shorter than the viewport is
+    // always fully visible instead of hanging a few px past the bottom edge.
+    let top = r.bottom + gap;
+    if (top + h + 8 > window.innerHeight) {
+      top = Math.max(8, r.top - h - gap);
+    }
+    node.style.left = `${left}px`;
+    node.style.top = `${top}px`;
+  }
+
+  reposition();
+  // Capture phase so a scroll inside the pane (which doesn't bubble to window)
+  // still re-pins the popover to the moving trigger.
+  const onScrollResize = () => reposition();
+  window.addEventListener("scroll", onScrollResize, true);
+  window.addEventListener("resize", onScrollResize);
+
+  return {
+    update(next: AnchoredPopoverParams) {
+      current = next;
+      reposition();
+    },
+    destroy() {
+      window.removeEventListener("scroll", onScrollResize, true);
+      window.removeEventListener("resize", onScrollResize);
+      portal.destroy();
+    },
+  };
+}

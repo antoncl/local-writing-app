@@ -314,6 +314,59 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         captured = self._run_capturing_create(OpenRouterProfile(api_key="sk-or"), call)
         self.assertNotIn("temperature", captured)
 
+    def test_openai_reasoning_model_omits_temperature_streaming(self):
+        # #1577: OpenAI reasoning models (o1/o3/o4) 400 on `temperature`. The
+        # OpenAI-direct path used to send it — the base family rule only caught
+        # the Anthropic no-sampling families, not native o-series ids.
+        call = ChatCall(
+            model="o3-mini",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+            temperature=0.7,
+        )
+        captured = self._run_capturing_create(OpenAIProfile(api_key="sk-openai"), call)
+        self.assertNotIn("temperature", captured)
+
+    def test_openai_reasoning_model_omits_temperature_non_streaming(self):
+        # The same gate on chat() — one supports_temperature override covers both.
+        call = ChatCall(
+            model="o1",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+            temperature=0.7,
+        )
+        captured = self._run_capturing_chat(OpenAIProfile(api_key="sk-openai"), call)
+        self.assertNotIn("temperature", captured)
+
+    def test_openai_sampling_model_keeps_temperature(self):
+        # Guard against over-broadening: gpt-4o samples and keeps temperature —
+        # its id contains an "o" but it is not a reasoning model.
+        call = ChatCall(
+            model="gpt-4o",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+            temperature=0.3,
+        )
+        captured = self._run_capturing_chat(OpenAIProfile(api_key="sk-openai"), call)
+        self.assertEqual(captured["temperature"], 0.3)
+
+    def test_openrouter_route_to_openai_reasoning_omits_temperature(self):
+        # #1577 general case: the gate lives in the shared family rule, so an
+        # OpenRouter route to the o-series (openai/o3) is protected too — not
+        # just the OpenAI-direct profile.
+        call = ChatCall(
+            model="openai/o3",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+            temperature=0.7,
+        )
+        captured = self._run_capturing_create(OpenRouterProfile(api_key="sk-or"), call)
+        self.assertNotIn("temperature", captured)
+
     def test_openrouter_stream_surfaces_reasoning_and_keeps_content_plain(self):
         # #1588: reasoning routes stream chain-of-thought on the `reasoning`
         # field; it must surface as thinking (dropping it made reasoning-only /

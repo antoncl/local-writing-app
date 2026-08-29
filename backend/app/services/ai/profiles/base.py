@@ -94,16 +94,26 @@ NO_TEMPERATURE_FAMILIES: tuple[str, ...] = (
 )
 
 
+# OpenAI reasoning models (o1 / o3-mini / o4-mini …) 400 on `temperature` the
+# same way the no-sampling families above do. Anchored `o<digit>` matches the
+# o-series on both the native id and any route (`openai/o3`) once the provider
+# segment is stripped, without catching sampling ids such as `gpt-4o`.
+_OPENAI_REASONING_RE = re.compile(r"^o\d", re.IGNORECASE)
+
+
 def family_supports_temperature(model_id: str) -> bool:
     """Whether `model_id`'s family accepts a `temperature` parameter.
 
-    False only for `NO_TEMPERATURE_FAMILIES`. The id is matched with any leading
+    False for the `NO_TEMPERATURE_FAMILIES` (Anthropic no-sampling) and for
+    OpenAI reasoning models (o-series). The id is matched with any leading
     `provider/` route segment stripped (`anthropic/claude-opus-4-8` → checked as
-    `claude-opus-4-8`) so an OpenRouter/other route to a no-sampling model is
-    caught the same as the native id. Variant suffixes (`:free`, `:beta`) ride
-    along after the family prefix and still match via `startswith`.
+    `claude-opus-4-8`; `openai/o3` → `o3`) so a routed model is caught the same
+    as the native id. Variant suffixes (`:free`, `:beta`) ride along after the
+    family prefix and still match via `startswith`.
     """
     base = model_id.split("/", 1)[-1]
+    if _OPENAI_REASONING_RE.match(base):
+        return False
     return not any(base.startswith(p) for p in NO_TEMPERATURE_FAMILIES)
 
 

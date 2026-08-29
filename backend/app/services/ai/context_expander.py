@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, Literal
 
-from app.models import ChatSessionContextItem, ChatSessionJournalEntry
+from app.models import ChatSessionJournalEntry
 from app.services.ai.helpers import _attr_or_item, _safe_read_node
 from app.services.ai.lore_selection import (
     _build_scene_matcher,
@@ -49,8 +49,8 @@ def expand_context(
     project: ProjectService,
     text: str,
     existing_journal: Iterable[ChatSessionJournalEntry] = (),
-    explicit_picks: Iterable[ChatSessionContextItem] = (),
     *,
+    picked_ids: Iterable[str] = (),
     source: JournalSource = "user_message",
     turn: int = 0,
     scene: Any = None,
@@ -80,6 +80,14 @@ def expand_context(
     `_build_scene_matcher`/`_scene_prose_ids` for effective-name resolution;
     only `_scene_prose_ids` needs the loaded node (an id string yields no
     prose surface — see there).
+
+    `picked_ids` are the ids already in context via the picker — the union
+    of `used_node_ids` (tags/views/containers/nodes resolved at lock render)
+    and any `context_items` lore picks. A picked entry that is also mentioned
+    must be passed here or it gets re-journaled as "auto-added" (#1634); it is
+    already sent via its own channel, so excluding it changes only the label.
+    Non-lore ids are harmless: node ids are globally unique, so a scene id
+    can never match a lore detection.
 
     `turn` is the message index at which the detection fires (the new
     user message's index). Recorded on each entry for the audit UI.
@@ -120,15 +128,13 @@ def expand_context(
     combined_direct = direct_ids | rendered_ids | prose_ids
     depth1_ids = _textual_one_hop(project, combined_direct, scene=scene, matcher=matcher)
 
-    # What's already pinned via explicit picks or earlier journal turns?
+    # What's already in context via a picker or an earlier journal turn?
     in_scope: set[str] = set()
     for entry in existing_journal:
         in_scope.add(entry.entry_id)
-    for pick in explicit_picks:
-        # Only "lore" picks dedup against our matcher — scene/snippet/preset
-        # picks have different identity spaces.
-        if pick.kind == "lore" and pick.id:
-            in_scope.add(pick.id)
+    for picked_id in picked_ids:
+        if picked_id:
+            in_scope.add(picked_id)
 
     # Sorted so the persisted journal's entry order is deterministic run-to-run
     # (these are sets; the final lore set is order-independent, but a stable

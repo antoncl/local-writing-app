@@ -101,6 +101,7 @@ function makeDeps(over: Partial<ChatCommitDeps> = {}): ChatCommitDeps {
     getStagedSetId: vi.fn(() => ""),
     onStaged: vi.fn(async () => {}),
     onCreated: vi.fn(async () => {}),
+    revealEntry: vi.fn(),
     ...over,
   };
 }
@@ -332,6 +333,33 @@ describe("ChatCommitController — commitToEntry", () => {
 
     expect(deps.setError).toHaveBeenCalledWith("boom");
     expect(entryBrainstorm.proposalFor("lore-1")).toBeNull();
+  });
+
+  it("fronts the target entry after a proposed commit", async () => {
+    const { c, deps } = reviseController();
+    extractPatch.mockResolvedValue(okResult({ fields: { bio: "new" } }));
+
+    await c.commitToEntry();
+
+    expect(deps.revealEntry).toHaveBeenCalledWith("lore-1");
+  });
+
+  it("does not front the entry when the patch proposes nothing", async () => {
+    const { c, deps } = reviseController();
+    extractPatch.mockResolvedValue(okResult({ body: null, fields: {} }));
+
+    await c.commitToEntry();
+
+    expect(deps.revealEntry).not.toHaveBeenCalled();
+  });
+
+  it("does not front the entry on a garbled reply", async () => {
+    const { c, deps } = reviseController();
+    extractPatch.mockResolvedValue(okResult({ garbled: true }));
+
+    await c.commitToEntry();
+
+    expect(deps.revealEntry).not.toHaveBeenCalled();
   });
 });
 
@@ -671,5 +699,15 @@ describe("ChatCommitController — stageToPendingSet", () => {
     expect(deps.onStaged).not.toHaveBeenCalled();
     expect(deps.setError).toHaveBeenCalledWith("disk full");
     expect(c.committing).toBe(false);
+  });
+
+  it("staging never fronts an entry (review lives on the card, not the entry pane)", async () => {
+    const { c, deps } = stageController({ entryTitle: () => "Mira" });
+    extractPatch.mockResolvedValue(okResult({ fields: { condition: "werewolf" } }));
+    createSet.mockResolvedValue(madeSet("set-9"));
+
+    await c.stageToPendingSet();
+
+    expect(deps.revealEntry).not.toHaveBeenCalled();
   });
 });

@@ -81,6 +81,14 @@ export interface ChatCommitDeps {
    *  launched-with-subject naming convention. Same host-owned write-back shape
    *  as onStaged. */
   onCreated: (entryId: string, entryTitle: string) => Promise<void>;
+  /** Bring the entry a revise commit just proposed to into view — open its pane
+   *  and front it — so the proposed-vs-current review renders where the author is
+   *  looking, not only behind a review-dot on a tab they must find. The commit
+   *  runs from the chat pane; the review renders on the entry pane. Host-owned
+   *  because resolving an entry's kind to a pane opener is host policy (the
+   *  controller is kind-agnostic). Called only after a change was actually
+   *  proposed. */
+  revealEntry: (entryId: string) => void;
 }
 
 // ADR-0055 §2/§4a: a staged mutation set carries the same content as an entry
@@ -297,6 +305,7 @@ export class ChatCommitController {
       return;
     }
     entryBrainstorm.propose(entryId, { body, fields: patch.fields, reviewMode });
+    this.deps.revealEntry(entryId);
     // Hand-off cue (#710 slice 3): the commit lands here in the chat pane but the
     // review renders on the entry pane. Name where it went so the author knows to
     // flip over. A scene subject isn't in the caller's roster → "the scene".

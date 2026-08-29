@@ -8,7 +8,7 @@
   // `value`, and an `onSelect`; each item may carry a `key` shown as a hint
   // (the host wires the actual keybinding, this only labels it).
 
-  type Item = { id: T; label: string; hint?: string; key?: string };
+  type Item = { id: T; label: string; hint?: string; key?: string; tone?: "warm" | "cool" };
 
   let {
     items,
@@ -31,6 +31,7 @@
       type="button"
       class="seg"
       class:on={value === item.id}
+      data-tone={item.tone}
       aria-pressed={value === item.id}
       aria-label={item.label}
       title={item.hint
@@ -84,6 +85,25 @@
   }
   .seg.on kbd {
     color: var(--accent-emphasis);
+    border-color: currentColor;
+  }
+  /* When a tone-bearing segment is the selected one, its background carries the
+     diff's warm/cool markup tint instead of the neutral accent, tying "I'm
+     reading Current/Proposed" to the colour that side's text wears (#1620). The
+     inset edge keeps the pair apart in greyscale, so hue is never the only cue. */
+  .seg.on[data-tone="warm"] {
+    background: var(--diff-now-soft);
+    color: var(--text);
+    box-shadow: inset 0 -2px 0 var(--diff-now-edge);
+  }
+  .seg.on[data-tone="cool"] {
+    background: var(--diff-was-soft);
+    color: var(--text);
+    box-shadow: inset 0 -2px 0 var(--diff-was-edge);
+  }
+  .seg.on[data-tone="warm"] kbd,
+  .seg.on[data-tone="cool"] kbd {
+    color: var(--text-2);
     border-color: currentColor;
   }
 </style>

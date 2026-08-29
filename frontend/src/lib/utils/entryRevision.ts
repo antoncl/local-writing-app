@@ -54,6 +54,48 @@ export type FieldFlip = {
 };
 
 /**
+ * Normalize cosmetic markdown whitespace that the app's own editor and the AI
+ * emit differently, so a purely cosmetic reformat produces no diff (#1617). The
+ * editor's serializer (turndown) writes bullets as `-   item` (three spaces)
+ * with whitespace-only loose-list padding lines; the AI writes `- item`. Neither
+ * changes what the prose renders, but on raw markdown it makes every list block
+ * differ, which the block diff can only show as a whole-block stack.
+ *
+ * Two careful, meaning-preserving moves (never a blanket trailing-strip):
+ *  - blank a WHITESPACE-ONLY line (turndown's loose-list padding). Trailing
+ *    whitespace AFTER content is left alone — two trailing spaces are a markdown
+ *    hard line break, which the diff and the accept-write must not silently drop.
+ *  - collapse the run of spaces after a SHALLOW (<=3 leading spaces) list marker
+ *    to one. Capping the indent at 3 keeps it off 4-space indented code blocks,
+ *    which — like fenced code — must pass through untouched.
+ * Idempotent.
+ */
+export function normalizeReviewWhitespace(text: string): string {
+  let inFence = false;
+  let fence = "";
+  return text
+    .split("\n")
+    .map((line) => {
+      const m = line.match(/^\s*(`{3,}|~{3,})/);
+      if (m) {
+        const marker = m[1][0];
+        if (!inFence) {
+          inFence = true;
+          fence = marker;
+        } else if (marker === fence) {
+          inFence = false;
+          fence = "";
+        }
+        return line; // fence lines pass through untouched
+      }
+      if (inFence) return line; // inside code: leave exactly as-is
+      if (/^[ \t]+$/.test(line)) return ""; // whitespace-only line (loose-list padding)
+      return line.replace(/^(\s{0,3}(?:[-*+]|\d{1,9}[.)]))\s+/, "$1 ");
+    })
+    .join("\n");
+}
+
+/**
  * Diff a proposed body against the current one into the flip's `DiffRun` shape.
  *
  * `diffRuns(was, now)` with the proposal as `was` and the current body as `now`
@@ -62,6 +104,6 @@ export type FieldFlip = {
  * consumer of these runs relies on.
  */
 export function reviewBodyProposal(currentBody: string, proposedBody: string): BodyRevision {
-  const runs = diffRuns(proposedBody, currentBody);
+  const runs = diffRuns(normalizeReviewWhitespace(proposedBody), normalizeReviewWhitespace(currentBody));
   return { runs, regions: groupRuns(runs).regions };
 }

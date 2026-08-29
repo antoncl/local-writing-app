@@ -22,6 +22,11 @@
     value = $bindable(""),
     placeholder = "",
     onChange = undefined,
+    // Called when Enter is pressed in the field. Opt-in: consumers that submit
+    // on Enter (e.g. the Search pane's Find) pass this; without it Enter is
+    // inert, as before. Handled on the real input so it never depends on native
+    // form implicit-submission (which a global key handler can block).
+    onEnter = undefined,
     clearable = true,
     // 0 by default: sync. Consumers opt in to debounce by passing a ms
     // value; useful if the matcher is expensive to recompute per keystroke.
@@ -30,6 +35,7 @@
     value?: string;
     placeholder?: string;
     onChange?: ((value: string) => void) | undefined;
+    onEnter?: (() => void) | undefined;
     clearable?: boolean;
     debounceMs?: number;
   } = $props();
@@ -75,6 +81,11 @@
   }
 
   function handleKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter" && onEnter) {
+      event.preventDefault();
+      onEnter();
+      return;
+    }
     if (event.key === "Escape") {
       if (value) {
         // Clear without losing focus — user is likely about to search again.

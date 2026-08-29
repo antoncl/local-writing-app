@@ -75,10 +75,10 @@
   }
 </script>
 
-<form class="search-bar" onsubmit={(event) => { event.preventDefault(); runSearch(); }}>
-  <SearchInput bind:value={query} placeholder="Find in scenes and lore" />
-  <button class="search-find" type="submit">Find</button>
-</form>
+<div class="search-bar">
+  <SearchInput bind:value={query} placeholder="Find in scenes and lore" onEnter={runSearch} />
+  <button class="search-find" type="button" onclick={runSearch}>Find</button>
+</div>
 <label class="inline-check">
   <input type="checkbox" bind:checked={includeOpenTodos} />
   Include open TODOs

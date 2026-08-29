@@ -46,6 +46,26 @@ describe("Search pane — results render", () => {
     expect(screen.getByText("The ship made planetfall at dawn.")).toBeInTheDocument();
   });
 
+  it("searches on Enter in the field, not only on the Find button", async () => {
+    // Regression guard: the NodeRow reduction (#1608) briefly relied on native
+    // <form> implicit-submission for Enter, which a global key handler blocks in
+    // the real app — so Enter found nothing while the Find button worked. Enter
+    // is now handled explicitly on the input (SearchInput onEnter).
+    vi.mocked(api.search).mockResolvedValue({
+      query: "arrival",
+      hits: [hit("scenes/act-1/arrival.md", 12, "The ship made planetfall at dawn.")],
+    });
+    render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in scenes and lore");
+    await fireEvent.input(input, { target: { value: "arrival" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    expect(api.search).toHaveBeenCalledWith("arrival", false);
+    expect(screen.getByText("scenes/act-1/arrival.md:12")).toBeInTheDocument();
+  });
+
   it("opens a clicked hit through onOpenHit", async () => {
     const h = hit("lore/places/citadel.md", 3, "The citadel loomed over the plain.");
     vi.mocked(api.search).mockResolvedValue({ query: "citadel", hits: [h] });

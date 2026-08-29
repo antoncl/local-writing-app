@@ -7,7 +7,7 @@ import { history, redo, undo, undoDepth } from "@tiptap/pm/history";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
 import { schema } from "@tiptap/pm/schema-basic";
 
-import { minimalReplaceTransaction, stateAtDocumentBoundary } from "./documentBoundary";
+import { minimalReplaceTransaction, stateAtDocumentBoundary, threeWayMerge } from "./documentBoundary";
 
 function stateWithHistory(): EditorState {
   return EditorState.create({ schema, plugins: [history()] });
@@ -162,5 +162,77 @@ describe("minimalReplaceTransaction (#694)", () => {
     expect(undone.applied).toBe(true);
     expect(undone.state.doc.child(0).textContent).toBe("one");
     expect(undone.state.doc.child(2).textContent).toBe("three RECONCILED");
+  });
+});
+
+describe("threeWayMerge (ADR-0077 rung 2, #1621 slice B)", () => {
+  it("merges disjoint edits — local's paragraph and remote's other paragraph both land", () => {
+    const base = docWithParagraphs("one", "two", "three");
+    const local = docWithParagraphs("one EDITED", "two", "three");
+    const remote = docWithParagraphs("one", "two", "three CHANGED");
+
+    const res = threeWayMerge(base, local, remote);
+    expect(res.conflict).toBe(false);
+    expect(res.doc!.childCount).toBe(3);
+    expect(res.doc!.child(0).textContent).toBe("one EDITED");
+    expect(res.doc!.child(1).textContent).toBe("two");
+    expect(res.doc!.child(2).textContent).toBe("three CHANGED");
+  });
+
+  it("merges disjoint edits regardless of order (remote first, local later)", () => {
+    const base = docWithParagraphs("one", "two", "three");
+    const local = docWithParagraphs("one", "two", "three LOCAL");
+    const remote = docWithParagraphs("one REMOTE", "two", "three");
+
+    const res = threeWayMerge(base, local, remote);
+    expect(res.conflict).toBe(false);
+    expect(res.doc!.child(0).textContent).toBe("one REMOTE");
+    expect(res.doc!.child(2).textContent).toBe("three LOCAL");
+  });
+
+  it("conflicts when both sides edit the same region", () => {
+    const base = docWithParagraphs("one", "two", "three");
+    const local = docWithParagraphs("one", "two LOCAL", "three");
+    const remote = docWithParagraphs("one", "two REMOTE", "three");
+
+    const res = threeWayMerge(base, local, remote);
+    expect(res.conflict).toBe(true);
+    expect(res.doc).toBeNull();
+  });
+
+  it("takes local wholesale when remote is unchanged, and remote wholesale when local is unchanged", () => {
+    const base = docWithParagraphs("one", "two");
+    const localOnly = threeWayMerge(base, docWithParagraphs("one EDITED", "two"), docWithParagraphs("one", "two"));
+    expect(localOnly.conflict).toBe(false);
+    expect(localOnly.doc!.child(0).textContent).toBe("one EDITED");
+
+    const remoteOnly = threeWayMerge(base, docWithParagraphs("one", "two"), docWithParagraphs("one", "two REMOTE"));
+    expect(remoteOnly.conflict).toBe(false);
+    expect(remoteOnly.doc!.child(1).textContent).toBe("two REMOTE");
+  });
+
+  it("composes with the reconcile primitive: applying the merged doc lands only remote's change and keeps undo", () => {
+    // The live editor holds `local` with an undoable user edit to paragraph one.
+    const base = docWithParagraphs("one", "two", "three");
+    let state = EditorState.create({ schema, doc: base, plugins: [history()] });
+    const p1End = paragraphTextEnd(state.doc, 0);
+    state = state.apply(state.tr.insertText(" EDITED", p1End));
+    expect(undoDepth(state)).toBe(1);
+
+    // Remote changed a disjoint paragraph. Merge, then apply via the 2-way
+    // reconcile — exactly how the wiring will land a merged doc in the editor.
+    const remote = docWithParagraphs("one", "two", "three CHANGED");
+    const res = threeWayMerge(base, state.doc, remote);
+    expect(res.conflict).toBe(false);
+    state = state.apply(minimalReplaceTransaction(state, res.doc!)!);
+
+    expect(state.doc.child(0).textContent).toBe("one EDITED");
+    expect(state.doc.child(2).textContent).toBe("three CHANGED");
+    expect(undoDepth(state)).toBe(1); // the merge never landed on the undo stack
+
+    // Undo reverts only the user's paragraph-one edit; remote's change stays.
+    const undone = run(state, undo);
+    expect(undone.state.doc.child(0).textContent).toBe("one");
+    expect(undone.state.doc.child(2).textContent).toBe("three CHANGED");
   });
 });

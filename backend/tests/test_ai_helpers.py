@@ -16,7 +16,11 @@ from app.services.ai.helpers import (
     create_environment_for_project,
     last_words,
 )
-from app.services.ai.lore_block import _format_lore_block
+from app.services.ai.lore_block import (
+    _format_lore_block,
+    _render_lore_entries,
+    _wrap_lore_block,
+)
 from app.services.ai.lore_selection import (
     _relevant_lore,
     _relevant_lore_ids,
@@ -841,6 +845,37 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         block = _format_lore_block(self.service, [scene_id])
         self.assertIn(f'<scene id="{scene_id}"', block)
         self.assertIn("Scene one body.", block)
+
+    def test_format_lore_block_matches_wrapped_render_lore_entries(self) -> None:
+        # ADR-0076 S7 refactor regression: `_format_lore_block` must stay
+        # byte-identical to wrapping `_render_lore_entries` directly — the
+        # extraction is pure, no drift between the tier blob and the per-entry
+        # leaves the Context door drills into.
+        ids = [self.honor["id"], self.nimitz["id"]]
+        direct = _format_lore_block(self.service, ids)
+        entries = _render_lore_entries(self.service, ids)
+        self.assertEqual(direct, _wrap_lore_block(entries))
+
+    def test_render_lore_entries_returns_per_entry_pairs_in_order(self) -> None:
+        # Each pair is the SAME element `_format_lore_block` concatenates —
+        # the per-entry leaf the Context door drills an entry down to.
+        ids = [self.honor["id"], self.nimitz["id"]]
+        entries = _render_lore_entries(self.service, ids)
+        self.assertEqual([i for i, _ in entries], ids)
+        for entry_id, xml in entries:
+            self.assertIn(f'id="{entry_id}"', xml)
+        wrapped = _format_lore_block(self.service, ids)
+        self.assertEqual(wrapped, "<lore>\n" + "\n\n".join(x for _, x in entries) + "\n</lore>")
+
+    def test_render_lore_entries_skips_unreadable_ids(self) -> None:
+        # Mirrors the old blob loop: an id whose node can't be read is simply
+        # skipped, not surfaced as an empty/error pair.
+        ids = [self.honor["id"], "does-not-exist", self.nimitz["id"]]
+        entries = _render_lore_entries(self.service, ids)
+        self.assertEqual([i for i, _ in entries], [self.honor["id"], self.nimitz["id"]])
+
+    def test_wrap_lore_block_empty_entries_is_empty_string(self) -> None:
+        self.assertEqual(_wrap_lore_block([]), "")
 
 
 class UseHelperTests(_HelperFixtureBase):

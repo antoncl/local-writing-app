@@ -81,6 +81,10 @@ class RenderedTemplate:
     # `PreviewCacheBlock.entry_ids` for drill-down. Empty when not lore-enabled.
     send_lore_stable_ids: list[str] = field(default_factory=list)
     send_lore_volatile_ids: list[str] = field(default_factory=list)
+    # ADR-0076 S7: each tier's per-entry rendered XML, keyed by entry_id, so the
+    # Context door can drill an entry down to its own <entry_type ...> element.
+    send_lore_stable_entries: dict[str, str] = field(default_factory=dict)
+    send_lore_volatile_entries: dict[str, str] = field(default_factory=dict)
     # ADR-0067 S2: the field descriptors registered via `{% do
     # field_contract.store(f) %}` during this render, in insertion order. Set by
     # `build_preview` from `env.field_contract.stored`; persisted on the chat

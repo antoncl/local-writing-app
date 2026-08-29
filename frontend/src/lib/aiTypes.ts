@@ -139,6 +139,9 @@ export type PreviewCacheBlock = {
   // ADR-0076 S2: the tier's member entry ids, for the Context door's
   // drill-down. Additive; empty/absent for non-lore blocks.
   entry_ids?: string[];
+  // ADR-0076 S7: per-entry rendered XML keyed by entry_id, for the Context
+  // door's per-entry drill leaf. Additive; empty/absent for non-lore blocks.
+  entry_xml?: Record<string, string>;
 };
 
 // Populated on AIPreviewResponse.error when the render failed. The preview

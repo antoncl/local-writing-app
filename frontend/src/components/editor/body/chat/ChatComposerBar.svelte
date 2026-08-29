@@ -10,23 +10,29 @@
   ADR-0076 S2: the 👁 preview popover became the worded, drillable **Context**
   door — the one place that answers "what will the AI see". It absorbed the
   post-lock inputs strip ("Inputs (locked)") and the journal-scope strip
-  ("Auto-added this conversation"); each lore tier now expands to its member
-  entries by title. Preview honesty (#1477) was fixed at the source (the
-  backend threads the send path's actual selection, not a static scan) — this
-  component only renders what it's given.
+  ("Auto-added this conversation"). Preview honesty (#1477) was fixed at the
+  source (the backend threads the send path's actual selection, not a static
+  scan) — this component only renders what it's given.
 
   ADR-0076 S5: the prompt chip's hand-rolled flat dropdown became the shared
   `Popover` + `PromptMenu` `/`-tree drill (same idiom as ConversationsPanel's
   ＋New menu) — the picker loses its search field; the assistant picker (its
   own search + soft partition) is untouched, only its chip glyph changed.
+
+  ADR-0076 S7: the door's interior (head + body) moved into `ContextDoor` — a
+  true panel-stack DRILL (root → a section → a lore tier's entry → that
+  entry's own rendered XML), not the old inline `<details>` expand. This
+  component now only positions the popover (`.cbv-preview-popover`) and owns
+  the outside-click dismissal; `ContextDoor` is read-only throughout, no
+  tri-state, no selection.
 -->
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { assistantTitle, partitionAssistants } from "@/lib/chat/assistantScope";
-  import { formatTokens } from "@/lib/utils/money";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import Popover from "@/components/chrome/Popover.svelte";
   import PromptMenu from "@/components/editor/PromptMenu.svelte";
+  import ContextDoor from "@/components/editor/body/chat/ContextDoor.svelte";
   import { buildPromptMenuTree } from "@/lib/editor-core/promptMenuTree";
   import type {
     AssistantEntrySummary,
@@ -107,21 +113,6 @@
     onPickAssistant,
     onNewChatWithSetup,
   }: Props = $props();
-
-  // Cache blocks that carry text — the readable system + lore the model sees.
-  const previewBlocksWithText = $derived(
-    (previewCacheBlocks ?? []).filter((b) => b.text && b.text.trim()),
-  );
-  // The system block is singled out (label "system") for its own section,
-  // annotated with the lore gate. The SYSTEM block also carries `tier:
-  // "stable"` (it caches with the stable prefix), so the tier partition
-  // below must exclude it by label — `tier` alone doesn't separate them.
-  const systemBlock = $derived(previewBlocksWithText.find((b) => b.label === "system"));
-  // Each tier drills down to its member entries by title (ADR-0076 decision 2).
-  const tierBlocks = $derived(previewBlocksWithText.filter((b) => b.tier && b.label !== "system"));
-  // Everything else (conversation turns carried in the send-path composition)
-  // keeps rendering as today's labeled sections — untouched by this slice.
-  const otherBlocks = $derived(previewBlocksWithText.filter((b) => !b.tier));
 
   // ---- prompt-picker UI state (composer chip → PromptMenu's `/`-tree drill,
   // ADR-0076 S5 — mirrors ConversationsPanel's ＋New menu; Popover owns its
@@ -385,116 +376,16 @@
         aria-label="Context — what will be sent"
         bind:this={chatPreviewPopoverEl}
       >
-        <header class="cbv-preview-popover-header">
-          <strong>Context</strong>
-          <small>what the AI will see, drillable</small>
-          <button
-            type="button"
-            class="cbv-preview-popover-close"
-            aria-label="Close"
-            onclick={() => (chatPreviewPopoverOpen = false)}
-          >×</button>
-        </header>
-        <div class="cbv-preview-popover-body">
-          <!-- a. System — the gate annotation (not a call-site marker; ADR-0076
-               decision 9's rejected alternative) then the system text, sourced
-               from the send-path block when present, else the same fallback
-               chain this popover always had. -->
-          <section class="cbv-ctx-section">
-            <span class="cbv-ctx-caps">System</span>
-            {#if loreEnabled}
-              <div
-                class="cbv-ctx-kv-line"
-                title="The template invoked use_lore()/use() — the send path selects and attaches lore; the tiers below are where it lands."
-              ><strong>lore-enabled</strong> · by this prompt</div>
-            {/if}
-            {#if systemBlock}
-              <pre class="cbv-preview-content">{systemBlock.text}</pre>
-            {:else if chatSystemPrompt && chatSystemPrompt.trim()}
-              <pre class="cbv-preview-content">{chatSystemPrompt}</pre>
-            {:else if chatPreviewMessages && chatPreviewMessages.length > 0}
-              {#each chatPreviewMessages as message}
-                <div class="cbv-preview-message">
-                  <header class="cbv-preview-msg-role">{message.role}</header>
-                  {#each message.blocks as block}
-                    <pre class="cbv-preview-content">{block.text}</pre>
-                  {/each}
-                </div>
-              {/each}
-            {:else if chatPromptEntryId}
-              <p class="cbv-meta">
-                Fill the required inputs above and the assembled message will appear here.
-              </p>
-            {:else}
-              <p class="cbv-meta">No system message will be sent. The model sees only the chat history.</p>
-            {/if}
-          </section>
-
-          <!-- b. Tiers — each lore tier drills down to its member entries by
-               title (ADR-0076 decision 2). The lore text stays reachable here
-               too: it lives ONLY in this block, never the rendered template. -->
-          {#each tierBlocks as block (block.label)}
-            <details class="cbv-ctx-tier">
-              <summary>
-                <GroupCaret size="xs" ambient />
-                <span class="cbv-ctx-caps">{block.label}</span>
-                <span class="cbv-ctx-kv">
-                  {#if block.entry_ids && block.entry_ids.length > 0}<strong>{block.entry_ids.length} {block.entry_ids.length === 1 ? "entry" : "entries"}</strong> · {/if}{formatTokens(block.tokens)} tok · cached ({block.tier})
-                </span>
-              </summary>
-              {#if block.entry_ids && block.entry_ids.length > 0}
-                <ul class="cbv-ctx-tier-entries">
-                  {#each block.entry_ids as id (id)}
-                    <li>{titleFor(id) ?? id}</li>
-                  {/each}
-                </ul>
-              {/if}
-              <pre class="cbv-preview-content">{block.text}</pre>
-            </details>
-          {/each}
-
-          <!-- Non-tier, non-system blocks (conversation turns) keep rendering
-               as today's labeled sections. -->
-          {#each otherBlocks as block}
-            <div class="cbv-preview-message">
-              <header class="cbv-preview-msg-role">{block.label}</header>
-              <pre class="cbv-preview-content">{block.text}</pre>
-            </div>
-          {/each}
-
-          <!-- c. Inputs (locked) — read-only, once the chat has locked its
-               prompt/assistant/inputs. Pre-lock the inputs strip IS the form. -->
-          {#if lockedInputDisplays.length > 0}
-            <section class="cbv-ctx-section">
-              <span class="cbv-ctx-caps">Inputs (locked)</span>
-              <!-- Keyed by input NAME — labels are author-authored and can
-                   collide, and a duplicate key is a hard Svelte error. -->
-              {#each lockedInputDisplays as pair (pair.name)}
-                <div class="cbv-ctx-kv-line"><strong>{pair.label}</strong> · <span class="cbv-ctx-value">{pair.value}</span></div>
-              {/each}
-            </section>
-          {/if}
-
-          <!-- d. Auto-added this conversation — the running journal roster; the
-               transcript already stamps per-turn journal_added chips, this is
-               the door's account of the whole conversation so far. -->
-          {#if journal.length > 0}
-            <section class="cbv-ctx-section">
-              <span class="cbv-ctx-caps">Auto-added this conversation</span>
-              {#each journal as entry (entry.entry_id)}
-                <div class="cbv-ctx-kv-line">
-                  {entry.title || entry.entry_id}{#if entry.added_at_turn != null} · turn {entry.added_at_turn}{/if}{#if entry.source === "depth1_expansion"} · ↳ depth 1{/if}
-                </div>
-              {/each}
-            </section>
-          {/if}
-
-          <p class="cbv-meta cbv-preview-hint">
-            This is the system message and context the assistant receives on the next turn.
-            Chat history above is also sent. Composer text becomes the next user message —
-            anything it newly mentions is auto-detected and joins the context at send.
-          </p>
-        </div>
+        <ContextDoor
+          {previewCacheBlocks}
+          {chatSystemPrompt}
+          {chatPreviewMessages}
+          {loreEnabled}
+          {lockedInputDisplays}
+          {journal}
+          {titleFor}
+          onClose={() => (chatPreviewPopoverOpen = false)}
+        />
       </div>
     {/if}
   </div>
@@ -684,63 +575,4 @@
     border: 1px solid var(--border-strong); border-radius: var(--r-lg);
     box-shadow: var(--elev-2); display: flex; flex-direction: column; overflow: hidden;
   }
-  .cbv-preview-popover-header {
-    display: flex; align-items: baseline; gap: 8px; padding: 9px 13px;
-    border-bottom: 1px solid var(--divider); background: var(--panel); font-size: var(--fs-sm);
-  }
-  .cbv-preview-popover-header strong { font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
-  .cbv-preview-popover-header small { color: var(--text-3); flex: 1; font-size: var(--fs-xs); }
-  .cbv-preview-popover-close {
-    background: transparent; border: none; cursor: pointer; font-size: var(--fs-lg);
-    line-height: 1; padding: 0 2px; color: var(--text-3);
-  }
-  .cbv-preview-popover-body { padding: 12px 14px; overflow-y: auto; flex: 1; }
-  .cbv-preview-content {
-    margin: 0 0 8px; font-family: var(--mono);
-    font-size: var(--fs-sm); line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; color: var(--text);
-  }
-  .cbv-preview-message { margin-bottom: 10px; }
-  .cbv-preview-msg-role {
-    font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.07em;
-    text-transform: uppercase; color: var(--text-3); margin-bottom: 3px;
-  }
-  /* Local copy of .cbv-meta — the popover's notes use it (the parent's scoped
-     rule doesn't reach this child's markup). */
-  .cbv-meta { margin: 0; font-size: var(--fs-sm); color: var(--text-3); }
-  .cbv-preview-hint { font-style: italic; }
-
-  /* ADR-0076 S2: the Context door's labeled sections (System / Inputs
-     (locked) / Auto-added this conversation) — the house caps-label recipe,
-     spacing on the --sp scale throughout. */
-  .cbv-ctx-section { margin-bottom: var(--sp-3); }
-  .cbv-ctx-section:last-child { margin-bottom: 0; }
-  .cbv-ctx-caps {
-    font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.07em;
-    text-transform: uppercase; color: var(--text-3);
-  }
-  .cbv-ctx-kv-line {
-    display: flex; gap: var(--sp-1); flex-wrap: wrap;
-    font-size: var(--fs-sm); color: var(--text-2); margin-top: var(--sp-1);
-  }
-  .cbv-ctx-kv-line strong { font-weight: 600; color: var(--text); }
-  .cbv-ctx-value { color: var(--text-2); }
-
-  /* A tier's <details>: the GroupCaret + <summary> idiom (mirrors
-     ChatTranscript's thinking accordion) — expands to the member entries by
-     title, then the block's own text (the lore lives only here). */
-  .cbv-ctx-tier { margin-bottom: var(--sp-3); }
-  .cbv-ctx-tier summary {
-    display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; list-style: none;
-    --group-caret-open: 0deg;
-  }
-  .cbv-ctx-tier summary::-webkit-details-marker { display: none; }
-  .cbv-ctx-tier[open] summary { --group-caret-open: 90deg; }
-  .cbv-ctx-kv { font-size: var(--fs-sm); color: var(--text-2); margin-left: var(--sp-1); }
-  .cbv-ctx-kv strong { font-weight: 600; color: var(--text); }
-  .cbv-ctx-tier-entries {
-    margin: var(--sp-1) 0 0; padding: var(--sp-0) 0 var(--sp-0) var(--sp-3); list-style: none;
-    font-size: var(--fs-sm); color: var(--text-2);
-    border-left: 2px solid var(--divider);
-  }
-  .cbv-ctx-tier-entries li { padding: var(--sp-0) 0; }
 </style>

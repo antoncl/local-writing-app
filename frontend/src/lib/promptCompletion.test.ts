@@ -21,7 +21,7 @@ const SCHEMA = {
   },
   fields: {
     summary: { name: "Summary", type: "text" },
-    pov: { name: "POV", type: "entity_ref" },
+    pov: { name: "POV", type: "entity_ref", picker_config: {} },
     internal: { name: "Internal", type: "text", hidden: true },
     spelling: { name: "Spelling", type: "text" },
     goal: { name: "Goal", type: "text" },
@@ -129,12 +129,23 @@ describe("makePromptCompletionSource", () => {
     expect(result).toContain("title"); // intrinsic
   });
 
+  it("follows an entity_ref hop — scene.pov.<field> offers the target's fields (#1294)", () => {
+    hoisted.entryTypes = { lore: ["lore:character"] };
+    const result = labels(run("{{ scene.pov."));
+    expect(result).toContain("goal"); // a character field
+    expect(result).not.toContain("secret"); // computed, filtered
+    expect(result).toContain("title"); // the target's intrinsic
+    expect(result).not.toContain("summary"); // NOT the scene's own fields
+    expect(run("{{ scene.pov.")?.from).toBe("{{ scene.pov.".length);
+  });
+
   it("declines member access it cannot resolve to a single type", () => {
     hoisted.entryTypes = { lore: ["lore:character", "lore:place"] };
     expect(run("{{ entry(inputs.hero).", { inputs: [input("hero", {})] })).toBeNull(); // ambiguous
     expect(run("{{ entry(inputs.hero).", { inputs: [input("hero")] })).toBeNull(); // untyped input
     expect(run('{{ entry("honor").ho')).toBeNull(); // literal id — needs the node index
-    expect(run("{{ scene.pov.ti")).toBeNull(); // reference chain
+    expect(run("{{ scene.pov.ti")).toBeNull(); // ambiguous ref hop (two target types)
+    expect(run("{{ scene.summary.x")).toBeNull(); // hop through a non-ref (text) field
     expect(run("{{ foo.bar")).toBeNull(); // unknown base
     expect(run("{{ scene.", { schema: null })).toBeNull(); // no schema loaded
   });

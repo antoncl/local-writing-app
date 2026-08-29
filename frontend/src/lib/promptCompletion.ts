@@ -7,9 +7,11 @@
 // prompt's own declared inputs, read live through a getter.
 //
 // Field names past a `.` (`scene.<field>`, `project.<field>`,
-// `entry(inputs.x).<field>`) are resolved from the live metadata schema; a base
-// whose type can't be known statically (a literal `entry("id")`, a reference
-// chain) declines rather than guessing a wrong field.
+// `entry(inputs.x).<field>`) are resolved from the live metadata schema, and a
+// chain of entity_ref hops is followed — `scene.pov.<field>` offers the
+// character's fields (ADR-0060 §8, #1294). A base whose type can't be known
+// statically (a literal `entry("id")`, an untyped or ambiguous ref hop) declines
+// rather than guessing a wrong field.
 
 import type { Completion, CompletionContext, CompletionResult, CompletionSource } from "@codemirror/autocomplete";
 
@@ -101,6 +103,43 @@ function resolveEntryType(base: string, inputs: PromptInputDefinition[], schema:
   return null;
 }
 
+// A single reference hop: `fieldId` on `entryType` must be an entity_ref /
+// entity_ref_list whose picker config resolves to ONE entry_type. A non-ref
+// field, an unconstrained ref, or an ambiguous multi-type ref declines — the
+// same "one unambiguous type, or decline" contract as the entry(inputs.x) base.
+function refHopTarget(fieldId: string, entryType: string, schema: MetadataSchema): string | null {
+  if (!(schema.entry_types[entryType]?.fields ?? []).includes(fieldId)) return null;
+  const field = schema.fields[fieldId];
+  if (!field || (field.type !== "entity_ref" && field.type !== "entity_ref_list")) return null;
+  if (!field.picker_config) return null;
+  const fqns = Object.values(pickerMembership(field.picker_config).entryTypes).flat();
+  return fqns.length === 1 ? fqns[0] : null;
+}
+
+// Cap on ref hops in a base, mirroring the render path's chain ceiling
+// (docs/prompts/helpers.md). Completion only walks the hops actually typed, so
+// this just bounds a pathologically long chain.
+const MAX_REF_HOPS = 6;
+
+// Resolve a member-access base to an entry_type, following reference hops: the
+// head (`scene` / `project` / a typed `entry(inputs.x)`) gives the first type,
+// then each `.<field>` where <field> is an entity_ref advances to that field's
+// target type — so `scene.pov.<field>` completes the character's fields
+// (#1294). Any hop that can't be typed to a single entry_type declines the base.
+function resolveBaseType(base: string, inputs: PromptInputDefinition[], schema: MetadataSchema): string | null {
+  const head = base.match(/^(scene|project|entry\([^)]*\))((?:\.\w+)*)$/);
+  if (!head) return null;
+  let entryType = resolveEntryType(head[1], inputs, schema);
+  if (!entryType) return null;
+  const hops = head[2] ? head[2].slice(1).split(".") : [];
+  if (hops.length > MAX_REF_HOPS) return null;
+  for (const fieldId of hops) {
+    entryType = refHopTarget(fieldId, entryType, schema);
+    if (!entryType) return null;
+  }
+  return entryType;
+}
+
 type Region = { kind: "expr" | "tag"; from: number };
 
 // The innermost `{{`/`{%` still open at `pos` (windowed — a template block is
@@ -171,11 +210,13 @@ export function makePromptCompletionSource(
     // type resolves (scene / project / a typed `entry(inputs.x)`), otherwise
     // decline (never offer top-level names after a dot).
     if (context.matchBefore(/[\w)\]"']\.\w*/)) {
-      const typed = context.matchBefore(/(?:scene|project|entry\([^)]*\))\.\w*/);
+      // A base of scene / project / entry(...) plus any number of `.<field>`
+      // reference hops, then the partial field after the final dot.
+      const typed = context.matchBefore(/(?:scene|project|entry\([^)]*\))(?:\.\w+)*\.\w*/);
       const schema = getSchema();
       if (typed && schema) {
         const dot = typed.text.lastIndexOf(".");
-        const entryType = resolveEntryType(typed.text.slice(0, dot), getInputs(), schema);
+        const entryType = resolveBaseType(typed.text.slice(0, dot), getInputs(), schema);
         if (entryType) {
           return {
             from: typed.from + dot + 1,

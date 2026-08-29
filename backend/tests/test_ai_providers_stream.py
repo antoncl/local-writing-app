@@ -176,7 +176,7 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
 
     def _run_capturing_create(self, profile, call):
         """Like `_run`, but capture the kwargs passed to `completions.create`
-        so the temperature gate on the send path can be asserted."""
+        so the temperature gate on the STREAMING send path can be asserted."""
         captured: dict = {}
 
         def _create(**kw):
@@ -192,6 +192,51 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         with patch("openai.OpenAI", _FakeOpenAI):
             list(profile.chat_stream(call))
         return captured
+
+    def _run_capturing_chat(self, profile, call):
+        """Capture the kwargs of the NON-streaming `chat()` create call, so its
+        temperature gate is locked independently of the streaming path."""
+        captured: dict = {}
+
+        def _create(**kw):
+            captured.update(kw)
+            choice = SimpleNamespace(
+                message=SimpleNamespace(content="ok"), finish_reason="stop"
+            )
+            return SimpleNamespace(choices=[choice])
+
+        class _FakeOpenAI:
+            def __init__(self, **_kwargs):
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(create=_create)
+                )
+
+        with patch("openai.OpenAI", _FakeOpenAI):
+            profile.chat(call)
+        return captured
+
+    def test_non_streaming_chat_omits_temperature_for_no_sampling_model(self):
+        # The same gate as the stream path, on chat() (openai_compatible.py:97).
+        call = ChatCall(
+            model="anthropic/claude-opus-4-8",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+            temperature=0.9,
+        )
+        captured = self._run_capturing_chat(OpenRouterProfile(api_key="sk-or"), call)
+        self.assertNotIn("temperature", captured)
+
+    def test_non_streaming_chat_sends_temperature_for_a_temp_ok_model(self):
+        call = ChatCall(
+            model="openai/gpt-4o",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+            temperature=0.3,
+        )
+        captured = self._run_capturing_chat(OpenRouterProfile(api_key="sk-or"), call)
+        self.assertEqual(captured["temperature"], 0.3)
 
     def test_temperature_sent_for_a_temp_ok_openrouter_model(self):
         call = ChatCall(

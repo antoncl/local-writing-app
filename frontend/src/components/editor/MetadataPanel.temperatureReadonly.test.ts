@@ -84,7 +84,7 @@ beforeEach(() => {
   aiSettings.resolvedPolicy = "cloud-allowed";
 });
 
-function mount(metadata: EntryMetadata) {
+function mount(metadata: EntryMetadata, onMetadataChange?: (m: EntryMetadata) => void) {
   const { container } = render(MetadataPanel, {
     props: {
       entryType: "assistant:default",
@@ -97,6 +97,7 @@ function mount(metadata: EntryMetadata) {
       ] as never,
       metadataFieldIds: ["ai_provider", "ai_capability_tier", "ai_model", "ai_temperature"],
       effectiveOverrides: null,
+      onMetadataChange,
     },
   });
   return container;
@@ -120,5 +121,35 @@ describe("MetadataPanel — Temperature read-only for no-sampling models (#1554)
       expect(container.querySelector("[aria-label='Temperature']")).not.toBeNull(),
     );
     expect(container.querySelector(".fr-temp-note")).toBeNull();
+  });
+
+  it("drops a stale stored temperature when the model rejects it", async () => {
+    // A value left over from a temp-ok model must not survive a switch to a
+    // no-sampling one — otherwise it 400s on send / is rejected at save (#1554).
+    const onMetadataChange = vi.fn();
+    mount(
+      { ai_provider: "anthropic", ai_model: "m-notemp", ai_temperature: 0.7 },
+      onMetadataChange,
+    );
+    await vi.waitFor(() => expect(onMetadataChange).toHaveBeenCalled());
+    const lastArg = onMetadataChange.mock.calls.at(-1)?.[0];
+    expect(lastArg).not.toHaveProperty("ai_temperature");
+  });
+
+  it("keeps a stored temperature when the model accepts it", async () => {
+    // The clear is gated on the model actually rejecting temperature — a temp-ok
+    // model must never have its value dropped.
+    const onMetadataChange = vi.fn();
+    const container = mount(
+      { ai_provider: "anthropic", ai_model: "m-temp", ai_temperature: 0.7 },
+      onMetadataChange,
+    );
+    await vi.waitFor(() =>
+      expect(container.querySelector("[aria-label='Temperature']")).not.toBeNull(),
+    );
+    // No clear-emitting call that strips ai_temperature.
+    for (const [arg] of onMetadataChange.mock.calls) {
+      expect(arg).toHaveProperty("ai_temperature");
+    }
   });
 });

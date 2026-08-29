@@ -168,6 +168,25 @@
   function fieldReadOnly(fieldId: string): boolean {
     return readOnly || (fieldId === "ai_temperature" && temperatureUnsupported);
   }
+  // ProviderTierPicker reports the selected model's capabilities here. Beyond
+  // gating the read-only field, we drop a stale stored temperature when the model
+  // rejects sampling: the value would otherwise be rejected at save (family
+  // models) or sent → a 400 (non-family OpenRouter routes the backend send path
+  // can't detect as no-temp). Only when we positively know (caps !== null) and a
+  // value is present, and only where edits are allowed. The user is not yet TOLD
+  // this happened — that notice rides the chat-send rework (ADR-0076), tracked
+  // in #1579. #1554.
+  function onModelCapabilities(caps: string[] | null): void {
+    assistantModelCapabilities = caps;
+    if (
+      canClearOwn &&
+      caps !== null &&
+      !caps.includes("temperature") &&
+      metadataValueString(metadata.ai_temperature) !== ""
+    ) {
+      clearField("ai_temperature");
+    }
+  }
 
   const entryTypeDef = $derived(metadataSchema.entry_types[entryType] ?? null);
   // The open entry's resolved type icon (#316), computed once for the rail header.
@@ -410,7 +429,7 @@
         model={metadataValueString(metadata.ai_model)}
         policy={aiSettings.resolvedPolicy}
         onChange={(detail) => updateAssistantProvider(detail.provider, detail.tier, detail.model)}
-        onCapabilities={(caps) => (assistantModelCapabilities = caps)}
+        onCapabilities={onModelCapabilities}
       />
     </div>
   {/if}

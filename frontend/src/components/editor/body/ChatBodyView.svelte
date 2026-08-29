@@ -1156,9 +1156,11 @@
       {/if}
       {#if chatRunning}
         <!-- ADR-0076 decision 5: the primary button flips to Stop while a
-             reply streams — enabled, never disabled, so an in-flight turn is
-             always abortable. -->
-        <button type="button" class="primary" onclick={() => stopChat()}>Stop</button>
+             reply streams. Disabled until the stream's AbortController exists
+             (chatAbort) so the control is honest — during the brief first-send
+             template render, chatRunning is already true but there is nothing
+             to abort yet, and a live "Stop" that no-ops would be a lie. -->
+        <button type="button" class="primary" disabled={!chatAbort} onclick={() => stopChat()}>Stop</button>
       {:else}
         <button
           type="button"

@@ -645,7 +645,9 @@ def _preview_lore_tiers(
         project_service,
         "",  # no composer text exists at preview time
         existing_journal=[],
-        explicit_picks=[],
+        # Mirror the send path (#1634): picker-resolved lore rides in
+        # used_node_ids, so exclude it from the detected journal here too.
+        picked_ids=list(rendered.used_node_ids or []),
         source="user_message",
         turn=0,
         scene=scene,

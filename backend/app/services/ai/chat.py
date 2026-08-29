@@ -106,7 +106,13 @@ def _detect_and_persist_journal(
         project,
         user_text,
         existing_journal=chat.journal,
-        explicit_picks=chat.context_items,
+        # Everything already in context via a picker: the resolved picks
+        # (used_node_ids) plus any context_items lore picks — so a picked entry
+        # that is also mentioned isn't re-journaled as "auto-added" (#1634).
+        picked_ids=[
+            *chat.used_node_ids,
+            *(item.id for item in chat.context_items if item.kind == "lore" and item.id),
+        ],
         source="user_message",
         turn=turn,
         scene=scene,

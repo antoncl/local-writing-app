@@ -7,7 +7,6 @@ from __future__ import annotations
 import pytest
 
 from app.models import (
-    ChatSessionContextItem,
     ChatSessionJournalEntry,
     CreateLoreEntryRequest,
     SaveLoreEntryRequest,
@@ -117,25 +116,28 @@ def test_dedup_against_existing_journal(project):
     assert project._nimitz_id in ids
 
 
-def test_dedup_against_explicit_lore_picks(project):
-    picks = [
-        ChatSessionContextItem(kind="lore", id=project._honor_id, title="Honor"),
-    ]
-    out = expand_context(project, "Honor and Nimitz arrived.", explicit_picks=picks)
+def test_dedup_against_picked_ids(project):
+    # Picker-resolved lore (tags/views/containers/nodes) rides in used_node_ids
+    # and is passed as `picked_ids` (#1634). A picked entry that is also
+    # mentioned must NOT be re-journaled as auto-added.
+    out = expand_context(
+        project, "Honor and Nimitz arrived.", picked_ids=[project._honor_id]
+    )
     ids = {e.entry_id for e in out}
-    assert project._honor_id not in ids  # excluded by explicit pick
-    assert project._nimitz_id in ids
+    assert project._honor_id not in ids  # excluded: already in context via the pick
+    assert project._nimitz_id in ids  # genuinely auto-detected, kept
 
 
-def test_explicit_picks_of_other_kinds_dont_dedup(project):
-    # A scene/snippet/preset pick should NOT shadow a lore detection
-    # even if ids collide (separate identity spaces).
-    picks = [
-        ChatSessionContextItem(kind="manuscript", id=project._honor_id, title="x"),
-    ]
-    out = expand_context(project, "Honor arrived.", explicit_picks=picks)
-    ids = {e.entry_id for e in out}
-    assert project._honor_id in ids
+def test_picked_ids_exclude_depth1_matches(project):
+    # The reported case: the subject (Honor) is picked; its body mentions Pavel,
+    # so Pavel would be pulled in via depth-1 expansion. If Pavel is ALSO picked,
+    # it must not surface as auto-added.
+    out = expand_context(
+        project,
+        "Honor stepped onto the bridge.",
+        picked_ids=[project._honor_id, project._pavel_id],
+    )
+    assert out == []  # both the direct and the depth-1 match are picks
 
 
 def test_depth1_does_not_recurse(project):
@@ -181,14 +183,11 @@ def test_dedup_is_set_union(project):
     existing = [
         ChatSessionJournalEntry(entry_id=project._honor_id, title="Honor"),
     ]
-    picks = [
-        ChatSessionContextItem(kind="lore", id=project._nimitz_id, title="Nimitz"),
-    ]
     out = expand_context(
         project,
         "Honor and Nimitz and Pavel Young met.",
         existing_journal=existing,
-        explicit_picks=picks,
+        picked_ids=[project._nimitz_id],
     )
     ids = {e.entry_id for e in out}
     assert project._honor_id not in ids   # shadowed by journal

@@ -9,6 +9,7 @@ Anthropic is deliberately not here — it has its own SDK and cache shape.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from typing import Any
 
@@ -26,6 +27,78 @@ from app.services.ai.profiles.base import (
 # Chat calls are long-running (large context, slow models); match the
 # timeout the free-function dispatcher used before the reshape.
 _CHAT_TIMEOUT = 180.0
+
+log = logging.getLogger(__name__)
+
+
+class _StreamDiag:
+    """Cheap per-stream accumulator for the "empty output" investigation (#1588).
+
+    Observes every raw chunk and records the signals that tell the candidate
+    causes apart, so that when a stream yields NO content we can log one line
+    that names the reason instead of guessing:
+
+    - ``content_idx0`` vs ``content_other`` — the adapter consumes only
+      ``choices[0]``; if content lands in ``choices[1:]`` (the doubled
+      ``finish_reason`` OpenRouter/deepseek emits) this split reveals it.
+    - ``reasoning`` — chars on ``reasoning``/``reasoning_content`` (the
+      OpenRouter override drops these; a reasoning-only turn would look empty).
+    - ``refusal`` — a moderation refusal (a fiction app is a prime trigger).
+    - ``finishes`` — ``(choice_index, finish_reason)``, e.g. ``content_filter``.
+
+    Every field is derived from a handful of ``getattr`` calls per chunk, so it
+    is safe on the normal (non-empty) hot path; the log only fires when empty.
+    """
+
+    def __init__(self) -> None:
+        self.chunks = 0
+        self.max_choices = 0
+        self.content_idx0 = 0
+        self.content_other = 0
+        self.reasoning = 0
+        self.refusal: Any = None
+        self.finishes: list[tuple[int, str]] = []
+        self.last: Any = None
+
+    def observe(self, chunk: Any) -> None:
+        self.chunks += 1
+        self.last = chunk
+        choices = getattr(chunk, "choices", None) or []
+        self.max_choices = max(self.max_choices, len(choices))
+        for idx, choice in enumerate(choices):
+            delta = getattr(choice, "delta", None)
+            if delta is not None:
+                text = getattr(delta, "content", None) or ""
+                if idx == 0:
+                    self.content_idx0 += len(text)
+                else:
+                    self.content_other += len(text)
+                reasoning = (
+                    getattr(delta, "reasoning_content", None)
+                    or getattr(delta, "reasoning", None)
+                )
+                if reasoning:
+                    self.reasoning += len(reasoning)
+                refusal = getattr(delta, "refusal", None)
+                if refusal:
+                    self.refusal = refusal
+            finish = getattr(choice, "finish_reason", None)
+            if finish:
+                self.finishes.append((idx, finish))
+
+    def log_empty(self, call: ChatCall, extra_body: dict) -> None:
+        """Emit one WARNING describing an empty stream. Fires only on the bug."""
+        log.warning(
+            "empty provider stream (#1588): model=%s chunks=%d max_choices=%d "
+            "content_idx0=%d content_other=%d reasoning=%d refusal=%r finishes=%s "
+            "req[msgs=%d sys_blocks=%d max_tokens=%s temp=%s extra=%s] last=%.400r",
+            call.model, self.chunks, self.max_choices,
+            self.content_idx0, self.content_other, self.reasoning, self.refusal,
+            self.finishes,
+            len(call.messages), len(call.system_blocks or []),
+            call.max_tokens, call.temperature, sorted(extra_body),
+            self.last,
+        )
 
 
 def _inband_error_message(obj: Any) -> str | None:
@@ -51,6 +124,14 @@ def _inband_error_message(obj: Any) -> str | None:
     else:
         message = getattr(err, "message", None) or getattr(err, "code", None)
     return str(message) if message else str(err)
+
+
+def _raise_on_inband(obj: Any) -> None:
+    """Raise ProviderError if `obj` (a chunk, choice, or response) carries an
+    in-band error — see `_inband_error_message`. A no-op otherwise."""
+    message = _inband_error_message(obj)
+    if message:
+        raise ProviderError(message)
 
 
 class OpenAICompatibleProfile(ProviderProfile):
@@ -125,9 +206,7 @@ class OpenAICompatibleProfile(ProviderProfile):
         if extra_body:
             kwargs["extra_body"] = extra_body
         response = client.chat.completions.create(**kwargs)
-        inband = _inband_error_message(response)
-        if inband:
-            raise ProviderError(inband)
+        _raise_on_inband(response)
         choices = getattr(response, "choices", None) or []
         if not choices:
             # A 200 with neither choices nor an error object — nothing to return.
@@ -135,9 +214,7 @@ class OpenAICompatibleProfile(ProviderProfile):
             # error rather than an IndexError.
             raise ProviderError("Provider returned an empty response (no choices).")
         choice = choices[0]
-        inband = _inband_error_message(choice)
-        if inband:
-            raise ProviderError(inband)
+        _raise_on_inband(choice)
         stop_reason = getattr(choice, "finish_reason", None)
         return ChatOutcome(choice.message.content or "", stop_reason, response)
 
@@ -158,9 +235,10 @@ class OpenAICompatibleProfile(ProviderProfile):
             messages=[{"role": "user", "content": "ping"}],
         )
 
-    def chat_stream(
-        self, call: ChatCall
-    ) -> Iterator[StreamDelta | StreamThinking | StreamFinal]:
+    def _open_stream(self, call: ChatCall) -> tuple[Any, dict]:
+        """Build the OpenAI client and open the streaming request. Returns the
+        chunk iterator and the `extra_body` (kept so an empty-stream diagnostic
+        can report which provider-specific fields were on the wire)."""
         try:
             from openai import OpenAI
         except ImportError as exc:
@@ -185,34 +263,48 @@ class OpenAICompatibleProfile(ProviderProfile):
         extra_body = self._extra_body(call)
         if extra_body:
             kwargs["extra_body"] = extra_body
+        return client.chat.completions.create(**kwargs), extra_body
+
+    def chat_stream(
+        self, call: ChatCall
+    ) -> Iterator[StreamDelta | StreamThinking | StreamFinal]:
+        stream, extra_body = self._open_stream(call)
         splitter = ThinkTagSplitter()
         stop_reason: str | None = None
         final_chunk: Any = None
-        for chunk in client.chat.completions.create(**kwargs):
+        # #1588: track whether any visible content/thinking reached the client, and
+        # accumulate diagnostics, so a no-content completion logs its cause instead
+        # of ending as a silent "Model returned empty output".
+        emitted = False
+        diag = _StreamDiag()
+        for chunk in stream:
+            diag.observe(chunk)
             # A choice-nested error frame (OpenRouter's shape for rate-limit /
-            # no-provider / upstream 5xx) does not make the SDK raise — surface
-            # it as a real error instead of ending the stream with empty content
-            # and a fake "success" (#1581). Top-level error frames already raise
-            # inside the SDK; this covers the chunk level too, defensively.
-            inband = _inband_error_message(chunk)
-            if inband:
-                raise ProviderError(inband)
+            # no-provider / upstream 5xx) does not make the SDK raise — surface it
+            # as a real error instead of a fake-success empty turn (#1581). The
+            # top-level frame already raises in the SDK; guard both levels here.
+            _raise_on_inband(chunk)
             if getattr(chunk, "usage", None) is not None:
                 final_chunk = chunk
             choices = getattr(chunk, "choices", None) or []
             if not choices:
                 continue
             choice = choices[0]
-            inband = _inband_error_message(choice)
-            if inband:
-                raise ProviderError(inband)
-            delta = getattr(choice, "delta", None)
-            yield from self._stream_delta_events(delta, splitter)
+            _raise_on_inband(choice)
+            for event in self._stream_delta_events(getattr(choice, "delta", None), splitter):
+                if event.text:
+                    emitted = True
+                yield event
             finish = getattr(choice, "finish_reason", None)
             if finish:
                 stop_reason = finish
         # Flush any pending buffered text after the stream ends.
-        yield from splitter.flush()
+        for event in splitter.flush():
+            if event.text:
+                emitted = True
+            yield event
+        if not emitted:
+            diag.log_empty(call, extra_body)
         usage = (
             self.extract_usage(final_chunk, call.model)
             if final_chunk is not None

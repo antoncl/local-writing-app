@@ -143,6 +143,24 @@ def _error_chunk(*, message, nested=True):
     return SimpleNamespace(choices=[], usage=None, error=err)
 
 
+def _two_choice_chunk(*, idx0=None, idx1=None, finish0=None, finish1=None):
+    """A fake chunk with TWO choices (#1588) — models the doubled-choice shape
+    deepseek/OpenRouter emits. The adapter reads only choices[0], so content in
+    idx1 while idx0 is empty is invisible to the client but must show in diag."""
+    def _choice(content, finish):
+        delta = SimpleNamespace(
+            content=content, reasoning=None, reasoning_content=None, refusal=None
+        )
+        return SimpleNamespace(delta=delta, finish_reason=finish)
+
+    return SimpleNamespace(
+        choices=[_choice(idx0, finish0), _choice(idx1, finish1)], usage=None
+    )
+
+
+_DIAG_LOGGER = "app.services.ai.profiles.openai_compatible"
+
+
 class OpenAICompatibleStreamTests(unittest.TestCase):
     """Exercise the real chat_stream skeleton by faking the openai SDK, so the
     delta handling, timeout, and OpenRouter override are covered (the endpoint
@@ -409,6 +427,65 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         response = SimpleNamespace(choices=[])
         with self.assertRaises(ProviderError):
             self._run_chat(OpenRouterProfile(api_key="sk-or"), response)
+
+    # ---- empty-stream diagnostics (#1588) -------------------------------
+    # When a stream yields no visible content, log ONE line naming the cause so
+    # the intermittent "Model returned empty output" stops being invisible.
+
+    def test_empty_stream_logs_content_in_second_choice(self):
+        # choices[0] empty, choices[1] carries the text: the adapter (choices[0]
+        # only) yields nothing, and the diag must expose the idx0/other split —
+        # the lead the doubled finish_reasons pointed at.
+        chunks = [_two_choice_chunk(idx0=None, idx1="hi", finish0="stop", finish1="stop")]
+        with self.assertLogs(_DIAG_LOGGER, level="WARNING") as cm:
+            events, _ = self._run(OpenRouterProfile(api_key="sk-or"), chunks)
+        self.assertEqual([e for e in events if isinstance(e, StreamDelta)], [])
+        logged = "\n".join(cm.output)
+        self.assertIn("empty provider stream", logged)
+        self.assertIn("content_idx0=0", logged)
+        self.assertIn("content_other=2", logged)
+        self.assertIn("max_choices=2", logged)
+
+    def test_empty_stream_logs_refusal_and_finish(self):
+        delta = SimpleNamespace(
+            content=None, reasoning=None, reasoning_content=None,
+            refusal="I can't help with that.",
+        )
+        choice = SimpleNamespace(delta=delta, finish_reason="content_filter")
+        chunks = [SimpleNamespace(choices=[choice], usage=None)]
+        with self.assertLogs(_DIAG_LOGGER, level="WARNING") as cm:
+            self._run(OpenRouterProfile(api_key="sk-or"), chunks)
+        logged = "\n".join(cm.output)
+        self.assertIn("refusal=", logged)
+        self.assertIn("can't help", logged)
+        self.assertIn("content_filter", logged)
+
+    def test_empty_stream_logs_dropped_reasoning(self):
+        # OpenRouter drops reasoning; a reasoning-only turn looks empty. The diag
+        # records the reasoning chars even though no thinking event was emitted.
+        chunks = [_chunk(reasoning="thinking hard", finish="stop")]
+        with self.assertLogs(_DIAG_LOGGER, level="WARNING") as cm:
+            events, _ = self._run(OpenRouterProfile(api_key="sk-or"), chunks)
+        self.assertEqual([e for e in events if isinstance(e, StreamThinking)], [])
+        self.assertIn("reasoning=13", "\n".join(cm.output))
+
+    def test_non_empty_stream_does_not_log(self):
+        chunks = [
+            _chunk(content="Hello", finish="stop"),
+            _chunk(usage=SimpleNamespace(
+                prompt_tokens=1, completion_tokens=1, prompt_tokens_details=None)),
+        ]
+        with self.assertNoLogs(_DIAG_LOGGER, level="WARNING"):
+            self._run(OpenRouterProfile(api_key="sk-or"), chunks)
+
+    def test_thinking_only_stream_does_not_log(self):
+        # Reasoning surfaced as thinking (no content) IS visible output — an
+        # OpenAI turn that emits StreamThinking must NOT log "empty". Pins that
+        # `emitted` counts thinking, not just content deltas.
+        chunks = [_chunk(reasoning="pondering", finish="stop")]
+        with self.assertNoLogs(_DIAG_LOGGER, level="WARNING"):
+            events, _ = self._run(OpenAIProfile(api_key="sk-openai"), chunks)
+        self.assertTrue([e for e in events if isinstance(e, StreamThinking)])
 
 
 def _a_delta_event(dtype, *, text=None, thinking=None):

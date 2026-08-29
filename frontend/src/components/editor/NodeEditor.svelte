@@ -912,10 +912,13 @@
   class:rail-bottom={scene && !railIsPane && railSide === "bottom"}
 >
   {#if scene && bodyShape === "chat"}
-    <!-- ADR-0076 S6: the chat header (title + setup) is one row inside the body;
-         the shell contributes no header. LayerAuthoringBar no-ops for chat and
-         EditorCostHint is empty for a typical chat (guarded on documentKind
-         "manuscript" + todo/rollup). -->
+    <!-- ADR-0076 S6: the chat header (title + setup) is one row inside the body,
+         so the shell renders no header content (LayerAuthoringBar no-ops for chat,
+         EditorCostHint is empty for a chat node). But an EMPTY header slot must
+         still occupy grid row 1 at zero height — without it ChatBodyView
+         auto-places into the `auto` row 1 instead of the `1fr` body row, and the
+         transcript stops filling the pane (dead space below the composer). -->
+    <div class="editor-header-void" aria-hidden="true"></div>
   {:else}
     <section class="editor-header">
       {#if scene}
@@ -1228,6 +1231,14 @@
     padding: 12px 22px 6px;
     border-bottom: 1px solid var(--divider);
     background: var(--surface);
+  }
+  /* ADR-0076 S6: empty stand-in that holds the header's grid row for chat (which
+     renders its header inside the body), so ChatBodyView stays in the `.editor-panel`
+     1fr row and the transcript fills the pane. Zero height, no chrome. */
+  .editor-header-void {
+    min-height: 0;
+    padding: 0;
+    border: 0;
   }
 
   .scene-title-row {

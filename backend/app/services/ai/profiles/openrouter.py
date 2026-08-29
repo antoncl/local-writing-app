@@ -281,6 +281,11 @@ def _row_to_descriptor(row: dict) -> ModelDescriptor:
         capabilities=capabilities,
         cost_in_per_mtok=cost_in,
         cost_out_per_mtok=cost_out,
+        # OpenRouter publishes the accepted params per route; honour that as the
+        # provider signal. The family rule (`accepts_temperature`) still overrides
+        # it, so a no-sampling `anthropic/…` route is read-only even if the list
+        # happens to include `temperature` (#1554).
+        supports_temperature="temperature" in supported,
     )
 
 

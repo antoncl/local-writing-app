@@ -174,6 +174,50 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         self.assertEqual(finals[0].usage.output_tokens, 5)
         self.assertEqual(captured["timeout"], 180.0)
 
+    def _run_capturing_create(self, profile, call):
+        """Like `_run`, but capture the kwargs passed to `completions.create`
+        so the temperature gate on the send path can be asserted."""
+        captured: dict = {}
+
+        def _create(**kw):
+            captured.update(kw)
+            return iter([_chunk(content="ok", finish="stop")])
+
+        class _FakeOpenAI:
+            def __init__(self, **_kwargs):
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(create=_create)
+                )
+
+        with patch("openai.OpenAI", _FakeOpenAI):
+            list(profile.chat_stream(call))
+        return captured
+
+    def test_temperature_sent_for_a_temp_ok_openrouter_model(self):
+        call = ChatCall(
+            model="openai/gpt-4o",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+            temperature=0.3,
+        )
+        captured = self._run_capturing_create(OpenRouterProfile(api_key="sk-or"), call)
+        self.assertEqual(captured["temperature"], 0.3)
+
+    def test_temperature_omitted_for_no_sampling_model_via_openrouter(self):
+        # The same model the family rule forbids, reached as `anthropic/…`, must
+        # not put temperature on the wire — the OpenAI-compatible send path used
+        # to send it unconditionally, 400ing at runtime (#1554).
+        call = ChatCall(
+            model="anthropic/claude-opus-4-8",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+            temperature=0.9,
+        )
+        captured = self._run_capturing_create(OpenRouterProfile(api_key="sk-or"), call)
+        self.assertNotIn("temperature", captured)
+
     def test_openrouter_stream_is_plain_content_only_with_longer_timeout(self):
         # OpenRouter deliberately does NOT surface reasoning fields as thinking
         # (byte-identical to the pre-reshape openrouter stream) and uses 300s.

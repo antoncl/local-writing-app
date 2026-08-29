@@ -47,3 +47,35 @@ def test_free_row_becomes_zero_cost_fast_tier() -> None:
     d = _row_to_descriptor(row)
     assert d.cost_in_per_mtok == 0.0
     assert d.tier == CapabilityTier.FAST  # $0 falls in the <$1 band
+
+
+# ---- _row_to_descriptor: temperature support from the route params ---------
+
+
+def _row(model_id: str, supported_parameters: list[str]) -> dict:
+    return {
+        "id": model_id,
+        "name": model_id,
+        "context_length": 8000,
+        "pricing": {"prompt": "0.000001", "completion": "0.000001"},
+        "supported_parameters": supported_parameters,
+    }
+
+
+def test_row_records_temperature_from_supported_parameters() -> None:
+    # OpenRouter publishes the accepted params per route; the descriptor's
+    # provider signal mirrors that list.
+    with_temp = _row_to_descriptor(_row("openai/gpt-4o", ["temperature", "tools"]))
+    without_temp = _row_to_descriptor(_row("some/reasoning-model", ["tools"]))
+    assert with_temp.supports_temperature is True
+    assert without_temp.supports_temperature is False
+    assert with_temp.accepts_temperature is True
+    assert without_temp.accepts_temperature is False
+
+
+def test_no_sampling_family_via_openrouter_is_readonly_despite_listed_param() -> None:
+    # Even when OpenRouter's route lists `temperature`, the family rule wins for
+    # a no-sampling Anthropic model reached as `anthropic/…` (#1554).
+    d = _row_to_descriptor(_row("anthropic/claude-opus-4-8", ["temperature", "tools"]))
+    assert d.supports_temperature is True  # provider signal
+    assert d.accepts_temperature is False  # family rule overrides

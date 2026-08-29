@@ -153,6 +153,22 @@
       : metadataFieldIds,
   );
 
+  // The selected assistant model's capabilities, lifted from ProviderTierPicker
+  // (which owns the catalogue fetch). null = unknown (not yet loaded / orphan
+  // id) → leave Temperature editable rather than guessing. When known and the
+  // model has no `temperature` capability, the Temperature field goes read-only
+  // with a "Not supported by the model" note (#1554). The no-sampling families
+  // (Anthropic Opus 4.7+/5, incl. via OpenRouter) are the only ones affected.
+  let assistantModelCapabilities = $state<string[] | null>(null);
+  const temperatureUnsupported = $derived(
+    documentKind === "assistant" &&
+      assistantModelCapabilities !== null &&
+      !assistantModelCapabilities.includes("temperature"),
+  );
+  function fieldReadOnly(fieldId: string): boolean {
+    return readOnly || (fieldId === "ai_temperature" && temperatureUnsupported);
+  }
+
   const entryTypeDef = $derived(metadataSchema.entry_types[entryType] ?? null);
   // The open entry's resolved type icon (#316), computed once for the rail header.
   const railTypeIcon = $derived(entryTypeIconClass(entryType, metadataSchema));
@@ -394,6 +410,7 @@
         model={metadataValueString(metadata.ai_model)}
         policy={aiSettings.resolvedPolicy}
         onChange={(detail) => updateAssistantProvider(detail.provider, detail.tier, detail.model)}
+        onCapabilities={(caps) => (assistantModelCapabilities = caps)}
       />
     </div>
   {/if}
@@ -568,7 +585,7 @@
             {:else}
               <FieldValueEditor
                 {field}
-                {readOnly}
+                readOnly={fieldReadOnly(fieldId)}
                 allowUnset={true}
                 embedded={true}
                 controlled={isRefField(field)}
@@ -595,6 +612,13 @@
                    both overridden and mutated reads `[versions] Captain ⤳` on
                    one line — design-language.md §marks, not split across cells (#492). -->
               <span class="fr-mutated-marker" title="Changed by here">⤳</span>
+            {/if}
+            {#if fieldId === "ai_temperature" && temperatureUnsupported}
+              <!-- The selected model dropped sampling (Anthropic Opus 4.7+/5,
+                   incl. via OpenRouter): the field renders read-only above and
+                   this quiet note says why, so the empty control doesn't read as
+                   a bug (#1554). -->
+              <small class="muted fr-temp-note">Not supported by the model</small>
             {/if}
           </div>
         </div>
@@ -810,6 +834,16 @@
   .field-row.wide .fr-val > :global(*) {
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  /* The "Not supported by the model" note (#1554) breaks to its own line under
+     the (read-only) Temperature control, right-aligned with the value column. */
+  .fr-temp-note {
+    flex-basis: 100%;
+    text-align: right;
+  }
+  .field-row.wide .fr-val > .fr-temp-note {
+    flex: 0 0 100%;
   }
 
   /* Inherited fields read a touch quieter — still fully editable. */

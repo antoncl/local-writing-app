@@ -67,6 +67,18 @@ describe("SchemaFieldInlineEditor field-editor fixes", () => {
     await fireEvent.click(screen.getByLabelText("Field display name"));
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("#1573: the icon popover is body-portaled so the pane's overflow can't clip it", async () => {
+    mount();
+    await fireEvent.click(screen.getByLabelText("Choose icon"));
+    const pop = document.querySelector(".sfi-icon-pop");
+    expect(pop).not.toBeNull();
+    // Reparented out of the editor and straight under <body> (#1573) — a click
+    // inside it (selecting an icon) must therefore still count as "inside".
+    expect(pop!.parentElement).toBe(document.body);
+    await fireEvent.click(pop!.querySelector(".ip-search") as HTMLElement);
+    expect(screen.queryByRole("dialog")).toBeTruthy();
+  });
 });
 
 const GROUPS: Record<string, MetadataGroupDefinition> = {

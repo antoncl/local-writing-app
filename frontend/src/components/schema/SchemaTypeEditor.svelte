@@ -33,6 +33,7 @@
   import SchemaFieldRow from "@/components/schema/SchemaFieldRow.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import IconPicker from "@/components/widgets/IconPicker.svelte";
+  import { anchoredPopover } from "@/lib/actions/anchoredPopover";
   import { fieldIconClass, fieldTypeLabel } from "@/lib/utils/fieldIcons";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import {
@@ -191,14 +192,19 @@
 
   // Type icon popover (#316) — mirrors the field-icon picker in
   // SchemaFieldInlineEditor: a tile button toggles the shared IconPicker. The
-  // Icon row sits near the top of the pane, so (unlike the field picker) it
-  // needs no flip-up; a document click-outside closes it.
+  // popover is body-portaled and viewport-anchored (`anchoredPopover`, #1573)
+  // so it escapes the pane's `overflow` box and never clips in a short/split
+  // pane. A document click-outside closes it; because the popover now lives
+  // under <body> (not the anchor), the check allows clicks inside `.sti-icon-pop`.
   let iconPickerOpen = $state(false);
+  let iconBtnEl: HTMLButtonElement | undefined = $state();
   $effect(() => {
     if (!iconPickerOpen) return;
     const onDocClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
-      if (!target?.closest(".sti-icon-anchor")) iconPickerOpen = false;
+      if (!target?.closest(".sti-icon-anchor") && !target?.closest(".sti-icon-pop")) {
+        iconPickerOpen = false;
+      }
     };
     document.addEventListener("click", onDocClick, true);
     return () => document.removeEventListener("click", onDocClick, true);
@@ -361,7 +367,10 @@
   </div>
   <div class="schema-type-color-row">
     <span>Color</span>
-    <SwatchPicker bind:value={draftColor} />
+    <!-- Read-only on a built-in type (#1574): Save Type is gated off for those,
+         so an editable picker here is a dead end. The chip still renders the
+         built-in's colour (honest "this is it, but not changeable here"). -->
+    <SwatchPicker bind:value={draftColor} readOnly={schemaTypeReadonly} />
     {#if !draftColor && selectedSchemaTypeId}
       {@const inherited = metadataSchema?.entry_types[selectedSchemaTypeId]?.color}
       {#if inherited}
@@ -377,13 +386,18 @@
   <div class="schema-type-icon-row">
     <span>Icon</span>
     <div class="sti-icon-anchor">
+      <!-- Read-only on a built-in type (#1574): Save Type is gated off there, so
+           the picker can't persist — the tile shows the icon but doesn't open. -->
       <button
         type="button"
         class="sfr-tile sti-icon-btn"
         class:inheriting={!draftIcon}
-        aria-label="Choose icon"
-        title="Choose icon"
-        onclick={() => (iconPickerOpen = !iconPickerOpen)}
+        class:read-only={schemaTypeReadonly}
+        aria-label={schemaTypeReadonly ? "Icon" : "Choose icon"}
+        title={schemaTypeReadonly ? "Icon" : "Choose icon"}
+        disabled={schemaTypeReadonly}
+        bind:this={iconBtnEl}
+        onclick={() => { if (!schemaTypeReadonly) iconPickerOpen = !iconPickerOpen; }}
       >
         <!-- Own icon, else the resolved inherited one; when the type has
              neither, a plus reads as "add an icon" (not a stand-in glyph that
@@ -391,7 +405,7 @@
         <i class={`ti ti-${draftIcon || inheritedIcon || "plus"}`} aria-hidden="true"></i>
       </button>
       {#if iconPickerOpen}
-        <div class="sti-icon-pop">
+        <div class="sti-icon-pop" use:anchoredPopover={{ anchor: iconBtnEl }}>
           <IconPicker
             value={draftIcon}
             defaultGlyph={inheritedIcon || "category"}
@@ -875,15 +889,21 @@
     border-color: var(--border-strong);
     color: var(--text-3);
   }
-  .sti-icon-btn:hover {
+  .sti-icon-btn:not(:disabled):hover {
     border-color: var(--accent);
     color: var(--accent-strong);
   }
+  /* Read-only (built-in) types (#1574): the tile is a plain display, not an
+     affordance — no pointer, no accent hover. */
+  .sti-icon-btn.read-only {
+    cursor: default;
+  }
+  /* Body-portaled + viewport-anchored by `anchoredPopover` (#1573); the action
+     owns position/left/top, this carries only the portaled elevation tier so it
+     clears the modal layer (matching SwatchPicker/TagPicker), never `z-index: 60`
+     which would open behind a dialog that embeds this editor. */
   .sti-icon-pop {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    z-index: 60;
+    z-index: 10000;
   }
 
   /* Fields / reusable-groups sections. */

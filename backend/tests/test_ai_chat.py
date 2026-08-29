@@ -674,6 +674,45 @@ class ChatEndpointJournalTests(unittest.TestCase):
         self.assertIn("Pavel Young", blocks[1]["text"])
         self.assertEqual(blocks[1]["tier"], "volatile")
 
+    def test_picker_added_lore_is_not_relabeled_as_auto_added(self) -> None:
+        """Regression for #1634: an entry already in context via the picker
+        (used_node_ids) must not be re-journaled as 'auto-added' when the message
+        also mentions it — while its body still feeds depth-1 expansion. Guards
+        the send-path wiring (the bug was the detector reading the always-empty
+        context_items instead of used_node_ids)."""
+        from app.models import SaveChatSessionRequest
+        self.service.save_chat_session(
+            self.chat_id,
+            SaveChatSessionRequest(
+                title="Test", prompt_entry_id="prompt_x", lore_enabled=True,
+                used_node_ids=[self.honor_id],
+            ),
+        )
+        loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("Reply.", "end_turn", SimpleNamespace()),
+             ):
+            response = self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "system_prompt": "You are a writing assistant.",
+                    "messages": [{"role": "user", "content": "Honor walked in."}],
+                    "chat_id": self.chat_id,
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        added_ids = {e["entry_id"] for e in response.json()["journal_added"]}
+        # Honor is a pick — NOT re-journaled as auto-added...
+        self.assertNotIn(self.honor_id, added_ids)
+        # ...but its body still drives depth-1 expansion, so Pavel (not picked) stays.
+        self.assertIn(self.pavel_id, added_ids)
+        chat = self.service.read_chat_session(self.chat_id)
+        self.assertNotIn(self.honor_id, [e.entry_id for e in chat.journal])
+
     def test_lore_gate_off_injects_no_lore(self) -> None:
         """ADR-0057 §2 Journey C: a chat whose prompt never called
         relevant_lore() (lore_enabled=False, the default) gets no send-time

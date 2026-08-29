@@ -8,13 +8,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@/lib/test/component";
 import ChatComposerBar from "./ChatComposerBar.svelte";
-import type { ChatSessionJournalEntry, PreviewCacheBlock } from "@/lib/types";
+import type { ChatSessionJournalEntry, PreviewCacheBlock, PromptEntrySummary } from "@/lib/types";
+
+// The doorway gates on the bound prompt RESOLVING in this roster (a deleted
+// prompt must not offer a no-op button), so a matching entry has to be present.
+const PROMPT_ROSTER = [
+  { id: "p1", title: "Draft prompt", entry_type: "prompt" },
+] as unknown as PromptEntrySummary[];
 
 const baseProps = {
   isLocked: true,
   chatPromptEntryId: "p1",
   chatAssistantId: "a1",
-  promptEntries: [],
+  promptEntries: PROMPT_ROSTER,
   routedPromptEntries: [],
   assistantEntries: [],
   assistantScope: [],
@@ -66,5 +72,17 @@ describe("ChatComposerBar lock doorway", () => {
       screen.queryByText("Locked after the first message — this prompt shapes every turn."),
     ).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Search prompts…")).toBeInTheDocument();
+  });
+
+  it("does not offer the doorway when the bound prompt no longer resolves", async () => {
+    // A locked chat whose prompt was deleted: chatPromptEntryId is set but the
+    // roster can't resolve it, so the action (openChatFromPromptEntry) can't run
+    // — the doorway must NOT appear rather than show a no-op button.
+    render(ChatComposerBar, { ...baseProps, promptEntries: [] });
+    await fireEvent.click(screen.getByTitle("Prompt is locked while this chat has messages."));
+    expect(
+      screen.queryByText("Locked after the first message — this prompt shapes every turn."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New chat with this setup" })).not.toBeInTheDocument();
   });
 });

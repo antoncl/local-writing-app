@@ -131,7 +131,11 @@
   // it becomes a doorway to a fresh chat with the same setup (decision 8).
   let doorwayOpen: "" | "prompt" | "assistant" = $state("");
   let doorwayPopoverEl: HTMLDivElement | null = $state(null);
-  const canDoorway = $derived(isLocked && !!chatPromptEntryId);
+  // The doorway is only honest when its action can actually run: "New chat with
+  // this setup" reuses the bound prompt, so gate on the prompt RESOLVING in the
+  // same roster ChatBodyView's activePromptEntry uses — a bound id that no longer
+  // resolves (a deleted prompt) must not offer a button that silently no-ops.
+  const canDoorway = $derived(isLocked && promptEntries.some((p) => p.id === chatPromptEntryId));
   function openDoorway(which: "prompt" | "assistant") {
     // Mutually exclusive with the pickers + Context door.
     promptPickerOpen = false;

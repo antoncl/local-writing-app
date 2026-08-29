@@ -476,33 +476,36 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
     # When a stream yields no visible content, log ONE line naming the cause so
     # the intermittent "Model returned empty output" stops being invisible.
 
-    def test_empty_stream_logs_content_in_second_choice(self):
+    def test_empty_stream_surfaces_as_error_with_diagnostic_in_detail(self):
         # choices[0] empty, choices[1] carries the text: the adapter (choices[0]
-        # only) yields nothing, and the diag must expose the idx0/other split —
-        # the lead the doubled finish_reasons pointed at.
+        # only) yields nothing → surfaced as a ProviderError (#1601), not a silent
+        # empty completion. The idx0/other split lands in `detail` (→ errors.log),
+        # never in the user-facing message. It's still logged as a WARNING.
         chunks = [_two_choice_chunk(idx0=None, idx1="hi", finish0="stop", finish1="stop")]
-        with self.assertLogs(_DIAG_LOGGER, level="WARNING") as cm:
-            events, _ = self._run(OpenRouterProfile(api_key="sk-or"), chunks)
-        self.assertEqual([e for e in events if isinstance(e, StreamDelta)], [])
-        logged = "\n".join(cm.output)
-        self.assertIn("empty provider stream", logged)
-        self.assertIn("content_idx0=0", logged)
-        self.assertIn("content_other=2", logged)
-        self.assertIn("max_choices=2", logged)
+        with self.assertLogs(_DIAG_LOGGER, level="WARNING"), \
+                self.assertRaises(ProviderError) as ctx:
+            self._run(OpenRouterProfile(api_key="sk-or"), chunks)
+        self.assertIn("no output", str(ctx.exception))
+        detail = ctx.exception.detail or ""
+        self.assertIn("content_idx0=0", detail)
+        self.assertIn("content_other=2", detail)
+        self.assertIn("max_choices=2", detail)
+        # The user-facing message must NOT carry the raw diagnostic.
+        self.assertNotIn("content_idx0", str(ctx.exception))
 
-    def test_empty_stream_logs_refusal_and_finish(self):
+    def test_empty_stream_detail_captures_refusal_and_finish(self):
         delta = SimpleNamespace(
             content=None, reasoning=None, reasoning_content=None,
             refusal="I can't help with that.",
         )
         choice = SimpleNamespace(delta=delta, finish_reason="content_filter")
         chunks = [SimpleNamespace(choices=[choice], usage=None)]
-        with self.assertLogs(_DIAG_LOGGER, level="WARNING") as cm:
+        with self.assertLogs(_DIAG_LOGGER, level="WARNING"), \
+                self.assertRaises(ProviderError) as ctx:
             self._run(OpenRouterProfile(api_key="sk-or"), chunks)
-        logged = "\n".join(cm.output)
-        self.assertIn("refusal=", logged)
-        self.assertIn("can't help", logged)
-        self.assertIn("content_filter", logged)
+        detail = ctx.exception.detail or ""
+        self.assertIn("can't help", detail)
+        self.assertIn("content_filter", detail)
 
     def test_non_empty_stream_does_not_log(self):
         chunks = [

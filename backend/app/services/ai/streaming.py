@@ -16,8 +16,9 @@ Line protocol (one JSON object per line):
 
 from __future__ import annotations
 
+import contextlib
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from app.services.ai import providers as ai_providers
@@ -64,12 +65,27 @@ def _done_line(
     return line
 
 
+def _error_line(ev: ai_providers.StreamError, *, policy: str) -> dict[str, Any]:
+    """The terminal `error` object. Carries only the user-facing `error`; the
+    private `detail` is recorded to errors.log by the endpoint's `on_error` hook
+    (#1601), never serialized onto the wire."""
+    return {
+        "type": "error",
+        "error": ev.error,
+        "provider": ev.provider,
+        "model": ev.model,
+        "latency_ms": ev.latency_ms,
+        "policy": policy,
+    }
+
+
 def transform_provider_events_to_ndjson(
     events: Iterator[ai_providers.StreamEvent],
     *,
     policy: str,
     extra_done: dict[str, Any] | None = None,
     descriptor: ModelDescriptor | None = None,
+    on_error: Callable[[ai_providers.StreamError], None] | None = None,
 ) -> Iterator[str]:
     """Adapt provider events to NDJSON lines. Suppresses empty deltas.
 
@@ -77,6 +93,11 @@ def transform_provider_events_to_ndjson(
     usage, the `done` line includes `usage` + `cost_usd`. The descriptor
     is pre-fetched by the endpoint so this sync generator can compute
     cost without an await.
+
+    `on_error`, when given, is called with each `StreamError` before its line is
+    emitted — the endpoint uses it to record the failure (message + the private
+    `detail`) to the project's errors.log (#1601). The wire line carries only the
+    user-facing `error`, never `detail`.
     """
     extra_done = extra_done or {}
     try:
@@ -92,14 +113,11 @@ def transform_provider_events_to_ndjson(
                     ev, policy=policy, extra_done=extra_done, descriptor=descriptor
                 ))
             elif isinstance(ev, ai_providers.StreamError):
-                yield _ndjson({
-                    "type": "error",
-                    "error": ev.error,
-                    "provider": ev.provider,
-                    "model": ev.model,
-                    "latency_ms": ev.latency_ms,
-                    "policy": policy,
-                })
+                if on_error is not None:
+                    # Recording a failure must never disrupt the stream.
+                    with contextlib.suppress(Exception):
+                        on_error(ev)
+                yield _ndjson(_error_line(ev, policy=policy))
     except Exception as exc:  # noqa: BLE001 — last-resort guard so the stream always terminates
         yield _ndjson({
             "type": "error",

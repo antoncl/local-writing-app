@@ -27,7 +27,7 @@ from app.services.project.ai_invocations import AiInvocationsMixin
 from app.services.project.assistant_tags import AssistantTagsMixin
 from app.services.project.assistants import AssistantEntriesMixin
 from app.services.project.chats import ChatSessionsMixin
-from app.services.project.client_errors import ClientErrorLogMixin
+from app.services.project.client_errors import ErrorLogMixin
 from app.services.project.computed_metadata import ComputedMetadataMixin
 from app.services.project.embedded_todos import EmbeddedTodosMixin
 
@@ -85,7 +85,7 @@ class ProjectService(
     AssistantEntriesMixin,
     AssistantTagsMixin,
     ChatSessionsMixin,
-    ClientErrorLogMixin,
+    ErrorLogMixin,
     ComputedMetadataMixin,
     EmbeddedTodosMixin,
     LoreEntriesMixin,

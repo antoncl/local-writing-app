@@ -63,9 +63,18 @@ from app.services.ai.profiles import Capability, CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
 from app.services.ai.streaming import transform_provider_events_to_ndjson
 from app.services.ai.usage import translate_usage_to_cost
-from app.services.project_service import ProjectServiceError
+from app.services.project_service import ProjectService, ProjectServiceError
 
 router = APIRouter()
+
+
+def _record_stream_error(project: ProjectService, ev: ai_providers.StreamError) -> None:
+    """Record an AI stream failure to the project's errors.log (#1601). Thin
+    adapter from the StreamError event to the intentful `record_ai_error`
+    mutation — `detail` (diagnostics) reaches the log, never the wire."""
+    project.record_ai_error(
+        message=ev.error, provider=ev.provider, model=ev.model, detail=ev.detail
+    )
 
 
 def _preview_error_detail(exc: PreviewError) -> Any:
@@ -545,6 +554,7 @@ async def ai_chat_stream(
                     if journal_added else None
                 ),
                 descriptor=descriptor,
+                on_error=lambda ev: _record_stream_error(project, ev),
             ),
             http_request,
         ),
@@ -631,6 +641,7 @@ async def ai_generate_stream(
                 policy=policy,
                 extra_done={"session_id": session_id, "char_count": char_count},
                 descriptor=descriptor,
+                on_error=lambda ev: _record_stream_error(project, ev),
             ),
             http_request,
         ),

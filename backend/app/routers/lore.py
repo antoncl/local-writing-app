@@ -8,6 +8,7 @@ from app.models import (
     CreateMutationSetEntryRequest,
     CreatePromptEntryRequest,
     EffectiveStateResponse,
+    LoreCodeFencePreview,
     LoreEntry,
     LoreEntryList,
     MoveLoreNoteToResearchResponse,
@@ -42,6 +43,17 @@ def create_lore_entry(project: CurrentProject, request: CreateLoreEntryRequest) 
 def get_lore_entry(project: CurrentProject, entry_id: str) -> LoreEntry:
     with translate_errors():
         return project.read_lore_entry(entry_id)
+
+
+@router.get("/api/lore/{entry_id}/unwrap-preview", response_model=LoreCodeFencePreview)
+def preview_lore_code_fence_unwrap(project: CurrentProject, entry_id: str) -> LoreCodeFencePreview:
+    """Preview unwrapping an entry whose whole body is one code fence (#1628).
+
+    Read-only: returns the unwrapped body for the revision-review surface; the
+    write happens through the normal lore save when the user commits. 409 if the
+    body is no longer a single wrapping fence."""
+    with translate_errors():
+        return LoreCodeFencePreview(body=project.preview_lore_code_fence_unwrap(entry_id))
 
 
 @router.get("/api/lore/{entity_id}/mutations", response_model=MutationMarkerList)

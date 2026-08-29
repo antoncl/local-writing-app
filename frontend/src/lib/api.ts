@@ -898,6 +898,12 @@ export const api = {
   getLoreEntry(entryId: string) {
     return request<LoreEntry>(`/lore/${entryId}`);
   },
+  // The entry's body with its whole-body code fence stripped (#1628), read-only —
+  // fed into the standard revision review so the user commits or declines the
+  // unwrap. 409s if the body is no longer a single wrapping fence.
+  unwrapLoreCodeFencePreview(entryId: string) {
+    return request<{ body: string }>(`/lore/${entryId}/unwrap-preview`);
+  },
   // Fork-to-here (#313): copy an inherited lore entry down into the current
   // project, keeping its id, and stop inheriting it. Returns the now-local entry.
   forkLoreEntry(entryId: string) {

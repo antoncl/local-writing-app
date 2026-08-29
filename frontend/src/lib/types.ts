@@ -1087,11 +1087,17 @@ export type EffectiveStateResponse = {
 // offer (#4), not an error. Its own read now (#635), not a validation field.
 export type LooseScene = { id: string; title: string; filename: string };
 
+// A lore entry whose whole body is a single fenced code block (#1628) — a paste
+// artifact that renders prose as monospaced source. Reported as a flag, not a
+// repair: the modal offers an explicit, reviewable unwrap.
+export type CodeFencedBody = { id: string; kind: string; title: string };
+
 export type ProjectValidation = {
   valid: boolean;
   warnings: string[];
   errors: string[];
   migrations_applied: string[];
+  code_fenced_bodies: CodeFencedBody[];
 };
 
 /**

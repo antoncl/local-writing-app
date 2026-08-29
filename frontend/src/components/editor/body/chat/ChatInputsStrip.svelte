@@ -2,11 +2,15 @@
   ChatInputsStrip — declared-inputs strip for ChatBodyView (#99).
   Renders a PromptInputField per declared prompt input. Presentational:
   the parent still owns chatInputDrafts + persistence; edits flow back via
-  onDraftChange, and the collapse toggle mutates the bound `hidden`.
+  onDraftChange.
+
+  ADR-0076 S2: pre-lock only now — a locked chat's filled values render
+  read-only in the Context door's "Inputs (locked)" section instead (the
+  post-lock "Show inputs" collapse retired). So this strip is a pure form:
+  no locked/disabled branches, no collapse toggle.
 -->
 <script lang="ts">
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import { isInputMissing } from "@/lib/utils/promptInputs";
   import type {
     LoreEntrySummary,
@@ -17,8 +21,6 @@
 
   interface Props {
     declaredInputs: PromptInputDefinition[];
-    isLocked: boolean;
-    hidden?: boolean;
     chatInputDrafts: Record<string, string>;
     structure: StructureDocument | null;
     researchStructure: StructureDocument | null;
@@ -30,8 +32,6 @@
 
   let {
     declaredInputs,
-    isLocked,
-    hidden = $bindable(false),
     chatInputDrafts,
     structure,
     researchStructure,
@@ -47,23 +47,12 @@
   let visibleInputs = $derived(declaredInputs.filter((i) => !i.hidden));
 </script>
 
-<div class="cbv-inputs-strip" class:cbv-inputs-locked={isLocked}>
-  {#if isLocked && visibleInputs.length > 0}
-    <button
-      type="button"
-      class="cbv-inputs-toggle"
-      aria-expanded={!hidden}
-      onclick={() => (hidden = !hidden)}
-    >
-      <GroupCaret collapsed={hidden} />
-      <span>{hidden ? "Show inputs" : "Hide inputs"}</span>
-    </button>
-  {/if}
-  {#if (!isLocked || !hidden) && visibleInputs.length > 0}
+<div class="cbv-inputs-strip">
+  {#if visibleInputs.length > 0}
     <div class="cbv-inputs-fields">
       {#each visibleInputs as input (input.name)}
         {@const missing = input.required && isInputMissing(input, chatInputDrafts[input.name])}
-        <label class="cbv-input-field" class:cbv-input-missing={missing} class:cbv-input-disabled={isLocked}>
+        <label class="cbv-input-field" class:cbv-input-missing={missing}>
           <span class="cbv-input-label">
             {input.label || input.name}{#if input.required}<span class="cbv-required-marker" title="Required"> *</span>{/if}
           </span>
@@ -77,7 +66,7 @@
             loreEntries={loreEntries}
             promptEntries={promptEntries}
             implicitContextMatcher={implicitContextMatcher}
-            onChange={(next) => !isLocked && onDraftChange(input.name, next)}
+            onChange={(next) => onDraftChange(input.name, next)}
           />
         </label>
       {/each}
@@ -95,11 +84,6 @@
     display: flex; flex-direction: column; gap: 8px; padding: 11px 14px;
     border-radius: 10px; border: 1px solid var(--divider); background: var(--inset);
   }
-  .cbv-inputs-toggle {
-    align-self: flex-start; display: inline-flex; align-items: center; gap: 4px;
-    padding: 2px 6px 2px 2px; font-size: var(--fs-xs); font-weight: 600;
-    background: transparent; border: none; cursor: pointer; color: var(--text-3);
-  }
   .cbv-inputs-fields { display: flex; flex-direction: column; gap: 8px; }
   .cbv-input-field { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-sm); }
   .cbv-input-label {
@@ -107,5 +91,4 @@
   }
   .cbv-required-marker { color: var(--danger); }
   .cbv-input-field.cbv-input-missing > .cbv-input-label { color: var(--danger); }
-  .cbv-input-field.cbv-input-disabled { opacity: 0.7; }
 </style>

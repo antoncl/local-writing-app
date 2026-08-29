@@ -136,6 +136,9 @@ export type PreviewCacheBlock = {
   tokens: number;
   tier?: string | null;
   text?: string;
+  // ADR-0076 S2: the tier's member entry ids, for the Context door's
+  // drill-down. Additive; empty/absent for non-lore blocks.
+  entry_ids?: string[];
 };
 
 // Populated on AIPreviewResponse.error when the render failed. The preview

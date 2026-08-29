@@ -2,6 +2,7 @@
 // these operate purely on their arguments so they live outside the component
 // and are unit-testable in isolation.
 import { effectivePromptInputs } from "@/lib/editor-core/promptResolution";
+import { coerceInputValue, decodePickerValue, isListShapedInputType } from "@/lib/utils/promptInputs";
 import type { NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
 // ---- cost-estimate + TTL strip state ----
@@ -134,4 +135,59 @@ export function ttlChipsFor(times: Record<string, string>, _tick: number): TtlCh
     else formatted = `${remainingSec}s`;
     return { slot, label, ttlLabel, formatted, expired: remainingSec <= 0, remainingSec };
   });
+}
+
+// ADR-0076 S2: the locked-inputs section of the Context door reads the
+// filled draft values as titled text, not raw wire encodings — a
+// `context_pick` shouldn't show its JSON, a list type shouldn't show its
+// array literal, and a ref should show its title, not its id. Skips hidden
+// inputs (never authored, so never worth showing) and empty drafts. `name`
+// rides along as the row's identity — labels are author-authored and not
+// unique, so a keyed render must key on the name (S2 review).
+export function displayInputValues(
+  inputs: PromptInputDefinition[],
+  drafts: Record<string, string>,
+  lookup: { titleFor: (id: string) => string | null },
+): { name: string; label: string; value: string }[] {
+  const out: { name: string; label: string; value: string }[] = [];
+  for (const input of inputs) {
+    if (input.hidden) continue;
+    const draft = drafts[input.name];
+    if (!draft || !draft.trim()) continue;
+    const label = input.label || input.name;
+    const value = displayValueFor(input, draft, lookup);
+    if (value) out.push({ name: input.name, label, value });
+  }
+  return out;
+}
+
+function displayValueFor(
+  input: PromptInputDefinition,
+  draft: string,
+  lookup: { titleFor: (id: string) => string | null },
+): string {
+  if (input.type === "context_pick") {
+    const refs = decodePickerValue(draft);
+    // A legacy bare-id draft (the #1094/#1482 live shape) decodes to [] —
+    // fall back to the raw draft, titled when we can: the `entry` row is the
+    // most important input on a revise brainstorm and must never vanish.
+    if (refs.length === 0) return lookup.titleFor(draft.trim()) ?? draft;
+    return refs
+      .map((ref) => ref.title || lookup.titleFor(ref.id) || ref.id)
+      .join(" · ");
+  }
+  if (input.type === "entity_ref" || input.type === "scene_ref") {
+    return lookup.titleFor(draft) ?? draft;
+  }
+  // Every list-shaped type (entity_ref_list, multi_select, tags, list…)
+  // decodes through the one shared coercion, so the door never shows the
+  // JSON wire form; entity ids resolve to titles, plain items pass through.
+  if (isListShapedInputType(input.type)) {
+    const coerced = coerceInputValue(draft, input.type);
+    if (Array.isArray(coerced)) {
+      return coerced.map((item) => lookup.titleFor(String(item)) ?? String(item)).join(" · ");
+    }
+    return draft;
+  }
+  return draft;
 }

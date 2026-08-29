@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 import {
   decodeChatInputDrafts,
+  displayInputValues,
   encodeChatInputDrafts,
   endsInUserTurn,
   seedSubjectEntryInput,
@@ -185,5 +186,91 @@ describe("ttlChipsFor", () => {
     const [chip] = ttlChipsFor({ system: "" }, 0);
     expect(chip.expired).toBe(true);
     expect(chip.formatted).toBe("expired");
+  });
+});
+
+describe("displayInputValues (ADR-0076 S2 — Context door's locked-inputs section)", () => {
+  const titleFor = (id: string) => (id === "lore_known" ? "Known Lore" : id === "scene_known" ? "Known Scene" : null);
+  const lookup = { titleFor };
+
+  it("skips hidden inputs", () => {
+    const inputs = [input("text", { name: "secret", hidden: true }), input("text", { name: "visible" })];
+    const drafts = { secret: "shh", visible: "shown" };
+    expect(displayInputValues(inputs, drafts, lookup)).toEqual([{ name: "visible", label: "visible", value: "shown" }]);
+  });
+
+  it("skips empty/whitespace-only drafts", () => {
+    const inputs = [input("text", { name: "a" }), input("text", { name: "b" })];
+    const drafts = { a: "", b: "   " };
+    expect(displayInputValues(inputs, drafts, lookup)).toEqual([]);
+  });
+
+  it("context_pick: joins ref titles, falling back to titleFor(id) then the id", () => {
+    const inputs = [input("context_pick", { name: "picks" })];
+    const draft = JSON.stringify([
+      { id: "lore_a", kind: "lore", title: "Own Title" },
+      { id: "lore_known", kind: "lore", title: "" },
+      { id: "lore_unknown", kind: "lore", title: "" },
+    ]);
+    expect(displayInputValues(inputs, { picks: draft }, lookup)).toEqual([
+      { name: "picks", label: "picks", value: "Own Title · Known Lore · lore_unknown" },
+    ]);
+  });
+
+  it("context_pick: a legacy bare-id draft falls back to the raw id, titled when known (S2 review)", () => {
+    // The #1094/#1482 live shape: a revise brainstorm's `entry` seeded as a
+    // bare id. decodePickerValue yields [] — the row must not vanish.
+    const inputs = [input("context_pick", { name: "entry" })];
+    expect(displayInputValues(inputs, { entry: "lore_known" }, lookup)).toEqual([
+      { name: "entry", label: "entry", value: "Known Lore" },
+    ]);
+    expect(displayInputValues(inputs, { entry: "lore_gone" }, lookup)).toEqual([
+      { name: "entry", label: "entry", value: "lore_gone" },
+    ]);
+  });
+
+  it("entity_ref_list: joins titleFor(id) ?? id, and tolerates non-JSON", () => {
+    const inputs = [input("entity_ref_list", { name: "refs" })];
+    expect(displayInputValues(inputs, { refs: JSON.stringify(["lore_known", "lore_x"]) }, lookup)).toEqual([
+      { name: "refs", label: "refs", value: "Known Lore · lore_x" },
+    ]);
+    // A non-JSON list draft coerces via the shared comma-split, not verbatim.
+    expect(displayInputValues(inputs, { refs: "lore_known, lore_x" }, lookup)).toEqual([
+      { name: "refs", label: "refs", value: "Known Lore · lore_x" },
+    ]);
+  });
+
+  it("list-shaped types (tags/multi_select) never leak the JSON wire form (S2 review)", () => {
+    const inputs = [input("tags", { name: "senses" })];
+    expect(displayInputValues(inputs, { senses: '["sight","sound"]' }, lookup)).toEqual([
+      { name: "senses", label: "senses", value: "sight · sound" },
+    ]);
+  });
+
+  it("entity_ref / scene_ref: titleFor(draft) ?? draft", () => {
+    const inputs = [input("entity_ref", { name: "ref" }), input("scene_ref", { name: "scene" })];
+    const drafts = { ref: "lore_known", scene: "scene_unknown" };
+    expect(displayInputValues(inputs, drafts, lookup)).toEqual([
+      { name: "ref", label: "ref", value: "Known Lore" },
+      { name: "scene", label: "scene", value: "scene_unknown" },
+    ]);
+  });
+
+  it("everything else: the draft string verbatim", () => {
+    const inputs = [input("text", { name: "note" }), input("boolean", { name: "flag" })];
+    const drafts = { note: "hello", flag: "true" };
+    expect(displayInputValues(inputs, drafts, lookup)).toEqual([
+      { name: "note", label: "note", value: "hello" },
+      { name: "flag", label: "flag", value: "true" },
+    ]);
+  });
+
+  it("label falls back to input.name when no label is set", () => {
+    const inputs = [input("text", { name: "x", label: "Focus" }), input("text", { name: "y" })];
+    const drafts = { x: "a", y: "b" };
+    expect(displayInputValues(inputs, drafts, lookup)).toEqual([
+      { name: "x", label: "Focus", value: "a" },
+      { name: "y", label: "y", value: "b" },
+    ]);
   });
 });

@@ -76,6 +76,11 @@ class RenderedTemplate:
     # the prompt is not lore-enabled or selects nothing.
     send_lore_stable: str = ""
     send_lore_volatile: str = ""
+    # ADR-0076 S2: the member entry ids behind each tier above, threaded out of
+    # `_preview_lore_tiers` so the Context door's tier blocks can carry
+    # `PreviewCacheBlock.entry_ids` for drill-down. Empty when not lore-enabled.
+    send_lore_stable_ids: list[str] = field(default_factory=list)
+    send_lore_volatile_ids: list[str] = field(default_factory=list)
     # ADR-0067 S2: the field descriptors registered via `{% do
     # field_contract.store(f) %}` during this render, in insertion order. Set by
     # `build_preview` from `env.field_contract.stored`; persisted on the chat

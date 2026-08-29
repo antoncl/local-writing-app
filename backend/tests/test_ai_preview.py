@@ -756,6 +756,95 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertTrue(all(b["tier"] == "volatile" for b in lore))  # cold, unhinted
         self.assertIn("Honor Harrington", "".join(b["text"] for b in lore))
 
+    def test_preview_lore_tier_blocks_carry_entry_ids(self) -> None:
+        # ADR-0076 S2: each tier block on `cache_blocks` carries `entry_ids` — the
+        # tier's own member ids, threaded from `_preview_lore_tiers` through
+        # `RenderedTemplate.send_lore_stable_ids`/`_volatile_ids` — so the Context
+        # door can drill "N entries" down to which N, by title.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        lore = [b for b in body["cache_blocks"] if "lore" in b["label"]]
+        self.assertTrue(lore, body["cache_blocks"])
+        for block in lore:
+            self.assertEqual(block["entry_ids"], [self.honor_id])
+        # Non-lore blocks (system) carry no entry_ids.
+        system_block = next(b for b in body["cache_blocks"] if b["label"] == "system")
+        self.assertEqual(system_block["entry_ids"], [])
+
+    def test_preview_tiers_mirror_the_sends_turn1_detection(self) -> None:
+        # #1477 (S2 review-corrected): the preview's tiers must match what the
+        # FIRST send would select. A real send runs `expand_context` over the
+        # last user message + the rendered system prompt + the scene's own
+        # prose (ADR-0075 slice 3/3b) and threads the detections in as the
+        # journal — so a scene-prose-mentioned entry IS attached by the very
+        # first send. `_preview_lore_tiers` mirrors that same detector with an
+        # empty composer (the one surface that can't exist yet), never the
+        # legacy `journal=None` static-scan branch no send runs. Both the
+        # prose-mentioned entry and an `always`-policy entry must appear.
+        nimitz = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character")
+        )
+        self.service.save_lore_entry(
+            nimitz.id,
+            SaveLoreEntryRequest(
+                title="Nimitz",
+                body="A treecat.",
+                base_revision=self.service.read_lore_entry(nimitz.id).revision,
+                entry_type="lore:character",
+                metadata={},
+            ),
+        )
+        pavel = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Pavel Young", entry_type="lore:character")
+        )
+        self.service.save_lore_entry(
+            pavel.id,
+            SaveLoreEntryRequest(
+                title="Pavel Young",
+                body="A rival captain.",
+                base_revision=self.service.read_lore_entry(pavel.id).revision,
+                entry_type="lore:character",
+                metadata={"context_policy": "always"},
+            ),
+        )
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body="Nimitz perched on Honor's shoulder as the ship dove into battle.",
+                base_revision=scene.revision,
+                status="draft",
+                entry_type="manuscript:scene",
+                metadata=scene.metadata,
+            ),
+        )
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        lore_blocks = [b for b in body["cache_blocks"] if "lore" in b["label"]]
+        lore_text = "".join(b["text"] for b in lore_blocks)
+        self.assertIn("Nimitz", lore_text)
+        self.assertIn("Pavel Young", lore_text)
+        # And the drill-down ids agree with the text (the door's count/list
+        # must be the truth of the payload).
+        all_ids = [i for b in lore_blocks for i in b["entry_ids"]]
+        self.assertIn(nimitz.id, all_ids)
+        self.assertIn(pavel.id, all_ids)
+
     def test_marked_target_in_context_pick_overrides_target_scene_id(self) -> None:
         # NC-style ★ target: a scene flagged target=true in a context_pick
         # input wins over the caller's implicit target_scene_id. Templates

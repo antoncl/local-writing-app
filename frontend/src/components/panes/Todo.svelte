@@ -163,7 +163,10 @@
     background: var(--surface);
     color: var(--text);
     font-family: inherit;
-    font-size: var(--fs-md);
+    /* The TODO description is a writing surface, not a compact UI label — prose
+       size, matching the app's body text and the "Add" box (a bare textarea).
+       --fs-md read "awfully small" against everything else. */
+    font-size: var(--fs-prose);
     line-height: 1.4;
     resize: vertical;
   }

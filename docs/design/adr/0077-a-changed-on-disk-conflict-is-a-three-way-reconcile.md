@@ -1,7 +1,7 @@
 # ADR-0077: A changed-on-disk conflict is a three-way reconcile, not a question
 
-- Status: **Proposed** — 2026-08-29. Checked against a cold-implementer pass over the save/reconcile
-  path (the three legs a merge needs, and which one the pane doesn't hold).
+- Status: **Accepted** — 2026-08-29, Anton, PR #1618. Checked against a cold-implementer pass over the
+  save/reconcile path (the three legs a merge needs, and which one the pane doesn't hold).
 - Verified against `458f9917` (2026-08-29).
 - Feature: #72 · Builds on the 2-way reconcile (`minimalReplaceTransaction`, #694 / PR #1320) · Follows
   ADR-0050 (undo is a per-surface caretaker; the in-editor prose history this preserves is the library

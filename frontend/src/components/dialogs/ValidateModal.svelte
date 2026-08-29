@@ -156,13 +156,8 @@
     cursor: pointer;
   }
 
-  .unwrap:hover:not(:disabled) {
+  .unwrap:hover {
     color: var(--text-1);
     border-color: var(--text-3);
-  }
-
-  .unwrap:disabled {
-    opacity: 0.5;
-    cursor: default;
   }
 </style>

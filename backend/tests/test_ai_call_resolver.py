@@ -11,7 +11,11 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from app.services.ai.call_resolver import ResolvedCall, resolve_call_params
+from app.services.ai.call_resolver import (
+    DEFAULT_MAX_TOKENS,
+    ResolvedCall,
+    resolve_call_params,
+)
 
 
 def _project(assistant: object | None) -> mock.Mock:
@@ -80,7 +84,8 @@ class ResolveCallParamsTests(unittest.TestCase):
             model_override=None,
             max_tokens_override=None,
         )
-        self.assertEqual(resolved.max_tokens, 4096)
+        # claude-sonnet-5 isn't in the baked catalogue → no clamp → the floor.
+        self.assertEqual(resolved.max_tokens, DEFAULT_MAX_TOKENS)
 
     def test_empty_assistant_temperature_coerces_to_none(self) -> None:
         assistant = SimpleNamespace(
@@ -108,7 +113,8 @@ class ResolveCallParamsTests(unittest.TestCase):
         self.assertEqual(resolved.provider, "ollama")
         self.assertEqual(resolved.model, "llama3")
         self.assertIsNone(resolved.temperature)
-        self.assertEqual(resolved.max_tokens, 4096)
+        # Ollama isn't in the baked catalogue → no clamp → the floor.
+        self.assertEqual(resolved.max_tokens, DEFAULT_MAX_TOKENS)
 
     def test_override_without_an_assistant_still_wins(self) -> None:
         resolved = resolve_call_params(
@@ -122,6 +128,57 @@ class ResolveCallParamsTests(unittest.TestCase):
         self.assertEqual(resolved.provider, "openai")
         self.assertEqual(resolved.model, "gpt-5")
         self.assertEqual(resolved.max_tokens, 1024)
+
+
+class MaxTokensClampTests(unittest.TestCase):
+    """The floor is clamped down to each model's published max output so raising
+    it can't 400 a model with a smaller ceiling (#1591). Uses the real baked
+    catalogue: gpt-4o caps at 16384 (below the 32768 floor); Haiku 4.5 at 64000
+    (above it)."""
+
+    def _resolve(self, meta: dict, *, override: int | None = None) -> ResolvedCall:
+        return resolve_call_params(
+            _project(SimpleNamespace(metadata=meta)),
+            _settings(),
+            assistant_id="a1",
+            provider_override=None,
+            model_override=None,
+            max_tokens_override=override,
+        )
+
+    def test_floor_clamps_down_to_model_max(self) -> None:
+        # gpt-4o max output is 16384 → the 32768 floor clamps to it.
+        resolved = self._resolve({"ai_provider": "openai", "ai_model": "gpt-4o"})
+        self.assertEqual(resolved.max_tokens, 16384)
+
+    def test_explicit_override_is_also_clamped(self) -> None:
+        # A hand-set 100000 on gpt-4o must be reduced to the model max, not 400'd.
+        resolved = self._resolve(
+            {"ai_provider": "openai", "ai_model": "gpt-4o"}, override=100000
+        )
+        self.assertEqual(resolved.max_tokens, 16384)
+
+    def test_no_clamp_when_model_max_exceeds_floor(self) -> None:
+        # Haiku 4.5 (64000) is above the floor → the floor stands.
+        resolved = self._resolve(
+            {"ai_provider": "anthropic", "ai_model": "claude-haiku-4-5-20251001"}
+        )
+        self.assertEqual(resolved.max_tokens, DEFAULT_MAX_TOKENS)
+
+    def test_value_below_model_max_is_unchanged(self) -> None:
+        # A small assistant budget stays as-is: min(2048, 16384) == 2048.
+        resolved = self._resolve(
+            {"ai_provider": "openai", "ai_model": "gpt-4o", "ai_max_tokens": 2048}
+        )
+        self.assertEqual(resolved.max_tokens, 2048)
+
+    def test_unknown_model_rides_the_floor_unclamped(self) -> None:
+        # A live-only OpenRouter route isn't baked → unknown max → the floor
+        # (OpenRouter clamps server-side, so this is safe).
+        resolved = self._resolve(
+            {"ai_provider": "openrouter", "ai_model": "deepseek/deepseek-v4-pro-0813"}
+        )
+        self.assertEqual(resolved.max_tokens, DEFAULT_MAX_TOKENS)
 
 
 class ResolvedCallToCallTests(unittest.TestCase):

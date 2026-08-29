@@ -151,6 +151,7 @@ def _row_to_descriptor(provider: str, row: dict[str, Any]) -> ModelDescriptor:
         cost_in_per_mtok=_opt_float(row.get("cost_in_per_mtok")),
         cost_out_per_mtok=_opt_float(row.get("cost_out_per_mtok")),
         cache_read_multiplier=_opt_float(row.get("cache_read_multiplier")),
+        max_output_tokens=_opt_int(row.get("max_output_tokens")),
     )
 
 
@@ -158,6 +159,12 @@ def _opt_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _opt_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(value)
 
 
 def _parse_date(value: Any) -> date | None:

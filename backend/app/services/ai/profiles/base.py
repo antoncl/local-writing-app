@@ -138,6 +138,13 @@ class ModelDescriptor:
     # `supported_parameters`. Combined with the family rule by
     # `accepts_temperature` — never read this raw for the effective answer.
     supports_temperature: bool = True
+    # The model's published max OUTPUT tokens — distinct from `context_window`
+    # (the input budget). Used to clamp a request's `max_tokens` down so we never
+    # ask a model for more than it allows (Anthropic/OpenAI 400 otherwise, #1591).
+    # None = unknown (live-only OpenRouter routes, Ollama, un-audited models); the
+    # resolver then keeps the configured default, safe for providers that clamp
+    # server-side (OpenRouter) or don't error (Ollama).
+    max_output_tokens: int | None = None
 
     @property
     def family(self) -> str:

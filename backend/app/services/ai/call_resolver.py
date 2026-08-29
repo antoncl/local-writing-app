@@ -18,6 +18,37 @@ if TYPE_CHECKING:
     from app.services.machine_settings import MachineSettings
     from app.services.project_service import ProjectService
 
+# Default per-request output-token cap when neither the request nor the assistant
+# sets one. Generous because the chat send path streams (large outputs don't risk
+# HTTP timeouts) and reasoning models spend part of the budget thinking before
+# they answer — a 4096 default let them exhaust it mid-thought and return nothing
+# (#1591). Always clamped down to the model's own max output (`_model_max_output`)
+# so raising the floor can't 400 a model with a smaller ceiling.
+DEFAULT_MAX_TOKENS = 32768
+
+
+def _model_max_output(provider: str, model: str) -> int | None:
+    """The model's published max output tokens from the baked catalogue — the
+    audited source for Anthropic/OpenAI, the only providers that 400 when
+    max_tokens exceeds the model's ceiling. None (a live-only OpenRouter route,
+    Ollama, or an un-audited model) means 'unknown', and the caller keeps the
+    desired value — safe for OpenRouter (clamps server-side) and Ollama (never
+    errors)."""
+    from app.services.ai.profiles._loader import baked_in_for
+
+    for descriptor in baked_in_for(provider):
+        if descriptor.id == model:
+            return descriptor.max_output_tokens
+    return None
+
+
+def _clamp_to_model_max(desired: int, provider: str, model: str) -> int:
+    """Cap `desired` at the model's max output when known; a 0/None cap (unknown)
+    leaves it untouched. Applies to explicit overrides too — a hand-set value
+    above a model's ceiling should be reduced, not 400'd."""
+    cap = _model_max_output(provider, model)
+    return min(desired, cap) if cap else desired
+
 
 @dataclass
 class ResolvedCall:
@@ -91,21 +122,22 @@ def resolve_call_params(
             max_tokens = max_tokens_override
         else:
             try:
-                max_tokens = int(meta.get("ai_max_tokens", 4096))
+                max_tokens = int(meta.get("ai_max_tokens", DEFAULT_MAX_TOKENS))
             except (TypeError, ValueError):
-                max_tokens = 4096
+                max_tokens = DEFAULT_MAX_TOKENS
         return ResolvedCall(
             provider=provider,
             model=model,
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=_clamp_to_model_max(max_tokens, provider, model),
             thinking_enabled=bool(meta.get("ai_thinking", False)),
         )
     provider = provider_override or settings.default_provider
     model = model_override or settings.default_models.get(provider or "", "")
+    desired = max_tokens_override if max_tokens_override is not None else DEFAULT_MAX_TOKENS
     return ResolvedCall(
         provider=provider,
         model=model,
         temperature=None,
-        max_tokens=max_tokens_override if max_tokens_override is not None else 4096,
+        max_tokens=_clamp_to_model_max(desired, provider, model),
     )

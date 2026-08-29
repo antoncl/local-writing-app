@@ -512,18 +512,34 @@
   async function persistActiveChat(): Promise<void> {
     const chatId = scene?.id;
     if (!chatId) return;
+    // #1564: CONSUME the pending cost delta + cache slots synchronously — build the
+    // payload (which reads them) and clear them BEFORE the await. Otherwise a second
+    // persist racing this one (e.g. setTitleFromPane's debounced rename, ungated by
+    // chatRunning) reads the same still-set `pendingTurnCost` and re-sends the delta;
+    // the backend appends an ai_invocations row per accepted delta, so the chat's cost
+    // total is permanently inflated by a turn. Cleared here (not after the save) so the
+    // race window closes; restored on failure so a failed save doesn't drop the cost.
+    const payload = currentChatSessionPayload();
+    const consumedCost = pendingTurnCost;
+    const consumedSlots = pendingTurnCacheWriteSlots;
+    pendingTurnCost = null;
+    pendingTurnCacheWriteSlots = [];
     try {
-      const saved = await api.saveNode<ChatSession>(chatId, currentChatSessionPayload());
+      const saved = await api.saveNode<ChatSession>(chatId, payload);
       activeChatTitle = saved.title;
       activeChatPinned = saved.pinned;
       activeChatCacheWriteTimes = { ...(saved.cache_write_times ?? {}) };
-      pendingTurnCost = null;
-      pendingTurnCacheWriteSlots = [];
       // Refresh our local snapshot of the persisted session — keeps the
       // cost-total footer accurate without re-fetching.
       chatSession = saved;
       onBodyChange?.();
     } catch (e) {
+      // The save failed — put the consumed delta/slots back (merging anything accrued
+      // meanwhile) so the next persist re-sends them rather than silently losing a turn.
+      if (consumedCost != null) pendingTurnCost = (pendingTurnCost ?? 0) + consumedCost;
+      if (consumedSlots.length > 0) {
+        pendingTurnCacheWriteSlots = [...new Set([...consumedSlots, ...pendingTurnCacheWriteSlots])];
+      }
       chatError = `Couldn't save chat: ${(e as Error).message}`;
     }
   }

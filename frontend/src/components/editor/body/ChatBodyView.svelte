@@ -54,6 +54,7 @@
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { cardEntriesStore } from "@/lib/stores/plotCards";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
+  import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { ChatCommitController } from "@/lib/stores/chatCommit.svelte";
   import { refreshChatSessions } from "@/lib/stores/chats";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -117,6 +118,9 @@
   // ---- chat working state (hydrated from chatSession on load) ----
   let chatHistory: ChatMessage[] = $state([]);
   let chatRunning = $state(false);
+  // ADR-0076 S3: the in-flight stream's abort handle, so the Send button can
+  // flip to Stop while streaming. Null when no stream is in flight.
+  let chatAbort: AbortController | null = $state(null);
   let chatError: string | null = $state(null);
   // A non-error status from a commit — "no changes proposed", "ignored N
   // fields" — surfaced so a hidden out-of-band commit is never a silent no-op.
@@ -349,6 +353,7 @@
       role: m.role,
       content: m.content,
       truncated: !!m.truncated,
+      stopped: !!m.stopped,
       thinking: m.thinking || undefined,
       journal_added: m.journal_added,
       usage: m.usage ?? null,
@@ -458,6 +463,7 @@
         content: m.content,
         thinking: m.thinking ?? "",
         truncated: !!m.truncated,
+        stopped: !!m.stopped,
         usage: m.usage ?? null,
         cost_usd: m.cost_usd ?? null,
         // ADR-0076 decision 3: per-turn provenance, echoed through like usage/cost.
@@ -535,54 +541,79 @@
       if (chatScrollEl) chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
     };
     let errored = false;
-    for await (const ev of api.aiChatStream({
-      assistant_id: chatAssistantId || null,
-      system_prompt: chatSystemPrompt,
-      messages: chatHistory.slice(0, idx).map(({ role, content }) => ({ role, content })),
-      chat_id: scene?.id ?? null,
-    })) {
-      if (ev.type === "delta") {
-        chatHistory[idx].content += ev.text;
-        chatHistory = chatHistory;
-        scheduleScroll();
-      } else if (ev.type === "thinking") {
-        chatHistory[idx].thinking = (chatHistory[idx].thinking ?? "") + ev.text;
-        chatHistory = chatHistory;
-        scheduleScroll();
-      } else if (ev.type === "done") {
-        chatHistory[idx].truncated = ev.truncated;
-        if (Array.isArray(ev.journal_added) && ev.journal_added.length > 0) {
-          chatHistory[idx].journal_added = ev.journal_added;
-          appendToActiveChatJournal(ev.journal_added);
-        }
-        if (ev.usage) chatHistory[idx].usage = ev.usage;
-        if (typeof ev.cost_usd === "number") {
-          chatHistory[idx].cost_usd = ev.cost_usd;
-          // Only a POSITIVE delta accrues toward the session total — the
-          // backend refuses <= 0 deltas (`_record_chat_cost_delta`), and a
-          // zero-priced turn must not fabricate a "session €0.00" for a chat
-          // whose true total is unknown/None (#697). The per-message stamp
-          // above keeps the honest 0 for the turn itself.
-          if (ev.cost_usd > 0) pendingTurnCost = (pendingTurnCost ?? 0) + ev.cost_usd;
-        }
-        if (ev.usage && ev.usage.cache_write_tokens > 0) {
-          if (!pendingTurnCacheWriteSlots.includes("system")) {
-            pendingTurnCacheWriteSlots = [...pendingTurnCacheWriteSlots, "system"];
+    // ADR-0076 S3: one abort handle per stream, so Stop can cancel the fetch
+    // mid-flight. Cleared in `finally` regardless of how the stream ends.
+    chatAbort = new AbortController();
+    try {
+      for await (const ev of api.aiChatStream(
+        {
+          assistant_id: chatAssistantId || null,
+          system_prompt: chatSystemPrompt,
+          messages: chatHistory.slice(0, idx).map(({ role, content }) => ({ role, content })),
+          chat_id: scene?.id ?? null,
+        },
+        chatAbort.signal,
+      )) {
+        if (ev.type === "delta") {
+          chatHistory[idx].content += ev.text;
+          chatHistory = chatHistory;
+          scheduleScroll();
+        } else if (ev.type === "thinking") {
+          chatHistory[idx].thinking = (chatHistory[idx].thinking ?? "") + ev.text;
+          chatHistory = chatHistory;
+          scheduleScroll();
+        } else if (ev.type === "done") {
+          chatHistory[idx].truncated = ev.truncated;
+          if (Array.isArray(ev.journal_added) && ev.journal_added.length > 0) {
+            chatHistory[idx].journal_added = ev.journal_added;
+            appendToActiveChatJournal(ev.journal_added);
           }
+          if (ev.usage) chatHistory[idx].usage = ev.usage;
+          if (typeof ev.cost_usd === "number") {
+            chatHistory[idx].cost_usd = ev.cost_usd;
+            // Only a POSITIVE delta accrues toward the session total — the
+            // backend refuses <= 0 deltas (`_record_chat_cost_delta`), and a
+            // zero-priced turn must not fabricate a "session €0.00" for a chat
+            // whose true total is unknown/None (#697). The per-message stamp
+            // above keeps the honest 0 for the turn itself.
+            if (ev.cost_usd > 0) pendingTurnCost = (pendingTurnCost ?? 0) + ev.cost_usd;
+          }
+          if (ev.usage && ev.usage.cache_write_tokens > 0) {
+            if (!pendingTurnCacheWriteSlots.includes("system")) {
+              pendingTurnCacheWriteSlots = [...pendingTurnCacheWriteSlots, "system"];
+            }
+          }
+          // ADR-0076 decision 3: stamp provider/model/latency onto the message
+          // itself, same as usage/cost above — it renders on the transcript's
+          // own meta line now instead of a floating cbv-meta paragraph below it.
+          chatHistory[idx].provider = ev.provider;
+          chatHistory[idx].model = ev.model;
+          chatHistory[idx].latency_ms = ev.latency_ms;
+          chatHistory = chatHistory;
+        } else if (ev.type === "error") {
+          errored = true;
+          chatError = ev.error || "Unknown error";
+          chatHistory = chatHistory.slice(0, idx);
+          onError();
         }
-        // ADR-0076 decision 3: stamp provider/model/latency onto the message
-        // itself, same as usage/cost above — it renders on the transcript's
-        // own meta line now instead of a floating cbv-meta paragraph below it.
-        chatHistory[idx].provider = ev.provider;
-        chatHistory[idx].model = ev.model;
-        chatHistory[idx].latency_ms = ev.latency_ms;
-        chatHistory = chatHistory;
-      } else if (ev.type === "error") {
-        errored = true;
-        chatError = ev.error || "Unknown error";
-        chatHistory = chatHistory.slice(0, idx);
-        onError();
       }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // ADR-0076 S3: a deliberate Stop, not a network error — keep the
+        // partial (if any), never rewind, never route through chatError.
+        if (chatHistory[idx] && !chatHistory[idx].content && !chatHistory[idx].thinking) {
+          // Nothing streamed yet — drop the empty assistant turn silently.
+          chatHistory = chatHistory.slice(0, idx);
+        } else if (chatHistory[idx]) {
+          chatHistory[idx].stopped = true;
+          chatHistory = chatHistory;
+        }
+        void persistActiveChat();
+        return;
+      }
+      throw err;
+    } finally {
+      chatAbort = null;
     }
     if (!errored && !chatHistory[idx]?.content && !chatHistory[idx]?.thinking) {
       chatHistory = chatHistory.slice(0, idx);
@@ -591,6 +622,10 @@
     } else if (!errored) {
       void persistActiveChat();
     }
+  }
+
+  function stopChat(): void {
+    chatAbort?.abort();
   }
 
   // #1436: a self-contained prompt is submittable with an EMPTY composer iff its
@@ -731,14 +766,28 @@
     }
   }
 
-  function clearChat() {
+  const runClear = async () => {
     chatHistory = [];
     chatError = null;
     // Reset cost-delta + cache-slot stamping so the next persist starts clean.
     pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
     // Persist the clear so a reload doesn't resurrect the messages.
-    void persistActiveChat();
+    await persistActiveChat();
+  };
+
+  // ADR-0076 decision 4: Clear is destructive and irreversible once persisted
+  // — confirm every time (no `dontShowAgainKey`; "safe hands").
+  function clearChat() {
+    const n = chatHistory.length;
+    confirmService.request({
+      title: `Delete ${n} message${n === 1 ? "" : "s"}?`,
+      message: "This clears the conversation and persists immediately. The prompt, assistant, and inputs will unlock.",
+      confirmLabel: "Clear chat",
+      destructive: true,
+      cannotBeUndone: true,
+      onConfirm: runClear,
+    });
   }
 
   function handleChatInputKeydown(event: KeyboardEvent) {
@@ -1061,7 +1110,7 @@
     {/if}
 
     <div class="cbv-action-row">
-      <button type="button" disabled={!chatHistory.length || chatRunning || commit.committing} onclick={clearChat}>Clear</button>
+      <button type="button" class="cbv-clear" disabled={!chatHistory.length || chatRunning || commit.committing} onclick={clearChat}>Clear</button>
       {#if commit.isCreateBrainstorm}
         <!-- ADR-0046 §6.4 create mode: finalize into a whole proposed entry
              (out of band, hidden), reviewed in the card below — not a flip. -->
@@ -1105,22 +1154,28 @@
           </button>
         {/if}
       {/if}
-      <button
-        type="button"
-        class="primary"
-        disabled={chatRunning
-          || commit.committing
-          || sendBlockingInputs.length > 0
-          || (!chatInput.trim() && !(activePromptEntry && chatHistory.length === 0 && promptEndsInUserTurn))}
-        title={sendBlockingInputs.length > 0
-          ? `Fill required input${sendBlockingInputs.length > 1 ? "s" : ""}: ${sendBlockingInputs.map((i) => i.label || i.name).join(", ")}`
-          : (!chatInput.trim() && activePromptEntry && chatHistory.length === 0 && promptEndsInUserTurn)
-            ? "Send the prompt as-is — it ends with a user turn"
-            : ""}
-        onclick={() => void sendChat()}
-      >
-        {chatRunning ? "Sending…" : "Send"}
-      </button>
+      {#if chatRunning}
+        <!-- ADR-0076 decision 5: the primary button flips to Stop while a
+             reply streams — enabled, never disabled, so an in-flight turn is
+             always abortable. -->
+        <button type="button" class="primary" onclick={() => stopChat()}>Stop</button>
+      {:else}
+        <button
+          type="button"
+          class="primary"
+          disabled={commit.committing
+            || sendBlockingInputs.length > 0
+            || (!chatInput.trim() && !(activePromptEntry && chatHistory.length === 0 && promptEndsInUserTurn))}
+          title={sendBlockingInputs.length > 0
+            ? `Fill required input${sendBlockingInputs.length > 1 ? "s" : ""}: ${sendBlockingInputs.map((i) => i.label || i.name).join(", ")}`
+            : (!chatInput.trim() && activePromptEntry && chatHistory.length === 0 && promptEndsInUserTurn)
+              ? "Send the prompt as-is — it ends with a user turn"
+              : ""}
+          onclick={() => void sendChat()}
+        >
+          Send
+        </button>
+      {/if}
     </div>
 
     {#if commit.draftProposal}
@@ -1215,6 +1270,9 @@
 
   /* ---- 10 · action row ---- */
   .cbv-action-row { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+  /* ADR-0076 decision 4: Clear is left-anchored, pushing the whole
+     commit/Send cluster to the right — Clear and Send are never adjacent. */
+  .cbv-clear { margin-inline-end: auto; }
   .cbv-action-row button {
     padding: 8px 14px; font-size: var(--fs-sm); font-weight: 600; border-radius: 9px;
     border: 1px solid var(--border); background: var(--surface); color: var(--text-2); cursor: pointer;

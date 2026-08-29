@@ -106,6 +106,25 @@ class ChatSessionEndpointTests(unittest.TestCase):
         self.assertEqual(reread["messages"][1]["model"], "claude-3-5-sonnet")
         self.assertEqual(reread["messages"][1]["latency_ms"], 9600)
 
+    def test_save_round_trips_the_stopped_flag(self) -> None:
+        # ADR-0076 S3: `stopped` mirrors `truncated`/`provider` — additive,
+        # optional, must survive a save and a fresh GET (not just the echo).
+        created = self.client.post("/api/chats", json={"title": "T"}).json()
+        payload = {
+            "title": "T",
+            "messages": [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "The Regent do", "stopped": True},
+            ],
+        }
+        response = self.client.put(f"/api/chats/{created['id']}", json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["messages"][1]["stopped"])
+
+        reread = self.client.get(f"/api/chats/{created['id']}").json()
+        self.assertTrue(reread["messages"][1]["stopped"])
+
     def test_save_response_carries_the_projected_cost_total(self) -> None:
         # ADR-0076 decision 6: the UI keeps the save response as its live
         # session copy, so the response's cost_usd_total must be the same

@@ -78,6 +78,10 @@
       {/if}
       {#if message.truncated}
         <div class="cbv-truncated">Response cut off — hit max tokens.</div>
+      {:else if message.stopped}
+        <!-- ADR-0076 decision 5: reuses the truncation-banner idiom — a
+             deliberate Stop, not an error, so the partial reply is kept. -->
+        <div class="cbv-truncated">Stopped early — partial reply kept.</div>
       {/if}
       {#if message.journal_added && message.journal_added.length > 0}
         <div class="cbv-journal-added" title="Lore auto-detected from this turn.">

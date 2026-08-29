@@ -541,6 +541,10 @@ class ChatSessionMessage(BaseModel):
     provider: str | None = None
     model: str | None = None
     latency_ms: int | None = None
+    # ADR-0076 S3: set when the user aborted the stream mid-turn (Stop). The
+    # partial content is kept as-is — a deliberate stop, not an error/rewind
+    # (#1037). Additive-optional, mirrors `truncated` above.
+    stopped: bool = False
 
 
 class ChatSessionContextItem(BaseModel):

@@ -87,8 +87,12 @@
 {#if groups.length > 0}
   {#each groups as group (group.label)}
     <div class="search-group-label">{group.label}</div>
+    <!-- Unkeyed: hits are ephemeral and fully replaced each search, and are
+         NOT unique on (file_id, line, path) — an entry matching in two metadata
+         fields (title + aliases) yields two hits identical on those, so a keyed
+         each collides (each_key_duplicate) and drops the group. -->
     <NodeList>
-      {#each group.hits as hit (hit.file_id + ":" + hit.line + ":" + hit.path)}
+      {#each group.hits as hit}
         <NodeRow title={`${hit.path}:${hit.line}`} onClick={() => onOpenHit(hit)}>
           {#snippet detailSlot()}
             <small class="search-excerpt"

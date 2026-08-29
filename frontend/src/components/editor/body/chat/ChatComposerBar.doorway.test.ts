@@ -16,12 +16,19 @@ const PROMPT_ROSTER = [
   { id: "p1", title: "Draft prompt", entry_type: "prompt" },
 ] as unknown as PromptEntrySummary[];
 
+// The routed pick list feeding the prompt chip's PromptMenu — a plain leaf
+// plus one with a "/" in its title, to exercise the group drill.
+const ROUTED_PROMPTS = [
+  { id: "p1", title: "Draft prompt", entry_type: "prompt" },
+  { id: "p2", title: "Revise/Tone", entry_type: "prompt" },
+] as unknown as PromptEntrySummary[];
+
 const baseProps = {
   isLocked: true,
   chatPromptEntryId: "p1",
   chatAssistantId: "a1",
   promptEntries: PROMPT_ROSTER,
-  routedPromptEntries: [],
+  routedPromptEntries: ROUTED_PROMPTS,
   assistantEntries: [],
   assistantScope: [],
   scopedDefaultId: "",
@@ -65,13 +72,31 @@ describe("ChatComposerBar lock doorway", () => {
     expect(screen.getByRole("button", { name: "New chat with this setup" })).toBeInTheDocument();
   });
 
-  it("regression: an unlocked prompt chip opens the picker, not the doorway", async () => {
+  it("regression: an unlocked prompt chip opens the PromptMenu, not the doorway", async () => {
     render(ChatComposerBar, { ...baseProps, isLocked: false });
     await fireEvent.click(screen.getByTitle("Pick a prompt"));
     expect(
       screen.queryByText("Locked after the first message — this prompt shapes every turn."),
     ).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Search prompts…")).toBeInTheDocument();
+    // "Draft prompt" has no "/" so it stays a flat leaf; "Revise/Tone" collapses
+    // into a drillable "Revise" group row (ADR-0076 S5's `/`-tree, not a flat
+    // search list — the search field is gone).
+    expect(screen.getByRole("menuitem", { name: "Draft prompt" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Revise" })).toBeInTheDocument();
+  });
+
+  it("drills into a grouped prompt title and picking the leaf calls onPickPrompt", async () => {
+    const onPickPrompt = vi.fn();
+    render(ChatComposerBar, { ...baseProps, isLocked: false, onPickPrompt });
+    await fireEvent.click(screen.getByTitle("Pick a prompt"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Revise" }));
+    const leaf = screen.getByRole("menuitem", { name: "Tone" });
+    expect(leaf).toBeInTheDocument();
+    await fireEvent.click(leaf);
+    expect(onPickPrompt).toHaveBeenCalledTimes(1);
+    expect(onPickPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p2", title: "Revise/Tone" }),
+    );
   });
 
   it("does not offer the doorway when the bound prompt no longer resolves", async () => {

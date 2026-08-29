@@ -175,6 +175,36 @@ Common fragments live as **snippets** — include one by id:
 {% include "builtin-project-settings" %}
 ```
 
+## Grouping prompts into menus
+
+When you have more than a handful of prompts, the picker gets long. A `/` in a
+prompt's **title** organizes it into a submenu — so name related prompts with a
+shared prefix and they fold together:
+
+| Title | Menu |
+| --- | --- |
+| `Revise / Tone` | **Revise** ▸ Tone |
+| `Revise / Length` | **Revise** ▸ Length |
+| `Summarize` | Summarize |
+
+Picking `Revise` opens a submenu of `Tone` and `Length`; `Summarize`, with no
+`/`, stays a plain top-level item.
+
+A few things worth knowing:
+
+- **Spaces around the `/` don't matter** — `Revise / Tone` and `Revise/Tone` are
+  the same. Nest as deep as you like: `Draft / Scene / Action`.
+- **It's opt-in.** A title with no `/` is just a normal item, so nothing changes
+  until you start using it.
+- **A group never doubles as a prompt.** If you have both `Revise` and
+  `Revise/Tone`, the plain `Revise` becomes an item *inside* the Revise group —
+  so one click never both runs a prompt and opens a submenu.
+- It's **purely how the name is displayed** in the menu — the title is what you
+  typed, and grouping changes nothing else about the prompt.
+
+The same menu is used wherever you pick a prompt — the chat prompt chip and the
+**＋ New** conversation menu on an entry.
+
 ## Where to look next
 
 - The prompt **[reference](#guide:reference)** — every variable, helper, filter,

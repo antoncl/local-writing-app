@@ -2,8 +2,9 @@
   The chat composer strip: the prompt-picker chip, the assistant-picker chip,
   and the Context door — extracted from ChatBodyView (#1086) to keep that view
   under the size cap. Pure picker UI: it owns the open/search/anchor state and
-  the shared outside-click dismissal, but the two *pick* gestures mutate the
-  parent's session state (and persist), so they surface as `onPickPrompt` /
+  (for the assistant picker, Context door, and doorway) the shared
+  outside-click dismissal, but the two *pick* gestures mutate the parent's
+  session state (and persist), so they surface as `onPickPrompt` /
   `onPickAssistant` callbacks — same idiom as ChatInputsStrip's `onDraftChange`.
 
   ADR-0076 S2: the 👁 preview popover became the worded, drillable **Context**
@@ -13,12 +14,20 @@
   entries by title. Preview honesty (#1477) was fixed at the source (the
   backend threads the send path's actual selection, not a static scan) — this
   component only renders what it's given.
+
+  ADR-0076 S5: the prompt chip's hand-rolled flat dropdown became the shared
+  `Popover` + `PromptMenu` `/`-tree drill (same idiom as ConversationsPanel's
+  ＋New menu) — the picker loses its search field; the assistant picker (its
+  own search + soft partition) is untouched, only its chip glyph changed.
 -->
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { assistantTitle, partitionAssistants } from "@/lib/chat/assistantScope";
   import { formatTokens } from "@/lib/utils/money";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import Popover from "@/components/chrome/Popover.svelte";
+  import PromptMenu from "@/components/editor/PromptMenu.svelte";
+  import { buildPromptMenuTree } from "@/lib/editor-core/promptMenuTree";
   import type {
     AssistantEntrySummary,
     ChatSessionJournalEntry,
@@ -109,10 +118,11 @@
   // keeps rendering as today's labeled sections — untouched by this slice.
   const otherBlocks = $derived(previewBlocksWithText.filter((b) => !b.tier));
 
-  // ---- prompt-picker UI state (composer chip → dropdown) ----
-  let promptPickerOpen = $state(false);
-  let promptPickerSearch = $state("");
-  let promptPickerEl: HTMLDivElement | null = $state(null);
+  // ---- prompt-picker UI state (composer chip → PromptMenu's `/`-tree drill,
+  // ADR-0076 S5 — mirrors ConversationsPanel's ＋New menu; Popover owns its
+  // own click-outside + Escape dismissal) ----
+  let promptMenuOpen = $state(false);
+  const promptMenu = $derived(buildPromptMenuTree(routedPromptEntries));
   let promptPickerBtnEl: HTMLButtonElement | null = $state(null);
 
   // ---- assistant-picker UI state (mirrors prompt picker; replaces native <select>) ----
@@ -138,7 +148,7 @@
   const canDoorway = $derived(isLocked && promptEntries.some((p) => p.id === chatPromptEntryId));
   function openDoorway(which: "prompt" | "assistant") {
     // Mutually exclusive with the pickers + Context door.
-    promptPickerOpen = false;
+    promptMenuOpen = false;
     assistantPickerOpen = false;
     chatPreviewPopoverOpen = false;
     doorwayOpen = which;
@@ -155,34 +165,8 @@
     return entry?.title ?? "Unknown prompt";
   }
 
-  function filteredChatPromptEntries(): PromptEntrySummary[] {
-    const q = promptPickerSearch.trim().toLowerCase();
-    const sorter = (a: PromptEntrySummary, b: PromptEntrySummary) =>
-      a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
-    if (!q) return routedPromptEntries.slice().sort(sorter);
-    return routedPromptEntries
-      .filter((e) => e.title.toLowerCase().includes(q) || (e.entry_type || "").toLowerCase().includes(q))
-      .sort(sorter);
-  }
-
-  async function toggleChatPromptPicker() {
-    if (isLocked) return;
-    promptPickerOpen = !promptPickerOpen;
-    promptPickerSearch = "";
-    if (promptPickerOpen) {
-      await tick();
-      const input = promptPickerEl?.querySelector<HTMLInputElement>(".cbv-picker-search");
-      input?.focus();
-    }
-  }
-
-  function closeChatPromptPicker() {
-    promptPickerOpen = false;
-    promptPickerSearch = "";
-  }
-
   function pickPrompt(entry: PromptEntrySummary): void {
-    closeChatPromptPicker();
+    promptMenuOpen = false;
     onPickPrompt(entry);
   }
 
@@ -211,13 +195,11 @@
     chatPreviewPopoverOpen = !chatPreviewPopoverOpen;
   }
 
-  // Shared outside-click dismissal for all three menus.
+  // Shared outside-click dismissal. The prompt picker's Popover owns its own
+  // click-outside + Escape dismissal (ADR-0076 S5) — only the assistant
+  // picker, Context door, and doorway route through this handler now.
   function handleDocumentClick(event: MouseEvent) {
     const target = event.target as Node;
-    if (promptPickerOpen) {
-      const insidePicker = promptPickerEl?.contains(target) || promptPickerBtnEl?.contains(target);
-      if (!insidePicker) closeChatPromptPicker();
-    }
     if (assistantPickerOpen) {
       const insidePicker = assistantPickerEl?.contains(target) || assistantPickerBtnEl?.contains(target);
       if (!insidePicker) closeAssistantPicker();
@@ -248,44 +230,29 @@
       class:cbv-chip-assigned={!!chatPromptEntryId}
       title={isLocked ? "Prompt is locked while this chat has messages." : "Pick a prompt"}
       bind:this={promptPickerBtnEl}
-      onclick={() => (canDoorway ? openDoorway("prompt") : void toggleChatPromptPicker())}
+      onclick={() => (canDoorway ? openDoorway("prompt") : (promptMenuOpen = !promptMenuOpen))}
       disabled={isLocked && !chatPromptEntryId}
-      aria-expanded={doorwayOpen === "prompt"}
+      aria-expanded={promptMenuOpen || doorwayOpen === "prompt"}
     >
-      <span class="cbv-chip-glyph" aria-hidden="true">✨</span>
+      <i class="cbv-chip-glyph ti ti-sparkles" aria-hidden="true"></i>
       <strong>{promptTitle(chatPromptEntryId)}</strong>
       {#if isLocked}
-        <span class="cbv-chip-lock" aria-label="locked">🔒</span>
+        <i class="cbv-chip-lock ti ti-lock" aria-label="locked"></i>
       {:else}
         <GroupCaret size="xs" />
       {/if}
     </button>
-    {#if promptPickerOpen}
-      <div class="cbv-prompt-picker" role="menu" bind:this={promptPickerEl}>
-        <input
-          class="cbv-picker-search"
-          type="text"
-          placeholder="Search prompts…"
-          bind:value={promptPickerSearch}
-        />
-        {#each filteredChatPromptEntries() as entry (entry.id)}
-          <button
-            type="button"
-            class:cbv-picker-active={entry.id === chatPromptEntryId}
-            onclick={() => pickPrompt(entry)}
-          >
-            <strong>{entry.title}</strong>
-            <small>{entry.entry_type}</small>
-          </button>
-        {:else}
-          <p class="cbv-picker-empty">
-            {promptPickerSearch
-              ? "No prompts match."
-              : "No chat-routed prompts. Create one with a Chat output (no output handler)."}
-          </p>
-        {/each}
-      </div>
-    {/if}
+    <Popover
+      bind:open={promptMenuOpen}
+      triggerEl={promptPickerBtnEl}
+      role="menu"
+      anchor="left"
+      offset={6}
+      minWidth="200px"
+      maxWidth="320px"
+    >
+      <PromptMenu nodes={promptMenu} onSelect={(entry) => pickPrompt(entry)} />
+    </Popover>
     {#if doorwayOpen === "prompt"}
       {@render doorway("Locked after the first message — this prompt shapes every turn.")}
     {/if}
@@ -302,10 +269,10 @@
       aria-label="Assistant"
       aria-expanded={doorwayOpen === "assistant"}
     >
-      <span class="cbv-chip-glyph" aria-hidden="true">🤖</span>
+      <i class="cbv-chip-glyph ti ti-robot" aria-hidden="true"></i>
       <strong>{assistantTitle(chatAssistantId, assistantEntries, scopedDefaultId)}</strong>
       {#if isLocked}
-        <span class="cbv-chip-lock" aria-label="locked">🔒</span>
+        <i class="cbv-chip-lock ti ti-lock" aria-label="locked"></i>
       {:else}
         <GroupCaret size="xs" />
       {/if}

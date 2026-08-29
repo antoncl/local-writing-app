@@ -35,7 +35,10 @@ async function loadTsExports(relPath) {
   return import(url);
 }
 
-const { CURATED_ICONS } = await loadTsExports("src/lib/utils/fieldIcons.ts");
+// Load from the dependency-free data modules, NOT `fieldIcons.ts` — that one
+// imports `@/lib/utils/colors`, a bare alias the `data:`-URL import below cannot
+// resolve (ERR_UNSUPPORTED_RESOLVE_REQUEST). Both modules here import nothing.
+const { CURATED_ICONS } = await loadTsExports("src/lib/utils/fieldIconsData.ts");
 const { UI_GLYPHS } = await loadTsExports("src/lib/icons/uiGlyphs.ts");
 
 // icons.json is the authoritative name -> codepoint map. Its package `exports`

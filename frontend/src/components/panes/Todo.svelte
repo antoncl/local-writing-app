@@ -85,7 +85,7 @@
 {#if todos.length > 0}
   <div class="todo-section-label">File TODOs</div>
   <NodeList>
-    {#each todos as item}
+    {#each todos as item (item.id)}
       <NodeCard>
         {#snippet leading()}
           <input class="todo-checkbox" type="checkbox" checked={item.status === "done"} aria-label="Toggle TODO" onchange={() => onToggleTodo(item)} />

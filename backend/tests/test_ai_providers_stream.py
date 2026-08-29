@@ -478,6 +478,15 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         with self.assertNoLogs(_DIAG_LOGGER, level="WARNING"):
             self._run(OpenRouterProfile(api_key="sk-or"), chunks)
 
+    def test_thinking_only_stream_does_not_log(self):
+        # Reasoning surfaced as thinking (no content) IS visible output — an
+        # OpenAI turn that emits StreamThinking must NOT log "empty". Pins that
+        # `emitted` counts thinking, not just content deltas.
+        chunks = [_chunk(reasoning="pondering", finish="stop")]
+        with self.assertNoLogs(_DIAG_LOGGER, level="WARNING"):
+            events, _ = self._run(OpenAIProfile(api_key="sk-openai"), chunks)
+        self.assertTrue([e for e in events if isinstance(e, StreamThinking)])
+
 
 def _a_delta_event(dtype, *, text=None, thinking=None):
     """One Anthropic content_block_delta stream event."""

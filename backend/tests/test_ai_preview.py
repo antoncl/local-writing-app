@@ -778,6 +778,43 @@ class PreviewEndpointTests(unittest.TestCase):
         system_block = next(b for b in body["cache_blocks"] if b["label"] == "system")
         self.assertEqual(system_block["entry_ids"], [])
 
+    def test_preview_lore_tier_block_derives_from_entry_xml(self) -> None:
+        # ADR-0076 S7: the tier block's `text` is not an independent render —
+        # it DERIVES from the same per-entry XML the Context door drills into
+        # (`entry_xml`, keyed by id), so the two can never drift.
+        second = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character")
+        )
+        self.service.save_lore_entry(
+            second.id,
+            SaveLoreEntryRequest(
+                title="Nimitz",
+                body="A treecat.",
+                base_revision=self.service.read_lore_entry(second.id).revision,
+                entry_type="lore:character",
+                metadata={"context_policy": "always"},
+            ),
+        )
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        lore = [b for b in body["cache_blocks"] if "lore" in b["label"] and b["entry_ids"]]
+        self.assertTrue(lore, body["cache_blocks"])
+        for block in lore:
+            self.assertGreaterEqual(len(block["entry_ids"]), 1)
+            self.assertEqual(
+                block["text"],
+                "<lore>\n"
+                + "\n\n".join(block["entry_xml"][i] for i in block["entry_ids"])
+                + "\n</lore>",
+            )
+
     def test_preview_tiers_mirror_the_sends_turn1_detection(self) -> None:
         # #1477 (S2 review-corrected): the preview's tiers must match what the
         # FIRST send would select. A real send runs `expand_context` over the

@@ -295,6 +295,10 @@ class PreviewCacheBlock(BaseModel):
     # drill-down ("12 entries" → which twelve, by title). Additive; empty
     # for non-lore blocks (system, conversation turns).
     entry_ids: list[str] = Field(default_factory=list)
+    # ADR-0076 S7: per-entry rendered XML keyed by entry_id (order lives in
+    # `entry_ids`), for the Context door's per-entry drill leaf. Additive; empty
+    # for non-lore blocks.
+    entry_xml: dict[str, str] = Field(default_factory=dict)
 
 
 class PreviewErrorInfo(BaseModel):

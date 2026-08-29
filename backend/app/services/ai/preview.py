@@ -574,24 +574,46 @@ def build_preview(
     # cache-aware preview can surface it (templates no longer emit lore). Only for a
     # lore-enabled prompt; `scene` is the same as-of anchor the send path resolves.
     if rendered.lore_invoked:
-        (
-            rendered.send_lore_stable,
-            rendered.send_lore_volatile,
-            rendered.send_lore_stable_ids,
-            rendered.send_lore_volatile_ids,
-        ) = _preview_lore_tiers(project_service, scene, rendered)
+        _apply_preview_lore_tiers(rendered, _preview_lore_tiers(project_service, scene, rendered))
 
     return rendered, session_id
+
+
+def _apply_preview_lore_tiers(rendered: RenderedTemplate, tiers: _PreviewLoreTiers) -> None:
+    """Carry a computed `_PreviewLoreTiers` onto its `RenderedTemplate` — the
+    tier XML, the member id order, and the per-entry XML map the Context door
+    drills into (ADR-0076 S7). Split out of `build_preview` to keep its
+    statement count under the complexity gate."""
+    rendered.send_lore_stable = tiers.stable_xml
+    rendered.send_lore_volatile = tiers.volatile_xml
+    rendered.send_lore_stable_ids = [i for i, _ in tiers.stable_entries]
+    rendered.send_lore_volatile_ids = [i for i, _ in tiers.volatile_entries]
+    rendered.send_lore_stable_entries = dict(tiers.stable_entries)
+    rendered.send_lore_volatile_entries = dict(tiers.volatile_entries)
+
+
+@dataclass
+class _PreviewLoreTiers:
+    """The send-path lore split into (stable, volatile) tiers, both as the
+    wrapped `<lore>` XML and as the per-entry (id, element_xml) pairs the
+    Context door drills into (ADR-0076 S7). Ids derive from the entry pairs,
+    so a separate readability filter is unnecessary — `_render_lore_entries`
+    already skips unreadable nodes."""
+
+    stable_xml: str
+    volatile_xml: str
+    stable_entries: list[tuple[str, str]]
+    volatile_entries: list[tuple[str, str]]
 
 
 def _preview_lore_tiers(
     project_service,
     scene: Any,
     rendered: RenderedTemplate,
-) -> tuple[str, str, list[str], list[str]]:
+) -> _PreviewLoreTiers:
     """The send-path lore the model will receive, split into (stable, volatile) XML
-    plus their member id lists, for the cache-aware preview (ADR-0060 §6) and the
-    Context door's drill-down (ADR-0076 S2). Mirrors the send path's selection +
+    plus their per-entry pairs, for the cache-aware preview (ADR-0060 §6) and the
+    Context door's per-entry drill (ADR-0076 S7). Mirrors the send path's selection +
     tiering (`_relevant_lore_ids` + `_tier_lore_ids`) but against a FRESH throwaway
     `AISession` — the cold turn-1 view (unhinted lore volatile; `use(node,
     "stable")` stable) — and never commits, so it cannot touch a live chat's cache
@@ -609,8 +631,7 @@ def _preview_lore_tiers(
     composer-accrued journal entries are rendered by the Context door's own
     journal section, frontend-side."""
     from app.services.ai.context_expander import expand_context
-    from app.services.ai.helpers import _safe_read_node
-    from app.services.ai.lore_block import _format_lore_block
+    from app.services.ai.lore_block import _render_lore_entries, _wrap_lore_block
     from app.services.ai.lore_selection import (
         _relevant_lore_ids,
         _tier_lore_ids,
@@ -634,19 +655,16 @@ def _preview_lore_tiers(
         project_service, scene, "implicit", preview_journal, list(rendered.used_node_ids or [])
     )
     if not ids:
-        return "", "", [], []
+        return _PreviewLoreTiers("", "", [], [])
     stable_ids, volatile_ids = _tier_lore_ids(
         project_service, ids, AISession(id="preview"), dict(rendered.used_node_hints or {})
     )
-    # The drill-down must list exactly what the block text carries:
-    # `_format_lore_block` silently skips ids whose node can't be read, so
-    # filter the id lists through the same readability check first.
-    stable_ids = [i for i in stable_ids if _safe_read_node(project_service, i) is not None]
-    volatile_ids = [i for i in volatile_ids if _safe_read_node(project_service, i) is not None]
     index = project_service.build_mutations_index() if scene is not None else None
-    stable_xml = _format_lore_block(project_service, stable_ids, scene, index=index)
-    volatile_xml = _format_lore_block(project_service, volatile_ids, scene, index=index)
-    return stable_xml, volatile_xml, stable_ids, volatile_ids
+    stable_entries = _render_lore_entries(project_service, stable_ids, scene, index=index)
+    volatile_entries = _render_lore_entries(project_service, volatile_ids, scene, index=index)
+    stable_xml = _wrap_lore_block(stable_entries)
+    volatile_xml = _wrap_lore_block(volatile_entries)
+    return _PreviewLoreTiers(stable_xml, volatile_xml, stable_entries, volatile_entries)
 
 
 def _raise_preview_error_from_template(
@@ -740,7 +758,14 @@ def _preview_send_blocks(
     `count(text)` returns the token count for a block."""
     blocks: list[PreviewCacheBlock] = []
 
-    def add(label: str, role: str, text: str, tier: str | None, entry_ids: list[str] | None = None) -> None:
+    def add(
+        label: str,
+        role: str,
+        text: str,
+        tier: str | None,
+        entry_ids: list[str] | None = None,
+        entry_xml: dict[str, str] | None = None,
+    ) -> None:
         if text.strip():
             blocks.append(
                 PreviewCacheBlock(
@@ -750,6 +775,7 @@ def _preview_send_blocks(
                     tier=tier,
                     text=text,
                     entry_ids=list(entry_ids or []),
+                    entry_xml=dict(entry_xml or {}),
                 )
             )
 
@@ -757,9 +783,16 @@ def _preview_send_blocks(
         m.text for m in rendered.messages if m.role == "system" and m.text.strip()
     )
     add("system", "system", system_text, "stable")
-    # ADR-0076 S2: the tier's member ids ride along for the Context door's drill-down.
-    add("stable lore", "system", rendered.send_lore_stable, "stable", rendered.send_lore_stable_ids)
-    add("volatile lore", "system", rendered.send_lore_volatile, "volatile", rendered.send_lore_volatile_ids)
+    # ADR-0076 S2/S7: the tier's member ids and per-entry XML ride along for the
+    # Context door's drill (entries, then each entry down to its own element).
+    add(
+        "stable lore", "system", rendered.send_lore_stable, "stable",
+        rendered.send_lore_stable_ids, rendered.send_lore_stable_entries,
+    )
+    add(
+        "volatile lore", "system", rendered.send_lore_volatile, "volatile",
+        rendered.send_lore_volatile_ids, rendered.send_lore_volatile_entries,
+    )
     for message in rendered.messages:
         if message.role != "system":
             add(message.role, message.role, message.text, None)

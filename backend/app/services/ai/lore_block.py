@@ -38,6 +38,63 @@ _NODE_XML_ATTR_FIELDS = frozenset({"id", "title", "entry_type", "aliases", "body
 _REF_FIELD_TYPES = frozenset({"entity_ref", "entity_ref_list"})
 
 
+def _render_lore_entries(
+    project: ProjectService,
+    entry_ids: list[str],
+    scene: Any = None,
+    position: int | None = None,
+    index: Any = None,
+) -> list[tuple[str, str]]:
+    """Render each node to its own XML element, returning [(entry_id, element_xml)]
+    in the given order. Skips ids whose node can't be read (same as the old blob
+    loop), so the returned ids are exactly what the wrapped block carries. This is
+    the single per-node render; `_format_lore_block` wraps the concatenation, and
+    the preview surfaces the pairs for the Context door's per-entry drill
+    (ADR-0076 S7).
+
+    When `scene` is given, every rendered field is resolved to its **effective
+    value at that (scene, position)** via `effective_state`, so an earlier scene
+    sees the old value and a later one the new — the redaction the feature exists
+    for (#33). Without a scene it renders base state unchanged (e.g. the chat
+    journal path until a resolution scene is supplied, §4.2). Pass a prebuilt
+    mutations `index` to avoid a re-scan per call.
+    """
+    if not entry_ids:
+        return []
+    scene_id = _scene_id_of(scene) if scene is not None else None
+    if scene_id and index is None:
+        try:
+            index = project.build_mutations_index()
+        except Exception:
+            index = None
+    try:
+        schema = project.read_metadata_schema()
+    except Exception:
+        schema = None
+    entries: list[tuple[str, str]] = []
+    for entry_id in entry_ids:
+        entry = _safe_read_node(project, entry_id)
+        if entry is None:
+            continue
+        overrides: dict[str, Any] = {}
+        if scene_id and index is not None:
+            try:
+                overrides = project.effective_state(entry_id, scene_id, position, index)
+            except Exception:
+                overrides = {}
+        entries.append((entry_id, _render_node_xml(project, schema, entry, entry_id, overrides)))
+    return entries
+
+
+def _wrap_lore_block(entries: list[tuple[str, str]]) -> str:
+    """Wrap rendered per-entry elements as one `<lore>...</lore>` block (the
+    send-path form). Empty string when there are no entries — the caller appends
+    no empty block."""
+    if not entries:
+        return ""
+    return "<lore>\n" + "\n\n".join(xml for _, xml in entries) + "\n</lore>"
+
+
 def _format_lore_block(
     project: ProjectService,
     entry_ids: list[str],
@@ -54,40 +111,11 @@ def _format_lore_block(
     every block is the stable key a reference in another block joins against.
 
     This is the single field-value choke-point through which both explicit and
-    implicit context flow (ADR-0006). When `scene` is given, every rendered
-    field is resolved to its **effective value at that (scene, position)** via
-    `effective_state`, so an earlier scene sees the old value and a later one the
-    new — the redaction the feature exists for (#33). Without a scene it renders
-    base state unchanged (e.g. the chat journal path until a resolution scene is
-    supplied, §4.2). Pass a prebuilt mutations `index` to avoid a re-scan per call.
+    implicit context flow (ADR-0006). Delegates the per-node render to
+    `_render_lore_entries` and wraps the result with `_wrap_lore_block` — the
+    same render also feeds the Context door's per-entry drill (ADR-0076 S7).
     """
-    if not entry_ids:
-        return ""
-    scene_id = _scene_id_of(scene) if scene is not None else None
-    if scene_id and index is None:
-        try:
-            index = project.build_mutations_index()
-        except Exception:
-            index = None
-    try:
-        schema = project.read_metadata_schema()
-    except Exception:
-        schema = None
-    chunks: list[str] = []
-    for entry_id in entry_ids:
-        entry = _safe_read_node(project, entry_id)
-        if entry is None:
-            continue
-        overrides: dict[str, Any] = {}
-        if scene_id and index is not None:
-            try:
-                overrides = project.effective_state(entry_id, scene_id, position, index)
-            except Exception:
-                overrides = {}
-        chunks.append(_render_node_xml(project, schema, entry, entry_id, overrides))
-    if not chunks:
-        return ""
-    return "<lore>\n" + "\n\n".join(chunks) + "\n</lore>"
+    return _wrap_lore_block(_render_lore_entries(project, entry_ids, scene, position, index))
 
 
 def _format_staged_set_block(

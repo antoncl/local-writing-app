@@ -16,6 +16,7 @@
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
+  import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { tagHexResolver } from "@/lib/utils/tags";
   import { parseSearchQuery, readTags } from "@/lib/utils/entrySearch";
   import { knownTagsStore } from "@/lib/stores/tags";
@@ -240,6 +241,7 @@
     depth={ctx.depth}
     active={ctx.active}
     stripeColor={stripeFor(entry, ctx)}
+    typeIcon={entryTypeIconClass(entry.entry_type, schema)}
     onClick={ctx.onClick}
     onmousedown={(event) => event.stopPropagation()}
     groupHeader={ctx.collapsible}

@@ -48,6 +48,12 @@
     // selectable row (no aria-pressed emitted — backward-compatible default).
     selected?: boolean | "mixed";
     stripeColor?: string | null;
+    // Optional entry-type icon (#316): a full Tabler className ("ti ti-flag")
+    // resolved from the node's entry_type via `entryTypeIconClass`. A quiet
+    // mnemonic glyph leading the title — the type's twin of the color stripe.
+    // Null (the default) renders nothing, so rows without a typed icon are
+    // visually unchanged; icons are opt-in per type.
+    typeIcon?: string | null;
     // Tree indent. Resolved to `margin-left: depth * 26px` (ADR-0066
     // Amendment 1 — raised from 14 so a nested level steps clearly, and margin
     // rather than padding so the whole border box shifts right: the curved
@@ -148,6 +154,7 @@
     active = false,
     selected = undefined,
     stripeColor = null,
+    typeIcon = null,
     depth = 0,
     onClick,
     onDblClick,
@@ -291,7 +298,7 @@
   {ondragover}
   {ondragleave}
   {ondrop}
->{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" aria-pressed={ariaPressed} onclick={onClick} ondblclick={onDblClick}>{@render textBody()}</button>{:else}{@render textBody()}{/if}{#if layerLabel}<span class="node-row-layer" title={`Inherited from ${layerLabel}`}>{layerLabel}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
+>{#if leading}{@render leading()}{/if}{#if typeIcon}<span class="node-row-type-icon" aria-hidden="true"><i class={typeIcon}></i></span>{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" aria-pressed={ariaPressed} onclick={onClick} ondblclick={onDblClick}>{@render textBody()}</button>{:else}{@render textBody()}{/if}{#if layerLabel}<span class="node-row-layer" title={`Inherited from ${layerLabel}`}>{layerLabel}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
 {#if nested && !collapsed}
   <div class="node-row-group-children">{@render nested()}</div>
@@ -386,6 +393,27 @@
     box-shadow: inset 4px 0 0 0 var(--row-stripe);
     border-radius: 6px;
     padding-left: 8px;
+  }
+
+  /* Entry-type icon (#316) — a quiet mnemonic glyph leading the title, the
+     type's twin of the color stripe. Muted so it never competes with the
+     title; sized to the row's title so it reads as part of the label, not an
+     affordance. Only present when the type declares an icon (opt-in), so most
+     rows are visually unchanged. */
+  .node-row-type-icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-3);
+    font-size: var(--fs-lg);
+    line-height: 1;
+  }
+  /* In compact / dense the title recedes to --fs-md; the icon follows so it
+     stays aligned with the smaller label. */
+  .node-row.density-compact .node-row-type-icon,
+  .node-row.density-dense .node-row-type-icon {
+    font-size: var(--fs-md);
   }
 
   /* The middle (click / static title) area takes all remaining space. */

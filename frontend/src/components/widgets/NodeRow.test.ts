@@ -44,3 +44,26 @@ describe("NodeRow tags", () => {
     expect(noTags.container.querySelector(".node-row-text.has-tags")).toBeNull();
   });
 });
+
+// #316: an entry-type icon renders as a quiet leading glyph before the title,
+// and only when the caller passes one (opt-in per type — rows without a typed
+// icon are visually unchanged).
+describe("NodeRow type icon (#316)", () => {
+  it("renders the leading type-icon glyph when typeIcon is set", () => {
+    const { container } = render(NodeRow, {
+      props: { title: "Alice", typeIcon: "ti ti-user" },
+    });
+    const icon = container.querySelector(".node-row-type-icon i");
+    expect(icon).not.toBeNull();
+    expect(icon?.className).toContain("ti-user");
+    // It leads the title (precedes the clickable label in DOM order).
+    const glyph = container.querySelector(".node-row-type-icon");
+    const label = container.querySelector(".node-row-click, .node-row-text");
+    expect(glyph && label && !!(glyph.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it("renders no glyph when typeIcon is absent (unchanged rows)", () => {
+    const { container } = render(NodeRow, { props: { title: "Alice" } });
+    expect(container.querySelector(".node-row-type-icon")).toBeNull();
+  });
+});

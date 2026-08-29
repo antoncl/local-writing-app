@@ -122,6 +122,9 @@ class MetadataSchemaInheritanceMixin:
         # this type before parent inheritance overwrites the effective `color`.
         # The editor uses this to distinguish "set on this type" from "inherited".
         next_entry_type["own_color"] = raw_entry_type.get("color")
+        # `own_icon` mirrors `own_color` — the type-level icon as declared here,
+        # before parent inheritance overwrites the effective `icon` (#316).
+        next_entry_type["own_icon"] = raw_entry_type.get("icon")
         inherited_fields = parent_def.get("fields", []) if isinstance(parent_def, dict) else []
         next_entry_type["fields"] = self._merge_metadata_field_lists(inherited_fields, local_fields)
         # L2: append generated fields from this type's group applications (after
@@ -200,6 +203,7 @@ class MetadataSchemaInheritanceMixin:
             "default_body",
             "default_inputs",
             "color",
+            "icon",
         ):
             if inheritable not in next_entry_type and inheritable in parent_def:
                 next_entry_type[inheritable] = parent_def[inheritable]

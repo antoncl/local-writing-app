@@ -9,6 +9,7 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { assistantTagsStore, assistantTagsAsScoped } from "@/lib/stores/assistantTags";
   import { tagHexResolver } from "@/lib/utils/tags";
+  import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { isAssistantListed } from "@/lib/stores/assistants";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
   import { api } from "@/lib/api";
@@ -215,6 +216,7 @@
     tagColor={tagHexFor}
     active={ctx.active}
     stripeColor={ctx.stripeColor}
+    typeIcon={entryTypeIconClass(entry.entry_type, schema)}
     dragging={ctx.dragging}
     dropPosition={ctx.dropPosition}
     onClick={ctx.onClick}

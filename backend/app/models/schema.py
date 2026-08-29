@@ -382,6 +382,15 @@ class EntryTypeDefinition(BaseModel):
     # override without disturbing the parent's value. Computed by the
     # schema inheritance resolver; not authored directly.
     own_color: str | None = None
+    # Type-level Tabler icon name (without the `ti-` prefix), the mnemonic twin
+    # of `color` and the same treatment fields/groups already carry (#316).
+    # Child types inherit unless they set their own; entries fall back to it.
+    # None = no icon set; the resolver walks the parent chain, then yields null.
+    icon: str | None = None
+    # The pre-inheritance icon value (mirrors `own_color`). The editor uses this
+    # to distinguish "icon set on this type" from "icon inherited from parent".
+    # Computed by the schema inheritance resolver; not authored directly.
+    own_icon: str | None = None
     # Soft-deprecation flag. Set on entry_types that are kept readable for
     # legacy projects but should not be offered when creating new entries.
     # Schemas keep their definition (so existing files still validate); UI

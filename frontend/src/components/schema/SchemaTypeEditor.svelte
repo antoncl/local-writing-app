@@ -7,6 +7,7 @@
     typeId: string;
     name: string;
     color: string | null;
+    icon: string | null;
   };
 </script>
 
@@ -31,6 +32,7 @@
   import SchemaFieldInlineEditor, { type FieldDraftPayload } from "@/components/schema/SchemaFieldInlineEditor.svelte";
   import SchemaFieldRow from "@/components/schema/SchemaFieldRow.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
+  import IconPicker from "@/components/widgets/IconPicker.svelte";
   import { fieldIconClass, fieldTypeLabel } from "@/lib/utils/fieldIcons";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import {
@@ -64,6 +66,7 @@
     initialName?: string;
     initialTypeId?: string;
     initialColor?: string | null;
+    initialIcon?: string | null;
     // Two-way bound by the parent:
     schemaTypeLayerId?: string;
     expandedSchemaFieldId?: string | null;
@@ -115,6 +118,7 @@
     initialName = "",
     initialTypeId = "",
     initialColor = null,
+    initialIcon = null,
     schemaTypeLayerId = $bindable(""),
     expandedSchemaFieldId = $bindable(null),
     fieldDropTarget = $bindable(null),
@@ -169,6 +173,7 @@
     name: initialName,
     typeId: initialTypeId,
     color: initialColor,
+    icon: initialIcon,
   }));
 
   let draftName = $state(seed.name);
@@ -177,6 +182,27 @@
   // from the prop rather than re-deriving. Renames are rejected at save by the parent.
   let draftTypeId = $state(seed.typeId);
   let draftColor = $state(seed.color);
+  let draftIcon = $state(seed.icon);
+  // The effective icon this type would inherit from its parent chain (#316),
+  // shown as the dashed fallback + "inherits X" hint when own-icon is unset.
+  const inheritedIcon = $derived(
+    selectedSchemaTypeId ? (metadataSchema?.entry_types[selectedSchemaTypeId]?.icon ?? null) : null,
+  );
+
+  // Type icon popover (#316) — mirrors the field-icon picker in
+  // SchemaFieldInlineEditor: a tile button toggles the shared IconPicker. The
+  // Icon row sits near the top of the pane, so (unlike the field picker) it
+  // needs no flip-up; a document click-outside closes it.
+  let iconPickerOpen = $state(false);
+  $effect(() => {
+    if (!iconPickerOpen) return;
+    const onDocClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest(".sti-icon-anchor")) iconPickerOpen = false;
+    };
+    document.addEventListener("click", onDocClick, true);
+    return () => document.removeEventListener("click", onDocClick, true);
+  });
 
   function handleNameInput(value: string) {
     draftName = value;
@@ -236,10 +262,14 @@
       name: draftName,
       typeId: draftTypeId,
       color: draftColor,
+      icon: draftIcon,
     };
   }
   const isDirty = $derived(
-    draftName !== baseline.name || draftTypeId !== baseline.typeId || draftColor !== baseline.color,
+    draftName !== baseline.name ||
+      draftTypeId !== baseline.typeId ||
+      draftColor !== baseline.color ||
+      draftIcon !== baseline.icon,
   );
   $effect(() => {
     dirty = isDirty;
@@ -250,6 +280,7 @@
       typeId: draftTypeId.trim(),
       name: draftName,
       color: draftColor,
+      icon: draftIcon,
     });
     // Re-baseline on success so `dirty` clears without a remount (a failed save
     // — e.g. a blocked rename — returns false and keeps the changes flagged).
@@ -337,6 +368,45 @@
         <small class="muted">inherits <code>{inherited}</code> from parent</small>
       {:else}
         <small class="muted">no color (chips fall back to the kind default)</small>
+      {/if}
+    {/if}
+  </div>
+  <!-- Type icon (#316): the mnemonic twin of Color, same author gesture as a
+       field's icon. A tile toggles the shared IconPicker; unset falls back to
+       the resolved inherited icon (parent chain), shown dashed. -->
+  <div class="schema-type-icon-row">
+    <span>Icon</span>
+    <div class="sti-icon-anchor">
+      <button
+        type="button"
+        class="sfr-tile sti-icon-btn"
+        class:inheriting={!draftIcon}
+        aria-label="Choose icon"
+        title="Choose icon"
+        onclick={() => (iconPickerOpen = !iconPickerOpen)}
+      >
+        <!-- Own icon, else the resolved inherited one; when the type has
+             neither, a plus reads as "add an icon" (not a stand-in glyph that
+             would contradict the "no icon" hint). -->
+        <i class={`ti ti-${draftIcon || inheritedIcon || "plus"}`} aria-hidden="true"></i>
+      </button>
+      {#if iconPickerOpen}
+        <div class="sti-icon-pop">
+          <IconPicker
+            value={draftIcon}
+            defaultGlyph={inheritedIcon || "category"}
+            fieldLabel={draftName || "type"}
+            onSelect={(next) => (draftIcon = next)}
+            onClose={() => (iconPickerOpen = false)}
+          />
+        </div>
+      {/if}
+    </div>
+    {#if !draftIcon && selectedSchemaTypeId}
+      {#if inheritedIcon}
+        <small class="muted">inherits <code>{inheritedIcon}</code> from parent</small>
+      {:else}
+        <small class="muted">no icon</small>
       {/if}
     {/if}
   </div>
@@ -774,6 +844,46 @@
   .schema-type-color-row small {
     color: var(--text-3);
     font-size: var(--fs-xs);
+  }
+
+  /* Icon row (#316): mirrors the color row's label/hint grammar. */
+  .schema-type-icon-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: var(--fs-md);
+  }
+  .schema-type-icon-row > span:first-child {
+    min-width: 80px;
+    color: var(--text-2);
+  }
+  .schema-type-icon-row small {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .sti-icon-anchor {
+    position: relative;
+  }
+  /* Wears the tile shape (.sfr-tile, global); a dashed border when the icon is
+     inherited (unset here), solid once this type owns one. */
+  .sti-icon-btn {
+    padding: 0;
+    cursor: pointer;
+  }
+  .sti-icon-btn.inheriting {
+    border-style: dashed;
+    border-color: var(--border-strong);
+    color: var(--text-3);
+  }
+  .sti-icon-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent-strong);
+  }
+  .sti-icon-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 60;
   }
 
   /* Fields / reusable-groups sections. */

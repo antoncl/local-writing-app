@@ -18,6 +18,7 @@
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import { nodeSet } from "@/lib/views/viewResult";
   import { resolveColor } from "@/lib/utils/colors";
+  import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import type {
     NodePickerConfig,
@@ -318,6 +319,7 @@
     title={ref.title}
     depth={ctx.depth}
     stripeColor={ref.missing ? "#c98a8a" : null}
+    typeIcon={entryTypeIconClass(ref.entry_type, metadataSchema)}
     onClick={ref.missing ? undefined : () => onNavigate({ id: ref.id, kind: ref.kind })}
   >
     {#snippet trailing()}

@@ -199,6 +199,74 @@ class LoreAndPromptTests(MetadataValidationBase):
         self.assertEqual(saved.entry_type, "lore:faction")
         self.assertEqual(saved.metadata["tags"], ["Politics"])
 
+    def test_entry_type_icon_inherits_like_color(self) -> None:
+        """A type-level `icon` inherits down the parent chain (child wins),
+        with `own_icon` carrying only what the type itself declared — the same
+        semantics as `color` (#316)."""
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        # Parent declares an icon.
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="faction",
+                entry_type=EntryTypeDefinition(
+                    name="Faction",
+                    kind="lore",
+                    parent="lore:base",
+                    fields=[],
+                    icon="flag",
+                ),
+            )
+        )
+        # Child sets no icon → inherits the parent's.
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="lore:faction:guild",
+                entry_type=EntryTypeDefinition(
+                    name="Guild",
+                    kind="lore",
+                    parent="lore:faction",
+                    fields=[],
+                ),
+            )
+        )
+        # Grandchild overrides with its own icon.
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="lore:faction:guild:secret",
+                entry_type=EntryTypeDefinition(
+                    name="Secret Guild",
+                    kind="lore",
+                    parent="lore:faction:guild",
+                    fields=[],
+                    icon="lock",
+                ),
+            )
+        )
+
+        parent = schema.entry_types["lore:faction"]
+        self.assertEqual(parent.icon, "flag")
+        self.assertEqual(parent.own_icon, "flag")
+
+        child = schema.entry_types["lore:faction:guild"]
+        self.assertEqual(child.icon, "flag")  # inherited
+        self.assertIsNone(child.own_icon)  # not set on this type
+
+        grandchild = schema.entry_types["lore:faction:guild:secret"]
+        self.assertEqual(grandchild.icon, "lock")  # own override wins
+        self.assertEqual(grandchild.own_icon, "lock")
+
+        # `own_icon` is computed, never persisted to the layer file.
+        project_schema = self.service._read_yaml(self.root / "metadata.schema.yaml")
+        self.assertNotIn("own_icon", project_schema["entry_types"]["lore:faction"])
+        self.assertEqual(project_schema["entry_types"]["lore:faction"]["icon"], "flag")
+
     def test_abstract_entry_type_cannot_be_used_by_documents(self) -> None:
         with self.assertRaisesRegex(
             ProjectServiceError, "abstract entry_type lore:base"

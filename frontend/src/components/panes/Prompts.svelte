@@ -17,6 +17,7 @@
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { resolveColor } from "@/lib/utils/colors";
+  import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import {
@@ -162,6 +163,7 @@
     depth={ctx.depth}
     active={ctx.active}
     stripeColor={resolveColor(null, entry.entry_type, "prompt", schema)?.hex ?? null}
+    typeIcon={entryTypeIconClass(entry.entry_type, schema)}
     dimmed={hiddenSet.has(entry.id)}
     onClick={ctx.onClick}
     onmousedown={(event) => event.stopPropagation()}

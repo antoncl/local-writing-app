@@ -8,7 +8,6 @@ pricing on the models endpoint.
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -26,14 +25,6 @@ if TYPE_CHECKING:
     from app.services.machine_settings import MachineSettings
 
 log = logging.getLogger(__name__)
-
-
-# OpenAI reasoning models (o1 / o3 / o4 families) don't sample and 400 on a
-# `temperature` parameter — the same shape as the Anthropic no-sampling families
-# the base rule already excludes (see family_supports_temperature). Anchored
-# `o<digit>` so it catches o1 / o3-mini / o4-mini but not a sampling model whose
-# id merely contains an "o" (gpt-4o, chatgpt-4o-latest).
-_OPENAI_REASONING_RE = re.compile(r"^o\d", re.IGNORECASE)
 
 
 class OpenAIProfile(OpenAICompatibleProfile):
@@ -88,15 +79,6 @@ class OpenAIProfile(OpenAICompatibleProfile):
         # OpenAI caches input transparently for prompts ≥ 1024 tokens;
         # no request markup needed. Dispatch layer sends as-is.
         return "auto"
-
-    def supports_temperature(self, model_id: str) -> bool:
-        # o1/o3/o4 reject `temperature`; every other OpenAI model accepts it.
-        # One override covers both send paths — chat() and _open_stream() each
-        # gate on self.supports_temperature (openai_compatible.py). Strip any
-        # `provider/` route segment so a routed id is caught like the native one.
-        if _OPENAI_REASONING_RE.match(model_id.split("/", 1)[-1]):
-            return False
-        return super().supports_temperature(model_id)
 
     def count_tokens(self, text: str, model_id: str) -> int:
         return default_token_count(text)

@@ -206,6 +206,16 @@ def test_family_rule_catches_the_same_model_through_openrouter():
     assert family_supports_temperature("meta-llama/llama-3.1-70b")
 
 
+def test_family_rule_flags_openai_reasoning_models():
+    # #1577: o-series reasoning models 400 on temperature — native and routed.
+    assert not family_supports_temperature("o3-mini")
+    assert not family_supports_temperature("o1")
+    assert not family_supports_temperature("openai/o3")
+    # Sampling ids that merely contain an "o" still accept it.
+    assert family_supports_temperature("gpt-4o")
+    assert family_supports_temperature("chatgpt-4o-latest")
+
+
 def test_base_supports_temperature_delegates_to_family_rule():
     profile = _DummyProfile()
     assert not profile.supports_temperature("claude-opus-5")

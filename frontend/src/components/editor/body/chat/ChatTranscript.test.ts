@@ -3,7 +3,7 @@
 // the rows must actually render, and the assistant speaker header must name
 // the answering assistant, not a hardcoded product name (#989).
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@/lib/test/component";
+import { fireEvent, render, screen } from "@/lib/test/component";
 import ChatTranscript from "./ChatTranscript.svelte";
 import type { ChatMessage } from "@/lib/types";
 
@@ -103,5 +103,35 @@ describe("ChatTranscript", () => {
     render(ChatTranscript, { chatHistory: history, chatRunning: false });
     expect(screen.getByText("Stopped early — partial reply kept.")).toBeInTheDocument();
     expect(screen.queryByText("Response cut off — hit max tokens.")).not.toBeInTheDocument();
+  });
+
+  // Stick-to-bottom (#1611): the jump-to-latest button is presentational
+  // here — ChatBodyView owns the pin/near-bottom logic and just flips
+  // `showJumpToLatest`.
+  it("shows the jump-to-latest button when showJumpToLatest is true", () => {
+    render(ChatTranscript, { chatHistory: [], chatRunning: false, showJumpToLatest: true });
+    expect(screen.getByRole("button", { name: "Jump to latest" })).toBeInTheDocument();
+  });
+
+  it("hides the jump-to-latest button when showJumpToLatest is false (or omitted)", () => {
+    render(ChatTranscript, { chatHistory: [], chatRunning: false, showJumpToLatest: false });
+    expect(screen.queryByRole("button", { name: "Jump to latest" })).not.toBeInTheDocument();
+
+    render(ChatTranscript, { chatHistory: [], chatRunning: false });
+    expect(screen.queryByRole("button", { name: "Jump to latest" })).not.toBeInTheDocument();
+  });
+
+  it("clicking the jump-to-latest button calls onJumpToLatest", async () => {
+    let clicked = false;
+    render(ChatTranscript, {
+      chatHistory: [],
+      chatRunning: false,
+      showJumpToLatest: true,
+      onJumpToLatest: () => {
+        clicked = true;
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
+    expect(clicked).toBe(true);
   });
 });

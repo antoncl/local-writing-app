@@ -2,7 +2,10 @@
   ChatTranscript — presentational message list for ChatBodyView (#99).
   Pure render of chatHistory; owns no state. The scroll element is bound
   back to the parent via `bind:scrollEl` so ChatBodyView keeps driving
-  scroll-to-bottom during streaming exactly as before.
+  scroll-to-bottom during streaming exactly as before. Stick-to-bottom
+  (#1611): scroll events forward via `onScroll`, and an optional floating
+  jump-to-latest button forwards via `onJumpToLatest` — the pin/near-bottom
+  logic itself lives in ChatBodyView, this stays presentational.
 -->
 <script lang="ts">
   import { renderChatContent, containsMath, ensureKatexLoaded } from "@/lib/utils/chatMessageRender";
@@ -16,9 +19,22 @@
     /** Speaker header for assistant turns — the answering assistant's title (#989). */
     assistantName?: string;
     scrollEl?: HTMLDivElement | null;
+    /** Stick-to-bottom (#1611): shows the floating jump button when the reader
+     *  has scrolled away from the tail. */
+    showJumpToLatest?: boolean;
+    onScroll?: () => void;
+    onJumpToLatest?: () => void;
   }
 
-  let { chatHistory, chatRunning, assistantName = "Assistant", scrollEl = $bindable(null) }: Props = $props();
+  let {
+    chatHistory,
+    chatRunning,
+    assistantName = "Assistant",
+    scrollEl = $bindable(null),
+    showJumpToLatest = false,
+    onScroll,
+    onJumpToLatest,
+  }: Props = $props();
 
   let katexReady = $state(false);
 
@@ -43,7 +59,8 @@
   }
 </script>
 
-<div class="cbv-messages" bind:this={scrollEl} aria-label="Chat history">
+<div class="cbv-transcript">
+<div class="cbv-messages" bind:this={scrollEl} aria-label="Chat history" onscroll={onScroll}>
   {#if chatHistory.length === 0}
     <p class="cbv-empty">No messages yet. Ctrl/⌘+Enter to send.</p>
   {/if}
@@ -106,6 +123,10 @@
     </div>
   {/each}
 </div>
+  {#if showJumpToLatest}
+    <button class="cbv-jump" type="button" onclick={onJumpToLatest} aria-label="Jump to latest">↓</button>
+  {/if}
+</div>
 
 <style>
   .cbv-empty {
@@ -115,10 +136,25 @@
   }
 
   /* ---- 4 · messages ---- */
+  .cbv-transcript {
+    position: relative; flex: 1 1 0; min-height: 96px;
+    display: flex; flex-direction: column;
+  }
   .cbv-messages {
-    flex: 1 1 0; min-height: 96px; overflow-y: auto;
+    flex: 1 1 0; min-height: 0; overflow-y: auto;
     display: flex; flex-direction: column; gap: 16px; padding: 16px 14px;
   }
+  /* Stick-to-bottom (#1611): floating jump-to-latest, overlays the viewport —
+     a sibling AFTER the scroller so it isn't clipped by scrolled content. */
+  .cbv-jump {
+    position: absolute; right: 16px; bottom: 14px; width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+    color: var(--text-2); box-shadow: 0 1px 3px var(--shadow); font-size: var(--fs-lg);
+    cursor: pointer;
+  }
+  .cbv-jump:hover { color: var(--text); border-color: var(--accent); }
+  .cbv-jump:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .cbv-message { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
   .cbv-message-user { align-items: flex-end; }
   .cbv-message-assistant { align-items: flex-start; }

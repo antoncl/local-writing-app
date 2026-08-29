@@ -136,6 +136,24 @@ describe("MetadataPanel — Temperature read-only for no-sampling models (#1554)
     expect(lastArg).not.toHaveProperty("ai_temperature");
   });
 
+  it("announces the discarded temperature instead of dropping it silently (#1579)", async () => {
+    // When a stored temperature is discarded because the model rejects sampling,
+    // the author is TOLD — a "Temperature cleared" notice naming the model —
+    // rather than the value just vanishing behind the quiet "Not supported" note.
+    const container = mount(
+      { ai_provider: "anthropic", ai_model: "m-notemp", ai_temperature: 0.7 },
+      vi.fn(),
+    );
+    await vi.waitFor(() => {
+      const note = container.querySelector(".fr-temp-cleared");
+      expect(note).not.toBeNull();
+      expect(note?.textContent).toContain("Temperature cleared");
+      expect(note?.textContent).toContain("m-notemp");
+    });
+    // The cleared notice REPLACES the quiet state note (not both at once).
+    expect(container.textContent).not.toContain("Not supported by the model");
+  });
+
   it("keeps a stored temperature when the model accepts it", async () => {
     // The clear is gated on the model actually rejecting temperature — a temp-ok
     // model must never have its value dropped.

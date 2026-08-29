@@ -168,22 +168,30 @@
   function fieldReadOnly(fieldId: string): boolean {
     return readOnly || (fieldId === "ai_temperature" && temperatureUnsupported);
   }
+  // #1579: which model discarded a stored temperature, so the note can TELL the
+  // user it happened rather than stripping the value silently. Null while the
+  // model accepts temperature (the field is editable, nothing was dropped).
+  let temperatureClearedForModel = $state<string | null>(null);
   // ProviderTierPicker reports the selected model's capabilities here. Beyond
   // gating the read-only field, we drop a stale stored temperature when the model
   // rejects sampling: the value would otherwise be rejected at save (family
   // models) or sent → a 400 (non-family OpenRouter routes the backend send path
   // can't detect as no-temp). Only when we positively know (caps !== null) and a
-  // value is present, and only where edits are allowed. The user is not yet TOLD
-  // this happened — that notice rides the chat-send rework (ADR-0076), tracked
-  // in #1579. #1554.
+  // value is present, and only where edits are allowed (#1554). The drop is now
+  // announced via the `.fr-temp-cleared` note below (#1579).
   function onModelCapabilities(caps: string[] | null): void {
     assistantModelCapabilities = caps;
-    if (
-      canClearOwn &&
-      caps !== null &&
-      !caps.includes("temperature") &&
-      metadataValueString(metadata.ai_temperature) !== ""
-    ) {
+    // Unknown (null) or temperature-capable → nothing to drop; retire any notice.
+    if (caps === null || caps.includes("temperature")) {
+      temperatureClearedForModel = null;
+      return;
+    }
+    if (canClearOwn && metadataValueString(metadata.ai_temperature) !== "") {
+      // Name the model minus any leading `provider/` route segment (an OpenRouter
+      // id like `anthropic/claude-opus-4-8` → `claude-opus-4-8`; mirrors the
+      // backend's family check). Falls back to "this model" for an empty id.
+      temperatureClearedForModel =
+        metadataValueString(metadata.ai_model).split("/").pop() || "this model";
       clearField("ai_temperature");
     }
   }
@@ -633,11 +641,21 @@
               <span class="fr-mutated-marker" title="Changed by here">⤳</span>
             {/if}
             {#if fieldId === "ai_temperature" && temperatureUnsupported}
-              <!-- The selected model dropped sampling (Anthropic Opus 4.7+/5,
-                   incl. via OpenRouter): the field renders read-only above and
-                   this quiet note says why, so the empty control doesn't read as
-                   a bug (#1554). -->
-              <small class="muted fr-temp-note">Not supported by the model</small>
+              {#if temperatureClearedForModel}
+                <!-- #1579: a stored temperature was just discarded because the
+                     selected model dropped sampling — announce it, so the value
+                     isn't stripped silently. -->
+                <small class="fr-temp-note fr-temp-cleared" role="status">
+                  <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+                  Temperature cleared — {temperatureClearedForModel} doesn't support it.
+                </small>
+              {:else}
+                <!-- The selected model dropped sampling (Anthropic Opus 4.7+/5,
+                     incl. via OpenRouter): the field renders read-only above and
+                     this quiet note says why, so the empty control doesn't read as
+                     a bug (#1554). -->
+                <small class="muted fr-temp-note">Not supported by the model</small>
+              {/if}
             {/if}
           </div>
         </div>
@@ -863,6 +881,19 @@
   }
   .field-row.wide .fr-val > .fr-temp-note {
     flex: 0 0 100%;
+  }
+  /* #1579: the model discarded a stored temperature — a real notice (a value was
+     removed), so it's not muted; a small alert glyph leads it, right-aligned like
+     the quiet note it replaces. */
+  .fr-temp-cleared {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    color: var(--text-2);
+  }
+  .fr-temp-cleared > .ti {
+    color: var(--danger);
   }
 
   /* Inherited fields read a touch quieter — still fully editable. */

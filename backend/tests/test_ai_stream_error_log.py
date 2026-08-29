@@ -99,16 +99,30 @@ def test_empty_stream_reaches_the_wire_as_error_with_message_only() -> None:
     assert not [e for e in events if isinstance(e, ai_providers.StreamDone)]
 
 
-def test_record_stream_error_writes_message_and_detail_to_errors_log(tmp_path: Path) -> None:
-    from app.routers.ai import _record_stream_error
+def test_record_ai_error_writes_message_and_detail_to_errors_log(tmp_path: Path) -> None:
+    from app.services.project.client_errors import ErrorLogMixin
 
-    project = SimpleNamespace(root_path=tmp_path)
-    _record_stream_error(
-        project,
-        _err(error="The model returned no output.",
-             detail="reasoning=19848 finishes=[(0,'length')]"),
+    class _Project(ErrorLogMixin):
+        root_path = tmp_path
+
+    _Project().record_ai_error(
+        message="The model returned no output.",
+        provider="openrouter",
+        model="deepseek/deepseek-v4-pro-0813",
+        detail="reasoning=19848 finishes=[(0,'length')]",
     )
     log = (tmp_path / "errors.log").read_text(encoding="utf-8")
     assert "backend error: The model returned no output." in log
-    assert "reasoning=19848" in log        # the diagnostic detail is recorded...
-    assert "ai openrouter/m" in log        # ...with provider/model as context
+    assert "reasoning=19848" in log                        # diagnostic detail recorded...
+    assert "ai openrouter/deepseek/deepseek-v4-pro-0813" in log  # ...with provider/model context
+
+
+def test_router_adapter_forwards_stream_error_to_record_ai_error() -> None:
+    from app.routers.ai import _record_stream_error
+
+    calls = []
+    project = SimpleNamespace(record_ai_error=lambda **kw: calls.append(kw))
+    _record_stream_error(project, _err(error="boom", detail="diag x=1"))
+    assert calls == [{
+        "message": "boom", "provider": "openrouter", "model": "m", "detail": "diag x=1",
+    }]

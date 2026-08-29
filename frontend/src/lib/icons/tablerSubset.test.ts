@@ -81,4 +81,24 @@ describe("bundled Tabler subset", () => {
       `Used in markup but not curated — add to CURATED_ICONS or UI_GLYPHS:\n${uncovered.join("\n")}`,
     ).toEqual([]);
   });
+
+  // `scripts/build-tabler-subset.mjs` reads these two glyph-name lists by
+  // transpiling them and importing from a `data:` URL, which cannot resolve
+  // `@/…` aliases (ERR_UNSUPPORTED_RESOLVE_REQUEST). They must therefore stay
+  // import-free, or `npm run icons:build` silently breaks until the next glyph
+  // add — the trap that split the palette out into `fieldIconsData.ts`.
+  it("keeps the build's glyph-name modules import-free (data:-URL loadable)", () => {
+    const modules = [join(here, "..", "utils", "fieldIconsData.ts"), join(here, "uiGlyphs.ts")];
+    for (const path of modules) {
+      const offending = readFileSync(path, "utf8")
+        .split("\n")
+        // A static `import …` statement, or a re-export `export … from "…"`
+        // (the trailing quote distinguishes a module specifier from a bare
+        // `Array.from(`). Either one makes the module un-loadable from a data: URL.
+        .filter((line) => /^\s*import\s/.test(line) || /^\s*export\b.*\bfrom\s*['"]/.test(line));
+      expect(offending, `${path} must not import — the subset build can't resolve aliases`).toEqual(
+        [],
+      );
+    }
+  });
 });

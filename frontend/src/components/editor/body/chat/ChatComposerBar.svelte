@@ -251,7 +251,16 @@
       minWidth="200px"
       maxWidth="320px"
     >
-      <PromptMenu nodes={promptMenu} onSelect={(entry) => pickPrompt(entry)} />
+      {#if promptMenu.length > 0}
+        <PromptMenu nodes={promptMenu} onSelect={(entry) => pickPrompt(entry)} />
+      {:else}
+        <!-- The `/`-tree menu renders nothing for an empty roster; keep the
+             flat dropdown's onboarding hint so a project with no chat-routed
+             prompts still gets guidance instead of a blank popover. -->
+        <p class="cbv-picker-empty">
+          No chat-routed prompts. Create one with a Chat output (no output handler).
+        </p>
+      {/if}
     </Popover>
     {#if doorwayOpen === "prompt"}
       {@render doorway("Locked after the first message — this prompt shapes every turn.")}

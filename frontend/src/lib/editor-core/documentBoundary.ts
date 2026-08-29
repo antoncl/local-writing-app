@@ -21,7 +21,8 @@
 // empty, so undo cannot reach across the boundary.
 
 import { EditorState, type Transaction } from "@tiptap/pm/state";
-import { DOMParser as PMDOMParser, type Node as ProseMirrorNode, type Schema } from "@tiptap/pm/model";
+import { DOMParser as PMDOMParser, type Fragment, type Node as ProseMirrorNode, type Schema } from "@tiptap/pm/model";
+import { Transform } from "@tiptap/pm/transform";
 
 /** A fresh state carrying over `state`'s document and plugin set. All plugin
  * state re-initializes against the current doc — undo history becomes empty,
@@ -65,4 +66,73 @@ export function minimalReplaceTransaction(
   const tr = state.tr.replace(start, endA, newDoc.slice(start, endB));
   tr.setMeta("addToHistory", false);
   return tr;
+}
+
+// The one changed span between `baseContent` and `otherContent`, in base
+// coordinates — the same single-range fragment diff `minimalReplaceTransaction`
+// uses (`findDiffStart`/`findDiffEnd` + the small-doc overlap nudge), lifted so
+// the three-way merge can reason about two of them. `baseEnd` bounds the region
+// replaced IN base; `otherStart`/`otherEnd` slice the replacement out of the
+// other doc. Null when the two are identical.
+type DiffRange = { baseStart: number; baseEnd: number; otherStart: number; otherEnd: number };
+
+function diffRange(baseContent: Fragment, otherContent: Fragment): DiffRange | null {
+  const start = baseContent.findDiffStart(otherContent);
+  if (start == null) return null;
+  const end = baseContent.findDiffEnd(otherContent);
+  if (!end) return null;
+  let { a: baseEnd, b: otherEnd } = end;
+  const overlap = start - Math.min(baseEnd, otherEnd);
+  if (overlap > 0) {
+    baseEnd += overlap;
+    otherEnd += overlap;
+  }
+  return { baseStart: start, baseEnd, otherStart: start, otherEnd };
+}
+
+/** The result of a three-way merge: either the merged document, or a conflict
+ *  (the caller falls back to the "changed on disk" dialog). */
+export type MergeResult = { doc: ProseMirrorNode; conflict: false } | { doc: null; conflict: true };
+
+/**
+ * Three-way merge of two ProseMirror documents against a common `base`
+ * (ADR-0077 rung 2, #1621 slice B). Each side's edit is its single changed span
+ * vs base (`diffRange`); if the two spans are **disjoint** in base coordinates
+ * the edits are independent — splice both onto base and return the merged doc;
+ * if they **overlap**, both sides touched the same region and it is a genuine
+ * conflict. Conservative by construction: a side that edits two separate places
+ * has one wide span, so a middle edit by the other side reads as overlap and
+ * declines to the dialog rather than guessing — prove-disjoint-or-ask (ADR-0077
+ * §4). A side equal to base lets the other win wholesale.
+ */
+export function threeWayMerge(
+  base: ProseMirrorNode,
+  local: ProseMirrorNode,
+  remote: ProseMirrorNode,
+): MergeResult {
+  const l = diffRange(base.content, local.content);
+  const r = diffRange(base.content, remote.content);
+  if (l == null) return { doc: remote, conflict: false }; // local unchanged → remote wins
+  if (r == null) return { doc: local, conflict: false }; // remote unchanged → local wins
+  // Disjoint in base coordinates? A strict gap is required: two edits at the
+  // SAME point (both insertions collapse to a zero-width base range there) are a
+  // conflict, not independent — order would be a guess. Requiring `<` also makes
+  // exactly-adjacent edits (one ends where the other begins) decline to the
+  // dialog rather than risk a wrong splice — prove-disjoint-or-ask (ADR-0077 §4).
+  const disjoint = l.baseEnd < r.baseStart || r.baseEnd < l.baseStart;
+  if (!disjoint) return { doc: null, conflict: true };
+  try {
+    const tr = new Transform(base);
+    // Splice the higher-positioned span first so the lower one's coordinates
+    // stay valid (each replace shifts everything after it).
+    const [first, firstDoc] = l.baseStart >= r.baseStart ? ([l, local] as const) : ([r, remote] as const);
+    const [second, secondDoc] = l.baseStart >= r.baseStart ? ([r, remote] as const) : ([l, local] as const);
+    tr.replace(first.baseStart, first.baseEnd, firstDoc.slice(first.otherStart, first.otherEnd));
+    tr.replace(second.baseStart, second.baseEnd, secondDoc.slice(second.otherStart, second.otherEnd));
+    return { doc: tr.doc, conflict: false };
+  } catch {
+    // An invalid splice (a structural edit the single-range recipe can't place
+    // cleanly) is treated as a conflict — never a corrupt merge.
+    return { doc: null, conflict: true };
+  }
 }

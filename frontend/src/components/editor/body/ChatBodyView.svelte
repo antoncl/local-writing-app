@@ -89,6 +89,10 @@
     researchStructure?: StructureDocument | null;
     defaultAssistantId?: string;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
+    // ADR-0076 S6: the serif document title, handed down from NodeEditor as a
+    // snippet so title + setup chips share ChatComposerBar's one row. Optional —
+    // only the chat mount passes it.
+    titleField?: import("svelte").Snippet;
     // Outbound events as callback props (#14: runes — replaces the dispatcher).
     // NB: this view declared an "open-chat" event historically but never
     // dispatched it (the editor-pane open-chat flow comes from ProseBodyView),
@@ -106,6 +110,7 @@
     researchStructure = null,
     defaultAssistantId = "",
     implicitContextMatcher = null,
+    titleField,
     onBodyChange,
     onFocus,
   }: Props = $props();
@@ -1051,6 +1056,7 @@
     <p class="cbv-error">Couldn't load chat: {loadError}</p>
   {:else if chatSession}
     <ChatComposerBar
+      {titleField}
       {isLocked}
       {chatPromptEntryId}
       {chatAssistantId}

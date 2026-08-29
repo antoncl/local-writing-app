@@ -37,6 +37,10 @@
   } from "@/lib/types";
 
   interface Props {
+    // ADR-0076 S6: the serif document title, handed down from NodeEditor. Renders
+    // as the first item of the composer strip so title + setup chips share one
+    // row. Optional — only the chat mount passes it.
+    titleField?: import("svelte").Snippet;
     // A chat with messages locks its prompt + assistant (they repeat every turn).
     isLocked: boolean;
     chatPromptEntryId: string;
@@ -83,6 +87,7 @@
   }
 
   let {
+    titleField,
     isLocked,
     chatPromptEntryId,
     chatAssistantId,
@@ -222,6 +227,12 @@
 </script>
 
 <div class="cbv-composer-strip">
+  {#if titleField}
+    <div class="cbv-header-title">{@render titleField()}</div>
+  {/if}
+  <!-- ADR-0076 S6: the three setup chips group so they wrap as a UNIT under the
+       title on a narrow pane (not chip-by-chip), matching the approved mockup. -->
+  <div class="cbv-setup">
   <div class="cbv-prompt-anchor">
     <button
       type="button"
@@ -487,6 +498,7 @@
       </div>
     {/if}
   </div>
+  </div>
 </div>
 
 <style>
@@ -500,6 +512,34 @@
     border-bottom: 1px solid var(--divider);
     flex: 0 0 auto;
   }
+
+  /* ADR-0076 S6: the serif title shares the composer strip's one row with the
+     setup chips. `flex: 1 1 auto` + a real min-width (not 0) lets it claim
+     leftover space at full width, and — combined with the strip's existing
+     flex-wrap — forces the whole chip cluster onto the next line rather than
+     squeezing the title to an unreadable sliver on a narrow pane. The
+     `.title-input` styling itself is NodeEditor-scoped and travels with the
+     snippet's markup; only its width is set here so it fills the wrapper. */
+  .cbv-header-title {
+    flex: 1 1 auto;
+    min-width: 160px;
+  }
+  .cbv-header-title :global(.title-input) {
+    width: 100%;
+  }
+  /* ADR-0076 S6: the three setup chips are one shrink-resistant, no-wrap group.
+     `flex-wrap: nowrap` keeps prompt · assistant · Context on a single line, and
+     `flex: 0 0 auto` means the whole block drops UNDER the title when it no longer
+     fits beside it, rather than the chips squeezing or splitting across lines
+     (the assistant title ellipsises to bound the block's width). */
+  .cbv-setup {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    flex: 0 0 auto;
+  }
+
   .cbv-chip {
     display: inline-flex;
     align-items: center;
@@ -521,7 +561,32 @@
   .cbv-chip strong { font-weight: 600; }
   .cbv-chip-glyph { font-size: var(--fs-md); }
   .cbv-chip-lock { font-size: var(--fs-xs); opacity: 0.65; }
-  .cbv-chip-locked { opacity: 0.8; }
+  /* ADR-0076 S6: once locked, the chip sheds the pill chrome entirely — no
+     border, no fill, tighter padding — and reads as role-coloured text with
+     a trailing lock. It's still the doorway click target (button/onclick
+     untouched), so a soft hover keeps it discoverable. Mirrors the mockup's
+     `.chip.locked`; overrides the unlocked `.cbv-chip`/-assigned/-graphite
+     chrome by two-class specificity, without touching those rules. */
+  .cbv-chip-locked {
+    background: none;
+    border-color: transparent;
+    padding: 4px 4px;
+    border-radius: var(--r-md);
+    color: var(--text-2);
+  }
+  .cbv-chip-locked.cbv-chip-assigned {
+    background: none;
+    border-color: transparent;
+    color: var(--k-snippet-text);
+  }
+  .cbv-chip-locked.cbv-chip-graphite {
+    background: none;
+    border-color: transparent;
+    color: var(--k-graphite-text);
+  }
+  .cbv-chip-locked:hover {
+    background: var(--inset);
+  }
   .cbv-chip-button { cursor: pointer; font: inherit; }
   .cbv-chip-button[disabled] { cursor: default; }
 

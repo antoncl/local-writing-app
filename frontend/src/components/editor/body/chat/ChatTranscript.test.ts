@@ -92,4 +92,16 @@ describe("ChatTranscript", () => {
     const { container } = render(ChatTranscript, { chatHistory: HISTORY, chatRunning: false });
     expect(container.querySelector(".cbv-turn-meta")).not.toBeInTheDocument();
   });
+
+  // ADR-0076 S3: a Stop mid-stream keeps the partial reply and stamps it
+  // `stopped` — the transcript shows the "Stopped early" banner, reusing the
+  // truncation-pill idiom (mutually exclusive with `truncated` in practice).
+  it("renders the Stopped early banner for a stopped message", () => {
+    const history = [
+      { role: "assistant", content: "The Regent do", stopped: true },
+    ] as ChatMessage[];
+    render(ChatTranscript, { chatHistory: history, chatRunning: false });
+    expect(screen.getByText("Stopped early — partial reply kept.")).toBeInTheDocument();
+    expect(screen.queryByText("Response cut off — hit max tokens.")).not.toBeInTheDocument();
+  });
 });

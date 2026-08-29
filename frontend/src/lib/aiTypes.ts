@@ -225,6 +225,10 @@ export type ChatMessage = {
   provider?: string | null;
   model?: string | null;
   latency_ms?: number | null;
+  // ADR-0076 S3: set when the user aborted the stream mid-turn (Stop) — the
+  // partial content is kept, rendered via the "Stopped early" banner. A
+  // deliberate stop, never routed through the error/rewind path (#1037).
+  stopped?: boolean;
 };
 
 export type AIChatRequest = {
@@ -343,6 +347,9 @@ export type ChatSessionMessage = {
   provider?: string | null;
   model?: string | null;
   latency_ms?: number | null;
+  // ADR-0076 S3: mirrors `truncated` — additive-optional, absent on messages
+  // persisted before this slice.
+  stopped?: boolean;
 };
 
 // The next-turn estimate a chat/dialog surface derives from the preview

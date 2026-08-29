@@ -57,6 +57,7 @@
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { ChatCommitController } from "@/lib/stores/chatCommit.svelte";
   import { refreshChatSessions } from "@/lib/stores/chats";
+  import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
   import {
@@ -408,6 +409,23 @@
     if (isLocked) return;
     chatAssistantId = id;
     await persistActiveChat();
+  }
+
+  // ADR-0076 S4: the lock doorway. Once a chat locks, its prompt/assistant/
+  // inputs can't change (decision 8) — this reuses the Run flow's
+  // create-seed-open chain to spin up a FRESH chat with the same setup
+  // (prompt + assistant + input drafts), never the transcript.
+  function newChatWithSetup(): void {
+    // The doorway is only offered when a prompt is bound (see ComposerBar
+    // canDoorway); guard anyway so the action is a no-op without a setup to
+    // carry.
+    if (!activePromptEntry) return;
+    void chatSessions.openChatFromPromptEntry(
+      activePromptEntry,
+      encodeChatInputDrafts(chatInputDrafts),
+      chatSubject || null,
+      { assistantId: chatAssistantId },
+    );
   }
 
   // defaultDraftFor / seedInputDraftsFromEntry / isInputMissing moved to
@@ -1050,6 +1068,7 @@
       {titleFor}
       onPickPrompt={(entry) => void pickPromptForChat(entry)}
       onPickAssistant={(id) => void pickAssistantForChat(id)}
+      onNewChatWithSetup={() => newChatWithSetup()}
     />
 
     <ChatTranscript

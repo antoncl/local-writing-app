@@ -28,6 +28,31 @@ from app.services.ai.profiles.base import (
 _CHAT_TIMEOUT = 180.0
 
 
+def _inband_error_message(obj: Any) -> str | None:
+    """Pull an in-band error message off a streamed chunk, a choice, or a
+    non-stream response, if one is present.
+
+    OpenRouter (unlike a raw OpenAI endpoint) reports some upstream failures —
+    rate-limit, "no available provider", an upstream 5xx, content moderation — as
+    an HTTP 200 response carrying an `error` object `{code, message, metadata}`.
+    When that object rides at the *top level* of a stream frame the `openai` SDK
+    raises for us; when it is nested on the *choice* it does not, so the caller
+    must look. `ChatCompletionChunk`/`Choice` allow extra fields, so the `error`
+    survives parsing and is readable here — it was just never inspected, which
+    turned a real failure into an empty "successful" turn (#1581).
+
+    Returns a human-readable message, or None when there is no error.
+    """
+    err = getattr(obj, "error", None)
+    if not err:
+        return None
+    if isinstance(err, dict):
+        message = err.get("message") or err.get("code")
+    else:
+        message = getattr(err, "message", None) or getattr(err, "code", None)
+    return str(message) if message else str(err)
+
+
 class OpenAICompatibleProfile(ProviderProfile):
     """A provider reachable through the `openai` SDK against a base URL.
 
@@ -100,7 +125,19 @@ class OpenAICompatibleProfile(ProviderProfile):
         if extra_body:
             kwargs["extra_body"] = extra_body
         response = client.chat.completions.create(**kwargs)
-        choice = response.choices[0]
+        inband = _inband_error_message(response)
+        if inband:
+            raise ProviderError(inband)
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            # A 200 with neither choices nor an error object — nothing to return.
+            # Guard the `choices[0]` index so this surfaces as a clean provider
+            # error rather than an IndexError.
+            raise ProviderError("Provider returned an empty response (no choices).")
+        choice = choices[0]
+        inband = _inband_error_message(choice)
+        if inband:
+            raise ProviderError(inband)
         stop_reason = getattr(choice, "finish_reason", None)
         return ChatOutcome(choice.message.content or "", stop_reason, response)
 
@@ -152,12 +189,23 @@ class OpenAICompatibleProfile(ProviderProfile):
         stop_reason: str | None = None
         final_chunk: Any = None
         for chunk in client.chat.completions.create(**kwargs):
+            # A choice-nested error frame (OpenRouter's shape for rate-limit /
+            # no-provider / upstream 5xx) does not make the SDK raise — surface
+            # it as a real error instead of ending the stream with empty content
+            # and a fake "success" (#1581). Top-level error frames already raise
+            # inside the SDK; this covers the chunk level too, defensively.
+            inband = _inband_error_message(chunk)
+            if inband:
+                raise ProviderError(inband)
             if getattr(chunk, "usage", None) is not None:
                 final_chunk = chunk
             choices = getattr(chunk, "choices", None) or []
             if not choices:
                 continue
             choice = choices[0]
+            inband = _inband_error_message(choice)
+            if inband:
+                raise ProviderError(inband)
             delta = getattr(choice, "delta", None)
             yield from self._stream_delta_events(delta, splitter)
             finish = getattr(choice, "finish_reason", None)

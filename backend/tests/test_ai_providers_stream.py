@@ -8,6 +8,7 @@ from app.services.ai import providers as ai_providers
 from app.services.ai.profiles.anthropic import AnthropicProfile
 from app.services.ai.profiles.base import (
     ChatCall,
+    ProviderError,
     StreamDelta,
     StreamFinal,
     StreamThinking,
@@ -124,6 +125,22 @@ def _chunk(*, content=None, reasoning=None, finish=None, usage=None):
     choice = SimpleNamespace(delta=delta, finish_reason=finish)
     empty = content is None and reasoning is None and finish is None and usage is not None
     return SimpleNamespace(choices=([] if empty else [choice]), usage=usage)
+
+
+def _error_chunk(*, message, nested=True):
+    """A fake OpenRouter in-band error frame (#1581).
+
+    OpenRouter reports rate-limit / no-provider / upstream-5xx failures as an
+    `error` object inside a 200 stream. `nested=True` places it on the *choice*
+    (the shape the `openai` SDK does NOT raise on, so the adapter must); `False`
+    places it at the top level of the chunk.
+    """
+    err = {"code": 429, "message": message}
+    if nested:
+        delta = SimpleNamespace(content=None, reasoning=None, reasoning_content=None)
+        choice = SimpleNamespace(delta=delta, finish_reason="error", error=err)
+        return SimpleNamespace(choices=[choice], usage=None)
+    return SimpleNamespace(choices=[], usage=None, error=err)
 
 
 class OpenAICompatibleStreamTests(unittest.TestCase):
@@ -282,6 +299,105 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         self.assertEqual("".join(deltas), "Hi")
         self.assertEqual(captured["timeout"], 300.0)
         self.assertEqual(captured["base_url"], "https://openrouter.ai/api/v1")
+
+    # ---- in-band error surfacing (#1581) --------------------------------
+    # OpenRouter's rate-limit / no-provider / upstream-5xx failures ride inside a
+    # 200 stream as an `error` object. A choice-nested one does not make the SDK
+    # raise, so the adapter used to end the stream with empty content and a fake
+    # "success" ("Model returned empty output" in the UI). It must surface.
+
+    def test_stream_surfaces_choice_nested_error(self):
+        chunks = [_error_chunk(message="Rate limited by upstream provider")]
+        with self.assertRaises(ProviderError) as ctx:
+            self._run(OpenRouterProfile(api_key="sk-or"), chunks)
+        self.assertIn("Rate limited by upstream provider", str(ctx.exception))
+
+    def test_stream_surfaces_top_level_error_chunk(self):
+        # Defensive: a top-level error frame the SDK let through must also surface.
+        chunks = [_error_chunk(message="No available provider", nested=False)]
+        with self.assertRaises(ProviderError) as ctx:
+            self._run(OpenRouterProfile(api_key="sk-or"), chunks)
+        self.assertIn("No available provider", str(ctx.exception))
+
+    def test_partial_deltas_then_error_still_surfaces(self):
+        # Content can arrive before the error frame; the deltas seen so far are
+        # kept, then the error is raised (not swallowed after some output).
+        chunks = [
+            _chunk(content="Hel"),
+            _error_chunk(message="Upstream 502"),
+        ]
+        with self.assertRaises(ProviderError) as ctx:
+            self._run(OpenRouterProfile(api_key="sk-or"), chunks)
+        self.assertIn("Upstream 502", str(ctx.exception))
+
+    def test_choice_nested_error_reaches_wire_as_stream_error(self):
+        # End-to-end through the dispatcher: the surfaced error must reach the
+        # client as a StreamError carrying OpenRouter's message — the event the
+        # frontend renders (cf. #1546, "test what reaches the wire").
+        chunks = [_error_chunk(message="No endpoints found for your data policy")]
+
+        class _FakeOpenAI:
+            def __init__(self, **_kwargs):
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(create=lambda **_kw: iter(chunks))
+                )
+
+        call = ChatCall(
+            model="deepseek/deepseek-v4-pro-0813",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+        )
+        with patch("openai.OpenAI", _FakeOpenAI), patch.object(
+            ai_providers, "profile_for",
+            lambda *_a, **_k: OpenRouterProfile(api_key="sk-or-test"),
+        ), patch.object(ai_providers, "_ensure_provider_key", lambda *_a, **_k: None):
+            events = list(
+                ai_providers.chat_stream(
+                    call, provider_name="openrouter", settings=None, policy="cloud"
+                )
+            )
+        errors = [e for e in events if isinstance(e, ai_providers.StreamError)]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("No endpoints found for your data policy", errors[0].error)
+        # And no fake terminal "success" alongside the error.
+        self.assertFalse([e for e in events if isinstance(e, ai_providers.StreamDone)])
+
+    # ---- non-stream chat() mirror guard (#1581) -------------------------
+
+    def _run_chat(self, profile, response):
+        class _FakeOpenAI:
+            def __init__(self, **_kwargs):
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(create=lambda **_kw: response)
+                )
+
+        call = ChatCall(
+            model="deepseek/deepseek-v4-pro-0813",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+        )
+        with patch("openai.OpenAI", _FakeOpenAI):
+            return profile.chat(call)
+
+    def test_non_stream_chat_surfaces_choice_nested_error(self):
+        choice = SimpleNamespace(
+            message=SimpleNamespace(content=None),
+            finish_reason="error",
+            error={"code": 429, "message": "Rate limited"},
+        )
+        response = SimpleNamespace(choices=[choice])
+        with self.assertRaises(ProviderError) as ctx:
+            self._run_chat(OpenRouterProfile(api_key="sk-or"), response)
+        self.assertIn("Rate limited", str(ctx.exception))
+
+    def test_non_stream_chat_guards_empty_choices(self):
+        # A 200 with no choices and no error must be a clean ProviderError, not
+        # an IndexError on `response.choices[0]`.
+        response = SimpleNamespace(choices=[])
+        with self.assertRaises(ProviderError):
+            self._run_chat(OpenRouterProfile(api_key="sk-or"), response)
 
 
 def _a_delta_event(dtype, *, text=None, thinking=None):

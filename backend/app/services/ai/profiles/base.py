@@ -279,7 +279,16 @@ class ProviderError(RuntimeError):
     """An expected, user-facing failure from a provider's call path — a
     missing SDK package, an unconfigured or mispasted key. The dispatch
     layer catches it and turns it into an error result, not a 500.
+
+    ``detail`` carries developer-facing diagnostics (e.g. the empty-stream dump,
+    #1601) that must NOT be shown to the user: the dispatch layer copies it onto
+    the ``StreamError`` so the stream layer can record it to ``errors.log``, while
+    the message alone reaches the UI. The message itself stays user-facing.
     """
+
+    def __init__(self, *args: object, detail: str | None = None) -> None:
+        super().__init__(*args)
+        self.detail = detail
 
 
 @dataclass

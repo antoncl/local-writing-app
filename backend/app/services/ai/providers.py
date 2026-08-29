@@ -302,6 +302,10 @@ class StreamError:
     model: str
     latency_ms: int
     error: str
+    # Developer-facing diagnostics (e.g. the empty-stream dump) copied from the
+    # raising ProviderError. Recorded to errors.log by the stream layer (#1601);
+    # never serialized to the client — `error` is the only user-facing field.
+    detail: str | None = None
 
 
 StreamEvent = StreamDelta | StreamThinking | StreamDone | StreamError
@@ -343,7 +347,7 @@ def chat_stream(
     except ProviderError as exc:
         yield StreamError(provider=provider_name, model=call.model,
                           latency_ms=int((time.perf_counter() - started) * 1000),
-                          error=str(exc))
+                          error=str(exc), detail=exc.detail)
         return
     except Exception as exc:  # noqa: BLE001
         yield StreamError(provider=provider_name, model=call.model,

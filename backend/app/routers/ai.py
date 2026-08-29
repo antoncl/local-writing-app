@@ -63,9 +63,29 @@ from app.services.ai.profiles import Capability, CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
 from app.services.ai.streaming import transform_provider_events_to_ndjson
 from app.services.ai.usage import translate_usage_to_cost
-from app.services.project_service import ProjectServiceError
+from app.services.error_log import append_error_line
+from app.services.project_service import ProjectService, ProjectServiceError
 
 router = APIRouter()
+
+
+def _record_stream_error(project: ProjectService, ev: ai_providers.StreamError) -> None:
+    """Record an AI stream failure to errors.log — the durable, user-findable
+    record (#386/#1601). Project scope when a project is open, machine scope when
+    not. The private `detail` (diagnostics, e.g. the empty-stream dump) lands only
+    in the log, never on the wire; `append_error_line` never raises, so recording
+    a failure can't itself break the stream."""
+    root = project.root_path
+    machine = root is None
+    append_error_line(
+        machine_settings_service.error_log_dir() if machine else root,
+        origin="backend",
+        level="error",
+        message=ev.error,
+        context=f"ai {ev.provider}/{ev.model}".strip(),
+        detail=ev.detail,
+        ensure_dir=machine,
+    )
 
 
 def _preview_error_detail(exc: PreviewError) -> Any:
@@ -545,6 +565,7 @@ async def ai_chat_stream(
                     if journal_added else None
                 ),
                 descriptor=descriptor,
+                on_error=lambda ev: _record_stream_error(project, ev),
             ),
             http_request,
         ),
@@ -631,6 +652,7 @@ async def ai_generate_stream(
                 policy=policy,
                 extra_done={"session_id": session_id, "char_count": char_count},
                 descriptor=descriptor,
+                on_error=lambda ev: _record_stream_error(project, ev),
             ),
             http_request,
         ),

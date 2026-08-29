@@ -28,6 +28,13 @@ from app.services.ai.profiles.base import (
 # timeout the free-function dispatcher used before the reshape.
 _CHAT_TIMEOUT = 180.0
 
+# User-facing message for a completion that streamed no visible content (#1601).
+# Names the log a user can actually find (the project's errors.log); the verbose
+# diagnostic rides as the error's `detail`, not in this line.
+_EMPTY_STREAM_MESSAGE = (
+    "The model returned no output. See errors.log in your project folder for details."
+)
+
 log = logging.getLogger(__name__)
 
 
@@ -86,19 +93,26 @@ class _StreamDiag:
             if finish:
                 self.finishes.append((idx, finish))
 
-    def log_empty(self, call: ChatCall, extra_body: dict) -> None:
-        """Emit one WARNING describing an empty stream. Fires only on the bug."""
-        log.warning(
-            "empty provider stream (#1588): model=%s chunks=%d max_choices=%d "
-            "content_idx0=%d content_other=%d reasoning=%d refusal=%r finishes=%s "
-            "req[msgs=%d sys_blocks=%d max_tokens=%s temp=%s extra=%s] last=%.400r",
-            call.model, self.chunks, self.max_choices,
-            self.content_idx0, self.content_other, self.reasoning, self.refusal,
-            self.finishes,
-            len(call.messages), len(call.system_blocks or []),
-            call.max_tokens, call.temperature, sorted(extra_body),
-            self.last,
+    def summary(self, call: ChatCall, extra_body: dict) -> str:
+        """One-line diagnostic describing an empty stream — the developer-facing
+        detail recorded to errors.log and logged as a WARNING (#1588/#1601). Never
+        shown to the user; the caller pairs it with a plain user message."""
+        return (
+            f"empty provider stream: model={call.model} chunks={self.chunks} "
+            f"max_choices={self.max_choices} content_idx0={self.content_idx0} "
+            f"content_other={self.content_other} reasoning={self.reasoning} "
+            f"refusal={self.refusal!r} finishes={self.finishes} "
+            f"req[msgs={len(call.messages)} sys_blocks={len(call.system_blocks or [])} "
+            f"max_tokens={call.max_tokens} temp={call.temperature} "
+            f"extra={sorted(extra_body)}] last={self.last!r:.400}"
         )
+
+    def log_empty(self, call: ChatCall, extra_body: dict) -> str:
+        """Log the empty-stream diagnostic as a WARNING and return it, so the same
+        line can ride along as the raised error's `detail`. Fires only on the bug."""
+        line = self.summary(call, extra_body)
+        log.warning("%s (#1588)", line)
+        return line
 
 
 def _inband_error_message(obj: Any) -> str | None:
@@ -308,7 +322,14 @@ class OpenAICompatibleProfile(ProviderProfile):
                     emitted = True
                 yield event
             if not emitted:
-                diag.log_empty(call, extra_body)
+                # A completion with no visible content is a failure from the
+                # user's side, not a silent empty "success" (#1601). Surface it:
+                # the diagnostic rides as the error's `detail` (→ errors.log, never
+                # the UI); the message is the plain, user-facing line. Raised inside
+                # the try, so the finally below still closes the stream (#1570).
+                raise ProviderError(
+                    _EMPTY_STREAM_MESSAGE, detail=diag.log_empty(call, extra_body)
+                )
             usage = (
                 self.extract_usage(final_chunk, call.model)
                 if final_chunk is not None

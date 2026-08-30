@@ -17,6 +17,7 @@
     type PromptGroupNode,
   } from "@/lib/views/promptNodes";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
+  import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { resolveColor } from "@/lib/utils/colors";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
@@ -103,11 +104,15 @@
     schema,
     referenceIndex: $referenceIndexStore,
   });
+  // The view's chosen render layout (ADR-0069); absent axes keep the pane default.
+  const appearance = $derived(paneViews.appearanceFor("prompt"));
 </script>
 
 <ViewNodeList
   bind:this={list}
   {view}
+  mode={appearance?.mode ?? paneViews.defaultModeFor("prompt")}
+  density={appearance?.density ?? undefined}
   active={(entry) => focusedDocument?.type === "prompt" && focusedDocument.id === entry.id}
   onClick={(entry) => onOpenEntry(entry.id)}
   row={entryRow}

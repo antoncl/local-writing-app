@@ -380,7 +380,15 @@ export type ChatSessionJournalEntry = {
   title?: string;
   entry_type?: string;
   added_at_turn?: number;
-  source?: "user_message" | "rendered_prompt" | "depth1_expansion";
+  source?: "user_message" | "rendered_prompt" | "depth1_expansion" | "scene_prose";
+};
+
+// #1635: a picked lore entry edited since the AI last saw it — surfaced in
+// the Context door's auto-added panel with an "edited" marker.
+export type ChangedPick = {
+  id: string;
+  title?: string;
+  entry_type?: string;
 };
 
 export type ChatSession = {

@@ -713,6 +713,40 @@ class ChatEndpointJournalTests(unittest.TestCase):
         chat = self.service.read_chat_session(self.chat_id)
         self.assertNotIn(self.honor_id, [e.entry_id for e in chat.journal])
 
+    def test_send_persists_seen_revisions_for_picked_lore(self) -> None:
+        """#1635: after a lore-enabled send with a picked entry, the chat's
+        persisted `seen_revisions` carries that entry's current revision —
+        the durable baseline the Context door's "edited since last seen"
+        badge (and a cold-process cache-tier reseed) both read."""
+        from app.models import SaveChatSessionRequest
+        self.service.save_chat_session(
+            self.chat_id,
+            SaveChatSessionRequest(
+                title="Test", prompt_entry_id="prompt_x", lore_enabled=True,
+                used_node_ids=[self.honor_id],
+            ),
+        )
+        current_revision = self.service.read_lore_entry(self.honor_id).revision
+        loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("Reply.", "end_turn", SimpleNamespace()),
+             ):
+            response = self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "system_prompt": "You are a writing assistant.",
+                    "messages": [{"role": "user", "content": "Hello."}],
+                    "chat_id": self.chat_id,
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        chat = self.service.read_chat_session(self.chat_id)
+        self.assertEqual(chat.seen_revisions.get(self.honor_id), current_revision)
+
     def test_lore_gate_off_injects_no_lore(self) -> None:
         """ADR-0057 §2 Journey C: a chat whose prompt never called
         relevant_lore() (lore_enabled=False, the default) gets no send-time

@@ -38,6 +38,7 @@
   import EntryDraftCard from "@/components/editor/body/chat/EntryDraftCard.svelte";
   import type {
     AssistantEntrySummary,
+    ChangedPick,
     ChatEstimate,
     ChatMessage,
     ChatSession,
@@ -181,6 +182,10 @@
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
   let activeChatJournal: ChatSessionJournalEntry[] = $state([]);
+  // #1635: picked lore entries edited since the AI last saw them — refreshed
+  // whenever the Context door opens, so the "· edited" marker reflects any
+  // lore edits made since the last preview.
+  let activeChatChangedPicks: ChangedPick[] = $state([]);
   let activeChatCacheWriteTimes: Record<string, string> = $state({});
   // V2 cost accounting — pluck the delta off the streaming `done` event
   // and forward it to the backend on the next persistActiveChat. $state (not
@@ -328,6 +333,23 @@
     }
   }
 
+  // #1635: fetch the chat's picked-lore edits on Context door open, so the
+  // "· edited" marker reflects any lore changes made since the last preview.
+  async function refreshChangedPicks(): Promise<void> {
+    const chatId = scene?.id;
+    if (!chatId) {
+      activeChatChangedPicks = [];
+      return;
+    }
+    try {
+      const res = await api.chatChangedPicks(chatId);
+      if (scene?.id !== chatId) return; // a switch raced us
+      activeChatChangedPicks = res.picks ?? [];
+    } catch {
+      activeChatChangedPicks = []; // door degrades to journal-only, never errors
+    }
+  }
+
   function resetChatState() {
     chatHistory = [];
     chatRunning = false;
@@ -350,6 +372,7 @@
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
     activeChatJournal = [];
+    activeChatChangedPicks = [];
     activeChatCacheWriteTimes = {};
     pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
@@ -1129,6 +1152,8 @@
       previewCacheBlocks={chatPreviewCacheBlocks}
       loreEnabled={chatLoreEnabled}
       journal={activeChatJournal}
+      changedPicks={activeChatChangedPicks}
+      onOpenDoor={refreshChangedPicks}
       {lockedInputDisplays}
       {titleFor}
       onPickPrompt={(entry) => void pickPromptForChat(entry)}

@@ -28,6 +28,7 @@ import type {
   AIInvocationList,
   CreateAIInvocationRequest,
   ChatSessionJournalEntry,
+  ChangedPick,
   ChatUsage,
   AssistantTagList,
   AssistantTagsOverview,
@@ -1331,6 +1332,11 @@ export const api = {
     return request<ChatSessionList>(`/chats/${encodeURIComponent(chatId)}`, {
       method: "DELETE",
     });
+  },
+  // #1635: picked lore entries edited since the AI last saw them — feeds the
+  // Context door's "· edited" marker on the auto-added panel.
+  chatChangedPicks(chatId: string) {
+    return request<{ picks: ChangedPick[] }>(`/chats/${encodeURIComponent(chatId)}/changed-picks`);
   },
   getTodos() {
     return request<TodoDocument>("/todos");

@@ -63,6 +63,33 @@ def _staged_set_block(project: ProjectService, staged_set_id: str) -> str:
     return _format_staged_set_block(staged.title, staged.target_entry_type, staged.rows)
 
 
+def _echo_chat_save_request(
+    chat: ChatSession,
+    *,
+    journal: list[Any],
+    seen_revisions: dict[str, str] | None = None,
+) -> SaveChatSessionRequest:
+    """A send-path save that echoes the chat's locked identity/state and writes
+    the given journal (and, when given, the last-seen lore revisions), leaving
+    every "None = preserve" field (lore_enabled, used_node_ids, …) untouched.
+    Shared by the journal-detection save and the #1635 seen-revisions save so a
+    newly echoed field can't be added to one and forgotten in the other."""
+    return SaveChatSessionRequest(
+        title=chat.title,
+        prompt_entry_id=chat.prompt_entry_id,
+        assistant_id=chat.assistant_id,
+        system_prompt=chat.system_prompt,
+        subject=chat.subject,
+        staged_set=chat.staged_set,
+        pinned=chat.pinned,
+        context_items=chat.context_items,
+        messages=chat.messages,
+        inputs=chat.inputs,
+        journal=journal,
+        seen_revisions=seen_revisions,
+    )
+
+
 def _detect_and_persist_journal(
     project: ProjectService,
     chat: ChatSession,
@@ -119,21 +146,11 @@ def _detect_and_persist_journal(
         rendered_text=system_prompt,
     )
     if new_entries:
+        # `seen_revisions` omitted → preserved; `lore_enabled` etc. are None-
+        # preserve fields on the request (see _echo_chat_save_request).
         project.save_chat_session(
             chat_id,
-            SaveChatSessionRequest(
-                title=chat.title,
-                prompt_entry_id=chat.prompt_entry_id,
-                assistant_id=chat.assistant_id,
-                system_prompt=chat.system_prompt,
-                pinned=chat.pinned,
-                context_items=chat.context_items,
-                messages=chat.messages,
-                inputs=chat.inputs,
-                journal=list(chat.journal) + new_entries,
-                # `lore_enabled` omitted → preserved (SaveChatSessionRequest
-                # treats None as "leave the captured gate alone").
-            ),
+            _echo_chat_save_request(chat, journal=list(chat.journal) + new_entries),
         )
     return new_entries
 
@@ -170,7 +187,7 @@ def _lore_cache_blocks(
     chat_id: str,
     journal_for_send: list[Any],
     scene: Any,
-) -> list[dict]:
+) -> tuple[list[dict], dict[str, str]]:
     """The chat's one deduped lore set, placed once *per volatility tier*
     (docs/design/context-caching.md §4). `_relevant_lore_ids` — the single selector
     — computes `{direct ∪ auto(journal) ∪ always} − {never, manual_only}`;
@@ -195,6 +212,11 @@ def _lore_cache_blocks(
 
     index = project.build_mutations_index() if scene is not None else None
     session = default_registry.get_or_create(f"chatlore:{chat_id}")
+    # #1635: on a cold process the in-memory baseline is empty; seed it from the
+    # chat's persisted last-seen revisions so tiering (and the door's "edited"
+    # signal) survive a restart. Only when cold — never clobber a live baseline.
+    if not session.baseline and chat.seen_revisions:
+        session.baseline = dict(chat.seen_revisions)
 
     # ADR-0060 §2/§5: one selector, computed ONCE, then split into the two tiers by
     # `_tier_lore_ids` against the same (pre-commit) baseline — so each entry lands
@@ -214,7 +236,7 @@ def _lore_cache_blocks(
     volatile_xml = _format_lore_block(project, volatile_ids, scene=scene, index=index)
     if volatile_xml:
         blocks.append({"text": volatile_xml, "tier": "volatile"})
-    return blocks
+    return blocks, dict(session.baseline)
 
 
 def expand_and_prepare_chat_blocks(
@@ -283,7 +305,21 @@ def expand_and_prepare_chat_blocks(
     # caps breakpoints (Anthropic: ≤4) and assigns each tier its ttl — the shared
     # layer only orders stable-first (ADR-0060 §5).
     if chat.lore_enabled:
-        blocks.extend(_lore_cache_blocks(project, chat, chat_id, journal_for_send, scene))
+        lore_blocks, seen_revisions = _lore_cache_blocks(
+            project, chat, chat_id, journal_for_send, scene
+        )
+        blocks.extend(lore_blocks)
+        # #1635: persist the last-seen revisions if they changed, so the door's
+        # "edited" badge survives a restart and reflects this turn's send. Carry
+        # the up-to-date journal (journal_for_send) so this save doesn't regress
+        # the entries _detect_and_persist_journal just wrote.
+        if seen_revisions != chat.seen_revisions:
+            project.save_chat_session(
+                chat_id,
+                _echo_chat_save_request(
+                    chat, journal=journal_for_send, seen_revisions=seen_revisions
+                ),
+            )
 
     return (blocks or None), chat_id, list(new_entries)
 

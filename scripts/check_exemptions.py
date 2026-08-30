@@ -2,21 +2,18 @@
 """Exemption ratchet — every escape hatch may shrink, never grow (#352).
 
 The failure mode this exists for: faced with a red gate, the cheapest fix is
-almost never fixing the code. It is adding the file to a grandfather set,
-widening a lint `ignore`, dropping a rule from `select`, or marking the test
-`skip`/`xfail`. Each edit is locally defensible; the aggregate is a dead gate,
-and nothing in the diff announces it. That temptation is strongest for
-generated code, where "make the red go away" is a well-formed instruction.
+almost never fixing the code. It is widening a lint `ignore`, dropping a rule
+from `select`, or marking the test `skip`/`xfail`. Each edit is locally
+defensible; the aggregate is a dead gate, and nothing in the diff announces it.
+That temptation is strongest for generated code, where "make the red go away" is
+a well-formed instruction. (The per-file GRANDFATHERED escape hatches the guards
+once carried are gone entirely — removed in #1681 so a violation always fails.)
 
 So the exemption lists are treated as ratchets: compare this checkout against a
 base ref (default `origin/master`) and FAIL if any of them got weaker.
 
-  * `scripts/check_file_size.py`      GRANDFATHERED
-  * `scripts/check_style_tokens.py`   GRANDFATHERED, GRANDFATHERED_FONT_FAMILY,
-                                      GENERATED_ROOTS (build-output skip list)
-  * `scripts/check_layer_imports.py`  GRANDFATHERED (services on the web layer)
-  * `scripts/check_http_client.py`    GRANDFATHERED (raw frontend network I/O)
-  * `scripts/check_svelte_runes.py`   GRANDFATHERED (legacy Svelte-4 constructs)
+  * `scripts/check_style_tokens.py`   GENERATED_ROOTS (build-output skip list,
+                                      must not grow)
   * `backend/pyproject.toml`          ruff lint `ignore` (must not grow),
                                       `select` (must not shrink),
                                       `per-file-ignores` (must not grow)
@@ -44,17 +41,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
-# file -> module-level set names to compare
+# file -> module-level set/tuple names to compare (must-not-grow lists). The
+# per-file GRANDFATHERED escape hatches were removed from the guards (#1681);
+# only the style guard's build-output skip list remains a watchable exemption.
 GUARD_SETS = {
-    "scripts/check_file_size.py": ("GRANDFATHERED",),
-    "scripts/check_style_tokens.py": (
-        "GRANDFATHERED",
-        "GRANDFATHERED_FONT_FAMILY",
-        "GENERATED_ROOTS",
-    ),
-    "scripts/check_layer_imports.py": ("GRANDFATHERED",),
-    "scripts/check_http_client.py": ("GRANDFATHERED",),
-    "scripts/check_svelte_runes.py": ("GRANDFATHERED",),
+    "scripts/check_style_tokens.py": ("GENERATED_ROOTS",),
 }
 PYPROJECT = "backend/pyproject.toml"
 
@@ -154,7 +145,7 @@ def compare(label: str, base: set[str], now: set[str], *, may_grow: bool) -> lis
 
 
 def guard_set_ratchets(base: str, shrank: list[str]) -> list[str]:
-    """The two guards' GRANDFATHERED sets: additions are the sin."""
+    """The style guard's GENERATED_ROOTS skip list: additions are the sin."""
     failures: list[str] = []
     for path, names in GUARD_SETS.items():
         base_src = at_base(base, path)

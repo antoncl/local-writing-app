@@ -20,7 +20,7 @@ string literal, a comment, or a docstring. Zero false positives by construction.
 Relative imports are resolved to absolute before matching, so `from ..main
 import app` inside `app/services/x.py` is caught as `app.main`.
 
-FAILS (exit 1) on any forbidden import unless the file is grandfathered below.
+FAILS (exit 1) on any forbidden import — there is no per-file exemption (#1681).
 Non-service paths are ignored, so it is safe to hand this the full staged-file
 list (pre-commit), a single edited file (the Claude Code PostToolUse hook), or
 the whole tree (CI).
@@ -34,12 +34,6 @@ from __future__ import annotations
 import ast
 import sys
 from pathlib import Path
-
-# Service files exempt from the boundary, matched against the path tail (repo
-# -relative, forward slashes). Empty and meant to stay empty: no service
-# currently imports the web layer. Add an entry only for a deliberate, PR
-# -announced exception — growth is ratcheted by scripts/check_exemptions.py.
-GRANDFATHERED: set[str] = set()
 
 # The web layer, top-level: the HTTP framework and its base, plus the route
 # modules themselves. A service importing any of these has inverted the layering.
@@ -108,10 +102,6 @@ def check_file(path: Path) -> list[tuple[int, str]]:
     return hits
 
 
-def is_grandfathered(posix_path: str) -> bool:
-    return any(posix_path.endswith(entry) for entry in GRANDFATHERED)
-
-
 def main(argv: list[str]) -> int:
     failed = False
     for raw in argv:
@@ -122,9 +112,6 @@ def main(argv: list[str]) -> int:
         if not hits:
             continue
         rel = path.as_posix()
-        if is_grandfathered(rel):
-            print(f"warn  {rel}: {len(hits)} web-layer import(s) (grandfathered - clean up when you next work here).")
-            continue
         failed = True
         for line_no, module in hits:
             print(f"FAIL  {rel}:{line_no}: service imports the web layer (`{module}`)")

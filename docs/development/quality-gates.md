@@ -72,9 +72,11 @@ per-job status.
 ## The exemption ratchet — the guard on the guards
 
 `scripts/check_exemptions.py` (CI, PRs only). Every escape hatch may shrink,
-never grow. It compares the branch against the PR base and fails on a new
-`GRANDFATHERED` entry, a widened ruff `ignore` or `per-file-ignores`, a rule
-dropped from `select`, or a newly skipped/xfailed test.
+never grow. It compares the branch against the PR base and fails on a widened
+ruff `ignore` or `per-file-ignores`, a rule dropped from `select`, a newly
+skipped/xfailed test, or a grown `GENERATED_ROOTS` build-output skip list. (The
+per-file `GRANDFATHERED` escape hatches the guards once carried were removed in
+#1681 — a guard violation now always fails, with no per-file exemption to grow.)
 
 **When a gate goes red, fix the code — do not widen the exemption.** If a new
 exemption is genuinely right, say so explicitly in the PR rather than letting it
@@ -134,12 +136,12 @@ at exactly the moment it had something to say.
 ## The two content guards
 
 - **File-size guard** (`scripts/check_file_size.py`) — the enforced half of "no
-  monolithic files": warns ≥1200, **fails ≥1500** lines on `.py/.svelte/.ts`.
-  Files knowingly over the cap live in that script's `GRANDFATHERED` set — split
-  them when you next work there, then delete the entry. The set is currently
-  empty (#76): every source file is under the cap.
+  monolithic files": warns ≥1200, **fails ≥1500** lines on `.py/.svelte/.ts`. A
+  file over the cap must be split — there's no per-file exemption (the empty
+  `GRANDFATHERED` escape hatch was removed in #1681; every source file is under
+  the cap, #76).
 - **Style-token guard** (`scripts/check_style_tokens.py`) — the enforced half of
   the design language (`docs/design/design-language.md` §5): hex/rgb color
-  literals and non-token `font-size` in frontend style code fail. Its own
-  shrink-to-zero `GRANDFATHERED` set (#129); sanctioned exceptions are listed in
-  the script's docstring.
+  literals and non-token `font-size` in frontend style code fail — no per-file
+  exemption (#1681). Sanctioned exceptions are listed in the script's docstring;
+  build outputs are skipped via the ratcheted `GENERATED_ROOTS` list.

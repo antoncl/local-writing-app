@@ -22,9 +22,9 @@ banning them now would throw false failures. Add them to PATTERNS once each
 reaches zero across `frontend/src`.
 
 FAILS (exit 1) on any `createEventDispatcher` in a `frontend/src` `.svelte` file
-unless the file is grandfathered below. Files outside `frontend/src/`, non-svelte
-files, and test files are ignored, so it is safe to hand this the full staged
-list, one edited file, or the whole tree.
+— there is no per-file exemption (#1681). Files outside `frontend/src/`,
+non-svelte files, and test files are ignored, so it is safe to hand this the full
+staged list, one edited file, or the whole tree.
 
 Usage:
     python scripts/check_svelte_runes.py <file> [<file> ...]
@@ -35,12 +35,6 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
-
-# Files exempt from the guard, matched against the path tail (repo-relative,
-# forward slashes). Empty and meant to stay empty: #49 removed the last real
-# usage. Add an entry only for a deliberate, PR-announced exception — growth is
-# ratcheted by scripts/check_exemptions.py.
-GRANDFATHERED: set[str] = set()
 
 TEST_MARKERS = (".test.", ".spec.", "frontend/src/lib/test/")
 
@@ -80,10 +74,6 @@ def check_file(path: Path) -> list[tuple[int, str]]:
     return sorted(hits)
 
 
-def is_grandfathered(posix_path: str) -> bool:
-    return any(posix_path.endswith(entry) for entry in GRANDFATHERED)
-
-
 def main(argv: list[str]) -> int:
     failed = False
     for raw in argv:
@@ -94,9 +84,6 @@ def main(argv: list[str]) -> int:
         if not hits:
             continue
         rel = path.as_posix()
-        if is_grandfathered(rel):
-            print(f"warn  {rel}: {len(hits)} legacy construct(s) (grandfathered - clean up when you next work here).")
-            continue
         failed = True
         for line_no, label in hits:
             print(f"FAIL  {rel}:{line_no}: {label}")

@@ -647,6 +647,13 @@
     if (!schemaTypeLayerId) return false;
     return await run(async () => {
       const previousTypeId = selectedSchemaTypeId && !schemaTypeReadonly ? selectedSchemaTypeId : null;
+      // Overriding a built-in's color/icon (#1644): the type is read-only
+      // (identity is system-owned), so `previousTypeId` is null, but the FQN
+      // already exists in the effective schema — pass allowExisting so the
+      // backend takes the ADR-0029 §A overlay path instead of the
+      // "already exists" 422. Identity keys are stripped on write; only the
+      // color/icon (and any existing field/group overlay) persist.
+      const builtinOverlay = schemaTypeReadonly && Boolean(selectedSchemaTypeId);
       // Entry-type identity is the kind-qualified FQN `kind:key` (#77). A new
       // type's id is the local key, which may itself nest (`revise:scene`, #600).
       // Always prepend the kind — stripping a leading `kind:` the author may have
@@ -671,7 +678,7 @@
         setStatus("Renaming detail types is not available yet");
         return;
       }
-      setMetadataSchema(await api.upsertMetadataEntryType(schemaTypeLayerId, nextTypeId, nextType, Boolean(previousTypeId)));
+      setMetadataSchema(await api.upsertMetadataEntryType(schemaTypeLayerId, nextTypeId, nextType, Boolean(previousTypeId) || builtinOverlay));
       await refreshMetadataSchema();
       setValidation(await api.validateProject());
       selectedSchemaTypeId = nextTypeId;

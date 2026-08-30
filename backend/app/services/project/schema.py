@@ -271,7 +271,7 @@ class MetadataSchemaMixin:
         built_in = bool(source and source.built_in)
 
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
-        self._assemble_entry_type_layer_data(request, entry_type_id, layer_data, schema, built_in)
+        self._assemble_entry_type_layer_data(request, entry_type_id, layer_data, built_in)
         self._validate_candidate_schema(root, layer_path, layer_data)
         self._write_yaml(layer_path, layer_data)
         return self.read_metadata_schema()
@@ -313,7 +313,6 @@ class MetadataSchemaMixin:
         request: UpsertMetadataEntryTypeRequest,
         entry_type_id: str,
         layer_data: dict[str, Any],
-        schema: MetadataSchema,
         built_in: bool,
     ) -> None:
         """Build the per-layer entry-type payload for an upsert and store it into
@@ -325,7 +324,7 @@ class MetadataSchemaMixin:
             entry_types = {}
         entry_type_data = self._base_entry_type_payload(request, entry_type_id, entry_types.get(entry_type_id))
         if built_in:
-            self._apply_builtin_overlay(entry_type_data, schema, entry_type_id)
+            self._apply_builtin_overlay(entry_type_data, entry_type_id)
         if built_in and not entry_type_data.get("fields") and not (set(entry_type_data) - {"fields"}):
             entry_types.pop(entry_type_id, None)
         else:
@@ -358,9 +357,7 @@ class MetadataSchemaMixin:
             entry_type_data.pop("parent", None)
         return entry_type_data
 
-    def _apply_builtin_overlay(
-        self, entry_type_data: dict[str, Any], schema: MetadataSchema, entry_type_id: str
-    ) -> None:
+    def _apply_builtin_overlay(self, entry_type_data: dict[str, Any], entry_type_id: str) -> None:
         """Overlay-only persistence for a built-in type (ADR-0029 §A): never
         write the shipped declaration (name/kind/parent/abstract stay inherited),
         and keep only the fields that EXTEND the built-in so inherited/intrinsic
@@ -368,7 +365,16 @@ class MetadataSchemaMixin:
         them)."""
         for declaration_key in ("name", "kind", "parent", "abstract"):
             entry_type_data.pop(declaration_key, None)
-        builtin_members = set(schema.entry_types[entry_type_id].fields)
+        # Strip against the type's SHIPPED membership — resolved from
+        # DEFAULT_METADATA_SCHEMA alone, NOT the effective schema (#1644). The
+        # effective schema already folds in this project's own field overlays, so
+        # using it here would treat a user-added field (e.g. a custom `weather` on
+        # lore:character) as a built-in member and silently drop it on the next
+        # color/icon save — only the shipped / intrinsic keys must be filtered.
+        shipped = MetadataSchema.model_validate(
+            self._resolve_metadata_schema_inheritance(deepcopy(DEFAULT_METADATA_SCHEMA))
+        ).entry_types.get(entry_type_id)
+        builtin_members = set(shipped.fields) if shipped else set()
         entry_type_data["fields"] = [
             field for field in entry_type_data.get("fields", []) if field not in builtin_members
         ]

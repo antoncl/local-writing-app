@@ -193,6 +193,97 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         self.assertTrue(overview.entry_type_sources["manuscript:act"].built_in)
         self.assertFalse(overview.field_sources["weather"].built_in)
 
+    def test_builtin_entry_type_color_icon_override_persists(self) -> None:
+        # #1644: a writer sets a color + glyph on a built-in type. The frontend
+        # sends the whole draft with allow_existing=True (the type read-only, so
+        # its name/kind/parent/abstract ride along but are stripped on write).
+        # Only the color/icon overlay persists, and the type stays a system type.
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="lore:character",
+                entry_type=EntryTypeDefinition(
+                    name="Character",
+                    kind="lore",
+                    parent="lore:base",
+                    fields=[],
+                    color="amber",
+                    icon="user",
+                ),
+                allow_existing=True,
+            )
+        )
+
+        character = schema.entry_types["lore:character"]
+        # The overlay is the type's OWN (pre-inheritance) color/icon...
+        self.assertEqual(character.own_color, "amber")
+        self.assertEqual(character.own_icon, "user")
+        # ...and wins in the resolved values (own over lore:base's slate-blue).
+        self.assertEqual(character.color, "amber")
+        self.assertEqual(character.icon, "user")
+        # Identity is untouched — the shipped declaration was never forked.
+        self.assertEqual(character.name, "Character")
+        self.assertEqual(character.parent, "lore:base")
+
+        # A color/icon-only overlay carries none of name/kind/parent/abstract, so
+        # the type is still reported as built-in (its identity stays locked).
+        overview = self.service.read_metadata_schema_overview()
+        self.assertTrue(overview.entry_type_sources["lore:character"].built_in)
+
+    def test_builtin_entry_type_upsert_requires_allow_existing(self) -> None:
+        # The contract the frontend's builtinOverlay flag rides on (#1644): the
+        # FQN already exists in the effective schema, so without allow_existing
+        # the upsert is the "already exists" 422 — not a silent no-op.
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.upsert_metadata_entry_type(
+                UpsertMetadataEntryTypeRequest(
+                    layer_id=layer_id,
+                    entry_type_id="lore:character",
+                    entry_type=EntryTypeDefinition(
+                        name="Character", kind="lore", parent="lore:base", icon="user"
+                    ),
+                    allow_existing=False,
+                )
+            )
+        self.assertIn("already exists", str(ctx.exception))
+
+    def test_builtin_color_icon_override_preserves_field_overlay(self) -> None:
+        # Data-safety property (#1644): a writer who has customized a built-in's
+        # fields must not lose them when they later set a glyph. The frontend
+        # sends `fields: []` on a color/icon save (previousTypeId is null for a
+        # read-only built-in), so the backend has to keep the existing layer
+        # membership rather than overwrite it with the empty list.
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layer_id,
+                field_id="weather",
+                field=MetadataFieldDefinition(name="Weather", type="text", options=[]),
+                entry_type="lore:character",
+                allow_existing=False,
+            )
+        )
+        self.assertIn("weather", self.service.read_metadata_schema().entry_types["lore:character"].fields)
+
+        # Now the glyph save, exactly as the editor sends it.
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="lore:character",
+                entry_type=EntryTypeDefinition(
+                    name="Character", kind="lore", parent="lore:base", fields=[], icon="user"
+                ),
+                allow_existing=True,
+            )
+        )
+
+        character = schema.entry_types["lore:character"]
+        self.assertEqual(character.own_icon, "user")
+        # The user's field survived the empty-fields payload.
+        self.assertIn("weather", character.fields)
+
     def test_summary_lives_on_parent_not_in_scene_own_fields(self) -> None:
         schema = self.service.read_metadata_schema()
         scene_definition = schema.entry_types["manuscript:scene"]

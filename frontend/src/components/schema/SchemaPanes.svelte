@@ -39,6 +39,7 @@
   import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
+  import { isDownwardLayerMove } from "@/lib/utils/fieldLayerMove";
   import type {
     DocumentKind,
     EntryMetadata,
@@ -793,21 +794,41 @@
   }
 
   // "Move to layer…" (#1667, ADR-0078 §8): reassigns a field DEFINITION's home
-  // layer — the field stays defined for the same entry type; only which
-  // layer's schema.yaml declares it changes. Unlike delete, this is not
-  // confirm-gated (it touches no document values), so — unlike deleteSchemaField,
-  // which gets its error handling for free from confirmService's onRun(run()) —
-  // this handler wraps the mutation in `run()` itself (mirrors dropSchemaTypeOnParent).
+  // layer — the field stays defined for the same entry type; only which layer's
+  // schema.yaml declares it changes. A move to a NEARER layer un-shares the
+  // field: projects that inherited it (including siblings this project can't
+  // see) lose it and their values are hidden. A precise "will this orphan?"
+  // check can't see those siblings, so a downward move warns instead (#1677),
+  // via confirmService with a "don't show again". An upward move only widens
+  // visibility, so it proceeds silently. The mutation runs through
+  // confirmService's onRun(run()) on the warned path, and `run()` directly on
+  // the silent one.
   async function moveSchemaField(fieldId: string, targetLayerId: string) {
     if (!fieldId || fieldId.startsWith("system:") || schemaFieldReadonly) return;
     const entryType = schemaFieldEntryType;
-    await run(async () => {
-      setMetadataSchema(await api.moveMetadataField(fieldId, targetLayerId, entryType));
-      await refreshMetadataSchema();
-      setValidation(await api.validateProject());
-      const layerLabel = metadataSchemaLayers.find((layer) => layer.id === targetLayerId)?.label ?? targetLayerId;
-      setStatus(`Moved field to ${layerLabel}`);
-    });
+    const sourceLayerId = metadataSchemaOverview?.field_sources[fieldId]?.layer_id;
+    if (sourceLayerId && isDownwardLayerMove(metadataSchemaLayers, sourceLayerId, targetLayerId)) {
+      const fieldName = metadataSchema?.fields[fieldId]?.name || fieldId;
+      const layerLabel = (id: string) => metadataSchemaLayers.find((layer) => layer.id === id)?.label ?? id;
+      confirmService.request({
+        title: "Move field to a nearer layer?",
+        message: `Moving "${fieldName}" to ${layerLabel(targetLayerId)} removes it from ${layerLabel(sourceLayerId)}. Other projects that inherit it will lose the field, and any values they've set for it will be hidden. This is reversible — move it back to restore it.`,
+        confirmLabel: "Move field",
+        destructive: false,
+        dontShowAgainKey: "moveFieldDownward",
+        onConfirm: () => doMoveSchemaField(fieldId, targetLayerId, entryType),
+      });
+      return;
+    }
+    await run(() => doMoveSchemaField(fieldId, targetLayerId, entryType));
+  }
+
+  async function doMoveSchemaField(fieldId: string, targetLayerId: string, entryType: string) {
+    setMetadataSchema(await api.moveMetadataField(fieldId, targetLayerId, entryType));
+    await refreshMetadataSchema();
+    setValidation(await api.validateProject());
+    const layerLabel = metadataSchemaLayers.find((layer) => layer.id === targetLayerId)?.label ?? targetLayerId;
+    setStatus(`Moved field to ${layerLabel}`);
   }
 
   function removeMetadataKey(metadata: EntryMetadata, fieldId: string) {

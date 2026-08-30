@@ -42,6 +42,11 @@
     collapsible: boolean;
     collapsed: boolean;
     childCount: number;
+    // Does this node's level (its sibling set) contain a collapsible node? A leaf
+    // reserves the caret gutter only when this is true (ADR-0066 Amendment 1,
+    // refined #1697): in a flat leaf-only group there's nothing to align to, so
+    // the gutter is reclaimed. Consumers pass it to `RowCaret`'s `reserveGutter`.
+    levelHasCollapsible: boolean;
     toggle: () => void;
     onClick: () => void;
     onDblClick: () => void;

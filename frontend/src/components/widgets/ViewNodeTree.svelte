@@ -87,6 +87,11 @@
     return getSwatch(annotations.get(id)?.color)?.hex ?? null;
   }
 
+  // Whether THIS recursion level (the node's sibling set) holds a collapsible
+  // node. A leaf reserves its caret gutter only when this is true (#1697) — a
+  // flat leaf-only level (e.g. a Lore kind-group) reclaims the width.
+  const levelHasCollapsible = $derived(groups.some((g) => g.children.length > 0));
+
   function rowCtx(group: ViewGroup<T>, node: T): RowCtx<T> {
     const key = group.key;
     return {
@@ -96,6 +101,7 @@
       collapsible: group.children.length > 0,
       collapsed: collapsed.has(key),
       childCount: subtreeCount(group),
+      levelHasCollapsible,
       toggle: () => toggle(key),
       toggleCollapse: () => collapseGuard.defer(() => toggle(key)),
       onClick: () => onClick?.(node),

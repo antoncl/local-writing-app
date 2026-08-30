@@ -1025,8 +1025,8 @@ function idsWhere<T extends EvalNode>(state: RunState<T>, pred: (n: T) => boolea
 
 // entry_type FQN → itself + every type whose `parent:` chain reaches it.
 // Mirrors the schema inheritance resolution (schema.py). The upward is-a walk
-// is the shared `entryTypeIsA` (#1689) — one traversal, not two — run over
-// every declared type. Memoized per run.
+// is the shared `entryTypeIsA` (#1689) — one implementation, not two — run
+// over every declared type. Memoized per run.
 function descendantFqns<T extends EvalNode>(state: RunState<T>, fqn: string): Set<string> {
   const cached = state.descendantsCache.get(fqn);
   if (cached) return cached;

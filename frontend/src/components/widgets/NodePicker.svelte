@@ -18,8 +18,7 @@
   import { knownTagsStore } from "@/lib/stores/tags";
   import { cardEntriesStore } from "@/lib/stores/plotCards";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
-  import { hidePromptEntries, isSnippetType } from "@/lib/editor-core/promptResolution";
-  import { entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
+  import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
   import { api } from "@/lib/api";
   import type {
     AssistantEntrySummary,
@@ -630,32 +629,31 @@
     }));
   });
 
-  // Snippets are prompts whose entry_type is-a `prompt:snippet` — the same
-  // ANCESTRY classification the backend's snippet_loader and the shelving use
-  // (#1685/#1688), so the picker can never offer an invocable prompt whose
-  // `{% include %}` the render loader would then refuse, and a user-defined
-  // snippet subtype is offerable. A config's entry_type whitelist matches by
-  // ancestry too (a listed type admits its subtypes, like `offer_on` and
-  // `descendants_of` do).
-  // Hidden Library prompts (ADR-0049 #682) drop out of the snippet picker too —
+  // The "snippet" category is really the PROMPT roster (#1688 investigated and
+  // resolved as by-design): the Category enum has no "prompt", so ViewFlowNode
+  // deliberately maps a prompt-kind hand_picked source through this group —
+  // filtering it to snippet-typed prompts would break hand-picking invocable
+  // prompts in the view designer, its only live consumer (no surface authors a
+  // snippet-kind config today, and `{% include %}` targets are typed by hand).
+  // The entry_type whitelist is EXACT-FQN like every roster here — the `type`
+  // leaf's grammar semantics (descendants_of is the family operator), and the
+  // checkbox tree expands a family into explicit leaves at authoring time.
+  // Hidden Library prompts (ADR-0049 #682) drop out of this picker too —
   // it is a prompt-discovery surface, so it routes through the shared seam.
+  // Whitelist Sets are hoisted OUT of the filter callbacks: the chain re-runs
+  // per search keystroke, and a per-item Set allocation was the waste.
+  const snippetAllowed = $derived(new Set(membership.entryTypes.snippet ?? []));
   const snippetEntries = $derived(
     hidePromptEntries(promptEntries, $hiddenLibraryStore)
-      .filter((p) => isSnippetType(p.entry_type, metadataSchema))
-      .filter((p) => {
-        const allowed = membership.entryTypes.snippet ?? [];
-        return allowed.length === 0 || allowed.some((fqn) => entryTypeIsA(metadataSchema, p.entry_type, fqn));
-      })
+      .filter((p) => snippetAllowed.size === 0 || snippetAllowed.has(p.entry_type))
       .filter(matchesSummary),
   );
 
   // Assistants matching the config's per-kind entry_type whitelist + search.
+  const assistantAllowed = $derived(new Set(membership.entryTypes.assistant ?? []));
   const assistantCandidates = $derived(
     assistantEntries
-      .filter((a) => {
-        const allowed = new Set(membership.entryTypes.assistant ?? []);
-        return allowed.size === 0 || allowed.has(a.entry_type);
-      })
+      .filter((a) => assistantAllowed.size === 0 || assistantAllowed.has(a.entry_type))
       .filter(matchesSummary),
   );
 

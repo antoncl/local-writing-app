@@ -112,12 +112,20 @@ function makeController(over: Partial<ChatCommitDeps> = {}) {
 }
 
 describe("ChatCommitController — launch-mode derivations", () => {
-  it("isCommitChat tracks whether the fed output declares a commit", () => {
+  it("isCommitChat keys off commit-presence, not the handler (ADR-0054 §2, #1705)", () => {
     const { c } = makeController();
     expect(c.isCommitChat).toBe(false);
     c.output = {}; // a plain chat: no handler, no commit
     expect(c.isCommitChat).toBe(false);
     c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
+    expect(c.isCommitChat).toBe(true);
+    // The two representable states where a handler-key reading would diverge:
+    // an extract handler with no `.commit` is NOT a commit chat...
+    c.output = { handler: "extract_to_node" };
+    expect(c.isCommitChat).toBe(false);
+    // ...and a commit riding an empty handler IS (the "Revise entities" shelf
+    // groups handler in ("", extract_to_node) with a commit — prompt_disposition.py).
+    c.output = { commit: { review: "visual_diff" } };
     expect(c.isCommitChat).toBe(true);
   });
 

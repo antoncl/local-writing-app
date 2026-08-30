@@ -35,11 +35,7 @@ import { api, HttpError } from "@/lib/api";
 import { entryIdFromPickValue } from "@/lib/editor-core/promptResolution";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
-import {
-  extractHandler,
-  outputHandlerFor,
-  type ExtractHost,
-} from "@/lib/editor-core/outputHandlers";
+import { extractHandler, type ExtractHost } from "@/lib/editor-core/outputHandlers";
 
 /** The live chat state + status/cost sinks the controller reaches into. Stable
  *  for the controller's life (wired once at construction) — the reactive inputs
@@ -116,12 +112,13 @@ export function patchToRows(patch: EntryPatch): MutationSetRow[] {
 
 export class ChatCommitController {
   // ---- fed each render by the host (the derivations below track these) -------
-  /** The active prompt's `output` config (ADR-0054): routing is
-   *  `outputHandlerFor(output.handler)` (`PromptOutput` has no `.kind`); a
-   *  `.commit` marks a brainstorm whose result is extracted to its `entry`
-   *  target (`.commit.review` = how it's reviewed; WHAT it extracts is
+  /** The active prompt's `output` config (ADR-0054; `PromptOutput` has no
+   *  `.kind`). A `.commit` marks a brainstorm whose result is extracted to its
+   *  `entry` target (`.commit.review` = how it's reviewed; WHAT it extracts is
    *  authored in the prompt's own `field_contract` loop, read back at commit —
-   *  ADR-0067 S2). */
+   *  ADR-0067 S2). The produce/apply phases route through the output-handler
+   *  registry in `editor-core/outputHandlers` (via the `extractHandler` this
+   *  controller drives); `isCommitChat` below is the separate presence test. */
   output = $state<PromptOutput | null>(null);
   /** The chat's per-input drafts — `entry` (revise target) / `entry_type`
    *  (create target) are seeded here at launch (ADR-0046 §6.4). */
@@ -160,10 +157,14 @@ export class ChatCommitController {
   constructor(private readonly deps: ChatCommitDeps) {}
 
   /** A chat carrying a `commit` (ADR-0054 §2) extracts its result to a
-   *  schema-typed node — the `extract_to_node` output handler (ADR-0065). This is
-   *  the routing question that was `output.kind === "entry_patch"`, now asked
-   *  through the registry instead of re-deriving it from the raw commit field. */
-  isCommitChat = $derived(outputHandlerFor(this.output)?.key === "extract_to_node");
+   *  schema-typed node. The predicate is the *presence of the commit object* —
+   *  "the presence of the object is the whole test" (ADR-0054 §2) — which is the
+   *  canonical classification the rest of the app uses: `promptDeclaresCommit`,
+   *  ChatBodyView's `chatSubjectEntryType`, and the backend `prompt_disposition`
+   *  "Revise entities" shelf. Keying off the output *handler* instead diverges on
+   *  representable front matter (an `extract_to_node` prompt with no `.commit`, or
+   *  a commit riding an empty handler), so this reads `.commit` directly (#1705). */
+  isCommitChat = $derived(!!this.output?.commit);
   /** The revise target — the `entry` input the launch seeded (empty in create
    *  mode). The draft may be an encoded context_pick list or a legacy bare id;
    *  read through the shared decoder, not as a raw string (#1482). */

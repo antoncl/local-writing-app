@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
-import type { LoreEntry, PromptEntry, PromotionPlan, PromotionTarget } from "@/lib/types";
+import type { LoreEntry, MutationSetEntry, PromptEntry, PromotionPlan, PromotionTarget } from "@/lib/types";
 
 // ADR-0078 §2/§9 (+ slice 3, prompts): PromoteModal fetches its own roster +
 // dry-run plan (like DirectoryPickerModal), so the api calls are stubbed
@@ -21,7 +21,12 @@ const plan: PromotionPlan = {
   also_promoted: [],
   resolves_differently: [],
   blocked_reason: null,
+  related: [],
 };
+
+// A lore plan with pinned staged mutation sets (ADR-0078 §7): the "related —
+// promote separately" bucket, which only ever populates for a lore promotion.
+const relatedPlan: PromotionPlan = { ...plan, related: ["Full Moon Transformation"] };
 
 // A prompt's plan (slice 3): the two lore-always-empty buckets populated, and
 // no lore-only buckets (stays_in_origin / invisible_at_destination are lore's
@@ -34,11 +39,31 @@ const promptPlan: PromotionPlan = {
   also_promoted: ["Style Guide Snippet"],
   resolves_differently: ["setting_context"],
   blocked_reason: null,
+  related: [],
 };
 
 const blockedPlan: PromotionPlan = {
   ...promptPlan,
   blocked_reason: "Includes a dynamic {% include input.x %} the cascade can't follow.",
+};
+
+// A mutation set's plan (slice 4): its pinned entity cascades (also_promoted),
+// mirroring a prompt's include cascade — no dynamic references, so
+// resolves_differently stays empty.
+const mutationSetPlan: PromotionPlan = {
+  destination: { layer_id: "series", label: "Series" },
+  travels: [],
+  stays_in_origin: [],
+  invisible_at_destination: [],
+  also_promoted: ["Alice"],
+  resolves_differently: [],
+  blocked_reason: null,
+  related: [],
+};
+
+const mutationSetBlockedPlan: PromotionPlan = {
+  ...mutationSetPlan,
+  blocked_reason: "Alice is owned by an intermediate ancestor and can't be lifted from here.",
 };
 
 const promoted: LoreEntry = {
@@ -66,11 +91,26 @@ const promotedPrompt: PromptEntry = {
   source_layer_label: "Series",
 };
 
+const promotedMutationSet: MutationSetEntry = {
+  id: "mset-1",
+  title: "Full Moon Transformation",
+  revision: "2",
+  entry_type: "mutation_set:mutation_set",
+  target_entry_type: "lore:character",
+  target_entity: "alice",
+  rows: [],
+  placed: false,
+  source_layer_id: "series",
+  source_layer_label: "Series",
+};
+
 const promotionTargets = vi.fn(async () => targets);
 const previewLorePromotion = vi.fn(async () => plan);
 const promoteLoreEntry = vi.fn(async () => promoted);
 const previewPromptPromotion = vi.fn(async () => promptPlan);
 const promotePromptEntry = vi.fn(async () => promotedPrompt);
+const previewMutationSetPromotion = vi.fn(async () => mutationSetPlan);
+const promoteMutationSetEntry = vi.fn(async () => promotedMutationSet);
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -79,6 +119,8 @@ vi.mock("@/lib/api", () => ({
     promoteLoreEntry: (...args: unknown[]) => promoteLoreEntry(...(args as [])),
     previewPromptPromotion: (...args: unknown[]) => previewPromptPromotion(...(args as [])),
     promotePromptEntry: (...args: unknown[]) => promotePromptEntry(...(args as [])),
+    previewMutationSetPromotion: (...args: unknown[]) => previewMutationSetPromotion(...(args as [])),
+    promoteMutationSetEntry: (...args: unknown[]) => promoteMutationSetEntry(...(args as [])),
   },
 }));
 
@@ -109,6 +151,19 @@ const styleGuidePrompt: PromptEntry = {
   source_layer_label: "Book",
 };
 
+const stagedMutationSet: MutationSetEntry = {
+  id: "mset-1",
+  title: "Full Moon Transformation",
+  revision: "1",
+  entry_type: "mutation_set:mutation_set",
+  target_entry_type: "lore:character",
+  target_entity: "alice",
+  rows: [],
+  placed: false,
+  source_layer_id: "book",
+  source_layer_label: "Book",
+};
+
 const base = {
   kind: "lore" as const,
   open: true,
@@ -124,6 +179,8 @@ beforeEach(() => {
   promoteLoreEntry.mockClear();
   previewPromptPromotion.mockClear();
   promotePromptEntry.mockClear();
+  previewMutationSetPromotion.mockClear();
+  promoteMutationSetEntry.mockClear();
   base.onClose = vi.fn();
   base.onFlush = vi.fn(async () => {});
   base.onPromoted = vi.fn();
@@ -218,6 +275,14 @@ describe("PromoteModal", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(base.onClose).toHaveBeenCalledTimes(1);
   });
+
+  it("renders the 'Related — promote separately' bucket for a lore plan with pinned staged sets (ADR-0078 §7)", async () => {
+    previewLorePromotion.mockResolvedValueOnce(relatedPlan);
+    render(PromoteModal, { props: { ...base } });
+
+    expect(await screen.findByText("Related — promote separately")).toBeTruthy();
+    expect(screen.getByText("Full Moon Transformation")).toBeTruthy();
+  });
 });
 
 describe("PromoteModal — prompt kind (ADR-0078 §2/§9 slice 3)", () => {
@@ -260,5 +325,43 @@ describe("PromoteModal — prompt kind (ADR-0078 §2/§9 slice 3)", () => {
 
     await fireEvent.click(confirmButton);
     expect(promotePromptEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe("PromoteModal — mutation_set kind (ADR-0078 §2/§9 slice 4)", () => {
+  const mutationSetBase = { ...base, kind: "mutation_set" as const, entry: stagedMutationSet };
+
+  it("dispatches to the mutation-set endpoints and renders also_promoted from a stub plan", async () => {
+    render(PromoteModal, { props: { ...mutationSetBase } });
+
+    await screen.findByRole("radio", { name: "Series" });
+    expect(previewMutationSetPromotion).toHaveBeenCalledWith("mset-1", "series");
+    expect(previewLorePromotion).not.toHaveBeenCalled();
+    expect(previewPromptPromotion).not.toHaveBeenCalled();
+
+    // "Also promoted" — the cascaded pinned entity, by title.
+    expect(await screen.findByText("Also promoted")).toBeTruthy();
+    expect(screen.getByText("Alice")).toBeTruthy();
+    // A mutation set carries no dynamic references.
+    expect(screen.queryByText("Resolves differently")).toBeNull();
+
+    const confirmButton = screen.getByRole("button", { name: "Promote to Series" });
+    await fireEvent.click(confirmButton);
+    expect(promoteMutationSetEntry).toHaveBeenCalledWith("mset-1", "series");
+    await vi.waitFor(() => expect(mutationSetBase.onPromoted).toHaveBeenCalledWith(promotedMutationSet));
+  });
+
+  it("shows a blocked reason (a pin owned by an intermediate ancestor) and disables Promote", async () => {
+    previewMutationSetPromotion.mockResolvedValueOnce(mutationSetBlockedPlan);
+    render(PromoteModal, { props: { ...mutationSetBase } });
+
+    expect(
+      await screen.findByText("Alice is owned by an intermediate ancestor and can't be lifted from here."),
+    ).toBeTruthy();
+    const confirmButton = screen.getByRole("button", { name: "Promote to Series" });
+    expect((confirmButton as HTMLButtonElement).disabled).toBe(true);
+
+    await fireEvent.click(confirmButton);
+    expect(promoteMutationSetEntry).not.toHaveBeenCalled();
   });
 });

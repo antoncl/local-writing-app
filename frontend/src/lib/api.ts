@@ -946,24 +946,19 @@ export const api = {
       method: "DELETE",
     });
   },
-  // ADR-0078 §2: the declared ancestor projects a node HERE may be promoted
-  // into — empty for a flat project (no `inherits:` chain). Generic across
-  // kinds; lore is the first caller (slice 2).
+  // ADR-0078 §2: declared ancestor projects a node HERE may promote into (empty for a flat project); shared by lore/prompt/mutation_set.
   promotionTargets() {
     return request<PromotionTarget[]>("/promotion/targets");
   },
-  // Pure dry-run (ADR-0078 §9): the partition the commit would run, without
-  // writing anything. Renders as the promote dialogue's three buckets.
+  // Pure dry-run (ADR-0078 §9): the partition the commit would run, unwritten.
   previewLorePromotion(entryId: string, targetLayerId: string) {
     return request<PromotionPlan>(`/lore/${entryId}/promote/preview`, {
       method: "POST",
       body: JSON.stringify({ target_layer_id: targetLayerId }),
     });
   },
-  // Lift an owned lore entry into a declared ancestor project, keeping its id
-  // (ADR-0078 §1/§2). Runs the same partition `previewLorePromotion` returned.
-  // Refuses 409 if the entry is already inherited, 400 if the target isn't a
-  // declared ancestor.
+  // Lift an owned lore entry into a declared ancestor, keeping its id (§1/§2).
+  // Refuses 409 already-inherited, 400 not-a-declared-ancestor.
   promoteLoreEntry(entryId: string, targetLayerId: string) {
     return request<LoreEntry>(`/lore/${entryId}/promote`, {
       method: "POST",
@@ -1048,9 +1043,7 @@ export const api = {
   forkPromptEntry(entryId: string) {
     return request<PromptEntry>(`/prompts/${entryId}/fork`, { method: "POST" });
   },
-  // ADR-0078 §2/§9 slice 3: the prompt counterparts to previewLorePromotion /
-  // promoteLoreEntry — same dry-run/commit shape, plus the §6 include-closure
-  // cascade and §5 dynamic-reference list the plan carries for a prompt.
+  // §2/§9 slice 3: prompt promote — same shape, plus the §6 include cascade + §5 dynamic-reference list.
   previewPromptPromotion(entryId: string, targetLayerId: string) {
     return request<PromotionPlan>(`/prompts/${entryId}/promote/preview`, {
       method: "POST",
@@ -1260,6 +1253,19 @@ export const api = {
   deleteMutationSetEntry(entryId: string) {
     return request<MutationSetEntryList>(`/mutation-sets/${entryId}`, {
       method: "DELETE",
+    });
+  },
+  // §2/§9 slice 4: mutation-set promote — staged + owned only; cascades a pin (§6/§7).
+  previewMutationSetPromotion(entryId: string, targetLayerId: string) {
+    return request<PromotionPlan>(`/mutation-sets/${entryId}/promote/preview`, {
+      method: "POST",
+      body: JSON.stringify({ target_layer_id: targetLayerId }),
+    });
+  },
+  promoteMutationSetEntry(entryId: string, targetLayerId: string) {
+    return request<MutationSetEntry>(`/mutation-sets/${entryId}/promote`, {
+      method: "POST",
+      body: JSON.stringify({ target_layer_id: targetLayerId }),
     });
   },
   listAssistantEntries() {

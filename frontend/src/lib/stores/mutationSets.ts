@@ -2,7 +2,7 @@
 // Mutations pane and the /mutate "apply a saved set" picker. Server-
 // mirrored slice; `writable` for legacy-safe reads (docs/frontend-architecture.md).
 
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
 import type { MutationSetEntry, MutationSetEntrySummary } from "@/lib/types";
 
@@ -49,4 +49,25 @@ export function setMutationSetEntries(entries: MutationSetEntrySummary[]): void 
 export function clearMutationSets(): void {
   mutationSetEntriesStore.set([]);
   mutationSetEditorStore.set(null);
+}
+
+// Close the create/edit dialog if it is open EDITING this exact set — a
+// mutation set has no autosave draft (Save is explicit), so there is nothing
+// to persist before promoting; closing the dialog on the set about to move is
+// the safety net instead (an open Save would otherwise target a file that's
+// no longer there). Also promote's post-commit reconciliation, below. A no-op
+// when the dialog is closed or editing a different set.
+export function closeMutationSetEditorIfEditing(entryId: string): void {
+  if (get(mutationSetEditorStore)?.editing?.id === entryId) closeMutationSetEditor();
+}
+
+// Fold a just-promoted mutation set (ADR-0078 §2/§9 slice 4) into the roster —
+// PromoteModal already called `api.promoteMutationSetEntry` (so it can show a
+// blocked/409/400 reason inline); this only applies the result. Unlike lore or
+// a prompt, a set is not an editor pane — there is no draft to reseed, so
+// refreshing the roster (it now shows inherited) plus the dialog close above
+// is the whole reconciliation.
+export async function applyPromotedMutationSet(entry: MutationSetEntry): Promise<void> {
+  await refreshMutationSetEntries();
+  closeMutationSetEditorIfEditing(entry.id);
 }

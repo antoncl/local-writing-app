@@ -8,14 +8,18 @@
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import { nodeSet } from "@/lib/views/viewResult";
   import { api } from "@/lib/api";
-  import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
+  import { isInherited } from "@/lib/utils/provenance";
   import {
     refreshMutationSetEntries,
     setMutationSetEntries,
     mutationSetEntriesStore,
     openEditMutationSet,
+    closeMutationSetEditorIfEditing,
+    applyPromotedMutationSet,
   } from "@/lib/stores/mutationSets";
-  import type { MutationSetEntrySummary } from "@/lib/types";
+  import PromoteModal from "@/components/dialogs/PromoteModal.svelte";
+  import type { MutationSetEntry, MutationSetEntrySummary } from "@/lib/types";
 
   // Browse/curate only: the create/edit dialog is hoisted to App root (ADR-0055
   // §3) so it also opens from a lore card, and drives through
@@ -24,6 +28,30 @@
 
   const entries = $derived($mutationSetEntriesStore);
   let error = $state("");
+
+  // Promote (ADR-0078 §2/§9 slice 4). A set has no editor pane (unlike lore /
+  // prompt), so PromoteAction's doc-action toolbar can't reach it — this flat
+  // roster is the one place every set (reusable or pinned) already lists, with
+  // row-action infrastructure (the delete "×" below) to extend, so the row is
+  // the launcher rather than a button inside MutationSetEditor (which would
+  // stack PromoteModal on top of a dialog).
+  let promoteModalEntry = $state<MutationSetEntry | null>(null);
+
+  // Owned-here (same isInherited/projectLayerIdStore read PromoteAction uses)
+  // AND staged — a placed one-off is anchored in a scene and out of scope
+  // (ADR-0078 Scope; the backend also refuses it).
+  function isPromotable(entry: MutationSetEntrySummary): boolean {
+    return !entry.placed && !isInherited({ source_layer_id: entry.source_layer_id }, $projectLayerIdStore);
+  }
+
+  async function openPromote(id: string) {
+    error = "";
+    try {
+      promoteModalEntry = await api.getMutationSetEntry(id);
+    } catch (err) {
+      error = `Could not open the set: ${err instanceof Error ? err.message : err}`;
+    }
+  }
 
   function typeLabel(id: string): string {
     return schema?.entry_types[id]?.name || id || "any type";
@@ -67,6 +95,18 @@
   </ViewNodeList>
 </div>
 
+<PromoteModal
+  kind="mutation_set"
+  open={promoteModalEntry !== null}
+  entry={promoteModalEntry}
+  onClose={() => (promoteModalEntry = null)}
+  onFlush={(entryId) => {
+    closeMutationSetEditorIfEditing(entryId);
+    return Promise.resolve();
+  }}
+  onPromoted={(promoted) => void applyPromotedMutationSet(promoted as MutationSetEntry)}
+/>
+
 {#snippet mutationRow(entry: MutationSetEntrySummary, ctx: RowCtx<MutationSetEntrySummary>)}
   <NodeRow
     title={entry.title}
@@ -76,6 +116,18 @@
   >
     {#snippet trailing()}
       <CountPill count={entry.row_count} />
+      {#if isPromotable(entry)}
+        <button
+          type="button"
+          class="row-action-promote"
+          aria-label="Promote {entry.title}"
+          title="Lift this staged set into a shared ancestor project"
+          onclick={(e) => {
+            e.stopPropagation();
+            void openPromote(entry.id);
+          }}
+        >Promote to…</button>
+      {/if}
       <button
         type="button"
         class="row-action-delete"
@@ -113,5 +165,20 @@
   }
   .row-action-delete:hover {
     color: var(--danger);
+  }
+  .row-action-promote {
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface);
+    color: var(--text-2);
+    cursor: pointer;
+    font-size: var(--fs-xs);
+    line-height: 1;
+    padding: 2px 6px;
+    white-space: nowrap;
+  }
+  .row-action-promote:hover {
+    color: var(--text-1);
+    border-color: var(--accent);
   }
 </style>

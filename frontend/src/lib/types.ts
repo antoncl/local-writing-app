@@ -194,8 +194,13 @@ export type PromotionPlan = {
   // Always empty for lore.
   resolves_differently: string[];
   // Non-null when the promotion is REFUSED (ADR-0078 §6, e.g. an unfollowable
-  // dynamic include) — the dialogue shows it and disables commit.
+  // dynamic include, or a hard-dependency owned by an intermediate ancestor)
+  // — the dialogue shows it and disables commit.
   blocked_reason: string | null;
+  // Staged mutation sets pinned to a promoted lore node (ADR-0078 §7):
+  // surfaced, not cascaded — they keep working from the origin and are
+  // promoted separately. Titles; empty unless the node has pinned staged sets.
+  related: string[];
 };
 
 export type PromptEntrySummary = {

@@ -22,6 +22,7 @@ from typing import Any
 
 from app.models import (
     LoreEntry,
+    MutationSetEntry,
     PromotionPlan,
     PromotionStayItem,
     PromotionTarget,
@@ -213,6 +214,25 @@ class PromotionMixin:
 
         return entry, dest, index, root
 
+    def _pinned_staged_sets(self, index: NodeIndex, node_id: str) -> list[str]:
+        """Staged mutation sets pinned (`target_entity`) to `node_id` (ADR-0078
+        §7) — surfaced on the node's promotion plan as `related`, NOT cascaded:
+        a pinned set keeps working from the origin by keep-id whether or not
+        the entity it targets is promoted. A PLACED set is excluded — it is
+        anchored in the manuscript, not a pending change to surface. Titles, in
+        id order."""
+        pinned_ids = [
+            edge.src
+            for edge in index.edges_by_dst.get(node_id, [])
+            if edge.field_id == "target_entity"
+            and (src_entry := index.by_id.get(edge.src)) is not None
+            and src_entry.kind == "mutation_set"
+        ]
+        staged_ids = [
+            set_id for set_id in pinned_ids if not self.read_mutation_set_entry(set_id).placed
+        ]
+        return [index.by_id[set_id].title for set_id in staged_ids]
+
     def _partition_lore_promotion(
         self, entry_id: str, target_layer_id: str
     ) -> tuple[LoreEntry, IndexLayer, dict[str, Any], dict[str, Any], PromotionPlan]:
@@ -232,6 +252,7 @@ class PromotionMixin:
             travels=sorted(travels),
             stays_in_origin=stay_items,
             invisible_at_destination=sorted(invisible),
+            related=self._pinned_staged_sets(index, entry_id),
         )
         return full, dest, travels, stays, plan
 
@@ -466,3 +487,101 @@ class PromotionMixin:
             self._write_promoted_prompt(member_id, dest, root)
         self._write_promoted_prompt(entry_id, dest, root)
         return self.read_prompt_entry(entry_id)
+
+    # --- mutation-set promotion (ADR-0078 slice 4, #1671) --------------------
+
+    def _partition_mutation_set_promotion(
+        self, entry_id: str, target_layer_id: str
+    ) -> tuple[MutationSetEntry, IndexLayer, list[str], PromotionPlan]:
+        """The one partition backing both mutation-set preview and commit
+        (ADR-0078 §7/§9). A set has no §4-shaped metadata to partition — its
+        rows + `target_entry_type` travel atomically in `extra`, unpartitioned
+        (§7). Its only hard dependency is the optional entity pin
+        (`target_entity`, §6): a pinned set's rows are meaningless detached
+        from the entity they apply to, so the pin either already resolves at
+        the destination, cascades with the set, or blocks the promotion — it
+        never stays behind as an override the way a lore field would.
+
+        A PLACED set refuses outright: it is anchored in the manuscript, not
+        a pending change to lift.
+
+        Returns `(full, dest, to_promote, plan)` — `to_promote` is the pinned
+        entity's id to cascade FIRST (0 or 1 element; empty when unpinned,
+        already visible at the destination, or the plan is blocked). Writes
+        nothing.
+        """
+        _entry, dest, index, root = self._promotion_guard(entry_id, target_layer_id, "mutation_set", "Mutation set")
+
+        full = self.read_mutation_set_entry(entry_id)
+        if full.placed:
+            raise ProjectServiceError(
+                "A placed mutation set is anchored in the manuscript; unplace it before promoting.", 422
+            )
+
+        to_promote: list[str] = []
+        blocked_reason: str | None = None
+        if full.target_entity and not self._target_visible_from_destination(
+            index, root, full.target_entity, dest.rank
+        ):
+            candidate = index.by_id.get(full.target_entity)
+            if candidate.source_layer_id == self._metadata_schema_layer_id(root):
+                to_promote = [full.target_entity]
+            else:
+                owner_layer = self.layer_by_id(root, candidate.source_layer_id)
+                owner_label = owner_layer.label if owner_layer is not None else candidate.source_layer_id
+                blocked_reason = f"{candidate.title} is owned by {owner_label} and can't be lifted from here"
+
+        plan = PromotionPlan(
+            destination=PromotionTarget(layer_id=dest.id, label=dest.label),
+            also_promoted=[index.by_id[full.target_entity].title] if to_promote else [],
+            blocked_reason=blocked_reason,
+        )
+        return full, dest, to_promote, plan
+
+    def preview_mutation_set_promotion(self, entry_id: str, target_layer_id: str) -> PromotionPlan:
+        """The dry-run promotion plan (ADR-0078 §9) for a mutation set. Writes
+        nothing."""
+        _full, _dest, _to_promote, plan = self._partition_mutation_set_promotion(entry_id, target_layer_id)
+        return plan
+
+    def _write_promoted_mutation_set(self, entry_id: str, dest: IndexLayer, root) -> None:
+        """Move one owned mutation-set node's file into `dest.folder`
+        (ADR-0078 §1/§7), mirroring `_write_mutation_set_file`'s write shape
+        (mutation_sets.py) and `promote_lore_entry`'s write/delete/invalidate
+        order. No stay-behind override: a mutation set has no §4 metadata
+        partition, so there is nothing left for the origin to keep."""
+        full = self.read_mutation_set_entry(entry_id)
+        self._write_node_entry_file(
+            self._filepath_for_new_node(dest.folder / "mutation-sets", full.title),
+            full.id,
+            full.title,
+            full.entry_type,
+            {"target_entity": full.target_entity} if full.target_entity else {},
+            "",
+            extra={
+                "target_entry_type": full.target_entry_type,
+                "rows": [row.model_dump() for row in full.rows],
+            },
+            omit_empty_metadata=True,
+        )
+        self._delete_node_file(self._path_for_node_id(entry_id, "mutation_set"))
+        # See `promote_lore_entry`: force a cold rebuild so the next read
+        # already resolves this id as inherited from `dest`.
+        node_index_gate.invalidate()
+
+    def promote_mutation_set_entry(self, entry_id: str, target_layer_id: str) -> MutationSetEntry:
+        """Commit the promotion computed by `_partition_mutation_set_promotion`
+        (ADR-0078 §7/§9): a placed set or a pin owned by an intermediate
+        ancestor refuses rather than promoting anything; otherwise the pinned
+        entity (if any) cascades FIRST, so it already resolves as inherited at
+        the destination by the time the set lands there.
+        """
+        _full, dest, to_promote, plan = self._partition_mutation_set_promotion(entry_id, target_layer_id)
+        if plan.blocked_reason:
+            raise ProjectServiceError(plan.blocked_reason, 422)
+
+        root = self._require_project()
+        for pin_id in to_promote:
+            self.promote_lore_entry(pin_id, target_layer_id)
+        self._write_promoted_mutation_set(entry_id, dest, root)
+        return self.read_mutation_set_entry(entry_id)

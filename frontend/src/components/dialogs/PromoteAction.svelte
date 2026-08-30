@@ -10,7 +10,7 @@
   import { isInherited } from "@/lib/utils/provenance";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import PromoteModal from "@/components/dialogs/PromoteModal.svelte";
-  import type { EditableDocument, LoreEntry, PromptEntry } from "@/lib/types";
+  import type { EditableDocument, LoreEntry, MutationSetEntry, PromptEntry } from "@/lib/types";
 
   type PromotableKind = "lore" | "prompt";
 
@@ -60,7 +60,10 @@
       : editorPanes.flushPromptPaneIfDirty(entryId);
   }
 
-  function handlePromoted(promoted: LoreEntry | PromptEntry): void {
+  // PromoteModal's callback contract covers all three kinds it can dispatch
+  // to (including mutation_set); this component only ever sets kind to "lore"
+  // or "prompt", so the extra member is a type-level formality, not a runtime path.
+  function handlePromoted(promoted: LoreEntry | PromptEntry | MutationSetEntry): void {
     void (promoteModalKind === "lore"
       ? editorPanes.applyPromotedLoreEntry(promoted as LoreEntry)
       : editorPanes.applyPromotedPromptEntry(promoted as PromptEntry));

@@ -1,29 +1,30 @@
 <script lang="ts">
-  // Promote a lore entry or a prompt to an ancestor project (ADR-0078 §2/§9,
-  // slices 2+3), launched from the editor's "Promote to…" doc action on an
-  // owned entry. Self-contained like DirectoryPickerModal: it fetches the
-  // destination roster and the dry-run plan itself on the closed→open
-  // transition, rather than the parent staging them — there is nothing about
-  // "what ancestors exist" or "what would move" that belongs anywhere but
-  // here. The parent only owns the `open` guard (the entry + its kind) and
-  // what happens to the pane once the promotion commits (`onPromoted`),
+  // Promote a lore entry, a prompt, or a staged mutation set to an ancestor
+  // project (ADR-0078 §2/§9, slices 2–4), launched from a "Promote to…"
+  // action on an owned entry. Self-contained like DirectoryPickerModal: it
+  // fetches the destination roster and the dry-run plan itself on the
+  // closed→open transition, rather than the parent staging them — there is
+  // nothing about "what ancestors exist" or "what would move" that belongs
+  // anywhere but here. The parent only owns the `open` guard (the entry + its
+  // kind) and what happens once the promotion commits (`onPromoted`),
   // mirroring ValidateModal/AIPolicyModal's split.
   //
-  // `kind` selects which pair of endpoints this instance dispatches to — lore
-  // and prompt share the same plan shape and dialogue chrome (ADR §9's one
-  // partition function, two entry points), so one component serves both
-  // rather than forking into a near-identical sibling.
+  // `kind` selects which pair of endpoints this instance dispatches to — all
+  // three kinds share the same plan shape and dialogue chrome (ADR §9's one
+  // partition function, two entry points), so one component serves them
+  // rather than forking into near-identical siblings.
   //
   // Backend errors (409 already-inherited, 400 not-a-declared-ancestor, or a
-  // slice-3 blocked plan) surface inline rather than the app-wide error
+  // blocked plan — an unfollowable dynamic include, or a pin owned by an
+  // intermediate ancestor) surface inline rather than the app-wide error
   // banner — a promotion needs the author looking at the dialogue that caused
   // it, not a toast that vanishes.
   import { api } from "@/lib/api";
   import Modal from "@/components/dialogs/Modal.svelte";
-  import type { LoreEntry, PromptEntry, PromotionPlan, PromotionTarget } from "@/lib/types";
+  import type { LoreEntry, MutationSetEntry, PromptEntry, PromotionPlan, PromotionTarget } from "@/lib/types";
 
-  type PromotableEntry = LoreEntry | PromptEntry;
-  type PromotableKind = "lore" | "prompt";
+  type PromotableEntry = LoreEntry | PromptEntry | MutationSetEntry;
+  type PromotableKind = "lore" | "prompt" | "mutation_set";
 
   let {
     kind,
@@ -57,14 +58,14 @@
   // `$derived` function reference) so the return type stays `PromotableEntry`
   // rather than a union of the two distinct signatures.
   function previewPromotion(entryId: string, targetLayerId: string): Promise<PromotionPlan> {
-    return kind === "lore"
-      ? api.previewLorePromotion(entryId, targetLayerId)
-      : api.previewPromptPromotion(entryId, targetLayerId);
+    if (kind === "lore") return api.previewLorePromotion(entryId, targetLayerId);
+    if (kind === "prompt") return api.previewPromptPromotion(entryId, targetLayerId);
+    return api.previewMutationSetPromotion(entryId, targetLayerId);
   }
   function commitPromotion(entryId: string, targetLayerId: string): Promise<PromotableEntry> {
-    return kind === "lore"
-      ? api.promoteLoreEntry(entryId, targetLayerId)
-      : api.promotePromptEntry(entryId, targetLayerId);
+    if (kind === "lore") return api.promoteLoreEntry(entryId, targetLayerId);
+    if (kind === "prompt") return api.promotePromptEntry(entryId, targetLayerId);
+    return api.promoteMutationSetEntry(entryId, targetLayerId);
   }
 
   let targets = $state<PromotionTarget[]>([]);
@@ -258,6 +259,21 @@
                 {/each}
               </ul>
               <p class="promote-note">These re-resolve against the destination once promoted.</p>
+            </section>
+          {/if}
+
+          {#if plan.related.length > 0}
+            <!-- ADR-0078 §7: staged mutation sets pinned to a promoted lore
+                 node. Surfaced, not cascaded — they keep working from the
+                 origin (keep-id) and are promoted as their own gesture. -->
+            <section class="promote-bucket">
+              <h3>Related — promote separately</h3>
+              <ul>
+                {#each plan.related as name}
+                  <li><span class="promote-field">{name}</span></li>
+                {/each}
+              </ul>
+              <p class="promote-note">These keep working from this project and are promoted on their own, not by this gesture.</p>
             </section>
           {/if}
         </div>

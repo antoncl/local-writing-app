@@ -11,18 +11,41 @@
 // have a mount test that asserts rows render — #642/#724), and the store-driven
 // "+" contract still holds (opening the store is what the "+" does; a preset
 // pins a new set).
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
-import { render, screen } from "@/lib/test/component";
+import { render, screen, fireEvent } from "@/lib/test/component";
 import Mutations from "./Mutations.svelte";
-import { metadataSchemaStore } from "@/lib/stores/schema";
+import { metadataSchemaStore, metadataSchemaLayersStore } from "@/lib/stores/schema";
 import {
   mutationSetEditorStore,
   mutationSetEntriesStore,
   openNewMutationSet,
   closeMutationSetEditor,
 } from "@/lib/stores/mutationSets";
-import type { MetadataSchema, MutationSetEntrySummary } from "@/lib/types";
+import type { MetadataSchema, MetadataSchemaLayer, MutationSetEntry, MutationSetEntrySummary } from "@/lib/types";
+
+// The Promote row action (ADR-0078 §2/§9 slice 4) opens PromoteModal, which
+// fetches its own roster on open — stub the api so the test never reaches a
+// real backend (#973 network guard). `getMutationSetEntry` echoes the summary
+// back as a "full" entry (this pane only needs id/title to open the modal).
+const getMutationSetEntry = vi.fn(async (id: string): Promise<MutationSetEntry> => ({
+  id,
+  title: "Full Moon",
+  revision: "1",
+  entry_type: "mutation_set:mutation_set",
+  target_entry_type: "lore:character",
+  target_entity: "",
+  rows: [],
+  placed: false,
+  source_layer_id: "",
+  source_layer_label: "",
+}));
+vi.mock("@/lib/api", () => ({
+  api: {
+    getMutationSetEntry: (...args: unknown[]) => getMutationSetEntry(...(args as [string])),
+    promotionTargets: vi.fn(async () => []),
+  },
+}));
 
 const SCHEMA = {
   version: 1,
@@ -49,6 +72,8 @@ afterEach(() => {
   closeMutationSetEditor();
   metadataSchemaStore.set(null);
   mutationSetEntriesStore.set([]);
+  metadataSchemaLayersStore.set([]);
+  getMutationSetEntry.mockClear();
 });
 
 describe("Mutations pane", () => {
@@ -75,5 +100,42 @@ describe("Mutations pane", () => {
       editing: null,
       preset: { target_entity: "mira", target_entry_type: "lore:character" },
     });
+  });
+
+  it("offers Promote for an owned, staged set, and opens PromoteModal with the fetched entry on click", async () => {
+    metadataSchemaStore.set(SCHEMA);
+    mutationSetEntriesStore.set([summary({ id: "mset-1", title: "Full Moon" })]);
+    render(Mutations);
+
+    const promoteButton = screen.getByRole("button", { name: "Promote Full Moon" });
+    await fireEvent.click(promoteButton);
+
+    expect(getMutationSetEntry).toHaveBeenCalledWith("mset-1");
+    // PromoteModal is now open on the fetched entry — its own dialogue chrome
+    // renders (the actual plan/bucket rendering is PromoteModal's own test).
+    // The row's own "Promote to…" button also reads that text, so key on the
+    // modal's dialog role instead of the ambiguous string.
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("No ancestor projects to promote into.")).toBeInTheDocument();
+  });
+
+  it("hides Promote for a placed one-off (anchored in a scene, out of ADR-0078 Scope)", () => {
+    metadataSchemaStore.set(SCHEMA);
+    mutationSetEntriesStore.set([summary({ title: "Full Moon", placed: true })]);
+    render(Mutations);
+
+    expect(screen.queryByRole("button", { name: "Promote Full Moon" })).toBeNull();
+  });
+
+  it("hides Promote for a set inherited from an ancestor project", () => {
+    metadataSchemaStore.set(SCHEMA);
+    metadataSchemaLayersStore.set([
+      { id: "root", label: "World", folder_path: "", schema_path: "", exists: true },
+      { id: "book", label: "Book", folder_path: "", schema_path: "", exists: true },
+    ] satisfies MetadataSchemaLayer[]);
+    mutationSetEntriesStore.set([summary({ title: "Full Moon", source_layer_id: "root" })]);
+    render(Mutations);
+
+    expect(screen.queryByRole("button", { name: "Promote Full Moon" })).toBeNull();
   });
 });

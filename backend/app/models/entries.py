@@ -676,7 +676,7 @@ class PromptEntrySummary(BaseModel):
     entry_type: str = "prompt:base"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     # Per-entry input declarations. Each prompt declares the parameters its
-    # template body references via `{{ input.<name> }}`. Instance-level only
+    # template body references via `{{ inputs.<name> }}`. Instance-level only
     # (ADR-0065 Amendment 2) — there is no type-level `inputs` to fall back to.
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
     # The prompt's EFFECTIVE inputs (ADR-0061): its own `inputs` plus,

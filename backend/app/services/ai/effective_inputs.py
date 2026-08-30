@@ -1,7 +1,7 @@
 """Resolve a prompt's EFFECTIVE inputs (ADR-0061).
 
 A prompt declares its `inputs` on its front matter and references them in its
-Jinja body as `{{ input.<name> }}`. A **snippet** (a `prompt:snippet`) is a
+Jinja body as `{{ inputs.<name> }}`. A **snippet** (a `prompt:snippet`) is a
 prompt with no invocation contract, pulled into another prompt's body by name
 with `{% include "<name>" %}`. Today inclusion carries only the *text*, so the
 snippet's input contract leaks upward: the including prompt must re-declare the

@@ -575,6 +575,45 @@ class LoreEntryList(BaseModel):
     entries: list[LoreEntrySummary] = Field(default_factory=list)
 
 
+class PromotionTarget(BaseModel):
+    """A layer a node may be promoted INTO — a declared ancestor project of the
+    open project (ADR-0078 §2). Offered by `GET /api/promotion/targets`. Generic
+    across kinds so slices 3/4 (prompts, mutation sets) reuse it."""
+
+    layer_id: str
+    label: str
+
+
+class PromotionStayItem(BaseModel):
+    """A field value that will NOT travel with a promoted node — it stays in the
+    origin as a layer override because it would leak origin-local structure into
+    the destination (ADR-0078 §4): an `entity_ref` whose target the destination
+    cannot see, or a tag the destination does not know."""
+
+    field: str
+    # Human-readable reason it stays — names the origin-local target or tag.
+    reason: str
+
+
+class PromotionPlan(BaseModel):
+    """The dry-run preview of a promotion (ADR-0078 §9). The same partition backs
+    both preview and commit, so what the author confirms is what runs."""
+
+    destination: PromotionTarget
+    # Field ids that travel with the node and resolve at the destination.
+    travels: list[str] = Field(default_factory=list)
+    # Values left behind as an origin override (ADR-0078 §4), each with its reason.
+    stays_in_origin: list[PromotionStayItem] = Field(default_factory=list)
+    # Fields that travel on the file but whose *definition* is origin-only, so they
+    # render only below the destination until the definition is itself promoted
+    # (ADR-0078 §3/§8) — informational, not acted on in this slice.
+    invisible_at_destination: list[str] = Field(default_factory=list)
+
+
+class PromoteLoreEntryRequest(BaseModel):
+    target_layer_id: str = Field(min_length=1)
+
+
 class CreateLoreEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     entry_type: str = "lore:note"

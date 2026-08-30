@@ -319,7 +319,11 @@
      (pane background, tier panel tint). Cards are gap-separated, not
      divider-separated; NodeList provides the gap. */
   .node-row.variant-card {
-    padding: 11px 14px;
+    /* Left padding is tighter than the other sides (#1649): the kind-stripe is
+       an inset 4px band, so a symmetric 14px left gutter left ~10px of dead space
+       between the stripe and the content. 10px pulls the glyph/title up to a
+       ~6px clearance from the band. */
+    padding: 11px 14px 11px 10px;
     /* Border-width is reserved so the row doesn't reflow when .active
        drops the accent color in. Only the focused row carries a visible
        frame; idle rows sit transparent against whatever's behind them
@@ -395,18 +399,21 @@
     padding-left: 8px;
   }
 
-  /* Entry-type icon (#316) — a quiet mnemonic glyph leading the title, the
-     type's twin of the color stripe. Muted so it never competes with the
-     title; sized to the row's title so it reads as part of the label, not an
-     affordance. Only present when the type declares an icon (opt-in), so most
-     rows are visually unchanged. */
+  /* Entry-type icon (#316, recoloured #1649) — a mnemonic glyph leading the
+     title, the type's twin of the color stripe. It takes the node's colour
+     (`--row-stripe`, the same value the stripe paints) so glyph and band echo
+     one identity; a glyphed type with no colour falls back to muted `--text-3`.
+     One step above the title (--fs-xl vs the title's --fs-lg) so it reads at a
+     glance — an icon renders lighter than text at equal px, so the +1px only
+     balances it, never lets it outweigh the title. Only present when the type
+     declares an icon (opt-in), so most rows are visually unchanged. */
   .node-row-type-icon {
     flex: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: var(--text-3);
-    font-size: var(--fs-lg);
+    color: var(--row-stripe, var(--text-3));
+    font-size: var(--fs-xl);
     line-height: 1;
   }
   /* In compact / dense the title recedes to --fs-md; the icon follows so it

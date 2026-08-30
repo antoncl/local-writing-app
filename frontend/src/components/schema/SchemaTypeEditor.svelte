@@ -100,6 +100,10 @@
     onSaveField?: (payload: FieldDraftPayload) => void;
     onCancelField?: () => void;
     onRemoveField?: () => void;
+    // "Move to layer…" (#1667, ADR-0078 §8): reassign an owned field's
+    // definition to a different inheritance layer. fieldId is the field being
+    // moved (parent still tracks selectedSchemaFieldId as the source of truth).
+    onMoveField?: (fieldId: string, targetLayerId: string) => void;
     onToggleFieldInline?: (fieldId: string, entryTypeId: string) => void;
     onCreateFieldDraft?: (layerId: string, entryTypeId?: string) => void;
     onApplyGroup?: (application: { group_id: string; label: string; key_prefix: string }) => Promise<boolean>;
@@ -144,6 +148,7 @@
     onSaveField = () => {},
     onCancelField = () => {},
     onRemoveField = () => {},
+    onMoveField = () => {},
     onToggleFieldInline = () => {},
     onCreateFieldDraft = () => {},
     onApplyGroup = async () => false,
@@ -436,9 +441,11 @@
         layerId={schemaFieldLayerId}
         groups={metadataSchema?.groups ?? {}}
         sectionLabels={typeSectionLabels}
+        metadataSchemaLayers={metadataSchemaLayers}
         onSave={onSaveField}
         onCancel={onCancelField}
         onRemove={onRemoveField}
+        onMove={(targetLayerId) => { if (selectedSchemaFieldId) onMoveField(selectedSchemaFieldId, targetLayerId); }}
       />
     {/snippet}
     <!-- Per-type override affordances, shared by own AND inherited rows

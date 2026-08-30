@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import SchemaTypeEditor from "./SchemaTypeEditor.svelte";
+import type { MetadataFieldDefinition, MetadataSchemaLayer } from "@/lib/types";
 
 describe("SchemaTypeEditor reusable groups on built-in types (#1033)", () => {
   it("shows Add group and the Reusable-groups section on a readonly (built-in) type", () => {
@@ -146,5 +147,64 @@ describe("SchemaTypeEditor built-in color/icon are overridable (#1644)", () => {
     expect(nameInput.readOnly).toBe(true);
     // The scope line names where the overlay lands, not a dead "System".
     expect(screen.getByText(/color and icon save to your project/i)).toBeTruthy();
+  });
+});
+
+describe("SchemaTypeEditor 'Move to layer…' (#1667, ADR-0078 §8)", () => {
+  const fieldDef: MetadataFieldDefinition = { name: "Summary", type: "text", options: [] };
+  const layers: MetadataSchemaLayer[] = [
+    { id: "layer-a", label: "Project", folder_path: "/proj", schema_path: "/proj/metadata.schema.yaml", exists: true },
+    { id: "layer-b", label: "World", folder_path: "/world", schema_path: "/world/metadata.schema.yaml", exists: true },
+  ];
+  const baseProps = {
+    schemaTypeKind: "lore" as const,
+    initialName: "Character",
+    initialTypeId: "lore:character",
+    selectedSchemaTypeId: "lore:character",
+    schemaTypeLayerId: "layer-a",
+    selectedSchemaFieldId: "summary",
+    expandedSchemaFieldId: "summary",
+    schemaFieldReadonly: false,
+    schemaFieldLayerId: "layer-a",
+    typeOwnFieldEntries: [["summary", fieldDef]] as [string, MetadataFieldDefinition][],
+    typeFieldSections: [{ group: null, entries: [["summary", fieldDef]] as [string, MetadataFieldDefinition][] }],
+    metadataSchemaLayers: layers,
+    onSaveType: vi.fn(),
+  };
+
+  it("offers every layer except the field's current one, and fires onMoveField(fieldId, target) on Move", async () => {
+    const onMoveField = vi.fn();
+    render(SchemaTypeEditor, { props: { ...baseProps, onMoveField } });
+
+    const select = screen.getByRole("combobox", { name: "Move to layer" }) as HTMLSelectElement;
+    const optionValues = Array.from(select.options).map((o) => o.value);
+    // The current source layer (layer-a, "Project") is excluded; the other
+    // layer (layer-b, "World") is offered.
+    expect(optionValues).not.toContain("layer-a");
+    expect(optionValues).toContain("layer-b");
+
+    const moveButton = screen.getByRole("button", { name: "Move" }) as HTMLButtonElement;
+    // Moving is consequential — no target chosen yet, so the button starts
+    // disabled rather than moving on bare select-change.
+    expect(moveButton.disabled).toBe(true);
+
+    await fireEvent.change(select, { target: { value: "layer-b" } });
+    expect(moveButton.disabled).toBe(false);
+    await fireEvent.click(moveButton);
+    expect(onMoveField).toHaveBeenCalledWith("summary", "layer-b");
+  });
+
+  it("hides the move control when there is only one layer", () => {
+    render(SchemaTypeEditor, {
+      props: { ...baseProps, metadataSchemaLayers: [layers[0]], onMoveField: vi.fn() },
+    });
+    expect(screen.queryByRole("combobox", { name: "Move to layer" })).toBeNull();
+  });
+
+  it("hides the move control on a built-in (read-only) field", () => {
+    render(SchemaTypeEditor, {
+      props: { ...baseProps, schemaFieldReadonly: true, onMoveField: vi.fn() },
+    });
+    expect(screen.queryByRole("combobox", { name: "Move to layer" })).toBeNull();
   });
 });

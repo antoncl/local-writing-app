@@ -5,6 +5,7 @@
     MetadataFieldType,
     MetadataFieldDefinition,
     MetadataGroupDefinition,
+    MetadataSchemaLayer,
     NodePickerConfig,
   } from "@/lib/types";
   import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
@@ -93,10 +94,17 @@
     // suggestions behind the freeform Section input, so it doubles as a
     // pick-from-existing dropdown. Distinct not required (deduped below).
     sectionLabels?: string[];
+    // The project's inheritance layers (#1667, ADR-0078 §8) — the "Move to
+    // layer…" picker's choices. `layerId` above doubles as this field's
+    // current source layer for an existing, editable field (openSchemaFieldDetail
+    // seeds it from field_sources[fieldId].layer_id), so it's excluded from the
+    // picker rather than threading a separate "current layer" prop.
+    metadataSchemaLayers?: MetadataSchemaLayer[];
     // --- Callback props (parent owns persistence) ---
     onSave?: (payload: FieldDraftPayload) => void;
     onCancel?: () => void;
     onRemove?: () => void;
+    onMove?: (targetLayerId: string) => void;
   }
 
   let {
@@ -106,9 +114,11 @@
     layerId = "",
     groups = {},
     sectionLabels = [],
+    metadataSchemaLayers = [],
     onSave = () => {},
     onCancel = () => {},
     onRemove = () => {},
+    onMove = () => {},
   }: Props = $props();
 
   // --- Draft state (initialized once at mount from `field`) ---
@@ -333,6 +343,27 @@
       // shape (or Cancel) to proceed.
       (type === "list" && currentShapeMissing),
   );
+
+  // --- "Move to layer…" (#1667, ADR-0078 §8) — reassigns this field
+  // DEFINITION's home layer; the def stays the same, only which layer's
+  // schema.yaml declares it changes. Only meaningful for an existing,
+  // editable field, and only when there's somewhere else to move it to
+  // (mirrors the SchemaTypeCreateForm "Save layer" length>1 gate). Moving is
+  // consequential, so it requires an explicit button — never a bare
+  // select-change. ---
+  const currentLayerLabel = $derived(
+    metadataSchemaLayers.find((layer) => layer.id === layerId)?.label ?? "",
+  );
+  const moveLayerChoices = $derived(metadataSchemaLayers.filter((layer) => layer.id !== layerId));
+  let moveTargetLayerId = $state("");
+  const moveAvailable = $derived(
+    Boolean(selectedFieldId) && !readonly && metadataSchemaLayers.length > 1 && moveLayerChoices.length > 0,
+  );
+  function submitMove() {
+    if (!moveTargetLayerId) return;
+    onMove(moveTargetLayerId);
+    moveTargetLayerId = "";
+  }
 </script>
 
 <svelte:window onclick={handleDocumentClick} />
@@ -573,6 +604,21 @@
       />
     </label>
   {/if}
+  {#if moveAvailable}
+    <div class="sfi-move-row">
+      <span class="sfi-move-hint">currently on <strong>{currentLayerLabel}</strong></span>
+      <label class="sfi-field sfi-move-field">
+        Move to layer…
+        <select bind:value={moveTargetLayerId} aria-label="Move to layer">
+          <option value="" disabled>— choose —</option>
+          {#each moveLayerChoices as layer (layer.id)}
+            <option value={layer.id}>{layer.label}</option>
+          {/each}
+        </select>
+      </label>
+      <button type="button" class="sfi-move-btn" disabled={!moveTargetLayerId} onclick={submitMove}>Move</button>
+    </div>
+  {/if}
   <div class="sfi-footer">
     <span class="sfi-spacer"></span>
     {#if selectedFieldId}
@@ -782,5 +828,41 @@
   .sfi-key-hint {
     font-size: var(--fs-xs);
     color: var(--text-3, var(--text-3));
+  }
+  /* "Move to layer…" (#1667, ADR-0078 §8) — sits directly above the footer's
+     Remove/Cancel/Done row so it reads as a sibling action on the same field. */
+  .sfi-move-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .sfi-move-hint {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .sfi-move-hint strong {
+    font-weight: var(--w-semibold);
+    color: var(--text-2);
+  }
+  .sfi-move-field {
+    flex: none;
+  }
+  .sfi-move-btn {
+    padding: 5px 11px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .sfi-move-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent-strong);
+  }
+  .sfi-move-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 </style>

@@ -108,6 +108,7 @@
   import { todoActions } from "@/lib/stores/todoActions.svelte";
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+  import { aiSpend } from "@/lib/stores/aiSpend.svelte";
   import {
     openPromptsPane,
     openPlotTemplatesPane,
@@ -364,6 +365,9 @@
     paneViews.reset();
     setKnownTags([]);
     setChatSessions([]);
+    // The AI Spend singleton would otherwise paint the previous project's
+    // totals under the next one until its refetch lands.
+    aiSpend.reset();
     // Preserve all pane configs. An earlier version stripped chat/preview/
     // prompts/assistants/chats out of `panes`, which made `panes.chats` etc.
     // undefined after a project switch — focusPane then created `{ z }` entries

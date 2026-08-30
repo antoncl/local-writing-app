@@ -337,13 +337,14 @@ export type CreateAIInvocationRequest = {
   cost_usd?: number | null;
 };
 
-// GET /api/ai/invocations/summary (#10). `cost_usd` sums only priced rows;
-// `unpriced_count` says how many rows had no price — unknown stays distinct
-// from 0.0 (#697).
+// GET /api/ai/invocations/summary (#10). `cost_usd` sums only priced rows and
+// is null when the scope has no priced row at all — unknown stays distinct
+// from 0.0 (#697); `unpriced_count` says how many rows had no price. The
+// top-level total is 0.0 for an empty scope (a known zero).
 export type AICostBucket = {
   key: string;
   label: string;
-  cost_usd: number;
+  cost_usd: number | null;
   count: number;
   unpriced_count: number;
   input_tokens: number;
@@ -351,7 +352,7 @@ export type AICostBucket = {
 };
 
 export type AICostSummary = {
-  total_cost_usd: number;
+  total_cost_usd: number | null;
   count: number;
   unpriced_count: number;
   input_tokens: number;

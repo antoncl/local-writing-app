@@ -16,7 +16,7 @@ function bucket(partial: Partial<AICostBucket>): AICostBucket {
   return {
     key: "k",
     label: "k",
-    cost_usd: 0,
+    cost_usd: null,
     count: 0,
     unpriced_count: 0,
     input_tokens: 0,
@@ -81,13 +81,15 @@ describe("AI Spend pane — rollup renders", () => {
   });
 
   it("shows — (not €0.00) when every row in scope is unpriced", async () => {
+    // The server ships null for an all-unpriced scope (#697); the pane must
+    // render it as — with the unpriced note, never as a confident €0.00.
     vi.mocked(api.aiCostSummary).mockResolvedValue(
       summary({
-        total_cost_usd: 0,
+        total_cost_usd: null,
         count: 2,
         unpriced_count: 2,
         by_model: [
-          bucket({ key: "llama3", label: "llama3", cost_usd: 0, count: 2, unpriced_count: 2 }),
+          bucket({ key: "llama3", label: "llama3", cost_usd: null, count: 2, unpriced_count: 2 }),
         ],
       }),
     );
@@ -100,6 +102,25 @@ describe("AI Spend pane — rollup renders", () => {
     expect(modelRows.textContent).toContain("llama3");
     expect(modelRows.textContent).toContain("2 unpriced");
     expect(modelRows.textContent).not.toContain("€0.00");
+  });
+
+  it("keeps the last-good summary when a refresh fails", async () => {
+    vi.mocked(api.aiCostSummary).mockResolvedValue(
+      summary({ total_cost_usd: 10.0, count: 3 }),
+    );
+    render(AiSpendPane, { props: { projectKey: "/tmp/p" } });
+    await tick();
+    await tick();
+    expect(screen.getByTestId("ai-spend-total").textContent).toContain("€9.20");
+
+    vi.mocked(api.aiCostSummary).mockRejectedValue(new Error("backend gone"));
+    await fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await tick();
+    await tick();
+
+    // The stats stay on screen; the error renders alongside, not instead.
+    expect(screen.getByTestId("ai-spend-total").textContent).toContain("€9.20");
+    expect(screen.getByText(/Couldn't load AI spend/)).toBeInTheDocument();
   });
 
   it("refetches with a since-bound when a range is picked", async () => {

@@ -30,6 +30,71 @@ from app.models import (
     CreateAIInvocationRequest,
 )
 
+# --- Cost-summary row helpers (#10). The summary reads RAW rows with the same
+# tolerant semantics as the other two ledger summers (`_compute_invocation_cost`
+# and the per-chat `cost_usd_total`), so a hand-edited row can never make the
+# rollup disagree with the per-scene/per-chat figures about which rows count.
+
+
+def _day_of(record: dict[str, Any]) -> str:
+    ts = record.get("ts")
+    return ts[:10] if isinstance(ts, str) else ""
+
+
+def _in_day_range(record: dict[str, Any], since: str | None, until: str | None) -> bool:
+    day = _day_of(record)
+    return (since is None or day >= since) and (until is None or day <= until)
+
+
+def _str_field(record: dict[str, Any], key: str) -> str:
+    value = record.get(key)
+    return value if isinstance(value, str) else ""
+
+
+def _token_field(usage: dict[str, Any], key: str) -> int:
+    value = usage.get(key)
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
+def _row_measures(record: dict[str, Any]) -> tuple[int, int, float | None]:
+    """A row's (billable input tokens, output tokens, cost-or-None)."""
+    usage = record.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
+    # The three input slots are disjoint (see ChatUsage) — sum for total
+    # billable input.
+    input_tokens = (
+        _token_field(usage, "input_tokens")
+        + _token_field(usage, "cached_input_tokens")
+        + _token_field(usage, "cache_write_tokens")
+    )
+    output_tokens = _token_field(usage, "output_tokens")
+    raw_cost = record.get("cost_usd")
+    cost = float(raw_cost) if isinstance(raw_cost, (int, float)) else None
+    return input_tokens, output_tokens, cost
+
+
+def _cost_rank(bucket: AICostBucket) -> tuple[float, int, str]:
+    return (-(bucket.cost_usd or 0.0), -bucket.count, bucket.key)
+
+
+def _bucket_targets(record: dict[str, Any], label_for: Any) -> list[tuple[str, str, str]]:
+    """The (breakdown, key, label) buckets one row lands in."""
+    model = _str_field(record, "model")
+    targets = [("by_model", model, model or "unknown model")]
+    for name, key_field in (
+        ("by_chat", "chat_session_id"),
+        ("by_scene", "scene_id"),
+        ("by_prompt", "prompt_entry_id"),
+    ):
+        node_id = _str_field(record, key_field)
+        if node_id:
+            targets.append((name, node_id, label_for(node_id)))
+    day = _day_of(record)
+    if day:
+        targets.append(("by_day", day, day))
+    return targets
+
 
 class AiInvocationsMixin:
     def _ai_invocations_path(self) -> Path:
@@ -103,157 +168,66 @@ class AiInvocationsMixin:
         `until` are inclusive `YYYY-MM-DD` day bounds compared against each
         row's UTC timestamp day; empty strings behave like unset. Sums
         stored `cost_usd` verbatim — never re-prices, since catalogue prices
-        drift and rows are frozen. A row with `cost_usd is None` still
-        counts toward `count` / `unpriced_count` and its token totals, but
-        never a cost sum — unknown stays distinct from 0.0 (#697).
+        drift and rows are frozen.
+
+        Iterates the raw rows with the same tolerant reads as the other two
+        ledger summers (`_compute_invocation_cost`, the per-chat
+        `cost_usd_total`) so all three count the same rows — a hand-edited
+        row must not make this total disagree with the per-chat chips. A row
+        without a numeric `cost_usd` still counts toward `count` /
+        `unpriced_count` and the token totals, but never a cost sum; a scope
+        with rows but no priced row reports cost None, not 0.0 (#697).
         """
         since = since or None
         until = until or None
         rows = [
-            invocation
-            for invocation in self.list_ai_invocations().invocations
-            if (since is None or invocation.ts[:10] >= since)
-            and (until is None or invocation.ts[:10] <= until)
+            record
+            for record in self._read_ai_invocations_raw()
+            if _in_day_range(record, since, until)
         ]
 
         # One node-index build serves every chat/scene/prompt label lookup,
-        # and only runs at all if some row actually needs one.
-        needs_index = any(
-            invocation.chat_session_id or invocation.scene_id or invocation.prompt_entry_id
-            for invocation in rows
-        )
-        index = self._build_node_index() if needs_index else None
+        # built lazily on the first labelled row so an unlabelled ledger
+        # never pays for it.
+        index: Any = None
 
         def label_for(node_id: str) -> str:
-            entry = index.by_id.get(node_id) if index is not None else None
+            nonlocal index
+            if index is None:
+                index = self._build_node_index()
+            entry = index.by_id.get(node_id)
             return entry.title if entry is not None and entry.title else node_id
 
-        by_model: dict[str, dict[str, Any]] = {}
-        by_chat: dict[str, dict[str, Any]] = {}
-        by_scene: dict[str, dict[str, Any]] = {}
-        by_prompt: dict[str, dict[str, Any]] = {}
-        by_day: dict[str, dict[str, Any]] = {}
-        totals = {"cost_usd": 0.0, "unpriced_count": 0, "input_tokens": 0, "output_tokens": 0}
+        names = ("by_model", "by_chat", "by_scene", "by_prompt", "by_day")
+        breakdowns: dict[str, dict[str, AICostBucket]] = {name: {} for name in names}
+        totals = AICostSummary(total_cost_usd=None, count=len(rows))
 
-        def bump(
-            buckets: dict[str, dict[str, Any]],
-            key: str,
-            label: str,
-            *,
-            priced: bool,
-            cost: float,
-            input_tokens: int,
-            output_tokens: int,
-        ) -> None:
-            bucket = buckets.setdefault(
-                key,
-                {
-                    "key": key,
-                    "label": label,
-                    "cost_usd": 0.0,
-                    "count": 0,
-                    "unpriced_count": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                },
-            )
-            bucket["count"] += 1
-            bucket["input_tokens"] += input_tokens
-            bucket["output_tokens"] += output_tokens
-            if priced:
-                bucket["cost_usd"] += cost
+        for record in rows:
+            input_tokens, output_tokens, cost = _row_measures(record)
+            totals.input_tokens += input_tokens
+            totals.output_tokens += output_tokens
+            if cost is None:
+                totals.unpriced_count += 1
             else:
-                bucket["unpriced_count"] += 1
+                totals.total_cost_usd = (totals.total_cost_usd or 0.0) + cost
+            for name, key, label in _bucket_targets(record, label_for):
+                bucket = breakdowns[name].setdefault(key, AICostBucket(key=key, label=label))
+                bucket.count += 1
+                bucket.input_tokens += input_tokens
+                bucket.output_tokens += output_tokens
+                if cost is None:
+                    bucket.unpriced_count += 1
+                else:
+                    bucket.cost_usd = (bucket.cost_usd or 0.0) + cost
 
-        for invocation in rows:
-            usage = invocation.usage
-            # The three input slots are disjoint (see ChatUsage) — sum for
-            # total billable input.
-            input_tokens = (
-                usage.input_tokens + usage.cached_input_tokens + usage.cache_write_tokens
-                if usage is not None
-                else 0
-            )
-            output_tokens = usage.output_tokens if usage is not None else 0
-            priced = invocation.cost_usd is not None
-            cost = invocation.cost_usd or 0.0
-
-            totals["input_tokens"] += input_tokens
-            totals["output_tokens"] += output_tokens
-            if priced:
-                totals["cost_usd"] += cost
-            else:
-                totals["unpriced_count"] += 1
-
-            bump(
-                by_model,
-                invocation.model,
-                invocation.model or "unknown model",
-                priced=priced,
-                cost=cost,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
-            if invocation.chat_session_id:
-                bump(
-                    by_chat,
-                    invocation.chat_session_id,
-                    label_for(invocation.chat_session_id),
-                    priced=priced,
-                    cost=cost,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                )
-            if invocation.scene_id:
-                bump(
-                    by_scene,
-                    invocation.scene_id,
-                    label_for(invocation.scene_id),
-                    priced=priced,
-                    cost=cost,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                )
-            if invocation.prompt_entry_id:
-                bump(
-                    by_prompt,
-                    invocation.prompt_entry_id,
-                    label_for(invocation.prompt_entry_id),
-                    priced=priced,
-                    cost=cost,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                )
-            day = invocation.ts[:10]
-            bump(
-                by_day,
-                day,
-                day,
-                priced=priced,
-                cost=cost,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
-
-        def ranked(buckets: dict[str, dict[str, Any]]) -> list[AICostBucket]:
-            ordered = sorted(
-                buckets.values(), key=lambda b: (-b["cost_usd"], -b["count"], b["key"])
-            )
-            return [AICostBucket(**b) for b in ordered]
-
-        by_day_ranked = [
-            AICostBucket(**b) for b in sorted(by_day.values(), key=lambda b: b["key"], reverse=True)
-        ]
-
-        return AICostSummary(
-            total_cost_usd=totals["cost_usd"],
-            count=len(rows),
-            unpriced_count=totals["unpriced_count"],
-            input_tokens=totals["input_tokens"],
-            output_tokens=totals["output_tokens"],
-            by_model=ranked(by_model),
-            by_chat=ranked(by_chat),
-            by_scene=ranked(by_scene),
-            by_prompt=ranked(by_prompt),
-            by_day=by_day_ranked,
+        totals.by_model = sorted(breakdowns["by_model"].values(), key=_cost_rank)
+        totals.by_chat = sorted(breakdowns["by_chat"].values(), key=_cost_rank)
+        totals.by_scene = sorted(breakdowns["by_scene"].values(), key=_cost_rank)
+        totals.by_prompt = sorted(breakdowns["by_prompt"].values(), key=_cost_rank)
+        totals.by_day = sorted(
+            breakdowns["by_day"].values(), key=lambda bucket: bucket.key, reverse=True
         )
+        # An empty scope is a known zero; rows with no priced row stay None.
+        if totals.total_cost_usd is None and not rows:
+            totals.total_cost_usd = 0.0
+        return totals

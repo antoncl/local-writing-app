@@ -1,16 +1,19 @@
 <script lang="ts">
   // AI Spend pane (#10): project-wide AI cost rollup — headline total plus
-  // by-model / by-chat / by-scene / by-day breakdowns over the invocation
-  // ledger. Aggregate buckets, not Nodes, so this is a bespoke stats surface
-  // rather than a NodeList (the widget-taxonomy carve-out for non-node data).
+  // by-model / by-chat / by-scene / by-prompt / by-day breakdowns over the
+  // invocation ledger. Aggregate buckets, not Nodes, so this is a bespoke
+  // stats surface rather than a NodeList (the widget-taxonomy carve-out for
+  // non-node data). Cost fields arrive nullable: null means "no priced row
+  // in this scope" and renders as — via formatCostEur, never €0.00 (#697).
   import { untrack } from "svelte";
-  import { aiSpend, type SpendRange } from "@/lib/stores/aiSpend.svelte";
+  import { aiSpend, SPEND_RANGES } from "@/lib/stores/aiSpend.svelte";
+  import SegmentedControl from "@/components/widgets/SegmentedControl.svelte";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import type { AICostBucket } from "@/lib/types";
 
   let {
-    // The open project's identity; a switch refetches so a pane left open
-    // across projects never shows the previous project's numbers.
+    // The open project's identity; a switch refetches (resetEditorWorkspace
+    // clears the store first, so the previous project's numbers never paint).
     projectKey = "",
   }: { projectKey?: string } = $props();
 
@@ -24,18 +27,7 @@
 
   const summary = $derived(aiSpend.summary);
 
-  const RANGES: { key: SpendRange; label: string }[] = [
-    { key: "all", label: "All time" },
-    { key: "30d", label: "30 days" },
-    { key: "month", label: "This month" },
-  ];
-
-  // A cost is only honest when at least one row in scope was priced: an
-  // all-unpriced scope shows "—" (unknown), never €0.00 (#697).
-  function costText(costUsd: number, count: number, unpricedCount: number): string {
-    if (count > 0 && unpricedCount === count) return formatCostEur(null);
-    return formatCostEur(costUsd);
-  }
+  const rangeItems = SPEND_RANGES.map((preset) => ({ id: preset.key, label: preset.label }));
 
   function bucketTitle(bucket: AICostBucket): string {
     const parts = [
@@ -49,16 +41,12 @@
 
 <div class="ai-spend" data-testid="ai-spend-pane">
   <div class="spend-controls">
-    <div class="spend-range" role="group" aria-label="Date range">
-      {#each RANGES as rangeOption (rangeOption.key)}
-        <button
-          type="button"
-          class="spend-range-option"
-          class:active={aiSpend.range === rangeOption.key}
-          onclick={() => void aiSpend.setRange(rangeOption.key)}
-        >{rangeOption.label}</button>
-      {/each}
-    </div>
+    <SegmentedControl
+      items={rangeItems}
+      value={aiSpend.range}
+      ariaLabel="Date range"
+      onSelect={(id) => void aiSpend.setRange(id)}
+    />
     <button type="button" class="spend-refresh" onclick={() => void aiSpend.refresh()}>
       Refresh
     </button>
@@ -66,34 +54,37 @@
 
   {#if aiSpend.error}
     <p class="muted">Couldn't load AI spend: {aiSpend.error}</p>
-  {:else if !summary}
-    <p class="muted">Loading…</p>
-  {:else}
-    <div class="spend-headline">
-      <span class="spend-total" data-testid="ai-spend-total">
-        {costText(summary.total_cost_usd, summary.count, summary.unpriced_count)}
-      </span>
-      <small class="spend-headline-detail">
-        {#if summary.count > 0}
-          {summary.count}
-          {summary.count === 1 ? "invocation" : "invocations"}
-          · {formatTokens(summary.input_tokens)} in / {formatTokens(summary.output_tokens)} out
-          {#if summary.unpriced_count > 0}
-            · {summary.unpriced_count} unpriced
+  {/if}
+  {#if summary}
+    <div class="spend-body" class:refreshing={aiSpend.loading}>
+      <div class="spend-headline">
+        <span class="spend-total" data-testid="ai-spend-total">
+          {formatCostEur(summary.total_cost_usd)}
+        </span>
+        <small class="spend-headline-detail">
+          {#if summary.count > 0}
+            {summary.count}
+            {summary.count === 1 ? "invocation" : "invocations"}
+            · {formatTokens(summary.input_tokens)} in / {formatTokens(summary.output_tokens)} out
+            {#if summary.unpriced_count > 0}
+              · {summary.unpriced_count} unpriced
+            {/if}
+          {:else if aiSpend.range === "all"}
+            No AI invocations recorded yet.
+          {:else}
+            No AI invocations in this range.
           {/if}
-        {:else if aiSpend.range === "all"}
-          No AI invocations recorded yet.
-        {:else}
-          No AI invocations in this range.
-        {/if}
-      </small>
-    </div>
+        </small>
+      </div>
 
-    {@render bucketSection("By model", summary.by_model, "ai-spend-by-model")}
-    {@render bucketSection("By chat", summary.by_chat, "ai-spend-by-chat")}
-    {@render bucketSection("By scene", summary.by_scene, "ai-spend-by-scene")}
-    {@render bucketSection("By prompt", summary.by_prompt, "ai-spend-by-prompt")}
-    {@render bucketSection("By day", summary.by_day, "ai-spend-by-day")}
+      {@render bucketSection("By model", summary.by_model, "ai-spend-by-model")}
+      {@render bucketSection("By chat", summary.by_chat, "ai-spend-by-chat")}
+      {@render bucketSection("By scene", summary.by_scene, "ai-spend-by-scene")}
+      {@render bucketSection("By prompt", summary.by_prompt, "ai-spend-by-prompt")}
+      {@render bucketSection("By day", summary.by_day, "ai-spend-by-day")}
+    </div>
+  {:else if !aiSpend.error}
+    <p class="muted">Loading…</p>
   {/if}
 </div>
 
@@ -108,9 +99,7 @@
             {#if bucket.unpriced_count > 0}
               <span class="spend-row-note">{bucket.unpriced_count} unpriced</span>
             {/if}
-            <span class="spend-row-cost">
-              {costText(bucket.cost_usd, bucket.count, bucket.unpriced_count)}
-            </span>
+            <span class="spend-row-cost">{formatCostEur(bucket.cost_usd)}</span>
           </li>
         {/each}
       </ul>
@@ -133,13 +122,6 @@
     flex-wrap: wrap;
   }
 
-  .spend-range {
-    display: flex;
-    gap: var(--sp-0);
-    flex-wrap: wrap;
-  }
-
-  .spend-range-option,
   .spend-refresh {
     border: none;
     background: none;
@@ -151,14 +133,21 @@
     white-space: nowrap;
   }
 
-  .spend-range-option:hover,
   .spend-refresh:hover {
     color: var(--text);
   }
 
-  .spend-range-option.active {
-    background: var(--inset);
-    color: var(--text);
+  .spend-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    transition: opacity var(--t-fast);
+  }
+
+  /* A refresh in flight dims the numbers on screen — they describe the
+     previous range/project state until the response lands. */
+  .spend-body.refreshing {
+    opacity: 0.5;
   }
 
   .spend-headline {

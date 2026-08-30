@@ -794,12 +794,14 @@ class AIInvocationList(BaseModel):
 
 class AICostBucket(BaseModel):
     """One aggregation bucket of the AI cost summary (#10). `cost_usd` sums
-    only priced rows; `unpriced_count` says how many rows in the bucket had
-    no price (unknown-cost models) — unknown stays distinct from 0.0 (#697).
+    only priced rows and is None when the bucket has no priced row at all —
+    unknown stays distinct from 0.0 on the wire, the same `saw_priced` policy
+    `ChatSession.cost_usd_total` follows (#697). `unpriced_count` says how
+    many rows in the bucket had no price (unknown-cost models).
     """
     key: str
     label: str
-    cost_usd: float = 0.0
+    cost_usd: float | None = None
     count: int = 0
     unpriced_count: int = 0
     input_tokens: int = 0
@@ -810,8 +812,10 @@ class AICostSummary(BaseModel):
     """GET /api/ai/invocations/summary response: project-wide totals plus
     breakdowns over the ai_invocations ledger. Sums stored `cost_usd` values
     verbatim — never re-prices (catalogue prices drift; rows are frozen).
+    `total_cost_usd` is 0.0 for an empty scope (a known zero) but None when
+    rows exist and none carries a price (#697).
     """
-    total_cost_usd: float = 0.0
+    total_cost_usd: float | None = 0.0
     count: int = 0
     unpriced_count: int = 0
     input_tokens: int = 0

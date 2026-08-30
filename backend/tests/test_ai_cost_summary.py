@@ -1,8 +1,10 @@
 """GET /api/ai/invocations/summary (#10): project-wide AI spend rollup over
 the ai_invocations ledger — totals plus by-model / by-chat / by-scene /
 by-day buckets. Costs are summed from stored `cost_usd` verbatim; unpriced
-rows (`cost_usd is None`) stay excluded from every sum but still counted
-(#697).
+rows stay excluded from every sum but still counted, and a scope with rows
+but no priced row reports cost None rather than 0.0 (#697). Rows are read
+raw with the same tolerant semantics as the scene/character/project computed
+costs, so the surfaces can never disagree about which rows count.
 """
 
 from __future__ import annotations
@@ -162,11 +164,57 @@ class AICostSummaryEndpointTests(unittest.TestCase):
         self.assertEqual(body["input_tokens"], 120)
         self.assertEqual(body["output_tokens"], 60)
 
+        # A bucket with no priced row reports None, not 0.0 — the frontend
+        # renders it as "—" straight off the wire (#697).
         llama_bucket = next(b for b in body["by_model"] if b["key"] == "llama3")
-        self.assertEqual(llama_bucket["cost_usd"], 0.0)
+        self.assertIsNone(llama_bucket["cost_usd"])
         self.assertEqual(llama_bucket["count"], 1)
         self.assertEqual(llama_bucket["unpriced_count"], 1)
         self.assertEqual(llama_bucket["input_tokens"], 20)
+
+    def test_all_unpriced_scope_reports_none_total_not_zero(self) -> None:
+        self._write_rows(
+            [
+                {"id": "inv_1", "ts": "2026-08-01T10:00:00+00:00", "model": "llama3"},
+                {"id": "inv_2", "ts": "2026-08-02T10:00:00+00:00", "model": "llama3"},
+            ]
+        )
+        response = self.client.get("/api/ai/invocations/summary")
+        body = response.json()
+        self.assertEqual(body["count"], 2)
+        self.assertEqual(body["unpriced_count"], 2)
+        # Rows exist but none is priced: unknown, not a known zero.
+        self.assertIsNone(body["total_cost_usd"])
+
+    def test_malformed_row_counted_like_the_sibling_summers(self) -> None:
+        # A hand-edited row that would fail AIInvocation validation (usage is
+        # a string, no ts) must still be counted the way the computed cost
+        # fields count it — priced rows sum, junk fields degrade to defaults.
+        self._write_rows(
+            [
+                {"id": "inv_ok", "ts": "2026-08-01T10:00:00+00:00", "cost_usd": 0.10},
+                {"cost_usd": 0.25, "usage": "garbage", "model": 7},
+            ]
+        )
+        response = self.client.get("/api/ai/invocations/summary")
+        body = response.json()
+        self.assertEqual(body["count"], 2)
+        self.assertAlmostEqual(body["total_cost_usd"], 0.35, places=6)
+        # The junk model field degrades to the unknown-model bucket; the
+        # ts-less row lands in no day bucket.
+        labels = [b["label"] for b in body["by_model"]]
+        self.assertIn("unknown model", labels)
+        self.assertEqual([b["key"] for b in body["by_day"]], ["2026-08-01"])
+
+    def test_malformed_date_bounds_are_rejected_not_silently_empty(self) -> None:
+        self._write_rows(
+            [{"id": "inv_1", "ts": "2026-08-30T10:00:00+00:00", "cost_usd": 0.10}]
+        )
+        # Unpadded/garbage dates would compare lexicographically and return an
+        # all-zero 200; the pattern guard must 422 them instead.
+        for bad in ("2026-8-1", "30/08/2026", "yesterday"):
+            response = self.client.get(f"/api/ai/invocations/summary?since={bad}")
+            self.assertEqual(response.status_code, 422, bad)
 
     def test_since_and_until_filter_by_inclusive_day_bounds(self) -> None:
         self._write_rows(

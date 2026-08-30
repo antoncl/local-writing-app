@@ -7,6 +7,7 @@
 import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
 import { chatSessions } from "@/lib/stores/chatSessions.svelte";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
+import { aiSpend } from "@/lib/stores/aiSpend.svelte";
 
 export function openPromptsPane(): void {
   workspaceLayout.ensureVisible("prompts");
@@ -25,8 +26,11 @@ export function openGuidePane(): void {
 }
 
 export function openAiSpendPane(): void {
-  // No refresh here: the pane's own mount/project effect fetches, and a
-  // second call from the opener would double-fetch on first open.
+  // First open: the pane's mount effect fetches (refreshing here too would
+  // double-fetch). Re-open of an already-mounted pane — workspace tabs stay
+  // mounted, so the effect won't re-run — refreshes here so the numbers
+  // include everything since the pane was last looked at.
+  if (aiSpend.summary || aiSpend.error) void aiSpend.refresh();
   workspaceLayout.ensureVisible("aiSpend");
 }
 

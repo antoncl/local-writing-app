@@ -29,9 +29,9 @@ callback. The trade-off: `fetch(url)` where `url` is a variable is not caught �
 accepted, because the failure mode this guards against is the *accidental*
 `fetch(`/api/…`)` a cold session hardcodes at a component, which always carries
 a literal URL at the call site. A local callback named `fetch` that is ever
-invoked with a literal URL string would false-positive; grandfather or rename it.
+invoked with a literal URL string would false-positive; rename it.
 
-FAILS (exit 1) on any raw call unless the file is grandfathered below. Files
+FAILS (exit 1) on any raw call — there is no per-file exemption (#1681). Files
 outside `frontend/src/`, the `api.ts` / `api/` client, and test files are
 ignored, so it is safe to hand this the full staged-file list, a single edited
 file, or the whole tree.
@@ -45,12 +45,6 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
-
-# Files exempt from the boundary, matched against the path tail (repo-relative,
-# forward slashes). Empty and meant to stay empty: only api.ts makes network
-# calls today. Add an entry only for a deliberate, PR-announced exception —
-# growth is ratcheted by scripts/check_exemptions.py.
-GRANDFATHERED: set[str] = set()
 
 # The sanctioned client, and the test surfaces that are not the production
 # boundary (tests may stub globals). Tail-matched. The client was one file until
@@ -103,10 +97,6 @@ def check_file(path: Path) -> list[tuple[int, str]]:
     return sorted(hits)
 
 
-def is_grandfathered(posix_path: str) -> bool:
-    return any(posix_path.endswith(entry) for entry in GRANDFATHERED)
-
-
 def main(argv: list[str]) -> int:
     failed = False
     for raw in argv:
@@ -117,9 +107,6 @@ def main(argv: list[str]) -> int:
         if not hits:
             continue
         rel = path.as_posix()
-        if is_grandfathered(rel):
-            print(f"warn  {rel}: {len(hits)} raw network call(s) (grandfathered - clean up when you next work here).")
-            continue
         failed = True
         for line_no, label in hits:
             print(f"FAIL  {rel}:{line_no}: {label} - route it through lib/api.ts")

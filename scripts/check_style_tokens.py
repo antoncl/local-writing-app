@@ -14,13 +14,7 @@ The :root / theme token-definition exemption applies only to styles.css — the
 token layer is where raw values are supposed to live; every other stylesheet
 is scanned in full, exactly like a component's `<style>` block. Known build
 outputs (GENERATED_ROOTS) are not authored style code and are skipped; that
-tuple is ratcheted by scripts/check_exemptions.py like the grandfather sets.
-
-Colors/sizes and font-family carry SEPARATE grandfather sets: a file can be
-clean on one axis while still owing debt on the other (e.g. the editor-shell
-files migrated their colors under #125 but still carry raw mono stacks). This
-keeps the two axes independent so removing a file from one set does not silently
-re-exempt it on the other.
+tuple is ratcheted by scripts/check_exemptions.py (must not grow).
 
 Sanctioned exceptions (never flagged):
   * `color: #fff` — ink on accent-solid controls (only as the `color`
@@ -32,10 +26,9 @@ Sanctioned exceptions (never flagged):
   * `color-mix(... white/black ...)` chip-tint math passes naturally — the
     keywords `white`/`black` are not hex/rgb literals
 
-FAILS (exit 1) on any violation unless the file is grandfathered below; a
-grandfathered file still warns (exit 0) so the debt stays visible. Non-style
-paths are ignored, so it is safe to hand this the full staged-file list
-(pre-commit) or a single edited file (the Claude Code PostToolUse hook).
+FAILS (exit 1) on any violation — there is no per-file exemption (#1681).
+Non-style paths are ignored, so it is safe to hand this the full staged-file
+list (pre-commit) or a single edited file (the Claude Code PostToolUse hook).
 
 Usage:
     python scripts/check_style_tokens.py <file> [<file> ...]
@@ -46,22 +39,6 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
-
-# Files with pre-token style debt, exempt from the hard FAIL until they are
-# restyled under #125. They still warn. Remove an entry once its file is
-# clean — this list only shrinks. Stored repo-relative with forward slashes;
-# matched against the path tail.
-# Empty: every frontend file's color/type literals now come from the token
-# layer. Add an entry only to temporarily exempt a NEW pre-token file while it
-# is being restyled — this set should stay empty in steady state.
-GRANDFATHERED: set[str] = set()
-
-# Files with raw `font-family` stacks bypassing the --sans/--serif/--mono
-# tokens (#144). Separate from GRANDFATHERED above (colors/sizes) so the axes
-# shrink independently. Empty: every font-family now resolves through a token
-# (var(--sans|--serif|--mono)) or `inherit`. Add an entry only to temporarily
-# exempt a NEW pre-token file while it is being restyled.
-GRANDFATHERED_FONT_FAMILY: set[str] = set()
 
 # Build outputs the style guard never scans (the icon-font subset legitimately
 # declares the icon face itself). Tail-anchored to specific known roots — never
@@ -174,17 +151,8 @@ def is_checked(path: Path) -> bool:
     return path.suffix in {".svelte", ".css"}
 
 
-def is_grandfathered(posix_path: str, grandfathered: set[str]) -> bool:
-    return any(posix_path.endswith(entry) for entry in grandfathered)
-
-
 def main(argv: list[str]) -> int:
     failed = False
-    # (category, grandfather set, label for the warn/summary line).
-    axes = [
-        ("style", GRANDFATHERED, "style"),
-        ("font", GRANDFATHERED_FONT_FAMILY, "font-family"),
-    ]
     for raw in argv:
         path = Path(raw)
         if not is_checked(path) or not path.is_file():
@@ -193,16 +161,9 @@ def main(argv: list[str]) -> int:
         if not violations:
             continue
         rel = path.as_posix()
-        for category, grandfathered, label in axes:
-            group = [(ln, msg) for ln, cat, msg in violations if cat == category]
-            if not group:
-                continue
-            if is_grandfathered(rel, grandfathered):
-                print(f"warn  {rel}: {len(group)} non-token {label} value(s) (grandfathered - clean up when you next work here).")
-                continue
-            failed = True
-            for line_no, message in group:
-                print(f"FAIL  {rel}:{line_no}: {message}")
+        failed = True
+        for line_no, _category, message in violations:
+            print(f"FAIL  {rel}:{line_no}: {message}")
     if failed:
         print("Style values come from the token layer (docs/design/design-language.md).")
     return 1 if failed else 0

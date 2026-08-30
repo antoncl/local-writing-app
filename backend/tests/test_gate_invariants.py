@@ -886,9 +886,26 @@ def test_the_hook_feeds_the_new_guards_their_files():
             assert any("check_http_client" in " ".join(cmd) for cmd in commands), f
 
 
-def test_the_new_guard_sets_are_ratcheted():
-    """A grandfather set nothing watches can grow silently — the whole failure
-    the ratchet exists to stop. Pin that both new guards are registered."""
+def test_the_guards_have_no_grandfather_escape_hatch():
+    """#1681 removed the per-file GRANDFATHERED sets from every guard, so a
+    violation always fails — there is nothing to add to make the red go away.
+
+    Pin the removal so it can't creep back: no guard still exposes a
+    GRANDFATHERED set or an `is_grandfathered` helper, and the exemption ratchet
+    no longer watches one (only the style guard's GENERATED_ROOTS build-output
+    list remains a watchable exemption)."""
+    for name in (
+        "check_file_size",
+        "check_style_tokens",
+        "check_layer_imports",
+        "check_http_client",
+        "check_svelte_runes",
+    ):
+        module = _load_script(name)
+        assert not hasattr(module, "GRANDFATHERED"), f"{name} still has a GRANDFATHERED set"
+        assert not hasattr(module, "GRANDFATHERED_FONT_FAMILY"), f"{name} still has GRANDFATHERED_FONT_FAMILY"
+        assert not hasattr(module, "is_grandfathered"), f"{name} still has is_grandfathered()"
     exemptions = _load_script("check_exemptions")
-    assert "scripts/check_layer_imports.py" in exemptions.GUARD_SETS
-    assert "scripts/check_http_client.py" in exemptions.GUARD_SETS
+    assert exemptions.GUARD_SETS == {"scripts/check_style_tokens.py": ("GENERATED_ROOTS",)}, (
+        "the only watchable exemption left is the style guard's GENERATED_ROOTS list"
+    )

@@ -2,8 +2,8 @@
 """Source-file size guard — the machine-enforced half of the "no monolithic
 files" rule (CLAUDE.md). Counts raw lines and:
 
-  * FAILS (exit 1) if any checked file is >= HARD_FAIL lines, unless it is
-    explicitly grandfathered below.
+  * FAILS (exit 1) if any checked file is >= HARD_FAIL lines. There is no
+    per-file exemption (#1681): a file over the cap must be split.
   * WARNS (still exit 0) from WARN lines up, so growth toward the cap is
     visible before it blocks.
 
@@ -24,21 +24,9 @@ WARN = 1200
 HARD_FAIL = 1500
 EXTENSIONS = {".py", ".svelte", ".ts", ".tsx", ".css"}
 
-# Files knowingly over the cap, exempt from the hard FAIL until a dedicated
-# split. They still warn. Remove an entry once it is back under HARD_FAIL.
-# Stored repo-relative with forward slashes; matched against the path tail.
-# Empty: every source file is under the cap (#76). Add an entry only to
-# temporarily exempt a NEW pre-split file while it is being broken up.
-GRANDFATHERED: set[str] = set()
-
-
 def line_count(path: Path) -> int:
     with path.open("rb") as handle:
         return sum(1 for _ in handle)
-
-
-def is_grandfathered(posix_path: str) -> bool:
-    return any(posix_path.endswith(entry) for entry in GRANDFATHERED)
 
 
 def main(argv: list[str]) -> int:
@@ -49,11 +37,9 @@ def main(argv: list[str]) -> int:
             continue
         rel = path.as_posix()
         count = line_count(path)
-        if count >= HARD_FAIL and not is_grandfathered(rel):
+        if count >= HARD_FAIL:
             print(f"FAIL  {rel}: {count} lines (cap {HARD_FAIL}) - split before committing.")
             failed = True
-        elif count >= HARD_FAIL:
-            print(f"warn  {rel}: {count} lines (over {HARD_FAIL}, grandfathered - split when you next work here).")
         elif count >= WARN:
             print(f"warn  {rel}: {count} lines (approaching the {HARD_FAIL}-line cap).")
     return 1 if failed else 0

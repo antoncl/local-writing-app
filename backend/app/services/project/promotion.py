@@ -389,7 +389,12 @@ class PromotionMixin:
             travels=sorted(travels_metadata),
             stays_in_origin=stay_items,
             invisible_at_destination=sorted(invisible),
-            also_promoted=[index.by_id[member_id].title for member_id in to_promote],
+            # Empty on a blocked plan: the classify loop may have collected some
+            # promotable members before hitting the one that blocks, but nothing
+            # cascades when the commit is refused, so don't advertise it.
+            also_promoted=(
+                [index.by_id[member_id].title for member_id in to_promote] if blocked_reason is None else []
+            ),
             resolves_differently=resolves_differently,
             blocked_reason=blocked_reason,
         )

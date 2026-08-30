@@ -150,6 +150,37 @@ class PromotePromptTests(unittest.TestCase):
         self.assertEqual(series_index.by_id["prompta"].source_layer_id, self.series_layer_id)
         self.assertEqual(series_index.by_id["snip"].source_layer_id, self.series_layer_id)
 
+    # --- 2b: a closure member owned by an intermediate ancestor blocks -------
+
+    def test_cascade_member_owned_by_intermediate_ancestor_is_blocked(self) -> None:
+        universe_layer_id = self.service._metadata_schema_layer_id(self.universe)
+        # Two included snippets: `asnip` owned in book01 (promotable, classified
+        # FIRST since closure is id-sorted), `zseriessnip` owned at the SERIES —
+        # between book01 (origin) and the universe destination, so unpromotable.
+        self._write_ancestor_prompt(self.root, "asnip", "A Snip", body="a", entry_type="prompt:snippet")
+        self._write_ancestor_prompt(
+            self.series, "zseriessnip", "Z Series Snip", body="z", entry_type="prompt:snippet"
+        )
+        self._write_ancestor_prompt(
+            self.root, "bookp", "Book Prompt", body='{% include "asnip" %}{% include "zseriessnip" %}\n'
+        )
+
+        # Promote the book prompt UP PAST series, to the universe: the series
+        # snippet is not visible there and can't be lifted from book01's scope.
+        plan = self.service.preview_prompt_promotion("bookp", universe_layer_id)
+        self.assertIsNotNone(plan.blocked_reason)
+        assert plan.blocked_reason is not None
+        self.assertIn("Z Series Snip", plan.blocked_reason)
+        # A blocked plan advertises no cascade, even though `asnip` was
+        # classified promotable before the loop hit the member that blocks.
+        self.assertEqual(plan.also_promoted, [])
+
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.promote_prompt_entry("bookp", universe_layer_id)
+        self.assertEqual(ctx.exception.status_code, 422)
+        # Nothing moved.
+        self._find_prompt_path(self.root, "bookp")
+
     # --- 3 (★): dynamic include is refused ----------------------------------
 
     def test_dynamic_include_is_refused(self) -> None:

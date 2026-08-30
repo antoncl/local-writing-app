@@ -35,6 +35,7 @@
   import IconPicker from "@/components/widgets/IconPicker.svelte";
   import { anchoredPopover } from "@/lib/actions/anchoredPopover";
   import { fieldIconClass, fieldTypeLabel } from "@/lib/utils/fieldIcons";
+  import { getSwatch } from "@/lib/utils/colors";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import {
     effectiveFieldHidden,
@@ -189,6 +190,13 @@
   const inheritedIcon = $derived(
     selectedSchemaTypeId ? (metadataSchema?.entry_types[selectedSchemaTypeId]?.icon ?? null) : null,
   );
+  // The resolved inherited colour, previewed on the swatch as a dashed dot when
+  // this type sets no own-colour (#1440) — so the swatch carries the "inherits …"
+  // hint the old caption spelled out. Null once an own-colour is chosen.
+  const inheritedColorId = $derived(
+    selectedSchemaTypeId ? (metadataSchema?.entry_types[selectedSchemaTypeId]?.color ?? null) : null,
+  );
+  const inheritedColorHex = $derived(!draftColor ? (getSwatch(inheritedColorId)?.hex ?? null) : null);
 
   // Type icon popover (#316) — mirrors the field-icon picker in
   // SchemaFieldInlineEditor: a tile button toggles the shared IconPicker. The
@@ -353,76 +361,63 @@
       </select>
     </label>
   {/if}
-  <label>
-    Type name
-    <input readonly={schemaTypeReadonly} value={draftName} placeholder="Faction" oninput={(event) => handleNameInput(event.currentTarget.value)} />
+  <div class="schema-type-name-block">
+    <label class="stn-label" for="schema-type-name-input">Type name</label>
+    <!-- Icon + colour ARE the type's identity — they mark it in the Types tree
+         and on every chip — so they sit here beside the name as its avatar,
+         not as body rows below (#1656). Both persist as a project-layer overlay
+         on built-in types too (#1644, ADR-0029 §A); the shipped declaration is
+         never forked. -->
+    <div class="schema-type-identity-header">
+      <div class="sti-icon-anchor">
+        <button
+          type="button"
+          class="sfr-tile sti-icon-btn"
+          class:inheriting={!draftIcon}
+          aria-label="Choose icon"
+          title={draftIcon ? "Choose icon" : inheritedIcon ? `Inherits ${inheritedIcon} — choose to override` : "Choose icon (none set)"}
+          bind:this={iconBtnEl}
+          onclick={() => (iconPickerOpen = !iconPickerOpen)}
+        >
+          <!-- Own icon, else the resolved inherited one (dashed via .inheriting);
+               with neither, a plus reads as "add an icon". -->
+          <i class={`ti ti-${draftIcon || inheritedIcon || "plus"}`} aria-hidden="true"></i>
+        </button>
+        {#if iconPickerOpen}
+          <div class="sti-icon-pop" use:anchoredPopover={{ anchor: iconBtnEl }}>
+            <IconPicker
+              value={draftIcon}
+              defaultGlyph={inheritedIcon || "category"}
+              fieldLabel={draftName || "type"}
+              onSelect={(next) => (draftIcon = next)}
+              onClose={() => (iconPickerOpen = false)}
+            />
+          </div>
+        {/if}
+      </div>
+      <!-- Unset own-colour previews the resolved inherited colour as a dashed
+           dot (SwatchPicker placeholderHex, #1440), so the swatch itself carries
+           the "inherits …" hint the old caption spelled out. -->
+      <SwatchPicker bind:value={draftColor} placeholderHex={inheritedColorHex} />
+      <input
+        id="schema-type-name-input"
+        class="stn-input"
+        readonly={schemaTypeReadonly}
+        value={draftName}
+        placeholder="Faction"
+        oninput={(event) => handleNameInput(event.currentTarget.value)}
+      />
+    </div>
     {#if draftTypeId}
       <small class="type-id-caption" title="Identifier used in YAML and template includes (generated from the type name)">id: <code>{draftTypeId}</code></small>
     {/if}
-  </label>
+  </div>
   <div class="schema-type-identity">
     <span class="kind-pill kind-{schemaTypeKind}">{schemaTypeKind}</span>
     {#if schemaTypeParent}
       {@const parentDef = metadataSchema?.entry_types[schemaTypeParent]}
       <span class="extends-label"><i class="ti ti-arrow-up" aria-hidden="true"></i> extends</span>
       <span class="extends-pill">{nodeTypeDisplayName(schemaTypeParent, parentDef)}</span>
-    {/if}
-  </div>
-  <div class="schema-type-color-row">
-    <span>Color</span>
-    <!-- Editable on built-in types too (#1644): the swatch persists as a
-         project-layer overlay (ADR-0029 §A), like this type's field/group
-         overlays — the built-in's shipped declaration is never forked. -->
-    <SwatchPicker bind:value={draftColor} />
-    {#if !draftColor && selectedSchemaTypeId}
-      {@const inherited = metadataSchema?.entry_types[selectedSchemaTypeId]?.color}
-      {#if inherited}
-        <small class="muted">inherits <code>{inherited}</code> from parent</small>
-      {:else}
-        <small class="muted">no color (chips fall back to the kind default)</small>
-      {/if}
-    {/if}
-  </div>
-  <!-- Type icon (#316): the mnemonic twin of Color, same author gesture as a
-       field's icon. A tile toggles the shared IconPicker; unset falls back to
-       the resolved inherited icon (parent chain), shown dashed. Editable on
-       built-in types too (#1644): the icon persists as a project-layer overlay,
-       exactly like the color swatch above. -->
-  <div class="schema-type-icon-row">
-    <span>Icon</span>
-    <div class="sti-icon-anchor">
-      <button
-        type="button"
-        class="sfr-tile sti-icon-btn"
-        class:inheriting={!draftIcon}
-        aria-label="Choose icon"
-        title="Choose icon"
-        bind:this={iconBtnEl}
-        onclick={() => (iconPickerOpen = !iconPickerOpen)}
-      >
-        <!-- Own icon, else the resolved inherited one; when the type has
-             neither, a plus reads as "add an icon" (not a stand-in glyph that
-             would contradict the "no icon" hint). -->
-        <i class={`ti ti-${draftIcon || inheritedIcon || "plus"}`} aria-hidden="true"></i>
-      </button>
-      {#if iconPickerOpen}
-        <div class="sti-icon-pop" use:anchoredPopover={{ anchor: iconBtnEl }}>
-          <IconPicker
-            value={draftIcon}
-            defaultGlyph={inheritedIcon || "category"}
-            fieldLabel={draftName || "type"}
-            onSelect={(next) => (draftIcon = next)}
-            onClose={() => (iconPickerOpen = false)}
-          />
-        </div>
-      {/if}
-    </div>
-    {#if !draftIcon && selectedSchemaTypeId}
-      {#if inheritedIcon}
-        <small class="muted">inherits <code>{inheritedIcon}</code> from parent</small>
-      {:else}
-        <small class="muted">no icon</small>
-      {/if}
     {/if}
   </div>
   {#if selectedSchemaTypeId}
@@ -847,36 +842,31 @@
     color: var(--text-2);
   }
 
-  /* Color row (label · swatch · inherited hint). */
-  .schema-type-color-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: var(--fs-md);
+  /* Identity header (#1656): the type's avatar — icon tile · colour swatch ·
+     name — on one line, since icon + colour ARE the type's identity (they mark
+     it in the Types tree and on chips). Replaces the old standalone Color / Icon
+     rows; the inherited-state hints now ride the controls (dashed swatch/tile +
+     tooltip). */
+  .schema-type-name-block {
+    display: grid;
+    gap: 5px;
   }
-  .schema-type-color-row > span:first-child {
-    min-width: 80px;
+  .stn-label {
+    display: block;
+    font-size: var(--fs-md);
     color: var(--text-2);
   }
-  .schema-type-color-row small {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-  }
-
-  /* Icon row (#316): mirrors the color row's label/hint grammar. */
-  .schema-type-icon-row {
+  .schema-type-identity-header {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: var(--fs-md);
+    gap: 8px;
   }
-  .schema-type-icon-row > span:first-child {
-    min-width: 80px;
-    color: var(--text-2);
-  }
-  .schema-type-icon-row small {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
+  /* Fills the row beside the fixed-size icon tile + swatch (overrides the global
+     input width:100%). */
+  .stn-input {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
   }
   .sti-icon-anchor {
     position: relative;

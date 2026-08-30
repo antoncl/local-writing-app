@@ -74,8 +74,9 @@ class PaneViewsController {
     const restored: Record<string, string | null> = {};
     for (const kind of new Set([...Object.keys(this.views), ...storedSelectionKinds()])) {
       const saved = loadSelection(kind);
-      // A built-in extra (e.g. "Openable chats") is a valid selection even though
-      // it is not a saved node — it is frontend-synthesized (builtinViews).
+      // A built-in extra (e.g. "Openable chats") is a valid selection even when
+      // no node exists yet — frontend-synthesized (builtinViews) until the first
+      // UI-state write materializes it backend-side (#1682).
       const valid = saved && ((this.views[kind] ?? []).some((v) => v.id === saved) || isBuiltinExtraViewId(saved));
       restored[kind] = valid ? saved : null;
     }
@@ -113,8 +114,9 @@ class PaneViewsController {
     this.specs = map;
     this.appearances = appearanceMap;
 
-    // Drop any selection that no longer resolves — but keep frontend-synthesized
-    // built-in extras, which are never in the backend spec map.
+    // Drop any selection that no longer resolves — but keep built-in extras,
+    // which enter the backend spec map only once materialized (#1682) and are
+    // synthesized locally until then.
     for (const [kind, id] of Object.entries(this.selected)) {
       if (id && !map.has(id) && !isBuiltinExtraViewId(id)) this.select(kind, null);
     }

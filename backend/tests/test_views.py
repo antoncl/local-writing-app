@@ -17,7 +17,7 @@ from project_fixtures import open_test_project
 from app.main import app
 from app.models import NodePickerConfig
 from app.models_views import ViewSpec
-from app.services.project.views import ViewsMixin
+from app.services.project.views import BUILTIN_EXTRA_VIEWS, ViewsMixin
 from app.view_grammar_generated import NestMatch, NestOp, ViewExpr
 
 
@@ -56,6 +56,41 @@ def test_default_view_specs_match_frontend() -> None:
             "group_by": dumped.get("group_by"),
         }
         assert got == expected, f"backend default for {kind!r} drifted from the frontend canonical: {got} != {expected}"
+
+
+def test_builtin_extra_view_specs_match_frontend() -> None:
+    """#1682: the backend `_builtin_extra_view_spec` and the frontend
+    `builtinViews` are two hand-written builders that MUST agree (the backend
+    materializes the extra on the first UI-state write; the frontend synthesizes
+    it for the switcher). Both assert the SAME canonical fixture, exactly like
+    the default-spec golden above. Roots fixed at the schema-less `<kind>:base`
+    fallback the frontend fixture uses."""
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "frontend" / "src" / "lib" / "views" / "__fixtures__" / "builtin-extra-view-specs.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    fixture_ids = [key for key in fixture if key != "_comment"]
+    # Every registered extra is in the golden and vice versa — a new extra must
+    # join the fixture (and the frontend suite) to ship.
+    assert sorted(fixture_ids) == sorted(BUILTIN_EXTRA_VIEWS)
+
+    def _strip_keep(obj: object) -> object:
+        # Same normalization as the default golden above: the frontend leaves the
+        # filter's default `mode: "keep"` implicit; the Pydantic dump makes it
+        # explicit.
+        if isinstance(obj, dict):
+            return {k: _strip_keep(v) for k, v in obj.items() if not (k == "mode" and v == "keep")}
+        if isinstance(obj, list):
+            return [_strip_keep(x) for x in obj]
+        return obj
+
+    for view_id in fixture_ids:
+        expected = fixture[view_id]
+        title, kind = BUILTIN_EXTRA_VIEWS[view_id]
+        dumped = ViewsMixin._builtin_extra_view_spec(view_id, f"{kind}:base").model_dump(exclude_none=True)
+        got = {"title": title, "expr": _strip_keep(dumped["expr"]), "sort_by": dumped["sort"]["by"]}
+        assert got == expected, f"backend builtin extra {view_id!r} drifted from the frontend canonical: {got} != {expected}"
 
 
 class ViewCrudTests(unittest.TestCase):
@@ -692,6 +727,68 @@ class ViewUiStateTests(unittest.TestCase):
         res = self.client.put(
             "/api/views/view_default_nonsense/ui", json={"ui": {"collapsed": ["x"]}}
         )
+        self.assertEqual(res.status_code, 422, res.text)
+
+    # ----- builtin extra views (#1682) — the view_default_* lifecycle applied
+    # ----- to the curated extras ("Runnable prompts", "Openable chats").
+
+    def test_unmaterialized_builtin_extra_reads_as_empty_200(self) -> None:
+        # Seeding fold state for a builtin extra must not 4xx (#1665's rule,
+        # extended): it reads as the honest in-memory node, off-disk until a
+        # UI-state write materializes it.
+        res = self.client.get("/api/views/view_builtin_prompt_runnable")
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertTrue(body["system"])
+        self.assertEqual(body["title"], "Runnable prompts")
+        self.assertEqual(body["spec"]["kind"], "prompt")
+        self.assertEqual(body["ui"]["collapsed"], [])
+        listed = self.client.get("/api/views").json()["entries"]
+        self.assertEqual([v for v in listed if v["id"] == "view_builtin_prompt_runnable"], [])
+
+    def test_first_ui_write_materializes_builtin_extra(self) -> None:
+        # The exact write the appearance control sends (ADR-0069) — the one that
+        # 404'd before #1682. It materializes the read-only extra with the
+        # runnable filter (backend-stamped vocabulary, #1684).
+        res = self.client.put(
+            "/api/views/view_builtin_prompt_runnable/ui",
+            json={"ui": {"appearance": {"density": "dense"}}},
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertTrue(body["system"])
+        self.assertEqual(body["title"], "Runnable prompts")
+        pred = body["spec"]["expr"]["filter"]["pred"]["field"]
+        self.assertEqual(pred["key"], "runnable")
+        self.assertEqual(pred["op"], "overlap")
+        self.assertEqual(pred["value"], ["runnable"])
+        self.assertEqual(body["ui"]["appearance"]["density"], "dense")
+        # Listed once; a later fold write MERGES onto the same node without
+        # wiping the appearance (the two ui writers are independent).
+        listed = self.client.get("/api/views").json()["entries"]
+        self.assertEqual(len([v for v in listed if v["id"] == "view_builtin_prompt_runnable"]), 1)
+        fold = self.client.put(
+            "/api/views/view_builtin_prompt_runnable/ui", json={"ui": {"collapsed": ["node:x"]}}
+        )
+        self.assertEqual(fold.status_code, 200, fold.text)
+        self.assertEqual(fold.json()["ui"]["appearance"]["density"], "dense")
+        self.assertEqual(fold.json()["ui"]["collapsed"], ["node:x"])
+        listed2 = self.client.get("/api/views").json()["entries"]
+        self.assertEqual(len([v for v in listed2 if v["id"] == "view_builtin_prompt_runnable"]), 1)
+
+    def test_materialized_builtin_extra_rejects_spec_edit(self) -> None:
+        self.client.put(
+            "/api/views/view_builtin_chat_openable/ui", json={"ui": {"collapsed": ["group:x"]}}
+        )
+        edit = self.client.put(
+            "/api/views/view_builtin_chat_openable",
+            json={"title": "Openable chats", "spec": {"kind": "chat", "expr": {"tagged": "x"}}},
+        )
+        self.assertEqual(edit.status_code, 403, edit.text)
+
+    def test_unknown_builtin_extra_id_is_422(self) -> None:
+        self.assertEqual(self.client.get("/api/views/view_builtin_nonsense").status_code, 422)
+        res = self.client.put("/api/views/view_builtin_nonsense/ui", json={"ui": {"collapsed": ["x"]}})
         self.assertEqual(res.status_code, 422, res.text)
 
 

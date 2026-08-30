@@ -1,0 +1,13 @@
+{
+  "_comment": "Canonical shape of the curated builtin EXTRA views (#1682) — the views a kind ships beside its default (frontend builtinViews.ts synthesizes them for the switcher; backend _builtin_extra_view_spec materializes them on the first UI-state write). Roots fixed at the schema-less <kind>:base fallback, matching default-view-specs.json. Asserted by frontend builtinViews.golden.test.ts AND backend test_views.py::test_builtin_extra_view_specs_match_frontend so the two hand-written builders can't drift. Update this when an extra's shape intentionally changes.",
+  "view_builtin_prompt_runnable": {
+    "title": "Runnable prompts",
+    "expr": { "filter": { "of": { "descendants_of": "prompt:base" }, "pred": { "field": { "key": "runnable", "op": "overlap", "value": ["runnable"] } } } },
+    "sort_by": "manual"
+  },
+  "view_builtin_chat_openable": {
+    "title": "Openable chats",
+    "expr": { "filter": { "of": { "descendants_of": "chat:base" }, "pred": { "field": { "key": "seed_disposition", "op": "disjoint", "value": ["Revise entities"] } } } },
+    "sort_by": "manual"
+  }
+}

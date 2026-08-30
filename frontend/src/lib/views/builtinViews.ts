@@ -3,11 +3,13 @@
 //   [0] the roster default (selected when nothing is chosen — the id the fold
 //       state materializes to, `view_default_<kind>`), then any curated extras.
 // The switcher renders each read-only (Duplicate-to-edit, never Edit/Delete);
-// `paneViews.specFor` resolves an extra's id to its spec here (extras are
-// frontend-synthesized, not backend nodes — a filter/roster carries no fold
-// state to persist). `chat` ships "Openable chats" and `prompt` ships "Runnable
-// prompts"; every other kind keeps its single default, so `defaultView` parity
-// with the backend is untouched.
+// `paneViews.specFor` resolves an extra's id to its spec here. Extras share the
+// default's backend lifecycle (#1682): synthesized until the first UI-state
+// write materializes a read-only system node, so appearance and fold state
+// persist for them too — the backend mirror is `_builtin_extra_view_spec`,
+// pinned to this file by the builtin-extra-view-specs golden. `chat` ships
+// "Openable chats" and `prompt` ships "Runnable prompts"; every other kind
+// keeps its single default.
 
 import { defaultView, kindUniverseExpr } from "@/lib/views/evaluateView";
 import { SEED_DISPOSITION_FIELD } from "@/lib/views/chatNodes";

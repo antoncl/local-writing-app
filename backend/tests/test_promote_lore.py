@@ -95,12 +95,17 @@ class PromoteLoreTests(unittest.TestCase):
         }
 
     def _raw_metadata(self, folder: Path, node_id: str) -> dict:
-        """The metadata literally on disk at `folder/lore/{node_id}.md` — unlike
-        `read_lore_entry`, this does NOT fold in any origin override, so it is
-        what a promoted node's *destination* file actually carries."""
-        path = folder / "lore" / f"{node_id}.md"
-        front_matter = self.service._read_front_matter_only(path, strict=True)
-        return front_matter.get("metadata") or {}
+        """The metadata literally on disk for `node_id` under `folder/lore/`,
+        located by front-matter id — the file is named from the *title*
+        (`_filepath_for_new_node`), not `{id}.md`, and a case-insensitive
+        filesystem masks that (a `Alice.md`/`alice.md` mismatch failed only on
+        the Linux CI). Unlike `read_lore_entry` this does NOT fold in any origin
+        override, so it is what a promoted node's destination file carries."""
+        for path in sorted((folder / "lore").glob("*.md")):
+            front_matter = self.service._read_front_matter_only(path, strict=True)
+            if (front_matter.get("id") or path.stem) == node_id:
+                return front_matter.get("metadata") or {}
+        raise AssertionError(f"No lore node {node_id!r} on disk under {folder}")
 
     # --- 1: moves the file, keeps the id ---------------------------------
 

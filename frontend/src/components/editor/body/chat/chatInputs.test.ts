@@ -6,7 +6,10 @@ import {
   displayInputValues,
   encodeChatInputDrafts,
   endsInUserTurn,
+  seedPickInput,
+  seedPickInputDraft,
   seedSubjectEntryInput,
+  subjectRefFromEntryType,
   ttlChipsFor,
 } from "./chatInputs";
 import { isInputMissing } from "@/lib/utils/promptInputs";
@@ -82,6 +85,80 @@ describe("seedSubjectEntryInput (#1094)", () => {
   it("scalar target or no `entry` input: falls back to the bare id (unchanged)", () => {
     expect(seedSubjectEntryInput(promptWithEntry("entity_ref"), SUBJECT)).toBe("plot_abc");
     expect(seedSubjectEntryInput(promptWithEntry(null), SUBJECT)).toBe("plot_abc");
+  });
+});
+
+describe("seedPickInput / seedPickInputDraft — bare-id seeds erased to \"[]\" (#1485)", () => {
+  // A prompt whose `as_of` input is a context_pick — impersonate's time-travel
+  // anchor. The old launcher seeded a bare scene id, which the wire coercion
+  // erased to "[]" → entry(…, at=[]) read the character at BOOK-START and the
+  // slider was silently ignored.
+  const promptWithAsOf = (type: PromptInputDefinition["type"] | null): PromptEntrySummary =>
+    ({ id: "p", title: "P", inputs: type ? [{ name: "as_of", type }] : [] }) as PromptEntrySummary;
+  const SCENE = { id: "scene_9", kind: "manuscript" as const, title: "scene_9", entryType: "manuscript:scene" };
+
+  it("seeds a context_pick as_of as an array-shaped ref that survives coercion", () => {
+    const seeded = seedPickInput(promptWithAsOf("context_pick"), "as_of", SCENE);
+    expect(seeded).toEqual([{ id: "scene_9", kind: "manuscript", title: "scene_9", entry_type: "manuscript:scene" }]);
+    const draft = decodeChatInputDrafts({ as_of: seeded }).as_of;
+    expect(isInputMissing(input("context_pick"), draft)).toBe(false);
+  });
+
+  it("a scalar as_of (scene_ref) or a prompt without the input keeps the bare id", () => {
+    expect(seedPickInput(promptWithAsOf("scene_ref"), "as_of", SCENE)).toBe("scene_9");
+    expect(seedPickInput(promptWithAsOf(null), "as_of", SCENE)).toBe("scene_9");
+  });
+
+  it("the draft form encodes a context_pick as the wire string (the create→revise handoff)", () => {
+    // Site 2: onCreated wrote a bare id into the context_pick `entry` DRAFT —
+    // the tolerant reader flipped to revise mode while the send path shipped
+    // "[]" and the template took the create branch. The draft seed must be the
+    // encoded ref string, which BOTH readers agree on.
+    const draft = seedPickInputDraft(promptWithEntry("context_pick"), "entry", SUBJECT);
+    expect(typeof draft).toBe("string");
+    expect(JSON.parse(draft)).toEqual([
+      { id: "plot_abc", kind: "plot", title: "Rescue arc", entry_type: "plot:plotline" },
+    ]);
+    expect(isInputMissing(input("context_pick"), draft)).toBe(false);
+  });
+
+  it("the draft form keeps a bare id for a scalar target", () => {
+    expect(seedPickInputDraft(promptWithEntry("entity_ref"), "entry", SUBJECT)).toBe("plot_abc");
+  });
+
+  it("the draft form stringifies an entity_ref_list — its draft is a JSON array too (#1703 review)", () => {
+    // A bare id here would throw in isInputMissing and read "Missing required"
+    // — the #1094 failure one type over.
+    const draft = seedPickInputDraft(promptWithEntry("entity_ref_list"), "entry", SUBJECT);
+    expect(draft).toBe('["plot_abc"]');
+    expect(isInputMissing(input("entity_ref_list"), draft)).toBe(false);
+  });
+
+  it("reads EFFECTIVE inputs: a snippet-contributed context_pick still gets the ref shape", () => {
+    // ADR-0061: an included snippet's inputs are effective but not own — the
+    // strip renders and coerces them, so the seeder must see them too.
+    const inherited = {
+      id: "p",
+      title: "P",
+      inputs: [],
+      effective_inputs: [{ name: "as_of", type: "context_pick" }],
+    } as unknown as PromptEntrySummary;
+    const SCENE2 = { id: "scene_9", kind: "manuscript" as const, title: "The Vault", entryType: "manuscript:scene" };
+    expect(seedPickInput(inherited, "as_of", SCENE2)).toEqual([
+      { id: "scene_9", kind: "manuscript", title: "The Vault", entry_type: "manuscript:scene" },
+    ]);
+  });
+});
+
+describe("subjectRefFromEntryType", () => {
+  it("derives the kind from the FQN prefix, defaulting to lore", () => {
+    expect(subjectRefFromEntryType("plot_1", "Arc", "plot:card")).toEqual({
+      id: "plot_1",
+      kind: "plot",
+      title: "Arc",
+      entryType: "plot:card",
+    });
+    expect(subjectRefFromEntryType("x", "X", "")).toEqual({ id: "x", kind: "lore", title: "X", entryType: undefined });
   });
 });
 

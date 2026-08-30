@@ -39,7 +39,7 @@
     promptEntriesOfferedOn,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
-  import { seedSubjectEntryInput } from "@/components/editor/body/chat/chatInputs";
+  import { seedPickInput, seedSubjectEntryInput } from "@/components/editor/body/chat/chatInputs";
   import type {
     ChatSessionSummary,
     MetadataSchema,
@@ -52,6 +52,7 @@
     subjectTitle = "",
     subjectEntryType = "",
     asOfScene = "",
+    asOfSceneTitle = "",
     promptEntries,
     metadataSchema,
     hostPaneId = null,
@@ -70,6 +71,11 @@
     // Launch seeds it onto the prompt's `as_of` scene input so a subject-anchored
     // conversation (impersonate) reads its subject as-of here. "" = book-start.
     asOfScene?: string;
+    // The anchor scene's display title, for the seeded ref (#1485 review): a
+    // ref's stored title SHADOWS live title lookups at display time, so a
+    // visible `as_of` (a cloned impersonate) would otherwise forever read the
+    // raw scene id in the Context door. Falls back to the id when absent.
+    asOfSceneTitle?: string;
     promptEntries: PromptEntrySummary[];
     metadataSchema: MetadataSchema | null;
     // The editor pane hosting this panel; a launched chat registers as its
@@ -145,8 +151,17 @@
     // Seed the read anchor onto the prompt's `as_of` scene input (ADR-0055 §1) —
     // hidden from the chat strip but persisted, so impersonate reads the subject
     // as-of the slider's scene; omitted at book-start (a prompt without an
-    // `as_of` input ignores the seed).
-    if (asOfScene) seededInputs.as_of = asOfScene;
+    // `as_of` input ignores the seed). Shape-aware (#1485): `as_of` is a
+    // `context_pick` on impersonate, and a bare scene id round-trips through
+    // the wire coercion to "[]" — silently reading the character at book-start.
+    if (asOfScene) {
+      seededInputs.as_of = seedPickInput(prompt, "as_of", {
+        id: asOfScene,
+        kind: "manuscript",
+        title: asOfSceneTitle || asOfScene,
+        entryType: "manuscript:scene",
+      });
+    }
     await chatSessions.openChatFromPromptEntry(prompt, seededInputs, null, {
       parentPaneId: hostPaneId,
       subject: subjectId,

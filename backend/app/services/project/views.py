@@ -99,6 +99,13 @@ class ViewsMixin:
         if index_entry is not None and index_entry.kind == "view":
             path = index_entry.path
         else:
+            # A `view_default_<kind>` default view has no file until the first fold
+            # materializes it (update_view_ui, §5). Return its honest in-memory
+            # default with empty fold state (a 200) rather than a 404, so seeding a
+            # fresh pane's collapse state never logs a 4xx (#1665). A materialized
+            # default has an index_entry and reads its real stored ui above.
+            if view_id.startswith(DEFAULT_VIEW_ID_PREFIX):
+                return self._default_view_node(view_id, ViewUiState())
             path = self._path_for_node_id(view_id, "view")
         front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
@@ -189,25 +196,46 @@ class ViewsMixin:
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         return self.list_views()
 
-    def _materialize_default_view(self, view_id: str, ui: ViewUiState) -> ViewNode:
-        """Write the read-only system default view node for a `view_default_<kind>`
-        id (ADR-0036 §5). Its spec is the kind's honest default (ADR-0037 §7) —
-        matching what the frontend's `defaultView(kind)` produces, so a later
-        Duplicate starts from the real default. Marked `system: true`
-        (Duplicate-not-Edit; save_view rejects it)."""
-        root = self._require_project()
+    def _default_view_node(self, view_id: str, ui: ViewUiState) -> ViewNode:
+        """The kind's honest in-memory default view for a `view_default_<kind>` id
+        (ADR-0036 §5) — spec = the kind's default (ADR-0037 §7), no file required.
+        Shared by read_view (an unmaterialized default → 200 with empty fold
+        state, #1665) and _materialize_default_view (which persists it on the
+        first fold). An unknown kind (no kind root) raises 422, so a genuinely
+        bogus id never becomes a silent 200. `system: true` (Duplicate-not-Edit)."""
         kind = view_id[len(DEFAULT_VIEW_ID_PREFIX):]
         root_type = self._kind_root_entry_type(kind)
         if not root_type:
             raise ProjectServiceError(f"No default view is defined for kind '{kind}'.", 422)
-        spec = self._default_view_spec(kind, root_type)
+        return ViewNode(
+            id=view_id,
+            title="Default",
+            revision="",
+            entry_type="view:view",
+            spec=self._default_view_spec(kind, root_type),
+            layout=self._parse_view_layout(None),
+            ui=ui,
+            system=True,
+            source_layer_id="",
+            source_layer_label="",
+        )
+
+    def _materialize_default_view(self, view_id: str, ui: ViewUiState) -> ViewNode:
+        """Persist the read-only system default view node for a `view_default_<kind>`
+        id (ADR-0036 §5) — the in-memory default (`_default_view_node`) written to
+        disk, so the pane's default (unselected) view is real-on-disk the moment
+        the user first folds it. `system: true` (Duplicate-not-Edit; save_view
+        rejects it); its spec matches the frontend's `defaultView(kind)` so a later
+        Duplicate starts from the real default."""
+        node = self._default_view_node(view_id, ui)
+        root = self._require_project()
         (root / "views").mkdir(parents=True, exist_ok=True)
         self._write_view_file(
             self._filepath_for_new_node(root / "views", view_id),
             view_id,
-            "Default",
-            "view:view",
-            spec,
+            node.title,
+            node.entry_type,
+            node.spec,
             ui=ui,
             system=True,
         )

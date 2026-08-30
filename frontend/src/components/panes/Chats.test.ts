@@ -17,7 +17,6 @@ import { metadataSchemaStore } from "@/lib/stores/schema";
 import type {
   ChatSessionSummary,
   MetadataSchema,
-  PromptContextStrategy,
   PromptEntrySummary,
   ViewSpec,
 } from "@/lib/types";
@@ -118,8 +117,9 @@ describe("Chats pane — designable view (ADR-0051 S6)", () => {
 });
 
 describe("Chats pane — Openable built-in view (ADR-0051 S6 follow-up)", () => {
-  // Only the chat root is needed now — openability is decided by each seeding
-  // prompt INSTANCE's own `context_strategy` (ADR-0065 S3), set directly below.
+  // Only the chat root is needed now — openability is the seeding prompt's
+  // backend-stamped `disposition` (#1684), carried on each fixture summary's
+  // `computed_metadata` the way the backend stamps it.
   const OPENABLE_SCHEMA = {
     entry_types: {
       "chat:chat_session": { name: "Chat", kind: "chat" },
@@ -127,19 +127,15 @@ describe("Chats pane — Openable built-in view (ADR-0051 S6 follow-up)", () => 
     fields: {},
   } as unknown as MetadataSchema;
 
-  const COMMIT_STRATEGY: PromptContextStrategy = {
-    output: { handler: "extract_to_node", commit: { review: "visual_diff" } },
-  };
-
-  function prompt(id: string, entryType: string, contextStrategy?: PromptContextStrategy | null): PromptEntrySummary {
+  function prompt(id: string, entryType: string, disposition: string): PromptEntrySummary {
     return {
       id,
       title: id,
       body: "",
       entry_type: entryType,
       metadata: {},
+      computed_metadata: { disposition, runnable: "" },
       inputs: [],
-      context_strategy: contextStrategy ?? null,
       source_layer_id: "layer_project",
       source_layer_label: "Project",
       is_library: false,
@@ -160,7 +156,7 @@ describe("Chats pane — Openable built-in view (ADR-0051 S6 follow-up)", () => 
         chat("c_free", "Freeform Chat"), // no seeding prompt
       ],
       spec,
-      [prompt("p_general", "prompt:general"), prompt("p_revise", "prompt:general", COMMIT_STRATEGY)],
+      [prompt("p_general", "prompt:general", "Chat"), prompt("p_revise", "prompt:general", "Revise entities")],
     );
     expect(screen.getByText("General Chat")).toBeInTheDocument();
     expect(screen.getByText("Freeform Chat")).toBeInTheDocument();

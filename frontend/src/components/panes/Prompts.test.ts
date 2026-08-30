@@ -11,7 +11,7 @@ import { render, screen, fireEvent } from "@/lib/test/component";
 import Prompts from "./Prompts.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
-import type { MetadataSchema, PromptContextStrategy, PromptEntrySummary } from "@/lib/types";
+import type { MetadataSchema, PromptEntrySummary } from "@/lib/types";
 
 // The Prompts view roster is `descendants_of prompt:base` (defaultView →
 // kindUniverseExpr), so the concrete type must be linked under the prompt root or
@@ -29,10 +29,13 @@ function libraryPrompt(id: string, title: string): PromptEntrySummary {
     id,
     title,
     body: "",
-    // ADR-0065 S3: roleplay collapsed to prompt:general; disposition here is
-    // untested (this describe covers hide/reveal only), so no context_strategy.
+    // ADR-0065 S3: roleplay collapsed to prompt:general. Disposition arrives
+    // backend-stamped (#1684); shelving itself is untested in the hide/reveal
+    // describe (its SCHEMA declares no computed fields), the stamp is just the
+    // realistic summary shape.
     entry_type: "prompt:general",
     metadata: {},
+    computed_metadata: { disposition: "Chat", runnable: "runnable" },
     inputs: [],
     source_layer_id: "layer_library",
     source_layer_label: "Library",
@@ -42,26 +45,55 @@ function libraryPrompt(id: string, title: string): PromptEntrySummary {
 
 const noop = () => {};
 
-// A schema for the disposition-shelving describe below — the dispositions
-// themselves are now read off each prompt INSTANCE's own `context_strategy`
-// (ADR-0065 S3), set directly by promptOf(); the schema only needs the prompt
-// root so the roster's `descendants_of prompt:base` view resolves.
+// A schema for the disposition-shelving describe below. The disposition VALUES
+// arrive backend-stamped in each summary's `computed_metadata` (#1684), set
+// directly by promptOf(); the schema declares `disposition`/`runnable` as
+// computed fields the way the resolved backend schema does — that is what
+// routes `fieldValue` to `computed_metadata`, and the declared option order is
+// the shelf order `show_empty` renders.
 const DISPOSITION_SCHEMA = {
   entry_types: {
     "prompt:base": { name: "Prompt" },
     "prompt:general": { name: "General", parent: "prompt:base" },
     "prompt:snippet": { name: "Snippet", parent: "prompt:base" },
   },
-  fields: {},
+  fields: {
+    disposition: {
+      name: "Disposition",
+      type: "computed",
+      category: "computed",
+      options: ["Continue", "Revise prose", "Chat", "Revise entities", "Snippets"].map((value) => ({
+        value,
+        label: value,
+      })),
+      computed: { function: "prompt_disposition", value_type: "select" },
+    },
+    runnable: {
+      name: "Runnable",
+      type: "computed",
+      category: "computed",
+      options: [{ value: "runnable", label: "Runnable" }],
+      computed: { function: "prompt_runnable", value_type: "select" },
+    },
+  },
 } as unknown as MetadataSchema;
 
 function promptOf(
   id: string,
   title: string,
   entry_type: string,
-  contextStrategy?: PromptContextStrategy | null,
+  disposition = "Chat",
+  runnable = "",
 ): PromptEntrySummary {
-  return { id, title, body: "", entry_type, metadata: {}, inputs: [], context_strategy: contextStrategy ?? null };
+  return {
+    id,
+    title,
+    body: "",
+    entry_type,
+    metadata: {},
+    computed_metadata: { disposition, runnable },
+    inputs: [],
+  };
 }
 
 function renderPane() {
@@ -86,19 +118,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Prompts pane — disposition shelves (#951)", () => {
-  it("groups the roster onto its disposition shelves, in shelf order", () => {
+describe("Prompts pane — disposition shelves (#951/#1684)", () => {
+  it("groups the roster onto the five declared shelves, in declared order", () => {
     metadataSchemaStore.set(DISPOSITION_SCHEMA);
     const { container } = render(Prompts, {
       props: {
         entries: [
-          // Deliberately out of shelf order to prove the pane clusters them.
-          promptOf("s", "A snippet", "prompt:snippet"),
-          promptOf("g", "Free chat", "prompt:general"),
-          promptOf("c", "Continue scene", "prompt:general", { output: { handler: "inline" } }),
-          promptOf("b", "Revise a character", "prompt:general", {
-            output: { handler: "extract_to_node", commit: { review: "visual_diff" } },
-          }),
+          // Deliberately out of shelf order to prove declared-option ordering.
+          promptOf("s", "A snippet", "prompt:snippet", "Snippets"),
+          promptOf("g", "Free chat", "prompt:general", "Chat"),
+          promptOf("c", "Continue scene", "prompt:general", "Continue"),
+          promptOf("b", "Revise a character", "prompt:general", "Revise entities"),
         ],
         onOpenEntry: noop,
         onNewEntry: noop,
@@ -110,9 +140,9 @@ describe("Prompts pane — disposition shelves (#951)", () => {
     const headings = Array.from(container.querySelectorAll(".node-row.group-header")).map((el) =>
       el.querySelector(".node-row-text")?.textContent?.trim(),
     );
-    // Only populated shelves appear (no replace_selection prompt → no "Revise prose"),
-    // and they appear in shelf order regardless of input order.
-    expect(headings).toEqual(["Continue", "Chat", "Revise entities", "Snippets"]);
+    // `show_empty` (#1684): ALL five declared shelves render in option order —
+    // the empty "Revise prose" shelf included — regardless of input order.
+    expect(headings).toEqual(["Continue", "Revise prose", "Chat", "Revise entities", "Snippets"]);
     // The rows themselves still render under their shelves.
     expect(screen.getByText("Continue scene")).toBeInTheDocument();
     expect(screen.getByText("Revise a character")).toBeInTheDocument();
@@ -169,8 +199,8 @@ describe("Prompts pane — ▶ Run affordance (#1433)", () => {
     render(Prompts, {
       props: {
         entries: [
-          promptOf("chat", "Free chat", "prompt:general"), // Chat, no offer_on → runnable
-          promptOf("cont", "Continue scene", "prompt:general", { output: { handler: "inline" } }), // Continue → not
+          promptOf("chat", "Free chat", "prompt:general", "Chat", "runnable"),
+          promptOf("cont", "Continue scene", "prompt:general", "Continue"),
         ],
         onOpenEntry: noop,
         onNewEntry: noop,
@@ -183,7 +213,8 @@ describe("Prompts pane — ▶ Run affordance (#1433)", () => {
 
   it("excludes a Chat prompt anchored to a host type via offer_on (e.g. impersonate)", () => {
     metadataSchemaStore.set(DISPOSITION_SCHEMA);
-    const impersonate = { ...promptOf("imp", "Impersonate", "prompt:general"), offer_on: ["lore:character"] };
+    // Backend stamps runnable "" for an offer_on-anchored Chat (#1684).
+    const impersonate = promptOf("imp", "Impersonate", "prompt:general", "Chat", "");
     render(Prompts, {
       props: { entries: [impersonate], onOpenEntry: noop, onNewEntry: noop, onCloneEntry: noop },
     });
@@ -195,7 +226,7 @@ describe("Prompts pane — ▶ Run affordance (#1433)", () => {
     const onRunEntry = vi.fn();
     render(Prompts, {
       props: {
-        entries: [promptOf("chat", "Free chat", "prompt:general")],
+        entries: [promptOf("chat", "Free chat", "prompt:general", "Chat", "runnable")],
         onOpenEntry: noop,
         onNewEntry: noop,
         onCloneEntry: noop,

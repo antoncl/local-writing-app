@@ -33,10 +33,64 @@ from app.models import (
 )
 from app.models.schema import PromptContextStrategy
 from app.services.ai.effective_inputs import SnippetSource
+from app.services.project.default_schema import (
+    PROMPT_DISPOSITION_CHAT,
+    PROMPT_DISPOSITION_CONTINUE,
+    PROMPT_DISPOSITION_REVISE_ENTITIES,
+    PROMPT_DISPOSITION_REVISE_PROSE,
+    PROMPT_DISPOSITION_SNIPPETS,
+    PROMPT_RUNNABLE_VALUE,
+)
 from app.services.project.errors import ProjectServiceError
 
 if TYPE_CHECKING:
+    from app.models.schema import MetadataSchema
     from app.services.ai.effective_inputs import EffectiveInputs
+
+# The closed output-handler vocabulary (ADR-0065) — the mirror of
+# `OutputHandlerKey` in frontend editor-core/outputHandlers.ts. Only the
+# `disposition` computation reads it backend-side; invocation itself stays a
+# frontend registry lookup.
+PROMPT_OUTPUT_HANDLER_INLINE = "inline"
+PROMPT_OUTPUT_HANDLER_EXTRACT = "extract_to_node"
+PROMPT_OUTPUT_HANDLER_FINALIZE = "finalize_scene"
+
+
+def prompt_disposition(strategy: PromptContextStrategy | None, *, is_snippet: bool) -> str:
+    """The shelf a prompt lands on (#951/#1684), from its own output contract.
+
+    Mirrors the frontend's retired `dispositionFor` exactly (promptNodes.ts,
+    pinned by test_prompt_disposition + the frontend label constants):
+    a snippet — by entry-type ancestry — has no invocation surface, whatever
+    its config; `finalize_scene` is a scene action with no editor surface; an
+    unrecognized handler is fail-closed uninvocable. Everything surface-less
+    shelves under Snippets. A missing/empty handler is a plain conversation,
+    which a `commit` capability upgrades to Revise entities.
+    """
+    if is_snippet:
+        return PROMPT_DISPOSITION_SNIPPETS
+    output = strategy.output if strategy else None
+    handler = (output.handler if output else "") or ""
+    if handler == PROMPT_OUTPUT_HANDLER_FINALIZE:
+        return PROMPT_DISPOSITION_SNIPPETS
+    if handler == PROMPT_OUTPUT_HANDLER_INLINE:
+        if output is not None and output.destination == "selection":
+            return PROMPT_DISPOSITION_REVISE_PROSE
+        return PROMPT_DISPOSITION_CONTINUE
+    if handler in ("", PROMPT_OUTPUT_HANDLER_EXTRACT):
+        if output is not None and output.commit is not None:
+            return PROMPT_DISPOSITION_REVISE_ENTITIES
+        return PROMPT_DISPOSITION_CHAT
+    return PROMPT_DISPOSITION_SNIPPETS
+
+
+def prompt_runnable(disposition: str, offer_on: list[str]) -> str:
+    """`runnable` iff a plain Chat with no `offer_on` anchor (#1433) — i.e.
+    launchable as a standalone conversation; "" otherwise (a select value, not
+    a boolean, so `overlap` filters work — see the field def)."""
+    if disposition == PROMPT_DISPOSITION_CHAT and not offer_on:
+        return PROMPT_RUNNABLE_VALUE
+    return ""
 
 
 class PromptEntriesMixin:
@@ -57,6 +111,7 @@ class PromptEntriesMixin:
         """
         root = self._require_project()
         index = self._build_node_index()
+        schema = self.read_metadata_schema()
         entries: list[PromptEntrySummary] = []
         for entry in index.by_id.values():
             if entry.kind != "prompt":
@@ -67,6 +122,8 @@ class PromptEntriesMixin:
                 continue
             raw_entry_type = front_matter.get("entry_type") or "prompt:base"
             entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "prompt:base"
+            offer_on = self._parse_offer_on(front_matter.get("offer_on"))
+            context_strategy = self._parse_context_strategy(front_matter.get("context_strategy"))
             entries.append(
                 PromptEntrySummary(
                     id=entry.id,
@@ -75,8 +132,11 @@ class PromptEntriesMixin:
                     entry_type=entry_type,
                     metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
                     inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
-                    offer_on=self._parse_offer_on(front_matter.get("offer_on")),
-                    context_strategy=self._parse_context_strategy(front_matter.get("context_strategy")),
+                    offer_on=offer_on,
+                    context_strategy=context_strategy,
+                    computed_metadata=self._prompt_computed_metadata(
+                        entry_type, context_strategy, offer_on, schema
+                    ),
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                     is_library=entry.is_library,
@@ -84,6 +144,25 @@ class PromptEntriesMixin:
                 )
             )
         return entries
+
+    def _prompt_computed_metadata(
+        self,
+        entry_type: str,
+        context_strategy: PromptContextStrategy | None,
+        offer_on: list[str],
+        schema: MetadataSchema,
+    ) -> dict[str, MetadataValue]:
+        """The resolver-stamped `disposition`/`runnable` values (#1684) — the
+        same rule as assistants' `_curation_metadata`: every prompt read path
+        stamps these into `computed_metadata` (a computed field some paths fill
+        and others don't is worse than none), and they never touch `metadata`,
+        which round-trips to disk."""
+        is_snippet = "prompt:snippet" in self.entry_type_ancestry(entry_type, schema=schema)
+        disposition = prompt_disposition(context_strategy, is_snippet=is_snippet)
+        return {
+            "disposition": disposition,
+            "runnable": prompt_runnable(disposition, offer_on),
+        }
 
     def _build_snippet_resolver(
         self, entries: list[PromptEntrySummary]
@@ -230,11 +309,14 @@ class PromptEntriesMixin:
         # entry_type, so "prompts don't hold references" was an assumption, not a
         # constraint — and without this the picker renders a row for a node that
         # no longer exists.
+        schema = self.read_metadata_schema()
         metadata = self._strip_dangling_references(
             self._normalise_metadata(front_matter.get("metadata"), path),
-            self.read_metadata_schema(),
+            schema,
             index,
         )
+        offer_on = self._parse_offer_on(front_matter.get("offer_on"))
+        context_strategy = self._parse_context_strategy(front_matter.get("context_strategy"))
         return PromptEntry(
             id=node_id,
             title=str(front_matter.get("title") or node_id),
@@ -243,9 +325,11 @@ class PromptEntriesMixin:
             entry_type=raw_entry_type,
             metadata=metadata,
             inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
-            offer_on=self._parse_offer_on(front_matter.get("offer_on")),
-            context_strategy=self._parse_context_strategy(front_matter.get("context_strategy")),
-            computed_metadata={},
+            offer_on=offer_on,
+            context_strategy=context_strategy,
+            computed_metadata=self._prompt_computed_metadata(
+                raw_entry_type, context_strategy, offer_on, schema
+            ),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
             is_library=index_entry.is_library if index_entry else False,
@@ -315,6 +399,13 @@ class PromptEntriesMixin:
             raise ProjectServiceError("Prompt changed on disk after it was opened.", 409)
         self._check_entry_type_kind(request.entry_type, "prompt")
         metadata = self._normalise_metadata(request.metadata, path)
+        # Never persist computed keys (`disposition`/`runnable`, #1684) — they
+        # are resolver-stamped at read, and a stored copy would assert a value
+        # the front matter contradicts on the next read. Computed keys ONLY,
+        # mirroring the assistant save path's narrow strip.
+        schema = self.read_metadata_schema()
+        computed = {field_id for field_id, field in schema.fields.items() if field.type == "computed"}
+        metadata = {k: v for k, v in metadata.items() if k not in computed}
         self._write_node_entry_file(
             path,
             node_id,

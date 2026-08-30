@@ -287,11 +287,17 @@ class ViewsMixin:
         if kind == "prompt":
             # The prompt shelf groups by DISPOSITION, not leaf entry_type (#951) —
             # what the prompt does to the document (five buckets), rather than one
-            # bucket per sub-type. `disposition` is a synthesized field the frontend
-            # Prompts pane supplies at render (promptNodes lift); this static spec only
-            # names the group_by key. First-seen (no `order`): shelf order comes from
-            # the lift's rank pre-clustering. Mirrors Assistants' `listed`.
-            return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="disposition")])
+            # bucket per sub-type. `disposition` is a resolver-stamped computed
+            # field (#1684, `prompts.py::_prompt_computed_metadata`), so this spec
+            # is honest everywhere, not just in the pane. `show_empty` renders the
+            # declared options in definition order — that IS the shelf order, and
+            # it replaces the retired frontend lift's rank pre-clustering.
+            # Mirrors Assistants' `listed`.
+            return ViewSpec(
+                kind=kind,
+                expr=roster,
+                group_by=[ViewGroupByLevel(field="disposition", show_empty=True)],
+            )
         if kind == "assistant":
             # #333. Two changes, both consequences of #332 making priority ONE
             # merged sequence:

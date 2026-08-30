@@ -1,0 +1,9 @@
+{
+  "_comment": "The prompt disposition vocabulary (#1684): the five shelf labels in shelf order (= the `disposition` computed field's declared option order), plus the `runnable` field's truthy value and both field keys. The BACKEND computes the values (services/project/prompts.py) and declares the options (default_schema.py); the frontend names some of these strings in code (promptNodes.ts constants, builtinViews predicates, chatNodes' seed lift). Asserted by backend test_prompt_disposition.py AND frontend promptNodes.test.ts so the two sides cannot drift. Update both sides together when the vocabulary intentionally changes.",
+  "disposition_field": "disposition",
+  "runnable_field": "runnable",
+  "runnable_value": "runnable",
+  "dispositions": ["Continue", "Revise prose", "Chat", "Revise entities", "Snippets"],
+  "chat_label": "Chat",
+  "revise_entities_label": "Revise entities"
+}

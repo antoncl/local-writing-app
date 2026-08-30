@@ -51,9 +51,9 @@ function openableChatsSpec(schema?: MetadataSchema | null): ViewSpec {
 
 // "Runnable prompts": the prompts launchable as a standalone chat — the Chat
 // disposition (a conversation with no output handler and no commit) that is also
-// anchored to no host type (`offer_on` empty). The Prompts lift stamps `runnable`
-// per node (promptNodes.isRunnablePrompt); this filters on it, the same way
-// "Openable chats" filters `seed_disposition`. `overlap` is the grammar's
+// anchored to no host type (`offer_on` empty). The backend stamps `runnable`
+// into every summary's `computed_metadata` (#1684); this filters on it, the same
+// way "Openable chats" filters `seed_disposition`. `overlap` is the grammar's
 // set-intersection op (no `eq`/`in`); the stamped scalar reads as a singleton.
 function runnablePromptsSpec(schema?: MetadataSchema | null): ViewSpec {
   return {

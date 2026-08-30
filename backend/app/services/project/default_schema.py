@@ -44,8 +44,36 @@ BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
     "assistant_listed",
     "assistant_position",
     "path",
+    "prompt_disposition",
+    "prompt_runnable",
 )
 COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_COMPUTED_FUNCTIONS
+
+# The five writer-facing prompt DISPOSITIONS (#951/#1684), in shelf order — what
+# a prompt does to the document, derived from its `context_strategy.output`:
+# inline+cursor → Continue · inline+selection → Revise prose · conversation
+# alone → Chat · conversation with a commit → Revise entities · no invocation
+# surface at all (a snippet, `finalize_scene`, or an unrecognized handler) →
+# Snippets. The option order below IS the shelf order: the default prompt view
+# groups with `show_empty`, which renders declared options in this sequence.
+# Values double as labels, matching what view filters/predicates store.
+PROMPT_DISPOSITION_CONTINUE = "Continue"
+PROMPT_DISPOSITION_REVISE_PROSE = "Revise prose"
+PROMPT_DISPOSITION_CHAT = "Chat"
+PROMPT_DISPOSITION_REVISE_ENTITIES = "Revise entities"
+PROMPT_DISPOSITION_SNIPPETS = "Snippets"
+PROMPT_DISPOSITIONS: tuple[str, ...] = (
+    PROMPT_DISPOSITION_CONTINUE,
+    PROMPT_DISPOSITION_REVISE_PROSE,
+    PROMPT_DISPOSITION_CHAT,
+    PROMPT_DISPOSITION_REVISE_ENTITIES,
+    PROMPT_DISPOSITION_SNIPPETS,
+)
+# The `runnable` computed field's single truthy value ("" when not runnable) —
+# runnable = Chat disposition AND no `offer_on` anchor, i.e. launchable as a
+# standalone chat (#1433). A string rather than a boolean so the field is a
+# `select` the view designer can filter with `overlap`, like `listed`.
+PROMPT_RUNNABLE_VALUE = "runnable"
 
 # `context_strategy.output.handler` (ADR-0065) is the registry key that selects
 # which OutputHandler runs a prompt's result — `inline` (stream a suggestion into
@@ -65,11 +93,12 @@ COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_CO
 # None of this — `handler`, the inline `destination` (`cursor`/`selection`), or
 # `commit.review` (`visual_diff`/`replace`) — is validated at rest: the backend
 # parses `context_strategy.output` and `model_dump`s it straight through
-# (`validate_prompt_output` was deleted, #1425). The frontend handler registry
-# (`OutputHandlerKey` in editor-core/outputHandlers.ts) owns the closed
-# vocabulary and fails closed on an unknown value — a prompt with an unrecognized
-# `handler` resolves to no surface, so it simply isn't invocable, not a
-# save-time rejection.
+# (`validate_prompt_output` was deleted, #1425). The handler vocabulary is
+# closed and mirrored on both sides — `OutputHandlerKey` in
+# editor-core/outputHandlers.ts (invocation) and `PROMPT_OUTPUT_HANDLER_*` in
+# services/project/prompts.py (the `disposition` computed field, #1684) — and
+# both fail closed on an unknown value: such a prompt resolves to no surface /
+# the Snippets shelf, so it simply isn't invocable, not a save-time rejection.
 
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
@@ -327,7 +356,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Prompt",
             "kind": "prompt",
             "abstract": True,
-            "fields": ["preferred_assistant_id", "assistant_tags", "color"],
+            "fields": ["preferred_assistant_id", "assistant_tags", "color", "disposition", "runnable"],
             "has_body": True,
             "body_editor": "code",
             "body_language": "jinja2",
@@ -1095,6 +1124,28 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         # is the topmost matching one. A degenerate `tagged:` source over
         # kind:assistant, expressed with the existing tags widget/infra.
         "assistant_tags": {"name": "Preferred assistant tags", "type": "tags"},
+        # A prompt's DISPOSITION (#951/#1684) — which shelf it belongs on, derived
+        # at read from the entry's own `context_strategy.output` (and snippet
+        # ancestry). Computed, not stored: the value IS the output contract's
+        # answer, so hand-editing it would assert a behaviour the front matter
+        # contradicts on the next read. Same `select` value_type shape as
+        # `listed`, so it is groupable/filterable while staying read-only; the
+        # option order is the shelf order (`show_empty` renders it).
+        "disposition": {
+            "name": "Disposition",
+            "type": "computed",
+            "options": [{"value": label, "label": label} for label in PROMPT_DISPOSITIONS],
+            "computed": {"function": "prompt_disposition", "value_type": "select"},
+        },
+        # Standalone-runnability (#1433/#1684): `runnable` when the prompt is a
+        # plain Chat with no `offer_on` anchor (launchable without a host node),
+        # "" otherwise. The "Runnable prompts" built-in view filters on it.
+        "runnable": {
+            "name": "Runnable",
+            "type": "computed",
+            "options": [{"value": PROMPT_RUNNABLE_VALUE, "label": "Runnable"}],
+            "computed": {"function": "prompt_runnable", "value_type": "select"},
+        },
         "author": {"name": "Author", "type": "text"},
         # #317: the built-in project-node vocabulary. These are `select`s rather
         # than free text so the model gets a constrained, resolvable value (a

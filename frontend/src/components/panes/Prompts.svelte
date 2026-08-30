@@ -10,12 +10,7 @@
   import LibraryHiddenToggle from "@/components/widgets/LibraryHiddenToggle.svelte";
   import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import { defaultView } from "@/lib/views/evaluateView";
-  import {
-    promptSummariesToGroupNodes,
-    RUNNABLE_FIELD,
-    RUNNABLE_LABEL,
-    type PromptGroupNode,
-  } from "@/lib/views/promptNodes";
+  import { RUNNABLE_FIELD, RUNNABLE_LABEL } from "@/lib/views/promptNodes";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
@@ -31,9 +26,10 @@
     // Prompts is a real view like Lore (ADR-0022/0036): the whole prompt roster
     // evaluated by evaluateView. The default view groups by DISPOSITION — what the
     // prompt does to the document, of which there are only five — not by leaf
-    // entry_type, which was a bucket per sub-type (#951). Disposition is a synthesized
-    // field the lift below stamps; membership is the whole roster, so an entry never
-    // "falls off" — an unrecognised one just shelves under Snippets.
+    // entry_type, which was a bucket per sub-type (#951). Disposition arrives on
+    // every summary as a backend computed field (#1684); membership is the whole
+    // roster, so an entry never "falls off" — an unrecognised one just shelves
+    // under Snippets.
     viewSpec = defaultView("prompt"),
     // Open a prompt entry in an editor pane (App owns the pane set).
     onOpenEntry,
@@ -94,13 +90,12 @@
 
   // Every NodeList is backed by a view (ADR-0022): the pane hands the whole view
   // (spec + roster + data env) to ViewNodeList, which owns evaluation + grouping.
-  // The lift stamps each roster node with its derived `disposition` (metadata) and
-  // pre-clusters by shelf order, so the default view's `group_by: [disposition]`
-  // buckets on it — the same shape as the Chats pane lifting `seed_disposition`.
-  const promptNodes = $derived(promptSummariesToGroupNodes(visibleEntries, schema));
+  // Summaries are EvalNodes as-is — `disposition`/`runnable` arrive stamped in
+  // `computed_metadata` (#1684), and the default view's `show_empty` group level
+  // orders the shelves by the field's declared options. No pane lift.
   const view = $derived({
     spec: viewSpec,
-    universe: promptNodes,
+    universe: visibleEntries,
     schema,
     referenceIndex: $referenceIndexStore,
   });
@@ -143,7 +138,7 @@
   </NodeList>
 {/snippet}
 
-{#snippet entryRow(entry: PromptGroupNode, ctx: RowCtx<PromptGroupNode>)}
+{#snippet entryRow(entry: PromptEntrySummary, ctx: RowCtx<PromptEntrySummary>)}
   <!-- A prompt whose source layer differs from the open project's is inherited
        and gets the level pill. For a built-in Library prompt (ADR-0049) that
        pill reads "Library", marking it as shipped read-only material, distinct
@@ -161,10 +156,11 @@
   >
     {#snippet trailing()}
       <!-- ▶ Run (#1433): a standalone-runnable prompt (Chat, empty offer_on) opens
-           a fresh chat bound to it. Gated on the `runnable` flag the lift stamps —
-           shown on runnable rows in any view, independent of the Library actions
-           below (a runnable Library prompt shows both). -->
-      {#if entry.metadata?.[RUNNABLE_FIELD] === RUNNABLE_LABEL}
+           a fresh chat bound to it. Gated on the backend-stamped `runnable`
+           computed field (#1684) — shown on runnable rows in any view,
+           independent of the Library actions below (a runnable Library prompt
+           shows both). -->
+      {#if entry.computed_metadata?.[RUNNABLE_FIELD] === RUNNABLE_LABEL}
         <button
           class="reveal-on-hover"
           type="button"

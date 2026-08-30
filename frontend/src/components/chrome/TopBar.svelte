@@ -61,6 +61,8 @@
     onOpenPlotTemplates = () => {},
     onOpenPlotBoard = () => {},
     onOpenMutations = () => {},
+    // Project AI spend rollup (#10).
+    onOpenAiSpend = () => {},
     // In-app guides (#1271). Reads in a workspace region, so project-gated like
     // the panes above even though the content itself is app-level.
     onOpenGuides = () => {},
@@ -115,6 +117,7 @@
     onOpenPlotTemplates?: () => void;
     onOpenPlotBoard?: () => void;
     onOpenMutations?: () => void;
+    onOpenAiSpend?: () => void;
     onOpenGuides?: () => void;
     onOpenImport?: () => void;
     onManageAllTags?: () => void;
@@ -354,6 +357,7 @@
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenPlotTemplates)}>Plot templates</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenPlotBoard)}>Plot board</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenMutations)}>Mutations</button>
+        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenAiSpend)}>AI spend</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenImport)}>Import documents…</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onManageAllTags)}>Manage all tags…</button>
 

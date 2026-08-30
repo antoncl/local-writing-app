@@ -14,6 +14,7 @@
   import PlotBoardPane from "@/components/panes/PlotBoardPane.svelte";
   import Mutations from "@/components/panes/Mutations.svelte";
   import GuideView from "@/components/panes/GuideView.svelte";
+  import AiSpendPane from "@/components/panes/AiSpendPane.svelte";
   import MutationSetEditor from "@/components/editor/body/MutationSetEditor.svelte";
   import {
     openNewMutationSet,
@@ -107,6 +108,15 @@
   import { todoActions } from "@/lib/stores/todoActions.svelte";
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+  import {
+    openPromptsPane,
+    openPlotTemplatesPane,
+    openMutationsPane,
+    openGuidePane,
+    openAiSpendPane,
+    openAssistantsPane,
+    openChatsPane,
+  } from "@/lib/stores/paneOpeners";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
   import type {
     AssistantEntrySummary,
@@ -617,38 +627,12 @@
     return isInherited({ source_layer_id: pane.scene?.source_layer_id }, $projectLayerIdStore);
   }
 
-  function openPromptsPane() {
-    workspaceLayout.ensureVisible("prompts");
-  }
-
-  function openPlotTemplatesPane() {
-    workspaceLayout.ensureVisible("plotTemplates");
-  }
-
   function openPlotBoardPane() {
     // Fetch-then-show, like openChatsPane / openAssistantsPane — but through run()
     // so an HTTP error surfaces in the banner rather than being swallowed. The
     // pane opens immediately and shows "Loading…" until the projection resolves.
     void run(() => refreshPlotBoard());
     workspaceLayout.ensureVisible("plotEditor");
-  }
-
-  function openMutationsPane() {
-    workspaceLayout.ensureVisible("mutations");
-  }
-
-  function openGuidePane() {
-    workspaceLayout.ensureVisible("guide");
-  }
-
-  function openAssistantsPane() {
-    void refreshAssistantEntries();
-    workspaceLayout.ensureVisible("assistants");
-  }
-
-  function openChatsPane() {
-    void chatSessions.refresh();
-    workspaceLayout.ensureVisible("chats");
   }
 
   function sceneEntryHasBody(scene: Scene): boolean {
@@ -848,6 +832,7 @@
   onOpenPlotTemplates={openPlotTemplatesPane}
   onOpenPlotBoard={openPlotBoardPane}
   onOpenMutations={openMutationsPane}
+  onOpenAiSpend={openAiSpendPane}
   onOpenGuides={openGuidePane}
   onOpenImport={openImportDocs}
   onManageAllTags={() => (tagsManagerOpen = true)}
@@ -912,6 +897,7 @@
       todo: { title: "TODO", body: todoBody, actions: todoBarActions },
       search: { title: "Search", body: searchBody },
       guide: { title: "Guides", body: guideBody, closable: true, onClose: closeRegion("guide") },
+      aiSpend: { title: "AI spend", body: aiSpendBody, closable: true, onClose: closeRegion("aiSpend") },
     }}
   />
 
@@ -1043,6 +1029,12 @@
     <!-- No .pane-content: GuideView owns its own reading layout (fixed picker +
          scrolling serif prose), filling the tile via `.ws-doc > *:last-child`. -->
     <GuideView />
+  {/snippet}
+
+  {#snippet aiSpendBody()}
+    <div class="pane-content">
+      <AiSpendPane projectKey={projectPath} />
+    </div>
   {/snippet}
 
   {#snippet assistantsActions()}

@@ -23,6 +23,8 @@ from typing import Any
 import yaml
 
 from app.models import (
+    AICostBucket,
+    AICostSummary,
     AIInvocation,
     AIInvocationList,
     CreateAIInvocationRequest,
@@ -92,3 +94,166 @@ class AiInvocationsMixin:
         raw.append(invocation.model_dump())
         self._write_yaml(self._ai_invocations_path(), {"invocations": raw})
         return invocation
+
+    def ai_cost_summary(
+        self, *, since: str | None = None, until: str | None = None
+    ) -> AICostSummary:
+        """Aggregate the ledger into project-wide totals plus by-model /
+        by-chat / by-scene / by-prompt / by-day buckets (#10). `since` /
+        `until` are inclusive `YYYY-MM-DD` day bounds compared against each
+        row's UTC timestamp day; empty strings behave like unset. Sums
+        stored `cost_usd` verbatim — never re-prices, since catalogue prices
+        drift and rows are frozen. A row with `cost_usd is None` still
+        counts toward `count` / `unpriced_count` and its token totals, but
+        never a cost sum — unknown stays distinct from 0.0 (#697).
+        """
+        since = since or None
+        until = until or None
+        rows = [
+            invocation
+            for invocation in self.list_ai_invocations().invocations
+            if (since is None or invocation.ts[:10] >= since)
+            and (until is None or invocation.ts[:10] <= until)
+        ]
+
+        # One node-index build serves every chat/scene/prompt label lookup,
+        # and only runs at all if some row actually needs one.
+        needs_index = any(
+            invocation.chat_session_id or invocation.scene_id or invocation.prompt_entry_id
+            for invocation in rows
+        )
+        index = self._build_node_index() if needs_index else None
+
+        def label_for(node_id: str) -> str:
+            entry = index.by_id.get(node_id) if index is not None else None
+            return entry.title if entry is not None and entry.title else node_id
+
+        by_model: dict[str, dict[str, Any]] = {}
+        by_chat: dict[str, dict[str, Any]] = {}
+        by_scene: dict[str, dict[str, Any]] = {}
+        by_prompt: dict[str, dict[str, Any]] = {}
+        by_day: dict[str, dict[str, Any]] = {}
+        totals = {"cost_usd": 0.0, "unpriced_count": 0, "input_tokens": 0, "output_tokens": 0}
+
+        def bump(
+            buckets: dict[str, dict[str, Any]],
+            key: str,
+            label: str,
+            *,
+            priced: bool,
+            cost: float,
+            input_tokens: int,
+            output_tokens: int,
+        ) -> None:
+            bucket = buckets.setdefault(
+                key,
+                {
+                    "key": key,
+                    "label": label,
+                    "cost_usd": 0.0,
+                    "count": 0,
+                    "unpriced_count": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                },
+            )
+            bucket["count"] += 1
+            bucket["input_tokens"] += input_tokens
+            bucket["output_tokens"] += output_tokens
+            if priced:
+                bucket["cost_usd"] += cost
+            else:
+                bucket["unpriced_count"] += 1
+
+        for invocation in rows:
+            usage = invocation.usage
+            # The three input slots are disjoint (see ChatUsage) — sum for
+            # total billable input.
+            input_tokens = (
+                usage.input_tokens + usage.cached_input_tokens + usage.cache_write_tokens
+                if usage is not None
+                else 0
+            )
+            output_tokens = usage.output_tokens if usage is not None else 0
+            priced = invocation.cost_usd is not None
+            cost = invocation.cost_usd or 0.0
+
+            totals["input_tokens"] += input_tokens
+            totals["output_tokens"] += output_tokens
+            if priced:
+                totals["cost_usd"] += cost
+            else:
+                totals["unpriced_count"] += 1
+
+            bump(
+                by_model,
+                invocation.model,
+                invocation.model or "unknown model",
+                priced=priced,
+                cost=cost,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+            if invocation.chat_session_id:
+                bump(
+                    by_chat,
+                    invocation.chat_session_id,
+                    label_for(invocation.chat_session_id),
+                    priced=priced,
+                    cost=cost,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+            if invocation.scene_id:
+                bump(
+                    by_scene,
+                    invocation.scene_id,
+                    label_for(invocation.scene_id),
+                    priced=priced,
+                    cost=cost,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+            if invocation.prompt_entry_id:
+                bump(
+                    by_prompt,
+                    invocation.prompt_entry_id,
+                    label_for(invocation.prompt_entry_id),
+                    priced=priced,
+                    cost=cost,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+            day = invocation.ts[:10]
+            bump(
+                by_day,
+                day,
+                day,
+                priced=priced,
+                cost=cost,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+
+        def ranked(buckets: dict[str, dict[str, Any]]) -> list[AICostBucket]:
+            ordered = sorted(
+                buckets.values(), key=lambda b: (-b["cost_usd"], -b["count"], b["key"])
+            )
+            return [AICostBucket(**b) for b in ordered]
+
+        by_day_ranked = [
+            AICostBucket(**b) for b in sorted(by_day.values(), key=lambda b: b["key"], reverse=True)
+        ]
+
+        return AICostSummary(
+            total_cost_usd=totals["cost_usd"],
+            count=len(rows),
+            unpriced_count=totals["unpriced_count"],
+            input_tokens=totals["input_tokens"],
+            output_tokens=totals["output_tokens"],
+            by_model=ranked(by_model),
+            by_chat=ranked(by_chat),
+            by_scene=ranked(by_scene),
+            by_prompt=ranked(by_prompt),
+            by_day=by_day_ranked,
+        )

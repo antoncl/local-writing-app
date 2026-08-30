@@ -13,6 +13,7 @@ from app.models import (
     AIChatRequest,
     AIChatResponse,
     AIContextPresetResponse,
+    AICostSummary,
     AIEntryPatch,
     AIGenerateRequest,
     AIGenerateResponse,
@@ -677,6 +678,22 @@ def ai_invocation_list(
             character_id=character_id,
             chat_session_id=chat_session_id,
         )
+
+
+@router.get("/api/ai/invocations/summary", response_model=AICostSummary)
+def ai_invocation_cost_summary(
+    project: CurrentProject,
+    since: str | None = Query(default=None),
+    until: str | None = Query(default=None),
+) -> AICostSummary:
+    """Project-wide AI spend rollup (#10): totals plus by-model / by-chat /
+    by-scene / by-prompt / by-day buckets over the ai_invocations ledger.
+    `since` / `until` are inclusive `YYYY-MM-DD` bounds compared against
+    each row's UTC timestamp day. Sums stored costs verbatim — never
+    re-prices.
+    """
+    with translate_errors():
+        return project.ai_cost_summary(since=since, until=until)
 
 
 @router.get("/api/ai/context-preset", response_model=AIContextPresetResponse)

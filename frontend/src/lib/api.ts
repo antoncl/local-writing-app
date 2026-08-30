@@ -63,6 +63,8 @@ import type {
   ProjectNode,
   ProspectiveProjectNode,
   ProjectValidation,
+  PromotionTarget,
+  PromotionPlan,
   SaveProjectNodeRequest,
   PromptEntry,
   PromptEntryList,
@@ -942,6 +944,30 @@ export const api = {
   deleteLoreEntry(entryId: string) {
     return request<LoreEntryList>(`/lore/${entryId}`, {
       method: "DELETE",
+    });
+  },
+  // ADR-0078 §2: the declared ancestor projects a node HERE may be promoted
+  // into — empty for a flat project (no `inherits:` chain). Generic across
+  // kinds; lore is the first caller (slice 2).
+  promotionTargets() {
+    return request<PromotionTarget[]>("/promotion/targets");
+  },
+  // Pure dry-run (ADR-0078 §9): the partition the commit would run, without
+  // writing anything. Renders as the promote dialogue's three buckets.
+  previewLorePromotion(entryId: string, targetLayerId: string) {
+    return request<PromotionPlan>(`/lore/${entryId}/promote/preview`, {
+      method: "POST",
+      body: JSON.stringify({ target_layer_id: targetLayerId }),
+    });
+  },
+  // Lift an owned lore entry into a declared ancestor project, keeping its id
+  // (ADR-0078 §1/§2). Runs the same partition `previewLorePromotion` returned.
+  // Refuses 409 if the entry is already inherited, 400 if the target isn't a
+  // declared ancestor.
+  promoteLoreEntry(entryId: string, targetLayerId: string) {
+    return request<LoreEntry>(`/lore/${entryId}/promote`, {
+      method: "POST",
+      body: JSON.stringify({ target_layer_id: targetLayerId }),
     });
   },
   // ADR-0051 S4 / ADR-0067 S2: the commit runs as a cached CONTINUATION of the

@@ -38,13 +38,17 @@ import {
   requestDeleteScene as runRequestDeleteScene,
   requestDeleteView as runRequestDeleteView,
 } from "./editorPaneDelete";
+import {
+  forkLore as runForkLore,
+  forkPrompt as runForkPrompt,
+  flushLorePaneIfDirty as runFlushLorePaneIfDirty,
+  applyPromotedLoreEntry as runApplyPromotedLoreEntry,
+} from "./editorPaneAncestry";
 import { clearImplicitContext, implicitContextFor } from "@/lib/stores/implicitContext.svelte";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { metadataSchemaStore, projectSchemaLayerId } from "@/lib/stores/schema";
 import { authoringDefaultLayerId } from "@/lib/utils/layerAuthoring";
 import { structureStore } from "@/lib/stores/structure";
-import { refreshLoreEntries } from "@/lib/stores/lore";
-import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { revealPlotline } from "@/lib/stores/plotlines";
 import { openEditMutationSet } from "@/lib/stores/mutationSets";
@@ -225,6 +229,14 @@ class EditorPanesController {
   // Remove any lingering autosave timers (App unmount / shutdown).
   dispose(): void {
     this.#autosave.dispose();
+  }
+
+  // The one privileged hook onto the private `#autosave` scheduler the
+  // editorPaneAncestry.ts fork/promote actions need before moving a file out
+  // from under a dirty pane — cancels a pending debounce so it cannot fire
+  // against the baseline the save is about to move.
+  cancelPendingAutosave(id: string): void {
+    this.#autosave.cancel(id);
   }
 
   addEditorPane(): EditorPaneState {
@@ -1176,57 +1188,24 @@ class EditorPanesController {
     });
   }
 
-  // Fork-to-here (#313): sever an inherited lore entry into a local copy, then
-  // reset the open pane to the now-local entry so the ancestor banner clears and
-  // edits stop writing back to the ancestor. Refreshes the roster so the Lore
-  // pane's provenance pill updates too.
-  async forkLore(entryId: string): Promise<void> {
-    // Flush unsaved edits first, then fork. The store's autosave invariant is
-    // that every pane transition saves if dirty; a fork that reset the pane
-    // without it dropped whatever was typed inside the 6s debounce — and those
-    // edits belong in the fork, not the void. Cancel the pending timer so it
-    // cannot fire against the baseline this save is about to move. A save that
-    // 409s throws out of here, aborting the fork with the draft intact.
-    //
-    // Match the lore pane directly — `paneForScene` is scene-only and would miss
-    // it, so the flush was dead for lore and dropped in-debounce edits (#520, a
-    // regression of the very case #313 fixed). Same predicate the reconcile
-    // `map` below uses, and the fix applied to `resetLoreOverrideField` (#518).
-    const open = this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
-    if (open?.dirty) {
-      this.#autosave.cancel(open.id);
-      await this.saveEditorPane(open.id);
-    }
-    const entry = await api.forkLoreEntry(entryId);
-    await refreshLoreEntries();
-    this.panes = this.panes.map((pane) =>
-      pane.document?.type === "lore" && pane.document.id === entryId
-        ? {
-            ...pane,
-            scene: entry,
-            dirty: false,
-            draftTitle: entry.title,
-            draftMarkdown: entry.body,
-            draftEntryType: entry.entry_type,
-            draftMetadata: cloneMetadata(entry.metadata),
-            saving: false,
-            recentlySaved: false,
-            // The entry is now local — it owns its own file, so there is no
-            // override target and the rail picker disappears (#314).
-            authoringLayerId: null,
-          }
-        : pane,
-    );
-    this.setStatus(`Forked ${entry.title} into this project`);
+  // Fork-to-here, promote, and Library-prompt-clone are the "inherited node
+  // moves layer" actions — extracted to editorPaneAncestry.ts (the file-size
+  // guard); these stay as thin delegates so the public surface (and every
+  // existing call site / test) is unchanged.
+  forkLore(entryId: string): Promise<void> {
+    return runForkLore(this, entryId);
   }
 
-  // Clone a built-in Library prompt into this project (ADR-0049 §5): mint a NEW
-  // id (orthogonal to slice 3's hide), open the fresh copy. No dirty-flush (read-only).
-  async forkPrompt(entryId: string): Promise<void> {
-    const clone = await api.forkPromptEntry(entryId);
-    await refreshPromptEntries();
-    await this.openPrompt(clone.id);
-    this.setStatus(`Cloned ${clone.title} into this project`);
+  flushLorePaneIfDirty(entryId: string): Promise<void> {
+    return runFlushLorePaneIfDirty(this, entryId);
+  }
+
+  applyPromotedLoreEntry(entry: LoreEntry): Promise<void> {
+    return runApplyPromotedLoreEntry(this, entry);
+  }
+
+  forkPrompt(entryId: string): Promise<void> {
+    return runForkPrompt(this, entryId);
   }
 
   // Clone a Library/ancestor plot template into this project (ADR-0048 S4c), the

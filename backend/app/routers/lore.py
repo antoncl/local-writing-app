@@ -15,6 +15,9 @@ from app.models import (
     MutationMarkerList,
     MutationSetEntry,
     MutationSetEntryList,
+    PromoteLoreEntryRequest,
+    PromotionPlan,
+    PromotionTarget,
     PromptEntry,
     PromptEntryList,
     SaveLoreEntryRequest,
@@ -124,6 +127,34 @@ def move_lore_note_to_research(project: CurrentProject, entry_id: str) -> MoveLo
     list so callers update both panes in one round-trip."""
     with translate_errors():
         return project.move_lore_note_to_research(entry_id)
+
+
+@router.get("/api/promotion/targets", response_model=list[PromotionTarget])
+def list_promotion_targets(project: CurrentProject) -> list[PromotionTarget]:
+    """Declared ancestor projects a node here may be promoted into (ADR-0078 §2)."""
+    with translate_errors():
+        return project.promotion_targets()
+
+
+@router.post("/api/lore/{entry_id}/promote/preview", response_model=PromotionPlan)
+def preview_lore_promotion(
+    project: CurrentProject, entry_id: str, request: PromoteLoreEntryRequest
+) -> PromotionPlan:
+    """Dry-run promotion plan (ADR-0078 §9): what would travel, what would stay
+    behind as an origin override, and what is invisible at the destination
+    until its field definition is also promoted. Writes nothing."""
+    with translate_errors():
+        return project.preview_lore_promotion(entry_id, request.target_layer_id)
+
+
+@router.post("/api/lore/{entry_id}/promote", response_model=LoreEntry)
+def promote_lore_entry(
+    project: CurrentProject, entry_id: str, request: PromoteLoreEntryRequest
+) -> LoreEntry:
+    """Lift an owned lore entry into a declared ancestor project, keeping its id
+    (ADR-0078 §1/§2). Runs the same partition `preview` returned."""
+    with translate_errors():
+        return project.promote_lore_entry(entry_id, request.target_layer_id)
 
 
 @router.get("/api/prompts", response_model=PromptEntryList)

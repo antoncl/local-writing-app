@@ -12,6 +12,7 @@ import type {
   AIPreviewResponse,
   AIInvocation,
   AIInvocationList,
+  AICostSummary,
   CreateAIInvocationRequest,
 } from "@/lib/types";
 import { request, streamNdjson } from "./core";
@@ -86,6 +87,17 @@ export const aiApi = {
     const query = search.toString();
     return request<AIInvocationList>(
       query ? `/ai/invocations?${query}` : "/ai/invocations",
+    );
+  },
+  // Project-wide AI spend rollup (#10). Bounds are inclusive YYYY-MM-DD days
+  // compared against each row's UTC timestamp day.
+  aiCostSummary(params: { since?: string; until?: string } = {}) {
+    const search = new URLSearchParams();
+    if (params.since) search.set("since", params.since);
+    if (params.until) search.set("until", params.until);
+    const query = search.toString();
+    return request<AICostSummary>(
+      query ? `/ai/invocations/summary?${query}` : "/ai/invocations/summary",
     );
   },
 };

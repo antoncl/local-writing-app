@@ -18,6 +18,7 @@ import { refreshTodos, refreshEmbeddedTodos, clearTodos } from "@/lib/stores/tod
 import { clearValidation } from "@/lib/stores/validation";
 import { clearChats } from "@/lib/stores/chats";
 import { clearAssistants } from "@/lib/stores/assistants";
+import { aiSpend } from "@/lib/stores/aiSpend.svelte";
 
 // Load the project-scoped server state in parallel. Mirrors exactly the slices
 // the open paths fetched serially (structure/research/lore/prompts/schema/
@@ -61,4 +62,5 @@ export function clearProjectData(): void {
   clearValidation();
   clearChats();
   clearAssistants();
+  aiSpend.reset();
 }

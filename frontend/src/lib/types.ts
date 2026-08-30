@@ -1301,6 +1301,8 @@ export type {
   AIInvocation,
   AIInvocationList,
   CreateAIInvocationRequest,
+  AICostBucket,
+  AICostSummary,
   ChatSessionMessage,
   ChatSessionContextItem,
   ChatSessionJournalEntry,

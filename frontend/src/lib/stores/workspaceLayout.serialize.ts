@@ -75,6 +75,10 @@ export const HOMES: Record<string, string> = {
   plotEditor: G_EDITOR,
   todo: G_TOOLS,
   search: G_TOOLS,
+  // Project AI spend rollup (#10): a stats surface, so it homes with the other
+  // tool panes; being in HOMES also lets a restored tab survive a reload (the
+  // pane refetches on mount, so no restore hook is needed).
+  aiSpend: G_TOOLS,
 };
 
 const KNOWN_REGIONS = new Set(Object.keys(HOMES));

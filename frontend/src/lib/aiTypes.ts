@@ -337,6 +337,33 @@ export type CreateAIInvocationRequest = {
   cost_usd?: number | null;
 };
 
+// GET /api/ai/invocations/summary (#10). `cost_usd` sums only priced rows and
+// is null when the scope has no priced row at all — unknown stays distinct
+// from 0.0 (#697); `unpriced_count` says how many rows had no price. The
+// top-level total is 0.0 for an empty scope (a known zero).
+export type AICostBucket = {
+  key: string;
+  label: string;
+  cost_usd: number | null;
+  count: number;
+  unpriced_count: number;
+  input_tokens: number;
+  output_tokens: number;
+};
+
+export type AICostSummary = {
+  total_cost_usd: number | null;
+  count: number;
+  unpriced_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  by_model: AICostBucket[];
+  by_chat: AICostBucket[];
+  by_scene: AICostBucket[];
+  by_prompt: AICostBucket[];
+  by_day: AICostBucket[];
+};
+
 export type ChatSessionMessage = {
   role: "user" | "assistant";
   content: string;

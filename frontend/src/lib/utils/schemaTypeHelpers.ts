@@ -252,7 +252,7 @@ export function entryTypeIsA(
   while (cursor && !seen.has(cursor)) {
     if (cursor === ancestor) return true;
     seen.add(cursor);
-    cursor = schema.entry_types[cursor]?.parent ?? undefined;
+    cursor = schema.entry_types?.[cursor]?.parent ?? undefined;
   }
   return false;
 }

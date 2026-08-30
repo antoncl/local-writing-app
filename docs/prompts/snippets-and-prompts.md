@@ -1,8 +1,8 @@
 # Snippets and prompts
 
-One node kind underpins the AI feature: `prompt`. A *snippet* is not a separate
-kind — it is a prompt entry type (`prompt:snippet`) whose role is to be included
-into other prompts rather than invoked itself.
+Prompts and snippets share one node kind: `prompt`. A *snippet* is not a
+separate kind — it is a prompt entry type (`prompt:snippet`) whose role is to be
+included into other prompts rather than invoked itself.
 
 ## The entry-type taxonomy
 
@@ -15,7 +15,7 @@ into other prompts rather than invoked itself.
 
 Users may instantiate these directly or sub-type them in the schema editor.
 Classification follows the parent chain: a user-defined sub-type of
-`prompt:snippet` is a snippet everywhere the app asks.
+`prompt:snippet` is itself a snippet — import-only, shelved with the snippets.
 
 ## Behavior is on the instance, not the type
 
@@ -56,12 +56,16 @@ or more prompts. Examples:
 - A boilerplate persona block ("You are an expert thriller writer with a clipped, declarative style")
 - A standing instruction applied everywhere ("avoid adverbs")
 
-Inside a prompt template, snippets are pulled in by node id (filenames give you
-readable ids):
+Inside a prompt template, snippets are pulled in by node id — or by title, when
+exactly one snippet carries it (filenames give you readable ids):
 
 ```jinja
 {% include "builtin-house-voice" %}
 ```
+
+See [Template language](template-language.md) for the full include syntax. Note
+that a title-based include stops resolving if the snippet is renamed or a second
+snippet takes the same title — ids are the stable handle.
 
 A snippet may declare `inputs` of its own; a prompt's **effective inputs** are
 its own plus the transitive union of every snippet it includes, so a snippet's
@@ -93,9 +97,9 @@ Supported `type` values:
 | `type` | Renders as | Template value |
 | --- | --- | --- |
 | `text` | single-line text input | string |
-| `long_text` | textarea | string |
+| `long_text` | multi-line text editor | string |
 | `number` | number input | number |
-| `boolean` | checkbox | `True` / `False` |
+| `boolean` | tri-state select (Unset / True / False) | `True` / `False`; Unset stays undefined, guard with `is defined` |
 | `select` | dropdown (uses `options`) | string |
 | `multi_select` | multi-select (uses `options`) | list of strings |
 | `tags` | tag editor | list of strings |
@@ -103,12 +107,13 @@ Supported `type` values:
 | `entity_ref` | `ReferencePicker` (single) | string id |
 | `entity_ref_list` | `ReferencePicker` (multi) | list of string ids |
 | `color` | color swatch picker | string token |
-| `context_pick` | node picker (adds picked nodes to context) | encoded ref list |
+| `context_pick` | node picker (adds picked nodes to context) | list of nodes; `entry(inputs.pick)` for the first |
 | `scene_ref` | scene picker (mutation resolution scene) | string id |
 
-For the reference-picking types, an optional `target` carries a
-`NodePickerConfig` that constrains the picker — the same shape `entity_ref`
-metadata fields use in `picker_config`:
+For `entity_ref`, `entity_ref_list`, and `context_pick`, an optional `target`
+carries a `NodePickerConfig` that constrains the picker — the same shape
+`entity_ref` metadata fields use in `picker_config`. (`scene_ref` ignores
+`target`: its picker is always constrained to scenes.)
 
 ```yaml
 - name: character
@@ -121,9 +126,11 @@ metadata fields use in `picker_config`:
   required: true
 ```
 
-Cardinality is implied by the type literal (`entity_ref` → single,
-`entity_ref_list` → multi); any `multiple` field on `target` is ignored for
-these types.
+For `entity_ref` and `entity_ref_list`, cardinality is implied by the type
+literal (single vs. multi) and any `multiple` field on `target` is ignored. A
+`context_pick` is the exception: it is multi-pick unless its `target` sets
+`multiple: false` (the shipped Roleplay prompt relies on this for its
+single-character pick).
 
 Inside the template the value is the raw id (or list of ids). Wrap with
 `entry()` to walk into fields:

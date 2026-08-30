@@ -26,7 +26,7 @@ This is the user-facing framing — internal docs still use the technical terms 
 | Page | Covers |
 | --- | --- |
 | [Reference](reference.md) | The typed surface — every variable, helper, filter, and tag with its type/shape. The completion contract. |
-| [Snippets and prompts](snippets-and-prompts.md) | The `snippet` and `prompt` node kinds — what they are, file layout, inheritance across nested projects |
+| [Snippets and prompts](snippets-and-prompts.md) | The `prompt` node kind and its entry types (invocable prompts vs. import-only snippets), input types, inheritance across nested projects |
 | [Template language](template-language.md) | Jinja2 sandbox + the custom `{% role %}` tag, and how a rendered template becomes role-tagged messages |
 | [Helpers](helpers.md) | Reference for every function callable from a prompt template (`text_before`, `use`, `pov`, …) |
 

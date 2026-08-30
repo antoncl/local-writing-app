@@ -14,7 +14,7 @@ import {
   type InlineDestination,
 } from "@/lib/editor-core/outputHandlers";
 import { pickerMembership } from "@/lib/utils/pickerSources";
-import { entryTypeIsA as schemaEntryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
+import { entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
 import type {
   LoreEntrySummary,
   MetadataSchema,
@@ -75,7 +75,7 @@ export function surfaceForStrategy(
 // ANCESTRY, matching the backend (#1685): a user-defined subtype of
 // `prompt:snippet` is a snippet too, not a conversation prompt.
 export function isSnippetType(entry_type: string, schema: MetadataSchema | null): boolean {
-  return schemaEntryTypeIsA(schema, entry_type, "prompt:snippet");
+  return entryTypeIsA(schema, entry_type, "prompt:snippet");
 }
 
 // The discovery surface a prompt is offered on. REPLACES the old `effectiveOutputKind`
@@ -176,16 +176,6 @@ export function promptEntryDescription(
   return ctx.metadataSchema?.entry_types[entry.entry_type]?.name ?? entry.entry_type;
 }
 
-// Walk `entryType`'s schema parent chain for `ancestor` (is-a). Delegates to the
-// shared upward walk in schemaTypeHelpers (#1685) — one traversal, not two.
-function entryTypeIsA(
-  ctx: PromptResolutionContext,
-  entryType: string,
-  ancestor: string,
-): boolean {
-  return schemaEntryTypeIsA(ctx.metadataSchema, entryType, ancestor);
-}
-
 // True iff `entry` declares it should be offered on a subject of schema type
 // `entryType` (ADR-0054 §4/S4) — one of its `offer_on` targets is an
 // ancestor-or-self of `entryType`. This is the author's explicit "show this
@@ -201,7 +191,7 @@ export function promptOffersOn(
   entryType: string | null | undefined,
 ): boolean {
   if (!entryType) return false;
-  return (entry.offer_on ?? []).some((target) => entryTypeIsA(ctx, entryType, target));
+  return (entry.offer_on ?? []).some((target) => entryTypeIsA(ctx.metadataSchema, entryType, target));
 }
 
 // The prompts offered as a "＋New" conversation on a subject of type `entryType`:

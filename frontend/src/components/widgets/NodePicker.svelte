@@ -629,27 +629,31 @@
     }));
   });
 
-  // Snippets are prompts of sub-types where kind=prompt and not abstract
-  // and (loosely) snippet-shaped; for v1 we expose all such prompt entries
-  // that match the search.
-  // Hidden Library prompts (ADR-0049 #682) drop out of the snippet picker too —
+  // The "snippet" category is really the PROMPT roster (#1688 investigated and
+  // resolved as by-design): the Category enum has no "prompt", so ViewFlowNode
+  // deliberately maps a prompt-kind hand_picked source through this group —
+  // filtering it to snippet-typed prompts would break hand-picking invocable
+  // prompts in the view designer, its only live consumer (no surface authors a
+  // snippet-kind config today, and `{% include %}` targets are typed by hand).
+  // The entry_type whitelist is EXACT-FQN like every roster here — the `type`
+  // leaf's grammar semantics (descendants_of is the family operator), and the
+  // checkbox tree expands a family into explicit leaves at authoring time.
+  // Hidden Library prompts (ADR-0049 #682) drop out of this picker too —
   // it is a prompt-discovery surface, so it routes through the shared seam.
+  // Whitelist Sets are hoisted OUT of the filter callbacks: the chain re-runs
+  // per search keystroke, and a per-item Set allocation was the waste.
+  const snippetAllowed = $derived(new Set(membership.entryTypes.snippet ?? []));
   const snippetEntries = $derived(
     hidePromptEntries(promptEntries, $hiddenLibraryStore)
-      .filter((p) => {
-        const allowed = new Set(membership.entryTypes.snippet ?? []);
-        return allowed.size === 0 || allowed.has(p.entry_type);
-      })
+      .filter((p) => snippetAllowed.size === 0 || snippetAllowed.has(p.entry_type))
       .filter(matchesSummary),
   );
 
   // Assistants matching the config's per-kind entry_type whitelist + search.
+  const assistantAllowed = $derived(new Set(membership.entryTypes.assistant ?? []));
   const assistantCandidates = $derived(
     assistantEntries
-      .filter((a) => {
-        const allowed = new Set(membership.entryTypes.assistant ?? []);
-        return allowed.size === 0 || allowed.has(a.entry_type);
-      })
+      .filter((a) => assistantAllowed.size === 0 || assistantAllowed.has(a.entry_type))
       .filter(matchesSummary),
   );
 

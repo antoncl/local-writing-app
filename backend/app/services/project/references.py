@@ -1136,16 +1136,10 @@ class ReferencesMixin:
         return ""
 
     def _entry_type_matches(self, entry_type_id: str, target_entry_type: str, schema: MetadataSchema) -> bool:
-        if entry_type_id == target_entry_type:
-            return True
-        seen: set[str] = set()
-        current = schema.entry_types.get(entry_type_id)
-        while current and current.parent and current.parent not in seen:
-            if current.parent == target_entry_type:
-                return True
-            seen.add(current.parent)
-            current = schema.entry_types.get(current.parent)
-        return False
+        # Is-a via the canonical ancestry primitive (#1689) — the same walk the
+        # snippet classification and the `is_a` Jinja helper use, so reference
+        # candidates can't drift from every other is-a consumer.
+        return target_entry_type in self.entry_type_ancestry(entry_type_id, schema=schema)
 
     def _candidate_from_index_entry(self, entry: NodeIndexEntry, *, include_summary: bool) -> ReferenceCandidate:
         return ReferenceCandidate(

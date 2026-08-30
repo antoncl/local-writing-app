@@ -18,7 +18,9 @@ import type { MetadataSchema, PlotlineSummary, PromptEntrySummary, ViewNodeSumma
 
 const SCHEMA = {
   entry_types: {
-    "prompt:snippet": { name: "Snippet" },
+    "prompt:snippet": { name: "Snippet", kind: "prompt" },
+    "prompt:voice_note": { name: "Voice note", kind: "prompt", parent: "prompt:snippet" },
+    "prompt:general": { name: "General", kind: "prompt" },
     "plot:plotline": { name: "Plotline", kind: "plot" },
     "plot:card": { name: "Card", kind: "plot" },
     "lore:character": { name: "Character", kind: "lore" },
@@ -47,12 +49,12 @@ function loreEntry(id: string, title: string, tags: string[], aliases: string[] 
   } as unknown as import("@/lib/types").LoreEntrySummary;
 }
 
-function snippet(id: string, title: string): PromptEntrySummary {
+function snippet(id: string, title: string, entryType = "prompt:snippet"): PromptEntrySummary {
   return {
     id,
     title,
     body: "",
-    entry_type: "prompt:snippet",
+    entry_type: entryType,
     metadata: {},
     computed_metadata: {},
     inputs: [],
@@ -96,7 +98,8 @@ describe("NodePicker snippet picker — hide filter (ADR-0049 #682)", () => {
     hideLibraryEntry("gone");
     render(NodePicker, {
       props: {
-        // A snippet-kind source with no entry_type leaves → every prompt is a snippet.
+        // A snippet-kind source with no entry_type leaves → the whole prompt
+        // roster (see the by-design note below).
         config: { sources: [{ kind: "snippet" }] },
         promptEntries: [snippet("keep", "Keeper"), snippet("gone", "Goner")],
         affordance: "add",
@@ -108,6 +111,29 @@ describe("NodePicker snippet picker — hide filter (ADR-0049 #682)", () => {
 
     expect(screen.getByText("Keeper")).toBeInTheDocument();
     expect(screen.queryByText("Goner")).toBeNull();
+  });
+});
+
+describe("NodePicker snippet category — the whole prompt roster, BY DESIGN (#1688)", () => {
+  it("offers invocable prompts too: hand-picking a prompt-kind view routes through this group", async () => {
+    // The Category enum has no "prompt", so ViewFlowNode maps a prompt-kind
+    // hand_picked source through the "snippet" category. #1688 tried filtering
+    // this roster to snippet-typed prompts and it broke that only live
+    // consumer — this pin keeps the roster whole.
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "snippet" }] },
+        promptEntries: [
+          snippet("sub", "Voice note", "prompt:voice_note"),
+          snippet("gen", "Brainstorm beats", "prompt:general"),
+        ],
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    expect(screen.getByText("Voice note")).toBeInTheDocument();
+    expect(screen.getByText("Brainstorm beats")).toBeInTheDocument();
   });
 });
 

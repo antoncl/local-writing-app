@@ -238,9 +238,14 @@ export function kindEntryTypeFqns(schema: MetadataSchema | null, kind: string): 
 
 // True iff `entryType` is `ancestor` or descends from it (is-a). The upward twin
 // of `descendantTypeFqns` below: walks the parent chain toward the root, matching
-// the backend's ancestry classification (`references.py`) so a user-defined
-// subtype is-a its built-in root on both sides. Without a schema only an exact
-// match holds. `seen` guards a malformed cyclic chain.
+// the backend's canonical ancestry primitive (`entry_type_ancestry`,
+// services/project/schema.py) so a user-defined subtype is-a its built-in root
+// on both sides. The frontend's one is-a PREDICATE (#1689) — promptResolution
+// and evaluateView's descendants_of route here (the value-picking chain walks
+// in colors.ts / `inheritedFromLabel` answer different questions). Without a
+// schema only an exact match holds. A depth cap guards a malformed cyclic
+// chain, allocation-free (same idiom as `inheritedFromLabel`) — this runs per
+// declared type inside `descendants_of` resolution.
 export function entryTypeIsA(
   schema: MetadataSchema | null,
   entryType: string,
@@ -248,10 +253,10 @@ export function entryTypeIsA(
 ): boolean {
   if (!schema) return entryType === ancestor;
   let cursor: string | undefined = entryType;
-  const seen = new Set<string>();
-  while (cursor && !seen.has(cursor)) {
+  let depth = 0;
+  while (cursor && depth < 32) {
     if (cursor === ancestor) return true;
-    seen.add(cursor);
+    depth += 1;
     cursor = schema.entry_types?.[cursor]?.parent ?? undefined;
   }
   return false;

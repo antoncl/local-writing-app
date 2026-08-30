@@ -6,18 +6,21 @@ import type { ViewGroupByLevel } from "@/lib/types";
 // (#374: the A–Z toggle rebuilt the level from scratch and dropped `show_empty`,
 // which no sibling mutator did).
 
-/** Change level `i`'s field, dropping `show_empty`.
+/** Change level `i`'s field, dropping `show_empty` — but only on a REAL change.
  *
  * `show_empty` declares THIS field's vocabulary should render in full, so it
  * must not ride along to a different field and fill it with a bucket per
- * registered value (#374). `order` is field-agnostic and is preserved. */
+ * registered value (#374). Re-selecting the level's current field is a no-op
+ * and must not strip the flag (#1693) — post-ADR-0037-Amendment-3 the flag is
+ * display-only, but losing it on a non-change is still a silent edit the user
+ * never made. `order` is field-agnostic and is preserved either way. */
 export function setLevelField(
   levels: ViewGroupByLevel[],
   i: number,
   field: string,
 ): ViewGroupByLevel[] {
   return levels.map((l, j) => {
-    if (j !== i) return l;
+    if (j !== i || l.field === field) return l;
     const next = { ...l, field };
     delete next.show_empty;
     return next;

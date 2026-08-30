@@ -128,3 +128,24 @@ nothing for a surface that doesn't exist).
 - **Modal vs. pane for a given surface is deliberately unresolved and may vary from place to place**
   (settings might be a pane, a lighter action a modal). Decided per surface at its slice, not
   globally here.
+
+## Amendments
+
+### 2026-08-30 — layout presets rejoin the chrome as a quick-toggle (#1651)
+
+§1 filed **layout presets** in the app menu as a project-scoped verb, and §Consequences shed the
+top bar's "Layout" button into the menu — while §3/§Consequences kept **the theme quick-toggle in
+the chrome**. In practice that split the two like-for-like presentation controls: theme (a quick
+flip a writer makes often) stayed a chrome affordance, while layout (the same kind of quick flip
+between workspace arrangements) became a verb buried under ten project commands.
+
+The refinement: **layout presets are a presentation quick-toggle in the same class as the theme
+toggle**, so they earn the same treatment — their own compact popover in the chrome, immediately
+beside the theme toggle, and out of the ≡ menu entirely.
+
+This does **not** loosen the load-bearing rule. A verb's scope still decides its home, nothing lives
+in two places, and the ≡ menu remains the single home for verbs. What changed is the *classification*
+of layout presets: they are presentation state, not a command — the same reasoning that already
+exempted the theme quick-toggle to the chrome. The full arrangement of layout (save/reset/named
+presets) rides along in the popover so the control stays whole rather than being split between chrome
+and menu.

@@ -1213,18 +1213,20 @@
           {commit.committing ? "Drafting…" : "Propose new entry"}
         </button>
       {:else if commit.isCommitChat}
-        <!-- ADR-0046 slice 3: finalize the brainstorm into a validated patch
-             (out of band, hidden), reviewed on the target entry's pane. -->
+        <!-- ADR-0046 slice 3: draft the brainstorm into a validated patch (out
+             of band, hidden), reviewed on the target entry's pane. Nothing is
+             written until the writer commits that review — the label says
+             "Propose…", mirroring the create path's "Propose new entry". -->
         <button
           type="button"
           class="cbv-commit"
           disabled={chatRunning || commit.committing || !commit.commitTargetEntryId || chatHistory.length === 0}
           title={commit.commitTargetEntryId
-            ? "Finalize this brainstorm and review the revised entry"
+            ? "Draft a revision of the entry and review it before saving — nothing is written until you commit"
             : "This brainstorm has no target entry"}
           onclick={() => void commit.commitToEntry()}
         >
-          {commit.committing ? "Committing…" : "Commit to entry"}
+          {commit.committing ? "Drafting…" : "Propose entry revision"}
         </button>
         {#if commit.canStage}
           <!-- ADR-0055 §4a/§6: the timeline branch — same content, staged as a

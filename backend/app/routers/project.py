@@ -24,6 +24,7 @@ from app.models import (
     ProjectInfo,
     ProjectNode,
     ProjectValidation,
+    ProspectiveAiPolicy,
     ProspectiveProjectNode,
     ProspectiveProjectNodeRequest,
     RenameStructureNodeRequest,
@@ -168,6 +169,18 @@ def prospective_project_node(
 ) -> ProspectiveProjectNode:
     with translate_errors():
         return project.prospective_project_node(Path(request.root_path), request.inherits)
+
+
+# The wizard's AI step (#1672): the policy a not-yet-created project would inherit
+# over the ticked ancestors, plus its provenance, so "inherit" shows its value and
+# source. Reuses the review step's request shape; a path-based read touching no
+# project state (first run has no scope, which is fine).
+@router.post("/api/project/prospective-ai-policy", response_model=ProspectiveAiPolicy)
+def prospective_ai_policy(
+    project: CurrentProject, request: ProspectiveProjectNodeRequest
+) -> ProspectiveAiPolicy:
+    with translate_errors():
+        return project.prospective_ai_policy(Path(request.root_path), request.inherits)
 
 
 @router.post("/api/project/validate", response_model=ProjectValidation)

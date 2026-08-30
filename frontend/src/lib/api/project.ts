@@ -11,6 +11,7 @@ import type {
   PathProbe,
   ProjectInfo,
   ProjectNode,
+  ProspectiveAiPolicy,
   ProspectiveProjectNode,
   ProjectValidation,
   SaveProjectNodeRequest,
@@ -49,6 +50,15 @@ export const projectApi = {
   // absolute candidate paths the location step produced.
   prospectiveProjectNode(rootPath: string, inherits: string[]) {
     return request<ProspectiveProjectNode>("/project/prospective-node", {
+      method: "POST",
+      body: JSON.stringify({ root_path: rootPath, inherits }),
+    });
+  },
+  // The wizard's AI step (#1672): the policy a prospective project would inherit
+  // over the ticked ancestors, plus its provenance — so "inherit" names its value
+  // and where it comes from. Same request shape as the review node.
+  prospectiveAiPolicy(rootPath: string, inherits: string[]) {
+    return request<ProspectiveAiPolicy>("/project/prospective-ai-policy", {
       method: "POST",
       body: JSON.stringify({ root_path: rootPath, inherits }),
     });

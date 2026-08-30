@@ -248,6 +248,18 @@ class ProspectiveProjectNode(BaseModel):
     field_sources: dict[str, str] = Field(default_factory=dict)
 
 
+class ProspectiveAiPolicy(BaseModel):
+    """The AI policy a not-yet-created project would inherit, plus its provenance
+    (#1672). The wizard's AI step shows this so the "inherit" state names its
+    value and where it comes from. `policy` is the resolved enum
+    (nearest-explicit-wins over the ticked chain, app-default seed); `source` is
+    the title of the ancestor that stated it, or None when the value is the
+    app-global default (nobody up the chain stated one)."""
+
+    policy: AIPolicy = "off"
+    source: str | None = None
+
+
 class LooseScene(BaseModel):
     """A scene file present on disk under `scenes/` but not referenced by the
     manuscript structure — a candidate for import (#4). Enumerated by

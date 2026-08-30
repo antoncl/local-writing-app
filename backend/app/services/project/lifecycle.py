@@ -43,6 +43,7 @@ from app.models import (
     ProjectInfo,
     ProjectNode,
     ProjectValidation,
+    ProspectiveAiPolicy,
     ProspectiveProjectNode,
     Scene,
     TodoItem,
@@ -96,11 +97,17 @@ class _AIPolicyResolver(LayerVisitor):
         # defaults to `off` so a caller that does not supply one still gets the
         # fail-closed floor (`decisions_ai_permission_fails_closed`).
         self.policy: AIPolicy = default
+        # The folder of the nearest layer that STATED the winning policy, or None
+        # when nobody stated one (the policy is the app-global default seed). Lets
+        # a caller show provenance — "inheriting Cloud from <Series>" vs "app
+        # default" (#1672). The resolved `policy` is unaffected either way.
+        self.source_folder: Path | None = None
 
     def visit_layer(self, layer: IndexLayer) -> None:
         stated = self._stated(layer.folder)
         if stated is not None:
             self.policy = stated
+            self.source_folder = layer.folder
 
 
 def _channel_safe_metadata_value(value: Any) -> MetadataValue:
@@ -684,6 +691,31 @@ class ProjectLifecycleMixin:
         )
         self.visit_layers(resolver, root)
         return resolver.policy
+
+    def prospective_ai_policy(self, root: Path, inherits: list[str]) -> ProspectiveAiPolicy:
+        """The AI policy a *not-yet-created* project at `root` declaring `inherits`
+        would resolve to, plus where it comes from (#1672). The wizard's AI step
+        shows this so "inherit" names its value and provenance instead of a vague
+        "from the projects above".
+
+        Same fold as `_resolved_ai_policy` (nearest-explicit-wins, app-default
+        seed) but over `prospective_layers` — the chain built from the wizard's
+        ticks, since the project has no manifest yet — and it reports the layer
+        that stated the winning policy. `source` is that ancestor's title
+        (`_readable_project_title`, guarded like every cross-project title read),
+        or None when nobody stated one and the value is the app-global default.
+        `root` itself never states a policy (no manifest yet), so the source is
+        always an ancestor or None."""
+        from app.services import machine_settings as ms_service
+
+        resolver = _AIPolicyResolver(
+            self._stated_ai_policy, default=ms_service.default_ai_policy()
+        )
+        for layer in self.prospective_layers(root, inherits):
+            resolver.visit_layer(layer)
+        source = resolver.source_folder
+        source_title = (self._readable_project_title(source) or source.name) if source else None
+        return ProspectiveAiPolicy(policy=resolver.policy, source=source_title)
 
     def _stated_ai_policy(self, folder: Path) -> AIPolicy | None:
         """What one layer's manifest *says*, or `None` when it says nothing.

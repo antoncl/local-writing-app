@@ -11,13 +11,14 @@
   // muted and no stop is active — picking a stop overrides (goes live), and the
   // Reset affordance returns it to inheriting. Absence of a stated policy is
   // exactly what makes the chain resolve it (§7's one inheritance law).
-  import type { AIPolicy } from "@/lib/types";
+  import type { AIPolicy, ProspectiveAiPolicy } from "@/lib/types";
 
   type PolicyDraft = AIPolicy | "inherit";
 
   let {
     value,
     canInherit = false,
+    inherited = null,
     onChange,
   }: {
     value: PolicyDraft;
@@ -25,6 +26,10 @@
     // First-run / top-level projects have nothing above them, so the control is
     // always a concrete Off/Local/Cloud with no inherit state or Reset.
     canInherit?: boolean;
+    // The resolved inherited policy + its provenance (#1672), so the inherit note
+    // names the value and where it comes from. Null = not resolved (fetch failed
+    // or in flight): the note falls back to the generic relationship copy.
+    inherited?: ProspectiveAiPolicy | null;
     onChange: (next: PolicyDraft) => void;
   } = $props();
 
@@ -35,11 +40,13 @@
   ];
 
   // Inheriting = declared a chain AND stated no policy here. No stop is active;
-  // the control reads muted. The concrete inherited value is not resolvable
-  // before the project exists, so the resting label names the relationship
-  // ("the projects above"), not a specific ancestor.
+  // the control reads muted. When the resolved value is known (`inherited`), the
+  // note names it and its source; otherwise it falls back to the relationship.
   const inheriting = $derived(canInherit && value === "inherit");
   const activePolicy = $derived<AIPolicy | null>(value === "inherit" ? null : value);
+  const inheritedLabel = $derived(
+    inherited ? (STOPS.find((stop) => stop.policy === inherited.policy)?.label ?? inherited.policy) : null,
+  );
 </script>
 
 <div class="policy-slider" class:inheriting>
@@ -64,9 +71,17 @@
 
   {#if canInherit}
     {#if inheriting}
-      <p class="inherit-note">
-        Inheriting from the projects above — pick a stop to set a policy for this project.
-      </p>
+      {#if inherited}
+        <p class="inherit-note">
+          Inheriting <strong>{inheritedLabel}</strong>
+          {#if inherited.source}from <strong>{inherited.source}</strong>{:else}(app default){/if} —
+          pick a stop to set this project's own policy.
+        </p>
+      {:else}
+        <p class="inherit-note">
+          Inheriting from the projects above — pick a stop to set a policy for this project.
+        </p>
+      {/if}
     {:else}
       <!-- On the --star provenance axis (slice 0), naming the source of the
            value it returns to rather than the word "inherit". -->
@@ -170,6 +185,13 @@
     margin: 0;
     font-size: var(--fs-xs);
     color: var(--text-3);
+  }
+
+  /* The resolved value + its source lift out of the muted note so the author
+     can read them at a glance (#1672). */
+  .inherit-note strong {
+    color: var(--text-2);
+    font-weight: 600;
   }
 
   /* The Reset control lives on the provenance/override axis (--star), matching

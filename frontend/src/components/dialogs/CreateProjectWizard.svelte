@@ -183,6 +183,7 @@
           <AiPolicySlider
             value={wizard.aiSliderValue}
             canInherit={wizard.canInheritPolicy}
+            inherited={wizard.inheritedPolicy}
             onChange={(next) => wizard.setAiPolicy(next)}
           />
 

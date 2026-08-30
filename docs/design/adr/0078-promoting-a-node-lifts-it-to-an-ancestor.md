@@ -1,7 +1,7 @@
 # ADR-0078: Promoting a node lifts it to an ancestor and leaves the origin-only parts behind
 
-- Status: **Accepted** — 2026-08-30, Anton. Shaped with Anton over the review that produced
-  §4–§7 and the mutation-set / dynamic-include refinements, then put through a
+- Status: **Accepted** — 2026-08-30, Anton, PR #1655. Shaped with Anton over the review that
+  produced §4–§7 and the mutation-set / dynamic-include refinements, then put through a
   cold-implementer pass (the failure-pattern countermeasure) whose findings are folded in,
   with acceptance tests defined per slice (§Acceptance).
 - Verified against `be10d00e` (2026-08-30, `nightly-307-gbe10d00e`).

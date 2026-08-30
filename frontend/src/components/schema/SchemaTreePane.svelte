@@ -127,7 +127,15 @@
     {/each}
   </div>
   <div class="schema-context-heading">
-    <strong>{schemaContextHeading}</strong>
+    <div class="sch-heading-row">
+      <strong>{schemaContextHeading}</strong>
+      <!-- The one always-visible "start a new type" entry (#1662): opens the
+           inline create card seeded at the kind root (a top-level type; extends
+           still editable). A row's "+" seeds a child instead. -->
+      <button class="sch-new-type" type="button" onclick={() => onRequestCreate(kindRootId)}>
+        <span aria-hidden="true">+</span> New type
+      </button>
+    </div>
     <small>Drag a custom type onto another type to change its parent.</small>
   </div>
   <div class="schema-node-tree" aria-label={`${schemaContextHeading} tree`}>
@@ -239,6 +247,35 @@
   .schema-context-heading {
     display: grid;
     gap: 2px;
+  }
+
+  /* Heading row: the "<Kind> Types" title on the left, the always-visible
+     "+ New type" affordance pinned right (#1662). */
+  .sch-heading-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .sch-new-type {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 9px;
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+
+  .sch-new-type:hover {
+    background: var(--panel);
+    border-color: var(--accent-emphasis);
+    color: var(--accent-emphasis);
   }
 
   .schema-context-heading small {

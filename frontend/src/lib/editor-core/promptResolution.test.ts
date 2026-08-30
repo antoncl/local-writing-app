@@ -512,7 +512,7 @@ describe("isSnippetType — ancestry classification (#1685)", () => {
 
 // #1700/#1701: committingPromptsFor resolves a subject's committing prompts
 // per entry type via offer_on, nearest-target-wins — replacing the old
-// promptEntriesWithCommit(ctx)[0] pick with no type-compatibility check.
+// type-blind [0] pick over the whole commit roster.
 describe("committingPromptsFor / chatPromptPickList (#1700/#1701)", () => {
   const typeSchema = {
     entry_types: {
@@ -524,47 +524,19 @@ describe("committingPromptsFor / chatPromptPickList (#1700/#1701)", () => {
     fields: {},
   } as unknown as MetadataSchema;
 
-  function committing(
-    id: string,
-    title: string,
-    offerOn: string[],
-  ): PromptEntrySummary {
+  function committing(id: string, title: string, offer_on: string[]): PromptEntrySummary {
     return {
-      id,
+      ...prompt(id, "prompt:general", {
+        output: { handler: "extract_to_node", commit: { review: "visual_diff" } },
+      }),
       title,
-      body: "",
-      entry_type: "prompt:chat",
-      metadata: {},
-      computed_metadata: {},
-      inputs: [],
-      offer_on: offerOn,
-      context_strategy: { output: { handler: "extract_to_node", commit: { review: "diff" } } },
-    } as unknown as PromptEntrySummary;
+      offer_on,
+    };
   }
 
   // A conversation prompt with no commit — an impersonate-style prompt.
-  function nonCommitting(id: string, title: string, offerOn: string[]): PromptEntrySummary {
-    return {
-      id,
-      title,
-      body: "",
-      entry_type: "prompt:chat",
-      metadata: {},
-      computed_metadata: {},
-      inputs: [],
-      offer_on: offerOn,
-      context_strategy: { output: { handler: "extract_to_node" } },
-    } as unknown as PromptEntrySummary;
-  }
-
-  function typeCtx(over: Partial<PromptResolutionContext> = {}): PromptResolutionContext {
-    return {
-      metadataSchema: typeSchema,
-      promptEntries: [],
-      loreEntries: [],
-      availableScenes: [],
-      ...over,
-    };
+  function nonCommitting(id: string, title: string, offer_on: string[]): PromptEntrySummary {
+    return { ...prompt(id, "prompt:general", { output: { handler: "extract_to_node" } }), title, offer_on };
   }
 
   const baseRevise = committing("p-base", "Revise Lore Entry", ["lore:base"]);
@@ -572,9 +544,45 @@ describe("committingPromptsFor / chatPromptPickList (#1700/#1701)", () => {
   const cardRevise = committing("p-card", "Revise Card", ["plot:card"]);
   const impersonate = nonCommitting("p-imp", "Impersonate", ["lore:character"]);
 
+  function typeCtx(over: Partial<PromptResolutionContext> = {}): PromptResolutionContext {
+    return ctx({ metadataSchema: typeSchema, promptEntries: [], ...over });
+  }
+
   describe("committingPromptsFor", () => {
     it("drops prompts without a commit", () => {
       const c = typeCtx({ promptEntries: [characterRevise, impersonate] });
+      expect(committingPromptsFor(c, "lore:character").map((p) => p.id)).toEqual(["p-char"]);
+    });
+
+    it("drops a committing prompt with no conversation surface (inline handler / snippet type)", () => {
+      // Same eligibility gate as every other discovery roster: a commit riding
+      // on an inline handler, or on a snippet-typed prompt, is not something a
+      // chat can bind — offer_on compatibility alone must not admit it.
+      const inlineCommit: PromptEntrySummary = {
+        ...prompt("p-inline", "prompt:general", {
+          output: { handler: "inline", commit: { review: "visual_diff" } },
+        }),
+        title: "Inline With Commit",
+        offer_on: ["lore:base"],
+      };
+      const snippetSchema = {
+        entry_types: {
+          ...typeSchema.entry_types,
+          "prompt:snippet": { name: "Snippet", kind: "prompt" },
+        },
+        fields: {},
+      } as unknown as MetadataSchema;
+      const snippetCommit: PromptEntrySummary = {
+        ...prompt("p-snip", "prompt:snippet", {
+          output: { handler: "extract_to_node", commit: { review: "visual_diff" } },
+        }),
+        title: "Snippet With Commit",
+        offer_on: ["lore:base"],
+      };
+      const c = typeCtx({
+        metadataSchema: snippetSchema,
+        promptEntries: [inlineCommit, snippetCommit, characterRevise],
+      });
       expect(committingPromptsFor(c, "lore:character").map((p) => p.id)).toEqual(["p-char"]);
     });
 

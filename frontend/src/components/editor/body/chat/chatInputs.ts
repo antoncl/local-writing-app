@@ -29,12 +29,14 @@ export function seedInputDraftsFromEntry(entry: PromptEntrySummary): Record<stri
 
 // The subject (`entry` / `entry_type`) is chat-level state seeded at launch, not
 // per-prompt state — a prompt switch (#1701) rebinds the prompt but must keep the
-// subject, not reset it to the new prompt's (empty) defaults. For each subject
-// name, `prev`'s value survives into `seeded` iff it is non-empty AND both the
-// outgoing and incoming prompt declare an input of that name with the SAME
-// declared `type` — drafts are stored in the widget's string form, so carrying
-// one across a type change (e.g. a custom prompt storing `entry_type` as
-// something other than plain text) would carry the wrong shape verbatim.
+// subject, not reset it to the new prompt's (empty) defaults. Called only for a
+// chat that HAS a subject (the caller gates on it): there the pick list offered
+// only prompts admitting that subject, so a carried pick stays in-target. For
+// each subject name, `prev`'s value survives into `seeded` iff it is non-empty
+// AND both the outgoing and incoming prompt declare an input of that name with
+// the SAME declared `type` — drafts are stored in the widget's string form, so
+// carrying one across a type change (e.g. a custom prompt storing `entry_type`
+// as something other than plain text) would carry the wrong shape verbatim.
 // `entry_type` is text by contract; `entry` is `context_pick` on the built-ins.
 export function carrySubjectSeeds(
   prev: Record<string, string>,

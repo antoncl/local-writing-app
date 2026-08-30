@@ -24,7 +24,6 @@
     chatPromptPickList,
     effectivePromptInputs,
     entryIdFromPickValue,
-    promptDeclaresCommit,
     resolutionSceneIdFromInputs,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
@@ -434,6 +433,13 @@
   // own dropdown before invoking these as callbacks.
   async function pickPromptForChat(entry: PromptEntrySummary): Promise<void> {
     if (isLocked) return;
+    // Capture the OUTGOING binding before the id reassignment below:
+    // `activePromptEntry`/`chatSubjectEntryType` are deriveds over
+    // `chatPromptEntryId`, so past that write they already resolve to the
+    // INCOMING prompt — the carry guard would compare the new prompt's input
+    // types against themselves and always pass.
+    const previousPromptEntry = activePromptEntry;
+    const hadSubject = chatSubjectEntryType !== "";
     chatPromptEntryId = entry.id;
     // Seed the assistant from the prompt: an explicit preferred pin wins;
     // otherwise the dynamic default = topmost assistant matching the prompt's
@@ -450,9 +456,15 @@
     // (deferred render lets the user edit input drafts freely).
     chatSystemPrompt = "";
     // The subject (`entry`/`entry_type`) is chat-level state seeded at launch;
-    // a prompt switch rebinds the prompt but keeps the subject (#1701) — every
-    // committing prompt declares `entry_type` (ADR-0067 Amendment 1).
-    chatInputDrafts = carrySubjectSeeds(chatInputDrafts, seedInputDraftsFromEntry(entry), activePromptEntry, entry);
+    // a prompt switch in a SUBJECT chat rebinds the prompt but keeps the
+    // subject (#1701) — the pick list only offered prompts admitting that
+    // subject, and every committing prompt declares `entry_type` (ADR-0067
+    // Amendment 1). A plain chat keeps the old reset-to-defaults: with no
+    // shared subject, a carried `entry` pick could point at a node the new
+    // prompt's picker would never offer.
+    chatInputDrafts = hadSubject
+      ? carrySubjectSeeds(chatInputDrafts, seedInputDraftsFromEntry(entry), previousPromptEntry, entry)
+      : seedInputDraftsFromEntry(entry);
     await persistActiveChat();
   }
 
@@ -1023,22 +1035,6 @@
   let activePromptEntry = $derived(chatPromptEntryId
     ? promptEntries.find((p) => p.id === chatPromptEntryId) ?? null
     : null);
-  // The chat's seeded subject type (#1701): non-empty only when the bound prompt
-  // is a committing one (a plain conversation prompt never has a target type)
-  // AND the launch actually seeded `entry_type`. Drives the pick list below so a
-  // draft chat can switch to another revise prompt for the same subject instead
-  // of losing its target.
-  let chatSubjectEntryType = $derived(
-    activePromptEntry && promptDeclaresCommit(promptDiscoveryCtx, activePromptEntry)
-      ? (chatInputDrafts["entry_type"] ?? "").trim()
-      : "",
-  );
-  // The chat-routed pick list for ChatComposerBar (#1701): a seeded subject offers
-  // the compatible committing prompts (chatPromptPickList → committingPromptsFor);
-  // no subject falls back to the pre-#1701 roster — conversation prompts minus
-  // brainstorms (#1086), since a brainstorm with no target would give a Commit
-  // button with nothing to commit to.
-  let routedPromptEntries = $derived(chatPromptPickList(promptDiscoveryCtx, chatSubjectEntryType));
   // The active prompt's `output` (ADR-0054): routing is `outputHandlerFor(output.handler)`
   // (`PromptOutput` has no `.kind`); a `.commit` marks a brainstorm that extracts to its
   // `entry` target (`.commit.review` = how it's reviewed; WHAT it extracts is authored in the
@@ -1058,6 +1054,25 @@
   let subjectLoreEntryType = $derived(
     loreEntries.find((entry) => entry.id === entryDraftTargetId)?.entry_type ?? "",
   );
+  // The chat's subject type (#1701): non-empty only when the bound prompt
+  // declares a `commit` — read off `activeOutput`, the component's one source
+  // for the bound output (a plain conversation prompt never has a target
+  // type). The LIVE revise target's type wins over the launch-seeded
+  // `entry_type` draft: revise mode keeps the `entry` picker editable (#695)
+  // and nothing re-seeds the hidden draft on a repoint, so only the picked
+  // entry's own type keeps the pick list honest. Create mode (and a non-lore
+  // subject, which `subjectLoreEntryType` leaves "") uses the seed.
+  let chatSubjectEntryType = $derived(
+    activeOutput?.commit
+      ? subjectLoreEntryType || (chatInputDrafts["entry_type"] ?? "").trim()
+      : "",
+  );
+  // The chat-routed pick list for ChatComposerBar (#1701): a subject chat offers
+  // the compatible committing prompts (chatPromptPickList → committingPromptsFor);
+  // no subject falls back to the pre-#1701 roster — conversation prompts minus
+  // brainstorms (#1086), since a brainstorm with no target would give a Commit
+  // button with nothing to commit to.
+  let routedPromptEntries = $derived(chatPromptPickList(promptDiscoveryCtx, chatSubjectEntryType));
   // Feed the commit controller (declared up by the state block) its reactive
   // inputs each render — kept next to activeOutput, the derived it consumes.
   $effect.pre(() => {

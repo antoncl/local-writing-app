@@ -103,11 +103,10 @@
   // committing prompt (#1700) — a type with no offer_on match drops out instead
   // of borrowing an unrelated type's prompt.
   const brainstormChoices = $derived(
-    entryTypeChoicesByKind($metadataSchemaStore, "lore")
-      .map((choice) => ({ choice, prompt: committingPromptsFor(brainstormCtx, choice.id)[0] ?? null }))
-      .filter((entry): entry is { choice: { id: string; name: string }; prompt: PromptEntrySummary } =>
-        entry.prompt !== null,
-      ),
+    entryTypeChoicesByKind($metadataSchemaStore, "lore").flatMap((choice) => {
+      const prompt = committingPromptsFor(brainstormCtx, choice.id)[0];
+      return prompt ? [{ choice, prompt }] : [];
+    }),
   );
 
   function launchBrainstorm(prompt: PromptEntrySummary, entryType: string, typeName: string): void {

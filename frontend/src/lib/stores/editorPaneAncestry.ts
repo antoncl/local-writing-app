@@ -18,7 +18,7 @@ import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { authoringDefaultLayerId } from "@/lib/utils/layerAuthoring";
 import { projectSchemaLayerId } from "@/lib/stores/schema";
 import { cloneMetadata, type EditorPaneState } from "@/lib/editor-core/editorPaneModel";
-import type { LoreEntry } from "@/lib/types";
+import type { LoreEntry, PromptEntry } from "@/lib/types";
 
 // The slice of the editor-pane controller these actions drive. The single
 // EditorPanesController instance satisfies it structurally; a narrow interface
@@ -68,17 +68,26 @@ function resetLorePane(
   );
 }
 
-// Flush a lore pane's pending (autosave-debounced) edits before an action that
+// Flush a pane's pending (autosave-debounced) edits before an action that
 // moves the file out from under it (fork's own flush, and PromoteModal's
-// `onFlush`, ADR-0078 §2/§9): the moved file must carry the author's latest
-// words. Cancels the pending timer first so it cannot fire against the
-// baseline the save is about to move.
-export async function flushLorePaneIfDirty(host: LoreAncestryHost, entryId: string): Promise<void> {
-  const open = host.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
+// `onFlush`, ADR-0078 §2/§9/slice-3): the moved file must carry the author's
+// latest words. Cancels the pending timer first so it cannot fire against the
+// baseline the save is about to move. Shared by lore and prompt — the two
+// kinds ADR-0078 promotes — via the exported per-kind wrappers below.
+async function flushPaneIfDirty(host: LoreAncestryHost, kind: "lore" | "prompt", entryId: string): Promise<void> {
+  const open = host.panes.find((p) => p.document?.type === kind && p.document.id === entryId);
   if (open?.dirty) {
     host.cancelPendingAutosave(open.id);
     await host.saveEditorPane(open.id);
   }
+}
+
+export function flushLorePaneIfDirty(host: LoreAncestryHost, entryId: string): Promise<void> {
+  return flushPaneIfDirty(host, "lore", entryId);
+}
+
+export function flushPromptPaneIfDirty(host: LoreAncestryHost, entryId: string): Promise<void> {
+  return flushPaneIfDirty(host, "prompt", entryId);
 }
 
 // Fork-to-here (#313): sever an inherited lore entry into a local copy, then
@@ -111,6 +120,43 @@ export async function forkLore(host: LoreAncestryHost, entryId: string): Promise
 export async function applyPromotedLoreEntry(host: LoreAncestryHost, entry: LoreEntry): Promise<void> {
   await refreshLoreEntries();
   resetLorePane(host, entry.id, entry, defaultAuthoringLayerId(entry));
+  host.setStatus(`Promoted ${entry.title} to ${entry.source_layer_label ?? "the ancestor project"}`);
+}
+
+// Reset the open prompt pane to a server entry after a promote swapped the
+// file underneath it, mirroring resetLorePane. Prompts carry the extra
+// draftInputs/draftOfferOn/draftContextStrategy fields (ADR-0054/0065) that
+// lore doesn't, and have no authoring-layer rail (ADR-0042 is lore-only), so
+// this is a distinct — not shared — reset rather than a parameterized one.
+function resetPromptPane(host: LoreAncestryHost, matchId: string, entry: PromptEntry): void {
+  host.panes = host.panes.map((pane) =>
+    pane.document?.type === "prompt" && pane.document.id === matchId
+      ? {
+          ...pane,
+          scene: entry,
+          dirty: false,
+          draftTitle: entry.title,
+          draftMarkdown: entry.body,
+          draftEntryType: entry.entry_type,
+          draftMetadata: cloneMetadata(entry.metadata),
+          draftInputs: JSON.parse(JSON.stringify(entry.inputs ?? [])),
+          draftOfferOn: [...(entry.offer_on ?? [])],
+          draftContextStrategy: entry.context_strategy ?? null,
+          saving: false,
+          recentlySaved: false,
+        }
+      : pane,
+  );
+}
+
+// Fold a just-promoted prompt (ADR-0078 §2/§9 slice 3) into the open pane and
+// refresh the roster — PromoteModal already called `api.promotePromptEntry`
+// (so it can show a blocked/409/400 reason inline); this only applies the
+// result. The prompt is now inherited/read-only-in-place (ADR-0049 `editable`),
+// so NodeEditor's own lock takes over from here — nothing else to flip.
+export async function applyPromotedPromptEntry(host: LoreAncestryHost, entry: PromptEntry): Promise<void> {
+  await refreshPromptEntries();
+  resetPromptPane(host, entry.id, entry);
   host.setStatus(`Promoted ${entry.title} to ${entry.source_layer_label ?? "the ancestor project"}`);
 }
 

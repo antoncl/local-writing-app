@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
-import type { LoreEntry, PromotionPlan, PromotionTarget } from "@/lib/types";
+import type { LoreEntry, PromptEntry, PromotionPlan, PromotionTarget } from "@/lib/types";
 
-// ADR-0078 §2/§9: PromoteModal fetches its own roster + dry-run plan (like
-// DirectoryPickerModal), so the api calls are stubbed rather than the
-// component reaching a real backend (#973 network guard).
+// ADR-0078 §2/§9 (+ slice 3, prompts): PromoteModal fetches its own roster +
+// dry-run plan (like DirectoryPickerModal), so the api calls are stubbed
+// rather than the component reaching a real backend (#973 network guard).
 const targets: PromotionTarget[] = [
   { layer_id: "root", label: "World" },
   { layer_id: "series", label: "Series" },
@@ -18,6 +18,27 @@ const plan: PromotionPlan = {
     { field: "location", reason: 'points at "The Rusty Anchor", a Book 2 place' },
   ],
   invisible_at_destination: ["faction"],
+  also_promoted: [],
+  resolves_differently: [],
+  blocked_reason: null,
+};
+
+// A prompt's plan (slice 3): the two lore-always-empty buckets populated, and
+// no lore-only buckets (stays_in_origin / invisible_at_destination are lore's
+// static-partition concepts — empty here, which is realistic for a prompt).
+const promptPlan: PromotionPlan = {
+  destination: { layer_id: "series", label: "Series" },
+  travels: [],
+  stays_in_origin: [],
+  invisible_at_destination: [],
+  also_promoted: ["Style Guide Snippet"],
+  resolves_differently: ["setting_context"],
+  blocked_reason: null,
+};
+
+const blockedPlan: PromotionPlan = {
+  ...promptPlan,
+  blocked_reason: "Includes a dynamic {% include input.x %} the cascade can't follow.",
 };
 
 const promoted: LoreEntry = {
@@ -32,15 +53,32 @@ const promoted: LoreEntry = {
   source_layer_label: "Series",
 };
 
+const promotedPrompt: PromptEntry = {
+  id: "style-guide",
+  title: "Style Guide",
+  body: "…",
+  revision: "2",
+  entry_type: "prompt:snippet",
+  metadata: {},
+  inputs: [],
+  computed_metadata: {},
+  source_layer_id: "series",
+  source_layer_label: "Series",
+};
+
 const promotionTargets = vi.fn(async () => targets);
 const previewLorePromotion = vi.fn(async () => plan);
 const promoteLoreEntry = vi.fn(async () => promoted);
+const previewPromptPromotion = vi.fn(async () => promptPlan);
+const promotePromptEntry = vi.fn(async () => promotedPrompt);
 
 vi.mock("@/lib/api", () => ({
   api: {
     promotionTargets: (...args: unknown[]) => promotionTargets(...(args as [])),
     previewLorePromotion: (...args: unknown[]) => previewLorePromotion(...(args as [])),
     promoteLoreEntry: (...args: unknown[]) => promoteLoreEntry(...(args as [])),
+    previewPromptPromotion: (...args: unknown[]) => previewPromptPromotion(...(args as [])),
+    promotePromptEntry: (...args: unknown[]) => promotePromptEntry(...(args as [])),
   },
 }));
 
@@ -58,7 +96,21 @@ const alice: LoreEntry = {
   source_layer_label: "Book",
 };
 
+const styleGuidePrompt: PromptEntry = {
+  id: "style-guide",
+  title: "Style Guide",
+  body: "…",
+  revision: "1",
+  entry_type: "prompt:snippet",
+  metadata: {},
+  inputs: [],
+  computed_metadata: {},
+  source_layer_id: "book",
+  source_layer_label: "Book",
+};
+
 const base = {
+  kind: "lore" as const,
   open: true,
   entry: alice,
   onClose: vi.fn(),
@@ -70,6 +122,8 @@ beforeEach(() => {
   promotionTargets.mockClear();
   previewLorePromotion.mockClear();
   promoteLoreEntry.mockClear();
+  previewPromptPromotion.mockClear();
+  promotePromptEntry.mockClear();
   base.onClose = vi.fn();
   base.onFlush = vi.fn(async () => {});
   base.onPromoted = vi.fn();
@@ -163,5 +217,48 @@ describe("PromoteModal", () => {
     render(PromoteModal, { props: { ...base } });
     await fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(base.onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PromoteModal — prompt kind (ADR-0078 §2/§9 slice 3)", () => {
+  const promptBase = { ...base, kind: "prompt" as const, entry: styleGuidePrompt };
+
+  it("dispatches to the prompt endpoints and renders the two new buckets from a stub prompt plan", async () => {
+    render(PromoteModal, { props: { ...promptBase } });
+
+    await screen.findByRole("radio", { name: "Series" });
+    expect(previewPromptPromotion).toHaveBeenCalledWith("style-guide", "series");
+    expect(previewLorePromotion).not.toHaveBeenCalled();
+
+    // "Also promoted" — the cascaded include-closure, by title.
+    expect(await screen.findByText("Also promoted")).toBeTruthy();
+    expect(screen.getByText("Style Guide Snippet")).toBeTruthy();
+
+    // "Resolves differently" — the dynamic input names.
+    expect(screen.getByText("Resolves differently")).toBeTruthy();
+    expect(screen.getByText("setting_context")).toBeTruthy();
+
+    const confirmButton = screen.getByRole("button", { name: "Promote to Series" });
+    await fireEvent.click(confirmButton);
+    expect(promotePromptEntry).toHaveBeenCalledWith("style-guide", "series");
+    expect(promoteLoreEntry).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(promptBase.onPromoted).toHaveBeenCalledWith(promotedPrompt));
+  });
+
+  it("shows a blocked reason prominently and disables Promote, without dropping the other buckets", async () => {
+    previewPromptPromotion.mockResolvedValueOnce(blockedPlan);
+    render(PromoteModal, { props: { ...promptBase } });
+
+    await screen.findByText(
+      "Includes a dynamic {% include input.x %} the cascade can't follow.",
+    );
+    // Context still renders alongside the block.
+    expect(screen.getByText("Also promoted")).toBeTruthy();
+
+    const confirmButton = screen.getByRole("button", { name: "Promote to Series" });
+    expect((confirmButton as HTMLButtonElement).disabled).toBe(true);
+
+    await fireEvent.click(confirmButton);
+    expect(promotePromptEntry).not.toHaveBeenCalled();
   });
 });

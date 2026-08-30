@@ -186,6 +186,16 @@ export type PromotionPlan = {
   travels: string[];
   stays_in_origin: PromotionStayItem[];
   invisible_at_destination: string[];
+  // The include-closure cascaded up with the node (ADR-0078 §6): a prompt's
+  // `{% include %}`d snippets, by title. Always empty for lore.
+  also_promoted: string[];
+  // Dynamic references that travel and re-resolve at the destination rather
+  // than move (ADR-0078 §5): a prompt's context_pick/scene_ref inputs, named.
+  // Always empty for lore.
+  resolves_differently: string[];
+  // Non-null when the promotion is REFUSED (ADR-0078 §6, e.g. an unfollowable
+  // dynamic include) — the dialogue shows it and disables commit.
+  blocked_reason: string | null;
 };
 
 export type PromptEntrySummary = {

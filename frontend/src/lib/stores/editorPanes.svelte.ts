@@ -42,7 +42,9 @@ import {
   forkLore as runForkLore,
   forkPrompt as runForkPrompt,
   flushLorePaneIfDirty as runFlushLorePaneIfDirty,
+  flushPromptPaneIfDirty as runFlushPromptPaneIfDirty,
   applyPromotedLoreEntry as runApplyPromotedLoreEntry,
+  applyPromotedPromptEntry as runApplyPromotedPromptEntry,
 } from "./editorPaneAncestry";
 import { clearImplicitContext, implicitContextFor } from "@/lib/stores/implicitContext.svelte";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
@@ -1202,6 +1204,14 @@ class EditorPanesController {
 
   applyPromotedLoreEntry(entry: LoreEntry): Promise<void> {
     return runApplyPromotedLoreEntry(this, entry);
+  }
+
+  flushPromptPaneIfDirty(entryId: string): Promise<void> {
+    return runFlushPromptPaneIfDirty(this, entryId);
+  }
+
+  applyPromotedPromptEntry(entry: PromptEntry): Promise<void> {
+    return runApplyPromotedPromptEntry(this, entry);
   }
 
   forkPrompt(entryId: string): Promise<void> {

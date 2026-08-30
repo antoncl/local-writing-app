@@ -585,9 +585,9 @@ class ChatSession(BaseModel):
     # change (a committing brainstorm's work-product). Persisted as a `staged_set`
     # entity_ref in the node's front-matter `metadata`, so the index extracts a
     # chat->set edge and the set survives closing the chat. Singular: a distinct
-    # staged change is a new chat with its own context. Empty for impersonate /
+    # mutation set is a new chat with its own context. Empty for impersonate /
     # freeform chats. Seeded into the AI context on send so a resumed conversation
-    # continues refining the same change instead of restarting.
+    # continues refining the same set instead of restarting.
     staged_set: str = ""
     pinned: bool = False
     created_at: str
@@ -659,7 +659,7 @@ class ChatSessionSummary(BaseModel):
     subject: str = ""
     # ADR-0055 S4: the mutation set this chat owns (`metadata.staged_set`),
     # surfaced on the roster so a designed view can group / filter chats by
-    # whether they carry a staged change. Empty for impersonate / freeform chats.
+    # whether they carry a mutation set. Empty for impersonate / freeform chats.
     staged_set: str = ""
     prompt_entry_id: str = ""
     assistant_id: str = ""

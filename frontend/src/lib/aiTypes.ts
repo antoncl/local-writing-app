@@ -436,7 +436,7 @@ export type ChatSessionSummary = {
   entry_type: string;
   subject?: string;
   // ADR-0055 S4: the mutation set this chat owns (metadata.staged_set), so a
-  // designed view can group / filter chats by whether they carry a staged change.
+  // designed view can group / filter chats by whether they carry a mutation set.
   staged_set?: string;
   prompt_entry_id: string;
   assistant_id: string;

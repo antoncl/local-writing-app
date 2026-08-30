@@ -838,7 +838,7 @@
         onSelect={(index) => void scrub.scrubTo(index)}
         onNavigate={(payload) => onNavigate?.(payload)}
       />
-      <!-- Staged changes (ADR-0055 §3): the mutation sets pinned to this entity,
+      <!-- Mutation sets (ADR-0055 §3): the mutation sets pinned to this entity,
            + ＋New to author another. The entity-side home for proposing a change
            the writer later places in a scene. -->
       {#key scene.id}

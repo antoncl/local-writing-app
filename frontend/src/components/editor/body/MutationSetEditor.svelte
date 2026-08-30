@@ -6,7 +6,7 @@
   //
   // A set is a reusable template (entity bound at apply time) UNLESS it is
   // pinned to an entity (ADR-0055 §3): opened with a `preset` (from a lore
-  // card's "New staged change") or editing a set that already carries
+  // card's "＋ New" mutation set) or editing a set that already carries
   // `target_entity`, the dialog locks the type to that entity's and records the
   // pin, so the set is a one-off *about* that character.
   import { untrack } from "svelte";
@@ -121,10 +121,10 @@
 </script>
 
 <MutationDialogShell
-  title={pinned ? (initial ? "Edit staged change" : "New staged change") : initial ? "Edit mutation set" : "New mutation set"}
+  title={initial ? "Edit mutation set" : "New mutation set"}
   subtitle={pinned
-    ? "A bundle of field changes staged for this character — place it in a scene to make it real."
-    : "A reusable bundle of field changes, applied to any matching entity in one gesture."}
+    ? "A mutation set staged for this character — place it in a scene to make it active."
+    : "A reusable mutation set, applied to any matching entity in one gesture."}
   ariaLabel="Edit mutation set"
   onCancel={onCancel}
 >

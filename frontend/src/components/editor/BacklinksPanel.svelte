@@ -117,7 +117,7 @@
   }
 
   /* Tier panel behind the rows — matches NodeRow's grouped-children tint (and
-     the Conversations / Staged-changes lists) so every rail list reads as one
+     the Conversations / Mutation-sets lists) so every rail list reads as one
      grouped surface. */
   .backlinks-list {
     padding: 8px;

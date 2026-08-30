@@ -184,7 +184,11 @@ treatment**, and the NodeEditor/metadata decision memos before touching those.
 
 - **Vocabulary** (from `AGENTS.md`): `Lore` = the collection, `Entry` (UI) /
   `LoreEntry` (code) = an item, `Scene` = atomic prose file, `Manuscript
-  Structure` = act/chapter/scene ordering. **Never** call story info "Codex".
+  Structure` = act/chapter/scene ordering. A `Mutation` = a mid-scene change
+  (⤳); a `Mutation set` = a reusable/pinned bundle, `staged` until placed then
+  `active` (display over `MutationSetEntry.placed`); verbs `stage`/`place`.
+  **Never** call story info "Codex", and **never** soften `mutation set` to
+  "change" / "staged change" / "pending change" (that is how the term drifts).
 - **No monolithic files**: split before any file passes ~1500 LOC
   (`docs/development/code-standards.md` §No monolithic source files).
 - **No compile errors, minimal warnings**: never wave off `svelte-check` issues as

@@ -28,9 +28,9 @@ describe("RailSectionHeader", () => {
   it("fires onToggle when the disclosure button is clicked", async () => {
     const onToggle = vi.fn();
     render(RailSectionHeader, {
-      props: { title: "Staged changes", glyph: "ti-stack-2", count: 0, expanded: false, onToggle },
+      props: { title: "Mutation sets", glyph: "ti-stack-2", count: 0, expanded: false, onToggle },
     });
-    await fireEvent.click(screen.getByRole("button", { name: /Staged changes/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /Mutation sets/ }));
     expect(onToggle).toHaveBeenCalledOnce();
   });
 

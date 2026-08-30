@@ -395,7 +395,7 @@ export class ChatCommitController {
       updated = true;
     } else {
       const set = await api.createMutationSetEntry({
-        title: `Staged change — ${subject}`,
+        title: `Mutation set — ${subject}`,
         target_entry_type: entryType,
         target_entity: entryId,
         rows,
@@ -408,8 +408,8 @@ export class ChatCommitController {
         : "";
     const count = `${rows.length} change${rows.length > 1 ? "s" : ""}`;
     this.deps.setNotice(
-      `${updated ? "Updated the staged change" : "Staged"} to ${subject} (${count}) — ` +
-        `review it under pending changes on the card, then place it from a scene.${dropped}`,
+      `${updated ? "Updated the mutation set" : "Staged a mutation set"} for ${subject} (${count}) — ` +
+        `review it under Mutation sets on the card, then place it in a scene to make it active.${dropped}`,
     );
   }
 

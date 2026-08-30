@@ -55,7 +55,7 @@ const createFromDraft = vi.mocked(treeActions.createNodeFromDraft);
 // A minimal created-set stub — the stage path only reads `.id`.
 const madeSet = (id: string): MutationSetEntry => ({
   id,
-  title: "Staged change",
+  title: "Mutation set",
   revision: "r1",
   entry_type: "mutation_set",
   target_entry_type: "lore:character",
@@ -574,7 +574,7 @@ describe("ChatCommitController — stageToPendingSet", () => {
     });
     // A set pinned to the subject, carrying the patch as replace rows.
     expect(createSet).toHaveBeenCalledWith({
-      title: "Staged change — Mira",
+      title: "Mutation set — Mira",
       target_entry_type: "lore:character",
       target_entity: "lore-1",
       rows: [
@@ -599,7 +599,7 @@ describe("ChatCommitController — stageToPendingSet", () => {
 
     expect(deps.addTurnCost).toHaveBeenCalledWith(0.03);
     expect(deps.setNotice).toHaveBeenLastCalledWith(
-      "Staged to Mira (1 change) — review it under pending changes on the card, then place it from a scene." +
+      "Staged a mutation set for Mira (1 change) — review it under Mutation sets on the card, then place it in a scene to make it active." +
         " Ignored 1 field(s) the model couldn't set legally: id.",
     );
   });
@@ -626,7 +626,7 @@ describe("ChatCommitController — stageToPendingSet", () => {
     expect(createSet).not.toHaveBeenCalled();
     expect(deps.onStaged).not.toHaveBeenCalled(); // edge already correct
     expect(deps.setNotice).toHaveBeenLastCalledWith(
-      "Updated the staged change to Mira (1 change) — review it under pending changes on the card, then place it from a scene.",
+      "Updated the mutation set for Mira (1 change) — review it under Mutation sets on the card, then place it in a scene to make it active.",
     );
   });
 

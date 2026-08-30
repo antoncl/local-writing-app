@@ -17,8 +17,16 @@ This project is a private, local-first fiction writing application.
 - Use `LoreEntry` in code when a type name needs to be unambiguous.
 - Use `Scene` as the atomic prose file.
 - Use `Manuscript Structure` for acts, chapters, sequences, and scene ordering.
+- Use `Mutation` for a mid-scene change to a lore value (the ⤳ pill). Use
+  `Mutation set` for a reusable / entity-pinned bundle of such changes. A
+  mutation set is `staged` while it sits unplaced on a card, and `active` once
+  placed into a scene (display words over the `MutationSetEntry.placed`
+  boolean). The verbs are `stage` (a chat stages a set onto a card) and `place`
+  (the writer places it into a scene, making it active).
 
 Avoid the term `Codex` for story information because it reads as derivative and now has OpenAI product baggage.
+
+Never soften `mutation` / `mutation set` to `change`, `staged change`, or `pending change`. These are one object with one name; the blander synonyms read as separate things and are how the vocabulary drifts. "Active" names the *set's* lifecycle only — never reuse it for the time-scrubbed value read-out (that stays `Changed by here`).
 
 ## Architecture
 

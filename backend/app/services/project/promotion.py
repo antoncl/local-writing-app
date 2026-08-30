@@ -89,8 +89,13 @@ class PromotionMixin:
         names = ", ".join(index.by_id[i].title if i in index.by_id else i for i in hidden_ids)
         item = PromotionStayItem(field=field, reason=f"references {names}, not visible at {dest.label}")
         # The full original list re-appears at the origin via the override
-        # (§4's `base`/`submitted` merge in `promote_lore_entry`).
-        return visible_ids, ids, item
+        # (§4's `base`/`submitted` merge in `promote_lore_entry`). When *every*
+        # target is hidden, drop the field from the destination entirely (None)
+        # rather than leave an empty list — matching the single-`entity_ref`
+        # path, so a wholly-origin-local list and a wholly-origin-local ref
+        # behave the same at the destination.
+        travel_value = visible_ids if visible_ids else None
+        return travel_value, ids, item
 
     def _partition_tags(
         self, dest: IndexLayer, known_at_dest: set[str], field: str, value: Any

@@ -161,6 +161,23 @@ class PromoteLoreTests(unittest.TestCase):
         series_index = self.service._build_node_index(self.series)
         self.assertEqual(series_index.edges_by_dst.get("rustyanchor", []), [])
 
+    # --- 3b: a wholly-origin-local list drops the field (not `[]`) at dest ---
+
+    def test_entity_ref_list_all_hidden_drops_field_at_dest(self) -> None:
+        self._define_field_at(self.universe, "allies", "entity_ref_list")
+        self._write_ancestor_lore(self.root, "nimitz", "Nimitz", entry_type="lore:note")
+        self._write_ancestor_lore(
+            self.root, "alice", "Alice", metadata={"allies": ["nimitz"]}, entry_type="lore:character"
+        )
+
+        self.service.promote_lore_entry("alice", self.series_layer_id)
+
+        # Dropped from the destination file entirely, matching the single
+        # entity_ref path — not left as an empty list.
+        self.assertNotIn("allies", self._raw_metadata(self.series, "alice"))
+        # The full list folds back at the origin via the override.
+        self.assertEqual(self.service.read_lore_entry("alice").metadata.get("allies"), ["nimitz"])
+
     # --- 4: unknown tag stays behind ---------------------------------------
 
     def test_unknown_tag_stays_behind(self) -> None:

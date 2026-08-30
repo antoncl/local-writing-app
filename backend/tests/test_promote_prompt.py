@@ -150,6 +150,34 @@ class PromotePromptTests(unittest.TestCase):
         self.assertEqual(series_index.by_id["prompta"].source_layer_id, self.series_layer_id)
         self.assertEqual(series_index.by_id["snip"].source_layer_id, self.series_layer_id)
 
+    # --- 2a: an included built-in Library snippet is not a blocker (#1674) ----
+
+    def test_include_of_builtin_library_snippet_not_blocked(self) -> None:
+        # A prompt that includes an app-shipped Library snippet must promote:
+        # the Library is the universal floor (visible from every destination),
+        # not an unpromotable intermediate ancestor. Regression for the raw-
+        # layer-id block ("... is owned by <id> and can't be lifted from here").
+        self._write_ancestor_prompt(
+            self.root, "narration", "Narration conventions", body='{% include "builtin-project-settings" %}\n'
+        )
+
+        # Fixture soundness: the Library include resolves to a real edge.
+        index = self.service._build_node_index()
+        self.assertTrue(
+            any(
+                edge.dst == "builtin-project-settings" and edge.field_id == INCLUDE_FIELD_ID
+                for edge in index.edges_by_src.get("narration", [])
+            )
+        )
+
+        plan = self.service.preview_prompt_promotion("narration", self.series_layer_id)
+        self.assertIsNone(plan.blocked_reason)
+        # The Library snippet is already visible everywhere — nothing cascades.
+        self.assertEqual(plan.also_promoted, [])
+
+        self.service.promote_prompt_entry("narration", self.series_layer_id)
+        self._find_prompt_path(self.series, "narration")
+
     # --- 2b: a closure member owned by an intermediate ancestor blocks -------
 
     def test_cascade_member_owned_by_intermediate_ancestor_is_blocked(self) -> None:

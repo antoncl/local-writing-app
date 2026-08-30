@@ -48,25 +48,38 @@ class PromotionMixin:
         return targets
 
     def _target_visible_from_destination(
-        self, index: NodeIndex, root, target_id: str, dest_rank: int
+        self, index: NodeIndex, root, target_id: str, dest_layer_id: str
     ) -> bool:
         """Whether some copy of `target_id` would still resolve once resolution
-        starts at a layer of rank `dest_rank` (ADR-0078 §4 / "to verify" note).
+        starts at the layer `dest_layer_id` (ADR-0078 §4 / "to verify" note).
 
-        Rank is **ascending**: the Library/machine floor is low, and the open
-        project — the most local layer — is the *highest* rank. A destination
-        is an ancestor, so it has a LOWER rank than the origin. A candidate is
-        reachable from that destination iff it lives at the destination itself
-        or further OUT (an even lower rank, i.e. `<= dest_rank`) — a candidate
-        at a HIGHER rank than the destination is more local than the
-        destination and would not be seen once resolution starts there. Get
-        this backwards and every partition silently inverts.
+        Resolved over the FULL layer sequence — machine and Library included.
+        A target owned by the Library (an app-shipped snippet a prompt
+        `{% include %}`s) or the machine layer is the universal floor: visible
+        from every destination, yet absent from the project-only walk a plain
+        `layer_by_id` uses (it would return None and the candidate would look
+        invisible — #1674). Rank is **ascending** (Library/machine lowest, the
+        open project highest), so a candidate is reachable from the destination
+        iff its rank is `<= dest_rank`.
+
+        Both the destination rank and the candidate ranks come from the SAME
+        full-chain stamping, so the comparison is on one scale. That matters:
+        `_layer_sequence` offsets project-layer ranks by the count of
+        machine/Library layers ahead of them, so a `dest.rank` taken from the
+        project-only walk would sit on a different scale than Library-inclusive
+        candidate ranks and silently invert the partition.
         """
-        for candidate in index.candidates.get(target_id, []):
-            layer = self.layer_by_id(root, candidate.source_layer_id)
-            if layer is not None and layer.rank <= dest_rank:
-                return True
-        return False
+        ranks = {
+            layer.id: layer.rank
+            for layer in self.collect_layers(root, include_machine=True, include_library=True)
+        }
+        dest_rank = ranks.get(dest_layer_id)
+        if dest_rank is None:
+            return False
+        return any(
+            (rank := ranks.get(candidate.source_layer_id)) is not None and rank <= dest_rank
+            for candidate in index.candidates.get(target_id, [])
+        )
 
     # --- per-field-type partition (ADR-0078 §3/§4) --------------------------
     #
@@ -82,7 +95,7 @@ class PromotionMixin:
         self, index: NodeIndex, root, dest: IndexLayer, field: str, value: Any
     ) -> tuple[Any, Any, PromotionStayItem | None]:
         target = value if isinstance(value, str) else ""
-        if not target or self._target_visible_from_destination(index, root, target, dest.rank):
+        if not target or self._target_visible_from_destination(index, root, target, dest.id):
             return value, None, None
         target_entry = index.by_id.get(target)
         title = target_entry.title if target_entry is not None else target
@@ -93,7 +106,7 @@ class PromotionMixin:
         self, index: NodeIndex, root, dest: IndexLayer, field: str, value: Any
     ) -> tuple[Any, Any, PromotionStayItem | None]:
         ids = [i for i in value if isinstance(i, str) and i] if isinstance(value, list) else []
-        visible_ids = [i for i in ids if self._target_visible_from_destination(index, root, i, dest.rank)]
+        visible_ids = [i for i in ids if self._target_visible_from_destination(index, root, i, dest.id)]
         hidden_ids = [i for i in ids if i not in visible_ids]
         if not hidden_ids:
             return visible_ids, None, None
@@ -392,7 +405,7 @@ class PromotionMixin:
         blocked_reason = self._prompt_dynamic_include_reason(full, closure_ids, index)
         if blocked_reason is None:
             for member_id in closure_ids:
-                if self._target_visible_from_destination(index, root, member_id, dest.rank):
+                if self._target_visible_from_destination(index, root, member_id, dest.id):
                     continue  # already inherited at/above the destination
                 candidate = index.by_id.get(member_id)
                 if candidate is None:
@@ -521,7 +534,7 @@ class PromotionMixin:
         to_promote: list[str] = []
         blocked_reason: str | None = None
         if full.target_entity and not self._target_visible_from_destination(
-            index, root, full.target_entity, dest.rank
+            index, root, full.target_entity, dest.id
         ):
             candidate = index.by_id.get(full.target_entity)
             if candidate.source_layer_id == self._metadata_schema_layer_id(root):

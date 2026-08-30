@@ -13,10 +13,11 @@
 export const DISPOSITION_FIELD = "disposition";
 export const RUNNABLE_FIELD = "runnable";
 
-// The `runnable` field's single truthy value ("" when not runnable): a prompt
-// is runnable — launchable as a standalone chat (#1433) — iff its disposition
-// is Chat AND it is anchored to no host type (`offer_on` empty).
-export const RUNNABLE_LABEL = "runnable";
+// The `runnable` field's single truthy VALUE ("" when not runnable; the
+// declared display label is "Runnable"): a prompt is runnable — launchable as
+// a standalone chat (#1433) — iff its disposition is Chat AND it is anchored
+// to no host type (`offer_on` empty).
+export const RUNNABLE_VALUE = "runnable";
 
 // The two dispositions a conversation seed can carry, exported so chatNodes'
 // seed-disposition descriptor and the "Openable chats" predicate bind to the

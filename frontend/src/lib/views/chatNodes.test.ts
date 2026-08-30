@@ -56,7 +56,12 @@ describe("chatSummariesToEvalNodes (ADR-0051 S6 follow-up)", () => {
   });
 
   it("leaves a chat whose prompt summary carries no stamp empty (older backend)", () => {
-    const unstamped = { ...prompt("p_old", "Chat"), computed_metadata: undefined };
+    // Deliberately out of the type contract (computed_metadata is required) —
+    // the runtime read must still degrade to "" rather than crash.
+    const unstamped = {
+      ...prompt("p_old", "Chat"),
+      computed_metadata: undefined,
+    } as unknown as PromptEntrySummary;
     const [node] = chatSummariesToEvalNodes([chat("c", "p_old")], [unstamped]);
     expect(node.metadata.seed_disposition).toBe("");
   });

@@ -213,8 +213,11 @@ export type PromptEntrySummary = {
   // the entry's own `context_strategy.output` + snippet ancestry) and
   // `runnable` (standalone-launchable, #1433). Read-only egress like
   // assistants' curation — `fieldValue` routes schema-computed fields here,
-  // and the backend save path strips these keys out of `metadata`.
-  computed_metadata?: EntryMetadata;
+  // and the backend save path strips these keys out of `metadata`. REQUIRED,
+  // not optional: every backend builder stamps it, and an optional type would
+  // let a construction site omit it silently (a chat seeded by such a summary
+  // would misclassify as openable).
+  computed_metadata: EntryMetadata;
   inputs: PromptInputDefinition[];
   // The prompt's EFFECTIVE inputs (ADR-0061): own `inputs` ∪ the transitive
   // union of every `prompt:snippet` it `{% include %}`s, computed by the one

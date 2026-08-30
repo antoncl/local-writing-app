@@ -12,8 +12,9 @@ import {
   DISPOSITION_FIELD,
   REVISE_ENTITIES_DISPOSITION_LABEL,
   RUNNABLE_FIELD,
-  RUNNABLE_LABEL,
+  RUNNABLE_VALUE,
 } from "@/lib/views/promptNodes";
+import { OUTPUT_HANDLER_KEYS } from "@/lib/editor-core/outputHandlers";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const vocab = JSON.parse(
@@ -24,7 +25,7 @@ describe("prompt disposition vocabulary parity (#1684)", () => {
   it("pins the field keys to the shared vocabulary", () => {
     expect(DISPOSITION_FIELD).toBe(vocab.disposition_field);
     expect(RUNNABLE_FIELD).toBe(vocab.runnable_field);
-    expect(RUNNABLE_LABEL).toBe(vocab.runnable_value);
+    expect(RUNNABLE_VALUE).toBe(vocab.runnable_value);
   });
 
   it("pins the labels the frontend names in code to the shared vocabulary", () => {
@@ -36,5 +37,13 @@ describe("prompt disposition vocabulary parity (#1684)", () => {
     expect(vocab.dispositions).toContain(vocab.chat_label);
     expect(vocab.dispositions).toContain(vocab.revise_entities_label);
     expect(vocab.dispositions).toHaveLength(5);
+  });
+
+  it("pins the handler registry to the shared vocabulary", () => {
+    // The backend's disposition computation reads a closed copy of this set
+    // (PROMPT_OUTPUT_HANDLER_KEYS); adding a handler to the registry without
+    // teaching the backend would silently shelve its prompts under Snippets,
+    // so the vocabulary file gates both sides.
+    expect([...OUTPUT_HANDLER_KEYS]).toEqual(vocab.handlers);
   });
 });

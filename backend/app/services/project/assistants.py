@@ -43,6 +43,7 @@ from app.models import (
     UnlistAssistantRequest,
 )
 from app.services.ai.providers import policy_permits
+from app.services.project.computed_metadata import strip_computed_fields
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import LayerVisitor
 from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntry
@@ -503,12 +504,7 @@ class AssistantEntriesMixin:
         # *different* project's schema layer declares — open project B, rename
         # an assistant, and a field project A relies on is gone from disk for
         # both. That is the regression this narrower form exists to avoid.
-        computed = {
-            field_id
-            for field_id, field in write_schema.fields.items()
-            if field.type == "computed"
-        }
-        metadata = {k: v for k, v in metadata.items() if k not in computed}
+        metadata = strip_computed_fields(metadata, write_schema)
         self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, "")
         self._maybe_rename_node_file(path, request.title)
         # Register the assistant's tags in the machine-global vocabulary so the

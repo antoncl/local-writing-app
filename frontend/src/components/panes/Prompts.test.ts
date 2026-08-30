@@ -5,6 +5,9 @@
 // reveals it with an un-hide, and (the regression the review caught) un-hiding
 // the last one un-latches "Show hidden" so the NEXT hide removes rather than
 // dims.
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
 import { render, screen, fireEvent } from "@/lib/test/component";
@@ -12,6 +15,15 @@ import Prompts from "./Prompts.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
 import type { MetadataSchema, PromptEntrySummary } from "@/lib/types";
+
+// The shelf vocabulary, from the shared drift-gate file — so the shelf-order
+// assertion below fails on a real reorder instead of passing against a stale
+// private copy (#1692 review).
+const here = dirname(fileURLToPath(import.meta.url));
+const vocab = JSON.parse(
+  readFileSync(resolve(here, "../../../../spec/prompt-disposition-labels.json"), "utf-8"),
+);
+const DISPOSITIONS: string[] = vocab.dispositions;
 
 // The Prompts view roster is `descendants_of prompt:base` (defaultView →
 // kindUniverseExpr), so the concrete type must be linked under the prompt root or
@@ -62,10 +74,7 @@ const DISPOSITION_SCHEMA = {
       name: "Disposition",
       type: "computed",
       category: "computed",
-      options: ["Continue", "Revise prose", "Chat", "Revise entities", "Snippets"].map((value) => ({
-        value,
-        label: value,
-      })),
+      options: DISPOSITIONS.map((value) => ({ value, label: value })),
       computed: { function: "prompt_disposition", value_type: "select" },
     },
     runnable: {
@@ -141,8 +150,10 @@ describe("Prompts pane — disposition shelves (#951/#1684)", () => {
       el.querySelector(".node-row-text")?.textContent?.trim(),
     );
     // `show_empty` (#1684): ALL five declared shelves render in option order —
-    // the empty "Revise prose" shelf included — regardless of input order.
-    expect(headings).toEqual(["Continue", "Revise prose", "Chat", "Revise entities", "Snippets"]);
+    // the empty "Revise prose" shelf included — regardless of input order. The
+    // expectation comes from the vocabulary file, so a shelf reorder fails here
+    // rather than passing against a stale literal.
+    expect(headings).toEqual(DISPOSITIONS);
     // The rows themselves still render under their shelves.
     expect(screen.getByText("Continue scene")).toBeInTheDocument();
     expect(screen.getByText("Revise a character")).toBeInTheDocument();

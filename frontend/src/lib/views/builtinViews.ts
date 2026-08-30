@@ -11,7 +11,7 @@
 
 import { defaultView, kindUniverseExpr } from "@/lib/views/evaluateView";
 import { SEED_DISPOSITION_FIELD } from "@/lib/views/chatNodes";
-import { REVISE_ENTITIES_DISPOSITION_LABEL, RUNNABLE_FIELD, RUNNABLE_LABEL } from "@/lib/views/promptNodes";
+import { REVISE_ENTITIES_DISPOSITION_LABEL, RUNNABLE_FIELD, RUNNABLE_VALUE } from "@/lib/views/promptNodes";
 import type { MetadataSchema, ViewSpec } from "@/lib/types";
 
 export type BuiltinView = { id: string; title: string; spec: ViewSpec };
@@ -61,7 +61,7 @@ function runnablePromptsSpec(schema?: MetadataSchema | null): ViewSpec {
     expr: {
       filter: {
         of: kindUniverseExpr("prompt", schema),
-        pred: { field: { key: RUNNABLE_FIELD, op: "overlap", value: [RUNNABLE_LABEL] } },
+        pred: { field: { key: RUNNABLE_FIELD, op: "overlap", value: [RUNNABLE_VALUE] } },
       },
     },
     sort: { by: "manual" },

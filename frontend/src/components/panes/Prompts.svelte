@@ -10,7 +10,7 @@
   import LibraryHiddenToggle from "@/components/widgets/LibraryHiddenToggle.svelte";
   import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import { defaultView } from "@/lib/views/evaluateView";
-  import { RUNNABLE_FIELD, RUNNABLE_LABEL } from "@/lib/views/promptNodes";
+  import { RUNNABLE_FIELD, RUNNABLE_VALUE } from "@/lib/views/promptNodes";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
@@ -75,12 +75,15 @@
   // pane-header "+" button drives its imperative handles (mirrors Lore). One add
   // button + a subtype menu, not a "+" per bucket.
   const ADD_MENU_KEY = "prompt:new";
-  let list:
+  // $state: the ViewNodeList now mounts inside the schema gate below, so the
+  // bind re-assigns when the gate flips and must be reactive.
+  let list = $state<
     | {
         toggleAddMenu: (parentId: string | null, key: string, event?: MouseEvent) => void;
         isAddMenuOpen: (key: string) => boolean;
       }
-    | undefined;
+    | undefined
+  >();
   export function toggleAddMenu(event?: MouseEvent) {
     list?.toggleAddMenu(null, ADD_MENU_KEY, event);
   }
@@ -103,24 +106,31 @@
   const appearance = $derived(paneViews.appearanceFor("prompt"));
 </script>
 
-<ViewNodeList
-  bind:this={list}
-  {view}
-  mode={appearance?.mode ?? paneViews.defaultModeFor("prompt")}
-  density={appearance?.density ?? undefined}
-  active={(entry) => focusedDocument?.type === "prompt" && focusedDocument.id === entry.id}
-  onClick={(entry) => onOpenEntry(entry.id)}
-  row={entryRow}
-  {addMenu}
->
-  {#snippet whenEmpty()}
-    {#if entries.length === 0}
-      <p class="muted">No prompts yet. Click + to create one.</p>
-    {:else}
-      <p class="muted">No prompts match this view.</p>
-    {/if}
-  {/snippet}
-</ViewNodeList>
+<!-- Shelving reads the schema-declared `disposition` computed field (#1684) —
+     routing to `computed_metadata` and the declared shelf order both need the
+     resolved schema — so hold the list through the brief schema-load window on
+     project open/switch rather than flashing a flat unshelved roster (the #227
+     first-render-race class). -->
+{#if schema}
+  <ViewNodeList
+    bind:this={list}
+    {view}
+    mode={appearance?.mode ?? paneViews.defaultModeFor("prompt")}
+    density={appearance?.density ?? undefined}
+    active={(entry) => focusedDocument?.type === "prompt" && focusedDocument.id === entry.id}
+    onClick={(entry) => onOpenEntry(entry.id)}
+    row={entryRow}
+    {addMenu}
+  >
+    {#snippet whenEmpty()}
+      {#if entries.length === 0}
+        <p class="muted">No prompts yet. Click + to create one.</p>
+      {:else}
+        <p class="muted">No prompts match this view.</p>
+      {/if}
+    {/snippet}
+  </ViewNodeList>
+{/if}
 
 <!-- ADR-0049 slice 3: reveal/hide the curated-away Library prompts (shared shelf
      footer, #723). Only shown when this project has hidden at least one. -->
@@ -160,7 +170,7 @@
            computed field (#1684) — shown on runnable rows in any view,
            independent of the Library actions below (a runnable Library prompt
            shows both). -->
-      {#if entry.computed_metadata?.[RUNNABLE_FIELD] === RUNNABLE_LABEL}
+      {#if entry.computed_metadata?.[RUNNABLE_FIELD] === RUNNABLE_VALUE}
         <button
           class="reveal-on-hover"
           type="button"

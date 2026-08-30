@@ -33,74 +33,25 @@ from app.models import (
 )
 from app.models.schema import PromptContextStrategy
 from app.services.ai.effective_inputs import SnippetSource
-from app.services.project.default_schema import (
-    PROMPT_DISPOSITION_CHAT,
-    PROMPT_DISPOSITION_CONTINUE,
-    PROMPT_DISPOSITION_REVISE_ENTITIES,
-    PROMPT_DISPOSITION_REVISE_PROSE,
-    PROMPT_DISPOSITION_SNIPPETS,
-    PROMPT_RUNNABLE_VALUE,
-)
+from app.services.project.computed_metadata import strip_computed_fields
 from app.services.project.errors import ProjectServiceError
+from app.services.project.prompt_disposition import prompt_disposition, prompt_runnable
 
 if TYPE_CHECKING:
     from app.models.schema import MetadataSchema
     from app.services.ai.effective_inputs import EffectiveInputs
 
-# The closed output-handler vocabulary (ADR-0065) — the mirror of
-# `OutputHandlerKey` in frontend editor-core/outputHandlers.ts. Only the
-# `disposition` computation reads it backend-side; invocation itself stays a
-# frontend registry lookup.
-PROMPT_OUTPUT_HANDLER_INLINE = "inline"
-PROMPT_OUTPUT_HANDLER_EXTRACT = "extract_to_node"
-PROMPT_OUTPUT_HANDLER_FINALIZE = "finalize_scene"
-
-
-def prompt_disposition(strategy: PromptContextStrategy | None, *, is_snippet: bool) -> str:
-    """The shelf a prompt lands on (#951/#1684), from its own output contract.
-
-    Mirrors the frontend's retired `dispositionFor` exactly (promptNodes.ts,
-    pinned by test_prompt_disposition + the frontend label constants):
-    a snippet — by entry-type ancestry — has no invocation surface, whatever
-    its config; `finalize_scene` is a scene action with no editor surface; an
-    unrecognized handler is fail-closed uninvocable. Everything surface-less
-    shelves under Snippets. A missing/empty handler is a plain conversation,
-    which a `commit` capability upgrades to Revise entities.
-    """
-    if is_snippet:
-        return PROMPT_DISPOSITION_SNIPPETS
-    output = strategy.output if strategy else None
-    handler = (output.handler if output else "") or ""
-    if handler == PROMPT_OUTPUT_HANDLER_FINALIZE:
-        return PROMPT_DISPOSITION_SNIPPETS
-    if handler == PROMPT_OUTPUT_HANDLER_INLINE:
-        if output is not None and output.destination == "selection":
-            return PROMPT_DISPOSITION_REVISE_PROSE
-        return PROMPT_DISPOSITION_CONTINUE
-    if handler in ("", PROMPT_OUTPUT_HANDLER_EXTRACT):
-        if output is not None and output.commit is not None:
-            return PROMPT_DISPOSITION_REVISE_ENTITIES
-        return PROMPT_DISPOSITION_CHAT
-    return PROMPT_DISPOSITION_SNIPPETS
-
-
-def prompt_runnable(disposition: str, offer_on: list[str]) -> str:
-    """`runnable` iff a plain Chat with no `offer_on` anchor (#1433) — i.e.
-    launchable as a standalone conversation; "" otherwise (a select value, not
-    a boolean, so `overlap` filters work — see the field def)."""
-    if disposition == PROMPT_DISPOSITION_CHAT and not offer_on:
-        return PROMPT_RUNNABLE_VALUE
-    return ""
-
 
 class PromptEntriesMixin:
     def list_prompt_entries(self) -> PromptEntryList:
-        entries = self._build_prompt_summaries()
-        self._populate_effective_inputs(entries)
+        # One schema read serves the disposition stamp and the snippet resolver.
+        schema = self.read_metadata_schema()
+        entries = self._build_prompt_summaries(schema)
+        self._populate_effective_inputs(entries, schema)
         entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
         return PromptEntryList(entries=entries)
 
-    def _build_prompt_summaries(self) -> list[PromptEntrySummary]:
+    def _build_prompt_summaries(self, schema: MetadataSchema | None = None) -> list[PromptEntrySummary]:
         """Every prompt node as a summary — WITHOUT `effective_inputs`, unsorted.
 
         Shared by `list_prompt_entries` (which adds effective_inputs then sorts)
@@ -108,10 +59,16 @@ class PromptEntriesMixin:
         resolve an include and must NOT trigger the effective-inputs pass: the
         loader runs once per `{% include %}` on every render, and that pass parses
         every prompt body for a read-model field the render path never reads.
+
+        `schema` lets a caller that already resolved the metadata schema (the
+        snippet loader, `_build_snippet_resolver`) share it — the disposition
+        stamp needs one for snippet ancestry, and re-resolving the layer chain
+        per `{% include %}` is exactly the per-render cost this builder's
+        contract forbids.
         """
         root = self._require_project()
         index = self._build_node_index()
-        schema = self.read_metadata_schema()
+        schema = schema or self.read_metadata_schema()
         entries: list[PromptEntrySummary] = []
         for entry in index.by_id.values():
             if entry.kind != "prompt":
@@ -165,20 +122,21 @@ class PromptEntriesMixin:
         }
 
     def _build_snippet_resolver(
-        self, entries: list[PromptEntrySummary]
+        self, entries: list[PromptEntrySummary], schema: MetadataSchema | None = None
     ) -> tuple[Callable[[str], SnippetSource | None], bool]:
         """Build a `(resolve_snippet, has_snippets)` pair over the project's
         `prompt:snippet` entries for the S1 effective-inputs resolver (ADR-0061).
 
         `entries` are already-loaded prompt summaries — the roster path reuses the
-        ones it just built (no extra disk reads); a single-body caller passes a
-        fresh `_build_prompt_summaries()`. The include name → snippet match reuses
-        the render loader's `match_snippet_name` so gathering and rendering can
-        never disagree on which snippet a name means.
+        ones it just built (no extra disk reads) and passes the schema it already
+        resolved; a single-body caller passes a fresh `_build_prompt_summaries()`.
+        The include name → snippet match reuses the render loader's
+        `match_snippet_name` so gathering and rendering can never disagree on
+        which snippet a name means.
         """
         from app.services.ai.snippet_loader import match_snippet_name
 
-        schema = self.read_metadata_schema()
+        schema = schema or self.read_metadata_schema()
         snippets = [
             entry
             for entry in entries
@@ -197,14 +155,16 @@ class PromptEntriesMixin:
 
         return resolve, bool(snippets)
 
-    def _populate_effective_inputs(self, entries: list[PromptEntrySummary]) -> None:
+    def _populate_effective_inputs(
+        self, entries: list[PromptEntrySummary], schema: MetadataSchema | None = None
+    ) -> None:
         """Set `effective_inputs` on each loaded prompt summary (ADR-0061) — its
         own `inputs` ∪ the transitive union of every `prompt:snippet` it
         `{% include %}`s."""
         from app.services.ai.effective_inputs import resolve_effective_inputs
         from app.services.ai.templates import create_environment
 
-        resolve, has_snippets = self._build_snippet_resolver(entries)
+        resolve, has_snippets = self._build_snippet_resolver(entries, schema)
         # No snippets ⇒ no include can resolve, so effective always equals own.
         # Set it directly (a non-empty own list must NOT be left as the default
         # empty list — the frontend's `effective_inputs ?? inputs` fallback only
@@ -399,13 +359,9 @@ class PromptEntriesMixin:
             raise ProjectServiceError("Prompt changed on disk after it was opened.", 409)
         self._check_entry_type_kind(request.entry_type, "prompt")
         metadata = self._normalise_metadata(request.metadata, path)
-        # Never persist computed keys (`disposition`/`runnable`, #1684) — they
-        # are resolver-stamped at read, and a stored copy would assert a value
-        # the front matter contradicts on the next read. Computed keys ONLY,
-        # mirroring the assistant save path's narrow strip.
-        schema = self.read_metadata_schema()
-        computed = {field_id for field_id, field in schema.fields.items() if field.type == "computed"}
-        metadata = {k: v for k, v in metadata.items() if k not in computed}
+        # Never persist `disposition`/`runnable` (#1684) — resolver-stamped at
+        # read; see strip_computed_fields for why the strip stays narrow.
+        metadata = strip_computed_fields(metadata, self.read_metadata_schema())
         self._write_node_entry_file(
             path,
             node_id,

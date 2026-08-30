@@ -46,7 +46,7 @@ import yaml
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 5
+CURRENT_VERSION = 6
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -129,6 +129,33 @@ def _create_research_structure(root: Path) -> None:
     )
 
 
+def _default_prompt_view_show_empty(doc: MigratableDocument) -> MigratableDocument:
+    """v5→v6 (#1684): the system default prompt view's `disposition` group level
+    gains `show_empty: true`. Shelf ORDER used to come from a frontend
+    render-time pre-clustering that #1684 removed; declared-option order via
+    `show_empty` replaces it, so a `view_default_prompt` node materialized
+    before the change must gain the flag or its shelves render in roster order
+    (and the node is system/read-only, so the user cannot repair it). Only the
+    system default is touched — a user's duplicated view is their own document.
+    Idempotent: a level already carrying `show_empty` passes through unchanged.
+    """
+    front_matter = doc.front_matter
+    if front_matter.get("id") != "view_default_prompt":
+        return doc
+    spec = front_matter.get("spec")
+    if not isinstance(spec, dict):
+        return doc
+    group_by = spec.get("group_by")
+    if not isinstance(group_by, list) or not group_by:
+        return doc
+    level = group_by[0]
+    if not isinstance(level, dict) or level.get("field") != "disposition" or level.get("show_empty"):
+        return doc
+    new_level = {**level, "show_empty": True}
+    new_spec = {**spec, "group_by": [new_level, *group_by[1:]]}
+    return MigratableDocument({**front_matter, "spec": new_spec}, doc.body)
+
+
 # Migrations run in registry order. Version numbers are history and are never
 # reused or renumbered, so a retired step leaves a gap. Two gaps now: 3 (create
 # project.md) was removed with #343 — it wrote a constant `id: project`, which
@@ -140,6 +167,11 @@ def _create_research_structure(root: Path) -> None:
 MIGRATIONS: list[MigrationStep] = [
     RootMigration(2, "create snippets/ folder for snippet node kind", _create_snippets_folder),
     RootMigration(5, "create research/ folder and research.structure.yaml", _create_research_structure),
+    DocumentMigration(
+        6,
+        "add show_empty to the materialized default prompt view's disposition grouping",
+        _default_prompt_view_show_empty,
+    ),
 ]
 
 

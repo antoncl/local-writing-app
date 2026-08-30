@@ -406,8 +406,10 @@
   // membership to intersect over and are PREPENDED to a roster rather than merged
   // into the schema-key set. Two sources: the structural `parent` ref (when any kind
   // is a tree kind, kind-scoped picker) and the lift-synthesized fields registered
-  // in `computedFields` (`disposition` on prompts, `seed_disposition` on chats,
-  // #960). A user-declared metadata field with the same key (rare) takes precedence —
+  // in `computedFields` (`seed_disposition` on chats, #960; prompts' `disposition`
+  // graduated to a real schema-declared computed field in #1684, so it arrives
+  // through the ordinary schema roster now, not here). A user-declared metadata
+  // field with the same key (rare) takes precedence —
   // the real field is already in the roster, so skip the synthetic to avoid a
   // duplicate option (`computedFieldByKey` likewise resolves the schema field first).
   function computedFieldOptions(kinds: Iterable<string>): FieldOption[] {
@@ -491,7 +493,7 @@
     // §F: the fields present on EVERY member — a group-aware set-intersection over
     // the input's concrete types (vertical inheritance AND shared field-groups). A
     // cross-kind set has no single root → resolve labels against the bare def. The
-    // computed fields (structural `parent`, and the lift-synthesized disposition /
+    // computed fields (structural `parent`, and the lift-synthesized
     // seed_disposition) aren't entry_type members, so they survive the intersection
     // only by being prepended here — offered whenever their kind is in the input set
     // (the indeterminate branch above inherits them via `fieldOptions`).

@@ -21,13 +21,18 @@ from project_fixtures import open_test_project
 
 from app.models import SavePromptEntryRequest
 from app.models.schema import PromptCommit, PromptContextStrategy, PromptOutput
+from app.services.migrations import MigratableDocument, _default_prompt_view_show_empty
 from app.services.project.default_schema import (
     BUILTIN_COMPUTED_FUNCTIONS,
     DEFAULT_METADATA_SCHEMA,
-    PROMPT_DISPOSITIONS,
-    PROMPT_RUNNABLE_VALUE,
 )
-from app.services.project.prompts import prompt_disposition, prompt_runnable
+from app.services.project.prompt_disposition import (
+    PROMPT_DISPOSITIONS,
+    PROMPT_OUTPUT_HANDLER_KEYS,
+    PROMPT_RUNNABLE_VALUE,
+    prompt_disposition,
+    prompt_runnable,
+)
 
 _VOCAB_PATH = Path(__file__).resolve().parents[2] / "spec" / "prompt-disposition-labels.json"
 _VOCAB = json.loads(_VOCAB_PATH.read_text(encoding="utf-8"))
@@ -86,6 +91,12 @@ class VocabularyParityTests(unittest.TestCase):
         self.assertEqual(PROMPT_RUNNABLE_VALUE, _VOCAB["runnable_value"])
         self.assertIn(_VOCAB["chat_label"], PROMPT_DISPOSITIONS)
         self.assertIn(_VOCAB["revise_entities_label"], PROMPT_DISPOSITIONS)
+
+    def test_handler_keys_match_the_shared_vocabulary(self) -> None:
+        # The frontend registry (OUTPUT_HANDLER_KEYS in outputHandlers.ts)
+        # asserts against the same list — adding a handler must touch the
+        # vocabulary file, which fails whichever side was forgotten.
+        self.assertEqual(list(PROMPT_OUTPUT_HANDLER_KEYS), _VOCAB["handlers"])
 
     def test_schema_declares_both_computed_fields_in_shelf_order(self) -> None:
         fields = DEFAULT_METADATA_SCHEMA["fields"]
@@ -175,6 +186,38 @@ class StampedReadModelTests(unittest.TestCase):
         self.assertEqual(saved.metadata.get("author"), "me")
         # The computed truth is unaffected by the echoed values.
         self.assertEqual(saved.computed_metadata["disposition"], "Chat")
+
+
+class DefaultPromptViewMigrationTests(unittest.TestCase):
+    """v5→v6: a materialized `view_default_prompt` gains `show_empty` so its
+    shelves keep declared-option order after the frontend pre-clustering left."""
+
+    OLD_SPEC = {
+        "kind": "prompt",
+        "expr": {"descendants_of": "prompt:base"},
+        "group_by": [{"field": "disposition"}],
+    }
+
+    def test_adds_show_empty_to_the_materialized_default(self) -> None:
+        doc = MigratableDocument(
+            {"id": "view_default_prompt", "spec": dict(self.OLD_SPEC)}, ""
+        )
+        migrated = _default_prompt_view_show_empty(doc)
+        self.assertEqual(
+            migrated.front_matter["spec"]["group_by"],
+            [{"field": "disposition", "show_empty": True}],
+        )
+        # Idempotent (ADR-0071 §2): re-applying is a no-op.
+        again = _default_prompt_view_show_empty(migrated)
+        self.assertEqual(again.front_matter, migrated.front_matter)
+
+    def test_leaves_other_documents_alone(self) -> None:
+        # A user's duplicated view is their own document — never rewritten.
+        duplicate = MigratableDocument({"id": "view_abc123", "spec": dict(self.OLD_SPEC)}, "")
+        self.assertIs(_default_prompt_view_show_empty(duplicate), duplicate)
+        # Non-view documents (scenes, prompts) pass through untouched.
+        scene = MigratableDocument({"id": "scene_1", "title": "Scene"}, "prose")
+        self.assertIs(_default_prompt_view_show_empty(scene), scene)
 
 
 if __name__ == "__main__":

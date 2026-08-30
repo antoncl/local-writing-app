@@ -88,8 +88,8 @@ describe("treeActions.createNodeFromDraft (ADR-0046 §6.4 / ADR-0048 §5)", () =
   });
 
   it("creates a plot card from a draft, not a lore entry (#1120)", async () => {
-    // A commit.target of plot:card dispatches to the card create/save/open path
-    // — the whole point of generalizing the writeback beyond lore.
+    // A target entry_type of plot:card (from inputs.entry_type) dispatches to the
+    // card create/save/open path — the whole point of generalizing beyond lore.
     const createdId = await treeActions.createNodeFromDraft("plot:card", {
       body: "She spills his coffee.",
       fields: { title: "They Meet", page_status: "sketch" },

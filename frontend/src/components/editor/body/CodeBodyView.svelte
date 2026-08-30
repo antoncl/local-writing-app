@@ -600,7 +600,6 @@
     <div class="entry-inputs-host" class:read-only={readOnly}>
       <PromptOutputEditor
         bind:contextStrategy
-        {metadataSchema}
         {readOnly}
         onChange={onContextStrategyChange}
       />

@@ -107,3 +107,19 @@ field, its value the field's content:
 ## Open question (for review)
 
 - **(b) Commit: cached continuation vs. fresh pass.** Because the contract is in the system prompt from turn 1, it is never buried — so the extraction can **continue the already-cached conversation** (a short "commit now" turn, no transcript re-ship) rather than run ADR-0051 S4's **fresh pass** (a small clean context, but the transcript re-shipped). The accumulator is orthogonal to this choice; it stays open pending a reliability check on the noisier continuation context.
+
+## Amendment 1 — the target type is a required input; `commit.target` is retired
+
+- Status: **Accepted** — 2026-08-30 (Anton). Issue: #1694.
+- Amends §5 ("The target type is authored; the caller binds the instance"), and by reference ADR-0063 S1.
+
+§5 fixed the target type on the prompt via `output.commit.target` ("so a location prompt can't be aimed at a character"). But every shipped node-writing built-in derives the type from the **caller's inputs**, never from that config: update reads it off the picked `inputs.entry`; create takes `inputs.entry_type` (seeded by the launcher — e.g. the Lore "Brainstorm new …" menu). `commit.target` was therefore a **second, competing declaration** of the same fact — and a **silent mode switch**: a declared target forces create and wins over a seeded `entry`, so setting "Target type" on a correct *revise* prompt silently turned it into a *create*, discarding the entry. The backend never read it (it *"passes the block through unread and unvalidated"*), and no built-in set it — its only live effect was the footgun. (Observed in authoring; motivated this amendment.)
+
+**Decision: there is one target type, and it is a required input the caller supplies.** A node-writing prompt only ever launches from code, so the caller always knows the type — chosen on create, read off the entry on update. `inputs.entry_type` becomes a **required** input every launcher seeds; `inputs.entry` stays optional and, when present, selects update over create. `output.commit.target` is removed from the model, the Output editor, and commit-type resolution; create-vs-update falls out of "is an `entry` seeded?". The type-safety §5 wanted is the **input's** job (`inputs.entry` / `inputs.entry_type` constrain the type), not an output-config mirror.
+
+**The preview empty-contract lint is fixed by this, not retired.** It rendered with no bound input and so was empty by construction — firing on the shipped built-ins. With `entry_type` required, the preview surfaces it like any required input; the author fills it, the contract renders against a real type, and the warning is gated behind all required inputs being satisfied — so it only flags a prompt that genuinely registers no fields once its inputs are present. The commit-time guard (`run_entry_patch_extraction`) remains the authoritative backstop where a concrete input is bound.
+
+**Anti-goals.**
+- Not removing the commit-time empty-contract guard — it is correct and stays.
+- No change to the "All prompts" grouping: it buckets on the computed `disposition`, derived from the presence of the `commit` object (not `commit.target`) plus the output handler and `offer_on`; retiring `commit.target` leaves the `commit` object intact, and a required input touches none of those.
+- No pre-1.0 migration — the built-in is re-authored; test projects recreated.

@@ -22,7 +22,7 @@ inputs:
 - name: entry_type
   type: text
   label: Entry type
-  required: false
+  required: true
   hidden: true
 context_strategy:
   output:

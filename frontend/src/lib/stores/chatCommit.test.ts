@@ -140,38 +140,15 @@ describe("ChatCommitController — launch-mode derivations", () => {
   });
 });
 
-// ADR-0063 S1: a prompt DECLARES the entry_type its commit creates. A declared
-// target makes the chat a create brainstorm for that type — and WINS over how the
-// chat was launched (a seeded `entry` would otherwise mean revise).
-describe("ChatCommitController — commit.target (ADR-0063 S1)", () => {
-  it("commitTarget reads output.commit.target (trimmed), else empty", () => {
+// ADR-0067 Amendment 1: the target entry_type is input-driven. Create drafts
+// against the seeded `inputs.entry_type`; a seeded `entry` makes it a revise. The
+// old `output.commit.target` override (which forced create over a seeded entry) is
+// retired — create-vs-revise falls out of "is an `entry` seeded?".
+describe("ChatCommitController — input-driven create/revise", () => {
+  it("commitDraft extracts against the seeded entry_type", async () => {
     const { c } = makeController();
-    expect(c.commitTarget).toBe("");
-    c.output = { handler: "extract_to_node", commit: { review: "visual_diff", target: "  lore:character  " } };
-    expect(c.commitTarget).toBe("lore:character");
-  });
-
-  it("a declared target drives draftEntryType and forces isCreateBrainstorm", () => {
-    const { c } = makeController();
-    c.output = { handler: "extract_to_node", commit: { review: "visual_diff", target: "lore:character" } };
-    // No launch inputs at all — the target alone makes it a create brainstorm.
-    expect(c.draftEntryType).toBe("lore:character");
-    expect(c.isCreateBrainstorm).toBe(true);
-  });
-
-  it("the target wins over a seeded entry — create, never revise, and no staging", () => {
-    const { c } = makeController();
-    c.output = { handler: "extract_to_node", commit: { review: "visual_diff", target: "lore:character" } };
-    // A seeded `entry` would normally mean revise; the declared target overrides it.
-    c.inputDrafts = { entry: "lore-1" };
-    c.subjectEntryType = "lore:character";
-    expect(c.isCreateBrainstorm).toBe(true);
-    expect(c.canStage).toBe(false);
-  });
-
-  it("commitDraft extracts against the declared target type", async () => {
-    const { c } = makeController();
-    c.output = { handler: "extract_to_node", commit: { review: "visual_diff", target: "lore:character" } };
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
+    c.inputDrafts = { entry_type: "lore:character" };
     extractDraft.mockResolvedValue(okResult({ body: "a spine", fields: { name: "Vale" } }));
 
     await c.commitDraft();
@@ -181,6 +158,18 @@ describe("ChatCommitController — commit.target (ADR-0063 S1)", () => {
       assistant_id: "asst-1",
       chat_id: "chat_1",
     });
+  });
+
+  it("canStage requires a seeded entry on a lore subject — a create has no base", () => {
+    const { c } = makeController();
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
+    c.subjectEntryType = "lore:character";
+    // Create mode (only entry_type, no entry): nothing to stage against.
+    c.inputDrafts = { entry_type: "lore:character" };
+    expect(c.canStage).toBe(false);
+    // Revise mode (a seeded entry): staging is offered.
+    c.inputDrafts = { entry: "lore-1" };
+    expect(c.canStage).toBe(true);
   });
 });
 

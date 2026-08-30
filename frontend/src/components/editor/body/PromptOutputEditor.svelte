@@ -3,7 +3,7 @@
   instance's `context_strategy.output` (ADR-0062 Am.2 / D3): which
   OutputHandler runs its result, the orthogonal `headless` toggle, and each
   mode's sub-form (inline destination + accept-time mark; extract_to_node's
-  commit — review, target type). A sidecar like OfferOnPicker/EntryInputsEditor,
+  commit — review). A sidecar like OfferOnPicker/EntryInputsEditor,
   peer to both in the Setup tab.
 
   Every field here has a live runtime consumer (see promptResolution.ts /
@@ -20,13 +20,11 @@
 -->
 <script lang="ts">
   import SegmentedControl from "@/components/widgets/SegmentedControl.svelte";
-  import { commitTargetOptions } from "./promptOutputFields";
-  import type { MetadataSchema, PromptCommit, PromptContextStrategy, PromptOnAccept, PromptOutput } from "@/lib/types";
+  import type { PromptCommit, PromptContextStrategy, PromptOnAccept, PromptOutput } from "@/lib/types";
 
   interface Props {
     // Persisted shape (bind:'d by the parent) — the instance's context_strategy.
     contextStrategy?: PromptContextStrategy | null;
-    metadataSchema: MetadataSchema | null;
     // Locked for a built-in Library prompt (the host also wraps us in `inert`).
     readOnly?: boolean;
     // Outbound: the output config changed → parent emits its change/save.
@@ -35,7 +33,6 @@
 
   let {
     contextStrategy = $bindable(null),
-    metadataSchema = null,
     readOnly = false,
     onChange,
   }: Props = $props();
@@ -71,7 +68,6 @@
   const commit = $derived(output?.commit ?? null);
   const review = $derived(commit?.review === "replace" ? "replace" : "visual_diff");
   const onAccept = $derived(output?.on_accept ?? null);
-  const targetOptions = $derived(commitTargetOptions(metadataSchema));
   // The one cell with no runtime yet (E lands the one-shot produce path) —
   // annotate it so the author doesn't think it silently no-ops.
   const headlessExtractNote = $derived(handler === "extract_to_node" && headless);
@@ -134,11 +130,6 @@
     if (!commit) return;
     patchOutput({ commit: { ...commit, review: next } });
   }
-
-  function setTarget(next: string): void {
-    if (!commit) return;
-    patchOutput({ commit: { ...commit, target: next || undefined } });
-  }
 </script>
 
 <details class="prompt-output-editor">
@@ -190,15 +181,6 @@
       </label>
       {#if commit}
         <SegmentedControl items={REVIEWS} value={review} ariaLabel="Commit review" onSelect={setReview} />
-        <label class="prompt-output-field">
-          Target type
-          <select value={commit.target ?? ""} disabled={readOnly} onchange={(e) => setTarget(e.currentTarget.value)}>
-            <option value="">Not set — revise the seeded entry</option>
-            {#each targetOptions as opt (opt.id)}
-              <option value={opt.id}>{opt.label}</option>
-            {/each}
-          </select>
-        </label>
       {/if}
     </div>
   {/if}

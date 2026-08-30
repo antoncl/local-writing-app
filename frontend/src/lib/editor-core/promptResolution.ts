@@ -14,7 +14,7 @@ import {
   type InlineDestination,
 } from "@/lib/editor-core/outputHandlers";
 import { pickerMembership } from "@/lib/utils/pickerSources";
-import { entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
+import { entryTypeAncestryDistance, entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
 import type {
   LoreEntrySummary,
   MetadataSchema,
@@ -160,13 +160,49 @@ export function finalizePromptRoster(ctx: PromptResolutionContext): PromptEntryS
   return filterPromptRoster(ctx, isFinalizePrompt);
 }
 
-// The brainstorm prompts — those declaring a `commit` (ADR-0054 §2) — as a
-// discovery roster, the commit-era replacement for the retired `entry_patch`
-// surface. Used where "a committing prompt" specifically is wanted (Lore's
-// Brainstorm affordance); the ＋New menu itself keys off `promptEntriesOfferedOn`
-// (offer_on + the `conversation` surface), where commit is orthogonal.
-export function promptEntriesWithCommit(ctx: PromptResolutionContext): PromptEntrySummary[] {
-  return filterPromptRoster(ctx, (entry) => promptDeclaresCommit(ctx, entry));
+// The committing prompts eligible for a subject of `entryType` (#1700/#1701 —
+// the resolution a caller picks a single prompt from, replacing the type-blind
+// `[0]` pick over the whole commit roster). Three axes compose: the prompt
+// declares a `commit` (ADR-0054 §2), it is invocable on the `conversation`
+// surface (the same eligibility gate every other discovery roster applies — an
+// inline-handler or snippet-typed prompt carrying a commit stays out), and its
+// `offer_on` admits the subject. Ranked nearest-target-wins by ancestry
+// distance (self = 0), the "nearer overrides farther" principle the layered
+// schema uses; ties fall to filterPromptRoster's title sort, since the distance
+// sort is stable and the roster arrives title-sorted.
+export function committingPromptsFor(
+  ctx: PromptResolutionContext,
+  entryType: string,
+): PromptEntrySummary[] {
+  const roster = filterPromptRoster(
+    ctx,
+    (entry) => promptDeclaresCommit(ctx, entry) && promptSurfaceFor(ctx, entry) === "conversation",
+  );
+  const ranked: [PromptEntrySummary, number][] = [];
+  for (const entry of roster) {
+    const distance = promptOfferDistance(ctx, entry, entryType);
+    if (distance !== null) ranked.push([entry, distance]);
+  }
+  return ranked.sort((a, b) => a[1] - b[1]).map(([entry]) => entry);
+}
+
+// The chat composer's "Pick a prompt" roster (#1701). A chat with a seeded
+// subject (`subjectEntryType` non-empty) offers the compatible committing
+// prompts — a draft chat can switch to another revise prompt for the same
+// target instead of being stuck with the one it launched from. A chat with no
+// subject (a plain conversation) falls back to the pre-#1701 behaviour: every
+// `conversation`-surface prompt EXCEPT the committing ones. That exclusion is
+// #1086's — a brainstorm prompt commits to a target node, and a chat with no
+// target would render a "Commit" button with nothing to commit to.
+// MEMBERSHIP is the contract here, not order: the composer's menu tree
+// (buildPromptMenuTree) re-sorts alphabetically per level, so the nearest-wins
+// ranking is only observable to a caller picking `[0]` (Lore's Draft menu).
+export function chatPromptPickList(
+  ctx: PromptResolutionContext,
+  subjectEntryType: string,
+): PromptEntrySummary[] {
+  if (subjectEntryType) return committingPromptsFor(ctx, subjectEntryType);
+  return promptEntriesForSurface(ctx, "conversation").filter((entry) => !promptDeclaresCommit(ctx, entry));
 }
 
 export function promptEntryDescription(
@@ -190,8 +226,26 @@ export function promptOffersOn(
   entry: PromptEntrySummary,
   entryType: string | null | undefined,
 ): boolean {
-  if (!entryType) return false;
-  return (entry.offer_on ?? []).some((target) => entryTypeIsA(ctx.metadataSchema, entryType, target));
+  return promptOfferDistance(ctx, entry, entryType) !== null;
+}
+
+// The specificity of an `offer_on` match for a subject of `entryType`: the
+// smallest ancestry distance from the subject to any declared target (self = 0),
+// or null when no target is an ancestor-or-self. The one walk behind both the
+// membership question (`promptOffersOn`) and the nearest-wins ranking
+// (`committingPromptsFor`) — keep them on this primitive so they cannot drift.
+export function promptOfferDistance(
+  ctx: PromptResolutionContext,
+  entry: PromptEntrySummary,
+  entryType: string | null | undefined,
+): number | null {
+  if (!entryType) return null;
+  let best: number | null = null;
+  for (const target of entry.offer_on ?? []) {
+    const distance = entryTypeAncestryDistance(ctx.metadataSchema, entryType, target);
+    if (distance !== null && (best === null || distance < best)) best = distance;
+  }
+  return best;
 }
 
 // The prompts offered as a "＋New" conversation on a subject of type `entryType`:

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   characterIdFromInputValue,
+  chatPromptPickList,
+  committingPromptsFor,
   dependencyAdvisoryText,
   entryIdFromPickValue,
   finalizePromptRoster,
@@ -505,6 +507,133 @@ describe("isSnippetType — ancestry classification (#1685)", () => {
     });
     expect(promptSurfaceFor(c, prompt("v", "prompt:voice_note"))).toBeNull();
     expect(promptEntriesForSurface(c, "conversation").map((e) => e.id)).toEqual(["g"]);
+  });
+});
+
+// #1700/#1701: committingPromptsFor resolves a subject's committing prompts
+// per entry type via offer_on, nearest-target-wins — replacing the old
+// type-blind [0] pick over the whole commit roster.
+describe("committingPromptsFor / chatPromptPickList (#1700/#1701)", () => {
+  const typeSchema = {
+    entry_types: {
+      "lore:base": { name: "Lore", kind: "lore", abstract: true },
+      "lore:character": { name: "Character", kind: "lore", parent: "lore:base" },
+      "lore:note": { name: "Note", kind: "lore", parent: "lore:base" },
+      "plot:card": { name: "Card", kind: "plot" },
+    },
+    fields: {},
+  } as unknown as MetadataSchema;
+
+  function committing(id: string, title: string, offer_on: string[]): PromptEntrySummary {
+    return {
+      ...prompt(id, "prompt:general", {
+        output: { handler: "extract_to_node", commit: { review: "visual_diff" } },
+      }),
+      title,
+      offer_on,
+    };
+  }
+
+  // A conversation prompt with no commit — an impersonate-style prompt.
+  function nonCommitting(id: string, title: string, offer_on: string[]): PromptEntrySummary {
+    return { ...prompt(id, "prompt:general", { output: { handler: "extract_to_node" } }), title, offer_on };
+  }
+
+  const baseRevise = committing("p-base", "Revise Lore Entry", ["lore:base"]);
+  const characterRevise = committing("p-char", "Revise Character", ["lore:character"]);
+  const cardRevise = committing("p-card", "Revise Card", ["plot:card"]);
+  const impersonate = nonCommitting("p-imp", "Impersonate", ["lore:character"]);
+
+  function typeCtx(over: Partial<PromptResolutionContext> = {}): PromptResolutionContext {
+    return ctx({ metadataSchema: typeSchema, promptEntries: [], ...over });
+  }
+
+  describe("committingPromptsFor", () => {
+    it("drops prompts without a commit", () => {
+      const c = typeCtx({ promptEntries: [characterRevise, impersonate] });
+      expect(committingPromptsFor(c, "lore:character").map((p) => p.id)).toEqual(["p-char"]);
+    });
+
+    it("drops a committing prompt with no conversation surface (inline handler / snippet type)", () => {
+      // Same eligibility gate as every other discovery roster: a commit riding
+      // on an inline handler, or on a snippet-typed prompt, is not something a
+      // chat can bind — offer_on compatibility alone must not admit it.
+      const inlineCommit: PromptEntrySummary = {
+        ...prompt("p-inline", "prompt:general", {
+          output: { handler: "inline", commit: { review: "visual_diff" } },
+        }),
+        title: "Inline With Commit",
+        offer_on: ["lore:base"],
+      };
+      const snippetSchema = {
+        entry_types: {
+          ...typeSchema.entry_types,
+          "prompt:snippet": { name: "Snippet", kind: "prompt" },
+        },
+        fields: {},
+      } as unknown as MetadataSchema;
+      const snippetCommit: PromptEntrySummary = {
+        ...prompt("p-snip", "prompt:snippet", {
+          output: { handler: "extract_to_node", commit: { review: "visual_diff" } },
+        }),
+        title: "Snippet With Commit",
+        offer_on: ["lore:base"],
+      };
+      const c = typeCtx({
+        metadataSchema: snippetSchema,
+        promptEntries: [inlineCommit, snippetCommit, characterRevise],
+      });
+      expect(committingPromptsFor(c, "lore:character").map((p) => p.id)).toEqual(["p-char"]);
+    });
+
+    it("drops committing prompts whose offer_on doesn't cover the subject type", () => {
+      const c = typeCtx({ promptEntries: [characterRevise, cardRevise] });
+      expect(committingPromptsFor(c, "lore:character").map((p) => p.id)).toEqual(["p-char"]);
+    });
+
+    it("a specialized (lore:character-offering) prompt sorts before a base-offering one when resolving lore:character", () => {
+      const c = typeCtx({ promptEntries: [baseRevise, characterRevise] });
+      expect(committingPromptsFor(c, "lore:character").map((p) => p.id)).toEqual(["p-char", "p-base"]);
+    });
+
+    it("the base-offering prompt still resolves alone for a sibling type the specialized prompt doesn't cover", () => {
+      const c = typeCtx({ promptEntries: [baseRevise, characterRevise] });
+      expect(committingPromptsFor(c, "lore:note").map((p) => p.id)).toEqual(["p-base"]);
+    });
+
+    it("an equal-distance tie falls back to title order", () => {
+      // Two prompts both offering exactly lore:character (distance 0 for both) —
+      // filterPromptRoster title-sorts first, and Array.sort is stable, so the
+      // title order survives the distance sort.
+      const alpha = committing("p-alpha", "Alpha Revise", ["lore:character"]);
+      const zeta = committing("p-zeta", "Zeta Revise", ["lore:character"]);
+      const c = typeCtx({ promptEntries: [zeta, alpha] });
+      expect(committingPromptsFor(c, "lore:character").map((p) => p.id)).toEqual(["p-alpha", "p-zeta"]);
+    });
+
+    it("drops a hidden prompt", () => {
+      const c = typeCtx({
+        promptEntries: [baseRevise, characterRevise],
+        hiddenPromptIds: new Set(["p-char"]),
+      });
+      expect(committingPromptsFor(c, "lore:character").map((p) => p.id)).toEqual(["p-base"]);
+    });
+  });
+
+  describe("chatPromptPickList", () => {
+    it("empty subject falls back to conversation prompts minus committing ones (pre-#1701 behaviour)", () => {
+      const chatPrompt = { ...impersonate, id: "p-chat-only", context_strategy: null } as PromptEntrySummary;
+      const c = typeCtx({ promptEntries: [chatPrompt, characterRevise] });
+      expect(chatPromptPickList(c, "").map((p) => p.id)).toEqual(["p-chat-only"]);
+    });
+
+    it("a non-empty subject delegates to committingPromptsFor", () => {
+      const c = typeCtx({ promptEntries: [baseRevise, characterRevise] });
+      expect(chatPromptPickList(c, "lore:character").map((p) => p.id)).toEqual(
+        committingPromptsFor(c, "lore:character").map((p) => p.id),
+      );
+      expect(chatPromptPickList(c, "lore:character").map((p) => p.id)).toEqual(["p-char", "p-base"]);
+    });
   });
 });
 

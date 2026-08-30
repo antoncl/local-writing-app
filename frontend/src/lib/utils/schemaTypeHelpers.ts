@@ -236,30 +236,42 @@ export function kindEntryTypeFqns(schema: MetadataSchema | null, kind: string): 
   return kindEntryTypeOptions(schema, kind).map((o) => o.fqn);
 }
 
-// True iff `entryType` is `ancestor` or descends from it (is-a). The upward twin
-// of `descendantTypeFqns` below: walks the parent chain toward the root, matching
-// the backend's canonical ancestry primitive (`entry_type_ancestry`,
-// services/project/schema.py) so a user-defined subtype is-a its built-in root
-// on both sides. The frontend's one is-a PREDICATE (#1689) — promptResolution
-// and evaluateView's descendants_of route here (the value-picking chain walks
-// in colors.ts / `inheritedFromLabel` answer different questions). Without a
-// schema only an exact match holds. A depth cap guards a malformed cyclic
-// chain, allocation-free (same idiom as `inheritedFromLabel`) — this runs per
-// declared type inside `descendants_of` resolution.
+// The number of `parent` hops from `entryType` up to `ancestor` (self = 0), or
+// null when `ancestor` isn't `entryType` or one of its ancestors. Walks the
+// parent chain toward the root, matching the backend's canonical ancestry
+// primitive (`entry_type_ancestry`, services/project/schema.py) so a
+// user-defined subtype is-a its built-in root on both sides. Without a schema
+// only an exact match holds (distance 0). A depth cap guards a malformed
+// cyclic chain, allocation-free (same idiom as `inheritedFromLabel`) — this
+// runs per declared type inside `descendants_of` resolution. The distance is
+// what lets a nearest-offer_on-wins resolution (#1700/#1701) rank several
+// ancestor-or-self matches instead of just testing membership.
+export function entryTypeAncestryDistance(
+  schema: MetadataSchema | null,
+  entryType: string,
+  ancestor: string,
+): number | null {
+  if (!schema) return entryType === ancestor ? 0 : null;
+  let cursor: string | undefined = entryType;
+  let depth = 0;
+  while (cursor && depth < 32) {
+    if (cursor === ancestor) return depth;
+    depth += 1;
+    cursor = schema.entry_types?.[cursor]?.parent ?? undefined;
+  }
+  return null;
+}
+
+// True iff `entryType` is `ancestor` or descends from it (is-a). The frontend's
+// one is-a PREDICATE (#1689) — promptResolution and evaluateView's
+// descendants_of route here (the value-picking chain walks in colors.ts /
+// `inheritedFromLabel` answer different questions).
 export function entryTypeIsA(
   schema: MetadataSchema | null,
   entryType: string,
   ancestor: string,
 ): boolean {
-  if (!schema) return entryType === ancestor;
-  let cursor: string | undefined = entryType;
-  let depth = 0;
-  while (cursor && depth < 32) {
-    if (cursor === ancestor) return true;
-    depth += 1;
-    cursor = schema.entry_types?.[cursor]?.parent ?? undefined;
-  }
-  return false;
+  return entryTypeAncestryDistance(schema, entryType, ancestor) !== null;
 }
 
 // An entry_type FQN plus every concrete descendant (seed-inclusive), matching the

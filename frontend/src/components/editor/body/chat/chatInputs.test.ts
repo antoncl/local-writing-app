@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 import {
+  carrySubjectSeeds,
   decodeChatInputDrafts,
   displayInputValues,
   encodeChatInputDrafts,
@@ -158,6 +159,69 @@ describe("subjectRefFromEntryType", () => {
       entryType: "plot:card",
     });
     expect(subjectRefFromEntryType("x", "X", "")).toEqual({ id: "x", kind: "lore", title: "X", entryType: undefined });
+  });
+});
+
+// A prompt declaring `entry`/`entry_type` inputs of the given types (or
+// neither), for carrySubjectSeeds' declaration + type-match checks.
+const promptWithSubjectInputs = (fields: {
+  entry?: PromptInputDefinition["type"];
+  entry_type?: PromptInputDefinition["type"];
+}): PromptEntrySummary => {
+  const inputs: PromptInputDefinition[] = [];
+  if (fields.entry) inputs.push({ name: "entry", type: fields.entry } as PromptInputDefinition);
+  if (fields.entry_type) inputs.push({ name: "entry_type", type: fields.entry_type } as PromptInputDefinition);
+  return { id: "p", title: "P", inputs } as PromptEntrySummary;
+};
+
+describe("carrySubjectSeeds (#1701 — a prompt switch keeps the chat's subject)", () => {
+  it("carries entry_type and entry when both prompts declare matching types", () => {
+    const prevEntry = promptWithSubjectInputs({ entry: "context_pick", entry_type: "text" });
+    const nextEntry = promptWithSubjectInputs({ entry: "context_pick", entry_type: "text" });
+    const prev = { entry: "lore_abc", entry_type: "lore:character" };
+    const seeded = { entry: "", entry_type: "" };
+    expect(carrySubjectSeeds(prev, seeded, prevEntry, nextEntry)).toEqual({
+      entry: "lore_abc",
+      entry_type: "lore:character",
+    });
+  });
+
+  it("skips a name the next prompt doesn't declare", () => {
+    const prevEntry = promptWithSubjectInputs({ entry: "context_pick", entry_type: "text" });
+    const nextEntry = promptWithSubjectInputs({ entry: "context_pick" }); // no entry_type input
+    const prev = { entry: "lore_abc", entry_type: "lore:character" };
+    const seeded = { entry: "" };
+    expect(carrySubjectSeeds(prev, seeded, prevEntry, nextEntry)).toEqual({ entry: "lore_abc" });
+  });
+
+  it("skips on type mismatch (context_pick vs text)", () => {
+    const prevEntry = promptWithSubjectInputs({ entry: "context_pick", entry_type: "text" });
+    const nextEntry = promptWithSubjectInputs({ entry: "text", entry_type: "text" }); // entry's type differs
+    const prev = { entry: "lore_abc", entry_type: "lore:character" };
+    const seeded = { entry: "", entry_type: "" };
+    expect(carrySubjectSeeds(prev, seeded, prevEntry, nextEntry)).toEqual({
+      entry: "", // not carried — the widget shape changed
+      entry_type: "lore:character", // still carried — text on both sides
+    });
+  });
+
+  it("an empty prev value is not carried", () => {
+    const prevEntry = promptWithSubjectInputs({ entry: "context_pick", entry_type: "text" });
+    const nextEntry = promptWithSubjectInputs({ entry: "context_pick", entry_type: "text" });
+    const prev = { entry: "", entry_type: "lore:character" };
+    const seeded = { entry: "seeded-default", entry_type: "" };
+    expect(carrySubjectSeeds(prev, seeded, prevEntry, nextEntry)).toEqual({
+      entry: "seeded-default",
+      entry_type: "lore:character",
+    });
+  });
+
+  it("non-subject drafts always come from seeded, never carried", () => {
+    const prevEntry = promptWithSubjectInputs({ entry: "context_pick", entry_type: "text" });
+    const nextEntry = promptWithSubjectInputs({ entry: "context_pick", entry_type: "text" });
+    const prev = { entry: "lore_abc", entry_type: "lore:character", note: "prev note" };
+    const seeded = { entry: "", entry_type: "", note: "seeded note" };
+    expect(carrySubjectSeeds(prev, seeded, prevEntry, nextEntry).note).toBe("seeded note");
   });
 });
 

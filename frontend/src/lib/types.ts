@@ -1019,6 +1019,13 @@ export type ProspectiveProjectNode = {
   field_sources: Record<string, string>;
 };
 
+// The wizard AI step's inherited-policy preview (#1672): the resolved policy over
+// the ticked chain, and the ancestor that stated it (null = the app default).
+export type ProspectiveAiPolicy = {
+  policy: AIPolicy;
+  source: string | null;
+};
+
 export type TodoItem = {
   id: string;
   text: string;

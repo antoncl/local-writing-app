@@ -206,5 +206,70 @@ class ProspectiveProjectNodeRouteTests(unittest.TestCase):
         self.assertIn("project:project", body["metadata_schema"]["entry_types"])
 
 
+class ProspectiveAiPolicyTests(unittest.TestCase):
+    """The wizard's AI step resolves the policy a not-yet-created project would
+    inherit over the ticked chain, plus its provenance (#1672)."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name).resolve()
+        set_projects_root(self.base)
+        self.universe = self.base / "universe"
+        self.series = self.universe / "series"
+        self.service = open_test_project(self.universe, "Universe")
+        make_project_folder(self.service, self.series, "Series")
+        self.book = self.series / "book"  # prospective — no manifest yet
+
+    def _set_policy(self, folder: Path, policy: str) -> None:
+        """Write `settings.ai.policy` into an ancestor's manifest directly (an
+        ancestor has no open scope, as in the metadata tests above)."""
+        manifest = self.service._read_yaml(folder / "project.yaml")
+        manifest.setdefault("settings", {}).setdefault("ai", {})["policy"] = policy
+        self.service._write_yaml(folder / "project.yaml", manifest)
+
+    def test_inherited_policy_names_its_source(self) -> None:
+        self._set_policy(self.universe, "cloud-allowed")
+        result = self.service.prospective_ai_policy(
+            self.book, [str(self.universe), str(self.series)]
+        )
+        self.assertEqual(result.policy, "cloud-allowed")
+        self.assertEqual(result.source, "Universe")
+
+    def test_a_nearer_ancestor_wins_and_sources_to_it(self) -> None:
+        self._set_policy(self.universe, "cloud-allowed")
+        self._set_policy(self.series, "local-only")  # series overrides universe
+        result = self.service.prospective_ai_policy(
+            self.book, [str(self.universe), str(self.series)]
+        )
+        self.assertEqual(result.policy, "local-only")
+        self.assertEqual(result.source, "Series")
+
+    def test_no_stated_policy_is_the_app_default_with_no_source(self) -> None:
+        # Nobody up the chain states a policy → the app-global default, and no
+        # source (it isn't an ancestor's doing) so the step can say "app default".
+        result = self.service.prospective_ai_policy(
+            self.book, [str(self.universe), str(self.series)]
+        )
+        self.assertIsNone(result.source)
+
+    def test_the_declaration_selects_an_unticked_ancestor_policy_is_dropped(self) -> None:
+        self._set_policy(self.universe, "cloud-allowed")
+        result = self.service.prospective_ai_policy(self.book, [])
+        self.assertIsNone(result.source)
+
+    def test_the_route_round_trips(self) -> None:
+        self._set_policy(self.universe, "cloud-allowed")
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/project/prospective-ai-policy",
+                json={"root_path": str(self.book), "inherits": [str(self.universe)]},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["policy"], "cloud-allowed")
+        self.assertEqual(body["source"], "Universe")
+
+
 if __name__ == "__main__":
     unittest.main()

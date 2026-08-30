@@ -19,6 +19,7 @@ import type {
   MachineSettingsView,
   MetadataSchema,
   MetadataValue,
+  ProspectiveAiPolicy,
   ProviderCredentialsView,
 } from "@/lib/types";
 import { joinPath, slugifyProjectName } from "@/lib/utils/projectPath";
@@ -84,6 +85,12 @@ class CreateWizard {
   hireModelLabel = $state("");
   // Guards the async provider-save / hire / curation buttons.
   aiBusy = $state(false);
+  // What the "inherit" state would actually resolve to, and from where (#1672) —
+  // fetched on entering the AI step so the slider's inherit note names the value
+  // and its provenance instead of a vague "from the projects above". Null when
+  // there's nothing to inherit or the fetch failed (the note falls back to the
+  // generic copy).
+  inheritedPolicy = $state<ProspectiveAiPolicy | null>(null);
 
   // ---- Step 4: review — book settings / overrides (design-doc §5 step 4) ----
   // The project node's authored fields, resolved over the ticked chain *before*
@@ -323,6 +330,7 @@ class CreateWizard {
     this.candidatesLoading = false;
     this.inherits = [];
     this.aiPolicy = "inherit";
+    this.inheritedPolicy = null;
     this.cancelHire();
     this.aiBusy = false;
     this.reviewLoading = false;
@@ -381,11 +389,29 @@ class CreateWizard {
     }
     if (!this.isFinalStep) {
       this.#stepIndex += 1;
+      // The AI step's "inherit" note names the resolved policy + its source;
+      // resolve it on entry, now the location step has settled the ancestry
+      // (#1672). Same forward-fetch shape as the review step below.
+      if (this.currentStep.id === "ai") void this.#loadInheritedPolicy();
       // The review step resolves the project node against the chain declared at
       // the location step; fetch it on entry (the AI step between them cannot
       // change the ancestry). Re-entering after a Back re-fetches — cheap, and
       // it keeps the inherited picture honest if the declaration changed.
       if (this.currentStep.id === "review") void this.#loadReview();
+    }
+  }
+
+  async #loadInheritedPolicy() {
+    // Nothing ticked ⇒ no inherit state on the slider, so nothing to resolve.
+    if (this.inherits.length === 0) {
+      this.inheritedPolicy = null;
+      return;
+    }
+    try {
+      this.inheritedPolicy = await api.prospectiveAiPolicy(this.resolvedRoot, this.inherits);
+    } catch {
+      // Degrade silently — the inherit note falls back to its generic copy.
+      this.inheritedPolicy = null;
     }
   }
 

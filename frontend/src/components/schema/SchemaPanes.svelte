@@ -274,24 +274,60 @@
     openSchemaFieldDetail(fieldId, entryTypeId);
   }
 
-  function createSchemaTypeDraft(layerId = projectSchemaLayerId(), parentTypeId = "") {
-    selectedSchemaTypeId = null;
-    const parentType = parentTypeId ? metadataSchema?.entry_types[parentTypeId] : null;
-    // Inherit the parent's kind; with no parent, stay in the current tab's kind.
-    schemaTypeKind = asSchemaKind(parentType?.kind) ?? schemaFieldKind;
-    schemaTypeParent = parentTypeId || (schemaSelectedEntryType?.abstract || schemaFieldEntryType !== "manuscript:scene" ? schemaFieldEntryType : defaultSchemaParentType(schemaFieldKind));
+  // Inline type creation (#1659). Creating a type/sub-type is one act with a
+  // different `extends`, so both the header "+" (seeds the kind root) and a row
+  // "+" (seeds that row) open ONE inline card in the tree. `createSeedParentId`
+  // is the parent to seed `extends` with (undefined = closed); the card renders
+  // nested under that type in SchemaTreePane. On submit we persist through the
+  // same saveSchemaType path and open the type editor for the new type — its
+  // fields, colour, and icon are configured there, not in the create step.
+  let createSeedParentId = $state<string | undefined>(undefined);
+
+  function openCreateTypeForm(parentTypeId: string) {
+    if (!parentTypeId) return;
+    createSeedParentId = parentTypeId;
+  }
+
+  function cancelCreateTypeForm() {
+    createSeedParentId = undefined;
+  }
+
+  async function submitCreateType(payload: { name: string; parentId: string; layerId: string; localKey: string }) {
+    // saveSchemaType composes from component state, so set the create context
+    // first (mirrors the old draft path); `localKey` is what the card previewed,
+    // saved verbatim (kind-prefixed) so the created id equals the preview.
+    const kind = asSchemaKind(metadataSchema?.entry_types[payload.parentId]?.kind) ?? schemaFieldKind;
+    // Snapshot the shared type-editing context: a type editor pane may be open,
+    // and it reads these same fields. On success openSchemaTypeDetail resets them
+    // to the new type; on failure we restore, so an aborted create never leaves a
+    // concurrently-open editor pointed at this half-set context (e.g. saving with
+    // selectedSchemaTypeId cleared to null).
+    const restore = {
+      kind: schemaTypeKind,
+      parent: schemaTypeParent,
+      layer: schemaTypeLayerId,
+      abstract: schemaTypeAbstract,
+      readonly: schemaTypeReadonly,
+      selected: selectedSchemaTypeId,
+    };
+    schemaTypeKind = kind;
+    schemaTypeParent = payload.parentId;
+    schemaTypeLayerId = payload.layerId || projectSchemaLayerId();
     schemaTypeAbstract = false;
     schemaTypeReadonly = false;
-    schemaTypeLayerId = layerId;
-    schemaTypeInitName = "";
-    schemaTypeInitId = "";
-    schemaTypeInitColor = null;
-    schemaTypeInitIcon = null;
-    schemaTypeDraftToken += 1;
-    // A new-type draft is a schema-tree action with no owning editor — the null
-    // host clears any stale subordinate link so it isn't auto-closed with an
-    // unrelated pane.
-    openSubordinatePane("schema_type", null, () => closeSchemaPane("schema_type"));
+    selectedSchemaTypeId = null;
+    const ok = await saveSchemaType({ typeId: payload.localKey, name: payload.name, color: null, icon: null });
+    if (ok !== false) {
+      createSeedParentId = undefined;
+      openSchemaTypeDetail(`${kind}:${payload.localKey}`);
+    } else {
+      schemaTypeKind = restore.kind;
+      schemaTypeParent = restore.parent;
+      schemaTypeLayerId = restore.layer;
+      schemaTypeAbstract = restore.abstract;
+      schemaTypeReadonly = restore.readonly;
+      selectedSchemaTypeId = restore.selected;
+    }
   }
 
   function openSchemaTypeDetail(typeId: string, ownerPaneId: string | null = null) {
@@ -360,6 +396,10 @@
   // entryType to a default of the target kind. The cascade updates
   // schemaContextHeading and schemaNodeTypeTree on the next tick.
   function switchSchemaKind(kind: SchemaKind) {
+    // Close any in-progress create card — it was seeded to a type in the kind
+    // we're leaving, so it would otherwise be orphaned (its target row is no
+    // longer in the tree) yet still marked open.
+    createSeedParentId = undefined;
     schemaFieldEntryType = defaultSchemaEntryType(kind);
   }
 
@@ -828,7 +868,7 @@
 </script>
 
 {#snippet schemaActions()}
-    <button class="pin-button" type="button" title="Add type" aria-label="Add type" onmousedown={(event) => event.stopPropagation()} onclick={() => createSchemaTypeDraft()}>+</button>
+    <button class="pin-button" type="button" title="Add type" aria-label="Add type" onmousedown={(event) => event.stopPropagation()} onclick={() => openCreateTypeForm(defaultSchemaParentType(schemaFieldKind))}>+</button>
 {/snippet}
 {#snippet schemaBody()}
   <SchemaTreePane
@@ -839,9 +879,14 @@
     selectedSchemaTypeId={selectedSchemaTypeId}
     schemaTypeLayerId={schemaTypeLayerId}
     metadataSchemaOverview={metadataSchemaOverview}
+    createSeedParentId={createSeedParentId}
+    kindRootId={defaultSchemaParentType(schemaFieldKind)}
+    metadataSchemaLayers={metadataSchemaLayers}
     projectSchemaLayerId={projectSchemaLayerId}
     onSwitchKind={switchSchemaKind}
-    onCreateType={createSchemaTypeDraft}
+    onRequestCreate={openCreateTypeForm}
+    onSubmitCreate={submitCreateType}
+    onCancelCreate={cancelCreateTypeForm}
     onOpenType={(typeId) => openSchemaTypeDetail(typeId)}
     onStartTypeDrag={startSchemaTypeDrag}
     onDropTypeOnParent={dropSchemaTypeOnParent}

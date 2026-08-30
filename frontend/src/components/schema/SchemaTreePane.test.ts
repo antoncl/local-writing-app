@@ -8,9 +8,11 @@
 // heading in SchemaPanes) is pinned by the asSchemaKind/SCHEMA_KIND_META unit
 // tests in schemaTypeHelpers.test.ts; together they cover the whole path that
 // shipped broken (the Plot tab silently collapsing to the Scene tree).
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import { SCHEMA_KINDS, SCHEMA_KIND_META } from "@/lib/utils/schemaTypeHelpers";
+import { metadataSchemaStore } from "@/lib/stores/schema";
+import type { MetadataSchema, MetadataSchemaLayer } from "@/lib/types";
 import SchemaTreePane from "./SchemaTreePane.svelte";
 
 describe("SchemaTreePane kind tabs (#729)", () => {
@@ -34,5 +36,52 @@ describe("SchemaTreePane kind tabs (#729)", () => {
     await rerender({ schemaFieldKind: "plot", onSwitchKind });
     expect(screen.getByRole("tab", { name: "Plot" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Scene" })).toHaveAttribute("aria-selected", "false");
+  });
+});
+
+describe("SchemaTreePane inline create (#1659)", () => {
+  const SCHEMA = {
+    entry_types: {
+      "lore:base": { kind: "lore", name: "Lore Entries", parent: null, abstract: true, fields: [] },
+      "lore:character": { kind: "lore", name: "Character", parent: "lore:base", fields: [] },
+    },
+    fields: {},
+    groups: {},
+  } as unknown as MetadataSchema;
+
+  const NODE = {
+    id: "lore:character",
+    label: "Character",
+    depth: 0,
+    definition: SCHEMA.entry_types["lore:character"],
+    children: [],
+    fieldEntries: [],
+  };
+
+  beforeEach(() => metadataSchemaStore.set(SCHEMA));
+  afterEach(() => metadataSchemaStore.set(null));
+
+  it("a row '+' requests the create card under that type (not a full pane)", async () => {
+    const onRequestCreate = vi.fn();
+    render(SchemaTreePane, {
+      props: { schemaFieldKind: "lore", schemaNodeTypeTree: [NODE], onRequestCreate },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Add sub-type to Character" }));
+    expect(onRequestCreate).toHaveBeenCalledWith("lore:character");
+  });
+
+  it("renders the create card inline under the seeded type", () => {
+    render(SchemaTreePane, {
+      props: {
+        schemaFieldKind: "lore",
+        schemaNodeTypeTree: [NODE],
+        createSeedParentId: "lore:character",
+        kindRootId: "lore:base",
+        metadataSchemaLayers: [{ id: "proj", label: "Project" }] as unknown as MetadataSchemaLayer[],
+      },
+    });
+    // Extends a non-root type ⇒ "New sub-type"; the card is in the tree, inline.
+    expect(screen.getByText("New sub-type")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Enter type name…")).toBeTruthy();
   });
 });

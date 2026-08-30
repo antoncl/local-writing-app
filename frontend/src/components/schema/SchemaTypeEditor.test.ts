@@ -142,7 +142,7 @@ describe("SchemaTypeEditor built-in color/icon are overridable (#1644)", () => {
 
   it("keeps the type name read-only — identity stays system-owned", () => {
     render(SchemaTypeEditor, { props: { ...builtinProps, onSaveType: vi.fn() } });
-    const nameInput = screen.getByPlaceholderText("Faction") as HTMLInputElement;
+    const nameInput = screen.getByPlaceholderText("Enter type name…") as HTMLInputElement;
     expect(nameInput.readOnly).toBe(true);
     // The scope line names where the overlay lands, not a dead "System".
     expect(screen.getByText(/color and icon save to your project/i)).toBeTruthy();

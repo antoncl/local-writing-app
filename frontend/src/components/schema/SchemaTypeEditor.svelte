@@ -404,7 +404,7 @@
         class="stn-input"
         readonly={schemaTypeReadonly}
         value={draftName}
-        placeholder="Faction"
+        placeholder="Enter type name…"
         oninput={(event) => handleNameInput(event.currentTarget.value)}
       />
     </div>

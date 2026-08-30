@@ -43,7 +43,7 @@
   // derived `seed_disposition` go in metadata (ADR-0029 §D), so a designed or
   // built-in view can group/filter by subject and hide the brainstorm ("Revise
   // entities") chats. The lift is shared with the view-designer preview.
-  const chatNodes = $derived(chatSummariesToEvalNodes(sessions, promptEntries, schema));
+  const chatNodes = $derived(chatSummariesToEvalNodes(sessions, promptEntries));
   const view = $derived({ spec: viewSpec, universe: chatNodes, schema, referenceIndex: $referenceIndexStore });
   // The view's chosen render layout (ADR-0069); absent axes keep the pane default.
   const appearance = $derived(paneViews.appearanceFor("chat"));

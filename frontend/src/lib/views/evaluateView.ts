@@ -97,7 +97,12 @@ export type SegmentOrigin = "handle" | "field" | "placed" | "revived";
 // `group_by` bucket). `color` is an optional group tint (handles carry one;
 // structure segments don't). `origin` (ADR-0037 §6) drives membership + the
 // collapse rules; `order: "label"` on a §2 field level opts its sibling buckets
-// into alphabetical-by-label ordering (default is first-seen in row order).
+// into alphabetical-by-label ordering. `optionIndex` (ADR-0037 Amendment 3) is
+// stamped on a bucket of an option-carrying field: the value's index in the
+// declared options, or null for a value outside the vocabulary — buildLevel
+// orders such sibling buckets by declared-option order by default (unless the
+// level opts into `order: "label"`); a field with no options stays first-seen
+// in row order.
 export type PathSegment = {
   key: string;
   label: string;
@@ -105,6 +110,7 @@ export type PathSegment = {
   color?: string | null;
   origin?: SegmentOrigin;
   order?: "label";
+  optionIndex?: number | null;
 };
 
 // A denormalized evaluator row: a member node tagged with its `path` — the
@@ -249,10 +255,10 @@ export function defaultView(kind: string, schema?: MetadataSchema | null): ViewS
   if (kind === "prompt") {
     // The prompt shelf groups by DISPOSITION, not leaf entry_type (#951) — what the
     // prompt does to the document, of which there are only five, instead of a bucket
-    // per sub-type. `disposition` is a synthesized field (the Prompts pane's
-    // promptSummariesToGroupNodes lift stamps it; key = promptNodes.DISPOSITION_FIELD),
-    // grouped first-seen so the lift's rank pre-clustering fixes shelf order — the
-    // same shape as the Assistants default grouping on the synthesized `listed`.
+    // per sub-type. `disposition` is a backend-stamped computed field (#1684, key =
+    // promptNodes.DISPOSITION_FIELD); its declared option order IS the shelf order,
+    // which the evaluator renders by default for option-carrying fields
+    // (ADR-0037 Amendment 3). Empty shelves stay hidden.
     return { kind, expr: roster, sort, group_by: [{ field: "disposition" }] };
   }
   if (kind === "assistant") {

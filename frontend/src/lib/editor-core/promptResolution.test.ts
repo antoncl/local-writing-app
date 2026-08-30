@@ -37,6 +37,7 @@ function prompt(
     body: "",
     entry_type: entryType,
     metadata: {},
+    computed_metadata: {},
     inputs: [],
     context_strategy: contextStrategy ?? null,
   };
@@ -208,6 +209,7 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
       body: "",
       entry_type: entryType,
       metadata: {},
+      computed_metadata: {},
       inputs: [],
       offer_on: offerOn,
       context_strategy: contextStrategy ?? null,
@@ -402,7 +404,7 @@ describe("resolvePromptPositionalArgs — slash positional args (#1276)", () => 
 
 describe("inheritedInputsFrom — the editor's inherited tier (ADR-0061 S3b)", () => {
   const roster: PromptEntrySummary[] = [
-    { id: "villain", title: "Villain Voice", body: "", entry_type: "prompt:snippet", metadata: {}, inputs: [] },
+    { id: "villain", title: "Villain Voice", body: "", entry_type: "prompt:snippet", metadata: {}, computed_metadata: {}, inputs: [] },
   ];
   const menace: PromptInputDefinition = { name: "menace", type: "select" };
   const subject: PromptInputDefinition = { name: "subject", type: "text" };
@@ -503,5 +505,18 @@ describe("isSnippetType — ancestry classification (#1685)", () => {
     });
     expect(promptSurfaceFor(c, prompt("v", "prompt:voice_note"))).toBeNull();
     expect(promptEntriesForSurface(c, "conversation").map((e) => e.id)).toEqual(["g"]);
+  });
+});
+
+describe("unknown handlers fail closed — including Object.prototype keys (#1692 review)", () => {
+  it("gives a prototype-named handler no surface, matching the backend's Snippets shelf", () => {
+    // A bare `_REGISTRY[key]` lookup would resolve "constructor"/"toString" to
+    // truthy Object.prototype members and misclassify the prompt as a
+    // conversation; the registry read uses Object.hasOwn so both runtimes
+    // agree that an unrecognized handler is uninvocable.
+    for (const handler of ["constructor", "toString", "valueOf", "who_knows"]) {
+      const entry = prompt("p", "prompt:general", { output: { handler } });
+      expect(promptSurfaceFor(ctx(), entry)).toBeNull();
+    }
   });
 });

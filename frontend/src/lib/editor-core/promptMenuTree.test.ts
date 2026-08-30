@@ -10,6 +10,7 @@ function prompt(title: string, id = title): PromptEntrySummary {
     body: "",
     entry_type: "prompt",
     metadata: {},
+    computed_metadata: {},
     inputs: [],
   };
 }

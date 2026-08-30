@@ -54,6 +54,7 @@ function snippet(id: string, title: string): PromptEntrySummary {
     body: "",
     entry_type: "prompt:snippet",
     metadata: {},
+    computed_metadata: {},
     inputs: [],
     is_library: true,
   };

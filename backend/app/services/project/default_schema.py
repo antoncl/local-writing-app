@@ -15,6 +15,14 @@ from __future__ import annotations
 
 from typing import Any
 
+# The prompt disposition vocabulary (#951/#1684) — one module owns the shelf
+# labels AND the handler keys the computation reads; the `disposition`/`runnable`
+# field defs below reference the labels so declared option order IS shelf order.
+from app.services.project.prompt_disposition import (
+    PROMPT_DISPOSITIONS,
+    PROMPT_RUNNABLE_VALUE,
+)
+
 # Intrinsic fields (#116): the identity triple stored in every node's
 # top-level front matter (not in `metadata`). The schema resolver injects
 # these keys into every entry_type's resolved `fields` list, in this order
@@ -44,6 +52,8 @@ BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
     "assistant_listed",
     "assistant_position",
     "path",
+    "prompt_disposition",
+    "prompt_runnable",
 )
 COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_COMPUTED_FUNCTIONS
 
@@ -65,11 +75,13 @@ COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_CO
 # None of this — `handler`, the inline `destination` (`cursor`/`selection`), or
 # `commit.review` (`visual_diff`/`replace`) — is validated at rest: the backend
 # parses `context_strategy.output` and `model_dump`s it straight through
-# (`validate_prompt_output` was deleted, #1425). The frontend handler registry
-# (`OutputHandlerKey` in editor-core/outputHandlers.ts) owns the closed
-# vocabulary and fails closed on an unknown value — a prompt with an unrecognized
-# `handler` resolves to no surface, so it simply isn't invocable, not a
-# save-time rejection.
+# (`validate_prompt_output` was deleted, #1425). The handler vocabulary is
+# closed and mirrored on both sides — `OUTPUT_HANDLER_KEYS` in
+# editor-core/outputHandlers.ts (invocation) and `PROMPT_OUTPUT_HANDLER_KEYS`
+# in services/project/prompt_disposition.py (the `disposition` computed field,
+# #1684), pinned together by spec/prompt-disposition-labels.json — and both
+# fail closed on an unknown value: such a prompt resolves to no surface / the
+# Snippets shelf, so it simply isn't invocable, not a save-time rejection.
 
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
@@ -327,7 +339,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Prompt",
             "kind": "prompt",
             "abstract": True,
-            "fields": ["preferred_assistant_id", "assistant_tags", "color"],
+            "fields": ["preferred_assistant_id", "assistant_tags", "color", "disposition", "runnable"],
             "has_body": True,
             "body_editor": "code",
             "body_language": "jinja2",
@@ -1095,6 +1107,23 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         # is the topmost matching one. A degenerate `tagged:` source over
         # kind:assistant, expressed with the existing tags widget/infra.
         "assistant_tags": {"name": "Preferred assistant tags", "type": "tags"},
+        # A prompt's DISPOSITION and standalone-runnability (#951/#1433/#1684),
+        # derived at read from the entry's own `context_strategy.output` —
+        # rationale, mapping, and the shelf-order/option-order contract live in
+        # prompt_disposition.py. Same `select` value_type shape as `listed`:
+        # groupable/filterable while staying read-only.
+        "disposition": {
+            "name": "Disposition",
+            "type": "computed",
+            "options": [{"value": label, "label": label} for label in PROMPT_DISPOSITIONS],
+            "computed": {"function": "prompt_disposition", "value_type": "select"},
+        },
+        "runnable": {
+            "name": "Runnable",
+            "type": "computed",
+            "options": [{"value": PROMPT_RUNNABLE_VALUE, "label": "Runnable"}],
+            "computed": {"function": "prompt_runnable", "value_type": "select"},
+        },
         "author": {"name": "Author", "type": "text"},
         # #317: the built-in project-node vocabulary. These are `select`s rather
         # than free text so the model gets a constrained, resolvable value (a

@@ -458,7 +458,11 @@
            and are normally skipped here — EXCEPT when one is an active proposal
            flip (a `title` rename, ADR-0046 3b): then it renders as a rail flip so
            the author can adopt it, and adoption routes back to the shell state. -->
-      {#if metadataSchema.fields[fieldId] && (!metadataSchema.fields[fieldId].intrinsic || isFlipResolve(fieldId)) && !effectiveFieldHidden(metadataSchema, entryType, fieldId)}
+      <!-- A computed field with no value renders no row at all (#1684): the row
+           would be a padlock beside nothing (a scene's cost before any
+           invocation, a non-runnable prompt's `runnable`), which is rail noise,
+           not information. The field stays in the schema/type editor. -->
+      {#if metadataSchema.fields[fieldId] && (!metadataSchema.fields[fieldId].intrinsic || isFlipResolve(fieldId)) && !effectiveFieldHidden(metadataSchema, entryType, fieldId) && (metadataSchema.fields[fieldId].type !== "computed" || computedFieldString(fieldId) !== "")}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
         <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")}>
@@ -587,12 +591,15 @@
                 onChange={(value) => onStatusChange?.(value)}
               />
             {:else if field.type === "computed"}
-              {@const computedValue = computedFieldString(fieldId)}
-              <!-- Read-only derived value. The text breaks on any character so a
-                   long, space-less computed value (a filesystem `path`, #417 s3)
-                   wraps within the rail instead of overflowing, and the full
-                   value sits on the title tooltip — restoring the overflow
-                   handling the old Project-pane path display had. -->
+              {@const computedRaw = computedFieldString(fieldId)}
+              {@const computedValue = (field.options ?? []).find((option) => option.value === computedRaw)?.label ?? computedRaw}
+              <!-- Read-only derived value, shown by its declared option label
+                   when the field has one (a select-valued computed field like
+                   `runnable` stores "runnable", displays "Runnable" — #1684).
+                   The text breaks on any character so a long, space-less
+                   computed value (a filesystem `path`, #417 s3) wraps within
+                   the rail instead of overflowing, and the full value sits on
+                   the title tooltip. -->
               <span class="fr-computed" title={computedValue}><span class="fr-computed-text">{computedValue}</span><i class="ti ti-lock" aria-hidden="true"></i></span>
             {:else if field.type === "color"}
               <!-- Color renders at its display_order slot like any field

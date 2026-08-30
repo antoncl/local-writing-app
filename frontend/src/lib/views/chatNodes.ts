@@ -7,23 +7,22 @@
 //
 // `seed_disposition` is **derived at render, never stored** — it is a pure
 // function of the `prompt_entry_id` the chat already carries, resolved through the
-// prompt roster to the seed's disposition label. That keeps ADR-0051 §3 intact (no
-// stored conversation-type facet): the seeding prompt distinguishes a brainstorm
-// chat from a normal one, and this just makes that distinction filterable without
-// persisting anything. It reuses the Prompts shelf's disposition vocabulary
-// (`dispositionFor`) so a writer sees one set of labels across both panes (#960).
+// prompt roster to the seed's backend-stamped `disposition` (#1684). That keeps
+// ADR-0051 §3 intact (no stored conversation-type facet): the seeding prompt
+// distinguishes a brainstorm chat from a normal one, and this just makes that
+// distinction filterable without persisting anything. It reuses the Prompts
+// shelf's disposition vocabulary so a writer sees one set of labels across both
+// panes (#960).
 
 import type {
   ChatSessionSummary,
   MetadataFieldDefinition,
-  MetadataSchema,
   PromptEntrySummary,
 } from "@/lib/types";
 import type { EvalNode } from "@/lib/views/evaluateView";
-import type { PromptResolutionContext } from "@/lib/editor-core/promptResolution";
 import {
   CHAT_DISPOSITION_LABEL,
-  dispositionFor,
+  DISPOSITION_FIELD,
   REVISE_ENTITIES_DISPOSITION_LABEL,
 } from "@/lib/views/promptNodes";
 
@@ -51,21 +50,15 @@ export type ChatEvalNode = ChatSessionSummary &
 export function chatSummariesToEvalNodes(
   sessions: ChatSessionSummary[],
   promptEntries: PromptEntrySummary[],
-  schema: MetadataSchema | null,
 ): ChatEvalNode[] {
-  // dispositionFor reads only ctx.metadataSchema; the rest satisfy the type.
-  const ctx: PromptResolutionContext = {
-    metadataSchema: schema,
-    promptEntries,
-    loreEntries: [],
-    availableScenes: [],
-  };
   const byId = new Map(promptEntries.map((entry) => [entry.id, entry]));
   return sessions.map((session): ChatEvalNode => {
     const prompt = session.prompt_entry_id ? byId.get(session.prompt_entry_id) : undefined;
-    // No resolved seed (freeform, or a deleted prompt) → "", which the "Openable
+    // The seed's disposition is the backend-stamped computed value (#1684). No
+    // resolved seed (freeform, or a deleted prompt) → "", which the "Openable
     // chats" blacklist treats as openable — the safe default.
-    const seed = prompt ? dispositionFor(ctx, prompt).label : "";
+    const stamped = prompt?.computed_metadata?.[DISPOSITION_FIELD];
+    const seed = typeof stamped === "string" ? stamped : "";
     // Computed key ties the written metadata key to the same constant the Openable
     // view's predicate reads — the type above must stay a literal (TS), but the
     // runtime key can't drift from the filter.

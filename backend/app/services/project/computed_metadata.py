@@ -24,6 +24,23 @@ from app.models import MetadataSchema, StructureDocument, StructureNode
 WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?")
 
 
+def strip_computed_fields(metadata: dict[str, Any], schema: MetadataSchema) -> dict[str, Any]:
+    """Drop the keys `schema` declares as computed fields from a metadata dict
+    about to be persisted. Computed values are stamped at read; a stored copy
+    would assert a value the real source (the resolver, the front matter it
+    derives from) contradicts on the very next read.
+
+    Deliberately a COMPUTED-KEYS-ONLY strip, never a full unknown/not-allowed
+    strip: `schema` may not be the only schema the node's fields answer to (an
+    assistant is machine-layer and shared across projects; a project layer may
+    declare fields this resolved view lacks), so filtering to known keys would
+    silently delete another layer's data from disk. Keep it narrow. Callers:
+    the assistant and prompt save paths.
+    """
+    computed = {field_id for field_id, field in schema.fields.items() if field.type == "computed"}
+    return {key: value for key, value in metadata.items() if key not in computed}
+
+
 class ComputedMetadataMixin:
     def _computed_entry_metadata(
         self,

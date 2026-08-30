@@ -675,6 +675,12 @@ class PromptEntrySummary(BaseModel):
     body: str = ""
     entry_type: str = "prompt:base"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    # Resolver-stamped computed fields (#1684): `disposition` (the shelf, from
+    # the entry's own `context_strategy.output` + snippet ancestry) and
+    # `runnable` (standalone-launchable). Read-only egress like assistants'
+    # `listed` — never round-tripped into front matter; the save path strips
+    # computed keys out of `metadata`.
+    computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     # Per-entry input declarations. Each prompt declares the parameters its
     # template body references via `{{ inputs.<name> }}`. Instance-level only
     # (ADR-0065 Amendment 2) — there is no type-level `inputs` to fall back to.

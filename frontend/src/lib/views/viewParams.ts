@@ -18,7 +18,7 @@
 import type { MetadataFieldDefinition, MetadataSchema, SelectOption, ViewExpr, ViewLeafValue, ViewParam, ViewSpec } from "@/lib/types";
 import { kindEntryTypeOptions } from "@/lib/utils/schemaTypeHelpers";
 import { type EvalBindings } from "@/lib/views/evaluateView";
-import { coerceStringList, isVarOperand } from "@/lib/views/fieldAccess";
+import { coerceStringList, effectiveFieldType, isVarOperand } from "@/lib/views/fieldAccess";
 import { walkViewExpr } from "@/lib/views/walkViewExpr";
 
 // A resolved strip control: the declared formal + the field its editor derives
@@ -70,8 +70,12 @@ export function toMultiValued(field: MetadataFieldDefinition): MetadataFieldDefi
   if (field.type === "entity_ref") return { ...field, type: "entity_ref_list" };
   // `multi_select` needs options to render (FieldValueEditor gates its chips on
   // `options.length > 0`); an options-less select would fall through to the raw
-  // text input, so leave it a single `select`.
-  if (field.type === "select" && field.options.length > 0) return { ...field, type: "multi_select" };
+  // text input, so leave it a single `select`. The EFFECTIVE type matters
+  // (#1684): a computed field carries its payload in `computed.value_type`
+  // (`disposition`/`runnable`/`listed` are select-valued), and without the
+  // routing its filter widget degrades to a free-text box.
+  const effective = effectiveFieldType(field);
+  if (effective === "select" && field.options.length > 0) return { ...field, type: "multi_select" };
   return field;
 }
 

@@ -33,20 +33,25 @@ from app.models import (
 )
 from app.models.schema import PromptContextStrategy
 from app.services.ai.effective_inputs import SnippetSource
+from app.services.project.computed_metadata import strip_computed_fields
 from app.services.project.errors import ProjectServiceError
+from app.services.project.prompt_disposition import prompt_disposition, prompt_runnable
 
 if TYPE_CHECKING:
+    from app.models.schema import MetadataSchema
     from app.services.ai.effective_inputs import EffectiveInputs
 
 
 class PromptEntriesMixin:
     def list_prompt_entries(self) -> PromptEntryList:
-        entries = self._build_prompt_summaries()
-        self._populate_effective_inputs(entries)
+        # One schema read serves the disposition stamp and the snippet resolver.
+        schema = self.read_metadata_schema()
+        entries = self._build_prompt_summaries(schema)
+        self._populate_effective_inputs(entries, schema)
         entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
         return PromptEntryList(entries=entries)
 
-    def _build_prompt_summaries(self) -> list[PromptEntrySummary]:
+    def _build_prompt_summaries(self, schema: MetadataSchema | None = None) -> list[PromptEntrySummary]:
         """Every prompt node as a summary — WITHOUT `effective_inputs`, unsorted.
 
         Shared by `list_prompt_entries` (which adds effective_inputs then sorts)
@@ -54,9 +59,16 @@ class PromptEntriesMixin:
         resolve an include and must NOT trigger the effective-inputs pass: the
         loader runs once per `{% include %}` on every render, and that pass parses
         every prompt body for a read-model field the render path never reads.
+
+        `schema` lets a caller that already resolved the metadata schema (the
+        snippet loader, `_build_snippet_resolver`) share it — the disposition
+        stamp needs one for snippet ancestry, and re-resolving the layer chain
+        per `{% include %}` is exactly the per-render cost this builder's
+        contract forbids.
         """
         root = self._require_project()
         index = self._build_node_index()
+        schema = schema or self.read_metadata_schema()
         entries: list[PromptEntrySummary] = []
         for entry in index.by_id.values():
             if entry.kind != "prompt":
@@ -67,6 +79,8 @@ class PromptEntriesMixin:
                 continue
             raw_entry_type = front_matter.get("entry_type") or "prompt:base"
             entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "prompt:base"
+            offer_on = self._parse_offer_on(front_matter.get("offer_on"))
+            context_strategy = self._parse_context_strategy(front_matter.get("context_strategy"))
             entries.append(
                 PromptEntrySummary(
                     id=entry.id,
@@ -75,8 +89,11 @@ class PromptEntriesMixin:
                     entry_type=entry_type,
                     metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
                     inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
-                    offer_on=self._parse_offer_on(front_matter.get("offer_on")),
-                    context_strategy=self._parse_context_strategy(front_matter.get("context_strategy")),
+                    offer_on=offer_on,
+                    context_strategy=context_strategy,
+                    computed_metadata=self._prompt_computed_metadata(
+                        entry_type, context_strategy, offer_on, schema
+                    ),
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                     is_library=entry.is_library,
@@ -85,21 +102,41 @@ class PromptEntriesMixin:
             )
         return entries
 
+    def _prompt_computed_metadata(
+        self,
+        entry_type: str,
+        context_strategy: PromptContextStrategy | None,
+        offer_on: list[str],
+        schema: MetadataSchema,
+    ) -> dict[str, MetadataValue]:
+        """The resolver-stamped `disposition`/`runnable` values (#1684) — the
+        same rule as assistants' `_curation_metadata`: every prompt read path
+        stamps these into `computed_metadata` (a computed field some paths fill
+        and others don't is worse than none), and they never touch `metadata`,
+        which round-trips to disk."""
+        is_snippet = "prompt:snippet" in self.entry_type_ancestry(entry_type, schema=schema)
+        disposition = prompt_disposition(context_strategy, is_snippet=is_snippet)
+        return {
+            "disposition": disposition,
+            "runnable": prompt_runnable(disposition, offer_on),
+        }
+
     def _build_snippet_resolver(
-        self, entries: list[PromptEntrySummary]
+        self, entries: list[PromptEntrySummary], schema: MetadataSchema | None = None
     ) -> tuple[Callable[[str], SnippetSource | None], bool]:
         """Build a `(resolve_snippet, has_snippets)` pair over the project's
         `prompt:snippet` entries for the S1 effective-inputs resolver (ADR-0061).
 
         `entries` are already-loaded prompt summaries — the roster path reuses the
-        ones it just built (no extra disk reads); a single-body caller passes a
-        fresh `_build_prompt_summaries()`. The include name → snippet match reuses
-        the render loader's `match_snippet_name` so gathering and rendering can
-        never disagree on which snippet a name means.
+        ones it just built (no extra disk reads) and passes the schema it already
+        resolved; a single-body caller passes a fresh `_build_prompt_summaries()`.
+        The include name → snippet match reuses the render loader's
+        `match_snippet_name` so gathering and rendering can never disagree on
+        which snippet a name means.
         """
         from app.services.ai.snippet_loader import match_snippet_name
 
-        schema = self.read_metadata_schema()
+        schema = schema or self.read_metadata_schema()
         snippets = [
             entry
             for entry in entries
@@ -118,14 +155,16 @@ class PromptEntriesMixin:
 
         return resolve, bool(snippets)
 
-    def _populate_effective_inputs(self, entries: list[PromptEntrySummary]) -> None:
+    def _populate_effective_inputs(
+        self, entries: list[PromptEntrySummary], schema: MetadataSchema | None = None
+    ) -> None:
         """Set `effective_inputs` on each loaded prompt summary (ADR-0061) — its
         own `inputs` ∪ the transitive union of every `prompt:snippet` it
         `{% include %}`s."""
         from app.services.ai.effective_inputs import resolve_effective_inputs
         from app.services.ai.templates import create_environment
 
-        resolve, has_snippets = self._build_snippet_resolver(entries)
+        resolve, has_snippets = self._build_snippet_resolver(entries, schema)
         # No snippets ⇒ no include can resolve, so effective always equals own.
         # Set it directly (a non-empty own list must NOT be left as the default
         # empty list — the frontend's `effective_inputs ?? inputs` fallback only
@@ -230,11 +269,14 @@ class PromptEntriesMixin:
         # entry_type, so "prompts don't hold references" was an assumption, not a
         # constraint — and without this the picker renders a row for a node that
         # no longer exists.
+        schema = self.read_metadata_schema()
         metadata = self._strip_dangling_references(
             self._normalise_metadata(front_matter.get("metadata"), path),
-            self.read_metadata_schema(),
+            schema,
             index,
         )
+        offer_on = self._parse_offer_on(front_matter.get("offer_on"))
+        context_strategy = self._parse_context_strategy(front_matter.get("context_strategy"))
         return PromptEntry(
             id=node_id,
             title=str(front_matter.get("title") or node_id),
@@ -243,9 +285,11 @@ class PromptEntriesMixin:
             entry_type=raw_entry_type,
             metadata=metadata,
             inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
-            offer_on=self._parse_offer_on(front_matter.get("offer_on")),
-            context_strategy=self._parse_context_strategy(front_matter.get("context_strategy")),
-            computed_metadata={},
+            offer_on=offer_on,
+            context_strategy=context_strategy,
+            computed_metadata=self._prompt_computed_metadata(
+                raw_entry_type, context_strategy, offer_on, schema
+            ),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
             is_library=index_entry.is_library if index_entry else False,
@@ -315,6 +359,9 @@ class PromptEntriesMixin:
             raise ProjectServiceError("Prompt changed on disk after it was opened.", 409)
         self._check_entry_type_kind(request.entry_type, "prompt")
         metadata = self._normalise_metadata(request.metadata, path)
+        # Never persist `disposition`/`runnable` (#1684) — resolver-stamped at
+        # read; see strip_computed_fields for why the strip stays narrow.
+        metadata = strip_computed_fields(metadata, self.read_metadata_schema())
         self._write_node_entry_file(
             path,
             node_id,

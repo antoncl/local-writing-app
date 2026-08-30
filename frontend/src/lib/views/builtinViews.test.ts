@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { builtinViews, builtinSpecFor, isBuiltinExtraViewId } from "./builtinViews";
 import { chatSummariesToEvalNodes } from "./chatNodes";
-import { promptSummariesToGroupNodes } from "./promptNodes";
 import { evaluateView } from "./evaluateView";
 import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/lib/types";
 
@@ -74,16 +73,26 @@ describe("builtinViews (ADR-0051 S6 follow-up)", () => {
 // designer, run through the real evaluator over lifted chat nodes. Proves the field
 // is genuinely filterable — not just present in a spec (#960).
 describe("Openable chats — evaluated over lifted chats end to end (#960)", () => {
+  // Seed dispositions are the backend-stamped computed values (#1684) — the
+  // lift copies them off the prompt summaries' `computed_metadata`.
   const prompts: PromptEntrySummary[] = [
-    { id: "p_general", title: "General", body: "", entry_type: "prompt:general", metadata: {}, inputs: [] },
+    {
+      id: "p_general",
+      title: "General",
+      body: "",
+      entry_type: "prompt:general",
+      metadata: {},
+      computed_metadata: { disposition: "Chat", runnable: "runnable" },
+      inputs: [],
+    },
     {
       id: "p_revise",
       title: "Revise",
       body: "",
       entry_type: "prompt:general",
       metadata: {},
+      computed_metadata: { disposition: "Revise entities", runnable: "" },
       inputs: [],
-      context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } },
     },
   ] as unknown as PromptEntrySummary[];
   const chat = (id: string, promptId: string): ChatSessionSummary =>
@@ -91,7 +100,6 @@ describe("Openable chats — evaluated over lifted chats end to end (#960)", () 
   const nodes = chatSummariesToEvalNodes(
     [chat("c_general", "p_general"), chat("c_brainstorm", "p_revise"), chat("c_free", "")],
     prompts,
-    EVAL_SCHEMA,
   );
 
   it("keeps general + freeform chats and drops the brainstorm one", () => {
@@ -110,9 +118,11 @@ describe("Openable chats — evaluated over lifted chats end to end (#960)", () 
 });
 
 // End-to-end: the "Runnable prompts" spec run through the real evaluator over
-// lifted prompt nodes — proving the stamped `runnable` flag is genuinely
-// filterable, not just present in the spec (mirrors the chat case above).
-describe("Runnable prompts — evaluated over lifted prompts end to end (#1433)", () => {
+// prompt summaries carrying the backend-stamped `runnable` computed field
+// (#1684) — proving it is genuinely filterable, not just present in the spec.
+// The schema declares `runnable` computed (as the resolved backend schema
+// does), which is what routes `fieldValue` to `computed_metadata`.
+describe("Runnable prompts — evaluated over stamped summaries end to end (#1433/#1684)", () => {
   const PROMPT_EVAL_SCHEMA = {
     entry_types: {
       "prompt:base": { name: "Prompt" },
@@ -122,19 +132,31 @@ describe("Runnable prompts — evaluated over lifted prompts end to end (#1433)"
       title: { name: "Title", type: "text", category: "intrinsic" },
       entry_type: { name: "Type", type: "text", category: "intrinsic" },
       id: { name: "ID", type: "text", category: "intrinsic" },
+      runnable: {
+        name: "Runnable",
+        type: "computed",
+        category: "computed",
+        options: [{ value: "runnable", label: "Runnable" }],
+        computed: { function: "prompt_runnable", value_type: "select" },
+      },
     },
   } as unknown as MetadataSchema;
 
-  const p = (id: string, extra: Partial<PromptEntrySummary> = {}): PromptEntrySummary =>
-    ({ id, title: id, body: "", entry_type: "prompt:general", metadata: {}, inputs: [], ...extra }) as unknown as PromptEntrySummary;
-  const nodes = promptSummariesToGroupNodes(
-    [
-      p("p_chat"), // Chat, no offer_on → runnable
-      p("p_impersonate", { offer_on: ["lore:character"] }), // Chat + offer_on → not
-      p("p_continue", { context_strategy: { output: { handler: "inline" } } }), // Continue → not
-    ],
-    PROMPT_EVAL_SCHEMA,
-  );
+  const p = (id: string, runnable: string): PromptEntrySummary =>
+    ({
+      id,
+      title: id,
+      body: "",
+      entry_type: "prompt:general",
+      metadata: {},
+      computed_metadata: { disposition: "Chat", runnable },
+      inputs: [],
+    }) as unknown as PromptEntrySummary;
+  const nodes = [
+    p("p_chat", "runnable"), // Chat, no offer_on → runnable
+    p("p_impersonate", ""), // Chat + offer_on → not
+    p("p_continue", ""), // Continue → not
+  ];
 
   it("keeps only the standalone-runnable prompt (Chat, empty offer_on)", () => {
     const spec = builtinViews("prompt", PROMPT_EVAL_SCHEMA)[1].spec;

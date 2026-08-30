@@ -285,19 +285,56 @@ function buildLevel<T extends EvalNode>(state: GroupTreeState<T>, rows: ViewRow<
   // ALPHABETIZE, not sink to the bottom as if it were empty.
   const isBareMember = (key: string): boolean => memberKeys.has(key) && !isLabelBucket(key);
   const hasLabelOrder = order.some((key) => isLabelBucket(key));
-  if (!hasLabelOrder) return built;
+  if (hasLabelOrder) {
+    const movable: number[] = [];
+    built.forEach((g, i) => {
+      if (isLabelBucket(g.key) || (isBareMember(g.key) && g.children.length === 0)) movable.push(i);
+    });
+    const sorted = movable
+      .map((i) => built[i])
+      .sort((a, b) => {
+        const am = isBareMember(a.key);
+        const bm = isBareMember(b.key);
+        if (am !== bm) return am ? 1 : -1; // bare members sink below label buckets
+        if (am) return 0; // stable sort keeps bare members in first-seen order
+        return (a.label ?? "").localeCompare(b.label ?? "", undefined, { sensitivity: "base" });
+      });
+    movable.forEach((slot, k) => {
+      built[slot] = sorted[k];
+    });
+    return built;
+  }
+
+  // ADR-0037 Amendment 3: buckets of an OPTION-CARRYING field (select /
+  // multi_select / a computed field with a select value_type) default to
+  // DECLARED-OPTION order — a closed vocabulary renders in its own sequence (a
+  // status ladder, the prompt shelves) instead of an accident of which rows
+  // exist. Out-of-vocabulary values (optionIndex null) follow the declared
+  // buckets in first-seen order; bare (empty-value) members sink below, exactly
+  // as under `order: "label"` (an out-of-sequence bare row amid ordered buckets
+  // reads as broken sorting). Fields with no options keep first-seen; the
+  // per-level A–Z toggle above takes precedence when set.
+  const isOptionBucket = (key: string): boolean => buckets.get(key)!.seg.optionIndex !== undefined;
+  const hasOptionOrder = order.some((key) => isOptionBucket(key));
+  if (!hasOptionOrder) return built;
   const movable: number[] = [];
   built.forEach((g, i) => {
-    if (isLabelBucket(g.key) || (isBareMember(g.key) && g.children.length === 0)) movable.push(i);
+    if (isOptionBucket(g.key) || (memberKeys.has(g.key) && g.children.length === 0)) movable.push(i);
   });
+  const indexOf = (key: string): number | null => buckets.get(key)!.seg.optionIndex ?? null;
   const sorted = movable
     .map((i) => built[i])
     .sort((a, b) => {
-      const am = isBareMember(a.key);
-      const bm = isBareMember(b.key);
-      if (am !== bm) return am ? 1 : -1; // bare members sink below label buckets
-      if (am) return 0; // stable sort keeps bare members in first-seen order
-      return (a.label ?? "").localeCompare(b.label ?? "", undefined, { sensitivity: "base" });
+      const abare = memberKeys.has(a.key) && !isOptionBucket(a.key);
+      const bbare = memberKeys.has(b.key) && !isOptionBucket(b.key);
+      if (abare !== bbare) return abare ? 1 : -1; // bare members sink below buckets
+      if (abare) return 0; // stable: bare members keep first-seen order
+      const ai = indexOf(a.key);
+      const bi = indexOf(b.key);
+      if (ai === null && bi === null) return 0; // OOV buckets keep first-seen order
+      if (ai === null) return 1; // OOV after declared
+      if (bi === null) return -1;
+      return ai - bi;
     });
   movable.forEach((slot, k) => {
     built[slot] = sorted[k];

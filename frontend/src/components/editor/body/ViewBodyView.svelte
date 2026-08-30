@@ -37,7 +37,6 @@
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
   import { chatSummariesToEvalNodes } from "@/lib/views/chatNodes";
-  import { promptSummariesToGroupNodes } from "@/lib/views/promptNodes";
   import { liftFieldByKey, liftFieldsForKind } from "@/lib/views/computedFields";
   import { chatSessionsStore } from "@/lib/stores/chats";
   import { buildBindings, resolveParamControls } from "@/lib/views/viewParams";
@@ -317,16 +316,15 @@
   // The chat roster lifted to EvalNodes (subject + derived seed_disposition),
   // the same lift the Chats pane uses — so designing a chat view previews the
   // real chats instead of "No chat nodes to preview" (ADR-0051 S6 follow-up).
-  let chatUniverse = $derived<EvalNode[]>(chatSummariesToEvalNodes($chatSessionsStore, promptEntries, schema));
-  // The prompt roster lifted with its derived `disposition` (the same lift the
-  // Prompts pane uses) — the default prompt view groups on `disposition` (#951), so
-  // the preview must stamp it too or a designed prompt view previews ungrouped.
-  let promptUniverse = $derived<EvalNode[]>(promptSummariesToGroupNodes(promptEntries, schema));
+  let chatUniverse = $derived<EvalNode[]>(chatSummariesToEvalNodes($chatSessionsStore, promptEntries));
   let universe = $derived<EvalNode[]>(universeFor(kind));
   function universeFor(k: string): EvalNode[] {
     if (k === "lore") return loreEntries;
     if (k === "assistant") return assistantEntries;
-    if (k === "prompt") return promptUniverse;
+    // Prompt summaries are EvalNodes as-is — `disposition`/`runnable` arrive
+    // backend-stamped in `computed_metadata` (#1684), so the preview and the
+    // pane evaluate the identical universe with no lift.
+    if (k === "prompt") return promptEntries;
     if (k === "manuscript") return structureToEvalNodes(structure);
     if (k === "chat") return chatUniverse;
     return [];
@@ -408,8 +406,10 @@
   // membership to intersect over and are PREPENDED to a roster rather than merged
   // into the schema-key set. Two sources: the structural `parent` ref (when any kind
   // is a tree kind, kind-scoped picker) and the lift-synthesized fields registered
-  // in `computedFields` (`disposition` on prompts, `seed_disposition` on chats,
-  // #960). A user-declared metadata field with the same key (rare) takes precedence —
+  // in `computedFields` (`seed_disposition` on chats, #960; prompts' `disposition`
+  // graduated to a real schema-declared computed field in #1684, so it arrives
+  // through the ordinary schema roster now, not here). A user-declared metadata
+  // field with the same key (rare) takes precedence —
   // the real field is already in the roster, so skip the synthetic to avoid a
   // duplicate option (`computedFieldByKey` likewise resolves the schema field first).
   function computedFieldOptions(kinds: Iterable<string>): FieldOption[] {
@@ -493,7 +493,7 @@
     // §F: the fields present on EVERY member — a group-aware set-intersection over
     // the input's concrete types (vertical inheritance AND shared field-groups). A
     // cross-kind set has no single root → resolve labels against the bare def. The
-    // computed fields (structural `parent`, and the lift-synthesized disposition /
+    // computed fields (structural `parent`, and the lift-synthesized
     // seed_disposition) aren't entry_type members, so they survive the intersection
     // only by being prepended here — offered whenever their kind is in the input set
     // (the indeterminate branch above inherits them via `fieldOptions`).

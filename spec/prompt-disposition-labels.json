@@ -1,0 +1,10 @@
+{
+  "_comment": "The prompt disposition vocabulary (#1684): the five shelf labels in shelf order (= the `disposition` computed field's declared option order), the `runnable` field's truthy value, both field keys, and the closed output-handler key set the disposition computation reads. The BACKEND computes the values and owns the vocabulary module (services/project/prompt_disposition.py; options declared in default_schema.py); the frontend names some of these strings in code (promptNodes.ts constants, builtinViews predicates, chatNodes' seed lift) and owns the handler registry (editor-core/outputHandlers.ts OUTPUT_HANDLER_KEYS). Asserted by backend test_prompt_disposition.py AND frontend promptNodes.test.ts so the two sides cannot drift — adding a handler or renaming a shelf must touch this file, which fails whichever side was forgotten. ",
+  "disposition_field": "disposition",
+  "runnable_field": "runnable",
+  "runnable_value": "runnable",
+  "dispositions": ["Continue", "Revise prose", "Chat", "Revise entities", "Snippets"],
+  "chat_label": "Chat",
+  "revise_entities_label": "Revise entities",
+  "handlers": ["inline", "extract_to_node", "finalize_scene"]
+}

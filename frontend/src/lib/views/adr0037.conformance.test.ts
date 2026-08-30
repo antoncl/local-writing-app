@@ -219,6 +219,79 @@ describe("ADR-0037 §2: group_by levels", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Amendment 3 — option-carrying fields bucket in DECLARED-OPTION order
+// ---------------------------------------------------------------------------
+describe("ADR-0037 Amendment 3: declared-option bucket order", () => {
+  // Self-contained fixture: a status ladder with declared order To do → Doing →
+  // Done, rows deliberately arriving in a different order, plus a value outside
+  // the vocabulary and a row with no value at all.
+  const STATUS_SCHEMA = {
+    version: 1,
+    entry_types: {
+      "lore:base": { name: "Lore", kind: "lore", abstract: true, fields: [] },
+      "lore:note": { name: "Note", kind: "lore", parent: "lore:base", fields: [] },
+    },
+    fields: {
+      title: { name: "Title", type: "text", category: "intrinsic" },
+      entry_type: { name: "Type", type: "text", category: "intrinsic" },
+      status: {
+        name: "Status",
+        type: "select",
+        options: [
+          { value: "todo", label: "To do" },
+          { value: "doing", label: "Doing" },
+          { value: "done", label: "Done" },
+        ],
+      },
+    },
+  } as unknown as MetadataSchema;
+  const NOTES: EvalNode[] = [
+    { id: "n_done", entry_type: "lore:note", title: "Finished", metadata: { status: "done" } },
+    { id: "n_limbo", entry_type: "lore:note", title: "Lost", metadata: { status: "limbo" } },
+    { id: "n_todo", entry_type: "lore:note", title: "Planned", metadata: { status: "todo" } },
+    { id: "n_bare", entry_type: "lore:note", title: "Unsorted", metadata: {} },
+    { id: "n_doing", entry_type: "lore:note", title: "Underway", metadata: { status: "doing" } },
+  ];
+  const notes = (spec: Partial<ViewSpec>) =>
+    evaluateView({ kind: "lore", ...spec } as ViewSpec, NOTES, { schema: STATUS_SCHEMA });
+
+  it("select buckets render in DECLARED-OPTION order regardless of row order; OOV values follow first-seen; bare rows sink", () => {
+    // Row order is done, limbo, todo, bare, doing — first-seen would put Done
+    // first. Declared order wins for the vocabulary; "limbo" (no such option)
+    // buckets after the declared ones; the valueless row sinks below everything
+    // (an out-of-sequence bare row amid ordered buckets reads as broken sorting).
+    const r = notes({ expr: { descendants_of: "lore:base" }, group_by: [{ field: "status" }] });
+    expect(shape(r.groups)).toEqual([
+      ["To do", ["Planned"]],
+      ["Doing", ["Underway"]],
+      ["Done", ["Finished"]],
+      ["limbo", ["Lost"]],
+      "Unsorted",
+    ]);
+    // Membership is untouched by bucket ordering (ADR-0027 §E): roster order.
+    expect(nodeIds(r)).toEqual(["n_done", "n_limbo", "n_todo", "n_bare", "n_doing"]);
+  });
+
+  it('order: "label" still overrides — the A–Z toggle beats declared-option order', () => {
+    const r = notes({ expr: { descendants_of: "lore:base" }, group_by: [{ field: "status", order: "label" }] });
+    expect(shape(r.groups)).toEqual([
+      ["Doing", ["Underway"]],
+      ["Done", ["Finished"]],
+      ["limbo", ["Lost"]],
+      ["To do", ["Planned"]],
+      "Unsorted", // bare row sinks under order:"label" too (2026-07-12 rule)
+    ]);
+  });
+
+  it("a field with no declared options keeps first-seen (the view's sort still drives its buckets)", () => {
+    // entry_type carries no options — the pre-amendment rule is untouched
+    // (mirrors the §2 sort-drives-buckets anchor above).
+    const r = lore({ expr: ALL, sort: { by: "title", dir: "asc" }, group_by: [{ field: "entry_type" }] });
+    expect((r.groups ?? []).map((g) => g.label)).toEqual(["Character", "Item", "Location"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Amendment 1 — Organize is owned per-group
 // ---------------------------------------------------------------------------
 describe("ADR-0037 Amendment 1: per-group Organize", () => {

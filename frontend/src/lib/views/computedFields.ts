@@ -1,10 +1,13 @@
 // Lift-synthesized fields a kind's view universe carries in `metadata` but the
-// metadata schema never declares — `disposition` on prompts (promptNodes) and
-// `seed_disposition` on chats (chatNodes). A pane lift stamps their VALUE at render;
-// this registry declares that the FIELD exists (key + descriptor with its choices)
-// so the view designer's field picker can offer it. Without this, a built-in view
-// could filter/group on such a field while a user building a custom view could not
-// pick it — the asymmetry #960 closes.
+// metadata schema never declares — today only `seed_disposition` on chats
+// (chatNodes). A pane lift stamps the VALUE at render; this registry declares
+// that the FIELD exists (key + descriptor with its choices) so the view
+// designer's field picker can offer it. Without this, a built-in view could
+// filter/group on such a field while a user building a custom view could not
+// pick it — the asymmetry #960 closes. (Prompts' `disposition`/`runnable` left
+// this registry in #1684: they are real backend computed fields now, so the
+// schema supplies them and the picker's schema-first guard would skip a
+// registry copy anyway.)
 //
 // This generalizes the pre-existing structural-`parent` injection in ViewBodyView
 // (which does exactly this for scenes/research). `parent` stays there because its
@@ -12,7 +15,6 @@
 // their lifts and register here.
 
 import type { MetadataFieldDefinition } from "@/lib/types";
-import { DISPOSITION_FIELD, dispositionFieldDef } from "@/lib/views/promptNodes";
 import { SEED_DISPOSITION_FIELD, seedDispositionFieldDef } from "@/lib/views/chatNodes";
 
 export type ComputedField = { key: string; def: MetadataFieldDefinition };
@@ -20,7 +22,6 @@ export type ComputedField = { key: string; def: MetadataFieldDefinition };
 // One entry per kind that has a lift-synthesized field. A thunk so each caller gets
 // a fresh descriptor object (defs are handed to pickers that may mutate copies).
 const REGISTRY: Record<string, () => ComputedField> = {
-  prompt: () => ({ key: DISPOSITION_FIELD, def: dispositionFieldDef() }),
   chat: () => ({ key: SEED_DISPOSITION_FIELD, def: seedDispositionFieldDef() }),
 };
 

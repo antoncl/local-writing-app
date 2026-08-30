@@ -11,7 +11,7 @@
 
 import { defaultView, kindUniverseExpr } from "@/lib/views/evaluateView";
 import { SEED_DISPOSITION_FIELD } from "@/lib/views/chatNodes";
-import { REVISE_ENTITIES_DISPOSITION_LABEL, RUNNABLE_FIELD, RUNNABLE_LABEL } from "@/lib/views/promptNodes";
+import { REVISE_ENTITIES_DISPOSITION_LABEL, RUNNABLE_FIELD, RUNNABLE_VALUE } from "@/lib/views/promptNodes";
 import type { MetadataSchema, ViewSpec } from "@/lib/types";
 
 export type BuiltinView = { id: string; title: string; spec: ViewSpec };
@@ -51,9 +51,9 @@ function openableChatsSpec(schema?: MetadataSchema | null): ViewSpec {
 
 // "Runnable prompts": the prompts launchable as a standalone chat — the Chat
 // disposition (a conversation with no output handler and no commit) that is also
-// anchored to no host type (`offer_on` empty). The Prompts lift stamps `runnable`
-// per node (promptNodes.isRunnablePrompt); this filters on it, the same way
-// "Openable chats" filters `seed_disposition`. `overlap` is the grammar's
+// anchored to no host type (`offer_on` empty). The backend stamps `runnable`
+// into every summary's `computed_metadata` (#1684); this filters on it, the same
+// way "Openable chats" filters `seed_disposition`. `overlap` is the grammar's
 // set-intersection op (no `eq`/`in`); the stamped scalar reads as a singleton.
 function runnablePromptsSpec(schema?: MetadataSchema | null): ViewSpec {
   return {
@@ -61,7 +61,7 @@ function runnablePromptsSpec(schema?: MetadataSchema | null): ViewSpec {
     expr: {
       filter: {
         of: kindUniverseExpr("prompt", schema),
-        pred: { field: { key: RUNNABLE_FIELD, op: "overlap", value: [RUNNABLE_LABEL] } },
+        pred: { field: { key: RUNNABLE_FIELD, op: "overlap", value: [RUNNABLE_VALUE] } },
       },
     },
     sort: { by: "manual" },

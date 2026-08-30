@@ -10,12 +10,7 @@
   import LibraryHiddenToggle from "@/components/widgets/LibraryHiddenToggle.svelte";
   import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import { defaultView } from "@/lib/views/evaluateView";
-  import {
-    promptSummariesToGroupNodes,
-    RUNNABLE_FIELD,
-    RUNNABLE_LABEL,
-    type PromptGroupNode,
-  } from "@/lib/views/promptNodes";
+  import { RUNNABLE_FIELD, RUNNABLE_VALUE } from "@/lib/views/promptNodes";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
@@ -31,9 +26,10 @@
     // Prompts is a real view like Lore (ADR-0022/0036): the whole prompt roster
     // evaluated by evaluateView. The default view groups by DISPOSITION — what the
     // prompt does to the document, of which there are only five — not by leaf
-    // entry_type, which was a bucket per sub-type (#951). Disposition is a synthesized
-    // field the lift below stamps; membership is the whole roster, so an entry never
-    // "falls off" — an unrecognised one just shelves under Snippets.
+    // entry_type, which was a bucket per sub-type (#951). Disposition arrives on
+    // every summary as a backend computed field (#1684); membership is the whole
+    // roster, so an entry never "falls off" — an unrecognised one just shelves
+    // under Snippets.
     viewSpec = defaultView("prompt"),
     // Open a prompt entry in an editor pane (App owns the pane set).
     onOpenEntry,
@@ -79,12 +75,15 @@
   // pane-header "+" button drives its imperative handles (mirrors Lore). One add
   // button + a subtype menu, not a "+" per bucket.
   const ADD_MENU_KEY = "prompt:new";
-  let list:
+  // $state: the ViewNodeList now mounts inside the schema gate below, so the
+  // bind re-assigns when the gate flips and must be reactive.
+  let list = $state<
     | {
         toggleAddMenu: (parentId: string | null, key: string, event?: MouseEvent) => void;
         isAddMenuOpen: (key: string) => boolean;
       }
-    | undefined;
+    | undefined
+  >();
   export function toggleAddMenu(event?: MouseEvent) {
     list?.toggleAddMenu(null, ADD_MENU_KEY, event);
   }
@@ -94,13 +93,12 @@
 
   // Every NodeList is backed by a view (ADR-0022): the pane hands the whole view
   // (spec + roster + data env) to ViewNodeList, which owns evaluation + grouping.
-  // The lift stamps each roster node with its derived `disposition` (metadata) and
-  // pre-clusters by shelf order, so the default view's `group_by: [disposition]`
-  // buckets on it — the same shape as the Chats pane lifting `seed_disposition`.
-  const promptNodes = $derived(promptSummariesToGroupNodes(visibleEntries, schema));
+  // Summaries are EvalNodes as-is — `disposition`/`runnable` arrive stamped in
+  // `computed_metadata` (#1684), and the evaluator orders the shelves by the
+  // field's declared options (ADR-0037 Amendment 3). No pane lift.
   const view = $derived({
     spec: viewSpec,
-    universe: promptNodes,
+    universe: visibleEntries,
     schema,
     referenceIndex: $referenceIndexStore,
   });
@@ -108,24 +106,31 @@
   const appearance = $derived(paneViews.appearanceFor("prompt"));
 </script>
 
-<ViewNodeList
-  bind:this={list}
-  {view}
-  mode={appearance?.mode ?? paneViews.defaultModeFor("prompt")}
-  density={appearance?.density ?? undefined}
-  active={(entry) => focusedDocument?.type === "prompt" && focusedDocument.id === entry.id}
-  onClick={(entry) => onOpenEntry(entry.id)}
-  row={entryRow}
-  {addMenu}
->
-  {#snippet whenEmpty()}
-    {#if entries.length === 0}
-      <p class="muted">No prompts yet. Click + to create one.</p>
-    {:else}
-      <p class="muted">No prompts match this view.</p>
-    {/if}
-  {/snippet}
-</ViewNodeList>
+<!-- Shelving reads the schema-declared `disposition` computed field (#1684) —
+     routing to `computed_metadata` and the declared shelf order both need the
+     resolved schema — so hold the list through the brief schema-load window on
+     project open/switch rather than flashing a flat unshelved roster (the #227
+     first-render-race class). -->
+{#if schema}
+  <ViewNodeList
+    bind:this={list}
+    {view}
+    mode={appearance?.mode ?? paneViews.defaultModeFor("prompt")}
+    density={appearance?.density ?? undefined}
+    active={(entry) => focusedDocument?.type === "prompt" && focusedDocument.id === entry.id}
+    onClick={(entry) => onOpenEntry(entry.id)}
+    row={entryRow}
+    {addMenu}
+  >
+    {#snippet whenEmpty()}
+      {#if entries.length === 0}
+        <p class="muted">No prompts yet. Click + to create one.</p>
+      {:else}
+        <p class="muted">No prompts match this view.</p>
+      {/if}
+    {/snippet}
+  </ViewNodeList>
+{/if}
 
 <!-- ADR-0049 slice 3: reveal/hide the curated-away Library prompts (shared shelf
      footer, #723). Only shown when this project has hidden at least one. -->
@@ -143,7 +148,7 @@
   </NodeList>
 {/snippet}
 
-{#snippet entryRow(entry: PromptGroupNode, ctx: RowCtx<PromptGroupNode>)}
+{#snippet entryRow(entry: PromptEntrySummary, ctx: RowCtx<PromptEntrySummary>)}
   <!-- A prompt whose source layer differs from the open project's is inherited
        and gets the level pill. For a built-in Library prompt (ADR-0049) that
        pill reads "Library", marking it as shipped read-only material, distinct
@@ -161,10 +166,11 @@
   >
     {#snippet trailing()}
       <!-- ▶ Run (#1433): a standalone-runnable prompt (Chat, empty offer_on) opens
-           a fresh chat bound to it. Gated on the `runnable` flag the lift stamps —
-           shown on runnable rows in any view, independent of the Library actions
-           below (a runnable Library prompt shows both). -->
-      {#if entry.metadata?.[RUNNABLE_FIELD] === RUNNABLE_LABEL}
+           a fresh chat bound to it. Gated on the backend-stamped `runnable`
+           computed field (#1684) — shown on runnable rows in any view,
+           independent of the Library actions below (a runnable Library prompt
+           shows both). -->
+      {#if entry.computed_metadata?.[RUNNABLE_FIELD] === RUNNABLE_VALUE}
         <button
           class="reveal-on-hover"
           type="button"

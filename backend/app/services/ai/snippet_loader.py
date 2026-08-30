@@ -75,7 +75,9 @@ class PromptSnippetLoader(BaseLoader):
         # needs id/title/entry_type, and going through the public list would run
         # the effective-inputs pass (a parse of every prompt body) on every
         # include of every render for a field the render path never reads.
-        entries = self.project._build_prompt_summaries()
+        # Pass the schema so the builder's disposition stamp (#1684) reuses this
+        # read instead of re-resolving the layer chain per include.
+        entries = self.project._build_prompt_summaries(schema)
 
         # `entry_type_ancestry` is the shared "is X a kind-of Y" primitive
         # (ADR-0026) — reuse it rather than re-walking the parent chain here.

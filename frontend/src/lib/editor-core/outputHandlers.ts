@@ -45,10 +45,19 @@ import type {
 
 export type OutputHandlerKey = "inline" | "extract_to_node" | "finalize_scene";
 
+// The closed handler vocabulary as a value — the mirror of the backend's
+// PROMPT_OUTPUT_HANDLER_KEYS (services/project/prompt_disposition.py, which
+// computes the `disposition` field from it, #1684). Pinned together by
+// spec/prompt-disposition-labels.json; promptNodes.test.ts asserts this list
+// against it, so adding a handler without updating the backend mapping fails
+// a test instead of silently shelving the new prompts under Snippets.
+export const OUTPUT_HANDLER_KEYS = ["inline", "extract_to_node", "finalize_scene"] as const satisfies readonly OutputHandlerKey[];
+
 // The roleplay finalize/cleanup projection (ADR-0070 S3). A recognized output
-// behaviour (mirrors backend HANDLER_KEYS) but a SCENE ACTION, not an editor
-// invocation — it runs from its own modal, so it is intentionally absent from
-// `_REGISTRY` and resolves to no editor surface (see `surfaceForStrategy`).
+// behaviour (mirrors the backend's PROMPT_OUTPUT_HANDLER_KEYS) but a SCENE
+// ACTION, not an editor invocation — it runs from its own modal, so it is
+// intentionally absent from `_REGISTRY` and resolves to no editor surface (see
+// `surfaceForStrategy`).
 export const FINALIZE_OUTPUT_HANDLER = "finalize_scene";
 export type OutputSource = "scan" | "transcript";
 export type OutputReview = "inline_mark" | "patch_diff";
@@ -197,5 +206,9 @@ export function inlineDestinationFor(output: PromptOutput | null | undefined): I
 // stays in the conversation.
 export function outputHandlerFor(output: PromptOutput | null | undefined): OutputHandler | null {
   const key = output?.handler as OutputHandlerKey | undefined;
-  return (key && _REGISTRY[key]) || null;
+  // Object.hasOwn, not a bare index: a hand-authored `handler: "constructor"`
+  // would otherwise resolve a truthy Object.prototype member and classify as a
+  // conversation — the backend correctly fails such a key closed (Snippets),
+  // and both sides must agree.
+  return (key && Object.hasOwn(_REGISTRY, key) && _REGISTRY[key]) || null;
 }

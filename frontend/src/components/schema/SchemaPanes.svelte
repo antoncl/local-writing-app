@@ -792,6 +792,24 @@
     setStatus(`Deleted ${fieldId}`);
   }
 
+  // "Move to layer…" (#1667, ADR-0078 §8): reassigns a field DEFINITION's home
+  // layer — the field stays defined for the same entry type; only which
+  // layer's schema.yaml declares it changes. Unlike delete, this is not
+  // confirm-gated (it touches no document values), so — unlike deleteSchemaField,
+  // which gets its error handling for free from confirmService's onRun(run()) —
+  // this handler wraps the mutation in `run()` itself (mirrors dropSchemaTypeOnParent).
+  async function moveSchemaField(fieldId: string, targetLayerId: string) {
+    if (!fieldId || fieldId.startsWith("system:") || schemaFieldReadonly) return;
+    const entryType = schemaFieldEntryType;
+    await run(async () => {
+      setMetadataSchema(await api.moveMetadataField(fieldId, targetLayerId, entryType));
+      await refreshMetadataSchema();
+      setValidation(await api.validateProject());
+      const layerLabel = metadataSchemaLayers.find((layer) => layer.id === targetLayerId)?.label ?? targetLayerId;
+      setStatus(`Moved field to ${layerLabel}`);
+    });
+  }
+
   function removeMetadataKey(metadata: EntryMetadata, fieldId: string) {
     if (!(fieldId in metadata)) return metadata;
     const nextMetadata = JSON.parse(JSON.stringify(metadata ?? {})) as EntryMetadata;
@@ -922,6 +940,7 @@
     onSaveField={saveSchemaField}
     onCancelField={() => (expandedSchemaFieldId = null)}
     onRemoveField={requestDeleteSchemaField}
+    onMoveField={moveSchemaField}
     onToggleFieldInline={toggleSchemaFieldInline}
     onCreateFieldDraft={createSchemaFieldDraft}
     onApplyGroup={applyGroupToType}

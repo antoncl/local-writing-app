@@ -130,6 +130,38 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     );
   });
 
+  it("seeds the subject's entry_type on a commit prompt that declares it (#1694)", async () => {
+    // ADR-0067 Amendment 1: revise-entry declares a required (hidden) `entry_type`
+    // input; on this revise path the subject's own type IS that value, so it's
+    // seeded alongside `entry` — otherwise the required hidden input is unfillable.
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    const reviseEntry = {
+      id: "p-revise-entry",
+      title: "Revise entry",
+      body: "",
+      entry_type: "prompt:general",
+      metadata: {},
+      inputs: [
+        { name: "entry", type: "context_pick", label: "Entry", required: false },
+        { name: "entry_type", type: "text", label: "Entry type", required: true, hidden: true },
+      ],
+      // Exact offer_on match: the empty test schema can't resolve is-a inheritance.
+      offer_on: ["lore:character"],
+    } as unknown as PromptEntrySummary;
+    renderPanel([reviseEntry], "lore:character");
+
+    await fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    await tick();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Revise entry" }));
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p-revise-entry" }),
+      expect.objectContaining({ entry_type: "lore:character" }),
+      null,
+      expect.objectContaining({ subject: "hero" }),
+    );
+  });
+
   it("seeds a context_pick `entry` target as an array-shaped ref, not a bare id (#1094)", async () => {
     // The real revise prompts declare `entry` as a required context_pick (an
     // array of NodePickerRefs). A bare-id seed made isInputMissing throw, so a

@@ -181,13 +181,12 @@ class PromptCommit(BaseModel):
     Present ⇒ the conversation gains a Commit button that extracts its result to
     the target node as a reviewable patch. `review` is how that result is reviewed
     (`visual_diff` = per-run adopt against the current entry; `replace` = a plain
-    current→proposed swap). `target` (ADR-0063 S1) is the entry_type FQN the
-    commit *creates* — declaring it makes the chat a create brainstorm for that
-    type regardless of how it was launched; unset ⇒ today's behaviour (revise
-    the seeded `entry`, or create the launch's `entry_type`). Frontend-only
-    dispatch fields (ADR-0065): the backend parses and passes this whole block
-    through unread and unvalidated, so `review`/`target` are kept lenient
-    (`str`, not a `Literal`) — a hand-edited layer stays readable either way.
+    current→proposed swap). The target entry_type is input-driven (ADR-0067
+    Amendment 1): the prompt revises the seeded `inputs.entry`, or — when no entry
+    is seeded — creates a node of the required `inputs.entry_type`. Frontend-only
+    dispatch field (ADR-0065): the backend parses and passes this whole block
+    through unread and unvalidated, so `review` is kept lenient (`str`, not a
+    `Literal`) — a hand-edited layer stays readable either way.
 
     `fields` — the old static allow-list of what the commit extracts — retired
     with ADR-0067 S2: a prompt now narrows what it extracts by authoring its
@@ -195,7 +194,6 @@ class PromptCommit(BaseModel):
     schema-declared list."""
 
     review: str = "visual_diff"
-    target: str | None = None
 
 
 class PromptOnAccept(BaseModel):

@@ -126,6 +126,26 @@ describe("PromptPreviewPane", () => {
     expect(within(container).queryByText(/declares no fields/)).toBeNull();
   });
 
+  it("does not lint while a required input is unfilled (#1694)", async () => {
+    // ADR-0067 Amendment 1: the contract is input-driven (fields(inputs.entry_type)),
+    // so until the required input is filled the render is legitimately empty — the
+    // warning must not fire on an unsatisfied preview (it fired on the built-ins).
+    (api.aiPreview as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...PREVIEW,
+      field_contract_stored: [],
+    });
+    const { container } = await renderExpanded({
+      ...commitProps("commit-required-unfilled", "extract_to_node"),
+      scene: {
+        id: "commit-required-unfilled",
+        title: "Scene",
+        body: "",
+        inputs: [{ name: "entry_type", type: "text", required: true }],
+      } as never,
+    });
+    expect(within(container).queryByText(/declares no fields/)).toBeNull();
+  });
+
   // ADR-0061 S2: the panel renders the EFFECTIVE inputs the resolver returns, so
   // a snippet's field shows up even though the outer prompt never declared it.
   it("shows a snippet-contributed input once the resolver returns it", async () => {

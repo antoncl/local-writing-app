@@ -135,6 +135,13 @@
         entryType: subjectEntryType || undefined,
       }),
     };
+    // ADR-0067 Amendment 1: a commit prompt's target entry_type is a required,
+    // caller-supplied input. On this revise path the subject's own type IS that
+    // value — seed it alongside `entry` for any prompt that declares the input, so
+    // the required (hidden) `entry_type` is satisfied without the writer touching it.
+    if (subjectEntryType && prompt.inputs?.some((i) => i.name === "entry_type")) {
+      seededInputs.entry_type = subjectEntryType;
+    }
     // Seed the read anchor onto the prompt's `as_of` scene input (ADR-0055 §1) —
     // hidden from the chat strip but persisted, so impersonate reads the subject
     // as-of the slider's scene; omitted at book-start (a prompt without an

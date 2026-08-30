@@ -70,7 +70,10 @@
     fill?: boolean;
     // The open prompt's output handler (#1252): when it commits to a node
     // (`extract_to_node`) but the render registers no field_contract, the commit
-    // can only produce an empty change — lint it here, at authoring time.
+    // can only produce an empty change — lint it here, at authoring time. Gated
+    // behind all required inputs being satisfied (#1694): a contract driven by an
+    // input (fields(inputs.entry_type)) is legitimately empty until that required
+    // input is filled, so the warning must not fire on an unsatisfied preview.
     outputHandler?: string;
   }
 
@@ -447,6 +450,7 @@
         {@const emptyCommitContract =
           outputHandler === "extract_to_node" &&
           record.result.rendered &&
+          promptPreviewMissingRequired.length === 0 &&
           (record.result.field_contract_stored?.length ?? 0) === 0}
         {#if record.result.warnings.length > 0 || emptyCommitContract}
           <div class="prompt-preview-warnings">

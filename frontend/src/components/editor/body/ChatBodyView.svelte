@@ -46,6 +46,7 @@
     ChatSessionMessage,
     EditableDocument,
     LoreEntrySummary,
+    NodePickerRef,
     PreviewCacheBlock,
     PreviewMessage,
     PromptEntrySummary,
@@ -74,6 +75,7 @@
     encodeChatInputDrafts,
     endsInUserTurn,
     seedInputDraftsFromEntry,
+    seedPickInputDraft,
     ttlChipsFor,
   } from "@/components/editor/body/chat/chatInputs";
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
@@ -287,7 +289,23 @@
     // roster rows — without a reload.
     onCreated: async (entryId, entryTitle) => {
       chatSubject = entryId;
-      chatInputDrafts = { ...chatInputDrafts, entry: entryId };
+      // Shape-aware seed (#1485): `entry` is a context_pick on commit prompts,
+      // and a bare id draft ships "[]" on the wire — the tolerant reader
+      // flipped the controller to revise mode while the template still took
+      // the CREATE branch. Seed the encoded ref so both readers agree.
+      const createdType = (chatInputDrafts["entry_type"] ?? "").trim();
+      const createdKind = (createdType.split(":")[0] || "lore") as NodePickerRef["kind"];
+      chatInputDrafts = {
+        ...chatInputDrafts,
+        entry: activePromptEntry
+          ? seedPickInputDraft(activePromptEntry, "entry", {
+              id: entryId,
+              kind: createdKind,
+              title: entryTitle,
+              entryType: createdType || undefined,
+            })
+          : entryId,
+      };
       // Retitle to the launched-with-subject convention ("<subject> — <prompt>",
       // chatSessions' launch naming) — but only while the chat still wears its
       // launch title (the bare prompt name), so a rename the user typed is

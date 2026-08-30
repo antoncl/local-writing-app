@@ -2,7 +2,7 @@
 // these operate purely on their arguments so they live outside the component
 // and are unit-testable in isolation.
 import { effectivePromptInputs } from "@/lib/editor-core/promptResolution";
-import { coerceInputValue, decodePickerValue, isListShapedInputType } from "@/lib/utils/promptInputs";
+import { coerceInputValue, decodePickerValue, encodePickerValue, isListShapedInputType } from "@/lib/utils/promptInputs";
 import type { NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
 // ---- cost-estimate + TTL strip state ----
@@ -37,24 +37,48 @@ export type SubjectRef = {
   entryType?: string;
 };
 
-// Seed the launching subject into a prompt's `entry` input, in the SHAPE that
-// input's declared type stores. A `context_pick` holds a NodePickerRef[]; an
-// `entity_ref_list` holds a string[]; a scalar ref (or a prompt with no `entry`
+// Seed a node ref into a prompt's named input, in the SHAPE that input's
+// declared type stores. A `context_pick` holds a NodePickerRef[]; an
+// `entity_ref_list` holds a string[]; a scalar ref (or a prompt without the
 // input, which ignores the seed) holds the bare id. The old launcher seeded a
 // bare id string unconditionally — but a `context_pick` value is array-shaped,
 // so `isInputMissing`'s `JSON.parse("plot_abc")` threw: a REQUIRED target
 // (plotline / plot-card revise) failed "Missing required: <label>" on send, and
 // an OPTIONAL one (lore revise) passed validation but was silently mis-seeded —
 // the empty-array drop `decodeChatInputDrafts`'s note above warns of (#1094).
+// #1485 generalized this beyond `entry`: the `as_of` time-travel anchor is a
+// `context_pick` too, and its bare-id seed was likewise erased to "[]" on the
+// wire (impersonate silently read the character at book-start).
 // Returns the natural typed value for openChatFromPromptEntry's `inputs`.
-export function seedSubjectEntryInput(entry: PromptEntrySummary, subject: SubjectRef): unknown {
-  const input = (entry.inputs ?? []).find((i) => i.name === "entry");
+export function seedPickInput(entry: PromptEntrySummary, name: string, subject: SubjectRef): unknown {
+  const input = (entry.inputs ?? []).find((i) => i.name === name);
   if (input?.type === "context_pick") {
     const ref: NodePickerRef = { id: subject.id, kind: subject.kind, title: subject.title };
     if (subject.entryType) ref.entry_type = subject.entryType;
     return [ref];
   }
   if (input?.type === "entity_ref_list") return [subject.id];
+  return subject.id;
+}
+
+// The `entry`-input form of `seedPickInput` — the ＋New launch's subject seed.
+export function seedSubjectEntryInput(entry: PromptEntrySummary, subject: SubjectRef): unknown {
+  return seedPickInput(entry, "entry", subject);
+}
+
+// The DRAFT-STRING form of `seedPickInput`, for writing straight into a live
+// chat's `chatInputDrafts` (which stores each input's widget string): a
+// `context_pick` draft is the encoded ref-list string, anything else the bare
+// id. The create-brainstorm handoff seeded a bare id into a context_pick draft
+// (#1485 site 2) — the tolerant `entryIdFromPickValue` read it, so the
+// controller flipped to revise mode, but the send-path coercion shipped "[]"
+// and the template took the CREATE branch: the two readers disagreed about
+// mode over one draft.
+export function seedPickInputDraft(entry: PromptEntrySummary, name: string, subject: SubjectRef): string {
+  const seeded = seedPickInput(entry, name, subject);
+  if (Array.isArray(seeded) && (entry.inputs ?? []).find((i) => i.name === name)?.type === "context_pick") {
+    return encodePickerValue(seeded as NodePickerRef[]);
+  }
   return subject.id;
 }
 

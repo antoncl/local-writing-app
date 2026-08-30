@@ -39,7 +39,7 @@
     promptEntriesOfferedOn,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
-  import { seedSubjectEntryInput } from "@/components/editor/body/chat/chatInputs";
+  import { seedPickInput, seedSubjectEntryInput } from "@/components/editor/body/chat/chatInputs";
   import type {
     ChatSessionSummary,
     MetadataSchema,
@@ -145,8 +145,19 @@
     // Seed the read anchor onto the prompt's `as_of` scene input (ADR-0055 §1) —
     // hidden from the chat strip but persisted, so impersonate reads the subject
     // as-of the slider's scene; omitted at book-start (a prompt without an
-    // `as_of` input ignores the seed).
-    if (asOfScene) seededInputs.as_of = asOfScene;
+    // `as_of` input ignores the seed). Shape-aware (#1485): `as_of` is a
+    // `context_pick` on impersonate, and a bare scene id round-trips through
+    // the wire coercion to "[]" — silently reading the character at
+    // book-start. The ref's title is the id (the input is hidden, so nothing
+    // displays it; a ref resolves by id+kind).
+    if (asOfScene) {
+      seededInputs.as_of = seedPickInput(prompt, "as_of", {
+        id: asOfScene,
+        kind: "manuscript",
+        title: asOfScene,
+        entryType: "manuscript:scene",
+      });
+    }
     await chatSessions.openChatFromPromptEntry(prompt, seededInputs, null, {
       parentPaneId: hostPaneId,
       subject: subjectId,

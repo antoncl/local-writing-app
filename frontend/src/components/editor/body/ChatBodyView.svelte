@@ -46,7 +46,6 @@
     ChatSessionMessage,
     EditableDocument,
     LoreEntrySummary,
-    NodePickerRef,
     PreviewCacheBlock,
     PreviewMessage,
     PromptEntrySummary,
@@ -76,6 +75,7 @@
     endsInUserTurn,
     seedInputDraftsFromEntry,
     seedPickInputDraft,
+    subjectRefFromEntryType,
     ttlChipsFor,
   } from "@/components/editor/body/chat/chatInputs";
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
@@ -294,16 +294,10 @@
       // flipped the controller to revise mode while the template still took
       // the CREATE branch. Seed the encoded ref so both readers agree.
       const createdType = (chatInputDrafts["entry_type"] ?? "").trim();
-      const createdKind = (createdType.split(":")[0] || "lore") as NodePickerRef["kind"];
       chatInputDrafts = {
         ...chatInputDrafts,
         entry: activePromptEntry
-          ? seedPickInputDraft(activePromptEntry, "entry", {
-              id: entryId,
-              kind: createdKind,
-              title: entryTitle,
-              entryType: createdType || undefined,
-            })
+          ? seedPickInputDraft(activePromptEntry, "entry", subjectRefFromEntryType(entryId, entryTitle, createdType))
           : entryId,
       };
       // Retitle to the launched-with-subject convention ("<subject> — <prompt>",

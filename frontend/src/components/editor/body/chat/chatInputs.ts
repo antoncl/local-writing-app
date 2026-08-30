@@ -2,7 +2,7 @@
 // these operate purely on their arguments so they live outside the component
 // and are unit-testable in isolation.
 import { effectivePromptInputs } from "@/lib/editor-core/promptResolution";
-import { coerceInputValue, decodePickerValue, encodePickerValue, isListShapedInputType } from "@/lib/utils/promptInputs";
+import { coerceInputValue, decodePickerValue, isListShapedInputType } from "@/lib/utils/promptInputs";
 import type { NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
 // ---- cost-estimate + TTL strip state ----
@@ -50,8 +50,12 @@ export type SubjectRef = {
 // `context_pick` too, and its bare-id seed was likewise erased to "[]" on the
 // wire (impersonate silently read the character at book-start).
 // Returns the natural typed value for openChatFromPromptEntry's `inputs`.
+// EFFECTIVE inputs, not own (#1703 review): a snippet-contributed `entry`/
+// `as_of` (ADR-0061) is rendered, validated, and coerced from the effective
+// list everywhere else — sniffing only `entry.inputs` here would give exactly
+// the bare-id seed this helper exists to prevent.
 export function seedPickInput(entry: PromptEntrySummary, name: string, subject: SubjectRef): unknown {
-  const input = (entry.inputs ?? []).find((i) => i.name === name);
+  const input = effectivePromptInputs(entry).find((i) => i.name === name);
   if (input?.type === "context_pick") {
     const ref: NodePickerRef = { id: subject.id, kind: subject.kind, title: subject.title };
     if (subject.entryType) ref.entry_type = subject.entryType;
@@ -76,10 +80,26 @@ export function seedSubjectEntryInput(entry: PromptEntrySummary, subject: Subjec
 // mode over one draft.
 export function seedPickInputDraft(entry: PromptEntrySummary, name: string, subject: SubjectRef): string {
   const seeded = seedPickInput(entry, name, subject);
-  if (Array.isArray(seeded) && (entry.inputs ?? []).find((i) => i.name === name)?.type === "context_pick") {
-    return encodePickerValue(seeded as NodePickerRef[]);
-  }
-  return subject.id;
+  // The one natural-value → draft-string rule `decodeChatInputDrafts` applies:
+  // strings pass through, array shapes stringify. That covers BOTH list types —
+  // a context_pick's encoded refs AND an entity_ref_list's id array (whose
+  // draft is a JSON array string too; a bare id there would throw in
+  // isInputMissing and read as "Missing required", the #1094 bug one type over).
+  return typeof seeded === "string" ? seeded : JSON.stringify(seeded);
+}
+
+// One SubjectRef from an entry's identity: the FQN prefix of an entry_type IS
+// its node kind (kind:key, #77) — the heuristic both launch sites share.
+// (ViewBodyView prefers the schema's `entry_types[fqn].kind` with this as
+// fallback; the launch sites deal only in freshly-minted/known types, so the
+// prefix is authoritative here.)
+export function subjectRefFromEntryType(id: string, title: string, entryType: string): SubjectRef {
+  return {
+    id,
+    kind: (entryType.split(":")[0] || "lore") as NodePickerRef["kind"],
+    title,
+    entryType: entryType || undefined,
+  };
 }
 
 // Round-trip the per-input drafts through a persisted `ChatSession.inputs`

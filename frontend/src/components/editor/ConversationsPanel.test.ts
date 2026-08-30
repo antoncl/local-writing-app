@@ -191,7 +191,43 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     );
   });
 
-  it("seeds the slider's scene onto the prompt's as_of input (ADR-0055 §1)", async () => {
+  it("seeds the slider's scene onto a context_pick as_of as an encoded ref (#1485)", async () => {
+    // Impersonate's real shape: `as_of` is a hidden context_pick. The old bare
+    // scene-id seed was erased to "[]" by the wire coercion — entry(at=[]) read
+    // the character at BOOK-START and the slider was silently ignored.
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    const impersonate = {
+      ...chatPrompt("p-imp", "Impersonate", ["lore:character"]),
+      inputs: [{ name: "as_of", type: "context_pick", hidden: true }],
+    } as unknown as PromptEntrySummary;
+    render(ConversationsPanel, {
+      props: {
+        subjectId: "hero",
+        subjectTitle: "Hero",
+        subjectEntryType: "lore:character",
+        asOfScene: "scene_ch12",
+        asOfSceneTitle: "Chapter 12 — The Vault",
+        promptEntries: [impersonate],
+        metadataSchema: SCHEMA,
+        hostPaneId: "pane-1",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    await tick();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Impersonate" }));
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p-imp" }),
+      {
+        entry: "hero", // no `entry` input declared → bare-id pass-through
+        as_of: [{ id: "scene_ch12", kind: "manuscript", title: "Chapter 12 — The Vault", entry_type: "manuscript:scene" }],
+      },
+      null,
+      expect.objectContaining({ subject: "hero" }),
+    );
+  });
+
+  it("a prompt without an as_of input still gets the bare-id pass-through (ignored downstream)", async () => {
     const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
     render(ConversationsPanel, {
       props: {

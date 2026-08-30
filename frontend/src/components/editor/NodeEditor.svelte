@@ -12,6 +12,7 @@
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import EntryReviewOverlay from "@/components/editor/body/EntryReviewOverlay.svelte";
   import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
+  import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
   import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
@@ -819,6 +820,7 @@
           subjectTitle={title}
           subjectEntryType={entryType}
           asOfScene={scrub.anchorSceneId}
+          asOfSceneTitle={structure ? findNodeBySceneId(structure.root, scrub.anchorSceneId)?.title ?? "" : ""}
           {promptEntries}
           {metadataSchema}
           {hostPaneId}

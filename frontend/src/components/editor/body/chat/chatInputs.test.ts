@@ -8,6 +8,7 @@ import {
   seedPickInput,
   seedPickInputDraft,
   seedSubjectEntryInput,
+  subjectRefFromEntryType,
   ttlChipsFor,
 } from "./chatInputs";
 import { isInputMissing } from "@/lib/utils/promptInputs";
@@ -122,6 +123,41 @@ describe("seedPickInput / seedPickInputDraft — bare-id seeds erased to \"[]\" 
 
   it("the draft form keeps a bare id for a scalar target", () => {
     expect(seedPickInputDraft(promptWithEntry("entity_ref"), "entry", SUBJECT)).toBe("plot_abc");
+  });
+
+  it("the draft form stringifies an entity_ref_list — its draft is a JSON array too (#1703 review)", () => {
+    // A bare id here would throw in isInputMissing and read "Missing required"
+    // — the #1094 failure one type over.
+    const draft = seedPickInputDraft(promptWithEntry("entity_ref_list"), "entry", SUBJECT);
+    expect(draft).toBe('["plot_abc"]');
+    expect(isInputMissing(input("entity_ref_list"), draft)).toBe(false);
+  });
+
+  it("reads EFFECTIVE inputs: a snippet-contributed context_pick still gets the ref shape", () => {
+    // ADR-0061: an included snippet's inputs are effective but not own — the
+    // strip renders and coerces them, so the seeder must see them too.
+    const inherited = {
+      id: "p",
+      title: "P",
+      inputs: [],
+      effective_inputs: [{ name: "as_of", type: "context_pick" }],
+    } as unknown as PromptEntrySummary;
+    const SCENE2 = { id: "scene_9", kind: "manuscript" as const, title: "The Vault", entryType: "manuscript:scene" };
+    expect(seedPickInput(inherited, "as_of", SCENE2)).toEqual([
+      { id: "scene_9", kind: "manuscript", title: "The Vault", entry_type: "manuscript:scene" },
+    ]);
+  });
+});
+
+describe("subjectRefFromEntryType", () => {
+  it("derives the kind from the FQN prefix, defaulting to lore", () => {
+    expect(subjectRefFromEntryType("plot_1", "Arc", "plot:card")).toEqual({
+      id: "plot_1",
+      kind: "plot",
+      title: "Arc",
+      entryType: "plot:card",
+    });
+    expect(subjectRefFromEntryType("x", "X", "")).toEqual({ id: "x", kind: "lore", title: "X", entryType: undefined });
   });
 });
 

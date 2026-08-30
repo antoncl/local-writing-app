@@ -867,9 +867,6 @@
   }
 </script>
 
-{#snippet schemaActions()}
-    <button class="pin-button" type="button" title="Add type" aria-label="Add type" onmousedown={(event) => event.stopPropagation()} onclick={() => openCreateTypeForm(defaultSchemaParentType(schemaFieldKind))}>+</button>
-{/snippet}
 {#snippet schemaBody()}
   <SchemaTreePane
     bind:draggedSchemaTypeId
@@ -941,7 +938,7 @@
 
 <RegionRegistrar
   regions={{
-    schema: { title: "Types", body: schemaBody, actions: schemaActions, closable: true, onClose: () => closeSchemaPane("schema") },
+    schema: { title: "Types", body: schemaBody, closable: true, onClose: () => closeSchemaPane("schema") },
     schema_type: { get title() { return schemaTypeTabTitle; }, body: schemaTypeBody, closable: true, onClose: () => closeSchemaPane("schema_type") },
   }}
 />

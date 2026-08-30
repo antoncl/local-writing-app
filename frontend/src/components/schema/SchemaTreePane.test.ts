@@ -61,6 +61,15 @@ describe("SchemaTreePane inline create (#1659)", () => {
   beforeEach(() => metadataSchemaStore.set(SCHEMA));
   afterEach(() => metadataSchemaStore.set(null));
 
+  it("the heading '+ New type' is always present and seeds a top-level create at the kind root", async () => {
+    const onRequestCreate = vi.fn();
+    render(SchemaTreePane, {
+      props: { schemaFieldKind: "lore", schemaNodeTypeTree: [NODE], kindRootId: "lore:base", onRequestCreate },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "New type" }));
+    expect(onRequestCreate).toHaveBeenCalledWith("lore:base");
+  });
+
   it("a row '+' requests the create card under that type (not a full pane)", async () => {
     const onRequestCreate = vi.fn();
     render(SchemaTreePane, {

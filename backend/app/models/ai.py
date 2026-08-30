@@ -641,6 +641,25 @@ class ChatSession(BaseModel):
     # etc.). Powers the TTL countdown chips (step 9). Updated when a turn
     # writes to a slot (extracted via UsageMetrics.cache_write_tokens > 0).
     cache_write_times: dict[str, str] = Field(default_factory=dict)
+    # #1635: the composite revision (read_lore_entry's `.revision`) of every
+    # lore entry the AI saw on the last send — session baseline made durable.
+    # Seeds the in-memory AISession baseline on a cold process (so cache tiers
+    # survive restart) and drives the Context door's "edited since last seen"
+    # badge for picked lore. Additive-optional (rides front matter; no migration).
+    seen_revisions: dict[str, str] = Field(default_factory=dict)
+
+
+class ChangedPick(BaseModel):
+    """A lore entry the chat picked that has been edited since the AI last saw
+    it (#1635) — surfaced in the Context door with an "edited" marker."""
+
+    id: str
+    title: str = ""
+    entry_type: str = ""
+
+
+class ChatChangedPicksResponse(BaseModel):
+    picks: list[ChangedPick] = Field(default_factory=list)
 
 
 class ChatSessionSummary(BaseModel):
@@ -741,6 +760,10 @@ class SaveChatSessionRequest(BaseModel):
     # set to the server's current ISO timestamp. Frontend sends the labels
     # for any slot whose `cache_write_tokens` was > 0 in the response.
     cache_write_slots: list[str] | None = None
+    # #1635: the last-seen lore revisions, echoed like `used_node_hints`. None =
+    # "leave the captured value alone" (general saves omit it); a dict (even {})
+    # is the new value. The send path is the only producer.
+    seen_revisions: dict[str, str] | None = None
 
 
 class AIInvocation(BaseModel):

@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen, within } from "@/lib/test/component";
 import ChatComposerBar from "./ChatComposerBar.svelte";
-import type { ChatSessionJournalEntry, PreviewCacheBlock } from "@/lib/types";
+import type { ChangedPick, ChatSessionJournalEntry, PreviewCacheBlock } from "@/lib/types";
 
 const BASE = "BASE-SYSTEM-PROMPT";
 
@@ -28,6 +28,8 @@ const baseProps = {
   previewCacheBlocks: [] as PreviewCacheBlock[],
   loreEnabled: false,
   journal: [] as ChatSessionJournalEntry[],
+  changedPicks: [] as ChangedPick[],
+  onOpenDoor: () => {},
   lockedInputDisplays: [] as { name: string; label: string; value: string }[],
   titleFor: (_id: string) => null as string | null,
   onPickPrompt: () => {},

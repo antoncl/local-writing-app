@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@/lib/test/component";
 import ChatComposerBar from "./ChatComposerBar.svelte";
-import type { ChatSessionJournalEntry, PreviewCacheBlock, PromptEntrySummary } from "@/lib/types";
+import type { ChangedPick, ChatSessionJournalEntry, PreviewCacheBlock, PromptEntrySummary } from "@/lib/types";
 
 // The doorway gates on the bound prompt RESOLVING in this roster (a deleted
 // prompt must not offer a no-op button), so a matching entry has to be present.
@@ -37,6 +37,8 @@ const baseProps = {
   previewCacheBlocks: [] as PreviewCacheBlock[],
   loreEnabled: false,
   journal: [] as ChatSessionJournalEntry[],
+  changedPicks: [] as ChangedPick[],
+  onOpenDoor: () => {},
   lockedInputDisplays: [] as { name: string; label: string; value: string }[],
   titleFor: (_id: string) => null as string | null,
   onPickPrompt: () => {},

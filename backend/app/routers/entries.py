@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from app.models import (
     AssistantEntry,
     AssistantEntryList,
+    ChatChangedPicksResponse,
     ChatSession,
     ChatSessionList,
     CreateAssistantEntryRequest,
@@ -145,6 +146,12 @@ def create_chat_session(project: CurrentProject, request: CreateChatSessionReque
 def get_chat_session(project: CurrentProject, chat_id: str) -> ChatSession:
     with translate_errors():
         return project.read_chat_session(chat_id)
+
+
+@router.get("/api/chats/{chat_id}/changed-picks", response_model=ChatChangedPicksResponse)
+def chat_changed_picks(project: CurrentProject, chat_id: str) -> ChatChangedPicksResponse:
+    with translate_errors():
+        return ChatChangedPicksResponse(picks=project.chat_changed_picks(chat_id))
 
 
 @router.put("/api/chats/{chat_id}", response_model=ChatSession)

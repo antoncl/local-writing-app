@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@/lib/test/component";
 import ContextDoor from "./ContextDoor.svelte";
-import type { ChatSessionJournalEntry, PreviewCacheBlock } from "@/lib/types";
+import type { ChangedPick, ChatSessionJournalEntry, PreviewCacheBlock } from "@/lib/types";
 
 const BASE = "BASE-SYSTEM-PROMPT";
 const XML_A = '<character id="lore_a" name="A">…A…</character>';
@@ -34,6 +34,7 @@ const baseProps = {
   loreEnabled: false,
   lockedInputDisplays: [] as { name: string; label: string; value: string }[],
   journal: [] as ChatSessionJournalEntry[],
+  changedPicks: [] as ChangedPick[],
   titleFor,
   onClose: () => {},
 };
@@ -113,6 +114,34 @@ describe("ContextDoor", () => {
     await fireEvent.click(screen.getByText("Auto-added this conversation"));
     expect(screen.getByText(/Shenzhen Protocol/)).toBeInTheDocument();
     expect(screen.getByText(/turn 2/)).toBeInTheDocument();
+  });
+
+  it("#1635: changedPicks alone (no journal) shows the auto-added row with count 1, and drilling shows the edited marker", async () => {
+    render(ContextDoor, {
+      ...baseProps,
+      journal: [],
+      changedPicks: [{ id: "lore-1", title: "Avatar" }],
+    });
+    const row = screen.getByText("Auto-added this conversation").closest("button");
+    expect(row).not.toBeNull();
+    expect(row).toHaveTextContent("1");
+    await fireEvent.click(screen.getByText("Auto-added this conversation"));
+    expect(screen.getByText(/Avatar/)).toBeInTheDocument();
+    expect(screen.getByText("edited")).toBeInTheDocument();
+  });
+
+  it("#1635: journal + changedPicks sum in the count and both render when drilled", async () => {
+    render(ContextDoor, {
+      ...baseProps,
+      journal: [{ entry_id: "lore_1", title: "Shenzhen Protocol", added_at_turn: 2 }],
+      changedPicks: [{ id: "lore-1", title: "Avatar" }],
+    });
+    const row = screen.getByText("Auto-added this conversation").closest("button");
+    expect(row).toHaveTextContent("2");
+    await fireEvent.click(screen.getByText("Auto-added this conversation"));
+    expect(screen.getByText(/Shenzhen Protocol/)).toBeInTheDocument();
+    expect(screen.getByText(/Avatar/)).toBeInTheDocument();
+    expect(screen.getByText("edited")).toBeInTheDocument();
   });
 
   it("with a prompt bound but nothing rendered yet, the System row guides the writer to fill inputs", async () => {

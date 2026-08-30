@@ -1248,6 +1248,7 @@ export type {
   ChatSessionMessage,
   ChatSessionContextItem,
   ChatSessionJournalEntry,
+  ChangedPick,
   ChatSession,
   ChatSessionSummary,
   ChatSessionList,

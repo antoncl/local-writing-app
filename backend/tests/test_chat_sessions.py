@@ -378,6 +378,145 @@ class ChatSessionEndpointTests(unittest.TestCase):
         self.assertEqual(len(body["messages"]), 2)
 
 
+class ChatSeenRevisionsTests(unittest.TestCase):
+    """#1635: `seen_revisions` — the last-seen-revision baseline for picked
+    lore, echoed like `used_node_hints` (None = leave alone; a dict, even {},
+    is the new value)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Seen Revisions Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_persist_round_trips(self) -> None:
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        saved = self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(title="T", seen_revisions={"lore-1": "abc"}),
+        )
+        self.assertEqual(saved.seen_revisions, {"lore-1": "abc"})
+        self.assertEqual(
+            self.service.read_chat_session(chat.id).seen_revisions, {"lore-1": "abc"}
+        )
+
+    def test_none_preserves_the_existing_value(self) -> None:
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(title="T", seen_revisions={"lore-1": "abc"}),
+        )
+        # A general save (rename, no seen_revisions) must not drop the captured value.
+        saved = self.service.save_chat_session(
+            chat.id, SaveChatSessionRequest(title="Renamed")
+        )
+        self.assertEqual(saved.seen_revisions, {"lore-1": "abc"})
+        self.assertEqual(
+            self.service.read_chat_session(chat.id).seen_revisions, {"lore-1": "abc"}
+        )
+
+    def test_empty_dict_clears_the_value(self) -> None:
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(title="T", seen_revisions={"lore-1": "abc"}),
+        )
+        saved = self.service.save_chat_session(
+            chat.id, SaveChatSessionRequest(title="T", seen_revisions={})
+        )
+        self.assertEqual(saved.seen_revisions, {})
+        self.assertEqual(self.service.read_chat_session(chat.id).seen_revisions, {})
+
+
+class ChatChangedPicksTests(unittest.TestCase):
+    """#1635: `chat_changed_picks` — picked lore whose current revision differs
+    from what the AI last saw."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Changed Picks Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_a_picked_entry_whose_revision_differs_is_returned(self) -> None:
+        from app.models import SaveLoreEntryRequest
+
+        entry = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Aurora", entry_type="lore:character")
+        )
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="T",
+                used_node_ids=[entry.id],
+                seen_revisions={entry.id: "stale-revision"},
+            ),
+        )
+        # Edit the entry — its live revision now differs from seen_revisions.
+        self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title="Aurora",
+                body="Updated body.",
+                base_revision=entry.revision,
+                entry_type="lore:character",
+            ),
+        )
+        picks = self.service.chat_changed_picks(chat.id)
+        self.assertEqual([p.id for p in picks], [entry.id])
+        self.assertEqual(picks[0].title, "Aurora")
+        self.assertEqual(picks[0].entry_type, "lore:character")
+
+    def test_a_picked_entry_whose_revision_matches_is_not_returned(self) -> None:
+        entry = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Aurora", entry_type="lore:character")
+        )
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        current = self.service.read_lore_entry(entry.id).revision
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="T",
+                used_node_ids=[entry.id],
+                seen_revisions={entry.id: current},
+            ),
+        )
+        self.assertEqual(self.service.chat_changed_picks(chat.id), [])
+
+    def test_a_pick_never_seen_is_not_returned(self) -> None:
+        # Not in seen_revisions at all — a pending pick, not an edit.
+        entry = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Aurora", entry_type="lore:character")
+        )
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(title="T", used_node_ids=[entry.id]),
+        )
+        self.assertEqual(self.service.chat_changed_picks(chat.id), [])
+
+    def test_a_used_node_id_that_is_a_scene_is_filtered_out_without_crashing(self) -> None:
+        (self.root / "scenes").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            self.root / "scenes" / "sc1.md", "sc1", "Opening", "manuscript:scene", {}, ""
+        )
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="T",
+                used_node_ids=["sc1"],
+                seen_revisions={"sc1": "whatever"},
+            ),
+        )
+        self.assertEqual(self.service.chat_changed_picks(chat.id), [])
+
+
 class ChatSubjectAndBodyTests(unittest.TestCase):
     """ADR-0051 S2: a chat carries a `subject` entity_ref (so a node surfaces
     its conversations), and its transcript lives in the node body (so the index

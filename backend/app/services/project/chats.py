@@ -22,6 +22,7 @@ from pathlib import Path
 import yaml
 
 from app.models import (
+    ChangedPick,
     ChatSession,
     ChatSessionJournalEntry,
     ChatSessionList,
@@ -211,6 +212,46 @@ class ChatSessionsMixin:
         session.cost_usd_total = log_total if saw_priced else None
         return session
 
+    def chat_changed_picks(self, chat_id: str) -> list[ChangedPick]:
+        """Picked lore entries whose current revision differs from what the AI
+        last saw (#1635). Read-only; compares each lore pick's live revision
+        against the chat's persisted `seen_revisions`. Never lists an entry the
+        AI has not seen yet (not in `seen_revisions`) — that's a pending pick,
+        not an edit."""
+        chat = self.read_chat_session(chat_id)
+        seen = chat.seen_revisions or {}
+        # used_node_ids can include scenes/cards — keep only lore entries.
+        pick_ids: list[str] = list(
+            dict.fromkeys(
+                [
+                    *chat.used_node_ids,
+                    *(i.id for i in chat.context_items if i.kind == "lore" and i.id),
+                ]
+            )
+        )
+        out: list[ChangedPick] = []
+        for entry_id in pick_ids:
+            if entry_id not in seen:
+                continue
+            try:
+                entry = self.read_lore_entry(entry_id)
+            except Exception:  # noqa: BLE001
+                # A pick that's no longer a readable lore entry — deleted (a
+                # stale-cache read raises FileNotFoundError, not
+                # ProjectServiceError), retyped to a non-lore kind, or corrupt.
+                # The door degrades to journal-only; never 500 a read.
+                continue
+            current = getattr(entry, "revision", "") or ""
+            if current and current != seen[entry_id]:
+                out.append(
+                    ChangedPick(
+                        id=entry_id,
+                        title=getattr(entry, "title", "") or "",
+                        entry_type=getattr(entry, "entry_type", "") or "",
+                    )
+                )
+        return out
+
     def create_chat_session(self, request: CreateChatSessionRequest) -> ChatSession:
         self._chats_dir().mkdir(parents=True, exist_ok=True)
         now = self._utcnow_iso()
@@ -310,6 +351,11 @@ class ChatSessionsMixin:
             journal=next_journal,
             cost_usd_total=next_cost,
             cache_write_times=next_cache_times,
+            seen_revisions=(
+                existing.seen_revisions
+                if request.seen_revisions is None
+                else request.seen_revisions
+            ),
         )
         self._write_chat_session(path, updated)
         return updated

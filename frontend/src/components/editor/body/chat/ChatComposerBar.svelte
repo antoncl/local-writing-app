@@ -36,6 +36,7 @@
   import { buildPromptMenuTree } from "@/lib/editor-core/promptMenuTree";
   import type {
     AssistantEntrySummary,
+    ChangedPick,
     ChatSessionJournalEntry,
     PreviewCacheBlock,
     PreviewMessage,
@@ -78,6 +79,12 @@
     // "Auto-added this conversation" section; the transcript already stamps
     // per-turn `journal_added` chips, so this is the running roster.
     journal: ChatSessionJournalEntry[];
+    // #1635: picked lore entries edited since the AI last saw them — the Context
+    // door badges these "· edited" inside the auto-added panel.
+    changedPicks: ChangedPick[];
+    // Fired when the Context door opens, so the parent can refresh changedPicks
+    // against any lore edits made since the last preview.
+    onOpenDoor: () => void;
     // Locked-chat filled input values, already titled for display (ChatBodyView
     // resolves them via chatInputs.ts's displayInputValues). Empty pre-lock —
     // the inputs strip is the form then, not telemetry. `name` is the row key
@@ -107,6 +114,8 @@
     previewCacheBlocks,
     loreEnabled,
     journal,
+    changedPicks,
+    onOpenDoor,
     lockedInputDisplays,
     titleFor,
     onPickPrompt,
@@ -189,6 +198,7 @@
 
   function toggleChatPreviewPopover() {
     chatPreviewPopoverOpen = !chatPreviewPopoverOpen;
+    if (chatPreviewPopoverOpen) onOpenDoor();
   }
 
   // Shared outside-click dismissal. The prompt picker's Popover owns its own
@@ -384,6 +394,7 @@
           {loreEnabled}
           {lockedInputDisplays}
           {journal}
+          {changedPicks}
           {titleFor}
           onClose={() => (chatPreviewPopoverOpen = false)}
         />

@@ -17,7 +17,7 @@
 <script lang="ts">
   import { formatTokens } from "@/lib/utils/money";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-  import type { ChatSessionJournalEntry, PreviewCacheBlock, PreviewMessage } from "@/lib/types";
+  import type { ChangedPick, ChatSessionJournalEntry, PreviewCacheBlock, PreviewMessage } from "@/lib/types";
 
   interface Props {
     previewCacheBlocks: PreviewCacheBlock[];
@@ -31,6 +31,9 @@
     loreEnabled: boolean;
     lockedInputDisplays: { name: string; label: string; value: string }[];
     journal: ChatSessionJournalEntry[];
+    // #1635: picked lore edited since the AI last saw it — listed in the
+    // auto-added panel with an "· edited" marker.
+    changedPicks: ChangedPick[];
     // id → title, for a tier's member entries and the locked-inputs display.
     titleFor: (id: string) => string | null;
     onClose: () => void;
@@ -44,6 +47,7 @@
     loreEnabled,
     lockedInputDisplays,
     journal,
+    changedPicks,
     titleFor,
     onClose,
   }: Props = $props();
@@ -137,10 +141,10 @@
         <GroupCaret size="xs" collapsed />
       </button>
     {/if}
-    {#if journal.length > 0}
+    {#if journal.length > 0 || changedPicks.length > 0}
       <button type="button" class="ctx-row" onclick={() => drill({ kind: "section", key: "journal" })}>
         <span class="ctx-row-label">Auto-added this conversation</span>
-        <span class="ctx-row-sub">{journal.length}</span>
+        <span class="ctx-row-sub">{journal.length + changedPicks.length}</span>
         <GroupCaret size="xs" collapsed />
       </button>
     {/if}
@@ -212,6 +216,11 @@
     {#each journal as entry (entry.entry_id)}
       <div class="cbv-ctx-kv-line">
         {entry.title || entry.entry_id}{#if entry.added_at_turn != null} · turn {entry.added_at_turn}{/if}{#if entry.source === "depth1_expansion"} · ↳ depth 1{/if}
+      </div>
+    {/each}
+    {#each changedPicks as pick (pick.id)}
+      <div class="cbv-ctx-kv-line">
+        {pick.title || pick.id} · <span class="ctx-edited">edited</span>
       </div>
     {/each}
   {:else if current.kind === "entry"}
@@ -367,5 +376,12 @@
   }
   .cbv-ctx-value {
     color: var(--text-2);
+  }
+  /* #1635: a picked lore entry edited since the AI last saw it. Informational,
+     not a warning — the neutral accent axis, never amber (--warn), which on the
+     quiet writing desk reads as "something is wrong" when nothing is. */
+  .ctx-edited {
+    color: var(--accent);
+    font-weight: 600;
   }
 </style>

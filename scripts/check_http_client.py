@@ -9,7 +9,8 @@ every request must carry the open project's scope, injected in one place. Since
 raw `fetch` from a component or store skips that injection and talks to the
 *wrong project* — a data-corrupting bug that is completely invisible to an
 author who does not read the code. That is precisely the case the ADR says to
-gate. `api.ts` itself is the sanctioned client and is exempt.
+gate. The sanctioned client — `api.ts` and the `api/` modules it composes
+(#1676) — is exempt.
 
 What counts as a raw network call:
   * `new EventSource(...)`, `new WebSocket(...)`, `new XMLHttpRequest(...)`
@@ -31,8 +32,9 @@ a literal URL at the call site. A local callback named `fetch` that is ever
 invoked with a literal URL string would false-positive; grandfather or rename it.
 
 FAILS (exit 1) on any raw call unless the file is grandfathered below. Files
-outside `frontend/src/`, `api.ts`, and test files are ignored, so it is safe to
-hand this the full staged-file list, a single edited file, or the whole tree.
+outside `frontend/src/`, the `api.ts` / `api/` client, and test files are
+ignored, so it is safe to hand this the full staged-file list, a single edited
+file, or the whole tree.
 
 Usage:
     python scripts/check_http_client.py <file> [<file> ...]
@@ -51,8 +53,13 @@ from pathlib import Path
 GRANDFATHERED: set[str] = set()
 
 # The sanctioned client, and the test surfaces that are not the production
-# boundary (tests may stub globals). Tail-matched.
+# boundary (tests may stub globals). Tail-matched. The client was one file until
+# #1676 split it by domain: `api.ts` is now the composition root, the network
+# primitives (`request`/`streamNdjson`/`fetch`/`WebSocket`) live in
+# `api/core.ts`, and the domain modules under `api/` hold the methods — so the
+# whole `frontend/src/lib/api/` directory is the sanctioned client too.
 CLIENT = "frontend/src/lib/api.ts"
+CLIENT_DIR = "frontend/src/lib/api/"
 TEST_MARKERS = (".test.", ".spec.", "frontend/src/lib/test/")
 
 PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -80,6 +87,8 @@ def is_checked(path: Path) -> bool:
     if path.suffix not in {".ts", ".js", ".svelte"}:
         return False
     if posix.endswith(f"/{CLIENT}"):
+        return False
+    if f"/{CLIENT_DIR}" in posix:  # any module under the client directory (#1676)
         return False
     return not any(marker in posix for marker in TEST_MARKERS)
 

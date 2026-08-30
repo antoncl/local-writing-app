@@ -29,7 +29,7 @@ describe("SchemaTypeEditor reusable groups on built-in types (#1033)", () => {
 });
 
 describe("SchemaTypeEditor type icon (#316)", () => {
-  it("renders the Icon row with a choose-icon tile, seeded from initialIcon", () => {
+  it("renders the icon tile in the identity header, seeded from initialIcon", () => {
     const { container } = render(SchemaTypeEditor, {
       props: {
         schemaTypeKind: "lore" as const,
@@ -69,6 +69,33 @@ describe("SchemaTypeEditor type icon (#316)", () => {
     expect(pop).not.toBeNull();
     expect(pop!.parentElement).toBe(document.body);
     expect(pop!.querySelector(".icon-picker")).not.toBeNull();
+  });
+});
+
+describe("SchemaTypeEditor identity header (#1656)", () => {
+  // Colour + icon ARE the type's identity, so they sit in the identity header
+  // beside the name (its avatar) — not as standalone body rows below.
+  it("places the icon tile and colour swatch beside the name, not as body rows", () => {
+    const { container } = render(SchemaTypeEditor, {
+      props: {
+        schemaTypeKind: "lore" as const,
+        initialName: "Character",
+        initialTypeId: "lore:character",
+        initialIcon: "user",
+        selectedSchemaTypeId: "lore:character",
+        schemaTypeLayerId: "proj",
+        onSaveType: vi.fn(),
+      },
+    });
+    const header = container.querySelector(".schema-type-identity-header");
+    expect(header).not.toBeNull();
+    // The icon tile, the colour swatch, and the name input all share the header.
+    expect(header!.querySelector(".sti-icon-btn")).not.toBeNull();
+    expect(header!.querySelector(".swatch-trigger")).not.toBeNull();
+    expect(header!.querySelector(".stn-input")).not.toBeNull();
+    // The old standalone Color / Icon rows are gone.
+    expect(container.querySelector(".schema-type-color-row")).toBeNull();
+    expect(container.querySelector(".schema-type-icon-row")).toBeNull();
   });
 });
 

@@ -859,10 +859,11 @@ button.row-action-add.active {
 
 /* .palette-* + .machine-settings-modal descendant styling co-located into MachineSettingsDialog.svelte (#14). */
 
-/* .schema-type-color-row co-located into SchemaTypeEditor.svelte (#14).
-   The former `.metadata-color-row` twin was DEAD (only ever referenced in a
-   JS comment, never rendered — MetadataPanel uses its own scoped
-   `.field-row.color-row`) and was deleted. */
+/* .schema-type-color-row / -icon-row REMOVED (#1656): the type's colour + icon
+   moved into the identity header (`.schema-type-identity-header` in
+   SchemaTypeEditor.svelte), beside the name. The former `.metadata-color-row`
+   twin was DEAD (only ever referenced in a JS comment, never rendered —
+   MetadataPanel uses its own scoped `.field-row.color-row`) and was deleted. */
 
 /* .schema-type-fields / -header / .schema-type-identity / .kind-pill /
    .extends-label / .extends-pill co-located into SchemaTypeEditor.svelte (#14). */

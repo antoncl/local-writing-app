@@ -238,9 +238,11 @@ export function kindEntryTypeFqns(schema: MetadataSchema | null, kind: string): 
 
 // True iff `entryType` is `ancestor` or descends from it (is-a). The upward twin
 // of `descendantTypeFqns` below: walks the parent chain toward the root, matching
-// the backend's ancestry classification (`references.py`) so a user-defined
-// subtype is-a its built-in root on both sides. Without a schema only an exact
-// match holds. `seen` guards a malformed cyclic chain.
+// the backend's canonical ancestry primitive (`entry_type_ancestry`,
+// services/project/schema.py) so a user-defined subtype is-a its built-in root
+// on both sides. The frontend's ONE is-a traversal (#1689) — promptResolution,
+// evaluateView's descendants_of, and the snippet picker all route here. Without
+// a schema only an exact match holds. `seen` guards a malformed cyclic chain.
 export function entryTypeIsA(
   schema: MetadataSchema | null,
   entryType: string,

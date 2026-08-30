@@ -18,7 +18,10 @@ import type { MetadataSchema, PlotlineSummary, PromptEntrySummary, ViewNodeSumma
 
 const SCHEMA = {
   entry_types: {
-    "prompt:snippet": { name: "Snippet" },
+    "prompt:snippet": { name: "Snippet", kind: "prompt" },
+    // A user-defined snippet SUBTYPE — a snippet by ancestry (#1688).
+    "prompt:voice_note": { name: "Voice note", kind: "prompt", parent: "prompt:snippet" },
+    "prompt:general": { name: "General", kind: "prompt" },
     "plot:plotline": { name: "Plotline", kind: "plot" },
     "plot:card": { name: "Card", kind: "plot" },
     "lore:character": { name: "Character", kind: "lore" },
@@ -47,12 +50,12 @@ function loreEntry(id: string, title: string, tags: string[], aliases: string[] 
   } as unknown as import("@/lib/types").LoreEntrySummary;
 }
 
-function snippet(id: string, title: string): PromptEntrySummary {
+function snippet(id: string, title: string, entryType = "prompt:snippet"): PromptEntrySummary {
   return {
     id,
     title,
     body: "",
-    entry_type: "prompt:snippet",
+    entry_type: entryType,
     metadata: {},
     computed_metadata: {},
     inputs: [],
@@ -96,7 +99,8 @@ describe("NodePicker snippet picker — hide filter (ADR-0049 #682)", () => {
     hideLibraryEntry("gone");
     render(NodePicker, {
       props: {
-        // A snippet-kind source with no entry_type leaves → every prompt is a snippet.
+        // A snippet-kind source with no entry_type leaves → every SNIPPET-typed
+        // prompt (by ancestry, #1688) is offerable.
         config: { sources: [{ kind: "snippet" }] },
         promptEntries: [snippet("keep", "Keeper"), snippet("gone", "Goner")],
         affordance: "add",
@@ -108,6 +112,44 @@ describe("NodePicker snippet picker — hide filter (ADR-0049 #682)", () => {
 
     expect(screen.getByText("Keeper")).toBeInTheDocument();
     expect(screen.queryByText("Goner")).toBeNull();
+  });
+});
+
+describe("NodePicker snippet picker — ancestry classification (#1688)", () => {
+  it("offers a snippet SUBTYPE and refuses an invocable prompt, matching the render loader", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "snippet" }] },
+        promptEntries: [
+          snippet("sub", "Voice note", "prompt:voice_note"), // snippet by ancestry → offered
+          snippet("gen", "Brainstorm beats", "prompt:general"), // invocable → never a snippet
+        ],
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    expect(screen.getByText("Voice note")).toBeInTheDocument();
+    // Pre-#1688 the empty whitelist exposed ALL prompts — picking one authored
+    // an {% include %} the backend's ancestry-filtered snippet_loader refuses.
+    expect(screen.queryByText("Brainstorm beats")).toBeNull();
+  });
+
+  it("an entry_type whitelist admits subtypes of a listed type (ancestry, like descendants_of)", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "snippet", expr: { type: "prompt:snippet" } }] },
+        promptEntries: [
+          snippet("exact", "Exact snippet"),
+          snippet("sub", "Voice note", "prompt:voice_note"),
+        ],
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    expect(screen.getByText("Exact snippet")).toBeInTheDocument();
+    expect(screen.getByText("Voice note")).toBeInTheDocument();
   });
 });
 

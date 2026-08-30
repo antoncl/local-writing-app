@@ -18,7 +18,8 @@
   import { knownTagsStore } from "@/lib/stores/tags";
   import { cardEntriesStore } from "@/lib/stores/plotCards";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
-  import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
+  import { hidePromptEntries, isSnippetType } from "@/lib/editor-core/promptResolution";
+  import { entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
   import { api } from "@/lib/api";
   import type {
     AssistantEntrySummary,
@@ -629,16 +630,21 @@
     }));
   });
 
-  // Snippets are prompts of sub-types where kind=prompt and not abstract
-  // and (loosely) snippet-shaped; for v1 we expose all such prompt entries
-  // that match the search.
+  // Snippets are prompts whose entry_type is-a `prompt:snippet` — the same
+  // ANCESTRY classification the backend's snippet_loader and the shelving use
+  // (#1685/#1688), so the picker can never offer an invocable prompt whose
+  // `{% include %}` the render loader would then refuse, and a user-defined
+  // snippet subtype is offerable. A config's entry_type whitelist matches by
+  // ancestry too (a listed type admits its subtypes, like `offer_on` and
+  // `descendants_of` do).
   // Hidden Library prompts (ADR-0049 #682) drop out of the snippet picker too —
   // it is a prompt-discovery surface, so it routes through the shared seam.
   const snippetEntries = $derived(
     hidePromptEntries(promptEntries, $hiddenLibraryStore)
+      .filter((p) => isSnippetType(p.entry_type, metadataSchema))
       .filter((p) => {
-        const allowed = new Set(membership.entryTypes.snippet ?? []);
-        return allowed.size === 0 || allowed.has(p.entry_type);
+        const allowed = membership.entryTypes.snippet ?? [];
+        return allowed.length === 0 || allowed.some((fqn) => entryTypeIsA(metadataSchema, p.entry_type, fqn));
       })
       .filter(matchesSummary),
   );

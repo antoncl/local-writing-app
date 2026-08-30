@@ -40,7 +40,7 @@ import type {
   ViewSpec,
 } from "@/lib/types";
 import { collectNests } from "@/lib/views/nestRegistry";
-import { kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
+import { entryTypeIsA, kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
 import { asArray, coerceStringList, fieldValue, fieldValueList, isCollectionField, isEmpty, isFieldOfOperand, isSortableField, isVarOperand } from "@/lib/views/fieldAccess";
 import { applyGroupBy } from "@/lib/views/groupBy";
 import { normalize } from "@/lib/views/groupTree";
@@ -1024,23 +1024,16 @@ function idsWhere<T extends EvalNode>(state: RunState<T>, pred: (n: T) => boolea
 }
 
 // entry_type FQN → itself + every type whose `parent:` chain reaches it.
-// Mirrors the schema inheritance resolution (schema.py). Memoized per run.
+// Mirrors the schema inheritance resolution (schema.py). The upward is-a walk
+// is the shared `entryTypeIsA` (#1689) — one traversal, not two — run over
+// every declared type. Memoized per run.
 function descendantFqns<T extends EvalNode>(state: RunState<T>, fqn: string): Set<string> {
   const cached = state.descendantsCache.get(fqn);
   if (cached) return cached;
-  const types = state.schema?.entry_types ?? {};
+  const schema = state.schema ?? null;
   const result = new Set<string>([fqn]);
-  for (const [key, def] of Object.entries(types)) {
-    let cur: string | null | undefined = def.parent;
-    const seen = new Set<string>();
-    while (cur && !seen.has(cur)) {
-      seen.add(cur);
-      if (cur === fqn) {
-        result.add(key);
-        break;
-      }
-      cur = types[cur]?.parent;
-    }
+  for (const key of Object.keys(schema?.entry_types ?? {})) {
+    if (entryTypeIsA(schema, key, fqn)) result.add(key);
   }
   state.descendantsCache.set(fqn, result);
   return result;

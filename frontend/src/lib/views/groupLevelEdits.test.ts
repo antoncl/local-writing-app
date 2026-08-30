@@ -19,6 +19,14 @@ describe("setLevelField", () => {
     expect(setLevelField(levels, 0, "tags")).toEqual([{ field: "tags", order: "label" }]);
   });
 
+  it("re-selecting the SAME field is a no-op — show_empty survives (#1693)", () => {
+    // #374's drop is for a REAL field change; picking the current field again
+    // must not silently strip the flag (a non-change is not an edit).
+    const levels: ViewGroupByLevel[] = [{ field: "listed", show_empty: true, order: "label" }];
+    const result = setLevelField(levels, 0, "listed");
+    expect(result[0]).toBe(levels[0]); // identity preserved, nothing dropped
+  });
+
   it("leaves other levels and the input array untouched", () => {
     const levels: ViewGroupByLevel[] = [
       { field: "listed", show_empty: true },

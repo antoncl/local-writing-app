@@ -71,6 +71,20 @@ describe("dispositionFor — the five shelves (#951)", () => {
     );
   });
 
+  it("shelves a user-defined SUBTYPE of prompt:snippet under Snippets (ancestry, #1685)", () => {
+    // Snippet-ness follows the schema parent chain, matching the backend's
+    // ancestry classification — an exact-string test would shelve this under Chat.
+    const schema = {
+      entry_types: {
+        "prompt:snippet": { name: "Snippet", kind: "prompt", parent: "prompt:base" },
+        "prompt:voice_note": { name: "Voice note", kind: "prompt", parent: "prompt:snippet" },
+      },
+      fields: {},
+    } as unknown as MetadataSchema;
+    const subCtx: PromptResolutionContext = { ...ctx, metadataSchema: schema };
+    expect(dispositionFor(subCtx, prompt("v", "prompt:voice_note")).label).toBe("Snippets");
+  });
+
   it("has commit distinguish Revise entities from a plain Chat on the same chat_panel", () => {
     expect(dispositionFor(ctx, prompt("c", "prompt:general")).label).toBe("Chat");
     expect(dispositionFor(ctx, prompt("d", "prompt:general", "d", COMMIT)).label).toBe(

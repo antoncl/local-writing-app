@@ -11,6 +11,7 @@ import {
   promptEntriesOfferedOn,
   promptOffersOn,
   promptOnAccept,
+  isSnippetType,
   promptSurfaceFor,
   resolvePromptPositionalArgs,
   type PromptResolutionContext,
@@ -467,5 +468,40 @@ describe("id readers over a context_pick value (#1482)", () => {
     ]);
     expect(characterIdFromInputValue(onlySelector)).toBeNull();
     expect(entryIdFromPickValue(onlySelector)).toBe("");
+  });
+});
+
+describe("isSnippetType — ancestry classification (#1685)", () => {
+  // Snippet-ness walks the schema parent chain, matching the backend's
+  // ancestry-based classification — a user-defined subtype of `prompt:snippet`
+  // is import-only too, and must not fall through to the conversation surface.
+  const subtypeSchema = {
+    entry_types: {
+      "prompt:base": { name: "Prompt", kind: "prompt", abstract: true },
+      "prompt:general": { name: "General", kind: "prompt", parent: "prompt:base" },
+      "prompt:snippet": { name: "Snippet", kind: "prompt", parent: "prompt:base" },
+      "prompt:voice_note": { name: "Voice note", kind: "prompt", parent: "prompt:snippet" },
+    },
+    fields: {},
+  } as unknown as MetadataSchema;
+
+  it("classifies the exact type and any descendant as a snippet", () => {
+    expect(isSnippetType("prompt:snippet", subtypeSchema)).toBe(true);
+    expect(isSnippetType("prompt:voice_note", subtypeSchema)).toBe(true);
+    expect(isSnippetType("prompt:general", subtypeSchema)).toBe(false);
+  });
+
+  it("falls back to an exact match without a schema", () => {
+    expect(isSnippetType("prompt:snippet", null)).toBe(true);
+    expect(isSnippetType("prompt:voice_note", null)).toBe(false);
+  });
+
+  it("gives a snippet subtype no surface, so it leaves every discovery roster", () => {
+    const c = ctx({
+      metadataSchema: subtypeSchema,
+      promptEntries: [prompt("v", "prompt:voice_note"), prompt("g", "prompt:general")],
+    });
+    expect(promptSurfaceFor(c, prompt("v", "prompt:voice_note"))).toBeNull();
+    expect(promptEntriesForSurface(c, "conversation").map((e) => e.id)).toEqual(["g"]);
   });
 });

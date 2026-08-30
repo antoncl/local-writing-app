@@ -135,7 +135,7 @@
   const showOfferOnPicker = $derived(
     isPrompt() &&
       !!scene &&
-      !isSnippetType(scene.entry_type) &&
+      !isSnippetType(scene.entry_type, metadataSchema) &&
       (!promptStrategy?.output?.handler || surfaceForStrategy(promptStrategy) === "conversation"),
   );
 
@@ -144,7 +144,7 @@
   // narrowed to the conversation surface: it's what AUTHORS the handler that
   // decides the surface in the first place.
   const showOutputEditor = $derived(
-    isPrompt() && !!scene && !isSnippetType(scene.entry_type),
+    isPrompt() && !!scene && !isSnippetType(scene.entry_type, metadataSchema),
   );
 
   // --- Dependency advisory (ADR-0061 §5 / S3a) ---

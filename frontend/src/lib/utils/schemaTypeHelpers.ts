@@ -236,6 +236,27 @@ export function kindEntryTypeFqns(schema: MetadataSchema | null, kind: string): 
   return kindEntryTypeOptions(schema, kind).map((o) => o.fqn);
 }
 
+// True iff `entryType` is `ancestor` or descends from it (is-a). The upward twin
+// of `descendantTypeFqns` below: walks the parent chain toward the root, matching
+// the backend's ancestry classification (`references.py`) so a user-defined
+// subtype is-a its built-in root on both sides. Without a schema only an exact
+// match holds. `seen` guards a malformed cyclic chain.
+export function entryTypeIsA(
+  schema: MetadataSchema | null,
+  entryType: string,
+  ancestor: string,
+): boolean {
+  if (!schema) return entryType === ancestor;
+  let cursor: string | undefined = entryType;
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor)) {
+    if (cursor === ancestor) return true;
+    seen.add(cursor);
+    cursor = schema.entry_types[cursor]?.parent ?? undefined;
+  }
+  return false;
+}
+
 // An entry_type FQN plus every concrete descendant (seed-inclusive), matching the
 // `descendants_of` leaf's family semantics. Walks the parent chain downward.
 export function descendantTypeFqns(schema: MetadataSchema | null, root: string): string[] {

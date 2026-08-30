@@ -1,82 +1,84 @@
 # Snippets and prompts
 
-Two node kinds underpin the AI feature.
+One node kind underpins the AI feature: `prompt`. A *snippet* is not a separate
+kind — it is a prompt entry type (`prompt:snippet`) whose role is to be included
+into other prompts rather than invoked itself.
 
-## `snippet` — reusable text the user wrote once
+## The entry-type taxonomy
 
-A snippet is a piece of prose the user authored to be **included** verbatim into one or more prompts. Examples:
+`prompt:base` is an **abstract** entry type; two concrete types ship under it:
 
-- A "house voice" style note repeated across every prose-generation prompt
-- A boilerplate persona block ("You are an expert thriller writer with a clipped, declarative style")
-- A standing instruction the user wants applied everywhere ("avoid adverbs")
+| Entry type | Role |
+| --- | --- |
+| `prompt:general` | An invocable prompt — everything from a continue-at-cursor rewrite to a brainstorm chat. What it does is declared per-instance (see below), not by its type. |
+| `prompt:snippet` | Import-only reusable text, `{% include %}`d into other prompts by id. Never invocable, whatever its configuration. |
+
+Users may instantiate these directly or sub-type them in the schema editor.
+Classification follows the parent chain: a user-defined sub-type of
+`prompt:snippet` is a snippet everywhere the app asks.
+
+## Behavior is on the instance, not the type
+
+A prompt node pairs:
+
+- An **instruction template** — the body markdown, rendered as Jinja2 (see
+  [Template language](template-language.md))
+- A **context strategy** (`context_strategy` front matter) — what to pull into
+  the envelope, and the **output** contract: which handler runs the result
+  (inline at cursor / inline over a selection / a conversation, optionally with a
+  commit that extracts the result to a node as a reviewable patch)
+- **Inputs** (`inputs` front matter) — typed declarations the dispatch UI
+  renders as a form
+- An optional **offer allow-list** (`offer_on`) — the subject entry types this
+  prompt is offered on as a "＋New" conversation
+
+All of these live in the node's own front matter. The entry-type definition
+carries none of them: a new prompt starts with no `context_strategy` and behaves
+as a plain conversation until its author picks an output in the editor's Setup
+tab. (Earlier versions declared `context_strategy` on the sub-type; that was
+inverted — behavior is instance-only.)
 
 ### Properties
 
-- **Kind:** `snippet`
-- **Has body:** yes (the body markdown *is* the snippet)
-- **Stored at:** `<project>/snippets/<title>.md`
-- **Front matter:** `id`, `title`, `entry_type`, and any user-defined fields from the schema
+- **Kind:** `prompt`
+- **Has body:** yes (the body markdown is the Jinja2 template)
+- **Stored at:** `<project>/prompts/<title>.md` — snippets and invocable prompts
+  side by side; the entry type in front matter is what separates them
+- **Front matter:** `id`, `title`, `entry_type`, plus `inputs`,
+  `context_strategy`, `offer_on` as applicable
 
-Snippets live in their own folder so they're easy to browse and back up separately. The filename is the title (sanitized), matching the convention used for scenes and lore.
+## Snippets
 
-### Including a snippet in a template
+A snippet is a piece of prose authored once and **included** verbatim into one
+or more prompts. Examples:
 
-Inside a prompt template, snippets are pulled in by node ID. Filenames give you readable IDs:
+- A "house voice" style note repeated across every prose-generation prompt
+- A boilerplate persona block ("You are an expert thriller writer with a clipped, declarative style")
+- A standing instruction applied everywhere ("avoid adverbs")
+
+Inside a prompt template, snippets are pulled in by node id (filenames give you
+readable ids):
 
 ```jinja
 {% include "builtin-house-voice" %}
 ```
 
-See [Template language](template-language.md) for the full include syntax.
+A snippet may declare `inputs` of its own; a prompt's **effective inputs** are
+its own plus the transitive union of every snippet it includes, so a snippet's
+fields surface on every invocation form that renders it without hand-copying.
 
 ### Inheritance across nested projects
 
-In a recursive project layout (e.g., Honorverse → series → book), snippets inherit downward: a snippet at the universe level is visible inside any descendant book without copying. Editing such a snippet edits the universe-level file, affecting every project beneath. To localize, fork it down to the active project explicitly (see project nesting in the architecture docs, forthcoming).
+In a nested project layout (e.g., universe → series → book), prompts — snippets
+included — inherit downward like other nodes: a snippet at the universe level is
+visible inside any descendant book without copying. Editing such a snippet edits
+the ancestor-level file, affecting every project beneath; clone it into the
+active project to localize. Built-in Library prompts behave the same way
+(clone to edit).
 
-## `prompt` — an AI invocation, modeled as a node
+## Input types
 
-A prompt is everything required to invoke the AI for one specific task. It pairs:
-
-- An **instruction template** (the body — Jinja2)
-- A **context strategy** (what to pull into the envelope before sending)
-- **Inputs** the user fills in at dispatch time (e.g., "how many words?")
-
-### Abstract parent + concrete sub-types
-
-`prompt` is an **abstract** entry type. Four concrete bases under it ship seeded:
-`continuation`, `revise`, `general`, `snippet`. Users may instantiate the bases
-directly, or sub-type one to declare the behavior for a specific task:
-
-| Sub-type | What it does |
-| --- | --- |
-| `prompt.continue_scene` | Generate prose from cursor + beat instructions (output: insert at cursor, visual diff) |
-| `prompt.revise_selection` | Rewrite a marked selection (output: replace selection, visual diff) |
-| `prompt.freeform` | Sparring / brainstorming / research (output: chat panel) |
-| `prompt.summarize` | Body → summary field (output: replace field, auto-apply + undo) |
-| `prompt.lore_query` | Research over lore canon (output: chat panel) |
-| `prompt.character_query` | Roleplay as a character at the current scene's effective state — used to verify mutable-metadata timelines (output: chat panel) |
-
-These sub-types ship seeded with the system schema. Users can fork them or add their own via the schema editor.
-
-### Properties
-
-- **Kind:** `prompt`
-- **Has body:** yes (the body markdown is the Jinja2 template; see [Template language](template-language.md))
-- **Stored at:** `<project>/prompts/<title>.md`
-- **Front matter:** `id`, `title`, `entry_type`, `inputs`, `context_strategy`
-
-### Properties on the entry-type definition (not on the node)
-
-These belong on the sub-type (`prompt.continue_scene`, etc.), not on individual prompt nodes:
-
-- `context_strategy` — declares the target, scan surface, and output handler
-- `inputs` — typed input declarations the dispatch UI renders as a form
-
-A user authoring a custom prompt picks (or forks) a sub-type, then writes the body template.
-
-### Input types
-
-The `inputs` list on a sub-type declares the dispatch form. Each entry is:
+The `inputs` list on a prompt declares the dispatch form. Each entry is:
 
 ```yaml
 - name: words
@@ -95,10 +97,18 @@ Supported `type` values:
 | `number` | number input | number |
 | `boolean` | checkbox | `True` / `False` |
 | `select` | dropdown (uses `options`) | string |
+| `multi_select` | multi-select (uses `options`) | list of strings |
+| `tags` | tag editor | list of strings |
+| `list` | repeatable text rows | list of strings |
 | `entity_ref` | `ReferencePicker` (single) | string id |
 | `entity_ref_list` | `ReferencePicker` (multi) | list of string ids |
+| `color` | color swatch picker | string token |
+| `context_pick` | node picker (adds picked nodes to context) | encoded ref list |
+| `scene_ref` | scene picker (mutation resolution scene) | string id |
 
-For `entity_ref` and `entity_ref_list`, an optional `target` carries a `NodePickerConfig` that constrains the picker — same shape as `context_pick` inputs and `entity_ref` metadata fields' `picker_config`:
+For the reference-picking types, an optional `target` carries a
+`NodePickerConfig` that constrains the picker — the same shape `entity_ref`
+metadata fields use in `picker_config`:
 
 ```yaml
 - name: character
@@ -111,29 +121,20 @@ For `entity_ref` and `entity_ref_list`, an optional `target` carries a `NodePick
   required: true
 ```
 
-Cardinality is implied by the type literal (`entity_ref` → single, `entity_ref_list` → multi); any `multiple` field on `target` is ignored for these types.
+Cardinality is implied by the type literal (`entity_ref` → single,
+`entity_ref_list` → multi); any `multiple` field on `target` is ignored for
+these types.
 
-Inside the template the value is the raw id (or list of ids). Wrap with `entry()` to walk into fields:
+Inside the template the value is the raw id (or list of ids). Wrap with
+`entry()` to walk into fields:
 
 ```jinja
 {{ entry(inputs.character).title }}
 {% for r in inputs.related %}- {{ entry(r).title }}{% endfor %}
 ```
 
-## File layout
-
-A project has:
-
-```
-<project>/
-  prompts/
-  snippets/
-  ...
-```
-
-Both folders are part of the project format; `snippets/` is created on open for any project that doesn't yet have it.
-
 ## See also
 
 - [Template language](template-language.md) — how the body markdown is rendered
 - [Helpers](helpers.md) — functions callable from a template
+- [Reference](reference.md) — the registered prompt vocabulary

@@ -783,7 +783,7 @@ export type NodePickerConfig = {
   allow_target_marking?: boolean;
 };
 
-// What ends up in input.<name> for a context_pick input — a list of
+// What ends up in inputs.<name> for a context_pick input — a list of
 // these light refs. Bodies are NOT carried; they're materialized
 // server-side at template render time. `target: true` on a scene
 // ref marks it as the implicit `scene` binding for the prompt's

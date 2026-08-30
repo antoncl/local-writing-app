@@ -206,7 +206,7 @@
 <details class="entry-inputs-editor">
   <summary>
     Inputs <small>{entryInputDrafts.length}</small>
-    <small class="entry-inputs-hint">declared on this prompt · use as <code>&lbrace;&lbrace; input.&lt;id&gt; &rbrace;&rbrace;</code></small>
+    <small class="entry-inputs-hint">declared on this prompt · use as <code>&lbrace;&lbrace; inputs.&lt;id&gt; &rbrace;&rbrace;</code></small>
   </summary>
   <!-- Read-only (Library prompt): the whole body is inert — viewable, not
        mutable — but the summary above stays live so the group can be expanded. -->

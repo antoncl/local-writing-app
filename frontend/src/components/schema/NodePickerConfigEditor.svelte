@@ -417,7 +417,7 @@
           oninput={(e) => onNameChange?.((e.currentTarget as HTMLInputElement).value)}
         />
         {#if name}
-          <code class="ctx-row-accessor">&lbrace;&lbrace; input.{name} &rbrace;&rbrace;</code>
+          <code class="ctx-row-accessor">&lbrace;&lbrace; inputs.{name} &rbrace;&rbrace;</code>
         {/if}
       </div>
     </div>
@@ -676,7 +676,7 @@
           <p class="ctx-scene-binding-help">
             At runtime the picker shows a ★ on each picked scene. The one the writer marks fills
             the template's <code>scene</code> variable — the rest stay available on
-            <code>{`{{ input.<id> }}`}</code>, and the marked one wins over any caller-supplied target.
+            <code>{`{{ inputs.<id> }}`}</code>, and the marked one wins over any caller-supplied target.
           </p>
         </div>
       </div>

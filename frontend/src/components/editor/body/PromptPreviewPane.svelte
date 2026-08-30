@@ -384,7 +384,7 @@
           <div class="prompt-preview-inputs-heading">
             Inputs
             <small>{promptPreviewDeclaredInputs.length}</small>
-            <small class="prompt-preview-inputs-hint">use in template as <code>&lbrace;&lbrace; input.&lt;name&gt; &rbrace;&rbrace;</code></small>
+            <small class="prompt-preview-inputs-hint">use in template as <code>&lbrace;&lbrace; inputs.&lt;name&gt; &rbrace;&rbrace;</code></small>
           </div>
           {#each promptPreviewDeclaredInputs as inputDef (inputDef.name)}
             {@const draft = record.inputDrafts[inputDef.name]}
@@ -398,8 +398,8 @@
                   type="button"
                   class="prompt-preview-field-accessor"
                   title="Click to copy"
-                  onclick={(e) => { e.preventDefault(); navigator.clipboard?.writeText(`{{ input.${inputDef.name} }}`).catch(() => {}); }}
-                ><code>&lbrace;&lbrace; input.{inputDef.name} &rbrace;&rbrace;</code></button>
+                  onclick={(e) => { e.preventDefault(); navigator.clipboard?.writeText(`{{ inputs.${inputDef.name} }}`).catch(() => {}); }}
+                ><code>&lbrace;&lbrace; inputs.{inputDef.name} &rbrace;&rbrace;</code></button>
               </span>
               <PromptInputField
                 input={inputDef}

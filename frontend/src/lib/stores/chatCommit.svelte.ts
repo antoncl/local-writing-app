@@ -112,12 +112,13 @@ export function patchToRows(patch: EntryPatch): MutationSetRow[] {
 
 export class ChatCommitController {
   // ---- fed each render by the host (the derivations below track these) -------
-  /** The active prompt's `output` config (ADR-0054): routing is
-   *  `outputHandlerFor(output.handler)` (`PromptOutput` has no `.kind`); a
-   *  `.commit` marks a brainstorm whose result is extracted to its `entry`
-   *  target (`.commit.review` = how it's reviewed; WHAT it extracts is
+  /** The active prompt's `output` config (ADR-0054; `PromptOutput` has no
+   *  `.kind`). A `.commit` marks a brainstorm whose result is extracted to its
+   *  `entry` target (`.commit.review` = how it's reviewed; WHAT it extracts is
    *  authored in the prompt's own `field_contract` loop, read back at commit —
-   *  ADR-0067 S2). */
+   *  ADR-0067 S2). The produce/apply phases route through the output-handler
+   *  registry in `editor-core/outputHandlers` (via the `extractHandler` this
+   *  controller drives); `isCommitChat` below is the separate presence test. */
   output = $state<PromptOutput | null>(null);
   /** The chat's per-input drafts — `entry` (revise target) / `entry_type`
    *  (create target) are seeded here at launch (ADR-0046 §6.4). */

@@ -89,18 +89,21 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "manuscript:act": {
             "name": "Act",
+            "icon": "stack-2",
             "kind": "manuscript",
             "parent": "manuscript:base",
             "fields": [],
         },
         "manuscript:chapter": {
             "name": "Chapter",
+            "icon": "book",
             "kind": "manuscript",
             "parent": "manuscript:base",
             "fields": [],
         },
         "manuscript:scene": {
             "name": "Scene",
+            "icon": "feather",
             "kind": "manuscript",
             "parent": "manuscript:base",
             "fields": [
@@ -137,6 +140,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "lore:character": {
             "name": "Character",
+            "icon": "user",
             "kind": "lore",
             "parent": "lore:base",
             "fields": ["role", "pronouns", "home_place", "character_cost"],
@@ -146,6 +150,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # was `place`, a documented key/display mismatch scar removed in
             # the pre-1.0 FQN cleanup. Matches the `location` field on scene.
             "name": "Location",
+            "icon": "map-pin",
             "kind": "lore",
             "parent": "lore:base",
             "fields": ["location_type", "region"],
@@ -164,6 +169,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # lives in the flat Lore collection and joins lore references + AI
             # context. Reinstated after an overeager research-era deprecation (#963).
             "name": "Note",
+            "icon": "notebook",
             "kind": "lore",
             "parent": "lore:base",
             "fields": [],
@@ -182,6 +188,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "research:topic": {
             "name": "Topic",
+            "icon": "folder",
             "kind": "research",
             "parent": "research:base",
             "fields": [],
@@ -196,6 +203,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # research-strategy decisions); notes participate in AI
             # context via the explicit picker for now.
             "name": "Note",
+            "icon": "notebook",
             "kind": "research",
             "parent": "research:base",
             "fields": ["tags"],
@@ -207,6 +215,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # abstract) so sets can be created directly; entry_type sub-classing
             # (e.g. shapeshift vs promotion families) stays available but unused.
             "name": "Mutation set",
+            "icon": "arrows-shuffle",
             "kind": "mutation_set",
             # ADR-0055 §3: `target_entity` is the OPTIONAL entity pin. Declaring
             # it as a schema `entity_ref` (stored in `metadata`, not the top-level
@@ -248,6 +257,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # fulfil its beats (card `beat_links`). An ordinary flat Node under
             # `plot/`, layered like lore.
             "name": "Plotline",
+            "icon": "route",
             "kind": "plot",
             "parent": "plot:base",
             # `color` first so the swatch sits under the type header, not below the
@@ -276,6 +286,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # exercises it, or by a writer as a schema extension. A flat Node under
             # `plot/`, layered like the plotline it references.
             "name": "Card",
+            "icon": "cards",
             "kind": "plot",
             "parent": "plot:base",
             "fields": ["plotline", "scene", "page_status", "beat_links", "causal_links", "follow_ups"],
@@ -289,6 +300,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # is the body. Template-level attributes (family, ai_use_guidance, …)
             # still ride in the `template:` front-matter block for now.
             "name": "Plot template",
+            "icon": "layout-grid",
             "kind": "plot",
             "parent": "plot:base",
             "fields": ["beats"],
@@ -303,6 +315,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # it carries no schema metadata fields — the layout is an opaque
             # payload on the node, not user metadata.
             "name": "Board",
+            "icon": "layout-board",
             "kind": "plot",
             "parent": "plot:base",
             "fields": [],
@@ -322,6 +335,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "prompt:general": {
             "name": "General",
+            "icon": "prompt",
             "kind": "prompt",
             "parent": "prompt:base",
             "fields": [],
@@ -329,6 +343,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "prompt:snippet": {
             "name": "Snippet",
+            "icon": "quote",
             "kind": "prompt",
             "parent": "prompt:base",
             "fields": [],
@@ -336,6 +351,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "assistant:assistant": {
             "name": "Assistant",
+            "icon": "sparkles",
             "kind": "assistant",
             "fields": [
                 "ai_provider",
@@ -355,6 +371,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "project:project": {
             "name": "Project",
+            "icon": "book-2",
             "kind": "project",
             # `color` leads: it is the level/inheritance cue the app reads
             # elsewhere (the `--star` axis, level pills), and field order is the
@@ -389,6 +406,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # tint. Neither is written by any editor today, but declaring
             # `subject` is what makes the chat→subject edge extract.
             "name": "Chat",
+            "icon": "message-circle",
             "kind": "chat",
             # `staged_set` (ADR-0055 S4): the mutation set a committing brainstorm
             # OWNS — a second entity_ref, into the mutation_set kind, earning the
@@ -405,6 +423,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # prose body). No schema fields in v1 — the view designer edits the
             # spec, not metadata. See ADR-0021.
             "name": "View",
+            "icon": "eye",
             "kind": "view",
             "fields": [],
             "has_body": False,

@@ -355,13 +355,13 @@ class EditorPanesController {
       }
     });
     if (conflict) {
-      // The reconcile ladder (ADR-0077): a lost-response adopt (rung 1) or a
-      // disjoint prose merge (rung 2) settles the close silently; overlap still asks.
-      if ((await reconcileOn409(this, id)) !== "conflict") {
+      // The reconcile ladder (ADR-0077): rungs 1–2 settle the close silently; a real conflict asks (with the diff preview).
+      const { outcome, remote } = await reconcileOn409(this, id);
+      if (outcome !== "conflict") {
         this.tearDown(id);
         return;
       }
-      offerCloseConflictRecovery(this, id);
+      offerCloseConflictRecovery(this, id, remote);
       return;
     }
     if (ok) this.tearDown(id);

@@ -14,7 +14,7 @@ import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import { HttpError, setKeepaliveSaves, api } from "@/lib/api";
-import { confirmService } from "@/lib/stores/confirmService.svelte";
+import { conflictDiffService } from "@/lib/stores/conflictDiffService.svelte";
 import {
   bodiesEqual,
   cloneMetadata,
@@ -178,26 +178,28 @@ function paneTitle(host: SaveFailureHost, id: string): string {
 }
 
 // The document changed on disk while this pane held unsaved edits and the
-// close-flush 409'd. Let the user pick a side; Cancel keeps the pane open (e.g.
-// to copy text out first). Moved out of editorPanes with #457 so both conflict
-// recoveries share one home.
-export function offerCloseConflictRecovery(host: SaveFailureHost, id: string): void {
-  const title = paneTitle(host, id);
-  confirmService.request({
-    title: "Changed on disk",
-    message:
-      `"${title}" was modified outside this pane while it had unsaved changes — ` +
-      "another window, another surface, or the file itself. Overwrite the on-disk " +
-      "version with this pane's content, or discard this pane's changes and keep " +
-      "what is on disk?",
-    confirmLabel: "Overwrite and close",
-    destructive: true,
-    secondaryLabel: "Discard changes and close",
-    onSecondary: () => host.tearDown(id),
-    onConfirm: async () => {
-      await host.saveEditorPane(id, { force: true });
-      host.tearDown(id);
-    },
+// close-flush 409'd. The diff-preview dialog (rung 3, #1638) shows on-disk vs this
+// pane before the choice; Cancel keeps the pane open (e.g. to copy text out first).
+// Moved out of editorPanes with #457 so both recoveries share one home.
+export function offerCloseConflictRecovery(host: SaveFailureHost, id: string, remote: ReloadableDocument | null): void {
+  const pane = host.panes.find((candidate) => candidate.id === id);
+  conflictDiffService.request({
+    title: paneTitle(host, id),
+    localBody: pane?.draftMarkdown ?? null,
+    onDiskBody: remote?.body ?? null,
+    actions: [
+      // Keep the pane open, resolve nothing — the escape hatch to copy text out first.
+      { label: "Cancel", onSelect: () => {} },
+      { label: "Discard changes and close", onSelect: () => host.tearDown(id) },
+      {
+        label: "Overwrite and close",
+        destructive: true,
+        onSelect: async () => {
+          await host.saveEditorPane(id, { force: true });
+          host.tearDown(id);
+        },
+      },
+    ],
   });
 }
 
@@ -205,11 +207,17 @@ export function offerCloseConflictRecovery(host: SaveFailureHost, id: string): v
 // Fire-and-forget from handleSaveFailure: the prompt is async user interaction
 // anyway, and every rung degrades to the dialog on failure.
 async function resolveAutosaveConflict(host: SaveFailureHost, id: string): Promise<void> {
-  if ((await reconcileOn409(host, id)) === "conflict") offerAutosaveConflictRecovery(host, id);
+  const { outcome, remote } = await reconcileOn409(host, id);
+  if (outcome === "conflict") offerAutosaveConflictRecovery(host, id, remote);
 }
 
 // Which rung of the ladder resolved a 409 (or "conflict" if none could).
 export type ReconcileOutcome = "adopted" | "merged" | "conflict";
+
+// The outcome plus the re-fetched on-disk document (null when the re-fetch never
+// happened). On "conflict" the caller feeds `remote` to the diff-preview dialog
+// (rung 3, #1638); the silent rungs ignore it.
+export type ReconcileResult = { outcome: ReconcileOutcome; remote: ReloadableDocument | null };
 
 // The reconcile ladder for a changed-on-disk 409 (ADR-0077), shared by BOTH 409
 // sites — background autosave and the close-flush — so every document kind is
@@ -223,23 +231,23 @@ export type ReconcileOutcome = "adopted" | "merged" | "conflict";
 //   Otherwise → "conflict": the caller offers the "changed on disk" dialog.
 // A failed re-fetch or a fresh conflict during the re-save degrades to "conflict" —
 // the dialog, never a guess (prove-disjoint-or-ask, ADR-0077 §4).
-export async function reconcileOn409(host: SaveFailureHost, id: string): Promise<ReconcileOutcome> {
+export async function reconcileOn409(host: SaveFailureHost, id: string): Promise<ReconcileResult> {
   const opening = host.panes.find((candidate) => candidate.id === id);
-  if (!opening?.scene) return "conflict";
+  if (!opening?.scene) return { outcome: "conflict", remote: null };
   const kind = opening.document?.type ?? "manuscript";
   const sceneId = opening.scene.id;
   let remote: ReloadableDocument;
   try {
     remote = await (RELOAD_GETTERS[kind] ?? api.getScene)(sceneId);
   } catch {
-    return "conflict"; // can't re-fetch → dialog
+    return { outcome: "conflict", remote: null }; // can't re-fetch → dialog (no diff)
   }
   // Re-read the pane AFTER the await: an edit during the re-fetch reassigns `panes`
   // (new objects), and reconciling against the pre-fetch snapshot would clobber that
   // fresh, unsaved work. If the pane moved (typed, switched, closed), fall to the
   // dialog rather than act on a stale snapshot.
   const pane = host.panes.find((candidate) => candidate.id === id);
-  if (!pane?.scene || pane.scene.id !== sceneId) return "conflict";
+  if (!pane?.scene || pane.scene.id !== sceneId) return { outcome: "conflict", remote };
   const base = pane.scene;
   // Rung 1 — lost response. "last-sent == on disk" is exactly: the drafts are not
   // dirty against the re-fetch. Reusing isEditorPaneDirty (autosave's single
@@ -247,7 +255,7 @@ export async function reconcileOn409(host: SaveFailureHost, id: string): Promise
   // exact match adopts and any real difference in any field falls through.
   if (!draftsDifferFrom(remote, pane)) {
     host.patchPane(id, { scene: remote, dirty: false, recentlySaved: false });
-    return "adopted";
+    return { outcome: "adopted", remote };
   }
   // Rung 2 — three-way merge, fields and body independently. A structured field the
   // two sides changed to different values is a conflict (#1633); disjoint fields merge.
@@ -287,13 +295,13 @@ export async function reconcileOn409(host: SaveFailureHost, id: string): Promise
       reseedPaneFields(host, id, fieldMerge.fields);
       try {
         await host.saveEditorPane(id);
-        return "merged";
+        return { outcome: "merged", remote };
       } catch {
-        return "conflict"; // a fresh conflict during the re-save → dialog
+        return { outcome: "conflict", remote }; // a fresh conflict during the re-save → dialog
       }
     }
   }
-  return "conflict";
+  return { outcome: "conflict", remote };
 }
 
 // After a rung-2 field merge adopts remote values into the drafts, bump the pane
@@ -327,26 +335,27 @@ function draftsDifferFrom(remote: ReloadableDocument, pane: EditorPaneState): bo
   );
 }
 
-// The same conflict, detected by a background autosave (#457). Unlike the close
-// variant this keeps the pane open on either choice: Overwrite force-saves in
-// place; Keep editing leaves the draft intact and lights the saveError badge —
-// which also stops the autosave from silently re-firing the prompt on its next
-// retry.
-export function offerAutosaveConflictRecovery(host: SaveFailureHost, id: string): void {
-  const title = paneTitle(host, id);
-  confirmService.request({
-    title: "Changed on disk",
-    message:
-      `"${title}" was modified outside this pane while it had unsaved changes — ` +
-      "another window, another surface, or the file itself. Overwrite the on-disk " +
-      "version with this pane's content, or keep editing and resolve it yourself?",
-    confirmLabel: "Overwrite",
-    destructive: true,
-    secondaryLabel: "Keep editing",
-    onSecondary: () => host.markPaneSaveError(id),
-    onConfirm: async () => {
-      await host.run(() => host.saveEditorPane(id, { force: true }));
-    },
+// The same conflict, detected by a background autosave (#457), with the diff
+// preview (rung 3, #1638). Unlike the close variant this keeps the pane open on
+// either choice: Overwrite force-saves in place; Keep editing (and backdrop/Esc)
+// leaves the draft intact and lights the saveError badge — which also stops the
+// autosave from silently re-firing the prompt on its next retry.
+export function offerAutosaveConflictRecovery(host: SaveFailureHost, id: string, remote: ReloadableDocument | null): void {
+  const pane = host.panes.find((candidate) => candidate.id === id);
+  conflictDiffService.request({
+    title: paneTitle(host, id),
+    localBody: pane?.draftMarkdown ?? null,
+    onDiskBody: remote?.body ?? null,
+    actions: [
+      { label: "Keep editing", onSelect: () => host.markPaneSaveError(id) },
+      {
+        label: "Overwrite",
+        destructive: true,
+        onSelect: async () => {
+          await host.run(() => host.saveEditorPane(id, { force: true }));
+        },
+      },
+    ],
   });
 }
 

@@ -15,7 +15,7 @@ import {
 } from "./editorPaneSave";
 import { editorPanes } from "./editorPanes.svelte";
 import { createEmptyEditorPane } from "@/lib/editor-core/editorPaneModel";
-import { confirmService } from "@/lib/stores/confirmService.svelte";
+import { conflictDiffService } from "@/lib/stores/conflictDiffService.svelte";
 import { HttpError, api } from "@/lib/api";
 import type { LoreEntry } from "@/lib/types";
 
@@ -74,12 +74,12 @@ describe("handleSaveFailure — classification (#457)", () => {
     expect(host.scheduleAutosaveRetry).not.toHaveBeenCalled();
   });
 
-  it("on a 409, runs the reconcile ladder first, then offers overwrite when it declines", async () => {
-    const request = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+  it("on a 409, runs the reconcile ladder first, then offers the diff dialog when it declines", async () => {
+    const request = vi.spyOn(conflictDiffService, "request").mockImplementation(() => {});
     const host = fakeHost(); // no on-disk twin → the re-fetch declines → dialog
     handleSaveFailure(host, "p", new HttpError("conflict", 409, null));
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
-    expect(request.mock.calls[0][0].confirmLabel).toBe("Overwrite");
+    expect(request.mock.calls[0][0].actions.at(-1)?.label).toBe("Overwrite"); // primary = overwrite
     expect(host.scheduleAutosaveRetry).not.toHaveBeenCalled();
     expect(host.markPaneSaveError).not.toHaveBeenCalled();
   });
@@ -89,25 +89,25 @@ describe("offerAutosaveConflictRecovery — the two choices (#457)", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("Overwrite force-saves in place through run()", async () => {
-    let request!: Parameters<typeof confirmService.request>[0];
-    vi.spyOn(confirmService, "request").mockImplementation((r) => {
+    let request!: Parameters<typeof conflictDiffService.request>[0];
+    vi.spyOn(conflictDiffService, "request").mockImplementation((r) => {
       request = r;
     });
     const host = fakeHost();
-    offerAutosaveConflictRecovery(host, "p");
-    await request.onConfirm?.();
+    offerAutosaveConflictRecovery(host, "p", null);
+    await request.actions.at(-1)?.onSelect(); // the Overwrite action
     expect(host.run).toHaveBeenCalledTimes(1);
     expect(host.saveEditorPane).toHaveBeenCalledWith("p", { force: true });
   });
 
   it("Keep editing lights the sticky badge so the retry does not re-pop the prompt", () => {
-    let request!: Parameters<typeof confirmService.request>[0];
-    vi.spyOn(confirmService, "request").mockImplementation((r) => {
+    let request!: Parameters<typeof conflictDiffService.request>[0];
+    vi.spyOn(conflictDiffService, "request").mockImplementation((r) => {
       request = r;
     });
     const host = fakeHost();
-    offerAutosaveConflictRecovery(host, "p");
-    request.onSecondary?.();
+    offerAutosaveConflictRecovery(host, "p", null);
+    request.actions[0]?.onSelect(); // the Keep editing action
     expect(host.markPaneSaveError).toHaveBeenCalledWith("p");
     expect(host.saveEditorPane).not.toHaveBeenCalled();
   });
@@ -210,7 +210,7 @@ describe("autosaveOnce — through the real controller (#457)", () => {
       body: "edited body",
       revision: "r2",
     });
-    const request = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+    const request = vi.spyOn(conflictDiffService, "request").mockImplementation(() => {});
 
     await autosaveOnce(editorPanes, "pane_1");
     await vi.waitFor(() => expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(false));
@@ -220,7 +220,7 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     expect(request).not.toHaveBeenCalled(); // never asked
   });
 
-  it("offers the dialog on a genuine 409 — the on-disk content really differs", async () => {
+  it("offers the diff dialog on a genuine 409 — the on-disk content really differs", async () => {
     seedDirtyLorePane();
     vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
     // A different window's edit landed on disk — not our draft.
@@ -230,15 +230,16 @@ describe("autosaveOnce — through the real controller (#457)", () => {
       body: "their body",
       revision: "r2",
     });
-    let request!: Parameters<typeof confirmService.request>[0];
-    vi.spyOn(confirmService, "request").mockImplementation((r) => {
+    let request!: Parameters<typeof conflictDiffService.request>[0];
+    vi.spyOn(conflictDiffService, "request").mockImplementation((r) => {
       request = r;
     });
 
     await autosaveOnce(editorPanes, "pane_1");
     await vi.waitFor(() => expect(request).toBeDefined());
 
-    expect(request.title).toBe("Changed on disk");
+    expect(request.onDiskBody).toBe("their body"); // the on-disk body reached the diff
+    expect(request.localBody).toBe("edited body"); // vs the pane's version
     expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(true); // still unsaved
   });
 
@@ -254,8 +255,8 @@ describe("autosaveOnce — through the real controller (#457)", () => {
       );
       return { ...LORE, title: "Edited Name", body: "edited body", revision: "r2" };
     });
-    let request!: Parameters<typeof confirmService.request>[0];
-    vi.spyOn(confirmService, "request").mockImplementation((r) => {
+    let request!: Parameters<typeof conflictDiffService.request>[0];
+    vi.spyOn(conflictDiffService, "request").mockImplementation((r) => {
       request = r;
     });
 
@@ -290,7 +291,7 @@ describe("autosaveOnce — through the real controller (#457)", () => {
       .spyOn(api, "saveLoreEntry")
       .mockRejectedValueOnce(new HttpError("conflict", 409, null)) // the initial autosave
       .mockResolvedValueOnce({ ...LORE, title: "Edited Name", body: "merged body", revision: "r3" }); // rung-2 re-save
-    const request = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+    const request = vi.spyOn(conflictDiffService, "request").mockImplementation(() => {});
 
     await autosaveOnce(editorPanes, "pane_1");
     await vi.waitFor(() => expect(editorPanes.panes.find((p) => p.id === "pane_1")?.scene?.revision).toBe("r3"));
@@ -314,7 +315,7 @@ describe("autosaveOnce — through the real controller (#457)", () => {
       .spyOn(api, "saveLoreEntry")
       .mockRejectedValueOnce(new HttpError("conflict", 409, null))
       .mockResolvedValueOnce({ ...LORE, title: "Edited Name", body: "merged body", metadata: { era: "future" }, revision: "r3" });
-    const request = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+    const request = vi.spyOn(conflictDiffService, "request").mockImplementation(() => {});
 
     await autosaveOnce(editorPanes, "pane_1");
     await vi.waitFor(() => expect(editorPanes.panes.find((p) => p.id === "pane_1")?.scene?.revision).toBe("r3"));
@@ -348,8 +349,8 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
     vi.spyOn(api, "getLoreEntry").mockResolvedValue({ ...LORE, metadata: { era: "future" }, revision: "r2" });
     const merge = injectMergeHandle("merged body");
-    let request!: Parameters<typeof confirmService.request>[0];
-    vi.spyOn(confirmService, "request").mockImplementation((r) => {
+    let request!: Parameters<typeof conflictDiffService.request>[0];
+    vi.spyOn(conflictDiffService, "request").mockImplementation((r) => {
       request = r;
     });
 
@@ -357,7 +358,7 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     await vi.waitFor(() => expect(request).toBeDefined());
 
     expect(merge).not.toHaveBeenCalled(); // a field conflict declines before the body merge
-    expect(request.title).toBe("Changed on disk");
+    expect(request.onDiskBody).toBe(request.localBody); // bodies equal → a field-only conflict
     expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(true); // still unsaved
   });
 
@@ -366,8 +367,8 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
     vi.spyOn(api, "getLoreEntry").mockResolvedValue({ ...LORE, body: "server body", revision: "r2" });
     const merge = injectMergeHandle(null); // the prose merge reports an overlap
-    let request!: Parameters<typeof confirmService.request>[0];
-    vi.spyOn(confirmService, "request").mockImplementation((r) => {
+    let request!: Parameters<typeof conflictDiffService.request>[0];
+    vi.spyOn(conflictDiffService, "request").mockImplementation((r) => {
       request = r;
     });
 
@@ -375,7 +376,7 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     await vi.waitFor(() => expect(request).toBeDefined());
 
     expect(merge).toHaveBeenCalledOnce(); // the merge was attempted (body-only gate passed)…
-    expect(request.title).toBe("Changed on disk"); // …but declined → the dialog
+    expect(request.onDiskBody).toBe("server body"); // …but declined → the dialog gets the on-disk body
     expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(true);
   });
 });

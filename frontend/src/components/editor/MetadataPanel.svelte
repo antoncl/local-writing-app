@@ -789,7 +789,7 @@
     border-bottom: 1px solid var(--divider);
   }
 
-  /* L1 section headers live in styles.css (shared with the Detail Type
+  /* L1 section headers live in styles.css (shared with the type
      editor); only the Field row chrome is scoped per-component. */
 
   /* Field row: ‹disclosure gutter› · glyph · name · value — the rail's one row

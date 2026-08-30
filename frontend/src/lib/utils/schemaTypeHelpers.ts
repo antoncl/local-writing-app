@@ -1,4 +1,4 @@
-// Shared, pure helpers for the Detail Type editor (SchemaTypeEditor) and a
+// Shared, pure helpers for the type editor (SchemaTypeEditor) and a
 // handful of remaining callers in App.svelte. Extracted alongside the
 // SchemaTypeEditor split (#14, second slice) so the component and the
 // parent's API-touching handlers (saveSchemaField, applyGroupToType, …)
@@ -87,7 +87,7 @@ export function normalizeListFieldValue(fieldType: string, value: MetadataValue)
 // of which have their own schema-type tree.
 export type SchemaKind = "manuscript" | "lore" | "research" | "prompt" | "assistant" | "project" | "plot";
 
-// The UI metadata each kind-keyed surface needs: the Detail Types tab label,
+// The UI metadata each kind-keyed surface needs: the Types tab label,
 // the tree's context heading, and the entry-type id to seed when a project has
 // no type of that kind yet. `Record<SchemaKind, …>` makes this EXHAUSTIVE — a
 // new SchemaKind fails to compile until it has a row here, which is the whole
@@ -126,7 +126,7 @@ export function asSchemaKind(kind: string | null | undefined): SchemaKind | null
 // Map an editor DocumentKind to the SchemaKind whose type tree governs it.
 // The editor opens plot via per-type documentKinds (`plot_template`, …) and
 // scenes as `structure_node`, neither of which is a schema kind — so any
-// schema-kind logic (Detail Types, "Edit type…") must resolve through here.
+// schema-kind logic (the Types tree, "Edit type…") must resolve through here.
 // Returns null for DocumentKinds with no schema tree (chat / snippet / view).
 export function schemaKindForDocumentKind(documentKind: string): SchemaKind | null {
   if (documentKind === "structure_node") return "manuscript";
@@ -440,7 +440,7 @@ export type NodeTypeOption = {
   definition: EntryTypeDefinition;
 };
 
-// One entry type as a tree node for the Detail Types pane.
+// One entry type as a tree node for the Types pane.
 export type NodeTypeTreeNode = NodeTypeOption & {
   children: NodeTypeTreeNode[];
   // Field entries baked into the tree at build time so the recursive
@@ -452,7 +452,7 @@ export type NodeTypeTreeNode = NodeTypeOption & {
   fieldEntries: [string, MetadataFieldDefinition][];
 };
 
-// Build the per-kind entry-type tree the Detail Types pane renders.
+// Build the per-kind entry-type tree the Types pane renders.
 // Roots come first in a kind-specific order (the kind's canonical root —
 // lore:base / prompt:base / research:base — or name-sorted for scene/
 // assistant/project); children sort by display name. Each node bakes in its own
@@ -513,7 +513,7 @@ export function buildNodeTypeTree(
   return rootIds.map((typeId) => buildNode(typeId, 0)).filter((node): node is NodeTypeTreeNode => Boolean(node));
 }
 
-// The Detail Types cascade as ONE pure step: the selected entry type resolves to
+// The Types cascade as ONE pure step: the selected entry type resolves to
 // its schema kind, and that single kind drives BOTH the tree roster AND the
 // context heading. Extracted from SchemaPanes so this wiring is unit-testable —
 // SchemaPanes is a headless RegionRegistrar controller (it registers render

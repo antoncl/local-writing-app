@@ -337,7 +337,7 @@ export function friendlyTemplateError(
         const declaredNames = declared.map((d) => d.name);
         const inputsList = declaredNames.length
           ? ` Available inputs: ${declaredNames.map((n) => "inputs." + n).join(", ")}.`
-          : " No inputs are declared on this prompt — add one in the Detail Type editor first.";
+          : " No inputs are declared on this prompt — add one in the type editor first.";
         return `Your template references \`inputs.${missing}\` but there's no input named "${missing}".${inputsList}`;
       }
     }

@@ -887,7 +887,7 @@
   {/if}
 
   <!-- SchemaPanes stays mounted for its schema-authoring state; it now registers
-       its Detail Types / Detail Type regions into the tiled shell rather than
+       its Types tree + per-type editor regions into the tiled shell rather than
        rendering its own floating panes. -->
   <SchemaPanes
     bind:this={schemaPanes}

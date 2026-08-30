@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The Detail Types pane's content — everything inside
+  // The Types pane's content — everything inside
   // `<section class="pane schema-pane">`: the kind tabs (Scene / Lore /
   // …), the context heading, and the entry-type tree (a NodeList of the
   // recursive renderNodeTypeCard snippet). The pane chrome (header with
@@ -116,7 +116,7 @@
   <div class="schema-node-tree" aria-label={`${schemaContextHeading} tree`}>
     <NodeList mode="tree" isEmpty={schemaNodeTypeTree.length === 0}>
       {#snippet whenEmpty()}
-        <p class="muted">No detail types defined for this context.</p>
+        <p class="muted">No types defined for this context.</p>
       {/snippet}
       {#each schemaNodeTypeTree as node (node.id)}
         {@render renderNodeTypeCard(node)}
@@ -140,7 +140,7 @@
     stripeColor={stripeHex}
     typeIcon={typeGlyph}
     active={selectedSchemaTypeId === node.id}
-    ariaLabel={`${node.label} detail type — ${sourceBadgeLabel(typeSource)}`}
+    ariaLabel={`${node.label} type — ${sourceBadgeLabel(typeSource)}`}
     collapsed={childCount === 0 || isCollapsed}
     draggable={!typeSource?.built_in}
     onClick={() => onOpenType(node.id)}
@@ -215,7 +215,7 @@
     font-size: var(--fs-xs);
   }
 
-  /* Outer container around the Detail Types NodeList. The NodeList itself
+  /* Outer container around the Types NodeList. The NodeList itself
      handles row spacing; this wrapper is here to keep an aria-label hook
      for the recursive tree. */
   .schema-node-tree {
@@ -225,7 +225,7 @@
 
   /* .schema-source-badge co-located into SchemaTypeEditor.svelte (#14). */
 
-  /* Mono type-pill on field rows in the Detail Types tree — mirrors the
+  /* Mono type-pill on field rows in the Types tree — mirrors the
      Editorial Card spec ("Field types sit in mono pills"). Distinguishes
      the field's type vocabulary (`text`, `select`, `entity_ref`…) from the
      neutral count/affordance pills used elsewhere. Tooltip carries the

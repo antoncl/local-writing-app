@@ -72,7 +72,7 @@ describe("SCHEMA_KIND_META / SCHEMA_KINDS / asSchemaKind (the kind cascade — #
   });
 });
 
-describe("resolveSchemaScope — the Detail Types cascade end-to-end (#729)", () => {
+describe("resolveSchemaScope — the Types cascade end-to-end (#729)", () => {
   // A schema that roots plot under an abstract plot:base (the #724 shape), plus a
   // manuscript:scene so the scene fallback is exercisable.
   const CASCADE_SCHEMA = {
@@ -98,7 +98,7 @@ describe("resolveSchemaScope — the Detail Types cascade end-to-end (#729)", ()
     expect(scope.kind).toBe("plot");
     expect(scope.heading).toBe("Plot Types");
     // plot:card (S5a, #738) resolves into the Plot tree like every plot type —
-    // this is what makes it visible + editable under Detail Types → Plot, the
+    // this is what makes it visible + editable under Types → Plot, the
     // requirement of #738. SchemaPanes is a headless RegionRegistrar (can't be
     // mounted), so this scope test is the render coverage for that surface.
     expect(treeIds(scope.tree)).toEqual(
@@ -127,7 +127,7 @@ describe("schemaKindForDocumentKind", () => {
   it("resolves plot's per-type documentKinds to the plot schema kind (#729)", () => {
     // The editor opens plot via per-type documentKinds (`plot_template` today;
     // `plot_plotline` / `plot_board` follow in later slices). All are governed by
-    // the single `plot` schema tree, so "Edit type…" / Detail Types must map every
+    // the single `plot` schema tree, so "Edit type…" / the Types tree must map every
     // `plot*` documentKind to "plot" — the prefix match is deliberate so future
     // per-type kinds need no change here.
     expect(schemaKindForDocumentKind("plot_template")).toBe("plot");

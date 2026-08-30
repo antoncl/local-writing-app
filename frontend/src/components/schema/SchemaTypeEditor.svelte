@@ -12,7 +12,7 @@
 </script>
 
 <script lang="ts">
-  // The Detail Type editor's pane content — everything inside
+  // The type editor's pane content — everything inside
   // `<section class="pane schema-type-pane">`. The pane chrome (header,
   // drag, resize, close) stays in App.svelte because it's part of its
   // pane-layout system.

@@ -868,7 +868,7 @@ button.row-action-add.active {
    .extends-label / .extends-pill co-located into SchemaTypeEditor.svelte (#14). */
 
 /* L1 group section header — shared between the MetadataPanel rail and the
-   Detail Type editor's field list. "Define looks like display." Padding
+   type editor's field list. "Define looks like display." Padding
    matches the per-row horizontal padding used by both .field-row and
    .schema-field-row. */
 .rail-group-head {

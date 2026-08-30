@@ -1,13 +1,13 @@
 <script lang="ts">
   // SchemaPanes — the schema-authoring surface, extracted from App.svelte (#14
-  // P0). Owns the "Detail Types" tree pane + the per-type editor pane + the
+  // P0). Owns the "Types" tree pane + the per-type editor pane + the
   // reusable-groups manager dialog, plus all the authoring state, the
   // entry-type→kind→tree derivation cascade, and the persistence handlers
   // (create/save/delete type+field, group apply, field reorder). App stays the
   // window-manager host: it passes the shared pane chrome + the error-wrapping
   // `run`, status sink, and editor-pane baseline refresh, and drives the three
-  // entry points (open Detail Types, open type for a document's "Edit type…",
-  // re-sync authoring selection after a project loads) via `bind:this`.
+  // entry points (open the Types tree, open one type for a document's "Edit
+  // type…", re-sync authoring selection after a project loads) via `bind:this`.
   import { get } from "svelte/store";
   import { api } from "@/lib/api";
   import SchemaTreePane from "@/components/schema/SchemaTreePane.svelte";
@@ -110,6 +110,17 @@
   let schemaTypeInitColor: string | null = $state(null);
   let schemaTypeInitIcon: string | null = $state(null);
   let schemaTypeDraftToken = $state(0);
+
+  // The per-type editor's tab is titled after the type it edits — like any
+  // editor tab named for its subject — so it never collides with the "Types"
+  // tree tab; a fresh draft reads "New type". Exposed as a `get title()` on the
+  // region entry below (not the map literal), since RegionRegistrar registers
+  // once on mount and never re-reads the literal (#1653).
+  const schemaTypeTabTitle = $derived(
+    selectedSchemaTypeId
+      ? metadataSchema?.entry_types[selectedSchemaTypeId]?.name || schemaTypeInitName || "Type"
+      : "New type",
+  );
 
   // --- Field-row drag-reorder (own fields of a type) --------------------------
   let fieldDragId: string | null = null;
@@ -318,7 +329,7 @@
   function openSchemaForCustomData(entryType: string, documentKind: DocumentKind, ownerPaneId: string | null = null) {
     // Phase B: the entry editor's "Edit type…" button opens ONLY the per-type
     // editor (schema_type pane) — not the schema/tree hierarchy view. Tree
-    // access is the top bar's "Detail Types" button.
+    // access is the top bar's "Types" button.
     // The dispatched DocumentKind is wider than the schema's kind universe and
     // uses per-type documentKinds for plot (plot_template, …); resolve it to the
     // governing SchemaKind before consulting the schema. Null = no schema tree.
@@ -377,7 +388,7 @@
     if (schemaTypeDirty) {
       confirmService.request({
         title: "Discard changes?",
-        message: "This detail type has unsaved changes. Closing the editor will discard them.",
+        message: "This type has unsaved changes. Closing the editor will discard them.",
         confirmLabel: "Discard changes",
         destructive: true,
         onConfirm: async () => {
@@ -402,7 +413,7 @@
     if (!entryType || !parentType || entryType.kind !== parentType.kind) return;
     const source = schemaTypeSource(typeId);
     if (!source || source.built_in) {
-      setStatus("System detail types cannot be moved");
+      setStatus("System types cannot be moved");
       return;
     }
     await run(async () => {
@@ -602,7 +613,7 @@
     selectedSchemaFieldId = nextFieldId;
     // Collapse the inline editor on a successful save.
     expandedSchemaFieldId = null;
-    setStatus("Updated details schema");
+    setStatus("Updated type schema");
   }
 
   // The apply-group form lives in SchemaTypeEditor; it builds the application
@@ -675,7 +686,7 @@
         icon: payload.icon || null,
       };
       if (previousTypeId && previousTypeId !== nextTypeId) {
-        setStatus("Renaming detail types is not available yet");
+        setStatus("Renaming types is not available yet");
         return;
       }
       setMetadataSchema(await api.upsertMetadataEntryType(schemaTypeLayerId, nextTypeId, nextType, Boolean(previousTypeId) || builtinOverlay));
@@ -683,7 +694,7 @@
       setValidation(await api.validateProject());
       selectedSchemaTypeId = nextTypeId;
       schemaFieldEntryType = nextTypeId;
-      setStatus("Updated detail type");
+      setStatus("Updated type");
     });
   }
 
@@ -694,7 +705,7 @@
     if (source?.built_in) return;
     const typeName = definition.name || typeId;
     confirmService.request({
-      title: "Delete Detail Type",
+      title: "Delete Type",
       message: `Delete "${typeName}"? Existing documents using this type must be changed first.`,
       confirmLabel: "Delete Type",
       destructive: true,
@@ -721,7 +732,7 @@
     if (!selectedSchemaFieldId || selectedSchemaFieldId.startsWith("system:") || schemaFieldReadonly) return;
     const fieldName = metadataSchema?.fields[selectedSchemaFieldId]?.name || selectedSchemaFieldId;
     confirmService.request({
-      title: "Delete Detail Field",
+      title: "Delete Field",
       message: `Delete "${fieldName}"? This removes the field definition and removes that metadata value from every document using it.`,
       confirmLabel: "Delete Field",
       destructive: true,
@@ -817,7 +828,7 @@
 </script>
 
 {#snippet schemaActions()}
-    <button class="pin-button" type="button" title="Add detail type" aria-label="Add detail type" onmousedown={(event) => event.stopPropagation()} onclick={() => createSchemaTypeDraft()}>+</button>
+    <button class="pin-button" type="button" title="Add type" aria-label="Add type" onmousedown={(event) => event.stopPropagation()} onclick={() => createSchemaTypeDraft()}>+</button>
 {/snippet}
 {#snippet schemaBody()}
   <SchemaTreePane
@@ -885,8 +896,8 @@
 
 <RegionRegistrar
   regions={{
-    schema: { title: "Detail Types", body: schemaBody, actions: schemaActions, closable: true, onClose: () => closeSchemaPane("schema") },
-    schema_type: { title: "Detail Type", body: schemaTypeBody, closable: true, onClose: () => closeSchemaPane("schema_type") },
+    schema: { title: "Types", body: schemaBody, actions: schemaActions, closable: true, onClose: () => closeSchemaPane("schema") },
+    schema_type: { get title() { return schemaTypeTabTitle; }, body: schemaTypeBody, closable: true, onClose: () => closeSchemaPane("schema_type") },
   }}
 />
 

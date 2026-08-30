@@ -45,11 +45,13 @@
     onRemoveRecent = () => {},
     onOpenFolder = () => {},
     onNewProject = () => {},
-    // Assistants (like Detail Types / Project) is project-scoped — its editor
+    // Assistants (like Types / Project) is project-scoped — its editor
     // lives in the workspace shell, so the button is disabled with no project open.
     onOpenAssistants = () => {},
     onOpenSettings = () => {},
-    // Detail Types is project-scoped — disabled when no project is open.
+    // The Types menu item is project-scoped — disabled when no project is open.
+    // (Handler name keeps its historical `DetailTypes` spelling; the UI label
+    // is "Types" now, #1653.)
     onOpenDetailTypes = () => {},
     onOpenProjectNode = () => {},
     // Pane-openers relocated from the Project pane body (#629): they open other
@@ -345,7 +347,7 @@
     >
         <div class="switcher-section-label">This project</div>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenProjectNode)}>Project</button>
-        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenDetailTypes)}>Detail Types</button>
+        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenDetailTypes)}>Types</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenAssistants)}>Assistants</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenChats)}>Chats</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenPrompts)}>Prompts</button>

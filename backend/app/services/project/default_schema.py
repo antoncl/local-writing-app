@@ -808,17 +808,18 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # A live `entity_ref` into the mutation_set kind, mirroring `subject`:
             # it lives in `metadata`, so the index extracts a chat->set edge (the
             # set surfaces the chats refining it) and deleting the set purges the
-            # chat's pin. Singular — a chat owns one staged change; a distinct
-            # change is a new chat with its own context. Empty for impersonate /
+            # chat's pin. Singular — a chat owns one mutation set; a distinct
+            # set is a new chat with its own context. Empty for impersonate /
             # freeform chats. On send the set's rows are seeded into the AI context
-            # so a resumed conversation continues refining the same change.
-            "name": "Staged change",
+            # so a resumed conversation continues refining the same set.
+            # (Field id kept as `staged_set`; only the label reads "Mutation set".)
+            "name": "Mutation set",
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "mutation_set"}]},
         },
         "target_entity": {
             # ADR-0055 §3: the OPTIONAL entity a mutation set is pinned to — the
-            # character this staged change is *about*. Unset ⇒ the reusable,
+            # character this mutation set is *about*. Unset ⇒ the reusable,
             # type-scoped template of #62 (entity bound at apply time); set ⇒ an
             # entity-pinned one-off, offered only for its own entity and stamping
             # it on apply. A live `entity_ref` so it rides the same kind-neutral

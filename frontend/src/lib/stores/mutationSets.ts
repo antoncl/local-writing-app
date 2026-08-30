@@ -16,7 +16,7 @@ export const mutationSetEntriesStore = writable<MutationSetEntrySummary[]>([]);
 // boundary (it stayed `undefined`, so the "+" was a silent no-op). A shared store
 // drives one dialog from either trigger — the pattern every other pane's "+" uses.
 // `preset` (ADR-0055 §3) pins a NEW set to an entity by construction — the
-// lore-card "New staged change" affordance seeds it so the set is entity-pinned
+// lore-card "＋ New" mutation-set affordance seeds it so the set is entity-pinned
 // and type-locked from the start. Absent (the Mutations-pane "+") ⇒ a reusable,
 // type-picked template, unchanged.
 export type MutationSetPinPreset = { target_entity: string; target_entry_type: string };

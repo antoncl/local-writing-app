@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The Staged-changes surface on a lore card (ADR-0055 §3). A mutation set can
+  // The Mutation-sets surface on a lore card (ADR-0055 §3). A mutation set can
   // be *pinned* to an entity (`target_entity`); this panel lists the sets pinned
   // to THIS entity and offers ＋New to author another. It is the entity-side home
   // for "propose a change about this character" — position-free bundles the
@@ -45,7 +45,8 @@
   const schema = $derived($metadataSchemaStore);
 
   // Open/closed persists (#1444) — survives node switches ({#key} remount
-  // re-reads the store) and reload. Staged changes defaults expanded.
+  // re-reads the store) and reload. The Mutation-sets section defaults expanded.
+  // (Persistence key kept as "staged-changes" so existing preferences survive.)
   const COLLAPSE_KEY = "staged-changes";
   const COLLAPSE_DEFAULT = true;
   const expanded = $derived(railSectionCollapse.isExpanded(COLLAPSE_KEY, COLLAPSE_DEFAULT));
@@ -69,9 +70,9 @@
 </script>
 
 {#if entityEntryType}
-  <section class="entry-pinned-sets" aria-label="Staged changes">
+  <section class="entry-pinned-sets" aria-label="Mutation sets">
     <RailSectionHeader
-      title="Staged changes"
+      title="Mutation sets"
       glyph="ti-stack-2"
       count={pinned.length}
       {expanded}
@@ -81,7 +82,7 @@
         <button
           type="button"
           class="ps-new"
-          title="Stage a new change for this entry"
+          title="Stage a new mutation set for this entry"
           onclick={startNew}
         >＋ New</button>
       {/snippet}
@@ -98,7 +99,7 @@
           row={pinnedRow}
         >
           {#snippet whenEmpty()}
-            <p class="muted">No staged changes yet — stage one with ＋New, then place it in a scene.</p>
+            <p class="muted">No mutation sets yet — stage one with ＋New, then place it in a scene to make it active.</p>
           {/snippet}
         </ViewNodeList>
       </div>

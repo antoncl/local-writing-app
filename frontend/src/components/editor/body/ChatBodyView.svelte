@@ -1234,10 +1234,10 @@
             type="button"
             class="cbv-commit"
             disabled={chatRunning || commit.committing || chatHistory.length === 0}
-            title="Stage this as a pending change pinned to the entry — place it from a scene later (it doesn't overwrite the entry)"
+            title="Stage this as a mutation set pinned to the entry — it lands on the entry's card; place it in a scene to make it active (it never overwrites the entry)"
             onclick={() => void commit.stageToPendingSet()}
           >
-            {commit.committing ? "Staging…" : "Stage as pending change"}
+            {commit.committing ? "Staging…" : "Stage as mutation set"}
           </button>
         {/if}
       {/if}

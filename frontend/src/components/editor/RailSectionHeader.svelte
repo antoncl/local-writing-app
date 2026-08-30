@@ -2,7 +2,7 @@
   // One collapsible section header for the metadata rail (#1438). Replaces the
   // three divergent implementations the rail grew — References borrowed a
   // NodeRow group header (sans --fs-lg 700 --text-2), while Conversations and
-  // Staged changes each rolled a bespoke serif-700 header. None matched the
+  // Mutation sets each rolled a bespoke serif-700 header. None matched the
   // inline field rows, so four label recipes shared one narrow column.
   //
   // The rail's one row grammar (design-language §3.5): every line reads
@@ -11,7 +11,7 @@
   // vertical line down the rail. Name typography is the field-row recipe: sans
   // --fs-md --w-medium --text — quiet tool text, never serif.
   //
-  // Why not NodeRow (the reason Conversations/Staged forked it): NodeRow styles
+  // Why not NodeRow (the reason Conversations/Mutation sets forked it): NodeRow styles
   // every <button> in its trailing slot as a fixed-size icon tile, which flattens
   // a worded "＋ New" menu button. Here the trailing slot is a plain snippet — the
   // caller supplies count + action styled however it likes. The row LISTS still

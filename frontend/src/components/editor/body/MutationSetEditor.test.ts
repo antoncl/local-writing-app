@@ -44,7 +44,9 @@ describe("MutationSetEditor pinned mode (ADR-0055 §3)", () => {
         onCancel: NOOP,
       },
     });
-    expect(screen.getByText("New staged change")).toBeInTheDocument();
+    // Title no longer relabels by pin (#1640) — both modes read "New mutation
+    // set"; pinned mode is distinguished by the "Pinned to" line, not the title.
+    expect(screen.getByText("New mutation set")).toBeInTheDocument();
     // The type picker is gone (its "Applies to" label absent); the pin is shown.
     expect(screen.queryByText("Applies to")).toBeNull();
     expect(screen.getByText(/Mira · Character/)).toBeInTheDocument();

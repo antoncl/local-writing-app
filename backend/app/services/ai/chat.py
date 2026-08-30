@@ -272,7 +272,7 @@ def expand_and_prepare_chat_blocks(
     # shared 1h cache block; multi-turn sessions reuse it for hours.
     blocks: list[dict] = list(system_prompt_cache_blocks(system_prompt) or [])
     # Slot 1b (ADR-0055 S4): the mutation set this chat OWNS, seeded so a resumed
-    # brainstorm continues refining the same staged change. Stable per chat (it
+    # brainstorm continues refining the same mutation set. Stable per chat (it
     # changes only when the writer re-stages), matching 1h TTL. Empty / dangling
     # ref → "" → no block. A mutation set, not lore, so it is not gated.
     staged_xml = _staged_set_block(project, chat.staged_set)

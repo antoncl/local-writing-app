@@ -106,3 +106,11 @@ A recurring transformation (a werewolf's dusk change: appearance + abilities + n
 a **mutation set** and re-applied to any character in one step, instead of retyping it. The short
 version: mark a change "reusable" when you author it, or manage sets in the Mutations list, then
 `/mutate` → pick a character → **apply a set**.
+
+A mutation set has two states. It is **staged** while it sits on a card unplaced — authored, but not
+yet part of any scene — and becomes **active** once you **place** it into a scene, where it goes live
+in the story from that point forward. (A brainstorm chat can *stage* a set onto its subject's card
+for you; you *place* it when you're ready.) These two words are the whole vocabulary: the thing is
+always a **mutation set**, never a "change", "staged change", or "pending change"; and "active" here
+means *this set is placed* — distinct from the timeline scrubber's "Changed by here", which is about
+a single value's effect at a point in the prose, not about the set.

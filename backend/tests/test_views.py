@@ -576,8 +576,13 @@ class ViewUiStateTests(unittest.TestCase):
         self.assertEqual(ui.json()["ui"]["collapsed"], ["node:q"])
 
     def test_first_ui_write_materializes_system_default_view(self) -> None:
-        # No file for view_default_manuscript yet; a fold write materializes it (§5).
-        self.assertEqual(self.client.get("/api/views/view_default_manuscript").status_code, 404)
+        # No file for view_default_manuscript yet: the GET returns the honest
+        # in-memory default with empty fold state as a 200, not a 404 (#1665); the
+        # fold write below materializes it on disk (§5).
+        pre = self.client.get("/api/views/view_default_manuscript")
+        self.assertEqual(pre.status_code, 200, pre.text)
+        self.assertTrue(pre.json()["system"])
+        self.assertEqual(pre.json()["ui"]["collapsed"], [])
         res = self.client.put(
             "/api/views/view_default_manuscript/ui", json={"ui": {"collapsed": ["node:act1"]}}
         )
@@ -666,7 +671,24 @@ class ViewUiStateTests(unittest.TestCase):
             self.client.get("/api/views/view_default_manuscript").json()["ui"]["collapsed"], ["node:b"]
         )
 
+    def test_unmaterialized_default_view_reads_as_empty_200(self) -> None:
+        # #1665: seeding a fresh pane's fold state must not log a 4xx. An
+        # unmaterialized view_default_<kind> reads as the honest in-memory default
+        # with empty fold state (200), not a 404 — and stays off disk (not listed)
+        # until a fold materializes it.
+        res = self.client.get("/api/views/view_default_lore")
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertTrue(body["system"])
+        self.assertEqual(body["ui"]["collapsed"], [])
+        self.assertEqual(body["spec"]["kind"], "lore")
+        listed = self.client.get("/api/views").json()["entries"]
+        self.assertEqual([v for v in listed if v["id"] == "view_default_lore"], [])
+
     def test_default_view_for_unknown_kind_is_422(self) -> None:
+        # A genuinely bogus default id never becomes a silent 200 — GET and the
+        # /ui materialize path both surface the unknown kind as 422.
+        self.assertEqual(self.client.get("/api/views/view_default_nonsense").status_code, 422)
         res = self.client.put(
             "/api/views/view_default_nonsense/ui", json={"ui": {"collapsed": ["x"]}}
         )

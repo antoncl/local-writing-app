@@ -98,7 +98,7 @@ anything else worth remembering. Each item is an **Entry**.
 The **Summary / Status / POV** fields on scenes are just a starting point. You can
 add your own fields and even your own node types — a *POV character* reference on
 scenes, a *danger level* on locations, whatever your book needs. Open the **≡ menu
-→ Detail Types** to do it.
+→ Types** to do it.
 
 This is a topic of its own — the **[Custom fields](#guide:custom-fields)** guide
 walks through it.

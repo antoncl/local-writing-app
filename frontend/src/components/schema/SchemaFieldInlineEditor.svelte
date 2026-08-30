@@ -45,7 +45,7 @@
 
 <script lang="ts">
   // Expand-in-place field editor (metadata revision, mockup C) used by the
-  // Detail Type editor inside `<section class="pane schema-type-pane">`. One
+  // type editor inside `<section class="pane schema-type-pane">`. One
   // row's editor is open at a time, accent-striped, directly under its row.
   //
   // Self-contained (#14 Step 4): the component owns the in-progress draft as

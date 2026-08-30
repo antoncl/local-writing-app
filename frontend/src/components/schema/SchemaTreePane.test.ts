@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Detail Types kind-tabs RENDER guard (#729). Making plot a first-class kind in
+// Types kind-tabs RENDER guard (#729). Making plot a first-class kind in
 // the schema-authoring UI means the "Plot" tab actually has to appear in the tab
 // strip and route through `onSwitchKind("plot")`. The strip renders from the
 // shared SCHEMA_KINDS/SCHEMA_KIND_META table, so this drives its expectations

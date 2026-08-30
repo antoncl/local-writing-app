@@ -61,7 +61,7 @@ export function entryTypeIconClass(
   return name ? `ti ti-${name}` : null;
 }
 
-// Ordered list of field types surfaced in the Detail Type editor's
+// Ordered list of field types surfaced in the type editor's
 // type-picker grid. `date` is intentionally omitted (deprecated per
 // [[decisions-field-types]]) and stays out of the picker; existing fields
 // of that type still render correctly via DEFAULT_FIELD_GLYPH.

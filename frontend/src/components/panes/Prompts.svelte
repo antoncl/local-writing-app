@@ -133,7 +133,7 @@
       <NodeRow title={choice.name} onClick={() => { onNewEntry(choice.id); close(); }} />
     {/each}
     {#snippet whenEmpty()}
-      <p class="muted">No prompt sub-types defined. Open a prompt entry's Detail Types to create one.</p>
+      <p class="muted">No prompt sub-types defined. Open Types from a prompt entry to create one.</p>
     {/snippet}
   </NodeList>
 {/snippet}

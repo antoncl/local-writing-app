@@ -103,6 +103,13 @@ spec) to author their own; the designer offers **Duplicate, not Edit** on a `sys
 rejects a `system` id. It is **always present in `list_views`** (synthesized from the kind's spec when
 no file exists); its file is written **lazily, on the first `ui` write** — visible-always, file-on-intent.
 
+> **Extended 2026-08-30 (#1682):** the curated builtin *extra* views a kind ships beside its default
+> (`view_builtin_*` — "Runnable prompts", "Openable chats") share this exact lifecycle: in-memory
+> until the first `ui` write materializes a `system: true` node. A materialized system node's spec and
+> title are **re-derived from the app's builder on every `ui` write** (self-healing) — only `ui` is
+> user data — and the frontend always renders an extra from its live synthesis, so the stored spec is
+> a Duplicate seed, never the render source.
+
 **Selection stays as-is at the store level:** `paneViews.selected[kind] === null` still means "default
 selected" and the switcher's Default row still picks `null`; the frontend's `defaultView(kind)` now
 returns §3's explicit whole-kind spec (not `{expr:null}`), and the *collapse layer alone* resolves the

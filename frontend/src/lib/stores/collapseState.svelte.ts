@@ -2,9 +2,10 @@
 // through ViewNodeList binds this controller's `collapsed` set into the wrapper;
 // the controller seeds it from the view's persisted `ui.collapsed`, and — as the
 // user folds/unfolds — debounces a lock-free PUT /api/views/{id}/ui back. For a
-// pane's *default* (unselected) view the id is `view_default_<kind>`, which the
-// backend materializes on the first write (so nothing exists until the user
-// actually folds something).
+// pane's *default* (unselected) view the id is `view_default_<kind>`, and for a
+// builtin extra it is `view_builtin_*` (#1682) — both are backend-materialized
+// on the first write (so nothing exists until the user actually folds
+// something).
 //
 // Reusable + instance-scoped: each rendering pane owns one. The change-detection
 // lives in a component `$effect` that calls `observe()` (which reads the set, so

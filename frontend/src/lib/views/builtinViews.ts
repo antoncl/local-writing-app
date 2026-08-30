@@ -3,11 +3,13 @@
 //   [0] the roster default (selected when nothing is chosen — the id the fold
 //       state materializes to, `view_default_<kind>`), then any curated extras.
 // The switcher renders each read-only (Duplicate-to-edit, never Edit/Delete);
-// `paneViews.specFor` resolves an extra's id to its spec here (extras are
-// frontend-synthesized, not backend nodes — a filter/roster carries no fold
-// state to persist). `chat` ships "Openable chats" and `prompt` ships "Runnable
-// prompts"; every other kind keeps its single default, so `defaultView` parity
-// with the backend is untouched.
+// `paneViews.specFor` resolves an extra's id to its spec here. Extras share the
+// default's backend lifecycle (#1682): synthesized until the first UI-state
+// write materializes a read-only system node, so appearance and fold state
+// persist for them too — the backend mirror is `_builtin_extra_view_spec`,
+// pinned to this file by the builtin-extra-view-specs golden. `chat` ships
+// "Openable chats" and `prompt` ships "Runnable prompts"; every other kind
+// keeps its single default.
 
 import { defaultView, kindUniverseExpr } from "@/lib/views/evaluateView";
 import { SEED_DISPOSITION_FIELD } from "@/lib/views/chatNodes";
@@ -20,8 +22,22 @@ const BUILTIN_EXTRA_PREFIX = "view_builtin_";
 
 // An extra built-in view (not the roster default) — selected by its own id and
 // treated as a valid selection by paneViews even though it is not a saved node.
+// NOTE: a prefix test only — it says the id CLAIMS to be an extra, not that this
+// build ships it. Selection validity uses `isShippedBuiltinExtraId` instead, so
+// a retired extra id in localStorage gets dropped rather than kept forever.
 export function isBuiltinExtraViewId(id: string): boolean {
   return id.startsWith(BUILTIN_EXTRA_PREFIX);
+}
+
+// Whether this build actually ships `id` as one of `kind`'s extras.
+export function isShippedBuiltinExtraId(kind: string, id: string): boolean {
+  return (EXTRAS[kind] ?? []).some((extra) => extra.id === id);
+}
+
+// The kinds that ship extras — derived from the registry so a new extra can't
+// dodge the golden's completeness check (builtinViews.golden.test.ts).
+export function kindsWithBuiltinExtras(): string[] {
+  return Object.keys(EXTRAS);
 }
 
 // "Openable chats": hides the brainstorm chats — those whose seed prompt has the
@@ -68,19 +84,21 @@ function runnablePromptsSpec(schema?: MetadataSchema | null): ViewSpec {
   };
 }
 
+// The extras registry — ONE enumeration, which builtinViews, the shipped-id
+// membership check, and the golden's kind coverage all derive from (mirrors the
+// backend BUILTIN_EXTRA_VIEWS registry).
+const EXTRAS: Record<string, { id: string; title: string; spec: (schema?: MetadataSchema | null) => ViewSpec }[]> = {
+  chat: [{ id: `${BUILTIN_EXTRA_PREFIX}chat_openable`, title: "Openable chats", spec: openableChatsSpec }],
+  prompt: [{ id: `${BUILTIN_EXTRA_PREFIX}prompt_runnable`, title: "Runnable prompts", spec: runnablePromptsSpec }],
+};
+
 export function builtinViews(kind: string, schema?: MetadataSchema | null): BuiltinView[] {
   const base: BuiltinView = {
     id: `view_default_${kind}`,
     title: kind === "chat" ? "All chats" : kind === "prompt" ? "All prompts" : "Default view",
     spec: defaultView(kind, schema),
   };
-  if (kind === "chat") {
-    return [base, { id: `${BUILTIN_EXTRA_PREFIX}chat_openable`, title: "Openable chats", spec: openableChatsSpec(schema) }];
-  }
-  if (kind === "prompt") {
-    return [base, { id: `${BUILTIN_EXTRA_PREFIX}prompt_runnable`, title: "Runnable prompts", spec: runnablePromptsSpec(schema) }];
-  }
-  return [base];
+  return [base, ...(EXTRAS[kind] ?? []).map((extra) => ({ id: extra.id, title: extra.title, spec: extra.spec(schema) }))];
 }
 
 // The spec for a built-in view id (default or extra), or null if not built-in.

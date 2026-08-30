@@ -13,7 +13,8 @@ consumes a stored spec's membership at runtime.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from app.models_views import (
@@ -26,10 +27,15 @@ from app.models_views import (
     ViewNodeList,
     ViewNodeSummary,
     ViewParam,
+    ViewSort,
     ViewSpec,
     ViewUiState,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.prompt_disposition import (
+    PROMPT_DISPOSITION_REVISE_ENTITIES,
+    PROMPT_RUNNABLE_VALUE,
+)
 from app.view_grammar_generated import (
     FieldPredicate,
     FilterOp,
@@ -43,6 +49,64 @@ from app.view_grammar_generated import (
 # pane's default (unselected) view; the node is materialized lazily here on the
 # first fold write.
 DEFAULT_VIEW_ID_PREFIX = "view_default_"
+
+# The curated builtin EXTRA views a kind ships beside its default (#1682,
+# mirroring frontend builtinViews.ts — the specs must stay in lockstep, pinned
+# by the builtin-extra-view-specs fixture both suites assert). They share the
+# default's lifecycle: synthesized in memory until the first UI-state write
+# materializes a read-only system node, so appearance and fold state persist
+# for them exactly as for `view_default_<kind>` — every view the app offers is
+# a real (or materializable) Node. The registry entry carries its own spec
+# builder, so the id roster and the spec dispatch cannot diverge.
+BUILTIN_VIEW_ID_PREFIX = "view_builtin_"
+
+
+def _runnable_prompts_spec(roster: ViewExpr) -> ViewSpec:
+    # The prompts launchable as a standalone chat: the backend-stamped computed
+    # `runnable` flag (#1684) — Chat disposition AND empty `offer_on`.
+    return ViewSpec(
+        kind="prompt",
+        expr=ViewExpr(
+            filter=FilterOp(
+                of=roster,
+                pred=ViewExpr(field=FieldPredicate(key="runnable", op="overlap", value=[PROMPT_RUNNABLE_VALUE])),
+            )
+        ),
+        sort=ViewSort(by="manual"),
+    )
+
+
+def _openable_chats_spec(roster: ViewExpr) -> ViewSpec:
+    # Hides the brainstorm chats: `seed_disposition` (the chat lift's copy of the
+    # seeding prompt's disposition) blacklisted on "Revise entities", so plain and
+    # freeform ("") chats stay openable.
+    return ViewSpec(
+        kind="chat",
+        expr=ViewExpr(
+            filter=FilterOp(
+                of=roster,
+                pred=ViewExpr(
+                    field=FieldPredicate(
+                        key="seed_disposition", op="disjoint", value=[PROMPT_DISPOSITION_REVISE_ENTITIES]
+                    )
+                ),
+            )
+        ),
+        sort=ViewSort(by="manual"),
+    )
+
+
+@dataclass(frozen=True)
+class BuiltinExtraView:
+    title: str
+    kind: str
+    build: Callable[[ViewExpr], ViewSpec]
+
+
+BUILTIN_EXTRA_VIEWS: dict[str, BuiltinExtraView] = {
+    "view_builtin_prompt_runnable": BuiltinExtraView("Runnable prompts", "prompt", _runnable_prompts_spec),
+    "view_builtin_chat_openable": BuiltinExtraView("Openable chats", "chat", _openable_chats_spec),
+}
 
 
 class ViewsMixin:
@@ -99,13 +163,15 @@ class ViewsMixin:
         if index_entry is not None and index_entry.kind == "view":
             path = index_entry.path
         else:
-            # A `view_default_<kind>` default view has no file until the first fold
-            # materializes it (update_view_ui, §5). Return its honest in-memory
-            # default with empty fold state (a 200) rather than a 404, so seeding a
-            # fresh pane's collapse state never logs a 4xx (#1665). A materialized
-            # default has an index_entry and reads its real stored ui above.
-            if view_id.startswith(DEFAULT_VIEW_ID_PREFIX):
-                return self._default_view_node(view_id, ViewUiState())
+            # An app-defined view id — `view_default_<kind>` or a builtin extra
+            # (#1682) — has no file until the first UI-state write materializes
+            # it (update_view_ui, §5). Return its honest in-memory node with
+            # empty fold state (a 200) rather than a 404, so seeding a fresh
+            # pane's collapse state never logs a 4xx (#1665). A materialized one
+            # has an index_entry and reads its real stored ui above.
+            system_node = self._system_view_node(view_id, ViewUiState())
+            if system_node is not None:
+                return system_node
             path = self._path_for_node_id(view_id, "view")
         front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
@@ -156,22 +222,24 @@ class ViewsMixin:
         stored blob, preserving spec/layout/title/system. It takes no
         base_revision and does not consult the spec revision, so a fold toggle
         never 409s against a concurrent designer save — the two lifecycles are
-        independent. A `view_default_<kind>` id with no file yet MATERIALIZES the
-        read-only system default view (§5): the pane's default (unselected) view
-        is real-on-disk the moment the user first folds it.
+        independent. An app-defined id with no file yet — `view_default_<kind>`
+        or a builtin extra (#1682) — MATERIALIZES the read-only system view
+        (§5): the pane's default (unselected) view, and the curated extras
+        beside it, are real-on-disk the moment the user first folds or restyles
+        one.
 
         The merge (only fields the request actually set are overwritten) keeps
         `ViewUiState`'s two independent writers from clobbering each other: the
         fold writer sends `collapsed`, the appearance control (ADR-0069) sends
         `appearance`, and neither wipes the other's field on this shared blob."""
-        if view_id.startswith(DEFAULT_VIEW_ID_PREFIX) and self._build_node_index().by_id.get(view_id) is None:
-            return self._materialize_default_view(view_id, request.ui)
+        if (
+            view_id.startswith((DEFAULT_VIEW_ID_PREFIX, BUILTIN_VIEW_ID_PREFIX))
+            and self._build_node_index().by_id.get(view_id) is None
+        ):
+            return self._materialize_system_view(view_id, request.ui)
         path = self._path_for_node_id(view_id, "view")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
-        spec = self._parse_view_spec(front_matter.get("spec"))
-        if spec is None:
-            raise ProjectServiceError(f"View {node_id} has no valid spec.", 422)
         # Merge onto the stored ui so an appearance write preserves `collapsed`
         # and vice-versa. `model_fields_set` is exactly the keys the request JSON
         # carried, so an omitted field is left untouched (ADR-0069).
@@ -179,10 +247,27 @@ class ViewsMixin:
         merged_ui = existing_ui.model_copy(
             update={key: getattr(request.ui, key) for key in request.ui.model_fields_set}
         )
+        spec = self._parse_view_spec(front_matter.get("spec"))
+        title = str(front_matter.get("title") or node_id)
+        # SELF-HEAL an app-defined system node (#1682): its spec and title are
+        # the APP's, re-derived on every write — only `ui` is user data. Without
+        # this, a materialized default/extra freezes whatever spec shipped when
+        # the user first folded it, silently diverging from the live definition
+        # as releases refine it (the exact staleness the #1692 review flagged
+        # for the pre-Amendment-3 materialized prompt default). Runs BEFORE the
+        # no-valid-spec guard, so a corrupted system node heals instead of
+        # bricking its ui writes.
+        if self._view_system(front_matter):
+            fresh = self._system_view_node(node_id, merged_ui)
+            if fresh is not None:
+                spec = fresh.spec
+                title = fresh.title
+        if spec is None:
+            raise ProjectServiceError(f"View {node_id} has no valid spec.", 422)
         self._write_view_file(
             path,
             node_id,
-            str(front_matter.get("title") or node_id),
+            title,
             self._view_entry_type(front_matter),
             spec,
             self._parse_view_layout(front_matter.get("layout")),
@@ -193,14 +278,70 @@ class ViewsMixin:
 
     def delete_view(self, view_id: str) -> ViewNodeList:
         path = self._path_for_node_id(view_id, "view")
+        # A system node (a materialized default or builtin extra) is app-owned:
+        # deleting it would silently discard the user's persisted appearance and
+        # fold state, then re-materialize at shipped defaults on the next write.
+        # `save_view` already guards spec edits the same way (#1682).
+        front_matter = self._read_front_matter_only(path, strict=True)
+        if self._view_system(front_matter):
+            raise ProjectServiceError("A system view cannot be deleted; it carries only UI state.", 403)
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         return self.list_views()
+
+    def _system_view_node(self, view_id: str, ui: ViewUiState) -> ViewNode | None:
+        """The in-memory node for an APP-DEFINED view id — the per-kind default
+        (`view_default_<kind>`) or a curated builtin extra (`view_builtin_*`,
+        #1682) — or None when the id is neither. The one dispatch read_view and
+        the materializer share, so the two id families can't drift lifecycles."""
+        if view_id.startswith(DEFAULT_VIEW_ID_PREFIX):
+            return self._default_view_node(view_id, ui)
+        if view_id.startswith(BUILTIN_VIEW_ID_PREFIX):
+            return self._builtin_extra_view_node(view_id, ui)
+        return None
+
+    def _builtin_extra_view_node(self, view_id: str, ui: ViewUiState) -> ViewNode:
+        """The in-memory node for a curated builtin extra view (#1682) — the
+        `view_default_*` treatment applied to the extras a kind ships beside its
+        default ("Runnable prompts", "Openable chats"). `system: true`
+        (Duplicate-not-Edit). An unknown `view_builtin_*` id raises 422, so a
+        bogus id never becomes a silent 200. A registered kind whose root
+        entry_type doesn't resolve (a degenerate schema) falls back to
+        `<kind>:base` — MIRRORING the frontend `kindUniverseExpr` fallback, so
+        the rendering half and the persisting half fail (or don't) together."""
+        registered = BUILTIN_EXTRA_VIEWS.get(view_id)
+        if registered is None:
+            raise ProjectServiceError(f"No builtin view is defined for id '{view_id}'.", 422)
+        root_type = self._kind_root_entry_type(registered.kind) or f"{registered.kind}:base"
+        return ViewNode(
+            id=view_id,
+            title=registered.title,
+            revision="",
+            entry_type="view:view",
+            spec=self._builtin_extra_view_spec(view_id, root_type),
+            layout=self._parse_view_layout(None),
+            ui=ui,
+            system=True,
+            source_layer_id="",
+            source_layer_label="",
+        )
+
+    @staticmethod
+    def _builtin_extra_view_spec(view_id: str, root_type: str) -> ViewSpec:
+        """The spec of a curated builtin extra (#1682). MUST stay in lockstep
+        with the frontend `builtinViews.ts` (which synthesizes the same views
+        for the pane switcher) — the golden fixture
+        `builtin-extra-view-specs.json` is asserted by both suites, like the
+        default-spec fixture. The registry entry carries the builder."""
+        registered = BUILTIN_EXTRA_VIEWS.get(view_id)
+        if registered is None:
+            raise ProjectServiceError(f"No builtin view is defined for id '{view_id}'.", 422)
+        return registered.build(ViewExpr(descendants_of=root_type))
 
     def _default_view_node(self, view_id: str, ui: ViewUiState) -> ViewNode:
         """The kind's honest in-memory default view for a `view_default_<kind>` id
         (ADR-0036 §5) — spec = the kind's default (ADR-0037 §7), no file required.
         Shared by read_view (an unmaterialized default → 200 with empty fold
-        state, #1665) and _materialize_default_view (which persists it on the
+        state, #1665) and _materialize_system_view (which persists it on the
         first fold). An unknown kind (no kind root) raises 422, so a genuinely
         bogus id never becomes a silent 200. `system: true` (Duplicate-not-Edit)."""
         kind = view_id[len(DEFAULT_VIEW_ID_PREFIX):]
@@ -220,14 +361,17 @@ class ViewsMixin:
             source_layer_label="",
         )
 
-    def _materialize_default_view(self, view_id: str, ui: ViewUiState) -> ViewNode:
-        """Persist the read-only system default view node for a `view_default_<kind>`
-        id (ADR-0036 §5) — the in-memory default (`_default_view_node`) written to
-        disk, so the pane's default (unselected) view is real-on-disk the moment
-        the user first folds it. `system: true` (Duplicate-not-Edit; save_view
-        rejects it); its spec matches the frontend's `defaultView(kind)` so a later
-        Duplicate starts from the real default."""
-        node = self._default_view_node(view_id, ui)
+    def _materialize_system_view(self, view_id: str, ui: ViewUiState) -> ViewNode:
+        """Persist the read-only system view node for an app-defined id — the
+        per-kind default (`view_default_<kind>`, ADR-0036 §5) or a builtin extra
+        (`view_builtin_*`, #1682) — the in-memory node written to disk, so it is
+        real-on-disk the moment the user first folds or restyles it. `system:
+        true` (Duplicate-not-Edit; save_view rejects it); its spec matches the
+        frontend synthesis (`defaultView` / `builtinViews`) so a later Duplicate
+        starts from the real thing."""
+        node = self._system_view_node(view_id, ui)
+        if node is None:  # unreachable from update_view_ui's prefix guard
+            raise ProjectServiceError(f"View {view_id} does not exist.", 404)
         root = self._require_project()
         (root / "views").mkdir(parents=True, exist_ok=True)
         self._write_view_file(

@@ -6,16 +6,24 @@
   // (Lore/Assistants/preview). `toggle` comes from `RowCtx.toggle`; the click is
   // stopped from bubbling to the row's own open-on-click.
   //
-  // Reserves a fixed caret gutter on EVERY row (ADR-0066 Amendment 1): when the
-  // row can't collapse (a leaf), it renders an empty slot of the same width, so a
+  // Reserves a fixed caret gutter on a row (ADR-0066 Amendment 1): when the row
+  // can't collapse (a leaf), it renders an empty slot of the same width so a
   // leaf's title aligns on the same left edge as a sibling sub-group's — no
   // per-pane `.tree-caret-gutter` needed. Pass `collapsible={ctx.collapsible}`.
+  //
+  // Refinement (#1697): a leaf reserves that gutter ONLY when its level actually
+  // has a collapsible sibling. In a flat, leaf-only group (e.g. the Lore pane's
+  // kind-groups) nothing needs the alignment, so reserving 22px on every row is
+  // dead horizontal space — pass `reserveGutter={ctx.levelHasCollapsible}` to
+  // reclaim it. Default true keeps the reserve-everywhere behaviour for callers
+  // that don't thread the flag.
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   let {
     collapsed = false,
     toggle = () => {},
     collapsible = true,
+    reserveGutter = true,
     size = "sm",
   }: {
     // Optional so a leaf can reserve the gutter with just `collapsible={false}`
@@ -23,6 +31,7 @@
     collapsed?: boolean;
     toggle?: () => void;
     collapsible?: boolean;
+    reserveGutter?: boolean;
     size?: "sm" | "md";
   } = $props();
 </script>
@@ -40,8 +49,9 @@
   >
     <GroupCaret {collapsed} {size} />
   </button>
-{:else}
-  <!-- Leaf: reserve the gutter so titles align with collapsible siblings. -->
+{:else if reserveGutter}
+  <!-- Leaf beside a collapsible sibling: reserve the gutter so titles align. A
+       leaf whose level has nothing collapsible reclaims the width (#1697). -->
   <span class="row-caret-gutter" class:md={size === "md"} aria-hidden="true"></span>
 {/if}
 

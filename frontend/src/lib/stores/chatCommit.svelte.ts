@@ -35,11 +35,7 @@ import { api, HttpError } from "@/lib/api";
 import { entryIdFromPickValue } from "@/lib/editor-core/promptResolution";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
-import {
-  extractHandler,
-  outputHandlerFor,
-  type ExtractHost,
-} from "@/lib/editor-core/outputHandlers";
+import { extractHandler, type ExtractHost } from "@/lib/editor-core/outputHandlers";
 
 /** The live chat state + status/cost sinks the controller reaches into. Stable
  *  for the controller's life (wired once at construction) — the reactive inputs
@@ -160,10 +156,14 @@ export class ChatCommitController {
   constructor(private readonly deps: ChatCommitDeps) {}
 
   /** A chat carrying a `commit` (ADR-0054 §2) extracts its result to a
-   *  schema-typed node — the `extract_to_node` output handler (ADR-0065). This is
-   *  the routing question that was `output.kind === "entry_patch"`, now asked
-   *  through the registry instead of re-deriving it from the raw commit field. */
-  isCommitChat = $derived(outputHandlerFor(this.output)?.key === "extract_to_node");
+   *  schema-typed node. The predicate is the *presence of the commit object* —
+   *  "the presence of the object is the whole test" (ADR-0054 §2) — which is the
+   *  canonical classification the rest of the app uses: `promptDeclaresCommit`,
+   *  ChatBodyView's `chatSubjectEntryType`, and the backend `prompt_disposition`
+   *  "Revise entities" shelf. Keying off the output *handler* instead diverges on
+   *  representable front matter (an `extract_to_node` prompt with no `.commit`, or
+   *  a commit riding an empty handler), so this reads `.commit` directly (#1705). */
+  isCommitChat = $derived(!!this.output?.commit);
   /** The revise target — the `entry` input the launch seeded (empty in create
    *  mode). The draft may be an encoded context_pick list or a legacy bare id;
    *  read through the shared decoder, not as a raw string (#1482). */

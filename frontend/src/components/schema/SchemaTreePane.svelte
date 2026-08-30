@@ -20,6 +20,7 @@
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
+  import SchemaTypeCreateForm from "@/components/schema/SchemaTypeCreateForm.svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { resolveColor } from "@/lib/utils/colors";
   import { entryTypeIconClass, fieldTypeLabel } from "@/lib/utils/fieldIcons";
@@ -30,7 +31,7 @@
     type NodeTypeTreeNode,
     type SchemaKind,
   } from "@/lib/utils/schemaTypeHelpers";
-  import type { MetadataSchemaOverview } from "@/lib/types";
+  import type { MetadataSchemaLayer, MetadataSchemaOverview } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
 
   interface Props {
@@ -41,12 +42,23 @@
     selectedSchemaTypeId?: string | null;
     schemaTypeLayerId?: string;
     metadataSchemaOverview?: MetadataSchemaOverview | null;
+    // --- Inline create form (#1659) ---
+    // undefined = closed; a type FQN = the create card is open nested under that
+    // type, seeding `extends` with it. The kind root (for the header "+") vs a
+    // clicked row (for a row "+") is just what it's seeded with.
+    createSeedParentId?: string | undefined;
+    kindRootId?: string;
+    metadataSchemaLayers?: MetadataSchemaLayer[];
     // --- Drag state (two-way bound; shared with the parent's drop handler) ---
     draggedSchemaTypeId?: string | null;
     // --- Callbacks (parent owns the side-effects) ---
     projectSchemaLayerId?: () => string;
     onSwitchKind?: (kind: SchemaKind) => void;
-    onCreateType?: (layerId: string, parentTypeId: string) => void;
+    // Open the inline create card under `parentTypeId` (a row "+"; the header "+"
+    // is opened by the parent at the kind root).
+    onRequestCreate?: (parentTypeId: string) => void;
+    onSubmitCreate?: (payload: { name: string; parentId: string; layerId: string; localKey: string }) => void;
+    onCancelCreate?: () => void;
     onOpenType?: (typeId: string) => void;
     onStartTypeDrag?: (typeId: string) => void;
     onDropTypeOnParent?: (parentTypeId: string) => void;
@@ -61,10 +73,15 @@
     selectedSchemaTypeId = null,
     schemaTypeLayerId = "",
     metadataSchemaOverview = null,
+    createSeedParentId = undefined,
+    kindRootId = "",
+    metadataSchemaLayers = [],
     draggedSchemaTypeId = $bindable(null),
     projectSchemaLayerId = () => "",
     onSwitchKind = () => {},
-    onCreateType = () => {},
+    onRequestCreate = () => {},
+    onSubmitCreate = () => {},
+    onCancelCreate = () => {},
     onOpenType = () => {},
     onStartTypeDrag = () => {},
     onDropTypeOnParent = () => {},
@@ -141,7 +158,7 @@
     typeIcon={typeGlyph}
     active={selectedSchemaTypeId === node.id}
     ariaLabel={`${node.label} type — ${sourceBadgeLabel(typeSource)}`}
-    collapsed={childCount === 0 || isCollapsed}
+    collapsed={createSeedParentId === node.id ? false : childCount === 0 || isCollapsed}
     draggable={!typeSource?.built_in}
     onClick={() => onOpenType(node.id)}
     ondragstart={() => {
@@ -168,12 +185,26 @@
     {/snippet}
     {#snippet trailing()}
       <CountPill count={childCount} title={`${fieldEntries.length} field${fieldEntries.length === 1 ? "" : "s"}, ${node.children.length} sub-type${node.children.length === 1 ? "" : "s"}`} />
-      <button class="row-action-add" type="button" title={`Add sub-type to ${node.label}`} aria-label={`Add sub-type to ${node.label}`} onclick={() => onCreateType(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+</button>
+      <button class="row-action-add" type="button" title={`Add sub-type to ${node.label}`} aria-label={`Add sub-type to ${node.label}`} onclick={() => onRequestCreate(node.id)}>+</button>
       {#if !typeSource?.built_in}
         <button class="row-action-delete" type="button" title={`Delete ${node.label}`} aria-label={`Delete ${node.label}`} onclick={() => onDeleteType(node.id)}>×</button>
       {/if}
     {/snippet}
     {#snippet nested()}
+      {#if createSeedParentId === node.id}
+        <!-- Rendered FIRST so the create card sits immediately under the row whose
+             "+" opened it — not buried beneath the parent's fields and sub-types
+             (#1659). -->
+        <SchemaTypeCreateForm
+          kind={schemaFieldKind}
+          seedParentId={node.id}
+          kindRootId={kindRootId}
+          layers={metadataSchemaLayers}
+          defaultLayerId={schemaTypeLayerId || projectSchemaLayerId()}
+          onSubmit={onSubmitCreate}
+          onCancel={onCancelCreate}
+        />
+      {/if}
       {#each fieldEntries as [fieldId, field] (fieldId)}
         {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
         <NodeRow

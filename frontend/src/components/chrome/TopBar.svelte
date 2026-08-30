@@ -136,27 +136,20 @@
     { key: "research", label: "Research" },
   ];
 
-  // The app menu (≡) is the single invocation surface (ADR-0047): the
-  // this-project actions, the layout presets, and Settings all live in one
-  // panel now, rather than as a loose button cluster on the right.
+  // The app menu (≡) is the invocation surface for verbs (ADR-0047): the
+  // this-project actions, Scene actions, Help, and Settings live in one panel,
+  // rather than as a loose button cluster on the right. Layout presets are the
+  // one thing that left it — they are a presentation quick-toggle, so they sit
+  // in the chrome beside the theme toggle (amended 2026-08-30, #1651).
   let appMenuOpen = $state(false);
   let appMenuButton = $state<HTMLButtonElement | null>(null);
-  let showSaveField = $state(false);
-  let saveName = $state("");
-
-  function resetSaveField() {
-    showSaveField = false;
-    saveName = "";
-  }
 
   function toggleAppMenu() {
     appMenuOpen = !appMenuOpen;
-    if (!appMenuOpen) resetSaveField();
   }
 
   function closeAppMenu() {
     appMenuOpen = false;
-    resetSaveField();
   }
 
   // Close the menu AND return focus to the ≡ trigger. The activated menu item
@@ -177,18 +170,50 @@
     fn();
   }
 
+  // Layout presets are a presentation quick-toggle (like the theme toggle), so
+  // they live in the chrome next to it in their own popover — not as a verb in
+  // the ≡ menu (ADR-0047, amended 2026-08-30, #1651). The inline "save preset"
+  // field state rides with this menu.
+  let layoutMenuOpen = $state(false);
+  let layoutMenuButton = $state<HTMLButtonElement | null>(null);
+  let showSaveField = $state(false);
+  let saveName = $state("");
+
+  function resetSaveField() {
+    showSaveField = false;
+    saveName = "";
+  }
+
+  function toggleLayoutMenu() {
+    layoutMenuOpen = !layoutMenuOpen;
+    if (!layoutMenuOpen) resetSaveField();
+  }
+
+  function closeLayoutMenu() {
+    layoutMenuOpen = false;
+    resetSaveField();
+  }
+
+  // Close the layout menu AND return focus to its trigger — same reasoning as
+  // closeAppMenuAndRefocus: the activated item unmounts with the panel, so
+  // without this focus falls to <body>.
+  function closeLayoutMenuAndRefocus() {
+    closeLayoutMenu();
+    layoutMenuButton?.focus();
+  }
+
   function applyBuiltIn(key: string) {
-    closeAppMenuAndRefocus();
+    closeLayoutMenuAndRefocus();
     onApplyPreset(key);
   }
 
   function applyUser(name: string) {
-    closeAppMenuAndRefocus();
+    closeLayoutMenuAndRefocus();
     onApplyUserPreset(name);
   }
 
   function resetLayout() {
-    closeAppMenuAndRefocus();
+    closeLayoutMenuAndRefocus();
     onResetLayout();
   }
 
@@ -196,7 +221,7 @@
     const name = saveName.trim();
     if (!name) return;
     onSavePreset(name);
-    closeAppMenuAndRefocus();
+    closeLayoutMenuAndRefocus();
   }
 
   const THEME_GLYPH: Record<ThemePreference, string> = {
@@ -307,9 +332,8 @@
       <span aria-hidden="true">≡</span>
     </button>
 
-    <!-- The single invocation surface (ADR-0047) as a shared `<Popover>` (#766.1),
-         a touch narrower than the switcher since the labels are short. onClose
-         resets the inline "save preset" field on any dismiss. -->
+    <!-- The verb-invocation surface (ADR-0047) as a shared `<Popover>` (#766.1),
+         a touch narrower than the switcher since the labels are short. -->
     <Popover
       bind:open={appMenuOpen}
       triggerEl={appMenuButton}
@@ -318,7 +342,6 @@
       minWidth="240px"
       maxWidth="480px"
       maxHeight="calc(100vh - 60px)"
-      onClose={resetSaveField}
     >
         <div class="switcher-section-label">This project</div>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenProjectNode)}>Project</button>
@@ -339,65 +362,6 @@
         <div class="switcher-divider" role="separator"></div>
         <div class="switcher-section-label">Help</div>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenGuides)}>Guides</button>
-
-        <div class="switcher-divider" role="separator"></div>
-        <div class="switcher-section-label">Layout</div>
-        {#each BUILT_IN_PRESETS as preset (preset.key)}
-          <button
-            type="button"
-            class="switcher-item preset-item"
-            role="menuitemradio"
-            aria-checked={activePreset === preset.key}
-            disabled={!projectOpen}
-            onclick={() => applyBuiltIn(preset.key)}
-          >
-            <span class="preset-check" aria-hidden="true">{activePreset === preset.key ? "✓" : ""}</span>
-            {preset.label}
-          </button>
-        {/each}
-
-        {#if userPresets.length > 0}
-          <div class="switcher-section-label">Saved</div>
-          {#each userPresets as name (name)}
-            <div class="preset-user-row">
-              <button type="button" class="switcher-item preset-item preset-user" role="menuitem" disabled={!projectOpen} onclick={() => applyUser(name)}>
-                <span class="preset-check" aria-hidden="true"></span>
-                <span class="preset-user-name">{name}</span>
-              </button>
-              <button
-                type="button"
-                class="preset-delete"
-                title="Delete {name}"
-                aria-label="Delete preset {name}"
-                disabled={!projectOpen}
-                onclick={() => onDeleteUserPreset(name)}
-              >×</button>
-            </div>
-          {/each}
-        {/if}
-
-        <div class="switcher-divider" role="separator"></div>
-        {#if showSaveField}
-          <form class="preset-save" onsubmit={(event) => { event.preventDefault(); commitSave(); }}>
-            <!-- svelte-ignore a11y_autofocus -->
-            <input
-              type="text"
-              bind:value={saveName}
-              placeholder="Preset name"
-              aria-label="New preset name"
-              autofocus
-            />
-            <button type="submit" disabled={!saveName.trim()}>Save</button>
-          </form>
-        {:else}
-          <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => (showSaveField = true)}>
-            <span class="switcher-icon" aria-hidden="true">+</span>
-            Save current as…
-          </button>
-        {/if}
-        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={resetLayout}>
-          Reset layout to default
-        </button>
 
         <div class="switcher-divider" role="separator"></div>
         <div class="switcher-section-label">App</div>
@@ -498,6 +462,96 @@
   </div>
 
   <div class="actions">
+    <div class="layout-menu-wrap">
+      <button
+        bind:this={layoutMenuButton}
+        type="button"
+        class="action-button icon-button"
+        class:active={layoutMenuOpen}
+        aria-haspopup="menu"
+        aria-expanded={layoutMenuOpen}
+        aria-label="Layout"
+        title="Layout"
+        disabled={!projectOpen}
+        onclick={toggleLayoutMenu}
+      >
+        <span aria-hidden="true">◫</span>
+      </button>
+
+      <!-- Layout presets as their own chrome quick-toggle popover, next to the
+           theme toggle (ADR-0047, amended 2026-08-30, #1651). Right-anchored so
+           a wide panel grows leftward into the bar, not off the viewport edge.
+           onClose resets the inline "save preset" field on any dismiss. -->
+      <Popover
+        bind:open={layoutMenuOpen}
+        triggerEl={layoutMenuButton}
+        role="menu"
+        label="Layout presets"
+        anchor="right"
+        minWidth="240px"
+        maxWidth="360px"
+        maxHeight="calc(100vh - 60px)"
+        onClose={resetSaveField}
+      >
+        {#each BUILT_IN_PRESETS as preset (preset.key)}
+          <button
+            type="button"
+            class="switcher-item preset-item"
+            role="menuitemradio"
+            aria-checked={activePreset === preset.key}
+            disabled={!projectOpen}
+            onclick={() => applyBuiltIn(preset.key)}
+          >
+            <span class="preset-check" aria-hidden="true">{activePreset === preset.key ? "✓" : ""}</span>
+            {preset.label}
+          </button>
+        {/each}
+
+        {#if userPresets.length > 0}
+          <div class="switcher-section-label">Saved</div>
+          {#each userPresets as name (name)}
+            <div class="preset-user-row">
+              <button type="button" class="switcher-item preset-item preset-user" role="menuitem" disabled={!projectOpen} onclick={() => applyUser(name)}>
+                <span class="preset-check" aria-hidden="true"></span>
+                <span class="preset-user-name">{name}</span>
+              </button>
+              <button
+                type="button"
+                class="preset-delete"
+                title="Delete {name}"
+                aria-label="Delete preset {name}"
+                disabled={!projectOpen}
+                onclick={() => onDeleteUserPreset(name)}
+              >×</button>
+            </div>
+          {/each}
+        {/if}
+
+        <div class="switcher-divider" role="separator"></div>
+        {#if showSaveField}
+          <form class="preset-save" onsubmit={(event) => { event.preventDefault(); commitSave(); }}>
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              type="text"
+              bind:value={saveName}
+              placeholder="Preset name"
+              aria-label="New preset name"
+              autofocus
+            />
+            <button type="submit" disabled={!saveName.trim()}>Save</button>
+          </form>
+        {:else}
+          <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => (showSaveField = true)}>
+            <span class="switcher-icon" aria-hidden="true">+</span>
+            Save current as…
+          </button>
+        {/if}
+        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={resetLayout}>
+          Reset layout to default
+        </button>
+      </Popover>
+    </div>
+
     <button
       type="button"
       class="action-button icon-button"
@@ -762,6 +816,20 @@
     padding: 4px 8px;
     font-size: var(--fs-xl);
     line-height: 1;
+  }
+
+  /* The layout quick-toggle owns its own anchored popover, so it needs the same
+     positioned wrapper the ≡ menu and switcher use. */
+  .top-bar .layout-menu-wrap {
+    position: relative;
+    flex: none;
+  }
+
+  /* An open quick-toggle reads as active, mirroring the ≡ button. */
+  .top-bar .action-button.active {
+    background: var(--panel);
+    border-color: var(--accent-emphasis);
+    color: var(--accent-emphasis);
   }
 
   /* The app menu (≡) anchors the far-left of the bar. It is the one deliberate

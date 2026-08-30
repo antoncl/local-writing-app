@@ -5,9 +5,11 @@
 // open/close, Escape refocuses the trigger, an overlay click dismisses without
 // refocus, and (unlike the breadcrumb's modal inherit dialog) focus is NOT pulled
 // into the panel. This pins that contract on both menus, plus the one bit of
-// per-menu wiring the primitive can't own: the app menu resetting its inline
-// "save preset" field on any dismiss (the `onClose` hook). The breadcrumb's own
-// test already covers the modal path through the same primitive.
+// per-menu wiring the primitive can't own: the layout quick-toggle menu (a third
+// popover, moved out of the ≡ menu into the chrome beside the theme toggle,
+// #1651) resetting its inline "save preset" field on any dismiss (the `onClose`
+// hook). The breadcrumb's own test already covers the modal path through the
+// same primitive.
 import { describe, it, expect, vi } from "vitest";
 import { tick } from "svelte";
 import { render, screen, fireEvent } from "@/lib/test/component";
@@ -123,18 +125,54 @@ describe("TopBar — app menu (#766.1)", () => {
     expect(screen.queryByRole("menu", { name: "Application menu" })).toBeNull();
   });
 
+  it("no longer carries the Layout section — it moved to the chrome (#1651)", async () => {
+    render(TopBar, { props: { currentTitle: "My Book", projectOpen: true } });
+    await fireEvent.click(screen.getByRole("button", { name: "Application menu" }));
+    // The layout presets and their save/reset affordances are gone from the ≡ menu.
+    expect(screen.queryByRole("menuitemradio", { name: /Writing/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Save current as…" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Reset layout to default" })).toBeNull();
+  });
+});
+
+describe("TopBar — layout quick-toggle (#1651)", () => {
+  it("opens beside the theme toggle, lists presets, checks the active one, and routes through the host", async () => {
+    const onApplyPreset = vi.fn();
+    render(TopBar, {
+      props: { currentTitle: "My Book", projectOpen: true, activePreset: "research", onApplyPreset },
+    });
+
+    const trigger = screen.getByRole("button", { name: "Layout" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    await fireEvent.click(trigger);
+    expect(screen.getByRole("menu", { name: "Layout presets" })).toBeInTheDocument();
+
+    // The active preset reads as checked; a built-in preset routes to the host and closes.
+    expect(screen.getByRole("menuitemradio", { name: /Research/ }).getAttribute("aria-checked")).toBe("true");
+    await fireEvent.click(screen.getByRole("menuitemradio", { name: /Writing/ }));
+    expect(onApplyPreset).toHaveBeenCalledWith("writing");
+    expect(screen.queryByRole("menu", { name: "Layout presets" })).toBeNull();
+    // Applying returns focus to the trigger (the item unmounts with the panel).
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("is disabled while no project is open (layout is project-scoped)", () => {
+    render(TopBar, { props: { currentTitle: "My Book", projectOpen: false } });
+    expect(screen.getByRole("button", { name: "Layout" })).toBeDisabled();
+  });
+
   it("resets the inline save-preset field whenever the menu dismisses (onClose)", async () => {
     render(TopBar, { props: { currentTitle: "My Book", projectOpen: true } });
 
-    // Reveal the "save current layout as…" input.
-    await fireEvent.click(screen.getByRole("button", { name: "Application menu" }));
+    // Reveal the "save current layout as…" input from the layout popover.
+    await fireEvent.click(screen.getByRole("button", { name: "Layout" }));
     await fireEvent.click(screen.getByRole("menuitem", { name: "Save current as…" }));
     expect(screen.getByRole("textbox", { name: "New preset name" })).toBeInTheDocument();
 
     // Dismiss via Escape — the primitive's onClose hook must reset the field.
     await fireEvent.keyDown(window, { key: "Escape" });
     // Reopen: the field is gone, the "Save current as…" affordance is back.
-    await fireEvent.click(screen.getByRole("button", { name: "Application menu" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Layout" }));
     expect(screen.queryByRole("textbox", { name: "New preset name" })).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Save current as…" })).toBeInTheDocument();
   });

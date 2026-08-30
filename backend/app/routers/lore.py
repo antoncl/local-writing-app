@@ -16,6 +16,7 @@ from app.models import (
     MutationSetEntry,
     MutationSetEntryList,
     PromoteLoreEntryRequest,
+    PromoteMutationSetEntryRequest,
     PromotePromptEntryRequest,
     PromotionPlan,
     PromotionTarget,
@@ -267,5 +268,28 @@ def place_mutation_set_entry(project: CurrentProject, entry_id: str) -> Mutation
 def delete_mutation_set_entry(project: CurrentProject, entry_id: str) -> MutationSetEntryList:
     with translate_errors():
         return project.delete_mutation_set_entry(entry_id)
+
+
+@router.post("/api/mutation-sets/{entry_id}/promote/preview", response_model=PromotionPlan)
+def preview_mutation_set_promotion(
+    project: CurrentProject, entry_id: str, request: PromoteMutationSetEntryRequest
+) -> PromotionPlan:
+    """Dry-run promotion plan (ADR-0078 §7/§9) for a mutation set: the pinned
+    entity (if any) either already resolves at the destination, cascades with
+    the set, or blocks the promotion. Writes nothing."""
+    with translate_errors():
+        return project.preview_mutation_set_promotion(entry_id, request.target_layer_id)
+
+
+@router.post("/api/mutation-sets/{entry_id}/promote", response_model=MutationSetEntry)
+def promote_mutation_set_entry(
+    project: CurrentProject, entry_id: str, request: PromoteMutationSetEntryRequest
+) -> MutationSetEntry:
+    """Lift an owned, staged mutation set into a declared ancestor project,
+    keeping its id (ADR-0078 §1/§2/§7), cascading its pinned entity first if
+    needed. Runs the same partition `preview` returned; raises if the plan is
+    blocked or the set is placed."""
+    with translate_errors():
+        return project.promote_mutation_set_entry(entry_id, request.target_layer_id)
 
 

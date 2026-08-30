@@ -617,10 +617,16 @@ class PromotionPlan(BaseModel):
     # inputs, named. Empty for lore (its metadata carries no selector).
     resolves_differently: list[str] = Field(default_factory=list)
     # Set when the promotion is REFUSED (ADR-0078 §6): a dynamic `{% include %}`
-    # the cascade cannot follow, or a closure member owned by an intermediate
-    # ancestor that cannot be lifted from this scope. The dialogue shows it and
-    # disables commit; a commit call raises. `None` = the plan is promotable.
+    # the cascade cannot follow, or a hard dependency (a prompt's include, a
+    # mutation set's pinned entity) owned by an intermediate ancestor that cannot
+    # be lifted from this scope. The dialogue shows it and disables commit; a
+    # commit call raises. `None` = the plan is promotable.
     blocked_reason: str | None = None
+    # Nodes that are RELATED but not moved by this promotion (ADR-0078 §7): staged
+    # mutation sets pinned to the node being promoted. They keep working from the
+    # origin (keep-id) and are promoted separately, not cascaded. Titles; empty
+    # unless the promoted node has pinned staged sets.
+    related: list[str] = Field(default_factory=list)
 
 
 class PromoteLoreEntryRequest(BaseModel):
@@ -628,6 +634,10 @@ class PromoteLoreEntryRequest(BaseModel):
 
 
 class PromotePromptEntryRequest(BaseModel):
+    target_layer_id: str = Field(min_length=1)
+
+
+class PromoteMutationSetEntryRequest(BaseModel):
     target_layer_id: str = Field(min_length=1)
 
 

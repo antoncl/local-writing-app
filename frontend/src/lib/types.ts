@@ -162,6 +162,32 @@ export type MoveLoreNoteToResearchResponse = {
   lore: LoreEntryList;
 };
 
+// ADR-0078 §2/§9: a layer a node here may be promoted INTO — a declared
+// ancestor project of the open project. `GET /api/promotion/targets` returns
+// these outermost-first, so the nearest ancestor (the usual pick) is last.
+export type PromotionTarget = {
+  layer_id: string;
+  label: string;
+};
+
+// A field value that will NOT travel with a promoted node — it stays in the
+// origin as a layer override because it would leak origin-local structure
+// into the destination (ADR-0078 §4).
+export type PromotionStayItem = {
+  field: string;
+  reason: string;
+};
+
+// The dry-run preview of a promotion (ADR-0078 §9), returned by both the
+// preview and (implicitly) the commit endpoint — the same partition backs
+// both, so what the author confirms is what runs.
+export type PromotionPlan = {
+  destination: PromotionTarget;
+  travels: string[];
+  stays_in_origin: PromotionStayItem[];
+  invisible_at_destination: string[];
+};
+
 export type PromptEntrySummary = {
   id: string;
   title: string;

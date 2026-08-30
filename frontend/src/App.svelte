@@ -36,6 +36,7 @@
   import FinalizeRoleplayDialog from "@/components/dialogs/FinalizeRoleplayDialog.svelte";
   import AIPolicyModal from "@/components/dialogs/AIPolicyModal.svelte";
   import ValidateModal from "@/components/dialogs/ValidateModal.svelte";
+  import PromoteAction from "@/components/dialogs/PromoteAction.svelte";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
   import TopBar from "@/components/chrome/TopBar.svelte";
@@ -1108,6 +1109,7 @@
           AI Policy
         </button>
       {/if}
+      <PromoteAction documentKind={editorPane.document?.type} entry={editorPane.scene} ownLayerId={$projectLayerIdStore} />
       <!-- The project node is its own window; deleting it would remove
            `project.md` (#750). Offer Delete on every other kind, never on the
            project itself — belt to the requestDeleteScene guard's braces. -->

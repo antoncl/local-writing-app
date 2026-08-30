@@ -249,6 +249,41 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
             )
         self.assertIn("already exists", str(ctx.exception))
 
+    def test_builtin_color_icon_override_preserves_field_overlay(self) -> None:
+        # Data-safety property (#1644): a writer who has customized a built-in's
+        # fields must not lose them when they later set a glyph. The frontend
+        # sends `fields: []` on a color/icon save (previousTypeId is null for a
+        # read-only built-in), so the backend has to keep the existing layer
+        # membership rather than overwrite it with the empty list.
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layer_id,
+                field_id="weather",
+                field=MetadataFieldDefinition(name="Weather", type="text", options=[]),
+                entry_type="lore:character",
+                allow_existing=False,
+            )
+        )
+        self.assertIn("weather", self.service.read_metadata_schema().entry_types["lore:character"].fields)
+
+        # Now the glyph save, exactly as the editor sends it.
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="lore:character",
+                entry_type=EntryTypeDefinition(
+                    name="Character", kind="lore", parent="lore:base", fields=[], icon="user"
+                ),
+                allow_existing=True,
+            )
+        )
+
+        character = schema.entry_types["lore:character"]
+        self.assertEqual(character.own_icon, "user")
+        # The user's field survived the empty-fields payload.
+        self.assertIn("weather", character.fields)
+
     def test_summary_lives_on_parent_not_in_scene_own_fields(self) -> None:
         schema = self.service.read_metadata_schema()
         scene_definition = schema.entry_types["manuscript:scene"]

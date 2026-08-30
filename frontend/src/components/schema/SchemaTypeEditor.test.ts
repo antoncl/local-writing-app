@@ -72,52 +72,52 @@ describe("SchemaTypeEditor type icon (#316)", () => {
   });
 });
 
-describe("SchemaTypeEditor built-in appearance is read-only (#1574)", () => {
-  // Save Type is gated `{#if !schemaTypeReadonly}`, so on a built-in type the
-  // Color + Icon pickers looked editable but had no way to persist — a silent
-  // dead end. They now render read-only: the appearance is still visible, but
-  // the controls don't invite an edit that can't be saved.
-  it("disables the Color swatch on a readonly (built-in) type", () => {
+describe("SchemaTypeEditor built-in color/icon are overridable (#1644)", () => {
+  // #1574 made Color + Icon read-only on a built-in because Save Type was gated
+  // off. #1644 reverses that: the display overlay (color + icon) persists as a
+  // project-layer override, so the controls are editable and Save is available —
+  // while name / id stay locked (identity is system-owned, stripped on write).
+  const builtinProps = {
+    schemaTypeKind: "lore" as const,
+    initialName: "Character",
+    initialTypeId: "lore:character",
+    selectedSchemaTypeId: "lore:character",
+    schemaTypeLayerId: "proj",
+    schemaTypeReadonly: true,
+  };
+
+  it("keeps the Color swatch editable on a readonly (built-in) type", () => {
     const { container } = render(SchemaTypeEditor, {
-      props: {
-        schemaTypeKind: "lore" as const,
-        initialName: "Character",
-        initialTypeId: "lore:character",
-        initialColor: "blue",
-        selectedSchemaTypeId: "lore:character",
-        schemaTypeLayerId: "proj",
-        schemaTypeReadonly: true,
-        onSaveType: vi.fn(),
-      },
+      props: { ...builtinProps, initialColor: "blue", onSaveType: vi.fn() },
     });
     const swatch = container.querySelector(".swatch-trigger") as HTMLButtonElement | null;
     expect(swatch).not.toBeNull();
-    expect(swatch!.disabled).toBe(true);
-    expect(swatch!.classList.contains("read-only")).toBe(true);
+    expect(swatch!.disabled).toBe(false);
+    expect(swatch!.classList.contains("read-only")).toBe(false);
   });
 
-  it("makes the Icon tile a non-opening display on a readonly type", async () => {
+  it("lets the Icon tile open the picker on a readonly type, and offers Save", async () => {
     const { container } = render(SchemaTypeEditor, {
-      props: {
-        schemaTypeKind: "lore" as const,
-        initialName: "Character",
-        initialTypeId: "lore:character",
-        initialIcon: "user",
-        selectedSchemaTypeId: "lore:character",
-        schemaTypeLayerId: "proj",
-        schemaTypeReadonly: true,
-        onSaveType: vi.fn(),
-      },
+      props: { ...builtinProps, initialIcon: "user", onSaveType: vi.fn() },
     });
-    // Relabelled from "Choose icon" — it no longer offers a choice — and disabled.
-    const tile = screen.getByRole("button", { name: "Icon" }) as HTMLButtonElement;
-    expect(tile.disabled).toBe(true);
-    expect(tile.classList.contains("read-only")).toBe(true);
-    // Still shows the built-in's glyph, so the appearance stays visible.
+    // Editable: labelled "Choose icon", not disabled, shows the seeded glyph...
+    const tile = screen.getByRole("button", { name: "Choose icon" }) as HTMLButtonElement;
+    expect(tile.disabled).toBe(false);
+    expect(tile.classList.contains("read-only")).toBe(false);
     expect(container.querySelector(".sti-icon-btn .ti-user")).not.toBeNull();
-    // Clicking cannot open the picker (the dead end #1574 removes).
+    // ...and clicking opens the picker (the #1574 dead end is gone).
     await fireEvent.click(tile);
-    expect(document.querySelector(".sti-icon-pop")).toBeNull();
-    expect(document.querySelector(".icon-picker")).toBeNull();
+    expect(document.querySelector(".sti-icon-pop")).not.toBeNull();
+    expect(document.querySelector(".icon-picker")).not.toBeNull();
+    // Save Type renders so the color/icon overlay can persist.
+    expect(screen.getByRole("button", { name: "Save Type" })).toBeTruthy();
+  });
+
+  it("keeps the type name read-only — identity stays system-owned", () => {
+    render(SchemaTypeEditor, { props: { ...builtinProps, onSaveType: vi.fn() } });
+    const nameInput = screen.getByPlaceholderText("Faction") as HTMLInputElement;
+    expect(nameInput.readOnly).toBe(true);
+    // The scope line names where the overlay lands, not a dead "System".
+    expect(screen.getByText(/color and icon save to your project/i)).toBeTruthy();
   });
 });

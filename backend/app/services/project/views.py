@@ -13,7 +13,8 @@ consumes a stored spec's membership at runtime.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from app.models_views import (
@@ -49,18 +50,62 @@ from app.view_grammar_generated import (
 # first fold write.
 DEFAULT_VIEW_ID_PREFIX = "view_default_"
 
-# Well-known ids of the curated builtin EXTRA views a kind ships beside its
-# default (#1682, mirroring frontend builtinViews.ts — the specs must stay in
-# lockstep, pinned by the builtin-extra-view-specs fixture both suites assert).
-# They share the default's lifecycle: synthesized in memory until the first
-# UI-state write materializes a read-only system node, so appearance and fold
-# state persist for them exactly as for `view_default_<kind>` — every view the
-# app offers is a real (or materializable) Node.
+# The curated builtin EXTRA views a kind ships beside its default (#1682,
+# mirroring frontend builtinViews.ts — the specs must stay in lockstep, pinned
+# by the builtin-extra-view-specs fixture both suites assert). They share the
+# default's lifecycle: synthesized in memory until the first UI-state write
+# materializes a read-only system node, so appearance and fold state persist
+# for them exactly as for `view_default_<kind>` — every view the app offers is
+# a real (or materializable) Node. The registry entry carries its own spec
+# builder, so the id roster and the spec dispatch cannot diverge.
 BUILTIN_VIEW_ID_PREFIX = "view_builtin_"
-BUILTIN_EXTRA_VIEWS: dict[str, tuple[str, str]] = {
-    # id → (title, anchor kind)
-    "view_builtin_prompt_runnable": ("Runnable prompts", "prompt"),
-    "view_builtin_chat_openable": ("Openable chats", "chat"),
+
+
+def _runnable_prompts_spec(roster: ViewExpr) -> ViewSpec:
+    # The prompts launchable as a standalone chat: the backend-stamped computed
+    # `runnable` flag (#1684) — Chat disposition AND empty `offer_on`.
+    return ViewSpec(
+        kind="prompt",
+        expr=ViewExpr(
+            filter=FilterOp(
+                of=roster,
+                pred=ViewExpr(field=FieldPredicate(key="runnable", op="overlap", value=[PROMPT_RUNNABLE_VALUE])),
+            )
+        ),
+        sort=ViewSort(by="manual"),
+    )
+
+
+def _openable_chats_spec(roster: ViewExpr) -> ViewSpec:
+    # Hides the brainstorm chats: `seed_disposition` (the chat lift's copy of the
+    # seeding prompt's disposition) blacklisted on "Revise entities", so plain and
+    # freeform ("") chats stay openable.
+    return ViewSpec(
+        kind="chat",
+        expr=ViewExpr(
+            filter=FilterOp(
+                of=roster,
+                pred=ViewExpr(
+                    field=FieldPredicate(
+                        key="seed_disposition", op="disjoint", value=[PROMPT_DISPOSITION_REVISE_ENTITIES]
+                    )
+                ),
+            )
+        ),
+        sort=ViewSort(by="manual"),
+    )
+
+
+@dataclass(frozen=True)
+class BuiltinExtraView:
+    title: str
+    kind: str
+    build: Callable[[ViewExpr], ViewSpec]
+
+
+BUILTIN_EXTRA_VIEWS: dict[str, BuiltinExtraView] = {
+    "view_builtin_prompt_runnable": BuiltinExtraView("Runnable prompts", "prompt", _runnable_prompts_spec),
+    "view_builtin_chat_openable": BuiltinExtraView("Openable chats", "chat", _openable_chats_spec),
 }
 
 
@@ -195,9 +240,6 @@ class ViewsMixin:
         path = self._path_for_node_id(view_id, "view")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
-        spec = self._parse_view_spec(front_matter.get("spec"))
-        if spec is None:
-            raise ProjectServiceError(f"View {node_id} has no valid spec.", 422)
         # Merge onto the stored ui so an appearance write preserves `collapsed`
         # and vice-versa. `model_fields_set` is exactly the keys the request JSON
         # carried, so an omitted field is left untouched (ADR-0069).
@@ -205,10 +247,27 @@ class ViewsMixin:
         merged_ui = existing_ui.model_copy(
             update={key: getattr(request.ui, key) for key in request.ui.model_fields_set}
         )
+        spec = self._parse_view_spec(front_matter.get("spec"))
+        title = str(front_matter.get("title") or node_id)
+        # SELF-HEAL an app-defined system node (#1682): its spec and title are
+        # the APP's, re-derived on every write — only `ui` is user data. Without
+        # this, a materialized default/extra freezes whatever spec shipped when
+        # the user first folded it, silently diverging from the live definition
+        # as releases refine it (the exact staleness the #1692 review flagged
+        # for the pre-Amendment-3 materialized prompt default). Runs BEFORE the
+        # no-valid-spec guard, so a corrupted system node heals instead of
+        # bricking its ui writes.
+        if self._view_system(front_matter):
+            fresh = self._system_view_node(node_id, merged_ui)
+            if fresh is not None:
+                spec = fresh.spec
+                title = fresh.title
+        if spec is None:
+            raise ProjectServiceError(f"View {node_id} has no valid spec.", 422)
         self._write_view_file(
             path,
             node_id,
-            str(front_matter.get("title") or node_id),
+            title,
             self._view_entry_type(front_matter),
             spec,
             self._parse_view_layout(front_matter.get("layout")),
@@ -219,6 +278,13 @@ class ViewsMixin:
 
     def delete_view(self, view_id: str) -> ViewNodeList:
         path = self._path_for_node_id(view_id, "view")
+        # A system node (a materialized default or builtin extra) is app-owned:
+        # deleting it would silently discard the user's persisted appearance and
+        # fold state, then re-materialize at shipped defaults on the next write.
+        # `save_view` already guards spec edits the same way (#1682).
+        front_matter = self._read_front_matter_only(path, strict=True)
+        if self._view_system(front_matter):
+            raise ProjectServiceError("A system view cannot be deleted; it carries only UI state.", 403)
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         return self.list_views()
 
@@ -238,17 +304,17 @@ class ViewsMixin:
         `view_default_*` treatment applied to the extras a kind ships beside its
         default ("Runnable prompts", "Openable chats"). `system: true`
         (Duplicate-not-Edit). An unknown `view_builtin_*` id raises 422, so a
-        bogus id never becomes a silent 200."""
+        bogus id never becomes a silent 200. A registered kind whose root
+        entry_type doesn't resolve (a degenerate schema) falls back to
+        `<kind>:base` — MIRRORING the frontend `kindUniverseExpr` fallback, so
+        the rendering half and the persisting half fail (or don't) together."""
         registered = BUILTIN_EXTRA_VIEWS.get(view_id)
         if registered is None:
             raise ProjectServiceError(f"No builtin view is defined for id '{view_id}'.", 422)
-        title, kind = registered
-        root_type = self._kind_root_entry_type(kind)
-        if not root_type:
-            raise ProjectServiceError(f"No builtin view is defined for id '{view_id}'.", 422)
+        root_type = self._kind_root_entry_type(registered.kind) or f"{registered.kind}:base"
         return ViewNode(
             id=view_id,
-            title=title,
+            title=registered.title,
             revision="",
             entry_type="view:view",
             spec=self._builtin_extra_view_spec(view_id, root_type),
@@ -265,43 +331,11 @@ class ViewsMixin:
         with the frontend `builtinViews.ts` (which synthesizes the same views
         for the pane switcher) — the golden fixture
         `builtin-extra-view-specs.json` is asserted by both suites, like the
-        default-spec fixture. Both filter on backend-stamped vocabulary
-        (#1684): `runnable` is the prompt's computed standalone-launchable
-        flag; `seed_disposition` is the chat lift's copy of the seeding
-        prompt's disposition, blacklisted on "Revise entities" so brainstorm
-        chats hide while plain and freeform ("") chats stay openable."""
-        roster = ViewExpr(descendants_of=root_type)
-        if view_id == "view_builtin_prompt_runnable":
-            return ViewSpec(
-                kind="prompt",
-                expr=ViewExpr(
-                    filter=FilterOp(
-                        of=roster,
-                        pred=ViewExpr(
-                            field=FieldPredicate(key="runnable", op="overlap", value=[PROMPT_RUNNABLE_VALUE])
-                        ),
-                    )
-                ),
-                sort=ViewSort(by="manual"),
-            )
-        if view_id == "view_builtin_chat_openable":
-            return ViewSpec(
-                kind="chat",
-                expr=ViewExpr(
-                    filter=FilterOp(
-                        of=roster,
-                        pred=ViewExpr(
-                            field=FieldPredicate(
-                                key="seed_disposition",
-                                op="disjoint",
-                                value=[PROMPT_DISPOSITION_REVISE_ENTITIES],
-                            )
-                        ),
-                    )
-                ),
-                sort=ViewSort(by="manual"),
-            )
-        raise ProjectServiceError(f"No builtin view is defined for id '{view_id}'.", 422)
+        default-spec fixture. The registry entry carries the builder."""
+        registered = BUILTIN_EXTRA_VIEWS.get(view_id)
+        if registered is None:
+            raise ProjectServiceError(f"No builtin view is defined for id '{view_id}'.", 422)
+        return registered.build(ViewExpr(descendants_of=root_type))
 
     def _default_view_node(self, view_id: str, ui: ViewUiState) -> ViewNode:
         """The kind's honest in-memory default view for a `view_default_<kind>` id

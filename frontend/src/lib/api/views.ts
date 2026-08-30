@@ -29,8 +29,9 @@ export const viewsApi = {
     });
   },
   // Lock-free ui write (ADR-0036). MERGES the given fields into the view's `ui`
-  // blob (a `view_default_<kind>` id with no file yet materializes the system
-  // default). Pass only the field you own — `collapsed` (fold state) or
+  // blob (an app-defined id with no file yet — `view_default_<kind>` or a
+  // `view_builtin_*` extra, #1682 — materializes the system node). Pass only
+  // the field you own — `collapsed` (fold state) or
   // `appearance` (ADR-0069) — and the backend leaves the other untouched, so the
   // two independent writers never clobber each other.
   updateViewUi(viewId: string, ui: Partial<ViewUiState>) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { builtinViews } from "./builtinViews";
+import { builtinViews, kindsWithBuiltinExtras } from "./builtinViews";
 import fixture from "./__fixtures__/builtin-extra-view-specs.json";
 
 // The frontend `builtinViews` synthesizes the curated extra views for the pane
@@ -9,8 +9,11 @@ import fixture from "./__fixtures__/builtin-extra-view-specs.json";
 // (a drifted spec would make the pane's "Runnable prompts" and its materialized
 // node select different rosters).
 describe("builtin extra view golden (backend/frontend drift guard)", () => {
+  // Kinds come from the registry itself, so an extra shipped on a NEW kind
+  // enters this coverage automatically — the completeness check below then
+  // fails until the fixture (and the backend registry) learn it.
   const byId = new Map(
-    ["prompt", "chat"].flatMap((kind) => builtinViews(kind).slice(1).map((v) => [v.id, v] as const)),
+    kindsWithBuiltinExtras().flatMap((kind) => builtinViews(kind).slice(1).map((v) => [v.id, v] as const)),
   );
 
   for (const [id, expected] of Object.entries(fixture)) {

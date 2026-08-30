@@ -87,9 +87,11 @@ def test_builtin_extra_view_specs_match_frontend() -> None:
 
     for view_id in fixture_ids:
         expected = fixture[view_id]
-        title, kind = BUILTIN_EXTRA_VIEWS[view_id]
-        dumped = ViewsMixin._builtin_extra_view_spec(view_id, f"{kind}:base").model_dump(exclude_none=True)
-        got = {"title": title, "expr": _strip_keep(dumped["expr"]), "sort_by": dumped["sort"]["by"]}
+        registered = BUILTIN_EXTRA_VIEWS[view_id]
+        dumped = ViewsMixin._builtin_extra_view_spec(view_id, f"{registered.kind}:base").model_dump(
+            exclude_none=True
+        )
+        got = {"title": registered.title, "expr": _strip_keep(dumped["expr"]), "sort_by": dumped["sort"]["by"]}
         assert got == expected, f"backend builtin extra {view_id!r} drifted from the frontend canonical: {got} != {expected}"
 
 
@@ -790,6 +792,39 @@ class ViewUiStateTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/views/view_builtin_nonsense").status_code, 422)
         res = self.client.put("/api/views/view_builtin_nonsense/ui", json={"ui": {"collapsed": ["x"]}})
         self.assertEqual(res.status_code, 422, res.text)
+
+    def test_system_view_cannot_be_deleted(self) -> None:
+        # A materialized system node (default or extra) carries only UI state;
+        # deleting it would silently discard the user's layout (#1696 review).
+        self.client.put("/api/views/view_builtin_prompt_runnable/ui", json={"ui": {"collapsed": ["a"]}})
+        res = self.client.delete("/api/views/view_builtin_prompt_runnable")
+        self.assertEqual(res.status_code, 403, res.text)
+        self.client.put("/api/views/view_default_lore/ui", json={"ui": {"collapsed": ["b"]}})
+        self.assertEqual(self.client.delete("/api/views/view_default_lore").status_code, 403)
+
+    def test_materialized_system_spec_self_heals_on_ui_write(self) -> None:
+        # A system node's spec/title are the APP's — re-derived on every ui
+        # write, so a node materialized under an older builder can't stay stale
+        # (#1696 review; the staleness class the #1692 review hit for the
+        # pre-Amendment-3 materialized prompt default). Simulate the old build
+        # by corrupting the stored spec by hand, then write ui state.
+        self.client.put("/api/views/view_builtin_prompt_runnable/ui", json={"ui": {"collapsed": ["a"]}})
+        views_dir = self.root / "views"
+        path = next(p for p in views_dir.glob("*.md") if "view_builtin_prompt_runnable" in p.read_text(encoding="utf-8"))
+        # Corrupt only the predicate op (the id also contains "runnable", so a
+        # broad replace would break node identity, not just the spec).
+        stale = path.read_text(encoding="utf-8").replace("overlap", "old_op")
+        path.write_text(stale, encoding="utf-8")
+        res = self.client.put(
+            "/api/views/view_builtin_prompt_runnable/ui", json={"ui": {"appearance": {"density": "dense"}}}
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        # The spec is back to the live builder's shape; the ui merge survived.
+        self.assertEqual(body["spec"]["expr"]["filter"]["pred"]["field"]["op"], "overlap")
+        self.assertEqual(body["title"], "Runnable prompts")
+        self.assertEqual(body["ui"]["appearance"]["density"], "dense")
+        self.assertEqual(body["ui"]["collapsed"], ["a"])
 
 
 if __name__ == "__main__":

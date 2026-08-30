@@ -22,8 +22,22 @@ const BUILTIN_EXTRA_PREFIX = "view_builtin_";
 
 // An extra built-in view (not the roster default) — selected by its own id and
 // treated as a valid selection by paneViews even though it is not a saved node.
+// NOTE: a prefix test only — it says the id CLAIMS to be an extra, not that this
+// build ships it. Selection validity uses `isShippedBuiltinExtraId` instead, so
+// a retired extra id in localStorage gets dropped rather than kept forever.
 export function isBuiltinExtraViewId(id: string): boolean {
   return id.startsWith(BUILTIN_EXTRA_PREFIX);
+}
+
+// Whether this build actually ships `id` as one of `kind`'s extras.
+export function isShippedBuiltinExtraId(kind: string, id: string): boolean {
+  return (EXTRAS[kind] ?? []).some((extra) => extra.id === id);
+}
+
+// The kinds that ship extras — derived from the registry so a new extra can't
+// dodge the golden's completeness check (builtinViews.golden.test.ts).
+export function kindsWithBuiltinExtras(): string[] {
+  return Object.keys(EXTRAS);
 }
 
 // "Openable chats": hides the brainstorm chats — those whose seed prompt has the
@@ -70,19 +84,21 @@ function runnablePromptsSpec(schema?: MetadataSchema | null): ViewSpec {
   };
 }
 
+// The extras registry — ONE enumeration, which builtinViews, the shipped-id
+// membership check, and the golden's kind coverage all derive from (mirrors the
+// backend BUILTIN_EXTRA_VIEWS registry).
+const EXTRAS: Record<string, { id: string; title: string; spec: (schema?: MetadataSchema | null) => ViewSpec }[]> = {
+  chat: [{ id: `${BUILTIN_EXTRA_PREFIX}chat_openable`, title: "Openable chats", spec: openableChatsSpec }],
+  prompt: [{ id: `${BUILTIN_EXTRA_PREFIX}prompt_runnable`, title: "Runnable prompts", spec: runnablePromptsSpec }],
+};
+
 export function builtinViews(kind: string, schema?: MetadataSchema | null): BuiltinView[] {
   const base: BuiltinView = {
     id: `view_default_${kind}`,
     title: kind === "chat" ? "All chats" : kind === "prompt" ? "All prompts" : "Default view",
     spec: defaultView(kind, schema),
   };
-  if (kind === "chat") {
-    return [base, { id: `${BUILTIN_EXTRA_PREFIX}chat_openable`, title: "Openable chats", spec: openableChatsSpec(schema) }];
-  }
-  if (kind === "prompt") {
-    return [base, { id: `${BUILTIN_EXTRA_PREFIX}prompt_runnable`, title: "Runnable prompts", spec: runnablePromptsSpec(schema) }];
-  }
-  return [base];
+  return [base, ...(EXTRAS[kind] ?? []).map((extra) => ({ id: extra.id, title: extra.title, spec: extra.spec(schema) }))];
 }
 
 // The spec for a built-in view id (default or extra), or null if not built-in.

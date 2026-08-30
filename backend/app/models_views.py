@@ -403,7 +403,8 @@ class SaveViewRequest(BaseModel):
 class UpdateViewUiRequest(BaseModel):
     """Body for the lock-free `PUT /api/views/{id}/ui` (ADR-0036). Carries ONLY
     the fold/ui state — never `spec`/`revision`, so a fold toggle can't 409
-    against a concurrent designer save. For a `view_default_<kind>` id the node
-    is materialized on first write."""
+    against a concurrent designer save. For an app-defined id — a
+    `view_default_<kind>` default or a `view_builtin_*` extra (#1682) — the
+    node is materialized on first write."""
 
     ui: ViewUiState = Field(default_factory=ViewUiState)

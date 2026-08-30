@@ -14,7 +14,7 @@
 
 import { api } from "@/lib/api";
 import { defaultView } from "@/lib/views/evaluateView";
-import { builtinSpecFor, isBuiltinExtraViewId } from "@/lib/views/builtinViews";
+import { builtinSpecFor, isBuiltinExtraViewId, isShippedBuiltinExtraId } from "@/lib/views/builtinViews";
 import type { MetadataSchema, ViewAppearance, ViewNodeSummary, ViewSpec } from "@/lib/types";
 
 const STORAGE_PREFIX = "paneView.selected."; // + kind
@@ -76,8 +76,10 @@ class PaneViewsController {
       const saved = loadSelection(kind);
       // A built-in extra (e.g. "Openable chats") is a valid selection even when
       // no node exists yet — frontend-synthesized (builtinViews) until the first
-      // UI-state write materializes it backend-side (#1682).
-      const valid = saved && ((this.views[kind] ?? []).some((v) => v.id === saved) || isBuiltinExtraViewId(saved));
+      // UI-state write materializes it backend-side (#1682). MEMBERSHIP, not a
+      // prefix test: a retired extra id from an older build must drop back to
+      // the default, not stay selected forever with 422ing writes.
+      const valid = saved && ((this.views[kind] ?? []).some((v) => v.id === saved) || isShippedBuiltinExtraId(kind, saved));
       restored[kind] = valid ? saved : null;
     }
     this.selected = restored;
@@ -114,11 +116,12 @@ class PaneViewsController {
     this.specs = map;
     this.appearances = appearanceMap;
 
-    // Drop any selection that no longer resolves — but keep built-in extras,
-    // which enter the backend spec map only once materialized (#1682) and are
-    // synthesized locally until then.
+    // Drop any selection that no longer resolves — but keep SHIPPED built-in
+    // extras, which enter the backend spec map only once materialized (#1682)
+    // and are synthesized locally until then. Membership, not a prefix test,
+    // so a retired extra id self-corrects to the default here.
     for (const [kind, id] of Object.entries(this.selected)) {
-      if (id && !map.has(id) && !isBuiltinExtraViewId(id)) this.select(kind, null);
+      if (id && !map.has(id) && !isShippedBuiltinExtraId(kind, id)) this.select(kind, null);
     }
   }
 
@@ -158,8 +161,17 @@ class PaneViewsController {
   specFor(kind: string, schema?: MetadataSchema | null): ViewSpec {
     const id = this.selected[kind];
     if (id) {
-      // A saved view's spec, else a built-in extra's synthesized spec.
-      const spec = this.specs.get(id) ?? builtinSpecFor(kind, id, schema);
+      // A built-in extra ALWAYS renders its live synthesis, never a stored
+      // copy: once materialized (#1682) the node also appears in `specs`, but
+      // it exists purely to carry ui state — preferring its frozen spec would
+      // fork behavior between users who touched the view and those who didn't
+      // whenever a release refines an extra (defaults dodge this because
+      // `selected === null` re-derives below; extras are selected by id).
+      if (isBuiltinExtraViewId(id)) {
+        const builtin = builtinSpecFor(kind, id, schema);
+        if (builtin) return builtin;
+      }
+      const spec = this.specs.get(id);
       if (spec) return spec;
     }
     return defaultView(kind, schema);

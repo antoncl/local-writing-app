@@ -209,19 +209,20 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
                     parent="lore:base",
                     fields=[],
                     color="amber",
-                    icon="user",
+                    icon="star",
                 ),
                 allow_existing=True,
             )
         )
 
         character = schema.entry_types["lore:character"]
-        # The overlay is the type's OWN (pre-inheritance) color/icon...
+        # The overlay is the type's OWN (pre-inheritance) color/icon, and beats
+        # the shipped default glyph (lore:character ships `user`, see #1646)...
         self.assertEqual(character.own_color, "amber")
-        self.assertEqual(character.own_icon, "user")
+        self.assertEqual(character.own_icon, "star")
         # ...and wins in the resolved values (own over lore:base's slate-blue).
         self.assertEqual(character.color, "amber")
-        self.assertEqual(character.icon, "user")
+        self.assertEqual(character.icon, "star")
         # Identity is untouched — the shipped declaration was never forked.
         self.assertEqual(character.name, "Character")
         self.assertEqual(character.parent, "lore:base")
@@ -273,16 +274,35 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
                 layer_id=layer_id,
                 entry_type_id="lore:character",
                 entry_type=EntryTypeDefinition(
-                    name="Character", kind="lore", parent="lore:base", fields=[], icon="user"
+                    name="Character", kind="lore", parent="lore:base", fields=[], icon="star"
                 ),
                 allow_existing=True,
             )
         )
 
         character = schema.entry_types["lore:character"]
-        self.assertEqual(character.own_icon, "user")
+        self.assertEqual(character.own_icon, "star")
         # The user's field survived the empty-fields payload.
         self.assertIn("weather", character.fields)
+
+    def test_builtin_types_ship_default_glyphs(self) -> None:
+        # #1646: concrete built-in types ship a starting glyph so they don't
+        # render blank — a per-type default (a glyph tells character from
+        # location, unlike the per-kind color default). `own_icon` is the
+        # type's own declared glyph, so it reads the seed directly.
+        types = self.service.read_metadata_schema().entry_types
+        self.assertEqual(types["lore:character"].own_icon, "user")
+        self.assertEqual(types["lore:location"].own_icon, "map-pin")
+        self.assertEqual(types["manuscript:scene"].own_icon, "feather")
+        self.assertEqual(types["manuscript:act"].own_icon, "stack-2")
+        self.assertEqual(types["plot:plotline"].own_icon, "route")
+        self.assertEqual(types["assistant:assistant"].own_icon, "sparkles")
+        self.assertEqual(types["chat:chat_session"].own_icon, "message-circle")
+        # lore:item is the deliberate catch-all — no single object glyph fits
+        # "any physical object", so it ships blank (a writer sets one per #1644).
+        self.assertIsNone(types["lore:item"].own_icon)
+        # Abstract bases carry no glyph — only the concrete types a writer sees.
+        self.assertIsNone(types["lore:base"].own_icon)
 
     def test_summary_lives_on_parent_not_in_scene_own_fields(self) -> None:
         schema = self.service.read_metadata_schema()

@@ -31,10 +31,10 @@ export const CURATED_ICON_CATEGORIES: IconCategory[] = [
   {
     label: "Objects",
     icons: [
-      "sword", "swords", "key", "lock", "lock-open", "book", "books",
+      "sword", "swords", "key", "lock", "lock-open", "book", "book-2", "books",
       "notebook", "writing-sign", "bookmark", "feather", "brush", "palette",
       "camera", "bell", "gift", "coin", "coins", "diamond", "tools",
-      "hammer", "flask", "bottle", "cup", "briefcase", "bulb",
+      "hammer", "flask", "bottle", "cup", "briefcase", "folder", "cards", "bulb",
     ],
   },
   {
@@ -58,7 +58,8 @@ export const CURATED_ICON_CATEGORIES: IconCategory[] = [
     icons: [
       "tag", "tags", "link", "affiliate", "hash", "pin", "paperclip",
       "quote", "list-check", "list-numbers", "letter-case", "align-left",
-      "toggle-right", "calculator",
+      "toggle-right", "calculator", "stack-2", "layout-grid", "layout-board",
+      "prompt", "arrows-shuffle", "message-circle",
     ],
   },
 ];

@@ -16,6 +16,7 @@ from app.models import (
     MutationSetEntry,
     MutationSetEntryList,
     PromoteLoreEntryRequest,
+    PromotePromptEntryRequest,
     PromotionPlan,
     PromotionTarget,
     PromptEntry,
@@ -203,6 +204,30 @@ def fork_prompt_entry(project: CurrentProject, entry_id: str) -> PromptEntry:
     forking-to-here (see `fork_prompt_entry` in the service)."""
     with translate_errors():
         return project.fork_prompt_entry(entry_id)
+
+
+@router.post("/api/prompts/{entry_id}/promote/preview", response_model=PromotionPlan)
+def preview_prompt_promotion(
+    project: CurrentProject, entry_id: str, request: PromotePromptEntryRequest
+) -> PromotionPlan:
+    """Dry-run promotion plan (ADR-0078 §9) for a prompt: the shared §4
+    metadata partition, the §6 include-closure cascade (or its ★
+    dynamic-include refusal), and the §5 dynamic-reference list. Writes
+    nothing."""
+    with translate_errors():
+        return project.preview_prompt_promotion(entry_id, request.target_layer_id)
+
+
+@router.post("/api/prompts/{entry_id}/promote", response_model=PromptEntry)
+def promote_prompt_entry(
+    project: CurrentProject, entry_id: str, request: PromotePromptEntryRequest
+) -> PromptEntry:
+    """Lift an owned prompt into a declared ancestor project, keeping its id
+    (ADR-0078 §1/§2), cascading its `{% include %}`d snippet closure with it
+    (§6). Runs the same partition `preview` returned; raises if the plan is
+    blocked."""
+    with translate_errors():
+        return project.promote_prompt_entry(entry_id, request.target_layer_id)
 
 
 @router.get("/api/mutation-sets", response_model=MutationSetEntryList)

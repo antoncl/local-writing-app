@@ -225,3 +225,34 @@ def literal_include_names(source: str, env: SandboxedEnvironment) -> list[str]:
                 if isinstance(item, nodes.Const) and isinstance(item.value, str):
                     names.append(item.value)
     return names
+
+
+def has_dynamic_include(source: str, env: SandboxedEnvironment) -> bool:
+    """Whether `source` contains a **dynamically-named** `{% include %}` — one
+    whose target `literal_include_names` cannot see because it is neither a
+    literal string nor a list of literal strings (e.g. `{% include input.x %}`).
+
+    This is the blind spot ADR-0078 §6 flags for promotion: a static
+    include-closure discovery (`literal_include_names`,
+    `_extract_include_edges`) cannot follow a dynamic include, so a prompt
+    that has one must be refused rather than silently promoted with an
+    incomplete closure. A body that fails to parse degrades to "no dynamic
+    include" like `literal_include_names` does — the render path surfaces the
+    real syntax error later.
+    """
+    if "include" not in source:
+        return False
+    try:
+        ast = env.parse(source)
+    except TemplateError:
+        return False
+    for node in ast.find_all(nodes.Include):
+        template = node.template
+        if isinstance(template, nodes.Const):
+            continue
+        if isinstance(template, nodes.List) and all(
+            isinstance(item, nodes.Const) for item in template.items
+        ):
+            continue
+        return True
+    return False

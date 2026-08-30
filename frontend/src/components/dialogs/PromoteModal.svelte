@@ -1,42 +1,71 @@
 <script lang="ts">
-  // Promote a lore entry to an ancestor project (ADR-0078 §2/§9), launched from
-  // the editor's "Promote to…" doc action on an owned lore entry. Self-contained
-  // like DirectoryPickerModal: it fetches the destination roster and the dry-run
-  // plan itself on the closed→open transition, rather than the parent staging
-  // them — there is nothing about "what ancestors exist" or "what would move"
-  // that belongs anywhere but here. The parent only owns the `open` guard (the
-  // entry to promote) and what happens to the pane once the promotion commits
-  // (`onPromoted`), mirroring ValidateModal/AIPolicyModal's split.
+  // Promote a lore entry or a prompt to an ancestor project (ADR-0078 §2/§9,
+  // slices 2+3), launched from the editor's "Promote to…" doc action on an
+  // owned entry. Self-contained like DirectoryPickerModal: it fetches the
+  // destination roster and the dry-run plan itself on the closed→open
+  // transition, rather than the parent staging them — there is nothing about
+  // "what ancestors exist" or "what would move" that belongs anywhere but
+  // here. The parent only owns the `open` guard (the entry + its kind) and
+  // what happens to the pane once the promotion commits (`onPromoted`),
+  // mirroring ValidateModal/AIPolicyModal's split.
   //
-  // Backend errors (409 already-inherited, 400 not-a-declared-ancestor) surface
-  // inline rather than the app-wide error banner — a promotion needs the author
-  // looking at the dialogue that caused it, not a toast that vanishes.
+  // `kind` selects which pair of endpoints this instance dispatches to — lore
+  // and prompt share the same plan shape and dialogue chrome (ADR §9's one
+  // partition function, two entry points), so one component serves both
+  // rather than forking into a near-identical sibling.
+  //
+  // Backend errors (409 already-inherited, 400 not-a-declared-ancestor, or a
+  // slice-3 blocked plan) surface inline rather than the app-wide error
+  // banner — a promotion needs the author looking at the dialogue that caused
+  // it, not a toast that vanishes.
   import { api } from "@/lib/api";
   import Modal from "@/components/dialogs/Modal.svelte";
-  import type { LoreEntry, PromotionPlan, PromotionTarget } from "@/lib/types";
+  import type { LoreEntry, PromptEntry, PromotionPlan, PromotionTarget } from "@/lib/types";
+
+  type PromotableEntry = LoreEntry | PromptEntry;
+  type PromotableKind = "lore" | "prompt";
 
   let {
+    kind,
     open,
     entry,
     onClose,
     onFlush,
     onPromoted,
   }: {
+    // Which pair of promote endpoints to call — the caller (PromoteAction)
+    // already knows the open pane's document kind.
+    kind: PromotableKind;
     open: boolean;
-    // The lore entry being promoted. Only read at the closed→open transition,
-    // like FinalizeRoleplayDialog's `openScene` — the modal owns its own copy
-    // of "what's loading" for the life of one promotion attempt.
-    entry: LoreEntry | null;
+    // The entry being promoted. Only read at the closed→open transition, like
+    // FinalizeRoleplayDialog's `openScene` — the modal owns its own copy of
+    // "what's loading" for the life of one promotion attempt.
+    entry: PromotableEntry | null;
     onClose: () => void;
     // Flush the pane's pending (autosave-debounced) edits before promoting —
     // the promoted file must carry the author's latest words, mirroring
     // FinalizeRoleplayDialog's `onFlush`.
     onFlush?: (entryId: string) => Promise<void>;
     // Called with the now-inherited entry on a successful commit. The parent
-    // owns the pane/roster refresh (editorPanes.applyPromotedLoreEntry), same
-    // division as onFinalized.
-    onPromoted: (entry: LoreEntry) => void;
+    // owns the pane/roster refresh (editorPanes.applyPromoted{Lore,Prompt}Entry),
+    // same division as onFinalized.
+    onPromoted: (entry: PromotableEntry) => void;
   } = $props();
+
+  // The two api calls this instance makes, dispatched by `kind` in one place
+  // rather than branching at every call site. Explicit wrappers (not a bare
+  // `$derived` function reference) so the return type stays `PromotableEntry`
+  // rather than a union of the two distinct signatures.
+  function previewPromotion(entryId: string, targetLayerId: string): Promise<PromotionPlan> {
+    return kind === "lore"
+      ? api.previewLorePromotion(entryId, targetLayerId)
+      : api.previewPromptPromotion(entryId, targetLayerId);
+  }
+  function commitPromotion(entryId: string, targetLayerId: string): Promise<PromotableEntry> {
+    return kind === "lore"
+      ? api.promoteLoreEntry(entryId, targetLayerId)
+      : api.promotePromptEntry(entryId, targetLayerId);
+  }
 
   let targets = $state<PromotionTarget[]>([]);
   let targetsLoading = $state(false);
@@ -95,7 +124,7 @@
     previewError = null;
     plan = null;
     try {
-      plan = await api.previewLorePromotion(entryId, targetLayerId);
+      plan = await previewPromotion(entryId, targetLayerId);
     } catch (err) {
       previewError = err instanceof Error ? err.message : String(err);
     } finally {
@@ -110,12 +139,12 @@
   }
 
   async function confirmPromote(): Promise<void> {
-    if (!entry || !selectedLayerId) return;
+    if (!entry || !selectedLayerId || plan?.blocked_reason) return;
     promoting = true;
     promoteError = null;
     try {
       await onFlush?.(entry.id);
-      const promoted = await api.promoteLoreEntry(entry.id, selectedLayerId);
+      const promoted = await commitPromotion(entry.id, selectedLayerId);
       onPromoted(promoted);
       onClose();
     } catch (err) {
@@ -162,6 +191,12 @@
       {:else if previewError}
         <p class="promote-error">{previewError}</p>
       {:else if plan}
+        {#if plan.blocked_reason}
+          <!-- Slice 3 (ADR-0078 §6): a prompt whose include-closure can't be
+               satisfied at the destination. Shown prominently — the other
+               buckets still render for context, but commit is refused. -->
+          <p class="promote-error">{plan.blocked_reason}</p>
+        {/if}
         <div class="promote-plan">
           <section class="promote-bucket">
             <h3>Moves to {plan.destination.label}</h3>
@@ -197,6 +232,34 @@
               <p class="promote-note">Their field definitions live only here — they reappear once a definition is promoted too.</p>
             </section>
           {/if}
+
+          {#if plan.also_promoted.length > 0}
+            <!-- ADR-0078 §6 (slice 3): the prompt's {% include %}d snippet
+                 closure, cascaded up as a unit. -->
+            <section class="promote-bucket">
+              <h3>Also promoted</h3>
+              <p class="promote-note">A prompt's includes come along with it.</p>
+              <ul>
+                {#each plan.also_promoted as name}
+                  <li><span class="promote-field">{name}</span></li>
+                {/each}
+              </ul>
+            </section>
+          {/if}
+
+          {#if plan.resolves_differently.length > 0}
+            <!-- ADR-0078 §5 (slice 3): dynamic inputs that travel unrewritten
+                 and re-resolve against the destination's scope. -->
+            <section class="promote-bucket">
+              <h3>Resolves differently</h3>
+              <ul>
+                {#each plan.resolves_differently as name}
+                  <li><span class="promote-field">{name}</span></li>
+                {/each}
+              </ul>
+              <p class="promote-note">These re-resolve against the destination once promoted.</p>
+            </section>
+          {/if}
         </div>
       {/if}
     {/if}
@@ -211,7 +274,7 @@
         <button
           type="button"
           class="primary"
-          disabled={!selectedLayerId || !plan || previewLoading || promoting}
+          disabled={!selectedLayerId || !plan || previewLoading || promoting || !!plan?.blocked_reason}
           onclick={confirmPromote}
         >
           {promoting ? "Promoting…" : `Promote to ${selectedTargetLabel}`}

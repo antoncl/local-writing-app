@@ -1048,6 +1048,21 @@ export const api = {
   forkPromptEntry(entryId: string) {
     return request<PromptEntry>(`/prompts/${entryId}/fork`, { method: "POST" });
   },
+  // ADR-0078 §2/§9 slice 3: the prompt counterparts to previewLorePromotion /
+  // promoteLoreEntry — same dry-run/commit shape, plus the §6 include-closure
+  // cascade and §5 dynamic-reference list the plan carries for a prompt.
+  previewPromptPromotion(entryId: string, targetLayerId: string) {
+    return request<PromotionPlan>(`/prompts/${entryId}/promote/preview`, {
+      method: "POST",
+      body: JSON.stringify({ target_layer_id: targetLayerId }),
+    });
+  },
+  promotePromptEntry(entryId: string, targetLayerId: string) {
+    return request<PromptEntry>(`/prompts/${entryId}/promote`, {
+      method: "POST",
+      body: JSON.stringify({ target_layer_id: targetLayerId }),
+    });
+  },
   // The "used by N prompts / M chats" dependency counts for a snippet (ADR-0061
   // §5). Harmless for a non-snippet prompt (nothing includes it → 0/0), so the
   // caller shows the advisory only when a count is non-zero.

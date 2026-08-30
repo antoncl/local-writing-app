@@ -608,9 +608,26 @@ class PromotionPlan(BaseModel):
     # render only below the destination until the definition is itself promoted
     # (ADR-0078 §3/§8) — informational, not acted on in this slice.
     invisible_at_destination: list[str] = Field(default_factory=list)
+    # The hard-dependency closure cascaded up with the node (ADR-0078 §6): a
+    # prompt's `{% include %}`d snippets promoted together. Titles, in id order.
+    # Always empty for lore (no hard dependencies).
+    also_promoted: list[str] = Field(default_factory=list)
+    # Dynamic references that travel and re-resolve against the destination scope
+    # rather than move (ADR-0078 §5): a prompt's `context_pick` / `scene_ref`
+    # inputs, named. Empty for lore (its metadata carries no selector).
+    resolves_differently: list[str] = Field(default_factory=list)
+    # Set when the promotion is REFUSED (ADR-0078 §6): a dynamic `{% include %}`
+    # the cascade cannot follow, or a closure member owned by an intermediate
+    # ancestor that cannot be lifted from this scope. The dialogue shows it and
+    # disables commit; a commit call raises. `None` = the plan is promotable.
+    blocked_reason: str | None = None
 
 
 class PromoteLoreEntryRequest(BaseModel):
+    target_layer_id: str = Field(min_length=1)
+
+
+class PromotePromptEntryRequest(BaseModel):
     target_layer_id: str = Field(min_length=1)
 
 

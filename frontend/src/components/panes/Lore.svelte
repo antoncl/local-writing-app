@@ -12,7 +12,7 @@
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import {
-    promptEntriesWithCommit,
+    committingPromptsFor,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
@@ -28,7 +28,7 @@
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
-  import type { ViewSpec } from "@/lib/types";
+  import type { PromptEntrySummary, ViewSpec } from "@/lib/types";
 
   let {
     entries,
@@ -85,9 +85,11 @@
   let searchQuery = $state("");
 
   // ADR-0046 §6.4: "Brainstorm a new <type>…" — launch the lore brainstorm with
-  // NO entry (create mode), seeding the target entry_type as a hidden input. The
-  // prompt is the same one the entry-pane revise launcher uses (an `extract_to_node`
-  // prompt carrying a `commit`, ADR-0054 §2 / ADR-0065); hidden when no such instance exists
+  // NO entry (create mode), seeding the target entry_type as a hidden input.
+  // Resolution is now PER entry type via `offer_on`, nearest-wins (#1700): each
+  // "Draft <Type>" row resolves its own committing prompt through
+  // `committingPromptsFor`, rather than one prompt picked for the whole menu
+  // with no type-compatibility check. Hidden when no compatible instance exists
   // yet (#606). A temporary home until ADR-0047 contextual actions land.
   const brainstormCtx = $derived({
     metadataSchema: schema,
@@ -96,14 +98,23 @@
     availableScenes: [],
     hiddenPromptIds: $hiddenLibraryStore,
   } satisfies PromptResolutionContext);
-  const brainstormPrompt = $derived(promptEntriesWithCommit(brainstormCtx)[0] ?? null);
 
-  function launchBrainstorm(entryType: string, typeName: string): void {
-    if (!brainstormPrompt) return;
+  // The "Brainstorm new…" menu rows: one per lore type WITH a resolvable
+  // committing prompt (#1700) — a type with no offer_on match drops out instead
+  // of borrowing an unrelated type's prompt.
+  const brainstormChoices = $derived(
+    entryTypeChoicesByKind($metadataSchemaStore, "lore")
+      .map((choice) => ({ choice, prompt: committingPromptsFor(brainstormCtx, choice.id)[0] ?? null }))
+      .filter((entry): entry is { choice: { id: string; name: string }; prompt: PromptEntrySummary } =>
+        entry.prompt !== null,
+      ),
+  );
+
+  function launchBrainstorm(prompt: PromptEntrySummary, entryType: string, typeName: string): void {
     // Name the chat for what it does — "Draft <Type>", matching the menu action —
     // rather than the dual-mode prompt's "Revise entry" title, which reads wrong
     // for a create flow (#695).
-    void chatSessions.openChatFromPromptEntry(brainstormPrompt, { entry_type: entryType }, null, {
+    void chatSessions.openChatFromPromptEntry(prompt, { entry_type: entryType }, null, {
       titleOverride: `Draft ${typeName}`,
     });
   }
@@ -218,13 +229,13 @@
       <p class="muted">No entry types defined.</p>
     {/snippet}
   </NodeList>
-  {#if brainstormPrompt}
+  {#if brainstormChoices.length > 0}
     <span class="row-add-popover-heading">Brainstorm new…</span>
     <NodeList density="dense" isEmpty={false}>
-      {#each entryTypeChoicesByKind($metadataSchemaStore, "lore") as choice (choice.id)}
+      {#each brainstormChoices as { choice, prompt } (choice.id)}
         <NodeRow
           title={`✨ Draft ${choice.name}`}
-          onClick={() => { launchBrainstorm(choice.id, choice.name); close(); }}
+          onClick={() => { launchBrainstorm(prompt, choice.id, choice.name); close(); }}
         />
       {/each}
     </NodeList>

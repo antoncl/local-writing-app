@@ -21,10 +21,10 @@
   import { onMount, tick } from "svelte";
   import { api } from "@/lib/api";
   import {
+    chatPromptPickList,
     effectivePromptInputs,
     entryIdFromPickValue,
     promptDeclaresCommit,
-    promptEntriesForSurface,
     resolutionSceneIdFromInputs,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
@@ -69,6 +69,7 @@
     topmostMatchingAssistant,
   } from "@/lib/chat/assistantScope";
   import {
+    carrySubjectSeeds,
     decodeChatInputDrafts,
     displayInputValues,
     encodeChatInputDrafts,
@@ -448,7 +449,10 @@
     // fills it in from api.aiPreview right before the first user turn ships
     // (deferred render lets the user edit input drafts freely).
     chatSystemPrompt = "";
-    chatInputDrafts = seedInputDraftsFromEntry(entry);
+    // The subject (`entry`/`entry_type`) is chat-level state seeded at launch;
+    // a prompt switch rebinds the prompt but keeps the subject (#1701) — every
+    // committing prompt declares `entry_type` (ADR-0067 Amendment 1).
+    chatInputDrafts = carrySubjectSeeds(chatInputDrafts, seedInputDraftsFromEntry(entry), activePromptEntry, entry);
     await persistActiveChat();
   }
 
@@ -1010,15 +1014,6 @@
     availableScenes: [],
     hiddenPromptIds: $hiddenLibraryStore,
   });
-  // The chat-routed pick list for ChatComposerBar (#1086): conversation prompts,
-  // minus brainstorms (a conversation prompt with a `commit`, ADR-0054 §2 / ADR-0065)
-  // — those launch contextually against a subject via Conversations ＋New, so
-  // free-picking one here would give a Commit button with no target entry.
-  let routedPromptEntries = $derived(
-    promptEntriesForSurface(promptDiscoveryCtx, "conversation").filter(
-      (entry) => !promptDeclaresCommit(promptDiscoveryCtx, entry),
-    ),
-  );
   $effect.pre(() => {
     void maybeLoadChat(scene?.id ?? null);
   });
@@ -1028,6 +1023,22 @@
   let activePromptEntry = $derived(chatPromptEntryId
     ? promptEntries.find((p) => p.id === chatPromptEntryId) ?? null
     : null);
+  // The chat's seeded subject type (#1701): non-empty only when the bound prompt
+  // is a committing one (a plain conversation prompt never has a target type)
+  // AND the launch actually seeded `entry_type`. Drives the pick list below so a
+  // draft chat can switch to another revise prompt for the same subject instead
+  // of losing its target.
+  let chatSubjectEntryType = $derived(
+    activePromptEntry && promptDeclaresCommit(promptDiscoveryCtx, activePromptEntry)
+      ? (chatInputDrafts["entry_type"] ?? "").trim()
+      : "",
+  );
+  // The chat-routed pick list for ChatComposerBar (#1701): a seeded subject offers
+  // the compatible committing prompts (chatPromptPickList → committingPromptsFor);
+  // no subject falls back to the pre-#1701 roster — conversation prompts minus
+  // brainstorms (#1086), since a brainstorm with no target would give a Commit
+  // button with nothing to commit to.
+  let routedPromptEntries = $derived(chatPromptPickList(promptDiscoveryCtx, chatSubjectEntryType));
   // The active prompt's `output` (ADR-0054): routing is `outputHandlerFor(output.handler)`
   // (`PromptOutput` has no `.kind`); a `.commit` marks a brainstorm that extracts to its
   // `entry` target (`.commit.review` = how it's reviewed; WHAT it extracts is authored in the

@@ -27,6 +27,36 @@ export function seedInputDraftsFromEntry(entry: PromptEntrySummary): Record<stri
   return drafts;
 }
 
+// The subject (`entry` / `entry_type`) is chat-level state seeded at launch, not
+// per-prompt state — a prompt switch (#1701) rebinds the prompt but must keep the
+// subject, not reset it to the new prompt's (empty) defaults. For each subject
+// name, `prev`'s value survives into `seeded` iff it is non-empty AND both the
+// outgoing and incoming prompt declare an input of that name with the SAME
+// declared `type` — drafts are stored in the widget's string form, so carrying
+// one across a type change (e.g. a custom prompt storing `entry_type` as
+// something other than plain text) would carry the wrong shape verbatim.
+// `entry_type` is text by contract; `entry` is `context_pick` on the built-ins.
+export function carrySubjectSeeds(
+  prev: Record<string, string>,
+  seeded: Record<string, string>,
+  prevEntry: PromptEntrySummary | null,
+  nextEntry: PromptEntrySummary,
+): Record<string, string> {
+  const out = { ...seeded };
+  if (!prevEntry) return out;
+  const prevInputs = effectivePromptInputs(prevEntry);
+  const nextInputs = effectivePromptInputs(nextEntry);
+  for (const name of ["entry", "entry_type"]) {
+    const prevValue = prev[name];
+    if (!prevValue) continue;
+    const prevType = prevInputs.find((input) => input.name === name)?.type;
+    const nextType = nextInputs.find((input) => input.name === name)?.type;
+    if (!prevType || !nextType || prevType !== nextType) continue;
+    out[name] = prevValue;
+  }
+  return out;
+}
+
 // The node a ＋New launch is about (ADR-0051 S2) — the subject seeded into the
 // prompt's target `entry` input. `kind` is the subject's node kind, one of
 // NodePickerRef's; the FQN prefix of an entry_type IS that kind.

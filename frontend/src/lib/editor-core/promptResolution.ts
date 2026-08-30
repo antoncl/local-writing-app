@@ -14,7 +14,7 @@ import {
   type InlineDestination,
 } from "@/lib/editor-core/outputHandlers";
 import { pickerMembership } from "@/lib/utils/pickerSources";
-import { entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
+import { entryTypeAncestryDistance, entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
 import type {
   LoreEntrySummary,
   MetadataSchema,
@@ -167,6 +167,49 @@ export function finalizePromptRoster(ctx: PromptResolutionContext): PromptEntryS
 // (offer_on + the `conversation` surface), where commit is orthogonal.
 export function promptEntriesWithCommit(ctx: PromptResolutionContext): PromptEntrySummary[] {
   return filterPromptRoster(ctx, (entry) => promptDeclaresCommit(ctx, entry));
+}
+
+// The committing prompts eligible for a subject of `entryType` (#1700/#1701 —
+// this REPLACES `promptEntriesWithCommit(ctx)[0]` as the resolution a caller
+// picks a single prompt from). Filters to prompts whose `offer_on` admits this
+// subject, then ranks nearest-target-wins by ancestry distance (self=0), the
+// same "nearer overrides farther" principle the layered schema uses. Ties
+// (equal distance, or no offer_on info to compare — never reached, offer_on is
+// required to pass the filter) fall to filterPromptRoster's title sort, since
+// Array.sort is stable and the roster arrives title-sorted.
+export function committingPromptsFor(
+  ctx: PromptResolutionContext,
+  entryType: string,
+): PromptEntrySummary[] {
+  const roster = filterPromptRoster(
+    ctx,
+    (entry) => promptDeclaresCommit(ctx, entry) && promptOffersOn(ctx, entry, entryType),
+  );
+  const distanceOf = (entry: PromptEntrySummary): number => {
+    let best = Infinity;
+    for (const target of entry.offer_on ?? []) {
+      const distance = entryTypeAncestryDistance(ctx.metadataSchema, entryType, target);
+      if (distance !== null && distance < best) best = distance;
+    }
+    return best;
+  };
+  return [...roster].sort((a, b) => distanceOf(a) - distanceOf(b));
+}
+
+// The chat composer's "Pick a prompt" roster (#1701). A chat with a seeded
+// subject (`subjectEntryType` non-empty) offers the compatible committing
+// prompts — a draft chat can switch to another revise prompt for the same
+// target instead of being stuck with the one it launched from. A chat with no
+// subject (a plain conversation) falls back to the pre-#1701 behaviour: every
+// `conversation`-surface prompt EXCEPT the committing ones. That exclusion is
+// #1086's — a brainstorm prompt commits to a target node, and a chat with no
+// target would render a "Commit" button with nothing to commit to.
+export function chatPromptPickList(
+  ctx: PromptResolutionContext,
+  subjectEntryType: string,
+): PromptEntrySummary[] {
+  if (subjectEntryType) return committingPromptsFor(ctx, subjectEntryType);
+  return promptEntriesForSurface(ctx, "conversation").filter((entry) => !promptDeclaresCommit(ctx, entry));
 }
 
 export function promptEntryDescription(

@@ -6,6 +6,7 @@ import {
   buildNodeTypeTree,
   coerceStringList,
   computedSpecFor,
+  entryTypeAncestryDistance,
   isMetadataValuePresent,
   kindEntryTypeFqns,
   kindEntryTypeOptions,
@@ -120,6 +121,56 @@ describe("resolveSchemaScope — the Types cascade end-to-end (#729)", () => {
     expect(nullScope.kind).toBe("manuscript");
     expect(nullScope.heading).toBe("Scene Types");
     expect(nullScope.tree).toEqual([]);
+  });
+});
+
+describe("entryTypeAncestryDistance (#1700/#1701 — nearest offer_on wins)", () => {
+  // A three-deep chain so self / parent / grandparent are all distinguishable.
+  const CHAIN_SCHEMA = {
+    version: 1,
+    entry_types: {
+      "lore:base": { name: "Lore", kind: "lore", abstract: true },
+      "lore:character": { name: "Character", kind: "lore", parent: "lore:base" },
+      "lore:hero": { name: "Hero", kind: "lore", parent: "lore:character" },
+      "lore:place": { name: "Place", kind: "lore" },
+    },
+    fields: {},
+  } as unknown as MetadataSchema;
+
+  it("self is distance 0", () => {
+    expect(entryTypeAncestryDistance(CHAIN_SCHEMA, "lore:hero", "lore:hero")).toBe(0);
+  });
+
+  it("direct parent is distance 1", () => {
+    expect(entryTypeAncestryDistance(CHAIN_SCHEMA, "lore:hero", "lore:character")).toBe(1);
+  });
+
+  it("grandparent is distance 2", () => {
+    expect(entryTypeAncestryDistance(CHAIN_SCHEMA, "lore:hero", "lore:base")).toBe(2);
+  });
+
+  it("an unrelated type is null", () => {
+    expect(entryTypeAncestryDistance(CHAIN_SCHEMA, "lore:hero", "lore:place")).toBeNull();
+  });
+
+  it("no schema: exact match is distance 0", () => {
+    expect(entryTypeAncestryDistance(null, "lore:hero", "lore:hero")).toBe(0);
+  });
+
+  it("no schema: mismatch is null", () => {
+    expect(entryTypeAncestryDistance(null, "lore:hero", "lore:character")).toBeNull();
+  });
+
+  it("a malformed cyclic parent chain returns null rather than hanging", () => {
+    const CYCLE_SCHEMA = {
+      version: 1,
+      entry_types: {
+        "lore:a": { name: "A", kind: "lore", parent: "lore:b" },
+        "lore:b": { name: "B", kind: "lore", parent: "lore:a" },
+      },
+      fields: {},
+    } as unknown as MetadataSchema;
+    expect(entryTypeAncestryDistance(CYCLE_SCHEMA, "lore:a", "lore:nope")).toBeNull();
   });
 });
 

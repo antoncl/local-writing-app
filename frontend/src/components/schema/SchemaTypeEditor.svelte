@@ -336,9 +336,12 @@
 
 <div class="pane-content schema-editor">
   {#if schemaTypeReadonly}
+    <!-- A built-in type: its name/structure is system-owned and stays locked,
+         but color and icon persist as a project-layer override (#1644, ADR-0029
+         §A) — same overlay path as this type's field/group edits below. -->
     <div class="schema-target-layer">
       <strong>Scope</strong>
-      <span>System</span>
+      <span>System type · color and icon save to your project</span>
     </div>
   {:else}
     <label>
@@ -367,10 +370,10 @@
   </div>
   <div class="schema-type-color-row">
     <span>Color</span>
-    <!-- Read-only on a built-in type (#1574): Save Type is gated off for those,
-         so an editable picker here is a dead end. The chip still renders the
-         built-in's colour (honest "this is it, but not changeable here"). -->
-    <SwatchPicker bind:value={draftColor} readOnly={schemaTypeReadonly} />
+    <!-- Editable on built-in types too (#1644): the swatch persists as a
+         project-layer overlay (ADR-0029 §A), like this type's field/group
+         overlays — the built-in's shipped declaration is never forked. -->
+    <SwatchPicker bind:value={draftColor} />
     {#if !draftColor && selectedSchemaTypeId}
       {@const inherited = metadataSchema?.entry_types[selectedSchemaTypeId]?.color}
       {#if inherited}
@@ -382,22 +385,20 @@
   </div>
   <!-- Type icon (#316): the mnemonic twin of Color, same author gesture as a
        field's icon. A tile toggles the shared IconPicker; unset falls back to
-       the resolved inherited icon (parent chain), shown dashed. -->
+       the resolved inherited icon (parent chain), shown dashed. Editable on
+       built-in types too (#1644): the icon persists as a project-layer overlay,
+       exactly like the color swatch above. -->
   <div class="schema-type-icon-row">
     <span>Icon</span>
     <div class="sti-icon-anchor">
-      <!-- Read-only on a built-in type (#1574): Save Type is gated off there, so
-           the picker can't persist — the tile shows the icon but doesn't open. -->
       <button
         type="button"
         class="sfr-tile sti-icon-btn"
         class:inheriting={!draftIcon}
-        class:read-only={schemaTypeReadonly}
-        aria-label={schemaTypeReadonly ? "Icon" : "Choose icon"}
-        title={schemaTypeReadonly ? "Icon" : "Choose icon"}
-        disabled={schemaTypeReadonly}
+        aria-label="Choose icon"
+        title="Choose icon"
         bind:this={iconBtnEl}
-        onclick={() => { if (!schemaTypeReadonly) iconPickerOpen = !iconPickerOpen; }}
+        onclick={() => (iconPickerOpen = !iconPickerOpen)}
       >
         <!-- Own icon, else the resolved inherited one; when the type has
              neither, a plus reads as "add an icon" (not a stand-in glyph that
@@ -678,11 +679,13 @@
     </section>
   {/if}
 
-  {#if !schemaTypeReadonly}
-    <div class="button-row">
-      <button type="button" disabled={!schemaTypeLayerId || !draftTypeId.trim() || !draftName.trim()} onclick={submitSaveType}>Save Type</button>
-    </div>
-  {/if}
+  <!-- Save is available on built-in types too (#1644): it persists the color /
+       icon overlay. Name and id stay read-only above, and the backend strips
+       every identity key on write — so this can only ever save the display
+       overlay for a system type, never fork its declaration. -->
+  <div class="button-row">
+    <button type="button" disabled={!schemaTypeLayerId || !draftTypeId.trim() || !draftName.trim()} onclick={submitSaveType}>Save Type</button>
+  </div>
 </div>
 
 <style>
@@ -892,11 +895,6 @@
   .sti-icon-btn:not(:disabled):hover {
     border-color: var(--accent);
     color: var(--accent-strong);
-  }
-  /* Read-only (built-in) types (#1574): the tile is a plain display, not an
-     affordance — no pointer, no accent hover. */
-  .sti-icon-btn.read-only {
-    cursor: default;
   }
   /* Body-portaled + viewport-anchored by `anchoredPopover` (#1573); the action
      owns position/left/top, this carries only the portaled elevation tier so it

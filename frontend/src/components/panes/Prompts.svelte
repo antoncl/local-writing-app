@@ -94,8 +94,8 @@
   // Every NodeList is backed by a view (ADR-0022): the pane hands the whole view
   // (spec + roster + data env) to ViewNodeList, which owns evaluation + grouping.
   // Summaries are EvalNodes as-is — `disposition`/`runnable` arrive stamped in
-  // `computed_metadata` (#1684), and the default view's `show_empty` group level
-  // orders the shelves by the field's declared options. No pane lift.
+  // `computed_metadata` (#1684), and the evaluator orders the shelves by the
+  // field's declared options (ADR-0037 Amendment 3). No pane lift.
   const view = $derived({
     spec: viewSpec,
     universe: visibleEntries,

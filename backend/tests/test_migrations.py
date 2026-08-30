@@ -226,7 +226,7 @@ class DocumentMigrationFrameworkTests(unittest.TestCase):
 
     def test_registry_steps_are_typed_root_or_document(self) -> None:
         # Every registered step is one of the two ADR-0071 shapes — no bare
-        # tuples/functions. (v6 is the registry's first DocumentMigration.)
+        # tuples/functions.
         for step in migrations.MIGRATIONS:
             self.assertIsInstance(step, (RootMigration, DocumentMigration))
 

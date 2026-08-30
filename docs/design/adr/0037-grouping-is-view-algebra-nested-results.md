@@ -84,6 +84,12 @@ alphabetized buckets reads as broken sorting (2026-07-12, Anton). In first-seen 
 interleaved by row order (as the table row above notes), which is expected there. Membership invariant
 unchanged (ADR-0027 §E): `groups` may repeat a node, `nodes` dedupes.
 
+> **Amended by [Amendment 3](#amendment-3--option-carrying-fields-bucket-in-declared-option-order-2026-08-30):**
+> an **option-carrying** field (select / multi_select / a computed field with a select value_type)
+> defaults to **declared-option order**, not first-seen; out-of-vocabulary buckets follow first-seen
+> after the declared ones, and bare rows sink as under `order: "label"`. First-seen remains the rule
+> for fields with no declared options; `order: "label"` still overrides.
+
 > **Amended by [Amendment 2](#amendment-2--manual-sort-honors-the-containment-relations-rank-2026-08-18):**
 > first-seen is meant to *derive* bucket order from the view's sort. Under `manual` sort a
 > containment Nest must derive it from the relation's `rank` (§4) — its input position — which the
@@ -323,6 +329,62 @@ In the implementing commit:
   missing `move` API) and the acts/chapters `{number}` counter (keyed on `scene_id`, which container
   nodes lack) are real defects surfaced alongside this bug, but are **separate issues**, not this
   amendment.
+
+## Amendment 3 — Option-carrying fields bucket in declared-option order (2026-08-30)
+
+**Status: accepted — directed by Anton during the #1684/#1692 review ("only [declared-option
+ordering] is a viable solution"); implemented in PR #1692.** This is §2's deferred "schema order"
+(red-pen point 3: "bucket order first-seen + `order:'label'` opt — no 'schema' order v1") arriving
+as the v2 default.
+
+### The problem
+When the prompt shelves became a real computed `select` field (#1684), shelf **order** needed a
+carrier. First-seen derives order from which rows exist — for a closed five-value vocabulary that
+means "Snippets" can render above "Continue" purely because of the roster's title sort. The interim
+carrier was `show_empty` on the default spec, which orders declared options but drags two problems
+with it: every empty shelf renders (a display change nobody asked for), and the ordering only holds
+for specs that carry the flag — a `view_default_prompt` materialized before the change, or any user
+view grouping on `disposition`, silently loses shelf order, and the designer drops `show_empty` on a
+field toggle with no control to restore it. Ordering and empty-bucket display were conflated in one
+flag.
+
+### The decision
+**A field with declared options buckets in declared-option order by default.** Precisely:
+
+- Applies to any `group_by` level whose resolved field def carries a non-empty `options` list —
+  `select`, `multi_select`, and a `computed` field whose `computed.value_type` is a select
+  (`disposition`, `runnable`, `listed`). The segment carries the option's index
+  (`PathSegment.optionIndex`); `buildLevel` orders those sibling buckets by it.
+- **Out-of-vocabulary** values (a stored value no option declares) bucket normally and follow the
+  declared buckets in first-seen order (`optionIndex: null`).
+- **Bare (missing-value) rows sink** below the ordered buckets — the same rule `order: "label"`
+  adopted (2026-07-12): an out-of-sequence bare row amid deliberately ordered buckets reads as
+  broken sorting.
+- **`order: "label"` still overrides** — the per-level A–Z toggle beats the declared order.
+- Fields with **no options** (entry_type, references, tags, free text) keep first-seen — the view's
+  sort still drives their bucket order, as §2 always said.
+- **`show_empty` is reduced to what its name says**: it *additionally* renders the declared options
+  that have no rows (the curation use-case, #333). It no longer carries ordering — the injected
+  empties land in the same declared order the default now produces. The Assistants default keeps it
+  (an empty Active bucket is that pane's point); the prompt default does not (empty shelves hidden).
+
+The rationale is §2's own: first-seen exists to *derive* bucket order from a meaningful source (the
+view's sort). A declared vocabulary IS a meaningful source — the author ordered those options — and
+deriving from row accidents instead discards it.
+
+### Conformance (amends the normative suite)
+- **Add** anchors: (a) a select level renders declared-option order regardless of row order (rows
+  arriving Soldier-first still bucket Knight, Soldier); (b) an out-of-vocabulary value buckets after
+  the declared ones; (c) a bare row sinks below option-ordered buckets; (d) `order: "label"` on the
+  same level still alphabetizes.
+- Existing §2 anchors survive unchanged: the select-label anchor's first-seen order coincides with
+  declared order; the entry_type first-seen/sort anchor is options-less and keeps first-seen.
+
+### Not in scope / unaffected
+- Nest ordering (Amendment 2), provenance/membership (§6), the pipeline (§5), `show_empty`'s
+  empty-bucket injection, and every options-less field's first-seen rule are untouched.
+- The designer still has no `show_empty` control and drops it on a field toggle (#1693) — now a
+  display-only nuisance rather than an ordering loss.
 
 ## Conformance
 

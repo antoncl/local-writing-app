@@ -62,7 +62,7 @@ const noop = () => {};
 // directly by promptOf(); the schema declares `disposition`/`runnable` as
 // computed fields the way the resolved backend schema does — that is what
 // routes `fieldValue` to `computed_metadata`, and the declared option order is
-// the shelf order `show_empty` renders.
+// the shelf order the evaluator renders by default (ADR-0037 Amendment 3).
 const DISPOSITION_SCHEMA = {
   entry_types: {
     "prompt:base": { name: "Prompt" },
@@ -128,7 +128,7 @@ afterEach(() => {
 });
 
 describe("Prompts pane — disposition shelves (#951/#1684)", () => {
-  it("groups the roster onto the five declared shelves, in declared order", () => {
+  it("groups the roster onto its shelves in declared-option order, empty shelves hidden", () => {
     metadataSchemaStore.set(DISPOSITION_SCHEMA);
     const { container } = render(Prompts, {
       props: {
@@ -149,11 +149,11 @@ describe("Prompts pane — disposition shelves (#951/#1684)", () => {
     const headings = Array.from(container.querySelectorAll(".node-row.group-header")).map((el) =>
       el.querySelector(".node-row-text")?.textContent?.trim(),
     );
-    // `show_empty` (#1684): ALL five declared shelves render in option order —
-    // the empty "Revise prose" shelf included — regardless of input order. The
-    // expectation comes from the vocabulary file, so a shelf reorder fails here
-    // rather than passing against a stale literal.
-    expect(headings).toEqual(DISPOSITIONS);
+    // ADR-0037 Amendment 3: populated shelves render in declared-option order
+    // regardless of input order; an unpopulated shelf ("Revise prose" here)
+    // renders no header. The expectation derives from the vocabulary file, so a
+    // shelf reorder fails here rather than passing against a stale literal.
+    expect(headings).toEqual(DISPOSITIONS.filter((d) => d !== "Revise prose"));
     // The rows themselves still render under their shelves.
     expect(screen.getByText("Continue scene")).toBeInTheDocument();
     expect(screen.getByText("Revise a character")).toBeInTheDocument();

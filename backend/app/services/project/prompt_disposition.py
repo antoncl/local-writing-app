@@ -18,8 +18,10 @@ from app.models.schema import PromptContextStrategy
 # conversation with a commit → Revise entities · no invocation surface at all (a
 # snippet, `finalize_scene`, or an unrecognized handler) → Snippets. The option
 # order in `default_schema.py` follows this tuple and IS the shelf order: the
-# default prompt view groups with `show_empty`, which renders declared options
-# in this sequence. Values double as labels, matching what view predicates store.
+# view evaluator renders an option-carrying field's buckets in declared-option
+# order by default (ADR-0037 Amendment 3), so every view grouping on
+# `disposition` — default, materialized, or user-made — shelves in this
+# sequence. Values double as labels, matching what view predicates store.
 PROMPT_DISPOSITION_CONTINUE = "Continue"
 PROMPT_DISPOSITION_REVISE_PROSE = "Revise prose"
 PROMPT_DISPOSITION_CHAT = "Chat"

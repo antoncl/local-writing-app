@@ -289,15 +289,12 @@ class ViewsMixin:
             # what the prompt does to the document (five buckets), rather than one
             # bucket per sub-type. `disposition` is a resolver-stamped computed
             # field (#1684, `prompts.py::_prompt_computed_metadata`), so this spec
-            # is honest everywhere, not just in the pane. `show_empty` renders the
-            # declared options in definition order — that IS the shelf order, and
-            # it replaces the retired frontend lift's rank pre-clustering.
-            # Mirrors Assistants' `listed`.
-            return ViewSpec(
-                kind=kind,
-                expr=roster,
-                group_by=[ViewGroupByLevel(field="disposition", show_empty=True)],
-            )
+            # is honest everywhere, not just in the pane. Shelf order is the
+            # field's declared option order, which the evaluator renders by
+            # default for option-carrying fields (ADR-0037 Amendment 3) — it
+            # replaced the retired frontend lift's rank pre-clustering, and it
+            # holds for any persisted or duplicated copy of this spec too.
+            return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="disposition")])
         if kind == "assistant":
             # #333. Two changes, both consequences of #332 making priority ONE
             # merged sequence:

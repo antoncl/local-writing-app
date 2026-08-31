@@ -17,6 +17,7 @@ through the chain below and yielding no value is correct, not a gap.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from app.models import MetadataSchema, StructureDocument, StructureNode
@@ -46,6 +47,56 @@ class _ManuscriptOrdinal(StructureVisitor):
         return None
 
 
+def _has_cascade_value(value: Any) -> bool:
+    """A cascade field counts as *set* only with a real value; None and the empty
+    string read as absent (inherit) — the ADR-0079 rule that makes absence the
+    inherited signal."""
+    return value is not None and value != ""
+
+
+class _CascadeResolver(StructureVisitor):
+    """Folds each schema `cascade_fields` id down the manuscript structure,
+    nearest-explicit-wins, stamping `node.resolved_cascade` (ADR-0079). Own value
+    wins; else the nearest ancestor that sets it; else the book (project) default;
+    else unset. Provenance (`source_id` — None for the book default — and `own`)
+    rides along for the inherited marker. The fold is **generic** over
+    cascade_fields; narration-specific reads (an omniscient `pov_mode` ignoring
+    `pov`) are a consumer concern, not baked in here."""
+
+    def __init__(
+        self,
+        cascade_fields: list[str],
+        own_metadata: Callable[[StructureNode], dict[str, Any]],
+        book_default: dict[str, Any],
+    ) -> None:
+        self._fields = cascade_fields
+        self._own = own_metadata
+        self._book_default = book_default
+
+    def visit_node(
+        self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+    ) -> None:
+        node.resolved_cascade = {
+            field_id: self._resolve(field_id, node, ancestors) for field_id in self._fields
+        } or None
+
+    def _resolve(
+        self, field_id: str, node: StructureNode, ancestors: tuple[StructureNode, ...]
+    ) -> dict[str, Any]:
+        own = self._own(node).get(field_id)
+        if _has_cascade_value(own):
+            return {"value": own, "source_id": node.id, "own": True}
+        # ancestors are root-first; the nearest is last.
+        for ancestor in reversed(ancestors):
+            inherited = self._own(ancestor).get(field_id)
+            if _has_cascade_value(inherited):
+                return {"value": inherited, "source_id": ancestor.id, "own": False}
+        book = self._book_default.get(field_id)
+        if _has_cascade_value(book):
+            return {"value": book, "source_id": None, "own": False}
+        return {"value": None, "source_id": None, "own": False}
+
+
 def strip_computed_fields(metadata: dict[str, Any], schema: MetadataSchema) -> dict[str, Any]:
     """Drop the keys `schema` declares as computed fields from a metadata dict
     about to be persisted. Computed values are stamped at read; a stored copy
@@ -64,6 +115,28 @@ def strip_computed_fields(metadata: dict[str, Any], schema: MetadataSchema) -> d
 
 
 class ComputedMetadataMixin:
+    def _stamp_resolved_cascade(
+        self,
+        root_node: StructureNode,
+        cascade_fields: list[str],
+        scene_front: dict[str, tuple[str | None, dict[str, Any]]],
+        book_default: dict[str, Any],
+    ) -> None:
+        """Fold `cascade_fields` down the tree and stamp `resolved_cascade` per node
+        (ADR-0079). Own values come from the pre-built front-matter index — which
+        covers every manuscript node, containers included — so no per-node file read.
+        A no-op when the schema declares no cascade_fields."""
+        if not cascade_fields:
+            return
+
+        def own_metadata(node: StructureNode) -> dict[str, Any]:
+            pair = scene_front.get(node.scene_id) if node.scene_id else None
+            return (pair[1] if pair else {}) or {}
+
+        TreeStructureService.walk(
+            root_node, _CascadeResolver(cascade_fields, own_metadata, book_default)
+        )
+
     def _computed_entry_metadata(
         self,
         body: str,

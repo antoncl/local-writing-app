@@ -30,6 +30,13 @@ class StructureNode(BaseModel):
     # None for non-scene nodes; stripped on write so it never drifts on disk.
     metadata: dict[str, Any] | None = None
     computed_metadata: dict[str, Any] = Field(default_factory=dict)
+    # ADR-0079: for each schema `cascade_fields` id, this node's RESOLVED value
+    # folded down the manuscript structure — own value, else the nearest ancestor
+    # that sets it, else the book (project) default, else unset — with provenance:
+    # `{field_id: {"value", "source_id", "own"}}` (`source_id` None = book default;
+    # `own` True = this node set it). Derived, never authored; stripped on write
+    # like `metadata`. None when the schema declares no cascade_fields.
+    resolved_cascade: dict[str, Any] | None = None
     children: list[StructureNode] = Field(default_factory=list)
 
 

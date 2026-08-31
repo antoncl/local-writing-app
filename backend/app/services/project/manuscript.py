@@ -79,6 +79,16 @@ class ManuscriptMixin:
             metadata = meta if isinstance(meta, dict) else {}
             scene_front[scene_id] = (status, metadata)
         self._inject_structure_computed_metadata(document.root, document.root, schema, scene_front)
+        if schema.cascade_fields:
+            # Narration (and any declared cascade_fields) inherit down the tree
+            # (ADR-0079). Guarded so a project that declares none pays neither the
+            # project-metadata fold nor the extra walk.
+            self._stamp_resolved_cascade(
+                document.root,
+                schema.cascade_fields,
+                scene_front,
+                self._resolved_project_node_metadata(root),
+            )
         return document
 
     def _inject_structure_computed_metadata(

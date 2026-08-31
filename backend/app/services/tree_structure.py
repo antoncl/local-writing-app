@@ -144,6 +144,8 @@ class TreeStructureService:
         self._strip_key_recursively(raw, "status")
         self._strip_key_recursively(raw, "color")
         self._strip_key_recursively(raw, "metadata")
+        # resolved_cascade is a derived fold (ADR-0079), never disk state.
+        self._strip_key_recursively(raw, "resolved_cascade")
         raw = self._rename_leaf_ref_in(raw, "scene_id", self.config.leaf_ref_field)
         text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True)
         self._atomic_write(self.yaml_path, text)

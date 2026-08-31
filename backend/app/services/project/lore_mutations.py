@@ -67,6 +67,7 @@ from app.models import (
 from app.services.project.errors import ProjectServiceError
 from app.services.project.markers import MarkerMixin
 from app.services.project.node_index import NodeIndex
+from app.services.tree_structure import TreeStructureService
 
 MUTATION_MARKER_PATTERN = re.compile(
     r"<!--\s*mutate:entity=(?P<entity>[A-Za-z0-9_-]+);field=(?P<field>[A-Za-z0-9_.-]+);"
@@ -457,15 +458,9 @@ class LoreMutationsMixin(MarkerMixin):
         except ProjectServiceError:
             return {}
         order: dict[str, int] = {}
-
-        def walk(node: Scene) -> None:
-            scene_id = getattr(node, "scene_id", None)
-            if scene_id and scene_id not in order:
-                order[scene_id] = len(order)
-            for child in getattr(node, "children", None) or []:
-                walk(child)
-
-        walk(structure.root)
+        for node in TreeStructureService.collect(structure.root):
+            if node.scene_id and node.scene_id not in order:
+                order[node.scene_id] = len(order)
         return order
 
     def _scene_body_for_scan(self, index: NodeIndex, scene_id: str) -> str | None:

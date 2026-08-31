@@ -170,18 +170,12 @@ class ManuscriptMixin:
 
         descendant_scene_count = 0
         descendant_container_count = 0
+        for n in TreeStructureService.collect(node, skip_root=True):
+            if self._is_leaf_node(n):
+                descendant_scene_count += 1
+            else:
+                descendant_container_count += 1
 
-        def walk(n: StructureNode, is_target: bool) -> None:
-            nonlocal descendant_scene_count, descendant_container_count
-            if not is_target:
-                if self._is_leaf_node(n):
-                    descendant_scene_count += 1
-                else:
-                    descendant_container_count += 1
-            for child in n.children:
-                walk(child, is_target=False)
-
-        walk(node, is_target=True)
         doomed_scene_ids = TreeStructureService.collect_leaf_ids(node)
         backlinks = self._backlinks_to_targets(doomed_scene_ids, exclude_source_ids=doomed_scene_ids)
         return StructureNodeDeletePreview(

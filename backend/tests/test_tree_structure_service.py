@@ -8,6 +8,8 @@ import yaml
 
 from app.models import StructureDocument, StructureNode
 from app.services.tree_structure import (
+    StructureCollector,
+    StructureVisitor,
     TreeConfig,
     TreeStructureError,
     TreeStructureService,
@@ -388,6 +390,104 @@ class TreeStructureServiceTests(unittest.TestCase):
         self.assertTrue(removed)
         self.assertIsNone(TreeStructureService.find_node(doc, "A1"))
         self.assertFalse(TreeStructureService.remove_node_by_id(doc.root, "ghost"))
+
+    # ---- walk / visitor: the one traversal all read-only consumers ride (#493) ----
+
+    def test_walk_is_depth_first_pre_order(self) -> None:
+        doc = self._sample_document()
+        seen: list[str] = []
+
+        class _Recorder(StructureVisitor):
+            def visit_node(
+                self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+            ) -> None:
+                seen.append(node.id)
+
+        TreeStructureService.walk(doc.root, _Recorder())
+        self.assertEqual(seen, ["root", "A", "A1", "A2", "B"])
+
+    def test_walk_passes_root_first_ancestors(self) -> None:
+        doc = self._sample_document()
+        seen: dict[str, list[str]] = {}
+
+        class _Recorder(StructureVisitor):
+            def visit_node(
+                self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+            ) -> None:
+                seen[node.id] = [a.id for a in ancestors]
+
+        TreeStructureService.walk(doc.root, _Recorder())
+        self.assertEqual(seen["root"], [])
+        self.assertEqual(seen["A"], ["root"])
+        self.assertEqual(seen["A1"], ["root", "A"])
+        self.assertEqual(seen["B"], ["root"])
+
+    def test_walk_truthy_return_halts_and_skips_remainder(self) -> None:
+        # Stopping at a container must not visit its children or later siblings.
+        doc = self._sample_document()
+        seen: list[str] = []
+
+        class _StopAtAct(StructureVisitor):
+            def visit_node(
+                self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+            ) -> bool:
+                seen.append(node.id)
+                return node.id == "A"
+
+        TreeStructureService.walk(doc.root, _StopAtAct())
+        self.assertEqual(seen, ["root", "A"])
+
+    def test_collect_includes_start_node_in_reading_order(self) -> None:
+        doc = self._sample_document()
+        self.assertEqual(
+            [n.id for n in TreeStructureService.collect(doc.root)],
+            ["root", "A", "A1", "A2", "B"],
+        )
+
+    def test_collect_skip_root_omits_start_node_only(self) -> None:
+        doc = self._sample_document()
+        self.assertEqual(
+            [n.id for n in TreeStructureService.collect(doc.root, skip_root=True)],
+            ["A", "A1", "A2", "B"],
+        )
+        act = TreeStructureService.find_node(doc, "A")
+        self.assertEqual(
+            [n.id for n in TreeStructureService.collect(act, skip_root=True)],
+            ["A1", "A2"],
+        )
+
+    def test_structure_collector_records_every_node(self) -> None:
+        doc = self._sample_document()
+        collector = StructureCollector()
+        TreeStructureService.walk(doc.root, collector)
+        self.assertEqual(
+            [n.id for n in collector.nodes], ["root", "A", "A1", "A2", "B"]
+        )
+
+    def test_walk_is_leaf_marks_nodes_terminal(self) -> None:
+        # A leaf carrying children (malformed) is still visited, but is_leaf stops
+        # the descent into its subtree — the plot-board layout's guarantee.
+        doc = self._sample_document()
+        a1 = TreeStructureService.find_node(doc, "A1")
+        a1.children.append(
+            StructureNode(id="A1x", type="scene", title="Stray", scene_id="s_a1x")
+        )
+        # Default walk has no leaf notion, so it descends into everything.
+        self.assertIn("A1x", [n.id for n in TreeStructureService.collect(doc.root)])
+
+        seen: list[str] = []
+
+        class _Recorder(StructureVisitor):
+            def visit_node(
+                self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+            ) -> None:
+                seen.append(node.id)
+
+        TreeStructureService.walk(
+            doc.root, _Recorder(), is_leaf=lambda n: n.type == "scene"
+        )
+        self.assertIn("A1", seen)  # the leaf itself is visited
+        self.assertNotIn("A1x", seen)  # its subtree is not descended
 
 
 if __name__ == "__main__":

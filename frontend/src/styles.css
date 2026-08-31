@@ -189,6 +189,19 @@
   --warn: #8a520d;
   --warn-soft: #fff4e6;
   --warn-border: #f0d29a;
+  /* Code-editor syntax highlighting (CodeEditor.svelte / prompt + JSON bodies).
+     CodeMirror's bundled defaultHighlightStyle ships fixed light-oriented token
+     colors that read dark-on-dark in dark mode; these theme tokens replace it so
+     highlighting follows the active theme. A restrained set — the surface is a
+     writing tool, not an IDE. Values chosen for AA contrast on --surface in each
+     theme (keyword=violet, name=accent, string=green, number=amber, comment=quiet
+     grey, punct/delimiters=slate). */
+  --syntax-keyword: #8039b3;
+  --syntax-name: #234e43;
+  --syntax-string: #2f6d43;
+  --syntax-number: #9a5a1a;
+  --syntax-comment: #66746b;
+  --syntax-punct: #566b7a;
   --shadow: rgba(36, 36, 36, 0.06);
   --shadow2: rgba(36, 36, 36, 0.10);
   --shadow-pane: rgba(36, 36, 36, 0.13);
@@ -288,6 +301,14 @@
   --warn: #e6c084;
   --warn-soft: #2c2414;
   --warn-border: #5a4a24;
+  /* Syntax highlighting on the dark side — lifted to read on --surface #1f2522
+     (mirrors the light block; see there for the role of each). */
+  --syntax-keyword: #c9a4ec;
+  --syntax-name: #7cc0a1;
+  --syntax-string: #8ecb9a;
+  --syntax-number: #d6a870;
+  --syntax-comment: #869187;
+  --syntax-punct: #9db0bd;
   --shadow: rgba(0, 0, 0, 0.40);
   --shadow2: rgba(0, 0, 0, 0.50);
   --shadow-pane: rgba(0, 0, 0, 0.55);

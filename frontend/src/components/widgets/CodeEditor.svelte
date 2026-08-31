@@ -7,6 +7,9 @@
   import { json as jsonLang } from "@codemirror/lang-json";
   import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
   import type { CompletionSource } from "@codemirror/autocomplete";
+  // Theme-aware syntax colors that override CodeMirror's light-oriented default
+  // (built once at module load; see codeHighlightStyle.ts for the why).
+  import { codeSyntaxHighlighting } from "./codeHighlightStyle";
 
   let {
     value = $bindable(),
@@ -50,7 +53,7 @@
     ro ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [];
 
   onMount(() => {
-    const extensions = [basicSetup, lintGutter()];
+    const extensions = [basicSetup, codeSyntaxHighlighting, lintGutter()];
     if (language === "jinja2") {
       const jinjaLanguage = StreamLanguage.define(jinja2);
       extensions.push(jinjaLanguage);

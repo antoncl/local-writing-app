@@ -115,6 +115,91 @@ class NarrationCascadeIntegrationTests(MetadataValidationBase):
     def _scene_node(self, root: StructureNode, scene_id: str) -> StructureNode:
         return next(n for n in TreeStructureService.collect(root) if n.scene_id == scene_id)
 
+    def _set_pov_mode(self, scene_id: str, entry_type: str, value: str) -> None:
+        s = self.service.read_scene(scene_id)
+        self.service.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=s.title,
+                body=s.body,
+                base_revision=s.revision,
+                entry_type=entry_type,
+                metadata={**s.metadata, "pov_mode": value},
+            ),
+        )
+
+    def _act_with_pov(self, value: str) -> StructureNode:
+        structure = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+        )
+        act = next(
+            n for n in TreeStructureService.collect(structure.root) if n.type == "manuscript:act"
+        )
+        self._set_pov_mode(act.scene_id, "manuscript:act", value)
+        return act
+
+    def test_freeze_pins_narration_on_first_prose(self) -> None:
+        # The core §4 guarantee: writing prose freezes the inherited narration onto
+        # the scene, so a later ancestor change no longer moves it — while an
+        # unwritten sibling still follows.
+        act_node = self._act_with_pov("third_limited")
+        self.service.create_scene(self._make_create_scene("Written", parent_id=act_node.id))
+        self.service.create_scene(self._make_create_scene("Unwritten", parent_id=act_node.id))
+
+        root = self.service.read_structure().root
+        written = next(n for n in TreeStructureService.collect(root) if n.title == "Written")
+
+        # Write prose into 'Written' (no explicit pov_mode) → freezes the act's value.
+        wscene = self.service.read_scene(written.scene_id)
+        self.service.save_scene(
+            written.scene_id,
+            SaveSceneRequest(title=wscene.title, body="First prose.", base_revision=wscene.revision),
+        )
+        # Now move the act's pov_mode.
+        self._set_pov_mode(act_node.scene_id, "manuscript:act", "third_omniscient")
+
+        root = self.service.read_structure().root
+        written = next(n for n in TreeStructureService.collect(root) if n.title == "Written")
+        unwritten = next(n for n in TreeStructureService.collect(root) if n.title == "Unwritten")
+        # Written scene keeps the frozen value (now its own); unwritten follows the act.
+        self.assertEqual(written.resolved_cascade["pov_mode"]["value"], "third_limited")
+        self.assertTrue(written.resolved_cascade["pov_mode"]["own"])
+        self.assertEqual(unwritten.resolved_cascade["pov_mode"]["value"], "third_omniscient")
+        self.assertFalse(unwritten.resolved_cascade["pov_mode"]["own"])
+
+    def test_freeze_does_not_overwrite_an_explicit_own_value(self) -> None:
+        # Writing prose while explicitly setting a different pov_mode keeps the
+        # author's choice — the freeze is setdefault, not overwrite.
+        act_node = self._act_with_pov("third_limited")
+        self.service.create_scene(self._make_create_scene("S", parent_id=act_node.id))
+        scene_node = next(
+            n for n in TreeStructureService.collect(self.service.read_structure().root)
+            if n.type == "manuscript:scene"
+        )
+        s = self.service.read_scene(scene_node.scene_id)
+        self.service.save_scene(
+            scene_node.scene_id,
+            SaveSceneRequest(
+                title=s.title, body="Prose.", base_revision=s.revision, metadata={"pov_mode": "first"}
+            ),
+        )
+        scene = next(
+            n for n in TreeStructureService.collect(self.service.read_structure().root)
+            if n.type == "manuscript:scene"
+        )
+        self.assertEqual(scene.resolved_cascade["pov_mode"]["value"], "first")
+        self.assertTrue(scene.resolved_cascade["pov_mode"]["own"])
+
+    def test_empty_scene_is_not_frozen(self) -> None:
+        # A scene with no prose keeps inheriting — no premature freeze.
+        act_node = self._act_with_pov("third_limited")
+        self.service.create_scene(self._make_create_scene("S", parent_id=act_node.id))
+        root = self.service.read_structure().root
+        act = next(n for n in TreeStructureService.collect(root) if n.type == "manuscript:act")
+        scene = next(n for n in act.children if n.type == "manuscript:scene")
+        self.assertFalse(scene.resolved_cascade["pov_mode"]["own"])
+        self.assertEqual(scene.resolved_cascade["pov_mode"]["source_id"], act.id)
+
     def test_read_structure_stamps_own_narration(self) -> None:
         scene = self.service.read_scene(self.scene_id)
         self.service.save_scene(

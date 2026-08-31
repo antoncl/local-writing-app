@@ -513,13 +513,34 @@ class ManuscriptMixin:
             source_layer_label=index_entry.source_layer_label if index_entry else "",
         )
 
+    def _freeze_cascade_on_first_prose(
+        self, root: Path, node_id: str, metadata: dict[str, Any], cascade_fields: list[str]
+    ) -> None:
+        """Snapshot the scene's INHERITED cascade values onto its own metadata the
+        first time prose appears (ADR-0079 §4), so a later ancestor change never
+        rewrites the narration the finished prose was authored under. Only inherited
+        fields are frozen; a field the scene already sets is left untouched
+        (`setdefault`), and an unset field (no ancestor, no book default) freezes to
+        nothing — it was never a choice the prose committed to."""
+        structure = self._read_structure(root)
+        scene_node = TreeStructureService.find_by_leaf_ref(structure, node_id)
+        resolved = (scene_node.resolved_cascade or {}) if scene_node else {}
+        for field_id in cascade_fields:
+            info = resolved.get(field_id) or {}
+            value = info.get("value")
+            if value is not None and not info.get("own"):
+                metadata.setdefault(field_id, value)
+
     def save_scene(self, scene_id: str, request: SaveSceneRequest) -> Scene:
         # Captured once and passed down: a capture is a write, so this unit of
         # work resolves its scope here rather than letting the snapshot store
         # read ambient state (ADR-0045).
         root = self._require_project()
         path = self._path_for_node_id(scene_id, "manuscript")
-        front_matter = self._read_front_matter_only(path, strict=True)
+        # The prior body rides along (not front-matter-only): the freeze below fires
+        # on the empty→non-empty transition (ADR-0079 §4), and the snapshot capture
+        # wants the pre-save state anyway.
+        front_matter, prior_body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
         current_revision = self._revision(path)
         if request.base_revision and request.base_revision != current_revision:
@@ -535,6 +556,8 @@ class ManuscriptMixin:
         schema = self.read_metadata_schema()
         metadata = self._normalise_metadata(request.metadata, path)
         metadata = self._canonicalise_metadata_tags(metadata, schema, kind="manuscript", entry_type=request.entry_type)
+        if schema.cascade_fields and not prior_body.strip() and request.body.strip():
+            self._freeze_cascade_on_first_prose(root, node_id, metadata, schema.cascade_fields)
 
         scene = Scene(
             id=node_id,

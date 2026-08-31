@@ -524,6 +524,82 @@ def test_tag_pick_lore_reaches_the_send_lore_tiers_end_to_end(tmp_path, monkeypa
     assert "Cassini" not in lore_block
 
 
+def test_relevant_lore_snippet_places_a_picked_entry(tmp_path, monkeypatch):
+    # #1725: the shipped "Relevant lore" snippet, included in a prompt, drives the
+    # standard lore path — the author's pick lands in the send-path lore block the
+    # model actually receives (not merely used_node_ids).
+    monkeypatch.setattr(
+        "app.services.machine_settings.config_path",
+        lambda: tmp_path / "machine_settings.yaml",
+    )
+    from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+    from app.services.ai.preview import PreviewRequest, build_preview
+    from app.services.project_service import ProjectService
+
+    service = ProjectService.created_at(tmp_path / "project", "Lore picks")
+    entry = service.create_lore_entry(
+        CreateLoreEntryRequest(title="Mirena", entry_type="lore:character")
+    )
+    entry = service.save_lore_entry(
+        entry.id,
+        SaveLoreEntryRequest(
+            title="Mirena",
+            body="A duelist who never draws first.",
+            base_revision=entry.revision,
+            entry_type="lore:character",
+            metadata={},
+        ),
+    )
+    picks = json.dumps([{"id": entry.id, "kind": "lore", "title": "Mirena"}])
+    rendered, _ = build_preview(
+        service,
+        PreviewRequest(
+            template_source='{% role "system" %}{% include "Relevant lore" %}{% endrole %}',
+            target_scene_id="",
+            session_id=None,
+            inputs={"lore": picks},
+            text_before="",
+            text_after="",
+            commit=False,
+        ),
+    )
+    assert rendered.lore_invoked is True
+    assert rendered.used_node_ids == [entry.id]
+    lore_block = (rendered.send_lore_stable or "") + (rendered.send_lore_volatile or "")
+    assert "Mirena" in lore_block
+    assert "A duelist who never draws first." in lore_block
+
+
+def test_relevant_lore_snippet_is_inert_without_a_pick(tmp_path, monkeypatch):
+    # #1725: with nothing picked — and no `lore` key in inputs at all — the snippet
+    # is completely inert. The `is defined` guard holds under StrictUndefined, so it
+    # neither raises nor invokes lore; the surrounding prompt is unchanged.
+    monkeypatch.setattr(
+        "app.services.machine_settings.config_path",
+        lambda: tmp_path / "machine_settings.yaml",
+    )
+    from app.services.ai.preview import PreviewRequest, build_preview
+    from app.services.project_service import ProjectService
+
+    service = ProjectService.created_at(tmp_path / "project", "Lore picks")
+    rendered, _ = build_preview(
+        service,
+        PreviewRequest(
+            template_source='{% role "system" %}before{% include "Relevant lore" %}after{% endrole %}',
+            target_scene_id="",
+            session_id=None,
+            inputs={},
+            text_before="",
+            text_after="",
+            commit=False,
+        ),
+    )
+    text = "".join(m.text for m in rendered.messages)
+    assert "before" in text and "after" in text
+    assert rendered.lore_invoked is False
+    assert rendered.used_node_ids == []
+
+
 def test_expand_container_picks_skips_structure_read_for_scene_only_picks():
     # The perf gate (the preview re-renders on a debounce): a prompt that picks
     # only scenes (each tagged manuscript:scene) never loads the structure.

@@ -37,6 +37,8 @@ Reason from the board below. Each plotline lists the beats it wants — the requ
 
 {{ plot_context() }}
 
+{% include "Relevant lore" %}
+
 ## The plotline under revision: {{ e.title }}
 {% if e.body %}
 {{ e.body }}

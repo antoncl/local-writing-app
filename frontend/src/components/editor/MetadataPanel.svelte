@@ -298,13 +298,25 @@
   // axes never share a node kind (a manuscript node is never layer-inherited), so
   // one treatment reads cleanly, the per-field source label saying whence.
   const cascadeFieldIds = $derived(metadataSchema.cascade_fields ?? []);
+  // pov_mode values with no viewpoint character (ADR-0079) — mirrors the backend
+  // narration gate (`services/project/narration.py`) so the rail and the model
+  // see the same effective POV.
+  const NO_CHARACTER_MODES = ["third_omniscient", "third_objective"];
+  function isCascadeField(fieldId: string): boolean {
+    return cascadeFieldIds.includes(fieldId);
+  }
   function cascadeInfo(fieldId: string): ResolvedCascadeField | null {
-    if (!cascadeFieldIds.includes(fieldId)) return null;
+    if (!isCascadeField(fieldId)) return null;
     return resolvedCascade?.[fieldId] ?? null;
   }
   function isCascadeInherited(fieldId: string): boolean {
     const info = cascadeInfo(fieldId);
-    return info != null && !info.own && info.value != null && info.value !== "";
+    if (info == null || info.own || info.value == null || info.value === "") return false;
+    // An omniscient / objective mode has no viewpoint character — don't surface an
+    // inherited `pov` the mode makes moot (the rail twin of resolved_narration's gate).
+    if (fieldId === "pov" && NO_CHARACTER_MODES.includes(String(resolvedCascade?.pov_mode?.value)))
+      return false;
+    return true;
   }
   function cascadeSourceLabel(fieldId: string): string {
     const info = cascadeInfo(fieldId);
@@ -527,14 +539,16 @@
             <button
               type="button"
               class="fr-icon fr-icon-reset"
-              title={defaultHint(fieldId)
-                ? `Set here — reset ${fieldLabel} to its default (${defaultHint(fieldId)})`
-                : `Set here — clear ${fieldLabel} (revert to default)`}
-              aria-label={`Reset ${fieldLabel} to default`}
+              title={isCascadeField(fieldId)
+                ? `Set here — reset ${fieldLabel} to the value it inherits`
+                : defaultHint(fieldId)
+                  ? `Set here — reset ${fieldLabel} to its default (${defaultHint(fieldId)})`
+                  : `Set here — clear ${fieldLabel} (revert to default)`}
+              aria-label={isCascadeField(fieldId) ? `Reset ${fieldLabel} to inherited` : `Reset ${fieldLabel} to default`}
               onclick={() => clearField(fieldId)}
             >
               <i class={fieldIconClass(field)} aria-hidden="true"></i>
-              <span class="fr-reset-chip">Reset to default</span>
+              <span class="fr-reset-chip">{isCascadeField(fieldId) ? "Reset to inherited" : "Reset to default"}</span>
             </button>
           {:else}
             <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>

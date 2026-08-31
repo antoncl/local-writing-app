@@ -113,7 +113,13 @@
       "name": "pov",
       "kind": "helper",
       "signature": "pov(scene)",
-      "summary": "The scene's POV character (`lore:character`) or `None`."
+      "summary": "The scene's POV character (`lore:character`) or `None` — the scene's OWN `pov` field. For the value a scene *inherits*, use `resolved_narration`."
+    },
+    {
+      "name": "resolved_narration",
+      "kind": "helper",
+      "signature": "resolved_narration(scene)",
+      "summary": "The scene's **effective** narration folded down the manuscript structure (ADR-0079): `{mode, character}`. Unlike `pov(scene)`, this resolves inheritance — a scene inheriting its POV from its act or the book reports that value — and drops `character` for `third_omniscient` / `third_objective` modes. `character` is a `lore:character` node (so `resolved_narration(scene).character.title` works) or `None`; `mode` is the `pov_mode` value or `None`."
     },
     {
       "name": "roleplay_beats",

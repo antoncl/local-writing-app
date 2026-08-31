@@ -37,6 +37,8 @@ from app.services.ai.field_contract import FieldContract
 from app.services.ai.plot_prompt_context import render_plot_context
 from app.services.ai.sessions import AISession
 from app.services.error_log import append_error_line
+from app.services.project.narration import resolved_narration as _resolve_narration_gate
+from app.services.tree_structure import TreeStructureService
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
@@ -517,6 +519,7 @@ def register_helpers(
 
     env.globals["last_words"] = last_words
     env.globals["pov"] = lambda scene: _pov(project, schema, scene)
+    env.globals["resolved_narration"] = lambda scene: _resolved_narration(project, schema, scene)
     env.globals["story_so_far"] = lambda scene: _story_so_far(project, scene)
 
     # ADR-0057 §2 + docs/design/context-caching.md §4: the gate-only declaration.
@@ -730,6 +733,39 @@ def _pov(
     if not _is_lore_id(raw):
         return None
     return EntryRef(project, schema, raw)
+
+
+# ----- `resolved_narration(scene)` ----------------------------------------
+
+
+def _resolved_narration(project: ProjectService, schema: Any, scene: Any) -> dict[str, Any]:
+    """The scene's EFFECTIVE narration folded down the manuscript structure
+    (ADR-0079): `{"mode", "character"}`. Unlike `pov(scene)` (the scene's OWN pov
+    field), this resolves inheritance — a scene that inherits its POV from an act
+    or the book reports that value here — and applies the mode-gates-character
+    rule (an omniscient / objective mode has no character). `character` is an
+    EntryRef when it resolves to a lore id, so `resolved_narration(scene).character.title`
+    works; `mode` is the raw `pov_mode` value (or None).
+
+    The fold lives on `StructureNode.resolved_cascade`, stamped by `read_structure`
+    — the same access `story_so_far` uses — so no `read_scene` change is needed.
+    """
+    target_id = _attr_or_item(scene, "id")
+    node = None
+    if target_id:
+        try:
+            structure = project.read_structure()
+            node = TreeStructureService.find_by_leaf_ref(structure, target_id)
+        except Exception:  # noqa: BLE001 — a missing/malformed tree must not 500 a render
+            node = None
+    narration = _resolve_narration_gate(node.resolved_cascade if node else None)
+    character_id = narration["character"]
+    character = (
+        EntryRef(project, schema, character_id)
+        if isinstance(character_id, str) and _is_lore_id(character_id)
+        else None
+    )
+    return {"mode": narration["mode"], "character": character}
 
 
 # ----- `story_so_far(scene)` ----------------------------------------------

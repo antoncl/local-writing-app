@@ -298,6 +298,63 @@ class PovHelperTests(_HelperFixtureBase):
         self.assertEqual(out.messages[0].text, "no POV")
 
 
+class ResolvedNarrationHelperTests(_HelperFixtureBase):
+    def test_gate_drops_character_for_no_character_modes(self) -> None:
+        from app.services.project.narration import resolved_narration
+
+        # A character-bearing mode keeps the resolved character.
+        rc = {"pov_mode": {"value": "third_limited"}, "pov": {"value": "char_x"}}
+        self.assertEqual(resolved_narration(rc), {"mode": "third_limited", "character": "char_x"})
+        # Omniscient / objective have no viewpoint character — dropped.
+        for mode in ("third_omniscient", "third_objective"):
+            rc = {"pov_mode": {"value": mode}, "pov": {"value": "char_x"}}
+            self.assertEqual(resolved_narration(rc), {"mode": mode, "character": None})
+        # Unset all the way down → both None (never raises).
+        self.assertEqual(resolved_narration(None), {"mode": None, "character": None})
+        self.assertEqual(resolved_narration({}), {"mode": None, "character": None})
+
+    def test_resolved_narration_global_folds_to_the_character(self) -> None:
+        # The global is registered and resolves the scene's POV off resolved_cascade
+        # (scene_two owns pov=Honor; mode unset, so not gated).
+        scene = self.service.read_scene(self.scene_two_node.scene_id)
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}POV: {{ resolved_narration(scene).character.title }}{% endrole %}',
+            context={"scene": scene},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, "POV: Honor Harrington")
+
+    def test_gate_is_applied_through_the_global(self) -> None:
+        # An omniscient scene: the global drops the character (the gate runs INSIDE
+        # the helper, not just in the pure function), while `pov(scene)` — the raw
+        # own field — still returns it.
+        from app.models import SaveSceneRequest
+
+        scene = self.service.read_scene(self.scene_two_node.scene_id)
+        self.service.save_scene(
+            scene.id,
+            SaveSceneRequest(
+                title=scene.title,
+                body=scene.body,
+                base_revision=scene.revision,
+                metadata={**scene.metadata, "pov_mode": "third_omniscient"},
+            ),
+        )
+        scene = self.service.read_scene(self.scene_two_node.scene_id)
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}'
+            "narration=[{% if resolved_narration(scene).character %}"
+            "{{ resolved_narration(scene).character.title }}{% else %}none{% endif %}] "
+            "own=[{{ pov(scene).title }}]"
+            "{% endrole %}",
+            context={"scene": scene},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, "narration=[none] own=[Honor Harrington]")
+
+
 class ScenesBeforeHelperTests(_HelperFixtureBase):
     def test_collects_summaries_of_prior_scenes_only(self) -> None:
         scene_two = self.service.read_scene(self.scene_two_node.scene_id)

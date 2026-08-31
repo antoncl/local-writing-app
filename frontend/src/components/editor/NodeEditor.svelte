@@ -738,6 +738,13 @@
   // so color flows through the generic rail loop like any field and renders at
   // its display_order slot via MetadataPanel's `type === "color"` branch.
   let metadataFieldIds = $derived((metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()])?.fields ?? []);
+  // ADR-0079: this node's resolved narration cascade, looked up client-side from
+  // the manuscript tree the rail already holds (no read_scene change). A manuscript
+  // node's backing-file id IS its scene_id, so one lookup serves scenes and
+  // act/chapter containers alike.
+  let resolvedCascade = $derived(
+    scene?.id && structure ? (findNodeBySceneId(structure.root, scene.id)?.resolved_cascade ?? null) : null,
+  );
   let hasBody = $derived(bodyShape !== "none");
   $effect.pre(() => {
     if (titleReload && titleReload.token !== lastTitleReloadToken) {
@@ -797,6 +804,7 @@
       onCustomData={() => onCustomData?.({ entryType, kind: documentKind })}
       onNavigate={(payload) => onNavigate?.(payload)}
       onResetField={documentKind === "lore" ? onResetField : undefined}
+      resolvedCascade={resolvedCascade}
     />
     {#key scene?.id ?? ""}
       <BacklinksPanel

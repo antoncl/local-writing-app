@@ -1,5 +1,5 @@
 ---
-id: builtin-diagnose-plot
+id: prompt_a5ccb80a83
 title: Diagnose plot
 entry_type: prompt:general
 ---

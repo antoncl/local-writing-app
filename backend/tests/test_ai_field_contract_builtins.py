@@ -20,6 +20,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from _builtins import builtin_prompt_id
 from project_fixtures import open_test_project
 
 from app.models import (
@@ -72,13 +73,16 @@ class FieldContractBuiltinsTests(unittest.TestCase):
 
     # --- summarize-scene: the filtered case (only `summary`) ---
     def test_summarize_scene_registers_only_summary(self) -> None:
-        stored = self._stored("builtin-summarize-scene", {"entry": self._scene_id()})
+        stored = self._stored(
+            builtin_prompt_id(self.service, "Summarize scene"), {"entry": self._scene_id()}
+        )
         self.assertEqual([f["id"] for f in stored], ["summary"])
 
     # --- revise-entry: the FULL proposable set, including body, both branches ---
     def test_revise_entry_create_registers_full_proposable_set(self) -> None:
         stored = self._stored(
-            "builtin-revise-entry", {"entry": "", "entry_type": "lore:character"}
+            builtin_prompt_id(self.service, "Revise entry"),
+            {"entry": "", "entry_type": "lore:character"},
         )
         ids = {f["id"] for f in stored}
         self.assertEqual(ids, self._proposable_ids("lore:character"))
@@ -88,7 +92,10 @@ class FieldContractBuiltinsTests(unittest.TestCase):
         note = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Alderman Vane", entry_type="lore:note")
         )
-        stored = self._stored("builtin-revise-entry", {"entry": note.id, "entry_type": ""})
+        stored = self._stored(
+            builtin_prompt_id(self.service, "Revise entry"),
+            {"entry": note.id, "entry_type": ""},
+        )
         ids = {f["id"] for f in stored}
         self.assertEqual(ids, self._proposable_ids("lore:note"))
         self.assertIn("body", ids)
@@ -96,14 +103,18 @@ class FieldContractBuiltinsTests(unittest.TestCase):
     # --- the two plot revises: same generic filter, real subjects ---
     def test_revise_plot_card_registers_full_proposable_set(self) -> None:
         card = self.service.create_card(CreateCardRequest(title="The Ambush"))
-        stored = self._stored("builtin-revise-plot-card", {"entry": card.id})
+        stored = self._stored(
+            builtin_prompt_id(self.service, "Revise plot card"), {"entry": card.id}
+        )
         ids = {f["id"] for f in stored}
         self.assertEqual(ids, self._proposable_ids("plot:card"))
         self.assertIn("body", ids)
 
     def test_revise_plotline_registers_full_proposable_set(self) -> None:
         line = self.service.create_plotline(CreatePlotlineRequest(title="Romance"))
-        stored = self._stored("builtin-revise-plotline", {"entry": line.id})
+        stored = self._stored(
+            builtin_prompt_id(self.service, "Revise plotline"), {"entry": line.id}
+        )
         ids = {f["id"] for f in stored}
         self.assertEqual(ids, self._proposable_ids("plot:plotline"))
         self.assertIn("body", ids)

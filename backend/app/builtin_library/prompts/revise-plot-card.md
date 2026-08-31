@@ -1,5 +1,5 @@
 ---
-id: builtin-revise-plot-card
+id: prompt_a2622629ca
 title: Revise plot card
 entry_type: prompt:general
 offer_on:

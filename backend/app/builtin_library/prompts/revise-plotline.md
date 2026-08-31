@@ -1,5 +1,5 @@
 ---
-id: builtin-revise-plotline
+id: prompt_0a3136cfd9
 title: Revise plotline
 entry_type: prompt:general
 offer_on:

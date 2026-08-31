@@ -1,5 +1,5 @@
 ---
-id: builtin-prose-settings
+id: prompt_1f26e1b2dc
 title: Prose generation settings
 entry_type: prompt:snippet
 ---
@@ -8,13 +8,13 @@ entry_type: prompt:snippet
   narrative-craft settings — POV + tense — that govern how manuscript PROSE
   reads. Include it INSIDE a {% role %} block, ONLY in prompts that generate
   manuscript prose destined for a scene:
-      {% include "builtin-prose-settings" %}
+      {% include "Prose generation settings" %}
   Each setting resolves scene-first: a scene's own pov_mode / tense wins, and
   falls back to the project's when the scene leaves it blank. Kept OUT of
   chat / roleplay and metadata-field brainstorms (revise-entry) on purpose: a
   first-person, present-tense manuscript must not push a character's descriptive
   fields — or a chat reply — into first person. The general facts (language,
-  spelling, units, …) live in `builtin-project-settings`. Empty settings are
+  spelling, units, …) live in `Project settings`. Empty settings are
   omitted, so the block disappears when nothing is set.
 #}
 {%- if project is defined and project and project.metadata -%}

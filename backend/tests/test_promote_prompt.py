@@ -17,6 +17,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from _builtins import builtin_prompt_id
 from layer_fixtures import declare_full_chain
 
 from app.services.project.errors import ProjectServiceError
@@ -158,14 +159,15 @@ class PromotePromptTests(unittest.TestCase):
         # not an unpromotable intermediate ancestor. Regression for the raw-
         # layer-id block ("... is owned by <id> and can't be lifted from here").
         self._write_ancestor_prompt(
-            self.root, "narration", "Narration conventions", body='{% include "builtin-project-settings" %}\n'
+            self.root, "narration", "Narration conventions", body='{% include "Project settings" %}\n'
         )
 
         # Fixture soundness: the Library include resolves to a real edge.
         index = self.service._build_node_index()
+        project_settings_id = builtin_prompt_id(self.service, "Project settings")
         self.assertTrue(
             any(
-                edge.dst == "builtin-project-settings" and edge.field_id == INCLUDE_FIELD_ID
+                edge.dst == project_settings_id and edge.field_id == INCLUDE_FIELD_ID
                 for edge in index.edges_by_src.get("narration", [])
             )
         )

@@ -1,5 +1,5 @@
 ---
-id: builtin-revise-entry
+id: prompt_cb76611de7
 title: Revise entry
 entry_type: prompt:general
 offer_on:
@@ -67,5 +67,5 @@ The {{ type_name(draft_type) }} has these fields to develop:
    always-in-context) is selected and placed by the backend; use_lore() just
    turns that on for this prompt. #}
 {{ use_lore() }}
-{% include "builtin-project-settings" %}
+{% include "Project settings" %}
 {% endrole %}

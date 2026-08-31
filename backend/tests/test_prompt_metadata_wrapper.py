@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from _builtins import builtin_prompt_id
 from project_fixtures import open_test_project
 
 from app.models import SavePromptEntryRequest
@@ -83,7 +84,7 @@ class PromptMetadataWrapperTests(unittest.TestCase):
         can't seed from a deleted type. The shipped built-in Library node instead
         declares the two inputs itself, in its own front matter, and a clone
         carries them across (ADR-0049 §7)."""
-        entry = self.service.read_prompt_entry("builtin-revise-entry")
+        entry = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Revise entry"))
         inputs = {i.name: i for i in entry.inputs}
         self.assertEqual(list(inputs), ["entry", "entry_type"])
         self.assertEqual(inputs["entry"].type, "context_pick")

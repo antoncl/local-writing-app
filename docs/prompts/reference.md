@@ -79,7 +79,7 @@ Standard Jinja filters (`join`, `length`, `default`, …) work as usual.
 | --- | --- |
 | `{% role "system"\|"user"\|"assistant" %}…{% endrole %}` | Marks the wrapped content's message role. An override: un-roled prose is homed to the base type's default role (usually `system`), so a prose-only prompt just works. |
 | `{% do … %}` | Evaluates an expression for its side effect and emits nothing (Jinja's `ext.do`) — the construct for the side-effecting helpers: `{% do use(node) %}` records a lore pick, `{% do field_contract.store(f) %}` registers a field. |
-| `{% include "snippet-id" %}` | Inlines a `prompt:snippet` node by id (e.g. `builtin-project-settings`). |
+| `{% include "Snippet title" %}` | Inlines a `prompt:snippet` node by title (e.g. `Project settings`). |
 
 ## Retired
 

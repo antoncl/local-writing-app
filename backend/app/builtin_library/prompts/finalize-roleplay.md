@@ -1,5 +1,5 @@
 ---
-id: builtin-finalize-roleplay
+id: prompt_c61687ef16
 title: Finalize roleplay
 entry_type: prompt:general
 context_strategy:
@@ -22,7 +22,7 @@ Rewrite the whole scene as clean, finished narrative prose:
 - Leave none of the beat scaffolding behind — no interiority notes, no attribution labels, no markers. Just the finished prose.
 - Keep the events, the dialogue, and their order. This is a cleanup and a point-of-view projection, not a new draft.
 
-{% include "builtin-prose-settings" %}
+{% include "Prose generation settings" %}
 Return only the finished prose.
 {% endrole %}
 

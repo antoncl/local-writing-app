@@ -20,6 +20,7 @@ node through the kind-neutral commit loop.
 
 from __future__ import annotations
 
+from _builtins import builtin_prompt_id
 from plot_fixtures import PlotTestCase
 
 from app.models import (
@@ -31,8 +32,8 @@ from app.services.ai.helpers import create_environment_for_project
 from app.services.ai.templates import render_template
 
 _THREE_ACT = "builtin-plot-three-act-story-arc"
-_DIAGNOSE = "builtin-diagnose-plot"
-_REVISE_PLOTLINE = "builtin-revise-plotline"
+_DIAGNOSE_TITLE = "Diagnose plot"
+_REVISE_PLOTLINE_TITLE = "Revise plotline"
 
 
 class _DiagnosticPromptBase(PlotTestCase):
@@ -54,9 +55,10 @@ class _DiagnosticPromptBase(PlotTestCase):
 
 class DiagnosePlotPromptTests(_DiagnosticPromptBase):
     def test_it_ships_as_a_plain_advisory_chat(self) -> None:
+        diagnose_id = builtin_prompt_id(self.service, _DIAGNOSE_TITLE)
         entries = self._summaries()
-        self.assertIn(_DIAGNOSE, entries)
-        entry = entries[_DIAGNOSE]
+        self.assertIn(diagnose_id, entries)
+        entry = entries[diagnose_id]
         self.assertTrue(entry.is_library)
         # Reuses `prompt:general` (like impersonate): no output handler, no commit —
         # a conversation that reports, never a brainstorm that patches.
@@ -68,14 +70,18 @@ class DiagnosePlotPromptTests(_DiagnosticPromptBase):
     def test_it_is_offered_nowhere_and_needs_no_subject(self) -> None:
         # No offer_on: it never appears in a subject's ＋New menu — the board
         # launches it by id. And no required input, so a zero-binding launch is legal.
-        entry = self.service.read_prompt_entry(_DIAGNOSE)
+        entry = self.service.read_prompt_entry(builtin_prompt_id(self.service, _DIAGNOSE_TITLE))
         self.assertEqual(entry.offer_on, [])
         self.assertFalse(any(i.required for i in entry.inputs))
 
     def test_its_body_reads_the_whole_ungated_board(self) -> None:
         plotline = self._plotline()
         self._card("They meet", body="She spills his coffee.", plotline=plotline.id)
-        out = self._render(self.service.read_prompt_entry(_DIAGNOSE).body)
+        out = self._render(
+            self.service.read_prompt_entry(
+                builtin_prompt_id(self.service, _DIAGNOSE_TITLE)
+            ).body
+        )
         # The whole board, ungated (the author diagnosing their own plot sees all of it).
         self.assertIn('completeness="whole_board"', out)
         self.assertIn("She spills his coffee.", out)
@@ -110,21 +116,24 @@ class EntryHelperResolvesPlotNodesTests(_DiagnosticPromptBase):
 
 class RevisePlotlinePromptTests(_DiagnosticPromptBase):
     def test_it_ships_as_a_commit_brainstorm_offered_on_plotlines(self) -> None:
+        revise_plotline_id = builtin_prompt_id(self.service, _REVISE_PLOTLINE_TITLE)
         entries = self._summaries()
-        self.assertIn(_REVISE_PLOTLINE, entries)
-        entry = entries[_REVISE_PLOTLINE]
+        self.assertIn(revise_plotline_id, entries)
+        entry = entries[revise_plotline_id]
         # Same disposition as revise-plot-card — a `prompt:general` carrying an
         # `extract_to_node` + `commit` instance `context_strategy` (ADR-0065 S3),
         # differing only in offer_on + body (the plotline target).
         self.assertEqual(entry.entry_type, "prompt:general")
         self.assertEqual(entry.offer_on, ["plot:plotline"])
-        output = self.service.read_prompt_entry(_REVISE_PLOTLINE).context_strategy.output
+        output = self.service.read_prompt_entry(revise_plotline_id).context_strategy.output
         self.assertEqual(output.handler, "extract_to_node")
         self.assertIsNotNone(output.commit)
 
     def test_its_body_renders_the_plotline_and_its_roster(self) -> None:
         plotline = self._plotline()
-        body = self.service.read_prompt_entry(_REVISE_PLOTLINE).body
+        body = self.service.read_prompt_entry(
+            builtin_prompt_id(self.service, _REVISE_PLOTLINE_TITLE)
+        ).body
         out = self._render(body, inputs={"entry": plotline.id})
         self.assertIn(plotline.title, out)  # the plotline under revision
         self.assertIn("<plot_context", out)  # the board block is injected

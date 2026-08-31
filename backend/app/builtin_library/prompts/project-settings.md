@@ -1,5 +1,5 @@
 ---
-id: builtin-project-settings
+id: prompt_b0b24a22d9
 title: Project settings
 entry_type: prompt:snippet
 ---
@@ -8,9 +8,9 @@ entry_type: prompt:snippet
   GENERAL authored facts — language, spelling, measurement system, author,
   word-count target, series number — so the model honours them everywhere.
   Include it INSIDE a {% role %} block:
-      {% include "builtin-project-settings" %}
+      {% include "Project settings" %}
   The narrative-craft settings (POV + tense) are deliberately NOT here — they
-  live in `builtin-prose-settings` and belong only in manuscript-prose prompts,
+  live in `Prose generation settings` and belong only in manuscript-prose prompts,
   so a first-person project doesn't push metadata-field brainstorms into first
   person (#1076). Labels + display order come from fields("project:project"),
   kept to `f.proposable` so computed fields (Path, AI cost) stay excluded; values

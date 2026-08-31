@@ -52,7 +52,7 @@ If `previous_text` is empty, no assistant message is emitted.
 ```jinja
 {% role "system" %}
 You are a thriller writer.
-{% include "builtin-house-style" %}
+{% include "House style" %}
 {% endrole %}
 ```
 
@@ -114,7 +114,7 @@ You are an expert fiction writer.
 {% if 'tense' in project.metadata %}Always write in {{ project.tense }} tense.{% endif %}
 {% if 'spelling' in project.metadata %}Use {{ project.spelling }} spelling.{% endif %}
 {% if 'measurement_system' in project.metadata %}Measurements are {{ project.measurement_system }}.{% endif %}
-{% include "builtin-house-voice" %}
+{% include "House voice" %}
 {{ use_lore() }}
 {% endrole %}
 
@@ -136,7 +136,7 @@ Write {{ inputs.words }} words that continue the story:
 {% endrole %}
 ```
 
-`use_lore()` enables the scene's implicit lore — the backend selects, places, tiers, and caches it; the template emits nothing for it. `story_so_far` and `text_before` are documented in [helpers.md](helpers.md); the include (`builtin-house-voice`) is a snippet node — see [snippets-and-prompts.md](snippets-and-prompts.md).
+`use_lore()` enables the scene's implicit lore — the backend selects, places, tiers, and caches it; the template emits nothing for it. `story_so_far` and `text_before` are documented in [helpers.md](helpers.md); the include (`House voice`) is a snippet node — see [snippets-and-prompts.md](snippets-and-prompts.md).
 
 ## Implementation reference
 

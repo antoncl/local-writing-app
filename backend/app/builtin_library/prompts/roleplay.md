@@ -1,5 +1,5 @@
 ---
-id: builtin-roleplay
+id: prompt_5d33fdb02d
 title: Roleplay
 entry_type: prompt:general
 inputs:

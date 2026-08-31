@@ -325,6 +325,35 @@ class ResolvedNarrationHelperTests(_HelperFixtureBase):
         )
         self.assertEqual(out.messages[0].text, "POV: Honor Harrington")
 
+    def test_gate_is_applied_through_the_global(self) -> None:
+        # An omniscient scene: the global drops the character (the gate runs INSIDE
+        # the helper, not just in the pure function), while `pov(scene)` — the raw
+        # own field — still returns it.
+        from app.models import SaveSceneRequest
+
+        scene = self.service.read_scene(self.scene_two_node.scene_id)
+        self.service.save_scene(
+            scene.id,
+            SaveSceneRequest(
+                title=scene.title,
+                body=scene.body,
+                base_revision=scene.revision,
+                metadata={**scene.metadata, "pov_mode": "third_omniscient"},
+            ),
+        )
+        scene = self.service.read_scene(self.scene_two_node.scene_id)
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}'
+            "narration=[{% if resolved_narration(scene).character %}"
+            "{{ resolved_narration(scene).character.title }}{% else %}none{% endif %}] "
+            "own=[{{ pov(scene).title }}]"
+            "{% endrole %}",
+            context={"scene": scene},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, "narration=[none] own=[Honor Harrington]")
+
 
 class ScenesBeforeHelperTests(_HelperFixtureBase):
     def test_collects_summaries_of_prior_scenes_only(self) -> None:

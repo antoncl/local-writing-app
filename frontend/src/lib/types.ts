@@ -50,7 +50,19 @@ export type StructureNode = {
   // pass (#184 Phase 3). Null for non-scene nodes.
   metadata?: Record<string, MetadataValue> | null;
   computed_metadata?: Record<string, MetadataValue>;
+  // ADR-0079: for each schema `cascade_fields` id, this node's RESOLVED value
+  // folded down the manuscript structure (own → nearest ancestor → book default →
+  // unset) with provenance. `source_id` null = book default; `own` true = this node
+  // set it. Derived, never written. Null when the schema declares no cascade_fields.
+  resolved_cascade?: Record<string, ResolvedCascadeField> | null;
   children: StructureNode[];
+};
+
+// One resolved cascade field (ADR-0079): the folded value + where it came from.
+export type ResolvedCascadeField = {
+  value: MetadataValue | null;
+  source_id: string | null;
+  own: boolean;
 };
 
 export type StructureDocument = {
@@ -986,6 +998,9 @@ export type MetadataSchema = {
   fields: Record<string, MetadataFieldDefinition>;
   // Reusable group definitions keyed by group id (L2 groups).
   groups?: Record<string, MetadataGroupDefinition>;
+  // Field ids that cascade down the manuscript structure, nearest-explicit-wins
+  // (ADR-0079). Unioned up the layer chain; narration seeds [pov_mode, pov].
+  cascade_fields?: string[];
 };
 
 export type MetadataSchemaLayer = {

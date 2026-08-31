@@ -17,11 +17,13 @@
     MetadataSchema,
     MetadataValue,
     PromptEntrySummary,
+    ResolvedCascadeField,
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
   import { inheritedLayerLabel, fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
+  import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 
   interface Props {
     entryType: string;
@@ -93,6 +95,11 @@
     // inherited value. Only the lore host wires it; absent → the override mark
     // stays a static marker (nothing to reset), e.g. scrubbed/parked panes.
     onResetField?: (fieldId: string) => void;
+    // ADR-0079: this node's resolved narration cascade (pov_mode / pov folded down
+    // the manuscript structure). Drives the SAME inherited treatment as the layer
+    // axis — a manuscript node is never layer-inherited (book-scoped), so the two
+    // axes never collide on one row. Null when the node declares no cascade.
+    resolvedCascade?: Record<string, ResolvedCascadeField> | null;
   }
 
   let {
@@ -124,6 +131,7 @@
     onCustomData,
     onNavigate,
     onResetField,
+    resolvedCascade = null,
   }: Props = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14
@@ -284,6 +292,25 @@
   function isLayerInherited(fieldId: string): boolean {
     return fieldProvenance(fieldId, entryIsInherited, overriddenFields) === "layer-inherited";
   }
+
+  // ADR-0079 structure axis: narration (pov_mode / pov) inherited down the
+  // manuscript tree. Reuses the layer-axis `.layer-inherited` treatment — the two
+  // axes never share a node kind (a manuscript node is never layer-inherited), so
+  // one treatment reads cleanly, the per-field source label saying whence.
+  const cascadeFieldIds = $derived(metadataSchema.cascade_fields ?? []);
+  function cascadeInfo(fieldId: string): ResolvedCascadeField | null {
+    if (!cascadeFieldIds.includes(fieldId)) return null;
+    return resolvedCascade?.[fieldId] ?? null;
+  }
+  function isCascadeInherited(fieldId: string): boolean {
+    const info = cascadeInfo(fieldId);
+    return info != null && !info.own && info.value != null && info.value !== "";
+  }
+  function cascadeSourceLabel(fieldId: string): string {
+    const info = cascadeInfo(fieldId);
+    if (info?.source_id == null) return "the book";
+    return (structure ? findStructureNodeById(structure.root, info.source_id)?.title : null) || "an ancestor";
+  }
   // The reset gesture is live only when a handler is wired and the rail is
   // editable — a scrubbed / snapshot-parked pane shows the mark inertly.
   const canResetOverride = $derived(onResetField != null && !readOnly);
@@ -345,6 +372,10 @@
     // A lore-proposal review (`resolve`) always shows the proposed `was` — the
     // candidate you click to adopt; snapshot compare shows the uniform `side`.
     if (flipped) return (flipped[compare.resolve ? "was" : compare.side] ?? "") as MetadataValue;
+    // A cascade field the scene doesn't own shows its RESOLVED (inherited) value —
+    // it isn't in `metadata` (absence is what makes it inherit), so read it from the
+    // fold (ADR-0079); editing writes it through as this node's own value.
+    if (isCascadeInherited(fieldId)) return cascadeInfo(fieldId)?.value ?? "";
     return metadata[fieldId];
   }
 
@@ -465,7 +496,7 @@
       {#if metadataSchema.fields[fieldId] && (!metadataSchema.fields[fieldId].intrinsic || isFlipResolve(fieldId)) && !effectiveFieldHidden(metadataSchema, entryType, fieldId) && (metadataSchema.fields[fieldId].type !== "computed" || computedFieldString(fieldId) !== "")}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")}>
+        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")}>
           <!-- Disclosure gutter — reserved so the field glyph lines up with the
                collapsible sections' glyph column (RailSectionHeader): caret ·
                glyph on every rail line (#1438). A reference field is itself
@@ -509,7 +540,7 @@
             <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           {/if}
           <span class="fr-name" title={field.description || undefined}>{fieldLabel}</span>
-          <div class="fr-val" class:fr-val-flat={isRefField(field)} title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : undefined}>
+          <div class="fr-val" class:fr-val-flat={isRefField(field)} title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : isCascadeInherited(fieldId) ? `Inherited from ${cascadeSourceLabel(fieldId)}` : undefined}>
             {#if isOverridden(fieldId)}
               {#if canResetOverride}
                 <!-- The `ti-versions` mark PR 2 ships, made interactive (#517):

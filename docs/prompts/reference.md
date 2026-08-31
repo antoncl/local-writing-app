@@ -41,7 +41,8 @@ thing.
 
 If a node's fields are organised into a named group, you can read a member straight off the group: `entry(x).GMO.Goal` reads the `Goal` field of the `GMO` group (`entry(x).GMO.goal` works too). When the group's name has a space, use brackets: `entry(x)["Antagonist GMO"].Goal`. An unknown group or field reads as `None`.
 | `type_name(x)` | `str` — a type's human name (from an `entry_type` FQN). |
-| `pov(scene)` | The scene's POV character (`lore:character`) or `None`. |
+| `pov(scene)` | The scene's POV character (`lore:character`) or `None` — the scene's OWN `pov` field. For the value a scene *inherits*, use `resolved_narration`. |
+| `resolved_narration(scene)` | The scene's **effective** narration folded down the manuscript structure (ADR-0079): `{mode, character}`. Unlike `pov(scene)`, this resolves inheritance — a scene inheriting its POV from its act or the book reports that value — and drops `character` for `third_omniscient` / `third_objective` modes. `character` is a `lore:character` node (so `resolved_narration(scene).character.title` works) or `None`; `mode` is the `pov_mode` value or `None`. |
 | `is_a(node, entry_type)` | `bool` — kind-of test against the type's `parent:` chain. |
 | `use(node, "stable"\|"volatile")` | `""` — adds the node to what the AI sees. It prints nothing where you write it: the app fetches the node and includes it for you, with no duplicates. Hand it a whole picker selection to add every pick at once. The optional `"stable"`/`"volatile"` hint nudges caching and can usually be left off. |
 | `use_lore()` | `""` — automatically includes the lore relevant to this scene: entries it links to, and entries named in its summary. Call it to turn that on; leave it out for no automatic lore. |

@@ -82,11 +82,11 @@ def resolve_snippet_name(
     for entry in snippets:
         if id_of(entry) in (name, stem):
             return SnippetMatch("resolved", entry)
-    title_matches = [entry for entry in snippets if title_of(entry) in {name, stem}]
-    if not title_matches:
+    ranked = [(layer_rank_of(entry), entry) for entry in snippets if title_of(entry) in {name, stem}]
+    if not ranked:
         return SnippetMatch("not_found")
-    nearest = max(layer_rank_of(entry) for entry in title_matches)
-    top = [entry for entry in title_matches if layer_rank_of(entry) == nearest]
+    nearest = max(rank for rank, _entry in ranked)
+    top = [entry for rank, entry in ranked if rank == nearest]
     if len(top) == 1:
         return SnippetMatch("resolved", top[0])
     return SnippetMatch("ambiguous", colliding=tuple(top))

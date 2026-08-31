@@ -678,7 +678,7 @@ def _include_line(source: str, name: str | None) -> int | None:
     if not name:
         return None
     for i, text in enumerate(source.splitlines(), start=1):
-        if "include" in text and (f'"{name}"' in text or f"'{name}'" in text):
+        if "{%" in text and "include" in text and (f'"{name}"' in text or f"'{name}'" in text):
             return i
     return None
 

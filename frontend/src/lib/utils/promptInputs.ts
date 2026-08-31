@@ -345,12 +345,9 @@ export function friendlyTemplateError(
   if (err.kind === "scene_not_found") {
     return `${err.message} Pick a different target scene in the preview controls above.`;
   }
-  // An {% include %} that didn't resolve. The backend message already reads for
-  // an author ("No snippet named …" / "… matches more than one snippet …"), so
-  // pass it through; the gutter marker (when the include is in this body) points
-  // at the line.
-  if (err.kind === "include") {
-    return err.message;
-  }
+  // Everything else — including an unresolved `{% include %}` (kind "include"),
+  // whose backend message already reads for an author ("No snippet named …" /
+  // "… matches more than one snippet …") — passes through; a lined error also
+  // draws the editor's gutter marker.
   return err.message;
 }

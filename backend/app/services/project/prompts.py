@@ -146,10 +146,15 @@ class PromptEntriesMixin:
             entry.id: SnippetSource(id=entry.id, body=entry.body, inputs=tuple(entry.inputs))
             for entry in snippets
         }
+        ranks = self._layer_rank_map()
 
         def resolve(name: str) -> SnippetSource | None:
             matched = match_snippet_name(
-                name, snippets, id_of=lambda e: e.id, title_of=lambda e: e.title
+                name,
+                snippets,
+                id_of=lambda e: e.id,
+                title_of=lambda e: e.title,
+                layer_rank_of=lambda e: ranks.get(e.source_layer_id, -1),
             )
             return sources.get(matched.id) if matched is not None else None
 

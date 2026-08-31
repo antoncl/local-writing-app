@@ -427,6 +427,14 @@ class MetadataSchema(BaseModel):
     # Reusable group definitions (L2), keyed by group id. Generated fields
     # from group_applications are injected into `fields` at resolution time.
     groups: dict[str, MetadataGroupDefinition] = Field(default_factory=dict)
+    # Field ids that inherit down the MANUSCRIPT-structure tree (book → act →
+    # chapter → scene), nearest-explicit-wins, rather than being per-node
+    # (ADR-0079). Narration seeds this as [pov_mode, pov]. Declared in YAML and
+    # unioned up the layer chain — deliberately NOT a per-field property (would
+    # tax every field author) nor a resolver constant (a schema fact). Empty when
+    # no layer declares it (an un-seeded / un-migrated project simply does not
+    # cascade), so there is no built-in default here.
+    cascade_fields: list[str] = Field(default_factory=list)
 
 
 class MetadataSchemaLayer(BaseModel):

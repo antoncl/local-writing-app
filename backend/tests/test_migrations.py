@@ -45,6 +45,38 @@ class MigrationFrameworkTests(unittest.TestCase):
         self.assertEqual(tree["root"]["title"], "Research")
         self.assertEqual(tree["root"]["children"], [])
 
+    def test_backfill_narration_cascade_fields_adds_to_existing_schema(self) -> None:
+        # v5→v6 (ADR-0079): an existing project's metadata.schema.yaml predates the
+        # cascade_fields key; the migration seeds it while preserving other content.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = yaml.safe_load(schema_path.read_text(encoding="utf-8")) or {}
+        data.pop("cascade_fields", None)  # simulate a pre-v6 file
+        data.setdefault("fields", {})["custom"] = {"name": "Custom", "type": "text"}
+        schema_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+        migrations._backfill_narration_cascade_fields(self.root)
+
+        after = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+        self.assertEqual(after["cascade_fields"], ["pov_mode", "pov"])
+        self.assertIn("custom", after["fields"])  # existing content preserved
+
+    def test_backfill_narration_cascade_fields_is_idempotent(self) -> None:
+        # Scaffold already seeds cascade_fields; re-running must not duplicate.
+        schema_path = self.root / "metadata.schema.yaml"
+        migrations._backfill_narration_cascade_fields(self.root)
+        migrations._backfill_narration_cascade_fields(self.root)
+        after = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+        self.assertEqual(after["cascade_fields"], ["pov_mode", "pov"])
+
+    def test_backfill_narration_cascade_fields_creates_missing_schema(self) -> None:
+        # A legacy project with no metadata.schema.yaml still gets the cascade.
+        schema_path = self.root / "metadata.schema.yaml"
+        schema_path.unlink()
+        migrations._backfill_narration_cascade_fields(self.root)
+        self.assertTrue(schema_path.exists())
+        after = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+        self.assertEqual(after["cascade_fields"], ["pov_mode", "pov"])
+
     def test_fresh_project_open_runs_no_migrations(self) -> None:
         reopened_service = ProjectService.opened_at(self.root)
         self.assertEqual(reopened_service.last_migrations, ())

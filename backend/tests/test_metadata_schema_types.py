@@ -24,6 +24,35 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         self.assertFalse(schema.entry_types["manuscript:act"].abstract)
         self.assertFalse(schema.entry_types["manuscript:chapter"].abstract)
 
+    def test_act_and_chapter_carry_narration_fields(self) -> None:
+        # ADR-0079: narration (pov_mode / pov) is authorable at every structure
+        # level so it can be overridden and cascade down to scenes. Act/chapter
+        # shipped with no fields before this.
+        schema = self.service.read_metadata_schema()
+        for type_id in ("manuscript:act", "manuscript:chapter"):
+            fields = schema.entry_types[type_id].fields
+            self.assertIn("pov_mode", fields)
+            self.assertIn("pov", fields)
+
+    def test_new_project_seeds_narration_cascade_fields(self) -> None:
+        # ADR-0079: cascade_fields is seeded into the scaffolded metadata.schema.yaml
+        # (YAML on the project), not the built-in floor, so a fresh project cascades
+        # narration out of the box.
+        schema = self.service.read_metadata_schema()
+        self.assertIn("pov_mode", schema.cascade_fields)
+        self.assertIn("pov", schema.cascade_fields)
+
+    def test_cascade_fields_union_up_the_layer_chain(self) -> None:
+        # A field declared cascading at an ancestor layer unions with the book's own
+        # cascade_fields (ADR-0079) — a series can declare it once for every book.
+        series_schema = self.world / "metadata.schema.yaml"
+        data = self.service._read_yaml(series_schema) if series_schema.exists() else {}
+        data["cascade_fields"] = [*(data.get("cascade_fields") or []), "tense"]
+        self.service._write_yaml(series_schema, data)
+        schema = self.service.read_metadata_schema()
+        self.assertIn("pov_mode", schema.cascade_fields)  # the book's own seed
+        self.assertIn("tense", schema.cascade_fields)  # inherited from the series
+
     def test_manuscript_structure_is_shared_abstract_parent(self) -> None:
         schema = self.service.read_metadata_schema()
         parent = schema.entry_types.get("manuscript:base")

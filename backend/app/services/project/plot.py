@@ -71,6 +71,7 @@ from app.models import (
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.errors import ProjectServiceError
 from app.services.project.plot_diagnostics import compute_plot_diagnostics
+from app.services.tree_structure import StructureVisitor, TreeStructureService
 
 PLOT_BOARD_FILENAME = "plot-board.md"
 PLOT_TEMPLATE_ENTRY_TYPE = "plot:template"
@@ -774,16 +775,11 @@ class PlotMixin:
         # the filter is `_is_leaf_node` (type == manuscript:scene), not merely
         # "has a scene_id". Title is the manuscript node's title (what the writer
         # sees in the tree), which create_scene seeds and rename keeps in step.
-        ordered: list[tuple[str, str]] = []
-
-        def walk(node) -> None:
-            if self._is_leaf_node(node) and node.scene_id:
-                ordered.append((node.scene_id, node.title))
-            for child in node.children:
-                walk(child)
-
-        walk(self.read_structure().root)
-        return ordered
+        return [
+            (node.scene_id, node.title)
+            for node in TreeStructureService.collect(self.read_structure().root)
+            if self._is_leaf_node(node) and node.scene_id
+        ]
 
     # ----- Template instantiation (a plotline IS an instance, ADR-0053) ----
     #
@@ -1004,24 +1000,37 @@ class PlotMixin:
         containers: dict[str, PlotBoardContainer] = {}
         scene_to_container: dict[str, str] = {}
         scene_to_order: dict[str, int] = {}
+        service = self
 
-        def walk(node: StructureNode, parent_container: str | None) -> None:
-            for child in node.children:
-                if self._is_leaf_node(child):
-                    if child.scene_id:
+        class _Layout(StructureVisitor):
+            """Rank each carded leaf scene by reading order and map it to its
+            innermost-container id; mint each container once, parented to its
+            nearest container ancestor (a node directly under root has None).
+            Pre-order == reading order, so encounter order is the rank and
+            `containers` lands in manuscript order."""
+
+            def visit_node(
+                self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+            ) -> None:
+                parent = ancestors[-1] if ancestors else None
+                parent_container = (
+                    parent.id if parent is not None and parent.type != "root" else None
+                )
+                if service._is_leaf_node(node):
+                    if node.scene_id:
                         # Rank by encounter order (pre-order == reading order); a
                         # scene under the root is homeless but still ranked.
-                        scene_to_order[child.scene_id] = len(scene_to_order)
+                        scene_to_order[node.scene_id] = len(scene_to_order)
                         if parent_container is not None:
-                            scene_to_container[child.scene_id] = parent_container
-                else:
-                    if child.id not in containers:
-                        containers[child.id] = PlotBoardContainer(
-                            id=child.id, title=child.title, parent=parent_container
-                        )
-                    walk(child, child.id)
+                            scene_to_container[node.scene_id] = parent_container
+                elif node.id not in containers:
+                    containers[node.id] = PlotBoardContainer(
+                        id=node.id, title=node.title, parent=parent_container
+                    )
 
-        walk(self.read_structure().root, None)
+        TreeStructureService.walk(
+            self.read_structure().root, _Layout(), skip_root=True
+        )
         return containers, scene_to_container, scene_to_order
 
     def _board_page_status(self, metadata: dict[str, Any], scene: str | None) -> str | None:

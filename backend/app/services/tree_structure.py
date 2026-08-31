@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import yaml
 
@@ -58,6 +58,44 @@ class TreeConfig:
     root_title: str
     leaf_ref_field: str
     leaf_subdir: str
+
+
+class StructureVisitor(Protocol):
+    """Visits each node of a manuscript/research structure tree in walk order.
+
+    The tree twin of `LayerVisitor` (services/project/layers.py): **every**
+    consumer of the structure walk is a visitor, including the ones whose body
+    reduces to a comprehension. Uniformity is the point — the manuscript tree
+    was walked seven different hand-rolled ways before this (#493), so a
+    consumer that hand-rolls the descent was one more place to find when the
+    walk's rules changed.
+
+    `visit_node` receives the node and its `ancestors` (root-first, empty at the
+    walk's start node). Returning a truthy value **halts** the whole walk — the
+    tree needs the find-first / early-exit that the short, always-fully-folded
+    layer chain does not; returning None continues. Subtree pruning is
+    deliberately absent: no consumer needs it (leaves carry empty `children`).
+    """
+
+    def visit_node(
+        self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+    ) -> bool | None: ...
+
+
+class StructureCollector(StructureVisitor):
+    """Accumulates every visited node, in walk order — the tree twin of
+    `LayerCollector`. A consumer with no per-node logic collects with this and
+    comprehends `nodes`, instead of hand-rolling a recursion; that is still one
+    traversal, still visitor-mediated. `TreeStructureService.collect` is the
+    one-liner that pairs the walk with this collector."""
+
+    def __init__(self) -> None:
+        self.nodes: list[StructureNode] = []
+
+    def visit_node(
+        self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+    ) -> None:
+        self.nodes.append(node)
 
 
 class TreeStructureService:
@@ -184,6 +222,40 @@ class TreeStructureService:
         else:
             parent.children.insert(max(0, position), node)
 
+    # ---- traversal (the one walk all read-only consumers ride) ----
+
+    @staticmethod
+    def walk(
+        root: StructureNode,
+        visitor: StructureVisitor,
+        *,
+        skip_root: bool = False,
+    ) -> None:
+        """Drive `visitor` over the subtree at `root`, depth-first pre-order,
+        children in stored (reading) order. **The** manuscript/research
+        structure traversal — the tree twin of `LayerWalkMixin.visit_layers`.
+
+        `skip_root` visits every descendant but not `root` itself — the shape
+        the cascade-delete previews need (count what is *under* the target). A
+        visitor returning True from `visit_node` halts the walk.
+        """
+
+        def _visit(node: StructureNode, ancestors: tuple[StructureNode, ...]) -> bool:
+            if not (skip_root and not ancestors) and visitor.visit_node(node, ancestors):
+                return True
+            child_ancestors = (*ancestors, node)
+            return any(_visit(child, child_ancestors) for child in node.children)
+
+        _visit(root, ())
+
+    @staticmethod
+    def collect(root: StructureNode, *, skip_root: bool = False) -> list[StructureNode]:
+        """Every node in the subtree, in walk order — `walk` + `StructureCollector`
+        in one call, for consumers with no per-node logic."""
+        collector = StructureCollector()
+        TreeStructureService.walk(root, collector, skip_root=skip_root)
+        return collector.nodes
+
     @staticmethod
     def contains_node(node: StructureNode, candidate_id: str) -> bool:
         """True if the node or any descendant has the given id."""
@@ -199,20 +271,12 @@ class TreeStructureService:
         """All `scene_id` values under a subtree. The field is named
         scene_id on the model regardless of the configured wire field;
         callers use `config.leaf_ref_field` if they need the disk-name."""
-        ids: set[str] = set()
-        if node.scene_id:
-            ids.add(node.scene_id)
-        for child in node.children:
-            ids.update(TreeStructureService.collect_leaf_ids(child))
-        return ids
+        return {n.scene_id for n in TreeStructureService.collect(node) if n.scene_id}
 
     @staticmethod
     def collect_descendant_ids(node: StructureNode) -> set[str]:
         """All node ids under a subtree, including `node` itself."""
-        ids: set[str] = {node.id}
-        for child in node.children:
-            ids.update(TreeStructureService.collect_descendant_ids(child))
-        return ids
+        return {n.id for n in TreeStructureService.collect(node)}
 
     # Manuscript container node types (as opposed to leaf scenes). Acts and
     # chapters carry their own `scene_id` (a backing file), so a node is NOT a
@@ -231,12 +295,11 @@ class TreeStructureService:
         is not a scene, so a picked container materializes the scenes beneath it,
         not the container's own node. Depth-first, children in stored order (the
         reading order `full_text()` uses)."""
-        out: list[str] = []
-        if node.scene_id and not TreeStructureService.is_container(node):
-            out.append(node.scene_id)
-        for child in node.children:
-            out.extend(TreeStructureService.collect_descendant_scene_ids_ordered(child))
-        return out
+        return [
+            n.scene_id
+            for n in TreeStructureService.collect(node)
+            if n.scene_id and not TreeStructureService.is_container(n)
+        ]
 
     # ---- helpers ----
 

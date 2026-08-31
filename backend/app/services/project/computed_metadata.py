@@ -20,6 +20,7 @@ import re
 from typing import Any
 
 from app.models import MetadataSchema, StructureDocument, StructureNode
+from app.services.tree_structure import StructureVisitor, TreeStructureService
 
 WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?")
 
@@ -125,21 +126,23 @@ class ComputedMetadataMixin:
         return None
 
     def _counter_in_manuscript(self, root: StructureNode, target_scene_id: str, entry_type: str) -> int | None:
-        result: list[int | None] = [None]
-        counter = [0]
+        class _Ordinal(StructureVisitor):
+            """Nth node of `entry_type` in pre-order, halting at the target."""
 
-        def walk(node: StructureNode) -> None:
-            if result[0] is not None:
-                return
-            if node.type == entry_type:
-                counter[0] += 1
-                if node.scene_id == target_scene_id:
-                    result[0] = counter[0]
-                    return
-            for child in node.children:
-                walk(child)
-                if result[0] is not None:
-                    return
+            def __init__(self) -> None:
+                self.count = 0
+                self.result: int | None = None
 
-        walk(root)
-        return result[0]
+            def visit_node(
+                self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+            ) -> bool | None:
+                if node.type == entry_type:
+                    self.count += 1
+                    if node.scene_id == target_scene_id:
+                        self.result = self.count
+                        return True
+                return None
+
+        ordinal = _Ordinal()
+        TreeStructureService.walk(root, ordinal)
+        return ordinal.result

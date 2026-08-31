@@ -2,42 +2,14 @@
   import { onDestroy, onMount } from "svelte";
   import { EditorView, basicSetup } from "codemirror";
   import { Compartment, EditorState } from "@codemirror/state";
-  import { StreamLanguage, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+  import { StreamLanguage } from "@codemirror/language";
   import { jinja2 } from "@codemirror/legacy-modes/mode/jinja2";
   import { json as jsonLang } from "@codemirror/lang-json";
   import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
   import type { CompletionSource } from "@codemirror/autocomplete";
-  import { tags as t } from "@lezer/highlight";
-
-  // House syntax palette. `basicSetup` ships CodeMirror's `defaultHighlightStyle`
-  // as a FALLBACK — and its token colors are fixed dark hues meant for a white
-  // page (#708/#256/#404740/…), so a Jinja/JSON body's highlighted tokens ({{ }}
-  // vars, {% %} tags, strings, {# comments #}) rendered dark-on-dark in dark mode
-  // (base text was fine — it uses var(--text)). Registering a NON-fallback style
-  // overrides the default entirely; its colors are theme tokens (styles.css
-  // --syntax-*), so they follow the active theme. Any tag left unstyled falls
-  // through to the themed base color — so this cannot regress into dark-on-dark. */
-  const codeHighlightStyle = HighlightStyle.define([
-    {
-      tag: [t.keyword, t.controlKeyword, t.operatorKeyword, t.definitionKeyword, t.moduleKeyword],
-      color: "var(--syntax-keyword)",
-    },
-    {
-      tag: [t.name, t.variableName, t.special(t.variableName), t.propertyName, t.labelName],
-      color: "var(--syntax-name)",
-    },
-    { tag: [t.string, t.special(t.string), t.character], color: "var(--syntax-string)" },
-    { tag: [t.number, t.integer, t.float, t.bool, t.atom, t.null], color: "var(--syntax-number)" },
-    {
-      tag: [t.comment, t.lineComment, t.blockComment, t.docComment],
-      color: "var(--syntax-comment)",
-      fontStyle: "italic",
-    },
-    {
-      tag: [t.operator, t.punctuation, t.bracket, t.brace, t.paren, t.separator, t.meta, t.tagName, t.angleBracket],
-      color: "var(--syntax-punct)",
-    },
-  ]);
+  // Theme-aware syntax colors that override CodeMirror's light-oriented default
+  // (built once at module load; see codeHighlightStyle.ts for the why).
+  import { codeSyntaxHighlighting } from "./codeHighlightStyle";
 
   let {
     value = $bindable(),
@@ -81,7 +53,7 @@
     ro ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [];
 
   onMount(() => {
-    const extensions = [basicSetup, syntaxHighlighting(codeHighlightStyle), lintGutter()];
+    const extensions = [basicSetup, codeSyntaxHighlighting, lintGutter()];
     if (language === "jinja2") {
       const jinjaLanguage = StreamLanguage.define(jinja2);
       extensions.push(jinjaLanguage);

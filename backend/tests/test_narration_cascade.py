@@ -4,7 +4,7 @@ import unittest
 
 from metadata_validation_base import MetadataValidationBase
 
-from app.models import SaveSceneRequest, StructureNode
+from app.models import CreateStructureNodeRequest, SaveSceneRequest, StructureNode
 from app.services.project.computed_metadata import _CascadeResolver
 from app.services.tree_structure import TreeStructureService
 
@@ -135,6 +135,37 @@ class NarrationCascadeIntegrationTests(MetadataValidationBase):
         self.assertEqual(pov_mode["source_id"], node.id)
         # pov is declared cascading but set nowhere → resolved-but-unset.
         self.assertIn("pov", node.resolved_cascade)
+
+    def test_scene_inherits_narration_from_container(self) -> None:
+        # A container (act) override folds to the scenes beneath it through the real
+        # pipeline — proving scene_front carries CONTAINER own-metadata, not scenes'
+        # only (the load-bearing assumption behind cascading at all).
+        structure = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+        )
+        act_node = next(
+            n for n in TreeStructureService.collect(structure.root) if n.type == "manuscript:act"
+        )
+        act_scene = self.service.read_scene(act_node.scene_id)
+        self.service.save_scene(
+            act_node.scene_id,
+            SaveSceneRequest(
+                title=act_scene.title,
+                body="",
+                base_revision=act_scene.revision,
+                entry_type="manuscript:act",
+                metadata={"pov_mode": "third_limited"},
+            ),
+        )
+        self.service.create_scene(self._make_create_scene("Scene X", parent_id=act_node.id))
+
+        root = self.service.read_structure().root
+        act = next(n for n in TreeStructureService.collect(root) if n.type == "manuscript:act")
+        scene = next(n for n in act.children if n.type == "manuscript:scene")
+        self.assertEqual(
+            scene.resolved_cascade["pov_mode"],
+            {"value": "third_limited", "source_id": act.id, "own": False},
+        )
 
 
 if __name__ == "__main__":

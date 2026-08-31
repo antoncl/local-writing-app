@@ -122,11 +122,13 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "parent": "manuscript:base",
             "fields": [
                 "status",
+                # Narration pair kept adjacent, mode first — pov_mode gates
+                # whether pov applies (ADR-0079); matches act/chapter ordering.
+                "pov_mode",
                 "pov",
                 "characters",
                 "location",
                 "tags",
-                "pov_mode",
                 "tense",
                 "dynamics",
                 "word_count",
@@ -398,7 +400,11 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "author",
                 "language",
                 "spelling",
+                # Book-level narration default: mode + the viewpoint character,
+                # both cascade down the manuscript (ADR-0079 Amendment 2). A
+                # single-POV novel sets pov once here; scenes inherit by absence.
                 "pov_mode",
+                "pov",
                 "tense",
                 "measurement_system",
                 "target_word_count",
@@ -753,8 +759,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "pov": {
             "name": "POV",
             "description": (
-                "The point-of-view character this scene is told through — a "
-                "reference to one existing character entry."
+                "The point-of-view character the narration follows — a reference "
+                "to one existing character entry. Cascades down the manuscript "
+                "(book / act / chapter / scene) unless a level below overrides it."
             ),
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},

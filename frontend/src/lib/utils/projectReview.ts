@@ -65,6 +65,10 @@ export function projectReviewRows(
     // computed fields are derived and read-only — neither is an author ask.
     if (field.intrinsic) continue;
     if (field.type === "computed" || field.category === "computed") continue;
+    // Entity references point at entries that don't exist yet at creation — the
+    // book has no lore, so the picker would be empty (ADR-0079: `pov` is a
+    // book-level default, but set later in the editor, not in the wizard).
+    if (field.type === "entity_ref" || field.type === "entity_ref_list") continue;
     if (effectiveFieldHidden(schema, entryType, fieldId)) continue;
 
     const hasLocal = Object.prototype.hasOwnProperty.call(overrides, fieldId);

@@ -22,6 +22,20 @@
 > `cascade_fields: [pov_mode, pov]`. **Read every `pov_character` below as the existing `pov`**
 > — key kept, no rename (a rename would migrate every scene's stored value for a cosmetic gain).
 
+> **Amendment 2 (2026-08-31): `pov` is also an authorable field on `project:project` (#1729).**
+> The Problem section below argues `pov_character` "cannot be a wizard field: a new book has no
+> characters." That holds for the **creation wizard** and nothing more — the cascade resolver
+> already reads the project node's metadata as the book-level default for *every* `cascade_field`,
+> `pov` included (`book_default = _resolved_project_node_metadata(root)`, `manuscript.py`), so a
+> project-stored POV character already cascades to every scene. Only the UI was missing: `pov` was
+> absent from the `project:project` field list, so there was no way to set the book default. It is
+> now added there — a single-POV novel sets the viewpoint character **once** on the book and every
+> scene inherits it by absence; multi-POV books leave it blank and set POV per act/chapter. The
+> wizard reasoning is preserved by having the review pane skip `entity_ref`/`entity_ref_list`
+> fields (creation-time has no entities to reference), so `pov` surfaces in the everyday project
+> metadata panel but never as an empty picker at creation. The two narration fields are also made
+> **adjacent** on `manuscript:scene` (`pov_mode` then `pov`), matching act/chapter ordering.
+
 ## Problem
 
 Narration is a **book-level default the author overrides down the manuscript-structure

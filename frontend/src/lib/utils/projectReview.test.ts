@@ -5,18 +5,20 @@ import { PROJECT_ENTRY_TYPE, projectReviewRows, resetTargetLabel } from "@/lib/u
 
 // A minimal project schema: one prompted select (pov_mode), one inheritable
 // select (measurement_system), an intrinsic field and a computed field that must
-// both be filtered out.
+// both be filtered out, and an entity_ref (pov) that must be skipped at creation
+// (no entities exist yet — ADR-0079 Amendment 2 / #1729).
 const SCHEMA: MetadataSchema = {
   version: 1,
   entry_types: {
     [PROJECT_ENTRY_TYPE]: {
       name: "Project",
       kind: "project",
-      fields: ["title", "measurement_system", "pov_mode", "tense", "project_cost"],
+      fields: ["title", "measurement_system", "pov_mode", "pov", "tense", "project_cost"],
     },
   },
   fields: {
     title: { name: "Title", type: "text", options: [], intrinsic: true },
+    pov: { name: "POV", type: "entity_ref", options: [] },
     measurement_system: {
       name: "Measurement system",
       type: "select",
@@ -36,10 +38,11 @@ const SCHEMA: MetadataSchema = {
 };
 
 describe("projectReviewRows", () => {
-  it("skips intrinsic and computed fields", () => {
+  it("skips intrinsic, computed, and entity_ref fields", () => {
     const ids = projectReviewRows(SCHEMA, {}, {}, {}).map((r) => r.fieldId);
     expect(ids).not.toContain("title"); // intrinsic
     expect(ids).not.toContain("project_cost"); // computed
+    expect(ids).not.toContain("pov"); // entity_ref — no entities exist at creation
     expect(ids).toEqual(["measurement_system", "pov_mode", "tense"]);
   });
 

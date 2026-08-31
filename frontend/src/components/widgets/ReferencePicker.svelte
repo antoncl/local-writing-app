@@ -227,21 +227,19 @@
   aria-label={ariaLabel}
 >
   {#if embedded && controlled}
-    <!-- Controlled rail mode (#1441): the field row owns the caret + label, so
-         we contribute only the trailing count+add (line 1) and, when expanded,
-         the ref list (line 2). `display:contents` on the section (see .controlled)
-         lets both drop straight into the field row's own flex-wrap, so the list
-         sits BELOW the header row instead of as a second strip (the §3.5
-         double-render fix). -->
-    <span class="reference-picker-inline">
-      <CountPill count={selectedRefs.length} />
-      {@render addTrigger()}
-    </span>
-    {#if open}
-      <div class="reference-picker-listblock">
-        {@render refList()}
-      </div>
-    {/if}
+    <!-- Rail pill mode (#1732, supersedes the #1441 caret+count+list): a
+         reference renders as an inline pill on the value line, always visible —
+         no caret, no count, no collapse. A single `entity_ref` and an
+         `entity_ref_list` share one vocabulary, differing only in how many pills
+         show; the empty state is the picker's own add trigger, so an empty field
+         reads as a slot a reference goes into. The section is a flex-wrap row
+         (see .controlled): inline and right-aligned for a single ref, stretched
+         to a full-width wrapping line for a list (the rail's `.fr-val.wide`
+         stretch), pills at natural width either way. -->
+    {#each refNodes as ref (ref.id)}
+      {@render refPill(ref)}
+    {/each}
+    {@render addTrigger()}
   {:else if embedded}
     <!-- Rail-embedded (#1216), uncontrolled: the field row already shows the
          label, so skip the picker's titled header and render just the
@@ -313,6 +311,31 @@
   </ViewNodeList>
 {/snippet}
 
+{#snippet refPill(ref: RefNode)}
+  {@const hex = ref.missing ? null : pillHexFor(ref)}
+  <span class="ref-pill" class:missing={ref.missing}>
+    <button
+      type="button"
+      class="ref-pill-body"
+      disabled={ref.missing}
+      title={ref.missing ? "This reference no longer resolves" : `Open ${ref.title}`}
+      onclick={ref.missing ? undefined : () => onNavigate({ id: ref.id, kind: ref.kind })}
+    >
+      <span class="ref-pill-dot" class:no-color={!hex} style={hex ? `--dot: ${hex}` : ""}></span>
+      <span class="ref-pill-name">{ref.missing ? "Missing" : ref.title}</span>
+    </button>
+    {#if !readOnly}
+      <button
+        type="button"
+        class="ref-pill-remove"
+        aria-label={`Remove ${ref.title}`}
+        title="Remove"
+        onclick={() => removeId(ref.id)}
+      >×</button>
+    {/if}
+  </span>
+{/snippet}
+
 {#snippet refRow(ref: RefNode, ctx: RowCtx<RefNode>)}
   {@const hex = ref.missing ? null : pillHexFor(ref)}
   <NodeRow
@@ -349,23 +372,90 @@
     gap: 6px;
   }
 
-  /* Controlled rail mode (#1441): the section is a layout no-op so its children
-     join the field row's own flex-wrap. The inline count+add ride the header
-     line (pushed right); the list block takes a full line of its own BELOW the
-     header — the single-row grammar, list underneath, no second strip. */
+  /* Rail pill mode (#1732): a flex-wrap row of pills + the add trigger. The rail
+     sizes this element — right-aligned at natural width for a single ref, and
+     stretched to a full-width line for a list (its row is `.fr-val.wide`, whose
+     `> *` gets flex:1). Pills sit at their natural width and wrap; the trigger
+     trails them. */
   .reference-picker.controlled {
-    display: contents;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-start;
   }
-  .reference-picker-inline {
-    margin-left: auto;
+
+  /* A reference pill (#1732): entity colour-dot + title, always visible, in the
+     app's pill vocabulary. The body navigates to the entity; a trailing × clears
+     it. Single and list refs render identical pills. */
+  .ref-pill {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    max-width: 100%;
+    border: 1px solid var(--divider);
+    border-radius: 999px;
+    background: var(--inset);
+    overflow: hidden;
+  }
+  .ref-pill-body {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+    padding: 2px 4px 2px 9px;
+    border: none;
+    background: none;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+    cursor: pointer;
   }
-  .reference-picker-listblock {
-    flex-basis: 100%;
-    width: 100%;
-    margin-top: 6px;
+  .ref-pill-body:disabled {
+    cursor: default;
+  }
+  .ref-pill-body:hover:not(:disabled) .ref-pill-name {
+    color: var(--accent-emphasis);
+  }
+  .ref-pill-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--dot, var(--text-3));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--dot, var(--text-3)) 45%, transparent);
+  }
+  .ref-pill-dot.no-color {
+    background: var(--text-3);
+    box-shadow: none;
+  }
+  .ref-pill-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ref-pill-remove {
+    display: inline-flex;
+    align-items: center;
+    align-self: stretch;
+    padding: 0 7px 0 3px;
+    border: none;
+    background: none;
+    color: var(--text-3);
+    font-size: var(--fs-md);
+    line-height: 1;
+    cursor: pointer;
+  }
+  .ref-pill-remove:hover {
+    color: var(--danger);
+  }
+  .ref-pill.missing {
+    border-color: var(--danger-border);
+    background: var(--danger-soft);
+  }
+  .ref-pill.missing .ref-pill-name {
+    color: var(--danger);
   }
 
   /* Embedded (rail) header: a compact caret + count + add strip in place of the

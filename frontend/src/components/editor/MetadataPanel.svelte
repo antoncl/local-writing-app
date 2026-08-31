@@ -4,7 +4,6 @@
   import { aiSettings } from "@/lib/stores/aiSettings.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import { fieldIconClass, entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { resolveColor } from "@/lib/utils/colors";
   import { effectiveFieldLabel, effectiveFieldHidden, metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
@@ -21,7 +20,6 @@
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
-  import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
   import { inheritedLayerLabel, fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
   import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 
@@ -240,27 +238,20 @@
   }
   const sections = $derived(buildSections(visibleFieldIds, metadataSchema));
 
-  // Reference fields (#1441) are the rail's collapsible collections: the field
-  // row owns the disclosure caret (in the glyph gutter), and the picker
-  // contributes the count+add on the header line plus the ref list BELOW the
-  // row (controlled ReferencePicker). Expanded state persists per field id
-  // (#1444), so it survives node switches and reload like the rail's sections.
+  // Reference fields render inline pills through the controlled ReferencePicker
+  // (#1732): a single `entity_ref` sits compact on the value line, an
+  // `entity_ref_list` wraps across the wide value line. No caret, no per-field
+  // collapse state — the pills are always visible.
   function isRefField(field: MetadataFieldDefinition): boolean {
     return field.type === "entity_ref" || field.type === "entity_ref_list";
   }
-  function isRefExpanded(fieldId: string): boolean {
-    return railSectionCollapse.isExpanded(`field:${fieldId}`, false);
-  }
-  function toggleRef(fieldId: string): void {
-    railSectionCollapse.toggle(`field:${fieldId}`, false);
-  }
 
   // Wide field types take the full rail width (control wraps below the
-  // name); compact types keep their control inline on the right.
+  // name); compact types keep their control inline on the right. A single
+  // `entity_ref` is one pill and stays inline; only the list wraps wide.
   function isWide(field: MetadataFieldDefinition): boolean {
     return (
       field.type === "long_text" ||
-      field.type === "entity_ref" ||
       field.type === "entity_ref_list" ||
       field.type === "tags" ||
       field.type === "list" ||
@@ -511,22 +502,10 @@
         <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")}>
           <!-- Disclosure gutter — reserved so the field glyph lines up with the
                collapsible sections' glyph column (RailSectionHeader): caret ·
-               glyph on every rail line (#1438). A reference field is itself
-               collapsible, so its caret lives here (#1441); a plain field leaves
+               glyph on every rail line (#1438). Reference fields no longer
+               collapse (#1732 — they render inline pills), so every field leaves
                the gutter empty. -->
-          {#if isRefField(field)}
-            <button
-              type="button"
-              class="fr-disc fr-disc-caret"
-              aria-expanded={isRefExpanded(fieldId)}
-              aria-label={`${isRefExpanded(fieldId) ? "Collapse" : "Expand"} ${fieldLabel}`}
-              onclick={() => toggleRef(fieldId)}
-            >
-              <GroupCaret collapsed={!isRefExpanded(fieldId)} />
-            </button>
-          {:else}
-            <span class="fr-disc" aria-hidden="true"></span>
-          {/if}
+          <span class="fr-disc" aria-hidden="true"></span>
           {#if canClearOwn && isOwnClearable(fieldId)}
             <!-- Clear-to-default (#522): the intra-project twin of #517's reset.
                  #517 hangs its "Reset to <source>" gesture off the `ti-versions`
@@ -554,7 +533,7 @@
             <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           {/if}
           <span class="fr-name" title={field.description || undefined}>{fieldLabel}</span>
-          <div class="fr-val" class:fr-val-flat={isRefField(field)} title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : isCascadeInherited(fieldId) ? `Inherited from ${cascadeSourceLabel(fieldId)}` : undefined}>
+          <div class="fr-val" title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : isCascadeInherited(fieldId) ? `Inherited from ${cascadeSourceLabel(fieldId)}` : undefined}>
             {#if isOverridden(fieldId)}
               {#if canResetOverride}
                 <!-- The `ti-versions` mark PR 2 ships, made interactive (#517):
@@ -668,7 +647,6 @@
                 allowUnset={true}
                 embedded={true}
                 controlled={isRefField(field)}
-                expanded={isRefExpanded(fieldId)}
                 value={displayValue(fieldId)}
                 ariaLabel={fieldLabel}
                 loreEntries={loreEntries}
@@ -860,32 +838,6 @@
   .fr-disc {
     flex: none;
     width: 22px;
-  }
-  /* A reference field is collapsible, so its gutter holds a real caret button
-     (a bare frame around the shared GroupCaret) rather than an empty spacer. */
-  .fr-disc-caret {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 22px;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-    border-radius: var(--r-sm);
-  }
-  .fr-disc-caret:hover {
-    background: var(--tier1);
-  }
-  /* Reference value area (#1441): a layout no-op so the controlled picker's
-     count+add ride the header line (their own margin-left:auto) and its ref list
-     takes a full-width line BELOW the row — the §3.5 one-row grammar, no second
-     strip. The field row is already flex-wrap (isWide), which the list uses.
-     `.fr-val.fr-val-flat` (not `.fr-val-flat`) so it beats the base `.fr-val`
-     display:flex regardless of source order. */
-  .fr-val.fr-val-flat {
-    display: contents;
   }
   .fr-icon {
     flex: none;

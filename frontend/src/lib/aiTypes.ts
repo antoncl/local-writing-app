@@ -153,8 +153,11 @@ export type PreviewErrorInfo = {
   // "undefined" — Jinja UndefinedError; undefined_name set when derivable.
   // "syntax"    — TemplateSyntaxError; line set.
   // "scene_not_found" — preview target_scene_id didn't resolve.
+  // "include"   — an {% include %} name didn't resolve to one snippet
+  //               (missing, or ambiguous within the project); line set when the
+  //               include is in the top-level body.
   // "other"     — catch-all.
-  kind: "undefined" | "syntax" | "scene_not_found" | "other";
+  kind: "undefined" | "syntax" | "scene_not_found" | "include" | "other";
   line?: number | null;
   col?: number | null;
   undefined_name?: string | null;

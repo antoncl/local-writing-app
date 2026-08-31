@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import date as _date_cls
 from typing import TYPE_CHECKING, Any, NoReturn
 
-from jinja2 import TemplateError, TemplateSyntaxError, UndefinedError
+from jinja2 import TemplateError, TemplateNotFound, TemplateSyntaxError, UndefinedError
 
 from app.models import PreviewCacheBlock
 from app.services.ai import tokens as ai_tokens
@@ -548,7 +548,7 @@ def build_preview(
             template_source, context=context, env=env, default_role=default_role
         )
     except TemplateError as exc:
-        _raise_preview_error_from_template(exc, context)
+        _raise_preview_error_from_template(exc, context, template_source)
 
     if session is not None and commit:
         session.commit()
@@ -669,8 +669,22 @@ def _preview_lore_tiers(
     return _PreviewLoreTiers(stable_xml, volatile_xml, stable_entries, volatile_entries)
 
 
+def _include_line(source: str, name: str | None) -> int | None:
+    """The 1-based line of the `{% include "<name>" %}` that names `name` in
+    `source`, or None. Best-effort so the editor can underline the offending
+    include: a nested include lives in a snippet's body, not this top-level
+    source, so it simply won't be found and the marker is omitted (the message
+    still shows)."""
+    if not name:
+        return None
+    for i, text in enumerate(source.splitlines(), start=1):
+        if "include" in text and (f'"{name}"' in text or f"'{name}'" in text):
+            return i
+    return None
+
+
 def _raise_preview_error_from_template(
-    exc: TemplateError, context: dict[str, Any]
+    exc: TemplateError, context: dict[str, Any], source: str = ""
 ) -> NoReturn:
     """Translate a Jinja `TemplateError` into a `PreviewError` (HTTP 422),
     carrying the line, a `kind` tag, and — for an attribute miss on a real
@@ -682,18 +696,27 @@ def _raise_preview_error_from_template(
     # doesn't expose column info on TemplateError; col stays None.
     line = getattr(exc, "lineno", None)
     undefined_namespace = None
-    if isinstance(exc, UndefinedError):
+    undefined_name = None
+    # Default message: the exception class + its text. The include case overrides
+    # it with the loader's already-friendly text (no `TemplateNotFound:` prefix).
+    message = f"{type(exc).__name__}: {exc.message}"
+    if isinstance(exc, TemplateNotFound):
+        # An unresolved `{% include %}` (#1719). PromptSnippetLoader raised this
+        # with a human message (missing vs ambiguous); surface it verbatim and
+        # point the editor gutter at the include line (#1718).
+        kind = "include"
+        message = exc.message or f'The include "{exc.name}" could not be resolved.'
+        line = line or _include_line(source, exc.name)
+    elif isinstance(exc, UndefinedError):
         kind = "undefined"
         undefined_name, obj_type = _extract_undefined_ref(exc.message or "")
         undefined_namespace = _namespace_for_object_type(context, obj_type)
     elif isinstance(exc, TemplateSyntaxError):
         kind = "syntax"
-        undefined_name = None
     else:
         kind = "other"
-        undefined_name = None
     raise PreviewError(
-        f"{type(exc).__name__}: {exc.message}",
+        message,
         422,
         line=int(line) if isinstance(line, int) else None,
         kind=kind,

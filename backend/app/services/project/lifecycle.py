@@ -307,7 +307,17 @@ class ProjectLifecycleMixin:
         }
 
     def _empty_metadata_schema(self) -> dict[str, Any]:
-        return {"version": 1, "entry_types": {}, "fields": {}, "groups": {}}
+        # A new project cascades narration (pov_mode / pov) down its manuscript
+        # structure by default (ADR-0079). Seeded here as YAML on the project —
+        # not baked into the app's built-in schema — so it is inspectable and a
+        # series/book can extend it; existing projects get it via migration.
+        return {
+            "version": 1,
+            "entry_types": {},
+            "fields": {},
+            "groups": {},
+            "cascade_fields": ["pov_mode", "pov"],
+        }
 
     def _project_title(self, root: Path) -> str | None:
         """This project's title, from the manifest — the only place it lives.

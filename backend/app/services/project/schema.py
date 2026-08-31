@@ -1040,3 +1040,11 @@ class MetadataSchemaMixin:
                 base.get("groups", {}),
                 layer.get("groups"),
             )
+        if "cascade_fields" in layer:
+            # A list, not a keyed section: union it up the chain (a series can
+            # declare narration cascade once and every book inherits it, ADR-0079)
+            # rather than child-replaces-parent.
+            base["cascade_fields"] = self._merge_metadata_field_lists(
+                base.get("cascade_fields", []),
+                layer.get("cascade_fields"),
+            )

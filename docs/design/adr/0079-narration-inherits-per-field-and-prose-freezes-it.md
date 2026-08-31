@@ -13,6 +13,15 @@
   **sidestepped**, not resolved, here.
 - Supersedes nothing.
 
+> **Amendment 1 (2026-08-31): `pov_character` is the existing `pov` field, not a new one.**
+> Implementation scoping found `pov` already ships on `manuscript:scene` as an `entity_ref`
+> restricted to characters (`default_schema.py:751`, "the point-of-view character this scene is
+> told through") — exactly this ADR's `pov_character`, mis-scoped as absent when the ADR was
+> written. So there is **no new field**: the two narration fields (`pov_mode`, `pov`) already
+> exist on scenes; slice 1 only attaches them to `manuscript:act`/`chapter` and adds
+> `cascade_fields: [pov_mode, pov]`. **Read every `pov_character` below as the existing `pov`**
+> — key kept, no rename (a rename would migrate every scene's stored value for a cosmetic gain).
+
 ## Problem
 
 Narration is a **book-level default the author overrides down the manuscript-structure

@@ -104,14 +104,16 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "icon": "stack-2",
             "kind": "manuscript",
             "parent": "manuscript:base",
-            "fields": [],
+            # Narration (pov_mode / pov) is authorable at every structure level so it
+            # can be overridden here and cascade to the scenes below (ADR-0079).
+            "fields": ["pov_mode", "pov"],
         },
         "manuscript:chapter": {
             "name": "Chapter",
             "icon": "book",
             "kind": "manuscript",
             "parent": "manuscript:base",
-            "fields": [],
+            "fields": ["pov_mode", "pov"],
         },
         "manuscript:scene": {
             "name": "Scene",

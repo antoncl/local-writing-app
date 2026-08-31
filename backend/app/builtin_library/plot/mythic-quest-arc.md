@@ -10,6 +10,7 @@ template:
   - Mythic Quest Arc
   family: journey
   description: A generic mythic journey lens for departure, ordeal, return, and integration.
+  genre: Any — a mythic adventure pattern; especially fantasy, adventure, and quest stories.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as

@@ -436,11 +436,15 @@ class PlotContextPlotline(BaseModel):
     to ask of the draft) are the template's guidance, snapshotted at instantiate — the
     structural intent the AI reasons with beyond per-beat one-liners; blank/empty for
     an ad-hoc plotline. `weak_spots` are the structure's characteristic failure modes,
-    fed as things to check the draft against."""
+    fed as things to check the draft against. `genre` (the plotline's own premise/genre,
+    seeded from the template, author-editable) and `description` (the prose body) are
+    sent so the brainstorm knows what it is writing (#1728)."""
 
     id: str
     title: str
     color: str | None = None
+    genre: str = ""
+    description: str = ""
     source_template_name: str = ""
     ai_guidance: str = ""
     diagnostic_questions: list[str] = Field(default_factory=list)

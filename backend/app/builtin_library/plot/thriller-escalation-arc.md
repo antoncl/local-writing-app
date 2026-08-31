@@ -11,6 +11,7 @@ template:
   family: genre
   description: A generic thriller lens for threat, time pressure, reversal, exposure,
     and confrontation.
+  genre: Thriller — rising danger, time pressure, and escalating stakes. Also fits action and suspense.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as

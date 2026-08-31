@@ -278,6 +278,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # beat list, when the plotline is edited.
             "fields": [
                 "color",
+                "genre",
                 "instance_beats",
                 "source_template_id",
                 "source_template_name",
@@ -605,6 +606,17 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Specialized beats",
             "type": "list",
             "item_group": "plot_instance_beat",
+        },
+        "genre": {
+            # The plotline's genre/premise (#1728). Seeded from the source
+            # template's authored genre at instantiate and freely editable — a
+            # thriller book's romance subplot carries its own genre, independent
+            # of the book's. Free text (not an enum) so a genre-neutral structure
+            # can explain its breadth. Fed to the AI via read_plot_context so a
+            # plotline brainstorm knows what it is writing. Visible (not hidden):
+            # it is author-facing, unlike the source_* lineage snapshots.
+            "name": "Genre",
+            "type": "text",
         },
         "source_template_id": {
             # Lineage snapshot (ADR-0048 S7 Slice 2, #776; ADR-0053): the stable id of

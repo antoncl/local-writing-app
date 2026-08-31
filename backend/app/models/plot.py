@@ -58,6 +58,7 @@ class PlotTemplateSpec(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     family: PlotTemplateFamily = "custom"
     description: str = ""
+    genre: str = ""
     cultural_context: str = ""
     prescriptiveness: PlotTemplatePrescriptiveness = "diagnostic"
     ai_use_guidance: str = ""

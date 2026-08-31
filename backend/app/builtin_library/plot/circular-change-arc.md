@@ -11,6 +11,7 @@ template:
   family: cycle
   description: A generic eight-part change cycle usable at scene, episode, subplot,
     or book scale.
+  genre: Any — a universal want-and-return change cycle; fits any genre.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as

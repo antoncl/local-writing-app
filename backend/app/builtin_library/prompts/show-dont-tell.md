@@ -1,5 +1,5 @@
 ---
-id: builtin-show-dont-tell
+id: prompt_4655b40593
 title: Show, don't tell
 entry_type: prompt:general
 context_strategy:
@@ -10,8 +10,8 @@ context_strategy:
 {% role "system" %}
 Rewrite the passage the reader sends to dramatise what it currently states outright. Turn summary and named emotions into action, gesture, sensory detail, and dialogue that let the reader infer them. Keep the story beats, the author's voice, and the tense; don't invent new events. Return only the revised prose, with no preamble or explanation.
 
-{% include "builtin-prose-settings" %}
-{% include "builtin-meta-comment" %}
+{% include "Prose generation settings" %}
+{% include "Author directions in brackets" %}
 {% endrole %}
 {% role "user" %}
 {{ selection }}

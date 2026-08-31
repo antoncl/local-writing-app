@@ -10,6 +10,7 @@ patch validates for a card.
 
 from __future__ import annotations
 
+from _builtins import builtin_prompt_id
 from plot_fixtures import PlotTestCase
 
 from app.models import (
@@ -22,7 +23,7 @@ from app.services.ai.helpers import create_environment_for_project
 from app.services.ai.templates import render_template
 
 _THREE_ACT = "builtin-plot-three-act-story-arc"
-_PROMPT_ID = "builtin-revise-plot-card"
+_PROMPT_TITLE = "Revise plot card"
 
 
 class _PlotAiContextBase(PlotTestCase):
@@ -157,15 +158,16 @@ class PlotContextHelperTests(_PlotAiContextBase):
 
 class RevisePlotCardPromptTests(_PlotAiContextBase):
     def test_the_prompt_ships_in_the_library_as_a_commit_brainstorm(self) -> None:
+        prompt_id = builtin_prompt_id(self.service, _PROMPT_TITLE)
         entries = {e.id: e for e in self.service.list_prompt_entries().entries}
-        self.assertIn(_PROMPT_ID, entries)
+        self.assertIn(prompt_id, entries)
         # The plot-card brainstorm is a `prompt:general` carrying an instance
         # `context_strategy` (#954, ADR-0065 S3), not its own sub-type: its commit
         # disposition is identical to `revise-entry`/`revise-plotline`, and its
         # plot-card target/body are per-instance (front matter). Same move as
         # `impersonate`.
-        self.assertEqual(entries[_PROMPT_ID].entry_type, "prompt:general")
-        output = self.service.read_prompt_entry(_PROMPT_ID).context_strategy.output
+        self.assertEqual(entries[prompt_id].entry_type, "prompt:general")
+        output = self.service.read_prompt_entry(prompt_id).context_strategy.output
         # ADR-0054 §2 / ADR-0065: the brainstorm is the `extract_to_node` handler + a
         # `commit`, not a distinct disposition.
         self.assertEqual(output.handler, "extract_to_node")
@@ -176,7 +178,7 @@ class RevisePlotCardPromptTests(_PlotAiContextBase):
         s0, s1 = self._scene("s0", chapter), self._scene("s1", chapter)
         card = self._card("The turn", body="He decides to leave.", scene=s0)
         self._card("Aftermath", body="SECRET_FUTURE fallout.", scene=s1)
-        body = self.service.read_prompt_entry(_PROMPT_ID).body
+        body = self.service.read_prompt_entry(builtin_prompt_id(self.service, _PROMPT_TITLE)).body
         out = self._render(body, inputs={"entry": card})
         self.assertIn("The turn", out)  # the card under revision
         self.assertIn("<plot_context", out)  # the board block is injected

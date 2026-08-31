@@ -11,7 +11,7 @@ Have two (or more) characters take turns in a single scene. Each `/roleplay <Nam
 
 ## The built-in prompt
 
-Roleplay is an app-owned **Library** prompt (`builtin-roleplay`, a `prompt:general` node). It is read-only in place — to change the model, the framing, or how the persona is assembled, **clone it** and edit the copy (the built-in is your starting template, not a fixed behaviour). Its one input is a required, single-pick `character` of type `context_pick` targeting lore characters.
+Roleplay is the built-in **Roleplay** prompt, an app-owned **Library** entry (a `prompt:general` node). It is read-only in place — to change the model, the framing, or how the persona is assembled, **clone it** and edit the copy (the built-in is your starting template, not a fixed behaviour). Its one input is a required, single-pick `character` of type `context_pick` targeting lore characters.
 
 ## Set up your characters (one time per character)
 

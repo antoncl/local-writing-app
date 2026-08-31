@@ -1,5 +1,5 @@
 ---
-id: builtin-summarize-scene
+id: prompt_24dd1026e3
 title: Summarize scene
 entry_type: prompt:general
 offer_on:

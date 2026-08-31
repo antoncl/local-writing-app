@@ -438,20 +438,26 @@ class PreviewEndpointTests(unittest.TestCase):
         return response.json()
 
     def test_preview_include_missing_snippet_reports_clean_error(self) -> None:
-        # An unresolved include must surface as the friendly 200-with-error the
-        # editor renders, not a crash.
+        # An unresolved include surfaces as the friendly 200-with-error the editor
+        # renders — kind "include", a human message, and the include's line for the
+        # gutter marker — not a bare TemplateNotFound (#1719 / #1718).
         body = self._preview_include("No Such Snippet")
         self.assertIsNotNone(body["error"])
         self.assertFalse(body["rendered"])
-        self.assertIn("TemplateNotFound", body["error"]["message"])
+        self.assertEqual(body["error"]["kind"], "include")
+        self.assertIn('No snippet named "No Such Snippet"', body["error"]["message"])
+        self.assertNotIn("TemplateNotFound", body["error"]["message"])
+        self.assertEqual(body["error"]["line"], 1)
 
     def test_preview_include_ambiguous_title_not_resolved(self) -> None:
-        # Two snippets share a title → ambiguous → must NOT resolve.
+        # Two snippets share a title in the same project → ambiguous → must NOT
+        # resolve, and the error says which way it failed (#1717 / #1719).
         self._make_prompt("Shared Name", "First body.", "prompt:snippet")
         self._make_prompt("Shared Name", "Second body.", "prompt:snippet")
         body = self._preview_include("Shared Name")
         self.assertIsNotNone(body["error"])
-        self.assertIn("TemplateNotFound", body["error"]["message"])
+        self.assertEqual(body["error"]["kind"], "include")
+        self.assertIn("matches more than one snippet", body["error"]["message"])
 
     def test_preview_include_strips_md_extension(self) -> None:
         self._make_prompt("Style Guide", "Write in past tense.", "prompt:snippet")
@@ -466,7 +472,8 @@ class PreviewEndpointTests(unittest.TestCase):
         self._make_prompt("Not A Snippet", "General prompt body.", "prompt:general")
         body = self._preview_include("Not A Snippet")
         self.assertIsNotNone(body["error"])
-        self.assertIn("TemplateNotFound", body["error"]["message"])
+        self.assertEqual(body["error"]["kind"], "include")
+        self.assertIn('No snippet named "Not A Snippet"', body["error"]["message"])
 
     def test_session_id_round_trips_through_preview(self) -> None:
         # ADR-0060 §2 retired the emitting `relevant_lore(..., partition)` form, so

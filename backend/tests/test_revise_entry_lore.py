@@ -21,6 +21,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from _builtins import builtin_prompt_id
 from project_fixtures import open_test_project
 
 from app.models import (
@@ -63,7 +64,7 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
     def _render(self, inputs: dict):
         """Render the builtin revise-entry template, returning (text, env). The
         env carries `lore_invoked` — the gate flag `build_preview` captures."""
-        prompt = self.service.read_prompt_entry("builtin-revise-entry")
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Revise entry"))
         env = create_environment_for_project(self.service)
         text = env.from_string(prompt.body).render(inputs=inputs)
         return text, env
@@ -131,7 +132,7 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
                 metadata={"pov_mode": "first", "tense": "present", "measurement_system": "metric"},
             )
         )
-        prompt = self.service.read_prompt_entry("builtin-revise-entry")
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Revise entry"))
         env = create_environment_for_project(self.service)
         rendered = env.from_string(prompt.body).render(
             inputs={"entry": "", "entry_type": "lore:character"},

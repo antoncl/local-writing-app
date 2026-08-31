@@ -13,7 +13,7 @@ from app.services.ai.effective_inputs import (
     SnippetSource,
     resolve_effective_inputs,
 )
-from app.services.ai.snippet_loader import match_snippet_name
+from app.services.ai.snippet_loader import match_snippet_name, resolve_snippet_name
 
 
 def _inp(name: str, type: str = "text", **kw) -> PromptInputDefinition:
@@ -249,3 +249,29 @@ def test_match_snippet_name_ambiguous_title_is_unresolved():
     snippets = [_cand("p1", "Dup"), _cand("p2", "Dup")]
     kw = {"id_of": lambda e: e.id, "title_of": lambda e: e.title}
     assert match_snippet_name("Dup", snippets, **kw) is None
+
+
+def test_resolve_snippet_name_prefers_the_nearer_layer_on_a_title_tie():
+    # Same title in two different layers — the higher `layer_rank_of` (nearer)
+    # wins, exactly as a project's own snippet shadows an inherited/built-in one.
+    near = _cand("p1", "Voice")
+    far = _cand("p2", "Voice")
+    ranks = {"p1": 1, "p2": 0}
+    kw = {"id_of": lambda e: e.id, "title_of": lambda e: e.title}
+    result = resolve_snippet_name(
+        "Voice", [far, near], **kw, layer_rank_of=lambda e: ranks[e.id]
+    )
+    assert result.status == "resolved"
+    assert result.entry is near
+
+
+def test_resolve_snippet_name_same_rank_title_collision_is_ambiguous():
+    # Two snippets sharing a title AT THE SAME rank (e.g. both in the same
+    # project) is a genuine collision — resolves to nothing, not a pick.
+    one = _cand("p1", "Voice")
+    two = _cand("p2", "Voice")
+    kw = {"id_of": lambda e: e.id, "title_of": lambda e: e.title}
+    result = resolve_snippet_name("Voice", [one, two], **kw, layer_rank_of=lambda _e: 0)
+    assert result.status == "ambiguous"
+    assert result.entry is None
+    assert list(result.colliding) == [one, two]

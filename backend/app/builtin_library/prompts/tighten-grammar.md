@@ -1,5 +1,5 @@
 ---
-id: builtin-tighten-grammar
+id: prompt_4511b25021
 title: Tighten grammar
 entry_type: prompt:general
 context_strategy:
@@ -10,7 +10,7 @@ context_strategy:
 {% role "system" %}
 Correct the grammar, punctuation, and spelling in the passage the reader sends. Make the smallest changes that fix real errors — do not restyle, reword, or change the meaning, the author's voice, or the tense. Leave deliberate, effective choices alone. Return only the corrected prose, with no preamble or explanation.
 
-{% include "builtin-meta-comment" %}
+{% include "Author directions in brackets" %}
 {% endrole %}
 {% role "user" %}
 {{ selection }}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from _builtins import builtin_prompt_id
 from metadata_validation_base import MetadataValidationBase
 
 from app.models import (
@@ -745,7 +746,7 @@ class LoreAndPromptTests(MetadataValidationBase):
         # branch — ADR-0065 S3 moved that declaration onto the shipped node's own
         # instance `context_strategy`, since roleplay is now a `prompt:general`
         # instance (not its own sub-type).
-        roleplay = self.service.read_prompt_entry("builtin-roleplay")
+        roleplay = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Roleplay"))
         self.assertEqual(roleplay.entry_type, "prompt:general")
         assert roleplay.context_strategy is not None
         roleplay_output = roleplay.context_strategy.output

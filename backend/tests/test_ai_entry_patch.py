@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from _builtins import builtin_prompt_id
 from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
@@ -518,7 +519,7 @@ class FieldRosterFromTypeTests(unittest.TestCase):
         # without a StrictUndefined error.
         # The shipped revise:entry body lives in the built-in Library now
         # (ADR-0049 §7), not a freshly-created instance's `default_body`.
-        prompt = self.service.read_prompt_entry("builtin-revise-entry")
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Revise entry"))
         env = create_environment_for_project(self.service)
         template = env.from_string(prompt.body)
         label = self.service.read_metadata_schema().entry_types["lore:character"].name
@@ -576,7 +577,7 @@ class FieldRosterFromTypeTests(unittest.TestCase):
         )
         # The shipped revise:entry body lives in the built-in Library now
         # (ADR-0049 §7), not a freshly-created instance's `default_body`.
-        prompt = self.service.read_prompt_entry("builtin-revise-entry")
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Revise entry"))
         env = create_environment_for_project(self.service)
         rendered = env.from_string(prompt.body).render(
             inputs={"entry": hero.id, "entry_type": ""}
@@ -746,7 +747,7 @@ class SceneSummaryPromptTests(unittest.TestCase):
         # ADR-0065 S3 collapsed `prompt:revise:scene_summary` into `prompt:general`
         # — the commit config that used to live on the type now rides the shipped
         # node's own instance `context_strategy`.
-        prompt = self.service.read_prompt_entry("builtin-summarize-scene")
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Summarize scene"))
         self.assertEqual(prompt.entry_type, "prompt:general")
         assert prompt.context_strategy is not None
         # A brainstorm chat with a commit (ADR-0054 §2 / ADR-0065): the handler is
@@ -766,7 +767,7 @@ class SceneSummaryPromptTests(unittest.TestCase):
         self.assertEqual(sources[0].get("kind"), "scene")
 
     def test_shipped_prompt_resolves_as_general(self) -> None:
-        prompt = self.service.read_prompt_entry("builtin-summarize-scene")
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Summarize scene"))
         self.assertEqual(prompt.entry_type, "prompt:general")
 
     def test_template_hands_the_scene_prose_but_carries_no_contract(self) -> None:
@@ -775,7 +776,7 @@ class SceneSummaryPromptTests(unittest.TestCase):
         # envelope is NOT in the seed — it is built at commit from the field
         # set the seed's own `field_contract` loop registered (asserted in
         # test_ai_extraction).
-        prompt = self.service.read_prompt_entry("builtin-summarize-scene")
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Summarize scene"))
         env = create_environment_for_project(self.service)
         rendered = env.from_string(prompt.body).render(inputs={"entry": self.scene_id})
         self.assertIn("chasing the thief", rendered)

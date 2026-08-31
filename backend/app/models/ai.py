@@ -317,6 +317,10 @@ class PreviewErrorInfo(BaseModel):
                             rather than an undeclared input.
       - "syntax"          → TemplateSyntaxError; `line` is set.
       - "scene_not_found" → preview target_scene_id didn't resolve.
+      - "include"         → an `{% include %}` name didn't resolve to one snippet
+                            (missing, or ambiguous within the project); `message`
+                            is the loader's human text and `line` is set when the
+                            include is in the top-level body.
       - "other"           → anything else (catch-all).
     """
 

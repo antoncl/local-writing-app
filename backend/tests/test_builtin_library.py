@@ -18,6 +18,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from _builtins import builtin_prompt_id
 from layer_fixtures import declare_full_chain
 from project_fixtures import open_test_project
 
@@ -27,26 +28,28 @@ from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project_service import ProjectService
 
-LIBRARY_IDS = {
-    "builtin-roleplay",
-    "builtin-revise-entry",
+# Titles of the built-in ids the tests below resolve by (built-in ids are now
+# opaque uuids; see `_builtins.builtin_prompt_id`).
+LIBRARY_TITLES = {
+    "Roleplay",
+    "Revise entry",
     # The inline selection-revise set (the ✨ Revise menu, shipped non-empty).
-    "builtin-shorten",
-    "builtin-expand",
-    "builtin-rephrase",
-    "builtin-tighten-grammar",
-    "builtin-describe",
-    "builtin-show-dont-tell",
+    "Shorten",
+    "Expand",
+    "Rephrase",
+    "Tighten grammar",
+    "Describe",
+    "Show, don't tell",
 }
 
 # The six built-in revise prompts, offered on any manuscript prose selection.
-REVISE_IDS = [
-    "builtin-shorten",
-    "builtin-expand",
-    "builtin-rephrase",
-    "builtin-tighten-grammar",
-    "builtin-describe",
-    "builtin-show-dont-tell",
+REVISE_TITLES = [
+    "Shorten",
+    "Expand",
+    "Rephrase",
+    "Tighten grammar",
+    "Describe",
+    "Show, don't tell",
 ]
 
 
@@ -55,6 +58,34 @@ class BuiltinLibraryTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = open_test_project(self.root, "Library Tests")
+        self.roleplay_id = builtin_prompt_id(self.service, "Roleplay")
+        self.revise_entry_id = builtin_prompt_id(self.service, "Revise entry")
+        self.shorten_id = builtin_prompt_id(self.service, "Shorten")
+        self.expand_id = builtin_prompt_id(self.service, "Expand")
+        self.rephrase_id = builtin_prompt_id(self.service, "Rephrase")
+        self.tighten_grammar_id = builtin_prompt_id(self.service, "Tighten grammar")
+        self.describe_id = builtin_prompt_id(self.service, "Describe")
+        self.show_dont_tell_id = builtin_prompt_id(self.service, "Show, don't tell")
+        self.project_settings_id = builtin_prompt_id(self.service, "Project settings")
+        self.prose_settings_id = builtin_prompt_id(self.service, "Prose generation settings")
+        self.library_ids = {
+            self.roleplay_id,
+            self.revise_entry_id,
+            self.shorten_id,
+            self.expand_id,
+            self.rephrase_id,
+            self.tighten_grammar_id,
+            self.describe_id,
+            self.show_dont_tell_id,
+        }
+        self.revise_ids = [
+            self.shorten_id,
+            self.expand_id,
+            self.rephrase_id,
+            self.tighten_grammar_id,
+            self.describe_id,
+            self.show_dont_tell_id,
+        ]
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -64,7 +95,7 @@ class BuiltinLibraryTests(unittest.TestCase):
 
     def test_library_prompts_resolve_in_a_fresh_project(self) -> None:
         entries = self._summaries()
-        for lib_id in LIBRARY_IDS:
+        for lib_id in self.library_ids:
             self.assertIn(lib_id, entries, f"{lib_id} should resolve out of the box")
             self.assertEqual(entries[lib_id].source_layer_label, "Library")
             # The read-model flag the frontend branches clone/hide on (#674) —
@@ -72,7 +103,7 @@ class BuiltinLibraryTests(unittest.TestCase):
             self.assertTrue(entries[lib_id].is_library)
         # And they read as inherited, not owned by the open project.
         own_layer_id = self.service._metadata_schema_layer_id(self.root)
-        for lib_id in LIBRARY_IDS:
+        for lib_id in self.library_ids:
             self.assertNotEqual(entries[lib_id].source_layer_id, own_layer_id)
 
     def test_library_does_not_clutter_the_project_folder(self) -> None:
@@ -81,15 +112,15 @@ class BuiltinLibraryTests(unittest.TestCase):
         # The prompts folder exists (scaffolded) but is empty of shipped files.
         self.assertEqual(list((self.root / "prompts").glob("*.md")), [])
         # Yet the shipped prompts resolve, and one reads back by id (runnable).
-        self.assertTrue(set(self._summaries()) >= LIBRARY_IDS)
-        roleplay = self.service.read_prompt_entry("builtin-roleplay")
+        self.assertTrue(set(self._summaries()) >= self.library_ids)
+        roleplay = self.service.read_prompt_entry(self.roleplay_id)
         self.assertIn("character_turns", roleplay.body)
 
     def test_library_prompt_cannot_be_saved_in_place(self) -> None:
-        before = self._library_path("builtin-roleplay").read_bytes()
+        before = self._library_path(self.roleplay_id).read_bytes()
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.save_prompt_entry(
-                "builtin-roleplay",
+                self.roleplay_id,
                 SavePromptEntryRequest(
                     title="Roleplay",
                     body="hijacked",
@@ -100,16 +131,16 @@ class BuiltinLibraryTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.status_code, 409)
         # The bundled app file is untouched — read-only by construction.
-        self.assertEqual(self._library_path("builtin-roleplay").read_bytes(), before)
+        self.assertEqual(self._library_path(self.roleplay_id).read_bytes(), before)
 
     def test_library_prompt_cannot_be_deleted(self) -> None:
-        before = self._library_path("builtin-revise-entry").read_bytes()
+        before = self._library_path(self.revise_entry_id).read_bytes()
         with self.assertRaises(ProjectServiceError) as ctx:
-            self.service.delete_prompt_entry("builtin-revise-entry")
+            self.service.delete_prompt_entry(self.revise_entry_id)
         self.assertEqual(ctx.exception.status_code, 409)
-        self.assertEqual(self._library_path("builtin-revise-entry").read_bytes(), before)
+        self.assertEqual(self._library_path(self.revise_entry_id).read_bytes(), before)
         # Still listed after the refused delete.
-        self.assertIn("builtin-revise-entry", self._summaries())
+        self.assertIn(self.revise_entry_id, self._summaries())
 
     def test_owned_prompt_coexists_with_the_library(self) -> None:
         created = self.service.create_prompt_entry(
@@ -117,7 +148,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         )
         entries = self._summaries()
         self.assertIn(created.id, entries)
-        self.assertTrue(set(entries) >= LIBRARY_IDS)
+        self.assertTrue(set(entries) >= self.library_ids)
         # The owned prompt is editable in place (the guard only bites inherited).
         own = self.service.read_prompt_entry(created.id)
         self.service.save_prompt_entry(
@@ -138,14 +169,14 @@ class BuiltinLibraryTests(unittest.TestCase):
         promises. If the flag ever drifts from the 409, this fails.
         """
         summaries = self._summaries()
-        for lib_id in LIBRARY_IDS:
+        for lib_id in self.library_ids:
             # Inherited Library prompts read as NOT editable on BOTH read models.
             self.assertFalse(summaries[lib_id].editable, f"{lib_id} is inherited")
             self.assertFalse(self.service.read_prompt_entry(lib_id).editable)
         # editable=False is not decorative: the save it forbids really 409s.
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.save_prompt_entry(
-                "builtin-roleplay",
+                self.roleplay_id,
                 SavePromptEntryRequest(
                     title="Roleplay",
                     body="hijacked",
@@ -158,7 +189,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         # The read-only guard covers DELETE too (delete_prompt_entry runs the same
         # reject), so editable=False must mirror that as well, not just save.
         with self.assertRaises(ProjectServiceError) as del_ctx:
-            self.service.delete_prompt_entry("builtin-revise-entry")
+            self.service.delete_prompt_entry(self.revise_entry_id)
         self.assertEqual(del_ctx.exception.status_code, 409)
         # An owned prompt reads editable=True on both read models, and the save
         # that value promises actually succeeds.
@@ -191,7 +222,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         goal-directed brainstorm and the structured result is extracted separately
         at commit.
         """
-        roleplay = self.service.read_prompt_entry("builtin-roleplay").body
+        roleplay = self.service.read_prompt_entry(self.roleplay_id).body
         for marker in (
             "project.metadata.tense",
             "project.metadata.measurement_system",
@@ -199,7 +230,7 @@ class BuiltinLibraryTests(unittest.TestCase):
             "character_turns",
         ):
             self.assertIn(marker, roleplay)
-        revise = self.service.read_prompt_entry("builtin-revise-entry").body
+        revise = self.service.read_prompt_entry(self.revise_entry_id).body
         for marker in (
             "ideation partner",
             "entry(inputs.entry)",
@@ -218,15 +249,15 @@ class BuiltinLibraryTests(unittest.TestCase):
         project's authored settings, and revise:entry pulls it in so a brainstorm
         knows the project's language/units/spelling out of the box."""
         entries = self._summaries()
-        self.assertIn("builtin-project-settings", entries)
-        self.assertTrue(entries["builtin-project-settings"].is_library)
-        body = self.service.read_prompt_entry("builtin-project-settings").body
+        self.assertIn(self.project_settings_id, entries)
+        self.assertTrue(entries[self.project_settings_id].is_library)
+        body = self.service.read_prompt_entry(self.project_settings_id).body
         # Reads labels from the project type; skips color and the narrative-craft
-        # settings (POV / tense), which live in builtin-prose-settings (#1076).
+        # settings (POV / tense), which live in the "Prose generation settings" snippet (#1076).
         self.assertIn('fields("project:project")', body)
         self.assertIn('not in ["color", "pov_mode", "tense"]', body)
-        revise = self.service.read_prompt_entry("builtin-revise-entry").body
-        self.assertIn('{% include "builtin-project-settings" %}', revise)
+        revise = self.service.read_prompt_entry(self.revise_entry_id).body
+        self.assertIn('{% include "Project settings" %}', revise)
 
     def test_project_settings_snippet_renders_the_authored_settings(self) -> None:
         """The snippet lists the project's set fields (renders clean, with the
@@ -253,7 +284,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         )
         env = create_environment_for_project(self.service)
         out = render_template(
-            '{% role "system" %}{% include "builtin-project-settings" %}{% endrole %}',
+            '{% role "system" %}{% include "Project settings" %}{% endrole %}',
             context={"project": self.service.current_project()},
             env=env,
         )
@@ -271,7 +302,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         in the shared author-directions snippet — so the ✨ Revise menu is
         non-empty out of the box and every one replaces the selection."""
         entries = self._summaries()
-        for pid in REVISE_IDS:
+        for pid in self.revise_ids:
             self.assertIn(pid, entries, f"{pid} should resolve out of the box")
             entry = self.service.read_prompt_entry(pid)
             self.assertTrue(entry.is_library)
@@ -279,7 +310,7 @@ class BuiltinLibraryTests(unittest.TestCase):
             output = entry.context_strategy.output
             self.assertEqual(output.handler, "inline")
             self.assertEqual(output.destination, "selection")
-            self.assertIn('{% include "builtin-meta-comment" %}', entry.body)
+            self.assertIn('{% include "Author directions in brackets" %}', entry.body)
             self.assertIn("{{ selection }}", entry.body)
 
     def test_describe_prompt_renders_selection_senses_and_snippet(self) -> None:
@@ -289,7 +320,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         from app.services.ai.helpers import create_environment_for_project
         from app.services.ai.templates import render_template
 
-        body = self.service.read_prompt_entry("builtin-describe").body
+        body = self.service.read_prompt_entry(self.describe_id).body
         env = create_environment_for_project(self.service)
         out = render_template(
             body,
@@ -308,7 +339,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         from app.services.ai.helpers import create_environment_for_project
         from app.services.ai.templates import render_template
 
-        body = self.service.read_prompt_entry("builtin-describe").body
+        body = self.service.read_prompt_entry(self.describe_id).body
         env = create_environment_for_project(self.service)
         out = render_template(
             body,
@@ -336,11 +367,11 @@ class BuiltinLibraryTests(unittest.TestCase):
             )
         )
         entries = self._summaries()
-        self.assertIn("builtin-prose-settings", entries)
-        self.assertTrue(entries["builtin-prose-settings"].is_library)
+        self.assertIn(self.prose_settings_id, entries)
+        self.assertTrue(entries[self.prose_settings_id].is_library)
         env = create_environment_for_project(self.service)
         out = render_template(
-            '{% role "system" %}{% include "builtin-prose-settings" %}{% endrole %}',
+            '{% role "system" %}{% include "Prose generation settings" %}{% endrole %}',
             context={"project": self.service.current_project()},
             env=env,
         )
@@ -384,7 +415,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         scene = self.service.read_scene(scene_id)
         env = create_environment_for_project(self.service)
         out = render_template(
-            '{% role "system" %}{% include "builtin-prose-settings" %}{% endrole %}',
+            '{% role "system" %}{% include "Prose generation settings" %}{% endrole %}',
             context={"project": self.service.current_project(), "scene": scene},
             env=env,
         )
@@ -403,7 +434,7 @@ class BuiltinLibraryTests(unittest.TestCase):
 
         env = create_environment_for_project(self.service)
         out = env.from_string(
-            '{% role "system" %}before{% include "builtin-project-settings" %}after{% endrole %}'
+            '{% role "system" %}before{% include "Project settings" %}after{% endrole %}'
         ).render()
         self.assertNotIn("## Project settings", out)
         self.assertIn("before", out)
@@ -413,11 +444,11 @@ class BuiltinLibraryTests(unittest.TestCase):
         """Clone (§5): a shipped prompt is lifted into the project under a NEW id
         as an editable copy. The Library original is untouched and still resolves
         — clone is not hide."""
-        before = self._library_path("builtin-roleplay").read_bytes()
-        source = self.service.read_prompt_entry("builtin-roleplay")
-        clone = self.service.fork_prompt_entry("builtin-roleplay")
+        before = self._library_path(self.roleplay_id).read_bytes()
+        source = self.service.read_prompt_entry(self.roleplay_id)
+        clone = self.service.fork_prompt_entry(self.roleplay_id)
         # New id, owned by the project (not the Library floor), and not shipped.
-        self.assertNotEqual(clone.id, "builtin-roleplay")
+        self.assertNotEqual(clone.id, self.roleplay_id)
         self.assertFalse(clone.is_library)
         # The whole point of the clone: it is now editable in place (#689).
         self.assertTrue(clone.editable)
@@ -432,8 +463,8 @@ class BuiltinLibraryTests(unittest.TestCase):
         # The copy lands as a real project file; the shipped original is byte-for-
         # byte untouched and still resolves.
         self.assertEqual(len(list((self.root / "prompts").glob("*.md"))), 1)
-        self.assertEqual(self._library_path("builtin-roleplay").read_bytes(), before)
-        self.assertIn("builtin-roleplay", self._summaries())
+        self.assertEqual(self._library_path(self.roleplay_id).read_bytes(), before)
+        self.assertIn(self.roleplay_id, self._summaries())
         # And the owned copy is now saveable in place (the read-only guard is off).
         saved = self.service.save_prompt_entry(
             clone.id,
@@ -470,14 +501,14 @@ class BuiltinLibraryTests(unittest.TestCase):
         # First build persists the snapshot; it must carry the Library entries.
         self.service._build_node_index(self.root)
         snapshot_text = snapshot.snapshot_path(self.root).read_text(encoding="utf-8")
-        for lib_id in LIBRARY_IDS:
+        for lib_id in self.library_ids:
             self.assertIn(lib_id, snapshot_text)
         # Drop the in-memory memo so the next build reloads from that snapshot —
         # what a fresh open does — and the Library must still resolve, labelled.
         node_index_gate.invalidate()
         entries = self._summaries()
-        self.assertTrue(set(entries) >= LIBRARY_IDS)
-        for lib_id in LIBRARY_IDS:
+        self.assertTrue(set(entries) >= self.library_ids)
+        for lib_id in self.library_ids:
             self.assertEqual(entries[lib_id].source_layer_label, "Library")
             # `is_library` is re-stamped from the layer on rehydrate, NOT read
             # from the serialized entry. If the warm load drops it, the pill
@@ -494,7 +525,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         # The behaviour the flag gates: clone must still work after a warm load,
         # not just resolve. With is_library lost, fork_prompt_entry would 409.
         node_index_gate.invalidate()
-        clone = self.service.fork_prompt_entry("builtin-roleplay")
+        clone = self.service.fork_prompt_entry(self.roleplay_id)
         self.assertFalse(clone.is_library)
 
     def _library_path(self, entry_id: str) -> Path:

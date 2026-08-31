@@ -1,5 +1,5 @@
 ---
-id: builtin-impersonate
+id: prompt_cb11befef1
 title: Impersonate
 entry_type: prompt:general
 offer_on:

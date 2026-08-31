@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from _builtins import builtin_prompt_id
 from project_fixtures import open_test_project
 
 from app.models import SavePromptEntryRequest
@@ -123,20 +124,24 @@ class StampedReadModelTests(unittest.TestCase):
     a computed field some paths fill and others don't is worse than none)."""
 
     # Shipped Library prompts cover four of the five shelves.
-    EXPECTED = {
-        "builtin-roleplay": ("Continue", ""),
-        "builtin-describe": ("Revise prose", ""),
-        "builtin-revise-entry": ("Revise entities", ""),
+    EXPECTED_TITLES = {
+        "Roleplay": ("Continue", ""),
+        "Describe": ("Revise prose", ""),
+        "Revise entry": ("Revise entities", ""),
         # offer_on anchors impersonate to lore:character → Chat but not runnable.
-        "builtin-impersonate": ("Chat", ""),
-        "builtin-finalize-roleplay": ("Snippets", ""),
-        "builtin-prose-settings": ("Snippets", ""),
+        "Impersonate": ("Chat", ""),
+        "Finalize roleplay": ("Snippets", ""),
+        "Prose generation settings": ("Snippets", ""),
     }
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = open_test_project(self.root, "Disposition Tests")
+        self.EXPECTED = {
+            builtin_prompt_id(self.service, title): expected
+            for title, expected in self.EXPECTED_TITLES.items()
+        }
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

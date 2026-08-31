@@ -1269,6 +1269,10 @@ class ReferencesMixin:
         if not snippets:
             return  # nothing an include could resolve to
         env = create_environment()
+        # Same layer-precedence rule the render loader uses, so an include edge
+        # targets the snippet that actually renders (a project's own snippet
+        # shadows a same-title built-in). #1717.
+        ranks = self._layer_rank_map()
         for prompt in prompts:
             try:
                 _, body = self._read_markdown_with_front_matter(prompt.path)
@@ -1279,7 +1283,11 @@ class ReferencesMixin:
             targets: list[str] = []
             for name in literal_include_names(body, env):
                 matched = match_snippet_name(
-                    name, snippets, id_of=lambda entry: entry.id, title_of=lambda entry: entry.title
+                    name,
+                    snippets,
+                    id_of=lambda entry: entry.id,
+                    title_of=lambda entry: entry.title,
+                    layer_rank_of=lambda entry: ranks.get(entry.source_layer_id, -1),
                 )
                 if matched is not None:
                     targets.append(matched.id)

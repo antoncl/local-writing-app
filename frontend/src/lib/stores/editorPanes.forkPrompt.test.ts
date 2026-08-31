@@ -11,7 +11,7 @@ import { api } from "@/lib/api";
 import type { PromptEntry } from "@/lib/types";
 
 const LIBRARY: PromptEntry = {
-  id: "builtin-roleplay",
+  id: "prompt_test_roleplay",
   title: "Roleplay",
   body: "shipped body",
   revision: "",

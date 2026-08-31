@@ -172,7 +172,7 @@ Known facts: {{ entry(inputs.character).metadata | json }}
 Common fragments live as **snippets** — include one by id:
 
 ```jinja
-{% include "builtin-project-settings" %}
+{% include "Project settings" %}
 ```
 
 ## Grouping prompts into menus

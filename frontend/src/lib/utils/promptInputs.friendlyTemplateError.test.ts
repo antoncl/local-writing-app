@@ -76,4 +76,17 @@ describe("friendlyTemplateError", () => {
     };
     expect(friendlyTemplateError(err, [], {})).toContain("Pick a different target scene");
   });
+
+  it("passes an unresolved-include message through verbatim", () => {
+    // The backend loader already phrases it for an author (missing / ambiguous);
+    // don't rewrap it.
+    const err: PreviewErrorInfo = {
+      message: 'No snippet named "House voice" was found to include.',
+      kind: "include",
+      line: 3,
+    };
+    expect(friendlyTemplateError(err, [], {})).toBe(
+      'No snippet named "House voice" was found to include.',
+    );
+  });
 });

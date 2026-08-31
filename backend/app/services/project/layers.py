@@ -205,6 +205,23 @@ class LayerWalkMixin:
         )
         return layers
 
+    def _layer_rank_map(self) -> dict[str, int]:
+        """`{source_layer_id: rank}` over the Library-to-open-project chain, where
+        a **higher** rank is a nearer, higher-priority layer.
+
+        Lets an include title match resolve by layer precedence (nearest wins,
+        `resolve_snippet_name`) without re-deriving rank from index insertion order
+        (`node_index.py` warns against that). The machine layer is excluded — it
+        contributes no prompts, so no snippet entry ever looks it up — leaving
+        Library at 0 and each project layer above it. Only the relative order is
+        used, so absolute values do not matter.
+        """
+        root = self._require_project()
+        return {
+            layer.id: layer.rank
+            for layer in self._layer_sequence(root, include_machine=False, include_library=True)
+        }
+
     def _stamp_project_layers(
         self, root: Path, folders: list[Path], *, start_rank: int = 0
     ) -> list[IndexLayer]:

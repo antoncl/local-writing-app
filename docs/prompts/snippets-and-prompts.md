@@ -56,16 +56,22 @@ or more prompts. Examples:
 - A boilerplate persona block ("You are an expert thriller writer with a clipped, declarative style")
 - A standing instruction applied everywhere ("avoid adverbs")
 
-Inside a prompt template, snippets are pulled in by node id — or by title, when
-exactly one snippet carries it (filenames give you readable ids):
+Inside a prompt template, snippets are pulled in by the **title** you see in the
+Library — the name is the handle:
 
 ```jinja
-{% include "builtin-house-voice" %}
+{% include "House voice" %}
 ```
 
-See [Template language](template-language.md) for the full include syntax. Note
-that a title-based include stops resolving if the snippet is renamed or a second
-snippet takes the same title — ids are the stable handle.
+Resolution is layer-aware: your own project's snippet shadows an inherited or
+built-in one of the same title, so overriding a shipped snippet is just making one
+with the same name. A title that matches two snippets *in the same project* is
+ambiguous and does not resolve — the same rule a programming language applies to a
+duplicate name; the editor flags it, and running the prompt reports which include
+failed. (An id still resolves too, for the rare template that wants to pin an exact
+entry, but titles are what the shipped prompts use.)
+
+See [Template language](template-language.md) for the full include syntax.
 
 A snippet may declare `inputs` of its own; a prompt's **effective inputs** are
 its own plus the transitive union of every snippet it includes, so a snippet's

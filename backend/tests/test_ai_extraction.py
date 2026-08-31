@@ -25,6 +25,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
+from _builtins import builtin_prompt_id
 from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 from test_ai_entry_patch import add_character_patch_fields
@@ -328,7 +329,7 @@ class ShippedPromptFieldContractTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_shipped_scene_summary_registers_and_offers_only_summary(self) -> None:
-        prompt = self.service.read_prompt_entry("builtin-summarize-scene")
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Summarize scene"))
         env = create_environment_for_project(self.service)
         env.from_string(prompt.body).render(inputs={"entry": self.scene_id})
         stored = env.field_contract.stored
@@ -347,7 +348,7 @@ class ShippedPromptFieldContractTests(unittest.TestCase):
         # Contrast case: revise-entry's loop registers the FULL proposable set
         # (`fields(e) if f.proposable`, no `f.id != "body"` exclusion), so
         # "body" IS in `stored` and the envelope offers it.
-        prompt = self.service.read_prompt_entry("builtin-revise-entry")
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Revise entry"))
         env = create_environment_for_project(self.service)
         env.from_string(prompt.body).render(inputs={"entry": self.hero.id, "entry_type": ""})
         stored = env.field_contract.stored

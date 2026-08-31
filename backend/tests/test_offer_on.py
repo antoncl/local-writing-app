@@ -18,6 +18,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from _builtins import builtin_prompt_id
 from project_fixtures import open_test_project
 
 from app.models import SavePromptEntryRequest
@@ -37,18 +38,23 @@ class OfferOnParsingTests(unittest.TestCase):
 
 class ImpersonateAndOfferOnTests(unittest.TestCase):
     # Each shipped conversation prompt now declares where it is offered.
-    OFFER_ON = {
-        "builtin-revise-entry": ["lore:base"],
-        "builtin-revise-plot-card": ["plot:card"],
-        "builtin-revise-plotline": ["plot:plotline"],
-        "builtin-summarize-scene": ["manuscript:scene"],
-        "builtin-impersonate": ["lore:character"],
+    OFFER_ON_TITLES = {
+        "Revise entry": ["lore:base"],
+        "Revise plot card": ["plot:card"],
+        "Revise plotline": ["plot:plotline"],
+        "Summarize scene": ["manuscript:scene"],
+        "Impersonate": ["lore:character"],
     }
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = open_test_project(self.root, "Offer-on Tests")
+        self.impersonate_id = builtin_prompt_id(self.service, "Impersonate")
+        self.OFFER_ON = {
+            builtin_prompt_id(self.service, title): expected
+            for title, expected in self.OFFER_ON_TITLES.items()
+        }
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -58,8 +64,8 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
 
     def test_impersonate_resolves_as_a_plain_general_chat(self) -> None:
         entries = self._summaries()
-        self.assertIn("builtin-impersonate", entries)
-        imp = entries["builtin-impersonate"]
+        self.assertIn(self.impersonate_id, entries)
+        imp = entries[self.impersonate_id]
         # It reuses the existing `prompt:general` type — no bespoke subtype (the
         # behaviour it needs, a plain chat with no handler and no commit, already
         # exists there).
@@ -78,7 +84,7 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
             self.assertEqual(self.service.read_prompt_entry(entry_id).offer_on, expected, entry_id)
 
     def test_impersonate_body_locks_into_the_character(self) -> None:
-        entry = self.service.read_prompt_entry("builtin-impersonate")
+        entry = self.service.read_prompt_entry(self.impersonate_id)
         body = entry.body
         # Pulls the character in via the seeded `entry` input, resolved AS-OF the
         # conversation's anchor scene (ADR-0060 §3) rather than at book-start.
@@ -93,7 +99,7 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         # The read anchor (ADR-0055 §1): slider-seeded at launch, `hidden` from the
         # running chat strip (the slider is the control), but a scene `context_pick`
         # so the prompt-editor preview still offers a picker to exercise the path.
-        inputs = {i.name: i for i in self.service.read_prompt_entry("builtin-impersonate").inputs}
+        inputs = {i.name: i for i in self.service.read_prompt_entry(self.impersonate_id).inputs}
         self.assertIn("as_of", inputs)
         self.assertTrue(inputs["as_of"].hidden)
         self.assertFalse(inputs["as_of"].required)
@@ -102,7 +108,7 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         self.assertIn("scene", kinds)
 
     def test_clone_carries_offer_on_and_a_save_round_trips_it(self) -> None:
-        clone = self.service.fork_prompt_entry("builtin-impersonate")
+        clone = self.service.fork_prompt_entry(self.impersonate_id)
         # The clone keeps the shipped allow-list verbatim — without this, a cloned
         # impersonate would silently stop appearing on character cards.
         self.assertEqual(clone.offer_on, ["lore:character"])
@@ -129,7 +135,7 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         # list, so a save that does NOT echo offer_on clears the key. This is why
         # the client round-trips it (api.savePromptEntry) — pinned so the mechanism
         # is deliberate, matching how `inputs` behaves.
-        clone = self.service.fork_prompt_entry("builtin-impersonate")
+        clone = self.service.fork_prompt_entry(self.impersonate_id)
         saved = self.service.save_prompt_entry(
             clone.id,
             SavePromptEntryRequest(

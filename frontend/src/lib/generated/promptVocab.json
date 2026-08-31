@@ -160,8 +160,8 @@
     {
       "name": "include",
       "kind": "tag",
-      "signature": "{% include \"snippet-id\" %}",
-      "summary": "Inlines a `prompt:snippet` node by id (e.g. `builtin-project-settings`)."
+      "signature": "{% include \"Snippet title\" %}",
+      "summary": "Inlines a `prompt:snippet` node by title (e.g. `Project settings`)."
     },
     {
       "name": "role",

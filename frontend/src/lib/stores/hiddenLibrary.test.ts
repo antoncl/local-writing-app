@@ -28,9 +28,9 @@ describe("hiddenLibrary (ADR-0049 slice 3)", () => {
   it("hide adds to the reactive set and persists to localStorage", () => {
     openProjectHidden(A);
     expect([...get(hiddenLibraryStore)]).toEqual([]);
-    hideLibraryEntry("builtin-roleplay");
-    expect(get(hiddenLibraryStore).has("builtin-roleplay")).toBe(true);
-    expect(localStorage.getItem(keyFor(A))).toBe(JSON.stringify(["builtin-roleplay"]));
+    hideLibraryEntry("prompt_test_roleplay");
+    expect(get(hiddenLibraryStore).has("prompt_test_roleplay")).toBe(true);
+    expect(localStorage.getItem(keyFor(A))).toBe(JSON.stringify(["prompt_test_roleplay"]));
   });
 
   it("unhide removes it and drops the key when the set empties", () => {

@@ -854,6 +854,7 @@ class PlotMixin:
                 "instance_beats": instance_beats,
                 "source_template_id": source.id,
                 "source_template_name": source.title,
+                "genre": source.template.genre,
                 "source_ai_guidance": source.template.ai_use_guidance,
                 "source_diagnostic_questions": list(source.template.global_diagnostic_questions),
                 "source_weak_spots": list(source.template.common_weak_spots),

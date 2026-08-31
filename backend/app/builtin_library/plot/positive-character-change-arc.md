@@ -11,6 +11,7 @@ template:
   family: character_arc
   description: A generic arc for a character moving from a limiting belief toward
     a harder truth.
+  genre: Any — a character growth arc that overlays any genre or external plot structure.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as

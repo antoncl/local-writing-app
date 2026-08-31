@@ -11,6 +11,7 @@ template:
   family: character_arc
   description: A generic arc for a character rejecting truth, deepening a lie, or
     choosing corruption.
+  genre: Any — a character fall/corruption arc that overlays any genre; common in tragedy and literary fiction.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as

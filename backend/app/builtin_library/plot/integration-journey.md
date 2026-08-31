@@ -11,6 +11,7 @@ template:
   family: journey
   description: A generic integration and connection journey template for identity
     pressure, failed coping, support, reconnection, and changed action.
+  genre: Any — a psychological integration arc; common in literary, drama, and character-driven stories across genres.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as

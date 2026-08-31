@@ -164,3 +164,33 @@ class RevisePlotlinePromptTests(_DiagnosticPromptBase):
         roster = patch.fields.get("instance_beats")
         self.assertEqual(len(roster), 2)
         self.assertEqual(roster[0]["title"], "The body")
+
+    def test_instantiate_seeds_the_plotline_genre_from_the_template(self) -> None:
+        # #1728: a template's authored genre is snapshotted onto the plotline at
+        # instantiate (a genre-neutral template seeds its "applies to any" phrasing).
+        plotline = self._plotline()
+        self.assertIn("Any", plotline.metadata.get("genre", ""))
+
+    def test_plot_context_renders_the_plotline_genre_and_description(self) -> None:
+        # #1728: the plotline's genre AND its own description reach the AI (the
+        # description was previously dropped — cards sent theirs, plotlines did not).
+        from app.models import SavePlotlineRequest
+
+        plotline = self._plotline()
+        current = self.service.read_plotline(plotline.id)
+        self.service.save_plotline(
+            plotline.id,
+            SavePlotlineRequest(
+                title=current.title,
+                body="A slow-burn romance between the rival cartographers.",
+                base_revision=current.revision,
+                entry_type="plot:plotline",
+                metadata={**current.metadata, "genre": "Romance"},
+            ),
+        )
+        body = self.service.read_prompt_entry(
+            builtin_prompt_id(self.service, _REVISE_PLOTLINE_TITLE)
+        ).body
+        out = self._render(body, inputs={"entry": plotline.id})
+        self.assertIn("<genre>Romance</genre>", out)
+        self.assertIn("slow-burn romance between the rival cartographers", out)

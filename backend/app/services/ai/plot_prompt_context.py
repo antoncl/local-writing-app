@@ -46,6 +46,16 @@ def _list_block(tag: str, item_tag: str, items: list[str]) -> list[str]:
     ]
 
 
+def _plotline_premise_block(plotline) -> list[str]:
+    """`<genre>` then `<description>` (#1728) — the plotline's own premise, ahead
+    of its craft guidance, so the model knows what it is writing before how."""
+    lines: list[str] = []
+    for tag, text in (("genre", plotline.genre), ("description", plotline.description)):
+        if text.strip():
+            lines.append(f"      <{tag}>{escape(text.strip())}</{tag}>")
+    return lines
+
+
 def _render_plotline(plotline) -> list[str]:
     """One `<plotline>` element: its structural guidance then its beat roster
     (ADR-0053 §1). `<use_guidance>` (how to use the structure as a diagnostic lens),
@@ -58,7 +68,7 @@ def _render_plotline(plotline) -> list[str]:
     attrs = f"title={quoteattr(plotline.title)}"
     if plotline.source_template_name:
         attrs += f" structure={quoteattr(plotline.source_template_name)}"
-    body: list[str] = []
+    body: list[str] = [*_plotline_premise_block(plotline)]
     if plotline.ai_guidance.strip():
         body.append(f"      <use_guidance>{escape(plotline.ai_guidance.strip())}</use_guidance>")
     if plotline.diagnostic_questions:

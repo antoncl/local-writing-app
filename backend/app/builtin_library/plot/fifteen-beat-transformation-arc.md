@@ -11,6 +11,7 @@ template:
   family: act
   description: A generic fifteen-beat transformation lens with original labels and
     wording.
+  genre: Any — a general commercial-fiction beat sheet; genre-agnostic though rooted in screenwriting.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as

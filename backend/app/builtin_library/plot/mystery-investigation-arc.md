@@ -11,6 +11,7 @@ template:
   family: puzzle
   description: A generic fair-play mystery spine for puzzle, evidence, suspects, false
     interpretations, and earned solution.
+  genre: Mystery — a fair-play investigation with clues, suspects, and a solvable puzzle. Also fits detective and crime fiction.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as

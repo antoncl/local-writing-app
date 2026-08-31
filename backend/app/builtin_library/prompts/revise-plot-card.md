@@ -37,6 +37,8 @@ Reason about the plot from the board below. The arcs list the beats the story wa
 
 {{ plot_context(as_of=e.id) }}
 
+{% include "Relevant lore" %}
+
 ## The card under revision: {{ e.title }}
 {% if e.body %}
 {{ e.body }}

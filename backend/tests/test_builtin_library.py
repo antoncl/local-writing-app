@@ -440,6 +440,45 @@ class BuiltinLibraryTests(unittest.TestCase):
         self.assertIn("before", out)
         self.assertIn("after", out)
 
+    def test_relevant_lore_snippet_ships_as_a_library_snippet(self) -> None:
+        """#1725: a reusable built-in snippet that adds an optional lore picker to
+        any prompt that includes it — placing the picks through the standard lore
+        path, never re-rendering them inline."""
+        snippet_id = builtin_prompt_id(self.service, "Relevant lore")
+        entries = self._summaries()
+        self.assertIn(snippet_id, entries)
+        self.assertTrue(entries[snippet_id].is_library)
+        entry = self.service.read_prompt_entry(snippet_id)
+        self.assertEqual(entry.entry_type, "prompt:snippet")
+        # It declares exactly one optional context_pick, named `lore`.
+        (lore_input,) = entry.inputs
+        self.assertEqual(lore_input.name, "lore")
+        self.assertEqual(lore_input.type, "context_pick")
+        self.assertFalse(lore_input.required)
+
+    def test_relevant_lore_is_wired_into_plotting_and_prose_prompts(self) -> None:
+        """#1725: the plotting and prose-enrichment prompts include the snippet, so
+        each gains the "Lore" picker for free via the effective-inputs resolver;
+        the mechanical revise prompts deliberately stay lore-free (a picker there
+        is noise)."""
+        summaries = self._summaries()
+        for title in (
+            "Diagnose plot",
+            "Revise plot card",
+            "Revise plotline",
+            "Describe",
+            "Expand",
+            "Show, don't tell",
+        ):
+            pid = builtin_prompt_id(self.service, title)
+            body = self.service.read_prompt_entry(pid).body
+            self.assertIn('{% include "Relevant lore" %}', body, f"{title} wires the snippet")
+            names = [i.name for i in summaries[pid].effective_inputs]
+            self.assertIn("lore", names, f"{title} surfaces the lore picker")
+        for title in ("Rephrase", "Shorten", "Tighten grammar"):
+            body = self.service.read_prompt_entry(builtin_prompt_id(self.service, title)).body
+            self.assertNotIn("Relevant lore", body, f"{title} stays lore-free")
+
     def test_clone_a_library_prompt_into_the_project(self) -> None:
         """Clone (§5): a shipped prompt is lifted into the project under a NEW id
         as an editable copy. The Library original is untouched and still resolves

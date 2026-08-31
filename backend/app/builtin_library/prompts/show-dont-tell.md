@@ -11,6 +11,7 @@ context_strategy:
 Rewrite the passage the reader sends to dramatise what it currently states outright. Turn summary and named emotions into action, gesture, sensory detail, and dialogue that let the reader infer them. Keep the story beats, the author's voice, and the tense; don't invent new events. Return only the revised prose, with no preamble or explanation.
 
 {% include "Prose generation settings" %}
+{% include "Relevant lore" %}
 {% include "Author directions in brackets" %}
 {% endrole %}
 {% role "user" %}

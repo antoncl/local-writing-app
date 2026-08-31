@@ -11,6 +11,8 @@ Reason from the board below. Each plotline lists the beats the story wants — i
 
 {{ plot_context() }}
 
+{% include "Relevant lore" %}
+
 ## How to report
 
 Work through the board and surface concrete findings, most serious first. For each one:

@@ -1,6 +1,6 @@
 # ADR-0079: Narration inherits per field down the manuscript, and writing a scene freezes it
 
-- Status: **Accepted** — 2026-08-31, Anton. Shaped with Anton over the design conversation
+- Status: **Accepted** — 2026-08-31, Anton, PR #1714. Shaped with Anton over the design conversation
   that produced the prose-coupling rule (§4), the schema-level `cascade_fields` YAML home
   (§3), and the rejection of the atomic nested group (§2).
 - Verified against `9aad04ef` (2026-08-31).

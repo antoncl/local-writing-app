@@ -21,6 +21,7 @@ while letting research use its own field name on disk.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -230,6 +231,7 @@ class TreeStructureService:
         visitor: StructureVisitor,
         *,
         skip_root: bool = False,
+        is_leaf: Callable[[StructureNode], bool] | None = None,
     ) -> None:
         """Drive `visitor` over the subtree at `root`, depth-first pre-order,
         children in stored (reading) order. **The** manuscript/research
@@ -238,11 +240,20 @@ class TreeStructureService:
         `skip_root` visits every descendant but not `root` itself — the shape
         the cascade-delete previews need (count what is *under* the target). A
         visitor returning True from `visit_node` halts the walk.
+
+        `is_leaf`, when given, marks nodes to treat as terminal: the walk still
+        *visits* a matching node but does not descend into its `children`. A
+        well-formed tree's leaves already carry empty `children`, so this only
+        bites a malformed one — but it keeps a consumer whose leaves are
+        terminal *by type* (the plot-board layout keys containers off non-leaf
+        nodes) exact regardless of tree shape.
         """
 
         def _visit(node: StructureNode, ancestors: tuple[StructureNode, ...]) -> bool:
             if not (skip_root and not ancestors) and visitor.visit_node(node, ancestors):
                 return True
+            if is_leaf is not None and is_leaf(node):
+                return False
             child_ancestors = (*ancestors, node)
             return any(_visit(child, child_ancestors) for child in node.children)
 

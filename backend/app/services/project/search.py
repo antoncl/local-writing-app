@@ -32,6 +32,24 @@ from app.services.project.node_index import NodeIndex
 from app.services.tree_structure import StructureVisitor, TreeStructureService
 
 
+class _SceneDisplayPaths(StructureVisitor):
+    """`scene_id → "Act / Chapter / Scene"` title breadcrumb (root title
+    omitted) for every node carrying a scene_id."""
+
+    def __init__(self) -> None:
+        self.paths: dict[str, str] = {}
+
+    def visit_node(
+        self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+    ) -> None:
+        if not node.scene_id:
+            return
+        titles = [a.title for a in ancestors if a.type != "root"]
+        if node.type != "root":
+            titles.append(node.title)
+        self.paths[node.scene_id] = " / ".join(titles)
+
+
 class SearchMixin:
     def search(self, request: SearchRequest) -> SearchResponse:
         root = self._require_project()
@@ -256,23 +274,6 @@ class SearchMixin:
         return resolved
 
     def _scene_display_paths(self) -> dict[str, str]:
-        class _Paths(StructureVisitor):
-            """`scene_id → "Act / Chapter / Scene"` title breadcrumb, root title
-            omitted, for every node carrying a scene_id."""
-
-            def __init__(self) -> None:
-                self.paths: dict[str, str] = {}
-
-            def visit_node(
-                self, node: StructureNode, ancestors: tuple[StructureNode, ...]
-            ) -> None:
-                if not node.scene_id:
-                    return
-                titles = [a.title for a in ancestors if a.type != "root"]
-                if node.type != "root":
-                    titles.append(node.title)
-                self.paths[node.scene_id] = " / ".join(titles)
-
-        visitor = _Paths()
+        visitor = _SceneDisplayPaths()
         TreeStructureService.walk(self.read_structure().root, visitor)
         return visitor.paths

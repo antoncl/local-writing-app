@@ -33,7 +33,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from collections import Counter
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -115,6 +115,40 @@ class _PlotNodeRead(NamedTuple):
     schema: Any
     front_matter: dict[str, Any]
     index_entry: Any
+
+
+class _PlotBoardLayout(StructureVisitor):
+    """Rank each carded leaf scene by reading order and map it to its
+    innermost-container id; mint each container once, parented to its nearest
+    container ancestor (a node directly under root has None). Pre-order ==
+    reading order, so encounter order is the rank and `containers` lands in
+    manuscript order. `is_leaf` is the same leaf/container line seed-from-
+    manuscript uses (type == manuscript:scene, not merely "has a scene_id")."""
+
+    def __init__(self, is_leaf: Callable[[StructureNode], bool]) -> None:
+        self._is_leaf = is_leaf
+        self.containers: dict[str, PlotBoardContainer] = {}
+        self.scene_to_container: dict[str, str] = {}
+        self.scene_to_order: dict[str, int] = {}
+
+    def visit_node(
+        self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+    ) -> None:
+        parent = ancestors[-1] if ancestors else None
+        parent_container = (
+            parent.id if parent is not None and parent.type != "root" else None
+        )
+        if self._is_leaf(node):
+            if node.scene_id:
+                # Rank by encounter order (pre-order == reading order); a scene
+                # under the root is homeless but still ranked.
+                self.scene_to_order[node.scene_id] = len(self.scene_to_order)
+                if parent_container is not None:
+                    self.scene_to_container[node.scene_id] = parent_container
+        elif node.id not in self.containers:
+            self.containers[node.id] = PlotBoardContainer(
+                id=node.id, title=node.title, parent=parent_container
+            )
 
 
 class PlotMixin:
@@ -997,41 +1031,14 @@ class PlotMixin:
         `containers` is insertion-ordered by a pre-order walk, i.e. manuscript
         reading order, which the board relies on to lay acts/chapters out in order.
         """
-        containers: dict[str, PlotBoardContainer] = {}
-        scene_to_container: dict[str, str] = {}
-        scene_to_order: dict[str, int] = {}
-        service = self
-
-        class _Layout(StructureVisitor):
-            """Rank each carded leaf scene by reading order and map it to its
-            innermost-container id; mint each container once, parented to its
-            nearest container ancestor (a node directly under root has None).
-            Pre-order == reading order, so encounter order is the rank and
-            `containers` lands in manuscript order."""
-
-            def visit_node(
-                self, node: StructureNode, ancestors: tuple[StructureNode, ...]
-            ) -> None:
-                parent = ancestors[-1] if ancestors else None
-                parent_container = (
-                    parent.id if parent is not None and parent.type != "root" else None
-                )
-                if service._is_leaf_node(node):
-                    if node.scene_id:
-                        # Rank by encounter order (pre-order == reading order); a
-                        # scene under the root is homeless but still ranked.
-                        scene_to_order[node.scene_id] = len(scene_to_order)
-                        if parent_container is not None:
-                            scene_to_container[node.scene_id] = parent_container
-                elif node.id not in containers:
-                    containers[node.id] = PlotBoardContainer(
-                        id=node.id, title=node.title, parent=parent_container
-                    )
-
+        layout = _PlotBoardLayout(self._is_leaf_node)
         TreeStructureService.walk(
-            self.read_structure().root, _Layout(), skip_root=True
+            self.read_structure().root,
+            layout,
+            skip_root=True,
+            is_leaf=self._is_leaf_node,
         )
-        return containers, scene_to_container, scene_to_order
+        return layout.containers, layout.scene_to_container, layout.scene_to_order
 
     def _board_page_status(self, metadata: dict[str, Any], scene: str | None) -> str | None:
         """The card's page status as the board shows it (ADR-0048 S7 Slice 5b):

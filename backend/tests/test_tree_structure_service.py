@@ -464,6 +464,31 @@ class TreeStructureServiceTests(unittest.TestCase):
             [n.id for n in collector.nodes], ["root", "A", "A1", "A2", "B"]
         )
 
+    def test_walk_is_leaf_marks_nodes_terminal(self) -> None:
+        # A leaf carrying children (malformed) is still visited, but is_leaf stops
+        # the descent into its subtree — the plot-board layout's guarantee.
+        doc = self._sample_document()
+        a1 = TreeStructureService.find_node(doc, "A1")
+        a1.children.append(
+            StructureNode(id="A1x", type="scene", title="Stray", scene_id="s_a1x")
+        )
+        # Default walk has no leaf notion, so it descends into everything.
+        self.assertIn("A1x", [n.id for n in TreeStructureService.collect(doc.root)])
+
+        seen: list[str] = []
+
+        class _Recorder(StructureVisitor):
+            def visit_node(
+                self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+            ) -> None:
+                seen.append(node.id)
+
+        TreeStructureService.walk(
+            doc.root, _Recorder(), is_leaf=lambda n: n.type == "scene"
+        )
+        self.assertIn("A1", seen)  # the leaf itself is visited
+        self.assertNotIn("A1x", seen)  # its subtree is not descended
+
 
 if __name__ == "__main__":
     unittest.main()

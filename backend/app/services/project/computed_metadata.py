@@ -25,6 +25,27 @@ from app.services.tree_structure import StructureVisitor, TreeStructureService
 WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?")
 
 
+class _ManuscriptOrdinal(StructureVisitor):
+    """The 1-based position of the target scene among nodes of `entry_type`, in
+    pre-order — halting the walk once the target is reached."""
+
+    def __init__(self, entry_type: str, target_scene_id: str) -> None:
+        self._entry_type = entry_type
+        self._target_scene_id = target_scene_id
+        self.count = 0
+        self.result: int | None = None
+
+    def visit_node(
+        self, node: StructureNode, ancestors: tuple[StructureNode, ...]
+    ) -> bool | None:
+        if node.type == self._entry_type:
+            self.count += 1
+            if node.scene_id == self._target_scene_id:
+                self.result = self.count
+                return True
+        return None
+
+
 def strip_computed_fields(metadata: dict[str, Any], schema: MetadataSchema) -> dict[str, Any]:
     """Drop the keys `schema` declares as computed fields from a metadata dict
     about to be persisted. Computed values are stamped at read; a stored copy
@@ -126,23 +147,6 @@ class ComputedMetadataMixin:
         return None
 
     def _counter_in_manuscript(self, root: StructureNode, target_scene_id: str, entry_type: str) -> int | None:
-        class _Ordinal(StructureVisitor):
-            """Nth node of `entry_type` in pre-order, halting at the target."""
-
-            def __init__(self) -> None:
-                self.count = 0
-                self.result: int | None = None
-
-            def visit_node(
-                self, node: StructureNode, ancestors: tuple[StructureNode, ...]
-            ) -> bool | None:
-                if node.type == entry_type:
-                    self.count += 1
-                    if node.scene_id == target_scene_id:
-                        self.result = self.count
-                        return True
-                return None
-
-        ordinal = _Ordinal()
+        ordinal = _ManuscriptOrdinal(entry_type, target_scene_id)
         TreeStructureService.walk(root, ordinal)
         return ordinal.result

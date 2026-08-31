@@ -77,6 +77,26 @@ class MigrationFrameworkTests(unittest.TestCase):
         after = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
         self.assertEqual(after["cascade_fields"], ["pov_mode", "pov"])
 
+    def test_migrate_project_backfills_cascade_fields_end_to_end(self) -> None:
+        # Proves the v6 step is REGISTERED and WIRED, not just that the function
+        # works in isolation: a mis-registered step passes the count test but
+        # never writes cascade_fields.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = yaml.safe_load(schema_path.read_text(encoding="utf-8")) or {}
+        data.pop("cascade_fields", None)
+        schema_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        manifest_path = self.root / "project.yaml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["schema_version"] = 5  # just below v6
+        manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+        migrate_project(self.root)
+
+        after = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+        self.assertIn("pov_mode", after.get("cascade_fields", []))
+        self.assertIn("pov", after.get("cascade_fields", []))
+        self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
+
     def test_fresh_project_open_runs_no_migrations(self) -> None:
         reopened_service = ProjectService.opened_at(self.root)
         self.assertEqual(reopened_service.last_migrations, ())

@@ -23,6 +23,7 @@ we cannot open degrades to no file log, never to a failed launch.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
@@ -60,19 +61,37 @@ class _LoggerWriter:
         self._log = log
         self._level = level
         self._buffer = ""
+        # Re-entrancy guard: if a handler downstream of self._log.log() fails,
+        # logging.handleError writes the traceback back to sys.stderr — us — and
+        # a naive re-log would drive the same failing handler again, unbounded.
+        # While emitting we swallow further writes instead of recursing.
+        self._emitting = False
+
+    def _emit(self, line: str) -> None:
+        if self._emitting:
+            return
+        self._emitting = True
+        try:
+            self._log.log(self._level, line)
+        finally:
+            self._emitting = False
 
     def write(self, message: str) -> int:
         self._buffer += message
         while "\n" in self._buffer:
             line, self._buffer = self._buffer.split("\n", 1)
             if line:
-                self._log.log(self._level, line)
+                self._emit(line)
         return len(message)
 
     def flush(self) -> None:
+        # Emit any trailing newline-less fragment — a crash message written as
+        # `sys.stderr.write("fatal: ")` right before exit would otherwise sit in
+        # the buffer forever. Registered with atexit on the swap so a normal
+        # (exception-driven) shutdown still drains it.
         if self._buffer:
-            self._log.log(self._level, self._buffer)
-            self._buffer = ""
+            line, self._buffer = self._buffer, ""
+            self._emit(line)
 
     def isatty(self) -> bool:
         return False
@@ -104,7 +123,7 @@ def configure_product_logging() -> Path | None:
         if getattr(handler, _MARK, False):
             return config_dir() / LOG_FILENAME
 
-    # Decide console echo from the *original* streams, before any swap, so we
+    # Decide console echo from the *original* stdout, before any swap, so we
     # never point a StreamHandler at the _LoggerWriter below (that would loop:
     # write -> log -> handler -> write -> ...).
     console = _live_stream(sys.stdout)
@@ -112,10 +131,16 @@ def configure_product_logging() -> Path | None:
     # Windowed-build safety: forward stray writes to a logger so print()/traceback
     # can't raise on a None/closed stream. Done first and unconditionally of the
     # file-handler setup, so crash-safety never depends on a writable app-data dir.
-    if _live_stream(sys.stdout) is None:
-        sys.stdout = _LoggerWriter(logging.getLogger("stdout"), logging.INFO)  # type: ignore[assignment]
+    # atexit drains any trailing newline-less fragment (a crash message) on a
+    # normal/exception-driven shutdown.
+    if console is None:
+        writer = _LoggerWriter(logging.getLogger("stdout"), logging.INFO)
+        sys.stdout = writer  # type: ignore[assignment]
+        atexit.register(writer.flush)
     if _live_stream(sys.stderr) is None:
-        sys.stderr = _LoggerWriter(logging.getLogger("stderr"), logging.ERROR)  # type: ignore[assignment]
+        writer = _LoggerWriter(logging.getLogger("stderr"), logging.ERROR)
+        sys.stderr = writer  # type: ignore[assignment]
+        atexit.register(writer.flush)
 
     try:
         directory = config_dir()

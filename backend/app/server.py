@@ -202,13 +202,16 @@ def self_check() -> int:
 
 
 def main(argv: list[str] | None = None) -> None:
-    # Route the general server stream to a rotating file under the app-data dir
-    # (#1745) — and, on a windowed build with no console, make stray writes safe
-    # — before anything logs. The --reload dev path doesn't come through here.
-    configure_product_logging()
     args = _build_parser().parse_args(argv)
     if args.self_check:
+        # A read-only runtime probe that exits immediately — keep it free of the
+        # file-log side effect (it uses only a TemporaryDirectory).
         raise SystemExit(self_check())
+    # Route the general server stream to a rotating file under the app-data dir
+    # (#1745) — and, on a windowed build with no console, make stray writes safe
+    # — before the serve path logs anything. The --reload dev path doesn't come
+    # through here.
+    configure_product_logging()
     host, port = resolve_bind(args)
     if not _is_loopback(host):
         logger.warning(

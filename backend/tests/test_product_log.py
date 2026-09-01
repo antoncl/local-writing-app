@@ -134,6 +134,74 @@ def test_windowed_build_adds_no_console_echo(
     assert isinstance(marked[0], RotatingFileHandler)
 
 
+def test_uvicorn_logs_reach_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The PR's core integration claim: passing log_config=None to uvicorn leaves
+    # its error/access loggers unconfigured, so they propagate to the root file
+    # handler instead of uvicorn's default console-only handlers. Proven against a
+    # real short-lived server (an in-process emit couldn't tell log_config=None
+    # from uvicorn's default), bound to an ephemeral port so parallel runs don't
+    # collide. Guards against a future log_config re-add or a uvicorn default change.
+    import threading
+    import time
+    import urllib.request
+
+    import uvicorn
+
+    from app.main import app
+
+    _use_temp_config_dir(monkeypatch, tmp_path)
+    configure_product_logging()
+
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_config=None))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        for _ in range(100):
+            if server.started and server.servers:
+                break
+            time.sleep(0.05)
+        assert server.started, "uvicorn did not start within the budget"
+        port = server.servers[0].sockets[0].getsockname()[1]
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2).read()
+        time.sleep(0.2)  # let the access log line flush
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+    text = _log_text(tmp_path)
+    assert "Application startup complete" in text  # uvicorn.error propagated to root
+    assert "/api/health" in text                   # uvicorn.access propagated to root
+
+
+def test_logger_writer_survives_a_failing_downstream_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The windowed disk-full / rollover-lock path: sys.stderr is the _LoggerWriter
+    # and the downstream handler keeps raising. logging.handleError writes the
+    # traceback back to sys.stderr (us); without the re-entrancy guard that would
+    # re-drive the same failing handler until RecursionError takes the server down.
+    class _Exploding(logging.Handler):
+        # Mirrors StreamHandler/RotatingFileHandler: a failing emit calls
+        # handleError, which (with logging.raiseExceptions) writes the traceback
+        # to sys.stderr — the path that closes the recursion loop.
+        def emit(self, record: logging.LogRecord) -> None:
+            try:
+                raise OSError("disk full during rollover")
+            except OSError:
+                self.handleError(record)
+
+    root = logging.getLogger()
+    root.addHandler(_Exploding())  # removed by _restore_logging
+    root.setLevel(logging.ERROR)
+    writer = _LoggerWriter(logging.getLogger("stderr"), logging.ERROR)
+    monkeypatch.setattr(sys, "stderr", writer)
+
+    # Must complete without RecursionError.
+    writer.write("a stray stderr line\n")
+
+
 def test_setup_failure_is_swallowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

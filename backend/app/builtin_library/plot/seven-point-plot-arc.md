@@ -11,7 +11,6 @@ template:
   family: act
   description: A generic seven-point plot lens organized around ending contrast, turns,
     pressure points, and resolution.
-  genre: Any — a general structure organized backward from the resolution; fits any genre.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as
@@ -38,6 +37,7 @@ template:
   locale: en
   metadata: {}
 metadata:
+  genre: Any — a general structure organized backward from the resolution; fits any genre.
   beats:
   - title: Hook
     function: Shows the initial state that will contrast with the resolution.

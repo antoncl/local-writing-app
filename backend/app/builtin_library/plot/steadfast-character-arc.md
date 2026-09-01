@@ -11,7 +11,6 @@ template:
   family: character_arc
   description: A generic arc for a character whose stable truth changes the surrounding
     world.
-  genre: Any — a steadfast protagonist who changes the world rather than themselves; overlays any genre.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as
@@ -38,6 +37,7 @@ template:
   locale: en
   metadata: {}
 metadata:
+  genre: Any — a steadfast protagonist who changes the world rather than themselves; overlays any genre.
   beats:
   - title: Core truth
     function: Establishes the value the character will hold under pressure.

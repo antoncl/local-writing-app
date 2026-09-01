@@ -11,7 +11,6 @@ template:
   family: relationship
   description: A generic relationship arc for attraction, vulnerability, rupture,
     repair, and emotionally satisfying closure.
-  genre: "Romance — the relationship is the plot: attraction, deepening, a dark moment, and reunion. Also fits a romantic subplot inside any genre."
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as
@@ -38,6 +37,7 @@ template:
   locale: en
   metadata: {}
 metadata:
+  genre: "Romance — the relationship is the plot: attraction, deepening, a dark moment, and reunion. Also fits a romantic subplot inside any genre."
   beats:
   - title: Encounter
     function: Brings the relationship participants into meaningful contact.

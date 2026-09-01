@@ -41,7 +41,7 @@ function view(ai_policy: MachineSettingsView["ai_policy"]): MachineSettingsView 
     ai_policy,
     update_channel: "stable",
     config_path: "C:/config.yaml",
-    log_dir: "C:/",
+    config_dir: "C:/",
   };
 }
 
@@ -133,7 +133,7 @@ describe("MachineSettingsDialog — app-wide AI policy (#746)", () => {
 describe("MachineSettingsDialog — logs location (#1750)", () => {
   it("surfaces the app-data folder so a user can find app.log / errors.log", () => {
     mount("off");
-    // The folder (log_dir) is shown verbatim in a <code>, distinct from the
+    // The folder (config_dir) is shown verbatim in a <code>, distinct from the
     // config.yaml path above it, and the log filenames are named.
     expect(screen.getByText("C:/", { selector: "code" })).toBeInTheDocument();
     expect(screen.getByText(/app\.log/)).toBeInTheDocument();

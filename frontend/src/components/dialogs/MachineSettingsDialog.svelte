@@ -451,7 +451,7 @@
         <p class="muted app-version">Version {appVersion}</p>
       {/if}
       <p class="muted stored-at">Stored locally at: <code>{settings?.config_path}</code></p>
-      <p class="muted stored-at">Logs: <code>{settings?.log_dir}</code> (app.log, errors.log)</p>
+      <p class="muted stored-at">Logs: <code>{settings?.config_dir}</code> (app.log, errors.log)</p>
 
       {#snippet actions()}
         <button type="button" onclick={onCancel}>Cancel</button>

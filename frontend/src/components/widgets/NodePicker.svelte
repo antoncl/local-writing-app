@@ -235,7 +235,8 @@
     open = !open;
     if (open) {
       search = "";
-      activeAxis = null; // always open on the root axis list
+      activeAxis = null;
+      hasNavigated = false; // reset to the default view (sole-type axis, else root)
       await tick();
       positionMenu();
       searchInputEl?.focus();
@@ -918,16 +919,27 @@
     assistants: "Assistants",
   };
   let activeAxis = $state<string | null>(null);
+  // Until the user navigates (drill in / back), the picker shows its DEFAULT view:
+  // a field authoring a single lore type (#1735 / #1742) lands straight in that
+  // axis — the character / location list — even when a "By tag" axis coexists, so
+  // it opens on the entries rather than a Lore/By-tag chooser. "Back to sources"
+  // sets `hasNavigated` and reaches the other axes. `toggle()` resets the flag on
+  // every open, so the field always opens on its type. `singleAxis` still covers
+  // the no-other-axes case on its own.
+  let hasNavigated = $state(false);
+  const defaultAxis = $derived(soleLoreGroup ? "lore" : null);
   const singleAxis = $derived(axes.length === 1 ? axes[0].id : null);
-  const effectiveAxis = $derived(singleAxis ?? activeAxis);
+  const effectiveAxis = $derived(singleAxis ?? (hasNavigated ? activeAxis : defaultAxis));
   const atRoot = $derived(effectiveAxis === null);
   const activeAxisLabel = $derived(effectiveAxis ? (AXIS_LABELS[effectiveAxis] ?? effectiveAxis) : "");
   const activePanelRows = $derived(effectiveAxis ? (axes.find((a) => a.id === effectiveAxis)?.rows ?? []) : []);
   function drillInto(id: string): void {
     activeAxis = id;
+    hasNavigated = true;
   }
   function backToRoot(): void {
     activeAxis = null;
+    hasNavigated = true;
   }
   // Clear every pick belonging to the drilled-in axis (the panel's own selection).
   const AXIS_KINDS: Record<string, NodePickerRef["kind"][]> = {

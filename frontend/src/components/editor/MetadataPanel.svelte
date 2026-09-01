@@ -309,10 +309,14 @@
       return false;
     return true;
   }
+  // A cascade source's human label: the book (null id), else the structure node's
+  // title, else a generic fallback. Shared by the inherited + override labels.
+  function cascadeNodeLabel(sourceId: string | null): string {
+    if (sourceId == null) return "the book";
+    return (structure ? findStructureNodeById(structure.root, sourceId)?.title : null) || "an ancestor";
+  }
   function cascadeSourceLabel(fieldId: string): string {
-    const info = cascadeInfo(fieldId);
-    if (info?.source_id == null) return "the book";
-    return (structure ? findStructureNodeById(structure.root, info.source_id)?.title : null) || "an ancestor";
+    return cascadeNodeLabel(cascadeInfo(fieldId)?.source_id ?? null);
   }
   // ADR-0079 override axis (#1734): this node SETS its own cascade value AND that
   // value shadows one it would otherwise inherit. Distinct from a value merely set
@@ -323,9 +327,7 @@
   }
   // Whom an overriding value shadows — the "Reset to inherited (from …)" target.
   function cascadeOverrideSourceLabel(fieldId: string): string {
-    const sourceId = cascadeInfo(fieldId)?.inherited_source_id ?? null;
-    if (sourceId == null) return "the book";
-    return (structure ? findStructureNodeById(structure.root, sourceId)?.title : null) || "an ancestor";
+    return cascadeNodeLabel(cascadeInfo(fieldId)?.inherited_source_id ?? null);
   }
   // The reset gesture is live only when a handler is wired and the rail is
   // editable — a scrubbed / snapshot-parked pane shows the mark inertly.

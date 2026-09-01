@@ -728,8 +728,13 @@
     const searching = isSearchActive(search);
     const rows: PickTreeRow[] = [];
     for (const group of loreGroups) {
-      const collapsed =
-        !searching && !soleLoreGroup && !expandedLoreTypeIds.has(group.typeId);
+      // `expandedLoreTypeIds` records the user's DEVIATION from the group's
+      // default: normally a group is collapsed and membership means "user
+      // expanded it"; a sole authored type (#1735) defaults to EXPANDED, so for
+      // it membership means "user collapsed it". Either way the caret's toggle
+      // still works both directions — the sole group isn't force-locked open.
+      const toggled = expandedLoreTypeIds.has(group.typeId);
+      const collapsed = !searching && (soleLoreGroup ? toggled : !toggled);
       rows.push({
         key: `lore-type:${group.typeId}`,
         depth: 0,

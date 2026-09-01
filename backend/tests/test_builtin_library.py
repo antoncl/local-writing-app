@@ -133,6 +133,35 @@ class BuiltinLibraryTests(unittest.TestCase):
         # The bundled app file is untouched — read-only by construction.
         self.assertEqual(self._library_path(self.roleplay_id).read_bytes(), before)
 
+    def test_library_prompt_metadata_can_be_overridden_in_place(self) -> None:
+        # The dogfooding case (#1738): a shipped prompt's metadata is editable in
+        # place as an ADR-0039 layer override — no clone needed — while its body
+        # stays read-only and its shipped file is never rewritten. `color` stands in
+        # for the routing fields (`preferred_assistant_id`/`assistant_tags`, covered
+        # in test_prompt_overrides.py); using it here avoids a machine-global tag
+        # vocabulary write, so this test needs no config isolation. Same code path.
+        before = self._library_path(self.roleplay_id).read_bytes()
+        own = self.service.read_prompt_entry(self.roleplay_id)
+        self.service.save_prompt_entry(
+            self.roleplay_id,
+            SavePromptEntryRequest(
+                title=own.title,
+                body=own.body,  # unchanged — the body stays read-only in place
+                base_revision=own.revision,
+                entry_type=own.entry_type,
+                metadata={**own.metadata, "color": "amber"},
+            ),
+        )
+        # The shipped file is byte-for-byte untouched; the delta lives in the project.
+        self.assertEqual(self._library_path(self.roleplay_id).read_bytes(), before)
+        self.assertTrue(any((self.root / "overrides").glob("*.md")))
+        # The open project now reads the overridden value, marked as an override,
+        # and the prompt is still not editable in place (its body stays fork-only).
+        folded = self.service.read_prompt_entry(self.roleplay_id)
+        self.assertEqual(folded.metadata["color"], "amber")
+        self.assertIn("color", folded.overridden_fields)
+        self.assertFalse(folded.editable)
+
     def test_library_prompt_cannot_be_deleted(self) -> None:
         before = self._library_path(self.revise_entry_id).read_bytes()
         with self.assertRaises(ProjectServiceError) as ctx:

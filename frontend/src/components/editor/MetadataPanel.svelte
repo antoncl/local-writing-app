@@ -314,6 +314,19 @@
     if (info?.source_id == null) return "the book";
     return (structure ? findStructureNodeById(structure.root, info.source_id)?.title : null) || "an ancestor";
   }
+  // ADR-0079 override axis (#1734): this node SETS its own cascade value AND that
+  // value shadows one it would otherwise inherit. Distinct from a value merely set
+  // with nothing above it — only a shadowing override earns the persistent mark.
+  function isCascadeOverridden(fieldId: string): boolean {
+    const info = cascadeInfo(fieldId);
+    return info != null && info.own === true && info.overrides === true;
+  }
+  // Whom an overriding value shadows — the "Reset to inherited (from …)" target.
+  function cascadeOverrideSourceLabel(fieldId: string): string {
+    const sourceId = cascadeInfo(fieldId)?.inherited_source_id ?? null;
+    if (sourceId == null) return "the book";
+    return (structure ? findStructureNodeById(structure.root, sourceId)?.title : null) || "an ancestor";
+  }
   // The reset gesture is live only when a handler is wired and the rail is
   // editable — a scrubbed / snapshot-parked pane shows the mark inertly.
   const canResetOverride = $derived(onResetField != null && !readOnly);
@@ -506,7 +519,7 @@
                collapse (#1732 — they render inline pills), so every field leaves
                the gutter empty. -->
           <span class="fr-disc" aria-hidden="true"></span>
-          {#if canClearOwn && isOwnClearable(fieldId)}
+          {#if canClearOwn && isOwnClearable(fieldId) && !isCascadeOverridden(fieldId)}
             <!-- Clear-to-default (#522): the intra-project twin of #517's reset.
                  #517 hangs its "Reset to <source>" gesture off the `ti-versions`
                  override-delta glyph — which only exists on an overridden field.
@@ -514,20 +527,21 @@
                  its own default glyph (the type/field icon, rendered on every
                  row), so THAT glyph becomes the affordance here: hover it to
                  reveal a "Reset to default" chip, click it to delete the sparse
-                 metadata key and revert the field to its default / unset. -->
+                 metadata key and revert the field to its default / unset. A cascade
+                 OVERRIDE never reaches this branch (it carries the ti-versions mark
+                 in the value cell, #1734), so a cascade field here is one set with
+                 nothing above it — "default", not "inherited". -->
             <button
               type="button"
               class="fr-icon fr-icon-reset"
-              title={isCascadeField(fieldId)
-                ? `Set here — reset ${fieldLabel} to the value it inherits`
-                : defaultHint(fieldId)
-                  ? `Set here — reset ${fieldLabel} to its default (${defaultHint(fieldId)})`
-                  : `Set here — clear ${fieldLabel} (revert to default)`}
-              aria-label={isCascadeField(fieldId) ? `Reset ${fieldLabel} to inherited` : `Reset ${fieldLabel} to default`}
+              title={defaultHint(fieldId)
+                ? `Set here — reset ${fieldLabel} to its default (${defaultHint(fieldId)})`
+                : `Set here — clear ${fieldLabel} (revert to default)`}
+              aria-label={`Reset ${fieldLabel} to default`}
               onclick={() => clearField(fieldId)}
             >
               <i class={fieldIconClass(field)} aria-hidden="true"></i>
-              <span class="fr-reset-chip">{isCascadeField(fieldId) ? "Reset to inherited" : "Reset to default"}</span>
+              <span class="fr-reset-chip">Reset to default</span>
             </button>
           {:else}
             <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
@@ -551,6 +565,26 @@
                 </button>
               {:else}
                 <i class="ti ti-versions fr-override-marker" title={`Overridden here — this value comes from a layer override in this project, not from ${sourceLayerLabel ?? "inherited canon"}`}></i>
+              {/if}
+            {:else if isCascadeOverridden(fieldId)}
+              <!-- ADR-0079 override (#1734): this scene sets a cascade value that
+                   SHADOWS the one it would inherit. Same ti-versions mark + reset
+                   as the layer override (#517), but the reset drops the own value
+                   so the field inherits again (clearField), and it names the
+                   ancestor it would fall back to. -->
+              {#if canClearOwn}
+                <button
+                  type="button"
+                  class="fr-override-marker fr-reset"
+                  title={`Overridden here — reset ${fieldLabel} to the value inherited from ${cascadeOverrideSourceLabel(fieldId)}`}
+                  aria-label={`Reset ${fieldLabel} to the value inherited from ${cascadeOverrideSourceLabel(fieldId)}`}
+                  onclick={() => clearField(fieldId)}
+                >
+                  <i class="ti ti-versions" aria-hidden="true"></i>
+                  <span class="fr-reset-chip"><i class="ti ti-arrow-back-up" aria-hidden="true"></i>Reset to inherited</span>
+                </button>
+              {:else}
+                <i class="ti ti-versions fr-override-marker" title={`Overridden here — differs from the value inherited from ${cascadeOverrideSourceLabel(fieldId)}`}></i>
               {/if}
             {/if}
             {#if isFlipResolve(fieldId)}

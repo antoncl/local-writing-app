@@ -65,6 +65,9 @@ export type MachineSettingsView = {
   // The update channel this install follows (ADR-0072 S6).
   update_channel: UpdateChannel;
   config_path: string;
+  // The app-data folder holding config.yaml and the durable logs (app.log,
+  // errors.log) — surfaced so a user can find them (#1750).
+  log_dir: string;
 };
 
 export type MachineSettingsUpdate = {

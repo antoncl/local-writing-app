@@ -90,6 +90,10 @@ class MachineSettingsView(BaseModel):
     # the settings dialog so the S7 UI can show/switch it.
     update_channel: UpdateChannel = "stable"
     config_path: str
+    # The app-data directory (config_dir()) — where config.yaml AND the durable
+    # logs live: app.log (#1745) and errors.log (#386/#741). Surfaced so a user
+    # can find the logs a bug report asks for (#1750).
+    log_dir: str
 
 
 class ProviderCredentialsPatch(BaseModel):

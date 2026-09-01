@@ -316,7 +316,7 @@ class ProjectLifecycleMixin:
             "entry_types": {},
             "fields": {},
             "groups": {},
-            "cascade_fields": ["pov_mode", "pov"],
+            "cascade_fields": ["pov_mode", "pov", "tense"],
         }
 
     def _project_title(self, root: Path) -> str | None:

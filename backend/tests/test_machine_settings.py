@@ -130,6 +130,16 @@ class RecentProjectsEndpointTests(unittest.TestCase):
         recents = view["recent_projects"]
         self.assertEqual(len(recents), 1)
 
+    def test_settings_view_exposes_the_config_dir(self) -> None:
+        # #1750: the app-data folder holding app.log + errors.log is surfaced so a
+        # user can find the logs a bug report asks for. config_dir() is
+        # authoritative (config_path = config_dir()/config.yaml); patch it here
+        # since the autouse conftest redirects only config_path.
+        fake = self.root / "appdata"
+        with patch.object(ms, "config_dir", lambda: fake):
+            view = self.client.get("/api/settings/machine").json()
+        self.assertEqual(view["config_dir"], str(fake))
+
     def test_settings_view_marks_out_of_root_recents_unavailable(self) -> None:
         """A recent outside the machine root is unavailable — equivalent to a
         deleted folder (#441). The view marks it (`within_root=False`) so the UI

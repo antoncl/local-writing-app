@@ -645,7 +645,10 @@ describe("NodePicker tag selectors (#1491)", () => {
       },
     });
     const menu = await openMenu();
-    // Multi-axis config (Lore + By tag) → drill into the By-tag axis (ADR-0074 7b).
+    // The sole authored type (lore:character) now opens on its own axis (#1742),
+    // so go Back to the root to reach the By-tag axis, then drill in (ADR-0074 7b).
+    await fireEvent.click(within(menu).getByRole("button", { name: "Back to sources" }));
+    await tick();
     await fireEvent.click(within(menu).getByText("By tag").closest("button")!);
     await tick();
     const tags = (await within(menu).findAllByRole("group", { name: "By tag" }))[0];
@@ -655,7 +658,7 @@ describe("NodePicker tag selectors (#1491)", () => {
   });
 });
 
-describe("NodePicker sole allowed type (#1735)", () => {
+describe("NodePicker sole allowed type (#1735 / #1742)", () => {
   async function openMenu(): Promise<HTMLElement> {
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await tick();
@@ -693,6 +696,26 @@ describe("NodePicker sole allowed type (#1735)", () => {
     expect(
       within(menu).getByRole("button", { name: "Expand Character" }),
     ).toBeInTheDocument();
+  });
+
+  it("still opens on the sole type's entries when a By-tag axis coexists (#1742)", async () => {
+    // A lore-scoped tag adds a "By tag" axis, so the picker is no longer a single
+    // axis — but a sole authored type must STILL land on its entries, not a
+    // Lore/By-tag chooser (the real-project gap #1735 missed).
+    setKnownTags([{ name: "villain", scope: { sources: [{ kind: "lore" }] } }] as never);
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }] },
+        loreEntries: [loreEntry("l1", "Mara Voss", ["villain"]), loreEntry("l2", "Quill", [])],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    // Characters show immediately even though a By-tag axis exists…
+    expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
+    expect(within(menu).getByText("Quill")).toBeInTheDocument();
+    // …and "Back to sources" is there to reach the By-tag axis when wanted.
+    expect(within(menu).getByRole("button", { name: "Back to sources" })).toBeInTheDocument();
   });
 });
 

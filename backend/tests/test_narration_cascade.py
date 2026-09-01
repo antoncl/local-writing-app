@@ -54,11 +54,34 @@ class CascadeResolverTests(unittest.TestCase):
 
     def test_own_value_wins(self) -> None:
         root = self._tree()
+        # S1's own "first" shadows the book default "third_omniscient" → an override.
         _resolve(root, {"S1": {"pov_mode": "first"}}, {"pov_mode": "third_omniscient"})
         self.assertEqual(
             _node(root, "S1").resolved_cascade["pov_mode"],
-            {"value": "first", "source_id": "S1", "own": True},
+            {
+                "value": "first",
+                "source_id": "S1",
+                "own": True,
+                "overrides": True,
+                "inherited_source_id": None,
+            },
         )
+
+    def test_own_value_overrides_the_nearest_ancestor(self) -> None:
+        # The act sets third_limited; S1 sets its own third_close. That own value
+        # SHADOWS the act, so it reports overrides + names the act (the nearest
+        # setter), not the book default, as what a reset would fall back to (#1734).
+        root = self._tree()
+        _resolve(
+            root,
+            {"A": {"pov_mode": "third_limited"}, "S1": {"pov_mode": "third_close"}},
+            {"pov_mode": "first"},
+        )
+        info = _node(root, "S1").resolved_cascade["pov_mode"]
+        self.assertEqual(info["value"], "third_close")
+        self.assertTrue(info["own"])
+        self.assertTrue(info["overrides"])
+        self.assertEqual(info["inherited_source_id"], "A")
 
     def test_inherits_from_nearest_ancestor(self) -> None:
         root = self._tree()
@@ -66,7 +89,13 @@ class CascadeResolverTests(unittest.TestCase):
         _resolve(root, {"A": {"pov_mode": "third_limited"}, "C": {"pov_mode": "third_close"}}, {})
         self.assertEqual(
             _node(root, "S1").resolved_cascade["pov_mode"],
-            {"value": "third_close", "source_id": "C", "own": False},
+            {
+                "value": "third_close",
+                "source_id": "C",
+                "own": False,
+                "overrides": False,
+                "inherited_source_id": None,
+            },
         )
 
     def test_falls_to_book_default(self) -> None:
@@ -74,7 +103,13 @@ class CascadeResolverTests(unittest.TestCase):
         _resolve(root, {}, {"pov_mode": "first"})
         self.assertEqual(
             _node(root, "S2").resolved_cascade["pov_mode"],
-            {"value": "first", "source_id": None, "own": False},
+            {
+                "value": "first",
+                "source_id": None,
+                "own": False,
+                "overrides": False,
+                "inherited_source_id": None,
+            },
         )
 
     def test_unset_when_nothing_sets_it(self) -> None:
@@ -82,7 +117,13 @@ class CascadeResolverTests(unittest.TestCase):
         _resolve(root, {}, {})
         self.assertEqual(
             _node(root, "S2").resolved_cascade["pov"],
-            {"value": None, "source_id": None, "own": False},
+            {
+                "value": None,
+                "source_id": None,
+                "own": False,
+                "overrides": False,
+                "inherited_source_id": None,
+            },
         )
 
     def test_per_field_independence(self) -> None:
@@ -96,8 +137,16 @@ class CascadeResolverTests(unittest.TestCase):
         s1 = _node(root, "S1")
         self.assertEqual(s1.resolved_cascade["pov_mode"]["source_id"], "A")
         self.assertFalse(s1.resolved_cascade["pov_mode"]["own"])
+        # pov is owned by the scene but NO ancestor/book sets it → set, not shadowing.
         self.assertEqual(
-            s1.resolved_cascade["pov"], {"value": "char_bob", "source_id": "S1", "own": True}
+            s1.resolved_cascade["pov"],
+            {
+                "value": "char_bob",
+                "source_id": "S1",
+                "own": True,
+                "overrides": False,
+                "inherited_source_id": None,
+            },
         )
 
     def test_empty_string_reads_as_unset(self) -> None:
@@ -249,7 +298,13 @@ class NarrationCascadeIntegrationTests(MetadataValidationBase):
         scene = next(n for n in act.children if n.type == "manuscript:scene")
         self.assertEqual(
             scene.resolved_cascade["pov_mode"],
-            {"value": "third_limited", "source_id": act.id, "own": False},
+            {
+                "value": "third_limited",
+                "source_id": act.id,
+                "own": False,
+                "overrides": False,
+                "inherited_source_id": None,
+            },
         )
 
 

@@ -59,10 +59,15 @@ export type StructureNode = {
 };
 
 // One resolved cascade field (ADR-0079): the folded value + where it came from.
+// `overrides` = this node's own value SHADOWS a value it would otherwise inherit
+// (drives the override mark, #1734); `inherited_source_id` = whose value it
+// shadows (null = the book), for the "reset to inherited" label.
 export type ResolvedCascadeField = {
   value: MetadataValue | null;
   source_id: string | null;
   own: boolean;
+  overrides: boolean;
+  inherited_source_id: string | null;
 };
 
 export type StructureDocument = {

@@ -58,10 +58,13 @@ class _CascadeResolver(StructureVisitor):
     """Folds each schema `cascade_fields` id down the manuscript structure,
     nearest-explicit-wins, stamping `node.resolved_cascade` (ADR-0079). Own value
     wins; else the nearest ancestor that sets it; else the book (project) default;
-    else unset. Provenance (`source_id` — None for the book default — and `own`)
-    rides along for the inherited marker. The fold is **generic** over
-    cascade_fields; narration-specific reads (an omniscient `pov_mode` ignoring
-    `pov`) are a consumer concern, not baked in here."""
+    else unset. Provenance rides along for the markers: `source_id` (None = book
+    default) and `own`; plus `overrides` — True when an own value SHADOWS a value
+    it would otherwise inherit — and `inherited_source_id` (whose value it shadows,
+    None = book), so the rail can show an override mark + "reset to inherited"
+    distinctly from a value merely set with nothing above it (#1734). The fold is
+    **generic** over cascade_fields; narration-specific reads (an omniscient
+    `pov_mode` ignoring `pov`) are a consumer concern, not baked in here."""
 
     def __init__(
         self,
@@ -84,17 +87,47 @@ class _CascadeResolver(StructureVisitor):
         self, field_id: str, node: StructureNode, ancestors: tuple[StructureNode, ...]
     ) -> dict[str, Any]:
         own = self._own(node).get(field_id)
+        # What this field WOULD resolve to if this node did not set it — computed
+        # even when `own` is present, so an own value can report whether it SHADOWS
+        # an inherited one (`overrides`) rather than merely being set (#1734).
+        inherited_value, inherited_source_id = self._inherited(field_id, ancestors)
+        shadows = _has_cascade_value(inherited_value)
         if _has_cascade_value(own):
-            return {"value": own, "source_id": node.id, "own": True}
+            return {
+                "value": own,
+                "source_id": node.id,
+                "own": True,
+                "overrides": shadows,
+                "inherited_source_id": inherited_source_id if shadows else None,
+            }
+        if shadows:
+            return {
+                "value": inherited_value,
+                "source_id": inherited_source_id,
+                "own": False,
+                "overrides": False,
+                "inherited_source_id": None,
+            }
+        return {
+            "value": None,
+            "source_id": None,
+            "own": False,
+            "overrides": False,
+            "inherited_source_id": None,
+        }
+
+    def _inherited(
+        self, field_id: str, ancestors: tuple[StructureNode, ...]
+    ) -> tuple[Any, str | None]:
+        """The (value, source_id) this field would inherit absent an own value: the
+        nearest ancestor that sets it, else the book (project) default (source_id
+        None), else (None, None)."""
         # ancestors are root-first; the nearest is last.
         for ancestor in reversed(ancestors):
             inherited = self._own(ancestor).get(field_id)
             if _has_cascade_value(inherited):
-                return {"value": inherited, "source_id": ancestor.id, "own": False}
-        book = self._book_default.get(field_id)
-        if _has_cascade_value(book):
-            return {"value": book, "source_id": None, "own": False}
-        return {"value": None, "source_id": None, "own": False}
+                return inherited, ancestor.id
+        return self._book_default.get(field_id), None
 
 
 def strip_computed_fields(metadata: dict[str, Any], schema: MetadataSchema) -> dict[str, Any]:

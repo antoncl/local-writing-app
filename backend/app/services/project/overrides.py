@@ -169,7 +169,14 @@ class LayerOverridesMixin:
             # the winner the open project resolves — the owning entry for an
             # inherited target. Overrides fold onto it.
             winner = candidates[0]
-            if winner.kind != "lore":
+            # Only kinds that support layer overrides fold their edges. Prompts
+            # joined lore here (#1738): an overridden `preferred_assistant_id`
+            # (entity_ref) must recompute its reference edge from the folded value
+            # so the index's backlinks and dangling-ref stripping stay consistent.
+            # The gate is really the presence of an override file, which is only
+            # ever written for these kinds; the allow-list keeps a hand-authored
+            # override targeting some other kind from folding edges unexpectedly.
+            if winner.kind not in {"lore", "prompt"}:
                 continue
             # An override applies only to an inherited winner. A winner the open
             # project owns locally (a fork that severed inheritance) keeps its own

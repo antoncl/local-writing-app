@@ -683,8 +683,8 @@
   // it can lead them with the `ti-versions` mark. The picker itself lives in
   // LayerAuthoringBar (kept out of this shell for the file-size cap).
   let overriddenFieldsForPanel = $derived(
-    documentKind === "lore" && scene && "overridden_fields" in scene
-      ? ((scene as import("@/lib/types").LoreEntry).overridden_fields ?? [])
+    (documentKind === "lore" || documentKind === "prompt") && scene && "overridden_fields" in scene
+      ? ((scene as unknown as { overridden_fields?: string[] }).overridden_fields ?? [])
       : [],
   );
   // The title header's label is the intrinsic `title` field's effective label
@@ -794,7 +794,7 @@
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}
       compare={snapshotCompare ?? entryCompare}
-      readOnly={scrubbed || snapshotParked || reviewing || inheritedReadOnly}
+      readOnly={scrubbed || snapshotParked || reviewing || (inheritedReadOnly && documentKind !== "prompt")}
       onEntryTypeChange={(next) => updateEntryType(next)}
       onStatusChange={(next) => updateStatus(next)}
       onMetadataChange={(next) => {
@@ -803,7 +803,7 @@
       }}
       onCustomData={() => onCustomData?.({ entryType, kind: documentKind })}
       onNavigate={(payload) => onNavigate?.(payload)}
-      onResetField={documentKind === "lore" ? onResetField : undefined}
+      onResetField={documentKind === "lore" || documentKind === "prompt" ? onResetField : undefined}
       resolvedCascade={resolvedCascade}
     />
     {#key scene?.id ?? ""}

@@ -782,8 +782,17 @@ class PromptEntry(BaseModel):
     is_library: bool = False
     # See PromptEntrySummary.editable (#689): the backend's own read-only-in-place
     # verdict, carried on the open document so NodeEditor keys its lock on it.
-    # Fail-closed default (see above).
+    # Fail-closed default (see above). `editable` governs the prompt BODY and
+    # title — those stay fork-only on an inherited prompt. Its *metadata* is a
+    # separate axis (#1738): an inherited prompt's metadata (preferred assistant,
+    # assistant tags, colour) is editable in place via an ADR-0039 layer override,
+    # so the rail is not locked even when `editable` is False.
     editable: bool = False
+    # The metadata fields whose effective value comes from a layer override at a
+    # consuming layer (#1738, mirroring LoreEntry.overridden_fields / ADR-0039).
+    # Empty for an owned prompt or an inherited one with no override; drives the
+    # rail's `ti-versions` override mark and its "reset to inherited" gesture.
+    overridden_fields: list[str] = Field(default_factory=list)
 
 
 class PromptEntryList(BaseModel):
@@ -810,6 +819,22 @@ class SavePromptEntryRequest(BaseModel):
     # `PromptOutputEditor` authors `output`; anything else on the block (e.g. the
     # unauthored `target`) still round-trips verbatim.
     context_strategy: PromptContextStrategy | None = None
+    # #1738 (mirroring SaveLoreEntryRequest): when the winner is an INHERITED
+    # prompt, its metadata is saved as an ADR-0039 layer override at the consuming
+    # layer rather than rewritten in place. These two are inert for an owned prompt
+    # (the ordinary in-place save ignores them).
+    #
+    # `clear_override_fields` — reset-to-inherited: drop this layer's override
+    # row(s) for the named fields so their effective value falls back to canon.
+    # The submitted `metadata` still echoes the overridden value (the reset gesture
+    # does not know the inherited value to send), so the diff would re-create the
+    # row; naming the field here is what reverts it.
+    clear_override_fields: list[str] = Field(default_factory=list)
+    # The consuming layer that authors the override (an ADR-0042 layer picker, when
+    # one exists for prompts). Absent → the open project. Prompts have no rail layer
+    # picker yet, so today this is always omitted and the override lands at the open
+    # project; the field exists so the contract matches lore and needs no later break.
+    authoring_layer_id: str | None = None
 
 
 class MutationSetRow(BaseModel):

@@ -1235,24 +1235,34 @@ class EditorPanesController {
   // returns the re-read entry. Cancel the debounce first — the same
   // baseline-moves-under-a-pending-timer hazard `forkLore` guards. A 409 throws
   // out of here (the caller's `run()` surfaces it) with the draft intact.
-  async resetLoreOverrideField(entryId: string, fieldId: string): Promise<void> {
-    // Match the lore pane directly — `paneForScene` is scene-only and would miss
-    // it (the same predicate `forkLore` uses to reconcile its pane).
-    const pane = this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
+  // Clear-to-inherit reset of one override-backed metadata field, for lore and
+  // prompt alike (#1738 / ADR-0039). Saves with `[fieldId]` to drop that field's
+  // override row at the pane's authoring layer, then reseeds the pane + editor to
+  // the re-read entry so the field shows its inherited value. Matches the pane
+  // directly — `paneForScene` is scene-only and would miss it (the predicate
+  // `forkLore` also uses). The prompt draft carries inputs/offer_on/context_strategy
+  // (they ride every prompt save); the lore draft is metadata only.
+  async resetOverrideField(entryId: string, fieldId: string): Promise<void> {
+    const pane = this.panes.find(
+      (p) => (p.document?.type === "lore" || p.document?.type === "prompt") && p.document.id === entryId,
+    );
     if (!pane?.scene) return;
     this.#autosave.cancel(pane.id);
-    const draftDocument = {
+    const base = {
       ...pane.scene,
       title: pane.draftTitle,
       entry_type: pane.draftEntryType,
       metadata: cloneMetadata(pane.draftMetadata),
     };
-    const entry = await api.saveLoreEntry(
-      draftDocument as LoreEntry,
-      pane.draftMarkdown,
-      pane.authoringLayerId,
-      [fieldId],
-    );
+    const entry =
+      pane.document?.type === "prompt"
+        ? await api.savePromptEntry(
+            { ...base, inputs: pane.draftInputs, offer_on: pane.draftOfferOn, context_strategy: pane.draftContextStrategy } as PromptEntry,
+            pane.draftMarkdown,
+            pane.authoringLayerId,
+            [fieldId],
+          )
+        : await api.saveLoreEntry(base as LoreEntry, pane.draftMarkdown, pane.authoringLayerId, [fieldId]);
     const reloadToken = this.nextMetadataReloadToken++;
     this.panes = this.panes.map((candidate) =>
       candidate.id === pane.id
@@ -1263,8 +1273,6 @@ class EditorPanesController {
             draftTitle: entry.title,
             draftMarkdown: entry.body,
             draftEntryType: entry.entry_type,
-            // Snap the draft to the re-read entry — the cleared field now shows
-            // its inherited value and the rest matches what this save persisted.
             draftMetadata: cloneMetadata(entry.metadata),
             saving: false,
             recentlySaved: false,
@@ -1272,8 +1280,8 @@ class EditorPanesController {
         : candidate,
     );
     // Bump the reload signal so NodeEditor resyncs its own `metadata` state to the
-    // reverted value — replacing the pane's scene alone doesn't reseed the
-    // editor's local copy (the same signal openLore / reconcile use).
+    // reverted value — replacing the pane's scene alone doesn't reseed the editor's
+    // local copy (the same signal openLore / reconcile use).
     this.metadataReloadsByPane = {
       ...this.metadataReloadsByPane,
       [pane.id]: {

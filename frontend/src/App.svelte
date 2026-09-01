@@ -1224,7 +1224,7 @@
         onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, { assistantId: detail.assistantId })}
         onViewSaveState={(state) => editorPanes.setViewSaveState(editorPane.id, state)}
         onAuthoringLayerChange={(layerId) => editorPanes.setEditorPaneAuthoringLayer(editorPane.id, layerId)}
-        onResetField={(fieldId) => editorPane.scene && run(() => editorPanes.resetLoreOverrideField(editorPane.scene!.id, fieldId))}
+        onResetField={(fieldId) => editorPane.scene && run(() => editorPanes.resetOverrideField(editorPane.scene!.id, fieldId))}
         onFlushScene={async () => {
           // A capture photographs the file and a restore overwrites it, so both
           // must run against a file that already holds the author's latest

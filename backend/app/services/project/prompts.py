@@ -35,6 +35,7 @@ from app.models.schema import PromptContextStrategy
 from app.services.ai.effective_inputs import SnippetSource
 from app.services.project.computed_metadata import strip_computed_fields
 from app.services.project.errors import ProjectServiceError
+from app.services.project.overrides import LayerOverride
 from app.services.project.prompt_disposition import prompt_disposition, prompt_runnable
 
 if TYPE_CHECKING:
@@ -69,6 +70,13 @@ class PromptEntriesMixin:
         root = self._require_project()
         index = self._build_node_index()
         schema = schema or self.read_metadata_schema()
+        # The override fold's inputs, resolved once and only when a chain actually
+        # carries overrides (#1738, mirroring list_lore_entries) — a flat project
+        # with no `overrides/` folder pays nothing, keeping the per-`{% include %}`
+        # snippet-loader path (which shares this builder) cheap.
+        has_overrides = bool(index.overrides_by_target)
+        field_types = self._schema_field_types(schema) if has_overrides else {}
+        open_layer_id = self._metadata_schema_layer_id(root) if has_overrides else ""
         entries: list[PromptEntrySummary] = []
         for entry in index.by_id.values():
             if entry.kind != "prompt":
@@ -81,13 +89,20 @@ class PromptEntriesMixin:
             entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "prompt:base"
             offer_on = self._parse_offer_on(front_matter.get("offer_on"))
             context_strategy = self._parse_context_strategy(front_matter.get("context_strategy"))
+            metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+            # Fold overrides so a list shows the effective value, but only onto an
+            # inherited winner — a locally-owned prompt ignores any leftover
+            # override, matching read_prompt_entry.
+            override_records = index.overrides_by_target.get(entry.id)
+            if override_records and entry.source_layer_id != open_layer_id:
+                metadata, _ = self.materialize_override_metadata(metadata, override_records, field_types)
             entries.append(
                 PromptEntrySummary(
                     id=entry.id,
                     title=str(front_matter.get("title") or entry.id),
                     body=body,
                     entry_type=entry_type,
-                    metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
+                    metadata=metadata,
                     inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
                     offer_on=offer_on,
                     context_strategy=context_strategy,
@@ -269,24 +284,46 @@ class PromptEntriesMixin:
         raw_entry_type = front_matter.get("entry_type") or "prompt:base"
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(f"Prompt {node_id} has invalid entry_type; it must be text.", 422)
-        # Hide references whose target is gone, exactly as the scene/lore/research
-        # read paths do (#345). The schema editor can put an `entity_ref` on any
-        # entry_type, so "prompts don't hold references" was an assumption, not a
-        # constraint — and without this the picker renders a row for a node that
-        # no longer exists.
         schema = self.read_metadata_schema()
-        metadata = self._strip_dangling_references(
-            self._normalise_metadata(front_matter.get("metadata"), path),
-            schema,
-            index,
-        )
+        metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+        # Fold the chain's layer overrides onto this inherited prompt's canon
+        # (#1738 / ADR-0039), exactly as `read_lore_entry` does: its metadata
+        # (preferred assistant, assistant tags, colour) is editable in place at a
+        # consuming layer even though the built-in file stays read-only. Applies
+        # only to an INHERITED winner — a prompt the open project owns (or a clone
+        # that severed inheritance) ignores any leftover override. `overridden_fields`
+        # tells the rail which values carry the `ti-versions` override mark.
+        overridden_fields: list[str] = []
+        override_records = index.overrides_by_target.get(node_id)
+        if (
+            override_records
+            and index_entry is not None
+            and index_entry.source_layer_id != self._metadata_schema_layer_id(root)
+        ):
+            metadata, overridden_fields = self.materialize_override_metadata(
+                metadata, override_records, self._schema_field_types(schema)
+            )
+        # Hide references whose target is gone, exactly as the scene/lore/research
+        # read paths do (#345) — the schema editor can put an `entity_ref` on any
+        # entry_type, so a dangling ref would otherwise render a picker row for a
+        # node that no longer exists. Applied AFTER the fold so an overridden
+        # entity_ref (a `preferred_assistant_id` set at a consuming layer) is
+        # stripped too when its target is gone.
+        metadata = self._strip_dangling_references(metadata, schema, index)
+        # A field the fold touched but the strip then removed is no longer a value
+        # to mark — keep `overridden_fields` in step with what shipped.
+        overridden_fields = [field for field in overridden_fields if field in metadata]
         offer_on = self._parse_offer_on(front_matter.get("offer_on"))
         context_strategy = self._parse_context_strategy(front_matter.get("context_strategy"))
         return PromptEntry(
             id=node_id,
             title=str(front_matter.get("title") or node_id),
             body=body,
-            revision=self._revision(path),
+            # A revision that spans the fold (#1738): the composite over the owning
+            # file plus every override in the chain, so an override edit changes
+            # `revision` for optimistic concurrency. With no overrides this
+            # reproduces `_revision(path)` exactly.
+            revision=self._composite_revision([path, *self._override_paths_for_target(index, node_id)]),
             entry_type=raw_entry_type,
             metadata=metadata,
             inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
@@ -305,6 +342,7 @@ class PromptEntriesMixin:
             # this branch does not special-case — unreachable here, since a
             # non-prompt winner is re-routed to the on-disk path before this.)
             editable=self._node_is_owned_here(index_entry, root) if index_entry else True,
+            overridden_fields=overridden_fields,
         )
 
     def fork_prompt_entry(self, entry_id: str) -> PromptEntry:
@@ -355,6 +393,139 @@ class PromptEntriesMixin:
         )
 
     def save_prompt_entry(self, entry_id: str, request: SavePromptEntryRequest) -> PromptEntry:
+        root = self._require_project()
+        index = self._build_node_index()
+        winner = index.by_id.get(entry_id)
+        open_layer_id = self._metadata_schema_layer_id(root)
+        # Owned locally (a book-local prompt or a clone), or not yet indexed → the
+        # ordinary in-place save to the prompt's own file. The layer walk is
+        # deferred to the inherited path, so a flat owned save never pays for it.
+        if winner is None or winner.kind != "prompt" or winner.source_layer_id == open_layer_id:
+            return self._save_owned_prompt_entry(entry_id, request)
+        # Inherited: the winner is a built-in Library node or an ancestor project's
+        # prompt (#1738). Its body and `inputs` stay fork-only, but its metadata is
+        # saved as a sparse ADR-0039 layer override at the consuming layer rather
+        # than rewritten in place.
+        return self._save_prompt_override(entry_id, request, winner, index, root, open_layer_id)
+
+    def _save_prompt_override(
+        self,
+        entry_id: str,
+        request: SavePromptEntryRequest,
+        winner,
+        index,
+        root,
+        open_layer_id: str,
+    ) -> PromptEntry:
+        """Write the consuming layer's sparse metadata override on an INHERITED
+        prompt (#1738 / ADR-0039), mirroring `_save_lore_override`.
+
+        Only metadata is captured — a prompt's body and `inputs` are not metadata
+        fields and stay fork-only (rewriting a prompt clones it). The override lands
+        at the authoring layer L: the request's explicit layer if given, else the
+        open project. Prompts have no per-layer schema-authoring surface for the
+        routing fields, so the diff uses the full-chain schema (unlike lore's
+        as-of-L scoping) — the routing fields are defined once on `prompt:base` at
+        the built-in layer and are present at every layer.
+
+        The BODY stays read-only in place: a body change is refused with the same
+        409 the whole-prompt lock raised before this change (#689/#676), so the
+        `editable=False` content-lock invariant is unbroken and only metadata gains
+        the override path. (Prompts diverge here from lore, which silently defers
+        body/title overrides — a prompt's Jinja body is first-class content with a
+        documented in-place lock, so refusing loudly beats dropping the edit.)
+        """
+        self._check_entry_type_kind(request.entry_type, "prompt")
+        schema = self.read_metadata_schema()
+        field_types = self._schema_field_types(schema)
+
+        owning_front_matter, canon_body = self._read_markdown_with_front_matter(winner.path, strict=True)
+        # rstrip matches the trailing-whitespace tolerance the clone path already
+        # uses when comparing a copied body (`test_clone_an_ancestor_prompt`).
+        if request.body.rstrip() != canon_body.rstrip():
+            label = winner.source_layer_label or "an ancestor"
+            raise ProjectServiceError(
+                f"This prompt's body is inherited from {label} and is read-only here; "
+                "fork it to change the body.",
+                409,
+            )
+
+        # Resolve the authoring layer L; absent request layer → the open project.
+        layer_by_id = {layer.id: layer for layer in self.collect_layers(root)}
+        if request.authoring_layer_id:
+            authoring_layer = layer_by_id.get(request.authoring_layer_id)
+            if authoring_layer is None:
+                raise ProjectServiceError("Unknown authoring layer.", 422)
+        else:
+            authoring_layer = layer_by_id.get(open_layer_id)
+        # An override must sit strictly below the owning layer — authoring at or
+        # above it is not a delta but a rewrite of that layer's own canon, which
+        # this project cannot do (fork it, or edit it where it is owned).
+        owning_layer = layer_by_id.get(winner.source_layer_id)
+        if authoring_layer is None or (owning_layer is not None and authoring_layer.rank <= owning_layer.rank):
+            label = winner.source_layer_label or "an ancestor"
+            raise ProjectServiceError(
+                f"This prompt is inherited from {label}; its metadata can only be overridden from a "
+                "layer below it. Fork it to change the body, or edit it where it is owned.",
+                422,
+            )
+
+        base_metadata = self._normalise_metadata(owning_front_matter.get("metadata"), winner.path)
+        # The base an override at L diffs against is the effective value of every
+        # layer ABOVE L, so the delta captures only what L itself changes and a
+        # later ancestor edit still flows down.
+        records_above = [
+            record
+            for record in index.overrides_by_target.get(entry_id, [])
+            if record.layer_rank < authoring_layer.rank
+        ]
+        base_above_layer, _ = self.materialize_override_metadata(base_metadata, records_above, field_types)
+
+        submitted = self._normalise_metadata(request.metadata, winner.path)
+        # Never override the resolver-stamped computed fields (#1684): they are not
+        # stored, and a stray echo of `disposition`/`runnable` must not mint a row.
+        submitted = strip_computed_fields(submitted, schema)
+
+        current_revision = self._composite_revision([winner.path, *self._override_paths_for_target(index, entry_id)])
+        if request.base_revision and request.base_revision != current_revision:
+            raise ProjectServiceError("Prompt changed on disk after it was opened.", 409)
+
+        rows = self._diff_metadata_to_override_rows(base_above_layer, submitted, field_types)
+        # Reset-to-inherited (#1738): drop the row(s) for any field the client asked
+        # to reset — the submitted metadata still echoes the overridden value, so the
+        # diff produced a row; dropping it reverts the field to canon. An empty result
+        # then deletes the override file below.
+        if request.clear_override_fields:
+            cleared = set(request.clear_override_fields)
+            rows = [row for row in rows if row.field not in cleared]
+
+        if rows:
+            self._write_override_file(authoring_layer.folder, entry_id, request.title, rows)
+        else:
+            # An empty delta means the author reverted to canon: drop this layer's
+            # override rather than leave an inert file (files-are-truth).
+            existing = self._override_file_for_target(authoring_layer.folder, entry_id)
+            if existing is not None:
+                self._delete_node_file(existing)
+
+        # Register the EFFECTIVE assistant_tags into the machine-global vocabulary
+        # (#88) — computed as L resolves them (base-above-L folded with this layer's
+        # rows), matching the owned save's registration of exactly what it wrote.
+        preview = LayerOverride(
+            entry_id, authoring_layer.id, authoring_layer.rank, authoring_layer.label, winner.path, tuple(rows)
+        )
+        effective_at_layer, _ = self.materialize_override_metadata(base_above_layer, [preview], field_types)
+        from app.services import machine_settings as ms_service
+
+        ms_service.register_assistant_tags(ms_service.tag_names_from_field(effective_at_layer.get("assistant_tags")))
+        return self.read_prompt_entry(entry_id)
+
+    def _save_owned_prompt_entry(self, entry_id: str, request: SavePromptEntryRequest) -> PromptEntry:
+        """The ordinary in-place save to a prompt's own file (owned by this
+        project). Reached only for an owned winner; the inherited path routes to
+        `_save_prompt_override`. `_reject_inherited_library_write` stays as a
+        defensive no-op (it returns when there is no index winner — a just-created,
+        not-yet-indexed prompt is owned)."""
         self._reject_inherited_library_write(entry_id, kind="prompt", noun="prompt")
         path = self._path_for_node_id(entry_id, "prompt")
         front_matter = self._read_front_matter_only(path, strict=True)

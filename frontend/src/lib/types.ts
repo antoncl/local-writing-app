@@ -298,6 +298,11 @@ export type PromptEntry = {
   is_library?: boolean;
   // See PromptEntrySummary.editable (#689).
   editable?: boolean;
+  // Metadata fields whose effective value comes from a layer override in this
+  // project's chain rather than inherited canon (#314 / ADR-0039). The backend
+  // computes it during the fold; the rail draws the `ti-versions` override mark
+  // against these. Empty for an entry with no overrides above its owning layer.
+  overridden_fields?: string[];
 };
 
 export type PromptEntryList = {

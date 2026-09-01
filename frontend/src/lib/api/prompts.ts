@@ -14,7 +14,23 @@ export const promptsApi = {
   getPromptEntry(entryId: string) {
     return request<PromptEntry>(`/prompts/${entryId}`);
   },
-  savePromptEntry(entry: PromptEntry, body: string) {
+  // `authoringLayerId` is the write-target layer L (#1738 / ADR-0039). Prompts
+  // have no rail layer picker yet, so it is `null` in practice → the open project:
+  // an inherited prompt's metadata edit lands there as a sparse override delta,
+  // while its body stays read-only (the backend 409s a BODY change, and never
+  // rewrites the inherited file). When a layer IS given it must sit below the
+  // owning layer; authoring at or above it is refused.
+  // `clearOverrideFields` (#1738) names the fields whose override row(s) to DROP
+  // at L, reverting them to the inherited value — the explicit "unset ⇒ inherit"
+  // signal. The submitted `metadata` still carries their overridden value; the
+  // backend drops the row regardless, which is what distinguishes a reset from
+  // omitting the field.
+  savePromptEntry(
+    entry: PromptEntry,
+    body: string,
+    authoringLayerId: string | null = null,
+    clearOverrideFields: string[] = [],
+  ) {
     return request<PromptEntry>(`/prompts/${entry.id}`, {
       method: "PUT",
       body: JSON.stringify({
@@ -32,6 +48,8 @@ export const promptsApi = {
         // omitting this silently wipes a forked prompt's output/commit config
         // on the next autosave.
         context_strategy: entry.context_strategy ?? null,
+        authoring_layer_id: authoringLayerId,
+        clear_override_fields: clearOverrideFields,
       }),
     });
   },

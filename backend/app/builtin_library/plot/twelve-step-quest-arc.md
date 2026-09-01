@@ -11,7 +11,6 @@ template:
   family: journey
   description: A generic twelve-step quest structure with rephrased labels and elastic
     placement.
-  genre: Any — Vogler's screenwriting adaptation of the mythic journey; broad genre fit.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as
@@ -38,6 +37,7 @@ template:
   locale: en
   metadata: {}
 metadata:
+  genre: Any — Vogler's screenwriting adaptation of the mythic journey; broad genre fit.
   beats:
   - title: Starting order
     function: Shows the world and identity before disruption.

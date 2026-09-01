@@ -313,15 +313,15 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "plot:template": {
             # A diagnostic story-structure lens (ADR-0048 S4b), shipped read-only
             # by the built-in Library (ADR-0049) or cloned into a project to adapt.
-            # The beat roster is the `beats` ordered-list field (S7 Slice 1, #736) —
+            # `genre` and the `beats` roster are metadata fields (#1744, #736) —
             # visible + editable via MetadataPanel like any field; the prose guide
-            # is the body. Template-level attributes (family, ai_use_guidance, …)
-            # still ride in the `template:` front-matter block for now.
+            # is the body. The remaining template-level attributes (family,
+            # ai_use_guidance, …) still ride in the `template:` front-matter block.
             "name": "Plot template",
             "icon": "layout-grid",
             "kind": "plot",
             "parent": "plot:base",
-            "fields": ["beats"],
+            "fields": ["genre", "beats"],
             "has_body": True,
         },
         "plot:board": {
@@ -615,15 +615,18 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "item_group": "plot_instance_beat",
         },
         "genre": {
-            # The plotline's genre/premise (#1728). Seeded from the source
-            # template's authored genre at instantiate and freely editable — a
-            # thriller book's romance subplot carries its own genre, independent
-            # of the book's. Free text (not an enum) so a genre-neutral structure
-            # can explain its breadth. Fed to the AI via read_plot_context so a
-            # plotline brainstorm knows what it is writing. Visible (not hidden):
-            # it is author-facing, unlike the source_* lineage snapshots.
+            # Genre/premise, authored on a `plot:template` and seeded onto each
+            # `plot:plotline` at instantiate (#1728, #1744). On the template it is
+            # the writer's own metadata field — editable in the panel like any node
+            # field, not a hidden spec attribute; on a plotline it is freely
+            # editable and independent of the book's genre (a thriller book's
+            # romance subplot carries its own). Free text (not an enum) so a
+            # genre-neutral structure can explain its breadth; long_text because a
+            # premise runs past a single line. Fed to the AI via read_plot_context
+            # so a plotline brainstorm knows what it is writing. Visible (not
+            # hidden): author-facing, unlike the source_* lineage snapshots.
             "name": "Genre",
-            "type": "text",
+            "type": "long_text",
         },
         "source_template_id": {
             # Lineage snapshot (ADR-0048 S7 Slice 2, #776; ADR-0053): the stable id of

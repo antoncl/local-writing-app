@@ -48,7 +48,9 @@ class SourceRef(BaseModel):
 class PlotTemplateSpec(BaseModel):
     """The structured payload of a `plot:template`, carried in the `template:`
     front-matter block — template-level attributes only. The beat roster moved to
-    the `beats` ordered-list metadata field (S7 Slice 1, #736)."""
+    the `beats` ordered-list metadata field (S7 Slice 1, #736), and `genre` to a
+    `long_text` node-metadata field (#1744) — both authored in the panel like any
+    node field, not as hidden spec attributes."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -58,7 +60,6 @@ class PlotTemplateSpec(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     family: PlotTemplateFamily = "custom"
     description: str = ""
-    genre: str = ""
     cultural_context: str = ""
     prescriptiveness: PlotTemplatePrescriptiveness = "diagnostic"
     ai_use_guidance: str = ""

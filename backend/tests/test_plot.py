@@ -26,6 +26,7 @@ from project_fixtures import open_test_project
 from app.models import (
     CreateCardRequest,
     CreatePlotlineRequest,
+    CreatePlotTemplateRequest,
     CreateSceneRequest,
     CreateStructureNodeRequest,
     EntryTypeDefinition,
@@ -1277,6 +1278,43 @@ class PlotTemplateLayeredTests(unittest.TestCase):
         # The clone lives in this book, the ancestor original is left in place.
         self.assertTrue((self.root / "plot").is_dir())
         self.assertTrue(path.exists())
+
+    def _author_owned_template_genre(self, title: str, genre: str) -> str:
+        created = self.service.create_plot_template(CreatePlotTemplateRequest(title=title))
+        current = self.service.read_plot_template(created.id)
+        self.service.save_plot_template(
+            created.id,
+            SavePlotTemplateRequest(
+                title=current.title,
+                template=current.template,
+                body=current.body,
+                base_revision=current.revision,
+                metadata={**current.metadata, "genre": genre},
+            ),
+        )
+        return created.id
+
+    def test_genre_is_a_template_metadata_field_a_writer_can_author(self) -> None:
+        # #1744: genre is a node-metadata field on plot:template, not a hidden
+        # `template:` spec attribute — a writer authors it through the ordinary
+        # metadata save path, it round-trips on read, and on disk it lives in the
+        # `metadata:` block, never back in the spec block.
+        genre = "Cozy mystery — a small town, an amateur sleuth, no on-page gore."
+        template_id = self._author_owned_template_genre("Cozy Mystery Lens", genre)
+        self.assertEqual(self.service.read_plot_template(template_id).metadata["genre"], genre)
+        on_disk = self.service._read_front_matter_only(
+            self.service._path_for_node_id(template_id, "plot"), strict=True
+        )
+        self.assertEqual(on_disk["metadata"]["genre"], genre)
+        self.assertNotIn("genre", on_disk.get("template", {}))
+
+    def test_instantiating_a_template_seeds_the_plotline_genre_from_its_metadata(self) -> None:
+        # #1744: instantiate snapshots the template's *metadata* genre onto the new
+        # plotline (previously it read the removed `template.genre` spec attribute).
+        genre = "Heist — a crew, a mark, a plan that goes sideways."
+        template_id = self._author_owned_template_genre("Heist Lens", genre)
+        plotline = self.service.instantiate_plot_template(template_id)
+        self.assertEqual(plotline.metadata.get("genre"), genre)
 
 
 if __name__ == "__main__":

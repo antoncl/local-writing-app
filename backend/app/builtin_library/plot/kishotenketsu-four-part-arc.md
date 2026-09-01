@@ -11,7 +11,6 @@ template:
   family: act
   description: A four-part structure where development, contrast, and reconciliation
     can matter more than direct conflict.
-  genre: Any — a four-part structure built on contrast rather than conflict; fits literary, slice-of-life, and contemplative stories across genres.
   cultural_context: Use without forcing Western antagonist escalation; the turn may
     be juxtaposition or recontextualization rather than combat.
   prescriptiveness: diagnostic
@@ -39,6 +38,7 @@ template:
   locale: en
   metadata: {}
 metadata:
+  genre: Any — a four-part structure built on contrast rather than conflict; fits literary, slice-of-life, and contemplative stories across genres.
   beats:
   - title: Introduction
     function: Introduces the situation, image, relationship, or premise without needing

@@ -46,7 +46,7 @@ import yaml
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 7
+CURRENT_VERSION = 8
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -169,6 +169,28 @@ def _backfill_tense_cascade_field(root: Path) -> None:
     _ensure_cascade_fields(root, ("tense",))
 
 
+def _lift_plot_template_genre(doc: MigratableDocument) -> MigratableDocument:
+    """v7→v8: `plot:template` genre moved out of the `template:` spec block into a
+    `long_text` node-metadata field (#1744), so a writer can author it in the panel
+    like any node field instead of only by hand-editing front matter. Lift
+    `template.genre` → `metadata.genre` on owned template clones. A no-op for every
+    other document, and idempotent: once genre has left the `template:` block there
+    is nothing to lift, and an existing `metadata.genre` is never clobbered."""
+    front_matter = doc.front_matter
+    if front_matter.get("entry_type") != "plot:template":
+        return doc
+    template = front_matter.get("template")
+    if not isinstance(template, dict) or "genre" not in template:
+        return doc
+    new_template = {key: value for key, value in template.items() if key != "genre"}
+    existing_metadata = front_matter.get("metadata")
+    new_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
+    new_metadata.setdefault("genre", template["genre"])
+    return MigratableDocument(
+        {**front_matter, "template": new_template, "metadata": new_metadata}, doc.body
+    )
+
+
 # Migrations run in registry order. Version numbers are history and are never
 # reused or renumbered, so a retired step leaves a gap. Two gaps now: 3 (create
 # project.md) was removed with #343 — it wrote a constant `id: project`, which
@@ -189,6 +211,11 @@ MIGRATIONS: list[MigrationStep] = [
         7,
         "add tense to cascade_fields so it inherits down the manuscript (ADR-0079, #1737)",
         _backfill_tense_cascade_field,
+    ),
+    DocumentMigration(
+        8,
+        "lift plot:template genre from the template: block into a node-metadata field (#1744)",
+        _lift_plot_template_genre,
     ),
 ]
 

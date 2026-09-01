@@ -14,6 +14,7 @@ from app.services.migrations import (
     DocumentMigration,
     MigratableDocument,
     RootMigration,
+    _lift_plot_template_genre,
     migrate_document,
     migrate_project,
     read_project_version,
@@ -319,6 +320,82 @@ class DocumentMigrationFrameworkTests(unittest.TestCase):
             self.assertEqual(result.body, "body")
         finally:
             self._restore(original_registry, original_current)
+
+
+class PlotTemplateGenreMigrationTests(unittest.TestCase):
+    """v7→v8 (#1744): lift `plot:template` genre out of the `template:` spec block
+    into a node-metadata field. Pure per-document transform — no root, no service."""
+
+    @staticmethod
+    def _doc(front_matter: dict) -> MigratableDocument:
+        return MigratableDocument(front_matter, "# guide")
+
+    def test_lifts_template_genre_into_metadata(self) -> None:
+        out = _lift_plot_template_genre(
+            self._doc(
+                {
+                    "id": "plot_x",
+                    "entry_type": "plot:template",
+                    "template": {"slug": "x", "genre": "Noir — rain and regret."},
+                    "metadata": {"beats": []},
+                }
+            )
+        )
+        self.assertNotIn("genre", out.front_matter["template"])
+        self.assertEqual(out.front_matter["metadata"]["genre"], "Noir — rain and regret.")
+        self.assertEqual(out.front_matter["metadata"]["beats"], [])  # existing metadata kept
+
+    def test_seeds_a_metadata_block_when_the_template_has_none(self) -> None:
+        out = _lift_plot_template_genre(
+            self._doc(
+                {
+                    "id": "plot_x",
+                    "entry_type": "plot:template",
+                    "template": {"genre": "Heist — a crew, a mark, a plan gone sideways."},
+                }
+            )
+        )
+        self.assertEqual(out.front_matter["metadata"]["genre"], "Heist — a crew, a mark, a plan gone sideways.")
+
+    def test_is_idempotent_once_genre_has_moved(self) -> None:
+        # No genre left in the block → the same object comes back, so the document
+        # pass's changed-check writes nothing (no mtime churn on re-open).
+        doc = self._doc(
+            {
+                "id": "plot_x",
+                "entry_type": "plot:template",
+                "template": {"slug": "x"},
+                "metadata": {"genre": "Noir — rain and regret."},
+            }
+        )
+        self.assertIs(_lift_plot_template_genre(doc), doc)
+
+    def test_never_clobbers_an_existing_metadata_genre(self) -> None:
+        out = _lift_plot_template_genre(
+            self._doc(
+                {
+                    "id": "plot_x",
+                    "entry_type": "plot:template",
+                    "template": {"genre": "from the block"},
+                    "metadata": {"genre": "already here"},
+                }
+            )
+        )
+        self.assertEqual(out.front_matter["metadata"]["genre"], "already here")
+        self.assertNotIn("genre", out.front_matter["template"])
+
+    def test_is_a_no_op_for_a_non_template_document(self) -> None:
+        # A plotline already carries genre in its own metadata; the lift must not
+        # touch any document that is not a plot:template.
+        doc = self._doc(
+            {
+                "id": "plotline_x",
+                "entry_type": "plot:plotline",
+                "template": {"genre": "ignored — not a template node"},
+                "metadata": {"genre": "Romance"},
+            }
+        )
+        self.assertIs(_lift_plot_template_genre(doc), doc)
 
 
 class ResearchStructureMigrationTests(unittest.TestCase):

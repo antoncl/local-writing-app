@@ -11,7 +11,6 @@ template:
   family: act
   description: A generic three-part structure template for broad story pressure, commitment,
     reversal, choice, and consequence.
-  genre: Any — a universal structure that takes on the genre of the story it is used in.
   cultural_context: ''
   prescriptiveness: diagnostic
   ai_use_guidance: Use as an elastic diagnostic lens. Do not treat plot points as
@@ -38,6 +37,7 @@ template:
   locale: en
   metadata: {}
 metadata:
+  genre: Any — a universal structure that takes on the genre of the story it is used in.
   beats:
   - title: Setup pressure
     function: Establishes ordinary conditions, desire, and pressure before commitment.

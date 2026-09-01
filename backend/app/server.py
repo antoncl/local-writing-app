@@ -21,6 +21,11 @@ That same loopback desktop launch also *quits* when its last browser tab closes
 running in the background. It is armed under the exact same condition that opens
 the browser: a LAN/Pi/systemd server is meant to outlive any tab, so shutting it
 down because a browser closed would be a bug.
+
+Running the product also routes the general server stream (uvicorn, warnings,
+tracebacks) to a rotating file under the app-data dir (#1745, ``product_log``) —
+so it survives once the frozen build goes windowed and has no console (#1746).
+The ``--reload`` dev path doesn't come through here and keeps its console.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ import uvicorn
 
 from app.main import app
 from app.services.machine_settings import bind_address
+from app.services.product_log import configure_product_logging
 from app.services.session_presence import presence
 
 DEFAULT_HOST = "127.0.0.1"
@@ -198,7 +204,14 @@ def self_check() -> int:
 def main(argv: list[str] | None = None) -> None:
     args = _build_parser().parse_args(argv)
     if args.self_check:
+        # A read-only runtime probe that exits immediately — keep it free of the
+        # file-log side effect (it uses only a TemporaryDirectory).
         raise SystemExit(self_check())
+    # Route the general server stream to a rotating file under the app-data dir
+    # (#1745) — and, on a windowed build with no console, make stray writes safe
+    # — before the serve path logs anything. The --reload dev path doesn't come
+    # through here.
+    configure_product_logging()
     host, port = resolve_bind(args)
     if not _is_loopback(host):
         logger.warning(
@@ -209,8 +222,11 @@ def main(argv: list[str] | None = None) -> None:
             port,
         )
     # Build the Server ourselves (rather than uvicorn.run) so the auto-shutdown
-    # watcher has a handle to stop gracefully via `should_exit`.
-    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
+    # watcher has a handle to stop gracefully via `should_exit`. `log_config=None`
+    # leaves uvicorn's own loggers unconfigured so they propagate to the root
+    # logger and land in the file log (#1745) instead of uvicorn's default
+    # console-only handlers.
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_config=None))
     if _should_open_browser(args, host):
         # One loopback-desktop condition, two consequences: open the browser once
         # the socket is live, and quit when the last tab closes (#1365/#1378).

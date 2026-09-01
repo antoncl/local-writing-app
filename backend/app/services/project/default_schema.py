@@ -104,16 +104,17 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "icon": "stack-2",
             "kind": "manuscript",
             "parent": "manuscript:base",
-            # Narration (pov_mode / pov) is authorable at every structure level so it
-            # can be overridden here and cascade to the scenes below (ADR-0079).
-            "fields": ["pov_mode", "pov"],
+            # Narration (pov_mode / pov / tense) is authorable at every structure
+            # level so it can be overridden here and cascade to the scenes below
+            # (ADR-0079).
+            "fields": ["pov_mode", "pov", "tense"],
         },
         "manuscript:chapter": {
             "name": "Chapter",
             "icon": "book",
             "kind": "manuscript",
             "parent": "manuscript:base",
-            "fields": ["pov_mode", "pov"],
+            "fields": ["pov_mode", "pov", "tense"],
         },
         "manuscript:scene": {
             "name": "Scene",
@@ -122,14 +123,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "parent": "manuscript:base",
             "fields": [
                 "status",
-                # Narration pair kept adjacent, mode first — pov_mode gates
-                # whether pov applies (ADR-0079); matches act/chapter ordering.
+                # Narration cascade fields kept adjacent, mode first — pov_mode
+                # gates whether pov applies (ADR-0079); matches act/chapter ordering.
                 "pov_mode",
                 "pov",
+                "tense",
                 "characters",
                 "location",
                 "tags",
-                "tense",
                 "dynamics",
                 "word_count",
                 "cost",

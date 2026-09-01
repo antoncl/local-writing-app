@@ -46,7 +46,7 @@ import yaml
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 6
+CURRENT_VERSION = 7
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -129,16 +129,14 @@ def _create_research_structure(root: Path) -> None:
     )
 
 
-def _backfill_narration_cascade_fields(root: Path) -> None:
-    """v5→v6: seed `cascade_fields: [pov_mode, pov]` into the project's
-    metadata.schema.yaml so narration inherits down the manuscript structure
-    (ADR-0079). New projects get this from the scaffold; existing ones predate the
-    key. There is deliberately no resolver-side default (that would be the Python
-    constant the ADR rejects), so the value must land in YAML here.
+def _ensure_cascade_fields(root: Path, field_ids: tuple[str, ...]) -> None:
+    """Ensure `field_ids` are present in the project's metadata.schema.yaml
+    `cascade_fields` list. There is deliberately no resolver-side default (that
+    would be the Python constant ADR-0079 rejects), so the value must land in YAML.
 
-    Idempotent (ADR-0071 §2): existing `cascade_fields` entries are kept and only
-    the two narration ids are ensured present. A project with no schema file gets a
-    minimal one — the merge treats every top-level key as optional."""
+    Idempotent (ADR-0071 §2): existing entries are kept and only the missing ids
+    are appended. A project with no schema file gets a minimal one — the merge
+    treats every top-level key as optional."""
     schema_path = root / "metadata.schema.yaml"
     data: dict[str, Any] = {}
     if schema_path.exists():
@@ -147,7 +145,7 @@ def _backfill_narration_cascade_fields(root: Path) -> None:
             data = loaded
     existing = data.get("cascade_fields")
     cascade = list(existing) if isinstance(existing, list) else []
-    for field_id in ("pov_mode", "pov"):
+    for field_id in field_ids:
         if field_id not in cascade:
             cascade.append(field_id)
     data["cascade_fields"] = cascade
@@ -155,6 +153,20 @@ def _backfill_narration_cascade_fields(root: Path) -> None:
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
+
+
+def _backfill_narration_cascade_fields(root: Path) -> None:
+    """v5→v6: seed `cascade_fields: [pov_mode, pov]` so narration inherits down the
+    manuscript structure (ADR-0079). New projects get this from the scaffold;
+    existing ones predate the key."""
+    _ensure_cascade_fields(root, ("pov_mode", "pov"))
+
+
+def _backfill_tense_cascade_field(root: Path) -> None:
+    """v6→v7: add `tense` to `cascade_fields` so tense inherits down the manuscript
+    like pov_mode/pov (ADR-0079, #1737). A separate step because existing projects
+    already ran v6; new projects get the full set from the scaffold."""
+    _ensure_cascade_fields(root, ("tense",))
 
 
 # Migrations run in registry order. Version numbers are history and are never
@@ -172,6 +184,11 @@ MIGRATIONS: list[MigrationStep] = [
         6,
         "seed cascade_fields=[pov_mode, pov] into metadata.schema.yaml (ADR-0079)",
         _backfill_narration_cascade_fields,
+    ),
+    RootMigration(
+        7,
+        "add tense to cascade_fields so it inherits down the manuscript (ADR-0079, #1737)",
+        _backfill_tense_cascade_field,
     ),
 ]
 

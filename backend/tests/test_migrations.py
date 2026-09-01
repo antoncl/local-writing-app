@@ -61,12 +61,32 @@ class MigrationFrameworkTests(unittest.TestCase):
         self.assertIn("custom", after["fields"])  # existing content preserved
 
     def test_backfill_narration_cascade_fields_is_idempotent(self) -> None:
-        # Scaffold already seeds cascade_fields; re-running must not duplicate.
+        # Scaffold already seeds cascade_fields (incl. tense, #1737); re-running the
+        # v6 step must not duplicate and must leave the scaffold's extras intact.
         schema_path = self.root / "metadata.schema.yaml"
         migrations._backfill_narration_cascade_fields(self.root)
         migrations._backfill_narration_cascade_fields(self.root)
         after = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
-        self.assertEqual(after["cascade_fields"], ["pov_mode", "pov"])
+        self.assertEqual(after["cascade_fields"], ["pov_mode", "pov", "tense"])
+
+    def test_backfill_tense_cascade_field_adds_to_a_v6_schema(self) -> None:
+        # v6→v7 (#1737): a project that ran v6 has [pov_mode, pov] but not tense;
+        # the v7 step appends tense while preserving order and other content.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = yaml.safe_load(schema_path.read_text(encoding="utf-8")) or {}
+        data["cascade_fields"] = ["pov_mode", "pov"]  # simulate a post-v6, pre-v7 file
+        schema_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+        migrations._backfill_tense_cascade_field(self.root)
+
+        after = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+        self.assertEqual(after["cascade_fields"], ["pov_mode", "pov", "tense"])
+        # Idempotent — re-running is a no-op.
+        migrations._backfill_tense_cascade_field(self.root)
+        self.assertEqual(
+            yaml.safe_load(schema_path.read_text(encoding="utf-8"))["cascade_fields"],
+            ["pov_mode", "pov", "tense"],
+        )
 
     def test_backfill_narration_cascade_fields_creates_missing_schema(self) -> None:
         # A legacy project with no metadata.schema.yaml still gets the cascade.
@@ -95,6 +115,7 @@ class MigrationFrameworkTests(unittest.TestCase):
         after = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
         self.assertIn("pov_mode", after.get("cascade_fields", []))
         self.assertIn("pov", after.get("cascade_fields", []))
+        self.assertIn("tense", after.get("cascade_fields", []))  # v7 (#1737)
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
 
     def test_fresh_project_open_runs_no_migrations(self) -> None:

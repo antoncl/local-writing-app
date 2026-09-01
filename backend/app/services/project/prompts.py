@@ -47,12 +47,14 @@ class PromptEntriesMixin:
     def list_prompt_entries(self) -> PromptEntryList:
         # One schema read serves the disposition stamp and the snippet resolver.
         schema = self.read_metadata_schema()
-        entries = self._build_prompt_summaries(schema)
+        entries = self._build_prompt_summaries(schema, fold_overrides=True)
         self._populate_effective_inputs(entries, schema)
         entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
         return PromptEntryList(entries=entries)
 
-    def _build_prompt_summaries(self, schema: MetadataSchema | None = None) -> list[PromptEntrySummary]:
+    def _build_prompt_summaries(
+        self, schema: MetadataSchema | None = None, *, fold_overrides: bool = False
+    ) -> list[PromptEntrySummary]:
         """Every prompt node as a summary — WITHOUT `effective_inputs`, unsorted.
 
         Shared by `list_prompt_entries` (which adds effective_inputs then sorts)
@@ -70,11 +72,13 @@ class PromptEntriesMixin:
         root = self._require_project()
         index = self._build_node_index()
         schema = schema or self.read_metadata_schema()
-        # The override fold's inputs, resolved once and only when a chain actually
-        # carries overrides (#1738, mirroring list_lore_entries) — a flat project
-        # with no `overrides/` folder pays nothing, keeping the per-`{% include %}`
-        # snippet-loader path (which shares this builder) cheap.
-        has_overrides = bool(index.overrides_by_target)
+        # The override fold's inputs, resolved once and only when the caller asks
+        # for the effective display values AND a chain actually carries overrides
+        # (#1738, mirroring list_lore_entries). `fold_overrides` is False on the
+        # per-`{% include %}` snippet-loader path — which shares this builder but
+        # reads only id/title/entry_type — so that hot path never folds, exactly as
+        # it never runs the effective-inputs pass.
+        has_overrides = fold_overrides and bool(index.overrides_by_target)
         field_types = self._schema_field_types(schema) if has_overrides else {}
         open_layer_id = self._metadata_schema_layer_id(root) if has_overrides else ""
         entries: list[PromptEntrySummary] = []
@@ -92,8 +96,9 @@ class PromptEntriesMixin:
             metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
             # Fold overrides so a list shows the effective value, but only onto an
             # inherited winner — a locally-owned prompt ignores any leftover
-            # override, matching read_prompt_entry.
-            override_records = index.overrides_by_target.get(entry.id)
+            # override, matching read_prompt_entry. `has_overrides` folds in the
+            # caller's opt-in (`fold_overrides`), so an unasked path never enters here.
+            override_records = index.overrides_by_target.get(entry.id) if has_overrides else None
             if override_records and entry.source_layer_id != open_layer_id:
                 metadata, _ = self.materialize_override_metadata(metadata, override_records, field_types)
             entries.append(

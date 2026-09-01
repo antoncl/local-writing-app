@@ -147,6 +147,14 @@ class PromptOverrideTests(unittest.TestCase):
             ["Beta", "Gamma", "Romance"],
         )
 
+    def test_the_prompt_list_shows_the_effective_overridden_value(self) -> None:
+        # list_prompt_entries opts into the fold (the display list must show the
+        # effective value); the snippet-render path does not. Pins that opt-in.
+        self._write_prompt_at(self.series, "revise", "Revise plotline", {"color": "slate"})
+        self._save_override("revise", {"color": "amber"})
+        summary = next(e for e in self.service.list_prompt_entries().entries if e.id == "revise")
+        self.assertEqual(summary.metadata["color"], "amber")
+
     def test_effective_edges_reflect_a_preferred_assistant_override(self) -> None:
         muse = self._make_assistant("Muse", layer=self.root)
         self._write_prompt_at(self.series, "describe", "Describe", {})
@@ -208,6 +216,26 @@ class PromptOverrideTests(unittest.TestCase):
 
         self.assertEqual(series_file.read_text(encoding="utf-8"), before)
         self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+
+    def test_a_body_change_to_an_inherited_prompt_is_refused_and_writes_nothing(self) -> None:
+        # The body stays read-only in place. A save that changes the body is refused
+        # (409) BEFORE any override is written — even when metadata also changed, so
+        # the refusal is atomic and the effective value is untouched.
+        self._write_prompt_at(self.series, "revise", "Revise plotline", {"color": "slate"})
+        with self.assertRaises(ProjectServiceError) as caught:
+            self.service.save_prompt_entry(
+                "revise",
+                SavePromptEntryRequest(
+                    title="Revise plotline",
+                    body="hijacked body",
+                    entry_type="prompt:general",
+                    metadata={"color": "amber"},
+                    authoring_layer_id=self._layer_id(self.root),
+                ),
+            )
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
+        self.assertEqual(self.service.read_prompt_entry("revise").metadata["color"], "slate")
 
     def test_authoring_at_or_above_the_owning_layer_is_refused(self) -> None:
         # The prompt is owned by the series; an override must sit strictly below it.

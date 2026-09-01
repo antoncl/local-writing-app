@@ -78,30 +78,53 @@ describe("ReferencePicker — embedded header (#1216)", () => {
   });
 });
 
-describe("ReferencePicker — controlled rail mode (#1441)", () => {
-  // The field row owns the caret and drives `expanded`; the picker contributes
-  // no toggle of its own, so the whole reference field reads as ONE rail row
-  // (chevron·glyph·name·count·+Add) with the list below (§3.5 double-render fix).
-  it("controlled: renders no title and no internal caret button", () => {
+describe("ReferencePicker — controlled rail mode (#1732)", () => {
+  // In the rail a reference renders as an inline pill, always visible — no
+  // title, no caret, no expand. A single `entity_ref` and an `entity_ref_list`
+  // render identical pills; `expanded` is vestigial (ref rows no longer collapse).
+  it("controlled: renders no title and no caret/toggle button", () => {
     render(ReferencePicker, {
-      props: { field, value: [], ariaLabel: "Characters", readOnly: true, embedded: true, controlled: true, expanded: false },
+      props: { field, value: [], ariaLabel: "Characters", readOnly: true, embedded: true, controlled: true },
     });
     expect(screen.queryByText("Characters")).not.toBeInTheDocument();
-    // No picker-owned toggle (the field-row gutter carries the caret now).
+    // No picker-owned toggle and no field caret — the pills stand on their own.
     expect(screen.queryByRole("button", { name: /characters/i })).toBeNull();
   });
 
-  it("controlled: the list follows the `expanded` prop, not an internal click", () => {
-    // Collapsed prop → no list.
-    const collapsed = render(ReferencePicker, {
-      props: { field, value: [], ariaLabel: "Characters", readOnly: true, embedded: true, controlled: true, expanded: false },
-    });
-    expect(collapsed.container.textContent).not.toContain("No references.");
-
-    // Expanded prop → the list renders (driven from outside, no toggle click).
+  it("controlled: renders each ref as an always-visible pill, no expand needed", () => {
     render(ReferencePicker, {
-      props: { field, value: [], ariaLabel: "Characters", readOnly: true, embedded: true, controlled: true, expanded: true },
+      props: { field, value: ["lore_1", "lore_2"], ariaLabel: "Characters", loreEntries, embedded: true, controlled: true },
     });
-    expect(screen.getByText("No references.")).toBeInTheDocument();
+    // Both refs show inline without any expand click; the old collapsible list
+    // (and its "No references." empty state) is gone.
+    expect(screen.getByText("Mira")).toBeInTheDocument();
+    expect(screen.getByText("Jonas")).toBeInTheDocument();
+    expect(screen.queryByText("No references.")).not.toBeInTheDocument();
+  });
+
+  it("controlled: an empty field renders no pills and no list, whatever `expanded` says", () => {
+    const { container } = render(ReferencePicker, {
+      props: { field, value: [], ariaLabel: "Characters", embedded: true, controlled: true, expanded: true },
+    });
+    expect(container.textContent).not.toContain("No references.");
+    expect(container.querySelector(".ref-pill")).toBeNull();
+  });
+
+  it("controlled: clicking a pill reports the navigation target through onNavigate", async () => {
+    const onNavigate = vi.fn();
+    render(ReferencePicker, {
+      props: { field, value: ["lore_1"], ariaLabel: "Characters", loreEntries, embedded: true, controlled: true, onNavigate },
+    });
+    await fireEvent.click(screen.getByText("Mira"));
+    expect(onNavigate).toHaveBeenCalledWith({ id: "lore_1", kind: "lore" });
+  });
+
+  it("controlled: a pill's × reports the reduced id list through onChange", async () => {
+    const onChange = vi.fn();
+    render(ReferencePicker, {
+      props: { field, value: ["lore_1", "lore_2"], ariaLabel: "Characters", loreEntries, embedded: true, controlled: true, onChange },
+    });
+    await fireEvent.click(screen.getByLabelText("Remove Mira"));
+    expect(onChange).toHaveBeenCalledWith(["lore_2"]);
   });
 });

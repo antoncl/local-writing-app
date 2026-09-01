@@ -655,6 +655,47 @@ describe("NodePicker tag selectors (#1491)", () => {
   });
 });
 
+describe("NodePicker sole allowed type (#1735)", () => {
+  async function openMenu(): Promise<HTMLElement> {
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    return document.querySelector(".ctx-menu") as HTMLElement;
+  }
+
+  it("opens the sole allowed lore type expanded — no collapse to click through", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }] },
+        loreEntries: [loreEntry("l1", "Mara Voss", []), loreEntry("l2", "Quill", [])],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    // The single allowed type's entries are visible immediately — no "Expand
+    // Character" step (the lone collapsed-group friction is gone).
+    expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
+    expect(within(menu).getByText("Quill")).toBeInTheDocument();
+    expect(within(menu).queryByRole("button", { name: "Expand Character" })).toBeNull();
+  });
+
+  it("keeps a broad { kind: lore } config collapsed — not an authored single type", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore" }] },
+        loreEntries: [loreEntry("l1", "Mara Voss", [])],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    // Broad config (all lore types allowed) → the group still opens collapsed even
+    // when the project happens to hold one sub-type; the entry sits behind the caret.
+    expect(within(menu).queryByText("Mara Voss")).toBeNull();
+    expect(
+      within(menu).getByRole("button", { name: "Expand Character" }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("NodePicker onChange callback (runes conversion #49)", () => {
   // The dispatch("change", …) → onChange callback prop is the crux of the runes
   // conversion; lock the payload shape and the multi-select append so a later

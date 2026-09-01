@@ -708,6 +708,18 @@
   function toggleLoreTypeCollapse(id: string) {
     expandedLoreTypeIds = toggleInSet(expandedLoreTypeIds, id);
   }
+  // When the config allows exactly one lore entry_type and nothing else — a
+  // POV=character or location=location field (`expr: { type: lore:<x> }`) — its
+  // sole group opens expanded. A lone collapsed group is pure friction: there is
+  // nothing else to drill into, so show the entries straight away (#1735). Keyed
+  // on the AUTHORED whitelist, not an incidental single group, so a broad
+  // `{ kind: lore }` config that a project happens to fill with one sub-type keeps
+  // the default collapse.
+  const soleLoreGroup = $derived(
+    allowedKinds.length === 1 &&
+      allowedKinds[0] === "lore" &&
+      (membership.entryTypes.lore?.length ?? 0) === 1,
+  );
   const loreTreeRows = $derived.by<PickTreeRow[]>(() => {
     // Gate on the author config exactly as the flat `visibleGroups` lore group
     // does — loreGroups itself is ungated, so without this a view-/plot-only
@@ -716,7 +728,8 @@
     const searching = isSearchActive(search);
     const rows: PickTreeRow[] = [];
     for (const group of loreGroups) {
-      const collapsed = !searching && !expandedLoreTypeIds.has(group.typeId);
+      const collapsed =
+        !searching && !soleLoreGroup && !expandedLoreTypeIds.has(group.typeId);
       rows.push({
         key: `lore-type:${group.typeId}`,
         depth: 0,

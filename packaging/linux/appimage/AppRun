@@ -1,6 +1,9 @@
 #!/bin/sh
 # AppImage entry point (ADR-0072 S5). Runs the frozen onedir binary bundled
-# under app/. The app is a local server — it starts on 127.0.0.1:8787; open that
-# in a browser (a native window is the S8 shell's job).
+# under app/. The app is a local server on 127.0.0.1:8787; launched with no args
+# (a loopback desktop run) it opens the default browser itself (#1365) and stops
+# when the last browser tab closes (#1378) — so clicking the AppImage IS the whole
+# desktop launch: no terminal, nothing to open by hand. A native window stays the
+# S8 pywebview shell's job (#1367, Post-1.0).
 HERE="$(dirname "$(readlink -f "$0")")"
 exec "$HERE/app/local-writing-app" "$@"

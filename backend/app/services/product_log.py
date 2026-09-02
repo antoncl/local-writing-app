@@ -110,6 +110,39 @@ def _live_stream(stream: TextIO | None) -> TextIO | None:
     return stream
 
 
+def _real_console(stream: TextIO | None) -> TextIO | None:
+    """A live, non-swapped console stream, or ``None``.
+
+    A ``_LoggerWriter`` we already installed is live but is NOT a console —
+    echoing to it would loop (write -> log -> handler -> write). So the echo
+    decision must treat a swapped stream as "no console".
+    """
+    live = _live_stream(stream)
+    if live is None or isinstance(live, _LoggerWriter):
+        return None
+    return live
+
+
+def guard_std_streams() -> None:
+    """Swap dead (``None``/closed) ``sys.stdout``/``sys.stderr`` for a logger-backed
+    writer so a windowed build can't crash on a stray ``print``/``traceback``.
+
+    Idempotent, and cheap enough to run on **every** product path — including
+    ``--self-check``, which prints before ``configure_product_logging`` is called
+    (the self-check must stay free of the file-log side effect but still not crash
+    on a ``None`` stream once the build is windowed, #1752). atexit drains any
+    trailing newline-less fragment (a crash message) on shutdown.
+    """
+    if _live_stream(sys.stdout) is None:
+        writer = _LoggerWriter(logging.getLogger("stdout"), logging.INFO)
+        sys.stdout = writer  # type: ignore[assignment]
+        atexit.register(writer.flush)
+    if _live_stream(sys.stderr) is None:
+        writer = _LoggerWriter(logging.getLogger("stderr"), logging.ERROR)
+        sys.stderr = writer  # type: ignore[assignment]
+        atexit.register(writer.flush)
+
+
 def configure_product_logging() -> Path | None:
     """Attach a rotating file handler for the general stream; return the log path.
 
@@ -123,24 +156,11 @@ def configure_product_logging() -> Path | None:
         if getattr(handler, _MARK, False):
             return config_dir() / LOG_FILENAME
 
-    # Decide console echo from the *original* stdout, before any swap, so we
-    # never point a StreamHandler at the _LoggerWriter below (that would loop:
-    # write -> log -> handler -> write -> ...).
-    console = _live_stream(sys.stdout)
-
-    # Windowed-build safety: forward stray writes to a logger so print()/traceback
-    # can't raise on a None/closed stream. Done first and unconditionally of the
-    # file-handler setup, so crash-safety never depends on a writable app-data dir.
-    # atexit drains any trailing newline-less fragment (a crash message) on a
-    # normal/exception-driven shutdown.
-    if console is None:
-        writer = _LoggerWriter(logging.getLogger("stdout"), logging.INFO)
-        sys.stdout = writer  # type: ignore[assignment]
-        atexit.register(writer.flush)
-    if _live_stream(sys.stderr) is None:
-        writer = _LoggerWriter(logging.getLogger("stderr"), logging.ERROR)
-        sys.stderr = writer  # type: ignore[assignment]
-        atexit.register(writer.flush)
+    # Decide console echo from the real (live, non-swapped) stdout, so we never
+    # point a StreamHandler at a _LoggerWriter (that would loop). Captured before
+    # guard_std_streams() swaps any remaining dead stream.
+    console = _real_console(sys.stdout)
+    guard_std_streams()  # idempotent — a no-op if main() already ran it
 
     try:
         directory = config_dir()

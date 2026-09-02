@@ -82,6 +82,21 @@ class CharacterArcInstantiationTests(PlotTestCase):
         self.service.instantiate_plot_template(_CHARACTER_ARC_TEMPLATE)
         self.assertEqual(self.service.read_plotline(plotline.id).entry_type, "plot:plotline")
 
+    def test_instantiate_arc_over_http_serializes_as_arc(self) -> None:
+        # The primary "create an arc" journey the slice-2 frontend hits: the
+        # widened `PlotlineEntry | CharacterArcEntry` response_model must put the
+        # arc's own entry_type on the wire (ADR-0080 §7), not coerce it to a
+        # plotline. The plotline branch is already wire-covered in
+        # test_plot_card_links.py; this covers the arc branch.
+        response = self.client.post(f"/api/plot/templates/{_CHARACTER_ARC_TEMPLATE}/instantiate")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["entry_type"], "plot:character_arc")
+        self.assertTrue(body["metadata"].get("instance_beats"))
+        self.assertNotIn("genre", body["metadata"])
+        # The node really is an arc (read via the service — no arc HTTP route yet).
+        self.assertEqual(self.service.read_character_arc(body["id"]).id, body["id"])
+
 
 class CharacterArcBeatLinkTests(PlotTestCase):
     """ADR-0080 §3: the card beat-link healer accepts any `plot:thread` holder —

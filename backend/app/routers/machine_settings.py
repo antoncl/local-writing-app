@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 
 from app.models import (
     AssistantTagList,
@@ -65,6 +65,31 @@ def update_machine_settings(request: MachineSettingsUpdate) -> MachineSettingsVi
         machine_settings_service.save_settings(updated)
         masked = machine_settings_service.mask_credentials(updated)
         return _build_settings_view(masked)
+
+
+# Loopback hosts: the caller is on the same machine as the server, so revealing a
+# server-side folder is meaningful. A LAN/Pi caller is refused — the folder is on
+# the server's desktop, not theirs.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+@router.post("/api/settings/machine/reveal-logs")
+def reveal_logs(request: Request) -> dict[str, str]:
+    """Open the app-data (logs) folder in the OS file manager (#1749).
+
+    Loopback-only: the folder lives on the *server* machine, so this only helps a
+    caller on that machine (a desktop launch). A remote (LAN/Pi) caller is refused
+    rather than spawning a file manager on the server's desktop. The frontend also
+    hides the button off-loopback; this is the matching backend guard.
+    """
+    host = request.client.host if request.client else ""
+    if host not in _LOOPBACK_HOSTS:
+        raise HTTPException(
+            status_code=403,
+            detail="Opening the logs folder is only available on the local machine.",
+        )
+    machine_settings_service.reveal_config_dir()
+    return {"config_dir": str(machine_settings_service.config_dir())}
 
 
 @router.get("/api/assistant-tags", response_model=AssistantTagList)

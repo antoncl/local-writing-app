@@ -40,7 +40,7 @@ import uvicorn
 
 from app.main import app
 from app.services.machine_settings import bind_address
-from app.services.product_log import configure_product_logging
+from app.services.product_log import configure_product_logging, guard_std_streams
 from app.services.session_presence import presence
 
 DEFAULT_HOST = "127.0.0.1"
@@ -202,15 +202,19 @@ def self_check() -> int:
 
 
 def main(argv: list[str] | None = None) -> None:
+    # A windowed build (#1752, console=False on Windows) has no console: sys.stdout
+    # /stderr are None, and a stray print()/traceback would crash. Make the streams
+    # safe FIRST, on every path — self_check prints before the file log is set up.
+    guard_std_streams()
     args = _build_parser().parse_args(argv)
     if args.self_check:
         # A read-only runtime probe that exits immediately — keep it free of the
-        # file-log side effect (it uses only a TemporaryDirectory).
+        # file-log side effect (it uses only a TemporaryDirectory). The stream
+        # guard above already made its prints crash-safe on a windowed build.
         raise SystemExit(self_check())
     # Route the general server stream to a rotating file under the app-data dir
-    # (#1745) — and, on a windowed build with no console, make stray writes safe
-    # — before the serve path logs anything. The --reload dev path doesn't come
-    # through here.
+    # (#1745) — before the serve path logs anything. The --reload dev path doesn't
+    # come through here.
     configure_product_logging()
     host, port = resolve_bind(args)
     if not _is_loopback(host):

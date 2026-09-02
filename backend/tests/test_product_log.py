@@ -30,6 +30,7 @@ from app.services.product_log import (
     LOG_FILENAME,
     _LoggerWriter,
     configure_product_logging,
+    guard_std_streams,
 )
 
 
@@ -200,6 +201,61 @@ def test_logger_writer_survives_a_failing_downstream_handler(
 
     # Must complete without RecursionError.
     writer.write("a stray stderr line\n")
+
+
+def test_guard_std_streams_swaps_dead_streams_without_a_file_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # #1752: the crash-safety swap must be callable on its own (before the file
+    # log, so --self-check on a windowed build doesn't crash) and must NOT touch
+    # the root handlers — that's configure_product_logging's job.
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    before = len(_marked_handlers())
+
+    guard_std_streams()
+
+    assert isinstance(sys.stdout, _LoggerWriter)
+    assert isinstance(sys.stderr, _LoggerWriter)
+    assert len(_marked_handlers()) == before  # no file/echo handler added
+    # Idempotent: a second call keeps the same writer, doesn't re-swap.
+    first_stdout = sys.stdout
+    guard_std_streams()
+    assert sys.stdout is first_stdout
+
+
+def test_configure_after_guard_adds_no_echo_to_the_swapped_stream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The split ordering (main() guards first, configures later): once stdout is
+    # the _LoggerWriter, configure must NOT add a StreamHandler pointing at it —
+    # that would recurse (write -> log -> handler -> write). Only the file handler.
+    _use_temp_config_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    guard_std_streams()  # main() would have done this before --self-check
+    configure_product_logging()
+
+    marked = _marked_handlers()
+    assert len(marked) == 1
+    assert isinstance(marked[0], RotatingFileHandler)
+
+
+def test_self_check_survives_windowed_streams(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The whole reason for the guard split: on a windowed build (#1752) sys.stdout
+    # is None and self_check() prints — main() must guard the streams before the
+    # --self-check branch so the probe can't crash on a None stream.
+    import app.server as server
+
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+
+    with pytest.raises(SystemExit) as exc:
+        server.main(["--self-check"])  # must not raise AttributeError on a None stream
+    assert exc.value.code == 0  # the probe ran and passed
+    assert isinstance(sys.stdout, _LoggerWriter)  # guard ran before the branch
 
 
 def test_setup_failure_is_swallowed(

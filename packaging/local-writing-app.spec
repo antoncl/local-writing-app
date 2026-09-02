@@ -85,13 +85,21 @@ a = Analysis(  # noqa: F821
 )
 pyz = PYZ(a.pure)  # noqa: F821
 
+# Windows: build windowed (no console window) for the installed-app feel (#1752).
+# The server self-opens the browser on a loopback launch (#1365), last-tab-close
+# quits it (#1378), and stray stdout/stderr are made safe by product_log's stream
+# guard (#1745) — so no console is load-bearing. `console` is a Windows concern;
+# macOS ships a windowless .app regardless (the BUNDLE below) and Linux is left as
+# a console binary, so only the win32 build flips.
+_console = sys.platform != "win32"
+
 exe = EXE(  # noqa: F821
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
     name="local-writing-app",
-    console=True,
+    console=_console,
     disable_windowed_traceback=False,
     argv_emulation=False,
     icon=_exe_icon,

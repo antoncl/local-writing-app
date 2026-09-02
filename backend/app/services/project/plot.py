@@ -43,7 +43,11 @@ from app.models import (
     CardEntry,
     CardList,
     CardSummary,
+    CharacterArcEntry,
+    CharacterArcList,
+    CharacterArcSummary,
     CreateCardRequest,
+    CreateCharacterArcRequest,
     CreatePlotlineRequest,
     CreatePlotTemplateRequest,
     CreateSceneRequest,
@@ -63,6 +67,7 @@ from app.models import (
     PlotTemplateSummary,
     RealizeCardRequest,
     SaveCardRequest,
+    SaveCharacterArcRequest,
     SavePlotBoardRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
@@ -79,6 +84,11 @@ PLOT_TEMPLATE_ENTRY_TYPE = "plot:template"
 # beat roster + colour + lineage. The former `plot:template_instance` / "arc" kind
 # is retired into this one.
 PLOT_PLOTLINE_ENTRY_TYPE = "plot:plotline"
+# The two concrete plot:thread subtypes (ADR-0080 §1): the plotline above and the
+# character arc below. plot:thread is the abstract beat-holder base they share; a
+# card's beat_links may target EITHER (the healer accepts any plot:thread holder, §3).
+PLOT_THREAD_ENTRY_TYPE = "plot:thread"
+PLOT_CHARACTER_ARC_ENTRY_TYPE = "plot:character_arc"
 # The `plot_beat` members carried verbatim into a plotline's `plot_instance_beat`
 # when a template is instantiated (ADR-0048 S7 Slice 2, #776). `specifics` is left
 # for the writer, so it is not in this snapshot set.
@@ -492,18 +502,21 @@ class PlotMixin:
             yield key
 
     def _heal_beat_links(self, metadata: dict[str, Any], index: Any) -> None:
-        """Keep only card→beat links that still resolve (ADR-0048 S7 Slice 3b; ADR-0053).
+        """Keep only card→beat links that still resolve (ADR-0048 S7 Slice 3b; ADR-0053;
+        ADR-0080 §3).
 
-        A `beat_links` item is a *(plotline node id, beat id)* pair stored as plain
+        A `beat_links` item is a *(thread holder node id, beat id)* pair stored as plain
         text — v1 keeps refs out of list-item shapes, so the top-level reference
         purge/heal never reaches these. This is that healing, plot-local: a link
-        survives only if its `plotline` is a live `plot:plotline` **and** its `beat_id`
-        is in that plotline's current roster. A link to a deleted plotline, or to a
-        beat since removed from the roster, is dropped — the board can only draw links
-        that mean something. Well-formedness + dedup are the shared
-        `_iter_valid_beat_link_pairs`; this adds the roster filter and re-emits each
-        surviving pair as a canonical `{plotline, beat_id}` dict. When nothing survives
-        the key is removed, so an all-dangling list heals to sparse rather than `[]`.
+        survives only if its holder is a live `plot:thread` — a plotline OR a character
+        arc (ADR-0080 §1) — **and** its `beat_id` is in that holder's current roster. A
+        link to a deleted holder, or to a beat since removed from the roster, is
+        dropped — the board can only draw links that mean something. Well-formedness +
+        dedup are the shared `_iter_valid_beat_link_pairs`; this adds the roster filter
+        and re-emits each surviving pair as a canonical `{plotline, beat_id}` dict. When
+        nothing survives the key is removed, so an all-dangling list heals to sparse
+        rather than `[]`. NOTE: the stored member key stays `plotline` (ADR-0080: "card
+        fields unchanged", zero-migration) even when it holds a character arc's id.
         """
         links = metadata.get(_BEAT_LINK_FIELD)
         if not isinstance(links, list):
@@ -512,22 +525,23 @@ class PlotMixin:
         healed: list[Any] = []
         for plotline_id, beat_id in self._iter_valid_beat_link_pairs(links):
             if plotline_id not in rosters:
-                rosters[plotline_id] = self._plotline_beat_ids(plotline_id, index)
+                rosters[plotline_id] = self._thread_beat_ids(plotline_id, index)
             roster = rosters[plotline_id]
             if roster is None or beat_id not in roster:
-                continue  # plotline gone / not a plotline / beat left the roster
+                continue  # holder gone / not a plot:thread / beat left the roster
             healed.append({"plotline": plotline_id, "beat_id": beat_id})
         if healed:
             metadata[_BEAT_LINK_FIELD] = healed
         else:
             metadata.pop(_BEAT_LINK_FIELD, None)
 
-    def _plotline_beat_ids(self, plotline_id: str, index: Any) -> set[str] | None:
-        """The beat ids in a `plot:plotline`'s roster, or None when the id is not a live
-        plotline. Reads just the front matter (the lightest node read); the plotline's
-        own writes guarantee its beats are id-healed."""
-        entry = index.by_id.get(plotline_id)
-        if entry is None or entry.entry_type != PLOT_PLOTLINE_ENTRY_TYPE:
+    def _thread_beat_ids(self, thread_id: str, index: Any) -> set[str] | None:
+        """The beat ids in a `plot:thread` holder's roster — a plotline's event-beats
+        or a character arc's change-beats (ADR-0080 §3) — or None when the id is not a
+        live plot:thread. Reads just the front matter (the lightest node read); the
+        holder's own writes guarantee its beats are id-healed."""
+        entry = index.by_id.get(thread_id)
+        if entry is None or PLOT_THREAD_ENTRY_TYPE not in self.entry_type_ancestry(entry.entry_type):
             return None
         front_matter = self._read_front_matter_only(entry.path, strict=True)
         metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
@@ -676,6 +690,45 @@ class PlotMixin:
         self._delete_plot_folder_node(entry_id, expected_entry_type="plot:plotline", noun="plotline")
         return self.list_plotlines()
 
+    # ----- Character arcs (plot:character_arc, ADR-0080) -----------------
+    #
+    # The plotline's sibling under the shared plot:thread beat-holder base
+    # (ADR-0080 §1): same book-local flat Node under plot/, same parametrized
+    # _*_plot_folder_node CRUD, differing only in entry_type + noun. It binds a
+    # `character` (§2); its beats are change-beats (§3). A card's beat_links may
+    # target it — the healer accepts any plot:thread holder.
+
+    def list_character_arcs(self) -> CharacterArcList:
+        return CharacterArcList(
+            entries=self._list_plot_folder_nodes(entry_type="plot:character_arc", summary_cls=CharacterArcSummary)
+        )
+
+    def create_character_arc(self, request: CreateCharacterArcRequest) -> CharacterArcEntry:
+        return self.read_character_arc(
+            self._create_plot_folder_node(
+                title=request.title,
+                requested_entry_type=request.entry_type,
+                default_entry_type="plot:character_arc",
+                noun="character arc",
+                node_id=request.id or None,
+            )
+        )
+
+    def read_character_arc(self, entry_id: str) -> CharacterArcEntry:
+        return self._build_plot_folder_entry(
+            self._read_plot_folder_node(entry_id, expected_entry_type="plot:character_arc", noun="character arc"),
+            CharacterArcEntry,
+        )
+
+    def save_character_arc(self, entry_id: str, request: SaveCharacterArcRequest) -> CharacterArcEntry:
+        return self.read_character_arc(
+            self._save_plot_folder_node(entry_id, request, expected_entry_type="plot:character_arc", noun="character arc")
+        )
+
+    def delete_character_arc(self, entry_id: str) -> CharacterArcList:
+        self._delete_plot_folder_node(entry_id, expected_entry_type="plot:character_arc", noun="character arc")
+        return self.list_character_arcs()
+
     # ----- Cards (plot:card) ---------------------------------------------
     #
     # A card (ADR-0048 §1) is a unit of story function: a synopsis (the body), a
@@ -822,20 +875,25 @@ class PlotMixin:
     # beats (the empty case); `instantiate_plot_template` is the one bespoke op —
     # it mints a plotline seeded with a snapshot of the template's beat roster.
 
-    def instantiate_plot_template(self, template_id: str) -> PlotlineEntry:
-        """Apply a template to this book (ADR-0048 §3; ADR-0053 §2): snapshot its
-        beats into a new, book-local `plot:plotline` the writer then specializes.
+    def instantiate_plot_template(self, template_id: str) -> PlotlineEntry | CharacterArcEntry:
+        """Apply a template to this book (ADR-0048 §3; ADR-0053 §2; ADR-0080 §7):
+        snapshot its beats into a new, book-local `plot:thread` holder the writer
+        then specializes.
 
         The template stays pristine (it may be an inherited, read-only Library
-        node); the plotline is a book-local editable copy. The beat roster is
-        *copied*, not linked — a plotline must stand alone (an ad-hoc one has no
+        node); the new holder is a book-local editable copy. The beat roster is
+        *copied*, not linked — a holder must stand alone (an ad-hoc one has no
         template at all), and snapshotting is what lets the writer diverge from the
         generic beats freely. `source_template_id` / `source_template_name` record the
         lineage, and `source_ai_guidance` / `source_diagnostic_questions` /
         `source_weak_spots` snapshot the template's structural guidance (how to use the
         lens + the questions to ask + the characteristic failure modes) so the
-        diagnostic reasons with it — all snapshots, so the plotline
+        diagnostic reasons with it — all snapshots, so the holder
         stays coherent and self-contained after it diverges or the source is gone.
+
+        Which concrete type is minted follows the template's `family` (ADR-0080
+        §7): a `character_arc`-family template spawns a `plot:character_arc`; any
+        other family spawns a `plot:plotline`, as before.
         """
         source = self.read_plot_template(template_id)
         # read_plot_template validated the beats field, so every item is a member
@@ -845,20 +903,31 @@ class PlotMixin:
             {key: beat[key] for key in _INSTANCE_BEAT_SNAPSHOT_KEYS if key in beat}
             for beat in source_beats
         ]
+        lineage = {
+            "instance_beats": instance_beats,
+            "source_template_id": source.id,
+            "source_template_name": source.title,
+            "source_ai_guidance": source.template.ai_use_guidance,
+            "source_diagnostic_questions": list(source.template.global_diagnostic_questions),
+            "source_weak_spots": list(source.template.common_weak_spots),
+        }
+        if source.template.family == "character_arc":
+            # No `genre` (an arc has no such field) and no character binding —
+            # the character/arc binding is left for the writer (ADR §Open).
+            new_id = self._create_plot_folder_node(
+                title=source.title,
+                requested_entry_type="",
+                default_entry_type=PLOT_CHARACTER_ARC_ENTRY_TYPE,
+                noun="character arc",
+                seed_metadata=lineage,
+            )
+            return self.read_character_arc(new_id)
         new_id = self._create_plot_folder_node(
             title=source.title,
             requested_entry_type="",
             default_entry_type=PLOT_PLOTLINE_ENTRY_TYPE,
             noun="plotline",
-            seed_metadata={
-                "instance_beats": instance_beats,
-                "source_template_id": source.id,
-                "source_template_name": source.title,
-                "genre": source.metadata.get("genre") or "",
-                "source_ai_guidance": source.template.ai_use_guidance,
-                "source_diagnostic_questions": list(source.template.global_diagnostic_questions),
-                "source_weak_spots": list(source.template.common_weak_spots),
-            },
+            seed_metadata={**lineage, "genre": source.metadata.get("genre") or ""},
         )
         return self.read_plotline(new_id)
 

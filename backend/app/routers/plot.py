@@ -15,6 +15,7 @@ from fastapi import APIRouter
 from app.models import (
     CardEntry,
     CardList,
+    CharacterArcEntry,
     CreateCardRequest,
     CreatePlotlineRequest,
     CreatePlotTemplateRequest,
@@ -171,10 +172,12 @@ def fork_plot_template(project: CurrentProject, entry_id: str) -> PlotTemplate:
         return project.fork_plot_template(entry_id)
 
 
-@router.post("/api/plot/templates/{entry_id}/instantiate", response_model=PlotlineEntry)
-def instantiate_plot_template(project: CurrentProject, entry_id: str) -> PlotlineEntry:
+@router.post("/api/plot/templates/{entry_id}/instantiate", response_model=PlotlineEntry | CharacterArcEntry)
+def instantiate_plot_template(project: CurrentProject, entry_id: str) -> PlotlineEntry | CharacterArcEntry:
     """Apply a template to this book — snapshot its beats into a new, book-local,
-    specializable plotline (ADR-0048 §3; ADR-0053 §2)."""
+    specializable plot:thread holder (ADR-0048 §3; ADR-0053 §2). A character-arc
+    family template yields a `plot:character_arc`; any other family yields a
+    `plot:plotline` (ADR-0080 §7)."""
     with translate_errors():
         return project.instantiate_plot_template(entry_id)
 

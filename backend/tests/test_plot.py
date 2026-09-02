@@ -999,12 +999,17 @@ class PlotKindRegistrationTests(PlotTestCase):
         self.assertIsNotNone(base)
         self.assertTrue(base.abstract)
         self.assertEqual(base.kind, "plot")
-        for concrete in ("plot:plotline", "plot:template", "plot:board", "plot:card"):
+        for concrete in ("plot:template", "plot:board", "plot:card"):
             self.assertEqual(
                 schema.entry_types[concrete].parent,
                 "plot:base",
                 f"{concrete} must hang off plot:base so the whole-kind roster resolves",
             )
+        # A plotline hangs off plot:base transitively, through the shared
+        # plot:thread beat-holder base it and plot:character_arc both inherit
+        # from (ADR-0080 §1) — not a direct child any more.
+        self.assertEqual(schema.entry_types["plot:plotline"].parent, "plot:thread")
+        self.assertIn("plot:base", self.service.entry_type_ancestry("plot:plotline", schema=schema))
 
     def test_plotline_carries_beats_and_lineage_fields(self) -> None:
         # ADR-0053 §1: a plotline IS a plot-template instance — the `plot:plotline`

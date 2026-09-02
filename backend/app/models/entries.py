@@ -179,6 +179,34 @@ class SavePlotlineRequest(_PlotFolderSaveRequest):
     entry_type: str = "plot:plotline"
 
 
+class CharacterArcSummary(_PlotFolderSummary):
+    entry_type: str = "plot:character_arc"
+
+
+class CharacterArcEntry(_PlotFolderEntry):
+    """A character arc (ADR-0080): a plot subtype, the plotline's SIBLING under the
+    shared plot:thread beat-holder base — not an `is_a` plotline. It binds the
+    `character` (metadata entity_ref) whose internal change it tracks; its
+    `instance_beats` are change-beats (states of that character), realised through
+    the plot's events. A card links a change-beat to mean "this card CAUSES this
+    change" (vs a plotline event-beat's "this card IS this beat"). Never a card's
+    primary/colour thread (§4)."""
+
+    entry_type: str = "plot:character_arc"
+
+
+class CharacterArcList(BaseModel):
+    entries: list[CharacterArcSummary] = Field(default_factory=list)
+
+
+class CreateCharacterArcRequest(_PlotFolderCreateRequest):
+    entry_type: str = "plot:character_arc"
+
+
+class SaveCharacterArcRequest(_PlotFolderSaveRequest):
+    entry_type: str = "plot:character_arc"
+
+
 class PlotBoard(BaseModel):
     """The plot board (ADR-0048 §3): a per-project layout singleton.
 

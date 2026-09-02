@@ -5,6 +5,10 @@
   **severed two things that were always one**, and the board should say so. This ADR unifies them and makes
   the result a real board node — which, as a free consequence, makes the whole board undoable (subsuming the
   parked ADR-0052).
+- Superseded in part by: **ADR-0080** (2026-09-02) — a character arc becomes a distinct plot subtype
+  (`plot:character_arc`). This ADR's plotline≡template-instance unification and its shared beat mechanism
+  **stand**; ADR-0080 overturns only §1 / §Why's universal claim that a plotline and an arc are
+  indistinguishable, and only for the character-arc case.
 - Feature: **#875** (undo everywhere) is the trigger; this ADR is the model it lands on.
 - Amends: **ADR-0048** §2 (a plotline was "a name, a color, a description" that cards merely reference) and
   its template-instance/arc split. Cards-over-manuscript, the 0..n-cards-per-scene cardinality, and the

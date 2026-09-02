@@ -1,6 +1,7 @@
 """Machine-settings and assistant-tag routes (#170 main.py split)."""
 from __future__ import annotations
 
+import ipaddress
 from pathlib import Path
 from typing import Any
 
@@ -67,10 +68,20 @@ def update_machine_settings(request: MachineSettingsUpdate) -> MachineSettingsVi
         return _build_settings_view(masked)
 
 
-# Loopback hosts: the caller is on the same machine as the server, so revealing a
-# server-side folder is meaningful. A LAN/Pi caller is refused — the folder is on
-# the server's desktop, not theirs.
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+def _is_loopback_client(host: str | None) -> bool:
+    """Whether the request's peer is on this machine (a loopback IP).
+
+    ``request.client.host`` is a numeric peer address, so this is an IP test, not
+    a hostname one — ``ipaddress.is_loopback`` (as ``server.py`` uses) classifies
+    every loopback form (127.0.0.0/8, ``::1``, IPv4-mapped) rather than matching a
+    couple of literals.
+    """
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 @router.post("/api/settings/machine/reveal-logs")
@@ -82,8 +93,7 @@ def reveal_logs(request: Request) -> dict[str, str]:
     rather than spawning a file manager on the server's desktop. The frontend also
     hides the button off-loopback; this is the matching backend guard.
     """
-    host = request.client.host if request.client else ""
-    if host not in _LOOPBACK_HOSTS:
+    if not _is_loopback_client(request.client.host if request.client else None):
         raise HTTPException(
             status_code=403,
             detail="Opening the logs folder is only available on the local machine.",

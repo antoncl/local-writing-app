@@ -553,8 +553,9 @@ class TestRevealConfigDir:
 class TestRevealLogsRoute:
     """The route (#1749): loopback-only, else 403; never reveals for a remote caller."""
 
-    def test_local_caller_reveals_and_returns_the_dir(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.2", "::1"])
+    def test_loopback_caller_reveals_and_returns_the_dir(
+        self, monkeypatch: pytest.MonkeyPatch, host: str
     ) -> None:
         revealed: list[bool] = []
         monkeypatch.setattr(
@@ -565,7 +566,7 @@ class TestRevealLogsRoute:
         monkeypatch.setattr(
             machine_settings_router.machine_settings_service, "config_dir", lambda: Path("/x/appdata")
         )
-        request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+        request = SimpleNamespace(client=SimpleNamespace(host=host))
 
         result = machine_settings_router.reveal_logs(request)  # type: ignore[arg-type]
 

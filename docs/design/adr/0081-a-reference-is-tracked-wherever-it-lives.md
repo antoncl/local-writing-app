@@ -1,8 +1,9 @@
 # ADR-0081: A reference is tracked wherever it lives in the metadata
 
-- Status: **Proposed** — 2026-09-02, drafted for review. Shaped with Anton, who reframed the
+- Status: **Accepted** — 2026-09-02, Anton, PR #1761. Shaped with Anton, who reframed the
   restriction from "a missing feature" to a **data-model inconsistency the user must remember**,
-  and named the fix as *one traversal, not six*.
+  and named the fix as *one traversal, not six*. Approval settled `tags` **in** (§4) and edges
+  staying **field-keyed** (member-level backlinks deferred).
 - Verified against `16c3b9fd` (2026-09-02).
 - Resolves: #1711 (entity_ref / entity_ref_list / tags barred from metadata group item shapes — a
   v1 restriction that lived only in a code comment).
@@ -121,9 +122,10 @@ Consistency is the whole argument, so the carve-out lifts for **all three** barr
 the `entity_ref` pair. `tags` members pull in two more top-level-only walkers that must descend for
 tags to behave inside a group as they do outside: tag **canonicalise/register**
 (`_canonicalise_metadata_tags`, `metadata_values.py`) and tag **rename**
-(`_rename_tag_in_documents`, `tags.py`; the assistant-tag paths similarly). *(This is the one place
-where scope buys the least per unit of surface — see Alternatives; the recommendation is to include
-tags so the model has no remaining exception, but it is the natural line to draw if we choose to.)*
+(`_rename_tag_in_documents`, `tags.py`; the assistant-tag paths similarly). *(Decided **in** at
+approval: the model keeps no remaining exception. This is the one place where scope buys the least
+per unit of surface, so the tag-path descent is the natural descope line if implementation finds its
+surface outsized — recorded as the fallback, not the plan.)*
 
 Full uniformity also means the **adjacency** passes that walk metadata the same top-level way stop
 mis-handling a nested ref/tag: the AI context envelope (`ai/entry_ref.py`, `ai/lore_block.py`),

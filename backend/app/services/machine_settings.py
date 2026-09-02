@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -150,6 +151,25 @@ def config_dir() -> Path:
 
 def config_path() -> Path:
     return config_dir() / CONFIG_FILENAME
+
+
+def reveal_config_dir() -> None:
+    """Open the app-data dir (``config_dir()``) in the OS file manager (#1749).
+
+    Platform-native: Explorer on Windows, Finder on macOS, ``xdg-open`` on Linux.
+    That directory holds ``app.log`` (#1745) and ``errors.log`` (#386/#741); it is
+    created if absent so the reveal never fails on a first run. The subprocess
+    calls are ``check=False`` — a missing file manager (a headless host) should
+    not raise; the caller only asked to *try* to show the folder.
+    """
+    directory = config_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        os.startfile(directory)  # type: ignore[attr-defined]  # Windows-only API
+    elif sys.platform == "darwin":
+        subprocess.run(["open", str(directory)], check=False)
+    else:
+        subprocess.run(["xdg-open", str(directory)], check=False)
 
 
 def validated_projects_root(raw: str) -> str:

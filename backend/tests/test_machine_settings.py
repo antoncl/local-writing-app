@@ -3,14 +3,18 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 import yaml
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from project_fixtures import clear_test_scope
 
 from app.main import app
+from app.routers import machine_settings as machine_settings_router
 from app.services import machine_settings as ms
 
 
@@ -509,6 +513,84 @@ class DefaultAiPolicyReadTests(unittest.TestCase):
         # load_settings() no longer seeds a default roster either.
         ms.load_settings()
         self.assertFalse(assistants.exists() and any(assistants.glob("*.md")))
+
+
+class TestRevealConfigDir:
+    """The service reveal (#1749): create the dir, dispatch to the platform opener."""
+
+    def test_opens_with_startfile_on_windows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = tmp_path / "appdata"
+        monkeypatch.setattr(ms, "config_dir", lambda: target)
+        monkeypatch.setattr(ms.sys, "platform", "win32")
+        opened: list[object] = []
+        monkeypatch.setattr(ms.os, "startfile", opened.append, raising=False)
+
+        ms.reveal_config_dir()
+
+        assert target.exists()  # created if absent so a first-run reveal never fails
+        assert opened == [target]
+
+    @pytest.mark.parametrize(("platform", "opener"), [("linux", "xdg-open"), ("darwin", "open")])
+    def test_opens_with_the_file_manager_on_posix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, opener: str
+    ) -> None:
+        target = tmp_path / "appdata"
+        monkeypatch.setattr(ms, "config_dir", lambda: target)
+        monkeypatch.setattr(ms.sys, "platform", platform)
+        calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(ms.subprocess, "run", lambda *a, **k: calls.append((a, k)))
+
+        ms.reveal_config_dir()
+
+        assert target.exists()
+        (args, kwargs), = calls
+        assert args[0] == [opener, str(target)]
+        assert kwargs["check"] is False  # a headless host must not raise
+
+
+class TestRevealLogsRoute:
+    """The route (#1749): loopback-only, else 403; never reveals for a remote caller."""
+
+    @pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.2", "::1"])
+    def test_loopback_caller_reveals_and_returns_the_dir(
+        self, monkeypatch: pytest.MonkeyPatch, host: str
+    ) -> None:
+        revealed: list[bool] = []
+        monkeypatch.setattr(
+            machine_settings_router.machine_settings_service,
+            "reveal_config_dir",
+            lambda: revealed.append(True),
+        )
+        monkeypatch.setattr(
+            machine_settings_router.machine_settings_service, "config_dir", lambda: Path("/x/appdata")
+        )
+        request = SimpleNamespace(client=SimpleNamespace(host=host))
+
+        result = machine_settings_router.reveal_logs(request)  # type: ignore[arg-type]
+
+        assert revealed == [True]
+        assert result["config_dir"] == str(Path("/x/appdata"))
+
+    @pytest.mark.parametrize("host", ["192.168.1.7", "10.0.0.2", None])
+    def test_remote_caller_is_refused_and_never_reveals(
+        self, monkeypatch: pytest.MonkeyPatch, host: str | None
+    ) -> None:
+        called: list[bool] = []
+        monkeypatch.setattr(
+            machine_settings_router.machine_settings_service,
+            "reveal_config_dir",
+            lambda: called.append(True),
+        )
+        client = None if host is None else SimpleNamespace(host=host)
+        request = SimpleNamespace(client=client)
+
+        with pytest.raises(HTTPException) as exc:
+            machine_settings_router.reveal_logs(request)  # type: ignore[arg-type]
+
+        assert exc.value.status_code == 403
+        assert called == []  # the reveal never ran for a non-local caller
 
 
 if __name__ == "__main__":

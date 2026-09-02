@@ -124,6 +124,11 @@ export const projectApi = {
   getVersion() {
     return request<AppVersion>("/version");
   },
+  // Open the app-data (logs) folder in the OS file manager (#1749). Loopback-only
+  // on the backend; the caller also hides the trigger off-localhost.
+  revealLogs() {
+    return request<{ config_dir: string }>("/settings/machine/reveal-logs", { method: "POST" });
+  },
   // Poll GitHub Releases for a newer build on the configured channel (ADR-0072
   // S6). Never throws for "offline" — that comes back as `reachable: false`.
   checkForUpdate() {

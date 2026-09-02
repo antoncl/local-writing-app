@@ -11,6 +11,7 @@ vi.mock("@/lib/api", () => ({
     getVersion: vi.fn(async () => ({ version: "9.9.9", build: null })),
     checkForUpdate: vi.fn(),
     checkOllamaHost: vi.fn(),
+    revealLogs: vi.fn(async () => ({ config_dir: "C:/appdata" })),
   },
 }));
 
@@ -137,6 +138,16 @@ describe("MachineSettingsDialog — logs location (#1750)", () => {
     // config.yaml path above it, and the log filenames are named.
     expect(screen.getByText("C:/", { selector: "code" })).toBeInTheDocument();
     expect(screen.getByText(/app\.log/)).toBeInTheDocument();
+  });
+});
+
+describe("MachineSettingsDialog — open logs folder (#1749)", () => {
+  it("reveals the logs folder on click when running on a loopback origin", async () => {
+    mount("off");
+    // happy-dom serves the page from http://localhost/, a loopback origin, so
+    // the button is shown (it's hidden for LAN/Pi access).
+    await fireEvent.click(screen.getByRole("button", { name: "Open folder" }));
+    expect(api.revealLogs).toHaveBeenCalledTimes(1);
   });
 });
 

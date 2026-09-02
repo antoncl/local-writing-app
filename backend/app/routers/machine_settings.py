@@ -1,10 +1,11 @@
 """Machine-settings and assistant-tag routes (#170 main.py split)."""
 from __future__ import annotations
 
+import ipaddress
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 
 from app.models import (
     AssistantTagList,
@@ -65,6 +66,40 @@ def update_machine_settings(request: MachineSettingsUpdate) -> MachineSettingsVi
         machine_settings_service.save_settings(updated)
         masked = machine_settings_service.mask_credentials(updated)
         return _build_settings_view(masked)
+
+
+def _is_loopback_client(host: str | None) -> bool:
+    """Whether the request's peer is on this machine (a loopback IP).
+
+    ``request.client.host`` is a numeric peer address, so this is an IP test, not
+    a hostname one — ``ipaddress.is_loopback`` (as ``server.py`` uses) classifies
+    every loopback form (127.0.0.0/8, ``::1``, IPv4-mapped) rather than matching a
+    couple of literals.
+    """
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+@router.post("/api/settings/machine/reveal-logs")
+def reveal_logs(request: Request) -> dict[str, str]:
+    """Open the app-data (logs) folder in the OS file manager (#1749).
+
+    Loopback-only: the folder lives on the *server* machine, so this only helps a
+    caller on that machine (a desktop launch). A remote (LAN/Pi) caller is refused
+    rather than spawning a file manager on the server's desktop. The frontend also
+    hides the button off-loopback; this is the matching backend guard.
+    """
+    if not _is_loopback_client(request.client.host if request.client else None):
+        raise HTTPException(
+            status_code=403,
+            detail="Opening the logs folder is only available on the local machine.",
+        )
+    machine_settings_service.reveal_config_dir()
+    return {"config_dir": str(machine_settings_service.config_dir())}
 
 
 @router.get("/api/assistant-tags", response_model=AssistantTagList)

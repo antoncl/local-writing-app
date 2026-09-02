@@ -28,6 +28,20 @@
     if (draft) applyProsePresentation(draft.display);
   }
 
+  // "Open logs folder" (#1749) reveals a folder on the SERVER machine, so it only
+  // makes sense when the user is on that machine — show it on a loopback origin,
+  // hide it for LAN/Pi access (the backend refuses off-loopback too).
+  const isLocalHost = ["127.0.0.1", "localhost", "::1"].includes(window.location.hostname);
+  let revealFailed = $state(false);
+  async function openLogsFolder() {
+    revealFailed = false;
+    try {
+      await api.revealLogs();
+    } catch {
+      revealFailed = true; // best-effort — surface a quiet hint if it didn't open
+    }
+  }
+
   let {
     open = false,
     // The persisted view (read-only here — used for `config_path` and
@@ -451,7 +465,15 @@
         <p class="muted app-version">Version {appVersion}</p>
       {/if}
       <p class="muted stored-at">Stored locally at: <code>{settings?.config_path}</code></p>
-      <p class="muted stored-at">Logs: <code>{settings?.config_dir}</code> (app.log, errors.log)</p>
+      <p class="muted stored-at">
+        Logs: <code>{settings?.config_dir}</code> (app.log, errors.log)
+        {#if isLocalHost}
+          <button type="button" class="reveal-logs" onclick={openLogsFolder}>Open folder</button>
+        {/if}
+      </p>
+      {#if revealFailed}
+        <p class="muted stored-at" role="status">Couldn't open the folder — it's at the path above.</p>
+      {/if}
 
       {#snippet actions()}
         <button type="button" onclick={onCancel}>Cancel</button>
@@ -476,6 +498,20 @@
 
   .stored-at {
     font-size: var(--fs-sm);
+  }
+
+  /* A quiet inline text button — an understated affordance next to the logs
+     path, not a prominent action (design-language "quiet writing desk"). */
+  .reveal-logs {
+    margin-left: 0.4rem;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font-size: var(--fs-sm);
+    font-family: inherit;
+    cursor: pointer;
+    text-decoration: underline;
   }
 
   .app-version {

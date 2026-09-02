@@ -258,30 +258,22 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "abstract": True,
             "fields": [],
         },
-        "plot:plotline": {
-            # A story thread — and, per ADR-0053, an instance of a plot template:
-            # one node kind, no separate "arc". The intrinsic title is its name;
-            # `color` tints its chips + the cards it is primary on; the prose body
-            # is its description. `instance_beats` is its ordered beat roster —
-            # copied from a template at instantiate and then specialized per book,
-            # or empty for an ad-hoc thread the writer beats out by hand (the ADR
-            # §1 empty/ad-hoc case). `source_template_id` / `source_template_name`
-            # snapshot which template it was rolled from, and `source_ai_guidance` /
-            # `source_diagnostic_questions` / `source_weak_spots` snapshot its
-            # template-level guidance at instantiate — the structural intent the
-            # diagnostic reasons with, kept coherent with the (specializable) beats
-            # rather than re-read live (all empty for ad-hoc). Cards reference one as their primary plotline and
-            # fulfil its beats (card `beat_links`). An ordinary flat Node under
-            # `plot/`, layered like lore.
-            "name": "Plotline",
-            "icon": "route",
+        "plot:thread": {
+            # Abstract beat-holder base (ADR-0080 §1): the contract a plotline and a
+            # character arc SHARE — an instantiated beat roster (`instance_beats`)
+            # plus the template-lineage snapshot (`source_template_*`). Never
+            # instantiated (like plot:base). Its two concrete children are
+            # plot:plotline (external events; + colour; can be a card's primary
+            # thread) and plot:character_arc (a character's internal change; +
+            # character binding; never primary, §4). What they share lives HERE, not
+            # in one inheriting from the other, so an arc reuses the beat machinery
+            # without being an `is_a` plotline (ADR-0080 §1/§4). `has_body` here so
+            # both children inherit the prose description body.
+            "name": "Thread",
             "kind": "plot",
+            "abstract": True,
             "parent": "plot:base",
-            # `color` first so the swatch sits under the type header, not below the
-            # beat list, when the plotline is edited.
             "fields": [
-                "color",
-                "genre",
                 "instance_beats",
                 "source_template_id",
                 "source_template_name",
@@ -290,7 +282,49 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "source_weak_spots",
             ],
             "has_body": True,
+        },
+        "plot:plotline": {
+            # A story thread — and, per ADR-0053, an instance of a plot template:
+            # one node kind, no separate "arc". The intrinsic title is its name;
+            # `color` tints its chips + the cards it is primary on; the prose body
+            # is its description. The beat roster (`instance_beats`) and
+            # template-lineage snapshot (`source_template_*`) are inherited from
+            # the shared abstract `plot:thread` base (ADR-0080 §1) — this type adds
+            # only `color` (the primary/tint axis) and `genre`. Cards reference one
+            # as their primary plotline and fulfil its beats (card `beat_links`).
+            # An ordinary flat Node under `plot/`, layered like lore.
+            "name": "Plotline",
+            "icon": "route",
+            "kind": "plot",
+            "parent": "plot:thread",
+            # `color` first so the swatch sits under the type header, not below the
+            # beat list, when the plotline is edited.
+            "fields": [
+                "color",
+                "genre",
+            ],
+            "has_body": True,
             "color": "plum",
+        },
+        "plot:character_arc": {
+            # A character arc (ADR-0080): the plotline's SIBLING under the shared
+            # plot:thread beat-holder base — NOT an `is_a` plotline. It binds the
+            # `character` (§2) whose internal change it tracks; that binding is what
+            # makes a thread an arc rather than a subplot. Its beats (inherited
+            # `instance_beats`) are change-beats — states of the character, realised
+            # through the plot's events; a card links one to mean "this card CAUSES
+            # this change" (§3). Never a card's primary/colour thread (§4: the card
+            # `plotline` ref targets plot:plotline exactly, so an arc is excluded by
+            # type). Its own glyph (seedling — growth/becoming) so the writer meets
+            # it as a distinct object. `instance_beats` + `source_template_*` +
+            # `has_body` are inherited from plot:thread; it adds only `character`.
+            "name": "Character arc",
+            "icon": "seedling",
+            "kind": "plot",
+            "parent": "plot:thread",
+            "fields": [
+                "character",
+            ],
         },
         "plot:card": {
             # A unit of story function (ADR-0048 §1): "this happens, and it does
@@ -505,7 +539,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # top-level ref-healers walk only top-level values), so `plotline` holds
             # the plotline node id as text and plot.py heals these by hand on card
             # save + read — dropping a link whose plotline is gone or whose `beat_id`
-            # has left that plotline's roster.
+            # has left that plotline's roster. The `plotline` member holds a
+            # `plot:thread` holder id — a plotline OR a character arc (ADR-0080
+            # §3); the key name is retained for zero-migration though it may hold
+            # an arc.
             "name": "Beat link",
             # Card→beat wiring, not an author-facing shape (#1003).
             "system": True,
@@ -779,6 +816,18 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "to one existing character entry. Cascades down the manuscript "
                 "(book / act / chapter / scene) unless a level below overrides it."
             ),
+            "type": "entity_ref",
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
+        },
+        "character": {
+            # The character a `plot:character_arc` is about (ADR-0080 §2): the arc's
+            # defining reference — "whose change is this?". A single live `entity_ref`
+            # into the lore character kind, mirroring `pov`. A plotline has NO such
+            # field. Not hard-required at save in this slice — ADR §Open defers the
+            # binding timing/UX (bound at instantiate vs after), so an arc may be
+            # briefly unbound; the "an arc names its character" invariant lands with
+            # that later UX work, not as a save-time check here.
+            "name": "Character",
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
         },

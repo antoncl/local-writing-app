@@ -517,6 +517,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": False,
             "description": "General tags for grouping and filtering. Never shown to the reader.",
+            # A tag is minted from a picker, not authored through the
+            # Conversations panel — kept out of the Offer-on picker's "editor"
+            # host set the same way mutation_set is (review fix).
+            "opens_in": "dialog",
         },
         "tag:assistant_tag": {
             # The assistant vocabulary (ADR-0082 slice 1): matches prompts to
@@ -529,6 +533,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": False,
             "description": "Tags that match prompts to assistants.",
+            "opens_in": "dialog",
         },
     },
     "groups": {

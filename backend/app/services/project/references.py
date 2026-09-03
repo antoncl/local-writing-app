@@ -540,6 +540,51 @@ class ReferencesMixin:
             resolved.root, resolved.index, layers=list(resolved.layers), manifest=resolved.manifest
         )
 
+    def _placeable_write_paths(
+        self, paths: tuple[Path, ...], layers: list[IndexLayer]
+    ) -> tuple[list[Path], list[Path]]:
+        """Which of `paths` `_patch_unit` can place against `layers`, and
+        which could not be — split out of `_mutate_index_for_write` so its
+        own branching stays under the complexity gate. `_patch_unit` places a
+        node file against the walk's own folder rules and raises for anything
+        else, so an unplaceable path — a config file, the snapshot, a write
+        outside the chain — lands in the second list instead of the first."""
+        placeable: list[Path] = []
+        dropped: list[Path] = []
+        for path in paths:
+            try:
+                self._patch_unit(path, layers)
+            except PatchNotApplicable:
+                dropped.append(path)
+                continue
+            placeable.append(path)
+        return placeable, dropped
+
+    def _dropped_write_is_stale_machine_layer(self, dropped: list[Path], layers: list[IndexLayer]) -> bool:
+        """Whether a write `_placeable_write_paths` dropped is not actually
+        "outside the chain" — the memo's own layer sequence may simply
+        predate the machine layer coming into existence. `_machine_layer_folder`
+        gates on an `assistants/`/`tags/` folder already existing, so the memo
+        built before the FIRST ever machine-layer node (assistant or tag) has
+        no machine layer in `layers` at all — `_patch_unit` then has no folder
+        to place the write against and drops it, leaving the memo stale and
+        the immediate read 404ing. The caller rebuilds cold rather than
+        no-ops when this is true, so the fresh walk picks up the
+        now-existing machine layer.
+
+        Scoped to the actual dropped path(s) — a genuinely foreign write (a
+        config file, the snapshot, a path outside the chain entirely) must
+        still no-op rather than trigger a cold rebuild just because it landed
+        in the same batch as an unrelated drop, so this checks each dropped
+        path's own resolved ancestry against the machine folder rather than
+        firing on "something, anything, was dropped"."""
+        if any(layer.is_machine for layer in layers):
+            return False
+        machine_folder = self._machine_layer_folder()
+        if machine_folder is None:
+            return False
+        return any(machine_folder in path.resolve().parents for path in dropped)
+
     def _mutate_index_for_write(
         self, current: ResolvedIndex, paths: tuple[Path, ...], structural: bool
     ) -> ResolvedIndex | None:
@@ -562,13 +607,9 @@ class ReferencesMixin:
         # file against the walk's own folder rules and raises for anything else,
         # so an unplaceable path — a config file, the snapshot, a write outside
         # the chain — drops out here and the memo is left untouched.
-        placeable = []
-        for path in paths:
-            try:
-                self._patch_unit(path, layers)
-            except PatchNotApplicable:
-                continue
-            placeable.append(path)
+        placeable, dropped = self._placeable_write_paths(paths, layers)
+        if self._dropped_write_is_stale_machine_layer(dropped, layers):
+            return self._resolve_index_cold(current.root)
         if not placeable:
             return None
         # Reuse the schema the memo was built with (#392) rather than re-reading
@@ -849,7 +890,8 @@ class ReferencesMixin:
         """Which node families this layer contributes — the per-layer logic the
         index walk used to inline (#329).
 
-        The machine layer is out-of-tree: assistants only. The Library is
+        The machine layer is out-of-tree: assistants and tags
+        (`MACHINE_LAYER_FAMILIES`, ADR-0082 slice 1). The Library is
         out-of-tree too and ships only its tenant kinds (prompts, ADR-0049).
         Scenes stay book-scoped, so they come from the open project alone.
         """

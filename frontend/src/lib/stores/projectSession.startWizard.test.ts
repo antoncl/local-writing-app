@@ -11,6 +11,11 @@ vi.mock("@/lib/api", () => ({ api: { getMachineSettings } }));
 const { refreshAssistantEntries } = vi.hoisted(() => ({ refreshAssistantEntries: vi.fn() }));
 vi.mock("@/lib/stores/assistants", () => ({ refreshAssistantEntries }));
 
+// Machine-global tag roster (ADR-0082 slice 1): `loadMachineSettings` hydrates
+// it alongside the assistant roster (review fix F4) — mocked out the same way.
+const { refreshTagNodes } = vi.hoisted(() => ({ refreshTagNodes: vi.fn() }));
+vi.mock("@/lib/stores/tagNodes", () => ({ refreshTagNodes }));
+
 vi.mock("@/lib/utils/colors", () => ({ setPalette: vi.fn() }));
 
 import { createWizard } from "@/lib/stores/createWizard.svelte";
@@ -29,6 +34,7 @@ describe("startCreateWizard (#556)", () => {
   beforeEach(() => {
     getMachineSettings.mockReset();
     refreshAssistantEntries.mockReset().mockResolvedValue(undefined);
+    refreshTagNodes.mockReset().mockResolvedValue(undefined);
     createWizard.close();
     // Simulate a stale-empty cache from app init: without the fresh read this
     // is what would (wrongly) show the first-run root step.
@@ -46,6 +52,9 @@ describe("startCreateWizard (#556)", () => {
     // instead of reappearing and letting the author overwrite the real root.
     expect(createWizard.needsRootFolder).toBe(false);
     expect(createWizard.open).toBe(true);
+    // loadMachineSettings hydrates the machine-global tag roster alongside
+    // the assistant one (review fix F4) — pin the fan-out itself.
+    expect(refreshTagNodes).toHaveBeenCalled();
   });
 
   it("shows the root step only when the root is genuinely unset", async () => {

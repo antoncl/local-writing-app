@@ -12,6 +12,11 @@ vi.mock("@/lib/api", () => ({ api: { getMachineSettings } }));
 const { refreshAssistantEntries } = vi.hoisted(() => ({ refreshAssistantEntries: vi.fn() }));
 vi.mock("@/lib/stores/assistants", () => ({ refreshAssistantEntries }));
 
+// Machine-global tag roster (ADR-0082 slice 1): `loadMachineSettings` hydrates
+// it alongside the assistant roster (review fix F4) — mocked out the same way.
+const { refreshTagNodes } = vi.hoisted(() => ({ refreshTagNodes: vi.fn() }));
+vi.mock("@/lib/stores/tagNodes", () => ({ refreshTagNodes }));
+
 vi.mock("@/lib/utils/colors", () => ({ setPalette: vi.fn() }));
 
 import { createWizard } from "@/lib/stores/createWizard.svelte";
@@ -30,6 +35,7 @@ describe("projectSession.rehydrate — first-run onboarding (#1400)", () => {
   beforeEach(() => {
     getMachineSettings.mockReset();
     refreshAssistantEntries.mockReset().mockResolvedValue(undefined);
+    refreshTagNodes.mockReset().mockResolvedValue(undefined);
     createWizard.close();
     createWizard.defaultProjectsFolder = "";
     // The singleton persists across tests; reset the field the offline guard reads.
@@ -47,6 +53,10 @@ describe("projectSession.rehydrate — first-run onboarding (#1400)", () => {
 
     expect(createWizard.needsRootFolder).toBe(true);
     expect(createWizard.open).toBe(true);
+    // loadMachineSettings hydrates the machine-global tag roster alongside
+    // the assistant one (review fix F4) — pin the fan-out itself, not just
+    // its downstream effect.
+    expect(refreshTagNodes).toHaveBeenCalled();
   });
 
   it("does not open the wizard for a returning user (root already set)", async () => {

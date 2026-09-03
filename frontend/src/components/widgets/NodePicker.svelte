@@ -42,7 +42,7 @@
     stripeForNode,
   } from "@/lib/utils/pickerStripes";
   import { isViewRef, pickerMembership } from "@/lib/utils/pickerSources";
-  import { buildSelectorRoster, membersForSelector } from "@/lib/views/pickerSelectors";
+  import { buildSelectorRoster, isSelectorRef, membersForSelector } from "@/lib/views/pickerSelectors";
   import {
     flattenSelectors,
     memberCountForRef,
@@ -980,8 +980,8 @@
     manuscript: (ref) => ref.kind === "manuscript",
     lore: (ref) => ref.kind === "lore",
     plotlines: (ref) => ref.kind === "plot",
-    tags: (ref) => ref.kind === "tag" && ref.selector != null,
-    tag_entries: (ref) => ref.kind === "tag" && ref.selector == null,
+    tags: (ref) => ref.kind === "tag" && isSelectorRef(ref),
+    tag_entries: (ref) => ref.kind === "tag" && !isSelectorRef(ref),
     views: (ref) => ref.kind === "view",
     snippets: (ref) => ref.kind === "snippet",
     research: (ref) => ref.kind === "research",

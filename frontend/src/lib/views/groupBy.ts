@@ -5,8 +5,25 @@
 // imports from `evaluateView` keep this dependency cycle-free at runtime.
 
 import type { EvalNode, PathSegment, ViewRow } from "@/lib/views/evaluateView";
-import type { MetadataSchema, ViewGroupByLevel } from "@/lib/types";
-import { asArray, fieldValue, isCollectionField, isEmpty } from "@/lib/views/fieldAccess";
+import type { MetadataSchema, ViewGroupByLevel, ViewSpec } from "@/lib/types";
+import { asArray, fieldValue, isCollectionField, isEmpty, isNodeSetField } from "@/lib/views/fieldAccess";
+
+// Whether ANY `group_by` level in `spec` groups on a node-set field —
+// entity_ref(_list), or a computed field the schema declares node-set-valued
+// (`isNodeSetField`) — the only shape `segmentForField`'s ref branch below
+// can call `ctx.resolveTitle` for. Callers gate a reactive tag-roster
+// resolver on this (ADR-0082 slice 1 review fix, F7): a view whose
+// `group_by` never touches a ref-shaped field never subscribes to the tag
+// roster (so an unrelated tag save doesn't re-evaluate it), and a view that
+// DOES re-evaluates correctly on a tag rename.
+export function groupByHasRefLevel(
+  spec: Pick<ViewSpec, "group_by"> | null | undefined,
+  schema: MetadataSchema | null | undefined,
+): boolean {
+  const levels = spec?.group_by;
+  if (!levels || levels.length === 0) return false;
+  return levels.some((level) => isNodeSetField(schema?.fields?.[level.field]));
+}
 
 // The slice of the evaluator's run state ν-by-attribute reads: the schema (per-
 // field bucket semantics) and the node index (reference levels resolve their

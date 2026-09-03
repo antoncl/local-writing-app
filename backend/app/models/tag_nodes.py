@@ -20,10 +20,13 @@ class TagEntry(BaseModel):
     title: str
     entry_type: str
     metadata: dict[str, Any] = Field(default_factory=dict)
-    revision: str | None = None
+    # `""`, not `None` — the roster's `revision` was `undefined` on the wire,
+    # so `saveTagEntry` sent no `base_revision` and the 409 staleness guard
+    # never fired (review fix). Mirrors `AssistantEntry`.
+    revision: str = ""
     # Layer provenance, as `ViewNode`/`AssistantEntry` carry it.
-    source_layer_id: str | None = None
-    source_layer_label: str | None = None
+    source_layer_id: str = ""
+    source_layer_label: str = ""
 
 
 class TagEntryList(BaseModel):
@@ -44,7 +47,10 @@ class CreateTagEntryRequest(BaseModel):
 
 class SaveTagEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    entry_type: str = "tag:tag"
+    # No default (review fix): for a tag the entry type IS the vocabulary, so a
+    # PUT that omits it must 422 rather than silently retype e.g. an assistant
+    # tag as a general one.
+    entry_type: str
     # Only `color` is meaningful today; the shape stays a dict so a future
     # field (e.g. `merged_into`, §5) needs no request-model change.
     metadata: dict[str, Any] = Field(default_factory=dict)

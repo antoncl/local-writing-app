@@ -27,6 +27,9 @@ describe("documentLabelFor", () => {
     expect(documentLabelFor("lore")).toBe("Entry");
     expect(documentLabelFor("plot_card")).toBe("Card");
     expect(documentLabelFor("prompt")).toBe("Prompt");
+    // ADR-0082 slice 1 review fix: was falling through to "Scene", so a tag's
+    // editor header/aria-labels read "Scene type" instead of "Tag type".
+    expect(documentLabelFor("tag")).toBe("Tag");
   });
 
   it("defaults unknown kinds to Scene", () => {

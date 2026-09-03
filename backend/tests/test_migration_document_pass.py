@@ -191,19 +191,26 @@ class ProjectDocumentPassTests(unittest.TestCase):
         # ally_path unused beyond seeding here — covered by the owned-only test.
         self.assertTrue(ally_path.exists())
 
-    # --- owned-only --------------------------------------------------------
+    # --- ancestor coverage (ADR-0082 slice 4 M2) ----------------------------
 
-    def test_ancestor_owned_document_is_not_rewritten(self) -> None:
+    def test_ancestor_owned_document_is_migrated_via_its_own_chain_run(self) -> None:
+        # Opening `root` first migrates its declared ancestor `base` through a
+        # full, independent `_run_migrations` of its own (ADR-0082 slice 4 M2)
+        # — so "ally", owned by `base`, IS rewritten: not by `root`'s document
+        # pass (which only ever walks documents `root` itself owns), but by
+        # `base`'s own document pass running as part of the same open.
         ally_path, _hero_path, _scene_path, _override_path = self._seed_owned_documents()
-        before = ally_path.read_text(encoding="utf-8")
 
         original_registry, original_current = self._register_steps(
             [DocumentMigration(99, "rename priority to urgency", _rename_priority_to_urgency)], 99
         )
         try:
             ProjectService.opened_at(self.root)
-            # "ally" is owned by `base`, not the open project `root` — untouched.
-            self.assertEqual(ally_path.read_text(encoding="utf-8"), before)
+            ally_front, _ = self.service._read_markdown_with_front_matter(ally_path, strict=True)
+            self.assertEqual(ally_front["metadata"]["urgency"], "high")
+            self.assertNotIn("priority", ally_front["metadata"])
+            # `base` itself is now stamped too — the whole point of chaining.
+            self.assertEqual(read_project_version(self.base), 99)
         finally:
             self._restore(original_registry, original_current)
 
@@ -253,11 +260,11 @@ class ProjectDocumentPassTests(unittest.TestCase):
             ],
             91,
         )
-        stamp_calls: list[int] = []
+        stamp_calls: list[tuple[Path, int]] = []
         original_write = migrations.write_project_version
 
         def counting_write(root: Path, version: int) -> None:
-            stamp_calls.append(version)
+            stamp_calls.append((root, version))
             original_write(root, version)
 
         migrations.write_project_version = counting_write
@@ -265,9 +272,15 @@ class ProjectDocumentPassTests(unittest.TestCase):
             service = ProjectService.opened_at(self.root)
             self.assertTrue(sentinel_path.exists())
             self.assertEqual(read_project_version(self.root), 91)
-            # Stamped exactly once, at the end of the whole ladder — not once
-            # per step (ADR-0071 §4).
-            self.assertEqual(stamp_calls, [91])
+            # Stamped exactly once PER LAYER, at the end of that layer's own
+            # ladder — not once per step (ADR-0071 §4) — and `base` is stamped
+            # BEFORE `root` (round-2 review #1807, Z10d), since opening `root`
+            # migrates its declared ancestor first (ADR-0082 slice 4 M2) and
+            # only then runs its own ladder.
+            self.assertEqual(stamp_calls, [(self.base, 91), (self.root, 91)])
+            self.assertEqual(read_project_version(self.base), 91)
+            # `last_migrations` names only the OPEN layer's own applied steps —
+            # `base`'s run is logged, not folded into this return value.
             self.assertEqual(len(service.last_migrations), 2)
 
             backup_dir = self.root / BACKUP_DIRNAME

@@ -240,6 +240,10 @@ front-matter `id` **and** in the structure files, say — is one `DocumentMigrat
   or a machine-root sweep) is a separate decision for whoever writes the first cross-layer content
   migration.
 
+  > **⚠ Superseded by Amendment 1 below.** ADR-0082 §6 decided this: opening a project now migrates
+  > its whole declared chain, not just its own layer — closing the cross-layer skew named here rather
+  > than leaving it to a future migration author.
+
 ## Acceptance (from #366)
 
 - A content migration applies to a single document body with no project root — `migrate_document`, with
@@ -263,3 +267,26 @@ front-matter `id` **and** in the structure files, say — is one `DocumentMigrat
 
 Sequential (2 and 3 each depend only on 1). Binding = the Decision + the invariant (§2); the slice
 boundaries may shift if implementation argues for it, amending this ADR before code.
+
+## Amendment 1 — opening a project migrates its whole declared chain, outermost first (2026-09-03, ADR-0082 §6, PR #1807)
+
+§5's ownership rule ("an ancestor migrates when **its** project is opened") and the Consequences
+section's "named and scoped out" cross-layer skew are reversed: **opening a project now runs the full
+ladder — root steps, chain steps, the document pass — on every layer of its declared chain, outermost
+first, each layer backed up and stamped through its own `ProjectService(WorkScope(root=layer))`, before
+the open layer runs its own.** A new `ChainMigration` step type (alongside `RootMigration`/
+`DocumentMigration`) carries a context accumulated across that walk, so a descendant layer's step can
+see what an ancestor layer's step already did. A machine-level once-step, keyed on
+`MachineSettings.version` rather than any project's `schema_version`, runs in the app lifespan for
+out-of-tree machine content — and again from the runner's top-level call, so a project opened without
+the app ever starting (a script, a test) still finds the machine vocabulary; both triggers are
+idempotent.
+
+The reason is ADR-0082 §6's tags migration: removing `tags` from the schema `type` Literal makes an
+**unmigrated ancestor's `metadata.schema.yaml` fail validation the moment a migrated descendant merges
+it** — the skew this ADR shrugged off as pre-existing is no longer harmless once a migration changes
+what a *valid* ancestor file looks like, not just what a *current* one looks like. A version-dispatching
+reader (branch behavior on an ancestor's stamped `schema_version` instead of migrating it) was rejected
+for the same reason every other content-shaped reader in this ADR stays version-blind: it is the
+`RootMigration`/`ChainMigration`/`DocumentMigration` framework's whole point that a live reader never has
+to know a format's history.

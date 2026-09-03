@@ -40,7 +40,7 @@ from app.routers import (
 from app.runtime import root_from_header
 from app.services.error_log import append_error_line
 from app.services.frontend_assets import frontend_dist_dir
-from app.services.machine_settings import error_log_dir
+from app.services.machine_settings import error_log_dir, migrate_assistant_tags_once
 from app.services.project.node_index_gate import node_index_gate
 
 # The node-index snapshot is flushed lazily behind a dirty flag (#476); write any
@@ -54,6 +54,12 @@ atexit.register(node_index_gate.flush)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # Machine-scope, one-time (ADR-0082 slice 4, #1785): converts the retired
+    # assistant-tags.yaml registry to tag:assistant_tag nodes. Gated on
+    # MachineSettings.version, so this is a no-op on every startup after the
+    # first (`migrate_assistant_tags_once`'s own docstring covers the second
+    # trigger — a project opened without the app ever starting).
+    migrate_assistant_tags_once()
     yield
     node_index_gate.flush()
 

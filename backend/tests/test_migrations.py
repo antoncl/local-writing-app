@@ -35,6 +35,11 @@ class MigrationFrameworkTests(unittest.TestCase):
     def test_create_stamps_current_schema_version(self) -> None:
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
 
+    def test_create_scaffolds_tags_folder(self) -> None:
+        # Z10(c), round-2 review #1807: `create_project` writes `tags/`
+        # where it used to write `tags.yaml` (ADR-0082 slice 4 M5).
+        self.assertTrue((self.root / "tags").is_dir())
+
     def test_create_initializes_research_artifacts(self) -> None:
         # A fresh project ships research/notes/ + an empty
         # research.structure.yaml so the research feature has somewhere
@@ -299,20 +304,31 @@ class DocumentMigrationFrameworkTests(unittest.TestCase):
             self._restore(original_registry, original_current)
 
     def test_registry_steps_are_typed_root_or_document(self) -> None:
-        # Every registered step is one of the two ADR-0071 shapes — no bare
-        # tuples/functions.
+        # Every registered step is one of the three ADR-0071/ADR-0082 shapes —
+        # no bare tuples/functions.
         for step in migrations.MIGRATIONS:
-            self.assertIsInstance(step, (RootMigration, DocumentMigration))
+            self.assertIsInstance(step, (RootMigration, DocumentMigration, migrations.ChainMigration))
 
         def noop(doc: MigratableDocument) -> MigratableDocument:
             return MigratableDocument(dict(doc.front_matter), doc.body)
 
+        def must_not_run(root, ctx) -> None:
+            raise AssertionError("migrate_document must never dispatch to a ChainMigration")
+
         original_registry, original_current = self._register_document_step(99, noop)
         try:
-            # A RootMigration in the registry is ignored by migrate_document; only
-            # the DocumentMigration we just registered is dispatched to.
+            # A RootMigration AND a ChainMigration (Z10f, round-2 review
+            # #1807) in the registry are both ignored by migrate_document;
+            # only the DocumentMigration we just registered is dispatched
+            # to. A ChainMigration's `fn` takes `(root, ctx)` — if
+            # migrate_document ever mis-dispatched to it with a single-arg
+            # call, this would raise a TypeError; if it dispatched at all,
+            # `must_not_run` raises.
             migrations.MIGRATIONS.insert(
                 0, RootMigration(50, "root step ignored by migrate_document", lambda root: None)
+            )
+            migrations.MIGRATIONS.insert(
+                0, migrations.ChainMigration(49, "chain step ignored by migrate_document", must_not_run)
             )
             doc = MigratableDocument({"id": "x"}, "body")
             result = migrate_document(doc, from_version=0)
@@ -578,6 +594,168 @@ class InvocationLedgerCsvMigrationTests(unittest.TestCase):
         summary = reopened.ai_cost_summary()
         self.assertEqual(summary.count, 2)
         self.assertAlmostEqual(summary.total_cost_usd, 0.049, places=6)
+
+
+class TagMigrationHelperTests(unittest.TestCase):
+    """Round-2 review of #1785 (PR #1807): unit tests for the pure per-value
+    helpers `_migrate_layer_tags` composes, isolated from a whole project
+    tree — a fresh `tmp_path`-scoped `tags/` folder stands in for a layer's
+    own vocabulary folder."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.layer_root = Path(self.temp_dir.name).resolve() / "layer"
+        (self.layer_root / "tags").mkdir(parents=True)
+        self.machine_root = Path(self.temp_dir.name).resolve() / "machine"
+        (self.machine_root / "tags").mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_z2_nested_item_group_member_tags_are_converted(self) -> None:
+        # Z2: `characters: [{name, tags: [Villain]}]` — a list-of-dicts
+        # item-group member (ADR-0081), not a top-level metadata key.
+        ctx = migrations.ChainContext()
+        front_matter = {
+            "metadata": {
+                "characters": [
+                    {"name": "Bob", "tags": ["Villain"]},
+                    {"name": "Ann"},
+                ]
+            }
+        }
+        changed = migrations._convert_document_metadata(
+            front_matter, kind="lore", layer_root=self.layer_root, machine_root=self.machine_root, ctx=ctx
+        )
+        self.assertTrue(changed)
+        characters = front_matter["metadata"]["characters"]
+        self.assertEqual(len(characters[0]["tags"]), 1)
+        tag_id = characters[0]["tags"][0]
+        self.assertRegex(tag_id, r"^tag_[0-9a-f]{10}$")
+        self.assertEqual(ctx.name_to_id.get("villain"), tag_id)
+        self.assertNotIn("tags", characters[1])
+
+    def test_z3_assistant_legacy_and_existing_tags_are_unioned(self) -> None:
+        # Z3: an assistant document carrying BOTH the pre-rename `tags` key
+        # AND an already-present `assistant_tags` — union, order-preserving,
+        # deduped, never an overwrite.
+        ctx = migrations.ChainContext()
+        existing_id = migrations.mint_tag_node(self.machine_root / "tags", "Editor", "tag:assistant_tag")
+        ctx.machine_names["editor"] = existing_id
+        front_matter = {
+            "metadata": {
+                "tags": ["Editor", "Proofreader"],  # Editor already known; Proofreader is new
+                "assistant_tags": [existing_id],  # already carries Editor's id
+            }
+        }
+        changed = migrations._convert_document_metadata(
+            front_matter, kind="assistant", layer_root=self.layer_root, machine_root=self.machine_root, ctx=ctx
+        )
+        self.assertTrue(changed)
+        self.assertNotIn("tags", front_matter["metadata"])
+        result = front_matter["metadata"]["assistant_tags"]
+        # Existing id first (order-preserving), Editor not duplicated, Proofreader appended.
+        self.assertEqual(result[0], existing_id)
+        self.assertEqual(len(result), 2)  # deduped: Editor collapses onto the existing id
+        proofreader_id = ctx.machine_names["proofreader"]
+        self.assertIn(proofreader_id, result)
+
+    def test_z4_a_legacy_name_shaped_like_an_id_is_still_minted(self) -> None:
+        # Z4: "already an id" is identity (present in a known map), never a
+        # regex match on shape — a legacy tag literally NAMED like an id
+        # must still convert.
+        ctx = migrations.ChainContext()
+        resolved, changed = migrations._resolve_name_list(
+            ["tag_0123456789"], self.layer_root / "tags", ctx.name_to_id, "tag:tag", (ctx.name_to_id, ctx.machine_names)
+        )
+        self.assertTrue(changed)
+        self.assertEqual(len(resolved), 1)
+        minted_id = resolved[0]
+        self.assertNotEqual(minted_id, "tag_0123456789")
+        self.assertRegex(minted_id, r"^tag_[0-9a-f]{10}$")
+        # The literal string is now a title on disk, not treated as an id.
+        titles = migrations._tag_node_names(self.layer_root / "tags")
+        self.assertIn("tag_0123456789", titles)
+
+    def test_z4_a_real_known_id_passes_through_unchanged(self) -> None:
+        # The flip side: a value that IS a known id (present in ctx) is left
+        # alone, not re-resolved/re-minted.
+        ctx = migrations.ChainContext()
+        real_id = migrations.mint_tag_node(self.layer_root / "tags", "Coastal", "tag:tag")
+        ctx.name_to_id["coastal"] = real_id
+        resolved, changed = migrations._resolve_name_list(
+            [real_id], self.layer_root / "tags", ctx.name_to_id, "tag:tag", (ctx.name_to_id, ctx.machine_names)
+        )
+        self.assertFalse(changed)
+        self.assertEqual(resolved, [real_id])
+
+    def test_z7_an_unresolved_tagged_leaf_becomes_the_empty_expr(self) -> None:
+        # Z7 / ADR-0082 §6: an unresolvable `tagged:` name is DROPPED — the
+        # leaf becomes `{}` (selects nothing, ADR-0036), not left stale.
+        ctx = migrations.ChainContext()
+        unresolved: list[str] = []
+        node, changed = migrations._convert_view_expr_node({"tagged": "Nowhere"}, ctx, unresolved)
+        self.assertTrue(changed)
+        self.assertEqual(node, {})
+        self.assertEqual(unresolved, ["tagged:Nowhere"])
+
+    def test_z7_an_unresolved_tagged_leaf_nested_in_intersect_becomes_empty(self) -> None:
+        ctx = migrations.ChainContext()
+        known_id = migrations.mint_tag_node(self.layer_root / "tags", "Mirrors", "tag:tag")
+        ctx.name_to_id["mirrors"] = known_id
+        unresolved: list[str] = []
+        spec = {"intersect": [{"tagged": "Mirrors"}, {"tagged": "Nowhere"}]}
+        node, changed = migrations._convert_view_expr_node(spec, ctx, unresolved)
+        self.assertTrue(changed)
+        self.assertEqual(node, {"intersect": [{"tagged": known_id}, {}]})
+        self.assertEqual(unresolved, ["tagged:Nowhere"])
+
+    def test_z7_an_unresolved_chat_ref_is_dropped_from_the_picks_list(self) -> None:
+        # Z7 / ADR-0082 §6: an unresolvable chat tag-ref is REMOVED from the
+        # picks list, not left as a stale reference.
+        ctx = migrations.ChainContext()
+        known_id = migrations.mint_tag_node(self.layer_root / "tags", "Mirrors", "tag:tag")
+        ctx.name_to_id["mirrors"] = known_id
+        unresolved: list[str] = []
+        picks = [
+            {"id": "tag:lore:Mirrors", "kind": "tag", "title": "Mirrors"},
+            {"id": "tag:lore:Nowhere", "kind": "tag", "title": "Nowhere"},
+            {"id": "lore_a", "kind": "lore", "title": "Ally"},  # concrete pick, untouched
+        ]
+        new_list, changed = migrations._convert_chat_ref_list(picks, ctx, unresolved)
+        self.assertTrue(changed)
+        self.assertEqual(len(new_list), 2)
+        self.assertEqual(new_list[0]["id"], f"tagged:lore:{known_id}")
+        self.assertEqual(new_list[1]["id"], "lore_a")
+        self.assertEqual(unresolved, ["tag:lore:Nowhere"])
+
+    def test_z9_the_tag_family_folder_is_never_walked_as_a_node_document(self) -> None:
+        # Step 1 already minted these; the generic document walk must skip
+        # `tags/` entirely rather than re-open what it just wrote. A lore
+        # file is ALSO seeded so the walk genuinely runs (proving the skip
+        # is deliberate, not just an empty folder).
+        calls: list[str] = []
+        original = migrations._migrate_one_node_document
+
+        def spy(path, *, kind, **kwargs):
+            calls.append(kind)
+            return original(path, kind=kind, **kwargs)
+
+        (self.layer_root / "tags.yaml").write_text("tags:" + chr(10) + "  - Coastal", encoding="utf-8")
+        lore_folder = self.layer_root / "lore"
+        lore_folder.mkdir()
+        (lore_folder / "ally.md").write_text(
+            chr(10).join(["---", "id: ally", "title: Ally", "entry_type: lore:character", "---", ""]),
+            encoding="utf-8",
+        )
+        migrations._migrate_one_node_document = spy
+        try:
+            ctx = migrations.ChainContext()
+            migrations._migrate_layer_tags(self.layer_root, ctx)
+        finally:
+            migrations._migrate_one_node_document = original
+        self.assertIn("lore", calls)
+        self.assertNotIn("tag", calls)
 
 
 if __name__ == "__main__":

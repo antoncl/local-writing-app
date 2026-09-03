@@ -192,7 +192,7 @@ class ProjectLifecycleMixin:
         declaration = self._declaration_for_new_project(root, inherits)
         root.parent.mkdir(parents=True, exist_ok=True)
         root.mkdir(parents=True, exist_ok=True)
-        for folder in ["scenes", "lore", "prompts", "plot", ".cache"]:
+        for folder in ["scenes", "lore", "prompts", "plot", "tags", ".cache"]:
             (root / folder).mkdir(exist_ok=True)
         (root / "research" / "notes").mkdir(parents=True, exist_ok=True)
         # `.cache/` holds derived indexes carrying absolute paths (node-index.json

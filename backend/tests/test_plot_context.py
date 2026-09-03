@@ -15,14 +15,17 @@ from plot_fixtures import PlotTestCase
 
 from app.models import (
     CreateCardRequest,
+    CreateLoreEntryRequest,
     CreatePlotlineRequest,
     CreateSceneRequest,
     CreateStructureNodeRequest,
     SaveCardRequest,
+    SaveCharacterArcRequest,
     SavePlotlineRequest,
 )
 
 _THREE_ACT = "builtin-plot-three-act-story-arc"
+_CHARACTER_ARC_TEMPLATE = "builtin-plot-positive-character-change-arc"
 
 
 class PlotContextTestCase(PlotTestCase):
@@ -210,6 +213,70 @@ class PlotlineRosterTests(PlotContextTestCase):
         self.assertEqual(context.omitted_cards, 1)
         context_line = next(p for p in context.plotlines if p.id == plotline.id)
         self.assertEqual(len(context_line.beats), len(plotline.metadata["instance_beats"]))  # ungated
+
+
+class CharacterArcContextTests(PlotContextTestCase):
+    """ADR-0080 §5 (#1770): character arcs reach the AI plot-context the same
+    way plotlines do — their own never-gated `arcs` list, plus a catalog entry
+    merged alongside the plotline catalog so a card's change-beat links resolve."""
+
+    def _bound_arc(self, name: str = "Mira Voss"):
+        arc = self.service.instantiate_plot_template(_CHARACTER_ARC_TEMPLATE)
+        character = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title=name, entry_type="lore:character")
+        )
+        arc = self.service.save_character_arc(
+            arc.id,
+            SaveCharacterArcRequest(
+                title=arc.title,
+                body="A rises then falls.",
+                metadata={**arc.metadata, "character": character.id},
+            ),
+        )
+        return arc, character
+
+    def test_arc_carries_full_roster_and_bound_character(self) -> None:
+        arc, _character = self._bound_arc()
+        context = self.service.read_plot_context()
+        context_arc = next(a for a in context.arcs if a.id == arc.id)
+        self.assertEqual(context_arc.character_name, "Mira Voss")
+        self.assertEqual(context_arc.character_initial, "M")
+        self.assertTrue(context_arc.beats)
+        self.assertEqual(context_arc.description, "A rises then falls.\n")
+
+    def test_a_cards_change_beat_link_resolves_through_the_merged_catalog(self) -> None:
+        # This is the regression this slice fixes: before, a card's change-beat
+        # link was silently dropped from the AI context (the plotline-only
+        # catalog missed the arc holder). Now it resolves, tagged as a
+        # character-arc beat wearing the bound character's identity.
+        arc, _character = self._bound_arc()
+        beat_id = arc.metadata["instance_beats"][0]["id"]
+        card_id = self._card("Turning Point", beat_links=[{"plotline": arc.id, "beat_id": beat_id}])
+
+        context = self.service.read_plot_context()
+        card = next(c for c in context.cards if c.id == card_id)
+        self.assertEqual(len(card.beats), 1)
+        resolved = card.beats[0]
+        self.assertEqual(resolved.beat_id, beat_id)
+        self.assertEqual(resolved.holder_kind, "plot:character_arc")
+        self.assertEqual(resolved.character_name, "Mira Voss")
+
+    def test_arcs_are_never_gated(self) -> None:
+        arc, _character = self._bound_arc()
+        chapter = self._chapter()
+        scenes = [self._scene(f"s{i}", chapter) for i in range(2)]
+        self._card("Card 0", scene=scenes[0])
+        self._card("Card 1", scene=scenes[1])
+        # A gate that withholds the later card still shows the arc in full.
+        context = self.service.read_plot_context(as_of=scenes[0])
+        self.assertEqual(context.omitted_cards, 1)
+        self.assertTrue(any(a.id == arc.id for a in context.arcs))
+
+    def test_an_unbound_arc_still_appears_with_no_character(self) -> None:
+        arc = self.service.instantiate_plot_template(_CHARACTER_ARC_TEMPLATE)
+        context = self.service.read_plot_context()
+        context_arc = next(a for a in context.arcs if a.id == arc.id)
+        self.assertIsNone(context_arc.character_name)
 
 
 class CausalEdgeTests(PlotContextTestCase):

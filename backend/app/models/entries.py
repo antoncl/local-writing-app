@@ -511,6 +511,32 @@ class PlotContextPlotline(BaseModel):
     beats: list[PlotContextBeat] = Field(default_factory=list)
 
 
+class PlotContextArc(BaseModel):
+    """A character arc as the AI reads it (ADR-0080 §5): the plotline's sibling
+    `plot:thread` holder — a bound character's CHANGE track, never gated (the
+    writer's own scaffolding, not manuscript content), so its full change-beat
+    roster is always present including change-beats no card fulfils yet (the gaps).
+    Carries the bound `character_name` (+ id and single-letter avatar) it is about,
+    and the same template guidance a plotline carries — `source_template_name`
+    (lineage), `ai_guidance` / `diagnostic_questions` / `weak_spots` (the structure's
+    intent), all inherited from plot:thread. No `genre` — that is the plotline's own
+    field. `description` is the prose body. This is the arc DATA reaching the AI; the
+    transformation/causation reasoning LENS the prompts apply is a separate concern."""
+
+    id: str
+    title: str
+    color: str | None = None
+    character_id: str | None = None
+    character_name: str | None = None
+    character_initial: str | None = None
+    description: str = ""
+    source_template_name: str = ""
+    ai_guidance: str = ""
+    diagnostic_questions: list[str] = Field(default_factory=list)
+    weak_spots: list[str] = Field(default_factory=list)
+    beats: list[PlotContextBeat] = Field(default_factory=list)
+
+
 class PlotContextCard(BaseModel):
     """A card as the AI reads it (ADR-0048 S8a): its `synopsis` (the prose
     stand-in a beat's fulfilment is reasoned from), its plotline, its reveal-order
@@ -543,7 +569,9 @@ class PlotContext(BaseModel):
     With no anchor the whole board is present (`completeness == "whole_board"`):
     plotter mode, nothing to spoil. Plotlines are never gated — they are the writer's
     own scaffolding, not manuscript content, and the full beat roster is what lets the
-    AI name a beat no card fulfils yet.
+    AI name a beat no card fulfils yet. Character arcs are carried the same way
+    (`arcs`), never gated — an arc is the writer's change scaffolding for a bound
+    character.
 
     Assembled read-only from card + plotline + structure data (ADR-0048 S4–S6; ADR-0053),
     reusing the board projection's resolve helpers. This is context assembly (prompt
@@ -557,6 +585,7 @@ class PlotContext(BaseModel):
     as_of_sequence: int | None = None
     omitted_cards: int = 0
     plotlines: list[PlotContextPlotline] = Field(default_factory=list)
+    arcs: list[PlotContextArc] = Field(default_factory=list)
     cards: list[PlotContextCard] = Field(default_factory=list)
 
 

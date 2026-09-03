@@ -15,14 +15,18 @@ from plot_fixtures import PlotTestCase
 
 from app.models import (
     CreateCardRequest,
+    CreateLoreEntryRequest,
     CreateSceneRequest,
     CreateStructureNodeRequest,
     SaveCardRequest,
+    SaveCharacterArcRequest,
 )
 from app.services.ai.helpers import create_environment_for_project
+from app.services.ai.plot_prompt_context import render_plot_context
 from app.services.ai.templates import render_template
 
 _THREE_ACT = "builtin-plot-three-act-story-arc"
+_CHARACTER_ARC_TEMPLATE = "builtin-plot-positive-character-change-arc"
 _PROMPT_TITLE = "Revise plot card"
 
 
@@ -154,6 +158,58 @@ class PlotContextHelperTests(_PlotAiContextBase):
         out = self._render('{% role "system" %}{{ plot_context() }}{% endrole %}')
         self.assertIn("<use_guidance>LENS_TEXT</use_guidance>", out)
         self.assertNotIn('<plotline title="Guided" />', out)  # opened, not self-closed
+
+
+class PlotContextArcRenderTests(_PlotAiContextBase):
+    """ADR-0080 §5 (#1770): character arcs render beside plotlines in the AI
+    plot-context block, and a card's change-beat renders an honest `<fulfils>`
+    (arc= + character=, not plotline=)."""
+
+    def _bound_arc(self, name: str = "Mira Voss"):
+        arc = self.service.instantiate_plot_template(_CHARACTER_ARC_TEMPLATE)
+        character = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title=name, entry_type="lore:character")
+        )
+        arc = self.service.save_character_arc(
+            arc.id,
+            SaveCharacterArcRequest(
+                title=arc.title,
+                body="A rises then falls.",
+                metadata={**arc.metadata, "character": character.id},
+            ),
+        )
+        return arc
+
+    def test_character_arcs_block_renders_the_bound_character_and_a_beat(self) -> None:
+        self._bound_arc()
+        out = render_plot_context(self.service.read_plot_context())
+        self.assertIn("<character_arcs>", out)
+        self.assertIn("<character_arc ", out)
+        self.assertIn('character="Mira Voss"', out)
+        self.assertIn("<beat", out)
+
+    def test_a_change_beat_fulfils_as_an_arc_not_a_plotline(self) -> None:
+        arc = self._bound_arc()
+        beat_id = arc.metadata["instance_beats"][0]["id"]
+        self._card("Turning Point", beat_links=[{"plotline": arc.id, "beat_id": beat_id}])
+
+        # An event-beat card, so a `plotline=` fulfils still renders alongside.
+        plotline = self._plotline()
+        plotline_beat_id = plotline.metadata["instance_beats"][0]["id"]
+        self._card(
+            "Meet Cute", beat_links=[{"plotline": plotline.id, "beat_id": plotline_beat_id}]
+        )
+
+        out = render_plot_context(self.service.read_plot_context())
+        self.assertIn(f'arc="{arc.title}"', out)
+        self.assertIn('character="Mira Voss"', out)
+        self.assertNotIn(f'plotline="{arc.title}"', out)
+        self.assertIn(f'plotline="{plotline.title}"', out)
+
+    def test_no_arcs_omits_the_character_arcs_block(self) -> None:
+        self._plotline()
+        out = render_plot_context(self.service.read_plot_context())
+        self.assertNotIn("<character_arcs>", out)
 
 
 class RevisePlotCardPromptTests(_PlotAiContextBase):

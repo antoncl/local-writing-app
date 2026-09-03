@@ -47,7 +47,8 @@ from app.models import (
 # PlotMixin's one `_resolve_card_beats`. plot.py does not import this module, so this is
 # a one-directional import. The AI context lists only plotlines today (arc change-tracks
 # reaching the AI is a later item), so every entry it builds is a plotline holder.
-from app.services.project.plot import PLOT_PLOTLINE_ENTRY_TYPE, _ThreadCatalogEntry
+from app.services.project.plot import PLOT_PLOTLINE_ENTRY_TYPE
+from app.services.project.plot_board import _ThreadCatalogEntry
 
 # On-disk metadata field keys this mixin reads a card / plotline's metadata by — the
 # same schema field-name literals plot.py reads them by; named here for legibility.

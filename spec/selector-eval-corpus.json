@@ -1,5 +1,5 @@
 {
-  "_comment": "Cross-runtime parity corpus for the context-pick selector evaluator (ADR-0074 slice 5). The SAME cases are run by backend/tests/test_selector_eval_parity.py (Python: evaluate_selector_membership) and frontend/src/lib/views/selectorEvalParity.test.ts (TypeScript: evaluateView). Both must return `expected` verbatim. `expected` is in node-array (roster) order, deduped. A change to either evaluator that breaks parity turns its runtime's gate red. Tags live in metadata.tags (list OR comma string); the `schema.entry_types[*].parent` chain drives type/descendants_of.",
+  "_comment": "Cross-runtime parity corpus for the context-pick selector evaluator (ADR-0074 slice 5 / ADR-0082 slice 2b). The SAME cases are run by backend/tests/test_selector_eval_parity.py (Python: evaluate_selector_membership) and frontend/src/lib/views/selectorEvalParity.test.ts (TypeScript: evaluateView). Both must return `expected` verbatim. `expected` is in node-array (roster) order, deduped. A change to either evaluator that breaks parity turns its runtime's gate red. `tagged` names a tag NODE by id and matches when that id appears anywhere in a node's metadata (any field, any depth) — schema-free, not keyed to a conventional `tags` field; the `schema.entry_types[*].parent` chain drives type/descendants_of.",
   "schema": {
     "entry_types": {
       "lore:base": {},
@@ -14,11 +14,11 @@
   "cases": [
     {
       "name": "bare tagged selects every tag bearer",
-      "expr": { "tagged": "World-building" },
+      "expr": { "tagged": "tag_world_building" },
       "nodes": [
-        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["World-building"] } },
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["tag_world_building"] } },
         { "id": "b", "entry_type": "lore:note", "metadata": { "tags": [] } },
-        { "id": "c", "entry_type": "lore:location", "metadata": { "tags": ["World-building", "Real-world"] } }
+        { "id": "c", "entry_type": "lore:location", "metadata": { "tags": ["tag_world_building", "tag_real_world"] } }
       ],
       "expected": ["a", "c"]
     },
@@ -26,15 +26,15 @@
       "name": "tag intersect type-union is the picker shape",
       "expr": {
         "intersect": [
-          { "tagged": "World-building" },
+          { "tagged": "tag_world_building" },
           { "union": [{ "type": "lore:note" }, { "type": "lore:location" }] }
         ]
       },
       "nodes": [
-        { "id": "note", "entry_type": "lore:note", "metadata": { "tags": ["World-building"] } },
-        { "id": "loc", "entry_type": "lore:location", "metadata": { "tags": ["World-building"] } },
-        { "id": "wrongtag", "entry_type": "lore:note", "metadata": { "tags": ["Real-world"] } },
-        { "id": "wrongtype", "entry_type": "lore:character", "metadata": { "tags": ["World-building"] } }
+        { "id": "note", "entry_type": "lore:note", "metadata": { "tags": ["tag_world_building"] } },
+        { "id": "loc", "entry_type": "lore:location", "metadata": { "tags": ["tag_world_building"] } },
+        { "id": "wrongtag", "entry_type": "lore:note", "metadata": { "tags": ["tag_real_world"] } },
+        { "id": "wrongtype", "entry_type": "lore:character", "metadata": { "tags": ["tag_world_building"] } }
       ],
       "expected": ["note", "loc"]
     },
@@ -58,66 +58,77 @@
       "expected": ["hero", "char"]
     },
     {
-      "name": "tagged matches a comma-string tags value",
-      "expr": { "tagged": "Beta" },
+      "name": "tagged matches through a user vocabulary field",
+      "expr": { "tagged": "tag_motif_a" },
       "nodes": [
-        { "id": "x", "entry_type": "lore:note", "metadata": { "tags": "Alpha, Beta" } },
-        { "id": "y", "entry_type": "lore:note", "metadata": { "tags": "Alpha" } }
+        { "id": "a", "entry_type": "lore:note", "metadata": { "motifs": ["tag_motif_a"] } },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "motifs": ["tag_motif_b"] } }
       ],
-      "expected": ["x"]
+      "expected": ["a"]
     },
     {
-      "name": "tagged is case-sensitive",
-      "expr": { "tagged": "world" },
-      "nodes": [{ "id": "x", "entry_type": "lore:note", "metadata": { "tags": ["World"] } }],
+      "name": "tagged matches a nested item-group member",
+      "expr": { "tagged": "tag_nested_x" },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "cast": [{ "name": "Nyla", "role_tag": "tag_nested_x" }] } },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "cast": [{ "name": "Rook", "role_tag": "tag_other" }] } }
+      ],
+      "expected": ["a"]
+    },
+    {
+      "name": "an id present only as a substring does not match",
+      "expr": { "tagged": "tag_x" },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "notes": "tag_x_extended" } }
+      ],
       "expected": []
     },
     {
       "name": "difference keep minus remove",
       "expr": {
-        "difference": { "keep": { "tagged": "T" }, "remove": { "type": "lore:location" } }
+        "difference": { "keep": { "tagged": "tag_t" }, "remove": { "type": "lore:location" } }
       },
       "nodes": [
-        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } },
-        { "id": "b", "entry_type": "lore:location", "metadata": { "tags": ["T"] } }
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["tag_t"] } },
+        { "id": "b", "entry_type": "lore:location", "metadata": { "tags": ["tag_t"] } }
       ],
       "expected": ["a"]
     },
     {
       "name": "complement is universe minus inner",
-      "expr": { "complement": { "tagged": "T" } },
+      "expr": { "complement": { "tagged": "tag_t" } },
       "nodes": [
-        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } },
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["tag_t"] } },
         { "id": "b", "entry_type": "lore:note", "metadata": { "tags": [] } }
       ],
       "expected": ["b"]
     },
     {
       "name": "union dedups and follows roster order",
-      "expr": { "union": [{ "tagged": "T" }, { "type": "lore:note" }] },
+      "expr": { "union": [{ "tagged": "tag_t" }, { "type": "lore:note" }] },
       "nodes": [
-        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } },
-        { "id": "b", "entry_type": "lore:note", "metadata": { "tags": ["T"] } }
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["tag_t"] } },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "tags": ["tag_t"] } }
       ],
       "expected": ["a", "b"]
     },
     {
       "name": "filter keep lowers to intersect",
-      "expr": { "filter": { "of": { "tagged": "T" }, "pred": { "type": "lore:note" } } },
+      "expr": { "filter": { "of": { "tagged": "tag_t" }, "pred": { "type": "lore:note" } } },
       "nodes": [
-        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } },
-        { "id": "b", "entry_type": "lore:location", "metadata": { "tags": ["T"] } }
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["tag_t"] } },
+        { "id": "b", "entry_type": "lore:location", "metadata": { "tags": ["tag_t"] } }
       ],
       "expected": ["a"]
     },
     {
       "name": "filter drop lowers to difference",
       "expr": {
-        "filter": { "of": { "tagged": "T" }, "pred": { "type": "lore:note" }, "mode": "drop" }
+        "filter": { "of": { "tagged": "tag_t" }, "pred": { "type": "lore:note" }, "mode": "drop" }
       },
       "nodes": [
-        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } },
-        { "id": "b", "entry_type": "lore:location", "metadata": { "tags": ["T"] } }
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["tag_t"] } },
+        { "id": "b", "entry_type": "lore:location", "metadata": { "tags": ["tag_t"] } }
       ],
       "expected": ["b"]
     },
@@ -157,7 +168,7 @@
     {
       "name": "empty expr selects nothing (ADR-0036)",
       "expr": {},
-      "nodes": [{ "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } }],
+      "nodes": [{ "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["tag_t"] } }],
       "expected": []
     },
     {

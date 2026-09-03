@@ -28,10 +28,18 @@ describe("FieldValue (#1108)", () => {
     expect(screen.queryByText("true")).toBeNull();
   });
 
-  it("tags: renders a chip per tag", () => {
-    mount(field("tags"), "hero, villain");
-    expect(screen.getByText("hero")).toBeTruthy();
-    expect(screen.getByText("villain")).toBeTruthy();
+  it("multi_select: renders a chip per selected option (the tags-chip idiom — the retired `tags` type's own chip branch is gone, ADR-0082 slice 2b; a tag vocabulary renders read-only through ReferencePicker like any entity_ref_list)", () => {
+    mount(
+      field("multi_select", {
+        options: [
+          { value: "hero", label: "Hero" },
+          { value: "villain", label: "Villain" },
+        ],
+      }),
+      ["hero", "villain"],
+    );
+    expect(screen.getByText("Hero")).toBeTruthy();
+    expect(screen.getByText("Villain")).toBeTruthy();
   });
 
   it("number: renders the value as text", () => {

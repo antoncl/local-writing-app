@@ -20,7 +20,7 @@ import pytest
 from app.services.ai.selector_eval import (
     SelectorNode,
     evaluate_selector_membership,
-    selector_node_tags,
+    selector_references,
 )
 
 _CORPUS_PATH = Path(__file__).resolve().parents[2] / "spec" / "selector-eval-corpus.json"
@@ -47,7 +47,7 @@ _IS_DESCENDANT = _make_is_descendant(_CORPUS["schema"]["entry_types"])
 @pytest.mark.parametrize("case", _CORPUS["cases"], ids=lambda c: c["name"])
 def test_selector_eval_parity(case: dict[str, Any]) -> None:
     nodes = [
-        SelectorNode(n["id"], n["entry_type"], selector_node_tags(n.get("metadata")), n.get("metadata") or {})
+        SelectorNode(n["id"], n["entry_type"], selector_references(n.get("metadata")), n.get("metadata") or {})
         for n in case["nodes"]
     ]
     result = evaluate_selector_membership(case["expr"], nodes, is_descendant=_IS_DESCENDANT)

@@ -24,7 +24,7 @@ const schema = {
     bio: { name: "Biography", type: "long_text", options: [] },
     allegiance: { name: "Allegiance", type: "select", options: [] },
     active: { name: "Active", type: "boolean", options: [] },
-    aliases: { name: "Aliases", type: "tags", options: [] },
+    aliases: { name: "Aliases", type: "multi_select", options: [] },
     status: { name: "Status", type: "select", options: [] },
     title: { name: "Title", type: "text", intrinsic: true, options: [] },
     secret: { name: "Secret", type: "text", hidden: true, options: [] },

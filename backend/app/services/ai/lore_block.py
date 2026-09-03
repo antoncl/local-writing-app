@@ -321,7 +321,7 @@ def _render_field_element(
 
 def _resolve_list_refs(project: ProjectService, field: Any, value: Any) -> Any:
     """A copy of a group-list value with each nested entity_ref id resolved to a
-    `{"id","name"}` map; tags and non-ref members pass through. Returns `value`
+    `{"id","name"}` map; non-ref members pass through. Returns `value`
     unchanged when the field carries no ref members (ADR-0081 §4)."""
     members = ref_members(field) if field is not None else None
     if not members or not isinstance(value, list):
@@ -366,7 +366,7 @@ def _ref_name(project: ProjectService, ref_id: str) -> str:
 
 
 def _scalar_text(value: Any) -> str:
-    """Render an inline scalar (or a flat scalar list — multi_select / tags) as
+    """Render an inline scalar (or a flat scalar list — multi_select) as
     text. `bool` renders as `true`/`false`, not Python's `True`/`False`."""
     if isinstance(value, bool):
         return "true" if value else "false"

@@ -17,7 +17,7 @@ const resolvedSchema = {
     title: { name: "Name", type: "text", options: [], category: "intrinsic" },
     entry_type: { name: "Type", type: "text", options: [], category: "intrinsic" },
     id: { name: "Id", type: "text", options: [], category: "intrinsic" },
-    aliases: { name: "Aliases", type: "tags", options: [], category: "stored" },
+    aliases: { name: "Aliases", type: "multi_select", options: [], category: "stored" },
     role: { name: "Role", type: "text", options: [], category: "stored" },
   },
 } as unknown as MetadataSchema;

@@ -11,7 +11,7 @@ helpers they call (`self._build_node_index`,
 `self._path_for_node_id`, `self._node_id_for_path`, `self._revision`,
 `self._strip_unknown_metadata_fields`, `self._strip_dangling_references`,
 `self._computed_entry_metadata`, `self._read_front_matter_only`,
-`self._canonicalise_metadata_tags`, `self._maybe_rename_node_file`,
+`self._maybe_rename_node_file`,
 `self._purge_references_to`) still live on the core class and resolve
 through the MRO at call time.
 
@@ -268,12 +268,6 @@ class LoreEntriesMixin:
         # entry L is the open project, so this is the full-chain schema, unchanged.
         schema = self._schema_as_authored(authoring_layer=authoring_layer)
         metadata = self._normalise_metadata(request.metadata, path)
-        # NOTE: the tag *vocabulary* stays full-chain here — the schema is as-of-L
-        # but `_canonicalise_metadata_tags` still reads all layers and writes its
-        # assertion back to the resolution scope's tags.yaml. Scoping it to L means
-        # moving the write *target*, not just the read (ADR-0045 §4); left for the
-        # PR 2 authoring work with the picker.
-        metadata = self._canonicalise_metadata_tags(metadata, schema, kind="lore", entry_type=request.entry_type)
         entry = LoreEntry(
             id=node_id,
             title=request.title,

@@ -17,7 +17,7 @@
     baseline?: string[];
   };
 
-  export const COLLECTION_TYPES = ["multi_select", "tags", "entity_ref_list"];
+  export const COLLECTION_TYPES = ["multi_select", "entity_ref_list"];
   export const isCollectionType = (type: string) => COLLECTION_TYPES.includes(type);
 
   // Scalar text types that accept an additive `add` (append) op — the backend
@@ -86,13 +86,12 @@
 
   // The item-widget field def for an add/remove op: a collection resolves to
   // its single-element type (entity_ref_list → entity_ref, multi_select →
-  // select, tags → text), so each add/remove marker carries one element. A
-  // list-edit row (baseline present, #71) always uses the field's own widget.
+  // select), so each add/remove marker carries one element. A list-edit row
+  // (baseline present, #71) always uses the field's own widget.
   export function effectiveFieldDef(row: MutationRow, def: MetadataFieldDefinition): MetadataFieldDefinition {
     if (!isCollectionType(def.type) || row.baseline !== undefined || row.op === "replace") return def;
     if (def.type === "entity_ref_list") return { ...def, type: "entity_ref" };
-    if (def.type === "multi_select") return { ...def, type: "select" };
-    return { ...def, type: "text" };
+    return { ...def, type: "select" };
   }
 </script>
 
@@ -105,7 +104,7 @@
     asMembershipList,
     diffCollectionMembership,
   } from "@/lib/editor-core/mutationListEdit";
-  import type { LoreEntrySummary, PromptEntrySummary, ScopedTag, StructureDocument } from "@/lib/types";
+  import type { LoreEntrySummary, PromptEntrySummary, StructureDocument } from "@/lib/types";
 
   let {
     rows,
@@ -119,7 +118,6 @@
     promptEntries = [],
     structure = null,
     researchStructure = null,
-    knownTags = [],
     implicitContextMatcher = null,
     onRowChange,
     onRowRemove,
@@ -138,7 +136,6 @@
     promptEntries?: PromptEntrySummary[];
     structure?: StructureDocument | null;
     researchStructure?: StructureDocument | null;
-    knownTags?: ScopedTag[];
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     onRowChange: (index: number, patch: Partial<MutationRow>) => void;
     onRowRemove?: (index: number) => void;
@@ -242,9 +239,6 @@
           structure={structure}
           researchStructure={researchStructure}
           implicitContextMatcher={implicitContextMatcher}
-          knownTags={knownTags}
-          documentKind="lore"
-          entryType={entryType}
           onChange={(v) => onRowChange(i, { value: v })}
         />
       </div>

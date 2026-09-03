@@ -3,7 +3,7 @@
   // field value — the *display* sibling of FieldValueEditor, at the field level as
   // NodeRow/NodeEditor are at the node level. A type **dispatcher**: per `field.type`
   // it delegates to the shared color-system widgets (ColoredSelect pill,
-  // ReferencePicker title, ToggleSwitch, TagChip, SwatchPicker) or renders the static
+  // ReferencePicker title, ToggleSwitch, SwatchPicker) or renders the static
   // display markup — never a raw string dump. Extracted verbatim from
   // FieldValueEditor's read-only branches so every surface (the metadata rail, chat's
   // structured diff, the create-draft card, the drift report, and — when a pane wants
@@ -12,7 +12,6 @@
   import ListValueEditor from "@/components/widgets/ListValueEditor.svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
-  import TagChip from "@/components/widgets/TagChip.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ToggleSwitch from "@/components/widgets/ToggleSwitch.svelte";
   import {
@@ -20,13 +19,11 @@
     isMetadataValuePresent,
     normalizeListFieldValue,
   } from "@/lib/utils/schemaTypeHelpers";
-  import { parseTagList, tagColorMap } from "@/lib/utils/tags";
   import type {
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataValue,
     PromptEntrySummary,
-    ScopedTag,
     StructureDocument,
   } from "@/lib/types";
 
@@ -47,13 +44,12 @@
     controlled?: boolean;
     expanded?: boolean;
     // Context the read-only widgets need to resolve a value's display:
-    // ReferencePicker needs the rosters to turn a ref id into a title/link; TagChip
-    // needs knownTags for its hue; ListValueEditor takes the matcher for highlights.
+    // ReferencePicker needs the rosters to turn a ref id into a title/link;
+    // ListValueEditor takes the matcher for highlights.
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
     structure?: StructureDocument | null;
     researchStructure?: StructureDocument | null;
-    knownTags?: ScopedTag[];
     excludeId?: string | null;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     onNavigate?: (payload: { id: string; kind: string }) => void;
@@ -71,7 +67,6 @@
     promptEntries = [],
     structure = null,
     researchStructure = null,
-    knownTags = [],
     excludeId = null,
     implicitContextMatcher = null,
     onNavigate,
@@ -79,8 +74,6 @@
 
   const label = $derived(ariaLabel ?? field.name);
   const currentValue = $derived(metadataValueString(value));
-  // Built once, not per-chip, so the read-only tags render stays O(n) (#247).
-  const tagColors = $derived(tagColorMap(knownTags));
 
   function metadataValueString(v: MetadataValue | undefined): string {
     if (Array.isArray(v)) return v.join(", ");
@@ -161,14 +154,6 @@
   <span class="fv-static" aria-label={label}>
     {#if currentValue}{currentValue}{:else}<span class="fv-empty">—</span>{/if}
   </span>
-{:else if field.type === "tags"}
-  <div class="multi-select-chips" aria-label={label}>
-    {#each parseTagList(currentValue) as tag (tag)}
-      <TagChip name={tag} color={tagColors.get(tag.toLowerCase()) ?? null} />
-    {:else}
-      <span class="fv-empty">—</span>
-    {/each}
-  </div>
 {:else if field.type === "list"}
   <ListValueEditor {field} {value} readOnly onChange={noop} {implicitContextMatcher} />
 {:else if field.type === "color"}

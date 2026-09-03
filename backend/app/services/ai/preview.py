@@ -35,7 +35,7 @@ from app.services.ai.selector_eval import (
     SelectorNode,
     UnsupportedSelectorExpr,
     evaluate_selector_membership,
-    selector_node_tags,
+    selector_references,
 )
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
@@ -223,7 +223,7 @@ def _selector_roster(project_service, kind: Any) -> list[SelectorNode] | None:
     front matter straight off the node index."""
     if kind == "lore":
         return [
-            SelectorNode(entry.id, entry.entry_type, selector_node_tags(entry.metadata), entry.metadata)
+            SelectorNode(entry.id, entry.entry_type, selector_references(entry.metadata), entry.metadata)
             for entry in project_service.list_lore_entries().entries
         ]
     if kind in _GENERIC_ROSTER_KINDS:
@@ -244,7 +244,7 @@ def _generic_roster(project_service, kind: str) -> list[SelectorNode]:
         metadata = project_service._normalise_metadata(front_matter.get("metadata"), entry.path)
         raw_type = front_matter.get("entry_type")
         entry_type = raw_type if isinstance(raw_type, str) else entry.entry_type
-        roster.append(SelectorNode(entry.id, entry_type, selector_node_tags(metadata), metadata))
+        roster.append(SelectorNode(entry.id, entry_type, selector_references(metadata), metadata))
     return roster
 
 

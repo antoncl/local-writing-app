@@ -39,11 +39,10 @@ export function promptInputTypeLabel(type: PromptInputType): string {
 
 // The list-shaped value types: their runtime value is a JSON-encoded array on
 // the wire (like entity_ref_list), so coerceInputValue parses them to a real
-// array for the template. multi_select / tags store a scalar-string list; `list`
+// array for the template. multi_select stores a scalar-string list; `list`
 // stores a scalar list (v1 is scalar-only).
 const LIST_SHAPED_INPUT_TYPES = new Set<PromptInputType>([
   "multi_select",
-  "tags",
   "list",
   "entity_ref_list",
 ]);

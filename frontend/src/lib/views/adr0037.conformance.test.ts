@@ -55,7 +55,7 @@ const LORE_SCHEMA = {
     entry_type: { name: "Type", type: "text", category: "intrinsic" },
     id: { name: "ID", type: "text", category: "intrinsic" },
     located_in: { name: "Located in", type: "entity_ref" },
-    tags: { name: "Tags", type: "tags" },
+    tags: { name: "Tags", type: "multi_select" },
     // Select options carry {value, label}: a §2 select-level bucket is LABELLED
     // by the option label, keyed by the value.
     rank: { name: "Rank", type: "select", options: [{ value: "k", label: "Knight" }, { value: "s", label: "Soldier" }] },

@@ -27,6 +27,16 @@ export interface AnchoredPopoverParams {
   anchor: HTMLElement | null | undefined;
   /** Gap in px between the trigger and the popover (default 6). */
   gap?: number;
+  /** #245: re-measure the anchor every animation frame while mounted, on top
+   *  of the scroll/resize listeners below — for a popover hosted under a
+   *  zoomed/panned SvelteFlow canvas (ViewFlowNode), where the anchor moves
+   *  on screen WITHOUT firing scroll/resize (the canvas transform, not the
+   *  page, moves it). Keeps the popover glued to the node at native 1× scale
+   *  ("anchor-track"), not scaled with the canvas. Off by default — the
+   *  scroll/resize path alone is enough outside a transformed ancestor, and a
+   *  RAF loop is needless work for every other host. Mirrors the tracking
+   *  loop TagPicker carried before ADR-0082 slice 2b generalised it here. */
+  track?: boolean;
 }
 
 export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams) {
@@ -35,6 +45,13 @@ export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams
   // resolve against the viewport instead of a clipped/transformed ancestor.
   node.style.position = "fixed";
   const portal = portalToBody(node);
+
+  // The last-applied rect, so the RAF loop reassigns styles only when the
+  // anchor actually moved — otherwise it would write `left`/`top` every frame
+  // even while the canvas sits idle, thrashing layout (and, for a caller that
+  // mirrors these coords into Svelte state, its reactivity) for nothing.
+  let lastLeft = NaN;
+  let lastTop = NaN;
 
   function reposition() {
     const anchor = current.anchor;
@@ -57,6 +74,9 @@ export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams
     if (top + h + 8 > window.innerHeight) {
       top = Math.max(8, r.top - h - gap);
     }
+    if (left === lastLeft && top === lastTop) return;
+    lastLeft = left;
+    lastTop = top;
     node.style.left = `${left}px`;
     node.style.top = `${top}px`;
   }
@@ -68,14 +88,33 @@ export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams
   window.addEventListener("scroll", onScrollResize, true);
   window.addEventListener("resize", onScrollResize);
 
+  let rafId = 0;
+  function trackLoop() {
+    reposition();
+    rafId = requestAnimationFrame(trackLoop);
+  }
+  function startTracking() {
+    if (!rafId) rafId = requestAnimationFrame(trackLoop);
+  }
+  function stopTracking() {
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+  }
+  if (current.track) startTracking();
+
   return {
     update(next: AnchoredPopoverParams) {
       current = next;
       reposition();
+      if (next.track) startTracking();
+      else stopTracking();
     },
     destroy() {
       window.removeEventListener("scroll", onScrollResize, true);
       window.removeEventListener("resize", onScrollResize);
+      stopTracking();
       portal.destroy();
     },
   };

@@ -1,7 +1,8 @@
 """Collection add/remove mutation ops + optional name/group grammar (#58, #65).
 
-v1.0 markers are scalar replace; v1.1 adds `op=add`/`op=remove` for the three
-collection field types and an optional `name=`/`group=` label. These prove:
+v1.0 markers are scalar replace; v1.1 adds `op=add`/`op=remove` for the two
+collection field types (`multi_select`, `entity_ref_list` — `tags` retired,
+ADR-0082 slice 2b) and an optional `name=`/`group=` label. These prove:
 
 - the grammar round-trips (scan parses op/name/group; rewrite preserves them);
 - the resolver computes `(base ∪ adds) ∖ removes`, remove-wins, as a `list[str]`;
@@ -45,7 +46,7 @@ class CollectionMutationTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = open_test_project(self.root, "Collection Mutation Tests")
-        _define_field(self.service, "clues", "tags", "Clues")
+        _define_field(self.service, "clues", "multi_select", "Clues")
         _define_field(self.service, "rank", "text", "Rank")
         self.honor = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
@@ -149,7 +150,7 @@ class CollectionMutationTests(unittest.TestCase):
             f"<!-- mutate:entity={self.honor};field=clues;value=knife%2Crope;id=c1 -->",
         )
         self.assertEqual(self.service.effective_state(self.honor, scene), {"clues": "knife,rope"})
-        self.assertEqual(self.service._coerce_mutation_value("knife,rope", "tags"), ["knife", "rope"])
+        self.assertEqual(self.service._coerce_mutation_value("knife,rope", "multi_select"), ["knife", "rope"])
 
     def test_add_remove_before_replace_are_superseded(self) -> None:
         # Prose order: a remove and an add, then a later whole-replace. The

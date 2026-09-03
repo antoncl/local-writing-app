@@ -22,7 +22,7 @@ describe("PROMPT_INPUT_TYPE_CHOICES — one catalog with the field types", () =>
   });
 
   it("adds the newly-unified list types and the prompt-only invocation types", () => {
-    for (const t of ["multi_select", "tags", "list"] as const) {
+    for (const t of ["multi_select", "list"] as const) {
       expect(PROMPT_INPUT_TYPE_CHOICES).toContain(t);
     }
     expect(PROMPT_INPUT_TYPE_CHOICES).toContain("context_pick");
@@ -38,15 +38,15 @@ describe("PROMPT_INPUT_TYPE_CHOICES — one catalog with the field types", () =>
 });
 
 describe("coerceInputValue — the new list-shaped types parse to real arrays", () => {
-  it("parses multi_select / tags / list JSON to an array (like entity_ref_list)", () => {
-    for (const t of ["multi_select", "tags", "list"] as const) {
+  it("parses multi_select / list JSON to an array (like entity_ref_list)", () => {
+    for (const t of ["multi_select", "list"] as const) {
       expect(coerceInputValue(JSON.stringify(["a", "b"]), t)).toEqual(["a", "b"]);
     }
   });
 
   it("treats empty as unset (null) so the template can guard `is defined`", () => {
     expect(coerceInputValue("", "multi_select")).toBeNull();
-    expect(coerceInputValue("   ", "tags")).toBeNull();
+    expect(coerceInputValue("   ", "multi_select")).toBeNull();
   });
 
   it("coerces an untouched scalar/comma default to a list (DefaultValueEditor emits a bare value)", () => {
@@ -54,7 +54,7 @@ describe("coerceInputValue — the new list-shaped types parse to real arrays", 
     // seeded via String(); it must still reach the template as ["sight"], not
     // be dropped by a strict JSON.parse. A comma-string default splits.
     expect(coerceInputValue("sight", "multi_select")).toEqual(["sight"]);
-    expect(coerceInputValue("a, b", "tags")).toEqual(["a", "b"]);
+    expect(coerceInputValue("a, b", "multi_select")).toEqual(["a", "b"]);
   });
 
   it("leaves scalar types (select / color) as trimmed strings", () => {

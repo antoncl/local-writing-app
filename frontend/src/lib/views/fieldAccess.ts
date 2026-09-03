@@ -50,7 +50,7 @@ export function fieldValueList(node: EvalNode, field: string): string[] {
 // tokens. Only these tokenize a comma-bearing string; every other type is scalar
 // and compares whole (#202). An array value is always treated as a collection
 // regardless of the declared type, since it is already multi-valued.
-const COLLECTION_FIELD_TYPES = new Set<string>(["multi_select", "entity_ref_list", "tags"]);
+const COLLECTION_FIELD_TYPES = new Set<string>(["multi_select", "entity_ref_list"]);
 export function isCollectionField(schema: MetadataSchema | null | undefined, key: string): boolean {
   const t = schema?.fields?.[key]?.type;
   return t != null && COLLECTION_FIELD_TYPES.has(t);

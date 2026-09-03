@@ -12,7 +12,7 @@ import {
 // A tiny lore-like roster. Order is load-bearing (manual sort == input order).
 const NODES: EvalNode[] = [
   { id: "a", entry_type: "lore:character", title: "Zed", metadata: { tags: ["hero"], pov: "honor" } },
-  { id: "b", entry_type: "lore:character", title: "Alice", metadata: { tags: "villain, gotham" } },
+  { id: "b", entry_type: "lore:character", title: "Alice", metadata: { tags: ["villain", "gotham"] } },
   { id: "c", entry_type: "lore:deity", title: "Mara", metadata: { tags: ["gotham"], power: 9 } },
   { id: "d", entry_type: "lore:location", title: "Kitchen", metadata: { locations: ["kitchen", "hall"] } },
   { id: "e", entry_type: "lore:demigod", title: "Cass", metadata: { power: 3 } },
@@ -131,7 +131,7 @@ describe("sort excludes unorderable fields (#237)", () => {
     entry_types: { "lore:base": { name: "Lore", kind: "lore", abstract: true, fields: [] } },
     fields: {
       title: { name: "Title", type: "text", category: "intrinsic" },
-      factions: { name: "Factions", type: "tags", category: "stored" },
+      factions: { name: "Factions", type: "multi_select", category: "stored" },
       accent: { name: "Accent", type: "color", category: "stored" },
       rank: { name: "Rank", type: "number", category: "stored" },
     },
@@ -284,8 +284,12 @@ describe("leaves", () => {
   it("descendants_of: a leaf type resolves to just itself", () => {
     expect(ids({ kind: "lore", expr: { descendants_of: "lore:character" } })).toEqual(["a", "b"]);
   });
-  it("tagged: matches array and CSV tag fields", () => {
+  it("tagged: matches an id anywhere in metadata — any field, at any depth in a list (ADR-0082 slice 2b)", () => {
     expect(ids({ kind: "lore", expr: { tagged: "gotham" } })).toEqual(["b", "c"]);
+  });
+  it("tagged: a comma-joined string is ONE whole candidate, never split (ids are uuids, not CSV lists)", () => {
+    const csv: EvalNode = { id: "f", entry_type: "lore:character", title: "Grouped", metadata: { tags: "villain, gotham" } };
+    expect(ids({ kind: "lore", expr: { tagged: "gotham" } }, [...NODES, csv])).toEqual(["b", "c"]);
   });
   it("hand_picked: explicit ids, in universe order", () => {
     expect(ids({ kind: "lore", expr: { hand_picked: ["e", "a"] } })).toEqual(["a", "e"]);
@@ -434,7 +438,7 @@ describe("field predicates (op enum 6→4: overlap/disjoint/set/unset)", () => {
 // #202: the 6→4 op collapse routed EVERY comparison through comma-splitting,
 // tokenizing scalar values (a title, a select) and dropping the numeric
 // equivalence the old `scalarEq` had. A genuinely scalar field must compare its
-// WHOLE value; only collection fields (multi_select / entity_ref_list / tags, or
+// WHOLE value; only collection fields (multi_select / entity_ref_list, or
 // an array value) tokenize.
 describe("scalar fields compare whole, collections tokenize (#202)", () => {
   const ROWS: EvalNode[] = [
@@ -448,7 +452,7 @@ describe("scalar fields compare whole, collections tokenize (#202)", () => {
       title: { name: "Title", type: "text", category: "intrinsic" },
       power: { name: "Power", type: "number", category: "stored" },
       faction: { name: "Faction", type: "text", category: "stored" },
-      roles: { name: "Roles", type: "tags", category: "stored" },
+      roles: { name: "Roles", type: "multi_select", category: "stored" },
     },
   } as unknown as MetadataSchema;
   const run = (spec: ViewSpec) => evaluateView(spec, ROWS, { schema: SC }).nodes.map((n) => n.id);
@@ -478,7 +482,7 @@ describe("scalar fields compare whole, collections tokenize (#202)", () => {
     const r = evaluateView({ kind: "lore", expr: { field: { key: "faction", op: "overlap", value: "7" } } }, ROWS2, { schema: SC });
     expect(r.nodes.map((n) => n.id)).toEqual([]);
   });
-  it("a declared collection field (tags) still tokenizes a CSV string", () => {
+  it("a declared collection field (multi_select) still tokenizes a CSV string", () => {
     expect(run({ kind: "lore", expr: { field: { key: "roles", op: "overlap", value: "red" } } })).toEqual(["q"]);
     expect(run({ kind: "lore", expr: { field: { key: "roles", op: "disjoint", value: "red" } } })).toEqual(["p"]);
   });

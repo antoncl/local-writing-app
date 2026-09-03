@@ -1,6 +1,6 @@
 <script lang="ts">
   // The per-field-type value editor, extracted from MetadataPanel so the same
-  // typed widgets (ReferencePicker → NodePicker, ColoredSelect, TagPicker,
+  // typed widgets (ReferencePicker → NodePicker, ColoredSelect,
   // MetadataLongTextEditor, toggle, number) drive every place a field value is
   // edited — the metadata rail AND the /mutate authoring form (#33). Given a
   // field definition + current value + onChange, it renders the right control
@@ -10,7 +10,6 @@
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
-  import TagPicker from "@/components/widgets/TagPicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ToggleSwitch from "@/components/widgets/ToggleSwitch.svelte";
   import FieldValue from "@/components/widgets/FieldValue.svelte";
@@ -24,7 +23,6 @@
     MetadataFieldDefinition,
     MetadataValue,
     PromptEntrySummary,
-    ScopedTag,
     StructureDocument,
   } from "@/lib/types";
 
@@ -58,17 +56,6 @@
     researchStructure?: StructureDocument | null;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     excludeId?: string | null;
-    knownTags?: ScopedTag[];
-    // Which vocabulary a `tags` field's roster comes from — governs whether the
-    // TagPicker's + offers governance (project) or stays add-only (assistant),
-    // see TagPicker. Defaults to project; only the assistant/prompt editor pane
-    // passes "assistant".
-    tagOrigin?: "project" | "assistant";
-    // A kind string used only as the TagPicker's scope (which takes a plain
-    // `string` and tolerates unknown kinds); not narrowed to DocumentKind so
-    // callers can pass a ViewSpec.kind without an unchecked cast.
-    documentKind?: string;
-    entryType?: string;
     onNavigate?: (payload: { id: string; kind: string }) => void;
     // ADR-0082 §2/F2, tri-state as of round 2 (P5): forwarded to
     // ReferencePicker (and, for a list field's entity_ref/entity_ref_list
@@ -94,10 +81,6 @@
     researchStructure = null,
     implicitContextMatcher = null,
     excludeId = null,
-    knownTags = [],
-    tagOrigin = "project",
-    documentKind = "manuscript",
-    entryType = "",
     onNavigate,
     createLayerId = undefined,
   }: Props = $props();
@@ -148,9 +131,9 @@
   }
 
   function normaliseFieldValue(f: MetadataFieldDefinition, v: MetadataValue): MetadataValue {
-    if (f.type === "multi_select" || f.type === "tags" || f.type === "entity_ref_list") {
+    if (f.type === "multi_select" || f.type === "entity_ref_list") {
       // Shared list normaliser: every set-typed list de-dupes on the way to disk
-      // (#704/#725) under its own case policy — tags/multi_select fold case,
+      // (#704/#725) under its own case policy — multi_select folds case,
       // entity_ref_list is case-sensitive. See normalizeListFieldValue.
       return normalizeListFieldValue(f.type, v);
     }
@@ -196,7 +179,6 @@
     {promptEntries}
     {structure}
     {researchStructure}
-    {knownTags}
     {excludeId}
     {implicitContextMatcher}
     {onNavigate}
@@ -260,21 +242,11 @@
   />
 {:else if field.type === "number"}
   <input type="number" aria-label={label} value={currentValue} oninput={(event) => emit(event.currentTarget.value)} />
-{:else if field.type === "tags"}
-  <TagPicker
-    value={currentValue}
-    knownTags={knownTags}
-    origin={tagOrigin}
-    scopeKind={documentKind}
-    scopeEntryType={entryType}
-    ariaLabel={label}
-    onChange={(v) => emit(v)}
-  />
 {:else if field.type === "list"}
   <!-- #698: the list value is already normalized (an array of scalars or
        member-keyed records) — bypass normaliseFieldValue's string coercion.
-       ADR-0081: thread the candidate rosters so an entity_ref / tags member's
-       picker resolves the same set a top-level field's does (they are prop-fed,
+       ADR-0081: thread the candidate rosters so an entity_ref member's picker
+       resolves the same set a top-level field's does (they are prop-fed,
        resolved client-side; without them a nested picker is empty). -->
   <ListValueEditor
     {field}
@@ -286,10 +258,6 @@
     {promptEntries}
     {structure}
     {researchStructure}
-    {knownTags}
-    {tagOrigin}
-    {documentKind}
-    {entryType}
     {excludeId}
     {createLayerId}
   />

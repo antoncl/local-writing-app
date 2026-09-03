@@ -555,7 +555,6 @@ class ManuscriptMixin:
         # nodes (lore); here L is always the resolution scope.
         schema = self.read_metadata_schema()
         metadata = self._normalise_metadata(request.metadata, path)
-        metadata = self._canonicalise_metadata_tags(metadata, schema, kind="manuscript", entry_type=request.entry_type)
         if schema.cascade_fields and not prior_body.strip() and request.body.strip():
             self._freeze_cascade_on_first_prose(root, node_id, metadata, schema.cascade_fields)
 

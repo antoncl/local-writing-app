@@ -2,8 +2,9 @@
 
 These pin the semantics the backend must share with the frontend `evaluateView`
 (`frontend/src/lib/views/evaluateView.ts`): `type` exact vs `descendants_of`
-is_a, `tagged` exact/CSV, set algebra, `filter` desugar, `field` overlap, and
-empty-expr = nothing. A drift here selects the wrong documents for AI context.
+is_a, `tagged` as a schema-free metadata backlink test, set algebra, `filter`
+desugar, `field` overlap, and empty-expr = nothing. A drift here selects the
+wrong documents for AI context.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from app.services.ai.selector_eval import (
     SelectorNode,
     UnsupportedSelectorExpr,
     evaluate_selector_membership,
-    selector_node_tags,
+    selector_references,
 )
 
 # A tiny is_a family: lore:hero descends from lore:character.
@@ -33,7 +34,7 @@ def _is_descendant(entry_type: str, target: str) -> bool:
 
 
 def _nodes(*specs: tuple[str, str, tuple[str, ...]]) -> list[SelectorNode]:
-    return [SelectorNode(nid, et, tags, {"tags": list(tags)}) for nid, et, tags in specs]
+    return [SelectorNode(nid, et, frozenset(tags), {"tags": list(tags)}) for nid, et, tags in specs]
 
 
 def _run(expr, nodes, **kw) -> list[str]:
@@ -78,16 +79,28 @@ def test_descendants_of_includes_subtypes():
     assert _run({"descendants_of": "lore:character"}, nodes) == ["hero", "char"]
 
 
-# --- tagged normalization (array + CSV, exact/case-sensitive) -------------
+# --- tagged: backlink-edge test over metadata (ADR-0082 slice 2b) ---------
 
 
-def test_tagged_matches_csv_stored_tags():
-    # The roster builder normalizes a CSV `tags` string into the tags tuple
-    # (selector_node_tags); the evaluator then matches against that tuple.
-    metadata = {"tags": "Alpha, Beta"}
-    assert selector_node_tags(metadata) == ("Alpha", "Beta")
-    node = SelectorNode("x", "lore:note", selector_node_tags(metadata), metadata)
-    assert _run({"tagged": "Beta"}, [node]) == ["x"]
+def test_tagged_matches_a_scalar_metadata_value():
+    # selector_references walks every scalar/list value in the metadata, not
+    # just a conventional `tags` field — a schema-free backlink test.
+    metadata = {"pov": "tag_x"}
+    assert selector_references(metadata) == frozenset({"tag_x"})
+    node = SelectorNode("x", "lore:note", selector_references(metadata), metadata)
+    assert _run({"tagged": "tag_x"}, [node]) == ["x"]
+
+
+def test_tagged_matches_a_nested_item_group_member():
+    metadata = {"cast": [{"name": "Nyla", "role_tag": "tag_x"}]}
+    node = SelectorNode("x", "lore:note", selector_references(metadata), metadata)
+    assert _run({"tagged": "tag_x"}, [node]) == ["x"]
+
+
+def test_tagged_id_as_substring_does_not_match():
+    metadata = {"notes": "tag_x_extended"}
+    node = SelectorNode("x", "lore:note", selector_references(metadata), metadata)
+    assert _run({"tagged": "tag_x"}, [node]) == []
 
 
 def test_tagged_is_case_sensitive():
@@ -130,8 +143,8 @@ def test_filter_drop_lowers_to_difference():
 
 def test_field_overlap_on_list_value_matches_plotline():
     nodes = [
-        SelectorNode("c1", "plot:card", (), {"plotline": ["pl_1", "pl_2"]}),
-        SelectorNode("c2", "plot:card", (), {"plotline": ["pl_3"]}),
+        SelectorNode("c1", "plot:card", frozenset(), {"plotline": ["pl_1", "pl_2"]}),
+        SelectorNode("c2", "plot:card", frozenset(), {"plotline": ["pl_3"]}),
     ]
     expr = {
         "intersect": [
@@ -144,9 +157,9 @@ def test_field_overlap_on_list_value_matches_plotline():
 
 def test_field_set_and_unset():
     nodes = [
-        SelectorNode("a", "lore:note", (), {"pov": "Bob"}),
-        SelectorNode("b", "lore:note", (), {"pov": ""}),
-        SelectorNode("c", "lore:note", (), {}),
+        SelectorNode("a", "lore:note", frozenset(), {"pov": "Bob"}),
+        SelectorNode("b", "lore:note", frozenset(), {"pov": ""}),
+        SelectorNode("c", "lore:note", frozenset(), {}),
     ]
     assert _run({"field": {"key": "pov", "op": "set"}}, nodes) == ["a"]
     assert _run({"field": {"key": "pov", "op": "unset"}}, nodes) == ["b", "c"]

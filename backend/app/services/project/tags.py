@@ -9,11 +9,13 @@ Method bodies moved verbatim. Shared helpers they call (`self._require_project`,
 `self._read_yaml`, `self._write_yaml`, `self.read_metadata_schema`,
 `self._entry_markdown_paths`, `self._read_markdown_with_front_matter`,
 `self._write_markdown_with_front_matter`) live elsewhere on the composed class
-and resolve through the MRO at call time. The scope helpers
-(`_tag_scope_for_node`, `_union_node_picker_scope`, `_write_scoped_tags`) and
-`read_known_tags` are also consumed by the core `_canonicalise_metadata_tags`
-save path — same MRO resolution. `_entry_markdown_paths` stays in core: it is a
-generic node-file lister shared with the schema slice.
+and resolve through the MRO at call time. `_entry_markdown_paths` stays in
+core: it is a generic node-file lister shared with the schema slice.
+
+The `tags` field type is retired (ADR-0082 slice 2b) — a tag vocabulary is now
+an `entity_ref_list` field, so nothing calls the scope/canonicalise helpers
+from a save path any more. This mixin (the legacy `tags.yaml` name/colour
+registry) stays until slice 4 removes it with the migration.
 """
 
 from __future__ import annotations
@@ -275,7 +277,12 @@ class TagsMixin:
     def _count_document_tags(self, paths: list[Path]) -> tuple[dict[str, int], dict[str, str]]:
         """Occurrences per lowercased tag name across `paths`, plus first-seen
         display casing. Shared by the overview and the merge bound so the count
-        the author sees and the set the guard enforces cannot drift apart."""
+        the author sees and the set the guard enforces cannot drift apart.
+
+        The `tags` field type is retired (ADR-0082 slice 2b) — this filter now
+        matches no schema field, so `tags_fields` is always empty and this
+        legacy registry sees zero document usages. Left as-is (not special-cased
+        away) pending slice 4, which removes this mixin outright."""
         schema = self.read_metadata_schema()
         tags_fields = {fid for fid, field in schema.fields.items() if field.type == "tags"}
         counts: dict[str, int] = {}
@@ -451,7 +458,11 @@ class TagsMixin:
         """Replace every occurrence of `source_lowers` with `target` in the tags
         fields of `paths`, de-duplicating the result. One traversal reaches a tags
         value wherever it lives — top-level or inside an item_group member
-        (ADR-0081)."""
+        (ADR-0081).
+
+        The `tags` field type is retired (ADR-0082 slice 2b) — `occ.field.type`
+        can no longer be `"tags"`, so this is a no-op walk pending slice 4's
+        removal of this mixin."""
         schema = self.read_metadata_schema()
 
         def _rename(occ: RefOccurrence) -> Any:

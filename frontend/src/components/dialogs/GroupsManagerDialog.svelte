@@ -28,7 +28,6 @@
     { value: "multi_select", label: "Multi-select" },
     { value: "entity_ref", label: "Reference" },
     { value: "entity_ref_list", label: "Reference list" },
-    { value: "tags", label: "Tags" },
     { value: "color", label: "Colour" },
   ];
 

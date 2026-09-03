@@ -23,7 +23,6 @@
     MetadataFieldDefinition,
     MetadataValue,
     PromptEntrySummary,
-    ScopedTag,
     StructureDocument,
   } from "@/lib/types";
 
@@ -35,17 +34,13 @@
     onChange: (value: MetadataValue) => void;
     readOnly?: boolean;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
-    // The candidate rosters a member's entity_ref / tags picker resolves from
+    // The candidate rosters a member's entity_ref picker resolves from
     // (ADR-0081) — they are prop-fed and resolved client-side, so a member
     // picker is empty without them. Forwarded verbatim to each member's editor.
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
     structure?: StructureDocument | null;
     researchStructure?: StructureDocument | null;
-    knownTags?: ScopedTag[];
-    tagOrigin?: "project" | "assistant";
-    documentKind?: string;
-    entryType?: string;
     excludeId?: string | null;
     // ADR-0082 §2/F2, tri-state as of round 2 (P5): forwarded to a member's
     // ReferencePicker verbatim — undefined (the default) means create_missing
@@ -63,10 +58,6 @@
     promptEntries = [],
     structure = null,
     researchStructure = null,
-    knownTags = [],
-    tagOrigin = "project",
-    documentKind = "manuscript",
-    entryType = "",
     excludeId = null,
     createLayerId = undefined,
   }: Props = $props();
@@ -260,10 +251,6 @@
                     {promptEntries}
                     {structure}
                     {researchStructure}
-                    {knownTags}
-                    {tagOrigin}
-                    {documentKind}
-                    {entryType}
                     {excludeId}
                     {createLayerId}
                   />
@@ -286,10 +273,6 @@
               {promptEntries}
               {structure}
               {researchStructure}
-              {knownTags}
-              {tagOrigin}
-              {documentKind}
-              {entryType}
               {excludeId}
               {createLayerId}
             />

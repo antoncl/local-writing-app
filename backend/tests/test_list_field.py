@@ -141,18 +141,20 @@ class ListFieldProjectTests(unittest.TestCase):
         errors = self.service._validate_metadata_schema_definition(self.service.read_metadata_schema())
         self.assertTrue(any("references unknown group nope" in error for error in errors), errors)
 
-    def test_reference_and_tag_members_allowed_but_date_still_rejected(self) -> None:
-        # ADR-0081: a ref member (slice 2) and a tags member (slice 3) are valid
-        # item shapes — the one metadata-ref traversal indexes/scrubs/heals a
-        # nested ref and canonicalises/renames a nested tag, so neither is a silent
-        # mis-link. date/multi_select stay out (no item affordances).
+    def test_reference_members_allowed_but_date_still_rejected(self) -> None:
+        # ADR-0081: a ref member (slice 2) and a ref-LIST member (slice 3) are
+        # valid item shapes — the one metadata-ref traversal indexes/scrubs/heals
+        # a nested ref wherever it lives, so neither is a silent mis-link.
+        # date/multi_select stay out (no item affordances). A tag vocabulary is
+        # itself an entity_ref_list member now (ADR-0082 slice 2b — the `tags`
+        # field type is retired), so this covers that shape too.
         schema_path = self.root / "metadata.schema.yaml"
         data = self.service._read_yaml(schema_path)
         data["groups"]["cast"] = {
             "name": "Cast",
             "members": [
                 {"key": "who", "name": "Who", "type": "entity_ref"},
-                {"key": "topics", "name": "Topics", "type": "tags"},
+                {"key": "topics", "name": "Topics", "type": "entity_ref_list"},
             ],
         }
         data["fields"]["cast_list"] = {"name": "Cast list", "type": "list", "item_group": "cast"}
@@ -163,7 +165,7 @@ class ListFieldProjectTests(unittest.TestCase):
         data["fields"]["schedule_list"] = {"name": "Schedule", "type": "list", "item_group": "schedule"}
         self.service._write_yaml(schema_path, data)
         errors = self.service._validate_metadata_schema_definition(self.service.read_metadata_schema())
-        # The entity_ref and tags members are accepted — no integrity error names them.
+        # The entity_ref and entity_ref_list members are accepted — no integrity error names them.
         self.assertFalse(any("member who" in error for error in errors), errors)
         self.assertFalse(any("member topics" in error for error in errors), errors)
         # date is still not a supported item member.

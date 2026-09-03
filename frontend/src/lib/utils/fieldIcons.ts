@@ -20,7 +20,6 @@ export const DEFAULT_FIELD_GLYPH: Record<MetadataFieldType, string> = {
   multi_select: "list-check",
   entity_ref: "link",
   entity_ref_list: "affiliate",
-  tags: "tag",
   computed: "calculator",
   color: "palette",
   list: "list-numbers",
@@ -64,7 +63,9 @@ export function entryTypeIconClass(
 // Ordered list of field types surfaced in the type editor's
 // type-picker grid. `date` is intentionally omitted (deprecated per
 // [[decisions-field-types]]) and stays out of the picker; existing fields
-// of that type still render correctly via DEFAULT_FIELD_GLYPH.
+// of that type still render correctly via DEFAULT_FIELD_GLYPH. `tags` is
+// retired (ADR-0082 slice 2b) — a tag vocabulary is authored as
+// `entity_ref_list` → source kind `tag` → `create_missing`.
 export const FIELD_TYPE_CHOICES: MetadataFieldType[] = [
   "text",
   "long_text",
@@ -75,7 +76,6 @@ export const FIELD_TYPE_CHOICES: MetadataFieldType[] = [
   "list",
   "entity_ref",
   "entity_ref_list",
-  "tags",
   "computed",
   "color",
 ];
@@ -94,7 +94,6 @@ export function fieldTypeLabel(type: MetadataFieldType): string {
     multi_select: "Select, Multiple",
     entity_ref: "Entry Reference",
     entity_ref_list: "Entry Reference, Multiple",
-    tags: "Tags",
     computed: "Computed",
     color: "Colour",
     // Plain "List" — the type a writer actually calls a list (an ordered

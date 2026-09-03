@@ -29,10 +29,8 @@ from tempfile import TemporaryDirectory
 from layer_fixtures import declare_full_chain
 
 from app.models import (
-    CreateLoreEntryRequest,
     MergeTagsRequest,
     NodePickerConfig,
-    SaveLoreEntryRequest,
     UpdateTagColorRequest,
     UpdateTagScopeRequest,
 )
@@ -75,34 +73,6 @@ class LayeredTagsTests(unittest.TestCase):
 
     def _raw_tags(self, folder: Path) -> list[dict]:
         return self.service._read_yaml(folder / "tags.yaml").get("tags", [])
-
-    def _write_ancestor_lore(self, folder: Path, node_id: str, tags: list[str]) -> None:
-        (folder / "lore").mkdir(parents=True, exist_ok=True)
-        self.service._write_markdown_with_front_matter(
-            folder / "lore" / f"{node_id}.md",
-            {"id": node_id, "title": node_id, "entry_type": "lore:character", "metadata": {"labels": tags}},
-            "Body.",
-        )
-
-    def _seed_tags_field(self, *entry_types: str) -> None:
-        """ADR-0082 §2 retired the built-in `tags` field's TYPE (it's an
-        `entity_ref_list` into the `tag` kind now, not free-text) — so a test
-        exercising the tags-TYPE registry mechanism (TagsMixin, dead code until
-        a later slice) needs its OWN field of that type, same recipe
-        `_seed_tags_group_field` already uses for the nested case. `labels`
-        applies to whichever entry types the test needs."""
-        schema_path = self.root / "metadata.schema.yaml"
-        data = self.service._read_yaml(schema_path)
-        data.setdefault("fields", {})["labels"] = {"name": "Labels", "type": "tags"}
-        for entry_type in entry_types:
-            local_name = entry_type.split(":", 1)[1]
-            kind = entry_type.split(":", 1)[0]
-            et = data.setdefault("entry_types", {}).setdefault(
-                entry_type, {"name": local_name.title(), "kind": kind, "fields": []}
-            )
-            if "labels" not in et.setdefault("fields", []):
-                et["fields"].append("labels")
-        self.service._write_yaml(schema_path, data)
 
     # --- read ----------------------------------------------------------
 
@@ -173,143 +143,14 @@ class LayeredTagsTests(unittest.TestCase):
             self.service.read_known_tags(up_to_layer_id="nosuchlayer")
 
     # --- the flattening hazard -----------------------------------------
-
-    def test_saving_does_not_copy_ancestor_tags_into_the_project(self) -> None:
-        # THE regression test for #339's implementation hazard. Every registry
-        # writer reads merged and rewrites a whole file; hand one the merged map
-        # and the next ordinary lore save silently absorbs the world's whole
-        # vocabulary into this book's tags.yaml.
-        self._seed_tags_field("lore:character")
-        self._write_layer_tags(self.universe, [{"name": "treecat", "scope": {}}])
-        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Honor", entry_type="lore:character"))
-
-        self.service.save_lore_entry(
-            entry.id,
-            SaveLoreEntryRequest(
-                title="Honor",
-                body="A captain.",
-                base_revision=entry.revision,
-                entry_type="lore:character",
-                metadata={"labels": ["grayson"]},
-            ),
-        )
-
-        self.assertEqual([tag["name"] for tag in self._raw_tags(self.root)], ["grayson"])
-        self.assertEqual([tag["name"] for tag in self._raw_tags(self.universe)], ["treecat"])
-
-    def _seed_tags_group_field(self) -> None:
-        """Give lore:character a `notes` list field whose item_group has a tags
-        member, so a tag can live nested (ADR-0081 slice 3)."""
-        schema_path = self.root / "metadata.schema.yaml"
-        data = self.service._read_yaml(schema_path)
-        data.setdefault("groups", {})["topics"] = {
-            "name": "Topics",
-            "members": [{"key": "topic", "name": "Topic", "type": "tags"}],
-        }
-        data.setdefault("fields", {})["notes"] = {"name": "Notes", "type": "list", "item_group": "topics"}
-        et = data.setdefault("entry_types", {}).setdefault(
-            "lore:character", {"name": "Character", "kind": "lore", "fields": []}
-        )
-        et.setdefault("fields", []).append("notes")
-        self.service._write_yaml(schema_path, data)
-
-    def test_a_tag_inside_a_group_member_is_registered_and_canonicalised(self) -> None:
-        # ADR-0081 slice 3: the tag lifecycle descends into an item_group member —
-        # a nested tag is registered in this layer and casing-canonicalised on
-        # save, exactly as a top-level tag. A top-level-only walk leaves it
-        # unregistered (the tag silent mis-link).
-        self._seed_tags_group_field()
-        entry = self.service.create_lore_entry(
-            CreateLoreEntryRequest(title="Zed", entry_type="lore:character")
-        )
-        saved = self.service.save_lore_entry(
-            entry.id,
-            SaveLoreEntryRequest(
-                title="Zed",
-                body="x",
-                base_revision=entry.revision,
-                entry_type="lore:character",
-                metadata={"notes": [{"topic": ["Hero", "hero"]}]},
-            ),
-        )
-        # Registered in this layer's tags.yaml (invisible to a top-level-only walk).
-        self.assertIn("Hero", [tag["name"] for tag in self._raw_tags(self.root)])
-        # Canonicalised in the saved node: dup casing collapses to first-seen "Hero".
-        self.assertEqual(saved.metadata["notes"][0]["topic"], ["Hero"])
-
-    def test_renaming_a_tag_descends_into_a_group_member(self) -> None:
-        # ADR-0081 slice 3: a tag rename (merge) rewrites a nested tag value, not
-        # just top-level tags fields. A top-level-only rename leaves the nested tag
-        # pointing at the old name (a stale/mis-linked tag).
-        self._seed_tags_group_field()
-        entry = self.service.create_lore_entry(
-            CreateLoreEntryRequest(title="Ripley", entry_type="lore:character")
-        )
-        self.service.save_lore_entry(
-            entry.id,
-            SaveLoreEntryRequest(
-                title="Ripley",
-                body="x",
-                base_revision=entry.revision,
-                entry_type="lore:character",
-                metadata={"notes": [{"topic": ["Hero"]}]},
-            ),
-        )
-        self.service.merge_tags(MergeTagsRequest(sources=["hero"], target="Protagonist"))
-        updated = self.service.read_lore_entry(entry.id)
-        self.assertEqual(updated.metadata["notes"][0]["topic"], ["Protagonist"])
-
-    def test_reusing_an_inherited_tag_writes_only_the_local_assertion(self) -> None:
-        # The tag is known (merged), so it is not re-registered as new; the
-        # broadening it triggers is recorded HERE as this layer's assertion, and
-        # the ancestor's record is not touched. Union is associative, so the
-        # merged read still reports the broadened scope.
-        self._seed_tags_field("lore:location")
-        self._write_layer_tags(self.universe, [{"name": "naval", "scope": _scope("lore", "lore:character")}])
-        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Basilisk", entry_type="lore:location"))
-
-        self.service.save_lore_entry(
-            entry.id,
-            SaveLoreEntryRequest(
-                title="Basilisk",
-                body="A station.",
-                base_revision=entry.revision,
-                entry_type="lore:location",
-                metadata={"labels": ["naval"]},
-            ),
-        )
-
-        self.assertEqual(
-            self._raw_tags(self.universe),
-            [{"name": "naval", "scope": _scope("lore", "lore:character")}],
-        )
-        self.assertEqual(
-            self._raw_tags(self.root),
-            [{"name": "naval", "scope": _scope("lore", "lore:location")}],
-        )
-        merged = self.service.read_known_tags().tags[0]
-        self.assertEqual(sorted(merged.scope.entry_types["lore"]), ["lore:character", "lore:location"])
-
-    def test_saving_adopts_the_ancestors_casing_for_an_inherited_tag(self) -> None:
-        # The bug this issue was filed for: an inherited tag used to be unknown
-        # here, so it was registered as new and the author's casing forked the
-        # vocabulary. Layering the read fixes it at the same call site.
-        self._seed_tags_field("lore:character")
-        self._write_layer_tags(self.universe, [{"name": "Treecat", "scope": {}}])
-        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character"))
-
-        saved = self.service.save_lore_entry(
-            entry.id,
-            SaveLoreEntryRequest(
-                title="Nimitz",
-                body="A treecat.",
-                base_revision=entry.revision,
-                entry_type="lore:character",
-                metadata={"labels": ["treecat"]},
-            ),
-        )
-
-        self.assertEqual(saved.metadata["labels"], ["Treecat"])
+    #
+    # The save-time registration/canonicalisation these tests used to pin
+    # (`_canonicalise_metadata_tags`) retired with the `tags` field TYPE
+    # (ADR-0082 slice 2b) — a tag vocabulary is now an `entity_ref_list` field,
+    # which does not canonicalise free text or auto-register new names on
+    # save. What's left below is the REGISTRY itself (scope/colour/merge over
+    # `tags.yaml`, directly written/read here), which TagsMixin still serves
+    # unchanged pending its slice-4 removal.
 
     # --- bounded writers ------------------------------------------------
 
@@ -386,18 +227,6 @@ class LayeredTagsTests(unittest.TestCase):
         with self.assertRaisesRegex(ProjectServiceError, "used in a parent folder"):
             self.service.merge_tags(MergeTagsRequest(sources=["treecat"], target="cats"))
 
-    def test_merging_a_source_used_in_ancestor_documents_is_refused(self) -> None:
-        # No ancestor *record*, but an ancestor *document* carries it — which
-        # this merge cannot rewrite. Allowing it would leave the merged-away tag
-        # in the (layered) usage count with no registry record anywhere, to be
-        # re-registered as new by the next save touching that entry.
-        self._seed_tags_field("lore:character")
-        self._write_layer_tags(self.root, [{"name": "sorcery", "scope": {}}, {"name": "magic", "scope": {}}])
-        self._write_ancestor_lore(self.universe, "old-entry", ["sorcery"])
-
-        with self.assertRaisesRegex(ProjectServiceError, "used in a parent folder"):
-            self.service.merge_tags(MergeTagsRequest(sources=["sorcery"], target="magic"))
-
     def test_merging_into_an_inherited_target_keeps_the_ancestor_scope_upstream(self) -> None:
         # The target may be inherited even when every source is local. Seeding the
         # union from the merged record would make this layer assert a scope the
@@ -437,29 +266,11 @@ class LayeredTagsTests(unittest.TestCase):
         self.assertEqual([tag["name"] for tag in self._raw_tags(self.universe)], ["treecat"])
 
     # --- overview -------------------------------------------------------
-
-    def test_usage_counts_span_the_layer_chain(self) -> None:
-        # A merged registry counted over one layer's documents is a half-layered
-        # read: it looks right and reports every inherited tag as less used than
-        # it is.
-        self._seed_tags_field("lore:character")
-        self._write_layer_tags(self.universe, [{"name": "treecat", "scope": {}}])
-        self._write_ancestor_lore(self.universe, "nimitz", ["treecat"])
-        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Samantha", entry_type="lore:character"))
-        self.service.save_lore_entry(
-            entry.id,
-            SaveLoreEntryRequest(
-                title="Samantha",
-                body="Another treecat.",
-                base_revision=entry.revision,
-                entry_type="lore:character",
-                metadata={"labels": ["treecat"]},
-            ),
-        )
-
-        usage = next(usage for usage in self.service.read_tags_overview().tags if usage.name == "treecat")
-
-        self.assertEqual(usage.count, 2)
+    #
+    # `test_usage_counts_span_the_layer_chain` (a document usage-count over a
+    # `tags`-typed field) retired with the field TYPE (ADR-0082 slice 2b):
+    # `_count_document_tags` now matches no schema field, so a document usage
+    # count is always 0 — see `TagsMixin._count_document_tags`'s own docstring.
 
     # --- colour (#247) --------------------------------------------------
 
@@ -552,28 +363,10 @@ class LayeredTagsTests(unittest.TestCase):
 
         self.assertEqual(usage.color, "forest")
 
-    def test_saving_a_broadened_coloured_tag_keeps_its_colour(self) -> None:
-        # The write-back that matters most: a coloured tag applied to a NEW
-        # sub-type auto-broadens on a normal save; that rebuild must carry the
-        # colour, or routine writing silently wipes it.
-        self._seed_tags_field("lore:location")
-        self._write_layer_tags(
-            self.root, [{"name": "hero", "scope": _scope("lore", "lore:character"), "color": "forest"}]
-        )
-        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Grayson", entry_type="lore:location"))
-        self.service.save_lore_entry(
-            entry.id,
-            SaveLoreEntryRequest(
-                title="Grayson",
-                body="A place.",
-                base_revision=entry.revision,
-                entry_type="lore:location",
-                metadata={"labels": ["hero"]},
-            ),
-        )
-
-        tag = next(tag for tag in self.service.read_known_tags().tags if tag.name == "hero")
-        self.assertEqual(tag.color, "forest")
+    # `test_saving_a_broadened_coloured_tag_keeps_its_colour` (a save-time
+    # scope auto-broaden) retired with the `tags` field TYPE (ADR-0082 slice
+    # 2b) along with `_canonicalise_metadata_tags`; scope broadening survives
+    # only through the direct registry writers below (`update_tag_scope`).
 
     def test_editing_scope_keeps_the_tags_colour(self) -> None:
         self._write_layer_tags(

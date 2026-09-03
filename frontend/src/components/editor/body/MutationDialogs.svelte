@@ -17,7 +17,6 @@
     type MutationUnitDraft,
   } from "@/lib/editor-core/mutationNodes";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
-  import { knownTagsStore } from "@/lib/stores/tags";
   import type { Editor } from "@tiptap/core";
   import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
 
@@ -101,7 +100,6 @@
     {loreEntries}
     {schema}
     {implicitContextMatcher}
-    knownTags={$knownTagsStore}
     initial={editInitial}
     {presetEntityId}
     {sceneId}

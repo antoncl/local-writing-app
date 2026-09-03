@@ -99,7 +99,7 @@ MUTATION_CARRIER_ROW_PATTERN = re.compile(
 )
 
 # Field types whose values are collections; these accept add/remove ops (#58).
-COLLECTION_FIELD_TYPES = frozenset({"multi_select", "tags", "entity_ref_list"})
+COLLECTION_FIELD_TYPES = frozenset({"multi_select", "entity_ref_list"})
 
 # Scalar text types that accept an additive `add` (append) op: the effective
 # value is the base (or latest live replace) with live adds concatenated in

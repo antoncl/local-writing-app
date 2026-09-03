@@ -48,12 +48,21 @@ function entryTypeField(name: string, kind: string, schema: MetadataSchema | nul
   return { name, type: "select", options };
 }
 
-// A var promoted into a `tagged` leaf compares tags → a tags picker (already
-// multi-valued, so `toMultiValued` passes it through). `tagged` is retired as a
-// designer-authorable predicate (ViewFlowNode), reachable only via a hand-written
-// spec, but the derivation blind spot was the same, so it's covered here.
+// A var promoted into a `tagged` leaf compares tag NODE ids → an entity_ref_list
+// picker over the tag vocabulary (already multi-valued, so `toMultiValued` passes
+// it through), scoped to `tag:assistant_tag` — the vocabulary a `tagged` leaf has
+// historically named (the SHIPPED assistant view's own TAG param instead promotes
+// a `field` predicate on `assistant_tags`, resolved by the `field` branch below,
+// not this one). `tagged` is retired as a designer-authorable predicate
+// (ViewFlowNode), reachable only via a hand-written spec, but the derivation
+// blind spot was the same, so it's covered here.
 function taggedField(name: string): MetadataFieldDefinition {
-  return { name, type: "tags", options: [] };
+  return {
+    name,
+    type: "entity_ref_list",
+    options: [],
+    picker_config: { sources: [{ kind: "tag", expr: { type: "tag:assistant_tag" } }] },
+  };
 }
 
 // A promoted param always fills an overlap/disjoint predicate's `value` operand

@@ -17,7 +17,7 @@ vi.mock("@/lib/errorLog", () => ({ reportClientError: vi.fn(), installGlobalErro
 // the lore entries whose metadata.tags contains "villain".
 const tagSpec: ViewSpec = { kind: "lore", expr: { tagged: "villain" } };
 const tagSelector: NodePickerRef = {
-  id: "tag:lore:villain",
+  id: "tagged:lore:villain",
   kind: "tag",
   title: "villain",
   selector: tagSpec,
@@ -157,7 +157,7 @@ describe("expandSelectorsInEncodedValue", () => {
   });
 
   it("never leaves a selector in the output (a stale one expands to nothing)", () => {
-    const stale: NodePickerRef = { id: "tag:lore:ghost", kind: "tag", title: "ghost", selector: { kind: "lore", expr: { tagged: "ghost" } } };
+    const stale: NodePickerRef = { id: "tagged:lore:ghost", kind: "tag", title: "ghost", selector: { kind: "lore", expr: { tagged: "ghost" } } };
     const encoded = encodePickerValue([stale, { id: "lore_b", kind: "lore", title: "Mara" }]);
     const out = JSON.parse(expandSelectorsInEncodedValue(encoded, ROSTER)) as NodePickerRef[];
     expect(out.some((r) => r.kind === "tag" || r.kind === "view")).toBe(false);
@@ -215,7 +215,7 @@ describe("selectorExpansionAnomaly + send-time logging", () => {
     vi.mocked(reportClientError).mockClear();
     // A distinct selector id so the module-level dedup can't be pre-tripped.
     const orphanTag: NodePickerRef = {
-      id: "tag:lore:orphan-uniq",
+      id: "tagged:lore:orphan-uniq",
       kind: "tag",
       title: "orphan",
       selector: { kind: "lore", expr: { tagged: "orphan" } } as ViewSpec,
@@ -237,7 +237,7 @@ describe("selectorExpansionAnomaly + send-time logging", () => {
     // A tag that matches no lore, over a PRESENT lore roster — an ordinary empty
     // result, not an anomaly. Must stay silent or every zero-match tag spams the log.
     const ghost: NodePickerRef = {
-      id: "tag:lore:ghost-nolog",
+      id: "tagged:lore:ghost-nolog",
       kind: "tag",
       title: "ghost",
       selector: { kind: "lore", expr: { tagged: "ghost-nolog" } } as ViewSpec,

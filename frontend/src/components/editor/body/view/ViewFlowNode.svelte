@@ -323,14 +323,13 @@
   let matchField = $derived(cfg.match?.field ?? "");
   let matchDir = $derived<NonNullable<ViewNodeData["match"]>["direction"]>(cfg.match?.direction ?? "child_to_parent");
   let matchBy = $derived<NonNullable<ViewNodeData["match"]>["by"]>(cfg.match?.by ?? "ref");
-  // Joinable field types (ADR-0028 §B): refs (by id) or text/tags (by title). A
+  // Joinable field types (ADR-0028 §B): refs (by id) or text/select (by title). A
   // number/boolean/date/computed/color field is never a tree edge, so keep the
   // picker to the types that can actually carry a parent↔child link. (context_pick
   // is a prompt-runtime input, not a metadata field type, so it can't appear here.)
   const NEST_JOINABLE_TYPES: MetadataFieldType[] = [
     "entity_ref",
     "entity_ref_list",
-    "tags",
     "select",
     "multi_select",
     "text",
@@ -471,7 +470,7 @@
   // `value_type` is groupable (the assistants roster's `listed`, #333) is
   // offered like any other — `type: "computed"` states authorship, not shape,
   // and a read-only field is still a perfectly good bucket key.
-  const GROUPABLE_TYPES: string[] = ["select", "multi_select", "tags", "entity_ref", "entity_ref_list"];
+  const GROUPABLE_TYPES: string[] = ["select", "multi_select", "entity_ref", "entity_ref_list"];
   let groupableFields = $derived(
     nodeFields.filter(
       (f) =>
@@ -563,7 +562,6 @@
       promptEntries={ctx.promptEntries}
       structure={ctx.structure}
       researchStructure={ctx.researchStructure}
-      knownTags={ctx.knownTagsFor(id)}
       {ariaLabel}
     />
   {/if}

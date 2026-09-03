@@ -427,30 +427,6 @@ export type KnownTags = {
   tags: ScopedTag[];
 };
 
-// The machine-global assistant-tag vocabulary (#88). Assistants live
-// machine-globally, so this is separate from a project's scoped KnownTags.
-// `color` is a palette swatch id (or null when unassigned).
-export type AssistantTag = {
-  name: string;
-  color: string | null;
-};
-
-export type AssistantTagList = {
-  tags: AssistantTag[];
-};
-
-// The assistant mirror of TagUsage, minus scope: assistant tags are flat
-// (name + colour only), so there is nothing to scope (#247).
-export type AssistantTagUsage = {
-  name: string;
-  count: number;
-  color?: string | null;
-};
-
-export type AssistantTagsOverview = {
-  tags: AssistantTagUsage[];
-};
-
 export type TagUsage = {
   name: string;
   scope: NodePickerConfig;
@@ -518,7 +494,6 @@ export type MetadataFieldType =
   | "multi_select"
   | "entity_ref"
   | "entity_ref_list"
-  | "tags"
   | "computed"
   | "color"
   | "list";
@@ -534,16 +509,16 @@ export const LIST_ITEM_SCALAR_TYPES = ["text", "long_text", "number", "boolean",
 export type ListItemScalarType = (typeof LIST_ITEM_SCALAR_TYPES)[number];
 
 // The types an item_group MEMBER may be (ADR-0081): the scalars above plus the
-// reference/tag types. Broader than the item_type sugar (which stays scalar-only)
-// — a named group member can hold a reference or tags, because their lifecycles
-// reach a nested value (a ref indexed / scrubbed / healed, a tag canonicalised /
-// renamed, like a top-level one). Used for group-shape filtering in the schema
-// editor. Mirrors the backend LIST_ITEM_GROUP_MEMBER_TYPES.
+// reference types. Broader than the item_type sugar (which stays scalar-only)
+// — a named group member can hold a reference, because its lifecycle reaches a
+// nested value (a ref indexed / scrubbed / healed, like a top-level one). Used
+// for group-shape filtering in the schema editor. Mirrors the backend
+// LIST_ITEM_GROUP_MEMBER_TYPES. `tags` retired (ADR-0082 slice 2b) — a tag
+// vocabulary is authored as `entity_ref_list` with `create_missing`.
 export const LIST_ITEM_GROUP_MEMBER_TYPES = [
   ...LIST_ITEM_SCALAR_TYPES,
   "entity_ref",
   "entity_ref_list",
-  "tags",
 ] as const;
 
 // One choice in a select / multi_select field, or a select prompt input.
@@ -632,7 +607,6 @@ export type PromptInputType =
   | "boolean"
   | "select"
   | "multi_select"
-  | "tags"
   | "list"
   | "entity_ref"
   | "entity_ref_list"

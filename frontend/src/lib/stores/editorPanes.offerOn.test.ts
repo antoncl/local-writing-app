@@ -47,7 +47,6 @@ function seedPromptPane(over: Record<string, unknown> = {}): void {
 
 function stubRefreshes(): void {
   vi.spyOn(api, "listPromptEntries").mockResolvedValue({ entries: [] });
-  vi.spyOn(api, "getAssistantTags").mockResolvedValue({ tags: [] });
   vi.spyOn(api, "getKnownTags").mockResolvedValue({ tags: [] });
   vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {} });
 }

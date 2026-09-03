@@ -29,7 +29,6 @@ from app.models import (
     SaveAssistantEntryRequest,
     SavePromptEntryRequest,
 )
-from app.services import machine_settings as ms_service
 from app.services.project.errors import ProjectServiceError
 from app.services.project.overrides import OVERRIDES_FOLDER
 from app.services.project_service import ProjectService
@@ -309,22 +308,6 @@ class PromptOverrideTests(unittest.TestCase):
         text = next((self.root / OVERRIDES_FOLDER).glob("*.md")).read_text(encoding="utf-8")
         self.assertIn("assistant_tags", text)
         self.assertNotIn("color", text)
-
-    # --- vocabulary registration ---------------------------------------
-
-    def test_effective_assistant_tags_are_not_registered_in_the_legacy_vocabulary(self) -> None:
-        # ADR-0082 §2: `assistant_tags` holds tag-node ids now, not free-text
-        # names — registering an id into the legacy name-keyed
-        # `assistant-tags.yaml` would corrupt it, so an override save (like an
-        # owned save, test_tag_bindings.py) no longer registers at all (#88's
-        # registration retired here; the store itself is dead code until a
-        # later slice removes it).
-        romance = self._tag("Romance")
-        before = ms_service.load_assistant_tags()
-        self._write_prompt_at(self.series, "revise", "Revise plotline", {"assistant_tags": []})
-        self._save_override("revise", {"assistant_tags": [romance]})
-        self.assertEqual(ms_service.load_assistant_tags(), before)
-
 
 if __name__ == "__main__":
     unittest.main()

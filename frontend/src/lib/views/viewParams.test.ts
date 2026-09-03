@@ -160,14 +160,14 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
     expect(c.field.type).toBe("text");
   });
 
-  it("a `tagged`-referenced param → a tags control (retired for authoring, hand-written specs), #293", () => {
+  it("a `tagged`-referenced param → an entity_ref_list tag-vocabulary control (retired for authoring, hand-written specs), #293", () => {
     const spec: ViewSpec = {
       kind: "lore",
       expr: { filter: { of: { descendants_of: "lore:base" }, pred: { tagged: { var: "Tag" } } } },
       params: [{ name: "Tag", label: "Tag", default: null }],
     };
     const [c] = resolveParamControls(spec, SCHEMA);
-    expect([c.field.type, c.fieldKey]).toEqual(["tags", "tags"]);
+    expect([c.field.type, c.fieldKey]).toEqual(["entity_ref_list", "tags"]);
   });
 
   it("no params ⇒ no controls (degenerate closed view)", () => {

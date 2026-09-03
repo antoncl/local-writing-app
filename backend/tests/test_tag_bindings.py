@@ -6,14 +6,13 @@ Covers: the default schema's `tags`/`assistant_tags` fields are
 `assistant:assistant` lists `assistant_tags`, not `tags`; `_field_shape_errors`
 accepts `create_missing` with exactly one concrete entry type and rejects it
 otherwise (two entry types, an abstract type, two kinds); saving an assistant
-with `assistant_tags: [tag_id]` succeeds and does not touch the legacy
-`assistant-tags.yaml` registry (retired in a later slice, not written to here
-anymore); the built-in assistant view's TAG predicate is covered in
-test_views.py (golden fixture comparison).
+or a prompt with `assistant_tags: [tag_id]` succeeds; the built-in assistant
+view's TAG predicate is covered in test_views.py (golden fixture comparison).
+The legacy `assistant-tags.yaml` registry itself is retired (ADR-0082 slice
+2b) — its last reader (`TagManagerDialog`'s assistant half) went with it.
 
-NOT covered here (part B / later slices, ADR-0082 §2 intent): retiring the
-`tags` field TYPE, `tagged:` by id, the parity corpus, the project tag
-registry.
+NOT covered here (part B / later slices, ADR-0082 §2 intent): `tagged:` by id,
+the parity corpus, the project tag registry.
 """
 
 from __future__ import annotations
@@ -32,7 +31,6 @@ from app.models import (
     SaveAssistantEntryRequest,
     SavePromptEntryRequest,
 )
-from app.services import machine_settings as ms
 
 
 class FromMembershipRoundTripTests(unittest.TestCase):
@@ -229,9 +227,9 @@ class AssistantTagsRenameSaveTests(unittest.TestCase):
             CreateTagEntryRequest(title="Editor", entry_type="tag:assistant_tag")
         ).id
 
-    def test_saving_an_assistant_with_assistant_tags_ids_succeeds_and_does_not_touch_the_registry(self) -> None:
+    def test_saving_an_assistant_with_assistant_tags_ids_succeeds(self) -> None:
+        # ADR-0082 §2: the value is a tag-id list now, not free-text names.
         tag_id = self._make_tag()
-        before = ms.load_assistant_tags()
         entry = self.service.create_assistant_entry(
             CreateAssistantEntryRequest(title="Ed", entry_type="assistant:assistant", layer_id="")
         )
@@ -244,13 +242,9 @@ class AssistantTagsRenameSaveTests(unittest.TestCase):
             ),
         )
         self.assertEqual(saved.metadata.get("assistant_tags"), [tag_id])
-        # ADR-0082 §2: the value is a tag-id list now, not free-text names — the
-        # legacy name-keyed registry must not gain an "Editor" record.
-        self.assertEqual(ms.load_assistant_tags(), before)
 
-    def test_saving_a_prompt_with_assistant_tags_ids_does_not_touch_the_registry(self) -> None:
+    def test_saving_a_prompt_with_assistant_tags_ids_succeeds(self) -> None:
         tag_id = self._make_tag()
-        before = ms.load_assistant_tags()
         entry = self.service.create_prompt_entry(
             CreatePromptEntryRequest(title="Draft", entry_type="prompt:general")
         )
@@ -264,7 +258,94 @@ class AssistantTagsRenameSaveTests(unittest.TestCase):
             ),
         )
         self.assertEqual(saved.metadata.get("assistant_tags"), [tag_id])
-        self.assertEqual(ms.load_assistant_tags(), before)
+
+
+class UserVocabularyEndToEndTests(unittest.TestCase):
+    """ADR-0082 Acceptance steps 1-2, through the public API: a user-authored
+    tag vocabulary (a custom `tag` sub-type, not a built-in), an
+    `entity_ref_list` field with `create_missing` referencing it, a tag
+    created through the tag-entry route, a scene saved with that tag, and a
+    `tagged: <id>` selector picking the scene up — end-to-end, no built-in
+    field or vocabulary involved."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "User Vocabulary Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_authored_vocabulary_tag_selects_the_scene_it_is_saved_on(self) -> None:
+        from app.models import (
+            EntryTypeDefinition,
+            MetadataFieldDefinition,
+            SaveSceneRequest,
+            UpsertMetadataEntryTypeRequest,
+            UpsertMetadataFieldRequest,
+        )
+        from app.services.ai.selector_eval import (
+            SelectorNode,
+            evaluate_selector_membership,
+            selector_references,
+        )
+
+        layer_id = self.service.read_metadata_schema_layers().layers[-1].id
+
+        # Step 1a: author the `tag:motifs` sub-type via the entry-type upsert route.
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="tag:motifs",
+                entry_type=EntryTypeDefinition(name="Motif", kind="tag", parent="tag:base", has_body=False),
+            )
+        )
+        # Step 1b: an entity_ref_list field on manuscript:scene, sourced from the
+        # new vocabulary, with "create when missing" ticked.
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layer_id,
+                field_id="motifs",
+                field=MetadataFieldDefinition(
+                    name="Motifs",
+                    type="entity_ref_list",
+                    picker_config={
+                        "sources": [{"kind": "tag", "expr": {"type": "tag:motifs"}}],
+                        "create_missing": True,
+                    },
+                ),
+                entry_type="manuscript:scene",
+            )
+        )
+
+        # Step 2a: create a tag via /api/tag-entries (create_tag_entry).
+        tag_id = self.service.create_tag_entry(
+            CreateTagEntryRequest(title="mirrors", entry_type="tag:motifs")
+        ).id
+
+        # Step 2b: save a scene referencing it.
+        from app.models import CreateSceneRequest
+
+        scene = self.service.create_scene(CreateSceneRequest(title="Reflections"))
+        saved = self.service.save_scene(
+            scene.id,
+            SaveSceneRequest(
+                title="Reflections",
+                body="Mirrors everywhere.",
+                base_revision=scene.revision,
+                entry_type="manuscript:scene",
+                metadata={"motifs": [tag_id]},
+            ),
+        )
+        self.assertEqual(saved.metadata.get("motifs"), [tag_id])
+
+        # A `tagged: <id>` selector over the manuscript roster selects the scene —
+        # the same schema-free backlink test the picker's "By tag" axis relies on.
+        node = SelectorNode(saved.id, "manuscript:scene", selector_references(saved.metadata), saved.metadata)
+        member_ids = evaluate_selector_membership(
+            {"tagged": tag_id}, [node], is_descendant=lambda et, target: et == target
+        )
+        self.assertEqual(member_ids, [saved.id])
 
 
 if __name__ == "__main__":

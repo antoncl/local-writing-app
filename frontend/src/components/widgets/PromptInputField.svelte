@@ -4,9 +4,9 @@
   // string. Used by both the inputs-dialog (prompt-dispatch flow) and the
   // prompt-preview inputs panel — keeps look-and-feel identical and halves the
   // maintenance surface for input types. The shared *value* types
-  // (multi_select / tags / list / color) delegate to the metadata
-  // FieldValueEditor — one dispatcher, no parallel widget code (#1225); the
-  // scalar / ref / context_pick types keep their own local controls.
+  // (multi_select / list / color) delegate to the metadata FieldValueEditor —
+  // one dispatcher, no parallel widget code (#1225); the scalar / ref /
+  // context_pick types keep their own local controls.
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
@@ -211,15 +211,12 @@
     tagEntries={$tagNodesStore}
     onChange={(detail) => onChange(JSON.stringify(detail.value))}
   />
-{:else if input.type === "multi_select" || input.type === "tags" || input.type === "list" || input.type === "color"}
-  <!-- Shared value types → the metadata FieldValueEditor (#1225). tagOrigin
-       "assistant" keeps a `tags` input add-only (no project tag governance in
-       the prompt-authoring context). -->
+{:else if input.type === "multi_select" || input.type === "list" || input.type === "color"}
+  <!-- Shared value types → the metadata FieldValueEditor (#1225). -->
   <FieldValueEditor
     field={inputAsField()}
     value={decodeFieldValue(value)}
     ariaLabel={ariaLabel ?? (input.label || input.name)}
-    tagOrigin="assistant"
     implicitContextMatcher={implicitContextMatcher}
     onChange={(v) => onChange(encodeFieldValue(v))}
   />

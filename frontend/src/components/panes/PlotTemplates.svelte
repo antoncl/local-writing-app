@@ -57,28 +57,59 @@
   // Every NodeList is backed by a view (ADR-0022): hand the whole view (spec +
   // roster + data env) to ViewNodeList, which owns evaluation. Grouping (none
   // here) comes from the spec, never synthesized in the pane.
-  const view = $derived({
+  //
+  // ADR-0080 slice 2: section arc templates apart from plotline templates. `family` isn't
+  // a schema field the view evaluator reads, so the split is a plain array partition, each
+  // half rendered through its own ViewNodeList sharing the same view spec — not a view
+  // group_by.
+  const plotlineEntries = $derived(visibleEntries.filter((e) => e.template?.family !== "character_arc"));
+  const arcEntries = $derived(visibleEntries.filter((e) => e.template?.family === "character_arc"));
+  const plotlineView = $derived({
     spec: viewSpec,
-    universe: visibleEntries,
+    universe: plotlineEntries,
+    schema,
+    referenceIndex: $referenceIndexStore,
+  });
+  const arcView = $derived({
+    spec: viewSpec,
+    universe: arcEntries,
     schema,
     referenceIndex: $referenceIndexStore,
   });
 </script>
 
-<ViewNodeList
-  {view}
-  active={(entry) => focusedDocument?.type === "plot_template" && focusedDocument.id === entry.id}
-  onClick={(entry) => onOpenEntry(entry.id)}
-  row={entryRow}
->
-  {#snippet whenEmpty()}
-    {#if entries.length === 0}
-      <p class="muted">No plot templates.</p>
-    {:else}
+{#if plotlineEntries.length}
+  <div class="section-head"><span>Plotlines</span></div>
+  <ViewNodeList
+    view={plotlineView}
+    active={(entry) => focusedDocument?.type === "plot_template" && focusedDocument.id === entry.id}
+    onClick={(entry) => onOpenEntry(entry.id)}
+    row={entryRow}
+  >
+    {#snippet whenEmpty()}
+      <!-- A raw partition can be non-empty while its evaluated view is (e.g. the schema
+           doesn't root plot:template under plot:base, #724) — keep the pane's own copy
+           rather than falling through to ViewNodeList's generic "No entries." -->
+      <p class="muted">{entries.length === 0 ? "No plot templates." : "No plot templates match this view."}</p>
+    {/snippet}
+  </ViewNodeList>
+{/if}
+{#if arcEntries.length}
+  <div class="section-head"><i class="ti ti-seedling" aria-hidden="true"></i><span>Character arcs</span></div>
+  <ViewNodeList
+    view={arcView}
+    active={(entry) => focusedDocument?.type === "plot_template" && focusedDocument.id === entry.id}
+    onClick={(entry) => onOpenEntry(entry.id)}
+    row={entryRow}
+  >
+    {#snippet whenEmpty()}
       <p class="muted">No plot templates match this view.</p>
-    {/if}
-  {/snippet}
-</ViewNodeList>
+    {/snippet}
+  </ViewNodeList>
+{/if}
+{#if !plotlineEntries.length && !arcEntries.length}
+  <p class="muted">{entries.length === 0 ? "No plot templates." : "No plot templates match this view."}</p>
+{/if}
 
 <!-- Reveal/hide the curated-away Library templates (shared shelf footer, #723).
      Only shown when this project has hidden at least one. -->
@@ -106,4 +137,22 @@
     {/snippet}
   </NodeRow>
 {/snippet}
+
+<style>
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 4px 2px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .section-head .ti {
+    font-size: var(--fs-sm);
+    line-height: 1;
+  }
+</style>
 

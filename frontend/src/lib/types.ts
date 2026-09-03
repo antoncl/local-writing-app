@@ -323,6 +323,7 @@ export type {
   PlotBoardProjection,
   PlotBoardCard,
   PlotBoardBeat,
+  PlotCardBeat,
   PlotBoardContainer,
   PlotBoardPlotline,
   PlotBoardPlotlineBeat,

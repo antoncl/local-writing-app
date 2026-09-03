@@ -23,11 +23,11 @@ import type { CoordinateExtent, Node } from "@xyflow/svelte";
 import type {
   BoardSize,
   BoardXY,
-  PlotBoardBeat,
   PlotBoardCharacterArc,
   PlotBoardLayout,
   PlotBoardPlotlineBeat,
   PlotBoardProjection,
+  PlotCardBeat,
 } from "@/lib/types";
 import { getSwatch, resolveColor, resolveColorForKind } from "@/lib/utils/colors";
 import { loreEntriesStore } from "@/lib/stores/lore";
@@ -67,8 +67,10 @@ export type PlotCardData = {
   // Page status (Slice 5b): on_page (scene attached) / off_page / unwritten. null =
   // the sparse default, rendered as unwritten. Drives the card's 3-state marker.
   pageStatus: string | null;
-  // The resolved beats this card fulfils (Slice 5b) — the badges it wears.
-  beats: PlotBoardBeat[];
+  // The resolved beats this card fulfils (Slice 5b) — the badges it wears, each
+  // carrying its denormalised effective colour (ADR-0080 slice 3b-ii): an
+  // event-beat's plotline swatch, or a change-beat's resolved arc colour.
+  beats: PlotCardBeat[];
   // The ids of the cards this card leads to (Slice 6b) — the authored causal links,
   // seeding the "Leads to…" picker's checked state.
   causalLinks: string[];
@@ -160,7 +162,13 @@ export function reconcileArcUiState(projection: PlotBoardProjection | null, stat
 // Geometry (px). Exported so the unit test asserts against the same constants the
 // layout uses rather than hard-coding magic numbers that could silently drift.
 export const CARD_WIDTH = 210;
-export const CARD_HEIGHT = 110;
+// Raised 110 → 150 (ADR-0080 slice 3b-ii): a card can now wear TWO pill segments
+// (event-beats + change-beats), which didn't fit the old height — the second segment
+// scrolled off, undercutting the "read a pivotal card at a glance" journey. Every
+// spacing constant that references CARD_HEIGHT scales with it, so this one knob
+// re-spaces the grid. The beats region still shrink-scrolls (`.beat-segments`) so a
+// pathologically over-beated card is bounded rather than overflowing even at 150.
+export const CARD_HEIGHT = 150;
 export const CARD_GAP_X = 24; // between cards in a row
 export const PLOTLINE_WIDTH = 240; // a plotline node is a touch wider than a card
 // A plot holder node (plotline or arc) is variable-height — SvelteFlow sizes it to its
@@ -395,6 +403,24 @@ export function buildBoardNodes(
   for (const act of acts) {
     for (const box of innerBoxesByAct.get(act.id) ?? []) pushContainer(box.id, box.title, 1, innerBox.get(box.id)!);
   }
+
+  // Arc colour resolution (Amendment 1 §1) — ONE site, used both to denormalise a
+  // card's change-beats below and to seed the arc node's own `resolvedColorHex`
+  // further down: own colour → the bound character's (lore) colour → the lore-kind
+  // default, never the generic `plot` kind default (an arc's colour echoes the
+  // CHARACTER it's about). Reads the lore roster + schema stores directly (the
+  // ReferencePicker/plotline-roster precedent — a global roster is read where
+  // needed, not threaded as a prop through every layer).
+  const schema = get(metadataSchemaStore);
+  const loreById = new Map(get(loreEntriesStore).map((entry) => [entry.id, entry] as const));
+  const resolveArcHex = (arc: PlotBoardCharacterArc): string | null => {
+    const character = arc.character_id ? loreById.get(arc.character_id) : undefined;
+    const characterColorId = typeof character?.metadata?.color === "string" ? character.metadata.color : null;
+    const characterHex = character ? resolveColor(characterColorId, character.entry_type, "lore", schema)?.hex : null;
+    return (arc.color ? (getSwatch(arc.color)?.hex ?? null) : null) ?? characterHex ?? resolveColorForKind("lore")?.hex ?? null;
+  };
+  const arcResolvedHexById = new Map(projection.arcs.map((arc) => [arc.id, resolveArcHex(arc)]));
+
   for (const card of projection.cards) {
     const line = card.plotline ? plotlineById.get(card.plotline) : undefined;
     // Container lock (#873): confine the card's drag to its innermost container box
@@ -431,7 +457,13 @@ export function buildBoardNodes(
         plotlineId: line?.id ?? null,
         plotlineName: line?.title ?? null,
         pageStatus: card.page_status,
-        beats: card.beats,
+        beats: card.beats.map((beat) => ({
+          ...beat,
+          resolvedColorHex:
+            beat.holder_kind === "plot:character_arc"
+              ? (arcResolvedHexById.get(beat.plotline_id) ?? null) // change-beat: the arc's effective colour
+              : (getSwatch(beat.plotline_color)?.hex ?? null), // event-beat: the plotline swatch
+        })),
         causalLinks: card.causal_links,
       },
     });
@@ -472,19 +504,10 @@ export function buildBoardNodes(
     ? Math.max(...projection.plotlines.map((line) => estPlotNodeHeight(line.beats.length)))
     : 0;
   const arcBandY = plotlineBandY + (maxPlotlineHeight ? maxPlotlineHeight + CONTAINER_GAP : 0);
-  // Colour resolution (Amendment 1 §1), done ONCE here per arc: own colour → the bound
-  // character's (lore) colour → the lore-kind default — never the generic `plot` kind
-  // default, since an arc's colour is meant to echo the CHARACTER it's about. Reads the
-  // lore roster + schema stores directly (the ReferencePicker/plotline-roster precedent
-  // — a global roster is read where needed, not threaded as a prop through every layer).
-  const schema = get(metadataSchemaStore);
-  const loreById = new Map(get(loreEntriesStore).map((entry) => [entry.id, entry] as const));
   projection.arcs.forEach((arc, i) => {
-    const character = arc.character_id ? loreById.get(arc.character_id) : undefined;
-    const characterColorId = typeof character?.metadata?.color === "string" ? character.metadata.color : null;
-    const characterHex = character ? resolveColor(characterColorId, character.entry_type, "lore", schema)?.hex : null;
-    const resolvedColorHex =
-      (arc.color ? (getSwatch(arc.color)?.hex ?? null) : null) ?? characterHex ?? resolveColorForKind("lore")?.hex ?? null;
+    // Already resolved once above (the single arc-colour-resolution site), so the
+    // node just reads its own entry back out of the map.
+    const resolvedColorHex = arcResolvedHexById.get(arc.id) ?? null;
     nodes.push({
       id: arc.id,
       type: "plotArc",

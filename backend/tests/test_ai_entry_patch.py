@@ -331,7 +331,7 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         schema = self.service.read_metadata_schema()
         roster = _fields(self.service, schema, self.hero.id)
         by_id = {f["id"]: f for f in roster}
-        for fid in ("color", "aliases", "tags"):
+        for fid in ("color", "aliases"):
             self.assertIn(fid, by_id, f"{fid} should be on a character")
             self.assertTrue(by_id[fid]["proposable"], f"{fid} should be proposable")
             self.assertTrue(
@@ -341,6 +341,17 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         # color's guidance explicitly steers off a hex code — the reported bug
         # was the model inventing a hex value + rationale for this field.
         self.assertIn("hex", by_id["color"]["description"].lower())
+        # ADR-0082 §2: `tags` is an entity_ref_list now — ADR-0046 §4 already
+        # excludes entity_ref/entity_ref_list from AI proposal (no reliable way
+        # to name the right node id), so `tags` moved from proposable to the
+        # same not-proposable-but-listed treatment `context_policy` gets below.
+        # It still carries its description.
+        self.assertIn("tags", by_id)
+        self.assertFalse(by_id["tags"]["proposable"], "tags is a reference field now — not proposable")
+        self.assertTrue(
+            (by_id["tags"].get("description") or "").strip(),
+            "built-in field tags should carry a default description",
+        )
         # ADR-0059 §F: `context_policy` is an author-owned context knob the AI
         # must never set. It ships `ai_proposable: false`, so it stays in the full
         # roster (ADR-0060 §3) but flagged not-proposable for the template to skip.

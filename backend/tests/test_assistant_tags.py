@@ -3,11 +3,20 @@
 Assistant tags are a flat, machine-global vocabulary (name + colour, no scope,
 no layers — `assistant-tags.yaml`, #88). PR-3 gives them the rename/merge the
 project side already has (`test_tags.py`), bounded to the reachable documents:
-the machine store, machine + open-project assistant files (`metadata.tags`), and
-the open project's prompt files (`metadata.assistant_tags`). What it deliberately
+the machine store, machine + open-project assistant files, and the open
+project's prompt files — both kinds now under `metadata.assistant_tags`
+(ADR-0082 §2 renamed the assistant's field off `tags`). What it deliberately
 does NOT reach — an ancestor layer's (parent project's) files — is pinned by
 `test_ancestor_assistant_reference_is_not_rewritten`, because "fixing" that would
 mean a child project silently rewriting a parent's files.
+
+This whole mixin is dead code (ADR-0082 §2, retired in a later slice): it
+rewrites the raw `assistant_tags` list on disk as plain strings, regardless of
+what the schema now says the field means (an `entity_ref_list` of tag-node
+ids). So its own read verification here goes through the RAW front matter
+(`_read_markdown_with_front_matter`), not `read_assistant_entry` /
+`read_prompt_entry` — those heal a value that doesn't resolve to a real node
+id (`_strip_dangling_references`), and a plain name string never does.
 
 The autouse conftest fixture redirects `config_path()` into a per-test tempdir,
 so the machine store and `assistants_dir()` are isolated automatically.
@@ -28,6 +37,7 @@ from app.models import (
     AssistantTag,
     CreateAssistantEntryRequest,
     CreatePromptEntryRequest,
+    CreateTagEntryRequest,
     MergeAssistantTagsRequest,
     SaveAssistantEntryRequest,
     SavePromptEntryRequest,
@@ -54,7 +64,9 @@ class AssistantTagGovernanceTests(unittest.TestCase):
         )
         self.service.save_assistant_entry(
             entry.id,
-            SaveAssistantEntryRequest(title=title, entry_type="assistant:assistant", metadata={"tags": tags}),
+            SaveAssistantEntryRequest(
+                title=title, entry_type="assistant:assistant", metadata={"assistant_tags": tags}
+            ),
         )
         return entry.id
 
@@ -77,10 +89,16 @@ class AssistantTagGovernanceTests(unittest.TestCase):
         return {tag.name: tag.color for tag in ms.load_assistant_tags()}
 
     def _assistant_tags(self, entry_id: str) -> list[str]:
-        return list(self.service.read_assistant_entry(entry_id).metadata.get("tags") or [])
+        # RAW read (see module docstring): `read_assistant_entry` heals a
+        # dangling entity_ref_list value, and a plain tag NAME never resolves.
+        path = self.service._build_assistant_index().by_id[entry_id].path
+        front_matter, _ = self.service._read_markdown_with_front_matter(path, strict=True)
+        return list((front_matter.get("metadata") or {}).get("assistant_tags") or [])
 
     def _prompt_tags(self, entry_id: str) -> list[str]:
-        return list(self.service.read_prompt_entry(entry_id).metadata.get("assistant_tags") or [])
+        path = self.service._path_for_node_id(entry_id, "prompt")
+        front_matter, _ = self.service._read_markdown_with_front_matter(path, strict=True)
+        return list((front_matter.get("metadata") or {}).get("assistant_tags") or [])
 
     # --- merge: the store ---------------------------------------------
 
@@ -204,6 +222,48 @@ class AssistantTagGovernanceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 422)
 
 
+
+class AssistantTagsRealIdRoundTripTests(unittest.TestCase):
+    """P9 round 2: the live half of the rename — `assistant_tags` holding
+    REAL tag-node ids round-trips through the validated, API-visible read
+    (`read_assistant_entry` / `read_prompt_entry`), not the raw front matter
+    `AssistantTagGovernanceTests` reads for the dead free-text mixin above.
+    A real id is exactly what a real save now carries (F2's create path
+    mints one), so this is the shape that matters going forward."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "book"
+        self.service = open_test_project(self.root, "Book")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_assistant_tags_with_a_real_tag_id_round_trips_through_read_assistant_entry(self) -> None:
+        tag = self.service.create_tag_entry(CreateTagEntryRequest(title="Editor", entry_type="tag:assistant_tag"))
+        entry = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Ed", entry_type="assistant:assistant", layer_id="")
+        )
+        self.service.save_assistant_entry(
+            entry.id,
+            SaveAssistantEntryRequest(
+                title="Ed", entry_type="assistant:assistant", metadata={"assistant_tags": [tag.id]}
+            ),
+        )
+        self.assertEqual(self.service.read_assistant_entry(entry.id).metadata.get("assistant_tags"), [tag.id])
+
+    def test_assistant_tags_with_a_real_tag_id_round_trips_through_read_prompt_entry(self) -> None:
+        tag = self.service.create_tag_entry(CreateTagEntryRequest(title="Editor", entry_type="tag:assistant_tag"))
+        entry = self.service.create_prompt_entry(CreatePromptEntryRequest(title="Draft", entry_type="prompt:general"))
+        self.service.save_prompt_entry(
+            entry.id,
+            SavePromptEntryRequest(
+                title="Draft", body="body", entry_type="prompt:general", metadata={"assistant_tags": [tag.id]}
+            ),
+        )
+        self.assertEqual(self.service.read_prompt_entry(entry.id).metadata.get("assistant_tags"), [tag.id])
+
+
 class AssistantTagReachabilityTests(unittest.TestCase):
     """The reach bound (ADR-0045): a merge rewrites machine + open-project files,
     never an ancestor layer's (a parent project's)."""
@@ -232,9 +292,18 @@ class AssistantTagReachabilityTests(unittest.TestCase):
         )
         self.service.save_assistant_entry(
             entry.id,
-            SaveAssistantEntryRequest(title=title, entry_type="assistant:assistant", metadata={"tags": tags}),
+            SaveAssistantEntryRequest(
+                title=title, entry_type="assistant:assistant", metadata={"assistant_tags": tags}
+            ),
         )
         return entry.id
+
+    def _assistant_tags(self, entry_id: str) -> list[str]:
+        # RAW read (module docstring): a free-text name never resolves as a
+        # tag-node id, so the validated read path would heal it away.
+        path = self.service._build_assistant_index().by_id[entry_id].path
+        front_matter, _ = self.service._read_markdown_with_front_matter(path, strict=True)
+        return list((front_matter.get("metadata") or {}).get("assistant_tags") or [])
 
     def test_ancestor_assistant_reference_is_not_rewritten(self) -> None:
         # An assistant owned by the parent (universe) project, tagged Beta.
@@ -247,8 +316,8 @@ class AssistantTagReachabilityTests(unittest.TestCase):
         # The open project's own file is rewritten; the parent project's file is
         # left alone — its stale Beta survives and would re-register on that
         # project's next save (the accepted reach bound, ADR-0045).
-        self.assertEqual(self.service.read_assistant_entry(owned_id).metadata.get("tags"), ["Editor"])
-        self.assertEqual(self.service.read_assistant_entry(ancestor_id).metadata.get("tags"), ["Beta"])
+        self.assertEqual(self._assistant_tags(owned_id), ["Editor"])
+        self.assertEqual(self._assistant_tags(ancestor_id), ["Beta"])
 
 
 class AssistantTagEndpointTests(unittest.TestCase):
@@ -271,7 +340,9 @@ class AssistantTagEndpointTests(unittest.TestCase):
         )
         self.service.save_assistant_entry(
             entry.id,
-            SaveAssistantEntryRequest(title=title, entry_type="assistant:assistant", metadata={"tags": tags}),
+            SaveAssistantEntryRequest(
+                title=title, entry_type="assistant:assistant", metadata={"assistant_tags": tags}
+            ),
         )
 
     def test_overview_then_merge_over_http(self) -> None:

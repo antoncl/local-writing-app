@@ -505,11 +505,12 @@ class AssistantEntriesMixin:
         metadata = strip_computed_fields(metadata, write_schema)
         self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, "")
         self._maybe_rename_node_file(path, request.title)
-        # Register the assistant's tags in the machine-global vocabulary so the
-        # `[+]` picker + tag manager surface them (#88).
-        from app.services import machine_settings as ms_service
-
-        ms_service.register_assistant_tags(ms_service.tag_names_from_field(metadata.get("tags")))
+        # ADR-0082 §2: `assistant_tags` is now an `entity_ref_list` of tag-node
+        # ids, not free-text names — `register_assistant_tags` expects names, so
+        # registering ids there would corrupt the legacy (dead, machine-global)
+        # registry. The vocabulary is the `tag:assistant_tag` nodes themselves;
+        # nothing registers them on save (`create_missing` mints on the picker's
+        # own create path instead).
         return self.read_assistant_entry(node_id)
 
     def delete_assistant_entry(self, entry_id: str) -> AssistantEntryList:

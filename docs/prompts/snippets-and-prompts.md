@@ -108,7 +108,7 @@ Supported `type` values:
 | `boolean` | tri-state select (Unset / True / False) | `True` / `False`; Unset stays undefined, guard with `is defined` |
 | `select` | dropdown (uses `options`) | string |
 | `multi_select` | multi-select (uses `options`) | list of strings |
-| `tags` | tag editor | list of strings |
+| `tags` | tag editor (legacy — ADR-0082; use `entity_ref_list` with a `target` naming a `tag` vocabulary instead) | list of strings |
 | `list` | repeatable text rows | list of strings |
 | `entity_ref` | `ReferencePicker` (single) | string id |
 | `entity_ref_list` | `ReferencePicker` (multi) | list of string ids |

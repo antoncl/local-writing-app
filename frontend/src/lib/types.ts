@@ -850,6 +850,10 @@ export type NodePickerConfig = {
   // that `scene` may be bound to one of the picked scenes. Single ★ per
   // input is enforced by the picker UI.
   allow_target_marking?: boolean;
+  // ADR-0082 §2: offer "Create ‹x›" when the typed name resolves to no
+  // candidate. Permitted only when `sources` resolves to exactly one
+  // concrete entry type.
+  create_missing?: boolean;
 };
 
 // What ends up in inputs.<name> for a context_pick input — a list of

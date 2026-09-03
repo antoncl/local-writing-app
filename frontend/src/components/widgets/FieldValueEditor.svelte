@@ -70,6 +70,12 @@
     documentKind?: string;
     entryType?: string;
     onNavigate?: (payload: { id: string; kind: string }) => void;
+    // ADR-0082 §2/F2, tri-state as of round 2 (P5): forwarded to
+    // ReferencePicker (and, for a list field's entity_ref/entity_ref_list
+    // members, ListValueEditor) verbatim — undefined (the default) means
+    // create_missing is not offered here at all; see ReferencePicker for the
+    // full rule. Only MetadataPanel passes a defined value.
+    createLayerId?: string | null | undefined;
   }
 
   let {
@@ -93,6 +99,7 @@
     documentKind = "manuscript",
     entryType = "",
     onNavigate,
+    createLayerId = undefined,
   }: Props = $props();
 
   const label = $derived(ariaLabel ?? field.name);
@@ -216,6 +223,7 @@
     promptEntries={promptEntries}
     onChange={(value) => emit(value)}
     onNavigate={(detail) => onNavigate?.(detail)}
+    {createLayerId}
   />
 {:else if field.type === "multi_select" && field.options.length > 0}
   <div class="multi-select-chips" aria-label={label}>
@@ -283,6 +291,7 @@
     {documentKind}
     {entryType}
     {excludeId}
+    {createLayerId}
   />
 {:else if field.type === "color"}
   <SwatchPicker value={currentValue || null} onChange={(id) => emit(id ?? "")} />

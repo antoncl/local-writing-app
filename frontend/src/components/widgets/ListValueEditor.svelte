@@ -47,6 +47,10 @@
     documentKind?: string;
     entryType?: string;
     excludeId?: string | null;
+    // ADR-0082 §2/F2, tri-state as of round 2 (P5): forwarded to a member's
+    // ReferencePicker verbatim — undefined (the default) means create_missing
+    // is not offered. See ReferencePicker for the full rule.
+    createLayerId?: string | null | undefined;
   }
 
   let {
@@ -64,6 +68,7 @@
     documentKind = "manuscript",
     entryType = "",
     excludeId = null,
+    createLayerId = undefined,
   }: Props = $props();
 
   const members = $derived(field.item_members ?? []);
@@ -260,6 +265,7 @@
                     {documentKind}
                     {entryType}
                     {excludeId}
+                    {createLayerId}
                   />
                 </div>
               </div>
@@ -285,6 +291,7 @@
               {documentKind}
               {entryType}
               {excludeId}
+              {createLayerId}
             />
           </div>
           {@render removeButton(index)}

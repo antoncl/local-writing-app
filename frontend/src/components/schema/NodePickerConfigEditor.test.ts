@@ -83,3 +83,68 @@ describe("NodePickerConfigEditor — plot source (ADR-0074 slice 6)", () => {
     expect(screen.queryByText("Template")).toBeNull();
   });
 });
+
+// ADR-0082 §2 / F1, P8 (round 2): the "Create when missing" checkbox — enabled
+// only when the config reduces to exactly one concrete entry type
+// (`singleConcreteTarget`, shared with `createTargetFor`), and an edit that
+// breaks that clears `create_missing` in the same emit so the backend
+// validator can never reject a config this editor produced.
+describe("NodePickerConfigEditor — create_missing checkbox (P8)", () => {
+  const TAG_SCHEMA = {
+    entry_types: {
+      "tag:tag": { name: "Tag", kind: "tag" },
+      "tag:assistant_tag": { name: "Assistant tag", kind: "tag" },
+    },
+    fields: {},
+  } as unknown as MetadataSchema;
+
+  afterEach(() => metadataSchemaStore.set(null as unknown as MetadataSchema));
+
+  it("enables the checkbox when the config resolves to one concrete type, and toggling it emits create_missing: true", async () => {
+    metadataSchemaStore.set(TAG_SCHEMA);
+    const onChange = vi.fn();
+    render(NodePickerConfigEditor, {
+      props: {
+        config: { sources: [{ kind: "tag", expr: { type: "tag:tag" } }] },
+        mode: "field" as const,
+        onChange,
+      },
+    });
+    const checkbox = screen.getByTestId("picker-create-missing") as HTMLInputElement;
+    expect(checkbox.disabled).toBe(false);
+    expect(checkbox.checked).toBe(false);
+    await fireEvent.click(checkbox);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ create_missing: true }));
+  });
+
+  it("disables the checkbox when the config names no single concrete type (an unconstrained kind-only source)", () => {
+    metadataSchemaStore.set(TAG_SCHEMA);
+    render(NodePickerConfigEditor, {
+      props: { config: { sources: [{ kind: "tag" }] }, mode: "field" as const },
+    });
+    const checkbox = screen.getByTestId("picker-create-missing") as HTMLInputElement;
+    expect(checkbox.disabled).toBe(true);
+  });
+
+  it("clears create_missing in the SAME emit when an edit adds a second concrete type", async () => {
+    metadataSchemaStore.set(TAG_SCHEMA);
+    const onChange = vi.fn();
+    render(NodePickerConfigEditor, {
+      props: {
+        config: { sources: [{ kind: "tag", expr: { type: "tag:tag" } }], create_missing: true },
+        mode: "field" as const,
+        onChange,
+      },
+    });
+    const checkbox = screen.getByTestId("picker-create-missing") as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.disabled).toBe(false);
+
+    // Check the second tag entry type — the config now names two, so
+    // singleConcreteTarget fails and create_missing must clear right here.
+    await fireEvent.click(screen.getByRole("button", { name: "Assistant tag" }));
+    expect(onChange).toHaveBeenCalled();
+    const patch = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(patch.create_missing).toBeUndefined();
+  });
+});

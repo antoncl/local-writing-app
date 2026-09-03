@@ -20,8 +20,14 @@ export function assistantScopeTags(entry: PromptEntrySummary | null): string[] {
   return readTags(entry?.metadata?.["assistant_tags"]);
 }
 
+// ADR-0082 §2: the assistant's field is `assistant_tags` (renamed off `tags`,
+// which no built-in binds anymore), and the overlap below is by tag NODE id —
+// both sides hold ids now. `readTags` keeps accepting an array (still true);
+// its comma-string branch is dead for ids (nothing writes that shape) but is
+// left in place — it costs nothing and still applies to any other consumer
+// that hands it a legacy string.
 export function assistantTagsOf(a: AssistantEntrySummary): string[] {
-  return readTags(a.metadata?.tags);
+  return readTags(a.metadata?.assistant_tags);
 }
 
 // The assistants a prompt may actually USE — the author's active roster (#333).

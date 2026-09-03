@@ -17,9 +17,8 @@
   } from "@/lib/editor-core/promptResolution";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
-  import { tagHexResolver } from "@/lib/utils/tags";
   import { parseSearchQuery, readTags } from "@/lib/utils/entrySearch";
-  import { knownTagsStore } from "@/lib/stores/tags";
+  import { tagTitleById } from "@/lib/stores/tagNodes";
   import { defaultView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
@@ -53,10 +52,20 @@
   // differs is inherited and gets a level pill (#313).
   const ownLayerId = $derived($projectLayerIdStore);
 
-  // Tag chips on a row carry the tag's colour, same as the rail's TagChip (#1447).
-  // Reading `$knownTagsStore` inside the derived expression lets the resolver
-  // re-track when the vocabulary or its colours change.
-  const tagHexFor = $derived(tagHexResolver($knownTagsStore));
+  // ADR-0082 §2: `lore:base`'s `tags` field is now an entity_ref_list of tag-
+  // node ids (F4) — resolved to titles through the tag roster store for both
+  // the row DISPLAY and the search-box `#tag` restrictor (loreSearchFilter,
+  // below), which now matches by title, not raw id. An id that hasn't
+  // resolved yet (roster not loaded) falls back to itself rather than
+  // vanishing from either surface. Colour on the chip comes in slice 3 (the
+  // picker's instance-colour helper); uncoloured until then.
+  function entryTagTitles(entry: LoreEntrySummary): string[] {
+    const titles = $tagTitleById;
+    return entryTags(entry).map((id) => titles.get(id) ?? id);
+  }
+  function tagColorNone(): string | null {
+    return null;
+  }
 
   // The view's chosen render layout (ADR-0069), set by the control beside the
   // view selector. Absent axes fall back to ViewNodeList's own defaults.
@@ -167,11 +176,16 @@
   // (ADR-0074): `#heist` matches only on tags, through the same parser the
   // picker uses so the two surfaces agree. A plain query keeps the existing
   // broad match (title + body + all metadata) unchanged.
+  //
+  // ADR-0082 §2: `tags` values are tag-node ids now — the restrictor matches
+  // against the resolved TITLE (entryTagTitles, the same fold the row chips
+  // use), same as it matched names before the rename; matching the raw id
+  // too would be noise no one types.
   function loreSearchFilter(entry: LoreEntrySummary, query: string): boolean {
     const parsed = parseSearchQuery(query);
     if (parsed.tagOnly) {
       if (!parsed.needle) return true;
-      return entryTags(entry).some((t) => t.toLowerCase().includes(parsed.needle));
+      return entryTagTitles(entry).some((t) => t.toLowerCase().includes(parsed.needle));
     }
     return entrySearchText(entry).includes(query);
   }
@@ -245,8 +259,8 @@
   <NodeRow
     title={entry.title}
     detail={entryDetailText(entry)}
-    tags={entryTags(entry)}
-    tagColor={tagHexFor}
+    tags={entryTagTitles(entry)}
+    tagColor={tagColorNone}
     layerLabel={inheritedLayerLabel(entry, ownLayerId)}
     depth={ctx.depth}
     active={ctx.active}

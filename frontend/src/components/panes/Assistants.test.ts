@@ -1,22 +1,21 @@
 // @vitest-environment happy-dom
-// Assistants pane mount + tag-color reactivity. Per the component-test-harness
+// Assistants pane mount + tag-chip display. Per the component-test-harness
 // rule (#642: a pane that DISPLAYS data needs a test asserting the rows render),
 // the first test pins the roster flowing through evaluateView's default
 // assistant view — the tag-parameterized roster grouped Active/Unlisted (#333).
-// The second test guards the one non-mechanical conversion in the runes pass
-// (#49): `tagHexFor` is a `$derived.by` over `assistantSwatchIds`, passed as
-// NodeRow's `tagColor`. It asserts a chip both takes its color from the tag
-// vocabulary AND recolors when the vocabulary changes — the reactivity a
-// vocabulary-independent (non-reactive) rewrite would drop.
+// The second test pins ADR-0082 §2's rename: `assistant_tags` holds tag-node
+// ids now, resolved to a title through the tag roster store (`tagTitleById`)
+// at the row — and, until colour returns in slice 3 (the picker's
+// instance-colour helper), the chip carries none, replacing the old
+// `assistantTagsStore`-keyed `tagHexFor` reactivity test.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { tick } from "svelte";
 import { render, screen } from "@/lib/test/component";
 import Assistants from "./Assistants.svelte";
 import { defaultView } from "@/lib/views/evaluateView";
 import { metadataSchemaStore } from "@/lib/stores/schema";
-import { assistantTagsStore } from "@/lib/stores/assistantTags";
-import { setPalette } from "@/lib/utils/colors";
-import type { AssistantEntrySummary, MetadataSchema } from "@/lib/types";
+import { tagNodesStore } from "@/lib/stores/tagNodes";
+import type { AssistantEntrySummary, MetadataSchema, TagEntry } from "@/lib/types";
 
 // `assistant:assistant` is the kind root the default view descends from; the
 // listed/unlisted split comes from `computed_metadata.listed` (#332/#333).
@@ -32,7 +31,7 @@ function assistant(id: string, title: string, tags: string[] = []): AssistantEnt
     id,
     title,
     entry_type: "assistant:assistant",
-    metadata: { tags },
+    metadata: { assistant_tags: tags },
     computed_metadata: { listed: "listed", position: 0 },
   } as AssistantEntrySummary;
 }
@@ -57,42 +56,33 @@ beforeEach(() => {
 });
 afterEach(() => {
   metadataSchemaStore.set(null as unknown as MetadataSchema);
-  assistantTagsStore.set([]);
-  setPalette([]);
+  tagNodesStore.set([]);
 });
 
 describe("Assistants pane — default view (#642)", () => {
   it("renders a listed assistant with its tag chip through the default view", () => {
-    renderPane([assistant("a1", "Editor Bot", ["hero"])]);
+    renderPane([assistant("a1", "Editor Bot", ["tag_hero"])]);
     expect(screen.getByText("Editor Bot")).toBeInTheDocument();
-    expect(screen.getByText("hero")).toBeInTheDocument();
+    // Unresolved (no matching roster entry) falls back to the raw id.
+    expect(screen.getByText("tag_hero")).toBeInTheDocument();
   });
 });
 
-describe("Assistants pane — tag chip color reactivity (#49 tagHexFor)", () => {
-  it("colors the chip from the tag vocabulary and recolors when it changes", async () => {
-    setPalette([
-      { id: "sw-red", label: "Red", hex: "#ff0000" },
-      { id: "sw-blue", label: "Blue", hex: "#0000ff" },
+describe("Assistants pane — tag chip title resolution (ADR-0082 §2)", () => {
+  it("resolves an assistant_tags id to its title through the tag roster store, uncoloured", async () => {
+    tagNodesStore.set([
+      { id: "tag_hero", title: "Hero", entry_type: "tag:assistant_tag", metadata: {} } as TagEntry,
     ]);
-    // The vocabulary paints "hero" red via its swatch id.
-    assistantTagsStore.set([{ name: "hero", color: "sw-red" }]);
 
-    const { container } = renderPane([assistant("a1", "Editor Bot", ["hero"])]);
-
-    // The chip carries the resolved hex in its inline style (--tag-text/-bg/-border).
-    const chipStyle = () =>
-      Array.from(container.querySelectorAll<HTMLElement>(".node-row-tag"))
-        .find((el) => el.textContent?.trim() === "hero")
-        ?.getAttribute("style") ?? "";
-    expect(chipStyle()).toContain("#ff0000");
-
-    // Recolor the vocabulary. `tagHexFor` reads `assistantSwatchIds` (derived from
-    // this store), so the chip must follow to blue. A conversion that resolved the
-    // color once and stopped tracking would leave it red.
-    assistantTagsStore.set([{ name: "hero", color: "sw-blue" }]);
+    const { container } = renderPane([assistant("a1", "Editor Bot", ["tag_hero"])]);
     await tick();
-    expect(chipStyle()).toContain("#0000ff");
-    expect(chipStyle()).not.toContain("#ff0000");
+
+    expect(screen.getByText("Hero")).toBeInTheDocument();
+    // No colour until slice 3 (the picker's instance-colour helper) — the
+    // chip carries no --tag-* inline style regardless of any vocabulary.
+    const chipStyle = Array.from(container.querySelectorAll<HTMLElement>(".node-row-tag")).find(
+      (el) => el.textContent?.trim() === "Hero",
+    );
+    expect(chipStyle?.getAttribute("style") || "").toBe("");
   });
 });

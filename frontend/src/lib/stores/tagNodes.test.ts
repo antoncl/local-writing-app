@@ -7,12 +7,12 @@ const { listTagEntries } = vi.hoisted(() => ({ listTagEntries: vi.fn() }));
 vi.mock("@/lib/api", () => ({ api: { listTagEntries } }));
 
 import type { TagEntry } from "@/lib/types";
-import { clearTagNodes, refreshTagNodes, tagById, tagNodesStore, tagTitleById } from "./tagNodes";
+import { clearTagNodes, findTagByTitle, refreshTagNodes, tagById, tagNodesStore, tagTitleById } from "./tagNodes";
 
-const T = (id: string, title: string): TagEntry => ({
+const T = (id: string, title: string, entryType = "tag:tag"): TagEntry => ({
   id,
   title,
-  entry_type: "tag:tag",
+  entry_type: entryType,
   metadata: {},
 });
 
@@ -81,5 +81,37 @@ describe("tagNodes store (ADR-0082 slice 1)", () => {
     await first;
 
     expect(get(tagNodesStore).map((t) => t.id)).toEqual(["tag_2"]);
+  });
+});
+
+describe("findTagByTitle (ADR-0082 §2 / F3)", () => {
+  beforeEach(() => {
+    listTagEntries.mockReset();
+    clearTagNodes();
+  });
+
+  it("matches case-insensitively and trims the query", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [T("tag_1", "Coastal")] });
+    await refreshTagNodes();
+    expect(findTagByTitle("coastal")?.id).toBe("tag_1");
+    expect(findTagByTitle("  COASTAL  ")?.id).toBe("tag_1");
+  });
+
+  it("returns undefined when nothing matches, including an empty query", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [T("tag_1", "Coastal")] });
+    await refreshTagNodes();
+    expect(findTagByTitle("urban")).toBeUndefined();
+    expect(findTagByTitle("")).toBeUndefined();
+    expect(findTagByTitle("   ")).toBeUndefined();
+  });
+
+  it("an entryType filter narrows to one vocabulary", async () => {
+    listTagEntries.mockResolvedValueOnce({
+      tags: [T("tag_1", "Editor", "tag:tag"), T("tag_2", "Editor", "tag:assistant_tag")],
+    });
+    await refreshTagNodes();
+    expect(findTagByTitle("Editor", "tag:assistant_tag")?.id).toBe("tag_2");
+    expect(findTagByTitle("Editor", "tag:tag")?.id).toBe("tag_1");
+    expect(findTagByTitle("Editor")?.id).toBe("tag_1"); // omitted → first match
   });
 });

@@ -22,7 +22,11 @@ from unittest.mock import patch
 
 from layer_fixtures import declare_full_chain
 
-from app.models import MetadataFieldDefinition, UpsertMetadataFieldRequest
+from app.models import (
+    CreateTagEntryRequest,
+    MetadataFieldDefinition,
+    UpsertMetadataFieldRequest,
+)
 from app.scope import WorkScope
 from app.services.project.errors import ProjectServiceError
 from app.services.project.overrides import OVERRIDES_FOLDER
@@ -252,16 +256,49 @@ class PromoteLoreTests(unittest.TestCase):
             self._raw_metadata(self.series, "alice").get("bonds"), [{"who": "nimitz"}]
         )
 
-    # --- 4: unknown tag stays behind ---------------------------------------
+    # --- 3d (P9 round 2): the REAL built-in `tags` field, a real tag node ----
 
-    def test_unknown_tag_stays_behind(self) -> None:
+    def test_builtin_tags_field_ref_to_a_project_local_tag_stays_behind(self) -> None:
+        # ADR-0082 §2: `tags` is the real, shipped `entity_ref_list` field now
+        # (not a synthetic stand-in) — a project-local tag node it references
+        # is exactly the origin-local-ref case ADR-0078 §4 / `_partition_
+        # entity_ref_list` already generalizes to any entity_ref_list field.
+        # Asserted through the promotion API on the built-in field itself, not
+        # a hand-declared one.
+        tag = self.service.create_tag_entry(CreateTagEntryRequest(title="Coastal", entry_type="tag:tag"))
         self._write_ancestor_lore(
-            self.root, "alice", "Alice", metadata={"tags": ["book2pov"]}, entry_type="lore:character"
+            self.root, "alice", "Alice", metadata={"tags": [tag.id]}, entry_type="lore:character"
         )
 
         self.service.promote_lore_entry("alice", self.series_layer_id)
 
-        self.assertNotIn("book2pov", self._raw_metadata(self.series, "alice").get("tags", []))
+        # Every target hidden (the tag lives only at book01) → the field is
+        # dropped at the destination entirely, not left as an empty list.
+        self.assertNotIn("tags", self._raw_metadata(self.series, "alice"))
+        # Staged as a book01 override.
+        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+        # Resolves when Alice is read from book01 (the override folds back in).
+        self.assertEqual(self.service.read_lore_entry("alice").metadata.get("tags"), [tag.id])
+        # Absent when Alice is read from series scope — no dangling reference.
+        series_service = ProjectService(WorkScope(root=self.series))
+        series_alice = series_service.read_lore_entry("alice")
+        self.assertNotIn("tags", series_alice.metadata)
+
+    # --- 4: unknown tag stays behind ---------------------------------------
+
+    def test_unknown_tag_stays_behind(self) -> None:
+        # ADR-0082 §2 retired the built-in `tags` field's TYPE (it's an
+        # `entity_ref_list` into the `tag` kind now) — this test pins the
+        # tags-TYPE partition (`_partition_tags`, dead code until a later
+        # slice) via its own field, same recipe `test_tags.py` uses.
+        self._define_field_at(self.root, "labels", "tags", entry_type="lore:character")
+        self._write_ancestor_lore(
+            self.root, "alice", "Alice", metadata={"labels": ["book2pov"]}, entry_type="lore:character"
+        )
+
+        self.service.promote_lore_entry("alice", self.series_layer_id)
+
+        self.assertNotIn("book2pov", self._raw_metadata(self.series, "alice").get("labels", []))
         self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
         known = self.service.read_known_tags(up_to_layer_id=self.series_layer_id)
         self.assertNotIn("book2pov", [tag.name.lower() for tag in known.tags])

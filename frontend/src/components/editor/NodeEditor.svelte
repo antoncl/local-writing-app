@@ -679,6 +679,28 @@
   });
   let documentLabel = $derived(documentLabelFor(documentKind));
 
+  // ADR-0082 §2/F2: the layer a `create_missing` tag is minted at — "the
+  // layer the saved node is written to". The pane's own authoring level
+  // (lore/prompt, `authoringLayerId`) when set; else, for an assistant, the
+  // open document's own layer; else null (the open project — scenes are
+  // always the open project). Always DEFINED here (never left `undefined`) —
+  // this is the metadata panel's own host, the one place `create_missing` is
+  // offered at all (P5, round 2); every other host passes nothing.
+  //
+  // The assistant case verified against `save_assistant_entry`
+  // (`assistants.py`): it writes straight to `index_entry.path` — the
+  // assistant's OWN file, wherever `_build_assistant_index` resolved it from
+  // (machine layer, or an ancestor/open project's `assistants/`) — never as
+  // an override into the open project the way lore/prompt saves can. So
+  // `scene?.source_layer_id` (the assistant's own layer) is the right target
+  // for a tag its save introduces, not `null`; `LayerAuthoringBar` itself
+  // confirms there's no authoring-level dropdown for an inherited assistant
+  // to begin with ("renders only for an inherited lore entry; no-ops
+  // otherwise", below) — no override path exists to redirect to.
+  let createLayerId = $derived(
+    authoringLayerId ?? (documentKind === "assistant" ? (scene?.source_layer_id ?? null) : null),
+  );
+
   // Fields whose value comes from a layer override (#314), passed to the rail so
   // it can lead them with the `ti-versions` mark. The picker itself lives in
   // LayerAuthoringBar (kept out of this shell for the file-size cap).
@@ -790,6 +812,7 @@
       excludeId={scene?.id ?? null}
       sourceLayerId={scene?.source_layer_id ?? null}
       sourceLayerLabel={scene?.source_layer_label ?? null}
+      createLayerId={createLayerId}
       overriddenFields={overriddenFieldsForPanel}
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}

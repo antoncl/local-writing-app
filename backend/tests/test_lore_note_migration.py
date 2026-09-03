@@ -17,7 +17,11 @@ from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
 from app.main import app
-from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+from app.models import (
+    CreateLoreEntryRequest,
+    CreateTagEntryRequest,
+    SaveLoreEntryRequest,
+)
 
 
 class MoveLoreNoteToResearchTests(unittest.TestCase):
@@ -54,10 +58,15 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         )
         return entry.id
 
+    def _tag(self, title: str) -> str:
+        # ADR-0082 §2: `tags` is an entity_ref_list of tag-node ids now.
+        return self.service.create_tag_entry(CreateTagEntryRequest(title=title, entry_type="tag:tag")).id
+
     # --- happy path ----------------------------------------------------------
 
     def test_move_creates_research_note_and_deletes_lore_source(self) -> None:
-        lore_id = self._make_lore_note(metadata={"tags": ["industrial", "labor"]})
+        industrial, labor = self._tag("industrial"), self._tag("labor")
+        lore_id = self._make_lore_note(metadata={"tags": [industrial, labor]})
 
         response = self.client.post(f"/api/lore/{lore_id}/move-to-research")
         self.assertEqual(response.status_code, 200, response.text)
@@ -73,8 +82,8 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         content = note_files[0].read_text(encoding="utf-8")
         self.assertIn("title: Lancashire mills", content)
         self.assertIn("entry_type: research:note", content)
-        self.assertIn("- industrial", content)
-        self.assertIn("- labor", content)
+        self.assertIn(f"- {industrial}", content)
+        self.assertIn(f"- {labor}", content)
         self.assertIn("Mills employed children from age 8.", content)
         # The source lore_note file is gone.
         lore_files = list((self.root / "lore").glob("*.md"))
@@ -92,9 +101,10 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
 
     def test_dropped_fields_reported_when_present(self) -> None:
         # Seed with aliases + context_policy — both intentionally dropped.
+        industrial = self._tag("industrial")
         lore_id = self._make_lore_note(
             metadata={
-                "tags": ["industrial"],
+                "tags": [industrial],
                 "aliases": ["Mill towns", "Cotton mills"],
                 "context_policy": "manual_only",
             }
@@ -106,12 +116,12 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         # The new note carries tags but neither aliases nor context_policy.
         note_files = list((self.root / "research" / "notes").glob("*.md"))
         content = note_files[0].read_text(encoding="utf-8")
-        self.assertIn("- industrial", content)
+        self.assertIn(f"- {industrial}", content)
         self.assertNotIn("aliases", content)
         self.assertNotIn("context_policy", content)
 
     def test_dropped_fields_empty_when_no_extras(self) -> None:
-        lore_id = self._make_lore_note(metadata={"tags": ["a"]})
+        lore_id = self._make_lore_note(metadata={"tags": [self._tag("a")]})
         body = self.client.post(
             f"/api/lore/{lore_id}/move-to-research"
         ).json()

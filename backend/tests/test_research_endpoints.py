@@ -254,6 +254,14 @@ class ResearchHttpEndpointTests(unittest.TestCase):
         self.assertEqual(body["body"], "")
 
     def test_save_note_roundtrips_body_and_tags(self) -> None:
+        # ADR-0082 §2: `tags` is an entity_ref_list of tag-node ids now — real
+        # tags, not free-text names (a name would heal away as dangling on read).
+        industrial = self.client.post(
+            "/api/tag-entries", json={"title": "industrial", "entry_type": "tag:tag"}
+        ).json()["id"]
+        labor = self.client.post(
+            "/api/tag-entries", json={"title": "labor", "entry_type": "tag:tag"}
+        ).json()["id"]
         self._create_node("Mill towns", "research:note")
         tree = self._read_tree()
         note_id = tree["root"]["children"][0]["scene_id"]
@@ -268,7 +276,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
                 "body": "Lancashire mills employed children from age 8.",
                 "base_revision": current["revision"],
                 "entry_type": "research:note",
-                "metadata": {"tags": ["industrial", "labor"]},
+                "metadata": {"tags": [industrial, labor]},
             },
         )
         self.assertEqual(response.status_code, 200, response.text)
@@ -277,7 +285,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
             saved["body"],
             "Lancashire mills employed children from age 8.",
         )
-        self.assertEqual(saved["metadata"], {"tags": ["industrial", "labor"]})
+        self.assertEqual(saved["metadata"], {"tags": [industrial, labor]})
 
         reread = self.client.get(f"/api/research/notes/{note_id}").json()
         # Save normalizes non-empty bodies to end with a single newline,
@@ -286,7 +294,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
             reread["body"].rstrip(),
             "Lancashire mills employed children from age 8.",
         )
-        self.assertEqual(reread["metadata"]["tags"], ["industrial", "labor"])
+        self.assertEqual(reread["metadata"]["tags"], [industrial, labor])
 
     def test_save_note_rejects_stale_revision(self) -> None:
         self._create_node("Note", "research:note")

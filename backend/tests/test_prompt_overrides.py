@@ -25,6 +25,7 @@ from layer_fixtures import declare_full_chain
 from app.models import (
     CreateAssistantEntryRequest,
     CreatePromptEntryRequest,
+    CreateTagEntryRequest,
     SaveAssistantEntryRequest,
     SavePromptEntryRequest,
 )
@@ -88,6 +89,15 @@ class PromptOverrideTests(unittest.TestCase):
         )
         return entry.id
 
+    def _tag(self, title: str) -> str:
+        # ADR-0082 §2: `assistant_tags` is now an `entity_ref_list` of real
+        # tag-node ids — the override fold is generic list-add machinery, so
+        # these tests exercise it with real ids rather than free-text names
+        # (which the validated read path would heal away as dangling).
+        return self.service.create_tag_entry(
+            CreateTagEntryRequest(title=title, entry_type="tag:assistant_tag")
+        ).id
+
     def _save_override(
         self,
         entry_id: str,
@@ -131,20 +141,21 @@ class PromptOverrideTests(unittest.TestCase):
         self.assertFalse((self.series / OVERRIDES_FOLDER).exists())
 
     def test_assistant_tags_override_adds_and_keeps_later_ancestor_additions(self) -> None:
-        self._write_prompt_at(self.series, "revise", "Revise plotline", {"assistant_tags": ["Beta"]})
+        beta, romance, gamma = self._tag("Beta"), self._tag("Romance"), self._tag("Gamma")
+        self._write_prompt_at(self.series, "revise", "Revise plotline", {"assistant_tags": [beta]})
         # The book adds one tag via an override.
-        self._save_override("revise", {"assistant_tags": ["Beta", "Romance"]})
+        self._save_override("revise", {"assistant_tags": [beta, romance]})
         self.assertEqual(
             self.service.read_prompt_entry("revise").metadata["assistant_tags"],
-            ["Beta", "Romance"],
+            [beta, romance],
         )
 
         # The series later gains a *different* tag. Because the override is an
         # `add`, not a whole-list replace, the ancestor addition still flows down.
-        self._write_prompt_at(self.series, "revise", "Revise plotline", {"assistant_tags": ["Beta", "Gamma"]})
+        self._write_prompt_at(self.series, "revise", "Revise plotline", {"assistant_tags": [beta, gamma]})
         self.assertEqual(
             self.service.read_prompt_entry("revise").metadata["assistant_tags"],
-            ["Beta", "Gamma", "Romance"],
+            [beta, gamma, romance],
         )
 
     def test_the_prompt_list_shows_the_effective_overridden_value(self) -> None:
@@ -275,11 +286,12 @@ class PromptOverrideTests(unittest.TestCase):
         self.assertEqual(self.service.read_prompt_entry("revise").metadata["color"], "slate")
 
     def test_clearing_a_field_reverts_it_while_other_overrides_stay(self) -> None:
+        beta, romance = self._tag("Beta"), self._tag("Romance")
         self._write_prompt_at(
-            self.series, "revise", "Revise plotline", {"color": "slate", "assistant_tags": ["Beta"]}
+            self.series, "revise", "Revise plotline", {"color": "slate", "assistant_tags": [beta]}
         )
         # Override two fields at the book.
-        self._save_override("revise", {"color": "amber", "assistant_tags": ["Beta", "Romance"]})
+        self._save_override("revise", {"color": "amber", "assistant_tags": [beta, romance]})
         self.assertEqual(sorted(self.service.read_prompt_entry("revise").overridden_fields), ["assistant_tags", "color"])
 
         # Clear just `color`. Its submitted value is still the override "amber", but
@@ -287,12 +299,12 @@ class PromptOverrideTests(unittest.TestCase):
         # "slate"; the assistant_tags override is untouched.
         cleared = self._save_override(
             "revise",
-            {"color": "amber", "assistant_tags": ["Beta", "Romance"]},
+            {"color": "amber", "assistant_tags": [beta, romance]},
             layer=self.root,
             clear=["color"],
         )
         self.assertEqual(cleared.metadata["color"], "slate")
-        self.assertEqual(cleared.metadata["assistant_tags"], ["Beta", "Romance"])
+        self.assertEqual(cleared.metadata["assistant_tags"], [beta, romance])
         self.assertEqual(cleared.overridden_fields, ["assistant_tags"])
         text = next((self.root / OVERRIDES_FOLDER).glob("*.md")).read_text(encoding="utf-8")
         self.assertIn("assistant_tags", text)
@@ -300,12 +312,18 @@ class PromptOverrideTests(unittest.TestCase):
 
     # --- vocabulary registration ---------------------------------------
 
-    def test_effective_assistant_tags_are_registered_in_the_vocabulary(self) -> None:
-        # An inherited prompt override that introduces a new assistant tag feeds it
-        # into the machine-global vocabulary, exactly as an owned save does (#88).
+    def test_effective_assistant_tags_are_not_registered_in_the_legacy_vocabulary(self) -> None:
+        # ADR-0082 §2: `assistant_tags` holds tag-node ids now, not free-text
+        # names — registering an id into the legacy name-keyed
+        # `assistant-tags.yaml` would corrupt it, so an override save (like an
+        # owned save, test_tag_bindings.py) no longer registers at all (#88's
+        # registration retired here; the store itself is dead code until a
+        # later slice removes it).
+        romance = self._tag("Romance")
+        before = ms_service.load_assistant_tags()
         self._write_prompt_at(self.series, "revise", "Revise plotline", {"assistant_tags": []})
-        self._save_override("revise", {"assistant_tags": ["Romance"]})
-        self.assertIn("Romance", [tag.name for tag in ms_service.load_assistant_tags()])
+        self._save_override("revise", {"assistant_tags": [romance]})
+        self.assertEqual(ms_service.load_assistant_tags(), before)
 
 
 if __name__ == "__main__":

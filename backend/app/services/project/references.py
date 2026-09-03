@@ -40,6 +40,7 @@ from app.models import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import MANIFEST_FILENAME, SCHEMA_FILENAME, LayerVisitor
+from app.services.project.metadata_refs import iter_ref_occurrences
 from app.services.project.node_index import (
     IndexLayer,
     NodeFamily,
@@ -1197,33 +1198,27 @@ class ReferencesMixin:
             except ProjectServiceError:
                 return []
         metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+        # One traversal finds every entity_ref / entity_ref_list value — top-level
+        # or inside an item_group member (ADR-0081) — instead of a per-field loop
+        # that only ever saw the top level. Deduped within a field id (a target
+        # listed twice, or in two group items under the same field, is one edge)
+        # but not across fields, since the field is part of the edge's identity.
+        # A tags occurrence contributes no edge. Nested edges collapse onto the
+        # list field's id (member-level granularity deferred, ADR-0081).
+        seen: set[tuple[str, str]] = set()
         edges: list[ReferenceEdge] = []
-        for field_id in entry_definition.fields:
-            field = schema.fields.get(field_id)
-            if field is None:
+        for occ in iter_ref_occurrences(metadata, schema):
+            if occ.field.type == "entity_ref":
+                candidates: list[object] = [occ.value]
+            elif occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
+                candidates = list(occ.value)
+            else:
                 continue
-            edges.extend(self._edges_from_field(entry.id, field_id, field.type, metadata.get(field_id)))
+            for target in candidates:
+                if isinstance(target, str) and target and (occ.field_id, target) not in seen:
+                    seen.add((occ.field_id, target))
+                    edges.append(ReferenceEdge(src=entry.id, dst=target, field_id=occ.field_id))
         return edges
-
-    def _edges_from_field(
-        self, src: str, field_id: str, field_type: str, value: object
-    ) -> list[ReferenceEdge]:
-        """The edges one `entity_ref` / `entity_ref_list` value contributes.
-
-        Deduped within the field — a target listed twice is one edge — but not
-        across fields, since the field is part of the edge's identity.
-        """
-        if field_type == "entity_ref":
-            candidates: list[object] = [value]
-        elif field_type == "entity_ref_list" and isinstance(value, list):
-            candidates = list(value)
-        else:
-            return []
-        targets = [item for item in candidates if isinstance(item, str) and item]
-        return [
-            ReferenceEdge(src=src, dst=target, field_id=field_id)
-            for target in dict.fromkeys(targets)
-        ]
 
     def _extract_include_edges(self, index: NodeIndex, schema: MetadataSchema | None) -> None:
         """Record each prompt's literal `{% include %}` tags as reference edges
@@ -1294,7 +1289,7 @@ class ReferencesMixin:
             if not targets:
                 continue
             # Dedup within the prompt — a snippet included twice is one edge —
-            # matching `_edges_from_field`, and append so a prompt's own
+            # matching the reference-edge dedup, and append so a prompt's own
             # `entity_ref` edges (if any) are kept alongside its include edges.
             index.edges_by_layer_src.setdefault((prompt.source_layer_id, prompt.id), []).extend(
                 ReferenceEdge(src=prompt.id, dst=dst, field_id=INCLUDE_FIELD_ID)

@@ -53,6 +53,7 @@ from app.services.project.node_index_snapshot import (
 from app.services.project.node_ops import NodeOpsMixin
 from app.services.project.overrides import OVERRIDES_FOLDER, LayerOverridesMixin
 from app.services.project.plot import PlotMixin
+from app.services.project.plot_board import PlotBoardMixin
 from app.services.project.plot_context import PlotContextMixin
 from app.services.project.project_node import ProjectNodeMixin
 from app.services.project.promotion import PromotionMixin
@@ -104,6 +105,7 @@ class ProjectService(
     LayerOverridesMixin,
     NodeOpsMixin,
     PlotMixin,
+    PlotBoardMixin,
     PlotContextMixin,
     ProjectLifecycleMixin,
     ProjectNodeMixin,

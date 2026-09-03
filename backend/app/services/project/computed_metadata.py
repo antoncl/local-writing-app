@@ -220,15 +220,19 @@ class ComputedMetadataMixin:
             return None
         if scope not in ("scene", "character", "project"):
             return None
+        # Routes through the shared ledger scan (#1708). Unlike the per-chat
+        # projection and the summary, a computed cost field reports 0.0 (not
+        # None) for a scope with no priced rows — the resolver only emits the
+        # field when it is non-None, so 0.0 keeps a genuine "no spend yet"
+        # figure visible rather than dropping the field.
         total = 0.0
-        for record in self._read_ai_invocations_raw():
+        for record, cost, _input, _output in self._iter_invocation_rows():
             if scope == "scene" and record.get("scene_id") != node_id:
                 continue
             if scope == "character" and record.get("character_id") != node_id:
                 continue
-            cost = record.get("cost_usd")
-            if isinstance(cost, (int, float)):
-                total += float(cost)
+            if cost is not None:
+                total += cost
         return total
 
     def _compute_counter(self, root: StructureNode, target_scene_id: str, entry_type: str, scope: str) -> int | None:

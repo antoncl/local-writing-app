@@ -17,6 +17,7 @@ both are generic/shared writers used by other slices too.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +75,18 @@ def _row_measures(record: dict[str, Any]) -> tuple[int, int, float | None]:
     return input_tokens, output_tokens, cost
 
 
+def _add_cost(acc: float | None, cost: float | None) -> float | None:
+    """Fold one row's cost into a running total under the shared "unknown
+    until a priced row" policy (#697): a scope stays None until its first
+    priced row, then accumulates. The per-chat `cost_usd_total`, the summary
+    grand total, and each summary bucket all reduce with this, so they agree
+    on when a total is known rather than re-expressing the rule three ways
+    (#1708)."""
+    if cost is None:
+        return acc
+    return (acc or 0.0) + cost
+
+
 def _cost_rank(bucket: AICostBucket) -> tuple[float, int, str]:
     return (-(bucket.cost_usd or 0.0), -bucket.count, bucket.key)
 
@@ -114,6 +127,22 @@ class AiInvocationsMixin:
             if isinstance(items, list):
                 return [record for record in items if isinstance(record, dict)]
         return []
+
+    def _iter_invocation_rows(
+        self, *, since: str | None = None, until: str | None = None
+    ) -> Iterator[tuple[dict[str, Any], float | None, int, int]]:
+        """The single tolerant scan of the ledger every summer routes
+        through (#1708): yields `(record, cost_or_None, input_tokens,
+        output_tokens)` per row, optionally restricted to an inclusive
+        `YYYY-MM-DD` day range. Centralising "which rows count, and how a row
+        is priced" here keeps the per-scene / per-chat / summary figures from
+        drifting apart on a future edit — a hand-edited row can never make one
+        summer disagree with another about a row."""
+        for record in self._read_ai_invocations_raw():
+            if not _in_day_range(record, since, until):
+                continue
+            input_tokens, output_tokens, cost = _row_measures(record)
+            yield record, cost, input_tokens, output_tokens
 
     def list_ai_invocations(
         self,
@@ -180,11 +209,6 @@ class AiInvocationsMixin:
         """
         since = since or None
         until = until or None
-        rows = [
-            record
-            for record in self._read_ai_invocations_raw()
-            if _in_day_range(record, since, until)
-        ]
 
         # One node-index build serves every chat/scene/prompt label lookup,
         # built lazily on the first labelled row so an unlabelled ledger
@@ -200,16 +224,17 @@ class AiInvocationsMixin:
 
         names = ("by_model", "by_chat", "by_scene", "by_prompt", "by_day")
         breakdowns: dict[str, dict[str, AICostBucket]] = {name: {} for name in names}
-        totals = AICostSummary(total_cost_usd=None, count=len(rows))
+        totals = AICostSummary(total_cost_usd=None, count=0)
 
-        for record in rows:
-            input_tokens, output_tokens, cost = _row_measures(record)
+        for record, cost, input_tokens, output_tokens in self._iter_invocation_rows(
+            since=since, until=until
+        ):
+            totals.count += 1
             totals.input_tokens += input_tokens
             totals.output_tokens += output_tokens
             if cost is None:
                 totals.unpriced_count += 1
-            else:
-                totals.total_cost_usd = (totals.total_cost_usd or 0.0) + cost
+            totals.total_cost_usd = _add_cost(totals.total_cost_usd, cost)
             for name, key, label in _bucket_targets(record, label_for):
                 bucket = breakdowns[name].setdefault(key, AICostBucket(key=key, label=label))
                 bucket.count += 1
@@ -217,8 +242,7 @@ class AiInvocationsMixin:
                 bucket.output_tokens += output_tokens
                 if cost is None:
                     bucket.unpriced_count += 1
-                else:
-                    bucket.cost_usd = (bucket.cost_usd or 0.0) + cost
+                bucket.cost_usd = _add_cost(bucket.cost_usd, cost)
 
         totals.by_model = sorted(breakdowns["by_model"].values(), key=_cost_rank)
         totals.by_chat = sorted(breakdowns["by_chat"].values(), key=_cost_rank)
@@ -228,6 +252,6 @@ class AiInvocationsMixin:
             breakdowns["by_day"].values(), key=lambda bucket: bucket.key, reverse=True
         )
         # An empty scope is a known zero; rows with no priced row stay None.
-        if totals.total_cost_usd is None and not rows:
+        if totals.total_cost_usd is None and totals.count == 0:
             totals.total_cost_usd = 0.0
         return totals

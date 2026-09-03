@@ -332,6 +332,64 @@ class AICostSummaryEndpointTests(unittest.TestCase):
         self.assertAlmostEqual(body["by_scene"][0]["cost_usd"], 0.15, places=6)
         self.assertEqual(body["by_scene"][0]["count"], 2)
 
+    # --- #1708: the three ledger summers now share one scan + reducer, so a
+    # per-chat/per-scene figure and its matching summary bucket must agree.
+    # These pin that agreement so a future edit to one summer can't drift.
+
+    def _bucket(self, breakdown: str, key: str) -> dict:
+        body = self.client.get("/api/ai/invocations/summary").json()
+        return next(b for b in body[breakdown] if b["key"] == key)
+
+    def test_per_chat_total_agrees_with_by_chat_bucket(self) -> None:
+        from app.models import CreateChatSessionRequest
+
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="c", system_prompt="")
+        )
+        self._write_rows(
+            [
+                {"id": "r1", "ts": "2026-08-01T10:00:00+00:00",
+                 "chat_session_id": chat.id, "cost_usd": 0.02},
+                {"id": "r2", "ts": "2026-08-01T11:00:00+00:00",
+                 "chat_session_id": chat.id, "cost_usd": None},
+                {"id": "r3", "ts": "2026-08-01T12:00:00+00:00",
+                 "chat_session_id": chat.id, "cost_usd": 0.03},
+            ]
+        )
+        projection = self.service.read_chat_session(chat.id).cost_usd_total
+        self.assertAlmostEqual(projection, 0.05, places=6)
+        self.assertAlmostEqual(self._bucket("by_chat", chat.id)["cost_usd"], projection, places=6)
+
+    def test_per_chat_unknown_total_agrees_with_by_chat_bucket(self) -> None:
+        # Only-unpriced chat: both the projection and the bucket report None
+        # (not 0.0) through the shared reducer (#697).
+        from app.models import CreateChatSessionRequest
+
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="c", system_prompt="")
+        )
+        self._write_rows(
+            [
+                {"id": "r1", "ts": "2026-08-01T10:00:00+00:00",
+                 "chat_session_id": chat.id, "cost_usd": None},
+            ]
+        )
+        self.assertIsNone(self.service.read_chat_session(chat.id).cost_usd_total)
+        self.assertIsNone(self._bucket("by_chat", chat.id)["cost_usd"])
+
+    def test_scene_computed_cost_agrees_with_by_scene_bucket(self) -> None:
+        self._write_rows(
+            [
+                {"id": "r1", "ts": "2026-08-01T10:00:00+00:00",
+                 "scene_id": "scene_x", "cost_usd": 0.04},
+                {"id": "r2", "ts": "2026-08-01T11:00:00+00:00",
+                 "scene_id": "scene_x", "cost_usd": None},
+            ]
+        )
+        computed = self.service._compute_invocation_cost("scene", "scene_x")
+        self.assertAlmostEqual(computed, 0.04, places=6)
+        self.assertAlmostEqual(self._bucket("by_scene", "scene_x")["cost_usd"], computed, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

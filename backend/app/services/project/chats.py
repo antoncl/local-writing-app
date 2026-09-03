@@ -32,6 +32,7 @@ from app.models import (
     CreateChatSessionRequest,
     SaveChatSessionRequest,
 )
+from app.services.project.ai_invocations import _add_cost
 from app.services.project.errors import ProjectServiceError
 
 
@@ -200,16 +201,12 @@ class ChatSessionsMixin:
         # A chat with no priced row — fresh, or one whose turns all ran an
         # unpriced model (those record no positive-cost row) — has an UNKNOWN
         # total, surfaced as None → "—"/hidden, not a fabricated €0.00 (#697).
-        log_total = 0.0
-        saw_priced = False
-        for record in self._read_ai_invocations_raw():
+        total: float | None = None
+        for record, cost, _input, _output in self._iter_invocation_rows():
             if str(record.get("chat_session_id") or "") != chat_id:
                 continue
-            cost = record.get("cost_usd")
-            if isinstance(cost, (int, float)):
-                log_total += float(cost)
-                saw_priced = True
-        session.cost_usd_total = log_total if saw_priced else None
+            total = _add_cost(total, cost)
+        session.cost_usd_total = total
         return session
 
     def chat_changed_picks(self, chat_id: str) -> list[ChangedPick]:

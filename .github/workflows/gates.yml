@@ -181,6 +181,16 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend (from the lockfile)
+        # Guard a transient npm-registry stall: one runner hung `npm ci` for 20 min
+        # with no output, silently eating the whole 20-min job budget (the same
+        # commit installed fine elsewhere). `timeout-minutes` makes a stall fail
+        # fast and obviously retryable instead of masquerading as a slow job; the
+        # fetch env caps a single stalled request and retries it rather than hanging.
+        timeout-minutes: 6
+        env:
+          npm_config_fetch_timeout: '120000'
+          npm_config_fetch_retries: '4'
+          npm_config_fetch_retry_maxtimeout: '60000'
         run: npm ci --prefix frontend
 
       - name: svelte-check
@@ -219,6 +229,16 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend (from the lockfile)
+        # Guard a transient npm-registry stall: one runner hung `npm ci` for 20 min
+        # with no output, silently eating the whole 20-min job budget (the same
+        # commit installed fine elsewhere). `timeout-minutes` makes a stall fail
+        # fast and obviously retryable instead of masquerading as a slow job; the
+        # fetch env caps a single stalled request and retries it rather than hanging.
+        timeout-minutes: 6
+        env:
+          npm_config_fetch_timeout: '120000'
+          npm_config_fetch_retries: '4'
+          npm_config_fetch_retry_maxtimeout: '60000'
         run: npm ci --prefix frontend
 
       - name: Build the bundle the backend serves at /
@@ -230,6 +250,9 @@ jobs:
           python -m pip install -e backend --no-deps
 
       - name: Install Playwright browser (chromium)
+        # A browser + apt-deps download — the same silent-stall class as npm ci
+        # above; bound it so a stalled fetch fails fast, not at the job timeout.
+        timeout-minutes: 8
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 

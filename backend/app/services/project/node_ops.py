@@ -17,6 +17,7 @@ from __future__ import annotations
 from app.models import (
     AssistantEntry,
     CardEntry,
+    CharacterArcEntry,
     ChatSession,
     LoreEntry,
     PlotlineEntry,
@@ -68,6 +69,7 @@ class NodeOpsMixin:
         | ViewNode
         | CardEntry
         | PlotlineEntry
+        | CharacterArcEntry
         | PlotTemplate
     ):
         """Unified node-read entrypoint.
@@ -107,16 +109,19 @@ class NodeOpsMixin:
 
     def _read_plot_node(
         self, node_id: str, entry_type: str
-    ) -> CardEntry | PlotlineEntry | PlotTemplate:
+    ) -> CardEntry | PlotlineEntry | CharacterArcEntry | PlotTemplate:
         """Sub-dispatch a `plot`-kind node to its per-family reader.
 
         Plot nodes read through their own readers, not read_lore_entry. A card
-        / plotline / template is a real Node addressable by id, so `use()` can
-        pull it into AI context like any other node (#1243). Matched by is-a,
-        not exact type: the readers' own `_require_plot_family` accepts a family
-        root or any sub-type of it, so a user-defined `plot:card` sub-type must
-        dispatch to read_card too — mirroring how the `lore` branch keys on
-        kind and thereby covers every lore sub-type. `plot:board` is a view
+        / plotline / character arc / template is a real Node addressable by id, so
+        `use()` and `entry()` can pull it into AI context like any other node
+        (#1243; ADR-0080). Matched by is-a, not exact type: the readers' own
+        `_require_plot_family` accepts a family root or any sub-type of it, so a
+        user-defined `plot:card` sub-type must dispatch to read_card too —
+        mirroring how the `lore` branch keys on kind and thereby covers every lore
+        sub-type. `plot:plotline` and `plot:character_arc` are SIBLINGS under
+        `plot:thread` (neither is-a the other), so the arc needs its own branch —
+        a `plot:thread` test would wrongly swallow both. `plot:board` is a view
         aggregate with no per-instance form, so it 422s like any unreadable kind.
         """
         ancestry = self.entry_type_ancestry(entry_type)
@@ -124,6 +129,8 @@ class NodeOpsMixin:
             return self.read_card(node_id)
         if "plot:plotline" in ancestry:
             return self.read_plotline(node_id)
+        if "plot:character_arc" in ancestry:
+            return self.read_character_arc(node_id)
         if "plot:template" in ancestry:
             return self.read_plot_template(node_id)
         raise ProjectServiceError(

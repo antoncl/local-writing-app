@@ -12,10 +12,14 @@ deterministic detector:
   `extract_to_node` + `commit` instance `context_strategy` as `revise-plot-card`
   (ADR-0065 S3), offered on `plot:plotline`, whose committable surface is the
   thread's beat roster + description.
+- `revise-character-arc` — the arc-level FIXER (ADR-0080 Amendment 2). The sibling
+  of `revise-plotline`, offered on `plot:character_arc`, reasoning in the
+  transformation register (is the change EARNED) rather than the event-structure
+  one; the `diagnose-plot` read gains a matching arc section.
 
-These prove the two prompts ship, route to the right handler, render their
-board context, and — for the fixer — that a returned patch validates for a plotline
-node through the kind-neutral commit loop.
+These prove the prompts ship, route to the right handler, render their board
+context (including the character-arc read), and — for the fixers — that a returned
+patch validates for the subject node through the kind-neutral commit loop.
 """
 
 from __future__ import annotations
@@ -25,20 +29,40 @@ from plot_fixtures import PlotTestCase
 
 from app.models import (
     CreateCardRequest,
+    CreateLoreEntryRequest,
     CreatePlotlineRequest,
     SaveCardRequest,
+    SaveCharacterArcRequest,
 )
 from app.services.ai.helpers import create_environment_for_project
 from app.services.ai.templates import render_template
 
 _THREE_ACT = "builtin-plot-three-act-story-arc"
+_CHARACTER_ARC_TEMPLATE = "builtin-plot-positive-character-change-arc"
 _DIAGNOSE_TITLE = "Diagnose plot"
 _REVISE_PLOTLINE_TITLE = "Revise plotline"
+_REVISE_ARC_TITLE = "Revise character arc"
 
 
 class _DiagnosticPromptBase(PlotTestCase):
     def _plotline(self):
         return self.service.instantiate_plot_template(_THREE_ACT)
+
+    def _arc(self, character: str | None = None):
+        """An instantiated positive-change arc, optionally bound to a fresh
+        `lore:character` of the given name."""
+        arc = self.service.instantiate_plot_template(_CHARACTER_ARC_TEMPLATE)
+        if character is not None:
+            char = self.service.create_lore_entry(
+                CreateLoreEntryRequest(title=character, entry_type="lore:character")
+            )
+            arc = self.service.save_character_arc(
+                arc.id,
+                SaveCharacterArcRequest(
+                    title=arc.title, body=arc.body, metadata={**arc.metadata, "character": char.id}
+                ),
+            )
+        return arc
 
     def _card(self, title: str, *, body: str = "", **metadata: object) -> str:
         card = self.service.create_card(CreateCardRequest(title=title))
@@ -90,6 +114,34 @@ class DiagnosePlotPromptTests(_DiagnosticPromptBase):
         self.assertIn("<diagnostic_questions>", out)
         self.assertIn("<weak_spots>", out)
 
+    def test_it_teaches_the_transformation_and_causation_read_of_an_arc(self) -> None:
+        # ADR-0080 Amendment 2: the diagnostic prose tells the model to read an
+        # arc as a transformation earned by causation, not an event sequence.
+        out = self._render(
+            self.service.read_prompt_entry(
+                builtin_prompt_id(self.service, _DIAGNOSE_TITLE)
+            ).body
+        )
+        self.assertIn("change track", out)  # transformation, not event-sequence framing
+        self.assertIn("earned", out)  # the arc question
+        self.assertIn("change-beat no card fulfils", out)  # the causation test
+
+    def test_a_bound_arc_and_its_change_beat_reach_the_diagnostic_context(self) -> None:
+        # The arc read has real data to work on: a bound arc renders as a
+        # <character_arc> and a card that fulfils a change-beat renders an honest
+        # <fulfils arc=… character=…> (ADR-0080 Amendment 2 over #1770's plumbing).
+        arc = self._arc(character="Mira Voss")
+        beat_id = arc.metadata["instance_beats"][0]["id"]
+        self._card("Turning point", beat_links=[{"plotline": arc.id, "beat_id": beat_id}])
+        out = self._render(
+            self.service.read_prompt_entry(
+                builtin_prompt_id(self.service, _DIAGNOSE_TITLE)
+            ).body
+        )
+        self.assertIn("<character_arc ", out)
+        self.assertIn('character="Mira Voss"', out)
+        self.assertIn('arc="', out)  # the card's change-beat is attributed to the arc, not a plotline
+
 
 class EntryHelperResolvesPlotNodesTests(_DiagnosticPromptBase):
     """The `entry()` Jinja helper must resolve plot nodes (card + plotline), not
@@ -112,6 +164,20 @@ class EntryHelperResolvesPlotNodesTests(_DiagnosticPromptBase):
         title, roster_len = out.split("|")
         self.assertEqual(title, line.title)
         self.assertGreater(int(roster_len), 0)  # color + instance_beats, not an empty roster
+
+    def test_entry_resolves_a_character_arc_title_and_fields(self) -> None:
+        # ADR-0080: an arc is a plot:thread SIBLING of the plotline, not an
+        # is-a plotline, so read_node's sub-dispatch needs its own branch — without
+        # it entry(arc) degraded to the bare id and an empty field roster, and
+        # revise-character-arc's field_contract loop registered nothing.
+        arc = self.service.instantiate_plot_template(_CHARACTER_ARC_TEMPLATE)
+        out = self._render(
+            '{% role "system" %}{{ entry(id).title }}|{{ fields(entry(id)) | length }}{% endrole %}',
+            id=arc.id,
+        )
+        title, roster_len = out.split("|")
+        self.assertEqual(title, arc.title)
+        self.assertGreater(int(roster_len), 0)  # character + color + instance_beats
 
 
 class RevisePlotlinePromptTests(_DiagnosticPromptBase):
@@ -194,3 +260,59 @@ class RevisePlotlinePromptTests(_DiagnosticPromptBase):
         out = self._render(body, inputs={"entry": plotline.id})
         self.assertIn("<genre>Romance</genre>", out)
         self.assertIn("slow-burn romance between the rival cartographers", out)
+
+
+class ReviseCharacterArcPromptTests(_DiagnosticPromptBase):
+    """ADR-0080 Amendment 2: the arc fixer — the sibling of revise-plotline,
+    offered on plot:character_arc, reasoning in the transformation register."""
+
+    def test_it_ships_as_a_commit_brainstorm_offered_on_character_arcs(self) -> None:
+        revise_arc_id = builtin_prompt_id(self.service, _REVISE_ARC_TITLE)
+        entries = self._summaries()
+        self.assertIn(revise_arc_id, entries)
+        entry = entries[revise_arc_id]
+        # Same disposition as revise-plotline — a `prompt:general` carrying an
+        # `extract_to_node` + `commit` instance `context_strategy`, differing only
+        # in offer_on + body (the character-arc target).
+        self.assertEqual(entry.entry_type, "prompt:general")
+        self.assertEqual(entry.offer_on, ["plot:character_arc"])
+        output = self.service.read_prompt_entry(revise_arc_id).context_strategy.output
+        self.assertEqual(output.handler, "extract_to_node")
+        self.assertIsNotNone(output.commit)
+
+    def test_its_body_reasons_in_the_transformation_register(self) -> None:
+        arc = self._arc()
+        body = self.service.read_prompt_entry(
+            builtin_prompt_id(self.service, _REVISE_ARC_TITLE)
+        ).body
+        out = self._render(body, inputs={"entry": arc.id})
+        self.assertIn(arc.title, out)  # the arc under revision
+        self.assertIn("<plot_context", out)  # the board block is injected
+        self.assertIn("instance_beats", out)  # the change-beat roster is a field to develop
+        # The prose is the transformation lens (want/lie), not event-structure.
+        self.assertIn("the want and the lie", out)
+
+    def test_a_returned_patch_validates_for_a_character_arc(self) -> None:
+        # The kind-neutral commit loop: a patch extracted from the brainstorm
+        # validates for a plot:character_arc node exactly as for a plotline.
+        arc = self._arc()
+        raw = '{"body": "Mira learns that control is not the same as safety.", "fields": {}}'
+        patch = self.service.validate_ai_entry_patch(arc.id, raw)
+        self.assertFalse(patch.garbled)
+        self.assertEqual(patch.body, "Mira learns that control is not the same as safety.")
+
+    def test_the_brainstorm_can_restructure_the_change_beat_roster(self) -> None:
+        # instance_beats is proposable for an arc too, so the fixer can rewrite the
+        # change-beat roster — the arc-level power over the card fixer.
+        arc = self._arc()
+        raw = (
+            '{"body": "", "fields": {"instance_beats": '
+            '[{"title": "Clings to the lie", "function": "the false safety"}, '
+            '{"title": "Pays its cost", "function": "the lie turns on her"}]}}'
+        )
+        patch = self.service.validate_ai_entry_patch(arc.id, raw)
+        self.assertFalse(patch.garbled)
+        self.assertNotIn("instance_beats", patch.dropped)
+        roster = patch.fields.get("instance_beats")
+        self.assertEqual(len(roster), 2)
+        self.assertEqual(roster[0]["title"], "Clings to the lie")

@@ -16,6 +16,7 @@ from project_fixtures import open_test_project
 from app.models import (
     AssistantEntry,
     CardEntry,
+    CharacterArcEntry,
     ChatSession,
     CreateAssistantEntryRequest,
     CreateCardRequest,
@@ -106,6 +107,15 @@ class ReadNodeDispatchTests(unittest.TestCase):
         created = self.service.create_plotline(CreatePlotlineRequest(title="A Thread"))
         result = self.service.read_node(created.id)
         self.assertIsInstance(result, PlotlineEntry)
+        self.assertEqual(result.id, created.id)
+
+    def test_dispatches_to_character_arc_reader(self) -> None:
+        # ADR-0080: a plot:character_arc is a plot:thread SIBLING of the plotline,
+        # so _read_plot_node needs its own branch — a bare is-a-plotline test would
+        # miss it and 422, leaving entry()/use() unable to pull an arc into context.
+        created = self.service.instantiate_plot_template("builtin-plot-positive-character-change-arc")
+        result = self.service.read_node(created.id)
+        self.assertIsInstance(result, CharacterArcEntry)
         self.assertEqual(result.id, created.id)
 
     def test_dispatches_to_plot_template_reader(self) -> None:

@@ -119,6 +119,19 @@ class FieldContractBuiltinsTests(unittest.TestCase):
         self.assertEqual(ids, self._proposable_ids("plot:plotline"))
         self.assertIn("body", ids)
 
+    def test_revise_character_arc_registers_full_proposable_set(self) -> None:
+        # ADR-0080 Amendment 2: the arc fixer registers the same generic
+        # proposable set for its subject — body (the description) + the change-beat
+        # roster; the bound character is a reference field, so it is filtered out.
+        arc = self.service.instantiate_plot_template("builtin-plot-positive-character-change-arc")
+        stored = self._stored(
+            builtin_prompt_id(self.service, "Revise character arc"), {"entry": arc.id}
+        )
+        ids = {f["id"] for f in stored}
+        self.assertEqual(ids, self._proposable_ids("plot:character_arc"))
+        self.assertIn("body", ids)
+        self.assertNotIn("character", ids)  # the entity_ref is not proposable
+
 
 if __name__ == "__main__":
     unittest.main()

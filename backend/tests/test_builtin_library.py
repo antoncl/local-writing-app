@@ -495,6 +495,7 @@ class BuiltinLibraryTests(unittest.TestCase):
             "Diagnose plot",
             "Revise plot card",
             "Revise plotline",
+            "Revise character arc",
             "Describe",
             "Expand",
             "Show, don't tell",

@@ -24,7 +24,6 @@
     MetadataValue,
     MutationSetEntry,
     PromptEntrySummary,
-    ScopedTag,
     StructureDocument,
   } from "@/lib/types";
 
@@ -36,7 +35,6 @@
     promptEntries = [],
     structure = null,
     researchStructure = null,
-    knownTags = [],
     onSaved,
     onCancel,
   }: {
@@ -48,7 +46,6 @@
     promptEntries?: PromptEntrySummary[];
     structure?: StructureDocument | null;
     researchStructure?: StructureDocument | null;
-    knownTags?: ScopedTag[];
     onSaved: () => void;
     onCancel: () => void;
   } = $props();
@@ -162,7 +159,6 @@
       promptEntries={promptEntries}
       structure={structure}
       researchStructure={researchStructure}
-      knownTags={knownTags}
       onRowChange={setRow}
       onRowRemove={removeRow}
       onRowAdd={addRow}

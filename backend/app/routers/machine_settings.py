@@ -1,4 +1,6 @@
-"""Machine-settings and assistant-tag routes (#170 main.py split)."""
+"""Machine-settings routes (#170 main.py split). The assistant-tag routes this
+module used to carry retired with the `assistant-tags.yaml` registry (ADR-0082
+slice 2b) — the assistant vocabulary is now `tag:assistant_tag` nodes."""
 from __future__ import annotations
 
 import ipaddress
@@ -8,14 +10,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from app.models import (
-    AssistantTagList,
-    AssistantTagsOverview,
     MachineSettingsUpdate,
     MachineSettingsView,
-    MergeAssistantTagsRequest,
-    SetAssistantTagColorRequest,
 )
-from app.runtime import CurrentProject, translate_errors
+from app.runtime import translate_errors
 from app.services import machine_settings as machine_settings_service
 
 router = APIRouter()
@@ -100,34 +98,5 @@ def reveal_logs(request: Request) -> dict[str, str]:
         )
     machine_settings_service.reveal_config_dir()
     return {"config_dir": str(machine_settings_service.config_dir())}
-
-
-@router.get("/api/assistant-tags", response_model=AssistantTagList)
-def get_assistant_tags() -> AssistantTagList:
-    # Machine-global (assistants live machine-globally), so this is not scoped
-    # to the open project (#88).
-    return AssistantTagList(tags=machine_settings_service.load_assistant_tags())
-
-
-@router.get("/api/assistant-tags/overview", response_model=AssistantTagsOverview)
-def get_assistant_tags_overview(project: CurrentProject) -> AssistantTagsOverview:
-    # Machine-global vocabulary, but the use-counts read the open project's
-    # prompt docs, so this rides the project scope like the governance ops (#247).
-    # With no project open it degrades to the machine roster alone.
-    with translate_errors():
-        return project.read_assistant_tags_overview()
-
-
-@router.post("/api/assistant-tags/merge", response_model=AssistantTagList)
-def merge_assistant_tags(project: CurrentProject, request: MergeAssistantTagsRequest) -> AssistantTagList:
-    # Rename is a single-source merge. Rewrites reachable references then the
-    # flat store; the survivor keeps its own colour (#247).
-    with translate_errors():
-        return project.merge_assistant_tags(request)
-
-
-@router.put("/api/assistant-tags/{name}", response_model=AssistantTagList)
-def set_assistant_tag_color(name: str, request: SetAssistantTagColorRequest) -> AssistantTagList:
-    return AssistantTagList(tags=machine_settings_service.set_assistant_tag_color(name, request.color))
 
 

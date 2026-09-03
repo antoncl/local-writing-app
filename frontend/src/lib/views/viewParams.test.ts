@@ -160,14 +160,26 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
     expect(c.field.type).toBe("text");
   });
 
-  it("a `tagged`-referenced param → a tags control (retired for authoring, hand-written specs), #293", () => {
+  it("a `tagged`-referenced param on a non-assistant kind → an UNRESTRICTED entity_ref_list tag-vocabulary control (any tag vocabulary, e.g. a user-authored tag:motifs), #293 / #1803 review", () => {
     const spec: ViewSpec = {
       kind: "lore",
       expr: { filter: { of: { descendants_of: "lore:base" }, pred: { tagged: { var: "Tag" } } } },
       params: [{ name: "Tag", label: "Tag", default: null }],
     };
     const [c] = resolveParamControls(spec, SCHEMA);
-    expect([c.field.type, c.fieldKey]).toEqual(["tags", "tags"]);
+    expect([c.field.type, c.fieldKey]).toEqual(["entity_ref_list", "tags"]);
+    expect(c.field.picker_config?.sources).toEqual([{ kind: "tag" }]);
+  });
+
+  it("a `tagged`-referenced param on an assistant-kind spec → scoped to the tag:assistant_tag vocabulary, #1803 review", () => {
+    const spec: ViewSpec = {
+      kind: "assistant",
+      expr: { filter: { of: { descendants_of: "assistant:base" }, pred: { tagged: { var: "Tag" } } } },
+      params: [{ name: "Tag", label: "Tag", default: null }],
+    };
+    const [c] = resolveParamControls(spec, SCHEMA);
+    expect([c.field.type, c.fieldKey]).toEqual(["entity_ref_list", "tags"]);
+    expect(c.field.picker_config?.sources).toEqual([{ kind: "tag", expr: { type: "tag:assistant_tag" } }]);
   });
 
   it("no params ⇒ no controls (degenerate closed view)", () => {

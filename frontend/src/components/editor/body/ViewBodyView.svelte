@@ -32,7 +32,6 @@
   import { setDesignerContext, type DesignerContext, type FieldOption, type RosterWarning } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { knownTagsStore } from "@/lib/stores/tags";
   import { tagTitleById } from "@/lib/stores/tagNodes";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
@@ -66,8 +65,6 @@
     valueSlotAccepts,
     inferInputTypes,
     inputKinds,
-    tagAppliesToInput,
-    anchorSet,
     FILTER_VALUE_HANDLE,
     OUTPUT_NODE_ID,
     type GraphNodeKind,
@@ -84,7 +81,6 @@
     LoreEntrySummary,
     MetadataFieldDefinition,
     PromptEntrySummary,
-    ScopedTag,
     StructureDocument,
     ViewLayout,
     ViewNode,
@@ -477,9 +473,9 @@
     descendantsOf: (fqn) => descendantTypeFqns(schema, fqn),
     kindOfType: (fqn) => schema?.entry_types?.[fqn]?.kind ?? fqn.split(":")[0] ?? null,
   };
-  // Rebuilt once per graph mutation (a $derived), not per picker call — both
-  // `fieldsForNode` and `knownTagsFor` run per node per render, so a per-call
-  // rebuild would be O(N²) over the node count.
+  // Rebuilt once per graph mutation (a $derived), not per picker call —
+  // `fieldsForNode` runs per node per render, so a per-call rebuild would be
+  // O(N²) over the node count.
   let inferenceGraph = $derived.by((): { byId: Map<string, ViewGraphNode>; edges: ViewGraphEdge[] } => ({
     byId: new Map(
       flowNodes.map((n) => [n.id, { id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} }]),
@@ -534,16 +530,6 @@
     const thin = !fieldsForNode(nodeId).some((o) => o.def.category !== "intrinsic");
     return { kinds, thin };
   }
-  // Per-node tag roster (#243 → #215): tags whose scope matches the node's inferred
-  // INPUT type-set — kind AND (when the tag narrows to entry_types) type, the
-  // "input pipe". Re-emitted unscoped so the TagPicker shows the whole matched set;
-  // an indeterminate input falls back to the anchor kind.
-  function knownTagsFor(nodeId: string): ScopedTag[] {
-    const ts: InputTypeSet = inputTypesForNode(nodeId) ?? anchorSet(kind);
-    return $knownTagsStore
-      .filter((t) => tagAppliesToInput(t.scope, ts, typeResolvers.descendantsOf))
-      .map((t) => ({ ...t, scope: { sources: [] } }));
-  }
   // ---- designer context for the custom nodes ----
   setDesignerContext(
     (): DesignerContext => ({
@@ -561,7 +547,6 @@
       fieldByKey: (key: string) => schema?.fields?.[key] ?? computedFieldByKey(kind, key),
       valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
       handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),
-      knownTagsFor,
       loreEntries,
       promptEntries,
       assistantEntries,

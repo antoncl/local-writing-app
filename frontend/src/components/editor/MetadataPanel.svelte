@@ -31,8 +31,6 @@
     documentLabel: string;
     documentEntryTypes: [string, EntryTypeDefinition][];
     metadataFieldIds: string[];
-    knownTags?: import("@/lib/types").ScopedTag[];
-    tagOrigin?: "project" | "assistant";
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
     structure?: StructureDocument | null;
@@ -112,8 +110,6 @@
     documentLabel,
     documentEntryTypes,
     metadataFieldIds,
-    knownTags = [],
-    tagOrigin = "project",
     loreEntries = [],
     promptEntries = [],
     structure = null,
@@ -258,7 +254,6 @@
     return (
       field.type === "long_text" ||
       field.type === "entity_ref_list" ||
-      field.type === "tags" ||
       field.type === "list" ||
       (field.type === "multi_select" && field.options.length > 0)
     );
@@ -619,10 +614,6 @@
                       researchStructure={researchStructure}
                       implicitContextMatcher={implicitContextMatcher}
                       excludeId={excludeId}
-                      knownTags={knownTags}
-                      tagOrigin={tagOrigin}
-                      documentKind={documentKind}
-                      entryType={entryType}
                       onChange={() => {}}
                     />
                   </div>
@@ -696,10 +687,6 @@
                 researchStructure={researchStructure}
                 implicitContextMatcher={implicitContextMatcher}
                 excludeId={excludeId}
-                knownTags={knownTags}
-                tagOrigin={tagOrigin}
-                documentKind={documentKind}
-                entryType={entryType}
                 createLayerId={createLayerId}
                 onChange={(v) => writeField(fieldId, v)}
                 onNavigate={(payload) => onNavigate?.(payload)}

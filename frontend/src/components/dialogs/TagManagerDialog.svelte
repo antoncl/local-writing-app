@@ -1,24 +1,26 @@
 <script lang="ts">
-  // The one "Manage tags" home (#247, slice 2 PR-3b). Both tag vocabularies —
-  // project tags (per-layer, scoped) and the flat, machine-global assistant
-  // tags — are governed from the SAME roster the "+" popover uses, injected with
-  // its vocabulary's adapter. No add-target here (onAdd omitted), so each row is
-  // a static label whose ⋯ opens Rename / Merge / colour (+ Suggest-on for the
-  // scoped project vocabulary). Retires the old lopsided TagManagerDialog
-  // (project scope/merge, no colour) + AssistantTagManager (colour only).
+  // The one "Manage tags" home (#247, slice 2 PR-3b). PROJECT tags (per-layer,
+  // scoped) are governed from the roster the "+" popover uses, injected with its
+  // vocabulary's adapter. No add-target here (onAdd omitted), so each row is a
+  // static label whose ⋯ opens Rename / Merge / colour / Suggest-on. Retires the
+  // old lopsided TagManagerDialog (project scope/merge, no colour).
+  //
+  // The ASSISTANT half retired (ADR-0082 slice 2b): the assistant vocabulary is
+  // now `tag:assistant_tag` nodes, not the legacy `assistant-tags.yaml` registry
+  // this dialog used to aggregate — governance for those moves to slice 3's tag
+  // pane. This dialog (the legacy `tags.yaml` project registry) itself stays
+  // until slice 4 removes it with the migration.
   //
   // No onChanged: every governance op calls its adapter.reconcile(), which bumps
   // App's one tag-vocabulary-revision signal; App's refreshAfterTagChange then
-  // re-syncs both rosters (the stores we read below) and any open editors.
+  // re-syncs the roster (the store we read below) and any open editors.
   import TagRosterPopover from "@/components/widgets/TagRosterPopover.svelte";
   import { knownTagsStore } from "@/lib/stores/tags";
-  import { assistantTagsStore, assistantTagsAsScoped } from "@/lib/stores/assistantTags";
-  import { projectTagGovernance, assistantTagGovernance } from "@/lib/utils/tagGovernance";
+  import { projectTagGovernance } from "@/lib/utils/tagGovernance";
 
   let { onClose }: { onClose: () => void } = $props();
 
   const projectTags = $derived($knownTagsStore);
-  const assistantTags = $derived(assistantTagsAsScoped($assistantTagsStore));
   // The roster's "already added" affordance is entity-only; nothing is selected
   // in the manager.
   const noSelection = new Set<string>();
@@ -50,22 +52,6 @@
             selectedKeys={noSelection}
             adapter={projectTagGovernance}
             ariaLabel="Project"
-          />
-        {/if}
-      </section>
-
-      <section class="tm-section">
-        <h3 class="tm-section-head">Assistant tags</h3>
-        {#if assistantTags.length === 0}
-          <p class="tm-section-empty">
-            No assistant tags yet. Tag an assistant or a prompt's assistant scope to register one.
-          </p>
-        {:else}
-          <TagRosterPopover
-            tags={assistantTags}
-            selectedKeys={noSelection}
-            adapter={assistantTagGovernance}
-            ariaLabel="Assistant"
           />
         {/if}
       </section>

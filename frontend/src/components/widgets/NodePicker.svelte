@@ -15,7 +15,7 @@
 
   import { tick } from "svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { knownTagsStore } from "@/lib/stores/tags";
+  import { tagNodesStore } from "@/lib/stores/tagNodes";
   import { cardEntriesStore } from "@/lib/stores/plotCards";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
@@ -28,7 +28,6 @@
     MetadataSchema,
     PlotlineSummary,
     PromptEntrySummary,
-    ScopedTag,
     StructureDocument,
     StructureNode,
     TagEntry,
@@ -225,33 +224,13 @@
     onChange?.({ value: next });
   }
 
-  // Trigger element + menu position state. The menu is rendered with
-  // `position: fixed` so it escapes the metadata-panel's overflow:auto
-  // (which clipped the dropdown when ReferencePicker hosts this picker
-  // inside a scene/lore metadata field). Position is captured from the
-  // trigger's getBoundingClientRect at open time and on resize/scroll.
+  // Trigger element the menu floats against — positioned + body-portaled by
+  // the shared `anchoredPopover` action inside NodePickerPopover (#1573),
+  // which escapes the metadata-panel's overflow:auto (had clipped the
+  // dropdown when ReferencePicker hosts this picker inside a scene/lore
+  // metadata field) and stays glued to the trigger under a zoomed/panned
+  // SvelteFlow canvas (#245, `track` on).
   let triggerEl: HTMLButtonElement | undefined = $state();
-  let menuStyle = $state("");
-  // Must match .ctx-menu's width / max-height in NodePickerPopover.svelte — this
-  // math clamps the popover to the viewport, so a size change there needs one here.
-  const MENU_WIDTH = 344;
-  const MENU_MAX_HEIGHT = 420;
-
-  function positionMenu() {
-    if (!triggerEl) return;
-    const r = triggerEl.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const spaceBelow = vh - r.bottom;
-    const spaceAbove = r.top;
-    const useAbove = spaceBelow < MENU_MAX_HEIGHT + 12 && spaceAbove > spaceBelow;
-    const top = useAbove
-      ? Math.max(8, r.top - MENU_MAX_HEIGHT - 4)
-      : Math.min(vh - 12, r.bottom + 4);
-    let left = r.left;
-    if (left + MENU_WIDTH + 8 > vw) left = Math.max(8, vw - MENU_WIDTH - 8);
-    menuStyle = `top: ${top}px; left: ${left}px;`;
-  }
 
   async function toggle() {
     open = !open;
@@ -260,7 +239,6 @@
       activeAxis = null;
       hasNavigated = false; // reset to the default view (sole-type axis, else root)
       await tick();
-      positionMenu();
       searchInputEl?.focus();
     }
   }
@@ -269,10 +247,6 @@
     open = false;
     search = "";
     activeAxis = null;
-  }
-
-  function handleViewportShift() {
-    if (open) positionMenu();
   }
 
   function handleDocumentClick(event: MouseEvent) {
@@ -394,22 +368,23 @@
     return groups;
   });
 
-  // Tags: the scoped known-tag vocabulary (loaded app-wide into knownTagsStore)
-  // becomes per-kind tag selectors ({kind, expr:{tagged}}). A tag is offered for
-  // each allowed kind it is in scope for (empty scope = every kind). Most
-  // context_pick inputs target one kind, so this is usually just "the tags".
-  // Read from the store, not a fetch — no network on the picker's own account.
-  const knownTags = $derived($knownTagsStore);
-  function tagInScopeFor(tag: ScopedTag, kind: string): boolean {
-    const { kinds } = pickerMembership(tag.scope);
-    return kinds.length === 0 || kinds.includes(kind);
-  }
+  // Tags: every tag-kind vocabulary (ADR-0082 — `tag_nodes.ts` roster, loaded
+  // app-wide into tagNodesStore) becomes per-kind tag selectors ({kind, expr:
+  // {tagged: tag.id}}) — not just the general `tag:tag` vocabulary; a
+  // user-authored one (e.g. `tag:motifs`) is first-class too. Most context_pick
+  // inputs target one kind, so this is usually just "the tags". Read from the
+  // store, not a fetch — no network on the picker's own account. `tag:
+  // assistant_tag` is the one exclusion: a separate vocabulary (the assistant
+  // strip's own TAG control, viewParams.ts) that never belongs to a lore/scene
+  // roster filter. A vocabulary with zero members of the allowed kind is
+  // already dropped below (the members guard), so no scope list is needed here.
+  const tagNodes = $derived($tagNodesStore.filter((t) => t.entry_type !== "tag:assistant_tag"));
   // A `tagged` leaf INTERSECTED with the config's entry_type constraint for the
   // kind, so a tag can't over-match past the picker's scope (a lore:character
   // input must not pull in a lore:location sharing the tag). The stored spec
   // drives invocation expansion too, so the constraint lives in the spec, not
   // just the display filter.
-  function tagSpecFor(kind: string, tag: string): ViewSpec {
+  function tagSpecFor(kind: string, tagId: string): ViewSpec {
     const fqns = membership.entryTypes[kind] ?? [];
     const typeExpr =
       fqns.length === 1
@@ -417,23 +392,24 @@
         : fqns.length > 1
           ? { union: fqns.map((f) => ({ type: f })) }
           : null;
-    const expr = typeExpr ? { intersect: [{ tagged: tag }, typeExpr] } : { tagged: tag };
+    const expr = typeExpr ? { intersect: [{ tagged: tagId }, typeExpr] } : { tagged: tagId };
     return { kind, expr } as ViewSpec;
   }
   const tagGroups = $derived.by<SelectorGroup[]>(() => {
     const groups: SelectorGroup[] = [];
     for (const kind of allowedKinds) {
-      for (const tag of knownTags) {
-        if (!tagInScopeFor(tag, kind)) continue;
+      for (const tag of tagNodes) {
+        // The `tagged:` id scheme (not `tag:${name}` — that collides with the
+        // `kind:key` entry_type FQN prefix, ADR-0082 §4).
         const ref: NodePickerRef = {
-          id: `tag:${kind}:${tag.name}`,
+          id: `tagged:${kind}:${tag.id}`,
           kind: "tag",
-          title: tag.name,
-          selector: tagSpecFor(kind, tag.name),
+          title: tag.title,
+          selector: tagSpecFor(kind, tag.id),
         };
         const members = membersForSelector(ref, selectorRoster);
-        // Skip a tag that resolves to nothing (a kind with no roster, or no
-        // current in-scope members) — an empty, pickable row is noise.
+        // Skip a tag that resolves to nothing (a kind with no roster, or zero
+        // members of the kind) — an empty, pickable row is noise.
         if (members.length > 0) groups.push({ ref, members });
       }
     }
@@ -1091,7 +1067,6 @@
 </script>
 
 <svelte:document onmousedown={handleDocumentClick} onkeydown={handleKeydown} />
-<svelte:window onscroll={handleViewportShift} onresize={handleViewportShift} />
 
 <div class="ctx-picker" class:compact>
   <!-- PR 2: chips + trigger live in one bordered "context bar" so the
@@ -1174,7 +1149,7 @@
       {#if open}
         <NodePickerPopover
           model={popoverModel}
-          {menuStyle}
+          anchor={triggerEl}
           {compact}
           bind:search
           bind:searchInputEl

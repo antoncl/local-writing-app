@@ -381,8 +381,8 @@ describe("displayInputValues (ADR-0076 S2 — Context door's locked-inputs secti
     ]);
   });
 
-  it("list-shaped types (tags/multi_select) never leak the JSON wire form (S2 review)", () => {
-    const inputs = [input("tags", { name: "senses" })];
+  it("list-shaped types (multi_select) never leak the JSON wire form (S2 review)", () => {
+    const inputs = [input("multi_select", { name: "senses" })];
     expect(displayInputValues(inputs, { senses: '["sight","sound"]' }, lookup)).toEqual([
       { name: "senses", label: "senses", value: "sight · sound" },
     ]);

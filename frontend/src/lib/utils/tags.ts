@@ -60,9 +60,8 @@ export function parseTagList(raw: string | null | undefined): string[] {
 }
 
 // The one home for "what colour is this tag?" — a lowercased-name → swatch-id
-// map built from the known-tags roster (#247). Every chip render site holds
-// `knownTags`, so they map through this rather than re-deriving a `.find()` each.
-// A one-off lookup is `tagColorMap(tags).get(name.toLowerCase()) ?? null`.
+// map built from the known-tags roster (#247). A one-off lookup is
+// `tagColorMap(tags).get(name.toLowerCase()) ?? null`.
 export function tagColorMap(knownTags: ScopedTag[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const tag of knownTags) {
@@ -73,10 +72,11 @@ export function tagColorMap(knownTags: ScopedTag[]): Map<string, string> {
 
 // A ready "tag name → hex" resolver for a chip render site (#1447). Folds the
 // roster into a colour map once, then resolves each tag's swatch to a hex — null
-// when the tag carries no colour. This is exactly what NodeRow's `tagColor`
-// callback wants (the rail's TagChip does the same swatch→hex step internally).
-// Call it inside a `$derived` that reads the roster, so the returned closure
-// re-tracks when the vocabulary or its colours change.
+// when the tag carries no colour. Call it inside a `$derived` that reads the
+// roster, so the returned closure re-tracks when the vocabulary or its colours
+// change. No production caller today (the legacy `tags` field type's chip
+// rendering retired with `TagPicker`/`TagChip`, ADR-0082 slice 2b) — kept with
+// its unit tests pending this file's own retirement (slice 4).
 export function tagHexResolver(knownTags: ScopedTag[]): (tag: string) => string | null {
   const ids = tagColorMap(knownTags);
   return (tag) => {

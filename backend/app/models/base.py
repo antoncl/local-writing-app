@@ -51,11 +51,12 @@ MetadataValue = str | int | float | bool | None | list[Any] | dict[str, Any]
 # Prompt inputs offer the same authorable *value* types as metadata fields
 # (MetadataFieldDefinition.type) — one catalog, so the two can't drift
 # (#1225 / decisions-inputs-fields-uniformity). Excluded from that catalog:
-# `computed` (derived, never entered) and `date` (deprecated). Added on top are
-# the two prompt-only invocation types (context_pick / scene_ref). Nothing in
-# the backend branches on the literal — inputs flow through as data — so a
-# list-shaped value (multi_select / tags / list) just needs to arrive as a real
-# JSON array (the frontend coerces it) to render.
+# `computed` (derived, never entered) and `date` (deprecated); `tags` retired
+# (ADR-0082 slice 2b) — a tag vocabulary is `entity_ref_list`, no longer a type
+# of its own. Added on top are the two prompt-only invocation types
+# (context_pick / scene_ref). Nothing in the backend branches on the literal —
+# inputs flow through as data — so a list-shaped value (multi_select / list)
+# just needs to arrive as a real JSON array (the frontend coerces it) to render.
 PromptInputType = Literal[
     "text",
     "long_text",
@@ -63,7 +64,6 @@ PromptInputType = Literal[
     "boolean",
     "select",
     "multi_select",
-    "tags",
     "list",
     "entity_ref",
     "entity_ref_list",

@@ -34,10 +34,11 @@ from typing import Any
 
 from app.models.schema import GroupMember, MetadataFieldDefinition, MetadataSchema
 
-# The metadata field types that hold a reference to another node or a tag vocab
-# entry — the values this traversal exists to find. `tags` rides along (slice 3
-# consumes it for canonicalise/rename); ref-only passes filter by `field.type`.
-REF_FIELD_TYPES = ("entity_ref", "entity_ref_list", "tags")
+# The metadata field types that hold a reference to another node — the values
+# this traversal exists to find. `tags` retired (ADR-0082 slice 2b): a tag
+# vocabulary is now an `entity_ref_list` field like any other, so it already
+# rides through this same set — no separate type to carry along.
+REF_FIELD_TYPES = ("entity_ref", "entity_ref_list")
 
 # Sentinel: a transform returns this to leave an occurrence untouched (distinct
 # from returning a new value that happens to equal the old one).

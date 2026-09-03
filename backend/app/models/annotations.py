@@ -34,8 +34,8 @@ class ScopedTag(BaseModel):
     name: str
     scope: NodePickerConfig = Field(default_factory=NodePickerConfig)
     source_layers: list[TagLayerRef] = Field(default_factory=list)
-    # A swatch id from the machine palette (same shape as AssistantTag.color,
-    # reused by SwatchPicker/getSwatch), or None when the tag has no colour.
+    # A swatch id from the machine palette (reused by SwatchPicker/getSwatch),
+    # or None when the tag has no colour.
     # Unlike scope (which unions across layers), colour is a single value: the
     # nearest asserting layer wins (#247).
     color: str | None = None
@@ -64,48 +64,6 @@ class TagUsage(BaseModel):
     color: str | None = None
 
 
-class AssistantTag(BaseModel):
-    """One entry in the machine-global assistant-tag vocabulary (#88). Assistants
-    live machine-globally, so their tag vocabulary can't live in a project's
-    per-project tags.yaml — it has its own store. `color` is a swatch id from the
-    machine palette (reused by SwatchPicker/getSwatch), or None when unassigned."""
-
-    name: str
-    color: str | None = None
-
-
-class AssistantTagList(BaseModel):
-    tags: list[AssistantTag] = Field(default_factory=list)
-
-
-class AssistantTagUsage(BaseModel):
-    """One assistant tag with its use-count, for the governance surface (#247).
-
-    The assistant mirror of `TagUsage`, minus `scope`: assistant tags are a
-    flat machine-global vocabulary (name + colour only), so there is nothing to
-    scope. `count` is the number of references across the reachable assistant +
-    prompt documents (see AssistantTagsMixin)."""
-
-    name: str
-    count: int = 0
-    color: str | None = None
-
-
-class AssistantTagsOverview(BaseModel):
-    tags: list[AssistantTagUsage] = Field(default_factory=list)
-
-
-class MergeAssistantTagsRequest(BaseModel):
-    # Rename is a single-source merge, exactly like MergeTagsRequest.
-    sources: list[str] = Field(default_factory=list)
-    target: str = Field(min_length=1)
-
-
-class SetAssistantTagColorRequest(BaseModel):
-    # A palette swatch id, or null to clear the color.
-    color: str | None = None
-
-
 class TagsOverview(BaseModel):
     tags: list[TagUsage] = Field(default_factory=list)
 
@@ -116,8 +74,7 @@ class UpdateTagScopeRequest(BaseModel):
 
 
 class UpdateTagColorRequest(BaseModel):
-    # Unlike SetAssistantTagColorRequest (assistant identity is in the URL), a
-    # project tag is named in the body, matching UpdateTagScopeRequest.
+    # A project tag is named in the body, matching UpdateTagScopeRequest.
     name: str = Field(min_length=1)
     # A palette swatch id, or null to clear the colour.
     color: str | None = None

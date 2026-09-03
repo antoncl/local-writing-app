@@ -3,14 +3,14 @@
 // which API it talks to, and how it reconciles afterwards, is the adapter's job,
 // not a `mode` branch inside the component (feedback_mode_is_presentation_not_functionality).
 //
-// Two vocabularies, two adapters: project tags (per-layer, scoped) and assistant
-// tags (flat, machine-global, NO scope). `supportsScope` is the one presentation
-// difference the popover reads — the assistant roster hides "Suggest on…" and its
-// scope chips, because assistant tags have nothing to scope.
+// Project tags (per-layer, scoped) is the one vocabulary left here — the
+// assistant-tag adapter retired with the legacy `assistant-tags.yaml` registry
+// (ADR-0082 slice 2b): the assistant vocabulary is now `tag:assistant_tag`
+// nodes, governed like any other tag node. `supportsScope` stays on the
+// interface for a future second adapter over a scoped vocabulary.
 
 import { api } from "@/lib/api";
 import { bumpTagVocabularyRevision, refreshKnownTags } from "@/lib/stores/tags";
-import { refreshAssistantTags } from "@/lib/stores/assistantTags";
 import type { NodePickerConfig } from "@/lib/types";
 
 export interface TagGovernanceAdapter {
@@ -49,29 +49,6 @@ export const projectTagGovernance: TagGovernanceAdapter = {
   },
   async merge(sources, target) {
     await api.mergeTags(sources, target);
-  },
-  async reconcile() {
-    bumpTagVocabularyRevision();
-  },
-};
-
-export const assistantTagGovernance: TagGovernanceAdapter = {
-  supportsScope: false,
-  async loadCounts() {
-    const overview = await api.getAssistantTagsOverview();
-    return new Map(overview.tags.map((tag) => [tag.name.toLowerCase(), tag.count]));
-  },
-  async setColor(name, color) {
-    await api.setAssistantTagColor(name, color);
-    await refreshAssistantTags();
-  },
-  async updateScope() {
-    // Assistant tags have no scope; `supportsScope: false` keeps the popover
-    // from ever reaching this. Guard loudly in case that invariant slips.
-    throw new Error("Assistant tags have no scope.");
-  },
-  async merge(sources, target) {
-    await api.mergeAssistantTags(sources, target);
   },
   async reconcile() {
     bumpTagVocabularyRevision();

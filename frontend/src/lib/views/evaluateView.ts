@@ -727,7 +727,11 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutra
   if (expr.tagged != null) {
     const set = resolveLeafOperand(state, expr.tagged);
     if (set === OPERAND_INACTIVE) return neutralUniverse ? new Set(state.order.keys()) : new Set<string>();
-    return idsWhere(state, (n) => nodeTags(n).some((t) => set.has(t)));
+    return idsWhere(state, (n) => {
+      const refs = nodeReferences(n);
+      for (const t of set) if (refs.has(t)) return true;
+      return false;
+    });
   }
   if (expr.field != null) {
     return evalField(state, expr.field, neutralUniverse);
@@ -1050,13 +1054,32 @@ function descendantFqns<T extends EvalNode>(state: RunState<T>, fqn: string): Se
   return result;
 }
 
-// A node's tags. Mirrors the Lore pane's reader: `metadata.tags` as an array or
-// a comma-separated string. (v1 keys off the conventional `tags` field.)
-function nodeTags(node: EvalNode): string[] {
-  const raw = node.metadata?.tags;
-  if (Array.isArray(raw)) return raw.map((v) => String(v).trim()).filter(Boolean);
-  if (typeof raw === "string") return raw.split(",").map((s) => s.trim()).filter(Boolean);
-  return [];
+// Every string this node's metadata references, at any depth: a scalar field's
+// (trimmed, non-empty) string value, or each item of a list field — recursing
+// into dicts nested inside a list (an item-group member) so a ref/tag id buried
+// in a group entry still counts. Schema-free: no field-key knowledge needed, so
+// a user vocabulary field (`motifs: [...]`) tags exactly like a built-in one.
+// Ids are uuids, so a false match against ordinary text is not a realistic risk.
+// Mirrors the backend `selector_references` reader.
+function nodeReferences(node: EvalNode): Set<string> {
+  const out = new Set<string>();
+  collectReferences(node.metadata, out);
+  return out;
+}
+
+function collectReferences(value: unknown, out: Set<string>): void {
+  if (typeof value === "string") {
+    const s = value.trim();
+    if (s) out.add(s);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectReferences(item, out);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const v of Object.values(value as Record<string, unknown>)) collectReferences(v, out);
+  }
 }
 
 // An unbound promoted formal — the predicate is inactive and passes the input

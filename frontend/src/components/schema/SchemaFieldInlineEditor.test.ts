@@ -79,6 +79,16 @@ describe("SchemaFieldInlineEditor field-editor fixes", () => {
     await fireEvent.click(pop!.querySelector(".ip-search") as HTMLElement);
     expect(screen.queryByRole("dialog")).toBeTruthy();
   });
+
+  it("ADR-0082 slice 2b: the field-type picker no longer offers 'Tags'", async () => {
+    mount();
+    await fireEvent.click(screen.getByLabelText("Change field type"));
+    const options = screen.queryAllByRole("option", { name: "Tags" });
+    expect(options).toHaveLength(0);
+    // The sibling ref-list type is still there — a tag vocabulary is authored
+    // through it (entity_ref_list → source kind "tag" → create_missing).
+    expect(screen.getByRole("option", { name: "Entry Reference, Multiple" })).toBeInTheDocument();
+  });
 });
 
 const GROUPS: Record<string, MetadataGroupDefinition> = {
@@ -86,9 +96,9 @@ const GROUPS: Record<string, MetadataGroupDefinition> = {
   // A ref-member group — a valid item shape as of ADR-0081 (a nested ref is
   // tracked wherever it lives), so it must be OFFERED.
   cast: { name: "Cast", members: [{ key: "who", name: "Who", type: "entity_ref" }] },
-  // A tags-member group — valid as of ADR-0081 slice 3 (the tag lifecycle
-  // descends), so it too must be OFFERED.
-  topics: { name: "Topics", members: [{ key: "topic", name: "Topic", type: "tags" }] },
+  // An entity_ref_list-member group — valid as of ADR-0081 slice 3 (the ref
+  // lifecycle descends into a list member too), so it too must be OFFERED.
+  topics: { name: "Topics", members: [{ key: "topic", name: "Topic", type: "entity_ref_list" }] },
   // A built-in machinery group — must not be offered as a new item shape.
   plot_beat_link: {
     name: "Beat link",
@@ -134,10 +144,10 @@ describe("SchemaFieldInlineEditor list item shape hides system groups (#1003)", 
     expect(values).toContain("group:cast"); // ref-member group is now shapeable
   });
 
-  it("offers a group with a tags member as an item shape (ADR-0081 slice 3)", () => {
+  it("offers a group with an entity_ref_list member as an item shape (ADR-0081 slice 3)", () => {
     mountList({ name: "Beats", type: "list", options: [] });
     const { values } = itemShapeValues();
-    expect(values).toContain("group:topics"); // tags-member group is now shapeable
+    expect(values).toContain("group:topics"); // entity_ref_list-member group is now shapeable
   });
 
   it("still shows a system group the field already uses, as a valid (not disabled) shape", () => {

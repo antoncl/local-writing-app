@@ -195,7 +195,7 @@ src/
                                SchemaFieldInlineEditor SelectOptionsEditor
                                DefaultValueEditor NodePickerConfigEditor
     widgets/                   NodeRow NodeList NodePicker ReferencePicker ColoredSelect
-                               SwatchPicker IconPicker TagPicker ProviderTierPicker
+                               SwatchPicker IconPicker ProviderTierPicker
                                PromptInputField PlainTextEditor CodeEditor
                                MetadataLongTextEditor SearchInput
     dialogs/                   Modal ConfirmModal NewProjectModal DirectoryPickerModal

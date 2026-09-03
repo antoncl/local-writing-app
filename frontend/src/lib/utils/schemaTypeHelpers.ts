@@ -66,18 +66,19 @@ export function coerceStringList(value: MetadataValue | undefined): string[] {
 // The SAVE-path normaliser for a list-shaped field value. Every set-typed list
 // self-normalises on write, so a duplicate arriving from an importer or
 // hand-edited YAML is de-duped on the way to disk, not only in the render (#704
-// for tags; #725 generalised it to the siblings). The case policy differs by
-// type and is deliberate, NOT a mechanical "dedupe everything":
-//   - `tags` and `multi_select` are controlled vocabularies where case is
-//     presentation → CASE-INSENSITIVE, first spelling wins. (The multi_select
-//     toggle already MATCHES options case-insensitively, so the saved value must
-//     fold the same way, else `Draft`/`draft` toggles as one but persists as two.)
-//   - `entity_ref_list` items are entity identifiers (like collection membership)
-//     → CASE-SENSITIVE: `Alpha` and `alpha` are two distinct refs.
+// for the retired `tags` type; #725 generalised it to the siblings). The case
+// policy differs by type and is deliberate, NOT a mechanical "dedupe everything":
+//   - `multi_select` is a controlled vocabulary where case is presentation →
+//     CASE-INSENSITIVE, first spelling wins. (Its toggle already MATCHES options
+//     case-insensitively, so the saved value must fold the same way, else
+//     `Draft`/`draft` toggles as one but persists as two.)
+//   - `entity_ref_list` items are entity identifiers (like collection membership,
+//     and — since ADR-0082 slice 2b — a tag vocabulary too) → CASE-SENSITIVE:
+//     `Alpha` and `alpha` are two distinct refs.
 // Any other field type is not set-shaped and passes through untouched.
 export function normalizeListFieldValue(fieldType: string, value: MetadataValue): string[] {
   const items = coerceStringList(value);
-  if (fieldType === "tags" || fieldType === "multi_select") return dedupeList(items, foldCaseInsensitive);
+  if (fieldType === "multi_select") return dedupeList(items, foldCaseInsensitive);
   if (fieldType === "entity_ref_list") return dedupeList(items);
   return items;
 }

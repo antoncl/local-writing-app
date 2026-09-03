@@ -24,7 +24,6 @@ from app.scope import WorkScope
 from app.services.atomic_io import atomic_write_text
 from app.services.machine_settings import touch_recent_project
 from app.services.project.ai_invocations import AiInvocationsMixin
-from app.services.project.assistant_tags import AssistantTagsMixin
 from app.services.project.assistants import AssistantEntriesMixin
 from app.services.project.chats import ChatSessionsMixin
 from app.services.project.client_errors import ErrorLogMixin
@@ -86,7 +85,6 @@ NODE_INDEX_SNAPSHOT_FILENAME = _SNAPSHOT_RELATIVE_PATH.name
 class ProjectService(
     AiInvocationsMixin,
     AssistantEntriesMixin,
-    AssistantTagsMixin,
     ChatSessionsMixin,
     ErrorLogMixin,
     ComputedMetadataMixin,

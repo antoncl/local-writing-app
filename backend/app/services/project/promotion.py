@@ -132,35 +132,23 @@ class PromotionMixin:
         travel_value = visible_ids if visible_ids else None
         return travel_value, ids, item
 
-    def _partition_tags(
-        self, dest: IndexLayer, known_at_dest: set[str], field: str, value: Any
-    ) -> tuple[Any, Any, PromotionStayItem | None]:
-        tag_list = [t for t in value if isinstance(t, str) and t] if isinstance(value, list) else []
-        travel_tags = [t for t in tag_list if t.lower() in known_at_dest]
-        unknown_tags = [t for t in tag_list if t.lower() not in known_at_dest]
-        if not unknown_tags:
-            return travel_tags, None, None
-        item = PromotionStayItem(field=field, reason=f"tagged {', '.join(unknown_tags)}, not known at {dest.label}")
-        return travel_tags, tag_list, item
-
     def _partition_field(
         self,
         index: NodeIndex,
         root,
         dest: IndexLayer,
-        known_at_dest: set[str],
         field_type: str,
         field: str,
         value: Any,
     ) -> tuple[Any, Any, PromotionStayItem | None]:
         """One field's `(travel_value, stay_value, stay_item)` — dispatched by
-        declared type (ADR-0078 §3/§4). Any type not named here travels whole."""
+        declared type (ADR-0078 §3/§4). Any type not named here travels whole.
+        `tags` retired (ADR-0082 slice 2b): a tag vocabulary is now an
+        `entity_ref_list` field and partitions through that branch instead."""
         if field_type == "entity_ref":
             return self._partition_entity_ref(index, root, dest, field, value)
         if field_type == "entity_ref_list":
             return self._partition_entity_ref_list(index, root, dest, field, value)
-        if field_type == "tags":
-            return self._partition_tags(dest, known_at_dest, field, value)
         return value, None, None
 
     def _blocked_nested_refs(
@@ -174,9 +162,10 @@ class PromotionMixin:
         has no representation yet (#698 v1, `_diff_metadata_to_override_rows`
         refuses it). Rather than let the field travel whole and leave a dangling
         ref at the destination, the promotion refuses and names the offending
-        reference — parity with the §6 dynamic-include refusal. Only entity refs
-        block; a nested `tags` member's unknown-at-destination tag is cosmetic
-        (it renders regardless), so it rides along like the list itself.
+        reference — parity with the §6 dynamic-include refusal. `ref_members`
+        only surfaces `entity_ref`/`entity_ref_list` group members (`tags` is
+        retired, ADR-0082 slice 2b), so this only ever blocks on a real
+        reference.
         """
         members = ref_members(field_def) if field_def is not None else None
         if not members or not isinstance(value, list):
@@ -219,7 +208,6 @@ class PromotionMixin:
         origin_types = self._schema_field_types(origin_schema)
         dest_schema = self.read_metadata_schema(up_to_layer_id=dest.id)
         dest_types = self._schema_field_types(dest_schema)
-        known_at_dest = {tag.name.lower() for tag in self.read_known_tags(up_to_layer_id=dest.id).tags}
 
         travels: dict[str, Any] = {}
         stays: dict[str, Any] = {}
@@ -229,9 +217,7 @@ class PromotionMixin:
 
         for field, value in metadata.items():
             field_type = origin_types.get(field, "text")
-            travel_value, stay_value, item = self._partition_field(
-                index, root, dest, known_at_dest, field_type, field, value
-            )
+            travel_value, stay_value, item = self._partition_field(index, root, dest, field_type, field, value)
             if travel_value is not None:
                 travels[field] = travel_value
             if stay_value is not None:

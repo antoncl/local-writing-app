@@ -14,8 +14,13 @@ verbatim from `evalExpr`/`evalLeaf`:
 
 - `type` is **exact** `entry_type` equality; `descendants_of` is the is_a family
   (self + every entry_type whose `parent:` chain reaches it).
-- `tagged` matches when the node's tags contain the name — **exact,
-  case-sensitive, trimmed** (tags stored as a list or a comma string).
+- `tagged` matches when a tag's id appears ANYWHERE in the node's metadata —
+  schema-free: a scalar value equal to the id, or a list (at any depth,
+  including inside item-group members) containing it. This is a backlink-edge
+  test, not a reference-graph traversal, so it needs no field-key knowledge
+  (a user vocabulary field like `motifs` tags exactly like a built-in one).
+  Ids are uuids, so a false match against ordinary text is not a realistic
+  risk.
 - `intersect`/`union`/`difference`/`complement` are plain set ∩/∪/∖; `complement`
   is against the roster universe. Membership is order-independent; the emitted
   list follows roster order (deduped), like `evalSegment`.
@@ -42,7 +47,7 @@ class SelectorNode(NamedTuple):
 
     id: str
     entry_type: str
-    tags: tuple[str, ...]
+    references: frozenset[str]
     metadata: Mapping[str, Any]
 
 
@@ -51,16 +56,31 @@ class UnsupportedSelectorExpr(Exception):
     caller can fail soft rather than silently resolve to an empty (wrong) set."""
 
 
-def selector_node_tags(metadata: Any) -> tuple[str, ...]:
-    """A node's tags, normalized exactly as the frontend `nodeTags` reader:
-    a list maps each item to a trimmed string (empties dropped); a bare string
-    splits on commas and trims. Case is preserved."""
-    raw = metadata.get("tags") if isinstance(metadata, Mapping) else None
-    if isinstance(raw, (list, tuple)):
-        return tuple(t for t in (str(x).strip() for x in raw) if t)
-    if isinstance(raw, str):
-        return tuple(t for t in (p.strip() for p in raw.split(",")) if t)
-    return ()
+def selector_references(metadata: Any) -> frozenset[str]:
+    """Every string this node's metadata references, at any depth: a scalar
+    field's (trimmed, non-empty) string value, or each item of a list field —
+    recursing into dicts nested inside a list (an item-group member) so a
+    ref/tag id buried in a group entry still counts. Mirrors the frontend
+    `nodeReferences` reader. This is the backlink-edge test `tagged` uses —
+    schema-free, no field-key knowledge required."""
+    out: set[str] = set()
+    _collect_references(metadata, out)
+    return frozenset(out)
+
+
+def _collect_references(value: Any, out: set[str]) -> None:
+    if isinstance(value, str):
+        s = value.strip()
+        if s:
+            out.add(s)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _collect_references(item, out)
+        return
+    if isinstance(value, Mapping):
+        for v in value.values():
+            _collect_references(v, out)
 
 
 def evaluate_selector_membership(
@@ -143,7 +163,7 @@ def _eval_leaf(
         return {n.id for n in nodes if any(is_desc(n.entry_type, t) for t in want)}
     if _has(expr, "tagged"):
         want = _leaf_operand(expr["tagged"])
-        return {n.id for n in nodes if want.intersection(n.tags)}
+        return {n.id for n in nodes if want & n.references}
     if _has(expr, "hand_picked"):
         want = set(expr["hand_picked"] or [])
         return {n.id for n in nodes if n.id in want}

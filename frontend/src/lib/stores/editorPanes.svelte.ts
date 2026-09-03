@@ -24,7 +24,6 @@
 
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
-import { refreshAssistantTags } from "@/lib/stores/assistantTags";
 import { AutosaveScheduler } from "@/lib/editor-core/autosave";
 import {
   type DocumentRef,
@@ -578,8 +577,6 @@ class EditorPanesController {
         savedDocument = await api.saveResearchNote(draftDocument as ResearchNote, pane.draftMarkdown);
       } else if (documentKind === "prompt") {
         savedDocument = await api.savePromptEntry(draftDocument as PromptEntry, pane.draftMarkdown);
-        // A prompt's assistant_tags may have registered new machine tags (#88).
-        void refreshAssistantTags();
       } else if (documentKind === "plot_template") {
         // An owned template clone (ADR-0048 S4c). The `template:` spec rides
         // through unchanged — there is no beat editor yet — so only title + body
@@ -600,7 +597,6 @@ class EditorPanesController {
         savedDocument = await api.savePlotline(draftDocument as PlotlineEntry, pane.draftMarkdown);
       } else if (documentKind === "assistant") {
         savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
-        void refreshAssistantTags();
       } else if (documentKind === "tag") {
         savedDocument = await api.saveTagEntry(draftDocument as unknown as import("@/lib/types").TagEntry);
       } else if (documentKind === "project") {
@@ -687,8 +683,8 @@ class EditorPanesController {
         baselineBody,
         draftMarkdown: pane.draftMarkdown,
       });
-      // Fire-and-forget (like refreshAssistantTags above): any saved node can register
-      // tag vocabulary, but a roster-fetch blip must not fail an already-saved node (#247).
+      // Fire-and-forget: any saved node can register tag vocabulary, but a
+      // roster-fetch blip must not fail an already-saved node (#247).
       void refreshKnownTags();
       this.setStatus(`Saved ${savedDocument.title}`);
     } catch (caught) {

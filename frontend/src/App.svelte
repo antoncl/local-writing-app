@@ -52,8 +52,7 @@
     refreshTodos as storeRefreshTodos,
     refreshEmbeddedTodos as storeRefreshEmbeddedTodos,
   } from "@/lib/stores/todos";
-  import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags, tagVocabularyRevision } from "@/lib/stores/tags";
-  import { refreshAssistantTags } from "@/lib/stores/assistantTags";
+  import { refreshKnownTags as storeRefreshKnownTags, setKnownTags, tagVocabularyRevision } from "@/lib/stores/tags";
   import { validationStore, setValidation, clearValidation } from "@/lib/stores/validation";
   import {
     structureStore,
@@ -314,9 +313,6 @@
     // last-opened project so an HMR reload / plain F5 doesn't drop the user back
     // to "No project open." Failure is non-fatal.
     void projectSession.rehydrate();
-    // Assistant tags are machine-global (like the roster) — load once at startup
-    // so colored chips + suggestions are ready before a project opens (#88).
-    void refreshAssistantTags();
     // Flush dirty panes on the way out (#369). `visibilitychange: hidden` fires
     // earlier and more reliably (tab switch, minimize, mobile background) while
     // the page is still alive to complete a normal, uncapped save. `pagehide` is
@@ -567,15 +563,12 @@
 
   // A tag merge/rename rewrites tag values across documents on disk; pull the new
   // rosters AND re-sync the entry lists + open editors so the change is reflected
-  // everywhere immediately (not just on next reload). One reconcile serves BOTH
-  // vocabularies (#247 PR-3): assistant governance flows through the same
-  // vocabulary-revision signal, and its rename/merge rewrites assistant nodes
-  // (`metadata.tags`) + prompt docs (`metadata.assistant_tags`), so the assistant
-  // roster + list belong here too. Refreshing the untouched vocabulary on a given
-  // op is two cheap GETs — the uniform reconcile is worth that over two signals.
+  // everywhere immediately (not just on next reload). The assistant-tag half of
+  // this reconcile retired with the legacy `assistant-tags.yaml` registry
+  // (ADR-0082 slice 2b) — the assistant vocabulary is `tag:assistant_tag` nodes,
+  // governed like any other tag node, not a separate signal here.
   async function refreshAfterTagChange() {
     await refreshKnownTags();
-    await refreshAssistantTags();
     await run(async () => {
       setLoreEntries((await api.listLoreEntries()).entries);
       setPromptEntries((await api.listPromptEntries()).entries);
@@ -752,7 +745,6 @@
   // Compiled matcher for implicit-context highlighting in editors. Derived in
   // the store layer from lore + schema (see stores/derived.ts).
   let implicitContextMatcher = $derived($implicitContextMatcherStore);
-  let knownTags = $derived($knownTagsStore);
   let focusedEditorPane = $derived(editorPanes.panes.find((pane) => pane.id === editorPanes.focusedEditorPaneId) ?? editorPanes.panes[0] ?? null);
   // Write-through the focused doc to the editor-focus store so the list panes
   // read it directly instead of having it drilled in (#14 Step 2). App is the
@@ -1186,7 +1178,6 @@
         structure={structure}
         researchStructure={researchStructure}
         loreEntries={loreEntries}
-        knownTags={knownTags}
         implicitContextMatcher={implicitContextMatcher}
         assistantEntries={assistantEntries}
         defaultAssistantId={defaultAssistantId}
@@ -1351,7 +1342,6 @@
       promptEntries={promptEntries}
       structure={structure}
       researchStructure={researchStructure}
-      knownTags={knownTags}
       onSaved={onMutationSetSaved}
       onCancel={closeMutationSetEditor}
     />

@@ -43,21 +43,21 @@ class MaterializeOverrideFoldTests(unittest.TestCase):
     def test_collection_remove_drops_inherited_item(self) -> None:
         base = {"tags": ["a", "b", "c"]}
         rec = _record(1, MutationSetRow(field="tags", op="remove", value="b"))
-        result, touched = self.service.materialize_override_metadata(base, [rec], {"tags": "tags"})
+        result, touched = self.service.materialize_override_metadata(base, [rec], {"tags": "multi_select"})
         self.assertEqual(result["tags"], ["a", "c"])
         self.assertEqual(touched, ["tags"])
 
     def test_collection_add_appends_absent_item(self) -> None:
         base = {"tags": ["a"]}
         rec = _record(1, MutationSetRow(field="tags", op="add", value="b"))
-        result, touched = self.service.materialize_override_metadata(base, [rec], {"tags": "tags"})
+        result, touched = self.service.materialize_override_metadata(base, [rec], {"tags": "multi_select"})
         self.assertEqual(result["tags"], ["a", "b"])
         self.assertEqual(touched, ["tags"])
 
     def test_collection_replace_sets_whole_value(self) -> None:
         base = {"tags": ["a", "b"]}
         rec = _record(1, MutationSetRow(field="tags", op="replace", value="x, y"))
-        result, touched = self.service.materialize_override_metadata(base, [rec], {"tags": "tags"})
+        result, touched = self.service.materialize_override_metadata(base, [rec], {"tags": "multi_select"})
         self.assertEqual(result["tags"], ["x", "y"])
         self.assertEqual(touched, ["tags"])
 

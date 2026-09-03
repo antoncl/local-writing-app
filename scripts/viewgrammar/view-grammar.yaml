@@ -82,7 +82,7 @@ node:
     filter:         { type: FilterOp, primary: true }   # derived: of ∩/∖ inject(pred)
     type:           { type: leaf_value, primary: true }   # str | {"var": name}
     descendants_of: { type: leaf_value, primary: true }
-    tagged:         { type: leaf_value, primary: true }
+    tagged:         { type: leaf_value, primary: true }   # tag NODE id; matches anywhere in metadata (schema-free backlink)
     field:          { type: FieldPredicate, primary: true }
     hand_picked:    { type: "list[str]", primary: true }
     var:            { type: str, primary: true }

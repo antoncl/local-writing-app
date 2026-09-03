@@ -27,7 +27,9 @@ from app.services.project_service import ProjectService
 
 
 def _setup_honor(service: ProjectService) -> str:
-    """Define `rank` (text) + `titles` (tags) on characters and create Honor."""
+    """Define `rank` (text) + `titles` (multi_select — a free-text collection
+    field, standing in for the retired `tags` type, ADR-0082 slice 2b) on
+    characters and create Honor."""
     layers = service.read_metadata_schema_layers()
     layer_id = layers.layers[-1].id
     service.upsert_metadata_field(
@@ -42,7 +44,7 @@ def _setup_honor(service: ProjectService) -> str:
         UpsertMetadataFieldRequest(
             layer_id=layer_id,
             field_id="titles",
-            field=MetadataFieldDefinition(name="Titles", type="tags"),
+            field=MetadataFieldDefinition(name="Titles", type="multi_select"),
             entry_type="lore:character",
         )
     )

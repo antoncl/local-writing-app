@@ -1,6 +1,4 @@
 import type {
-  AssistantTagList,
-  AssistantTagsOverview,
   EntryTypeDefinition,
   GroupApplication,
   KnownTags,
@@ -26,25 +24,6 @@ export const schemaApi = {
   },
   getKnownTags() {
     return request<KnownTags>("/tags");
-  },
-  getAssistantTags() {
-    return request<AssistantTagList>("/assistant-tags");
-  },
-  setAssistantTagColor(name: string, color: string | null) {
-    return request<AssistantTagList>(`/assistant-tags/${encodeURIComponent(name)}`, {
-      method: "PUT",
-      body: JSON.stringify({ color }),
-    });
-  },
-  getAssistantTagsOverview() {
-    return request<AssistantTagsOverview>("/assistant-tags/overview");
-  },
-  mergeAssistantTags(sources: string[], target: string) {
-    // Rename is a single-source merge, exactly like mergeTags (#247).
-    return request<AssistantTagList>("/assistant-tags/merge", {
-      method: "POST",
-      body: JSON.stringify({ sources, target }),
-    });
   },
   getTagsOverview() {
     return request<TagsOverview>("/tags/overview");

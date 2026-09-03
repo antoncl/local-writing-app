@@ -38,13 +38,13 @@
   // positioning + focus) and three navigation callbacks.
 
   import { isSearchActive } from "@/lib/utils/entrySearch";
-  import { portalToBody } from "@/lib/actions/portal";
+  import { anchoredPopover } from "@/lib/actions/anchoredPopover";
   import PickTree from "@/components/widgets/PickTree.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   let {
     model,
-    menuStyle = "",
+    anchor,
     compact = false,
     search = $bindable(""),
     searchInputEl = $bindable(null),
@@ -53,7 +53,11 @@
     onClearPanel,
   }: {
     model: NodePickerPopoverModel;
-    menuStyle?: string;
+    /** The trigger button the menu floats against — positioned + body-portaled
+     *  via the shared `anchoredPopover` action (#1573), `track` on (#245) so a
+     *  host under a zoomed/panned SvelteFlow canvas (ViewFlowNode) keeps the
+     *  menu glued to the node at native 1× instead of scaling with the canvas. */
+    anchor: HTMLElement | null | undefined;
     compact?: boolean;
     search?: string;
     searchInputEl?: HTMLInputElement | null;
@@ -63,7 +67,7 @@
   } = $props();
 </script>
 
-<div class="ctx-menu" class:compact role="menu" style={menuStyle} use:portalToBody>
+<div class="ctx-menu" class:compact role="menu" use:anchoredPopover={{ anchor, track: true }}>
   {#snippet emptySearch()}
     <div class="ctx-empty">
       <svg class="ctx-empty-icon-svg" width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -196,11 +200,13 @@
     /* `fixed` so the popover escapes ancestor overflow:auto/hidden
        containers (notably .metadata-panel's scroll region that was
        clipping it when this picker is hosted by ReferencePicker inside
-       a lore/scene metadata field). Coordinates are JS-computed from
-       the trigger's getBoundingClientRect — see NodePicker.positionMenu(). */
+       a lore/scene metadata field). Coordinates are computed by the shared
+       `anchoredPopover` action from the trigger's getBoundingClientRect and
+       this box's own measured size — one JS source, not a duplicated
+       constant. */
     position: fixed;
-    /* Keep width/max-height in sync with MENU_WIDTH / MENU_MAX_HEIGHT in
-       NodePicker.positionMenu() — that math clamps this box to the viewport. */
+    /* anchoredPopover reads this via offsetWidth/offsetHeight to clamp the
+       popover to the viewport — it is the ONE source of the menu's box size. */
     width: 344px;
     max-width: calc(100vw - 16px);
     max-height: 420px;

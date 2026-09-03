@@ -285,10 +285,12 @@ in `backend/app/models/schema.py` — that is the source of truth, not this
 section (which drifted from it once). Broadly the types group into: simple
 scalars (`text`, `long_text`, `number`, `boolean`, `color`), fixed-option
 choices (`select` for one, `multi_select` for several), references to other
-nodes (`entity_ref`, `entity_ref_list`), free-form `tags`, an ordered `list`
-whose item shape is a single scalar or a reusable group (#698), and app-derived
-`computed`. `date` is retained so older projects still load and render, but it
-is deliberately kept out of the type picker.
+nodes (`entity_ref`, `entity_ref_list`), an ordered `list` whose item shape is
+a single scalar or a reusable group (#698), and app-derived `computed`. `date`
+is retained so older projects still load and render, but it is deliberately
+kept out of the type picker. Tags are nodes of kind `tag`, referenced through
+an `entity_ref_list` field with `create_missing` — there is no separate `tags`
+type (ADR-0082).
 
 Computed fields are visible to the UI and search layer, but their values are
 derived by the app. For example, `word_count` is computed from a scene body and

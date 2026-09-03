@@ -327,8 +327,6 @@
                     field={row.field}
                     value={row.value}
                     ariaLabel={row.label}
-                    documentKind="project"
-                    entryType="project:project"
                     onChange={(value) => wizard.setNodeField(row.fieldId, value)}
                   />
                 </div>

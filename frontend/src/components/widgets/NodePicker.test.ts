@@ -10,7 +10,7 @@ import { render, screen, fireEvent, within } from "@/lib/test/component";
 import NodePicker from "./NodePicker.svelte";
 import { api } from "@/lib/api";
 import { metadataSchemaStore } from "@/lib/stores/schema";
-import { setKnownTags, clearKnownTags } from "@/lib/stores/tags";
+import { tagNodesStore } from "@/lib/stores/tagNodes";
 import { cardEntriesStore } from "@/lib/stores/plotCards";
 import { setPalette } from "@/lib/utils/colors";
 import { hideLibraryEntry, openProjectHidden } from "@/lib/stores/hiddenLibrary";
@@ -83,15 +83,15 @@ beforeEach(() => {
   metadataSchemaStore.set(SCHEMA);
   // The picker lazily fetches saved views when the menu opens (ADR-0074 slice
   // 5); default it empty so tests that don't exercise views never touch the
-  // network (#973). Tags come from knownTagsStore (no fetch) — empty by default.
+  // network (#973). Tags come from tagNodesStore (no fetch) — empty by default.
   vi.spyOn(api, "listViews").mockResolvedValue({ entries: [] });
-  clearKnownTags();
+  tagNodesStore.set([]);
   cardEntriesStore.set([]);
 });
 afterEach(() => {
   openProjectHidden(null);
   localStorage.clear();
-  clearKnownTags();
+  tagNodesStore.set([]);
   cardEntriesStore.set([]);
   vi.restoreAllMocks();
 });
@@ -570,20 +570,21 @@ describe("NodePicker saved-view selectors (#1487)", () => {
   });
 });
 
-// ADR-0074 slice 5 pt.2 (#1491): the scoped known-tag vocabulary becomes
-// per-kind tag selectors — absorb "everything tagged X" as one live ref, or
-// drill in and pick members.
+// ADR-0074 slice 5 pt.2 (#1491) / ADR-0082 slice 2b: the general tag-node
+// vocabulary becomes per-kind tag selectors — absorb "everything tagged X" as
+// one live ref, or drill in and pick members. Selector refs name a tag by id
+// (`tagged:${kind}:${tag.id}`), not name.
 describe("NodePicker tag selectors (#1491)", () => {
-  const villainTag = { name: "villain", scope: { sources: [{ kind: "lore" }] } };
+  const villainTag = { id: "tag_villain", title: "villain", entry_type: "tag:tag" };
 
   function renderWithTags(extra: Record<string, unknown> = {}) {
     return render(NodePicker, {
       props: {
         config: { sources: [{ kind: "lore" }], multiple: true },
         loreEntries: [
-          loreEntry("lore_a", "Vex", ["villain"]),
-          loreEntry("lore_b", "Mara", ["hero"]),
-          loreEntry("lore_c", "Nok", ["villain"]),
+          loreEntry("lore_a", "Vex", ["tag_villain"]),
+          loreEntry("lore_b", "Mara", ["tag_hero"]),
+          loreEntry("lore_c", "Nok", ["tag_villain"]),
         ],
         affordance: "add",
         ...extra,
@@ -597,10 +598,10 @@ describe("NodePicker tag selectors (#1491)", () => {
   }
 
   beforeEach(() => {
-    setKnownTags([villainTag] as never);
+    tagNodesStore.set([villainTag] as never);
   });
 
-  it("renders a scoped tag as a selector over its tagged members", async () => {
+  it("renders a tag node as a selector over its tagged members", async () => {
     renderWithTags();
     const menu = await openMenu();
     // Multi-axis config (Lore + By tag) → drill into the By-tag axis (ADR-0074 7b).
@@ -618,7 +619,7 @@ describe("NodePicker tag selectors (#1491)", () => {
     expect(within(tags).queryByText("Mara")).toBeNull();
   });
 
-  it("checking a tag stores ONE live selector ref (absorb)", async () => {
+  it("checking a tag stores ONE live selector ref (absorb), keyed by id", async () => {
     const onChange = vi.fn();
     renderWithTags({ onChange });
     const menu = await openMenu();
@@ -630,8 +631,8 @@ describe("NodePicker tag selectors (#1491)", () => {
     await tick();
     const [detail] = onChange.mock.calls[0];
     expect(detail.value).toHaveLength(1);
-    expect(detail.value[0]).toMatchObject({ id: "tag:lore:villain", kind: "tag", title: "villain" });
-    expect(detail.value[0].selector).toEqual({ kind: "lore", expr: { tagged: "villain" } });
+    expect(detail.value[0]).toMatchObject({ id: "tagged:lore:tag_villain", kind: "tag", title: "villain" });
+    expect(detail.value[0].selector).toEqual({ kind: "lore", expr: { tagged: "tag_villain" } });
   });
 
   it("respects the config's entry_type constraint — a tag can't over-match past scope (#1493 review)", async () => {
@@ -639,10 +640,10 @@ describe("NodePicker tag selectors (#1491)", () => {
       props: {
         config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }], multiple: true },
         loreEntries: [
-          loreEntry("lore_a", "Vex", ["villain"]), // a character
+          loreEntry("lore_a", "Vex", ["tag_villain"]), // a character
           // A location sharing the 'villain' tag — must NOT be pulled into a
           // character-restricted input.
-          { ...loreEntry("loc_1", "Dark Keep", ["villain"]), entry_type: "lore:location" },
+          { ...loreEntry("loc_1", "Dark Keep", ["tag_villain"]), entry_type: "lore:location" },
         ],
         affordance: "add",
       },
@@ -658,6 +659,29 @@ describe("NodePicker tag selectors (#1491)", () => {
     await expandGroup(tags, "villain");
     expect(within(tags).getByText("Vex")).toBeInTheDocument();
     expect(within(tags).queryByText("Dark Keep")).toBeNull();
+  });
+
+  it("offers a user-authored vocabulary (tag:motifs) as a By-tag row, but never tag:assistant_tag (review)", async () => {
+    const motifTag = { id: "tag_mirrors", title: "mirrors", entry_type: "tag:motifs" };
+    const assistantTag = { id: "tag_editor", title: "Editor", entry_type: "tag:assistant_tag" };
+    tagNodesStore.set([villainTag, motifTag, assistantTag] as never);
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore" }], multiple: true },
+        loreEntries: [loreEntry("lore_a", "Vex", ["tag_mirrors"])],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    await fireEvent.click(within(menu).getByText("By tag").closest("button")!);
+    await tick();
+    const tags = (await within(menu).findAllByRole("group", { name: "By tag" }))[0];
+    // tag:motifs is first-class — its tagged member surfaces the row.
+    expect(within(tags).getByText("mirrors")).toBeInTheDocument();
+    // tag:assistant_tag is the assistant/prompt vocabulary, never offered here
+    // (it has no lore members either way, but the exclusion is by entry_type,
+    // not just the members guard).
+    expect(within(tags).queryByText("Editor")).toBeNull();
   });
 });
 
@@ -886,11 +910,11 @@ describe("NodePicker sole allowed type (#1735 / #1742)", () => {
     // A lore-scoped tag adds a "By tag" axis, so the picker is no longer a single
     // axis — but a sole authored type must STILL land on its entries, not a
     // Lore/By-tag chooser (the real-project gap #1735 missed).
-    setKnownTags([{ name: "villain", scope: { sources: [{ kind: "lore" }] } }] as never);
+    tagNodesStore.set([{ id: "tag_villain", title: "villain", entry_type: "tag:tag" }] as never);
     render(NodePicker, {
       props: {
         config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }] },
-        loreEntries: [loreEntry("l1", "Mara Voss", ["villain"]), loreEntry("l2", "Quill", [])],
+        loreEntries: [loreEntry("l1", "Mara Voss", ["tag_villain"]), loreEntry("l2", "Quill", [])],
         affordance: "add",
       },
     });
@@ -1208,7 +1232,7 @@ describe("NodePicker instance colour (#1520)", () => {
   // #1528 follow-up: a member must carry its own colour in a tag's list too — the
   // member ref drops metadata, so it resolves through the ref→colour index.
   it("honours a member's instance colour in a tag's list", async () => {
-    setKnownTags([{ name: "epic", scope: { sources: [{ kind: "lore" }] } }] as never);
+    tagNodesStore.set([{ id: "tag_epic", title: "epic", entry_type: "tag:tag" }] as never);
     render(NodePicker, {
       props: {
         config: { sources: [{ kind: "lore" }], multiple: true },
@@ -1218,7 +1242,7 @@ describe("NodePicker instance colour (#1520)", () => {
             title: "Aetheria",
             body: "",
             entry_type: "lore:character",
-            metadata: { color: "crimson", tags: ["epic"] },
+            metadata: { color: "crimson", tags: ["tag_epic"] },
           } as unknown as import("@/lib/types").LoreEntrySummary,
         ],
         affordance: "add",

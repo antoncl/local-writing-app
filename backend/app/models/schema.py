@@ -20,15 +20,16 @@ ListItemScalarType = Literal["text", "long_text", "number", "boolean", "select",
 LIST_ITEM_SCALAR_TYPES: Final[frozenset[str]] = frozenset(get_args(ListItemScalarType))
 
 # The types an item_group MEMBER may be (ADR-0081) — the scalars above plus the
-# reference/tag types. Broader than the item_type sugar (which stays scalar-only,
-# above): a named group member can hold a reference or tags, because their
-# lifecycles reach a value wherever it lives through the one metadata-ref
-# traversal (services/project/metadata_refs.py) — a ref is indexed / scrubbed /
-# healed and a tag is canonicalised / renamed inside a group member exactly as at
-# top level, no longer a silent mis-link. `date` / `multi_select` stay out (no
-# item affordances), so this is a deliberate set, not "any type".
+# reference types. Broader than the item_type sugar (which stays scalar-only,
+# above): a named group member can hold a reference, because its lifecycle
+# reaches a value wherever it lives through the one metadata-ref traversal
+# (services/project/metadata_refs.py) — a ref is indexed / scrubbed / healed
+# inside a group member exactly as at top level, no longer a silent mis-link.
+# `date` / `multi_select` stay out (no item affordances), so this is a
+# deliberate set, not "any type". `tags` retired (ADR-0082 slice 2b) — a tag
+# vocabulary is authored as `entity_ref_list` with `create_missing`.
 LIST_ITEM_GROUP_MEMBER_TYPES: Final[frozenset[str]] = LIST_ITEM_SCALAR_TYPES | frozenset(
-    {"entity_ref", "entity_ref_list", "tags"}
+    {"entity_ref", "entity_ref_list"}
 )
 
 
@@ -44,7 +45,6 @@ class MetadataFieldDefinition(BaseModel):
         "multi_select",
         "entity_ref",
         "entity_ref_list",
-        "tags",
         "computed",
         "color",
         "list",
@@ -290,7 +290,6 @@ class GroupMember(BaseModel):
         "multi_select",
         "entity_ref",
         "entity_ref_list",
-        "tags",
         "color",
     ] = "text"
     icon: str | None = None

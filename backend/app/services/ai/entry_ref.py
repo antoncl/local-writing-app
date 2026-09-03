@@ -325,9 +325,10 @@ class _EntryMetadataView:
         return value
 
     def _wrap_list_item(self, item: Any, members: dict[str, Any]) -> Any:
-        """A group-list item with its ref members wrapped to ``EntryRef``(s). A
-        ``tags`` member (also in ``members``) passes through — tags aren't entity
-        refs, same as at the top level; a non-dict item passes through untouched."""
+        """A group-list item with its ref members wrapped to ``EntryRef``(s).
+        ``members`` only ever names ``entity_ref``/``entity_ref_list`` members
+        (``ref_members``; ``tags`` retired, ADR-0082 slice 2b) — a non-dict item
+        passes through untouched."""
         if not isinstance(item, dict):
             return item
         wrapped = dict(item)

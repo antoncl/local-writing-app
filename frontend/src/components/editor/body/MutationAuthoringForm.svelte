@@ -38,7 +38,6 @@
     MetadataValue,
     MutationSetEntrySummary,
     PromptEntrySummary,
-    ScopedTag,
     StructureDocument,
   } from "@/lib/types";
 
@@ -48,7 +47,6 @@
     schema = null,
     structure = null,
     researchStructure = null,
-    knownTags = [],
     implicitContextMatcher = null,
     initial = null,
     presetEntityId = "",
@@ -62,7 +60,6 @@
     schema: MetadataSchema | null;
     structure?: StructureDocument | null;
     researchStructure?: StructureDocument | null;
-    knownTags?: ScopedTag[];
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     initial?: MutationUnitDraft | null;
     /** Pre-selected entity id for create mode (e.g. from `/mutate Alice`). */
@@ -441,7 +438,6 @@
       promptEntries={promptEntries}
       structure={structure}
       researchStructure={researchStructure}
-      knownTags={knownTags}
       implicitContextMatcher={implicitContextMatcher}
       onRowChange={setRow}
       onRowRemove={removeRow}

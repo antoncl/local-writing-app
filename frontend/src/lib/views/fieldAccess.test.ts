@@ -14,7 +14,7 @@ describe("fieldValue routes on authorship category (ADR-0029 §D)", () => {
     groups: {},
     fields: {
       listed: { name: "Curation", type: "computed", options: [], category: "computed", computed: { function: "assistant_listed", value_type: "select" } },
-      tags: { name: "Tags", type: "tags", options: [], category: "stored" },
+      tags: { name: "Tags", type: "entity_ref_list", options: [], category: "stored" },
     },
   } as unknown as Parameters<typeof fieldValue>[2];
   const node = {
@@ -45,7 +45,7 @@ describe("effectiveFieldType", () => {
     expect(effectiveFieldType(def("computed", { computed: { function: "assistant_listed", value_type: "select" } }))).toBe("select");
   });
   it("passes a stored field's own type through", () => {
-    expect(effectiveFieldType(def("tags"))).toBe("tags");
+    expect(effectiveFieldType(def("multi_select"))).toBe("multi_select");
   });
   it("is undefined for an absent def or an undeclared value_type", () => {
     expect(effectiveFieldType(null)).toBeUndefined();
@@ -64,7 +64,7 @@ describe("isSortableField (#237 sort roster contract)", () => {
     }
   });
   it("excludes set-valued, opaque-ref, and color types", () => {
-    for (const t of ["tags", "multi_select", "entity_ref", "entity_ref_list", "color"]) {
+    for (const t of ["multi_select", "entity_ref", "entity_ref_list", "color"]) {
       expect(isSortableField(t), t).toBe(false);
     }
   });
@@ -117,7 +117,7 @@ describe("isNodeSetField (#204 generic node-set dispatch)", () => {
     expect(isNodeSetField(def("computed"))).toBe(false); // no computed meta
   });
   it("scalar / set-of-values fields and an absent def are not node-set", () => {
-    for (const t of ["text", "select", "multi_select", "tags", "number", "color"] as const) {
+    for (const t of ["text", "select", "multi_select", "number", "color"] as const) {
       expect(isNodeSetField(def(t)), t).toBe(false);
     }
     expect(isNodeSetField(null)).toBe(false);

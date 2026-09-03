@@ -220,16 +220,6 @@ describe("coerceStringList", () => {
 });
 
 describe("normalizeListFieldValue", () => {
-  // #704: the tags SAVE path — not just the render — must de-dupe, so a case
-  // duplicate from an importer / hand-edited YAML can't be persisted.
-  it("de-dupes a tags value case-insensitively (first spelling wins)", () => {
-    expect(normalizeListFieldValue("tags", "Alpha, alpha, beta, BETA")).toEqual(["Alpha", "beta"]);
-  });
-
-  it("de-dupes tags whether the value arrives as a string or an array", () => {
-    expect(normalizeListFieldValue("tags", ["a", "A", "b"])).toEqual(["a", "b"]);
-  });
-
   // #725: multi_select is a controlled vocabulary — de-dupe CASE-INSENSITIVELY,
   // matching the toggle's case-insensitive option compare, so a case dup can't be
   // persisted while the toggle treats the two as one.

@@ -407,10 +407,10 @@ def test_tag_selector_pick_materializes_to_tagged_lore_end_to_end(tmp_path, monk
             ),
         )
 
-    # ADR-0082 §2: `tags` is an entity_ref_list of tag-node ids now — real
-    # tags, not free-text names. `tagged:` by id is a later slice (the
-    # selector still matches literal stored values, so pointing it at the
-    # same id the field carries keeps this end-to-end, unchanged mechanism).
+    # ADR-0082 §2 / slice 2b: `tags` is an entity_ref_list of tag-node ids now
+    # — real tags, not free-text names — and `tagged:` names a tag by that
+    # same id (a metadata backlink test), so pointing it at the id the field
+    # carries is the real end-to-end shape, not a stand-in.
     world_building = service.create_tag_entry(
         CreateTagEntryRequest(title="World-building", entry_type="tag:tag")
     ).id
@@ -500,8 +500,8 @@ def test_tag_pick_lore_reaches_the_send_lore_tiers_end_to_end(tmp_path, monkeypa
             ),
         )
 
-    # ADR-0082 §2: `tags` is an entity_ref_list of tag-node ids now — see the
-    # sibling test above for why `tagged:` matches the id unchanged.
+    # ADR-0082 §2 / slice 2b: `tags` is an entity_ref_list of tag-node ids now
+    # — see the sibling test above for why `tagged:` matches the id directly.
     world_building = service.create_tag_entry(
         CreateTagEntryRequest(title="World-building", entry_type="tag:tag")
     ).id

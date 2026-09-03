@@ -268,7 +268,7 @@ front-matter `id` **and** in the structure files, say — is one `DocumentMigrat
 Sequential (2 and 3 each depend only on 1). Binding = the Decision + the invariant (§2); the slice
 boundaries may shift if implementation argues for it, amending this ADR before code.
 
-## Amendment 1 — opening a project migrates its whole declared chain, outermost first (2026-09-03, ADR-0082 §6, PR TBD)
+## Amendment 1 — opening a project migrates its whole declared chain, outermost first (2026-09-03, ADR-0082 §6, PR #1807)
 
 §5's ownership rule ("an ancestor migrates when **its** project is opened") and the Consequences
 section's "named and scoped out" cross-layer skew are reversed: **opening a project now runs the full

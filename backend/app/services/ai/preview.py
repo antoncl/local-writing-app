@@ -182,6 +182,17 @@ def _is_selector_pick(item: Any) -> bool:
     return isinstance(item, dict) and isinstance(item.get("selector"), dict)
 
 
+def _ref_fields(schema: Any) -> frozenset[str]:
+    """The `entity_ref`/`entity_ref_list` field keys in `schema` — derived the
+    same way `preview.py` would derive `collection_fields`/`numeric_fields`,
+    passed to `evaluate_selector_membership`'s `ref_fields` so a `field`
+    predicate over a reference key (the shipped assistant view's TAG param
+    filter, `field: {key: assistant_tags, op: overlap, value: {var: TAG}}`) is
+    canonicalised through a merged tag's redirect (ADR-0082 §5, #1805 X1)."""
+    fields = getattr(schema, "fields", None) or {}
+    return frozenset(key for key, field in fields.items() if getattr(field, "type", None) in ("entity_ref", "entity_ref_list"))
+
+
 def _selector_member_picks(
     project_service,
     item: dict[str, Any],
@@ -208,7 +219,11 @@ def _selector_member_picks(
     index = project_service._build_node_index()
     try:
         member_ids = evaluate_selector_membership(
-            selector.get("expr"), nodes, is_descendant=is_descendant, canonical_id=index.canonical_id
+            selector.get("expr"),
+            nodes,
+            is_descendant=is_descendant,
+            ref_fields=_ref_fields(schema),
+            canonical_id=index.canonical_id,
         )
     except UnsupportedSelectorExpr as exc:
         logger.warning(

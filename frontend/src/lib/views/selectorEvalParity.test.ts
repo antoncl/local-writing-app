@@ -17,7 +17,7 @@ import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
 type CorpusNode = { id: string; entry_type: string; metadata?: Record<string, unknown> | null };
 type CorpusCase = { name: string; expr: unknown; nodes: CorpusNode[]; expected: string[] };
 type Corpus = {
-  schema: { entry_types: Record<string, { parent?: string }> };
+  schema: { entry_types: Record<string, { parent?: string }>; fields?: Record<string, { type?: string }> };
   cases: CorpusCase[];
   redirects?: Record<string, string>;
 };
@@ -26,27 +26,38 @@ const here = dirname(fileURLToPath(import.meta.url));
 const corpusPath = resolve(here, "../../../../spec/selector-eval-corpus.json");
 const corpus = JSON.parse(readFileSync(corpusPath, "utf-8")) as Corpus;
 
-// Only the entry_types parent chain is load-bearing (type / descendants_of); the
-// rest of MetadataSchema is irrelevant to membership, so a thin cast is enough —
-// matching how evaluateView.test.ts constructs its SCHEMA.
+// Only the entry_types parent chain and the field TYPES are load-bearing (type /
+// descendants_of, and — #1805 X1 — `isNodeSetField` reading `fields[key].type`
+// for a reference-field `field` predicate); the rest of MetadataSchema is
+// irrelevant to membership, so a thin cast is enough — matching how
+// evaluateView.test.ts constructs its SCHEMA.
 const schema = {
   version: 1,
   entry_types: corpus.schema.entry_types,
-  fields: {},
+  fields: corpus.schema.fields ?? {},
 } as unknown as MetadataSchema;
 
 // A merged-tag redirect follower built from the corpus's `redirects` map
-// (identity when a case's id isn't a key), chain-walked to its end — mirrors
-// `NodeIndex.canonical_id` (ADR-0082 §5 / #1805). `evaluateView` applies it to
-// BOTH the `tagged:` operand and each node's own references (`nodeReferences`),
-// so passing it unconditionally is a no-op for every pre-existing case.
+// (identity when a case's id isn't a key) — mirrors `NodeIndex.canonical_id`
+// (ADR-0082 §5 / #1805). `evaluateView` applies it to the `tagged:` operand,
+// each node's own references (`nodeReferences`), and a reference-field `field`
+// predicate's operand/values (X1), so passing it unconditionally is a no-op
+// for every case that touches none of those.
+//
+// Mirrors `NodeIndex._walk_merge_chain` exactly (#1805 X6): a chain-walk that
+// REVISITS an id already on ITS OWN path resolves the START id (`id`) to
+// ITSELF, not to whichever id the walk last reached — see the backend
+// double's docstring (`test_selector_eval_parity.py`) for why that single rule
+// covers both an in-cycle id and a cycle-ADJACENT one identically.
 const redirects = corpus.redirects ?? {};
 function canonicalId(id: string): string {
-  const seen = new Set<string>();
+  const seen = [id];
   let current = id;
-  while (Object.hasOwn(redirects, current) && !seen.has(current)) {
-    seen.add(current);
-    current = redirects[current];
+  while (Object.hasOwn(redirects, current)) {
+    const next = redirects[current];
+    if (seen.includes(next)) return id;
+    seen.push(next);
+    current = next;
   }
   return current;
 }

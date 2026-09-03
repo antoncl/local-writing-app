@@ -266,3 +266,81 @@ def test_canonical_id_kwarg_defaults_to_none_unchanged_behaviour():
     node = SelectorNode("x", "lore:note", frozenset({"tag_t"}), {"tags": ["tag_t"]})
     assert _run({"tagged": "tag_t"}, [node]) == ["x"]
     assert _run({"tagged": "tag_t"}, [node], canonical_id=None) == ["x"]
+
+
+# --- `field` on a REFERENCE field canonicalises too (#1805 X1) -------------
+# The shipped assistant view's TAG param filter is exactly this shape:
+# `field: {key: assistant_tags, op: overlap, value: {var: TAG}}`.
+
+
+def test_field_overlap_on_a_ref_field_follows_the_OPERAND_redirect():
+    nodes = [
+        SelectorNode("c1", "plot:card", frozenset(), {"plotline": ["tag_survivor"]}),
+        SelectorNode("c2", "plot:card", frozenset(), {"plotline": ["tag_other"]}),
+    ]
+    canon = {"tag_merged_old": "tag_survivor"}.get
+    expr = {"field": {"key": "plotline", "op": "overlap", "value": "tag_merged_old"}}
+    assert _run(expr, nodes, ref_fields=frozenset({"plotline"}), canonical_id=lambda i: canon(i) or i) == ["c1"]
+
+
+def test_field_overlap_on_a_ref_field_follows_the_NODE_value_redirect():
+    nodes = [
+        SelectorNode("c1", "plot:card", frozenset(), {"plotline": ["tag_merged_old"]}),
+        SelectorNode("c2", "plot:card", frozenset(), {"plotline": ["tag_other"]}),
+    ]
+    canon = {"tag_merged_old": "tag_survivor"}.get
+    expr = {"field": {"key": "plotline", "op": "overlap", "value": "tag_survivor"}}
+    assert _run(expr, nodes, ref_fields=frozenset({"plotline"}), canonical_id=lambda i: canon(i) or i) == ["c1"]
+
+
+def test_field_overlap_on_a_ref_field_scalar_entity_ref_follows_the_redirect():
+    # entity_ref (non-list) — the scalar-overlap branch, not the collection one.
+    nodes = [
+        SelectorNode("a", "lore:note", frozenset(), {"pov_character": "tag_survivor"}),
+        SelectorNode("b", "lore:note", frozenset(), {"pov_character": "tag_other"}),
+    ]
+    canon = {"tag_merged_old": "tag_survivor"}.get
+    expr = {"field": {"key": "pov_character", "op": "overlap", "value": "tag_merged_old"}}
+    assert _run(expr, nodes, ref_fields=frozenset({"pov_character"}), canonical_id=lambda i: canon(i) or i) == ["a"]
+
+
+def test_field_overlap_without_ref_fields_membership_is_NOT_canonicalised():
+    # `canonical_id` given but the key isn't in `ref_fields` — a non-reference
+    # field's literal value must never fold through a merged-tag redirect.
+    nodes = [SelectorNode("c1", "plot:card", frozenset(), {"plotline": ["tag_merged_old"]})]
+    canon = {"tag_merged_old": "tag_survivor"}.get
+    expr = {"field": {"key": "plotline", "op": "overlap", "value": "tag_survivor"}}
+    assert _run(expr, nodes, canonical_id=lambda i: canon(i) or i) == []
+
+
+# --- merge cycles resolve to identity, not an arbitrary member (#1805 X6) --
+
+
+def test_a_merge_cycle_operand_resolves_to_its_own_start_id():
+    # a<->b cycle; c walks INTO it without being a member. `canonical_id`'s
+    # CONTRACT (mirroring `NodeIndex.canonical_id`) is that every one of a, b,
+    # c already resolves to itself for this redirect shape — this pins the
+    # module against a canonical_id double that gets that contract wrong, not
+    # the module's own (trivial, single-call) `canon(w)` application.
+    redirects = {"a": "b", "b": "a", "c": "a"}
+
+    def canonical_id(node_id: str) -> str:
+        seen: list[str] = [node_id]
+        current = node_id
+        while current in redirects:
+            next_id = redirects[current]
+            if next_id in seen:
+                return node_id
+            seen.append(next_id)
+            current = next_id
+        return current
+
+    assert canonical_id("c") == "c"
+    assert canonical_id("a") == "a"
+    assert canonical_id("b") == "b"
+
+    nodes = [
+        SelectorNode("x", "lore:note", frozenset({"c"}), {"tags": ["c"]}),
+        SelectorNode("y", "lore:note", frozenset({"a"}), {"tags": ["a"]}),
+    ]
+    assert _run({"tagged": "c"}, nodes, canonical_id=canonical_id) == ["x"]

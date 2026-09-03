@@ -123,7 +123,21 @@ describe("viewUsesTagIds — widens the gate to a plain tagged: filter too (#180
     expect(viewUsesTagIds(SPEC, SCHEMA)).toBe(true);
   });
 
-  it("is false when neither a tagged: leaf nor a ref group_by level is present", () => {
+  // #1805 X2: the shipped assistant view's TAG param filter
+  // (`field: {key: assistant_tags, op: overlap, value: {var: TAG}}`) has no
+  // group_by AND no tagged: leaf — only a `field` predicate over a reference
+  // field — so it needs its own arm of the gate.
+  it("is true for a field predicate over a reference field, with no group_by or tagged: leaf", () => {
+    const spec = { kind: "lore", expr: { field: { key: "motifs", op: "overlap", value: "tag_1" } } } as ViewSpec;
+    expect(viewUsesTagIds(spec, SCHEMA)).toBe(true);
+  });
+
+  it("is false for a field predicate over a NON-reference field", () => {
+    const spec = { kind: "lore", expr: { field: { key: "status", op: "overlap", value: "draft" } } } as ViewSpec;
+    expect(viewUsesTagIds(spec, SCHEMA)).toBe(false);
+  });
+
+  it("is false when neither a tagged: leaf, a ref group_by level, nor a ref field predicate is present", () => {
     const spec = { kind: "lore", expr: { type: "lore:note" }, group_by: [{ field: "status" }] } as ViewSpec;
     expect(viewUsesTagIds(spec, SCHEMA)).toBe(false);
   });

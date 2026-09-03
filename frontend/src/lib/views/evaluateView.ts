@@ -41,7 +41,20 @@ import type {
 } from "@/lib/types";
 import { collectNests } from "@/lib/views/nestRegistry";
 import { entryTypeIsA, kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
-import { asArray, coerceStringList, fieldValue, fieldValueList, isCollectionField, isEmpty, isFieldOfOperand, isSortableField, isVarOperand } from "@/lib/views/fieldAccess";
+import {
+  asArray,
+  canonicalizeIds,
+  canonicalizeRefValue,
+  coerceStringList,
+  fieldValue,
+  fieldValueList,
+  isCollectionField,
+  isEmpty,
+  isFieldOfOperand,
+  isNodeSetField,
+  isSortableField,
+  isVarOperand,
+} from "@/lib/views/fieldAccess";
 import { applyGroupBy } from "@/lib/views/groupBy";
 import { normalize } from "@/lib/views/groupTree";
 // Re-exported so consumers keep importing the view API from one place; the
@@ -215,10 +228,12 @@ export type EvalContext = {
   resolveTitle?: (id: string) => string | undefined;
   // ADR-0082 §5: follows a merged tag's id to its survivor — identity when
   // absent or when the id was never merged. Applied in `nodeReferences` (so
-  // `tagged:` matches through a redirect) and in the `groupBy` ref branch
-  // before the title lookup (so a bucket lands on the survivor). Callers that
+  // `tagged:` matches through a redirect), in `evalField` for a reference
+  // field's operand/values (#1805 X1), and in the `groupBy` ref branch before
+  // the title lookup (so a bucket lands on the survivor). Callers that
   // group/filter by tag thread one backed by `tagNodesStore`'s
-  // `canonicalTagId`, under the same `groupsByRef` gate `resolveTitle` is.
+  // `canonicalTagId`, under the same `usesTagIds` (`viewUsesTagIds`) gate
+  // `resolveTitle` is.
   canonicalId?: (id: string) => string;
 };
 
@@ -739,7 +754,15 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutra
     // ADR-0082 §5 / #1805: the OPERAND follows the same redirect the node side
     // does — a `tagged: <merged id>` leaf written before a merge still matches a
     // node now carrying the survivor's id, mirroring the backend
-    // `evaluate_selector_membership`'s `canonical_id` kwarg.
+    // `evaluate_selector_membership`'s `canonical_id` kwarg. This runs on `set`
+    // AFTER `resolveLeafOperand`, so it covers a `{var}`-bound tagged leaf's
+    // BOUND ids too, not just a literal string — unlike the retired bespoke
+    // `pickerSelectors.canonicalizedSpec` clone, which only rewrote a literal
+    // `e.tagged === "string"` and left a promoted-formal `tagged` untouched.
+    // Canonicalising a binding's ids here is correct (a bound tag id predates a
+    // merge exactly like a literal one can) and idempotent (re-canonicalising an
+    // already-survivor id is a no-op), so this is a strict widening, not a
+    // behavior change for the literal-operand case the old clone handled.
     const want = state.canonicalId ? canonicalizeIds(set, state.canonicalId) : set;
     return idsWhere(state, (n) => {
       const refs = nodeReferences(n, state.canonicalId);
@@ -1085,16 +1108,6 @@ function nodeReferences(node: EvalNode, canonicalId?: (id: string) => string): S
   return canonicalizeIds(out, canonicalId);
 }
 
-// Map every id in `ids` through `canonicalId` (ADR-0082 §5). Shared by the
-// node-reference reader above and the `tagged:` leaf OPERAND (#1805) — whichever
-// side still names a merged tag's id, the other side's already-canonical form is
-// what it is compared against.
-function canonicalizeIds(ids: Set<string>, canonicalId: (id: string) => string): Set<string> {
-  const out = new Set<string>();
-  for (const id of ids) out.add(canonicalId(id));
-  return out;
-}
-
 function collectReferences(value: unknown, out: Set<string>): void {
   if (typeof value === "string") {
     const s = value.trim();
@@ -1144,18 +1157,33 @@ function evalField<T extends EvalNode>(
   if (pred.op === "set") return idsWhere(state, (n) => !isEmpty(fieldValue(n, pred.key, state.schema)));
   if (pred.op === "unset") return idsWhere(state, (n) => isEmpty(fieldValue(n, pred.key, state.schema)));
   const collection = isCollectionField(state.schema, pred.key);
-  const operand = resolveOperand(state, pred.value, collection);
+  let operand = resolveOperand(state, pred.value, collection);
   if (operand === OPERAND_INACTIVE) {
     return neutralUniverse ? new Set(state.order.keys()) : new Set<string>();
   }
+  // ADR-0082 §5 / #1805 X1: a reference field (`entity_ref`/`entity_ref_list`)
+  // follows the same merged-tag redirect `tagged:` does — the shipped
+  // assistant view's TAG param filter is exactly this shape (`field: {key:
+  // assistant_tags, op: overlap, value: {var: TAG}}`). BOTH the operand and
+  // each node's own value fold through `canonicalId`, mirroring the backend
+  // `_eval_field`.
+  const isRef = isNodeSetField(state.schema?.fields?.[pred.key]);
+  if (isRef && state.canonicalId) operand = canonicalizeIds(operand, state.canonicalId);
   const numeric = state.schema?.fields?.[pred.key]?.type === "number";
   const want = pred.op === "overlap"; // else "disjoint"
   return idsWhere(state, (n) => {
     const raw = fieldValue(n, pred.key, state.schema);
     const overlaps =
       collection || Array.isArray(raw)
-        ? intersects(toStringSet(raw), operand) // tokenized set-overlap (string equality)
-        : scalarOverlap(raw, operand, numeric); // whole value, numeric only for number fields
+        ? intersects(
+            isRef && state.canonicalId ? canonicalizeIds(toStringSet(raw), state.canonicalId) : toStringSet(raw),
+            operand,
+          ) // tokenized set-overlap (string equality)
+        : scalarOverlap(
+            isRef && state.canonicalId ? canonicalizeRefValue(raw, state.canonicalId) : raw,
+            operand,
+            numeric,
+          ); // whole value, numeric only for number fields
     return overlaps === want;
   });
 }

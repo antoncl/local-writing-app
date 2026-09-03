@@ -27,13 +27,16 @@ export function groupByHasRefLevel(
 }
 
 // Whether ANY signal in `spec` touches a tag id: a `group_by` ref-level
-// (`groupByHasRefLevel`, above) OR the expr tree contains a `tagged:` leaf
-// anywhere (ADR-0082 §5 / #1805 — the OPERAND canonicalisation `evalLeaf`'s
-// `tagged` branch applies needs the same merged-tag redirect the ref-group
-// bucket does). Callers gate BOTH the reactive tag-roster `resolveTitle` AND
-// `canonicalId` readers on this (widened from the group_by-only F7 gate): a
-// view that touches no tag ids at all never subscribes to the tag store, but
-// EITHER a ref group_by OR a plain `tagged:` filter with no grouping does.
+// (`groupByHasRefLevel`, above), a `tagged:` leaf anywhere in the expr tree, OR
+// a `field` predicate over a reference field's `key` (#1805 X2 — the shipped
+// assistant view's TAG param filter, `field: {key: assistant_tags, op:
+// overlap, value: {var: TAG}}`, is exactly this shape; ADR-0082 §5 / #1805 X1
+// canonicalises its operand/values the same way the ref-group bucket does).
+// Callers gate BOTH the reactive tag-roster `resolveTitle` AND `canonicalId`
+// readers on this (widened from the group_by-only F7 gate): a view that
+// touches no tag ids at all never subscribes to the tag store, but a ref
+// group_by, a `tagged:` filter, or a ref-field `field` predicate — with no
+// grouping at all — all do.
 export function viewUsesTagIds(
   spec: Pick<ViewSpec, "group_by" | "expr"> | null | undefined,
   schema: MetadataSchema | null | undefined,
@@ -46,6 +49,7 @@ export function viewUsesTagIds(
     // `!= null` (not a truthiness/`in` check) is the correct "is this leaf
     // set" test.
     if (e.tagged != null) found = true;
+    if (e.field != null && isNodeSetField(schema?.fields?.[e.field.key])) found = true;
   });
   return found;
 }

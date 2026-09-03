@@ -142,6 +142,12 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
       detail,
     );
   }
+  // 204 No Content (e.g. the dedicated tag-entry delete, ADR-0082 slice 1
+  // review fix; the unified `/api/nodes/{id}` delete) has no body to parse —
+  // `response.json()` throws on an empty body.
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return response.json() as Promise<T>;
 }
 

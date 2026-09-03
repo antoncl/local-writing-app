@@ -18,6 +18,7 @@ import { setPlotTemplates } from "@/lib/stores/plotTemplates";
 import { deletePlotline } from "@/lib/stores/plotlines";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { setAssistantEntries } from "@/lib/stores/assistants";
+import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
 import { researchStructureStore, setResearchStructure, setStructure } from "@/lib/stores/structure";
 import { refreshTodos } from "@/lib/stores/todos";
@@ -60,11 +61,11 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
   // fallback (its own kind); chat and assistant are listed explicitly so they
   // no longer borrow the prompt wording (#1082).
   const fileLabel =
-    ({ manuscript: "scene", lore: "entry", research: "note", view: "view", plot_template: "template", plot_card: "card", plotline: "plotline", chat: "chat", assistant: "assistant" } as Record<string, string>)[
+    ({ manuscript: "scene", lore: "entry", research: "note", view: "view", plot_template: "template", plot_card: "card", plotline: "plotline", chat: "chat", assistant: "assistant", tag: "tag" } as Record<string, string>)[
       documentKind
     ] ?? "prompt";
   const titleLabel =
-    ({ manuscript: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card", plotline: "Delete Plotline", chat: "Delete Chat", assistant: "Delete Assistant" } as Record<string, string>)[
+    ({ manuscript: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card", plotline: "Delete Plotline", chat: "Delete Chat", assistant: "Delete Assistant", tag: "Delete Tag" } as Record<string, string>)[
       documentKind
     ] ?? "Delete Prompt";
   const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
@@ -121,6 +122,11 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
     await deletePlotline(pane.scene.id);
   } else if (documentKind === "assistant") {
     setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);
+  } else if (documentKind === "tag") {
+    // The dedicated delete returns 204, not the roster (review fix) — refresh
+    // it ourselves, mirroring the assistant branch's write-through.
+    await api.deleteTagEntry(pane.scene.id);
+    await refreshTagNodes();
   } else if (documentKind === "chat") {
     setChatSessions((await api.deleteChatSession(pane.scene.id)).sessions);
     if (host.activeChatId === pane.scene.id) host.activeChatId = null;

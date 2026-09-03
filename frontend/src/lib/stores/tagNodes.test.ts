@@ -7,7 +7,7 @@ const { listTagEntries } = vi.hoisted(() => ({ listTagEntries: vi.fn() }));
 vi.mock("@/lib/api", () => ({ api: { listTagEntries } }));
 
 import type { TagEntry } from "@/lib/types";
-import { clearTagNodes, refreshTagNodes, tagNodesStore, tagTitleById } from "./tagNodes";
+import { clearTagNodes, refreshTagNodes, tagById, tagNodesStore, tagTitleById } from "./tagNodes";
 
 const T = (id: string, title: string): TagEntry => ({
   id,
@@ -26,6 +26,13 @@ describe("tagNodes store (ADR-0082 slice 1)", () => {
     listTagEntries.mockResolvedValueOnce({ tags: [T("tag_1", "Coastal"), T("tag_2", "Urban")] });
     await refreshTagNodes();
     expect(get(tagNodesStore).map((t) => t.id)).toEqual(["tag_1", "tag_2"]);
+  });
+
+  it("tagById maps ids to the whole entry", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [T("tag_1", "Coastal")] });
+    await refreshTagNodes();
+    expect(get(tagById).get("tag_1")).toEqual(T("tag_1", "Coastal"));
+    expect(get(tagById).get("tag_missing")).toBeUndefined();
   });
 
   it("tagTitleById maps ids to titles", async () => {

@@ -434,13 +434,11 @@ class AssistantEntriesMixin:
         )
 
     def _assistant_write_schema(self) -> MetadataSchema:
-        """The schema an assistant create/save validates against. An assistant is
-        machine-global (#332): when a project is open we resolve its chain (a
-        project layer may declare a custom assistant sub-type), but the wizard's
-        first-run hire runs with no project open (#1402), so fall back to the
-        built-in machine-layer schema — which already declares
-        `assistant:assistant` — rather than `_require_project()`-ing a 409."""
-        return self.read_metadata_schema() if self.root_path is not None else self.builtin_metadata_schema()
+        """The schema an assistant create/save validates against. Delegates to
+        `LayerWalkMixin._machine_write_schema()` (`layers.py`) — was identical
+        to `TagNodesMixin._tag_write_schema` before ADR-0082 slice 1's review
+        factored the shared body out from under both."""
+        return self._machine_write_schema()
 
     def create_assistant_entry(self, request: CreateAssistantEntryRequest) -> AssistantEntry:
         target_folder = self._assistant_layer_folder_for_id(request.layer_id)
@@ -533,8 +531,12 @@ class AssistantEntriesMixin:
         return self._layer_folder_for_id(layer_id, "assistants")
 
     def _build_assistant_index(self) -> NodeIndex:
-        """Build a node index covering just the assistant kind. Works without
-        an open project (machine layer only) or with one (full layered walk).
+        """Build a node index covering both machine-layer families — assistants
+        AND tags (`MACHINE_LAYER_FAMILIES`, ADR-0082 slice 1). Works without an
+        open project (machine layer only) or with one (full layered walk).
+        Shared by `TagNodesMixin` (`_tag_index_entry`), which filters to
+        `kind == "tag"` the same way this mixin filters to `kind == "assistant"`
+        — one index build, not two byte-identical ones.
         """
         if self.root_path is not None:
             return self._build_node_index(self.root_path)

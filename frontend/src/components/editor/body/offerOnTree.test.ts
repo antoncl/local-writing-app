@@ -47,6 +47,10 @@ const SCHEMA = {
 
     "mutation_set:mutation_set": { name: "Mutation set", kind: "mutation_set", fields: [], opens_in: "dialog" },
 
+    "tag:base": { name: "Tag", kind: "tag", abstract: true, fields: [] },
+    "tag:tag": { name: "Tag", kind: "tag", parent: "tag:base", fields: [], opens_in: "dialog" },
+    "tag:assistant_tag": { name: "Assistant tag", kind: "tag", parent: "tag:base", fields: [], opens_in: "dialog" },
+
     "assistant:assistant": { name: "Assistant", kind: "assistant", fields: [] },
     "chat:chat_session": { name: "Chat", kind: "chat", fields: [] },
     "project:project": { name: "Project", kind: "project", fields: [] },
@@ -102,6 +106,14 @@ describe("offerOnRows — opens_in-derived host filter (#1199)", () => {
     expect(shown.has("mutation_set:mutation_set")).toBe(false);
     // mutation_set has no eligible concrete type, so its kind header is dropped too.
     expect(headers([])).not.toContain("mutation_set");
+  });
+
+  it("keeps tags out (ADR-0082 slice 1 review fix)", () => {
+    const shown = new Set(ids([]));
+    expect(shown.has("tag:tag")).toBe(false);
+    expect(shown.has("tag:assistant_tag")).toBe(false);
+    // Neither tag sub-type is eligible, so the kind header is dropped too.
+    expect(headers([])).not.toContain("tag");
   });
 
   it("drops the deprecated lore subtree entirely", () => {

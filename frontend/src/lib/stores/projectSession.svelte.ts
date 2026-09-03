@@ -22,6 +22,7 @@ import { get } from "svelte/store";
 import { structureStore } from "@/lib/stores/structure";
 import { isLeafNode } from "@/lib/utils/treeHelpers";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
+import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { createWizard } from "@/lib/stores/createWizard.svelte";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { loadProjectData } from "@/lib/stores/index";
@@ -128,6 +129,12 @@ class ProjectSession {
     // The file-backed assistant index is canonical for the chat-panel and
     // inputs-dialog pickers; load it eagerly alongside machine settings.
     await refreshAssistantEntries();
+    // The tag roster is machine-global too (ADR-0082 slice 1: the machine
+    // layer contributes its own tag entries beside its assistants) — it must
+    // exist before any project is open, same as the assistant roster above.
+    // `loadProjectData` refreshes it again on project open (project tags
+    // change with the project); this is the no-project hydration.
+    await refreshTagNodes();
   }
 
   // Re-pull machine settings just to refresh the recents list. Called after

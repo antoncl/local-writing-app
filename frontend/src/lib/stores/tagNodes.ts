@@ -14,20 +14,24 @@ export async function refreshTagNodes(): Promise<void> {
   tagNodesStore.set((await api.listTagEntries()).tags);
 }
 
-export function setTagNodes(tags: TagEntry[]): void {
-  tagNodesStore.set(tags);
-}
-
 export function clearTagNodes(): void {
   tagNodesStore.set([]);
 }
 
-// Id -> title, for resolving a tag reference's chip/bucket label without every
-// consumer re-deriving the same Map from the roster array (§3 of the ADR: the
-// frontend keeps a tag roster store so `entity_ref`/`entity_ref_list` values
-// pointing at a tag resolve to a title instead of a raw id).
-export const tagTitleById = derived(tagNodesStore, (tags) => {
+// Id -> entry, derived once so every by-id consumer (ReferencePicker's
+// `resolveRefById`, `tagTitleById` below) shares one Map instead of each
+// re-deriving its own from the roster array.
+export const tagById = derived(tagNodesStore, (tags) => {
+  const map = new Map<string, TagEntry>();
+  for (const tag of tags) map.set(tag.id, tag);
+  return map;
+});
+
+// Id -> title, for resolving a tag reference's chip/bucket label (§3 of the
+// ADR: the frontend keeps a tag roster store so `entity_ref`/`entity_ref_list`
+// values pointing at a tag resolve to a title instead of a raw id).
+export const tagTitleById = derived(tagById, (byId) => {
   const map = new Map<string, string>();
-  for (const tag of tags) map.set(tag.id, tag.title);
+  for (const [id, tag] of byId) map.set(id, tag.title);
   return map;
 });

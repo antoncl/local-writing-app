@@ -34,6 +34,7 @@
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { knownTagsStore } from "@/lib/stores/tags";
   import { tagTitleById } from "@/lib/stores/tagNodes";
+  import { get } from "svelte/store";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
@@ -343,12 +344,21 @@
   // the strip having content, else the hairline dangles with nothing beneath it.
   const paramStripControls = $derived(resolveParamControls(spec, schema));
   const previewBindings = $derived.by((): EvalBindings => buildBindings(spec.params, paramOverrides));
+  // A plain closure, NOT `$tagTitleById` read inline inside `preview`'s
+  // `$derived` — `get()` takes an untracked snapshot, so calling this from
+  // inside `evaluateView`'s synchronous run does not subscribe `preview` to
+  // the tag roster (review fix). The reactive `$store` form would have, and
+  // every tag save would then re-evaluate every open view's preview whether
+  // or not it groups by anything tag-shaped.
+  function resolveTagTitle(id: string): string | undefined {
+    return get(tagTitleById).get(id);
+  }
   let preview = $derived(
     evaluateView(spec, universe, {
       schema,
       referenceIndex,
       bindings: previewBindings,
-      resolveTitle: (id) => $tagTitleById.get(id),
+      resolveTitle: resolveTagTitle,
     }),
   );
   // Nest diagnostics surfaced as warnings so a truncated/lossy tree is never

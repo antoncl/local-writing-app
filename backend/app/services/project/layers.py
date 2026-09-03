@@ -53,6 +53,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Protocol
 
+from app.models import MetadataSchema
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import IndexLayer
 
@@ -161,8 +162,9 @@ class LayerWalkMixin:
 
         **The** entry point. `include_machine` prepends the machine config dir
         as an ordinary out-of-tree layer (`is_machine=True`) when it actually
-        holds an `assistants/` folder — the condition the old
-        `_collect_machine_layer_assistants` early-returned on. `include_library`
+        holds an `assistants/` OR a `tags/` folder (ADR-0082 slice 1) — the
+        condition the old `_collect_machine_layer_assistants` early-returned on.
+        `include_library`
         prepends the app-owned built-in Library (`is_library=True`, ADR-0049) as
         the outermost — deepest, lowest-priority — layer. Both are out-of-tree
         app layers the node index wants but schema layering must not see, so
@@ -382,6 +384,18 @@ class LayerWalkMixin:
                 return layer.folder / folder_name
         raise ProjectServiceError(f"Unknown layer id {layer_id}.", 422)
 
+    def _machine_write_schema(self) -> MetadataSchema:
+        """The schema a machine-layer node (assistant or tag) create/save
+        validates against. Both families are machine-global (#332 / ADR-0082
+        slice 1): with a project open we resolve its chain (a project layer may
+        declare a custom sub-type), but the first-run assistant hire and the
+        first-ever tag both run with no project open, so fall back to the
+        built-in machine-layer schema rather than `_require_project()`-ing a
+        409. Was `_assistant_write_schema` / `_tag_write_schema`, byte-identical
+        on both mixins; factored here beside `_layer_folder_for_id` so neither
+        copy can drift."""
+        return self.read_metadata_schema() if self.root_path is not None else self.builtin_metadata_schema()
+
     def machine_layer(self, *, rank: int = 0) -> IndexLayer | None:
         """The machine layer as an `IndexLayer`, or None when it has neither an
         `assistants/` nor a `tags/` folder.
@@ -459,20 +473,26 @@ class LayerWalkMixin:
         return folder.resolve()
 
     def _machine_layer_folder(self) -> Path | None:
-        """The machine config dir, when it carries an `assistants/` or `tags/`
-        folder — the two families `MACHINE_LAYER_FAMILIES` contributes
-        (`references.py`; `tags/` joined in ADR-0082 slice 1). Either alone is
-        enough: a fresh machine dir whose first-ever node is a tag (no
+        """The machine config dir, when it carries any `MACHINE_LAYER_FAMILIES`
+        folder (`references.py`) — `assistants/` or `tags/` today. Any one
+        alone is enough: a fresh machine dir whose first-ever node is a tag (no
         assistant created yet) must still resolve a machine layer, or its tag
         never becomes visible to `list_tag_entries` with no project open.
 
-        Imported lazily: `machine_settings` reaches back into service-level
-        config and importing it at module scope closes an import cycle.
+        The gate is derived from `MACHINE_LAYER_FAMILIES` rather than the two
+        folder names spelled out here a second time — a future machine family
+        joining that list is picked up with no edit to this method.
+
+        Both imported lazily: `machine_settings` reaches back into
+        service-level config, and `references` (the module this class's own
+        `references.py` mixin lives beside) would close an import cycle at
+        module scope — importing it at call time avoids both.
         """
         from app.services import machine_settings as ms_service
+        from app.services.project.references import MACHINE_LAYER_FAMILIES
 
         machine_dir = ms_service.assistants_dir().parent
-        if not ((machine_dir / "assistants").exists() or (machine_dir / "tags").exists()):
+        if not any((machine_dir / family.folder_name).exists() for family in MACHINE_LAYER_FAMILIES):
             return None
         # Resolved, like every project layer (`_project_layer_folders`, #356) and
         # `root` itself. It was the one un-canonicalised folder in the chain, and

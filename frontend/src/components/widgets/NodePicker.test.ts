@@ -658,6 +658,39 @@ describe("NodePicker tag selectors (#1491)", () => {
   });
 });
 
+describe("NodePicker tag-kind member picks (ADR-0082 slice 1)", () => {
+  async function openMenu(): Promise<HTMLElement> {
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    return document.querySelector(".ctx-menu") as HTMLElement;
+  }
+
+  // A picker whose only source is kind "tag" (a real tag NODE, not the
+  // legacy `tags` field's scoped-selector literal above) lists tag entries
+  // as plain member picks — the "Tags" group — and offers no "By tag"
+  // selector axis: `buildSelectorRoster` registers no roster for kind "tag",
+  // so every candidate selector resolves to zero members and is dropped
+  // (review fix F3 — no code change needed, the existing member/selector
+  // split already keeps the two apart; this pins the behaviour).
+  it("renders the Tags member group and no By-tag selector axis", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "tag" }], multiple: true },
+        tagEntries: [
+          { id: "tag_1", title: "Coastal", entry_type: "tag:tag", metadata: {} },
+          { id: "tag_2", title: "Urban", entry_type: "tag:tag", metadata: {} },
+        ],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    // The sole axis renders directly — no root chooser, no "By tag" anywhere.
+    expect(within(menu).getByText("Coastal")).toBeInTheDocument();
+    expect(within(menu).getByText("Urban")).toBeInTheDocument();
+    expect(within(menu).queryByText("By tag")).toBeNull();
+  });
+});
+
 describe("NodePicker sole allowed type (#1735 / #1742)", () => {
   async function openMenu(): Promise<HTMLElement> {
     await fireEvent.click(screen.getByRole("button", { expanded: false }));

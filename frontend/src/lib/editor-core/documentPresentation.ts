@@ -34,6 +34,7 @@ const DOCUMENT_LABELS: Record<string, string> = {
   plot_card: "Card",
   plotline: "Plotline",
   plot_template: "Template",
+  tag: "Tag",
 };
 
 export function documentLabelFor(documentKind: string): string {

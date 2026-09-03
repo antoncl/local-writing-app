@@ -44,7 +44,7 @@ def save_tag_entry(project: CurrentProject, tag_id: str, request: SaveTagEntryRe
         return project.save_tag_entry(tag_id, request)
 
 
-@router.delete("/api/tag-entries/{tag_id}", response_model=TagEntryList)
-def delete_tag_entry(project: CurrentProject, tag_id: str) -> TagEntryList:
+@router.delete("/api/tag-entries/{tag_id}", status_code=204)
+def delete_tag_entry(project: CurrentProject, tag_id: str) -> None:
     with translate_errors():
-        return project.delete_tag_entry(tag_id)
+        project.delete_tag_entry(tag_id)

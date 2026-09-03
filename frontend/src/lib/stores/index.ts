@@ -60,7 +60,15 @@ export function clearProjectData(): void {
   clearSchema();
   clearReferenceIndex();
   clearKnownTags();
+  // Not a plain clear (review fix): the tag roster is machine-global
+  // (ADR-0082 slice 1) — machine-layer tags remain valid with no project
+  // open, same as the assistant roster (`clearAssistants` below has no such
+  // re-refresh yet, but tags need one because `loadMachineSettings` hydrates
+  // this store even before this flow runs). Fire-and-forget: a full clear
+  // then a fresh GET, not awaited — this function is synchronous like its
+  // siblings, and the roster is empty for one tick either way.
   clearTagNodes();
+  void refreshTagNodes();
   clearTodos();
   clearValidation();
   clearChats();

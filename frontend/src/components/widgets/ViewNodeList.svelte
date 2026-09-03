@@ -131,6 +131,16 @@
   // field needs the tag roster store as the fallback — same reasoning as the
   // param strip's reference/tag pickers sourcing global stores directly above.
   import { tagTitleById } from "@/lib/stores/tagNodes";
+  import { get } from "svelte/store";
+
+  // A plain closure, NOT read inside `computedResult`'s `$derived.by` — `get()`
+  // takes an untracked snapshot, so this does not subscribe the derived to the
+  // tag roster (review fix). `$tagTitleById.get(id)` inline would have, and
+  // every tag save would then re-evaluate every open view whether or not it
+  // groups by anything tag-shaped.
+  function resolveTagTitle(id: string): string | undefined {
+    return get(tagTitleById).get(id);
+  }
 
   let {
     result,
@@ -265,7 +275,7 @@
           schema: view.schema,
           bindings,
           referenceIndex: view.referenceIndex,
-          resolveTitle: (id) => $tagTitleById.get(id),
+          resolveTitle: resolveTagTitle,
         })
       : (result ?? nodeSet<T>([])),
   );

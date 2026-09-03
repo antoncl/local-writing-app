@@ -28,8 +28,10 @@ export const tagNodesApi = {
       }),
     });
   },
+  // 204 No Content — the dedicated delete deliberately does not return the
+  // roster (review fix); callers `refreshTagNodes()` themselves.
   deleteTagEntry(tagId: string) {
-    return request<TagEntryList>(`/tag-entries/${encodeURIComponent(tagId)}`, {
+    return request<void>(`/tag-entries/${encodeURIComponent(tagId)}`, {
       method: "DELETE",
     });
   },

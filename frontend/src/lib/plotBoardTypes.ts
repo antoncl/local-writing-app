@@ -23,6 +23,22 @@ export type PlotBoardPlotline = {
   beats: PlotBoardPlotlineBeat[];
 };
 
+// A character arc as the board sees it (ADR-0080 §5 / Amendment 1): the plotline's
+// sibling holder — id, title, its own colour swatch id (null → the frontend falls
+// back to the bound character's, then the lore kind default), the bound character
+// (id + display name + single-letter avatar, each null when unbound), and its
+// ordered change-beat roster. Rendered as a node in its own band, below the
+// plotline band — a sibling holder, not merged into `plotlines`.
+export type PlotBoardCharacterArc = {
+  id: string;
+  title: string;
+  color: string | null;
+  character_id: string | null;
+  character_name: string | null;
+  character_initial: string | null;
+  beats: PlotBoardPlotlineBeat[];
+};
+
 // A manuscript container (an act, a chapter — whatever the project declares) as a
 // soft, free-flow board box (ADR-0048 S7 Slice 4). `parent` is the enclosing
 // container's id, or null when its parent is the manuscript root (a top-level act),
@@ -42,6 +58,12 @@ export type PlotBoardContainer = {
 // `plotline_color` is the owning plotline's swatch id (null when it has none), so a
 // card can tint each beat badge by its plotline — same-plotline beats share a colour,
 // disambiguating collisions between same-named beats of different plotlines.
+// ADR-0080 §5 / Amendment 1: an arc is the plotline's SIBLING beat-holder, projected
+// separately (see `PlotBoardCharacterArc` + `PlotBoardProjection.arcs` below). A
+// change-beat's board record still uses the `plotline_*` field NAMES above (holds the
+// ARC's id/title/own-colour for an arc beat — zero-churn on the existing badge
+// consumers); `holder_kind` says which subtype so the card's pill can tell an
+// event-beat from a change-beat, and `character_*` names the arc's bound character.
 export type PlotBoardBeat = {
   plotline_id: string;
   plotline_title: string;
@@ -51,6 +73,13 @@ export type PlotBoardBeat = {
   // The beat's 1-based position in its plotline roster (#941), resolved by the
   // backend so the badge shows a stable number that disambiguates same-titled beats.
   number: number;
+  // Which plot:thread subtype holds this beat — "plot:plotline" (an event-beat) or
+  // "plot:character_arc" (a change-beat). Defaults to plotline where constructed
+  // locally (e.g. a test fixture) so existing plotline-only call sites need no change.
+  holder_kind: string;
+  character_id: string | null;
+  character_name: string | null;
+  character_initial: string | null;
 };
 
 // A card as the board renders it: identity, the synopsis (the card body), the
@@ -134,6 +163,9 @@ export type PlotBoardProjection = {
   board_revision: string;
   layout: Record<string, unknown>;
   plotlines: PlotBoardPlotline[];
+  // ADR-0080 §5 / Amendment 1: character arcs, projected separately from
+  // `plotlines` — a sibling holder band, not merged into the plotline list.
+  arcs: PlotBoardCharacterArc[];
   containers: PlotBoardContainer[];
   cards: PlotBoardCard[];
   diagnostics: PlotDiagnostic[];

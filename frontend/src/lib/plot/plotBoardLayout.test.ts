@@ -3,7 +3,7 @@
 // so the board's real logic — container grouping, nesting, positions, and the derived
 // card/container data — is verified here (node env, no DOM); the custom nodes carry
 // their own mount tests, and the composition is browser-checked.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach } from "vitest";
 import {
   boardIsEmpty,
   buildBoardNodes,
@@ -16,14 +16,18 @@ import {
   readBoardPositions,
   readBoardSizes,
   reconcilePlotlineUiState,
+  reconcileArcUiState,
   CARD_GAP_X,
   CARD_HEIGHT,
   CARD_WIDTH,
   CONTAINER_HEADER,
   CONTAINER_PAD,
+  PLOTLINE_WIDTH,
   type PlotCardData,
   type PlotContainerData,
 } from "./plotBoardLayout";
+import { setPalette } from "@/lib/utils/colors";
+import { loreEntriesStore } from "@/lib/stores/lore";
 import type { PlotBoardProjection } from "@/lib/types";
 
 function projection(over: Partial<PlotBoardProjection> = {}): PlotBoardProjection {
@@ -32,12 +36,28 @@ function projection(over: Partial<PlotBoardProjection> = {}): PlotBoardProjectio
     board_revision: "r1",
     layout: {},
     plotlines: [],
+    arcs: [],
     containers: [],
     cards: [],
     diagnostics: [],
     ...over,
   };
 }
+
+const arc = (
+  id: string,
+  title: string,
+  over: Partial<PlotBoardProjection["arcs"][number]> = {},
+): PlotBoardProjection["arcs"][number] => ({
+  id,
+  title,
+  color: null,
+  character_id: null,
+  character_name: null,
+  character_initial: null,
+  beats: [],
+  ...over,
+});
 
 const line = (
   id: string,
@@ -70,8 +90,18 @@ const card = (
 
 const containerNodes = (nodes: ReturnType<typeof buildBoardNodes>) => nodes.filter((n) => n.type === "plotContainer");
 const plotlineNodes = (nodes: ReturnType<typeof buildBoardNodes>) => nodes.filter((n) => n.type === "plotPlotline");
+const arcNodes = (nodes: ReturnType<typeof buildBoardNodes>) => nodes.filter((n) => n.type === "plotArc");
 const cardNodes = (nodes: ReturnType<typeof buildBoardNodes>) => nodes.filter((n) => n.type === "plotCard");
 const dataOf = (nodes: ReturnType<typeof buildBoardNodes>, id: string) => nodes.find((n) => n.id === id)!.data;
+
+// The arc colour resolution reads the machine palette + lore roster global stores
+// directly (buildBoardNodes' one store-backed exception — mirrors the ReferencePicker/
+// plotline-roster precedent). Reset both between tests so no test's palette/roster
+// leaks into the next.
+beforeEach(() => {
+  setPalette([]);
+  loreEntriesStore.set([]);
+});
 
 describe("buildBoardNodes", () => {
   it("returns no nodes for an empty board", () => {
@@ -708,5 +738,146 @@ describe("plotline nodes (ADR-0053 §3)", () => {
     const zero = projection({ plotlines: [line("p1", "Main", "blue", [{ beat_id: "b1", title: "Setup", use_count: 0 }])] });
     const one = projection({ plotlines: [line("p1", "Main", "blue", [{ beat_id: "b1", title: "Setup", use_count: 1 }])] });
     expect(projectionDataKey(zero)).not.toBe(projectionDataKey(one));
+  });
+});
+
+describe("character-arc nodes (ADR-0080 §5 / Amendment 1)", () => {
+  it("emits one draggable plotArc node per arc, carrying its beats + bound character", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        arcs: [
+          arc("a1", "Elena's redemption", { character_id: "char_1", character_name: "Elena", character_initial: "E", beats: [{ beat_id: "b1", title: "Denial", use_count: 0 }] }),
+          arc("a2", "Marcus's fall"),
+        ],
+      }),
+    );
+    const arcs = arcNodes(nodes);
+    expect(arcs.map((n) => n.id)).toEqual(["a1", "a2"]);
+    // Draggable by the same leading grip as a card/plotline (#876).
+    expect(arcs[0].draggable).toBe(true);
+    expect(arcs[0].dragHandle).toBe(".plot-card-drag-handle");
+    expect(arcs[0].data).toMatchObject({
+      title: "Elena's redemption",
+      color: null,
+      beats: [{ beat_id: "b1", title: "Denial", use_count: 0 }],
+      characterId: "char_1",
+      characterName: "Elena",
+      characterInitial: "E",
+    });
+  });
+
+  it("lays arc nodes out in a band BELOW the plotline band", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        plotlines: [line("p1", "Main")],
+        arcs: [arc("a1", "Elena's redemption")],
+      }),
+    );
+    const plY = plotlineNodes(nodes)[0].position.y;
+    const arcY = arcNodes(nodes)[0].position.y;
+    expect(arcY).toBeGreaterThan(plY);
+  });
+
+  it("still bands below every card/container/plotline when there are no plotlines", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        containers: [container("chap", "Chapter 1")],
+        cards: [card("c1", { container: "chap" })],
+        arcs: [arc("a1", "Elena's redemption")],
+      }),
+    );
+    const arcY = arcNodes(nodes)[0].position.y;
+    const others = nodes.filter((n) => n.type !== "plotArc");
+    for (const n of others) expect(arcY).toBeGreaterThan(n.position.y);
+  });
+
+  it("a saved override wins over the derived band slot", () => {
+    const nodes = buildBoardNodes(projection({ arcs: [arc("a1", "Elena's redemption")] }), { a1: { x: 7, y: 8 } });
+    expect(arcNodes(nodes)[0].position).toEqual({ x: 7, y: 8 });
+  });
+
+  it("spaces sibling arcs the same PLOTLINE_WIDTH + gap as plotline nodes", () => {
+    const nodes = buildBoardNodes(projection({ arcs: [arc("a1", "One"), arc("a2", "Two")] }));
+    const [n1, n2] = arcNodes(nodes);
+    expect(n2.position.x - n1.position.x).toBe(PLOTLINE_WIDTH + CARD_GAP_X);
+  });
+
+  it("persists arc positions (dragged) alongside cards/plotlines, sparse by override", () => {
+    const nodes = buildBoardNodes(projection({ arcs: [arc("a1", "Elena's redemption")] }));
+    expect(movableNodePositions(nodes)).toHaveProperty("a1");
+    expect(overriddenNodePositions(nodes, new Set(["a1"]))).toHaveProperty("a1");
+    expect(overriddenNodePositions(nodes, new Set())).not.toHaveProperty("a1");
+  });
+
+  describe("colour resolution (Amendment 1 §1): own → bound character's → the lore kind default", () => {
+    it("uses the arc's OWN colour when set, even with a bound character", () => {
+      setPalette([
+        { id: "rose", label: "Rose", hex: "#b0567a" },
+        { id: "moss", label: "Moss", hex: "#5a7a4a" },
+      ]);
+      loreEntriesStore.set([{ id: "char_1", title: "Elena", body: "", entry_type: "lore:character", metadata: { color: "moss" } }]);
+      const nodes = buildBoardNodes(projection({ arcs: [arc("a1", "Elena's redemption", { color: "rose", character_id: "char_1" })] }));
+      expect((arcNodes(nodes)[0].data as { resolvedColorHex: string | null }).resolvedColorHex).toBe("#b0567a");
+    });
+
+    it("falls back to the bound character's colour when the arc has none", () => {
+      setPalette([{ id: "moss", label: "Moss", hex: "#5a7a4a" }]);
+      loreEntriesStore.set([{ id: "char_1", title: "Elena", body: "", entry_type: "lore:character", metadata: { color: "moss" } }]);
+      const nodes = buildBoardNodes(projection({ arcs: [arc("a1", "Elena's redemption", { character_id: "char_1" })] }));
+      expect((arcNodes(nodes)[0].data as { resolvedColorHex: string | null }).resolvedColorHex).toBe("#5a7a4a");
+    });
+
+    it("falls back to the lore kind default when the arc is unbound and colourless", () => {
+      setPalette([{ id: "slate-blue", label: "Slate blue", hex: "#4a6a8a" }]);
+      const nodes = buildBoardNodes(projection({ arcs: [arc("a1", "Untitled")] }));
+      // resolveColorForKind("lore") — the KIND_DEFAULT_SWATCH mapping (colors.ts).
+      expect((arcNodes(nodes)[0].data as { resolvedColorHex: string | null }).resolvedColorHex).toBe("#4a6a8a");
+    });
+  });
+});
+
+describe("boardIsEmpty (arcs)", () => {
+  it("is NOT empty when it has arcs but no cards/plotlines (ADR-0080: an arc is a node too)", () => {
+    expect(boardIsEmpty(projection({ arcs: [arc("a1", "Elena's redemption")] }))).toBe(false);
+  });
+});
+
+describe("projectionDataKey (arcs)", () => {
+  it("changes when an arc's own colour changes", () => {
+    const before = projection({ arcs: [arc("a1", "Elena's redemption", { color: null })] });
+    const after = projection({ arcs: [arc("a1", "Elena's redemption", { color: "rose" })] });
+    expect(projectionDataKey(before)).not.toBe(projectionDataKey(after));
+  });
+
+  it("changes when an arc is rebound to a different character", () => {
+    const before = projection({ arcs: [arc("a1", "Elena's redemption", { character_id: "char_1" })] });
+    const after = projection({ arcs: [arc("a1", "Elena's redemption", { character_id: "char_2" })] });
+    expect(projectionDataKey(before)).not.toBe(projectionDataKey(after));
+  });
+
+  it("changes when a card's beat holder_kind or character_id changes (rebind rehydrates the pill)", () => {
+    const eventBeat = { plotline_id: "x", plotline_title: "", plotline_color: null, beat_id: "b1", title: "", number: 1, holder_kind: "plot:plotline", character_id: null, character_name: null, character_initial: null };
+    const changeBeat = { ...eventBeat, holder_kind: "plot:character_arc", character_id: "char_1" };
+    const before = projection({ cards: [card("c1", { beats: [eventBeat] })] });
+    const after = projection({ cards: [card("c1", { beats: [changeBeat] })] });
+    expect(projectionDataKey(before)).not.toBe(projectionDataKey(after));
+  });
+});
+
+describe("reconcileArcUiState (mirrors reconcilePlotlineUiState, #928)", () => {
+  const proj = projection({ arcs: [arc("a1", "Elena's redemption"), arc("a2", "Marcus's fall")] });
+
+  it("keeps an expanded id that still exists on the board", () => {
+    const state = { expandedArcId: "a1" };
+    expect(reconcileArcUiState(proj, state)).toBe(state);
+  });
+
+  it("drops an expanded id whose arc was deleted", () => {
+    expect(reconcileArcUiState(proj, { expandedArcId: "gone" })).toEqual({ expandedArcId: null });
+  });
+
+  it("leaves a null (loading / failed) projection untouched", () => {
+    const state = { expandedArcId: "a1" };
+    expect(reconcileArcUiState(null, state)).toBe(state);
   });
 });

@@ -164,6 +164,11 @@
     // the plotline node (no `from`), or a badge dropped back on its own card, just links.
     if (payload.from && payload.from !== id) {
       actions.onMoveBeat(payload.from, id, payload.plotline, payload.beat_id);
+    } else if (payload.holder_kind) {
+      // A change-beat (ADR-0080 §4): thread the holder kind through so the link path
+      // skips primary-adoption. Omitted for the (still far more common) plotline drag,
+      // whose payload carries no `holder_kind` at all (plotDnd's wire economy).
+      actions.onLinkBeat(id, payload.plotline, payload.beat_id, payload.holder_kind);
     } else {
       actions.onLinkBeat(id, payload.plotline, payload.beat_id);
     }
@@ -173,8 +178,13 @@
   }
   // Start dragging a beat badge OFF this card (#941): carry the source card id so the
   // drop target moves the link rather than duplicating it. Only on an interactive card.
-  function onBeatDragStart(e: DragEvent, plotline: string, beatId: string) {
-    if (actions && id) setPlotBeatDrag(e, plotline, beatId, id);
+  // `holderKind` (ADR-0080 §4) rides along so a re-dragged CHANGE-beat badge (an arc
+  // holder) still skips primary-adoption on the target card — without it, the move would
+  // adopt the arc as the target's primary and the backend would 422 the save.
+  function onBeatDragStart(e: DragEvent, plotline: string, beatId: string, holderKind: string) {
+    if (actions && id) {
+      setPlotBeatDrag(e, plotline, beatId, id, holderKind === "plot:character_arc" ? "plot:character_arc" : "plot:plotline");
+    }
   }
 
   async function startEdit() {
@@ -328,7 +338,7 @@
             class:nodrag={actions}
             class:nopan={actions}
             draggable={!!actions}
-            ondragstart={(e) => onBeatDragStart(e, beat.plotline_id, beat.beat_id)}
+            ondragstart={(e) => onBeatDragStart(e, beat.plotline_id, beat.beat_id, beat.holder_kind)}
           >
             {#if actions}
               <!-- A leading grip signals the badge drags card→card (#941 follow-up), the

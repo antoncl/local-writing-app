@@ -52,3 +52,12 @@ export type CardList = { entries: CardSummary[] };
 export type PlotlineSummary = PlotFolderSummary;
 export type PlotlineEntry = PlotFolderEntry;
 export type PlotlineList = { entries: PlotlineSummary[] };
+
+// A character arc (ADR-0080): the plotline's SIBLING under the shared plot:thread
+// beat-holder base — same book-local flat-node shape (name/color/beats ride the
+// same `metadata`), differing only in the `character` binding (§2) and never being
+// a card's primary (§4). The `/plot/character-arcs` endpoint is the family
+// discriminator, exactly as `/plot/plotlines` is for a plotline.
+export type CharacterArcSummary = PlotFolderSummary;
+export type CharacterArcEntry = PlotFolderEntry;
+export type CharacterArcList = { entries: CharacterArcSummary[] };

@@ -40,6 +40,7 @@ const projection = (): PlotBoardProjection => ({
   board_revision: "r",
   layout: {},
   plotlines: [],
+  arcs: [],
   containers: [],
   cards: [],
   diagnostics: [],
@@ -291,6 +292,18 @@ describe("card content ops", () => {
     expect(save.mock.calls[0][0].metadata).toEqual({
       plotline: "i1",
       beat_links: [{ plotline: "i1", beat_id: "b1" }],
+    });
+  });
+
+  it("linkCardBeat still links a change-beat but never adopts the arc as primary (ADR-0080 §4)", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({})); // no primary, no links
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await linkCardBeat("c1", "arc1", "b1", "plot:character_arc");
+    // The beat_link IS created — only the primary-adoption is skipped (the backend
+    // 422s an arc as a card's `plotline`).
+    expect(save.mock.calls[0][0].metadata).toEqual({
+      beat_links: [{ plotline: "arc1", beat_id: "b1" }],
     });
   });
 

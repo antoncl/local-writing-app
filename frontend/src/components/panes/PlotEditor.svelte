@@ -29,6 +29,7 @@
     readBoardPositions,
     readBoardSizes,
     reconcilePlotlineUiState,
+    reconcileArcUiState,
     type PlotBoardNode,
     type PlotContainerData,
   } from "@/lib/plot/plotBoardLayout";
@@ -66,12 +67,14 @@
     getPlotlineEntry,
     plotlineReveal,
   } from "@/lib/stores/plotlines";
+  import { deleteArc, getArcEntry, saveArcEntry } from "@/lib/stores/characterArcs";
   import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNodeFlow from "./plot/PlotCardNodeFlow.svelte";
   import PlotContainerNodeFlow from "./plot/PlotContainerNodeFlow.svelte";
   import PlotPlotlineNode from "./plot/PlotPlotlineNode.svelte";
+  import PlotArcNode from "./plot/PlotArcNode.svelte";
   import PlotCausalEdge from "./plot/PlotCausalEdge.svelte";
   import PlotTemplatePalette from "./plot/PlotTemplatePalette.svelte";
   import PlotDiagnosticsPanel from "./plot/PlotDiagnosticsPanel.svelte";
@@ -83,6 +86,7 @@
     type PlotEdgeActions,
   } from "./plot/plotCardActions";
   import { PLOT_PLOTLINE_ACTIONS, type PlotPlotlineActions } from "./plot/plotPlotlineActions";
+  import { PLOT_ARC_ACTIONS, type PlotArcActions } from "./plot/plotArcActions";
   import { PLOT_CONTAINER_ACTIONS, type PlotContainerActions } from "./plot/plotContainerActions";
   import type { BoardSize, BoardXY, PlotBoardProjection } from "@/lib/types";
 
@@ -265,8 +269,8 @@
     // Link a beat dropped from a plotline node (#824); unlink via the badge ×. A beat
     // drop can also adopt the card's primary (#863), which the whole-card before/after
     // flip reverses along with the link.
-    onLinkBeat: (cardId, instance, beatId) =>
-      void undoRecorder.cardEdit(cardId, "link beat", () => linkCardBeat(cardId, instance, beatId)),
+    onLinkBeat: (cardId, instance, beatId, holderKind) =>
+      void undoRecorder.cardEdit(cardId, "link beat", () => linkCardBeat(cardId, instance, beatId, holderKind)),
     onUnlinkBeat: (cardId, instance, beatId) =>
       void undoRecorder.cardEdit(cardId, "unlink beat", () => unlinkCardBeat(cardId, instance, beatId)),
     // Move a beat badge from one card to another (#941): a two-card edit (unlink source +
@@ -342,6 +346,49 @@
     onOpenInEditor: (id) => void editorPanes.openPlotline(id),
   });
 
+  // On-node character-arc editing (ADR-0080 §5). A SEPARATE ephemeral expand id from
+  // `expandedPlotlineId` (#3b-i correctness point) — an arc and a plotline are distinct
+  // node kinds with distinct id spaces; overloading one field would let an arc's id
+  // dangle against (or clear) a plotline's when reconciled.
+  let expandedArcId = $state<string | null>(null);
+  setContext<PlotArcActions>(PLOT_ARC_ACTIONS, {
+    get expandedId() {
+      return expandedArcId;
+    },
+    toggleExpanded: (id) => {
+      expandedArcId = expandedArcId === id ? null : id;
+    },
+    loadArc: (id) => getArcEntry(id),
+    save: async (entry) => {
+      try {
+        // Recorded onto the SAME shared caretaker as every other content op (§7), via
+        // the arc-specific `arcEdit` — never `plotlineEdit` (which would restore this
+        // through the plotline command shape).
+        return await undoRecorder.arcEdit(entry.id, "edit character arc", () => saveArcEntry(entry));
+      } catch (e) {
+        editorPanes.setError(e instanceof Error ? e.message : "Couldn't save the character arc.");
+        throw e;
+      }
+    },
+    // Bind/clear the arc's character as its own recorded edit: fetch the live entry,
+    // patch `metadata.character`, save. Returns the saved entry so the node resyncs.
+    setCharacter: async (id, characterId) => {
+      try {
+        return await undoRecorder.arcEdit(id, "bind character", async () => {
+          const entry = await getArcEntry(id);
+          const metadata = { ...entry.metadata };
+          if (characterId) metadata.character = characterId;
+          else delete metadata.character;
+          return saveArcEntry({ ...entry, metadata });
+        });
+      } catch (e) {
+        editorPanes.setError(e instanceof Error ? e.message : "Couldn't update the arc's character.");
+        throw e;
+      }
+    },
+    onDelete: (id) => removeArc(id),
+  });
+
   // Container resize (#878). A container box carries no position (its origin is always
   // derived), but a resize handle gives it a manual SIZE, pinned in `containerSizes`
   // keyed by container id. A new-object assign (not a mutate) triggers the reactive
@@ -392,6 +439,13 @@
     const healed = reconcilePlotlineUiState(projection, { focusedPlotlineId, expandedPlotlineId });
     if (healed.focusedPlotlineId !== focusedPlotlineId) focusedPlotlineId = healed.focusedPlotlineId;
     if (healed.expandedPlotlineId !== expandedPlotlineId) expandedPlotlineId = healed.expandedPlotlineId;
+  });
+
+  // Same self-heal for the arc's expand id, against `projection.arcs` (ADR-0080 §5) —
+  // a SEPARATE reconcile from the plotline one above, never sharing its id.
+  $effect(() => {
+    const healed = reconcileArcUiState(projection, { expandedArcId });
+    if (healed.expandedArcId !== expandedArcId) expandedArcId = healed.expandedArcId;
   });
 
   // Delete a card from the board (#860). Confirmed (destructive, app dialog) — the
@@ -464,14 +518,28 @@
   let templates = $derived($plotTemplatesStore);
   let plotlines = $derived($plotlineEntriesStore);
 
-  // Instantiate a template → a plotline node, expanded for editing (the createPlotlineOnBoard
-  // shape). The Empty tile is `newPlotline` (an ad-hoc, beat-less plotline).
+  // Instantiate a template → a plotline OR character-arc node, expanded for editing
+  // (ADR-0080 §5: the returned entry's `entry_type` says which — a character-arc-family
+  // template yields a `plot:character_arc`). The Empty tile is `newPlotline` (an ad-hoc,
+  // beat-less plotline; there is no ad-hoc arc equivalent this slice).
+  //
+  // The ONE instantiate call already minted the node — its `create` callback below just
+  // hands back the id already returned, so `createArc`/`createPlotline` capture its state
+  // for the undo record without minting a second time. Branching AFTER the call (not
+  // before) is what routes an arc through `createArc`, never `createPlotline` — the
+  // latter's undo would recreate a deleted arc AS a plotline (#3b-i correctness point).
   async function instantiateTemplate(id: string): Promise<void> {
     if (creatingPlotline) return; // shares newPlotline's guard — one mint per gesture
     creatingPlotline = true;
     try {
-      expandedPlotlineId = await undoRecorder.createPlotline(() => instantiateTemplateOnBoard(id));
-      editorPanes.setStatus("Created plotline from template");
+      const entry = await instantiateTemplateOnBoard(id);
+      if (entry.entry_type === "plot:character_arc") {
+        expandedArcId = await undoRecorder.createArc(async () => entry.id);
+        editorPanes.setStatus("Created character arc from template");
+      } else {
+        expandedPlotlineId = await undoRecorder.createPlotline(async () => entry.id);
+        editorPanes.setStatus("Created plotline from template");
+      }
     } catch (e) {
       editorPanes.setError(e instanceof Error ? e.message : "Could not instantiate the template.");
     } finally {
@@ -505,6 +573,28 @@
         // Close a NodeEditor pane open on this plotline ("Open in editor", the node's
         // onOpenInEditor → editorPanes.openPlotline): the node is gone, so the pane
         // would 404 on its next save. Mirrors removeCard / editorPaneDelete (#861).
+        const openPane = editorPanes.panes.find((p) => p.document?.id === id);
+        if (openPane) editorPanes.tearDown(openPane.id);
+      },
+    });
+  }
+
+  // Delete a character arc (ADR-0080 §5) — the node's kebab "Delete character arc",
+  // mirroring `removePlotline`. Cards that fulfilled one of its change-beats lose that
+  // beat_link (never a recolour — an arc is never a card's primary, §4). The title
+  // comes off the live projection (no separate roster subscription needed for this).
+  function removeArc(id: string): void {
+    const arc = projection?.arcs.find((a) => a.id === id);
+    confirmService.request({
+      title: "Remove character arc",
+      message: `Remove ${arc?.title ? `“${arc.title}”` : "this character arc"}? Cards that fulfilled one of its change-beats lose that link; their prose is untouched.`,
+      confirmLabel: "Remove character arc",
+      destructive: true,
+      onConfirm: async () => {
+        if (expandedArcId === id) expandedArcId = null;
+        // Recorded (§5, mirroring §7): captures the arc + every card fulfilling one of
+        // its change-beats, deletes, so Ctrl+Z restores it with its beats + those links.
+        await undoRecorder.deleteArc(id, () => deleteArc(id));
         const openPane = editorPanes.panes.find((p) => p.document?.id === id);
         if (openPane) editorPanes.tearDown(openPane.id);
       },
@@ -547,7 +637,12 @@
     });
   }
 
-  const nodeTypes = { plotCard: PlotCardNodeFlow, plotContainer: PlotContainerNodeFlow, plotPlotline: PlotPlotlineNode };
+  const nodeTypes = {
+    plotCard: PlotCardNodeFlow,
+    plotContainer: PlotContainerNodeFlow,
+    plotPlotline: PlotPlotlineNode,
+    plotArc: PlotArcNode,
+  };
   // Authored causal edges render via PlotCausalEdge (a hover-× to remove the link);
   // derived edges keep the default renderer.
   const edgeTypes = { causal: PlotCausalEdge };
@@ -874,6 +969,7 @@
         ondelete={onDeleteCausal}
         onpaneclick={() => {
           expandedPlotlineId = null;
+          expandedArcId = null;
           focusedPlotlineId = null;
           selectedDiagnosticId = null;
         }}
@@ -963,7 +1059,7 @@
           // A dragged card or plotline node becomes overridden (pinned): it now
           // persists and keeps its spot instead of reflowing to its derived slot.
           for (const node of nodes) {
-            if (node.type === "plotCard" || node.type === "plotPlotline") overriddenIds.add(node.id);
+            if (node.type === "plotCard" || node.type === "plotPlotline" || node.type === "plotArc") overriddenIds.add(node.id);
           }
         }}
         minZoom={0.2}
@@ -1076,7 +1172,8 @@
      full board reconcile that froze the menu open for ~10s, #1100). Only one menu is ever
      open, so `:has()` matches at most one wrapper. */
   .board-canvas :global(.svelte-flow__node:has(.card-menu)),
-  .board-canvas :global(.svelte-flow__node:has(.plotline-menu)) {
+  .board-canvas :global(.svelte-flow__node:has(.plotline-menu)),
+  .board-canvas :global(.svelte-flow__node:has(.arc-menu)) {
     z-index: 1000 !important;
   }
   .board-hint {

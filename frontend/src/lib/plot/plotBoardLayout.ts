@@ -18,8 +18,20 @@
 // they key on the draggable node types (`plotCard` + `plotPlotline`), so the derived
 // container boxes never enter the layout.
 
+import { get } from "svelte/store";
 import type { CoordinateExtent, Node } from "@xyflow/svelte";
-import type { BoardSize, BoardXY, PlotBoardBeat, PlotBoardLayout, PlotBoardPlotlineBeat, PlotBoardProjection } from "@/lib/types";
+import type {
+  BoardSize,
+  BoardXY,
+  PlotBoardBeat,
+  PlotBoardCharacterArc,
+  PlotBoardLayout,
+  PlotBoardPlotlineBeat,
+  PlotBoardProjection,
+} from "@/lib/types";
+import { getSwatch, resolveColor, resolveColorForKind } from "@/lib/utils/colors";
+import { loreEntriesStore } from "@/lib/stores/lore";
+import { metadataSchemaStore } from "@/lib/stores/schema";
 
 // A container box: an act/chapter's title, how many cards it (transitively) holds,
 // and its nesting level (0 = a top-level act, 1 = a box nested inside one). The box
@@ -71,15 +83,33 @@ export type PlotPlotlineData = {
   beats: PlotBoardPlotlineBeat[];
 };
 
-export type PlotBoardNode = Node<PlotContainerData | PlotCardData | PlotPlotlineData>;
+// A character-arc node (ADR-0080 §5 / Amendment 1): the plotline's sibling holder,
+// drawn in its own band below the plotline band. `color` is the arc's OWN swatch id
+// (null when unset — Amendment 1 §1: an unset arc previews the bound character's
+// colour instead of reading colourless); `resolvedColorHex` is that whole resolution
+// (own → character's → the lore kind default), computed ONCE here so PlotArcNode
+// never re-resolves it. `characterId`/`characterName`/`characterInitial` are the
+// bound character (each null when unbound).
+export type PlotArcData = {
+  title: string;
+  color: string | null;
+  beats: PlotBoardPlotlineBeat[];
+  characterId: string | null;
+  characterName: string | null;
+  characterInitial: string | null;
+  resolvedColorHex: string | null;
+};
+
+export type PlotBoardNode = Node<PlotContainerData | PlotCardData | PlotPlotlineData | PlotArcData>;
 
 // A board is empty (show the hint, hide the canvas) only when it has NEITHER cards NOR
-// plotlines. Since ADR-0053 a plotline is a first-class board node, so a card-less board
-// with plotlines still has something to render — treating it as empty would hide an
-// instantiated plotline (the S3 palette gesture). Pure + exported so the render decision
-// is unit-tested against the SvelteFlow-gated PlotEditor.
+// plotlines NOR arcs. Since ADR-0053 a plotline is a first-class board node (and
+// ADR-0080 an arc is its sibling), so a card-less board with a thread still has
+// something to render — treating it as empty would hide an instantiated plotline/arc
+// (the S3 palette gesture). Pure + exported so the render decision is unit-tested
+// against the SvelteFlow-gated PlotEditor.
 export function boardIsEmpty(projection: PlotBoardProjection): boolean {
-  return projection.cards.length === 0 && projection.plotlines.length === 0;
+  return projection.cards.length === 0 && projection.plotlines.length === 0 && projection.arcs.length === 0;
 }
 
 // The board's ephemeral per-plotline UI state: which thread is FOCUSED (S5b — its card
@@ -109,12 +139,41 @@ export function reconcilePlotlineUiState(
   return { focusedPlotlineId, expandedPlotlineId };
 }
 
+// The board's ephemeral per-arc UI state: which arc node is EXPANDED into its inline
+// editor. A SEPARATE id from `expandedPlotlineId` (ADR-0080 §5 / #3b-i correctness
+// point) — an arc and a plotline are different node kinds with distinct id spaces, so
+// overloading one field would let an arc's id clear (or be cleared by) a plotline's.
+export type ArcUiState = { expandedArcId: string | null };
+
+// Reconcile that state against the live projection, mirroring `reconcilePlotlineUiState`
+// (#928) for arcs: after any refetch, drop an id the projection no longer contains (an
+// arc deleted from elsewhere must not strand an "expanded" id on a dead node). A NULL
+// projection is left untouched; an unchanged state returns the SAME object.
+export function reconcileArcUiState(projection: PlotBoardProjection | null, state: ArcUiState): ArcUiState {
+  if (!projection) return state;
+  const live = new Set(projection.arcs.map((arc) => arc.id));
+  const expandedArcId = state.expandedArcId && live.has(state.expandedArcId) ? state.expandedArcId : null;
+  if (expandedArcId === state.expandedArcId) return state;
+  return { expandedArcId };
+}
+
 // Geometry (px). Exported so the unit test asserts against the same constants the
 // layout uses rather than hard-coding magic numbers that could silently drift.
 export const CARD_WIDTH = 210;
 export const CARD_HEIGHT = 110;
 export const CARD_GAP_X = 24; // between cards in a row
 export const PLOTLINE_WIDTH = 240; // a plotline node is a touch wider than a card
+// A plot holder node (plotline or arc) is variable-height — SvelteFlow sizes it to its
+// content, and a collapsed beat roster runs one row per beat — so the arc band clears the
+// plotline band by ESTIMATING each plotline's height from its beat count (a flat one-row
+// nominal overlapped a multi-beat plotline: a 7-beat node measures ~210px, not ~110).
+// Header + one row per beat, tuned to slightly OVER-estimate so the bands never collide;
+// a small extra gap is harmless, an overlap is not.
+export const PLOT_NODE_HEADER_H = 64; // header band above the collapsed beat roster
+export const PLOT_NODE_BEAT_ROW_H = 24; // one beat row in that roster
+export function estPlotNodeHeight(beatCount: number): number {
+  return PLOT_NODE_HEADER_H + beatCount * PLOT_NODE_BEAT_ROW_H;
+}
 export const CONTAINER_PAD = 20; // inner padding between a box edge and its content
 export const CONTAINER_HEADER = 32; // the title-bar band at the top of a box
 export const CONTAINER_GAP = 24; // between sibling boxes / rows / acts
@@ -401,6 +460,52 @@ export function buildBoardNodes(
       data: { title: line.title, color: line.color, beats: line.beats },
     });
   });
+
+  // Character-arc nodes (ADR-0080 §5 / Amendment 1): a SIBLING band below the
+  // plotline band — an arc is a distinct holder kind, not merged into the plotline
+  // row, so a writer scanning bands sees "the events" and "the internal changes" as
+  // two registers. Same per-node x-spacing + saved-override model as plotlines; empty
+  // when there are no plotlines, so an arc-only board doesn't leave a dead gap above it.
+  // Clear the TALLEST plotline (nodes are variable-height; estimate from beat count),
+  // so the arc band never lands inside a multi-beat plotline node.
+  const maxPlotlineHeight = projection.plotlines.length
+    ? Math.max(...projection.plotlines.map((line) => estPlotNodeHeight(line.beats.length)))
+    : 0;
+  const arcBandY = plotlineBandY + (maxPlotlineHeight ? maxPlotlineHeight + CONTAINER_GAP : 0);
+  // Colour resolution (Amendment 1 §1), done ONCE here per arc: own colour → the bound
+  // character's (lore) colour → the lore-kind default — never the generic `plot` kind
+  // default, since an arc's colour is meant to echo the CHARACTER it's about. Reads the
+  // lore roster + schema stores directly (the ReferencePicker/plotline-roster precedent
+  // — a global roster is read where needed, not threaded as a prop through every layer).
+  const schema = get(metadataSchemaStore);
+  const loreById = new Map(get(loreEntriesStore).map((entry) => [entry.id, entry] as const));
+  projection.arcs.forEach((arc, i) => {
+    const character = arc.character_id ? loreById.get(arc.character_id) : undefined;
+    const characterColorId = typeof character?.metadata?.color === "string" ? character.metadata.color : null;
+    const characterHex = character ? resolveColor(characterColorId, character.entry_type, "lore", schema)?.hex : null;
+    const resolvedColorHex =
+      (arc.color ? (getSwatch(arc.color)?.hex ?? null) : null) ?? characterHex ?? resolveColorForKind("lore")?.hex ?? null;
+    nodes.push({
+      id: arc.id,
+      type: "plotArc",
+      position: saved[arc.id] ?? { x: i * (PLOTLINE_WIDTH + CARD_GAP_X), y: arcBandY },
+      width: PLOTLINE_WIDTH,
+      // Same leading-grip handle as a card/plotline (#876).
+      draggable: true,
+      dragHandle: `.${CARD_DRAG_HANDLE_CLASS}`,
+      selectable: false,
+      zIndex: NODE_Z_INDEX,
+      data: {
+        title: arc.title,
+        color: arc.color,
+        beats: arc.beats,
+        characterId: arc.character_id,
+        characterName: arc.character_name,
+        characterInitial: arc.character_initial,
+        resolvedColorHex,
+      },
+    });
+  });
   return nodes;
 }
 
@@ -466,15 +571,18 @@ export function containerDescendantIds(projection: PlotBoardProjection, containe
 }
 
 // Serialize the current movable-node positions for persistence (S7c; ADR-0053): the
-// draggable node types — plotCard AND plotPlotline (both keyed by their own id in the
-// shared `positions` map) — but never container boxes, which are derived. Positions
-// are stored raw (not rounded) so the persist threshold matches moveNodesCommand's
-// raw-inequality drag record: rounding here would let a sub-pixel drag record an undo
-// step that saved nothing, so a later Ctrl+Z would reverse an invisible move.
+// draggable node types — plotCard, plotPlotline, AND plotArc (ADR-0080 §5; all keyed by
+// their own id in the shared `positions` map) — but never container boxes, which are
+// derived. Positions are stored raw (not rounded) so the persist threshold matches
+// moveNodesCommand's raw-inequality drag record: rounding here would let a sub-pixel
+// drag record an undo step that saved nothing, so a later Ctrl+Z would reverse an
+// invisible move.
 export function movableNodePositions(nodes: PlotBoardNode[]): Record<string, BoardXY> {
   const out: Record<string, BoardXY> = {};
   for (const n of nodes) {
-    if (n.type === "plotCard" || n.type === "plotPlotline") out[n.id] = { x: n.position.x, y: n.position.y };
+    if (n.type === "plotCard" || n.type === "plotPlotline" || n.type === "plotArc") {
+      out[n.id] = { x: n.position.x, y: n.position.y };
+    }
   }
   return out;
 }
@@ -511,10 +619,23 @@ export function projectionDataKey(p: PlotBoardProjection): string {
       c.scene,
       c.container,
       c.page_status,
-      c.beats.map((b) => [b.plotline_id, b.beat_id, b.title, b.plotline_color]),
+      // `holder_kind`/`character_id` (ADR-0080 §5) so a card's beat pill can distinguish
+      // an event-beat from a change-beat and (in the next slice) show the right avatar —
+      // rehydrated the moment either changes.
+      c.beats.map((b) => [b.plotline_id, b.beat_id, b.title, b.plotline_color, b.holder_kind, b.character_id]),
       c.causal_links,
     ]),
     p.plotlines.map((l) => [l.id, l.title, l.color, l.beats.map((b) => [b.beat_id, b.title, b.use_count])]),
+    // ADR-0080 §5: an arc's own colour AND its bound character (a rebind changes which
+    // colour it falls back to, and the character name/avatar it shows) — a rebind or
+    // recolour must rebuild the board so the node's resolved colour rehydrates.
+    p.arcs.map((a) => [
+      a.id,
+      a.title,
+      a.color,
+      a.character_id,
+      a.beats.map((b) => [b.beat_id, b.title, b.use_count]),
+    ]),
     p.containers.map((c) => [c.id, c.title, c.parent]),
   ]);
 }

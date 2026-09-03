@@ -229,12 +229,22 @@ function beatLinksOf(metadata: CardEntry["metadata"]): PlotBeatLink[] {
 // card that already has a primary keeps it, and later beats from other plotlines show
 // only as badges (#871); the writer re-picks via the kebab. A re-add of an already-linked
 // beat is a no-op, so it never resurrects a cleared primary.
-function linkBeatInMetadata(metadata: CardEntry["metadata"], plotline: string, beat_id: string): boolean {
+//
+// `holderKind` (ADR-0080 §4): a change-beat's holder is a character arc, which the
+// backend 422s as a card's `plotline` — so a change-beat drop must NEVER adopt primary,
+// even onto a primary-less card. The beat_link is still created either way; only the
+// primary-adoption is arc-specific.
+function linkBeatInMetadata(
+  metadata: CardEntry["metadata"],
+  plotline: string,
+  beat_id: string,
+  holderKind: string = "plot:plotline",
+): boolean {
   const links = beatLinksOf(metadata);
   if (links.some((l) => l.plotline === plotline && l.beat_id === beat_id)) return false;
   links.push({ plotline, beat_id });
   metadata.beat_links = links;
-  if (!metadata.plotline) metadata.plotline = plotline;
+  if (!metadata.plotline && holderKind !== "plot:character_arc") metadata.plotline = plotline;
   return true;
 }
 
@@ -250,8 +260,10 @@ function unlinkBeatInMetadata(metadata: CardEntry["metadata"], plotline: string,
 
 // Drop a beat onto a card → add the link (deduped; a card fulfils a beat once).
 // Already linked → no change, so mutateCardMetadata skips the save + board rebuild.
-export function linkCardBeat(cardId: string, plotline: string, beat_id: string): Promise<void> {
-  return mutateCardMetadata(cardId, (metadata) => linkBeatInMetadata(metadata, plotline, beat_id));
+// `holderKind` (ADR-0080 §4) is the dragged beat's holder subtype — threaded from the
+// drag payload so a change-beat drop never adopts the arc as the card's primary.
+export function linkCardBeat(cardId: string, plotline: string, beat_id: string, holderKind?: string): Promise<void> {
+  return mutateCardMetadata(cardId, (metadata) => linkBeatInMetadata(metadata, plotline, beat_id, holderKind));
 }
 
 // Remove a beat from a card (the badge's × on the card).

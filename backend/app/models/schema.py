@@ -20,14 +20,16 @@ ListItemScalarType = Literal["text", "long_text", "number", "boolean", "select",
 LIST_ITEM_SCALAR_TYPES: Final[frozenset[str]] = frozenset(get_args(ListItemScalarType))
 
 # The types an item_group MEMBER may be (ADR-0081) — the scalars above plus the
-# reference/tag types. Broader than the item_type sugar (which stays scalar-only,
-# above): a named group member can now hold a reference, because the reference
+# reference types. Broader than the item_type sugar (which stays scalar-only,
+# above): a named group member can hold a reference, because the reference
 # lifecycle reaches a ref wherever it lives (one traversal,
 # services/project/metadata_refs.py) — indexed, scrubbed on delete, healed on
-# read, no longer a silent mis-link. `date` / `multi_select` stay out (no item
-# affordances), so this is a deliberate set, not "any type".
+# read, no longer a silent mis-link. `tags` is NOT here yet: its lifecycle
+# (canonicalise/register, rename) still walks only top-level values; it joins
+# this set in ADR-0081 slice 3, alongside the tag-descent, keeping safety before
+# the gate. `date` / `multi_select` stay out (no item affordances).
 LIST_ITEM_GROUP_MEMBER_TYPES: Final[frozenset[str]] = LIST_ITEM_SCALAR_TYPES | frozenset(
-    {"entity_ref", "entity_ref_list", "tags"}
+    {"entity_ref", "entity_ref_list"}
 )
 
 
@@ -59,11 +61,12 @@ class MetadataFieldDefinition(BaseModel):
     # scalar sequence, the way multi_select stores). Exactly one of the two
     # must be set when type == "list"; both must be absent otherwise. A
     # select-typed item_type reads its choices from this field's `options`.
-    # An item_group member may be a reference/tag type (ADR-0081): the reference
+    # An item_group member may be a reference type (ADR-0081): the reference
     # lifecycle reaches a nested ref (one traversal, metadata_refs.py), so it is
-    # indexed / scrubbed / healed like a top-level one. The item_type sugar stays
-    # scalar-only (the Literal above) — refs enter through named item_group
-    # members, not the bare single-scalar shape.
+    # indexed / scrubbed / healed like a top-level one. `tags` follows in slice 3
+    # with the tag-lifecycle descent. The item_type sugar stays scalar-only (the
+    # Literal above) — refs enter through named item_group members, not the bare
+    # single-scalar shape.
     item_group: str | None = None
     item_type: ListItemScalarType | None = None
     # DERIVED, not authored (the `category` pattern): the resolved item shape

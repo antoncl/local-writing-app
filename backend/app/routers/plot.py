@@ -16,7 +16,9 @@ from app.models import (
     CardEntry,
     CardList,
     CharacterArcEntry,
+    CharacterArcList,
     CreateCardRequest,
+    CreateCharacterArcRequest,
     CreatePlotlineRequest,
     CreatePlotTemplateRequest,
     PlotBoard,
@@ -28,6 +30,7 @@ from app.models import (
     PlotTemplateList,
     RealizeCardRequest,
     SaveCardRequest,
+    SaveCharacterArcRequest,
     SavePlotBoardRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
@@ -100,6 +103,41 @@ def save_plotline(project: CurrentProject, entry_id: str, request: SavePlotlineR
 def delete_plotline(project: CurrentProject, entry_id: str) -> PlotlineList:
     with translate_errors():
         return project.delete_plotline(entry_id)
+
+
+# Character arcs (ADR-0080): the plotline's sibling `plot:thread` holder — its own
+# sub-resource (`character-arcs`, distinct from `plotlines`/`cards`/`templates`/
+# `board`) so no id can shadow another family's route.
+
+
+@router.get("/api/plot/character-arcs", response_model=CharacterArcList)
+def list_character_arcs(project: CurrentProject) -> CharacterArcList:
+    with translate_errors():
+        return project.list_character_arcs()
+
+
+@router.post("/api/plot/character-arcs", response_model=CharacterArcEntry)
+def create_character_arc(project: CurrentProject, request: CreateCharacterArcRequest) -> CharacterArcEntry:
+    with translate_errors():
+        return project.create_character_arc(request)
+
+
+@router.get("/api/plot/character-arcs/{entry_id}", response_model=CharacterArcEntry)
+def get_character_arc(project: CurrentProject, entry_id: str) -> CharacterArcEntry:
+    with translate_errors():
+        return project.read_character_arc(entry_id)
+
+
+@router.put("/api/plot/character-arcs/{entry_id}", response_model=CharacterArcEntry)
+def save_character_arc(project: CurrentProject, entry_id: str, request: SaveCharacterArcRequest) -> CharacterArcEntry:
+    with translate_errors():
+        return project.save_character_arc(entry_id, request)
+
+
+@router.delete("/api/plot/character-arcs/{entry_id}", response_model=CharacterArcList)
+def delete_character_arc(project: CurrentProject, entry_id: str) -> CharacterArcList:
+    with translate_errors():
+        return project.delete_character_arc(entry_id)
 
 
 @router.get("/api/plot/cards", response_model=CardList)

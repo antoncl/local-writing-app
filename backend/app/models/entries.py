@@ -289,6 +289,22 @@ class PlotBoardPlotline(BaseModel):
     beats: list[PlotBoardPlotlineBeat] = Field(default_factory=list)
 
 
+class PlotBoardCharacterArc(BaseModel):
+    """A character arc as the board sees it (ADR-0080 §1 / Amendment 1): the plotline's
+    sibling holder — id, title, its own colour (None → the frontend falls back to the
+    bound character's), the bound character it is about (id + display name + single-letter
+    avatar), and its ordered change-beat roster with use-counts. Rendered as a node in the
+    arc band, separate from the plotline band (Amendment 1 §5)."""
+
+    id: str
+    title: str
+    color: str | None = None
+    character_id: str | None = None
+    character_name: str | None = None
+    character_initial: str | None = None
+    beats: list[PlotBoardPlotlineBeat] = Field(default_factory=list)
+
+
 class PlotBoardContainer(BaseModel):
     """A manuscript container (an act, a chapter — whatever container types the
     project declares) as the board renders it (ADR-0048 S7 Slice 4): a soft,
@@ -326,6 +342,18 @@ class PlotBoardBeat(BaseModel):
     # The beat's 1-based position in its plotline's roster (#941) — a stable per-plotline
     # number the board shows on the badge, so two same-titled beats are tellable apart.
     number: int
+    # ADR-0080 §5 / Amendment 1: which subtype holds this beat, so a card's pill
+    # reads it as an event-beat (plotline) or a change-beat (character arc). The
+    # `plotline_*` fields above hold the HOLDER's id/title/colour regardless of
+    # subtype (a character arc's colour is its own `color`, else None → the
+    # frontend falls back to the bound character's colour). Name retained for
+    # zero-churn on the existing badge consumers; it means "holder" for an arc.
+    holder_kind: str = "plot:plotline"
+    # The bound character of a change-beat's arc (§2) — its display name + single-
+    # letter avatar (Amendment 1 §4). None for a plotline event-beat, or an unbound arc.
+    character_id: str | None = None
+    character_name: str | None = None
+    character_initial: str | None = None
 
 
 class PlotBoardCard(BaseModel):
@@ -433,6 +461,9 @@ class PlotBoardProjection(BaseModel):
     board_revision: str = ""
     layout: dict[str, Any] = Field(default_factory=dict)
     plotlines: list[PlotBoardPlotline] = Field(default_factory=list)
+    # ADR-0080 §5 / Amendment 1: character arcs, projected separately from
+    # `plotlines` — a sibling holder band, not merged into the plotline list.
+    arcs: list[PlotBoardCharacterArc] = Field(default_factory=list)
     containers: list[PlotBoardContainer] = Field(default_factory=list)
     cards: list[PlotBoardCard] = Field(default_factory=list)
     # Cross-dimension findings (ADR-0048 S7) — a derived facet of the board, computed

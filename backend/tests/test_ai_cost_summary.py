@@ -261,10 +261,14 @@ class AICostSummaryEndpointTests(unittest.TestCase):
         self.assertEqual(len(body["by_chat"]), 1)
         self.assertEqual(body["by_chat"][0]["key"], "chat_nonexistent")
         self.assertEqual(body["by_chat"][0]["label"], "chat_nonexistent")
+        # A deleted / never-a-node id is inert: the frontend renders it as
+        # "(deleted …)" rather than a clickable row (#1709).
+        self.assertFalse(body["by_chat"][0]["openable"])
         # by_prompt falls back to the id the same way when no title resolves.
         self.assertEqual(len(body["by_prompt"]), 1)
         self.assertEqual(body["by_prompt"][0]["key"], "prompt_nonexistent")
         self.assertEqual(body["by_prompt"][0]["label"], "prompt_nonexistent")
+        self.assertFalse(body["by_prompt"][0]["openable"])
 
     def test_chat_bucket_uses_real_session_title_when_present(self) -> None:
         from app.models import CreateChatSessionRequest
@@ -287,6 +291,10 @@ class AICostSummaryEndpointTests(unittest.TestCase):
         self.assertEqual(len(body["by_chat"]), 1)
         self.assertEqual(body["by_chat"][0]["key"], chat.id)
         self.assertEqual(body["by_chat"][0]["label"], "Plot brainstorm")
+        # A live node resolves openable so the frontend wires open-on-click.
+        self.assertTrue(body["by_chat"][0]["openable"])
+        # A non-node breakdown (by_model) is never openable.
+        self.assertTrue(all(not b["openable"] for b in body["by_model"]))
 
     def test_empty_chat_scene_and_prompt_ids_do_not_create_buckets(self) -> None:
         self._write_rows(

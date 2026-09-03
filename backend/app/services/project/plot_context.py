@@ -19,7 +19,9 @@ reveal position, so it is never a spoiler and is always admitted.
 
 Plotlines are the writer's own scaffolding, not manuscript content, so they are
 never gated; the full beat roster is always present so the AI can name a beat no
-card fulfils yet — the gaps.
+card fulfils yet — the gaps. Character arcs are carried the same way (ADR-0080 §5):
+their own never-gated `arcs` list, with a catalog entry merged alongside the
+plotline catalog so a card's change-beat links resolve too.
 
 This is context assembly (prompt INPUT). None of the quarry's claims/evidence
 apparatus survives (migration principle 2); the JSON node-patch loop, not an XML
@@ -37,17 +39,22 @@ from typing import Any
 
 from app.models import (
     PlotContext,
+    PlotContextArc,
     PlotContextBeat,
     PlotContextCard,
     PlotContextPlotline,
 )
 
-# The shared card-beat catalog entry + the plotline holder-kind (ADR-0080 §5): the AI
+# The shared card-beat catalog entry + the thread holder-kinds (ADR-0080 §5): the AI
 # context builds the same `_ThreadCatalogEntry` the board projection does, so both feed
 # PlotMixin's one `_resolve_card_beats`. plot.py does not import this module, so this is
-# a one-directional import. The AI context lists only plotlines today (arc change-tracks
-# reaching the AI is a later item), so every entry it builds is a plotline holder.
-from app.services.project.plot import PLOT_PLOTLINE_ENTRY_TYPE
+# a one-directional import. The AI context builds catalog entries for BOTH plotlines
+# and character arcs — both `plot:thread` holders — so a card's event-beat AND
+# change-beat links resolve to the one merged catalog.
+from app.services.project.plot import (
+    PLOT_CHARACTER_ARC_ENTRY_TYPE,
+    PLOT_PLOTLINE_ENTRY_TYPE,
+)
 from app.services.project.plot_board import _ThreadCatalogEntry
 
 # On-disk metadata field keys this mixin reads a card / plotline's metadata by — the
@@ -96,7 +103,12 @@ class PlotContextMixin:
             admitted.append(card)
         admitted_ids = {card.id for card in admitted}
 
-        plotlines, plotline_titles, beat_catalog = self._context_plotlines()
+        index = self._build_node_index()
+        plotlines, plotline_titles, plotline_catalog = self._context_plotlines()
+        arcs, arc_catalog = self._context_arcs(index)
+        # One catalog over BOTH thread subtypes so a card's event-beats AND
+        # change-beats resolve (plotline + arc ids are disjoint node ids).
+        beat_catalog = {**plotline_catalog, **arc_catalog}
         context_cards = [
             self._context_card(card, scene_to_order, plotline_titles, beat_catalog, admitted_ids)
             for card in admitted
@@ -109,6 +121,7 @@ class PlotContextMixin:
             as_of_sequence=anchor_rank if gated else None,
             omitted_cards=omitted,
             plotlines=plotlines,
+            arcs=arcs,
             cards=context_cards,
         )
 
@@ -131,6 +144,27 @@ class PlotContextMixin:
                 return None, None
         return None, None
 
+    def _thread_context_beats(
+        self, metadata: dict[str, Any]
+    ) -> tuple[list[PlotContextBeat], dict[str, str]]:
+        """One `plot:thread` holder's full roster as (PlotContextBeat list, {beat_id:
+        title}) — the ungated requirement list plus the title map a card's beat links
+        resolve against. Shared by plotlines (event-beats) and arcs (change-beats)."""
+        beats: list[PlotContextBeat] = []
+        titles: dict[str, str] = {}
+        for beat in self._iter_roster_beats(metadata):
+            title = str(beat.get("title") or "")
+            beats.append(
+                PlotContextBeat(
+                    beat_id=beat["id"],
+                    title=title,
+                    function=str(beat.get("function") or ""),
+                    guidance=str(beat.get("guidance") or ""),
+                )
+            )
+            titles[beat["id"]] = title
+        return beats, titles
+
     def _context_plotlines(
         self,
     ) -> tuple[list[PlotContextPlotline], dict[str, str], dict[str, _ThreadCatalogEntry]]:
@@ -143,25 +177,14 @@ class PlotContextMixin:
         card's beat links resolve to titled badges by a map lookup rather than a re-read.
         Every entry here is a plotline holder (`holder_kind` = plot:plotline, no
         character); the board projection fills the colour + arc characters, but the AI
-        context renders no pills, so it leaves colour/character None."""
+        context renders no pills, so it leaves colour/character None. This plotline
+        catalog is plotline-only; arcs are merged in by the caller (`read_plot_context`)."""
         plotlines: list[PlotContextPlotline] = []
         plotline_titles: dict[str, str] = {}
         catalog: dict[str, _ThreadCatalogEntry] = {}
         for line in self.list_plotlines().entries:
             plotline_titles[line.id] = line.title
-            beats: list[PlotContextBeat] = []
-            titles: dict[str, str] = {}
-            for beat in self._iter_roster_beats(line.metadata):
-                title = str(beat.get("title") or "")
-                beats.append(
-                    PlotContextBeat(
-                        beat_id=beat["id"],
-                        title=title,
-                        function=str(beat.get("function") or ""),
-                        guidance=str(beat.get("guidance") or ""),
-                    )
-                )
-                titles[beat["id"]] = title
+            beats, titles = self._thread_context_beats(line.metadata)
             questions = line.metadata.get(_SOURCE_DIAGNOSTIC_QUESTIONS_FIELD) or []
             weak_spots = line.metadata.get(_SOURCE_WEAK_SPOTS_FIELD) or []
             plotlines.append(
@@ -190,6 +213,52 @@ class PlotContextMixin:
                 character_initial=None,
             )
         return plotlines, plotline_titles, catalog
+
+    def _context_arcs(
+        self, index: Any
+    ) -> tuple[list[PlotContextArc], dict[str, _ThreadCatalogEntry]]:
+        """All character arcs with their FULL change-beat rosters (ADR-0080 §5) —
+        ungated scaffolding, so a change-beat no card fulfils still appears (a gap).
+        Mirrors `_context_plotlines`: one traversal builds the `PlotContextArc` list
+        AND a `{arc_id: _ThreadCatalogEntry}` catalog (holder_kind = character_arc, the
+        bound character resolved) so a card's change-beat links resolve to titled,
+        character-tagged badges — the catalog entry is why a change-beat is no longer
+        dropped on the AI path. Colour is unused here (the AI renders no pills)."""
+        arcs: list[PlotContextArc] = []
+        catalog: dict[str, _ThreadCatalogEntry] = {}
+        for arc in self.list_character_arcs().entries:
+            character_id, character_name, character_initial = self._resolve_arc_character(
+                arc.metadata.get("character"), index
+            )
+            beats, titles = self._thread_context_beats(arc.metadata)
+            questions = arc.metadata.get(_SOURCE_DIAGNOSTIC_QUESTIONS_FIELD) or []
+            weak_spots = arc.metadata.get(_SOURCE_WEAK_SPOTS_FIELD) or []
+            arcs.append(
+                PlotContextArc(
+                    id=arc.id,
+                    title=arc.title,
+                    color=arc.metadata.get(_COLOR_FIELD) or None,
+                    character_id=character_id,
+                    character_name=character_name,
+                    character_initial=character_initial,
+                    description=arc.body,
+                    source_template_name=str(arc.metadata.get(_SOURCE_TEMPLATE_NAME_FIELD) or ""),
+                    ai_guidance=str(arc.metadata.get(_SOURCE_AI_GUIDANCE_FIELD) or ""),
+                    diagnostic_questions=[str(q) for q in questions if str(q).strip()],
+                    weak_spots=[str(w) for w in weak_spots if str(w).strip()],
+                    beats=beats,
+                )
+            )
+            catalog[arc.id] = _ThreadCatalogEntry(
+                title=arc.title,
+                color=arc.metadata.get(_COLOR_FIELD) or None,
+                beat_titles=titles,
+                holder_kind=PLOT_CHARACTER_ARC_ENTRY_TYPE,
+                character_id=character_id,
+                character_name=character_name,
+                character_initial=character_initial,
+            )
+        return arcs, catalog
 
     def _context_card(
         self,

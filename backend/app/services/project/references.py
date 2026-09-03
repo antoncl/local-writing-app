@@ -1408,13 +1408,22 @@ class ReferencesMixin:
         dependency surface (S3), not an `entity_ref` — the same reason the
         entity-ref backlinks skip it. A node whose *only* edges are includes is
         therefore absent, so the dict comprehension guards each key on a non-empty
-        list rather than trusting `edges_by_src` to hold none."""
+        list rather than trusting `edges_by_src` to hold none.
+
+        Each `dst` is folded through `canonical_id` (ADR-0082 §5), same as
+        `rebuild_reverse_edges` folds `edges_by_dst`: this is the response the
+        frontend builds ITS OWN reverse index (`referenceIndexStore`) and
+        `projectReferences` from, so a merged tag's id must resolve to the
+        survivor here too, or the frontend would count a redirected reference
+        against a tag that left every picker. Deduped per src after folding —
+        two carriers of the same merged id, or one carrier of the merged id
+        alongside the survivor itself, collapse to one edge, not two."""
         node_index = self._build_node_index()
         refs = {
             src: deduped
             for src, edges in node_index.edges_by_src.items()
             if (deduped := list(dict.fromkeys(
-                edge.dst for edge in edges if edge.field_id != INCLUDE_FIELD_ID
+                node_index.canonical_id(edge.dst) for edge in edges if edge.field_id != INCLUDE_FIELD_ID
             )))
         }
         return ReferenceGraphResponse(refs=refs)

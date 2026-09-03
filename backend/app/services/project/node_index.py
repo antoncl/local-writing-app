@@ -330,44 +330,80 @@ class NodeIndex:
         values (ADR-0082 §5). Must run before `rebuild_reverse_edges`, which
         folds edges onto the canonical id.
 
-        Walks each merged tag's `merged_into` chain to its end: **cycle
-        guard** — stop and log at the first repeated id, so a hand-edited loop
-        degrades to "resolves to itself" rather than hanging. **Dangling
+        Walks each merged tag's `merged_into` chain to its end: **dangling
         survivor** — a chain that names an id outside `by_id` stops at the
         last id that DOES exist, so `mirror -> ghost` (ghost missing) still
         resolves `mirror` to `mirror`, never to a target nothing can read.
+        **Cycle guard** — a hand-edited loop (A merges into B, B into A) has
+        no survivor at all, so EVERY member of the cycle resolves to itself,
+        never to another cycle member (a two-node cycle must not leave A
+        pointing at B and B pointing at A — that is not "resolving", it is
+        the same broken state one hop later). Logged once per distinct cycle,
+        not once per member.
         """
         canonical: dict[str, str] = {}
         redirects_to: dict[str, list[str]] = {}
+        logged_cycles: set[frozenset[str]] = set()
         for node_id, entry in self.by_id.items():
             if entry.kind == "tag" and entry.merged_into:
                 redirects_to.setdefault(entry.merged_into, []).append(node_id)
             if entry.kind != "tag" or not entry.merged_into:
                 continue
-            seen = {node_id}
-            current = node_id
-            while True:
-                current_entry = self.by_id.get(current)
-                next_id = (
-                    current_entry.merged_into
-                    if current_entry is not None and current_entry.kind == "tag"
-                    else None
-                )
-                if not next_id or next_id not in self.by_id:
-                    break
-                if next_id in seen:
-                    log.warning(
-                        "merged_into cycle detected at tag %s (already visited %s); "
-                        "stopping the chain there.",
-                        node_id,
-                        next_id,
-                    )
-                    break
-                seen.add(next_id)
-                current = next_id
-            canonical[node_id] = current
+            if node_id in canonical:
+                # Already resolved as a member of a cycle found while walking
+                # an earlier node_id this call — recomputing would just
+                # re-detect the same cycle and log it again.
+                continue
+            survivor = self._walk_merge_chain(node_id, canonical, logged_cycles)
+            if survivor is not None:
+                canonical[node_id] = survivor
         self.canonical = canonical
         self.redirects_to = redirects_to
+
+    def _walk_merge_chain(
+        self, node_id: str, canonical: dict[str, str], logged_cycles: set[frozenset[str]]
+    ) -> str | None:
+        """Walk `node_id`'s `merged_into` chain to its end (its survivor), for
+        `_resolve_canonical`. Split out to keep that method's own branching
+        under the complexity gate.
+
+        A dangling or terminal chain returns the survivor for the CALLER to
+        record. A cycle resolves every member directly into `canonical`
+        (deduped against `logged_cycles` so it is logged once, not once per
+        member) and returns None, so the caller does not ALSO record
+        `node_id` — that would overwrite the self-resolution the cycle branch
+        already made, with `current`, whatever this walk had reached when it
+        detected the loop.
+        """
+        seen = [node_id]
+        current = node_id
+        while True:
+            current_entry = self.by_id.get(current)
+            next_id = (
+                current_entry.merged_into
+                if current_entry is not None and current_entry.kind == "tag"
+                else None
+            )
+            if not next_id or next_id not in self.by_id:
+                return current
+            if next_id in seen:
+                # The walk has returned to an id already on this path — every
+                # id from `next_id` onward (inclusive) is a cycle member and
+                # resolves to ITSELF, not to its neighbour.
+                cycle_members = seen[seen.index(next_id):]
+                key = frozenset(cycle_members)
+                if key not in logged_cycles:
+                    logged_cycles.add(key)
+                    log.warning(
+                        "merged_into cycle detected: %s -> %s; each resolves to itself.",
+                        " -> ".join(cycle_members),
+                        next_id,
+                    )
+                for member in cycle_members:
+                    canonical[member] = member
+                return None
+            seen.append(next_id)
+            current = next_id
 
     def canonical_id(self, node_id: str) -> str:
         """`node_id`, following every `merged_into` redirect to its survivor —

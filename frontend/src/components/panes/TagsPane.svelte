@@ -16,14 +16,17 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
-  import { tagNodesStore, liveTags, refreshTagNodes, upsertTagNode } from "@/lib/stores/tagNodes";
+  import { tagNodesStore, tagById, liveTags, canonicalIdIn, refreshTagNodes, upsertTagNode } from "@/lib/stores/tagNodes";
   import { referenceIndexStore, refreshReferenceIndex } from "@/lib/stores/references";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { projectReferences } from "@/lib/views/referenceIndex";
-  import { tagChipHexByTitle } from "@/lib/utils/pickerStripes";
   import { resolveColor } from "@/lib/utils/colors";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
+  import { setLoreEntries } from "@/lib/stores/lore";
+  import { setPromptEntries } from "@/lib/stores/prompts";
+  import { refreshAssistantEntries } from "@/lib/stores/assistants";
+  import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { api } from "@/lib/api";
   import { SvelteSet } from "svelte/reactivity";
   import type { NodePickerRef } from "@/lib/types";
@@ -31,6 +34,7 @@
   let { onOpenTag }: { onOpenTag: (id: string) => void } = $props();
 
   const tags = $derived($tagNodesStore);
+  const tagByIdMap = $derived($tagById);
   const schema = $derived($metadataSchemaStore);
   const referenceIndex = $derived($referenceIndexStore);
   const ownLayerId = $derived($projectLayerIdStore);
@@ -87,8 +91,11 @@
   }
 
   // Chip/stripe colour — the same instance-colour resolver a picker chip
-  // uses (F2), keyed by title since a redirect never surfaces its own title.
-  const tagColorByTitle = $derived(tagChipHexByTitle($liveTags, schema));
+  // uses (F2). TagsPane always has the real TagEntry in hand (not just a
+  // resolved title, unlike the Assistants/Lore chip lists), so it reads
+  // `metadata.color` straight off the entry — no title-keyed
+  // `tagChipHexByTitle` needed here, and no title-collision risk either
+  // (R4: a title is unique only within a vocabulary; an id always is).
   function stripeFor(tag: TagEntry): string | null {
     const color = tag.metadata?.color;
     return resolveColor(typeof color === "string" ? color : null, tag.entry_type, "tag", schema)?.hex ?? null;
@@ -106,6 +113,20 @@
     upsertTagNode(saved);
   }
 
+  // The retired App.svelte `refreshAfterTagChange`'s refresh set (R5,
+  // git show origin/master:frontend/src/App.svelte ~L570): a merge/delete
+  // rewrites documents on disk, so re-sync the tag rosters, the entry
+  // lists that show tag chips, and any open editor's baseline (an open
+  // pane must not clobber the rewrite on its own next autosave).
+  async function refreshAfterTagChange(): Promise<void> {
+    await refreshTagNodes();
+    await refreshReferenceIndex();
+    setLoreEntries((await api.listLoreEntries()).entries);
+    setPromptEntries((await api.listPromptEntries()).entries);
+    await refreshAssistantEntries();
+    await editorPanes.refreshOpenEditorPaneBaselines();
+  }
+
   function handleMergePick(source: TagEntry, detail: { value: NodePickerRef[] }): void {
     const target = detail.value[0];
     if (!target) return;
@@ -116,24 +137,34 @@
       destructive: true,
       onConfirm: async () => {
         await api.mergeTagEntries(source.id, target.id);
-        await refreshTagNodes();
-        await refreshReferenceIndex();
+        await refreshAfterTagChange();
       },
     });
+  }
+
+  // R7: every OTHER tag whose `merged_into` chain resolves to `tagId` —
+  // `canonicalIdIn` already follows a multi-hop chain to its end, so a
+  // redirect-of-a-redirect counts too, not just a direct one.
+  function redirectCountFor(tagId: string): number {
+    return tags.filter((t) => t.id !== tagId && canonicalIdIn(tagByIdMap, t.id) === tagId).length;
   }
 
   function handleDelete(tag: TagEntry): void {
     const count = usageCount(tag.id);
     const referenced = count === 0 ? "It is not referenced anywhere." : `It is referenced by ${count} node${count === 1 ? "" : "s"}; the reference will be removed from each.`;
+    const redirectCount = redirectCountFor(tag.id);
+    const redirects =
+      redirectCount > 0
+        ? ` It also removes ${redirectCount} merged tag${redirectCount === 1 ? "" : "s"} that redirect${redirectCount === 1 ? "s" : ""} to it.`
+        : "";
     confirmService.request({
       title: "Delete tag",
-      message: `Delete "${tag.title}"? ${referenced}`,
+      message: `Delete "${tag.title}"? ${referenced}${redirects}`,
       confirmLabel: "Delete tag",
       destructive: true,
       onConfirm: async () => {
         await api.deleteTagEntry(tag.id);
-        await refreshTagNodes();
-        await refreshReferenceIndex();
+        await refreshAfterTagChange();
       },
     });
   }

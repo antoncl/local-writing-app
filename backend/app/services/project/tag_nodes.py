@@ -152,18 +152,26 @@ class TagNodesMixin:
         return None
 
     def _transitive_redirects(self, tag_id: str, index: NodeIndex) -> set[str]:
-        """Every tag id that redirects to `tag_id`, directly or through
+        """Every OTHER tag id that redirects to `tag_id`, directly or through
         another redirect (ADR-0082 §5) — `index.redirects_to` is one hop, so
-        this walks it to a fixed point."""
-        found: set[str] = set()
+        this walks it to a fixed point.
+
+        `tag_id` itself is NEVER in the result, even when a hand-edited cycle's
+        edges loop back to it (a caller deleting `tag_id`'s redirects must not
+        be handed `tag_id` back — that is the file the caller's own separate
+        `_delete_node_file` unlinks, and unlinking it twice raises). `visited`
+        seeds with `tag_id` so the walk can never re-add it, which is also
+        what makes this cycle-safe (bounded by set membership either way)."""
+        visited = {tag_id}
         frontier = [tag_id]
         while frontier:
             current = frontier.pop()
             for redirect_id in index.redirects_to.get(current, []):
-                if redirect_id not in found:
-                    found.add(redirect_id)
+                if redirect_id not in visited:
+                    visited.add(redirect_id)
                     frontier.append(redirect_id)
-        return found
+        visited.discard(tag_id)
+        return visited
 
     def merge_tag_entries(self, source_id: str, target_id: str) -> TagEntry:
         """Merge `source_id` into `target_id`: record a `merged_into` redirect
@@ -171,10 +179,19 @@ class TagNodesMixin:
         rule below is a 422 — this is a governance action on data the author
         is looking at, not a lookup that can 404.
 
-        1. Rewrite references to the source, in the owned scope, to the
+        1. Write `metadata.merged_into = target` on the source's own file
+           FIRST — the redirect is what makes the merge correct at all
+           (`canonical_id` resolves every read through it the moment the
+           index next builds), so it must land before anything that can fail.
+        2. Rewrite references to the source, in the owned scope, to the
            target (`_rewrite_references_from_to`, the same sweep
-           `_purge_references_to` uses).
-        2. Write `metadata.merged_into = target` on the source's own file.
+           `_purge_references_to` uses) — an eager convenience, not a
+           correctness requirement. If this raises, the redirect from step 1
+           already stands and the error propagates: the merge is not rolled
+           back, and a carrier that still names the source keeps reading as
+           the target via `canonical_id` regardless (S3) until a rerun of the
+           sweep (idempotent — nothing left naming the source, nothing to
+           rewrite) or the carrier's own next save (S4) catches it up.
         3. Index maintenance happens through the write funnel as usual — the
            next index build reads the redirect and resolves it everywhere
            (`NodeIndex.canonical_id`).
@@ -213,9 +230,6 @@ class TagNodesMixin:
                 422,
             )
 
-        if self.root_path is not None:
-            self._rewrite_references_from_to(source_id, target_id, self.root_path)
-
         source_metadata = self._normalise_metadata(
             self._read_front_matter_only(source_entry.path, strict=True).get("metadata"),
             source_entry.path,
@@ -229,4 +243,16 @@ class TagNodesMixin:
             source_metadata,
             "",
         )
+
+        # Eager convenience, run AFTER the redirect above (see the docstring):
+        # a carrier this sweep never reaches still reads as the survivor via
+        # `canonical_id`, so nothing here is load-bearing for correctness.
+        # Machine-only (no project open): skipped by design, not merely
+        # unreached — references live in whichever project's node files are
+        # open, never the machine layer itself, so there is no owned scope to
+        # sweep here. Correctness still holds: `canonical_id` resolves the
+        # redirect on every read regardless of which scope opens next.
+        if self.root_path is not None:
+            self._rewrite_references_from_to(source_id, target_id, self.root_path)
+
         return self.read_tag_entry(target_id)

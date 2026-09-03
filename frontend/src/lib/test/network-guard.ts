@@ -21,7 +21,7 @@
 //      swallowed leak loud too.
 //
 // The right fix for a flagged test is to mock `@/lib/api` (see
-// components/dialogs/TagManagerDialog.test.ts). A test that genuinely needs a
+// components/panes/TagsPane.test.ts). A test that genuinely needs a
 // stubbed transport can `vi.stubGlobal("fetch", …)` and drain the record.
 //
 // This is the test-side twin of the backend `scripts/check_http_client.py` gate:
@@ -31,7 +31,7 @@ import { afterEach } from "vitest";
 
 const MESSAGE =
   "Tests must not touch the network: mock '@/lib/api' (see " +
-  "components/dialogs/TagManagerDialog.test.ts) instead of letting a component " +
+  "components/panes/TagsPane.test.ts) instead of letting a component " +
   "fetch a real backend on mount (#973).";
 
 const attempts: string[] = [];

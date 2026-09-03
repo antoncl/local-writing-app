@@ -145,6 +145,73 @@ class ReferenceGraphTests(unittest.TestCase):
         self.assertEqual(self.service._backlinks_to_targets({alice}, exclude_source_ids={alice}), [])
 
 
+class MergedTagEdgeTests(unittest.TestCase):
+    """ADR-0082 §5: `reference_graph()` folds each `dst` through
+    `canonical_id`, exactly like the backend's own `edges_by_dst` — the
+    frontend builds its reverse index and `projectReferences` straight off
+    this response, so a merged tag's id must resolve to the survivor here
+    too."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Merged Tag Edge Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _write_lore_carrying(self, node_id: str, title: str, tags: list) -> None:
+        """Write straight to disk, bypassing `save_lore_entry` — S4's
+        lazy rewrite fires on save, which would already canonicalise a merged
+        id before it reaches the file. This pins `reference_graph()`'s OWN
+        fold, independent of S4: a file that still carries the merged id
+        (never re-saved since the merge, ADR-0082 §5) must still report the
+        survivor here."""
+        path = self.root / "lore" / f"{node_id}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.service._write_markdown_with_front_matter(
+            path,
+            {"id": node_id, "title": title, "entry_type": "lore:character", "metadata": {"tags": tags}},
+            "Body.",
+        )
+
+    def test_a_carrier_of_the_merged_id_reports_the_survivor(self) -> None:
+        from app.models import CreateTagEntryRequest
+
+        mirror = self.service.create_tag_entry(
+            CreateTagEntryRequest(title="mirror", entry_type="tag:tag")
+        ).id
+        mirrors = self.service.create_tag_entry(
+            CreateTagEntryRequest(title="mirrors", entry_type="tag:tag")
+        ).id
+        self.service.merge_tag_entries(mirror, mirrors)
+
+        # A carrier that still names the merged id directly on disk — the
+        # owned-scope sweep only rewrites files that existed at merge time,
+        # and this one is written straight to disk, never through the S4
+        # save-time rewrite — the point of `canonical_id` resolving reads.
+        self._write_lore_carrying("lore_hero", "Hero", [mirror])
+
+        graph = self.service.reference_graph()
+        self.assertEqual(graph.refs["lore_hero"], [mirrors])
+
+    def test_a_list_naming_both_the_merged_id_and_its_survivor_dedupes(self) -> None:
+        from app.models import CreateTagEntryRequest
+
+        mirror = self.service.create_tag_entry(
+            CreateTagEntryRequest(title="mirror", entry_type="tag:tag")
+        ).id
+        mirrors = self.service.create_tag_entry(
+            CreateTagEntryRequest(title="mirrors", entry_type="tag:tag")
+        ).id
+        self.service.merge_tag_entries(mirror, mirrors)
+
+        self._write_lore_carrying("lore_hero", "Hero", [mirror, mirrors])
+
+        graph = self.service.reference_graph()
+        self.assertEqual(graph.refs["lore_hero"], [mirrors])
+
+
 class ShadowedEdgeTests(unittest.TestCase):
     """A descendant layer's entry replaces its ancestor's edges, not merges with
     them — the edges have to move in step with `by_id`, which the walk overwrites

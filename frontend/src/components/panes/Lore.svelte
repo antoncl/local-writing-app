@@ -65,7 +65,7 @@
   }
   // ADR-0082 §3/F2: the tag's own instance colour, through the same resolver
   // the picker chip uses — title-keyed since `entryTagTitles` above is titles.
-  const tagColorByTitle = $derived(tagChipHexByTitle($liveTags, schema));
+  const tagColorByTitle = $derived(tagChipHexByTitle($liveTags, schema, "tag:tag"));
   function tagColorFor(title: string): string | null {
     return tagColorByTitle.get(title) ?? null;
   }

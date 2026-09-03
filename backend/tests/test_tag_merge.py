@@ -68,6 +68,20 @@ class TagMergeHttpTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["id"]
 
+    def _write_tag(self, node_id: str, title: str, merged_into: str | None = None) -> Path:
+        """Hand-write a tag file directly — the way a genuine `merged_into`
+        CYCLE reaches disk (the merge endpoint's own 422s prevent one; only a
+        hand edit, or two racing governance actions, can produce it)."""
+        path = self.root / "tags" / f"{node_id}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        metadata: dict = {}
+        if merged_into is not None:
+            metadata["merged_into"] = merged_into
+        self.service._write_markdown_with_front_matter(
+            path, {"id": node_id, "title": title, "entry_type": "tag:tag", "metadata": metadata}, ""
+        )
+        return path
+
     def _write_lore(self, node_id: str, title: str, motifs: list[str]) -> Path:
         # Filename matches the title, like a save would leave it — a save on
         # this fixture must not ALSO rename the file (`_maybe_rename_node_file`
@@ -123,6 +137,69 @@ class TagMergeHttpTests(unittest.TestCase):
             self.root / "lore" / "Villain.md", strict=True
         )
         self.assertEqual(villain_fm["metadata"]["motifs"], [mirrors])
+
+    def test_redirect_lands_even_when_the_owned_scope_sweep_then_raises(self) -> None:
+        """R2: the redirect write (step 1) is what makes the merge correct;
+        the reference-rewrite sweep (step 2) is an eager convenience that
+        runs AFTER it. If the sweep raises, the redirect from step 1 already
+        stands and the error propagates — the merge is not rolled back."""
+        mirror = self._create_tag("mirror")
+        mirrors = self._create_tag("mirrors")
+        self._write_lore("lore_hero", "Hero", [mirror])
+
+        with (
+            patch.object(self.service, "_rewrite_references_from_to", side_effect=RuntimeError("boom")),
+            self.assertRaises(RuntimeError),
+        ):
+            self.service.merge_tag_entries(mirror, mirrors)
+
+        # The redirect already landed before the sweep raised — the source
+        # reads/resolves as the survivor regardless of the carrier below.
+        source = self.client.get(f"/api/tag-entries/{mirror}").json()
+        self.assertEqual(source["merged_into"], mirrors)
+        index = self.service._build_node_index()
+        self.assertEqual(index.canonical_id(mirror), mirrors)
+
+        # The carrier was never reached (the mock raised before doing any
+        # work) — still holds the raw source id on disk.
+        hero_fm, _ = self.service._read_markdown_with_front_matter(
+            self.root / "lore" / "Hero.md", strict=True
+        )
+        self.assertEqual(hero_fm["metadata"]["motifs"], [mirror])
+
+        # A rerun of the (real, unmocked) sweep both fixes the carrier the
+        # first attempt never reached AND is idempotent to call again.
+        self.service._rewrite_references_from_to(mirror, mirrors, self.root)
+        hero_fm, _ = self.service._read_markdown_with_front_matter(
+            self.root / "lore" / "Hero.md", strict=True
+        )
+        self.assertEqual(hero_fm["metadata"]["motifs"], [mirrors])
+        self.service._rewrite_references_from_to(mirror, mirrors, self.root)  # no-op, no error
+        hero_fm, _ = self.service._read_markdown_with_front_matter(
+            self.root / "lore" / "Hero.md", strict=True
+        )
+        self.assertEqual(hero_fm["metadata"]["motifs"], [mirrors])
+
+    def test_merge_at_the_machine_layer_skips_the_sweep_by_design(self) -> None:
+        """R2: with no project open, `merge_tag_entries` writes the redirect
+        but never calls the owned-scope sweep at all (there is no project
+        node file to sweep) — correctness still holds through `canonical_id`
+        on read, the same as the machine-layer delete purge's own guard."""
+        from project_fixtures import clear_test_scope
+
+        clear_test_scope()
+        mirror = self._create_tag("mirror", entry_type="tag:assistant_tag")
+        mirrors = self._create_tag("mirrors", entry_type="tag:assistant_tag")
+        # The HTTP path resolves a FRESH `ProjectService` per request scoped
+        # off the wire header (`resolve_current_project`), not `self.service`
+        # — patch the class method, not the instance, so it covers whichever
+        # object the request actually builds.
+        with patch.object(ProjectService, "_rewrite_references_from_to") as sweep:
+            response = self.client.post(f"/api/tag-entries/{mirror}/merge", json={"into": mirrors})
+        self.assertEqual(response.status_code, 200, response.text)
+        sweep.assert_not_called()
+        source = self.client.get(f"/api/tag-entries/{mirror}").json()
+        self.assertEqual(source["merged_into"], mirrors)
 
     # --- every 422 rule -------------------------------------------------------
 
@@ -196,6 +273,24 @@ class TagMergeHttpTests(unittest.TestCase):
         response = self.client.delete(f"/api/tag-entries/{mirror}")
         self.assertEqual(response.status_code, 204, response.text)
         self.assertEqual(self.client.get(f"/api/tag-entries/{mirrors}").status_code, 200)
+
+    def test_deleting_a_cycle_member_does_not_double_unlink(self) -> None:
+        """R1: a hand-edited 2-cycle (a.merged_into=b, b.merged_into=a) has no
+        survivor — `_transitive_redirects` must never hand `delete_tag_entry`
+        the id it is already deleting back as one of ITS OWN redirects, or the
+        second `_delete_node_file` call raises on an already-gone file."""
+        self._write_tag("tag_a", "a", merged_into="tag_b")
+        self._write_tag("tag_b", "b", merged_into="tag_a")
+
+        response = self.client.delete("/api/tag-entries/tag_a")
+        self.assertEqual(response.status_code, 204, response.text)
+
+        # Exactly the two cycle files are gone — `tag_a`'s own delete plus its
+        # (one) OTHER redirect `tag_b`, never `tag_a` unlinked a second time.
+        self.assertFalse((self.root / "tags" / "tag_a.md").exists())
+        self.assertFalse((self.root / "tags" / "tag_b.md").exists())
+        self.assertEqual(self.client.get("/api/tag-entries/tag_a").status_code, 404)
+        self.assertEqual(self.client.get("/api/tag-entries/tag_b").status_code, 404)
 
     # --- S7: pickers exclude redirects -----------------------------------------
 

@@ -53,9 +53,31 @@ class CanonicalIdTests(unittest.TestCase):
         self.assertEqual(index.canonical_id("b"), "c")
         self.assertEqual(index.canonical_id("c"), "c")
 
-    def test_cycle_stops_at_the_first_repeat_and_does_not_hang(self) -> None:
-        # a -> b -> a: a malformed loop degrades to "resolves to itself"
-        # rather than looping forever.
+    def test_two_cycle_resolves_every_member_to_itself(self) -> None:
+        # a -> b, b -> a: neither has a survivor, so EACH resolves to itself
+        # -- never to the other (that would just be the same broken state
+        # one hop later, not a resolution).
+        index = NodeIndex()
+        index.add(_tag("a", merged_into="b"))
+        index.add(_tag("b", merged_into="a"))
+        index.resolve()
+        self.assertEqual(index.canonical_id("a"), "a")
+        self.assertEqual(index.canonical_id("b"), "b")
+
+    def test_three_cycle_resolves_every_member_to_itself(self) -> None:
+        # a -> b -> c -> a.
+        index = NodeIndex()
+        index.add(_tag("a", merged_into="b"))
+        index.add(_tag("b", merged_into="c"))
+        index.add(_tag("c", merged_into="a"))
+        index.resolve()
+        self.assertEqual(index.canonical_id("a"), "a")
+        self.assertEqual(index.canonical_id("b"), "b")
+        self.assertEqual(index.canonical_id("c"), "c")
+
+    def test_cycle_resolution_does_not_hang(self) -> None:
+        # The same 2-cycle, pinned as a termination guarantee independent of
+        # the exact resolved value above.
         index = NodeIndex()
         index.add(_tag("a", merged_into="b"))
         index.add(_tag("b", merged_into="a"))

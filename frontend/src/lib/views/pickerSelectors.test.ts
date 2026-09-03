@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CardSummary, LoreEntrySummary, NodePickerRef, ViewSpec } from "@/lib/types";
 import {
   buildSelectorRoster,
@@ -10,6 +10,8 @@ import {
 } from "./pickerSelectors";
 import { coerceInputValue, encodePickerValue } from "@/lib/utils/promptInputs";
 import { reportClientError } from "@/lib/errorLog";
+import { clearTagNodes, tagNodesStore } from "@/lib/stores/tagNodes";
+import type { TagEntry } from "@/lib/types";
 
 vi.mock("@/lib/errorLog", () => ({ reportClientError: vi.fn(), installGlobalErrorLogging: vi.fn() }));
 
@@ -108,6 +110,51 @@ describe("membersForSelector", () => {
   it("is empty for a bare ViewRef with no inline spec (unresolvable here)", () => {
     const bare: NodePickerRef = { id: "view:v1", kind: "view", title: "V", selector: { view: "v1" } };
     expect(membersForSelector(bare, ROSTER)).toEqual([]);
+  });
+
+  describe("through a merged-tag redirect (ADR-0082 §5, R6)", () => {
+    const T = (id: string, title: string, mergedInto: string | null = null): TagEntry => ({
+      id,
+      title,
+      entry_type: "tag:tag",
+      metadata: {},
+      merged_into: mergedInto,
+    });
+
+    afterEach(() => clearTagNodes());
+
+    it("a persisted selector still naming the merged id expands to a node now carrying the survivor id", () => {
+      tagNodesStore.set([T("tag_mirror", "mirror", "tag_mirrors"), T("tag_mirrors", "mirrors")]);
+      // The stored selector predates the merge — it still says "tag_mirror".
+      const staleSelector: NodePickerRef = {
+        id: "tagged:lore:tag_mirror",
+        kind: "tag",
+        title: "mirror",
+        selector: { kind: "lore", expr: { tagged: "tag_mirror" } },
+      };
+      // The carrier's own metadata already carries the survivor's id (a
+      // re-save, or a node created after the merge).
+      const roster = buildSelectorRoster({
+        loreEntries: [lore("lore_hero", "Hero", ["tag_mirrors"])],
+      });
+
+      expect(membersForSelector(staleSelector, roster).map((m) => m.id)).toEqual(["lore_hero"]);
+    });
+
+    it("also matches a carrier that still holds the merged id itself (both sides fold to the survivor)", () => {
+      tagNodesStore.set([T("tag_mirror", "mirror", "tag_mirrors"), T("tag_mirrors", "mirrors")]);
+      const currentSelector: NodePickerRef = {
+        id: "tagged:lore:tag_mirrors",
+        kind: "lore",
+        title: "mirrors",
+        selector: { kind: "lore", expr: { tagged: "tag_mirrors" } },
+      };
+      const roster = buildSelectorRoster({
+        loreEntries: [lore("lore_hero", "Hero", ["tag_mirror"])],
+      });
+
+      expect(membersForSelector(currentSelector, roster).map((m) => m.id)).toEqual(["lore_hero"]);
+    });
   });
 });
 

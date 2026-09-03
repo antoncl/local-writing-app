@@ -11,6 +11,7 @@ import { metadataSchemaStore } from "@/lib/stores/schema";
 import { tagNodesStore } from "@/lib/stores/tagNodes";
 import { referenceIndexStore } from "@/lib/stores/references";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
+import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { api } from "@/lib/api";
 import type { MetadataSchema, TagEntry } from "@/lib/types";
 
@@ -30,6 +31,13 @@ beforeEach(() => {
   metadataSchemaStore.set(SCHEMA);
   vi.spyOn(api, "listTagEntries").mockResolvedValue({ tags: [] });
   vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {} });
+  // R5's refresh set — a merge/delete re-syncs these too, so a mount test
+  // that drives either one must mock them (the network guard fails a real
+  // fetch, #973).
+  vi.spyOn(api, "listLoreEntries").mockResolvedValue({ entries: [] });
+  vi.spyOn(api, "listPromptEntries").mockResolvedValue({ entries: [] });
+  vi.spyOn(api, "listAssistantEntries").mockResolvedValue({ entries: [] });
+  vi.spyOn(editorPanes, "refreshOpenEditorPaneBaselines").mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -109,5 +117,43 @@ describe("TagsPane — merge action (#642)", () => {
     await confirmService.resolve();
 
     expect(mergeSpy).toHaveBeenCalledWith("tag_mirror", "tag_mirrors");
+    // R5: the retired App.svelte `refreshAfterTagChange`'s refresh set —
+    // an open editor pane must not clobber the rewrite on its next autosave.
+    expect(editorPanes.refreshOpenEditorPaneBaselines).toHaveBeenCalled();
+  });
+
+  it("deleting a tag also refreshes open editor pane baselines (R5)", async () => {
+    tagNodesStore.set([tag("tag_mirrors", "mirrors")]);
+    const deleteSpy = vi.spyOn(api, "deleteTagEntry").mockResolvedValue(undefined);
+
+    render(TagsPane, { props: { onOpenTag: () => {} } });
+
+    const row = screen.getByTestId("tag-row-tag_mirrors");
+    await fireEvent.click(within(row).getByTestId("tag-delete"));
+    expect(confirmService.active).not.toBeNull();
+
+    await confirmService.resolve();
+
+    expect(deleteSpy).toHaveBeenCalledWith("tag_mirrors");
+    expect(editorPanes.refreshOpenEditorPaneBaselines).toHaveBeenCalled();
+  });
+});
+
+describe("TagsPane — delete confirm names transitive redirects (R7)", () => {
+  it("counts a two-hop chain (a -> b -> the tag being deleted)", async () => {
+    // a redirects to b, b redirects to mirrors — deleting mirrors also
+    // removes BOTH a and b, not just the one directly pointing at it.
+    tagNodesStore.set([
+      tag("tag_a", "a", "tag:tag", "tag_b"),
+      tag("tag_b", "b", "tag:tag", "tag_mirrors"),
+      tag("tag_mirrors", "mirrors"),
+    ]);
+
+    render(TagsPane, { props: { onOpenTag: () => {} } });
+
+    const row = screen.getByTestId("tag-row-tag_mirrors");
+    await fireEvent.click(within(row).getByTestId("tag-delete"));
+
+    expect(confirmService.active?.message).toContain("2 merged tags");
   });
 });

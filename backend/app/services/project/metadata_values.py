@@ -40,6 +40,7 @@ from app.services.project.errors import ProjectServiceError
 from app.services.project.metadata_refs import (
     UNCHANGED,
     RefOccurrence,
+    member_as_field,
     rewrite_ref_occurrences,
 )
 from app.services.project.node_index import NodeIndex, NodeIndexEntry
@@ -414,14 +415,12 @@ class MetadataValuesMixin:
     @staticmethod
     def _group_member_as_field(member: GroupMember) -> MetadataFieldDefinition:
         """A list item's member, viewed as a plain field definition, so the
-        per-scalar validators (and their reference checks) apply verbatim."""
+        per-scalar validators (and their reference checks) apply verbatim.
 
-        return MetadataFieldDefinition(
-            name=member.name or member.key,
-            type=member.type,
-            options=member.options,
-            picker_config=member.picker_config,
-        )
+        Delegates to the shared ``metadata_refs.member_as_field`` — the one place
+        that maps a group member to a field — so validation and the ref traversal
+        never drift on the mapping (ADR-0081)."""
+        return member_as_field(member)
 
     def validate_ai_entry_patch(self, entry_id: str, raw: str) -> AIEntryPatch:
         """Turn a brainstorm-commit reply into a validated, review-ready patch

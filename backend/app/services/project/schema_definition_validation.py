@@ -123,10 +123,10 @@ def _list_field_schema_errors(field_id: str, field: MetadataFieldDefinition, sch
             errors.append(f"List metadata field {field_id} references unknown group {field.item_group}.")
         else:
             # Members must stay inside LIST_ITEM_GROUP_MEMBER_TYPES — the scalars
-            # plus the reference types (ADR-0081): a nested ref is now indexed /
-            # scrubbed / healed by the one metadata-ref traversal, so it is no
-            # longer a silent mis-link. `tags` joins in slice 3 (with its lifecycle
-            # descent); `date` / `multi_select` stay out (no item affordances).
+            # plus the reference/tag types (ADR-0081): a nested ref is indexed /
+            # scrubbed / healed and a nested tag canonicalised / renamed by the one
+            # metadata-ref traversal, so neither is a silent mis-link. `date` /
+            # `multi_select` stay out (no item affordances).
             for member in group.members:
                 if member.type not in LIST_ITEM_GROUP_MEMBER_TYPES:
                     errors.append(

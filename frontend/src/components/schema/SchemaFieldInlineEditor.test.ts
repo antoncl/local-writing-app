@@ -86,6 +86,9 @@ const GROUPS: Record<string, MetadataGroupDefinition> = {
   // A ref-member group — a valid item shape as of ADR-0081 (a nested ref is
   // tracked wherever it lives), so it must be OFFERED.
   cast: { name: "Cast", members: [{ key: "who", name: "Who", type: "entity_ref" }] },
+  // A tags-member group — valid as of ADR-0081 slice 3 (the tag lifecycle
+  // descends), so it too must be OFFERED.
+  topics: { name: "Topics", members: [{ key: "topic", name: "Topic", type: "tags" }] },
   // A built-in machinery group — must not be offered as a new item shape.
   plot_beat_link: {
     name: "Beat link",
@@ -129,6 +132,12 @@ describe("SchemaFieldInlineEditor list item shape hides system groups (#1003)", 
     mountList({ name: "Beats", type: "list", options: [] });
     const { values } = itemShapeValues();
     expect(values).toContain("group:cast"); // ref-member group is now shapeable
+  });
+
+  it("offers a group with a tags member as an item shape (ADR-0081 slice 3)", () => {
+    mountList({ name: "Beats", type: "list", options: [] });
+    const { values } = itemShapeValues();
+    expect(values).toContain("group:topics"); // tags-member group is now shapeable
   });
 
   it("still shows a system group the field already uses, as a valid (not disabled) shape", () => {

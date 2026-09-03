@@ -125,60 +125,80 @@ class MetadataValuesMixin:
         known = {tag.name.lower(): tag for tag in self.read_known_tags().tags}
         local = self._read_layer_tags(root)
         node_scope = self._tag_scope_for_node(kind, entry_type)
-        changed = False
-        next_metadata = dict(metadata)
+        registry_changed = False
 
-        for field_id, value in metadata.items():
-            field = schema.fields.get(field_id)
-            if not field or field.type != "tags" or not isinstance(value, list):
-                continue
-            if any(not isinstance(raw_tag, str) for raw_tag in value):
-                continue
-            canonical_values: list[str] = []
-            seen_values: set[str] = set()
-            for raw_tag in value:
-                tag = raw_tag.strip()
-                if not tag:
-                    continue
-                key = tag.lower()
-                entry = known.get(key)
-                if entry is None:
-                    # New tag → scope it to the sub-type it was entered on.
-                    entry = ScopedTag(name=tag, scope=node_scope.model_copy(deep=True))
-                    known[key] = entry
-                    local[key] = ScopedTag(name=tag, scope=node_scope.model_copy(deep=True))
-                    changed = True
-                else:
-                    # Known tag used here → auto-broaden its scope to include
-                    # this (sub-)type (organic growth). The *merged* scope decides
-                    # whether anything needs recording; what gets recorded is this
-                    # layer's assertion. Union is associative, so re-reading merged
-                    # reproduces `broadened` without ever touching an ancestor's
-                    # record.
-                    broadened = self._union_node_picker_scope(entry.scope, node_scope)
-                    if broadened.model_dump() != entry.scope.model_dump():
-                        entry.scope = broadened
-                        held = local.get(key)
-                        local[key] = ScopedTag(
-                            name=entry.name,
-                            scope=self._union_node_picker_scope(held.scope, node_scope)
-                            if held
-                            else node_scope.model_copy(deep=True),
-                            # Carry the local colour through the rebuild — a routine
-                            # save that auto-broadens a coloured tag must not wipe
-                            # its colour (#247; same threading as merge_tags).
-                            color=held.color if held else None,
-                        )
-                        changed = True
-                if key in seen_values:
-                    continue
-                seen_values.add(key)
-                canonical_values.append(entry.name)
-            next_metadata[field_id] = canonical_values
+        def _canonicalise(occ: RefOccurrence) -> Any:
+            nonlocal registry_changed
+            if occ.field.type != "tags" or not isinstance(occ.value, list):
+                return UNCHANGED
+            if any(not isinstance(raw_tag, str) for raw_tag in occ.value):
+                return UNCHANGED
+            canonical, did_change = self._canonicalise_tag_list(occ.value, known, local, node_scope)
+            registry_changed = registry_changed or did_change
+            return canonical
 
-        if changed:
+        # One traversal reaches every tags value — top-level or inside an
+        # item_group member (ADR-0081) — so a nested tag is canonicalised and
+        # registered exactly like a top-level one.
+        next_metadata, _ = rewrite_ref_occurrences(metadata, schema, _canonicalise)
+        if registry_changed:
             self._write_scoped_tags(list(local.values()))
         return next_metadata
+
+    def _canonicalise_tag_list(
+        self,
+        value: list[Any],
+        known: dict[str, ScopedTag],
+        local: dict[str, ScopedTag],
+        node_scope: Any,
+    ) -> tuple[list[str], bool]:
+        """Canonicalise one tags value against the vocabulary: normalise casing,
+        register a new tag (scoped to the node's sub-type), and auto-broaden a
+        known tag's scope to include this sub-type. Mutates ``known``/``local`` in
+        place; returns the canonical values and whether the local registry changed.
+        Factored out of the top-level loop so the traversal can apply it to a
+        nested group member too (ADR-0081)."""
+        canonical_values: list[str] = []
+        seen_values: set[str] = set()
+        changed = False
+        for raw_tag in value:
+            tag = raw_tag.strip()
+            if not tag:
+                continue
+            key = tag.lower()
+            entry = known.get(key)
+            if entry is None:
+                # New tag → scope it to the sub-type it was entered on.
+                entry = ScopedTag(name=tag, scope=node_scope.model_copy(deep=True))
+                known[key] = entry
+                local[key] = ScopedTag(name=tag, scope=node_scope.model_copy(deep=True))
+                changed = True
+            else:
+                # Known tag used here → auto-broaden its scope to include this
+                # (sub-)type (organic growth). The *merged* scope decides whether
+                # anything needs recording; what gets recorded is this layer's
+                # assertion. Union is associative, so re-reading merged reproduces
+                # `broadened` without ever touching an ancestor's record.
+                broadened = self._union_node_picker_scope(entry.scope, node_scope)
+                if broadened.model_dump() != entry.scope.model_dump():
+                    entry.scope = broadened
+                    held = local.get(key)
+                    local[key] = ScopedTag(
+                        name=entry.name,
+                        scope=self._union_node_picker_scope(held.scope, node_scope)
+                        if held
+                        else node_scope.model_copy(deep=True),
+                        # Carry the local colour through the rebuild — a routine save
+                        # that auto-broadens a coloured tag must not wipe its colour
+                        # (#247; same threading as merge_tags).
+                        color=held.color if held else None,
+                    )
+                    changed = True
+            if key in seen_values:
+                continue
+            seen_values.add(key)
+            canonical_values.append(entry.name)
+        return canonical_values, changed
 
     def _validate_scene_metadata(
         self,

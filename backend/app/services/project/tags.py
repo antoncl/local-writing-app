@@ -34,6 +34,11 @@ from app.models import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import LayerVisitor
+from app.services.project.metadata_refs import (
+    UNCHANGED,
+    RefOccurrence,
+    rewrite_ref_occurrences,
+)
 from app.services.project.node_index import IndexLayer
 
 
@@ -444,24 +449,25 @@ class TagsMixin:
 
     def _rename_tag_in_documents(self, paths: list[Path], source_lowers: set[str], target: str) -> None:
         """Replace every occurrence of `source_lowers` with `target` in the tags
-        fields of `paths`, de-duplicating the result."""
+        fields of `paths`, de-duplicating the result. One traversal reaches a tags
+        value wherever it lives — top-level or inside an item_group member
+        (ADR-0081)."""
         schema = self.read_metadata_schema()
-        tags_fields = {fid for fid, field in schema.fields.items() if field.type == "tags"}
+
+        def _rename(occ: RefOccurrence) -> Any:
+            if occ.field.type != "tags" or not isinstance(occ.value, list):
+                return UNCHANGED
+            renamed = self._rename_tag_in_value(occ.value, source_lowers, target)
+            return renamed if renamed != occ.value else UNCHANGED
+
         for path in paths:
             front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
             metadata = front_matter.get("metadata")
             if not isinstance(metadata, dict):
                 continue
-            changed = False
-            for field_id, value in list(metadata.items()):
-                if field_id not in tags_fields or not isinstance(value, list):
-                    continue
-                next_values = self._rename_tag_in_value(value, source_lowers, target)
-                if next_values != value:
-                    metadata[field_id] = next_values
-                    changed = True
+            next_metadata, changed = rewrite_ref_occurrences(metadata, schema, _rename)
             if changed:
-                front_matter["metadata"] = metadata
+                front_matter["metadata"] = next_metadata
                 self._write_markdown_with_front_matter(path, front_matter, body)
 
     def _rename_tag_in_value(self, value: list[Any], source_lowers: set[str], target: str) -> list[Any]:

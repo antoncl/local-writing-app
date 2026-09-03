@@ -56,6 +56,11 @@ export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams
   function reposition() {
     const anchor = current.anchor;
     if (!anchor) return;
+    // A detached anchor (its node removed from the DOM while the popover is
+    // still open) reports a zero rect — without this guard `track`'s RAF loop
+    // would snap the popover to (0, gap) every frame instead of leaving it at
+    // its last real position (review, #1803).
+    if (!anchor.isConnected) return;
     const gap = current.gap ?? 6;
     const r = anchor.getBoundingClientRect();
     // The node is already in the DOM (portalToBody appended it), so reading its

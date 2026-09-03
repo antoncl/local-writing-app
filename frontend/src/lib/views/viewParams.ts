@@ -49,19 +49,27 @@ function entryTypeField(name: string, kind: string, schema: MetadataSchema | nul
 }
 
 // A var promoted into a `tagged` leaf compares tag NODE ids → an entity_ref_list
-// picker over the tag vocabulary (already multi-valued, so `toMultiValued` passes
-// it through), scoped to `tag:assistant_tag` — the vocabulary a `tagged` leaf has
-// historically named (the SHIPPED assistant view's own TAG param instead promotes
-// a `field` predicate on `assistant_tags`, resolved by the `field` branch below,
-// not this one). `tagged` is retired as a designer-authorable predicate
+// picker over a tag vocabulary (already multi-valued, so `toMultiValued` passes
+// it through) — the SHIPPED assistant view's own TAG param instead promotes a
+// `field` predicate on `assistant_tags`, resolved by the `field` branch below,
+// not this one. `tagged` is retired as a designer-authorable predicate
 // (ViewFlowNode), reachable only via a hand-written spec, but the derivation
-// blind spot was the same, so it's covered here.
-function taggedField(name: string): MetadataFieldDefinition {
+// blind spot was the same, so it's covered here. The offered vocabulary depends
+// on the spec's own kind (review, #1803): an `assistant`-kind spec's `tagged`
+// leaf names the `tag:assistant_tag` vocabulary (the shape a hand-written
+// assistant view would use); every other kind gets no entry-type restriction —
+// any tag vocabulary (the general `tag:tag` roster, or a user-authored one like
+// `tag:motifs`) can carry a lore/scene/etc. tag.
+function taggedField(name: string, kind: string): MetadataFieldDefinition {
+  const sources =
+    kind === "assistant"
+      ? [{ kind: "tag", expr: { type: "tag:assistant_tag" } }]
+      : [{ kind: "tag" }];
   return {
     name,
     type: "entity_ref_list",
     options: [],
-    picker_config: { sources: [{ kind: "tag", expr: { type: "tag:assistant_tag" } }] },
+    picker_config: { sources },
   };
 }
 
@@ -157,7 +165,7 @@ function controlFieldFor(
     // back to a text box the user can type an FQN into.
     return field.options.length > 0 ? { field, fieldKey: "entry_type" } : { field: textFallback(label), fieldKey: "entry_type" };
   }
-  if (ref?.kind === "tagged") return { field: taggedField(label), fieldKey: "tags" };
+  if (ref?.kind === "tagged") return { field: taggedField(label, kind), fieldKey: "tags" };
   return { field: textFallback(label), fieldKey: "" };
 }
 

@@ -368,14 +368,17 @@
     return groups;
   });
 
-  // Tags: the general tag-node vocabulary (`tag:tag`, ADR-0082 — `tag_nodes.ts`
-  // roster, loaded app-wide into tagNodesStore) becomes per-kind tag selectors
-  // ({kind, expr:{tagged: tag.id}}). Most context_pick inputs target one kind,
-  // so this is usually just "the tags". Read from the store, not a fetch — no
-  // network on the picker's own account. `assistant_tag` nodes are a separate
-  // vocabulary (the assistant strip's own TAG control, viewParams.ts) and are
-  // never offered here.
-  const tagNodes = $derived($tagNodesStore.filter((t) => t.entry_type === "tag:tag"));
+  // Tags: every tag-kind vocabulary (ADR-0082 — `tag_nodes.ts` roster, loaded
+  // app-wide into tagNodesStore) becomes per-kind tag selectors ({kind, expr:
+  // {tagged: tag.id}}) — not just the general `tag:tag` vocabulary; a
+  // user-authored one (e.g. `tag:motifs`) is first-class too. Most context_pick
+  // inputs target one kind, so this is usually just "the tags". Read from the
+  // store, not a fetch — no network on the picker's own account. `tag:
+  // assistant_tag` is the one exclusion: a separate vocabulary (the assistant
+  // strip's own TAG control, viewParams.ts) that never belongs to a lore/scene
+  // roster filter. A vocabulary with zero members of the allowed kind is
+  // already dropped below (the members guard), so no scope list is needed here.
+  const tagNodes = $derived($tagNodesStore.filter((t) => t.entry_type !== "tag:assistant_tag"));
   // A `tagged` leaf INTERSECTED with the config's entry_type constraint for the
   // kind, so a tag can't over-match past the picker's scope (a lore:character
   // input must not pull in a lore:location sharing the tag). The stored spec

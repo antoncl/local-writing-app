@@ -40,6 +40,31 @@ describe("anchoredPopover", () => {
     expect(pop.isConnected).toBe(false);
   });
 
+  it("does not re-snap to (0, gap) once the anchor is detached from the DOM (#1803 review)", () => {
+    const anchor = document.createElement("button");
+    const pop = document.createElement("div");
+    document.body.append(anchor, pop);
+    // happy-dom reports a zero rect for every element by default, which would
+    // make a real vs. a detached-anchor reposition indistinguishable — stub a
+    // non-zero rect so a genuine snap-to-(0,gap) is observable.
+    anchor.getBoundingClientRect = () =>
+      ({ left: 40, right: 140, top: 20, bottom: 40, width: 100, height: 20, x: 40, y: 20, toJSON: () => ({}) }) as DOMRect;
+
+    const handle = anchoredPopover(pop, { anchor });
+    const leftAfterMount = pop.style.left;
+    const topAfterMount = pop.style.top;
+    expect(leftAfterMount).not.toBe("0px"); // sanity: the stubbed rect took effect
+
+    anchor.remove(); // detached — isConnected is now false, rect would read zero
+    handle.update({ anchor });
+
+    // Left at its last real position, not snapped to (0, gap).
+    expect(pop.style.left).toBe(leftAfterMount);
+    expect(pop.style.top).toBe(topAfterMount);
+
+    handle.destroy();
+  });
+
   // #245 (ADR-0082 slice 2b generalised TagPicker's inline copy here): under a
   // zoomed/panned SvelteFlow canvas the anchor moves on screen WITHOUT firing
   // scroll/resize (the canvas transform moves it, not the page), so `track`

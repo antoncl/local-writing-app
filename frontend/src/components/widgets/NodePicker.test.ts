@@ -660,6 +660,29 @@ describe("NodePicker tag selectors (#1491)", () => {
     expect(within(tags).getByText("Vex")).toBeInTheDocument();
     expect(within(tags).queryByText("Dark Keep")).toBeNull();
   });
+
+  it("offers a user-authored vocabulary (tag:motifs) as a By-tag row, but never tag:assistant_tag (review)", async () => {
+    const motifTag = { id: "tag_mirrors", title: "mirrors", entry_type: "tag:motifs" };
+    const assistantTag = { id: "tag_editor", title: "Editor", entry_type: "tag:assistant_tag" };
+    tagNodesStore.set([villainTag, motifTag, assistantTag] as never);
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore" }], multiple: true },
+        loreEntries: [loreEntry("lore_a", "Vex", ["tag_mirrors"])],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    await fireEvent.click(within(menu).getByText("By tag").closest("button")!);
+    await tick();
+    const tags = (await within(menu).findAllByRole("group", { name: "By tag" }))[0];
+    // tag:motifs is first-class — its tagged member surfaces the row.
+    expect(within(tags).getByText("mirrors")).toBeInTheDocument();
+    // tag:assistant_tag is the assistant/prompt vocabulary, never offered here
+    // (it has no lore members either way, but the exclusion is by entry_type,
+    // not just the members guard).
+    expect(within(tags).queryByText("Editor")).toBeNull();
+  });
 });
 
 describe("NodePicker tag-kind member picks (ADR-0082 slice 1)", () => {

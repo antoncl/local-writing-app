@@ -1,7 +1,6 @@
 # ADR-0082: A tag is a node, and a tags field is a reference list into a vocabulary
 
-- **Status:** Accepted (2026-09-03, Anton, PR #1779)
-- **Date:** 2026-09-03
+- Status: **Accepted** — 2026-09-03, Anton, PR #1779.
 - **Issue:** #1778
 - **Relates to:** ADR-0081 (references at any depth), ADR-0078 (promotion), ADR-0045 (scope is
   the unit of work), ADR-0042 / #339 (authoring level, layered tags), ADR-0071 (migration
@@ -78,8 +77,9 @@ hardwires.
 **A tag is a node.** A vocabulary is an entry type of a new `tag` kind, a tag is an entry of
 that type, and a tags field is an `entity_ref_list` filtered to that entry type, with one new
 picker affordance: create the entry when the typed name resolves to nothing. The `tags` field
-type, both tag registries, their merge endpoints and the tag-specific rename machinery are
-retired; every tag lifecycle is the reference lifecycle ADR-0081 already made uniform.
+type, both tag registries and the tag-specific rename machinery are retired, and the two merge
+endpoints become one merge on tag nodes (§5); every other tag lifecycle is the reference
+lifecycle ADR-0081 already made uniform.
 
 ### 1 — The `tag` kind, and why it is a kind
 
@@ -110,22 +110,28 @@ scoped to kind `tag`.
 Storage follows the app's one shape. Every indexed kind is **one Markdown file per node with
 front matter** — views, mutation sets and chats are already body-less nodes carrying their
 payload in front matter (`NODE_FAMILIES`, `backend/app/services/project/references.py:77`). The
-file is named by title slug like every other node (`_filepath_for_new_node`,
+file is named by title slug like a lore entry or a scene (`_filepath_for_new_node`,
 `project_service.py:553`); the id is minted by `_new_id("tag")` (`project_service.py:647`).
-`tag` is a `NodeFamily` row with folder `tags/`, and the index walk, layer walk, purge, heal and
-title passes see tag files with no new collector (`_families_for_layer`, `references.py:852`).
-A many-per-file YAML collection was rejected (§ Alternatives).
+`tag` is a `NodeFamily` row with folder `tags/`; for project layers `_families_for_layer`
+(`references.py:840`) falls through to `NODE_FAMILIES`, so the index walk, purge, heal and
+title passes see project tag files with no new collector. The machine layer is filtered to
+assistants by a derived predicate (`MACHINE_LAYER_FAMILIES`, `references.py:113`, deliberately
+not a literal), which widens to `tag` so the layer contributes `tag:assistant_tag` entries
+beside its assistants. The built-in Library (`LIBRARY_LAYER_FAMILIES`, `references.py:124`,
+prompt and plot) is unchanged: it ships no tags. A many-per-file YAML collection was rejected
+(§ Alternatives).
 
-**What registering a kind costs**, following the trail `research` left: a row in `NODE_FAMILIES`
-and in `MACHINE_LAYER_FAMILIES` (`references.py:113`, so the machine layer contributes
-`tag:assistant_tag` entries beside its assistants); `tag` in the entry-type upsert whitelist
+**What registering a kind costs** — the full surface, which `research` touched only in part
+(it has no save-dispatch or upsert-whitelist row): the `NODE_FAMILIES` row and the
+`MACHINE_LAYER_FAMILIES` predicate above; `tag` in the entry-type upsert whitelist
 (`services/project/schema.py:287`); rows in the three kind ladders — `_SAVE_NODE_DISPATCH`,
 `read_node`, `delete_node` (`node_ops.py:42`, `:60`, `:172`) and `_SAVE_NODE_REQUEST_BY_KIND`
 (`routers/entries.py:179`) — since there is no generic create and each kind has its own POST;
 a `create_tag_entry` behind `POST /api/tags` that the picker calls; `tag` among the promotable
-kinds (the promotion routers and `overrides.py:179` fold only `lore`/`prompt` today), because
-lifting a tag to an ancestor *is* promotion; and the frontend registrations (`SchemaKind` /
-`SCHEMA_KIND_META`, `schemaTypeHelpers.ts:88`; `DocumentKind` / `EditableDocument`,
+kinds (the promotion routers and `_fold_override_edges`, `overrides.py:179`, fold only
+`lore`/`prompt` today), because
+lifting a tag to an ancestor *is* promotion; and the frontend registrations (`SchemaKind`,
+`schemaTypeHelpers.ts:88`; `SCHEMA_KIND_META`, `:103`; `DocumentKind` / `EditableDocument`,
 `types.ts:153`). `NodeEditor` opens a tag through `has_body: false` like a view.
 
 **Layering is node layering.** A tag lives at exactly one layer, the one it was written to, and
@@ -171,8 +177,11 @@ too — a node at L must not reference a tag that exists only below it, which is
 dangling-edge case. For a machine-roster assistant it is the machine layer, and that path must
 work **with no project open**: `_require_project` (`project_service.py:385`) 409s there today
 and only the assistant paths avoid it (`assistants.py:442`), so tag creation gets the same
-machine-only path, with `layer_by_id(include_machine=True)` (`layers.py:335`). The picker
-cannot ask for a layer; lifting a tag to an ancestor is ADR-0078 promotion of the tag node.
+machine-only path, with `layer_by_id(include_machine=True)` (`layers.py:335`). The picker does
+not offer a layer of its own: a save has exactly one write target (ADR-0045), the tag is a
+side effect of that save, and a second layer choice inside a chip picker would let a node
+reference a tag *below* its own layer — the dangling case above. Lifting a tag to an ancestor
+is a deliberate act: ADR-0078 promotion of the tag node.
 
 **Closed vocabularies need nothing.** A field without `create_missing` is a closed pick over
 the vocabulary — the curated series-level case — and is enforced the way every ref is: the id
@@ -192,12 +201,13 @@ registration in `save_assistant_entry` (`assistants.py:514`), `assistantTagsOf`
 (`assistantScope.ts:23`), the shipped assistant view's `key="tags"` predicate
 (`views.py:463`, `evaluateView.ts:271`). The `tags` prompt-input type (`PromptInputType`,
 `models/base.py:59`), rendered today with a hard-coded assistant origin
-(`components/widgets/PromptInputField.svelte:220`), retires: a prompt input that picks tags is a
+(`tagOrigin="assistant"`, `components/widgets/PromptInputField.svelte:220`), retires: a prompt
+input that picks tags is a
 node-pick input whose `target` names the vocabulary, which prompt inputs already carry
 (`PromptInputDefinition.target`, `schema.py:188`).
 
 Group members are covered without a word: `GroupMember` already admits `entity_ref_list`
-(`LIST_ITEM_GROUP_MEMBER_TYPES`, `schema.py:30`), and `tags` simply leaves that tuple.
+(`LIST_ITEM_GROUP_MEMBER_TYPES`, `schema.py:30`), and `tags` simply leaves that set.
 
 ### 3 — What is free, because it is the reference lifecycle
 
@@ -228,9 +238,12 @@ Two things are *not* free and are decided here:
   `stores/tags.ts`, now a node list of kind `tag` across the merged chain), and the evaluator,
   `FieldValue` chips and the picker resolve tag ids through it. That store is also where
   `merged_into` (§5) is followed on the frontend.
-- **Colour on the chip.** `FieldValue` and `NodeRow` colour only `tags` and `color` fields today
-  (`FieldValue.svelte:167`, `NodeRow.svelte:91`); a reference chip to a `tag` node renders the
-  target's resolved colour. Whether *any* ref chip should is not decided here.
+- **Colour on the chip.** The reference picker already resolves a target node's own
+  `metadata.color` onto its chips and selector members (`buildInstanceColorMap`,
+  `frontend/src/lib/utils/pickerStripes.ts:47`, #1528). `FieldValue` and `NodeRow` do not: they
+  colour only `tags` and `color` fields, from the name-keyed tag map (`FieldValue.svelte:167`,
+  `NodeRow.svelte:91`). A tag chip in those two surfaces resolves through the same helper the
+  picker uses.
 
 ### 4 — `tagged:` means "references this tag", by id
 
@@ -242,8 +255,9 @@ by name breaks under rename, which is the bug this ADR exists to remove. So `tag
 references T** — a backlink edge from the node to T exists. That covers user vocabularies
 (`motifs`) without the evaluator knowing field keys, and it is the same graph the usage counts
 read. The picker emits the id; the ADR-0074 parity contract stands, and the corpus
-(`spec/selector-eval-corpus.json`) is rewritten with ids — its by-name cases including the
-comma-string and case-sensitivity ones (`:61`, `:70`) lose their subject and retire. The `TAG`
+(`spec/selector-eval-corpus.json`) is rewritten with ids — its by-name cases lose their
+subject and retire, including "tagged matches a comma-string tags value" and "tagged is
+case-sensitive". The `TAG`
 parameter of the built-in roster view (`views.py:463`) is an `overlap` over an
 `entity_ref_list`, which the evaluator already handles; its strip control (`taggedField`,
 `viewParams.ts:55`, which synthesises a `type: "tags"` field) becomes a picker over kind `tag`.
@@ -265,8 +279,10 @@ write (a book's scenes, when merging at the series). So:
 - **The redirect resolves at one choke point: the node index.** The index entry of a merged tag
   carries `merged_into`; id→entry lookup canonicalises through it, and edge building rewrites
   the edge's destination to the survivor, so backlinks, usage counts and `tagged:` land on
-  `mirrors` with no consumer doing anything. Edges whose field is `merged_into` are excluded
-  from usage counts. The frontend follows the same field in the tag roster store (§3). A merged
+  `mirrors` with no consumer doing anything. An edge from the `merged_into` field is a
+  *redirect*, not a reference: the index keeps it apart from backlink edges, so it counts
+  toward no usage total and `tagged: mirrors` (§4) never matches the tag node `mirror` itself.
+  The frontend follows the same field in the tag roster store (§3). A merged
   tag is therefore never *dangling* — the heal pass does not strip it — and the chain cannot
   collide, because ids are unique.
 - **Lazy rewrite rides save-time ref validation.** There is no "ref pass on save" to hook; what
@@ -301,14 +317,18 @@ receives the root and a context the runner builds outermost-first.
 **Per layer, outermost first (schema version 8 → 9),** one `ChainMigration`:
 
 1. read `<layer>/tags.yaml`; mint one `tag:tag` node per record in `<layer>/tags/` (title =
-   name, `color` carried), extending the inherited name→id map. A name already mapped by an
-   ancestor mints nothing — the union collapses to the ancestor's node, as the union merge did.
+   name, `color` carried), extending the inherited name→id map. The map is keyed
+   **case-insensitively**, as the registry was (`_TagRegistryMerger` keys by `name.lower()`):
+   a name already mapped by an ancestor in any casing mints nothing and keeps the ancestor's
+   casing — the union collapses to the ancestor's node, as the union merge did, and the §2
+   resolution rule holds for migrated data too.
 2. walk the layer's node documents, **including `overrides/*.md`** (ADR-0071 §3; ADR-0078 parks
    a stayed-behind tag there) and rewrite each `tags` / `assistant_tags` value through the map
    (prompts' `assistant_tags` through the machine map). A name in a document but in no
    registry is minted at this layer first.
 3. rewrite `tagged:` leaves in saved views and in chats' persisted context picks
-   (`chats.py:350`), including their selector `id`/`title`, and the `field.key: "tags"` /
+   (`save_chat_session`, `chats.py:350`), including their selector `id`/`title`, and the
+   `field.key: "tags"` /
    `TAG`-param bindings in on-disk copies of the shipped assistant view (`views.py:463`); a
    name that resolves to nothing is dropped and logged.
 4. any user-authored `metadata.schema.yaml` field with `type: tags` becomes the
@@ -330,8 +350,8 @@ runner change is called out in the PR. A version-dispatching reader was rejected
 **Machine, once, before any project step.** `assistant-tags.yaml` → `tag:assistant_tag` nodes
 in `<machine>/tags/`; machine-roster assistants' `tags` → `assistant_tags: [ids]`. The ladder
 has no machine seam — a root step takes a project root — so this is a machine-level step keyed
-on a new `schema_version` on `MachineSettings` (`machine_settings.py:107`), run in the app
-lifespan, idempotent.
+on the `version` field `MachineSettings` already carries (`machine_settings.py:107`,
+`version: int = 1`), bumped for it, run in the app lifespan, idempotent.
 
 **Scaffold.** `create_project` writes a `tags/` folder where it writes `tags.yaml` today
 (`lifecycle.py:211`).
@@ -350,9 +370,11 @@ lifespan, idempotent.
   `research.py:358`, and the TS mirrors;
 - `tagged:` by id as "references this tag" in both evaluators and the picker, the rewritten
   parity corpus, the `TAG` strip control, the replaced selector id scheme;
-- `merged_into`: the index choke point, the save-time rewrite, the survivor-delete cascade; the
-  tag roster store; the governance pane as the tag kind's instance list; tag-chip colour from
-  the target;
+- **one merge operation on tag nodes** (owned-scope rewrite + `merged_into`), replacing
+  `merge_tags` and `merge_assistant_tags`; `merged_into` in the index choke point, the
+  save-time rewrite, the survivor-delete cascade; the tag roster store; the governance pane as
+  the tag kind's instance list; tag-chip colour in `FieldValue`/`NodeRow` via the picker's
+  helper;
 - the retirement of `TagsMixin`'s registry, `AssistantTagsMixin`, `_canonicalise_metadata_tags`,
   `_partition_tags`, the tag-scope endpoints and stores, `KnownTags` / `AssistantTag`
   (`models/annotations.py`);
@@ -362,12 +384,11 @@ lifespan, idempotent.
 - **A body on a tag.** `tag:base` declares no body. If an author wants to write about a motif,
   `lore:` is where in-world things with prose live; nothing here prevents a `lore:motif` entry
   type from coexisting with a `tag:motifs` vocabulary.
-- **The AI-context join.** A hand-built view `lore where motifs overlap field_of($scene,
-  motifs)` is expressible in the view grammar today, but the AI-path selector evaluator
-  supports only the flat-membership subset and raises on `field_of`/`var`
-  (`selector_eval.py`, module docstring). Making a join view a context selector is a separate
-  decision and this ADR does not sketch its shape.
-- **Target colour on every reference chip** (§3).
+- **The AI-context join** (lore that shares a motif with the current scene, pulled into
+  context automatically). The view grammar can express such a view today, but the AI-path
+  selector evaluator supports only the flat-membership subset and raises on the relational
+  operators (`selector_eval.py`, module docstring). Making a join view a context selector is a
+  separate decision.
 - **Automatic deletion of a merged tag** (§5).
 
 ## Alternatives considered
@@ -474,19 +495,20 @@ The user journey that defines done, in the public vocabulary:
    where they were; a saved view with a `tagged:` leaf and a chat with a tag pick still select
    the same nodes.
 
-**Not:** a body on a tag, target colour on non-tag ref chips, an AI-context join view, or
-automatic deletion of merged tags.
+**Not:** a body on a tag, an AI-context join view, or automatic deletion of merged tags.
 
 ## To verify / build at implementation
 
 - `_partition_entity_ref_list` returns `None` (field dropped) when every target is hidden where
   `_partition_tags` returned `[]`; confirm the override shape ADR-0078 §4 expects.
-- The lore-block renderer's treatment of ref members vs flat lists (`lore_block.py:324`,
-  `:369`) — a tags value moves from the second branch to the first.
+- The lore-block renderer's treatment of ref members vs flat lists (`_resolve_list_refs`,
+  `lore_block.py:324`; `_scalar_text`, `:369`) — a tags value moves from the second branch to
+  the first.
 - `NodeIndexEntry` carries no metadata today; `merged_into` becomes an index field, which bumps
   the index snapshot (`node_index_snapshot.py`).
 - The machine layer exists only once `<machine>/assistants/` does (`_machine_layer_folder`,
   `layers.py:422`); creating the first machine tag must create the layer.
-- The `changed-picks` reconciliation (`routers/entries.py:151`) against migrated selector ids.
+- The `changed-picks` reconciliation (`chat_changed_picks`, `routers/entries.py:151`) against
+  migrated selector ids.
 - Which frontend surfaces build a roster for the `"tag"` selector kind today
   (`buildSelectorRoster`, `NodePicker.svelte:332`) and now read the tag roster store.

@@ -423,9 +423,14 @@ class ChatSessionsMixin:
         if request.cost_delta_usd is None or request.cost_delta_usd <= 0:
             return
         delta = float(request.cost_delta_usd)
-        # Try to resolve provider/model via the chat's assistant for
-        # richer telemetry rows. Empty when the assistant lookup
-        # fails — the cost still attributes correctly via chat_session_id.
+        # Provider/model for the telemetry row. The assistant's static
+        # config is only a FALLBACK: a tier-configured assistant leaves
+        # `ai_model` blank (the concrete model is resolved from the tier at
+        # send time), so reading the config alone recorded an empty model
+        # and every row bucketed as "unknown model" (#1794). The turn's own
+        # provenance — stamped on the assistant message from the stream
+        # response (ADR-0076) — is ground truth and wins below; the config
+        # still covers older messages that predate per-turn provenance.
         provider = ""
         model = ""
         try:
@@ -439,12 +444,17 @@ class ChatSessionsMixin:
                     model = raw_model
         except Exception:
             pass
-        # Pick up the last assistant turn's usage telemetry if the
-        # incoming messages carry it. Falls back to None when absent.
+        # Pick up the last assistant turn's usage + per-turn provenance if
+        # the incoming messages carry it. The message's model/provider
+        # override the assistant's static config; usage falls back to None.
         last_usage: ChatUsage | None = None
         for message in reversed(request.messages):
             if message.role == "assistant" and message.usage is not None:
                 last_usage = message.usage
+                if isinstance(message.provider, str) and message.provider:
+                    provider = message.provider
+                if isinstance(message.model, str) and message.model:
+                    model = message.model
                 break
         self.append_ai_invocation(
             CreateAIInvocationRequest(

@@ -84,6 +84,32 @@ class PromoteLoreTests(unittest.TestCase):
             )
         )
 
+    def _define_group_list_field_at(
+        self, folder: Path, field_id: str, member_key: str, *, entry_type: str = "lore:character"
+    ) -> None:
+        """Author a `list`-of-`item_group` field at `folder` whose named group has
+        one `entity_ref` member `member_key`. `item_members` is resolver-derived
+        from the group, so both the group and the field are written to the layer's
+        own schema file (ADR-0081 §4 authoring shape)."""
+        path = folder / "metadata.schema.yaml"
+        data = self.service._read_yaml(path)
+        data.setdefault("groups", {})[f"{field_id}_grp"] = {
+            "name": field_id.capitalize(),
+            "members": [{"key": member_key, "name": member_key.capitalize(), "type": "entity_ref"}],
+        }
+        data.setdefault("fields", {})[field_id] = {
+            "name": field_id.capitalize(),
+            "type": "list",
+            "item_group": f"{field_id}_grp",
+        }
+        entry = data.setdefault("entry_types", {}).get(entry_type) or {}
+        own = list(entry.get("fields") or [])
+        if field_id not in own:
+            own.insert(0, field_id)
+        entry["fields"] = own
+        data["entry_types"][entry_type] = entry
+        self.service._write_yaml(path, data)
+
     def _snapshot_files(self, folder: Path) -> set[str]:
         # `.cache/` is the rebuildable node-index snapshot (#392) — a read can
         # legitimately write it back (the memo's deferred flush), so it is not
@@ -182,6 +208,49 @@ class PromoteLoreTests(unittest.TestCase):
         self.assertNotIn("allies", self._raw_metadata(self.series, "alice"))
         # The full list folds back at the origin via the override.
         self.assertEqual(self.service.read_lore_entry("alice").metadata.get("allies"), ["nimitz"])
+
+    # --- 3c (ADR-0081 §4): a nested origin-local ref BLOCKS the promotion ----
+
+    def test_nested_origin_local_ref_blocks_promotion(self) -> None:
+        # A nested group-list ref can't stay behind as an override the way a
+        # top-level ref does (no structured-list override yet, #698 v1), so an
+        # origin-local target refuses the promotion rather than dangling at dest.
+        self._define_group_list_field_at(self.universe, "bonds", "who")
+        self._write_ancestor_lore(self.root, "rustyanchor", "The Rusty Anchor", entry_type="lore:note")
+        self._write_ancestor_lore(
+            self.root, "alice", "Alice",
+            metadata={"bonds": [{"who": "rustyanchor"}]}, entry_type="lore:character",
+        )
+
+        plan = self.service.preview_lore_promotion("alice", self.series_layer_id)
+        self.assertIsNotNone(plan.blocked_reason)
+        self.assertIn("The Rusty Anchor", plan.blocked_reason)
+
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.promote_lore_entry("alice", self.series_layer_id)
+        self.assertEqual(ctx.exception.status_code, 422)
+        # Refused as a whole: nothing moved.
+        self.assertTrue(any((self.root / "lore").glob("*.md")))
+        self.assertEqual(list((self.series / "lore").glob("*.md")), [])
+
+    def test_nested_ref_visible_at_destination_travels(self) -> None:
+        # The counterpart: a nested ref whose target is already visible at the
+        # destination is fine — the list travels whole, no block, no dangling.
+        self._define_group_list_field_at(self.universe, "bonds", "who")
+        self._write_ancestor_lore(self.universe, "nimitz", "Nimitz", entry_type="lore:note")
+        self._write_ancestor_lore(
+            self.root, "alice", "Alice",
+            metadata={"bonds": [{"who": "nimitz"}]}, entry_type="lore:character",
+        )
+
+        plan = self.service.preview_lore_promotion("alice", self.series_layer_id)
+        self.assertIsNone(plan.blocked_reason)
+
+        self.service.promote_lore_entry("alice", self.series_layer_id)
+        # The nested ref rides along on the promoted file and still resolves.
+        self.assertEqual(
+            self._raw_metadata(self.series, "alice").get("bonds"), [{"who": "nimitz"}]
+        )
 
     # --- 4: unknown tag stays behind ---------------------------------------
 

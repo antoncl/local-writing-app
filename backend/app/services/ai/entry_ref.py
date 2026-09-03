@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from app.services.project.metadata_refs import ref_members
+
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
 
@@ -294,6 +296,20 @@ class _EntryMetadataView:
         if field_def is None:
             return value
         field_type = getattr(field_def, "type", None)
+        if field_type in ("entity_ref", "entity_ref_list"):
+            return self._wrap_ref(field_type, value)
+        if field_type == "list" and isinstance(value, list):
+            # A group-list (ADR-0081 §4): wrap the ref members inside each item so
+            # `entry.cast[0].who.name` resolves the target like a top-level ref.
+            members = ref_members(field_def)
+            if members:
+                return [self._wrap_list_item(item, members) for item in value]
+        return value
+
+    def _wrap_ref(self, field_type: Any, value: Any) -> Any:
+        """Wrap an ``entity_ref`` / ``entity_ref_list`` value into ``EntryRef``(s)
+        so a template reads the target's fields; pass any other value through.
+        Shared by top-level fields and item_group members."""
         if field_type == "entity_ref" and isinstance(value, str) and value:
             return EntryRef(self._project, self._schema, value, depth=self._depth)
         if field_type == "entity_ref_list" and isinstance(value, list):
@@ -303,6 +319,18 @@ class _EntryMetadataView:
                 if isinstance(v, str) and v
             ]
         return value
+
+    def _wrap_list_item(self, item: Any, members: dict[str, Any]) -> Any:
+        """A group-list item with its ref members wrapped to ``EntryRef``(s). A
+        ``tags`` member (also in ``members``) passes through — tags aren't entity
+        refs, same as at the top level; a non-dict item passes through untouched."""
+        if not isinstance(item, dict):
+            return item
+        wrapped = dict(item)
+        for member_key, member_field in members.items():
+            if member_key in wrapped:
+                wrapped[member_key] = self._wrap_ref(member_field.type, wrapped[member_key])
+        return wrapped
 
     def __getitem__(self, key: str) -> Any:
         if key not in self._data:

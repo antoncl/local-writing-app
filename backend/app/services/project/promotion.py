@@ -29,9 +29,20 @@ from app.models import (
     PromptEntry,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.metadata_refs import ref_members
 from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project.references import INCLUDE_FIELD_ID
+
+
+def _member_ref_ids(value: Any, member_type: str) -> list[str]:
+    """The referenced ids a single group-member value holds — one for an
+    ``entity_ref``, many for an ``entity_ref_list``, none for anything else."""
+    if member_type == "entity_ref":
+        return [value] if isinstance(value, str) and value else []
+    if member_type == "entity_ref_list":
+        return [v for v in value if isinstance(v, str) and v] if isinstance(value, list) else []
+    return []
 
 
 class PromotionMixin:
@@ -152,22 +163,60 @@ class PromotionMixin:
             return self._partition_tags(dest, known_at_dest, field, value)
         return value, None, None
 
+    def _blocked_nested_refs(
+        self, index: NodeIndex, root, dest: IndexLayer, field_def: Any, field: str, value: Any
+    ) -> list[str]:
+        """Block reasons for a group-list field whose item_group members reference
+        a node not visible at `dest` (ADR-0081 §4).
+
+        A top-level ref that isn't visible at the destination stays behind as an
+        origin override; a nested ref can't, because a structured `list` override
+        has no representation yet (#698 v1, `_diff_metadata_to_override_rows`
+        refuses it). Rather than let the field travel whole and leave a dangling
+        ref at the destination, the promotion refuses and names the offending
+        reference — parity with the §6 dynamic-include refusal. Only entity refs
+        block; a nested `tags` member's unknown-at-destination tag is cosmetic
+        (it renders regardless), so it rides along like the list itself.
+        """
+        members = ref_members(field_def) if field_def is not None else None
+        if not members or not isinstance(value, list):
+            return []
+        reasons: list[str] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            for key, member_field in members.items():
+                if key not in item:
+                    continue
+                for rid in _member_ref_ids(item[key], member_field.type):
+                    if self._target_visible_from_destination(index, root, rid, dest.id):
+                        continue
+                    title = index.by_id[rid].title if rid in index.by_id else rid
+                    reasons.append(
+                        f"{field} references {title}, which is not visible at {dest.label} "
+                        "and can't stay behind (a nested reference has no origin override yet)"
+                    )
+        return reasons
+
     def _partition_node_metadata(
         self, metadata: dict[str, Any], dest: IndexLayer, index: NodeIndex, root
-    ) -> tuple[dict[str, Any], dict[str, Any], list[PromotionStayItem], list[str]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], list[PromotionStayItem], list[str], list[str]]:
         """The kind-agnostic §4 metadata partition, shared by every promotable
         kind. Reads the origin's own field types (how the ORIGIN defines each
         field), the destination's schema (`up_to_layer_id=dest.id`, to spot a
         book-only field definition, §3/§8) and known tags (§4), then dispatches
         each field through `_partition_field`.
 
-        Returns `(travels, stays, stay_items, invisible)` — the same four
-        pieces `_partition_lore_promotion` used to compute inline; a kind's own
+        Returns `(travels, stays, stay_items, invisible, blocked)` — the first
+        four are the pieces `_partition_lore_promotion` used to compute inline;
+        `blocked` is the reasons a nested group-list reference refuses the
+        promotion outright (ADR-0081 §4, `_blocked_nested_refs`). A kind's own
         partition wraps this with its owned-here/destination guards and any
         kind-specific extras (a prompt's §5/§6) and folds the result into its
         `PromotionPlan`.
         """
-        origin_types = self._schema_field_types(self.read_metadata_schema())
+        origin_schema = self.read_metadata_schema()
+        origin_types = self._schema_field_types(origin_schema)
         dest_schema = self.read_metadata_schema(up_to_layer_id=dest.id)
         dest_types = self._schema_field_types(dest_schema)
         known_at_dest = {tag.name.lower() for tag in self.read_known_tags(up_to_layer_id=dest.id).tags}
@@ -176,6 +225,7 @@ class PromotionMixin:
         stays: dict[str, Any] = {}
         stay_items: list[PromotionStayItem] = []
         invisible: list[str] = []
+        blocked: list[str] = []
 
         for field, value in metadata.items():
             field_type = origin_types.get(field, "text")
@@ -193,8 +243,12 @@ class PromotionMixin:
                 # the file, just invisible at the destination until the
                 # definition itself is promoted.
                 invisible.append(field)
+            if field_type == "list":
+                blocked.extend(
+                    self._blocked_nested_refs(index, root, dest, origin_schema.fields.get(field), field, value)
+                )
 
-        return travels, stays, stay_items, invisible
+        return travels, stays, stay_items, invisible, blocked
 
     def _promotion_guard(
         self, entry_id: str, target_layer_id: str, kind: str, noun: str
@@ -258,7 +312,9 @@ class PromotionMixin:
 
         # An owned node folds to its own authored values — no override to fold.
         full = self.read_lore_entry(entry_id)
-        travels, stays, stay_items, invisible = self._partition_node_metadata(full.metadata, dest, index, root)
+        travels, stays, stay_items, invisible, blocked = self._partition_node_metadata(
+            full.metadata, dest, index, root
+        )
 
         plan = PromotionPlan(
             destination=PromotionTarget(layer_id=dest.id, label=dest.label),
@@ -266,6 +322,7 @@ class PromotionMixin:
             stays_in_origin=stay_items,
             invisible_at_destination=sorted(invisible),
             related=self._pinned_staged_sets(index, entry_id),
+            blocked_reason="; ".join(blocked) or None,
         )
         return full, dest, travels, stays, plan
 
@@ -284,9 +341,11 @@ class PromotionMixin:
         Writing the override first would silently drop it.
         """
         root = self._require_project()
-        full, dest, travels_metadata, stays_metadata, _plan = self._partition_lore_promotion(
+        full, dest, travels_metadata, stays_metadata, plan = self._partition_lore_promotion(
             entry_id, target_layer_id
         )
+        if plan.blocked_reason:
+            raise ProjectServiceError(plan.blocked_reason, 422)
 
         promoted = LoreEntry(
             id=full.id,
@@ -394,7 +453,7 @@ class PromotionMixin:
         _entry, dest, index, root = self._promotion_guard(entry_id, target_layer_id, "prompt", "Prompt")
 
         full = self.read_prompt_entry(entry_id)
-        travels_metadata, stays_metadata, stay_items, invisible = self._partition_node_metadata(
+        travels_metadata, stays_metadata, stay_items, invisible, meta_blocked = self._partition_node_metadata(
             full.metadata, dest, index, root
         )
         resolves_differently = [i.name for i in full.inputs if i.type in ("context_pick", "scene_ref")]
@@ -417,6 +476,11 @@ class PromotionMixin:
                 layer_label = member_layer.label if member_layer is not None else candidate.source_layer_id
                 blocked_reason = f"{candidate.title} is owned by {layer_label} and can't be lifted from here"
                 break
+
+        # A nested group-list reference that can't stay behind (ADR-0081 §4) is as
+        # fatal as an un-followable include; surface it when nothing else already has.
+        if blocked_reason is None and meta_blocked:
+            blocked_reason = "; ".join(meta_blocked)
 
         plan = PromotionPlan(
             destination=PromotionTarget(layer_id=dest.id, label=dest.label),
@@ -452,7 +516,7 @@ class PromotionMixin:
         sees it as already at the destination."""
         index = self._build_node_index()
         full = self.read_prompt_entry(entry_id)
-        travels_metadata, stays_metadata, _stay_items, _invisible = self._partition_node_metadata(
+        travels_metadata, stays_metadata, _stay_items, _invisible, _blocked = self._partition_node_metadata(
             full.metadata, dest, index, root
         )
         self._write_node_entry_file(

@@ -26,6 +26,7 @@ from app.services.ai.helpers import (
     _scene_id_of,
     _xml_safe_tag,
 )
+from app.services.project.metadata_refs import ref_members
 
 if TYPE_CHECKING:
     from app.models import MutationSetRow
@@ -251,7 +252,7 @@ def _render_node_field_lines(
         if _is_empty_value(value):
             continue
         field_type = getattr(field, "type", "") if field is not None else ""
-        lines.append(_render_field_element(project, field_id, str(field_type), value))
+        lines.append(_render_field_element(project, field_id, str(field_type), value, field))
     return lines
 
 
@@ -289,7 +290,7 @@ def _is_empty_value(value: Any) -> bool:
 
 
 def _render_field_element(
-    project: ProjectService, field_id: str, field_type: str, value: Any
+    project: ProjectService, field_id: str, field_type: str, value: Any, field: Any = None
 ) -> str:
     """One indented child element for a field, dispatched on type. References
     resolve the target's name for legibility while carrying its id as the join
@@ -310,8 +311,36 @@ def _render_field_element(
     if field_type == "list":
         # A list of scalars or member-keyed maps — quote it as JSON so the shape
         # is unambiguous (mirrors the `fields()` descriptor's "JSON array of …").
-        return f"  <{tag}>\n{xml_escape(json.dumps(value, ensure_ascii=False))}\n  </{tag}>"
+        # A nested entity_ref member is resolved to `{"id","name"}` so the model
+        # reads the target's name inline AND keeps the id as the join key — parity
+        # with a top-level ref's `<field id>Name</field>` (ADR-0081 §4).
+        rendered = _resolve_list_refs(project, field, value)
+        return f"  <{tag}>\n{xml_escape(json.dumps(rendered, ensure_ascii=False))}\n  </{tag}>"
     return f"  <{tag}>{xml_escape(_scalar_text(value))}</{tag}>"
+
+
+def _resolve_list_refs(project: ProjectService, field: Any, value: Any) -> Any:
+    """A copy of a group-list value with each nested entity_ref id resolved to a
+    `{"id","name"}` map; tags and non-ref members pass through. Returns `value`
+    unchanged when the field carries no ref members (ADR-0081 §4)."""
+    members = ref_members(field) if field is not None else None
+    if not members or not isinstance(value, list):
+        return value
+    resolved: list[Any] = []
+    for item in value:
+        if not isinstance(item, dict):
+            resolved.append(item)
+            continue
+        new_item = dict(item)
+        for key, member_field in members.items():
+            if key not in new_item:
+                continue
+            if member_field.type == "entity_ref":
+                new_item[key] = _ref_id_name(project, new_item[key])
+            elif member_field.type == "entity_ref_list" and isinstance(new_item[key], list):
+                new_item[key] = [_ref_id_name(project, ref) for ref in new_item[key] if ref]
+        resolved.append(new_item)
+    return resolved
 
 
 def _ref_element(project: ProjectService, tag: str, ref_id: Any) -> str:
@@ -319,9 +348,21 @@ def _ref_element(project: ProjectService, tag: str, ref_id: Any) -> str:
     reads the target's title; falls back to the id as the text when the target
     can't be read, so a dangling ref still shows something."""
     rid = str(ref_id)
-    target = _safe_read_node(project, rid)
-    name = str(_attr_or_item(target, "title") or rid) if target is not None else rid
-    return f"<{tag} id={quoteattr(rid)}>{xml_escape(name)}</{tag}>"
+    return f"<{tag} id={quoteattr(rid)}>{xml_escape(_ref_name(project, rid))}</{tag}>"
+
+
+def _ref_id_name(project: ProjectService, ref_id: Any) -> dict[str, str]:
+    """`{"id","name"}` for one nested entity_ref value — the JSON-safe twin of
+    `_ref_element`, carrying both the join key and the legible name."""
+    rid = str(ref_id)
+    return {"id": rid, "name": _ref_name(project, rid)}
+
+
+def _ref_name(project: ProjectService, ref_id: str) -> str:
+    """The target's display title for a ref id, or the id when it can't be read
+    (so a dangling ref still shows something)."""
+    target = _safe_read_node(project, ref_id)
+    return str(_attr_or_item(target, "title") or ref_id) if target is not None else ref_id
 
 
 def _scalar_text(value: Any) -> str:

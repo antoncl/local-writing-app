@@ -71,9 +71,13 @@ def member_as_field(member: GroupMember) -> MetadataFieldDefinition:
     )
 
 
-def _ref_members(field: MetadataFieldDefinition) -> dict[str, MetadataFieldDefinition] | None:
+def ref_members(field: MetadataFieldDefinition) -> dict[str, MetadataFieldDefinition] | None:
     """The ref/tag members of a ``list``-of-``item_group`` field, keyed by member
     key, or ``None`` if the field is not a group-shaped list carrying any.
+
+    Public so the *adjacency* passes (AI-context wrapping, lore-block rendering,
+    promotion partition — ADR-0081 §4) share this one definition of *which
+    members of a field are references* instead of each re-deriving the descent.
 
     ``item_scalar`` (the ``item_type`` sugar) stores flat scalars, not member
     maps, and its catalog excludes ref types today (ADR-0081 admits refs through
@@ -82,8 +86,8 @@ def _ref_members(field: MetadataFieldDefinition) -> dict[str, MetadataFieldDefin
     if field.type != "list" or field.item_scalar:
         return None
     members = field.item_members or []
-    ref_members = {m.key: member_as_field(m) for m in members if m.type in REF_FIELD_TYPES}
-    return ref_members or None
+    found = {m.key: member_as_field(m) for m in members if m.type in REF_FIELD_TYPES}
+    return found or None
 
 
 def iter_ref_occurrences(
@@ -98,13 +102,13 @@ def iter_ref_occurrences(
         if field.type in REF_FIELD_TYPES:
             yield RefOccurrence(field_id, None, field, value)
             continue
-        ref_members = _ref_members(field)
-        if ref_members is None or not isinstance(value, list):
+        members = ref_members(field)
+        if members is None or not isinstance(value, list):
             continue
         for item in value:
             if not isinstance(item, dict):
                 continue
-            for member_key, member_field in ref_members.items():
+            for member_key, member_field in members.items():
                 if member_key in item:
                     yield RefOccurrence(field_id, member_key, member_field, item[member_key])
 
@@ -134,9 +138,9 @@ def rewrite_ref_occurrences(
                 cleaned[field_id] = new_value
                 changed = True
             continue
-        ref_members = _ref_members(field)
-        if ref_members is not None and isinstance(value, list):
-            changed |= _rewrite_list_members(cleaned, field_id, value, ref_members, transform)
+        members = ref_members(field)
+        if members is not None and isinstance(value, list):
+            changed |= _rewrite_list_members(cleaned, field_id, value, members, transform)
     return cleaned, changed
 
 
@@ -144,7 +148,7 @@ def _rewrite_list_members(
     cleaned: dict[str, Any],
     field_id: str,
     value: list[Any],
-    ref_members: dict[str, MetadataFieldDefinition],
+    members: dict[str, MetadataFieldDefinition],
     transform: Callable[[RefOccurrence], Any],
 ) -> bool:
     """Rewrite the ref/tag members inside a ``list``-of-``item_group`` value.
@@ -157,7 +161,7 @@ def _rewrite_list_members(
     for index, item in enumerate(value):
         if not isinstance(item, dict):
             continue
-        for member_key, member_field in ref_members.items():
+        for member_key, member_field in members.items():
             if member_key not in item:
                 continue
             old = item[member_key]

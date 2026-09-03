@@ -713,14 +713,26 @@ describe("NodePicker create row (ADR-0082 §2 / F1)", () => {
   };
   const TAGS = [{ id: "tag_1", title: "Coastal", entry_type: "tag:tag", metadata: {} }];
 
-  it("shows the create row when all four conditions hold", async () => {
+  it("shows the create row when all conditions hold, preserving the typed casing", async () => {
     render(NodePicker, {
-      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add" },
+      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add", onCreate: vi.fn() },
     });
     const menu = await openMenu();
     await type("Urban");
     expect(within(menu).getByTestId("node-picker-create")).toBeInTheDocument();
     expect(within(menu).getByText("Create “Urban”")).toBeInTheDocument();
+  });
+
+  // P5 (round 2): `onCreate` itself is a precondition now, not just what fires
+  // on click — every host but the metadata rail passes none, so the row must
+  // never render there regardless of how eligible the config otherwise is.
+  it("hides the row when the caller wires no onCreate at all, however eligible the config", async () => {
+    render(NodePicker, {
+      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add" },
+    });
+    const menu = await openMenu();
+    await type("Urban");
+    expect(within(menu).queryByTestId("node-picker-create")).toBeNull();
   });
 
   it("hides the row when create_missing is unset", async () => {
@@ -729,6 +741,7 @@ describe("NodePicker create row (ADR-0082 §2 / F1)", () => {
         config: { sources: [{ kind: "tag", expr: { type: "tag:tag" } }], multiple: true },
         tagEntries: TAGS,
         affordance: "add",
+        onCreate: vi.fn(),
       },
     });
     const menu = await openMenu();
@@ -748,6 +761,7 @@ describe("NodePicker create row (ADR-0082 §2 / F1)", () => {
         },
         tagEntries: TAGS,
         affordance: "add",
+        onCreate: vi.fn(),
       },
     });
     const menu = await openMenu();
@@ -757,7 +771,7 @@ describe("NodePicker create row (ADR-0082 §2 / F1)", () => {
 
   it("hides the row when the search is empty", async () => {
     render(NodePicker, {
-      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add" },
+      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add", onCreate: vi.fn() },
     });
     const menu = await openMenu();
     expect(within(menu).queryByTestId("node-picker-create")).toBeNull();
@@ -765,7 +779,7 @@ describe("NodePicker create row (ADR-0082 §2 / F1)", () => {
 
   it("hides the row when a candidate already matches the search case-insensitively by title", async () => {
     render(NodePicker, {
-      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add" },
+      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add", onCreate: vi.fn() },
     });
     const menu = await openMenu();
     await type("coastal");
@@ -773,15 +787,58 @@ describe("NodePicker create row (ADR-0082 §2 / F1)", () => {
     expect(within(menu).getByText("Coastal")).toBeInTheDocument();
   });
 
-  it("onCreate receives the typed title and the resolved entry_type", async () => {
+  // P1 (round 2, corrected): the GATE (and the match check) runs off
+  // parseSearchQuery's `needle`, not the raw box value — a `#`-restrictor is
+  // a filter, not a name, so it must never offer a create at all. What's
+  // EMITTED (and shown on the row) is the user's own trimmed-but-not-
+  // lower-cased text: matching is case-insensitive, but minting must not
+  // silently relabel what they typed.
+  it("#villain (a tag-restrictor query) never offers a create; villain does, preserving the typed casing", async () => {
+    render(NodePicker, {
+      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add", onCreate: vi.fn() },
+    });
+    const menu = await openMenu();
+    await type("#villain");
+    expect(within(menu).queryByTestId("node-picker-create")).toBeNull();
+    await type("Villain");
+    expect(within(menu).getByTestId("node-picker-create")).toBeInTheDocument();
+    expect(within(menu).getByText("Create “Villain”")).toBeInTheDocument();
+  });
+
+  it("matching stays case-insensitive even though the emitted/shown title preserves casing", async () => {
+    const tagsWithVillain = [...TAGS, { id: "tag_2", title: "Villain", entry_type: "tag:tag", metadata: {} }];
+    render(NodePicker, {
+      props: { config: CREATE_MISSING_CONFIG, tagEntries: tagsWithVillain, affordance: "add", onCreate: vi.fn() },
+    });
+    const menu = await openMenu();
+    // Typed lower-case; the existing candidate is "Villain" — still a match.
+    await type("villain");
+    expect(within(menu).queryByTestId("node-picker-create")).toBeNull();
+    expect(within(menu).getByText("Villain")).toBeInTheDocument();
+  });
+
+  it("onCreate receives the trimmed typed title, casing preserved, and the resolved entry_type", async () => {
     const onCreate = vi.fn();
     render(NodePicker, {
       props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add", onCreate },
     });
     const menu = await openMenu();
-    await type("Urban");
+    await type("  Urban  ");
     await fireEvent.click(within(menu).getByTestId("node-picker-create"));
     expect(onCreate).toHaveBeenCalledWith("Urban", "tag:tag");
+  });
+
+  it("the row renders aria-disabled and ignores a click while `creating` is true", async () => {
+    const onCreate = vi.fn();
+    render(NodePicker, {
+      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add", onCreate, creating: true },
+    });
+    const menu = await openMenu();
+    await type("Urban");
+    const row = within(menu).getByTestId("node-picker-create");
+    expect(row).toHaveAttribute("aria-disabled", "true");
+    await fireEvent.click(row);
+    expect(onCreate).not.toHaveBeenCalled();
   });
 });
 

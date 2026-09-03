@@ -10,10 +10,11 @@
 // (which doubled the label) while keeping the expand/collapse control.
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { tick } from "svelte";
+import { get } from "svelte/store";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import ReferencePicker from "./ReferencePicker.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
-import { clearTagNodes, tagNodesStore } from "@/lib/stores/tagNodes";
+import { clearTagNodes, tagById, tagNodesStore } from "@/lib/stores/tagNodes";
 import * as tagNodesModule from "@/lib/stores/tagNodes";
 import { api } from "@/lib/api";
 import type { LoreEntrySummary, MetadataFieldDefinition, TagEntry } from "@/lib/types";
@@ -33,6 +34,11 @@ const loreEntries = [
 afterEach(() => {
   metadataSchemaStore.set(null);
   clearTagNodes();
+  // Several create_missing tests spy on api.createTagEntry / api.listTagEntries
+  // / findTagByTitle without their own restore — a leftover mock (e.g. the
+  // stale-roster test's findTagByTitle stub) otherwise silently short-circuits
+  // a LATER test's real create path.
+  vi.restoreAllMocks();
 });
 
 describe("ReferencePicker — callback props (runes port of change/navigate)", () => {
@@ -208,6 +214,9 @@ describe("ReferencePicker — create_missing wiring (ADR-0082 §2 / F2/F3)", () 
     await fireEvent.click(createRow);
     await tick();
 
+    // NodePicker's create row emits the trimmed typed title, casing preserved
+    // (P1, corrected) — the gate/match check use the parsed needle, but what
+    // mints (and shows) keeps the user's own casing.
     expect(createSpy).toHaveBeenCalledWith("Mystery", "tag:tag", null, "layer_x");
     expect(onChange).toHaveBeenCalledWith(["tag_new"]);
   });
@@ -238,5 +247,91 @@ describe("ReferencePicker — create_missing wiring (ADR-0082 §2 / F2/F3)", () 
     expect(findSpy).toHaveBeenCalledWith("Mystery", "tag:tag");
     expect(createSpy).not.toHaveBeenCalled();
     expect(onChange).toHaveBeenCalledWith(["tag_existing"]);
+  });
+
+  it("two rapid clicks call createTagEntry once (P2 in-flight guard)", async () => {
+    setSchema();
+    const onChange = vi.fn();
+    let resolveCreate!: (value: TagEntry) => void;
+    const createSpy = vi.spyOn(api, "createTagEntry").mockImplementation(
+      () => new Promise<TagEntry>((resolve) => { resolveCreate = resolve; }),
+    );
+    vi.spyOn(api, "listTagEntries").mockResolvedValue({ tags: [] });
+
+    const createRow = await openAndType({ onChange, createLayerId: "layer_x" }, "Mystery");
+    // The second click fires while the first POST is still pending — the
+    // guard that matters is ReferencePicker's own `creating` flag, checked
+    // synchronously inside `handleCreate` itself, not the row's `aria-disabled`
+    // (which depends on the prop round-trip settling first).
+    await fireEvent.click(createRow);
+    await fireEvent.click(createRow);
+    resolveCreate({ id: "tag_new", title: "mystery", entry_type: "tag:tag", metadata: {} });
+    await tick();
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("lands the created tag in tagById before emitting, and the row disappears, even when the follow-up refresh fails (P3)", async () => {
+    setSchema();
+    const onChange = vi.fn();
+    vi.spyOn(api, "createTagEntry").mockResolvedValue({
+      id: "tag_new",
+      title: "Mystery",
+      entry_type: "tag:tag",
+      metadata: {},
+    } as TagEntry);
+    // The best-effort follow-up refresh fails outright — must not undo the
+    // upsert or block the emit.
+    vi.spyOn(api, "listTagEntries").mockRejectedValue(new Error("offline"));
+
+    const createRow = await openAndType({ onChange, createLayerId: "layer_x" }, "Mystery");
+    await fireEvent.click(createRow);
+    await tick();
+    await Promise.resolve(); // let the failing refreshTagNodes() settle
+    await tick();
+
+    expect(get(tagById).get("tag_new")?.title).toBe("Mystery");
+    expect(onChange).toHaveBeenCalledWith(["tag_new"]);
+    // The roster now carries "Mystery" (via the upsert), so the still-open
+    // picker's own gate (unaffected by the failed refresh) hides the row.
+    expect(screen.queryByTestId("node-picker-create")).toBeNull();
+  });
+
+  it("never offers create when createLayerId is undefined (the default) — no onCreate reaches NodePicker (P5)", async () => {
+    setSchema();
+    render(ReferencePicker, {
+      props: { field: createMissingField, value: [], ariaLabel: "Motifs" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Add Motifs" }));
+    const box = document.querySelector(".ctx-search") as HTMLInputElement;
+    await fireEvent.input(box, { target: { value: "Mystery" } });
+    await tick();
+    expect(screen.queryByTestId("node-picker-create")).toBeNull();
+  });
+
+  it("dedupes on emit — a found-existing or a created id already selected is never appended twice (P4)", async () => {
+    setSchema();
+    const onChange = vi.fn();
+    const findSpy = vi
+      .spyOn(tagNodesModule, "findTagByTitle")
+      .mockReturnValue({ id: "tag_existing", title: "Mystery", entry_type: "tag:tag", metadata: {} } as TagEntry);
+
+    render(ReferencePicker, {
+      props: { field: createMissingField, value: ["tag_existing"], ariaLabel: "Motifs", onChange, createLayerId: "layer_x" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Add Motifs" }));
+    const box = document.querySelector(".ctx-search") as HTMLInputElement;
+    await fireEvent.input(box, { target: { value: "Mystery" } });
+    await tick();
+    // The row can still render (its own gate reads the search-filtered
+    // NodePicker roster, not `value`), but resolving to an already-selected
+    // id must not append a duplicate.
+    const createRow = screen.queryByTestId("node-picker-create");
+    if (createRow) await fireEvent.click(createRow);
+    await tick();
+
+    expect(findSpy).toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

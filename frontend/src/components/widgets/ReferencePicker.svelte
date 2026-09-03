@@ -39,7 +39,7 @@
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   // Tag nodes read from the store too (ADR-0082 slice 1), same reasoning: a ref
   // pointing at a tag resolves anywhere without the caller threading the roster.
-  import { tagById, tagNodesStore, refreshTagNodes, findTagByTitle } from "@/lib/stores/tagNodes";
+  import { tagById, tagNodesStore, refreshTagNodes, findTagByTitle, upsertTagNode } from "@/lib/stores/tagNodes";
   import { api } from "@/lib/api";
 
   let {
@@ -73,12 +73,20 @@
     // pass). onChange carries the selected id(s); onNavigate opens a ref.
     onChange = () => {},
     onNavigate = () => {},
-    // ADR-0082 §2/F2: the layer a `create_missing` tag is minted at — the
-    // pane's authoring level when set (lore/prompt), else the open
-    // document's machine layer when it's an assistant, else null (the open
-    // project). Threaded from the editor down to here; `null` for surfaces
-    // with no save-layer of their own (the chat inputs dialog).
-    createLayerId = null,
+    // ADR-0082 §2/F2, tri-state as of round 2 (P5) — `create_missing` is
+    // offered ONLY where the metadata panel is the host, because only there
+    // does a create land somewhere a save actually writes:
+    //   undefined (the default) — create NOT offered. No `onCreate` reaches
+    //     NodePicker at all, so the row never renders, for ANY kind — not
+    //     just a dead button for a non-tag create_missing field, but also no
+    //     `keepEmptyForCreate` pinning an axis open with nothing in it.
+    //   null — the open project.
+    //   a string — that layer id.
+    // Only `NodeEditor` (via `MetadataPanel`) passes a defined value; every
+    // other host (PromptInputField, ParamStrip/view controls,
+    // MutationFieldRows/MutationAuthoringForm, EntryInputsEditor,
+    // ViewFlowNode, PlotArcNode) passes nothing.
+    createLayerId = undefined,
   }: {
     field: MetadataFieldDefinition;
     value?: string | string[] | null;
@@ -94,7 +102,7 @@
     promptEntries?: PromptEntrySummary[];
     onChange?: (value: string | string[]) => void;
     onNavigate?: (detail: { id: string; kind: string }) => void;
-    createLayerId?: string | null;
+    createLayerId?: string | null | undefined;
   } = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
@@ -198,27 +206,56 @@
     emit(nextIds);
   }
 
-  // "Create ‹x›" (F1/F2): wired for kind `tag` only — the picker's create row
-  // is kind-generic, but minting a node is a per-kind write, and tag is the
-  // only kind create_missing targets today. Resolve-before-create (ADR-0082
-  // §2): a case-insensitive title match wins over minting a duplicate, since
-  // the create row's own gate (NodePicker's `hasTitleMatch`) reads a
-  // search-filtered roster that can be stale by the time this fires.
+  // "Create ‹x›" (F1/F2, P5 round 2): wired for kind `tag` only — the picker's
+  // create row is kind-generic, but minting a node is a per-kind write, and
+  // tag is the only kind create_missing targets today. Offered only when the
+  // host passed a `createLayerId` at all (see the prop doc) — `undefined`
+  // means NodePicker never gets an `onCreate`, so `createEnabled` here is
+  // read-only wiring, not a second gate.
+  const createEnabled = $derived(createLayerId !== undefined);
+
+  // In-flight guard (P2): a second click while the POST is outstanding is
+  // ignored, and the row renders `aria-disabled` (via `creating` on
+  // NodePicker) so the ignore is visible, not silent.
+  let creating = $state(false);
   let createError = $state("");
+
+  // Append an id, deduping against what's already selected (P4) — a
+  // resolve-before-create hit or a freshly minted id must never duplicate an
+  // existing pick, for a list field or (defensively) a single one.
+  function appendSelected(id: string) {
+    if (selectedIds.includes(id)) return;
+    emit(multi ? [...selectedIds, id] : [id]);
+  }
+
+  // Resolve-before-create (ADR-0082 §2): a case-insensitive title match wins
+  // over minting a duplicate, since the create row's own gate (NodePicker's
+  // `hasTitleMatch`) reads a search-filtered roster that can be stale by the
+  // time this fires.
   async function handleCreate(title: string, entryType: string) {
-    if (targetKind !== "tag" || !title.trim()) return;
+    if (!createEnabled || targetKind !== "tag" || !title.trim() || creating) return;
     createError = "";
+    creating = true;
     try {
       const existing = findTagByTitle(title, entryType);
       if (existing) {
-        emit(multi ? [...selectedIds, existing.id] : [existing.id]);
+        appendSelected(existing.id);
         return;
       }
       const created = await api.createTagEntry(title.trim(), entryType, null, createLayerId ?? null);
-      await refreshTagNodes();
-      emit(multi ? [...selectedIds, created.id] : [created.id]);
+      // Land the POST's own response in the roster before emitting (P3) — the
+      // picker (and any other reader of tagById/tagTitleById) sees the new
+      // tag immediately, without waiting on a second round trip.
+      upsertTagNode(created);
+      appendSelected(created.id);
+      // Best-effort follow-up only — reconciles the roster with whatever else
+      // may have changed server-side, but the upsert above already made this
+      // create correct on its own; a failure here must not undo it.
+      void refreshTagNodes();
     } catch (e) {
       createError = e instanceof Error ? e.message : String(e);
+    } finally {
+      creating = false;
     }
   }
 
@@ -340,7 +377,8 @@
         assistantEntries={$assistantEntriesStore}
         tagEntries={$tagNodesStore}
         onChange={handlePickerChange}
-        onCreate={handleCreate}
+        onCreate={createEnabled ? handleCreate : undefined}
+        creating={creating}
       />
       {#if createError}<p class="reference-picker-create-error">{createError}</p>{/if}
     </span>

@@ -31,6 +31,7 @@
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { api } from "@/lib/api";
   import { isViewRef, membershipToSources, pickerMembership } from "@/lib/utils/pickerSources";
+  import { singleConcreteTarget } from "@/lib/utils/pickerCreate";
   import {
     buildTree,
     concreteLeaves,
@@ -286,8 +287,28 @@
     writeSelection(entryKind, next);
   }
 
+  // Whether the config (as of an in-progress edit) still names exactly one
+  // concrete entry type — the same shape rule the backend enforces
+  // (`_create_missing_shape_errors`, `schema_definition_validation.py`) and
+  // NodePicker re-derives at render time (`createTargetFor`). Shared here so
+  // the checkbox's enabled state and its "clear on now-invalid edit" guard
+  // (below) can't drift from either.
+  const createMissingTarget = $derived(singleConcreteTarget(config, metadataSchema));
+
+  function toggleCreateMissing(checked: boolean) {
+    emit({ create_missing: checked || undefined });
+  }
+
   function emit(patch: Partial<NodePickerConfig>) {
-    onChange?.({ ...config, ...patch });
+    const next = { ...config, ...patch };
+    // P8 (round 2, ADR-0082 §2): an edit that stops the config naming one
+    // concrete type must clear `create_missing` in the SAME emit, not leave
+    // it stranded true — the backend validator would otherwise 422 a config
+    // this editor itself produced.
+    if (next.create_missing && !singleConcreteTarget(next, metadataSchema)) {
+      next.create_missing = undefined;
+    }
+    onChange?.(next);
   }
 
   // Schema-derived trees: stable across config edits.
@@ -661,6 +682,29 @@
     {/if}
   </section>
 
+  <!-- ADR-0082 §2 / F1, P8 (round 2): offer to mint a new entry when a typed
+       name resolves to nothing — only meaningful once the config names one
+       concrete type, so the checkbox stays disabled (and unchecks itself via
+       `emit`, above) until then. Both modes: a prompt's entity_ref(_list)
+       input can opt in exactly like a metadata field's picker_config. -->
+  <section class="ctx-section">
+    <header class="ctx-section-label">Create when missing</header>
+    <label class="ctx-inline-check">
+      <input
+        class="ctx-check"
+        type="checkbox"
+        data-testid="picker-create-missing"
+        checked={config.create_missing === true}
+        disabled={readonly || !createMissingTarget}
+        onchange={(e) => toggleCreateMissing((e.currentTarget as HTMLInputElement).checked)}
+      />
+      <span>Offer to create a new entry when the typed name matches nothing</span>
+    </label>
+    {#if !createMissingTarget}
+      <p class="ctx-muted">Available once this picker names exactly one concrete type above.</p>
+    {/if}
+  </section>
+
   <!-- Whole-document presets retired (ADR-0074 slice 4b): "Full Novel Text" is
        now checking the manuscript root in the runtime tree, and "Full Outline"
        was a rendering, not a pick. Stored `presets` are tolerated but no longer
@@ -1003,6 +1047,18 @@
   /* --- Custom checkbox — the binary form toggles (Required / Multiple /
      scene-binding). The tri-state SOURCE tree uses the shared PickCheck (ADR-0074
      slice 7a), matching the runtime picker; these are plain settings checkboxes. */
+
+  /* Plain checkbox + label row (P8, ADR-0082 §2) — lighter than the boxed
+     .ctx-scene-binding treatment; "Create when missing" is a one-line opt-in,
+     not a feature with its own explanatory card. */
+  .ctx-inline-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-sm);
+    color: var(--text);
+    cursor: pointer;
+  }
 
   .ctx-check {
     appearance: none;

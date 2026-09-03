@@ -22,7 +22,9 @@
     // panel's config resolves to one concrete entry type and the typed
     // search matches no existing candidate by title. Rendered above the
     // panel's own rows, wherever they show (drilled-in or single-axis).
-    createRow: { title: string; onCreate: () => void } | null;
+    // `disabled` (P2): the caller's create is in flight — the row still
+    // shows (so the click target doesn't jump) but ignores clicks.
+    createRow: { title: string; onCreate: () => void; disabled?: boolean } | null;
   };
 </script>
 
@@ -73,16 +75,19 @@
     </div>
   {/snippet}
 
-  {#snippet createRow(row: { title: string; onCreate: () => void })}
+  {#snippet createRow(row: { title: string; onCreate: () => void; disabled?: boolean })}
     <!-- ADR-0082 §2 / F1: lifted from TagRosterPopover's `trp-create` gesture
          (same "Create ‹x›" affordance, generalized to any create_missing
-         source — NodePicker/this shell know nothing about tags). -->
+         source — NodePicker/this shell know nothing about tags). `disabled`
+         (P2): the caller's create POST is in flight — ignore a repeat click
+         rather than fire a second create. -->
     <button
       type="button"
       class="ctx-create-row"
       data-testid="node-picker-create"
+      aria-disabled={row.disabled ?? false}
       onmousedown={(e) => e.preventDefault()}
-      onclick={row.onCreate}
+      onclick={() => { if (!row.disabled) row.onCreate(); }}
     >
       <span class="ctx-create-plus" aria-hidden="true">+</span> Create “{row.title}”
     </button>
@@ -323,6 +328,13 @@
   }
   .ctx-create-row:hover {
     background: var(--accent-soft);
+  }
+  .ctx-create-row[aria-disabled="true"] {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .ctx-create-row[aria-disabled="true"]:hover {
+    background: transparent;
   }
   .ctx-create-plus {
     font-size: var(--fs-md);

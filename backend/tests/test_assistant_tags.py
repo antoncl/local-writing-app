@@ -37,6 +37,7 @@ from app.models import (
     AssistantTag,
     CreateAssistantEntryRequest,
     CreatePromptEntryRequest,
+    CreateTagEntryRequest,
     MergeAssistantTagsRequest,
     SaveAssistantEntryRequest,
     SavePromptEntryRequest,
@@ -219,6 +220,48 @@ class AssistantTagGovernanceTests(unittest.TestCase):
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.merge_assistant_tags(MergeAssistantTagsRequest(sources=["Beta"], target="   "))
         self.assertEqual(ctx.exception.status_code, 422)
+
+
+
+class AssistantTagsRealIdRoundTripTests(unittest.TestCase):
+    """P9 round 2: the live half of the rename — `assistant_tags` holding
+    REAL tag-node ids round-trips through the validated, API-visible read
+    (`read_assistant_entry` / `read_prompt_entry`), not the raw front matter
+    `AssistantTagGovernanceTests` reads for the dead free-text mixin above.
+    A real id is exactly what a real save now carries (F2's create path
+    mints one), so this is the shape that matters going forward."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "book"
+        self.service = open_test_project(self.root, "Book")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_assistant_tags_with_a_real_tag_id_round_trips_through_read_assistant_entry(self) -> None:
+        tag = self.service.create_tag_entry(CreateTagEntryRequest(title="Editor", entry_type="tag:assistant_tag"))
+        entry = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Ed", entry_type="assistant:assistant", layer_id="")
+        )
+        self.service.save_assistant_entry(
+            entry.id,
+            SaveAssistantEntryRequest(
+                title="Ed", entry_type="assistant:assistant", metadata={"assistant_tags": [tag.id]}
+            ),
+        )
+        self.assertEqual(self.service.read_assistant_entry(entry.id).metadata.get("assistant_tags"), [tag.id])
+
+    def test_assistant_tags_with_a_real_tag_id_round_trips_through_read_prompt_entry(self) -> None:
+        tag = self.service.create_tag_entry(CreateTagEntryRequest(title="Editor", entry_type="tag:assistant_tag"))
+        entry = self.service.create_prompt_entry(CreatePromptEntryRequest(title="Draft", entry_type="prompt:general"))
+        self.service.save_prompt_entry(
+            entry.id,
+            SavePromptEntryRequest(
+                title="Draft", body="body", entry_type="prompt:general", metadata={"assistant_tags": [tag.id]}
+            ),
+        )
+        self.assertEqual(self.service.read_prompt_entry(entry.id).metadata.get("assistant_tags"), [tag.id])
 
 
 class AssistantTagReachabilityTests(unittest.TestCase):

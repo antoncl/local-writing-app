@@ -28,10 +28,28 @@ from app.models import (
     CreateAssistantEntryRequest,
     CreatePromptEntryRequest,
     CreateTagEntryRequest,
+    NodePickerConfig,
     SaveAssistantEntryRequest,
     SavePromptEntryRequest,
 )
 from app.services import machine_settings as ms
+
+
+class FromMembershipRoundTripTests(unittest.TestCase):
+    """P7 (round 2 review): `create_missing` is a mechanic like `multiple` /
+    `allow_target_marking` — `from_membership` must forward it, or any caller
+    that rebuilds a config through the legacy (kinds, entry_types) constructor
+    silently drops it."""
+
+    def test_create_missing_forwards_through_from_membership(self) -> None:
+        cfg = NodePickerConfig.from_membership(
+            kinds=["tag"], entry_types={"tag": ["tag:tag"]}, create_missing=True
+        )
+        self.assertTrue(cfg.create_missing)
+
+    def test_create_missing_defaults_to_none_when_omitted(self) -> None:
+        cfg = NodePickerConfig.from_membership(kinds=["tag"], entry_types={"tag": ["tag:tag"]})
+        self.assertIsNone(cfg.create_missing)
 
 
 class DefaultSchemaTagBindingTests(unittest.TestCase):

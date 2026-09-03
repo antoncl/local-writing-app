@@ -47,9 +47,10 @@
     documentKind?: string;
     entryType?: string;
     excludeId?: string | null;
-    // ADR-0082 §2/F2: forwarded to a member's ReferencePicker verbatim — the
-    // layer a `create_missing` tag member mints at. See ReferencePicker.
-    createLayerId?: string | null;
+    // ADR-0082 §2/F2, tri-state as of round 2 (P5): forwarded to a member's
+    // ReferencePicker verbatim — undefined (the default) means create_missing
+    // is not offered. See ReferencePicker for the full rule.
+    createLayerId?: string | null | undefined;
   }
 
   let {
@@ -67,7 +68,7 @@
     documentKind = "manuscript",
     entryType = "",
     excludeId = null,
-    createLayerId = null,
+    createLayerId = undefined,
   }: Props = $props();
 
   const members = $derived(field.item_members ?? []);

@@ -267,14 +267,18 @@ class NodePickerConfig(BaseModel):
         presets: list[str] | None = None,
         multiple: bool | None = None,
         allow_target_marking: bool | None = None,
+        create_missing: bool | None = None,
     ) -> NodePickerConfig:
         """Build a config from the legacy `(kinds, entry_types)` membership pair,
-        encoding it as degenerate `sources`. Mechanics pass through."""
+        encoding it as degenerate `sources`. Mechanics pass through — including
+        `create_missing` (round 2 review fix, ADR-0082 §2): omitting it here
+        would silently drop it on any round-trip through this constructor."""
         return cls(
             sources=_membership_to_sources(kinds or [], entry_types or {}),
             presets=presets or [],
             multiple=multiple,
             allow_target_marking=allow_target_marking,
+            create_missing=create_missing,
         )
 
 

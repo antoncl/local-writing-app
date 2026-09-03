@@ -120,10 +120,17 @@
     excludeIds = [],
     onChange,
     // ADR-0082 §2 / F1: present only when `config.create_missing` resolves to
-    // one concrete entry type (`createTargetFor`). Kind-generic — NodePicker
+    // one concrete entry type (`createTargetFor`) AND the caller wires this —
+    // absent (the default) means "no create offered here" (P5), not just "no
+    // handler to call": the row itself never renders, so a non-tag host or a
+    // strip/dialog surface can't show a dead button. Kind-generic — NodePicker
     // itself never mentions tags; the caller (ReferencePicker) decides what a
     // create means for the kind it wired.
     onCreate,
+    // In-flight guard (P2): the caller's create POST is still awaited. The
+    // create row renders `aria-disabled` and ignores clicks meanwhile, so a
+    // double-click can't fire a second create.
+    creating = false,
   }: {
     config?: NodePickerConfig;
     value?: NodePickerRef[];
@@ -141,6 +148,7 @@
     excludeIds?: string[];
     onChange?: (detail: { value: NodePickerRef[] }) => void;
     onCreate?: (title: string, entryType: string) => void;
+    creating?: boolean;
   } = $props();
 
   const affordanceVerb = $derived(affordance === "change" ? "Change" : "Add");
@@ -686,8 +694,12 @@
   // the roster it checks against reuses whichever candidate list already
   // covers that kind — already search-filtered, so an exact-title match
   // among them is a subset of a substring match (entrySearch.ts) and this
-  // needs no separate unfiltered read.
-  const createTarget = $derived(createTargetFor(config, metadataSchema));
+  // needs no separate unfiltered read. Gated on `onCreate` being wired at all
+  // (P5, ADR-0082 §2 round 2): a caller that passes no handler — every host
+  // but the metadata rail — never renders a dead create button, and never
+  // pins an otherwise-empty axis open for one either (`keepEmptyForCreate`
+  // below reads the same `createTarget`, so it inherits the gate).
+  const createTarget = $derived(onCreate ? createTargetFor(config, metadataSchema) : null);
   const createRosterForTarget = $derived.by(() => {
     switch (createTarget?.kind) {
       case "tag":
@@ -704,11 +716,29 @@
         return [];
     }
   });
+  // The GATE (is a create offered at all) runs off `parsedSearch.needle`
+  // (trimmed + lower-cased by the shared parser, entrySearch.ts) — not the
+  // raw `search` box value — so readiness and the match check agree with the
+  // candidate matching above (matchesSummary) instead of re-deriving it from
+  // an untrimmed string. A `#`-restrictor query is a FILTER ("show only
+  // tag-restricted results"), not a name to mint — `tagOnly` suppresses the
+  // row outright, or "#villain" could offer to create a tag literally titled
+  // "#villain".
+  //
+  // What's EMITTED (and shown on the row) is different: `search.trim()`, the
+  // user's own casing — matching is case-insensitive, but minting a tag
+  // titled "villain" when the author typed "Villain" would silently
+  // relabel their own input. Safe to use unguarded here: `tagOnly` already
+  // gates `showCreateRow` above, so a shown row's `search` never carries a
+  // leading `#`.
   const showCreateRow = $derived(
-    !!createTarget && isSearchActive(search) && !hasTitleMatch(createRosterForTarget, search),
+    !!createTarget &&
+      !parsedSearch.tagOnly &&
+      !!parsedSearch.needle &&
+      !hasTitleMatch(createRosterForTarget, parsedSearch.needle),
   );
   function handleCreate(): void {
-    if (!createTarget) return;
+    if (!createTarget || creating) return;
     onCreate?.(search.trim(), createTarget.entryType);
   }
 
@@ -1056,7 +1086,7 @@
     hasAnyConfigured,
     hasAnyResults,
     totalVisibleItems,
-    createRow: showCreateRow ? { title: search.trim(), onCreate: handleCreate } : null,
+    createRow: showCreateRow ? { title: search.trim(), onCreate: handleCreate, disabled: creating } : null,
   });
 </script>
 

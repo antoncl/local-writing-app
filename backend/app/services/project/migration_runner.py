@@ -56,7 +56,17 @@ class MigrationRunnerMixin:
             for layer in self.collect_layers(root):
                 if layer.is_root or not (layer.folder / "project.yaml").exists():
                     continue
-                applied = ProjectService(WorkScope(root=layer.folder))._run_migrations(chain=ctx)
+                try:
+                    applied = ProjectService(WorkScope(root=layer.folder))._run_migrations(chain=ctx)
+                except Exception as exc:
+                    # Z5 (round-2 review, #1807): name the ancestor in the
+                    # message before it propagates — an unmigrated ancestor
+                    # leaves the descendant correctly unmigrated/unstamped
+                    # too (its own step below never runs), since an
+                    # unmigrated ancestor's schema/tags would otherwise
+                    # break the descendant's merge silently.
+                    logger.exception("Migrating declared ancestor %s failed", layer.folder)
+                    raise RuntimeError(f"Migrating declared ancestor {layer.folder} failed: {exc}") from exc
                 if applied:
                     logger.info("Migrated ancestor layer %s: %s", layer.folder, "; ".join(applied))
             result = self._run_migrations_for_this_layer(ctx)

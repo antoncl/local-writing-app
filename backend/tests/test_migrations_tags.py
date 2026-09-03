@@ -333,6 +333,121 @@ class TagsChainMigrationTests(unittest.TestCase):
         series_reopened = ProjectService.opened_at(self.series)
         self.assertEqual(series_reopened.last_migrations, ())
 
+    def test_migrated_scene_carries_ids_in_its_raw_front_matter(self) -> None:
+        # Z10(e), round-2 review #1807: assert the on-disk file directly, not
+        # only through the read API (test_scene_reads_through_the_api_with_
+        # resolved_titles already covers the API side).
+        scene_path = self.book_service._path_for_node_id(self.scene_id, "manuscript")
+        front_matter = yaml.safe_load(scene_path.read_text(encoding="utf-8").split("---\n", 2)[1])
+        self.assertEqual(
+            front_matter["metadata"]["tags"], [self.coastal_id, self.mirrors_id, self.untracked_id]
+        )
+
+    def test_z8_minted_tag_node_bytes_match_the_apps_own_writer(self) -> None:
+        # Z8, round-2 review #1807: a chain-step-minted tag node's bytes must
+        # be identical (framing, newline handling) to one the app writes
+        # itself through `create_tag_entry` — not merely similar.
+        from app.models import CreateTagEntryRequest
+        from app.services import migrations
+
+        reopened = ProjectService(WorkScope(root=self.book))
+        app_written = reopened.create_tag_entry(CreateTagEntryRequest(title="Compare Me", entry_type="tag:tag"))
+        app_path = next(p for p in (self.book / "tags").glob("*.md") if p.stem == "Compare Me")
+        app_bytes = app_path.read_bytes()
+
+        minted_id = migrations.mint_tag_node(self.book / "tags", "Compare Me Too", "tag:tag")
+        minted_path = next(p for p in (self.book / "tags").glob("*.md") if p.stem == "Compare Me Too")
+        minted_bytes = minted_path.read_bytes()
+
+        def normalize(data: bytes, tag_id: str, title: str) -> bytes:
+            return data.replace(tag_id.encode("utf-8"), b"ID").replace(title.encode("utf-8"), b"TITLE")
+
+        self.assertEqual(
+            normalize(app_bytes, app_written.id, "Compare Me"),
+            normalize(minted_bytes, minted_id, "Compare Me Too"),
+        )
+
+
+class AncestorSkipAndFailureTests(unittest.TestCase):
+    """Round-2 review (#1807): Z5 (an ancestor's failure names the ancestor
+    folder before re-raising, and the descendant stays unmigrated) and
+    Z10(b) (a DECLARED ancestor with no `project.yaml` is skipped by the
+    runner, not implicitly treated as a project)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.series = self.base / "series"
+        self.book = self.series / "book"
+        self.book_service = ProjectService.created_at(self.book, "Book")
+        self.series_service = ProjectService.created_at(self.series, "Series")
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        self.addCleanup(self._patcher.stop)
+        declare(self.book_service, self.book, [self.series], base=self.base)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_z5_ancestor_failure_names_the_ancestor_and_leaves_descendant_unstamped(self) -> None:
+        from app.services import migrations
+
+        def boom(root: Path) -> None:
+            raise RuntimeError("simulated failure")
+
+        original_registry = list(migrations.MIGRATIONS)
+        original_current = migrations.CURRENT_VERSION
+        original_series_version = read_project_version(self.series)
+        migrations.MIGRATIONS.append(migrations.RootMigration(99, "boom", boom))
+        migrations.CURRENT_VERSION = 99
+        # Stamp `book` past the failing step so ONLY the ancestor (`series`)
+        # has it pending — isolates the failure to the ancestor's own run.
+        manifest_path = self.book / "project.yaml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["schema_version"] = 99
+        manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+        try:
+            from app.services.project.errors import ProjectServiceError
+
+            with self.assertRaises(ProjectServiceError) as caught:
+                ProjectService.opened_at(self.book)
+            self.assertIn(f"Migrating declared ancestor {self.series} failed", str(caught.exception))
+            # The ancestor never got as far as the end-of-ladder stamp.
+            self.assertEqual(read_project_version(self.series), original_series_version)
+        finally:
+            migrations.MIGRATIONS.clear()
+            migrations.MIGRATIONS.extend(original_registry)
+            migrations.CURRENT_VERSION = original_current
+
+    def test_declared_ancestor_without_project_yaml_is_skipped(self) -> None:
+        # A folder ABOVE `series` in the walk, declared in `series`'s own
+        # `inherits:`, but never scaffolded (no project.yaml) — the runner
+        # must skip it silently rather than error or implicitly treat the
+        # declaration as making it a project.
+        import os
+
+        ghost = self.base / "ghost"
+        ghost.mkdir(parents=True, exist_ok=True)
+        series_manifest_path = self.series / "project.yaml"
+        manifest = yaml.safe_load(series_manifest_path.read_text(encoding="utf-8"))
+        manifest["inherits"] = [os.path.relpath(ghost, self.series).replace("\\", "/")]
+        series_manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+        # Roll series back so its own ladder actually runs and walks its
+        # (bogus) declared chain.
+        manifest["schema_version"] = CURRENT_VERSION - 1
+        series_manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+        ProjectService.opened_at(self.book)  # must not raise
+        self.assertFalse((ghost / ".migration-backups").exists())
+        self.assertFalse((ghost / "project.yaml").exists())
+        self.assertEqual(read_project_version(self.series), CURRENT_VERSION)
+
 
 if __name__ == "__main__":
     unittest.main()

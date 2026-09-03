@@ -417,24 +417,17 @@ def assistant_tags_path() -> Path:
 def machine_tag_names() -> dict[str, str]:
     """Lower-cased title → id, over every `<machine>/tags/*.md` node — the
     assistant-tag vocabulary a chain migration's `ChainContext.machine_names`
-    seeds from (ADR-0082 slice 4, #1785). A pure read (safe to call before
-    `migrate_assistant_tags_once()` has ever run — an empty/absent folder just
-    yields `{}`), so it does not belong on `migrate_assistant_tags_once()`
-    itself: a chain step re-reads this on every open, past `version==2` too,
-    to see a tag another chain step minted moments earlier."""
+    seeds from (ADR-0082 slice 4, #1785). Delegates to `migrations._tag_node_names`
+    (round-2 review Z1: the SAME walk a project layer's own chain step uses
+    to reseed its `tags/` folder, so the two cannot drift). A pure read (safe
+    to call before `migrate_assistant_tags_once()` has ever run — an
+    empty/absent folder just yields `{}`), so it does not belong on
+    `migrate_assistant_tags_once()` itself: a chain step re-reads this on
+    every open, past `version==2` too, to see a tag another chain step
+    minted moments earlier."""
     from app.services import migrations
 
-    names: dict[str, str] = {}
-    folder = tags_dir()
-    if not folder.exists():
-        return names
-    for path in sorted(folder.glob("*.md")):
-        front_matter, _ = migrations._read_front_matter(path)
-        tag_id = front_matter.get("id")
-        title = front_matter.get("title")
-        if isinstance(tag_id, str) and isinstance(title, str) and title.strip():
-            names.setdefault(title.strip().lower(), tag_id)  # first-seen casing wins
-    return names
+    return migrations._tag_node_names(tags_dir())
 
 
 def _mint_machine_tags_from_yaml_registry(tags_folder: Path, name_to_id: dict[str, str]) -> None:
@@ -469,21 +462,29 @@ def _mint_machine_tags_from_yaml_registry(tags_folder: Path, name_to_id: dict[st
 def _rewrite_roster_assistant_tags(tags_folder: Path, name_to_id: dict[str, str]) -> None:
     """The roster-rewrite half of `migrate_assistant_tags_once`: every
     `<machine>/assistants/*.md` carrying the pre-rename `metadata.tags` gets
-    it renamed to `metadata.assistant_tags`, names resolved to ids."""
+    it renamed to `metadata.assistant_tags`, names resolved to ids. An
+    assistant that ALSO already carries an `assistant_tags` value (a
+    hand-migrated or partially migrated roster file) gets the UNION,
+    order-preserving and deduped (round-2 review Z3) — never a silent
+    overwrite that drops one side."""
     from app.services import migrations
 
     roster_folder = assistants_dir()
     if not roster_folder.exists():
         return
+    known = (name_to_id,)
     for path in sorted(roster_folder.glob("*.md")):
         front_matter, body = migrations._read_front_matter(path)
         metadata = front_matter.get("metadata")
         if not isinstance(metadata, dict) or "tags" not in metadata:
             continue
-        resolved, _ = migrations._resolve_name_list(
-            metadata.pop("tags"), tags_folder, name_to_id, "tag:assistant_tag"
+        resolved_from_tags = migrations._resolved_or_empty(
+            metadata.pop("tags"), tags_folder, name_to_id, "tag:assistant_tag", known
         )
-        metadata["assistant_tags"] = resolved
+        resolved_existing = migrations._resolved_or_empty(
+            metadata.get("assistant_tags"), tags_folder, name_to_id, "tag:assistant_tag", known
+        )
+        metadata["assistant_tags"] = migrations._dedupe_preserve_order((*resolved_existing, *resolved_from_tags))
         migrations._write_front_matter(path, front_matter, body)
 
 

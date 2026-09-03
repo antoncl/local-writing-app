@@ -278,7 +278,9 @@ the open layer runs its own.** A new `ChainMigration` step type (alongside `Root
 `DocumentMigration`) carries a context accumulated across that walk, so a descendant layer's step can
 see what an ancestor layer's step already did. A machine-level once-step, keyed on
 `MachineSettings.version` rather than any project's `schema_version`, runs in the app lifespan for
-out-of-tree machine content.
+out-of-tree machine content — and again from the runner's top-level call, so a project opened without
+the app ever starting (a script, a test) still finds the machine vocabulary; both triggers are
+idempotent.
 
 The reason is ADR-0082 §6's tags migration: removing `tags` from the schema `type` Literal makes an
 **unmigrated ancestor's `metadata.schema.yaml` fail validation the moment a migrated descendant merges

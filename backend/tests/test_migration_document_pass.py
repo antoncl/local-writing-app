@@ -260,11 +260,11 @@ class ProjectDocumentPassTests(unittest.TestCase):
             ],
             91,
         )
-        stamp_calls: list[int] = []
+        stamp_calls: list[tuple[Path, int]] = []
         original_write = migrations.write_project_version
 
         def counting_write(root: Path, version: int) -> None:
-            stamp_calls.append(version)
+            stamp_calls.append((root, version))
             original_write(root, version)
 
         migrations.write_project_version = counting_write
@@ -274,9 +274,10 @@ class ProjectDocumentPassTests(unittest.TestCase):
             self.assertEqual(read_project_version(self.root), 91)
             # Stamped exactly once PER LAYER, at the end of that layer's own
             # ladder — not once per step (ADR-0071 §4) — and `base` is stamped
-            # too, ahead of `root`, since opening `root` also migrates its
-            # declared ancestor (ADR-0082 slice 4 M2).
-            self.assertEqual(stamp_calls, [91, 91])
+            # BEFORE `root` (round-2 review #1807, Z10d), since opening `root`
+            # migrates its declared ancestor first (ADR-0082 slice 4 M2) and
+            # only then runs its own ladder.
+            self.assertEqual(stamp_calls, [(self.base, 91), (self.root, 91)])
             self.assertEqual(read_project_version(self.base), 91)
             # `last_migrations` names only the OPEN layer's own applied steps —
             # `base`'s run is logged, not folded into this return value.

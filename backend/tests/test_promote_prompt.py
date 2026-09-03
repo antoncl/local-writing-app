@@ -88,6 +88,31 @@ class PromotePromptTests(unittest.TestCase):
             if p.is_file() and ".cache" not in p.relative_to(folder).parts
         }
 
+    def _define_group_list_field_at(
+        self, folder: Path, field_id: str, member_key: str, *, entry_type: str
+    ) -> None:
+        """Author a `list`-of-`item_group` field at `folder` whose named group has
+        one `entity_ref` member — the ADR-0081 §4 shape, `item_members` derived
+        from the group by the resolver."""
+        path = folder / "metadata.schema.yaml"
+        data = self.service._read_yaml(path)
+        data.setdefault("groups", {})[f"{field_id}_grp"] = {
+            "name": field_id.capitalize(),
+            "members": [{"key": member_key, "name": member_key.capitalize(), "type": "entity_ref"}],
+        }
+        data.setdefault("fields", {})[field_id] = {
+            "name": field_id.capitalize(),
+            "type": "list",
+            "item_group": f"{field_id}_grp",
+        }
+        entry = data.setdefault("entry_types", {}).get(entry_type) or {}
+        own = list(entry.get("fields") or [])
+        if field_id not in own:
+            own.insert(0, field_id)
+        entry["fields"] = own
+        data["entry_types"][entry_type] = entry
+        self.service._write_yaml(path, data)
+
     # --- 1: moves the file, keeps the id; refusals ------------------------
 
     def test_promote_prompt_moves_file_keeps_id(self) -> None:
@@ -118,6 +143,31 @@ class PromotePromptTests(unittest.TestCase):
         with self.assertRaises(ProjectServiceError) as ctx2:
             self.service.promote_prompt_entry("genprompt", "not-a-real-layer")
         self.assertEqual(ctx2.exception.status_code, 400)
+
+    # --- 1a (ADR-0081 §4): a prompt's nested origin-local ref blocks too -----
+
+    def test_prompt_nested_origin_local_ref_blocks_promotion(self) -> None:
+        # A prompt's metadata carries refs like any node; a nested one pointing at
+        # an origin-local target refuses the promotion (same channel as a lore
+        # node — the shared `_partition_node_metadata` block, wired into the prompt
+        # plan alongside the §6 include refusal).
+        self._define_group_list_field_at(self.universe, "bonds", "who", entry_type="prompt:general")
+        (self.root / "lore").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            self.root / "lore" / "rustyanchor.md", "rustyanchor", "The Rusty Anchor", "lore:note", {}, ""
+        )
+        self._write_ancestor_prompt(
+            self.root, "genprompt", "General Prompt", body="Hi.", metadata={"bonds": [{"who": "rustyanchor"}]}
+        )
+
+        plan = self.service.preview_prompt_promotion("genprompt", self.series_layer_id)
+        self.assertIsNotNone(plan.blocked_reason)
+        self.assertIn("The Rusty Anchor", plan.blocked_reason)
+
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.promote_prompt_entry("genprompt", self.series_layer_id)
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertEqual(list((self.series / "prompts").glob("*.md")), [])
 
     # --- 2: include closure cascades ---------------------------------------
 

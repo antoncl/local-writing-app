@@ -1,27 +1,32 @@
 """AI-invocation telemetry slice of ProjectService (#14 backend split).
 
-An append-only log at `<project>/ai_invocations.yaml`: each accepted
+An append-only log at `<project>/ai_invocations.csv`: each accepted
 continuation/roleplay generation pushes one record (model, tokens, cost,
 scene_id, character_id, chat_session_id). The `cost` / `character_cost` /
 `project_cost` computed fields project from this log via the computed-metadata
 resolver. Not a Node kind yet — promote when the audit-log UI lands (GH #9/#10).
 This mixin owns the log IO; `ProjectService` composes it.
 
-Method bodies moved verbatim from project_service.py. Shared helpers they call
-(`self._require_project`, `self._read_yaml`, `self._write_yaml`,
-`self._new_id`, `self._utcnow_iso`, and `self._chats_dir` from
-`ChatSessionsMixin`) live elsewhere on the composed class and resolve through
-the MRO at call time. `_utcnow_iso` and `_write_node_entry_file` stay in core:
-both are generic/shared writers used by other slices too.
+The ledger is a plain append-only CSV, following the logging-system precedent
+(#1801): each new row is an O(1) line append (`open(…, "a")`), not a
+read-modify-rewrite of the whole file. On disk the record is flat — the nested
+`usage` object hoists to four fixed `usage_*` columns — and an empty cell means
+None (an unpriced row has an empty `cost_usd`; a row with no usage captured has
+all four `usage_*` cells empty, distinct from a captured zero). Readers key by
+the header names, so a later column stays additive. The one-time move off the
+old `{invocations: [...]}` YAML list is migration v9 (ADR-0071 ladder).
+
+Shared helpers the methods call (`self._require_project`, `self._new_id`,
+`self._utcnow_iso`, and `self._chats_dir` from `ChatSessionsMixin`) live
+elsewhere on the composed class and resolve through the MRO at call time.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import csv
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 from app.models import (
     AICostBucket,
@@ -114,24 +119,136 @@ def _bucket_targets(
     return targets
 
 
+# --- CSV ledger serialization (#1801). The on-disk row is flat: the nine
+# string fields, `cost_usd`, then the four `usage_*` columns hoisted out of the
+# nested usage object. In memory a record keeps the nested `usage` shape the
+# rest of the slice (and `AIInvocation`) expects, so the CSV format is confined
+# to the reader/writer here and the v9 migration — no consumer sees it. These
+# are module-public because migration v9 reuses the exact same column order and
+# flattening (one contract, authored once).
+
+_INVOCATION_STR_COLUMNS = (
+    "id",
+    "ts",
+    "prompt_entry_id",
+    "prompt_entry_type",
+    "scene_id",
+    "character_id",
+    "chat_session_id",
+    "provider",
+    "model",
+)
+_INVOCATION_USAGE_COLUMNS = (
+    "usage_input_tokens",
+    "usage_cached_input_tokens",
+    "usage_cache_write_tokens",
+    "usage_output_tokens",
+)
+INVOCATION_CSV_COLUMNS = (
+    *_INVOCATION_STR_COLUMNS,
+    "cost_usd",
+    *_INVOCATION_USAGE_COLUMNS,
+)
+
+
+def _num_cell(value: Any) -> str:
+    """A numeric cell: empty for None / non-numeric (the "unknown" sentinel),
+    else the plain number (`repr` keeps an int an int and a float a float, so a
+    token count round-trips as `4200`, not `4200.0`)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return ""
+    return repr(value)
+
+
+def _cell_to_float(cell: Any) -> float | None:
+    """An empty numeric cell reads back as None (unknown), not 0.0. A garbage
+    cell degrades to None (unpriced) rather than dropping the row — the same
+    way the old YAML reader let a non-numeric `cost_usd` fall through to
+    unpriced (the established "junk degrades to defaults" tolerance)."""
+    text = (cell or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _cells_to_usage(row: Mapping[str, Any]) -> dict[str, int] | None:
+    """Rebuild the nested usage dict from the four `usage_*` cells. All-empty =
+    no usage captured (None); otherwise an empty or garbage cell within a
+    captured group degrades to the ChatUsage default 0."""
+    cells = {
+        column.removeprefix("usage_"): (row.get(column) or "").strip()
+        for column in _INVOCATION_USAGE_COLUMNS
+    }
+    if not any(cells.values()):
+        return None
+    return {key: _cell_to_int(text) for key, text in cells.items()}
+
+
+def _cell_to_int(text: str) -> int:
+    try:
+        return int(text) if text else 0
+    except ValueError:
+        return 0
+
+
+def invocation_record_to_csv_row(record: Mapping[str, Any]) -> dict[str, str]:
+    """Flatten one in-memory record (the nested shape `AIInvocation.model_dump`
+    produces) to a CSV cell dict keyed by `INVOCATION_CSV_COLUMNS`."""
+    row = {
+        column: (value if isinstance(value := record.get(column), str) else "")
+        for column in _INVOCATION_STR_COLUMNS
+    }
+    row["cost_usd"] = _num_cell(record.get("cost_usd"))
+    usage = record.get("usage")
+    if isinstance(usage, Mapping):
+        # A captured usage block: a missing subkey degrades to the ChatUsage
+        # default 0, so the group is never mistaken for "no usage" on readback.
+        for column in _INVOCATION_USAGE_COLUMNS:
+            token = usage.get(column.removeprefix("usage_"))
+            row[column] = _num_cell(token) if isinstance(token, (int, float)) else "0"
+    else:
+        # No usage captured: all four cells stay empty (the None sentinel).
+        for column in _INVOCATION_USAGE_COLUMNS:
+            row[column] = ""
+    return row
+
+
+def csv_row_to_invocation_record(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Rebuild the nested in-memory record from one `csv.DictReader` row, the
+    inverse of `invocation_record_to_csv_row`. Returns None only for a
+    structurally-truncated line — the sole drop reason. Every bad *value*
+    degrades to its default (the old YAML reader's "junk counts, degraded"
+    tolerance), so a hand-edited row still lands in the same rollups as the
+    computed cost fields."""
+    # A short row — fewer fields than the header — has None for the missing
+    # trailing columns; a crash mid-append is the only thing that writes one.
+    if any(value is None for key, value in row.items() if key is not None):
+        return None
+    record: dict[str, Any] = {
+        column: (row.get(column) or "") for column in _INVOCATION_STR_COLUMNS
+    }
+    record["cost_usd"] = _cell_to_float(row.get("cost_usd"))
+    usage = _cells_to_usage(row)
+    if usage is not None:
+        record["usage"] = usage
+    return record
+
+
 class AiInvocationsMixin:
     def _ai_invocations_path(self) -> Path:
         root = self._require_project()
-        return root / "ai_invocations.yaml"
+        return root / "ai_invocations.csv"
 
     def _read_ai_invocations_raw(self) -> list[dict[str, Any]]:
         path = self._ai_invocations_path()
         if not path.exists():
             return []
-        with path.open("r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
-        if isinstance(data, list):
-            return [record for record in data if isinstance(record, dict)]
-        if isinstance(data, dict):
-            items = data.get("invocations", [])
-            if isinstance(items, list):
-                return [record for record in items if isinstance(record, dict)]
-        return []
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            records = [csv_row_to_invocation_record(row) for row in csv.DictReader(handle)]
+        return [record for record in records if record is not None]
 
     def _iter_invocation_rows(
         self, *, since: str | None = None, until: str | None = None
@@ -176,7 +293,6 @@ class AiInvocationsMixin:
         self, request: CreateAIInvocationRequest
     ) -> AIInvocation:
         self._require_project()
-        raw = self._read_ai_invocations_raw()
         invocation = AIInvocation(
             id=self._new_id("inv"),
             ts=self._utcnow_iso(),
@@ -190,8 +306,16 @@ class AiInvocationsMixin:
             usage=request.usage,
             cost_usd=request.cost_usd,
         )
-        raw.append(invocation.model_dump())
-        self._write_yaml(self._ai_invocations_path(), {"invocations": raw})
+        # Append one line — no read-modify-rewrite of the whole ledger. A crash
+        # here loses at most this partial last line, which the reader skips
+        # (#1801). The header is written only when the file is new/empty.
+        path = self._ai_invocations_path()
+        needs_header = not path.exists() or path.stat().st_size == 0
+        with path.open("a", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=INVOCATION_CSV_COLUMNS)
+            if needs_header:
+                writer.writeheader()
+            writer.writerow(invocation_record_to_csv_row(invocation.model_dump()))
         return invocation
 
     def ai_cost_summary(

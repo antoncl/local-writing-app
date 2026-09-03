@@ -92,7 +92,7 @@ research.structure.yaml
 metadata.schema.yaml      # this layer's schema contributions
 tags.yaml
 todo.yaml
-ai_invocations.yaml       # AI call log and costs
+ai_invocations.csv        # append-only AI call log and costs
 scenes/ lore/ prompts/ research/ chats/ views/
 .cache/                   # disposable, always rebuildable
 ```

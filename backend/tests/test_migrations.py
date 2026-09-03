@@ -476,5 +476,109 @@ class ResearchStructureMigrationTests(unittest.TestCase):
         self.assertEqual(tree["root"]["children"][0]["title"], "Industrial Revolution")
 
 
+class InvocationLedgerCsvMigrationTests(unittest.TestCase):
+    """v8→v9 (#1801): the ai_invocations ledger moves from a YAML list to an
+    append-only CSV. The transform runs off the root and reuses the ledger's
+    shared column contract, so a migrated row reads back through the live
+    reader identically."""
+
+    _ROWS = [
+        {
+            "id": "inv_1",
+            "ts": "2026-08-30T10:00:00+00:00",
+            "chat_session_id": "chat_1",
+            "provider": "anthropic",
+            "model": "claude-sonnet-5",
+            "usage": {
+                "input_tokens": 4200,
+                "cached_input_tokens": 1300,
+                "cache_write_tokens": 800,
+                "output_tokens": 1100,
+            },
+            "cost_usd": 0.049,
+        },
+        {
+            "id": "inv_2",
+            "ts": "2026-08-31T09:00:00+00:00",
+            "scene_id": "manuscript_1",
+            "provider": "ollama",
+            "model": "llama3",
+            "cost_usd": None,  # unpriced row
+        },
+    ]
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.root = self.base / "project"
+        self.service = ProjectService.created_at(self.root, "Ledger Project")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _write_yaml(self, payload: object) -> None:
+        (self.root / "ai_invocations.yaml").write_text(
+            yaml.safe_dump(payload, sort_keys=False), encoding="utf-8"
+        )
+
+    def test_converts_yaml_list_and_reads_back_through_the_live_reader(self) -> None:
+        self._write_yaml({"invocations": self._ROWS})
+        migrations._migrate_invocations_to_csv(self.root)
+
+        self.assertFalse((self.root / "ai_invocations.yaml").exists())
+        self.assertTrue((self.root / "ai_invocations.csv").exists())
+
+        rows = self.service._read_ai_invocations_raw()
+        self.assertEqual([row["id"] for row in rows], ["inv_1", "inv_2"])
+        self.assertEqual(rows[0]["usage"]["input_tokens"], 4200)
+        self.assertAlmostEqual(rows[0]["cost_usd"], 0.049, places=6)
+        # Unpriced row: cost stays None (not 0.0), no usage captured.
+        self.assertIsNone(rows[1]["cost_usd"])
+        self.assertNotIn("usage", rows[1])
+
+    def test_converts_the_historical_bare_list_shape(self) -> None:
+        # The oldest on-disk shape was a bare top-level list, not
+        # {invocations: [...]}; both must convert.
+        self._write_yaml(self._ROWS)
+        migrations._migrate_invocations_to_csv(self.root)
+        rows = self.service._read_ai_invocations_raw()
+        self.assertEqual([row["id"] for row in rows], ["inv_1", "inv_2"])
+
+    def test_idempotent_when_csv_already_present_drops_a_stray_yaml(self) -> None:
+        # A leftover YAML beside an existing CSV: the CSV is authoritative and
+        # is left byte-for-byte untouched; the stale YAML is removed.
+        csv_path = self.root / "ai_invocations.csv"
+        csv_path.write_text("id,ts\ninv_keep,t\n", encoding="utf-8")
+        self._write_yaml({"invocations": self._ROWS})
+
+        migrations._migrate_invocations_to_csv(self.root)
+
+        self.assertFalse((self.root / "ai_invocations.yaml").exists())
+        self.assertEqual(csv_path.read_text(encoding="utf-8"), "id,ts\ninv_keep,t\n")
+
+    def test_no_op_when_no_ledger_exists(self) -> None:
+        migrations._migrate_invocations_to_csv(self.root)
+        self.assertFalse((self.root / "ai_invocations.csv").exists())
+
+    def test_migration_is_registered_and_runs_on_open(self) -> None:
+        # Proves v9 is WIRED (not just that the function works): roll the
+        # project back to v8, drop a YAML ledger, reopen — the ledger becomes
+        # CSV, its rows survive, and the version stamps forward.
+        manifest_path = self.root / "project.yaml"
+        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        data["schema_version"] = 8
+        manifest_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        self._write_yaml({"invocations": self._ROWS})
+
+        reopened = ProjectService.opened_at(self.root)
+
+        self.assertFalse((self.root / "ai_invocations.yaml").exists())
+        self.assertTrue((self.root / "ai_invocations.csv").exists())
+        self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
+        summary = reopened.ai_cost_summary()
+        self.assertEqual(summary.count, 2)
+        self.assertAlmostEqual(summary.total_cost_usd, 0.049, places=6)
+
+
 if __name__ == "__main__":
     unittest.main()

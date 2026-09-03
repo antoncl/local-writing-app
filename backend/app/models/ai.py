@@ -777,9 +777,9 @@ class SaveChatSessionRequest(BaseModel):
 class AIInvocation(BaseModel):
     """Append-only telemetry record for one accepted AI invocation
     (continuation, roleplay, or chat turn). The cost computed field sums
-    these by scope. Storage: <project>/ai_invocations.yaml. Not a Node
-    kind for MVP — sidecar log; promote to a kind later if an audit-log
-    UI surfaces.
+    these by scope. Storage: <project>/ai_invocations.csv (append-only,
+    #1801). Not a Node kind for MVP — sidecar log; promote to a kind later
+    if an audit-log UI surfaces.
     """
     id: str
     ts: str

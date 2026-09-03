@@ -33,6 +33,7 @@ document is slice 2 (#366).
 
 from __future__ import annotations
 
+import csv
 import logging
 import zipfile
 from collections.abc import Callable
@@ -46,7 +47,7 @@ import yaml
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 8
+CURRENT_VERSION = 9
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -191,6 +192,46 @@ def _lift_plot_template_genre(doc: MigratableDocument) -> MigratableDocument:
     )
 
 
+def _migrate_invocations_to_csv(root: Path) -> None:
+    """v8→v9: the AI-invocations ledger moves from a YAML list
+    (`ai_invocations.yaml`) to an append-only CSV (`ai_invocations.csv`), so a
+    new row is an O(1) line append instead of a whole-file rewrite (#1801).
+    Read the old list — tolerating both historical shapes, a bare list or
+    `{invocations: [...]}` — write every row through the shared CSV flattener,
+    then drop the YAML.
+
+    Idempotent (ADR-0071 §2): with the CSV already present the YAML is just
+    removed (the CSV is authoritative and never re-derived from it); an absent
+    YAML is a no-op. Authored against the known v8 format — it reuses only the
+    ledger's stable column contract, never the live reader."""
+    from app.services.project.ai_invocations import (
+        INVOCATION_CSV_COLUMNS,
+        invocation_record_to_csv_row,
+    )
+
+    yaml_path = root / "ai_invocations.yaml"
+    csv_path = root / "ai_invocations.csv"
+    if csv_path.exists():
+        yaml_path.unlink(missing_ok=True)
+        return
+    if not yaml_path.exists():
+        return
+    loaded = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    if isinstance(loaded, list):
+        rows: Any = loaded
+    elif isinstance(loaded, dict) and isinstance(loaded.get("invocations"), list):
+        rows = loaded["invocations"]
+    else:
+        rows = []
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=INVOCATION_CSV_COLUMNS)
+        writer.writeheader()
+        for record in rows:
+            if isinstance(record, dict):
+                writer.writerow(invocation_record_to_csv_row(record))
+    yaml_path.unlink()
+
+
 # Migrations run in registry order. Version numbers are history and are never
 # reused or renumbered, so a retired step leaves a gap. Two gaps now: 3 (create
 # project.md) was removed with #343 — it wrote a constant `id: project`, which
@@ -216,6 +257,11 @@ MIGRATIONS: list[MigrationStep] = [
         8,
         "lift plot:template genre from the template: block into a node-metadata field (#1744)",
         _lift_plot_template_genre,
+    ),
+    RootMigration(
+        9,
+        "move the ai_invocations ledger from a YAML list to an append-only CSV (#1801)",
+        _migrate_invocations_to_csv,
     ),
 ]
 

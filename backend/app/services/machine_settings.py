@@ -396,6 +396,123 @@ def assistants_dir() -> Path:
     return config_path().parent / "assistants"
 
 
+def tags_dir() -> Path:
+    """Folder holding the machine's own tag-kind nodes (the assistant-tag
+    vocabulary, `tag:assistant_tag` — ADR-0082 slice 1), a sibling of
+    `assistants_dir()`. Derived from `config_path()` for the same isolation
+    reason."""
+    return config_path().parent / "tags"
+
+
+ASSISTANT_TAGS_FILENAME = "assistant-tags.yaml"
+
+
+def assistant_tags_path() -> Path:
+    """The retired machine-global assistant-tag registry (#88) — read once by
+    `migrate_assistant_tags_once()` (ADR-0082 slice 4, #1785) and never again;
+    kept isolated the same way as `tags_dir()`."""
+    return config_path().parent / ASSISTANT_TAGS_FILENAME
+
+
+def machine_tag_names() -> dict[str, str]:
+    """Lower-cased title → id, over every `<machine>/tags/*.md` node — the
+    assistant-tag vocabulary a chain migration's `ChainContext.machine_names`
+    seeds from (ADR-0082 slice 4, #1785). A pure read (safe to call before
+    `migrate_assistant_tags_once()` has ever run — an empty/absent folder just
+    yields `{}`), so it does not belong on `migrate_assistant_tags_once()`
+    itself: a chain step re-reads this on every open, past `version==2` too,
+    to see a tag another chain step minted moments earlier."""
+    from app.services import migrations
+
+    names: dict[str, str] = {}
+    folder = tags_dir()
+    if not folder.exists():
+        return names
+    for path in sorted(folder.glob("*.md")):
+        front_matter, _ = migrations._read_front_matter(path)
+        tag_id = front_matter.get("id")
+        title = front_matter.get("title")
+        if isinstance(tag_id, str) and isinstance(title, str) and title.strip():
+            names.setdefault(title.strip().lower(), tag_id)  # first-seen casing wins
+    return names
+
+
+def _mint_machine_tags_from_yaml_registry(tags_folder: Path, name_to_id: dict[str, str]) -> None:
+    """The `assistant-tags.yaml` half of `migrate_assistant_tags_once`: mint a
+    `tag:assistant_tag` node for every not-yet-known `{name, color}` record,
+    then rename the registry out of the way (unconditionally, once it
+    exists — the rename alone is what makes a re-run a no-op)."""
+    from app.services import migrations
+
+    yaml_path = assistant_tags_path()
+    if not yaml_path.exists():
+        return
+    try:
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        data = {}
+    raw = data.get("tags") if isinstance(data, dict) else None
+    if isinstance(raw, list):
+        for entry in raw:
+            if not (isinstance(entry, dict) and isinstance(entry.get("name"), str)):
+                continue
+            name = entry["name"].strip()
+            if not name:
+                continue
+            color = entry.get("color")
+            migrations._ensure_tag_id(
+                name, tags_folder, name_to_id, "tag:assistant_tag", color=color if isinstance(color, str) else None
+            )
+    yaml_path.replace(yaml_path.with_name(f"{yaml_path.name}.migrated"))
+
+
+def _rewrite_roster_assistant_tags(tags_folder: Path, name_to_id: dict[str, str]) -> None:
+    """The roster-rewrite half of `migrate_assistant_tags_once`: every
+    `<machine>/assistants/*.md` carrying the pre-rename `metadata.tags` gets
+    it renamed to `metadata.assistant_tags`, names resolved to ids."""
+    from app.services import migrations
+
+    roster_folder = assistants_dir()
+    if not roster_folder.exists():
+        return
+    for path in sorted(roster_folder.glob("*.md")):
+        front_matter, body = migrations._read_front_matter(path)
+        metadata = front_matter.get("metadata")
+        if not isinstance(metadata, dict) or "tags" not in metadata:
+            continue
+        resolved, _ = migrations._resolve_name_list(
+            metadata.pop("tags"), tags_folder, name_to_id, "tag:assistant_tag"
+        )
+        metadata["assistant_tags"] = resolved
+        migrations._write_front_matter(path, front_matter, body)
+
+
+def migrate_assistant_tags_once() -> None:
+    """The machine-scope once-step (ADR-0082 slice 4 M3, #1785): convert the
+    retired `assistant-tags.yaml` registry into `tag:assistant_tag` nodes, and
+    rewrite the roster's own `metadata.tags` → `metadata.assistant_tags`
+    (name → id) to match.
+
+    Gated on `MachineSettings.version` (not a project's `schema_version` — the
+    machine config dir is not a project and has no manifest to stamp), so this
+    is idempotent and safe to call from more than one place: `main.py`'s
+    lifespan runs it once at server startup, and a project open
+    (`MigrationRunnerMixin._run_migrations`) runs it again on the way to
+    seeding a chain migration's `ChainContext` — the second call is what makes
+    the machine step visible to a project opened by a script or a test that
+    never starts the app.
+    """
+    settings = load_settings()
+    if settings.version >= 2:
+        return
+    tags_folder = tags_dir()
+    name_to_id = machine_tag_names()
+    _mint_machine_tags_from_yaml_registry(tags_folder, name_to_id)
+    _rewrite_roster_assistant_tags(tags_folder, name_to_id)
+    settings.version = 2
+    save_settings(settings)
+
+
 def error_log_dir() -> Path:
     """Folder holding the machine-scope `errors.log` (#741) — the config dir, a
     sibling of `config.yaml` — used when a failure has no project bound (a

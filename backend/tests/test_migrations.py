@@ -299,10 +299,10 @@ class DocumentMigrationFrameworkTests(unittest.TestCase):
             self._restore(original_registry, original_current)
 
     def test_registry_steps_are_typed_root_or_document(self) -> None:
-        # Every registered step is one of the two ADR-0071 shapes — no bare
-        # tuples/functions.
+        # Every registered step is one of the three ADR-0071/ADR-0082 shapes —
+        # no bare tuples/functions.
         for step in migrations.MIGRATIONS:
-            self.assertIsInstance(step, (RootMigration, DocumentMigration))
+            self.assertIsInstance(step, (RootMigration, DocumentMigration, migrations.ChainMigration))
 
         def noop(doc: MigratableDocument) -> MigratableDocument:
             return MigratableDocument(dict(doc.front_matter), doc.body)

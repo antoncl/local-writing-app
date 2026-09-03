@@ -29,15 +29,25 @@ migrating doesn't always live under the project tree: a snapshot restored later
 shape can reach it. `migrate_document` applies the `DocumentMigration` subladder
 to a single document; the project-wide pass that runs it over every owned
 document is slice 2 (#366).
+
+A third shape, `ChainMigration` (ADR-0082 slice 4, #1785), is for a step that
+needs to know what an ANCESTOR layer just did: `fn` mutates one layer's root
+like `RootMigration`, but also takes a `ChainContext` that
+`MigrationRunnerMixin._run_migrations` threads outermost-first across the whole
+declared chain, so a descendant layer's step sees names an ancestor's step
+already minted.
 """
 
 from __future__ import annotations
 
 import csv
+import json
 import logging
+import re
+import uuid
 import zipfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -47,7 +57,7 @@ import yaml
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 9
+CURRENT_VERSION = 10
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -99,7 +109,46 @@ class DocumentMigration:
     fn: DocumentMigrationFn
 
 
-MigrationStep = RootMigration | DocumentMigration
+@dataclass
+class ChainContext:
+    """Threaded across one open's whole chain migration run, outermost layer
+    first (ADR-0082 slice 4, #1785 — the old `_TagRegistryMerger`'s union,
+    stated once instead of re-derived per reader).
+
+    `name_to_id` is the general tag vocabulary: lower-cased title -> tag-node
+    id, over every `tag:tag` node minted so far at any layer already
+    processed this run. First-seen (outermost) casing wins on a case-only
+    clash, same rule the retired registry merge used. `machine_names` is the
+    separate assistant-tag vocabulary (`tag:assistant_tag`, out-of-tree at the
+    machine layer) — seeded once from whatever `machine_tag_names()` already
+    finds on disk before the chain runs, then grown in place by a layer's own
+    step when it mints a not-yet-seen assistant-tag name.
+
+    A mutable dataclass, not frozen: every layer's step mutates the same two
+    dicts in place so a later layer (or a later pass within one layer) sees
+    an earlier mint without threading a new context back out.
+    """
+
+    name_to_id: dict[str, str] = field(default_factory=dict)
+    machine_names: dict[str, str] = field(default_factory=dict)
+
+
+ChainMigrationFn = Callable[[Path, ChainContext], None]
+
+
+@dataclass(frozen=True)
+class ChainMigration:
+    """A project-shaped step like `RootMigration`, but `fn` also takes the
+    chain-wide `ChainContext` (ADR-0082 slice 4) — for a step whose result at
+    one layer depends on what an ancestor layer's own run of the same step
+    already did (e.g. minting a tag node only once across the chain)."""
+
+    version: int
+    description: str
+    fn: ChainMigrationFn
+
+
+MigrationStep = RootMigration | DocumentMigration | ChainMigration
 
 
 def _create_snippets_folder(root: Path) -> None:
@@ -232,6 +281,601 @@ def _migrate_invocations_to_csv(root: Path) -> None:
     yaml_path.unlink()
 
 
+# --- v9→v10: tags.yaml + tags/assistant_tags occurrences → tag-kind nodes ----
+# (ADR-0082 slice 4, #1785). The `tags` value type is gone (slice 2); a name in
+# a `tags.yaml` registry becomes a `tag:tag` node, and every list-valued
+# `tags`/`assistant_tags` occurrence across a layer's own documents becomes a
+# list of tag-node ids. No service-instance method is called from any function
+# below — `_create_research_structure` is the precedent (raw file IO only), so
+# a step here can run against an ANCESTOR layer that the currently-open
+# ProjectService is not bound to.
+
+TAG_ID_PATTERN = re.compile(r"^tag_[0-9a-f]{10}$")
+# A chat's `inputs` JSON carries a selector ref for a tag axis pick as
+# `tag:<kind>:<name>` (the pre-migration id shape the picker emitted) — `kind`
+# is the KIND OF NODE the selector targets (e.g. "lore"), not the tag's own
+# vocabulary. Post-migration the same pick is `tagged:<kind>:<id>`.
+_CHAT_TAG_REF_ID = re.compile(r"^tag:(?P<kind>[^:]+):(?P<name>.+)$")
+
+# The `entity_ref_list` shape every retired `type: tags` field/input becomes
+# (ADR-0082 §2's own built-in fields, e.g. `default_schema.py`'s `tags`
+# field, are the precedent this mirrors). A schema field spells the picker
+# constraint as `picker_config`; a prompt input spells the identical shape as
+# `target` — `_TAG_PICKER_SHAPE` is reused for both, keyed onto whichever name
+# the caller needs.
+_TAG_PICKER_SHAPE: dict[str, Any] = {
+    "sources": [{"kind": "tag", "expr": {"type": "tag:tag"}}],
+    "create_missing": True,
+}
+
+# Mirrors `ProjectService._sanitize_filename`'s two constants — copied rather
+# than imported so a chain step never reaches for a service-instance method
+# (module docstring).
+_FILENAME_ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_FILENAME_WHITESPACE = re.compile(r"\s+")
+_FILENAME_WINDOWS_RESERVED = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def _sanitize_filename(title: str) -> str:
+    """Copy of `ProjectService._sanitize_filename` (module docstring: a chain
+    step writes files directly, never through a service-instance method)."""
+    sanitized = _FILENAME_ILLEGAL_CHARS.sub("_", title)
+    sanitized = _FILENAME_WHITESPACE.sub(" ", sanitized).strip()
+    sanitized = sanitized.rstrip(". ")
+    if len(sanitized) > 100:
+        sanitized = sanitized[:100].rstrip(". ")
+    if not sanitized:
+        sanitized = "Untitled"
+    base = sanitized.split(".")[0].upper()
+    if base in _FILENAME_WINDOWS_RESERVED:
+        sanitized = "_" + sanitized
+    return sanitized
+
+
+def _unique_filepath(folder: Path, sanitized: str) -> Path:
+    """Copy of `ProjectService._unique_filepath`'s new-file half (no
+    `current_path` — every caller here is minting a brand new node)."""
+    candidate = folder / f"{sanitized}.md"
+    if not candidate.exists():
+        return candidate
+    i = 2
+    while True:
+        candidate = folder / f"{sanitized} ({i}).md"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
+def _read_front_matter(path: Path) -> tuple[dict[str, Any], str]:
+    """Copy of `ProjectService._read_markdown_with_front_matter`'s lenient
+    (non-strict) half: a file this can't parse reads as `({}, <the raw
+    text>)`, so a caller checking `if not front_matter: continue` skips a
+    hand-broken document rather than taking the whole layer's migration down."""
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        return {}, text
+    _, rest = text.split("---\n", 1)
+    if "\n---\n" not in rest:
+        return {}, text
+    front, body = rest.split("\n---\n", 1)
+    body = body.lstrip("\n")
+    try:
+        data = yaml.safe_load(front) or {}
+    except yaml.YAMLError:
+        return {}, text
+    if not isinstance(data, dict):
+        return {}, text
+    return data, body
+
+
+def _write_front_matter(path: Path, front_matter: dict[str, Any], body: str) -> None:
+    """Copy of `ProjectService._write_markdown_with_front_matter` — the
+    content-transform framing (one `\\n` before the body, whatever the reader
+    handed back), so re-serialising an existing document does not churn its
+    body formatting. `mint_tag_node` below uses the OTHER framing
+    (`_write_node_entry_file`'s, a blank line before the body) because it is
+    authoring a brand new node, not round-tripping one."""
+    front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=True).strip()
+    path.write_text(f"---\n{front_matter_text}\n---\n{body}", encoding="utf-8", newline="\n")
+
+
+def mint_tag_node(folder: Path, title: str, entry_type: str, *, color: str | None = None) -> str:
+    """Write a brand new body-less tag node under `folder` and return its id.
+
+    Front matter mirrors `ProjectService._write_node_entry_file` byte-for-byte
+    (a blank line before the — empty — body): `id`, `title`, `entry_type`,
+    `metadata` (always present, `{}` when there is no color, matching
+    `create_tag_entry`'s own write). Shared by M3 (a machine `tag:assistant_tag`
+    minted from `assistant-tags.yaml`) and the chain step below (a project
+    `tag:tag` minted from `tags.yaml` or an unmapped name met along the way).
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    tag_id = f"tag_{uuid.uuid4().hex[:10]}"
+    front_matter_data: dict[str, Any] = {"id": tag_id, "title": title, "entry_type": entry_type}
+    front_matter_data["metadata"] = {"color": color} if color else {}
+    front_matter_text = yaml.safe_dump(front_matter_data, sort_keys=False, allow_unicode=True).strip()
+    path = _unique_filepath(folder, _sanitize_filename(title))
+    path.write_text(f"---\n{front_matter_text}\n---\n\n", encoding="utf-8", newline="\n")
+    return tag_id
+
+
+def _ensure_tag_id(
+    name: str, folder: Path, name_to_id: dict[str, str], entry_type: str, *, color: str | None = None
+) -> str:
+    """The name→id resolver every conversion below shares: case-insensitive
+    lookup in `name_to_id` first (an ancestor's — or this same run's — mint,
+    first-seen casing wins), else mint a fresh node under `folder` and record
+    it. Returns `""` for a blank name (nothing to mint)."""
+    clean = name.strip()
+    if not clean:
+        return ""
+    key = clean.lower()
+    existing = name_to_id.get(key)
+    if existing:
+        return existing
+    tag_id = mint_tag_node(folder, clean, entry_type, color=color)
+    name_to_id[key] = tag_id
+    return tag_id
+
+
+def _resolve_or_mint_one(item: str, folder: Path, name_to_id: dict[str, str], entry_type: str) -> str:
+    """One list/`tagged:`-adjacent name: pass an already-migrated id through
+    unchanged, else resolve/mint it."""
+    if TAG_ID_PATTERN.match(item):
+        return item
+    return _ensure_tag_id(item, folder, name_to_id, entry_type)
+
+
+def _resolve_name_list(
+    raw: Any, folder: Path, name_to_id: dict[str, str], entry_type: str
+) -> tuple[list[str], bool]:
+    """A `metadata.tags`/`metadata.assistant_tags`/rewritten-input value: a
+    list of names and/or already-migrated ids → a list of ids, minting any
+    unmapped name at `folder`. Non-list input passes through unresolved
+    (`changed=False`) — a hand-edited scalar is left for a human, not guessed
+    at. `changed` is also True when a blank/non-string item is dropped."""
+    if not isinstance(raw, list):
+        return raw, False
+    resolved: list[str] = []
+    changed = False
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            changed = True
+            continue
+        new_item = _resolve_or_mint_one(item.strip(), folder, name_to_id, entry_type)
+        if new_item != item:
+            changed = True
+        if new_item:
+            resolved.append(new_item)
+    return resolved, changed
+
+
+def _read_legacy_tags_yaml(path: Path) -> list[tuple[str, str | None]]:
+    """`tags.yaml`'s own reader (the retired `TagsMixin._read_layer_tags`'
+    precedent, slice 3): `{tags: [...]}`, each item a bare name string or
+    `{name, scope, color}`. `scope` is dropped — a vocabulary's picker
+    constraint now lives on the FIELD (`picker_config`), not per-tag."""
+    if not path.exists():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return []
+    raw = data.get("tags") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return []
+    records: list[tuple[str, str | None]] = []
+    for item in raw:
+        if isinstance(item, str):
+            name = item.strip()
+            if name:
+                records.append((name, None))
+        elif isinstance(item, dict):
+            name = str(item.get("name", "")).strip()
+            if name:
+                color = item.get("color")
+                records.append((name, color if isinstance(color, str) else None))
+    return records
+
+
+def _mint_layer_tags_from_yaml(layer_root: Path, ctx: ChainContext) -> None:
+    """Step 1 (M4): every `tags.yaml` record not already in `ctx.name_to_id`
+    (case-insensitive — a name an ancestor already minted mints nothing here)
+    becomes a `tag:tag` node under `<layer>/tags/`. Renames `tags.yaml` →
+    `tags.yaml.migrated` whenever the file exists, whether or not it had
+    anything to mint — the rename alone is what makes a re-run a no-op."""
+    yaml_path = layer_root / "tags.yaml"
+    for name, color in _read_legacy_tags_yaml(yaml_path):
+        _ensure_tag_id(name, layer_root / "tags", ctx.name_to_id, "tag:tag", color=color)
+    if yaml_path.exists():
+        yaml_path.replace(layer_root / "tags.yaml.migrated")
+
+
+def _convert_document_metadata(
+    front_matter: dict[str, Any], *, kind: str, layer_root: Path, machine_root: Path, ctx: ChainContext
+) -> bool:
+    """Step 2 (M4): a node document's own `metadata.tags`/`metadata.assistant_tags`
+    — `tags` resolves through the general vocabulary (`ctx.name_to_id`, minted
+    at THIS layer); `assistant_tags` through the machine vocabulary
+    (`ctx.machine_names`, minted at the MACHINE `tags/`, since a prompt may
+    name an assistant tag the roster never had). An `assistant` document's old
+    `tags` key (the pre-rename field name) is renamed to `assistant_tags` and
+    resolved through the machine vocabulary too — the same rule M3 applies to
+    the machine roster itself, kept here too in case a project layer ever
+    carries its own `assistants/` folder (`references.NODE_FAMILIES` does not
+    special-case a layer out of that family)."""
+    metadata = front_matter.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    changed = False
+    if kind == "assistant" and "tags" in metadata:
+        raw = metadata.pop("tags")
+        resolved, _ = _resolve_name_list(raw, machine_root / "tags", ctx.machine_names, "tag:assistant_tag")
+        metadata["assistant_tags"] = resolved
+        changed = True
+    else:
+        if "tags" in metadata:
+            resolved, item_changed = _resolve_name_list(
+                metadata["tags"], layer_root / "tags", ctx.name_to_id, "tag:tag"
+            )
+            if item_changed:
+                metadata["tags"] = resolved
+                changed = True
+        if "assistant_tags" in metadata:
+            resolved, item_changed = _resolve_name_list(
+                metadata["assistant_tags"], machine_root / "tags", ctx.machine_names, "tag:assistant_tag"
+            )
+            if item_changed:
+                metadata["assistant_tags"] = resolved
+                changed = True
+    return changed
+
+
+def _convert_override_rows(
+    front_matter: dict[str, Any], *, layer_root: Path, machine_root: Path, ctx: ChainContext
+) -> bool:
+    """Step 2 (M4): an `overrides/*.md` row whose `field` is `tags`/
+    `assistant_tags` carries a comma-joined name list as `value` (the
+    whole-collection `replace`-marker shape `lore_mutations._split_collection_value`
+    reads); resolve each name to an id and rejoin."""
+    rows = front_matter.get("rows")
+    if not isinstance(rows, list):
+        return False
+    changed = False
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        field_name = row.get("field")
+        value = row.get("value")
+        if field_name not in ("tags", "assistant_tags") or not isinstance(value, str):
+            continue
+        names = [item.strip() for item in value.split(",") if item.strip()]
+        if not names:
+            continue
+        if field_name == "tags":
+            ids = [_resolve_or_mint_one(n, layer_root / "tags", ctx.name_to_id, "tag:tag") for n in names]
+        else:
+            ids = [
+                _resolve_or_mint_one(n, machine_root / "tags", ctx.machine_names, "tag:assistant_tag")
+                for n in names
+            ]
+        new_value = ",".join(i for i in ids if i)
+        if new_value != value:
+            row["value"] = new_value
+            changed = True
+    return changed
+
+
+def _convert_view_expr_node(
+    node: Any, ctx: ChainContext, unresolved_log: list[str]
+) -> tuple[Any, bool]:
+    """Step 3 (M4): one recursive walk over a `ViewExpr`-shaped tree (a saved
+    view's `spec`, or a chat selector ref's `selector`) that handles BOTH
+    conversions the tree can carry — `tagged: "<name>"` → `tagged: <id>`
+    (looked up, never minted here: an unresolved name selects nothing under
+    ADR-0036 and is left as-is, logged) and a `field: {key: "tags", ...}`
+    predicate (the assistant view's TAG axis, pre-rename) → `key:
+    "assistant_tags"` — rather than two passes, so `intersect`/`union`/
+    `filter`/... nesting is only walked once."""
+    if isinstance(node, dict):
+        changed = False
+        new_node: dict[str, Any] = {}
+        for key, value in node.items():
+            if key == "tagged" and isinstance(value, str):
+                if TAG_ID_PATTERN.match(value):
+                    new_node[key] = value
+                    continue
+                lookup = value.strip().lower()
+                resolved = ctx.name_to_id.get(lookup) or ctx.machine_names.get(lookup)
+                if resolved:
+                    new_node[key] = resolved
+                    changed = True
+                else:
+                    new_node[key] = value
+                    unresolved_log.append(f"tagged:{value}")
+                continue
+            if key == "field" and isinstance(value, dict) and value.get("key") == "tags":
+                new_field = dict(value)
+                new_field["key"] = "assistant_tags"
+                new_node[key] = new_field
+                changed = True
+                continue
+            child, child_changed = _convert_view_expr_node(value, ctx, unresolved_log)
+            new_node[key] = child
+            changed = changed or child_changed
+        return new_node, changed
+    if isinstance(node, list):
+        new_list = []
+        changed = False
+        for item in node:
+            child, child_changed = _convert_view_expr_node(item, ctx, unresolved_log)
+            new_list.append(child)
+            changed = changed or child_changed
+        return new_list, changed
+    return node, False
+
+
+def _convert_chat_ref(ref: Any, ctx: ChainContext, unresolved_log: list[str]) -> tuple[Any, bool]:
+    """One `NodePickerRef`-shaped dict from a chat's `inputs`: a `tag:<kind>:
+    <name>` id (the pre-migration tag-axis pick, ADR-0082 slice 2b) becomes
+    `tagged:<kind>:<id>`; its `selector` (if any) walks through
+    `_convert_view_expr_node` too. Any other ref (a concrete member pick, or
+    an id that does not match the tag-ref shape) passes through untouched. An
+    unresolvable name leaves the WHOLE ref untouched and logs it — a stale id
+    is safer than a half-converted ref."""
+    if not isinstance(ref, dict):
+        return ref, False
+    ref_id = ref.get("id")
+    if not isinstance(ref_id, str):
+        return ref, False
+    match = _CHAT_TAG_REF_ID.match(ref_id)
+    if not match:
+        return ref, False
+    lookup = match.group("name").strip().lower()
+    resolved = ctx.name_to_id.get(lookup) or ctx.machine_names.get(lookup)
+    if not resolved:
+        unresolved_log.append(ref_id)
+        return ref, False
+    new_ref = dict(ref)
+    new_ref["id"] = f"tagged:{match.group('kind')}:{resolved}"
+    selector = ref.get("selector")
+    if isinstance(selector, dict):
+        new_selector, _ = _convert_view_expr_node(selector, ctx, unresolved_log)
+        new_ref["selector"] = new_selector
+    return new_ref, True
+
+
+def _convert_chat_inputs(front_matter: dict[str, Any], ctx: ChainContext, unresolved_log: list[str]) -> bool:
+    """Step 3 (M4): a chat's `inputs.<name>` value is the picker codec's wire
+    shape (`promptInputs.ts`'s `encodePickerValue`) — a JSON-encoded STRING
+    array, or (a persisted older seed) an already-decoded array. Either way,
+    re-encode in the SAME shape it was found in."""
+    inputs = front_matter.get("inputs")
+    if not isinstance(inputs, dict):
+        return False
+    changed = False
+    for key, raw_value in list(inputs.items()):
+        was_string = isinstance(raw_value, str)
+        if was_string:
+            if not raw_value.strip():
+                continue
+            try:
+                parsed = json.loads(raw_value)
+            except (ValueError, TypeError):
+                continue
+        elif isinstance(raw_value, list):
+            parsed = raw_value
+        else:
+            continue
+        if not isinstance(parsed, list):
+            continue
+        new_list = []
+        value_changed = False
+        for item in parsed:
+            new_item, item_changed = _convert_chat_ref(item, ctx, unresolved_log)
+            new_list.append(new_item)
+            value_changed = value_changed or item_changed
+        if value_changed:
+            inputs[key] = json.dumps(new_list) if was_string else new_list
+            changed = True
+    return changed
+
+
+def _convert_prompt_input_defs(input_defs: Any) -> bool:
+    """Step 3 tail (M4): a `PromptInputDefinition`-shaped list (a prompt's own
+    `inputs`, or an entry type's `default_inputs`) — any `type: "tags"` item
+    becomes `entity_ref_list` with a `target` carrying the tag-picker shape."""
+    if not isinstance(input_defs, list):
+        return False
+    changed = False
+    for item in input_defs:
+        if isinstance(item, dict) and item.get("type") == "tags":
+            item["type"] = "entity_ref_list"
+            item["target"] = dict(_TAG_PICKER_SHAPE)
+            changed = True
+    return changed
+
+
+def _convert_schema_field_def(field_def: dict[str, Any]) -> None:
+    """A `MetadataFieldDefinition`/`GroupMember`-shaped dict, mutated in
+    place: `type: "tags"` → `entity_ref_list` with the tag-picker
+    `picker_config`."""
+    field_def["type"] = "entity_ref_list"
+    field_def["picker_config"] = dict(_TAG_PICKER_SHAPE)
+
+
+def _convert_member_list_tags_type(members: Any) -> bool:
+    """A `list[GroupMember]`-shaped value (a field's own `item_members`, or a
+    reusable group's `members`): convert any `type: "tags"` entry in place."""
+    if not isinstance(members, list):
+        return False
+    changed = False
+    for member in members:
+        if isinstance(member, dict) and member.get("type") == "tags":
+            _convert_schema_field_def(member)
+            changed = True
+    return changed
+
+
+def _convert_schema_fields_tags_type(fields: Any) -> bool:
+    """The top-level `fields:` map: each field's own `type`, plus its
+    `item_members` (ADR-0081's nested list-item shape)."""
+    if not isinstance(fields, dict):
+        return False
+    changed = False
+    for field_def in fields.values():
+        if not isinstance(field_def, dict):
+            continue
+        if field_def.get("type") == "tags":
+            _convert_schema_field_def(field_def)
+            changed = True
+        if _convert_member_list_tags_type(field_def.get("item_members")):
+            changed = True
+    return changed
+
+
+def _convert_schema_groups_tags_type(groups: Any) -> bool:
+    """The `groups:` map of reusable L2 group definitions: each one's `members`."""
+    if not isinstance(groups, dict):
+        return False
+    changed = False
+    for group_def in groups.values():
+        if isinstance(group_def, dict) and _convert_member_list_tags_type(group_def.get("members")):
+            changed = True
+    return changed
+
+
+def _convert_schema_entry_types_tags_type(entry_types: Any) -> bool:
+    """The `entry_types:` map: each type's `default_inputs` (the prompt-input
+    twin of a field-def conversion, `_convert_prompt_input_defs`)."""
+    if not isinstance(entry_types, dict):
+        return False
+    changed = False
+    for entry_type_def in entry_types.values():
+        if isinstance(entry_type_def, dict) and _convert_prompt_input_defs(
+            entry_type_def.get("default_inputs")
+        ):
+            changed = True
+    return changed
+
+
+def _migrate_schema_tags_type(schema_path: Path) -> None:
+    """Step 4 (M4): `metadata.schema.yaml` at this layer — `type: "tags"`
+    everywhere it can appear (a field, a field's list-item members, a
+    reusable group's members, a type's seeded `default_inputs`). A no-op file
+    (nothing to convert, or no file at all) is left untouched — no rewrite
+    churn."""
+    if not schema_path.exists():
+        return
+    try:
+        data = yaml.safe_load(schema_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return
+    if not isinstance(data, dict):
+        return
+    # A list literal, not a generator/tuple passed straight to `any()`: every
+    # branch must actually RUN (each converts a different part of the tree),
+    # so this must not short-circuit on the first True the way `any()` over a
+    # lazily-evaluated argument would.
+    results = [
+        _convert_schema_fields_tags_type(data.get("fields")),
+        _convert_schema_groups_tags_type(data.get("groups")),
+        _convert_schema_entry_types_tags_type(data.get("entry_types")),
+    ]
+    changed = any(results)
+    if changed:
+        schema_path.write_text(
+            yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8", newline="\n"
+        )
+
+
+def _migrate_one_node_document(
+    path: Path, *, kind: str, layer_root: Path, machine_root: Path, ctx: ChainContext, unresolved_log: list[str]
+) -> None:
+    """Steps 2+3 (M4) for ONE already-collected node document: the generic
+    `metadata.tags`/`metadata.assistant_tags` conversion, plus whatever
+    kind-specific tree a view/chat/prompt also carries a tag reference in.
+    Writes back only when something actually changed."""
+    front_matter, body = _read_front_matter(path)
+    if not front_matter:
+        return
+    changed = _convert_document_metadata(
+        front_matter, kind=kind, layer_root=layer_root, machine_root=machine_root, ctx=ctx
+    )
+    if kind == "view":
+        spec = front_matter.get("spec")
+        if isinstance(spec, dict):
+            new_spec, spec_changed = _convert_view_expr_node(spec, ctx, unresolved_log)
+            if spec_changed:
+                front_matter["spec"] = new_spec
+                changed = True
+    if kind == "chat" and _convert_chat_inputs(front_matter, ctx, unresolved_log):
+        changed = True
+    if kind == "prompt" and _convert_prompt_input_defs(front_matter.get("inputs")):
+        changed = True
+    if changed:
+        _write_front_matter(path, front_matter, body)
+
+
+def _migrate_one_override(path: Path, *, layer_root: Path, machine_root: Path, ctx: ChainContext) -> None:
+    """Step 2 (M4) for one `overrides/*.md` file — its `rows[].value` where
+    `field` is `tags`/`assistant_tags`."""
+    front_matter, body = _read_front_matter(path)
+    if not front_matter:
+        return
+    if _convert_override_rows(front_matter, layer_root=layer_root, machine_root=machine_root, ctx=ctx):
+        _write_front_matter(path, front_matter, body)
+
+
+def _migrate_layer_tags(root: Path, ctx: ChainContext) -> None:
+    """v9→v10 (ADR-0082 slice 4, #1785): convert ONE layer's own on-disk
+    `tags` value-type shapes into the node model. `root` is that layer's own
+    folder — an ancestor being migrated ahead of the open project, or the
+    open project itself; `ctx` is the running chain-wide context (mutated in
+    place, so a later layer sees an earlier one's mints)."""
+    from app.services import machine_settings as ms_service
+    from app.services.project.overrides import OVERRIDES_FOLDER
+    from app.services.project.references import NODE_FAMILIES
+
+    machine_root = ms_service.config_path().parent
+    unresolved: list[str] = []
+
+    _mint_layer_tags_from_yaml(root, ctx)
+
+    for family in NODE_FAMILIES:
+        folder = root / family.folder_name
+        if not folder.exists():
+            continue
+        for path in sorted(folder.glob("*.md")):
+            _migrate_one_node_document(
+                path,
+                kind=family.kind,
+                layer_root=root,
+                machine_root=machine_root,
+                ctx=ctx,
+                unresolved_log=unresolved,
+            )
+
+    overrides_folder = root / OVERRIDES_FOLDER
+    if overrides_folder.exists():
+        for path in sorted(overrides_folder.glob("*.md")):
+            _migrate_one_override(path, layer_root=root, machine_root=machine_root, ctx=ctx)
+
+    _migrate_schema_tags_type(root / "metadata.schema.yaml")
+
+    if unresolved:
+        logger.warning(
+            "v10 tag migration at %s: %d unresolved tag reference(s) left as-is: %s",
+            root,
+            len(unresolved),
+            ", ".join(sorted(set(unresolved))),
+        )
+
+
 # Migrations run in registry order. Version numbers are history and are never
 # reused or renumbered, so a retired step leaves a gap. Two gaps now: 3 (create
 # project.md) was removed with #343 — it wrote a constant `id: project`, which
@@ -262,6 +906,12 @@ MIGRATIONS: list[MigrationStep] = [
         9,
         "move the ai_invocations ledger from a YAML list to an append-only CSV (#1801)",
         _migrate_invocations_to_csv,
+    ),
+    ChainMigration(
+        10,
+        "convert tags.yaml + tags/assistant_tags occurrences into tag-kind node "
+        "references, per declared chain layer (ADR-0082 slice 4, #1785)",
+        _migrate_layer_tags,
     ),
 ]
 

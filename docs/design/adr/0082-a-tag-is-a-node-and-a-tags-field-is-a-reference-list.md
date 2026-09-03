@@ -1,6 +1,6 @@
 # ADR-0082: A tag is a node, and a tags field is a reference list into a vocabulary
 
-- **Status:** Draft — awaiting review
+- **Status:** Accepted (2026-09-03, Anton, PR #1779)
 - **Date:** 2026-09-03
 - **Issue:** #1778
 - **Relates to:** ADR-0081 (references at any depth), ADR-0078 (promotion), ADR-0045 (scope is

@@ -316,9 +316,12 @@
          `entity_ref_list` share one vocabulary, differing only in how many pills
          show; the empty state is the picker's own add trigger, so an empty field
          reads as a slot a reference goes into. The section is a flex-wrap row
-         (see .controlled): inline and right-aligned for a single ref, stretched
-         to a full-width wrapping line for a list (the rail's `.fr-val.wide`
-         stretch), pills at natural width either way. -->
+         (see .controlled): inline and right-aligned when compact, stretched to a
+         full-width wrapping line when the rail marks the row `.fr-val.wide`
+         (#1810: MetadataPanel only does that for a list once it actually HOLDS
+         pills — an empty list stays compact, the add trigger right-aligned like
+         a single ref's, not stretched into its own left-aligned row), pills at
+         natural width either way. -->
     {#each refNodes as ref (ref.id)}
       {@render refPill(ref)}
     {/each}

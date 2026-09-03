@@ -37,6 +37,11 @@ from app.services.ai.entry_patch import (
 from app.services.color_snap import nearest_swatch_id
 from app.services.machine_settings import palette as machine_palette
 from app.services.project.errors import ProjectServiceError
+from app.services.project.metadata_refs import (
+    UNCHANGED,
+    RefOccurrence,
+    rewrite_ref_occurrences,
+)
 from app.services.project.node_index import NodeIndex, NodeIndexEntry
 from app.services.project.references import REFERENCE_BEARING_KINDS
 
@@ -639,18 +644,23 @@ class MetadataValuesMixin:
         file still carries the stale ID until the user next saves the
         entry, at which point the cleaned metadata is written back.
         """
-        cleaned = dict(metadata)
-        for field_id, value in metadata.items():
-            field = schema.fields.get(field_id)
-            if not field:
-                continue
-            if field.type == "entity_ref":
-                if value not in (None, "") and not self._ref_matches_picker(value, field, node_index):
-                    cleaned[field_id] = ""
-            elif field.type == "entity_ref_list" and isinstance(value, list):
-                filtered = [item for item in value if self._ref_matches_picker(item, field, node_index)]
-                if len(filtered) != len(value):
-                    cleaned[field_id] = filtered
+        # One traversal reaches every ref occurrence — top-level or inside an
+        # item_group member (ADR-0081); `occ.field` is the member-as-field, so its
+        # picker config constrains a nested ref exactly as a top-level one. A
+        # non-ref (tags) occurrence is left untouched.
+        def _heal(occ: RefOccurrence) -> Any:
+            if occ.field.type == "entity_ref":
+                if occ.value not in (None, "") and not self._ref_matches_picker(
+                    occ.value, occ.field, node_index
+                ):
+                    return ""
+                return UNCHANGED
+            if occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
+                filtered = [i for i in occ.value if self._ref_matches_picker(i, occ.field, node_index)]
+                return filtered if len(filtered) != len(occ.value) else UNCHANGED
+            return UNCHANGED
+
+        cleaned, _ = rewrite_ref_occurrences(metadata, schema, _heal)
         return cleaned
 
     def _ref_matches_picker(
@@ -683,22 +693,19 @@ class MetadataValuesMixin:
         value pointing at one of ``purge_ids`` removed, plus a flag for
         whether anything changed.
         """
-        cleaned = dict(metadata)
-        changed = False
-        for field_id, value in metadata.items():
-            field = schema.fields.get(field_id)
-            if not field:
-                continue
-            if field.type == "entity_ref":
-                if isinstance(value, str) and value in purge_ids:
-                    cleaned[field_id] = ""
-                    changed = True
-            elif field.type == "entity_ref_list" and isinstance(value, list):
-                filtered = [item for item in value if not (isinstance(item, str) and item in purge_ids)]
-                if len(filtered) != len(value):
-                    cleaned[field_id] = filtered
-                    changed = True
-        return cleaned, changed
+        # Same one traversal as the read-side heal — a deleted target's id is
+        # scrubbed wherever it lives, top-level or inside an item_group member
+        # (ADR-0081). This is the pass that closes the silent mis-link: a nested
+        # ref to a deleted node would otherwise never be rewritten. tags untouched.
+        def _purge(occ: RefOccurrence) -> Any:
+            if occ.field.type == "entity_ref":
+                return "" if (isinstance(occ.value, str) and occ.value in purge_ids) else UNCHANGED
+            if occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
+                filtered = [i for i in occ.value if not (isinstance(i, str) and i in purge_ids)]
+                return filtered if len(filtered) != len(occ.value) else UNCHANGED
+            return UNCHANGED
+
+        return rewrite_ref_occurrences(metadata, schema, _purge)
 
     def _ids_safe_to_purge(self, purge_ids: set[str], index: NodeIndex, root: Path) -> set[str]:
         """Which of `purge_ids` may have their references destroyed (#379).

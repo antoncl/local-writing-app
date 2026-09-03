@@ -417,7 +417,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "ai_max_tokens",
                 "ai_thinking",
                 "summary",
-                "tags",
+                "assistant_tags",
                 "color",
                 "listed",
                 "position",
@@ -792,12 +792,17 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "multi_select",
         },
         "tags": {
+            # ADR-0082 §2: an ordinary entity_ref_list into the general tag
+            # vocabulary (kind `tag`, entry type `tag:tag`), not the retired
+            # `tags` value type. `create_missing` lets a typed name that
+            # resolves to nothing mint a new tag node at the save's write layer.
             "name": "Tags",
             "description": (
-                "Free-form labels for grouping and filtering entries. For your own "
+                "Labels for grouping and filtering entries. For your own "
                 "organization and Views; never shown to the reader."
             ),
-            "type": "tags",
+            "type": "entity_ref_list",
+            "picker_config": {"sources": [{"kind": "tag", "expr": {"type": "tag:tag"}}], "create_missing": True},
         },
         "context_policy": {
             # How the AI-context layers treat this entry. Values:
@@ -1226,9 +1231,18 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         # A prompt's soft assistant scope (ADR-0024): the picker surfaces
         # assistants carrying any of these tags first, and the dynamic default
-        # is the topmost matching one. A degenerate `tagged:` source over
-        # kind:assistant, expressed with the existing tags widget/infra.
-        "assistant_tags": {"name": "Preferred assistant tags", "type": "tags"},
+        # is the topmost matching one. ADR-0082 §2: an entity_ref_list into the
+        # assistant-tag vocabulary (kind `tag`, entry type `tag:assistant_tag`),
+        # shared with `assistant:assistant`'s own (renamed) field of the same id
+        # — one field definition, one vocabulary, referenced by both kinds.
+        "assistant_tags": {
+            "name": "Preferred assistant tags",
+            "type": "entity_ref_list",
+            "picker_config": {
+                "sources": [{"kind": "tag", "expr": {"type": "tag:assistant_tag"}}],
+                "create_missing": True,
+            },
+        },
         # A prompt's DISPOSITION and standalone-runnability (#951/#1433/#1684),
         # derived at read from the entry's own `context_strategy.output` —
         # rationale, mapping, and the shelf-order/option-order contract live in

@@ -47,6 +47,9 @@
     documentKind?: string;
     entryType?: string;
     excludeId?: string | null;
+    // ADR-0082 §2/F2: forwarded to a member's ReferencePicker verbatim — the
+    // layer a `create_missing` tag member mints at. See ReferencePicker.
+    createLayerId?: string | null;
   }
 
   let {
@@ -64,6 +67,7 @@
     documentKind = "manuscript",
     entryType = "",
     excludeId = null,
+    createLayerId = null,
   }: Props = $props();
 
   const members = $derived(field.item_members ?? []);
@@ -260,6 +264,7 @@
                     {documentKind}
                     {entryType}
                     {excludeId}
+                    {createLayerId}
                   />
                 </div>
               </div>
@@ -285,6 +290,7 @@
               {documentKind}
               {entryType}
               {excludeId}
+              {createLayerId}
             />
           </div>
           {@render removeButton(index)}

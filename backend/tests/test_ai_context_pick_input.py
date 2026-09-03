@@ -384,7 +384,11 @@ def test_tag_selector_pick_materializes_to_tagged_lore_end_to_end(tmp_path, monk
         "app.services.machine_settings.config_path",
         lambda: tmp_path / "machine_settings.yaml",
     )
-    from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+    from app.models import (
+        CreateLoreEntryRequest,
+        CreateTagEntryRequest,
+        SaveLoreEntryRequest,
+    )
     from app.services.ai.preview import PreviewRequest, build_preview
     from app.services.project_service import ProjectService
 
@@ -403,24 +407,33 @@ def test_tag_selector_pick_materializes_to_tagged_lore_end_to_end(tmp_path, monk
             ),
         )
 
+    # ADR-0082 §2: `tags` is an entity_ref_list of tag-node ids now — real
+    # tags, not free-text names. `tagged:` by id is a later slice (the
+    # selector still matches literal stored values, so pointing it at the
+    # same id the field carries keeps this end-to-end, unchanged mechanism).
+    world_building = service.create_tag_entry(
+        CreateTagEntryRequest(title="World-building", entry_type="tag:tag")
+    ).id
+    real_world = service.create_tag_entry(CreateTagEntryRequest(title="Real-world", entry_type="tag:tag")).id
+
     # Two match the tag AND a type in the union; one has the wrong tag; one is
     # tagged but a type outside the union. Roster order = title-sorted.
-    hit_note = make("Aetheria", "lore:note", ["World-building"])
-    hit_loc = make("Boundary", "lore:location", ["World-building"])
-    make("Cassini", "lore:note", ["Real-world"])  # wrong tag
-    make("Delta", "lore:character", ["World-building"])  # tagged, type not in union
+    hit_note = make("Aetheria", "lore:note", [world_building])
+    hit_loc = make("Boundary", "lore:location", [world_building])
+    make("Cassini", "lore:note", [real_world])  # wrong tag
+    make("Delta", "lore:character", [world_building])  # tagged, type not in union
 
     picks = json.dumps(
         [
             {
-                "id": "tag:lore:World-building",
+                "id": f"tag:lore:{world_building}",
                 "kind": "tag",
                 "title": "World-building",
                 "selector": {
                     "kind": "lore",
                     "expr": {
                         "intersect": [
-                            {"tagged": "World-building"},
+                            {"tagged": world_building},
                             {"union": [{"type": "lore:note"}, {"type": "lore:location"}]},
                         ]
                     },
@@ -464,7 +477,11 @@ def test_tag_pick_lore_reaches_the_send_lore_tiers_end_to_end(tmp_path, monkeypa
         "app.services.machine_settings.config_path",
         lambda: tmp_path / "machine_settings.yaml",
     )
-    from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+    from app.models import (
+        CreateLoreEntryRequest,
+        CreateTagEntryRequest,
+        SaveLoreEntryRequest,
+    )
     from app.services.ai.preview import PreviewRequest, build_preview
     from app.services.project_service import ProjectService
 
@@ -483,20 +500,27 @@ def test_tag_pick_lore_reaches_the_send_lore_tiers_end_to_end(tmp_path, monkeypa
             ),
         )
 
-    hit = make("Aetheria", "lore:note", ["World-building"])
-    make("Cassini", "lore:note", ["Real-world"])  # wrong tag — must NOT appear
+    # ADR-0082 §2: `tags` is an entity_ref_list of tag-node ids now — see the
+    # sibling test above for why `tagged:` matches the id unchanged.
+    world_building = service.create_tag_entry(
+        CreateTagEntryRequest(title="World-building", entry_type="tag:tag")
+    ).id
+    real_world = service.create_tag_entry(CreateTagEntryRequest(title="Real-world", entry_type="tag:tag")).id
+
+    hit = make("Aetheria", "lore:note", [world_building])
+    make("Cassini", "lore:note", [real_world])  # wrong tag — must NOT appear
 
     picks = json.dumps(
         [
             {
-                "id": "tag:lore:World-building",
+                "id": f"tag:lore:{world_building}",
                 "kind": "tag",
                 "title": "World-building",
                 "selector": {
                     "kind": "lore",
                     "expr": {
                         "intersect": [
-                            {"tagged": "World-building"},
+                            {"tagged": world_building},
                             {"union": [{"type": "lore:note"}]},
                         ]
                     },

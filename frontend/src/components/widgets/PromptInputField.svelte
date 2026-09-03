@@ -196,6 +196,7 @@
     loreEntries={loreEntries}
     promptEntries={promptEntries}
     onChange={(value) => onChange(encodeRefValue(value))}
+    createLayerId={null}
   />
 {:else if input.type === "context_pick"}
   <NodePicker
@@ -222,6 +223,7 @@
     tagOrigin="assistant"
     implicitContextMatcher={implicitContextMatcher}
     onChange={(v) => onChange(encodeFieldValue(v))}
+    createLayerId={null}
   />
 {:else}
   <input

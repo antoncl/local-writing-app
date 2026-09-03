@@ -12,7 +12,8 @@ import { render, screen, fireEvent } from "@/lib/test/component";
 import Lore from "./Lore.svelte";
 import { defaultView } from "@/lib/views/evaluateView";
 import { metadataSchemaStore } from "@/lib/stores/schema";
-import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
+import { clearTagNodes, tagNodesStore } from "@/lib/stores/tagNodes";
+import type { LoreEntrySummary, MetadataSchema, TagEntry } from "@/lib/types";
 
 // The lore default view resolves the roster to `descendants_of lore:base`, so
 // the concrete sub-type must descend from that root or evaluateView yields
@@ -40,6 +41,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   metadataSchemaStore.set(null as unknown as MetadataSchema);
+  clearTagNodes();
 });
 
 describe("Lore pane — default view (#642)", () => {
@@ -95,5 +97,17 @@ describe("Lore pane — # tag search (#1468)", () => {
     expect(screen.getByText("Aragorn")).toBeInTheDocument();
     expect(screen.getByText("Boromir")).toBeInTheDocument();
     expect(screen.queryByText("Gollum")).toBeNull();
+  });
+
+  it("ADR-0082 §2: #tag matches by the resolved TITLE, not the stored id", async () => {
+    tagNodesStore.set([{ id: "tag_x", title: "Coastal", entry_type: "tag:tag", metadata: {} } as TagEntry]);
+    const withIdTag = [tagged("l-d", "Faramir", "captain of the rangers", ["tag_x"])];
+    const { container } = render(Lore, {
+      props: { entries: withIdTag, viewSpec: defaultView("lore", SCHEMA), onOpenEntry: noop },
+    });
+    await typeSearch(container, "#coastal");
+    expect(screen.getByText("Faramir")).toBeInTheDocument();
+    await typeSearch(container, "#tag_x");
+    expect(screen.queryByText("Faramir")).toBeNull();
   });
 });

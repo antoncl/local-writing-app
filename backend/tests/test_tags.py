@@ -80,9 +80,29 @@ class LayeredTagsTests(unittest.TestCase):
         (folder / "lore").mkdir(parents=True, exist_ok=True)
         self.service._write_markdown_with_front_matter(
             folder / "lore" / f"{node_id}.md",
-            {"id": node_id, "title": node_id, "entry_type": "lore:character", "metadata": {"tags": tags}},
+            {"id": node_id, "title": node_id, "entry_type": "lore:character", "metadata": {"labels": tags}},
             "Body.",
         )
+
+    def _seed_tags_field(self, *entry_types: str) -> None:
+        """ADR-0082 §2 retired the built-in `tags` field's TYPE (it's an
+        `entity_ref_list` into the `tag` kind now, not free-text) — so a test
+        exercising the tags-TYPE registry mechanism (TagsMixin, dead code until
+        a later slice) needs its OWN field of that type, same recipe
+        `_seed_tags_group_field` already uses for the nested case. `labels`
+        applies to whichever entry types the test needs."""
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["labels"] = {"name": "Labels", "type": "tags"}
+        for entry_type in entry_types:
+            local_name = entry_type.split(":", 1)[1]
+            kind = entry_type.split(":", 1)[0]
+            et = data.setdefault("entry_types", {}).setdefault(
+                entry_type, {"name": local_name.title(), "kind": kind, "fields": []}
+            )
+            if "labels" not in et.setdefault("fields", []):
+                et["fields"].append("labels")
+        self.service._write_yaml(schema_path, data)
 
     # --- read ----------------------------------------------------------
 
@@ -159,6 +179,7 @@ class LayeredTagsTests(unittest.TestCase):
         # writer reads merged and rewrites a whole file; hand one the merged map
         # and the next ordinary lore save silently absorbs the world's whole
         # vocabulary into this book's tags.yaml.
+        self._seed_tags_field("lore:character")
         self._write_layer_tags(self.universe, [{"name": "treecat", "scope": {}}])
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Honor", entry_type="lore:character"))
 
@@ -169,7 +190,7 @@ class LayeredTagsTests(unittest.TestCase):
                 body="A captain.",
                 base_revision=entry.revision,
                 entry_type="lore:character",
-                metadata={"tags": ["grayson"]},
+                metadata={"labels": ["grayson"]},
             ),
         )
 
@@ -243,6 +264,7 @@ class LayeredTagsTests(unittest.TestCase):
         # broadening it triggers is recorded HERE as this layer's assertion, and
         # the ancestor's record is not touched. Union is associative, so the
         # merged read still reports the broadened scope.
+        self._seed_tags_field("lore:location")
         self._write_layer_tags(self.universe, [{"name": "naval", "scope": _scope("lore", "lore:character")}])
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Basilisk", entry_type="lore:location"))
 
@@ -253,7 +275,7 @@ class LayeredTagsTests(unittest.TestCase):
                 body="A station.",
                 base_revision=entry.revision,
                 entry_type="lore:location",
-                metadata={"tags": ["naval"]},
+                metadata={"labels": ["naval"]},
             ),
         )
 
@@ -272,6 +294,7 @@ class LayeredTagsTests(unittest.TestCase):
         # The bug this issue was filed for: an inherited tag used to be unknown
         # here, so it was registered as new and the author's casing forked the
         # vocabulary. Layering the read fixes it at the same call site.
+        self._seed_tags_field("lore:character")
         self._write_layer_tags(self.universe, [{"name": "Treecat", "scope": {}}])
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character"))
 
@@ -282,11 +305,11 @@ class LayeredTagsTests(unittest.TestCase):
                 body="A treecat.",
                 base_revision=entry.revision,
                 entry_type="lore:character",
-                metadata={"tags": ["treecat"]},
+                metadata={"labels": ["treecat"]},
             ),
         )
 
-        self.assertEqual(saved.metadata["tags"], ["Treecat"])
+        self.assertEqual(saved.metadata["labels"], ["Treecat"])
 
     # --- bounded writers ------------------------------------------------
 
@@ -368,6 +391,7 @@ class LayeredTagsTests(unittest.TestCase):
         # this merge cannot rewrite. Allowing it would leave the merged-away tag
         # in the (layered) usage count with no registry record anywhere, to be
         # re-registered as new by the next save touching that entry.
+        self._seed_tags_field("lore:character")
         self._write_layer_tags(self.root, [{"name": "sorcery", "scope": {}}, {"name": "magic", "scope": {}}])
         self._write_ancestor_lore(self.universe, "old-entry", ["sorcery"])
 
@@ -418,6 +442,7 @@ class LayeredTagsTests(unittest.TestCase):
         # A merged registry counted over one layer's documents is a half-layered
         # read: it looks right and reports every inherited tag as less used than
         # it is.
+        self._seed_tags_field("lore:character")
         self._write_layer_tags(self.universe, [{"name": "treecat", "scope": {}}])
         self._write_ancestor_lore(self.universe, "nimitz", ["treecat"])
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Samantha", entry_type="lore:character"))
@@ -428,7 +453,7 @@ class LayeredTagsTests(unittest.TestCase):
                 body="Another treecat.",
                 base_revision=entry.revision,
                 entry_type="lore:character",
-                metadata={"tags": ["treecat"]},
+                metadata={"labels": ["treecat"]},
             ),
         )
 
@@ -531,6 +556,7 @@ class LayeredTagsTests(unittest.TestCase):
         # The write-back that matters most: a coloured tag applied to a NEW
         # sub-type auto-broadens on a normal save; that rebuild must carry the
         # colour, or routine writing silently wipes it.
+        self._seed_tags_field("lore:location")
         self._write_layer_tags(
             self.root, [{"name": "hero", "scope": _scope("lore", "lore:character"), "color": "forest"}]
         )
@@ -542,7 +568,7 @@ class LayeredTagsTests(unittest.TestCase):
                 body="A place.",
                 base_revision=entry.revision,
                 entry_type="lore:location",
-                metadata={"tags": ["hero"]},
+                metadata={"labels": ["hero"]},
             ),
         )
 

@@ -9,6 +9,7 @@ from app.models import (
     CreateLoreEntryRequest,
     CreatePromptEntryRequest,
     CreateSceneRequest,
+    CreateTagEntryRequest,
     DeleteMetadataEntryTypeRequest,
     EntryTypeDefinition,
     MetadataFieldDefinition,
@@ -54,7 +55,11 @@ class LoreAndPromptTests(MetadataValidationBase):
             ["role", "pronouns", "home_place", "character_cost"],
         )
         self.assertEqual(schema.fields["aliases"].type, "multi_select")
-        self.assertEqual(schema.fields["tags"].type, "tags")
+        # ADR-0082 §2: `tags` is an entity_ref_list into the tag vocabulary now
+        # (kind `tag`, entry_type `tag:tag`), not the retired-for-built-ins
+        # `tags` value type.
+        self.assertEqual(schema.fields["tags"].type, "entity_ref_list")
+        self.assertEqual(schema.fields["tags"].picker_config.create_missing, True)
         self.assertEqual(schema.fields["related_entries"].type, "entity_ref_list")
         self.assertEqual(schema.fields["related_entries"].picker_config.kinds, ["lore"])
         self.assertEqual(schema.fields["related_entries"].picker_config.entry_types, {})
@@ -186,6 +191,11 @@ class LoreAndPromptTests(MetadataValidationBase):
         entry = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="The Pact", entry_type="lore:faction")
         )
+        # ADR-0082 §2: `tags` is an entity_ref_list of tag-node ids now — a real
+        # tag, not a free-text name.
+        tag_id = self.service.create_tag_entry(
+            CreateTagEntryRequest(title="Politics", entry_type="tag:tag")
+        ).id
         saved = self.service.save_lore_entry(
             entry.id,
             SaveLoreEntryRequest(
@@ -193,12 +203,12 @@ class LoreAndPromptTests(MetadataValidationBase):
                 body="A secret faction.",
                 base_revision=entry.revision,
                 entry_type="lore:faction",
-                metadata={"tags": ["Politics"]},
+                metadata={"tags": [tag_id]},
             ),
         )
 
         self.assertEqual(saved.entry_type, "lore:faction")
-        self.assertEqual(saved.metadata["tags"], ["Politics"])
+        self.assertEqual(saved.metadata["tags"], [tag_id])
 
     def test_entry_type_icon_inherits_like_color(self) -> None:
         """A type-level `icon` inherits down the parent chain (child wins),
@@ -308,6 +318,8 @@ class LoreAndPromptTests(MetadataValidationBase):
             CreateLoreEntryRequest(title="Taverna", entry_type="lore:location")
         )
 
+        # ADR-0082 §2: `tags` is an entity_ref_list of tag-node ids now.
+        crew_tag = self.service.create_tag_entry(CreateTagEntryRequest(title="crew", entry_type="tag:tag")).id
         saved = self.service.save_lore_entry(
             entry.id,
             SaveLoreEntryRequest(
@@ -317,7 +329,7 @@ class LoreAndPromptTests(MetadataValidationBase):
                 entry_type="lore:character",
                 metadata={
                     "aliases": ["Ren"],
-                    "tags": ["crew"],
+                    "tags": [crew_tag],
                     "home_place": place.id,
                     "related_entries": [place.id],
                 },
@@ -326,7 +338,7 @@ class LoreAndPromptTests(MetadataValidationBase):
 
         self.assertEqual(saved.entry_type, "lore:character")
         self.assertEqual(saved.metadata["aliases"], ["Ren"])
-        self.assertEqual(saved.metadata["tags"], ["crew"])
+        self.assertEqual(saved.metadata["tags"], [crew_tag])
         self.assertFalse(hasattr(saved, "status"))
         listed_entry = self.service.list_lore_entries().entries[0]
         self.assertEqual(listed_entry.title, "Seren")
@@ -507,7 +519,7 @@ class LoreAndPromptTests(MetadataValidationBase):
                 body="Keeps the ember map.",
                 base_revision=entry.revision,
                 entry_type="lore:character",
-                metadata={"tags": ["Navigator"]},
+                metadata={},
             ),
         )
 
@@ -516,7 +528,24 @@ class LoreAndPromptTests(MetadataValidationBase):
         self.assertEqual(result.hits[0].kind, "lore")
         self.assertEqual(result.hits[0].file_id, entry.id)
 
+    def _seed_tags_type_field(self) -> None:
+        """ADR-0082 §2 retired the built-in `tags` field's TYPE (it's an
+        `entity_ref_list` into the `tag` kind now, not free-text) — so a test
+        exercising the tags-TYPE registry mechanism (TagsMixin, dead code
+        until a later slice) needs its own field of that type, same recipe
+        `test_tags.py`'s `_seed_tags_field` uses."""
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["labels"] = {"name": "Labels", "type": "tags"}
+        et = data.setdefault("entry_types", {}).setdefault(
+            "lore:character", {"name": "Character", "kind": "lore", "fields": []}
+        )
+        if "labels" not in et.setdefault("fields", []):
+            et["fields"].append("labels")
+        self.service._write_yaml(schema_path, data)
+
     def test_tag_registry_canonicalizes_lore_tags_case_insensitively(self) -> None:
+        self._seed_tags_type_field()
         self.service._write_yaml(self.root / "tags.yaml", {"tags": ["Crew"]})
         entry = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
@@ -529,20 +558,21 @@ class LoreAndPromptTests(MetadataValidationBase):
                 body=entry.body,
                 base_revision=entry.revision,
                 entry_type="lore:character",
-                metadata={"tags": ["crew", "ALLY", "ally"]},
+                metadata={"labels": ["crew", "ALLY", "ally"]},
             ),
         )
 
-        self.assertEqual(saved.metadata["tags"], ["Crew", "ALLY"])
+        self.assertEqual(saved.metadata["labels"], ["Crew", "ALLY"])
         self.assertEqual(
             [tag.name for tag in self.service.read_known_tags().tags], ["ALLY", "Crew"]
         )
         front_matter, _ = self.service._read_markdown_with_front_matter(
             self.service._path_for_node_id(entry.id, "lore"), strict=True
         )
-        self.assertEqual(front_matter["metadata"]["tags"], ["Crew", "ALLY"])
+        self.assertEqual(front_matter["metadata"]["labels"], ["Crew", "ALLY"])
 
     def test_aliases_do_not_populate_known_tags(self) -> None:
+        self._seed_tags_type_field()
         self.service._write_yaml(self.root / "tags.yaml", {"tags": ["Crew"]})
         entry = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Robert Smith", entry_type="lore:character")
@@ -555,12 +585,12 @@ class LoreAndPromptTests(MetadataValidationBase):
                 body=entry.body,
                 base_revision=entry.revision,
                 entry_type="lore:character",
-                metadata={"aliases": ["Mr. Smith", "Bob"], "tags": ["crew"]},
+                metadata={"aliases": ["Mr. Smith", "Bob"], "labels": ["crew"]},
             ),
         )
 
         self.assertEqual(saved.metadata["aliases"], ["Mr. Smith", "Bob"])
-        self.assertEqual(saved.metadata["tags"], ["Crew"])
+        self.assertEqual(saved.metadata["labels"], ["Crew"])
         self.assertEqual(
             [tag.name for tag in self.service.read_known_tags().tags], ["Crew"]
         )

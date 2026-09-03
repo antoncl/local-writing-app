@@ -18,6 +18,11 @@
     hasAnyConfigured: boolean;
     hasAnyResults: boolean;
     totalVisibleItems: number;
+    // ADR-0082 §2 / F1: "Create ‹title›" — present only when the active
+    // panel's config resolves to one concrete entry type and the typed
+    // search matches no existing candidate by title. Rendered above the
+    // panel's own rows, wherever they show (drilled-in or single-axis).
+    createRow: { title: string; onCreate: () => void } | null;
   };
 </script>
 
@@ -68,6 +73,21 @@
     </div>
   {/snippet}
 
+  {#snippet createRow(row: { title: string; onCreate: () => void })}
+    <!-- ADR-0082 §2 / F1: lifted from TagRosterPopover's `trp-create` gesture
+         (same "Create ‹x›" affordance, generalized to any create_missing
+         source — NodePicker/this shell know nothing about tags). -->
+    <button
+      type="button"
+      class="ctx-create-row"
+      data-testid="node-picker-create"
+      onmousedown={(e) => e.preventDefault()}
+      onclick={row.onCreate}
+    >
+      <span class="ctx-create-plus" aria-hidden="true">+</span> Create “{row.title}”
+    </button>
+  {/snippet}
+
   <!-- Popover head: ← back (when drilled into an axis) + the panel title +
        the search box (ADR-0074 slice 7b drill-in). -->
   <div class="ctx-pop-head">
@@ -115,9 +135,12 @@
       <!-- Search is contextual: cross-axis results at root, within-axis when
            drilled in (ADR-0074 slice 7b). -->
       {#if model.effectiveAxis}
+        {#if model.createRow}
+          {@render createRow(model.createRow)}
+        {/if}
         {#if model.activePanelRows.length > 0}
           <PickTree rows={model.activePanelRows} ariaLabel={model.activeAxisLabel} />
-        {:else}
+        {:else if !model.createRow}
           {@render emptySearch()}
         {/if}
       {:else if model.axes.length > 0}
@@ -279,6 +302,31 @@
     font-size: var(--fs-lg);
     color: var(--text-2);
     padding: 8px 8px 2px;
+  }
+
+  /* "Create ‹x›" (ADR-0082 §2 / F1) — mirrors TagRosterPopover's .trp-create. */
+  .ctx-create-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin-bottom: 2px;
+    padding: 7px 9px;
+    border: 1px dashed var(--accent);
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--accent-strong);
+    font-size: var(--fs-sm);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ctx-create-row:hover {
+    background: var(--accent-soft);
+  }
+  .ctx-create-plus {
+    font-size: var(--fs-md);
+    line-height: 1;
   }
   .ctx-clear {
     flex: none;

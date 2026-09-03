@@ -37,6 +37,20 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
     ]);
   });
 
+  it("ADR-0082 §2/F5: the assistant view's TAG param follows the assistant_tags rename — it's a `field` predicate (not `tagged`), so fieldKey tracks the key on the spec directly", () => {
+    const schema = {
+      ...SCHEMA,
+      fields: { ...SCHEMA.fields, assistant_tags: { name: "Preferred assistant tags", type: "entity_ref_list", options: [] } },
+    } as unknown as MetadataSchema;
+    const spec: ViewSpec = {
+      kind: "assistant",
+      expr: { filter: { of: { descendants_of: "assistant:base" }, pred: { field: { key: "assistant_tags", op: "overlap", value: { var: "TAG" } } } } },
+      params: [{ name: "TAG", label: "Tag", default: null }],
+    };
+    const [c] = resolveParamControls(spec, schema);
+    expect([c.field.type, c.fieldKey]).toEqual(["entity_ref_list", "assistant_tags"]);
+  });
+
   it("already-multi and non-set fields pass through un-widened", () => {
     const schema = {
       version: 1,

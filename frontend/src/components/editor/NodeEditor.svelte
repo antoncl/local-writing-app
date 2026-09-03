@@ -679,6 +679,15 @@
   });
   let documentLabel = $derived(documentLabelFor(documentKind));
 
+  // ADR-0082 §2/F2: the layer a `create_missing` tag is minted at — "the
+  // layer the saved node is written to". The pane's own authoring level
+  // (lore/prompt, `authoringLayerId`) when set; else, for a machine-roster
+  // assistant, the open document's own layer (its tags go there too); else
+  // null (the open project — scenes are always the open project).
+  let createLayerId = $derived(
+    authoringLayerId ?? (documentKind === "assistant" ? (scene?.source_layer_id ?? null) : null),
+  );
+
   // Fields whose value comes from a layer override (#314), passed to the rail so
   // it can lead them with the `ti-versions` mark. The picker itself lives in
   // LayerAuthoringBar (kept out of this shell for the file-size cap).
@@ -790,6 +799,7 @@
       excludeId={scene?.id ?? null}
       sourceLayerId={scene?.source_layer_id ?? null}
       sourceLayerLabel={scene?.source_layer_label ?? null}
+      createLayerId={createLayerId}
       overriddenFields={overriddenFieldsForPanel}
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}

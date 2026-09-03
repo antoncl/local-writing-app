@@ -24,6 +24,9 @@ const SCHEMA = {
     "plot:plotline": { name: "Plotline", kind: "plot" },
     "plot:card": { name: "Card", kind: "plot" },
     "lore:character": { name: "Character", kind: "lore" },
+    "tag:tag": { name: "Tag", kind: "tag" },
+    "tag:assistant_tag": { name: "Assistant tag", kind: "tag" },
+    "tag:base": { name: "Tag", kind: "tag", abstract: true },
   },
   fields: {},
 } as unknown as MetadataSchema;
@@ -688,6 +691,97 @@ describe("NodePicker tag-kind member picks (ADR-0082 slice 1)", () => {
     expect(within(menu).getByText("Coastal")).toBeInTheDocument();
     expect(within(menu).getByText("Urban")).toBeInTheDocument();
     expect(within(menu).queryByText("By tag")).toBeNull();
+  });
+});
+
+describe("NodePicker create row (ADR-0082 §2 / F1)", () => {
+  async function openMenu(): Promise<HTMLElement> {
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    return document.querySelector(".ctx-menu") as HTMLElement;
+  }
+  async function type(q: string) {
+    const box = document.querySelector(".ctx-search") as HTMLInputElement;
+    await fireEvent.input(box, { target: { value: q } });
+    await tick();
+  }
+
+  const CREATE_MISSING_CONFIG = {
+    sources: [{ kind: "tag", expr: { type: "tag:tag" } }],
+    create_missing: true,
+    multiple: true,
+  };
+  const TAGS = [{ id: "tag_1", title: "Coastal", entry_type: "tag:tag", metadata: {} }];
+
+  it("shows the create row when all four conditions hold", async () => {
+    render(NodePicker, {
+      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add" },
+    });
+    const menu = await openMenu();
+    await type("Urban");
+    expect(within(menu).getByTestId("node-picker-create")).toBeInTheDocument();
+    expect(within(menu).getByText("Create “Urban”")).toBeInTheDocument();
+  });
+
+  it("hides the row when create_missing is unset", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "tag", expr: { type: "tag:tag" } }], multiple: true },
+        tagEntries: TAGS,
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    await type("Urban");
+    expect(within(menu).queryByTestId("node-picker-create")).toBeNull();
+  });
+
+  it("hides the row when the config resolves to more than one entry type", async () => {
+    render(NodePicker, {
+      props: {
+        config: {
+          sources: [
+            { kind: "tag", expr: { union: [{ type: "tag:tag" }, { type: "tag:assistant_tag" }] } },
+          ],
+          create_missing: true,
+          multiple: true,
+        },
+        tagEntries: TAGS,
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    await type("Urban");
+    expect(within(menu).queryByTestId("node-picker-create")).toBeNull();
+  });
+
+  it("hides the row when the search is empty", async () => {
+    render(NodePicker, {
+      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add" },
+    });
+    const menu = await openMenu();
+    expect(within(menu).queryByTestId("node-picker-create")).toBeNull();
+  });
+
+  it("hides the row when a candidate already matches the search case-insensitively by title", async () => {
+    render(NodePicker, {
+      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add" },
+    });
+    const menu = await openMenu();
+    await type("coastal");
+    expect(within(menu).queryByTestId("node-picker-create")).toBeNull();
+    expect(within(menu).getByText("Coastal")).toBeInTheDocument();
+  });
+
+  it("onCreate receives the typed title and the resolved entry_type", async () => {
+    const onCreate = vi.fn();
+    render(NodePicker, {
+      props: { config: CREATE_MISSING_CONFIG, tagEntries: TAGS, affordance: "add", onCreate },
+    });
+    const menu = await openMenu();
+    await type("Urban");
+    await fireEvent.click(within(menu).getByTestId("node-picker-create"));
+    expect(onCreate).toHaveBeenCalledWith("Urban", "tag:tag");
   });
 });
 

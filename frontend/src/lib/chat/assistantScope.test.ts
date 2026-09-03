@@ -15,12 +15,16 @@ import {
 // only (ADR-0024 Amendment 1), and the backend stamps this pair on every
 // assistant it returns — a summary without it is not a shape the API produces.
 // `listed: "unlisted"` is exercised deliberately in the amendment's own tests.
+//
+// ADR-0082 §2: the assistant's field is `assistant_tags` now (renamed off
+// `tags`), holding tag-node ids — these opaque strings stand in for ids, the
+// pure functions under test only compare them for equality.
 const A = (id: string, title: string, tags?: unknown, listed = "listed"): AssistantEntrySummary =>
   ({
     id,
     title,
     entry_type: "assistant:assistant",
-    metadata: tags === undefined ? {} : { tags },
+    metadata: tags === undefined ? {} : { assistant_tags: tags },
     computed_metadata: { listed, position: 0 },
   }) as AssistantEntrySummary;
 

@@ -53,7 +53,7 @@
     refreshEmbeddedTodos as storeRefreshEmbeddedTodos,
   } from "@/lib/stores/todos";
   import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags, tagVocabularyRevision } from "@/lib/stores/tags";
-  import { assistantTagsStore, refreshAssistantTags, assistantTagsAsScoped } from "@/lib/stores/assistantTags";
+  import { refreshAssistantTags } from "@/lib/stores/assistantTags";
   import { validationStore, setValidation, clearValidation } from "@/lib/stores/validation";
   import {
     structureStore,
@@ -753,9 +753,6 @@
   // the store layer from lore + schema (see stores/derived.ts).
   let implicitContextMatcher = $derived($implicitContextMatcherStore);
   let knownTags = $derived($knownTagsStore);
-  // Assistant/prompt editors additionally offer the machine-global assistant-tag
-  // vocabulary (#88, empty scope → suggest on every field of those editors).
-  let assistantTagScoped = $derived(assistantTagsAsScoped($assistantTagsStore));
   let focusedEditorPane = $derived(editorPanes.panes.find((pane) => pane.id === editorPanes.focusedEditorPaneId) ?? editorPanes.panes[0] ?? null);
   // Write-through the focused doc to the editor-focus store so the list panes
   // read it directly instead of having it drilled in (#14 Step 2). App is the
@@ -1189,12 +1186,7 @@
         structure={structure}
         researchStructure={researchStructure}
         loreEntries={loreEntries}
-        knownTags={editorPane.document?.type === "assistant" || editorPane.document?.type === "prompt"
-          ? [...knownTags, ...assistantTagScoped]
-          : knownTags}
-        tagOrigin={editorPane.document?.type === "assistant" || editorPane.document?.type === "prompt"
-          ? "assistant"
-          : "project"}
+        knownTags={knownTags}
         implicitContextMatcher={implicitContextMatcher}
         assistantEntries={assistantEntries}
         defaultAssistantId={defaultAssistantId}

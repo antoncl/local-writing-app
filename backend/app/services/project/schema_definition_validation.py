@@ -19,6 +19,7 @@ from app.models import (
     LIST_ITEM_GROUP_MEMBER_TYPES,
     MetadataFieldDefinition,
     MetadataSchema,
+    NodePickerConfig,
 )
 from app.services.project.schema_validation import ENTRY_TYPE_FQN_RE
 
@@ -73,6 +74,39 @@ def _entry_type_group_application_errors(entry_type_id: str, entry_type, schema:
     ]
 
 
+def _create_missing_shape_errors(
+    field_id: str, picker_config: NodePickerConfig, schema: MetadataSchema
+) -> list[str]:
+    """ADR-0082 §2: `create_missing: true` needs an unambiguous target, so the
+    minted entry has one certain type — `picker_config.sources` must resolve
+    (via `NodePickerConfig.kinds` / `entry_types`) to exactly ONE kind with
+    exactly ONE concrete (non-abstract) entry type. Shared by a field's own
+    `picker_config` and a list field's `item_group` member `picker_config`
+    (`_list_field_schema_errors`)."""
+    if not picker_config.create_missing:
+        return []
+    kinds = picker_config.kinds
+    if len(kinds) != 1:
+        return [
+            f"Metadata field {field_id} sets create_missing but its picker_config sources "
+            f"{len(kinds)} kind(s); create_missing requires exactly one kind."
+        ]
+    fqns = picker_config.entry_types.get(kinds[0]) or []
+    if len(fqns) != 1:
+        return [
+            f"Metadata field {field_id} sets create_missing but its picker_config sources "
+            f"{len(fqns)} entry type(s) of kind {kinds[0]!r}; create_missing requires exactly "
+            "one concrete entry type."
+        ]
+    entry_type = schema.entry_types.get(fqns[0])
+    if entry_type is None or entry_type.abstract:
+        return [
+            f"Metadata field {field_id} sets create_missing but its entry type {fqns[0]!r} is "
+            "abstract or unknown; create_missing requires one concrete entry type."
+        ]
+    return []
+
+
 def _field_shape_errors(field_id: str, field: MetadataFieldDefinition, schema: MetadataSchema) -> list[str]:
     """Field type coherence: `computed` type ⇔ computed settings, and list
     item-shape rules (delegated to `_list_field_schema_errors`)."""
@@ -83,6 +117,8 @@ def _field_shape_errors(field_id: str, field: MetadataFieldDefinition, schema: M
     errors: list[str] = []
     if field.computed:
         errors.append(f"Metadata field {field_id} has computed settings but is not type computed.")
+    if field.picker_config is not None:
+        errors.extend(_create_missing_shape_errors(field_id, field.picker_config, schema))
     if field.type == "list":
         errors.extend(_list_field_schema_errors(field_id, field, schema))
     elif field.item_group is not None or field.item_type is not None:
@@ -132,6 +168,10 @@ def _list_field_schema_errors(field_id: str, field: MetadataFieldDefinition, sch
                     errors.append(
                         f"List metadata field {field_id} item shape {field.item_group} has "
                         f"member {member.key} of type {member.type}, which list items do not support."
+                    )
+                if member.picker_config is not None:
+                    errors.extend(
+                        _create_missing_shape_errors(f"{field_id}.{member.key}", member.picker_config, schema)
                     )
     return errors
 

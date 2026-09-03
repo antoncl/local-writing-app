@@ -35,7 +35,6 @@ from app.models.schema import PromptContextStrategy
 from app.services.ai.effective_inputs import SnippetSource
 from app.services.project.computed_metadata import strip_computed_fields
 from app.services.project.errors import ProjectServiceError
-from app.services.project.overrides import LayerOverride
 from app.services.project.prompt_disposition import prompt_disposition, prompt_runnable
 
 if TYPE_CHECKING:
@@ -513,16 +512,11 @@ class PromptEntriesMixin:
             if existing is not None:
                 self._delete_node_file(existing)
 
-        # Register the EFFECTIVE assistant_tags into the machine-global vocabulary
-        # (#88) — computed as L resolves them (base-above-L folded with this layer's
-        # rows), matching the owned save's registration of exactly what it wrote.
-        preview = LayerOverride(
-            entry_id, authoring_layer.id, authoring_layer.rank, authoring_layer.label, winner.path, tuple(rows)
-        )
-        effective_at_layer, _ = self.materialize_override_metadata(base_above_layer, [preview], field_types)
-        from app.services import machine_settings as ms_service
-
-        ms_service.register_assistant_tags(ms_service.tag_names_from_field(effective_at_layer.get("assistant_tags")))
+        # ADR-0082 §2: `assistant_tags` is now an `entity_ref_list` of tag-node
+        # ids, not free-text names — registering ids into the legacy (dead,
+        # name-keyed) machine vocabulary would corrupt it, so this no longer
+        # registers on save (`create_missing` mints on the picker's own create
+        # path instead). `preview`/`effective_at_layer` are no longer needed here.
         return self.read_prompt_entry(entry_id)
 
     def _save_owned_prompt_entry(self, entry_id: str, request: SavePromptEntryRequest) -> PromptEntry:
@@ -559,11 +553,9 @@ class PromptEntriesMixin:
             omit_empty_metadata=True,
         )
         self._maybe_rename_node_file(path, request.title)
-        # A prompt's `assistant_tags` (its soft assistant scope) feed the same
-        # machine-global vocabulary as assistants' own tags (#88).
-        from app.services import machine_settings as ms_service
-
-        ms_service.register_assistant_tags(ms_service.tag_names_from_field(metadata.get("assistant_tags")))
+        # ADR-0082 §2: `assistant_tags` is now an `entity_ref_list` of tag-node
+        # ids, not free-text names — no longer registered into the legacy
+        # (dead, name-keyed) machine vocabulary on save.
         return self.read_prompt_entry(node_id)
 
     @staticmethod

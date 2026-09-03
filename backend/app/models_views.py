@@ -241,6 +241,10 @@ class NodePickerConfig(BaseModel):
     multiple: bool | None = None
     # Author opt-in for context-pick target-marking.
     allow_target_marking: bool | None = None
+    # ADR-0082 §2: offer "Create ‹x›" when the typed name resolves to no
+    # candidate. A mechanic, not membership — permitted only when `sources`
+    # resolves to exactly one concrete entry type (`_field_shape_errors`).
+    create_missing: bool | None = None
 
     @property
     def kinds(self) -> list[str]:

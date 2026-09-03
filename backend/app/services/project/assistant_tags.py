@@ -41,12 +41,14 @@ from app.models import (
 )
 from app.services.project.errors import ProjectServiceError
 
-# The two (kind, field) references into the assistant-tag vocabulary. Assistant
-# nodes carry `tags`; prompt nodes carry `assistant_tags`. Kept explicit rather
-# than derived from schema `type == "tags"` because a scene's `tags` field is
-# that same type but points at the PROJECT vocabulary — the field id is what
-# disambiguates the two stores, not the type.
-_ASSISTANT_TAG_FIELD = "tags"
+# The two (kind, field) references into the assistant-tag vocabulary. Both
+# assistant nodes and prompt nodes now carry `assistant_tags` (ADR-0082 §2
+# renamed the assistant's field off the retired-for-built-ins `tags`, so an
+# `entity_ref_list` field id no longer has to disambiguate two vocabularies by
+# convention). The two constants are equal today; kept as two names because
+# this whole mixin is dead code slated for retirement in a later ADR-0082
+# slice, not touched further here.
+_ASSISTANT_TAG_FIELD = "assistant_tags"
 _PROMPT_ASSISTANT_TAG_FIELD = "assistant_tags"
 
 

@@ -70,6 +70,10 @@
     documentKind?: string;
     entryType?: string;
     onNavigate?: (payload: { id: string; kind: string }) => void;
+    // ADR-0082 §2/F2: forwarded to ReferencePicker (and, for a list field's
+    // entity_ref/entity_ref_list members, ListValueEditor) — the layer a
+    // `create_missing` tag is minted at. See ReferencePicker for the rule.
+    createLayerId?: string | null;
   }
 
   let {
@@ -93,6 +97,7 @@
     documentKind = "manuscript",
     entryType = "",
     onNavigate,
+    createLayerId = null,
   }: Props = $props();
 
   const label = $derived(ariaLabel ?? field.name);
@@ -216,6 +221,7 @@
     promptEntries={promptEntries}
     onChange={(value) => emit(value)}
     onNavigate={(detail) => onNavigate?.(detail)}
+    {createLayerId}
   />
 {:else if field.type === "multi_select" && field.options.length > 0}
   <div class="multi-select-chips" aria-label={label}>
@@ -283,6 +289,7 @@
     {documentKind}
     {entryType}
     {excludeId}
+    {createLayerId}
   />
 {:else if field.type === "color"}
   <SwatchPicker value={currentValue || null} onChange={(id) => emit(id ?? "")} />

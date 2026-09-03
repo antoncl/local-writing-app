@@ -270,11 +270,14 @@ export function defaultView(kind: string, schema?: MetadataSchema | null): ViewS
   if (kind === "assistant") {
     // #333 — mirrors `_default_view_spec`; see there for why `listed` replaces
     // `source_layer` and why the tag formal ships unbound (inactive ⇒ the whole
-    // roster). `field`-on-tags rather than the retired-for-authoring `tagged`
-    // leaf, so a duplicate of this view stays editable in the designer.
+    // roster). `field`-on-assistant_tags (ADR-0082 §2 renamed the field off
+    // `tags`) rather than the retired-for-authoring `tagged` leaf, so a
+    // duplicate of this view stays editable in the designer.
     return {
       kind,
-      expr: { filter: { of: roster, pred: { field: { key: "tags", op: "overlap", value: { var: "TAG" } } } } },
+      expr: {
+        filter: { of: roster, pred: { field: { key: "assistant_tags", op: "overlap", value: { var: "TAG" } } } },
+      },
       sort,
       // No `default` — an absent authored default IS the unbound state, and
       // omitting it keeps this byte-identical to the backend's `exclude_none`

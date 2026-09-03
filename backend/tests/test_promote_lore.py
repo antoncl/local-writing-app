@@ -255,13 +255,18 @@ class PromoteLoreTests(unittest.TestCase):
     # --- 4: unknown tag stays behind ---------------------------------------
 
     def test_unknown_tag_stays_behind(self) -> None:
+        # ADR-0082 §2 retired the built-in `tags` field's TYPE (it's an
+        # `entity_ref_list` into the `tag` kind now) — this test pins the
+        # tags-TYPE partition (`_partition_tags`, dead code until a later
+        # slice) via its own field, same recipe `test_tags.py` uses.
+        self._define_field_at(self.root, "labels", "tags", entry_type="lore:character")
         self._write_ancestor_lore(
-            self.root, "alice", "Alice", metadata={"tags": ["book2pov"]}, entry_type="lore:character"
+            self.root, "alice", "Alice", metadata={"labels": ["book2pov"]}, entry_type="lore:character"
         )
 
         self.service.promote_lore_entry("alice", self.series_layer_id)
 
-        self.assertNotIn("book2pov", self._raw_metadata(self.series, "alice").get("tags", []))
+        self.assertNotIn("book2pov", self._raw_metadata(self.series, "alice").get("labels", []))
         self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
         known = self.service.read_known_tags(up_to_layer_id=self.series_layer_id)
         self.assertNotIn("book2pov", [tag.name.lower() for tag in known.tags])

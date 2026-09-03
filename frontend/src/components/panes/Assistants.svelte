@@ -7,11 +7,10 @@
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
-  import { assistantTagsStore, assistantTagsAsScoped } from "@/lib/stores/assistantTags";
-  import { tagHexResolver } from "@/lib/utils/tags";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { isAssistantListed } from "@/lib/stores/assistants";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
+  import { tagTitleById } from "@/lib/stores/tagNodes";
   import { api } from "@/lib/api";
   import type { AIHealthResponse } from "@/lib/aiTypes";
   // `isBareDescendantsOf` / `kindUniverseExpr` went with the whole-roster guard
@@ -54,10 +53,14 @@
   // Per-group collapse is ephemeral and owned by ViewNodeList (phase 1; not
   // persisted, same as the Lore pane).
 
-  // Colored tag chips: name → hex from the machine-global assistant-tag
-  // vocabulary (#88), via the shared resolver (#1447). Reading the store inside
-  // the derived expression lets the closure re-track when colours change.
-  const tagHexFor = $derived(tagHexResolver(assistantTagsAsScoped($assistantTagsStore)));
+  // ADR-0082 §2: `assistant_tags` now holds tag-node ids — resolve to titles
+  // through the tag roster store for display (F4). Tag-chip colour comes in
+  // slice 3 (the picker's instance-colour helper); until then every chip is
+  // uncoloured rather than reading the retired name-keyed hex map.
+  const tagTitles = $derived($tagTitleById);
+  function tagColorNone(): string | null {
+    return null;
+  }
 
   // Every NodeList is backed by a view (ADR-0022), and the view is authoritative
   // for its own shape (ADR-0037 §3): any buckets come from the spec's own
@@ -212,8 +215,8 @@
   <NodeRow
     title={entry.title}
     depth={ctx.depth}
-    tags={assistantTagsOf(entry)}
-    tagColor={tagHexFor}
+    tags={assistantTagsOf(entry).map((id) => tagTitles.get(id) ?? id)}
+    tagColor={tagColorNone}
     active={ctx.active}
     stripeColor={ctx.stripeColor}
     typeIcon={entryTypeIconClass(entry.entry_type, schema)}

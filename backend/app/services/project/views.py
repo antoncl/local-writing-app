@@ -446,21 +446,22 @@ class ViewsMixin:
             #    while layer *was* the ordering; now it would re-cluster the
             #    author's single dragged list by an accident of which folder each
             #    file sits in. Provenance survives as a row annotation.
-            #  - born tag-scoped (ADR-0024): `tags` is the soft scope that
-            #    decides which assistants are relevant. The formal ships UNBOUND,
-            #    so the predicate is inactive and the pane opens on the whole
-            #    roster (ADR-0031 §B) — nothing is decided for the author, the
-            #    control is simply already there.
-            # `field`-on-tags rather than the `tagged` leaf: identical
+            #  - born tag-scoped (ADR-0024): `assistant_tags` is the soft scope
+            #    that decides which assistants are relevant (ADR-0082 §2 renamed
+            #    the field off `tags`, which no built-in binds anymore). The
+            #    formal ships UNBOUND, so the predicate is inactive and the pane
+            #    opens on the whole roster (ADR-0031 §B) — nothing is decided for
+            #    the author, the control is simply already there.
+            # `field`-on-assistant_tags rather than the `tagged` leaf: identical
             # OR-over-tags semantics, but it stays designer-authorable and its
-            # strip control resolves the real schema `tags` field, so a duplicate
-            # of this view can be edited instead of being a one-way door.
+            # strip control resolves the real schema `assistant_tags` field, so a
+            # duplicate of this view can be edited instead of being a one-way door.
             return ViewSpec(
                 kind=kind,
                 expr=ViewExpr(
                     filter=FilterOp(
                         of=roster,
-                        pred=ViewExpr(field=FieldPredicate(key="tags", op="overlap", value={"var": "TAG"})),
+                        pred=ViewExpr(field=FieldPredicate(key="assistant_tags", op="overlap", value={"var": "TAG"})),
                     )
                 ),
                 params=[ViewParam(name="TAG", label="Tag")],

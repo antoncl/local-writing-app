@@ -9,10 +9,13 @@
 // prints the label, so the embedded picker must drop its own titled header
 // (which doubled the label) while keeping the expand/collapse control.
 import { afterEach, describe, it, expect, vi } from "vitest";
+import { tick } from "svelte";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import ReferencePicker from "./ReferencePicker.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { clearTagNodes, tagNodesStore } from "@/lib/stores/tagNodes";
+import * as tagNodesModule from "@/lib/stores/tagNodes";
+import { api } from "@/lib/api";
 import type { LoreEntrySummary, MetadataFieldDefinition, TagEntry } from "@/lib/types";
 
 const field = {
@@ -160,5 +163,80 @@ describe("ReferencePicker — tag node resolution (ADR-0082 slice 1)", () => {
     });
     await fireEvent.click(screen.getByText("Motifs"));
     expect(screen.getByText("tag_missing")).toBeInTheDocument();
+  });
+});
+
+describe("ReferencePicker — create_missing wiring (ADR-0082 §2 / F2/F3)", () => {
+  const createMissingField = {
+    name: "Motifs",
+    type: "entity_ref_list",
+    options: [],
+    picker_config: { sources: [{ kind: "tag", expr: { type: "tag:tag" } }], create_missing: true },
+  } as unknown as MetadataFieldDefinition;
+
+  afterEach(() => {
+    metadataSchemaStore.set(null);
+  });
+
+  function setSchema() {
+    metadataSchemaStore.set({
+      entry_types: { "tag:tag": { name: "Tag", kind: "tag" } },
+      fields: {},
+    } as never);
+  }
+
+  async function openAndType(props: Record<string, unknown>, query: string) {
+    render(ReferencePicker, {
+      props: { field: createMissingField, value: [], ariaLabel: "Motifs", ...props },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Add Motifs" }));
+    const box = document.querySelector(".ctx-search") as HTMLInputElement;
+    await fireEvent.input(box, { target: { value: query } });
+    await tick();
+    return screen.getByTestId("node-picker-create");
+  }
+
+  it("calls createTagEntry with the threaded createLayerId, then selects the new id", async () => {
+    setSchema();
+    const onChange = vi.fn();
+    const createSpy = vi
+      .spyOn(api, "createTagEntry")
+      .mockResolvedValue({ id: "tag_new", title: "Mystery", entry_type: "tag:tag", metadata: {} } as TagEntry);
+    vi.spyOn(api, "listTagEntries").mockResolvedValue({ tags: [] });
+
+    const createRow = await openAndType({ onChange, createLayerId: "layer_x" }, "Mystery");
+    await fireEvent.click(createRow);
+    await tick();
+
+    expect(createSpy).toHaveBeenCalledWith("Mystery", "tag:tag", null, "layer_x");
+    expect(onChange).toHaveBeenCalledWith(["tag_new"]);
+  });
+
+  it("a stale-roster case: when findTagByTitle resolves an existing tag, onCreate selects it instead of creating", async () => {
+    // The create row's own visibility gate (NodePicker's hasTitleMatch) and
+    // findTagByTitle read the same roster, so they can't statically disagree —
+    // the scenario F3 guards is a roster update landing BETWEEN the row's
+    // render and the click (a genuine timing race). Pinning the outcome
+    // directly is more reliable here than fighting that race through the DOM:
+    // findTagByTitle is stubbed to report the match it would have found mid-
+    // flight, and this asserts ReferencePicker's onCreate honours it — select,
+    // never create.
+    setSchema();
+    const onChange = vi.fn();
+    const createSpy = vi.spyOn(api, "createTagEntry");
+    const findSpy = vi.spyOn(tagNodesModule, "findTagByTitle").mockReturnValue({
+      id: "tag_existing",
+      title: "Mystery",
+      entry_type: "tag:tag",
+      metadata: {},
+    } as TagEntry);
+
+    const createRow = await openAndType({ onChange, createLayerId: null }, "Mystery");
+    await fireEvent.click(createRow);
+    await tick();
+
+    expect(findSpy).toHaveBeenCalledWith("Mystery", "tag:tag");
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenCalledWith(["tag_existing"]);
   });
 });

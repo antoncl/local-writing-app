@@ -39,7 +39,8 @@
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   // Tag nodes read from the store too (ADR-0082 slice 1), same reasoning: a ref
   // pointing at a tag resolves anywhere without the caller threading the roster.
-  import { tagById, tagNodesStore } from "@/lib/stores/tagNodes";
+  import { tagById, tagNodesStore, refreshTagNodes, findTagByTitle } from "@/lib/stores/tagNodes";
+  import { api } from "@/lib/api";
 
   let {
     field,
@@ -72,6 +73,12 @@
     // pass). onChange carries the selected id(s); onNavigate opens a ref.
     onChange = () => {},
     onNavigate = () => {},
+    // ADR-0082 §2/F2: the layer a `create_missing` tag is minted at — the
+    // pane's authoring level when set (lore/prompt), else the open
+    // document's machine layer when it's an assistant, else null (the open
+    // project). Threaded from the editor down to here; `null` for surfaces
+    // with no save-layer of their own (the chat inputs dialog).
+    createLayerId = null,
   }: {
     field: MetadataFieldDefinition;
     value?: string | string[] | null;
@@ -87,6 +94,7 @@
     promptEntries?: PromptEntrySummary[];
     onChange?: (value: string | string[]) => void;
     onNavigate?: (detail: { id: string; kind: string }) => void;
+    createLayerId?: string | null;
   } = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
@@ -188,6 +196,30 @@
   function handlePickerChange(detail: { value: NodePickerRef[] }) {
     const nextIds = detail.value.map((ref) => ref.id);
     emit(nextIds);
+  }
+
+  // "Create ‹x›" (F1/F2): wired for kind `tag` only — the picker's create row
+  // is kind-generic, but minting a node is a per-kind write, and tag is the
+  // only kind create_missing targets today. Resolve-before-create (ADR-0082
+  // §2): a case-insensitive title match wins over minting a duplicate, since
+  // the create row's own gate (NodePicker's `hasTitleMatch`) reads a
+  // search-filtered roster that can be stale by the time this fires.
+  let createError = $state("");
+  async function handleCreate(title: string, entryType: string) {
+    if (targetKind !== "tag" || !title.trim()) return;
+    createError = "";
+    try {
+      const existing = findTagByTitle(title, entryType);
+      if (existing) {
+        emit(multi ? [...selectedIds, existing.id] : [existing.id]);
+        return;
+      }
+      const created = await api.createTagEntry(title.trim(), entryType, null, createLayerId ?? null);
+      await refreshTagNodes();
+      emit(multi ? [...selectedIds, created.id] : [created.id]);
+    } catch (e) {
+      createError = e instanceof Error ? e.message : String(e);
+    }
   }
 
   function removeId(id: string) {
@@ -308,7 +340,9 @@
         assistantEntries={$assistantEntriesStore}
         tagEntries={$tagNodesStore}
         onChange={handlePickerChange}
+        onCreate={handleCreate}
       />
+      {#if createError}<p class="reference-picker-create-error">{createError}</p>{/if}
     </span>
   {/if}
 {/snippet}
@@ -517,5 +551,13 @@
     background: var(--danger-soft);
     border-color: var(--danger-border);
     color: var(--danger);
+  }
+
+  /* Surfaced when a create-tag call fails (F2) — the trigger itself has no
+     other error slot to fall back to. */
+  .reference-picker-create-error {
+    margin: 4px 0 0;
+    color: var(--danger);
+    font-size: var(--fs-xs);
   }
 </style>

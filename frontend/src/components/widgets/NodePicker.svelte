@@ -42,6 +42,7 @@
     stripeForNode,
   } from "@/lib/utils/pickerStripes";
   import { isViewRef, pickerMembership } from "@/lib/utils/pickerSources";
+  import { createTargetFor, hasTitleMatch } from "@/lib/utils/pickerCreate";
   import { buildSelectorRoster, isSelectorRef, membersForSelector } from "@/lib/views/pickerSelectors";
   import {
     flattenSelectors,
@@ -118,6 +119,11 @@
     // caller having to filter the in-memory data sources.
     excludeIds = [],
     onChange,
+    // ADR-0082 §2 / F1: present only when `config.create_missing` resolves to
+    // one concrete entry type (`createTargetFor`). Kind-generic — NodePicker
+    // itself never mentions tags; the caller (ReferencePicker) decides what a
+    // create means for the kind it wired.
+    onCreate,
   }: {
     config?: NodePickerConfig;
     value?: NodePickerRef[];
@@ -134,6 +140,7 @@
     hideChips?: boolean;
     excludeIds?: string[];
     onChange?: (detail: { value: NodePickerRef[] }) => void;
+    onCreate?: (title: string, entryType: string) => void;
   } = $props();
 
   const affordanceVerb = $derived(affordance === "change" ? "Change" : "Add");
@@ -674,6 +681,37 @@
       .filter(matchesSummary),
   );
 
+  // ---- "Create ‹x›" (ADR-0082 §2 / F1) -------------------------------------
+  // `create_missing` names exactly one concrete entry type (`createTargetFor`);
+  // the roster it checks against reuses whichever candidate list already
+  // covers that kind — already search-filtered, so an exact-title match
+  // among them is a subset of a substring match (entrySearch.ts) and this
+  // needs no separate unfiltered read.
+  const createTarget = $derived(createTargetFor(config, metadataSchema));
+  const createRosterForTarget = $derived.by(() => {
+    switch (createTarget?.kind) {
+      case "tag":
+        return tagCandidates;
+      case "lore":
+        return loreGroups.flatMap((g) => g.entries);
+      case "snippet":
+        return snippetEntries;
+      case "research":
+        return filteredResearchNotes;
+      case "assistant":
+        return assistantCandidates;
+      default:
+        return [];
+    }
+  });
+  const showCreateRow = $derived(
+    !!createTarget && isSearchActive(search) && !hasTitleMatch(createRosterForTarget, search),
+  );
+  function handleCreate(): void {
+    if (!createTarget) return;
+    onCreate?.(search.trim(), createTarget.entryType);
+  }
+
   // Chip text resolution. Show the entry-type's display name from the
   // schema when known; fall back to a sensible singular for the kind.
   // Fixes the inverted-affordance bug where `character` chips read the
@@ -800,6 +838,16 @@
     return rows;
   });
 
+  // A flat-kind group with zero matching items still has to render its axis
+  // when THIS kind is the one offering a create row (F1) — otherwise the
+  // exact case that motivates a create (nothing matches the search) also
+  // makes the axis vanish, and the create row it was going to hold along
+  // with it. Kind-generic: any of the five flat groups below can be a
+  // create_missing target, not just tag_entries.
+  function keepEmptyForCreate(kind: string): boolean {
+    return showCreateRow && createTarget?.kind === kind;
+  }
+
   const visibleGroups = $derived.by(() => {
     type Group = { id: string; label: string; items: NodePickerRef[] };
     const groups: Group[] = [];
@@ -819,7 +867,7 @@
           })),
         ),
       );
-      if (loreItems.length > 0) {
+      if (loreItems.length > 0 || keepEmptyForCreate("lore")) {
         groups.push({ id: "lore", label: "Lore", items: loreItems });
       }
     }
@@ -830,7 +878,7 @@
           id: s.id, kind: "snippet" as const, title: s.title, entry_type: s.entry_type,
         })),
       );
-      if (items.length > 0) groups.push({ id: "snippets", label: "Snippets", items });
+      if (items.length > 0 || keepEmptyForCreate("snippet")) groups.push({ id: "snippets", label: "Snippets", items });
     }
 
     if (allowedKinds.includes("research")) {
@@ -839,7 +887,7 @@
           id: n.id, kind: "research" as const, title: n.title, entry_type: n.entry_type,
         })),
       );
-      if (items.length > 0) groups.push({ id: "research", label: "Research", items });
+      if (items.length > 0 || keepEmptyForCreate("research")) groups.push({ id: "research", label: "Research", items });
     }
 
     if (allowedKinds.includes("assistant")) {
@@ -848,7 +896,7 @@
           id: a.id, kind: "assistant" as const, title: a.title, entry_type: a.entry_type,
         })),
       );
-      if (items.length > 0) groups.push({ id: "assistants", label: "Assistants", items });
+      if (items.length > 0 || keepEmptyForCreate("assistant")) groups.push({ id: "assistants", label: "Assistants", items });
     }
 
     if (allowedKinds.includes("tag")) {
@@ -860,7 +908,7 @@
           id: t.id, kind: "tag" as const, title: t.title, entry_type: t.entry_type,
         })),
       );
-      if (items.length > 0) groups.push({ id: "tag_entries", label: "Tags", items });
+      if (items.length > 0 || keepEmptyForCreate("tag")) groups.push({ id: "tag_entries", label: "Tags", items });
     }
 
     // Plot is no longer a flat leaf group — plotlines render as tri-state card
@@ -1008,6 +1056,7 @@
     hasAnyConfigured,
     hasAnyResults,
     totalVisibleItems,
+    createRow: showCreateRow ? { title: search.trim(), onCreate: handleCreate } : null,
   });
 </script>
 

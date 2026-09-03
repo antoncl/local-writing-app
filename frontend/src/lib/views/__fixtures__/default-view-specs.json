@@ -21,7 +21,7 @@
     "group_by": [{ "field": "disposition" }]
   },
   "assistant": {
-    "expr": { "filter": { "of": { "descendants_of": "assistant:base" }, "pred": { "field": { "key": "tags", "op": "overlap", "value": { "var": "TAG" } } } } },
+    "expr": { "filter": { "of": { "descendants_of": "assistant:base" }, "pred": { "field": { "key": "assistant_tags", "op": "overlap", "value": { "var": "TAG" } } } } },
     "params": [{ "name": "TAG", "label": "Tag" }],
     "group_by": [{ "field": "listed", "show_empty": true }]
   },

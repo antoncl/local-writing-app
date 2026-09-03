@@ -46,6 +46,10 @@
     // visible. Null / matching the open project = authored here, no treatment.
     sourceLayerId?: string | null;
     sourceLayerLabel?: string | null;
+    // ADR-0082 §2/F2: forwarded to FieldValueEditor → ReferencePicker — the
+    // layer a `create_missing` tag is minted at. See ReferencePicker for the
+    // rule; NodeEditor computes it.
+    createLayerId?: string | null;
     // Layer-override marks (#314 / ADR-0039): the metadata fields whose effective
     // value comes from an override in this project's chain, not inherited canon.
     // Each such field leads its value with the `ti-versions` mark — the hierarchy
@@ -118,6 +122,7 @@
     excludeId = null,
     sourceLayerId = null,
     sourceLayerLabel = null,
+    createLayerId = null,
     overriddenFields = [],
     computedFieldString = () => "",
     effectiveOverrides = null,
@@ -695,6 +700,7 @@
                 tagOrigin={tagOrigin}
                 documentKind={documentKind}
                 entryType={entryType}
+                createLayerId={createLayerId}
                 onChange={(v) => writeField(fieldId, v)}
                 onNavigate={(payload) => onNavigate?.(payload)}
               />

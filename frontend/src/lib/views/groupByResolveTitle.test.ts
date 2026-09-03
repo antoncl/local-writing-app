@@ -57,6 +57,32 @@ describe("group_by ref bucket resolves an off-roster id through resolveTitle", (
   });
 });
 
+describe("group_by ref bucket folds a merged tag's id onto the survivor (ADR-0082 §5)", () => {
+  const nodesBothIds: EvalNode[] = [
+    { id: "scene_1", entry_type: "manuscript:scene", title: "Chapter one", metadata: { motifs: ["tag_mirror"] } },
+    { id: "scene_2", entry_type: "manuscript:scene", title: "Chapter two", metadata: { motifs: ["tag_mirrors"] } },
+  ];
+
+  it("both a merged id and its survivor bucket under the SAME (survivor) key", () => {
+    const result = evaluateView(SPEC, nodesBothIds, {
+      schema: SCHEMA,
+      resolveTitle: (id) => (id === "tag_mirrors" ? "mirrors" : undefined),
+      canonicalId: (id) => (id === "tag_mirror" ? "tag_mirrors" : id),
+    });
+    const groups = result.groups ?? [];
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.nodeId).toBe("tag_mirrors");
+    expect(groups[0]?.label).toBe("mirrors");
+    expect(groups[0]?.children.map((c) => c.node?.id).sort()).toEqual(["scene_1", "scene_2"]);
+  });
+
+  it("is identity when no canonicalId is threaded", () => {
+    const result = evaluateView(SPEC, NODES, { schema: SCHEMA, resolveTitle: () => "Coastal" });
+    const group = (result.groups ?? [])[0];
+    expect(group?.nodeId).toBe("tag_1");
+  });
+});
+
 describe("groupByHasRefLevel — gates the reactive tag-roster subscription (review fix F7)", () => {
   it("is true when a group_by level's field is a node-set (entity_ref_list) field", () => {
     expect(groupByHasRefLevel(SPEC, SCHEMA)).toBe(true);

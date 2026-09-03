@@ -139,7 +139,6 @@ function seedDirtyLorePane(): void {
 
 function stubSuccessRefreshes(): void {
   vi.spyOn(api, "listLoreEntries").mockResolvedValue({ entries: [] });
-  vi.spyOn(api, "getKnownTags").mockResolvedValue({ tags: [] });
   vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {} });
 }
 

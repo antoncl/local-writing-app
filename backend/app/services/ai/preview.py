@@ -222,13 +222,21 @@ def _selector_roster(project_service, kind: Any) -> list[SelectorNode] | None:
     listed value matches what the reader shows (#314); other content kinds read
     front matter straight off the node index."""
     if kind == "lore":
+        index = project_service._build_node_index()
         return [
-            SelectorNode(entry.id, entry.entry_type, selector_references(entry.metadata), entry.metadata)
+            SelectorNode(entry.id, entry.entry_type, _canonical_references(index, entry.metadata), entry.metadata)
             for entry in project_service.list_lore_entries().entries
         ]
     if kind in _GENERIC_ROSTER_KINDS:
         return _generic_roster(project_service, kind)
     return None
+
+
+def _canonical_references(index, metadata: dict[str, Any]) -> frozenset[str]:
+    """`selector_references`, with each collected string canonicalised through
+    a merged-tag redirect (ADR-0082 §5), so `tagged: <survivor>` matches a
+    node that still carries a merged tag's id."""
+    return frozenset(index.canonical_id(ref) for ref in selector_references(metadata))
 
 
 def _generic_roster(project_service, kind: str) -> list[SelectorNode]:
@@ -244,7 +252,7 @@ def _generic_roster(project_service, kind: str) -> list[SelectorNode]:
         metadata = project_service._normalise_metadata(front_matter.get("metadata"), entry.path)
         raw_type = front_matter.get("entry_type")
         entry_type = raw_type if isinstance(raw_type, str) else entry.entry_type
-        roster.append(SelectorNode(entry.id, entry_type, selector_references(metadata), metadata))
+        roster.append(SelectorNode(entry.id, entry_type, _canonical_references(index, metadata), metadata))
     return roster
 
 

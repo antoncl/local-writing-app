@@ -7,6 +7,7 @@
 import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
 import { chatSessions } from "@/lib/stores/chatSessions.svelte";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
+import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { aiSpend } from "@/lib/stores/aiSpend.svelte";
 
 export function openPromptsPane(): void {
@@ -42,4 +43,12 @@ export function openAssistantsPane(): void {
 export function openChatsPane(): void {
   void chatSessions.refresh();
   workspaceLayout.ensureVisible("chats");
+}
+
+export function openTagsPane(): void {
+  // The `tag` kind's instance list (ADR-0082 §3/F3) — a fresh roster on
+  // every open, the same "re-open refreshes" contract `openAssistantsPane`
+  // gives its list.
+  void refreshTagNodes();
+  workspaceLayout.ensureVisible("tags");
 }

@@ -90,9 +90,13 @@ class NodeOpsMixin:
         """
         self._require_project()
         index = self._build_node_index()
-        entry = index.by_id.get(node_id)
+        # Canonicalised (ADR-0082 §5): a merged tag's id resolves to the
+        # survivor's entry, so `use(mirror_id)` / a picked-node re-read reaches
+        # `mirrors` with no caller change. Identity for every other kind.
+        entry = index.by_id.get(index.canonical_id(node_id))
         if entry is None:
             raise ProjectServiceError(f"Node {node_id} does not exist.", 404)
+        node_id = entry.id
         if entry.kind == "manuscript":
             return self.read_scene(node_id)
         if entry.kind == "lore":

@@ -87,9 +87,14 @@
     // the row). Pills pack to the measured width (ADR-0066); the genuine
     // remainder collapses into a trailing +N chip.
     tags?: readonly string[];
-    // Optional per-tag hue: given a tag, return a hex (or null for the neutral
-    // chip). Colors the tag as a Chip (a distinct color system from the kind
-    // Stripe — widget taxonomy). Used by the assistant-tag vocabulary (#88).
+    // Optional per-tag hue: given a tag STRING — whatever `tags` above carries
+    // for that pill (today, a title: every caller resolves the tag node's id
+    // to its title before handing it to `tags`, ADR-0082 §2) — return a hex
+    // (or null for the neutral chip). Colors the tag as a Chip (a distinct
+    // color system from the kind Stripe — widget taxonomy). Resolves through
+    // the tag node's own `metadata.color` now (ADR-0082 §3), the same
+    // instance-colour path a picker chip uses, in place of the retired
+    // name-keyed registry map.
     tagColor?: ((tag: string) => string | null) | null;
     // Provenance: the owning layer's label when this node is inherited from an
     // ancestor project (#313 / ADR-0039). Renders a small "level pill" on the

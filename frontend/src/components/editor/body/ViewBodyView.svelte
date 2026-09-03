@@ -32,7 +32,7 @@
   import { setDesignerContext, type DesignerContext, type FieldOption, type RosterWarning } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { tagTitleById } from "@/lib/stores/tagNodes";
+  import { canonicalIdIn, tagById, tagTitleById } from "@/lib/stores/tagNodes";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
@@ -356,6 +356,9 @@
       // when `groupsByRef` is true — conditional tracking, not an
       // unconditional inline read that would subscribe every preview.
       resolveTitle: groupsByRef ? (id) => $tagTitleById.get(id) : undefined,
+      // Same gate (ADR-0082 §5): a merged tag's id folds onto the survivor's
+      // bucket before the title lookup runs.
+      canonicalId: groupsByRef ? (id) => canonicalIdIn($tagById, id) : undefined,
     }),
   );
   // Nest diagnostics surfaced as warnings so a truncated/lossy tree is never

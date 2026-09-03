@@ -116,7 +116,15 @@ class PromotionMixin:
     def _partition_entity_ref_list(
         self, index: NodeIndex, root, dest: IndexLayer, field: str, value: Any
     ) -> tuple[Any, Any, PromotionStayItem | None]:
-        ids = [i for i in value if isinstance(i, str) and i] if isinstance(value, list) else []
+        # Canonicalised before the visibility test (ADR-0082 §5): a value that
+        # still names a merged tag's id is tested — and travels, or stays — as
+        # the survivor, not the tag that redirects away from it. Deduped, so a
+        # list that already carried the survivor doesn't double it.
+        ids = (
+            list(dict.fromkeys(index.canonical_id(i) for i in value if isinstance(i, str) and i))
+            if isinstance(value, list)
+            else []
+        )
         visible_ids = [i for i in ids if self._target_visible_from_destination(index, root, i, dest.id)]
         hidden_ids = [i for i in ids if i not in visible_ids]
         if not hidden_ids:

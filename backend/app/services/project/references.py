@@ -40,7 +40,7 @@ from app.models import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import MANIFEST_FILENAME, SCHEMA_FILENAME, LayerVisitor
-from app.services.project.metadata_refs import iter_ref_occurrences
+from app.services.project.metadata_refs import RefOccurrence, iter_ref_occurrences
 from app.services.project.node_index import (
     IndexLayer,
     NodeFamily,
@@ -670,7 +670,8 @@ class ReferencesMixin:
         Two no-op shapes, one per gesture:
 
         - a plain single-file save (`#392`): the file's index signature (id,
-          kind, entry_type, title, edges) is unmoved — a prose-only edit;
+          kind, entry_type, title, `merged_into`, edges) is unmoved — a
+          prose-only edit;
         - a **structural** write (`#476`): it skips the signature comparison (a
           delete moves the path set), but is still a no-op when *every* path was
           absent from the index **and** is gone from disk now — a delete of a
@@ -692,15 +693,24 @@ class ReferencesMixin:
 
     def _index_signature_from_memo(
         self, index: NodeIndex, path: Path
-    ) -> tuple[str, str, str, str, tuple[ReferenceEdge, ...]] | None:
+    ) -> tuple[str, str, str, str, str | None, tuple[ReferenceEdge, ...]] | None:
         """What the held index records for the file at `path`: its identity
         fields plus its edges. None when no entry there — a brand-new file, which
-        is a change, so the caller must patch."""
+        is a change, so the caller must patch.
+
+        `merged_into` (ADR-0082 §5) is in the tuple deliberately, not folded
+        into "edges": a merge writes `metadata.merged_into` on the source's own
+        file, and `_reference_edges_for_entry` deliberately extracts NO edge
+        for that field (it is a redirect, not a reference) — so without this,
+        the id/kind/entry_type/title/edges signature would be unmoved and the
+        write would read as a no-op, leaving the live memo's `canonical` /
+        `redirects_to` stale until an unrelated write forced a rebuild.
+        """
         for entries in index.candidates.values():
             for entry in entries:
                 if entry.path == path:
                     edges = tuple(index.edges_by_layer_src.get((entry.source_layer_id, entry.id), ()))
-                    return (entry.id, entry.kind, entry.entry_type, entry.title, edges)
+                    return (entry.id, entry.kind, entry.entry_type, entry.title, entry.merged_into, edges)
         return None
 
     _SIGNATURE_STRUCTURAL = object()
@@ -1032,6 +1042,7 @@ class ReferencesMixin:
             source_layer_label=layer.label,
             is_library=layer.is_library,
             forked_from_layer_id=self._forked_from_layer_id(front_matter.get("forked_from")),
+            merged_into=self._merged_into(family.kind, front_matter),
         )
         duplicate = index.entry_for_layer(node_id, layer.id)
         if duplicate is not None:
@@ -1101,6 +1112,21 @@ class ReferencesMixin:
         if base is None:
             return ""
         return self._metadata_schema_layer_id(base / raw_forked_from.strip())
+
+    def _merged_into(self, kind: str, front_matter: dict[str, Any]) -> str | None:
+        """A tag's `metadata.merged_into`, read straight off the parsed front
+        matter (ADR-0082 §5) — not through `_reference_edges_for_entry`, which
+        needs a loaded schema and runs later. Reading it here at collection
+        time means `NodeIndex.resolve()` can fold every reference-lifecycle
+        pass onto the survivor even when the schema failed to load. `None` for
+        every non-`tag` kind and for an ordinary (unmerged) tag."""
+        if kind != "tag":
+            return None
+        metadata = front_matter.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
+        raw = metadata.get("merged_into")
+        return raw.strip() if isinstance(raw, str) and raw.strip() else None
 
     def _safe_relative(self, path: Path, anchor: Path) -> Path | str:
         try:
@@ -1248,27 +1274,48 @@ class ReferencesMixin:
             except ProjectServiceError:
                 return []
         metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
-        # One traversal finds every entity_ref / entity_ref_list value — top-level
-        # or inside an item_group member (ADR-0081) — instead of a per-field loop
-        # that only ever saw the top level. Deduped within a field id (a target
-        # listed twice, or in two group items under the same field, is one edge)
-        # but not across fields, since the field is part of the edge's identity.
-        # A tags occurrence contributes no edge. Nested edges collapse onto the
-        # list field's id (member-level granularity deferred, ADR-0081).
+        return self._edges_from_metadata(entry.id, metadata, schema)
+
+    def _edges_from_metadata(
+        self, src_id: str, metadata: dict[str, Any], schema: MetadataSchema
+    ) -> list[ReferenceEdge]:
+        """The edges one node's already-normalised metadata declares (split out
+        of `_reference_edges_for_entry` so its own guard clauses stay a
+        separate, simpler function).
+
+        One traversal finds every entity_ref / entity_ref_list value — top-level
+        or inside an item_group member (ADR-0081) — instead of a per-field loop
+        that only ever saw the top level. Deduped within a field id (a target
+        listed twice, or in two group items under the same field, is one edge)
+        but not across fields, since the field is part of the edge's identity.
+        Nested edges collapse onto the list field's id (member-level
+        granularity deferred, ADR-0081).
+        """
         seen: set[tuple[str, str]] = set()
         edges: list[ReferenceEdge] = []
         for occ in iter_ref_occurrences(metadata, schema):
-            if occ.field.type == "entity_ref":
-                candidates: list[object] = [occ.value]
-            elif occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
-                candidates = list(occ.value)
-            else:
+            # A merge redirect is not a reference: `NodeIndex.resolve()` reads
+            # it into `canonical` / `redirects_to` instead (ADR-0082 §5), so
+            # counting it here would double it as an ordinary usage and let
+            # `tagged: <the merged tag itself>` match the tag it redirects
+            # away from.
+            if occ.field_id == "merged_into":
                 continue
-            for target in candidates:
+            for target in self._ref_occurrence_candidates(occ):
                 if isinstance(target, str) and target and (occ.field_id, target) not in seen:
                     seen.add((occ.field_id, target))
-                    edges.append(ReferenceEdge(src=entry.id, dst=target, field_id=occ.field_id))
+                    edges.append(ReferenceEdge(src=src_id, dst=target, field_id=occ.field_id))
         return edges
+
+    @staticmethod
+    def _ref_occurrence_candidates(occ: RefOccurrence) -> list[object]:
+        """The candidate target(s) one ref occurrence names — a single value
+        for `entity_ref`, each item for `entity_ref_list`, nothing otherwise."""
+        if occ.field.type == "entity_ref":
+            return [occ.value]
+        if occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
+            return list(occ.value)
+        return []
 
     def _extract_include_edges(self, index: NodeIndex, schema: MetadataSchema | None) -> None:
         """Record each prompt's literal `{% include %}` tags as reference edges
@@ -1408,6 +1455,12 @@ class ReferencesMixin:
         candidates: list[ReferenceCandidate] = []
         for entry in index.by_id.values():
             if exclude_id and entry.id == exclude_id:
+                continue
+            # A merged tag is a redirect, not a pickable node any more — it
+            # left every picker the moment it merged (ADR-0082 §5). The
+            # governance pane still sees it (`list_tag_entries`, unfiltered),
+            # under "Merged".
+            if entry.merged_into:
                 continue
             if kind and entry.kind != kind:
                 continue

@@ -75,6 +75,19 @@ class SnapshotTestCase(unittest.TestCase):
         )
         return path
 
+    def _write_tag(self, folder: Path, node_id: str, title: str, *, merged_into: str | None = None) -> Path:
+        (folder / "tags").mkdir(parents=True, exist_ok=True)
+        path = folder / "tags" / f"{node_id}.md"
+        metadata: dict = {}
+        if merged_into is not None:
+            metadata["merged_into"] = merged_into
+        self.service._write_markdown_with_front_matter(
+            path,
+            {"id": node_id, "title": title, "entry_type": "tag:tag", "metadata": metadata},
+            "",
+        )
+        return path
+
     def _count_collections(self) -> list[int]:
         """Install a spy on the per-layer collector; returns a one-slot counter.
 
@@ -135,6 +148,24 @@ class SnapshotIsUsedTests(SnapshotTestCase):
         self.assertEqual(warm.edges_by_dst, cold.edges_by_dst)
         self.assertEqual(warm.warnings, cold.warnings)
         self.assertEqual(warm.errors, cold.errors)
+
+    def test_merged_into_round_trips_through_the_snapshot(self) -> None:
+        """ADR-0082 §5: `merged_into` (and the `canonical`/`redirects_to`
+        `resolve()` derives from it) must survive a warm rehydrate exactly
+        like `forked_from_layer_id` does — a redirect that only "worked" on a
+        cold build would silently stop resolving the moment the snapshot
+        served it."""
+        self._write_tag(self.root, "tag_mirror", "mirror", merged_into="tag_mirrors")
+        self._write_tag(self.root, "tag_mirrors", "mirrors")
+
+        cold = self._open_index()
+        warm = self._open_index()
+
+        self.assertEqual(cold.by_id["tag_mirror"].merged_into, "tag_mirrors")
+        self.assertEqual(warm.by_id["tag_mirror"].merged_into, "tag_mirrors")
+        self.assertEqual(warm.canonical_id("tag_mirror"), "tag_mirrors")
+        self.assertEqual(warm.canonical, cold.canonical)
+        self.assertEqual(warm.redirects_to, cold.redirects_to)
 
     def test_shadow_warnings_are_not_doubled(self) -> None:
         """`resolve()` derives them, so persisting them would emit each twice —

@@ -11,12 +11,15 @@ so existing references keep working unchanged.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.services.project.overrides import LayerOverride
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,13 @@ class NodeIndexEntry:
     # shadow as deliberate and stays quiet; "" (an ordinary entry) keeps the
     # warning loud for an accidental collision.
     forked_from_layer_id: str = ""
+    # Kind `tag` only (ADR-0082 §5): the id this tag was merged into, read from
+    # `metadata.merged_into` at collection time. None for an ordinary tag (or
+    # any non-tag entry). `resolve()` follows this into `NodeIndex.canonical` /
+    # `redirects_to` — the one choke point every reference-lifecycle read
+    # (backlinks, `tagged:`, title lookup, dangling-check) goes through, so a
+    # merged tag's id resolves to its survivor everywhere without a second pass.
+    merged_into: str | None = None
 
 
 @dataclass(frozen=True)
@@ -171,6 +181,17 @@ class NodeIndex:
     # Reverse adjacency — the structure backlinks are served from. Populated by
     # `rebuild_reverse_edges` once the walk is complete.
     edges_by_dst: dict[str, list[ReferenceEdge]] = field(default_factory=dict)
+    # A merged tag's id → the id it resolves to after following every
+    # `merged_into` link to the end of the chain (ADR-0082 §5). Populated by
+    # `resolve()`; absent (identity) for anything that was never merged.
+    # `canonical_id()` is the accessor — `by_id` is deliberately left alone so
+    # `list_tag_entries` and the governance pane still see the redirect record.
+    canonical: dict[str, str] = field(default_factory=dict)
+    # The inverse of one hop of `merged_into` — survivor id → every tag id that
+    # names it directly (NOT transitively resolved through `canonical`, so a
+    # multi-hop chain's cascade-delete can walk it one link at a time).
+    # Populated by `resolve()`.
+    redirects_to: dict[str, list[str]] = field(default_factory=dict)
     # Collection diagnostics, keyed by **(source layer id, path)** — the same
     # provenance entries and edges carry (#382). Before this the diagnostics
     # were flat `warnings` / `errors` string lists with no record of their
@@ -301,7 +322,58 @@ class NodeIndex:
             # is deliberate, not an accidental id collision, so it is silent.
             if shadower.forked_from_layer_id != shadowed.source_layer_id
         ]
+        self._resolve_canonical()
         self.rebuild_reverse_edges()
+
+    def _resolve_canonical(self) -> None:
+        """(Re)build `canonical` / `redirects_to` from `by_id`'s `merged_into`
+        values (ADR-0082 §5). Must run before `rebuild_reverse_edges`, which
+        folds edges onto the canonical id.
+
+        Walks each merged tag's `merged_into` chain to its end: **cycle
+        guard** — stop and log at the first repeated id, so a hand-edited loop
+        degrades to "resolves to itself" rather than hanging. **Dangling
+        survivor** — a chain that names an id outside `by_id` stops at the
+        last id that DOES exist, so `mirror -> ghost` (ghost missing) still
+        resolves `mirror` to `mirror`, never to a target nothing can read.
+        """
+        canonical: dict[str, str] = {}
+        redirects_to: dict[str, list[str]] = {}
+        for node_id, entry in self.by_id.items():
+            if entry.kind == "tag" and entry.merged_into:
+                redirects_to.setdefault(entry.merged_into, []).append(node_id)
+            if entry.kind != "tag" or not entry.merged_into:
+                continue
+            seen = {node_id}
+            current = node_id
+            while True:
+                current_entry = self.by_id.get(current)
+                next_id = (
+                    current_entry.merged_into
+                    if current_entry is not None and current_entry.kind == "tag"
+                    else None
+                )
+                if not next_id or next_id not in self.by_id:
+                    break
+                if next_id in seen:
+                    log.warning(
+                        "merged_into cycle detected at tag %s (already visited %s); "
+                        "stopping the chain there.",
+                        node_id,
+                        next_id,
+                    )
+                    break
+                seen.add(next_id)
+                current = next_id
+            canonical[node_id] = current
+        self.canonical = canonical
+        self.redirects_to = redirects_to
+
+    def canonical_id(self, node_id: str) -> str:
+        """`node_id`, following every `merged_into` redirect to its survivor —
+        identity when `node_id` was never merged (ADR-0082 §5). The one choke
+        point every reference-lifecycle read canonicalises through."""
+        return self.canonical.get(node_id, node_id)
 
     def rebuild_reverse_edges(self) -> None:
         """(Re)build `edges_by_dst` from `edges_by_src`.
@@ -311,11 +383,17 @@ class NodeIndex:
         scan 229 µs / 518 µs (ADR-0040). Building it costs 0.7 ms / 6.5 ms, paid
         once per index build. Must run *after* the whole walk: forward edges are
         overwritten per id as inner layers shadow outer ones.
+
+        Folded through `canonical_id` (ADR-0082 §5): an edge whose destination
+        is a merged tag lands on the survivor, so backlinks, usage counts and
+        `_backlinks_to_targets` read as the survivor with no consumer doing
+        anything. The edge's own `dst` is left unchanged — only the map key it
+        is filed under moves.
         """
         reverse: dict[str, list[ReferenceEdge]] = {}
         for edges in self.edges_by_src.values():
             for edge in edges:
-                reverse.setdefault(edge.dst, []).append(edge)
+                reverse.setdefault(self.canonical_id(edge.dst), []).append(edge)
         # Sorted, so a backlink list does not depend on the order ids happen to
         # sit in `candidates`. That order is an accident of insertion — a cold
         # build gets walk order, an incremental patch (#307) re-inserts a

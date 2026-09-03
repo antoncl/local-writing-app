@@ -33,7 +33,7 @@ describe("api wire scope (#965)", () => {
   it("omits X-Project-Root before any project is open", async () => {
     const mock = stubFetch({});
     const { api } = await import("@/lib/api");
-    await api.getTagsOverview();
+    await api.listTagEntries();
     expect(scopeHeaderOf(mock, 0)).toBeNull();
   });
 
@@ -42,7 +42,7 @@ describe("api wire scope (#965)", () => {
     const { api } = await import("@/lib/api");
     await api.openProject(ROOT);
     expect(sessionStorage.getItem(SCOPE_KEY)).toBe(ROOT);
-    await api.getTagsOverview();
+    await api.listTagEntries();
     expect(scopeHeaderOf(mock, 1)).toBe(encodeURIComponent(ROOT));
   });
 
@@ -53,7 +53,7 @@ describe("api wire scope (#965)", () => {
     sessionStorage.setItem(SCOPE_KEY, ROOT);
     const mock = stubFetch({});
     const { api } = await import("@/lib/api"); // inits projectScopeRoot from storage
-    await api.getTagsOverview();
+    await api.listTagEntries();
     expect(scopeHeaderOf(mock, 0)).toBe(encodeURIComponent(ROOT));
   });
 });

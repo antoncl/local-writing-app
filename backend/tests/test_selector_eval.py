@@ -186,3 +186,41 @@ def test_intersect_of_no_children_is_empty():
 def test_unsupported_operators_raise(expr):
     with pytest.raises(UnsupportedSelectorExpr):
         _run(expr, _nodes(("a", "lore:note", ())))
+
+
+# --- merged-tag canonicalisation (ADR-0082 §5) ------------------------------
+#
+# `SelectorNode.references` are canonicalised where the roster is built
+# (`preview.py`'s `_canonical_references`), not inside this module — this
+# pins that a `tagged:` leaf over such a roster matches through a redirect,
+# the same contract `preview.py`'s own construction sites rely on.
+
+
+class _FakeIndex:
+    """The one method `_canonical_references` reads off a `NodeIndex` — a
+    small stand-in so this stays a unit test, not a project fixture."""
+
+    def __init__(self, canonical: dict[str, str]) -> None:
+        self._canonical = canonical
+
+    def canonical_id(self, node_id: str) -> str:
+        return self._canonical.get(node_id, node_id)
+
+
+def test_tagged_matches_a_carrier_still_holding_a_merged_tags_id():
+    from app.services.ai.preview import _canonical_references
+
+    index = _FakeIndex({"tag_mirror": "tag_mirrors"})
+    metadata = {"motifs": ["tag_mirror"]}
+    node = SelectorNode("lore_a", "lore:note", _canonical_references(index, metadata), metadata)
+    assert _run({"tagged": "tag_mirrors"}, [node]) == ["lore_a"]
+    # The merged id itself no longer matches — it left the roster's edges.
+    assert _run({"tagged": "tag_mirror"}, [node]) == []
+
+
+def test_canonical_references_is_identity_when_nothing_is_merged():
+    from app.services.ai.preview import _canonical_references
+
+    index = _FakeIndex({})
+    metadata = {"motifs": ["tag_a", "tag_b"]}
+    assert _canonical_references(index, metadata) == frozenset({"tag_a", "tag_b"})

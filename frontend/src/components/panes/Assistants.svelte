@@ -10,7 +10,8 @@
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { isAssistantListed } from "@/lib/stores/assistants";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
-  import { tagTitleById } from "@/lib/stores/tagNodes";
+  import { liveTags, tagTitleById } from "@/lib/stores/tagNodes";
+  import { tagChipHexByTitle } from "@/lib/utils/pickerStripes";
   import { api } from "@/lib/api";
   import type { AIHealthResponse } from "@/lib/aiTypes";
   // `isBareDescendantsOf` / `kindUniverseExpr` went with the whole-roster guard
@@ -54,12 +55,13 @@
   // persisted, same as the Lore pane).
 
   // ADR-0082 §2: `assistant_tags` now holds tag-node ids — resolve to titles
-  // through the tag roster store for display (F4). Tag-chip colour comes in
-  // slice 3 (the picker's instance-colour helper); until then every chip is
-  // uncoloured rather than reading the retired name-keyed hex map.
+  // through the tag roster store for display (F4).
   const tagTitles = $derived($tagTitleById);
-  function tagColorNone(): string | null {
-    return null;
+  // ADR-0082 §3/F2: the tag's own instance colour, through the same resolver
+  // the picker chip uses — title-keyed since `tags` below is titles.
+  const tagColorByTitle = $derived(tagChipHexByTitle($liveTags, schema));
+  function tagColorFor(title: string): string | null {
+    return tagColorByTitle.get(title) ?? null;
   }
 
   // Every NodeList is backed by a view (ADR-0022), and the view is authoritative
@@ -216,7 +218,7 @@
     title={entry.title}
     depth={ctx.depth}
     tags={assistantTagsOf(entry).map((id) => tagTitles.get(id) ?? id)}
-    tagColor={tagColorNone}
+    tagColor={tagColorFor}
     active={ctx.active}
     stripeColor={ctx.stripeColor}
     typeIcon={entryTypeIconClass(entry.entry_type, schema)}

@@ -15,7 +15,7 @@
 
   import { tick } from "svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { tagNodesStore } from "@/lib/stores/tagNodes";
+  import { liveTags } from "@/lib/stores/tagNodes";
   import { cardEntriesStore } from "@/lib/stores/plotCards";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
@@ -320,7 +320,7 @@
   const cardEntries = $derived($cardEntriesStore);
   // Ref → instance-colour index (#1528): chips + selector members hold only a ref,
   // not the entity, so they resolve a node's own metadata.color (a tag's list too).
-  const instanceColorByRef = $derived(buildInstanceColorMap({ loreEntries, cardEntries, structure }));
+  const instanceColorByRef = $derived(buildInstanceColorMap({ loreEntries, cardEntries, structure, tagEntries }));
   function instanceColorFor(kind: string | undefined, id: string): string | null {
     return kind ? (instanceColorByRef.get(`${kind}:${id}`) ?? null) : null;
   }
@@ -378,7 +378,10 @@
   // strip's own TAG control, viewParams.ts) that never belongs to a lore/scene
   // roster filter. A vocabulary with zero members of the allowed kind is
   // already dropped below (the members guard), so no scope list is needed here.
-  const tagNodes = $derived($tagNodesStore.filter((t) => t.entry_type !== "tag:assistant_tag"));
+  // `liveTags` (ADR-0082 §5): a merged tag left every picker the moment it
+  // merged — including this "By tag" axis, which would otherwise offer a
+  // dead selector no longer distinguishable from its survivor.
+  const tagNodes = $derived($liveTags.filter((t) => t.entry_type !== "tag:assistant_tag"));
   // A `tagged` leaf INTERSECTED with the config's entry_type constraint for the
   // kind, so a tag can't over-match past the picker's scope (a lore:character
   // input must not pull in a lore:location sharing the tag). The stored spec

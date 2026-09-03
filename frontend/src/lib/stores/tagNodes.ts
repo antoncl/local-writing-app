@@ -68,25 +68,65 @@ export const tagById = derived(tagNodesStore, (tags) => {
   return map;
 });
 
+// Tags without `merged_into` — the live vocabulary a picker/roster/create
+// gesture may offer (ADR-0082 §5). A merged tag left every picker the moment
+// it merged; the governance surface (TagsPane) still shows it, unfiltered,
+// under "Merged".
+export const liveTags = derived(tagNodesStore, (tags) => tags.filter((tag) => !tag.merged_into));
+
+// The pure chain-follow: `id`, following every `merged_into` redirect over
+// `byId` to its survivor — identity when `id` was never merged, or when it
+// names a tag outside the roster (ADR-0082 §5). Cycle-guarded the same way
+// the backend's `NodeIndex.canonical_id` is: a malformed loop degrades to
+// "stop at the first repeat" rather than hanging. Public (not just
+// `canonicalTagId` below) so a REACTIVE caller — one already holding a live
+// `$tagById` read, e.g. `ViewNodeList`/`ViewBodyView`'s `canonicalId` prop —
+// can apply it without going through `get()`, which would silently opt the
+// caller out of Svelte's dependency tracking.
+export function canonicalIdIn(byId: ReadonlyMap<string, TagEntry>, id: string): string {
+  const seen = new Set([id]);
+  let current = id;
+  for (;;) {
+    const next = byId.get(current)?.merged_into;
+    if (!next || !byId.has(next) || seen.has(next)) return current;
+    seen.add(next);
+    current = next;
+  }
+}
+
+// `get(tagById)` snapshot convenience for a non-reactive caller (a plain
+// event handler, `findTagByTitle`-adjacent code) — never inside a `$derived`,
+// where `canonicalIdIn($tagById, id)` is what tracks correctly.
+export function canonicalTagId(id: string): string {
+  return canonicalIdIn(get(tagById), id);
+}
+
 // Id -> title, for resolving a tag reference's chip/bucket label (§3 of the
 // ADR: the frontend keeps a tag roster store so `entity_ref`/`entity_ref_list`
-// values pointing at a tag resolve to a title instead of a raw id).
+// values pointing at a tag resolve to a title instead of a raw id). A merged
+// id maps to the SURVIVOR's title (§5) — `canonicalIdIn` is followed before
+// the title lookup, so a carrier that has not been re-saved yet still shows
+// the tag it now reads as.
 export const tagTitleById = derived(tagById, (byId) => {
   const map = new Map<string, string>();
-  for (const [id, tag] of byId) map.set(id, tag.title);
+  for (const id of byId.keys()) {
+    const survivor = byId.get(canonicalIdIn(byId, id));
+    if (survivor) map.set(id, survivor.title);
+  }
   return map;
 });
 
-// ADR-0082 §2 / F3: case-insensitive title resolution over the current
-// roster, ahead of a create — a same-title tag one hop up the merged chain
-// (or created moments ago by a sibling save) is referenced, not duplicated.
-// `entryType` narrows to one vocabulary when given (a picker source names
-// exactly one when `create_missing` is eligible, F1); omitted, any vocabulary
-// matches.
+// ADR-0082 §2 / F3: case-insensitive title resolution over the LIVE roster,
+// ahead of a create — a same-title tag one hop up the merged chain (or
+// created moments ago by a sibling save) is referenced, not duplicated. A
+// merged tag is skipped (§5): typing its old name must mint or match the
+// survivor, never resurrect the redirect. `entryType` narrows to one
+// vocabulary when given (a picker source names exactly one when
+// `create_missing` is eligible, F1); omitted, any vocabulary matches.
 export function findTagByTitle(title: string, entryType?: string): TagEntry | undefined {
   const needle = title.trim().toLowerCase();
   if (!needle) return undefined;
-  return get(tagNodesStore).find(
+  return get(liveTags).find(
     (tag) => tag.title.trim().toLowerCase() === needle && (!entryType || tag.entry_type === entryType),
   );
 }

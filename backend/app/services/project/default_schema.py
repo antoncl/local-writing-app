@@ -499,7 +499,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Tag",
             "kind": "tag",
             "abstract": True,
-            "fields": ["color"],
+            "fields": ["color", "merged_into"],
             "has_body": False,
             "description": (
                 "A label. Tags are nodes: a vocabulary is a tag type, a tag is "
@@ -852,6 +852,26 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "and not a description of a color."
             ),
             "type": "color",
+        },
+        "merged_into": {
+            # ADR-0082 §5: set by the merge operation only (`merge_tag_entries`),
+            # never authored by hand. The index's `NodeIndex.canonical_id`
+            # resolves every reference to this tag as the target — reads,
+            # filters, groups and counts land on the survivor with no file
+            # outside the merge's owned scope touched. Not `ai_proposable`: a
+            # brainstorm commit must never redirect a tag on its own.
+            #
+            # No `readonly`/`hidden`-style flag exists on MetadataFieldDefinition
+            # (checked before adding this), so the field stays visible in the
+            # rail like any other stored field rather than being hidden there.
+            "name": "Merged into",
+            "description": (
+                "Set when this tag was merged into another; the app reads, "
+                "filters and counts this tag as that one."
+            ),
+            "type": "entity_ref",
+            "picker_config": {"sources": [{"kind": "tag"}]},
+            "ai_proposable": False,
         },
         "characters": {
             "name": "Characters",

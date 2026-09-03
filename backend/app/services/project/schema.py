@@ -891,8 +891,11 @@ class MetadataSchemaMixin:
         multi_select → invalid items dropped. A `list` field with the `select`
         item sugar (#698) stores the same flat scalar sequence multi_select
         does and reads its choices from the field's own options, so it
-        migrates through the identical list branch. Skips `tags` (freeform;
-        tag renames flow through merge_tags, not the option list).
+        migrates through the identical list branch. A tag vocabulary is an
+        `entity_ref_list` (ADR-0082 §2), so it never carries options and never
+        reaches this at all — a tag rename is a title edit on the tag node,
+        and a merge is the `merged_into` redirect (§5), never an option-list
+        migration.
         """
 
         def carries_options(field: MetadataFieldDefinition) -> bool:

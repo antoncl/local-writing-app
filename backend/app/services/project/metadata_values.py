@@ -153,6 +153,15 @@ class MetadataValuesMixin:
         schema: MetadataSchema,
         node_index: NodeIndex | None = None,
     ) -> list[str]:
+        # ADR-0082 §5's lazy rewrite: the ONE entry point every entity_ref /
+        # entity_ref_list value reaches on its way to `_validate_entity_ref_list_value`
+        # — scene, lore and plot saves alike — so it is where a merged tag's id is
+        # rewritten to its survivor, in place, before the value it landed on is
+        # validated. `metadata` is the caller's own dict (or a Pydantic model's
+        # `.metadata` attribute, mutable through the same reference), so this
+        # mutation is what a book scene's next save actually writes to disk.
+        if node_index is not None:
+            self._canonicalise_metadata_refs(metadata, schema, node_index)
         errors: list[str] = []
         entry_type_definition = schema.entry_types.get(entry_type)
         if not entry_type_definition:
@@ -586,6 +595,40 @@ class MetadataValuesMixin:
         cleaned, _ = rewrite_ref_occurrences(metadata, schema, _heal)
         return cleaned
 
+    def _canonicalise_metadata_refs(
+        self,
+        metadata: dict[str, Any],
+        schema: MetadataSchema,
+        node_index: NodeIndex,
+    ) -> bool:
+        """Rewrite every entity_ref / entity_ref_list occurrence to its
+        canonical (redirect-followed) id, IN PLACE, before validation runs
+        (ADR-0082 §5). A value that still names a merged tag's id is rewritten
+        to the survivor's id; a list that ends up naming the survivor twice
+        (because two of its entries had merged into it) is deduped. Returns
+        whether anything changed, for a caller that wants to know.
+        """
+
+        def _canonicalise(occ: RefOccurrence) -> Any:
+            if occ.field.type == "entity_ref":
+                if isinstance(occ.value, str) and occ.value:
+                    canonical = node_index.canonical_id(occ.value)
+                    return canonical if canonical != occ.value else UNCHANGED
+                return UNCHANGED
+            if occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
+                rewritten = [
+                    node_index.canonical_id(item) if isinstance(item, str) else item for item in occ.value
+                ]
+                deduped = list(dict.fromkeys(rewritten))
+                return deduped if deduped != occ.value else UNCHANGED
+            return UNCHANGED
+
+        cleaned, changed = rewrite_ref_occurrences(metadata, schema, _canonicalise)
+        if changed:
+            metadata.clear()
+            metadata.update(cleaned)
+        return changed
+
     def _ref_matches_picker(
         self, item: Any, field: MetadataFieldDefinition, node_index: NodeIndex
     ) -> bool:
@@ -595,7 +638,11 @@ class MetadataValuesMixin:
         inside `_strip_dangling_references` (#76)."""
         if not isinstance(item, str) or not item:
             return False
-        target = node_index.by_id.get(item)
+        # A merged tag's id is NOT dangling (ADR-0082 §5): it resolves to the
+        # survivor's entry, so a book scene that still carries a merged id
+        # keeps reading/filtering as the survivor until its next save rewrites
+        # the id (S4).
+        target = node_index.by_id.get(node_index.canonical_id(item))
         if target is None:
             return False
         cfg = field.picker_config
@@ -793,6 +840,68 @@ class MetadataValuesMixin:
         # Only a changed node pays for its body: re-read the whole file so
         # everything below the front matter is preserved, then write the cleaned
         # mapping back over it.
+        try:
+            front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
+        except ProjectServiceError:
+            return
+        front_matter["metadata"] = cleaned
+        self._write_markdown_with_front_matter(entry.path, front_matter, body)
+
+    def _rewrite_references_from_to(self, source_id: str, target_id: str, root: Path) -> None:
+        """Rewrite every entity_ref / entity_ref_list occurrence naming
+        `source_id` to `target_id`, in place, across the same
+        `REFERENCE_BEARING_KINDS` sweep `_purge_references_to` uses — NOT the
+        narrow single-layer `_entry_markdown_paths` (ADR-0082 §5's merge step
+        1). A list that ends up naming the target twice, because it already
+        carried it, is deduped.
+
+        Unlike `_purge_references_to` there is no `_ids_safe_to_purge` guard:
+        this never destroys data, it only redirects a still-live reference to
+        the tag that owns it now.
+        """
+        schema = self.read_metadata_schema(root)
+        index = self._build_node_index(root)
+        for entry in list(index.by_id.values()):
+            if entry.kind in REFERENCE_BEARING_KINDS:
+                self._rewrite_entry_reference(entry, schema, source_id, target_id)
+
+    @staticmethod
+    def _rewritten_ref_value(occ: RefOccurrence, source_id: str, target_id: str) -> Any:
+        """One occurrence's value with `source_id` swapped for `target_id`, or
+        `UNCHANGED` — the transform `_rewrite_references_from_to` applies
+        through `rewrite_ref_occurrences`. A list that ends up naming the
+        target twice, because it already carried it, is deduped."""
+        if occ.field.type == "entity_ref":
+            return target_id if occ.value == source_id else UNCHANGED
+        if occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
+            rewritten = [target_id if item == source_id else item for item in occ.value]
+            deduped = list(dict.fromkeys(rewritten))
+            return deduped if deduped != occ.value else UNCHANGED
+        return UNCHANGED
+
+    def _rewrite_entry_reference(
+        self, entry: NodeIndexEntry, schema: MetadataSchema, source_id: str, target_id: str
+    ) -> None:
+        """Rewrite one node's `source_id` occurrences to `target_id` and write
+        its file if anything changed. Front matter only until a change is
+        confirmed, matching `_purge_entry_metadata`'s pay-for-what-you-touch
+        shape. A file that fails to parse is skipped, never raised."""
+        try:
+            front_matter = self._read_front_matter_only(entry.path, strict=True)
+        except ProjectServiceError:
+            return
+        raw_metadata = front_matter.get("metadata")
+        if not isinstance(raw_metadata, dict):
+            return
+        try:
+            normalised = self._normalise_metadata(raw_metadata, entry.path)
+        except ProjectServiceError:
+            return
+        cleaned, changed = rewrite_ref_occurrences(
+            normalised, schema, lambda occ: self._rewritten_ref_value(occ, source_id, target_id)
+        )
+        if not changed:
+            return
         try:
             front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
         except ProjectServiceError:

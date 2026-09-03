@@ -84,7 +84,11 @@ class EntryRef:
         except Exception:
             self._loaded = _MISSING
             return None
-        idx_entry = index.by_id.get(self._id)
+        # Canonicalised first (ADR-0082 §5): a ref that still names a merged
+        # tag's id resolves to the survivor's entry, so `{{ mirror.title }}`
+        # reads as `mirrors` with no template change. Identity for every
+        # other kind (`canonical_id` is a no-op there).
+        idx_entry = index.by_id.get(index.canonical_id(self._id))
         if idx_entry is None:
             self._loaded = _MISSING
             return None
@@ -97,16 +101,23 @@ class EntryRef:
     def _read_by_kind(self, idx_entry: Any) -> Any:
         """Resolve the node behind this ref via the reader for its kind, or
         `_MISSING` for kinds/entry_types that aren't a resolvable subject.
+
+        Reads by `idx_entry.id`, not `self._id`: `_load` already canonicalised
+        the lookup, so for a merged tag they differ and the survivor's id is
+        the one every reader below must be handed.
         """
+        node_id = idx_entry.id
         kind = idx_entry.kind
         if kind == "lore":
-            return self._project.read_lore_entry(self._id)
+            return self._project.read_lore_entry(node_id)
         if kind == "manuscript":
-            return self._project.read_scene(self._id)
+            return self._project.read_scene(node_id)
         if kind == "prompt":
-            return self._project.read_prompt_entry(self._id)
+            return self._project.read_prompt_entry(node_id)
         if kind == "research":
-            return self._project.read_research_note(self._id)
+            return self._project.read_research_note(node_id)
+        if kind == "tag":
+            return self._project.read_tag_entry(node_id)
         if kind == "plot":
             # A plot node — card, plotline, or character arc — is a first-class
             # Node a prompt can pull in (revise-plot-card / revise-plotline /
@@ -114,11 +125,11 @@ class EntryRef:
             # plotline (ADR-0080), so it needs its own branch. Board and template
             # are not revisable subjects, so they stay unresolved.
             if idx_entry.entry_type == "plot:plotline":
-                return self._project.read_plotline(self._id)
+                return self._project.read_plotline(node_id)
             if idx_entry.entry_type == "plot:card":
-                return self._project.read_card(self._id)
+                return self._project.read_card(node_id)
             if idx_entry.entry_type == "plot:character_arc":
-                return self._project.read_character_arc(self._id)
+                return self._project.read_character_arc(node_id)
             return _MISSING
         return _MISSING
 

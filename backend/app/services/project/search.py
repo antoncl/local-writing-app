@@ -264,7 +264,7 @@ class SearchMixin:
         # id. Display-only: this returns a copy for search/rendering.
         def _to_title(occ: RefOccurrence) -> Any:
             if occ.field.type == "entity_ref" and isinstance(occ.value, str):
-                target = node_index.by_id.get(occ.value)
+                target = node_index.by_id.get(node_index.canonical_id(occ.value))
                 return target.title if target and target.title else UNCHANGED
             if occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
                 return [self._ref_title_or_id(item, node_index) for item in occ.value]
@@ -277,7 +277,7 @@ class SearchMixin:
     def _ref_title_or_id(item: Any, node_index: NodeIndex) -> Any:
         """A ref id swapped for its target's title, or the item unchanged when it
         does not resolve to a titled node (display-only, for entity_ref_list)."""
-        target = node_index.by_id.get(item) if isinstance(item, str) else None
+        target = node_index.by_id.get(node_index.canonical_id(item)) if isinstance(item, str) else None
         return target.title if target and target.title else item
 
     def _scene_display_paths(self) -> dict[str, str]:

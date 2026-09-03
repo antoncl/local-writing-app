@@ -73,7 +73,6 @@ function stubSceneRefreshes(): void {
   vi.spyOn(api, "getStructure").mockResolvedValue({ nodes: [] } as never);
   vi.spyOn(api, "getTodos").mockResolvedValue({ items: [] } as never);
   vi.spyOn(api, "getEmbeddedTodos").mockResolvedValue({ items: [] } as never);
-  vi.spyOn(api, "getKnownTags").mockResolvedValue({ tags: [] } as never);
   vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {} } as never);
 }
 

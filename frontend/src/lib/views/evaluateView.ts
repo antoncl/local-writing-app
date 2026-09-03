@@ -213,6 +213,13 @@ export type EvalContext = {
   // Optional so every existing evaluateView caller/test is unchanged; callers
   // that group panes thread one backed by the tag roster store.
   resolveTitle?: (id: string) => string | undefined;
+  // ADR-0082 §5: follows a merged tag's id to its survivor — identity when
+  // absent or when the id was never merged. Applied in `nodeReferences` (so
+  // `tagged:` matches through a redirect) and in the `groupBy` ref branch
+  // before the title lookup (so a bucket lands on the survivor). Callers that
+  // group/filter by tag thread one backed by `tagNodesStore`'s
+  // `canonicalTagId`, under the same `groupsByRef` gate `resolveTitle` is.
+  canonicalId?: (id: string) => string;
 };
 
 // The explicit "whole roster of `kind`" membership expr (ADR-0036 §3). Replaces
@@ -306,6 +313,7 @@ type RunState<T extends EvalNode> = {
   bindings?: EvalBindings; // #184: name → id-set|value-set (free variables)
   referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>; // #184: targetId → referrers
   resolveTitle?: (id: string) => string | undefined; // ADR-0082 slice 1: off-roster ref titles (e.g. tags)
+  canonicalId?: (id: string) => string; // ADR-0082 §5: merged-tag redirect follow
   diag: ViewDiagnostics; // nest accumulator (cycle/orphan/fan-out counts)
   nestRan: boolean; // whether any `nest` evaluated (gates `diagnostics` on result)
   // ADR-0028 Amendment 1 (#260): the single-sink-DAG support for a routed orphan
@@ -352,6 +360,7 @@ export function evaluateView<T extends EvalNode>(
     bindings: ctx.bindings,
     referenceIndex: ctx.referenceIndex,
     resolveTitle: ctx.resolveTitle,
+    canonicalId: ctx.canonicalId,
     diag: { cyclicLinksSkipped: 0, orphansDropped: 0, fanoutTruncated: false },
     nestRan: false,
     nestsById: new Map(),
@@ -728,7 +737,7 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutra
     const set = resolveLeafOperand(state, expr.tagged);
     if (set === OPERAND_INACTIVE) return neutralUniverse ? new Set(state.order.keys()) : new Set<string>();
     return idsWhere(state, (n) => {
-      const refs = nodeReferences(n);
+      const refs = nodeReferences(n, state.canonicalId);
       for (const t of set) if (refs.has(t)) return true;
       return false;
     });
@@ -1060,11 +1069,17 @@ function descendantFqns<T extends EvalNode>(state: RunState<T>, fqn: string): Se
 // in a group entry still counts. Schema-free: no field-key knowledge needed, so
 // a user vocabulary field (`motifs: [...]`) tags exactly like a built-in one.
 // Ids are uuids, so a false match against ordinary text is not a realistic risk.
-// Mirrors the backend `selector_references` reader.
-function nodeReferences(node: EvalNode): Set<string> {
+// Mirrors the backend `selector_references` reader. `canonicalId` (ADR-0082
+// §5) follows a merged tag's id to its survivor, so `tagged: <survivor>`
+// matches a node that still carries a merged id — undefined is the identity
+// function (every non-tag-aware caller is unchanged).
+function nodeReferences(node: EvalNode, canonicalId?: (id: string) => string): Set<string> {
   const out = new Set<string>();
   collectReferences(node.metadata, out);
-  return out;
+  if (!canonicalId) return out;
+  const canonical = new Set<string>();
+  for (const ref of out) canonical.add(canonicalId(ref));
+  return canonical;
 }
 
 function collectReferences(value: unknown, out: Set<string>): void {

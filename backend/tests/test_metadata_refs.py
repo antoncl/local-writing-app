@@ -128,7 +128,9 @@ def test_purge_scrubs_a_nested_ref_to_a_deleted_node() -> None:
 def test_strip_hides_a_nested_dangling_ref_and_keeps_a_live_one() -> None:
     # ★ heal-nested. char_a and char_c exist in the index; char_b was deleted.
     service = ProjectService(None)
-    node_index = SimpleNamespace(by_id={"char_a": object(), "char_c": object()})
+    node_index = SimpleNamespace(
+        by_id={"char_a": object(), "char_c": object()}, canonical_id=lambda node_id: node_id
+    )
     cleaned = service._strip_dangling_references(_metadata(), _schema(), node_index)
     assert cleaned["rels"][0]["who"] == ""           # dangling nested ref hidden
     assert cleaned["rels"][1]["who"] == "char_c"     # live nested ref kept
@@ -174,7 +176,8 @@ def test_resolve_reference_titles_swaps_a_nested_id_for_its_title() -> None:
             "char_a": SimpleNamespace(title="Alice"),
             "char_b": SimpleNamespace(title="Bob"),
             "char_c": SimpleNamespace(title="Cara"),
-        }
+        },
+        canonical_id=lambda node_id: node_id,
     )
     resolved = service._resolve_reference_titles(_metadata(), "character", _schema(), node_index)
     assert resolved["pov"] == "Alice"            # top-level ref → title

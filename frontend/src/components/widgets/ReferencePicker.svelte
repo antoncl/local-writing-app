@@ -39,7 +39,7 @@
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   // Tag nodes read from the store too (ADR-0082 slice 1), same reasoning: a ref
   // pointing at a tag resolves anywhere without the caller threading the roster.
-  import { tagById, tagNodesStore, refreshTagNodes, findTagByTitle, upsertTagNode } from "@/lib/stores/tagNodes";
+  import { canonicalIdIn, liveTags, tagById, refreshTagNodes, findTagByTitle, upsertTagNode } from "@/lib/stores/tagNodes";
   import { api } from "@/lib/api";
 
   let {
@@ -188,8 +188,10 @@
     // A tag node (ADR-0082 slice 1). `kind: "tag"` here names a MEMBER pick —
     // note it carries no `selector`, which is how a selector ref (the same
     // "tag" kind value, §4 of the ADR) is told apart; slice 2 disambiguates
-    // the literal itself.
-    const tag = $tagById.get(id);
+    // the literal itself. Canonicalised first (§5): a chip for a merged id
+    // shows the survivor's title/type, while `.id` stays the value actually
+    // stored, so removal-by-id still targets what the field holds.
+    const tag = $tagById.get(canonicalIdIn($tagById, id));
     if (tag) return { id, kind: "tag", title: tag.title, entry_type: tag.entry_type };
     // Fall back to the picker's configured kind so a freshly-saved ref whose
     // index hasn't refreshed yet still shows the right type-pill color.
@@ -279,6 +281,12 @@
     }
     if (ref.kind === "manuscript") {
       return findStructureColor(structure?.root, ref.id);
+    }
+    if (ref.kind === "tag") {
+      // Canonicalised (ADR-0082 §5): a chip for a merged id resolves the
+      // survivor's own colour, not its own (dropped) instance override.
+      const tag = $tagById.get(canonicalIdIn($tagById, ref.id));
+      return typeof tag?.metadata?.color === "string" ? tag.metadata.color : null;
     }
     return null;
   }
@@ -375,7 +383,7 @@
         promptEntries={promptEntries}
         plotEntries={$plotlineEntriesStore}
         assistantEntries={$assistantEntriesStore}
-        tagEntries={$tagNodesStore}
+        tagEntries={$liveTags}
         onChange={handlePickerChange}
         onCreate={createEnabled ? handleCreate : undefined}
         creating={creating}

@@ -1,4 +1,8 @@
-"""Metadata schema, fields, groups, and tags routes (#170 main.py split)."""
+"""Metadata schema, fields, and groups routes (#170 main.py split).
+
+The tag-registry routes (`/api/tags*`) retired with `TagsMixin` (ADR-0082
+slice 3, #1784) — the `tag` kind's own CRUD lives at `/api/tag-entries`
+(`routers/tag_nodes.py`)."""
 from __future__ import annotations
 
 from fastapi import APIRouter
@@ -7,8 +11,6 @@ from app.models import (
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DeleteMetadataGroupRequest,
-    KnownTags,
-    MergeTagsRequest,
     MetadataSchema,
     MetadataSchemaLayers,
     MetadataSchemaOverview,
@@ -17,9 +19,6 @@ from app.models import (
     SetFieldOrderRequest,
     SetFieldOverrideRequest,
     SetGroupApplicationsRequest,
-    TagsOverview,
-    UpdateTagColorRequest,
-    UpdateTagScopeRequest,
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
     UpsertMetadataGroupRequest,
@@ -45,39 +44,6 @@ def get_metadata_schema_layers(project: CurrentProject) -> MetadataSchemaLayers:
 def get_metadata_schema_overview(project: CurrentProject) -> MetadataSchemaOverview:
     with translate_errors():
         return project.read_metadata_schema_overview()
-
-
-@router.get("/api/tags", response_model=KnownTags)
-def get_known_tags(project: CurrentProject, layer: str | None = None) -> KnownTags:
-    """The merged vocabulary. `layer` reads it as of an authoring level instead
-    of the open project (#339) — ancestors of that layer stay visible, layers
-    below it drop out."""
-    with translate_errors():
-        return project.read_known_tags(up_to_layer_id=layer)
-
-
-@router.get("/api/tags/overview", response_model=TagsOverview)
-def get_tags_overview(project: CurrentProject) -> TagsOverview:
-    with translate_errors():
-        return project.read_tags_overview()
-
-
-@router.put("/api/tags/scope", response_model=KnownTags)
-def update_tag_scope(project: CurrentProject, request: UpdateTagScopeRequest) -> KnownTags:
-    with translate_errors():
-        return project.update_tag_scope(request)
-
-
-@router.put("/api/tags/color", response_model=KnownTags)
-def update_tag_color(project: CurrentProject, request: UpdateTagColorRequest) -> KnownTags:
-    with translate_errors():
-        return project.update_tag_color(request)
-
-
-@router.post("/api/tags/merge", response_model=KnownTags)
-def merge_tags(project: CurrentProject, request: MergeTagsRequest) -> KnownTags:
-    with translate_errors():
-        return project.merge_tags(request)
 
 
 @router.put("/api/metadata/schema/entry-types", response_model=MetadataSchema)

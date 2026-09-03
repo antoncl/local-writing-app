@@ -1,6 +1,3 @@
-import type { ScopedTag } from "@/lib/types";
-import { getSwatch } from "@/lib/utils/colors";
-
 // The one home for the `split(",").map(trim).filter(Boolean)` idiom (#247/#704):
 // a comma-joined value → trimmed, non-empty tokens, order preserved, NO de-dupe.
 // Callers that want set semantics layer a de-dupe on top — the policy is not the
@@ -57,30 +54,4 @@ export function dedupeTags(tags: string[]): string[] {
 // list (#247). Prefer this over hand-rolling the split + de-dupe.
 export function parseTagList(raw: string | null | undefined): string[] {
   return dedupeTags(splitCommaList(raw));
-}
-
-// The one home for "what colour is this tag?" — a lowercased-name → swatch-id
-// map built from the known-tags roster (#247). A one-off lookup is
-// `tagColorMap(tags).get(name.toLowerCase()) ?? null`.
-export function tagColorMap(knownTags: ScopedTag[]): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const tag of knownTags) {
-    if (tag.color) map.set(tag.name.toLowerCase(), tag.color);
-  }
-  return map;
-}
-
-// A ready "tag name → hex" resolver for a chip render site (#1447). Folds the
-// roster into a colour map once, then resolves each tag's swatch to a hex — null
-// when the tag carries no colour. Call it inside a `$derived` that reads the
-// roster, so the returned closure re-tracks when the vocabulary or its colours
-// change. No production caller today (the legacy `tags` field type's chip
-// rendering retired with `TagPicker`/`TagChip`, ADR-0082 slice 2b) — kept with
-// its unit tests pending this file's own retirement (slice 4).
-export function tagHexResolver(knownTags: ScopedTag[]): (tag: string) => string | null {
-  const ids = tagColorMap(knownTags);
-  return (tag) => {
-    const id = ids.get(tag.toLowerCase());
-    return id ? (getSwatch(id)?.hex ?? null) : null;
-  };
 }

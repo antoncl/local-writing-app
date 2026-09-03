@@ -216,6 +216,28 @@ class LayeredTagsTests(unittest.TestCase):
         # Canonicalised in the saved node: dup casing collapses to first-seen "Hero".
         self.assertEqual(saved.metadata["notes"][0]["topic"], ["Hero"])
 
+    def test_renaming_a_tag_descends_into_a_group_member(self) -> None:
+        # ADR-0081 slice 3: a tag rename (merge) rewrites a nested tag value, not
+        # just top-level tags fields. A top-level-only rename leaves the nested tag
+        # pointing at the old name (a stale/mis-linked tag).
+        self._seed_tags_group_field()
+        entry = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Ripley", entry_type="lore:character")
+        )
+        self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title="Ripley",
+                body="x",
+                base_revision=entry.revision,
+                entry_type="lore:character",
+                metadata={"notes": [{"topic": ["Hero"]}]},
+            ),
+        )
+        self.service.merge_tags(MergeTagsRequest(sources=["hero"], target="Protagonist"))
+        updated = self.service.read_lore_entry(entry.id)
+        self.assertEqual(updated.metadata["notes"][0]["topic"], ["Protagonist"])
+
     def test_reusing_an_inherited_tag_writes_only_the_local_assertion(self) -> None:
         # The tag is known (merged), so it is not re-registered as new; the
         # broadening it triggers is recorded HERE as this layer's assertion, and

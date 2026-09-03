@@ -19,6 +19,17 @@ from app.models_views import NodePickerConfig
 ListItemScalarType = Literal["text", "long_text", "number", "boolean", "select", "color"]
 LIST_ITEM_SCALAR_TYPES: Final[frozenset[str]] = frozenset(get_args(ListItemScalarType))
 
+# The types an item_group MEMBER may be (ADR-0081) — the scalars above plus the
+# reference/tag types. Broader than the item_type sugar (which stays scalar-only,
+# above): a named group member can now hold a reference, because the reference
+# lifecycle reaches a ref wherever it lives (one traversal,
+# services/project/metadata_refs.py) — indexed, scrubbed on delete, healed on
+# read, no longer a silent mis-link. `date` / `multi_select` stay out (no item
+# affordances), so this is a deliberate set, not "any type".
+LIST_ITEM_GROUP_MEMBER_TYPES: Final[frozenset[str]] = LIST_ITEM_SCALAR_TYPES | frozenset(
+    {"entity_ref", "entity_ref_list", "tags"}
+)
+
 
 class MetadataFieldDefinition(BaseModel):
     name: str
@@ -48,10 +59,11 @@ class MetadataFieldDefinition(BaseModel):
     # scalar sequence, the way multi_select stores). Exactly one of the two
     # must be set when type == "list"; both must be absent otherwise. A
     # select-typed item_type reads its choices from this field's `options`.
-    # v1 keeps entity_ref / entity_ref_list / tags OUT of item shapes — the
-    # read-side healers only walk top-level values, and a half-healed nested
-    # ref would be a silent mis-link (enforced at schema-integrity time for
-    # item_group; by the Literal below for item_type).
+    # An item_group member may be a reference/tag type (ADR-0081): the reference
+    # lifecycle reaches a nested ref (one traversal, metadata_refs.py), so it is
+    # indexed / scrubbed / healed like a top-level one. The item_type sugar stays
+    # scalar-only (the Literal above) — refs enter through named item_group
+    # members, not the bare single-scalar shape.
     item_group: str | None = None
     item_type: ListItemScalarType | None = None
     # DERIVED, not authored (the `category` pattern): the resolved item shape

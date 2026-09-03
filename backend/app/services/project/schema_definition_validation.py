@@ -16,7 +16,7 @@ ProjectService MRO unchanged; the per-concern checks are pure module functions.
 from __future__ import annotations
 
 from app.models import (
-    LIST_ITEM_SCALAR_TYPES,
+    LIST_ITEM_GROUP_MEMBER_TYPES,
     MetadataFieldDefinition,
     MetadataSchema,
 )
@@ -122,14 +122,13 @@ def _list_field_schema_errors(field_id: str, field: MetadataFieldDefinition, sch
         if group is None:
             errors.append(f"List metadata field {field_id} references unknown group {field.item_group}.")
         else:
-            # Members must stay inside the one scalar catalog
-            # (LIST_ITEM_SCALAR_TYPES) — the POSITIVE form of the item_type
-            # Literal, so the two cannot drift. Reference-typed members are
-            # out because the read-side healers only walk top-level values
-            # (a nested ref they cannot heal or purge is a silent
-            # mis-link); date and multi_select carry no item affordances.
+            # Members must stay inside LIST_ITEM_GROUP_MEMBER_TYPES — the scalars
+            # plus the reference/tag types (ADR-0081): a nested ref is now indexed
+            # / scrubbed / healed by the one metadata-ref traversal, so it is no
+            # longer a silent mis-link. `date` / `multi_select` stay out (no item
+            # affordances).
             for member in group.members:
-                if member.type not in LIST_ITEM_SCALAR_TYPES:
+                if member.type not in LIST_ITEM_GROUP_MEMBER_TYPES:
                     errors.append(
                         f"List metadata field {field_id} item shape {field.item_group} has "
                         f"member {member.key} of type {member.type}, which list items do not support."

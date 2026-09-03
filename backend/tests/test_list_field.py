@@ -5,7 +5,8 @@ maps keyed by member key) or a single scalar (`item_type` sugar, values =
 flat scalars). Covers: soft shape-conflict integrity (cross-layer merges must
 never make the schema unreadable), resolver stamping of `item_members` (one
 internal model; authored copies purged), schema-integrity checks (unknown
-group, reference-typed members banned from item shapes), per-item value
+group; reference/tag members allowed as of ADR-0081, date/multi_select still
+out), per-item value
 validation through the real save path, the AI patch path's whole-field drop
 (a partial list would let adopt silently delete items), option migration for
 the select sugar, the nested unknown-member read heal, the delete-group
@@ -140,9 +141,10 @@ class ListFieldProjectTests(unittest.TestCase):
         errors = self.service._validate_metadata_schema_definition(self.service.read_metadata_schema())
         self.assertTrue(any("references unknown group nope" in error for error in errors), errors)
 
-    def test_reference_members_are_rejected_in_item_shapes(self) -> None:
-        # v1 exclusion: the read-side healers only walk top-level values, so a
-        # nested ref they cannot heal/purge would be a silent mis-link.
+    def test_reference_members_allowed_but_date_still_rejected(self) -> None:
+        # ADR-0081: a ref member is now a valid item shape — the one metadata-ref
+        # traversal indexes / scrubs / heals a nested ref, so it is no longer a
+        # silent mis-link. date/multi_select stay out (no item affordances).
         schema_path = self.root / "metadata.schema.yaml"
         data = self.service._read_yaml(schema_path)
         data["groups"]["cast"] = {
@@ -150,11 +152,17 @@ class ListFieldProjectTests(unittest.TestCase):
             "members": [{"key": "who", "name": "Who", "type": "entity_ref"}],
         }
         data["fields"]["cast_list"] = {"name": "Cast list", "type": "list", "item_group": "cast"}
+        data["groups"]["schedule"] = {
+            "name": "Schedule",
+            "members": [{"key": "at", "name": "At", "type": "date"}],
+        }
+        data["fields"]["schedule_list"] = {"name": "Schedule", "type": "list", "item_group": "schedule"}
         self.service._write_yaml(schema_path, data)
         errors = self.service._validate_metadata_schema_definition(self.service.read_metadata_schema())
-        self.assertTrue(
-            any("member who of type entity_ref" in error for error in errors), errors
-        )
+        # The entity_ref member is accepted — no integrity error names it.
+        self.assertFalse(any("member who" in error for error in errors), errors)
+        # date is still not a supported item member.
+        self.assertTrue(any("member at of type date" in error for error in errors), errors)
 
     # ---- per-item value validation through the real save path ----
 

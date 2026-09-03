@@ -217,6 +217,7 @@ from app.models.project import (
     UpdateProjectSettingsRequest,
 )
 from app.models.schema import (
+    LIST_ITEM_GROUP_MEMBER_TYPES,
     LIST_ITEM_SCALAR_TYPES,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
@@ -349,6 +350,7 @@ __all__ = [
     "FinalizeSceneRequest",
     "GroupApplication",
     "GroupMember",
+    "LIST_ITEM_GROUP_MEMBER_TYPES",
     "LIST_ITEM_SCALAR_TYPES",
     "ListItemScalarType",
     "KnownTags",

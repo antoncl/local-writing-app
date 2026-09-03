@@ -499,14 +499,27 @@ export type MetadataFieldType =
   | "list";
 
 // The scalar item shapes a `list` field may declare via `item_type` (#698,
-// ADR-0048 §6). Deliberately narrower than MetadataFieldType: reference
-// types and tags are excluded in v1 (the read-side healers only walk
-// top-level values), and nesting a list in a list is not a thing. The const
-// is the single runtime source (picker choices, group-shape filtering); the
-// union derives from it so the two cannot drift. Mirrors the backend's
-// LIST_ITEM_SCALAR_TYPES.
+// ADR-0048 §6). Deliberately narrower than MetadataFieldType: the item_type
+// sugar is a single scalar per item (nesting a list in a list is not a thing).
+// Refs/tags are not item_type shapes — they enter through named item_group
+// members instead (LIST_ITEM_GROUP_MEMBER_TYPES, ADR-0081). The const is the
+// item_type picker's choices; the union derives from it so the two cannot
+// drift. Mirrors the backend's LIST_ITEM_SCALAR_TYPES.
 export const LIST_ITEM_SCALAR_TYPES = ["text", "long_text", "number", "boolean", "select", "color"] as const;
 export type ListItemScalarType = (typeof LIST_ITEM_SCALAR_TYPES)[number];
+
+// The types an item_group MEMBER may be (ADR-0081): the scalars above plus the
+// reference/tag types. Broader than the item_type sugar (which stays scalar-only)
+// — a named group member can hold a reference, because the reference lifecycle
+// reaches a nested ref (indexed / scrubbed / healed like a top-level one). Used
+// for group-shape filtering in the schema editor. Mirrors the backend
+// LIST_ITEM_GROUP_MEMBER_TYPES.
+export const LIST_ITEM_GROUP_MEMBER_TYPES = [
+  ...LIST_ITEM_SCALAR_TYPES,
+  "entity_ref",
+  "entity_ref_list",
+  "tags",
+] as const;
 
 // One choice in a select / multi_select field, or a select prompt input.
 // Stored as `{value, label?, color?}`. Bare strings are accepted on the

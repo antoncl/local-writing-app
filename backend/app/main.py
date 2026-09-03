@@ -34,6 +34,7 @@ from app.routers import (
     scenes,
     session,
     snapshots,
+    tag_nodes,
     updates,
 )
 from app.runtime import root_from_header
@@ -130,6 +131,7 @@ app.include_router(snapshots.router)
 app.include_router(lore.router)
 app.include_router(plot.router)
 app.include_router(entries.router)
+app.include_router(tag_nodes.router)
 app.include_router(machine_settings.router)
 app.include_router(ai.router)
 app.include_router(updates.router)

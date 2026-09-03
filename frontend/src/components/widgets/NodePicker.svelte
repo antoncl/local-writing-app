@@ -31,6 +31,7 @@
     ScopedTag,
     StructureDocument,
     StructureNode,
+    TagEntry,
     ViewNodeSummary,
     ViewSpec,
   } from "@/lib/types";
@@ -99,6 +100,11 @@
     // Assistants are machine-global nodes; enumerated here so views/pickers can
     // hand-pick them (the view designer's hand_picked leaf over kind=assistant).
     assistantEntries = [],
+    // Tag nodes (ADR-0082 slice 1): a flat kind list like assistants, so a
+    // `picker_config` source naming `kind: "tag"` can list them as MEMBER
+    // picks — a plain id/kind/title ref carrying no `selector`, unlike the
+    // `tagged:` selector refs the "By tag" axis below already offers.
+    tagEntries = [],
     // Compact mode trims chrome so the picker fits inside the Inputs
     // dialog's narrow column. Composer-level renders use the default.
     compact = false,
@@ -123,6 +129,7 @@
     promptEntries?: PromptEntrySummary[];
     plotEntries?: PlotlineSummary[];
     assistantEntries?: AssistantEntrySummary[];
+    tagEntries?: TagEntry[];
     compact?: boolean;
     hideChips?: boolean;
     excludeIds?: string[];
@@ -137,7 +144,7 @@
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   const metadataSchema = $derived($metadataSchemaStore);
 
-  type Category = "manuscript" | "lore" | "snippet" | "assistant" | "research" | "plot";
+  type Category = "manuscript" | "lore" | "snippet" | "assistant" | "research" | "plot" | "tag";
 
   let open = $state(false);
   let search = $state("");
@@ -658,6 +665,15 @@
       .filter(matchesSummary),
   );
 
+  // Tag nodes matching the config's per-vocabulary entry_type whitelist +
+  // search (ADR-0082 slice 1) — MEMBER picks, a flat kind list like assistants.
+  const tagAllowed = $derived(new Set(membership.entryTypes.tag ?? []));
+  const tagCandidates = $derived(
+    tagEntries
+      .filter((t) => tagAllowed.size === 0 || tagAllowed.has(t.entry_type))
+      .filter(matchesSummary),
+  );
+
   // Chip text resolution. Show the entry-type's display name from the
   // schema when known; fall back to a sensible singular for the kind.
   // Fixes the inverted-affordance bug where `character` chips read the
@@ -835,6 +851,18 @@
       if (items.length > 0) groups.push({ id: "assistants", label: "Assistants", items });
     }
 
+    if (allowedKinds.includes("tag")) {
+      // `tag_entries`, not `tags` — that id is the "By tag" selector axis
+      // above (`tagged:` refs, which always carry a `selector`). These are
+      // plain member picks with none, which is how the two are told apart.
+      const items = dropExcluded(
+        tagCandidates.map((t) => ({
+          id: t.id, kind: "tag" as const, title: t.title, entry_type: t.entry_type,
+        })),
+      );
+      if (items.length > 0) groups.push({ id: "tag_entries", label: "Tags", items });
+    }
+
     // Plot is no longer a flat leaf group — plotlines render as tri-state card
     // containers through the selector PickTree (ADR-0074 slice 6), above.
 
@@ -913,6 +941,7 @@
     lore: "Lore",
     plotlines: "Plot",
     tags: "By tag",
+    tag_entries: "Tags",
     views: "Saved views",
     snippets: "Snippets",
     research: "Research",
@@ -941,21 +970,28 @@
     activeAxis = null;
     hasNavigated = true;
   }
-  // Clear every pick belonging to the drilled-in axis (the panel's own selection).
-  const AXIS_KINDS: Record<string, NodePickerRef["kind"][]> = {
-    manuscript: ["manuscript"],
-    lore: ["lore"],
-    plotlines: ["plot"],
-    tags: ["tag"],
-    views: ["view"],
-    snippets: ["snippet"],
-    research: ["research"],
-    assistants: ["assistant"],
+  // Clear every pick belonging to the drilled-in axis (the panel's own
+  // selection). A predicate per axis, not just a kind Set: "tags" (By tag)
+  // and "tag_entries" (ADR-0082 slice 1 member picks) both hold
+  // `NodePickerRef["kind"] === "tag"` refs, and only `selector` presence
+  // tells a `tagged:` selector ref apart from a real tag-node pick — a kind-
+  // only Set would have the two axes clear each other's selection.
+  const AXIS_CLEAR_PREDICATE: Record<string, (ref: NodePickerRef) => boolean> = {
+    manuscript: (ref) => ref.kind === "manuscript",
+    lore: (ref) => ref.kind === "lore",
+    plotlines: (ref) => ref.kind === "plot",
+    tags: (ref) => ref.kind === "tag" && ref.selector != null,
+    tag_entries: (ref) => ref.kind === "tag" && ref.selector == null,
+    views: (ref) => ref.kind === "view",
+    snippets: (ref) => ref.kind === "snippet",
+    research: (ref) => ref.kind === "research",
+    assistants: (ref) => ref.kind === "assistant",
   };
   function clearActivePanel(): void {
     if (!effectiveAxis) return;
-    const kinds = new Set(AXIS_KINDS[effectiveAxis] ?? []);
-    onChange?.({ value: value.filter((r) => !kinds.has(r.kind)) });
+    const belongsToAxis = AXIS_CLEAR_PREDICATE[effectiveAxis];
+    if (!belongsToAxis) return;
+    onChange?.({ value: value.filter((r) => !belongsToAxis(r)) });
   }
 
   // The presentational view-model handed to NodePickerPopover — all render

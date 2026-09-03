@@ -28,7 +28,9 @@ from app.models import (
     SaveLoreEntryRequest,
     SavePromptEntryRequest,
     SaveSceneRequest,
+    SaveTagEntryRequest,
     Scene,
+    TagEntry,
 )
 from app.models_views import SaveViewRequest, ViewNode
 from app.services.project.errors import ProjectServiceError
@@ -47,6 +49,7 @@ class NodeOpsMixin:
         "assistant": (SaveAssistantEntryRequest, "save_assistant_entry"),
         "chat": (SaveChatSessionRequest, "save_chat_session"),
         "view": (SaveViewRequest, "save_view"),
+        "tag": (SaveTagEntryRequest, "save_tag_entry"),
     }
 
     def lookup_node_kind(self, node_id: str) -> str | None:
@@ -71,6 +74,7 @@ class NodeOpsMixin:
         | PlotlineEntry
         | CharacterArcEntry
         | PlotTemplate
+        | TagEntry
     ):
         """Unified node-read entrypoint.
 
@@ -103,6 +107,8 @@ class NodeOpsMixin:
             return self.read_view(node_id)
         if entry.kind == "plot":
             return self._read_plot_node(node_id, entry.entry_type)
+        if entry.kind == "tag":
+            return self.read_tag_entry(node_id)
         raise ProjectServiceError(
             f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422
         )
@@ -206,6 +212,9 @@ class NodeOpsMixin:
             return
         if entry.kind == "view":
             self.delete_view(node_id)
+            return
+        if entry.kind == "tag":
+            self.delete_tag_entry(node_id)
             return
         raise ProjectServiceError(
             f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422

@@ -343,9 +343,48 @@ class LayerWalkMixin:
             None,
         )
 
+    def _layer_folder_for_id(self, layer_id: str | None, folder_name: str) -> Path:
+        """Resolve a layer_id (from list_metadata_schema_layers, "", or None) to
+        one of its per-kind folders (`assistants/`, `tags/`, …) — the ~30 lines
+        of layer-id arithmetic `_assistant_layer_folder_for_id` (assistants.py)
+        used to carry alone, factored out so `TagNodesMixin` (ADR-0082 slice 1)
+        shares it instead of duplicating it, parameterised only by the folder
+        name.
+
+        Three cases, and the distinction between the first two is load-bearing:
+          None → the LOCAL (innermost) layer, i.e. the open project. Degenerates
+            to the machine layer when no project is open.
+          ""   → the machine config dir explicitly (kept distinct from None so a
+            caller can put a new entry on the machine layer *while a project is
+            open*, which None would silently redirect).
+          else → that layer by id.
+
+        Reverses the id over the one walk (#329) instead of re-deriving the
+        chain. The machine layer stays reachable two ways — "" and its folder
+        hash — which the create/reorder endpoints both rely on.
+        """
+        from app.services import machine_settings as ms_service
+
+        if layer_id is None:
+            machine_dir = ms_service.assistants_dir().parent
+            return (machine_dir if self.root_path is None else self.root_path) / folder_name
+        if not layer_id:
+            return ms_service.assistants_dir().parent / folder_name
+        # Deliberately not `_machine_layer_folder()`: that gates on an
+        # `assistants/`/`tags/` folder already existing, and this path is how
+        # the *first* machine-layer entry of either kind gets created.
+        machine_dir = ms_service.assistants_dir().parent
+        if self._metadata_schema_layer_id(machine_dir) == layer_id:
+            return machine_dir / folder_name
+        if self.root_path is not None:
+            layer = self.layer_by_id(self.root_path, layer_id)
+            if layer is not None:
+                return layer.folder / folder_name
+        raise ProjectServiceError(f"Unknown layer id {layer_id}.", 422)
+
     def machine_layer(self, *, rank: int = 0) -> IndexLayer | None:
-        """The machine layer as an `IndexLayer`, or None when it has no
-        `assistants/` folder.
+        """The machine layer as an `IndexLayer`, or None when it has neither an
+        `assistants/` nor a `tags/` folder.
 
         One constructor, so the walk and the two callers that need the machine
         layer *without* a project chain (the index's no-project path and the
@@ -420,7 +459,12 @@ class LayerWalkMixin:
         return folder.resolve()
 
     def _machine_layer_folder(self) -> Path | None:
-        """The machine config dir, when it carries an `assistants/` folder.
+        """The machine config dir, when it carries an `assistants/` or `tags/`
+        folder — the two families `MACHINE_LAYER_FAMILIES` contributes
+        (`references.py`; `tags/` joined in ADR-0082 slice 1). Either alone is
+        enough: a fresh machine dir whose first-ever node is a tag (no
+        assistant created yet) must still resolve a machine layer, or its tag
+        never becomes visible to `list_tag_entries` with no project open.
 
         Imported lazily: `machine_settings` reaches back into service-level
         config and importing it at module scope closes an import cycle.
@@ -428,7 +472,7 @@ class LayerWalkMixin:
         from app.services import machine_settings as ms_service
 
         machine_dir = ms_service.assistants_dir().parent
-        if not (machine_dir / "assistants").exists():
+        if not ((machine_dir / "assistants").exists() or (machine_dir / "tags").exists()):
             return None
         # Resolved, like every project layer (`_project_layer_folders`, #356) and
         # `root` itself. It was the one un-canonicalised folder in the chain, and

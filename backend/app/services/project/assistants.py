@@ -523,41 +523,14 @@ class AssistantEntriesMixin:
 
     def _assistant_layer_folder_for_id(self, layer_id: str | None) -> Path:
         """Resolve a layer_id (from list_metadata_schema_layers, "", or None) to
-        its assistants/ folder.
-
-        Three cases, and the distinction between the first two is load-bearing:
-          None → the LOCAL (innermost) layer, i.e. the open project. Curation is
-            always an opinion the current book holds about what it inherits, so
-            a caller that is simply curating says nothing about layers at all —
-            #318's "no layer arithmetic in the frontend". Degenerates to the
-            machine layer when no project is open, which is then the only layer.
-          ""   → the machine config dir explicitly (the canonical per-user
-            roster). Kept distinct from None because `create_assistant_entry`
-            uses it to put a new assistant on the machine layer *while a project
-            is open*, which None would silently redirect.
-          else → that layer by id.
-
-        Reverses the id over the one walk (#329) instead of re-deriving the
-        chain. The machine layer stays reachable two ways — "" and its folder
-        hash — which the create/reorder endpoints both rely on.
+        its assistants/ folder. Curation is always an opinion the current book
+        holds about what it inherits, so a caller that is simply curating says
+        nothing about layers at all — #318's "no layer arithmetic in the
+        frontend". The layer-id arithmetic itself is `_layer_folder_for_id`
+        (`layers.py`), shared with `TagNodesMixin` (ADR-0082 slice 1) — see its
+        docstring for the three-case contract.
         """
-        from app.services import machine_settings as ms_service
-
-        if layer_id is None:
-            return ms_service.assistants_dir() if self.root_path is None else self.root_path / "assistants"
-        if not layer_id:
-            return ms_service.assistants_dir()
-        # Deliberately not `_machine_layer_folder()`: that gates on the
-        # assistants/ folder already existing, and this path is how the *first*
-        # machine assistant gets created.
-        machine_dir = ms_service.assistants_dir().parent
-        if self._metadata_schema_layer_id(machine_dir) == layer_id:
-            return machine_dir / "assistants"
-        if self.root_path is not None:
-            layer = self.layer_by_id(self.root_path, layer_id)
-            if layer is not None:
-                return layer.folder / "assistants"
-        raise ProjectServiceError(f"Unknown layer id {layer_id}.", 422)
+        return self._layer_folder_for_id(layer_id, "assistants")
 
     def _build_assistant_index(self) -> NodeIndex:
         """Build a node index covering just the assistant kind. Works without

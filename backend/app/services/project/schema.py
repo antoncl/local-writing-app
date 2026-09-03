@@ -285,10 +285,11 @@ class MetadataSchemaMixin:
         or self-parenting."""
         entry_type_id = request.entry_type_id.strip()
         if request.entry_type.kind not in {
-            "manuscript", "lore", "prompt", "assistant", "project", "chat", "mutation_set", "view", "plot"
+            "manuscript", "lore", "prompt", "assistant", "project", "chat", "mutation_set", "view", "plot", "tag"
         }:
             raise ProjectServiceError(
-                "Node type kind must be scene, lore, prompt, assistant, project, chat, mutation_set, view, or plot.",
+                "Node type kind must be scene, lore, prompt, assistant, project, chat, mutation_set, view, plot, "
+                "or tag.",
                 422,
             )
         fqn = entry_type_id if ":" in entry_type_id else f"{request.entry_type.kind}:{entry_type_id}"

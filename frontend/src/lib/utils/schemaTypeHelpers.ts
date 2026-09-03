@@ -85,7 +85,7 @@ export function normalizeListFieldValue(fieldType: string, value: MetadataValue)
 // The schema's kind universe (a Node's "class"). Narrower than the wider
 // DocumentKind, which also covers chat / snippet / structure_node — none
 // of which have their own schema-type tree.
-export type SchemaKind = "manuscript" | "lore" | "research" | "prompt" | "assistant" | "project" | "plot";
+export type SchemaKind = "manuscript" | "lore" | "research" | "prompt" | "assistant" | "project" | "plot" | "tag";
 
 // The UI metadata each kind-keyed surface needs: the Types tab label,
 // the tree's context heading, and the entry-type id to seed when a project has
@@ -108,6 +108,7 @@ export const SCHEMA_KIND_META: Record<SchemaKind, SchemaKindMeta> = {
   assistant: { label: "Assistant", heading: "Assistant Types", defaultType: "assistant:assistant" },
   project: { label: "Project", heading: "Project Types", defaultType: "project:project" },
   plot: { label: "Plot", heading: "Plot Types", defaultType: "plot:plotline" },
+  tag: { label: "Tag", heading: "Tag Types", defaultType: "tag:tag" },
 };
 
 // The schema kinds in tab-strip display order (derived from the table's key

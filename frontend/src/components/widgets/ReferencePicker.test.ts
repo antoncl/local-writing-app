@@ -12,7 +12,8 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import ReferencePicker from "./ReferencePicker.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
-import type { LoreEntrySummary, MetadataFieldDefinition } from "@/lib/types";
+import { clearTagNodes, tagNodesStore } from "@/lib/stores/tagNodes";
+import type { LoreEntrySummary, MetadataFieldDefinition, TagEntry } from "@/lib/types";
 
 const field = {
   name: "Characters",
@@ -26,7 +27,10 @@ const loreEntries = [
   { id: "lore_2", title: "Jonas", entry_type: "lore:character" },
 ] as unknown as LoreEntrySummary[];
 
-afterEach(() => metadataSchemaStore.set(null));
+afterEach(() => {
+  metadataSchemaStore.set(null);
+  clearTagNodes();
+});
 
 describe("ReferencePicker — callback props (runes port of change/navigate)", () => {
   it("reports the navigation target through onNavigate on a row click", async () => {
@@ -126,5 +130,35 @@ describe("ReferencePicker — controlled rail mode (#1732)", () => {
     });
     await fireEvent.click(screen.getByLabelText("Remove Mira"));
     expect(onChange).toHaveBeenCalledWith(["lore_2"]);
+  });
+});
+
+describe("ReferencePicker — tag node resolution (ADR-0082 slice 1)", () => {
+  // A read-only ref value pointing at a `tag` kind node — not resolvable
+  // through any of the in-memory props (loreEntries/promptEntries/…) — falls
+  // through resolveRefById's chain to the tag roster store, so a chip shows
+  // the tag's title rather than its bare id.
+  const tagField = {
+    name: "Motifs",
+    type: "entity_ref_list",
+    options: [],
+    picker_config: { sources: [{ kind: "tag", entry_types: ["tag:tag"] }] },
+  } as unknown as MetadataFieldDefinition;
+
+  it("read-only: resolves a tag's title from tagNodesStore", async () => {
+    tagNodesStore.set([{ id: "tag_1", title: "Coastal", entry_type: "tag:tag", metadata: {} } as TagEntry]);
+    render(ReferencePicker, {
+      props: { field: tagField, value: ["tag_1"], ariaLabel: "Motifs", readOnly: true },
+    });
+    await fireEvent.click(screen.getByText("Motifs"));
+    expect(screen.getByText("Coastal")).toBeInTheDocument();
+  });
+
+  it("shows the raw id when the tag isn't in the roster yet", async () => {
+    render(ReferencePicker, {
+      props: { field: tagField, value: ["tag_missing"], ariaLabel: "Motifs", readOnly: true },
+    });
+    await fireEvent.click(screen.getByText("Motifs"));
+    expect(screen.getByText("tag_missing")).toBeInTheDocument();
   });
 });

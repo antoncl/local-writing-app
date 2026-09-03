@@ -18,7 +18,7 @@ import { canonicalizeInputDefinitions } from "@/lib/utils/promptInputs";
 // A lightweight handle to the open document: which kind it is + its id. The
 // pane resolves the full document into `scene`.
 export type DocumentRef = {
-  type: "manuscript" | "lore" | "prompt" | "assistant" | "project" | "structure_node" | "chat" | "research" | "view" | "plot_template" | "plot_card" | "plotline";
+  type: "manuscript" | "lore" | "prompt" | "assistant" | "project" | "structure_node" | "chat" | "research" | "view" | "plot_template" | "plot_card" | "plotline" | "tag";
   id: string;
 };
 

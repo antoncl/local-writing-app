@@ -33,6 +33,7 @@
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { knownTagsStore } from "@/lib/stores/tags";
+  import { tagTitleById } from "@/lib/stores/tagNodes";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
@@ -347,6 +348,7 @@
       schema,
       referenceIndex,
       bindings: previewBindings,
+      resolveTitle: (id) => $tagTitleById.get(id),
     }),
   );
   // Nest diagnostics surfaced as warnings so a truncated/lossy tree is never

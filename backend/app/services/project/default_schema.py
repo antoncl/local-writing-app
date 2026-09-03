@@ -491,6 +491,45 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # (0.5.0 step 3, #80) instead of the inert none-shape.
             "body_shape": "view",
         },
+        "tag:base": {
+            # Abstract root for the `tag` kind (ADR-0082 slice 1): a label. A
+            # vocabulary is a concrete sub-type (tag:tag, tag:assistant_tag, or
+            # a user-authored one like tag:motifs); a tag is an entry of it, and
+            # a field that holds tags is a reference list into the vocabulary.
+            "name": "Tag",
+            "kind": "tag",
+            "abstract": True,
+            "fields": ["color"],
+            "has_body": False,
+            "description": (
+                "A label. Tags are nodes: a vocabulary is a tag type, a tag is "
+                "an entry of it, and a field that holds tags is a reference "
+                "list into the vocabulary (ADR-0082)."
+            ),
+        },
+        "tag:tag": {
+            # The general-purpose vocabulary (0082 slice 1). Concrete so tags
+            # are created directly from the picker; body-less like a view.
+            "name": "Tag",
+            "icon": "tag",
+            "kind": "tag",
+            "parent": "tag:base",
+            "fields": [],
+            "has_body": False,
+            "description": "General tags for grouping and filtering. Never shown to the reader.",
+        },
+        "tag:assistant_tag": {
+            # The assistant vocabulary (ADR-0082 slice 1): matches prompts to
+            # assistants. Lives at the machine layer, alongside assistants
+            # themselves (MACHINE_LAYER_FAMILIES, references.py).
+            "name": "Assistant tag",
+            "icon": "tag",
+            "kind": "tag",
+            "parent": "tag:base",
+            "fields": [],
+            "has_body": False,
+            "description": "Tags that match prompts to assistants.",
+        },
     },
     "groups": {
         "plot_beat": {

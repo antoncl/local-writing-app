@@ -51,4 +51,35 @@ describe("tagNodes store (ADR-0082 slice 1)", () => {
     expect(get(tagNodesStore)).toEqual([]);
     expect(get(tagTitleById).size).toBe(0);
   });
+
+  it("refreshTagNodes swallows a fetch error and keeps the previous roster", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [T("tag_1", "Coastal")] });
+    await refreshTagNodes();
+    listTagEntries.mockRejectedValueOnce(new Error("offline"));
+    await expect(refreshTagNodes()).resolves.toBeUndefined();
+    expect(get(tagNodesStore).map((t) => t.id)).toEqual(["tag_1"]);
+  });
+
+  it("a late response never overwrites a newer one (sequence guard)", async () => {
+    let resolveFirst!: (value: { tags: TagEntry[] }) => void;
+    let resolveSecond!: (value: { tags: TagEntry[] }) => void;
+    listTagEntries
+      .mockImplementationOnce(
+        () => new Promise((resolve) => { resolveFirst = resolve; }),
+      )
+      .mockImplementationOnce(
+        () => new Promise((resolve) => { resolveSecond = resolve; }),
+      );
+
+    const first = refreshTagNodes();
+    const second = refreshTagNodes();
+
+    // The SECOND call resolves first — the first call's response arrives late.
+    resolveSecond({ tags: [T("tag_2", "Second")] });
+    await second;
+    resolveFirst({ tags: [T("tag_1", "First")] });
+    await first;
+
+    expect(get(tagNodesStore).map((t) => t.id)).toEqual(["tag_2"]);
+  });
 });

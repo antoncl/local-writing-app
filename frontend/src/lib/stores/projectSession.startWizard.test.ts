@@ -52,6 +52,9 @@ describe("startCreateWizard (#556)", () => {
     // instead of reappearing and letting the author overwrite the real root.
     expect(createWizard.needsRootFolder).toBe(false);
     expect(createWizard.open).toBe(true);
+    // loadMachineSettings hydrates the machine-global tag roster alongside
+    // the assistant one (review fix F4) — pin the fan-out itself.
+    expect(refreshTagNodes).toHaveBeenCalled();
   });
 
   it("shows the root step only when the root is genuinely unset", async () => {

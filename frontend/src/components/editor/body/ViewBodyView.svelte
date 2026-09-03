@@ -34,10 +34,10 @@
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { knownTagsStore } from "@/lib/stores/tags";
   import { tagTitleById } from "@/lib/stores/tagNodes";
-  import { get } from "svelte/store";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
+  import { groupByHasRefLevel } from "@/lib/views/groupBy";
   import { chatSummariesToEvalNodes } from "@/lib/views/chatNodes";
   import { liftFieldByKey, liftFieldsForKind } from "@/lib/views/computedFields";
   import { chatSessionsStore } from "@/lib/stores/chats";
@@ -344,21 +344,22 @@
   // the strip having content, else the hairline dangles with nothing beneath it.
   const paramStripControls = $derived(resolveParamControls(spec, schema));
   const previewBindings = $derived.by((): EvalBindings => buildBindings(spec.params, paramOverrides));
-  // A plain closure, NOT `$tagTitleById` read inline inside `preview`'s
-  // `$derived` — `get()` takes an untracked snapshot, so calling this from
-  // inside `evaluateView`'s synchronous run does not subscribe `preview` to
-  // the tag roster (review fix). The reactive `$store` form would have, and
-  // every tag save would then re-evaluate every open view's preview whether
-  // or not it groups by anything tag-shaped.
-  function resolveTagTitle(id: string): string | undefined {
-    return get(tagTitleById).get(id);
-  }
+  // Whether `spec`'s `group_by` ever touches a ref-shaped field — gates the
+  // reactive tag-roster read below (ADR-0082 slice 1 review fix F7): a view
+  // that never groups by a ref field never subscribes to the tag roster (so
+  // an unrelated tag save doesn't re-evaluate the preview), while one that
+  // does correctly re-evaluates on a tag rename. Structural only — reads
+  // `spec`/`schema`, never `$tagTitleById` itself.
+  const groupsByRef = $derived(groupByHasRefLevel(spec, schema));
   let preview = $derived(
     evaluateView(spec, universe, {
       schema,
       referenceIndex,
       bindings: previewBindings,
-      resolveTitle: resolveTagTitle,
+      // Only reads `$tagTitleById` (and so only subscribes `preview` to it)
+      // when `groupsByRef` is true — conditional tracking, not an
+      // unconditional inline read that would subscribe every preview.
+      resolveTitle: groupsByRef ? (id) => $tagTitleById.get(id) : undefined,
     }),
   );
   // Nest diagnostics surfaced as warnings so a truncated/lossy tree is never

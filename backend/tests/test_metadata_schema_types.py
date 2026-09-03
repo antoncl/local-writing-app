@@ -393,6 +393,14 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         topic = schema.entry_types["research:topic"]
         self.assertEqual(topic.opens_in, "tree_container")
 
+    def test_tag_types_opens_in_dialog(self) -> None:
+        # A tag is minted from a picker, not authored through the
+        # Conversations panel — kept out of the Offer-on picker's "editor"
+        # host set (ADR-0082 slice 1 review fix; `offerOnTree.ts`).
+        schema = self.service.read_metadata_schema()
+        self.assertEqual(schema.entry_types["tag:tag"].opens_in, "dialog")
+        self.assertEqual(schema.entry_types["tag:assistant_tag"].opens_in, "dialog")
+
     def test_concrete_type_inherits_default_opens_in_editor(self) -> None:
         # A concrete type that doesn't override opens_in inherits "editor"
         # from its base (mirrors has_body/body_shape inheritance).

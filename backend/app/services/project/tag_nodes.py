@@ -73,9 +73,19 @@ class TagNodesMixin:
 
     def list_tag_entries(self) -> TagEntryList:
         index = self._build_assistant_index()
-        entries = [
-            self._tag_from_index_entry(entry) for entry in index.by_id.values() if entry.kind == "tag"
-        ]
+        entries: list[TagEntry] = []
+        for entry in index.by_id.values():
+            if entry.kind != "tag":
+                continue
+            try:
+                entries.append(self._tag_from_index_entry(entry))
+            except ProjectServiceError:
+                # One hand-broken tags/*.md must not 422 the whole roster —
+                # `list_assistant_entries` applies the same guard on its own
+                # read. This list is now on the boot path (`loadMachineSettings`
+                # awaits `refreshTagNodes` with no project open), so a single
+                # malformed machine-layer file must not take the roster down.
+                continue
         entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
         return TagEntryList(tags=entries)
 

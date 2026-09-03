@@ -542,26 +542,25 @@ class ReferencesMixin:
 
     def _placeable_write_paths(
         self, paths: tuple[Path, ...], layers: list[IndexLayer]
-    ) -> tuple[list[Path], bool]:
+    ) -> tuple[list[Path], list[Path]]:
         """Which of `paths` `_patch_unit` can place against `layers`, and
-        whether at least one could not be — split out of
-        `_mutate_index_for_write` so its own branching stays under the
-        complexity gate. `_patch_unit` places a node file against the walk's
-        own folder rules and raises for anything else, so an unplaceable path
-        — a config file, the snapshot, a write outside the chain — drops out
-        of the returned list."""
+        which could not be — split out of `_mutate_index_for_write` so its
+        own branching stays under the complexity gate. `_patch_unit` places a
+        node file against the walk's own folder rules and raises for anything
+        else, so an unplaceable path — a config file, the snapshot, a write
+        outside the chain — lands in the second list instead of the first."""
         placeable: list[Path] = []
-        dropped = False
+        dropped: list[Path] = []
         for path in paths:
             try:
                 self._patch_unit(path, layers)
             except PatchNotApplicable:
-                dropped = True
+                dropped.append(path)
                 continue
             placeable.append(path)
         return placeable, dropped
 
-    def _dropped_write_is_stale_machine_layer(self, dropped: bool, layers: list[IndexLayer]) -> bool:
+    def _dropped_write_is_stale_machine_layer(self, dropped: list[Path], layers: list[IndexLayer]) -> bool:
         """Whether a write `_placeable_write_paths` dropped is not actually
         "outside the chain" — the memo's own layer sequence may simply
         predate the machine layer coming into existence. `_machine_layer_folder`
@@ -571,8 +570,20 @@ class ReferencesMixin:
         to place the write against and drops it, leaving the memo stale and
         the immediate read 404ing. The caller rebuilds cold rather than
         no-ops when this is true, so the fresh walk picks up the
-        now-existing machine layer."""
-        return dropped and not any(layer.is_machine for layer in layers) and self._machine_layer_folder() is not None
+        now-existing machine layer.
+
+        Scoped to the actual dropped path(s) — a genuinely foreign write (a
+        config file, the snapshot, a path outside the chain entirely) must
+        still no-op rather than trigger a cold rebuild just because it landed
+        in the same batch as an unrelated drop, so this checks each dropped
+        path's own resolved ancestry against the machine folder rather than
+        firing on "something, anything, was dropped"."""
+        if any(layer.is_machine for layer in layers):
+            return False
+        machine_folder = self._machine_layer_folder()
+        if machine_folder is None:
+            return False
+        return any(machine_folder in path.resolve().parents for path in dropped)
 
     def _mutate_index_for_write(
         self, current: ResolvedIndex, paths: tuple[Path, ...], structural: bool

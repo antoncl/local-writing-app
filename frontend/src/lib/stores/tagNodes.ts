@@ -10,8 +10,27 @@ import type { TagEntry } from "@/lib/types";
 
 export const tagNodesStore = writable<TagEntry[]>([]);
 
+// Monotonic guard so an overlapping refresh (a save's refresh racing a
+// delete's, or two rapid tag-manager edits) can't land an older response
+// over a newer one — mirrors `aiSpend`'s `#seq` (`stores/aiSpend.svelte.ts`).
+let latest = 0;
+
+// Refresh swallows errors — backend may be offline, or (since
+// `projectSession.loadMachineSettings` now awaits this on every app boot)
+// not listening yet — and leaves the previous roster in place, matching
+// `refreshAssistantEntries` (`stores/assistants.ts`). A throw here would
+// otherwise abort `rehydrate()`/`startCreateWizard()` before the wizard even
+// opens, and make `clearProjectData`'s fire-and-forget call an unhandled
+// rejection.
 export async function refreshTagNodes(): Promise<void> {
-  tagNodesStore.set((await api.listTagEntries()).tags);
+  const seq = ++latest;
+  try {
+    const tags = (await api.listTagEntries()).tags;
+    if (seq !== latest) return; // superseded by a later refresh
+    tagNodesStore.set(tags);
+  } catch {
+    // Leave previous list in place.
+  }
 }
 
 export function clearTagNodes(): void {

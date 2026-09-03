@@ -53,6 +53,10 @@ describe("projectSession.rehydrate — first-run onboarding (#1400)", () => {
 
     expect(createWizard.needsRootFolder).toBe(true);
     expect(createWizard.open).toBe(true);
+    // loadMachineSettings hydrates the machine-global tag roster alongside
+    // the assistant one (review fix F4) — pin the fan-out itself, not just
+    // its downstream effect.
+    expect(refreshTagNodes).toHaveBeenCalled();
   });
 
   it("does not open the wizard for a returning user (root already set)", async () => {

@@ -26,13 +26,13 @@ const schema = (withBase: boolean) =>
     fields: {},
   }) as unknown as MetadataSchema;
 
-function libraryTemplate(id: string, title: string): PlotTemplateSummary {
+function libraryTemplate(id: string, title: string, family?: string): PlotTemplateSummary {
   return {
     id,
     title,
     body: "",
     entry_type: "plot:template",
-    template: { slug: id, display_name: title },
+    template: { slug: id, display_name: title, ...(family ? { family } : {}) },
     source_layer_id: "layer_library",
     source_layer_label: "Library",
     is_library: true,
@@ -41,10 +41,10 @@ function libraryTemplate(id: string, title: string): PlotTemplateSummary {
 
 const noop = () => {};
 
-function renderPane() {
+function renderPane(entries?: PlotTemplateSummary[]) {
   return render(PlotTemplates, {
     props: {
-      entries: [libraryTemplate("t-three-act", "Three-Act Story Arc"), libraryTemplate("t-kisho", "Kishotenketsu")],
+      entries: entries ?? [libraryTemplate("t-three-act", "Three-Act Story Arc"), libraryTemplate("t-kisho", "Kishotenketsu")],
       onOpenEntry: noop,
       onCloneEntry: noop,
     },
@@ -81,5 +81,37 @@ describe("PlotTemplates pane render (#724)", () => {
     await tick();
     expect(screen.queryByText("Three-Act Story Arc")).toBeNull();
     expect(screen.getByText("No plot templates match this view.")).toBeInTheDocument();
+  });
+
+  // ADR-0080 slice 2: arc templates get their own section, seedling glyph and all —
+  // the split is a plain array partition (family isn't a schema field), not a view
+  // group_by, so both sections still ride the same view spec.
+  it("sections character-arc templates apart from plotlines", async () => {
+    renderPane([
+      libraryTemplate("t-three-act", "Three-Act Story Arc"),
+      libraryTemplate("t-arc", "Positive Change Arc", "character_arc"),
+    ]);
+    await tick();
+    const plotlinesHeader = screen.getByText("Plotlines");
+    const arcsHeader = screen.getByText("Character arcs");
+    expect(plotlinesHeader).toBeInTheDocument();
+    expect(arcsHeader).toBeInTheDocument();
+    expect(screen.getByText("Three-Act Story Arc")).toBeInTheDocument();
+    expect(screen.getByText("Positive Change Arc")).toBeInTheDocument();
+    const position = plotlinesHeader.compareDocumentPosition(arcsHeader);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("hides the Character arcs section when no arc template exists", async () => {
+    renderPane([libraryTemplate("t-three-act", "Three-Act Story Arc")]);
+    await tick();
+    expect(screen.queryByText("Character arcs")).toBeNull();
+    expect(screen.getByText("Plotlines")).toBeInTheDocument();
+  });
+
+  it("shows the seedling glyph on the Character arcs header", async () => {
+    const { container } = renderPane([libraryTemplate("t-arc", "Positive Change Arc", "character_arc")]);
+    await tick();
+    expect(container.querySelector(".ti-seedling")).toBeTruthy();
   });
 });

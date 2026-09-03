@@ -145,4 +145,45 @@ describe("PlotTemplatePalette", () => {
     expect(screen.getByText("No plot templates.")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Empty plotline/i })).toBeTruthy();
   });
+
+  // ADR-0080 slice 2: arc templates get their own section, seedling glyph and all —
+  // the split is a plain array partition (family isn't a schema field), not a view
+  // group_by, so both sections still ride the same `plot` view spec.
+  it("sections character-arc templates apart from plotlines", async () => {
+    mount({
+      entries: [
+        tpl({ id: "p1", title: "Three-Act" }),
+        tpl({ id: "a1", title: "Positive Change Arc", template: { slug: "positive-change-arc", display_name: "Positive Change Arc", family: "character_arc" } }),
+      ],
+    });
+    await tick();
+    const plotlinesHeader = screen.getByText("Plotlines");
+    const arcsHeader = screen.getByText("Character arcs");
+    expect(plotlinesHeader).toBeTruthy();
+    expect(arcsHeader).toBeTruthy();
+    expect(screen.getByText("Three-Act")).toBeTruthy();
+    expect(screen.getByText("Positive Change Arc")).toBeTruthy();
+    // Plotlines first.
+    const position = plotlinesHeader.compareDocumentPosition(arcsHeader);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("hides the Character arcs section when no arc template exists", async () => {
+    mount({ entries: [tpl({ id: "p1", title: "Three-Act" })] });
+    await tick();
+    expect(screen.queryByText("Character arcs")).toBeNull();
+    expect(screen.getByText("Plotlines")).toBeTruthy();
+  });
+
+  it("shows the seedling glyph on the Character arcs header", async () => {
+    const { container } = render(PlotTemplatePalette, {
+      props: {
+        entries: [tpl({ id: "a1", title: "Positive Change Arc", template: { slug: "positive-change-arc", display_name: "Positive Change Arc", family: "character_arc" } })],
+        onInstantiate: vi.fn(),
+        onEmpty: vi.fn(),
+      },
+    });
+    await tick();
+    expect(container.querySelector(".ti-seedling")).toBeTruthy();
+  });
 });

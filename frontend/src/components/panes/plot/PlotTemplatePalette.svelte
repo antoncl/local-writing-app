@@ -56,9 +56,22 @@
   // (every template shares plot:template, so a group header would be redundant). The spec
   // is constant — build it once, not on every roster/hide recompute.
   const viewSpec = defaultView("plot");
-  let view = $derived({
+
+  // ADR-0080 slice 2: section arc templates apart from plotline templates. `family` isn't
+  // a schema field the view evaluator reads, so the split is a plain array partition, each
+  // half rendered through its own ViewNodeList sharing the same `plot` view spec — not a
+  // view group_by.
+  let plotlineTemplates = $derived(visibleEntries.filter((e) => e.template?.family !== "character_arc"));
+  let arcTemplates = $derived(visibleEntries.filter((e) => e.template?.family === "character_arc"));
+  let plotlineView = $derived({
     spec: viewSpec,
-    universe: visibleEntries,
+    universe: plotlineTemplates,
+    schema,
+    referenceIndex: $referenceIndexStore,
+  });
+  let arcView = $derived({
+    spec: viewSpec,
+    universe: arcTemplates,
     schema,
     referenceIndex: $referenceIndexStore,
   });
@@ -80,11 +93,17 @@
   </button>
 
   <div class="palette-list">
-    <ViewNodeList {view} onClick={(entry) => onInstantiate(entry.id)} row={templateRow}>
-      {#snippet whenEmpty()}
-        <p class="muted palette-empty">No plot templates.</p>
-      {/snippet}
-    </ViewNodeList>
+    {#if plotlineTemplates.length}
+      <div class="section-head"><span>Plotlines</span></div>
+      <ViewNodeList view={plotlineView} onClick={(entry) => onInstantiate(entry.id)} row={templateRow} />
+    {/if}
+    {#if arcTemplates.length}
+      <div class="section-head"><i class="ti ti-seedling" aria-hidden="true"></i><span>Character arcs</span></div>
+      <ViewNodeList view={arcView} onClick={(entry) => onInstantiate(entry.id)} row={templateRow} />
+    {/if}
+    {#if !plotlineTemplates.length && !arcTemplates.length}
+      <p class="muted palette-empty">No plot templates.</p>
+    {/if}
   </div>
 </aside>
 
@@ -180,5 +199,20 @@
   .palette-empty {
     padding: 6px 4px;
     font-size: var(--fs-sm);
+  }
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 4px 2px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .section-head .ti {
+    font-size: var(--fs-sm);
+    line-height: 1;
   }
 </style>

@@ -135,6 +135,24 @@ def test_strip_hides_a_nested_dangling_ref_and_keeps_a_live_one() -> None:
     assert cleaned["pov"] == "char_a"                # live top-level ref kept
 
 
+def test_resolve_reference_titles_swaps_a_nested_id_for_its_title() -> None:
+    # ADR-0081 slice 2: display resolution reaches a nested ref, so it shows the
+    # target's title, not a raw id.
+    service = ProjectService(None)
+    node_index = SimpleNamespace(
+        by_id={
+            "char_a": SimpleNamespace(title="Alice"),
+            "char_b": SimpleNamespace(title="Bob"),
+            "char_c": SimpleNamespace(title="Cara"),
+        }
+    )
+    resolved = service._resolve_reference_titles(_metadata(), "character", _schema(), node_index)
+    assert resolved["pov"] == "Alice"            # top-level ref → title
+    assert resolved["rels"][0]["who"] == "Bob"    # nested ref → title
+    assert resolved["rels"][1]["who"] == "Cara"
+    assert resolved["rels"][0]["kind"] == "ally"  # sibling member untouched
+
+
 def test_reference_edges_include_a_nested_ref() -> None:
     # ★ backlinks-find-nested. The reference graph must have an edge from the
     # group member, or char_b/char_c have no backlink to this node.

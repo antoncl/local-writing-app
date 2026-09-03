@@ -28,6 +28,11 @@ from app.models import (
     SearchResponse,
     StructureNode,
 )
+from app.services.project.metadata_refs import (
+    UNCHANGED,
+    RefOccurrence,
+    rewrite_ref_occurrences,
+)
 from app.services.project.node_index import NodeIndex
 from app.services.tree_structure import StructureVisitor, TreeStructureService
 
@@ -251,27 +256,29 @@ class SearchMixin:
         schema: MetadataSchema,
         node_index: NodeIndex,
     ) -> dict[str, Any]:
-        entry_definition = schema.entry_types.get(entry_type)
-        if entry_definition is None:
+        if schema.entry_types.get(entry_type) is None:
             return metadata
-        resolved = dict(metadata)
-        for field_id in entry_definition.fields:
-            field = schema.fields.get(field_id)
-            if field is None:
-                continue
-            value = resolved.get(field_id)
-            if value is None:
-                continue
-            if field.type == "entity_ref" and isinstance(value, str):
-                target = node_index.by_id.get(value)
-                if target and target.title:
-                    resolved[field_id] = target.title
-            elif field.type == "entity_ref_list" and isinstance(value, list):
-                resolved[field_id] = [
-                    (node_index.by_id.get(item).title if isinstance(item, str) and node_index.by_id.get(item) and node_index.by_id.get(item).title else item)
-                    for item in value
-                ]
+
+        # One traversal reaches every ref — top-level or inside an item_group
+        # member (ADR-0081) — so a nested ref shows its target's title, not a raw
+        # id. Display-only: this returns a copy for search/rendering.
+        def _to_title(occ: RefOccurrence) -> Any:
+            if occ.field.type == "entity_ref" and isinstance(occ.value, str):
+                target = node_index.by_id.get(occ.value)
+                return target.title if target and target.title else UNCHANGED
+            if occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
+                return [self._ref_title_or_id(item, node_index) for item in occ.value]
+            return UNCHANGED
+
+        resolved, _ = rewrite_ref_occurrences(metadata, schema, _to_title)
         return resolved
+
+    @staticmethod
+    def _ref_title_or_id(item: Any, node_index: NodeIndex) -> Any:
+        """A ref id swapped for its target's title, or the item unchanged when it
+        does not resolve to a titled node (display-only, for entity_ref_list)."""
+        target = node_index.by_id.get(item) if isinstance(item, str) else None
+        return target.title if target and target.title else item
 
     def _scene_display_paths(self) -> dict[str, str]:
         visitor = _SceneDisplayPaths()

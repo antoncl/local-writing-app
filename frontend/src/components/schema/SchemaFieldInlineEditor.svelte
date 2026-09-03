@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  import { LIST_ITEM_SCALAR_TYPES } from "@/lib/types";
+  import { LIST_ITEM_GROUP_MEMBER_TYPES, LIST_ITEM_SCALAR_TYPES } from "@/lib/types";
   import type {
     ListItemScalarType,
     MetadataFieldType,
@@ -204,13 +204,14 @@
   const aiProposableApplies = $derived(
     type !== "computed" && type !== "entity_ref" && type !== "entity_ref_list",
   );
-  // Groups offered as item shapes: only members inside the one scalar
-  // catalog (LIST_ITEM_SCALAR_TYPES — same source as the backend's positive
-  // integrity check). A group with, e.g., an entity_ref member is legal to
-  // APPLY (flattened) but would 422 as an item shape, so it isn't offered.
+  // Groups offered as item shapes: members inside LIST_ITEM_GROUP_MEMBER_TYPES
+  // — the scalars plus reference/tag types (ADR-0081), mirroring the backend's
+  // positive integrity check. A group with an entity_ref member is now a valid
+  // item shape (a nested ref is indexed / scrubbed / healed like a top-level
+  // one); only date / multi_select members keep a group out.
   const shapeableGroups = $derived(
     Object.entries(groups).filter(([, groupDef]) =>
-      groupDef.members.every((m) => (LIST_ITEM_SCALAR_TYPES as readonly string[]).includes(m.type)),
+      groupDef.members.every((m) => (LIST_ITEM_GROUP_MEMBER_TYPES as readonly string[]).includes(m.type)),
     ),
   );
   // An EXISTING field can point at a group the filter above excludes (the

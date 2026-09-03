@@ -17,7 +17,15 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import { dropPositionFromEvent, reorderByPosition } from "@/lib/utils/listOrder";
   import { metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
-  import type { GroupMember, MetadataFieldDefinition, MetadataValue } from "@/lib/types";
+  import type {
+    GroupMember,
+    LoreEntrySummary,
+    MetadataFieldDefinition,
+    MetadataValue,
+    PromptEntrySummary,
+    ScopedTag,
+    StructureDocument,
+  } from "@/lib/types";
 
   interface Props {
     field: MetadataFieldDefinition;
@@ -27,9 +35,36 @@
     onChange: (value: MetadataValue) => void;
     readOnly?: boolean;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
+    // The candidate rosters a member's entity_ref / tags picker resolves from
+    // (ADR-0081) — they are prop-fed and resolved client-side, so a member
+    // picker is empty without them. Forwarded verbatim to each member's editor.
+    loreEntries?: LoreEntrySummary[];
+    promptEntries?: PromptEntrySummary[];
+    structure?: StructureDocument | null;
+    researchStructure?: StructureDocument | null;
+    knownTags?: ScopedTag[];
+    tagOrigin?: "project" | "assistant";
+    documentKind?: string;
+    entryType?: string;
+    excludeId?: string | null;
   }
 
-  let { field, value, onChange, readOnly = false, implicitContextMatcher = null }: Props = $props();
+  let {
+    field,
+    value,
+    onChange,
+    readOnly = false,
+    implicitContextMatcher = null,
+    loreEntries = [],
+    promptEntries = [],
+    structure = null,
+    researchStructure = null,
+    knownTags = [],
+    tagOrigin = "project",
+    documentKind = "manuscript",
+    entryType = "",
+    excludeId = null,
+  }: Props = $props();
 
   const members = $derived(field.item_members ?? []);
   /** Scalar sugar → items are bare scalars (flat storage); group shape →
@@ -216,6 +251,15 @@
                     value={itemMemberValue(item, member)}
                     onChange={(next) => setMemberValue(index, member, next)}
                     {implicitContextMatcher}
+                    {loreEntries}
+                    {promptEntries}
+                    {structure}
+                    {researchStructure}
+                    {knownTags}
+                    {tagOrigin}
+                    {documentKind}
+                    {entryType}
+                    {excludeId}
                   />
                 </div>
               </div>
@@ -232,6 +276,15 @@
               onChange={(next) => setMemberValue(index, members[0], next)}
               {readOnly}
               {implicitContextMatcher}
+              {loreEntries}
+              {promptEntries}
+              {structure}
+              {researchStructure}
+              {knownTags}
+              {tagOrigin}
+              {documentKind}
+              {entryType}
+              {excludeId}
             />
           </div>
           {@render removeButton(index)}

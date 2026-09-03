@@ -83,6 +83,9 @@ describe("SchemaFieldInlineEditor field-editor fixes", () => {
 
 const GROUPS: Record<string, MetadataGroupDefinition> = {
   gmo: { name: "GMO", members: [{ key: "goal", name: "Goal", type: "text" }] },
+  // A ref-member group — a valid item shape as of ADR-0081 (a nested ref is
+  // tracked wherever it lives), so it must be OFFERED.
+  cast: { name: "Cast", members: [{ key: "who", name: "Who", type: "entity_ref" }] },
   // A built-in machinery group — must not be offered as a new item shape.
   plot_beat_link: {
     name: "Beat link",
@@ -120,6 +123,12 @@ describe("SchemaFieldInlineEditor list item shape hides system groups (#1003)", 
     const { values } = itemShapeValues();
     expect(values).toContain("group:gmo");
     expect(values).not.toContain("group:plot_beat_link");
+  });
+
+  it("offers a group with an entity_ref member as an item shape (ADR-0081)", () => {
+    mountList({ name: "Beats", type: "list", options: [] });
+    const { values } = itemShapeValues();
+    expect(values).toContain("group:cast"); // ref-member group is now shapeable
   });
 
   it("still shows a system group the field already uses, as a valid (not disabled) shape", () => {

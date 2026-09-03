@@ -175,3 +175,39 @@ describe("ListValueEditor — shape-mismatched items (post shape-switch)", () =>
     expect(screen.queryByDisplayValue("stray string")).toBeNull();
   });
 });
+
+describe("ListValueEditor — entity_ref member picker (ADR-0081)", () => {
+  const castField: MetadataFieldDefinition = {
+    name: "Cast",
+    type: "list",
+    options: [],
+    item_group: "cast",
+    item_scalar: false,
+    item_members: [
+      {
+        key: "who",
+        name: "Who",
+        type: "entity_ref",
+        picker_config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }] },
+      },
+    ],
+  } as unknown as MetadataFieldDefinition;
+
+  const loreRoster = [
+    { id: "char_a", title: "Alice", body: "", entry_type: "lore:character", metadata: { tags: [], aliases: [] } },
+  ] as unknown as import("@/lib/types").LoreEntrySummary[];
+
+  it("threads the candidate roster so a member's ref picker resolves it (was empty)", async () => {
+    // Regression for the two dropped boundaries: FieldValueEditor's list branch
+    // and ListValueEditor's per-member editor must forward loreEntries, or the
+    // nested picker filters an empty roster and shows no candidates.
+    render(ListValueEditor, {
+      field: castField,
+      value: [{ who: "" }],
+      onChange: () => {},
+      loreEntries: loreRoster,
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Add Who" }));
+    expect(await screen.findByText("Alice")).toBeInTheDocument();
+  });
+});

@@ -264,8 +264,26 @@
   />
 {:else if field.type === "list"}
   <!-- #698: the list value is already normalized (an array of scalars or
-       member-keyed records) — bypass normaliseFieldValue's string coercion. -->
-  <ListValueEditor {field} {value} onChange={(next) => onChange(next)} {implicitContextMatcher} />
+       member-keyed records) — bypass normaliseFieldValue's string coercion.
+       ADR-0081: thread the candidate rosters so an entity_ref / tags member's
+       picker resolves the same set a top-level field's does (they are prop-fed,
+       resolved client-side; without them a nested picker is empty). -->
+  <ListValueEditor
+    {field}
+    {value}
+    onChange={(next) => onChange(next)}
+    {readOnly}
+    {implicitContextMatcher}
+    {loreEntries}
+    {promptEntries}
+    {structure}
+    {researchStructure}
+    {knownTags}
+    {tagOrigin}
+    {documentKind}
+    {entryType}
+    {excludeId}
+  />
 {:else if field.type === "color"}
   <SwatchPicker value={currentValue || null} onChange={(id) => emit(id ?? "")} />
 {:else}

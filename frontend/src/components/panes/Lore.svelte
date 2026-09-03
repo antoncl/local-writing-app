@@ -18,7 +18,8 @@
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { parseSearchQuery, readTags } from "@/lib/utils/entrySearch";
-  import { tagTitleById } from "@/lib/stores/tagNodes";
+  import { liveTags, tagTitleById } from "@/lib/stores/tagNodes";
+  import { tagChipHexByTitle } from "@/lib/utils/pickerStripes";
   import { defaultView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
@@ -57,14 +58,16 @@
   // the row DISPLAY and the search-box `#tag` restrictor (loreSearchFilter,
   // below), which now matches by title, not raw id. An id that hasn't
   // resolved yet (roster not loaded) falls back to itself rather than
-  // vanishing from either surface. Colour on the chip comes in slice 3 (the
-  // picker's instance-colour helper); uncoloured until then.
+  // vanishing from either surface.
   function entryTagTitles(entry: LoreEntrySummary): string[] {
     const titles = $tagTitleById;
     return entryTags(entry).map((id) => titles.get(id) ?? id);
   }
-  function tagColorNone(): string | null {
-    return null;
+  // ADR-0082 §3/F2: the tag's own instance colour, through the same resolver
+  // the picker chip uses — title-keyed since `entryTagTitles` above is titles.
+  const tagColorByTitle = $derived(tagChipHexByTitle($liveTags, schema, "tag:tag"));
+  function tagColorFor(title: string): string | null {
+    return tagColorByTitle.get(title) ?? null;
   }
 
   // The view's chosen render layout (ADR-0069), set by the control beside the
@@ -260,7 +263,7 @@
     title={entry.title}
     detail={entryDetailText(entry)}
     tags={entryTagTitles(entry)}
-    tagColor={tagColorNone}
+    tagColor={tagColorFor}
     layerLabel={inheritedLayerLabel(entry, ownLayerId)}
     depth={ctx.depth}
     active={ctx.active}

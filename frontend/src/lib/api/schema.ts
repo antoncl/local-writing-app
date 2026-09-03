@@ -1,9 +1,6 @@
 import type {
   EntryTypeDefinition,
   GroupApplication,
-  KnownTags,
-  NodePickerConfig,
-  TagsOverview,
   MetadataFieldDefinition,
   MetadataGroupDefinition,
   MetadataSchema,
@@ -21,30 +18,6 @@ export const schemaApi = {
   },
   getMetadataSchemaOverview() {
     return request<MetadataSchemaOverview>("/metadata/schema/overview");
-  },
-  getKnownTags() {
-    return request<KnownTags>("/tags");
-  },
-  getTagsOverview() {
-    return request<TagsOverview>("/tags/overview");
-  },
-  updateTagScope(name: string, scope: NodePickerConfig) {
-    return request<KnownTags>("/tags/scope", {
-      method: "PUT",
-      body: JSON.stringify({ name, scope }),
-    });
-  },
-  setTagColor(name: string, color: string | null) {
-    return request<KnownTags>("/tags/color", {
-      method: "PUT",
-      body: JSON.stringify({ name, color }),
-    });
-  },
-  mergeTags(sources: string[], target: string) {
-    return request<KnownTags>("/tags/merge", {
-      method: "POST",
-      body: JSON.stringify({ sources, target }),
-    });
   },
   upsertMetadataEntryType(layerId: string, entryTypeId: string, entryType: EntryTypeDefinition, allowExisting = true) {
     return request<MetadataSchema>("/metadata/schema/entry-types", {

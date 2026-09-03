@@ -51,7 +51,7 @@ from app.services.project.node_index import (
 # stale because the code that produced it changed, with the payload's shape and
 # every project file untouched, and no human-maintained version number catches
 # that reliably.
-SNAPSHOT_FORMAT_VERSION = 2
+SNAPSHOT_FORMAT_VERSION = 3
 
 # Source trees whose contents determine what a build *produces*: the walk, the
 # collectors, the edge extraction, the built-in schema, the models they parse
@@ -228,6 +228,10 @@ def serialize(
                 # an id — layer ids are `sha256(path)` and must never land on disk
                 # (`_layer_id_for_folder`). `None` for an ordinary entry.
                 "forked_from_layer": layer_index_by_id.get(entry.forked_from_layer_id),
+                # ADR-0082 §5: a plain id, unlike `forked_from_layer` — it names
+                # another NODE (any tag, possibly in a different layer), not a
+                # layer position, so there is no chain to re-derive on load.
+                "merged_into": entry.merged_into,
             }
             for entries in index.candidates.values()
             for entry in entries
@@ -446,6 +450,7 @@ def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
                 # is_library=False and clone/read-only silently break (#674).
                 is_library=layer.is_library,
                 forked_from_layer_id=forked_from_layer_id,
+                merged_into=entry.get("merged_into"),
             )
         )
     # `add` front-inserts, which is only innermost-first if entries arrive in

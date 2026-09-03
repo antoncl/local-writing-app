@@ -805,10 +805,9 @@ class LayerWalkMixin:
         (ADR-0042 §3, #393): the chain is truncated after L, dropping every
         more-local layer below it. This is a *truncation*, not a filter, and
         the two coincide only because the schema merge is strictly ordered
-        nearer-wins (`_merge_metadata_schema_layer`) — so stopping the fold at
-        L leaves exactly the layers L can see, the same reasoning
-        `read_known_tags` relies on for tags. `None` is the whole chain, which
-        is what every resolution-scope caller wants and gets unchanged.
+        nearer-wins (`_merge_metadata_schema_layer`). `None` is the whole
+        chain, which is what every resolution-scope caller wants and gets
+        unchanged.
 
         This called `_project_layer_folders` directly for a while, to dodge the
         `Path.resolve()` each layer id costs (`read_metadata_schema` is hot and
@@ -826,9 +825,8 @@ class LayerWalkMixin:
     ) -> list[IndexLayer]:
         """`layers` cut after the one whose id is `up_to_layer_id` (#393).
 
-        An id absent from the chain is a 404 — the same loud contract
-        `read_known_tags` enforces, so an authoring layer that is not on this
-        project's walk is an error rather than a silently full chain.
+        An id absent from the chain is a 404 — an authoring layer that is not
+        on this project's walk is an error rather than a silently full chain.
         """
         for index, layer in enumerate(layers):
             if layer.id == up_to_layer_id:

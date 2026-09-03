@@ -13,10 +13,13 @@
 // `coerceInputValue`, before the API call. `coerceInputValue` itself stays pure
 // (roster-blind) — see lib/utils/promptInputs.ts.
 
+import { get } from "svelte/store";
 import { decodePickerValue, encodePickerValue } from "@/lib/utils/promptInputs";
 import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
 import { structureToEvalNodes } from "@/lib/views/structureNodes";
+import { walkViewExpr } from "@/lib/views/walkViewExpr";
 import { reportClientError } from "@/lib/errorLog";
+import { canonicalIdIn, tagById } from "@/lib/stores/tagNodes";
 import type {
   AssistantEntrySummary,
   CardSummary,
@@ -77,11 +80,39 @@ function memberRef(node: EvalNode, kind: string): NodePickerRef {
 /** The live members a selector currently resolves to — the evaluated, deduped
  * node list mapped to member refs. Empty when the spec can't be resolved or the
  * kind has no roster. */
+// A `{tagged: <id>}` leaf's own operand, canonicalised (ADR-0082 §5): a
+// selector persisted BEFORE its tag merged still names the merged id — a
+// merge never rewrites a stored selector, only node documents (S4) — so the
+// query side needs following too, not just the node side `nodeReferences`
+// canonicalises. A fresh clone (`walkViewExpr` mutates in place, and `spec`
+// here is `ref.selector`, the CALLER's own stored object) walks every leaf
+// in the tree, including nested ones under `intersect`/`union` (the "By tag"
+// axis's `type` + `tagged` combo, `NodePicker.svelte`'s `tagSpecFor`) — a
+// `{var}`-bound `tagged` (a promoted formal) is left untouched, since that is
+// resolved from bindings, not a literal id.
+function canonicalizedSpec(spec: ViewSpec, canonicalId: (id: string) => string): ViewSpec {
+  const clone: ViewSpec = structuredClone(spec);
+  walkViewExpr(clone.expr, (e) => {
+    if (typeof e.tagged === "string") e.tagged = canonicalId(e.tagged);
+  });
+  return clone;
+}
+
 export function membersForSelector(ref: NodePickerRef, roster: SelectorRoster): NodePickerRef[] {
   const resolved = specForSelector(ref);
   if (resolved === null) return [];
   const nodes = roster.rostersByKind[resolved.kind] ?? [];
-  const result = evaluateView(resolved.spec, nodes, { schema: roster.schema ?? null });
+  // ADR-0082 §5: a plain (non-reactive) function, so a `get()` snapshot is
+  // correct here — unlike ViewNodeList's `$tagById`, there is no `$derived`
+  // to keep tracking. A persisted `{tagged: <merged id>}` selector still
+  // expands to a node now carrying the survivor's id: the spec's own operand
+  // is canonicalised above, and `nodeReferences` (inside `evaluateView`, via
+  // the `canonicalId` ctx below) canonicalises each node's references too —
+  // whichever side still names the merged id, the other side's already-
+  // canonical form is what it is compared against.
+  const canonicalId = (id: string) => canonicalIdIn(get(tagById), id);
+  const spec = canonicalizedSpec(resolved.spec, canonicalId);
+  const result = evaluateView(spec, nodes, { schema: roster.schema ?? null, canonicalId });
   return result.nodes.map((n) => memberRef(n, resolved.kind));
 }
 

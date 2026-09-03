@@ -208,7 +208,11 @@ class ProjectLifecycleMixin:
         self._write_project_node_file(root / "project.md", self._new_project_node(title))
         self._write_yaml(root / "project.yaml", self._new_project_manifest(title, declaration))
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
-        self._write_yaml(root / "tags.yaml", {"tags": []})
+        # No more `tags.yaml` scaffold here: the legacy name/colour registry
+        # (`TagsMixin`) retired with ADR-0082 slice 3 — a tag is a `tag`-kind
+        # node now (`tags/*.md`), not a registry entry. An EXISTING project's
+        # `tags.yaml` is read by slice 4's migration, with its own small YAML
+        # reader (it does not resurrect this mixin).
         initial_scene = Scene(
             id=self._new_id("manuscript"),
             title="Untitled Scene",

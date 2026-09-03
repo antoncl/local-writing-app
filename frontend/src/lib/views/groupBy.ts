@@ -36,6 +36,11 @@ export type GroupByContext<T extends EvalNode> = {
   // `entity_ref_list` field, most commonly. Optional so a caller with no
   // off-roster vocabulary (or an existing test) needs no change.
   resolveTitle?: (id: string) => string | undefined;
+  // ADR-0082 §5: follows a merged tag's id to its survivor, applied to the ref
+  // branch BEFORE the title lookup — so a scene view grouped by Motifs buckets
+  // a carrier that still holds a merged id under the survivor's header, not a
+  // second one. Identity when absent.
+  canonicalId?: (id: string) => string;
 };
 
 // Apply the ordered `group_by` levels to already-denormalized rows. Each level
@@ -138,7 +143,8 @@ function segmentForField<T extends EvalNode>(
     if (field === "entry_type") {
       out.push(seg(value, ctx.schema?.entry_types?.[value]?.name ?? value, null));
     } else if (isRef) {
-      out.push(seg(value, ctx.nodeById.get(value)?.title ?? ctx.resolveTitle?.(value) ?? value, value));
+      const canonical = ctx.canonicalId?.(value) ?? value;
+      out.push(seg(canonical, ctx.nodeById.get(canonical)?.title ?? ctx.resolveTitle?.(canonical) ?? canonical, canonical));
     } else if (options) {
       // Option-carrying field: stamp the declared-order index (null = a value
       // outside the vocabulary, ordered after the declared buckets).

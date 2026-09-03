@@ -69,7 +69,6 @@ describe("editorPanes adopt-save serialization (#614)", () => {
       }),
     );
     vi.spyOn(api, "listLoreEntries").mockResolvedValue({ entries: [] });
-    vi.spyOn(api, "getKnownTags").mockResolvedValue({ tags: [] });
     vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {} });
 
     const inFlight = editorPanes.saveEditorPane("pane_1"); // deliberately NOT awaited

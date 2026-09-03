@@ -71,7 +71,6 @@ from app.services.project.search import SearchMixin
 from app.services.project.snapshot_diff import SnapshotDiffMixin
 from app.services.project.snapshot_witness import SnapshotWitnessMixin
 from app.services.project.tag_nodes import TagNodesMixin
-from app.services.project.tags import TagsMixin
 from app.services.project.todos import TodosMixin
 from app.services.project.views import ViewsMixin
 
@@ -118,7 +117,6 @@ class ProjectService(
     SnapshotWitnessMixin,
     SearchMixin,
     TagNodesMixin,
-    TagsMixin,
     TodosMixin,
     MutationSetEntriesMixin,
     ViewsMixin,

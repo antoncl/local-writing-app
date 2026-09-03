@@ -188,7 +188,7 @@ src/
     editor-core/               implicitContextHighlight  implicitContextMatcher
   components/
     chrome/                    TopBar
-    panes/                     Pane Tree Lore Prompts Chats Assistants Project Search Todo
+    panes/                     Pane Tree Lore Prompts Chats Assistants TagsPane Project Search Todo
     editor/                    NodeEditor MetadataPanel BacklinksPanel InputsDialog
       body/                    ProseBodyView CodeBodyView ChatBodyView FieldsOnlyView
     schema/                    SchemaTypeEditor SchemaTreePane SchemaFieldRow
@@ -199,7 +199,7 @@ src/
                                PromptInputField PlainTextEditor CodeEditor
                                MetadataLongTextEditor SearchInput
     dialogs/                   Modal ConfirmModal NewProjectModal DirectoryPickerModal
-                               MachineSettingsDialog GroupsManagerDialog TagManagerDialog
+                               MachineSettingsDialog GroupsManagerDialog
 ```
 
 New files from decomposition land in the matching folder (e.g. P0 autosave controller →

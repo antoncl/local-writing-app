@@ -52,7 +52,7 @@
     refreshTodos as storeRefreshTodos,
     refreshEmbeddedTodos as storeRefreshEmbeddedTodos,
   } from "@/lib/stores/todos";
-  import { refreshKnownTags as storeRefreshKnownTags, setKnownTags, tagVocabularyRevision } from "@/lib/stores/tags";
+  import { clearTagNodes } from "@/lib/stores/tagNodes";
   import { validationStore, setValidation, clearValidation } from "@/lib/stores/validation";
   import {
     structureStore,
@@ -116,8 +116,9 @@
     openAiSpendPane,
     openAssistantsPane,
     openChatsPane,
+    openTagsPane,
   } from "@/lib/stores/paneOpeners";
-  import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
+  import TagsPane from "@/components/panes/TagsPane.svelte";
   import type {
     AssistantEntrySummary,
     CodeFencedBody,
@@ -159,8 +160,6 @@
   // (editorPanes.activeChatId); the chat-session roster + openers live in the
   // chatSessions controller (lib/stores/chatSessions).
   let appState = $state<AppState>({ name: "needsProject" });
-  // One "Manage tags" home governs both vocabularies (#247 PR-3b).
-  let tagsManagerOpen = $state(false);
   // The finalize-roleplay modal (ADR-0070 S3), opened imperatively from the ≡ menu.
   let finalizeDialog = $state<FinalizeRoleplayDialog | null>(null);
   // "Import documents" (#635) — the loose-scene adoption surface, opened from the
@@ -359,7 +358,7 @@
     // loadForProject re-seeds it (openProjectWorkspace calls this first).
     workspaceLayout.closeForProject();
     paneViews.reset();
-    setKnownTags([]);
+    clearTagNodes();
     setChatSessions([]);
     // The AI Spend singleton would otherwise paint the previous project's
     // totals under the next one until its refetch lands.
@@ -556,34 +555,6 @@
   async function refreshAssistantEntries() {
     await storeRefreshAssistantEntries();
   }
-
-  async function refreshKnownTags() {
-    await storeRefreshKnownTags();
-  }
-
-  // A tag merge/rename rewrites tag values across documents on disk; pull the new
-  // rosters AND re-sync the entry lists + open editors so the change is reflected
-  // everywhere immediately (not just on next reload). The assistant-tag half of
-  // this reconcile retired with the legacy `assistant-tags.yaml` registry
-  // (ADR-0082 slice 2b) — the assistant vocabulary is `tag:assistant_tag` nodes,
-  // governed like any other tag node, not a separate signal here.
-  async function refreshAfterTagChange() {
-    await refreshKnownTags();
-    await run(async () => {
-      setLoreEntries((await api.listLoreEntries()).entries);
-      setPromptEntries((await api.listPromptEntries()).entries);
-      await refreshAssistantEntries();
-      await editorPanes.refreshOpenEditorPaneBaselines();
-    });
-  }
-
-  // Any vocabulary-governance op (the + popover's governance surface, the tag
-  // manager) bumps `tagVocabularyRevision` after it rewrites tags on disk;
-  // reconcile once, here — so no picker has to thread a callback up through the
-  // components between it and App just to re-sync (#247). Skips the initial 0.
-  $effect(() => {
-    if ($tagVocabularyRevision > 0) void refreshAfterTagChange();
-  });
 
   async function refreshTodos() {
     await storeRefreshTodos();
@@ -828,7 +799,7 @@
   onOpenAiSpend={openAiSpendPane}
   onOpenGuides={openGuidePane}
   onOpenImport={openImportDocs}
-  onManageAllTags={() => (tagsManagerOpen = true)}
+  onManageAllTags={openTagsPane}
   canFinalize={canFinalizeRoleplay}
   onFinalizeRoleplay={() => activeScene && finalizeDialog?.open(activeScene)}
   {inheritRows}
@@ -887,6 +858,7 @@
       mutations: { title: "Reusable mutations", body: mutationsBody, actions: mutationsActions, closable: true, onClose: closeRegion("mutations") },
       assistants: { title: "Assistants", body: assistantsBody, actions: assistantsActions, view: { kind: "assistant", switcher: true }, closable: true, onClose: closeRegion("assistants") },
       chats: { title: "Chats", body: chatsBody, actions: chatsActions, view: { kind: "chat", switcher: true }, closable: true, onClose: closeRegion("chats") },
+      tags: { title: "Tags", body: tagsBody, closable: true, onClose: closeRegion("tags") },
       todo: { title: "TODO", body: todoBody, actions: todoBarActions },
       search: { title: "Search", body: searchBody },
       guide: { title: "Guides", body: guideBody, closable: true, onClose: closeRegion("guide") },
@@ -1059,6 +1031,14 @@
         onOpenChat={(id) => run(() => editorPanes.openChat(id))}
         onDeleteChat={(id) => chatSessions.deleteChatSessionFromPane(id)}
       />
+    </div>
+  {/snippet}
+
+  {#snippet tagsBody()}
+    <!-- Self-contained: TagsPane reads tagNodesStore/referenceIndexStore
+         directly rather than through App-local state (ADR-0082 slice 3). -->
+    <div class="pane-content schema-list">
+      <TagsPane onOpenTag={(id) => editorPanes.openNodeOfKind(id, "tag")} />
     </div>
   {/snippet}
 
@@ -1329,10 +1309,6 @@
     onFlush={(id) => editorPanes.flushSceneIfDirty(id)}
     onFinalized={(restored) => editorPanes.reconcileSceneFromServer(restored)}
   />
-  {#if tagsManagerOpen}
-    <TagManagerDialog onClose={() => (tagsManagerOpen = false)} />
-  {/if}
-
   {#if $mutationSetEditorStore}
     <MutationSetEditor
       initial={$mutationSetEditorStore.editing}

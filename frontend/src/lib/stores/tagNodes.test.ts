@@ -7,13 +7,23 @@ const { listTagEntries } = vi.hoisted(() => ({ listTagEntries: vi.fn() }));
 vi.mock("@/lib/api", () => ({ api: { listTagEntries } }));
 
 import type { TagEntry } from "@/lib/types";
-import { clearTagNodes, findTagByTitle, refreshTagNodes, tagById, tagNodesStore, tagTitleById } from "./tagNodes";
+import {
+  canonicalTagId,
+  clearTagNodes,
+  findTagByTitle,
+  liveTags,
+  refreshTagNodes,
+  tagById,
+  tagNodesStore,
+  tagTitleById,
+} from "./tagNodes";
 
-const T = (id: string, title: string, entryType = "tag:tag"): TagEntry => ({
+const T = (id: string, title: string, entryType = "tag:tag", mergedInto: string | null = null): TagEntry => ({
   id,
   title,
   entry_type: entryType,
   metadata: {},
+  merged_into: mergedInto,
 });
 
 describe("tagNodes store (ADR-0082 slice 1)", () => {
@@ -84,6 +94,73 @@ describe("tagNodes store (ADR-0082 slice 1)", () => {
   });
 });
 
+describe("canonicalTagId (ADR-0082 §5 / F1)", () => {
+  beforeEach(() => {
+    listTagEntries.mockReset();
+    clearTagNodes();
+  });
+
+  it("is identity for an unmerged id, and for an id outside the roster", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [T("tag_1", "Coastal")] });
+    await refreshTagNodes();
+    expect(canonicalTagId("tag_1")).toBe("tag_1");
+    expect(canonicalTagId("tag_ghost")).toBe("tag_ghost");
+  });
+
+  it("follows a single-hop redirect to the survivor", async () => {
+    listTagEntries.mockResolvedValueOnce({
+      tags: [T("tag_mirror", "mirror", "tag:tag", "tag_mirrors"), T("tag_mirrors", "mirrors")],
+    });
+    await refreshTagNodes();
+    expect(canonicalTagId("tag_mirror")).toBe("tag_mirrors");
+  });
+
+  it("follows a chain to its end", async () => {
+    listTagEntries.mockResolvedValueOnce({
+      tags: [
+        T("tag_a", "a", "tag:tag", "tag_b"),
+        T("tag_b", "b", "tag:tag", "tag_c"),
+        T("tag_c", "c"),
+      ],
+    });
+    await refreshTagNodes();
+    expect(canonicalTagId("tag_a")).toBe("tag_c");
+  });
+
+  it("stops at the first repeat rather than looping forever on a cycle", async () => {
+    listTagEntries.mockResolvedValueOnce({
+      tags: [T("tag_a", "a", "tag:tag", "tag_b"), T("tag_b", "b", "tag:tag", "tag_a")],
+    });
+    await refreshTagNodes();
+    expect(["tag_a", "tag_b"]).toContain(canonicalTagId("tag_a"));
+  });
+
+  it("tagTitleById maps a merged id to the SURVIVOR's title", async () => {
+    listTagEntries.mockResolvedValueOnce({
+      tags: [T("tag_mirror", "mirror", "tag:tag", "tag_mirrors"), T("tag_mirrors", "mirrors")],
+    });
+    await refreshTagNodes();
+    const map = get(tagTitleById);
+    expect(map.get("tag_mirror")).toBe("mirrors");
+    expect(map.get("tag_mirrors")).toBe("mirrors");
+  });
+});
+
+describe("liveTags (ADR-0082 §5)", () => {
+  beforeEach(() => {
+    listTagEntries.mockReset();
+    clearTagNodes();
+  });
+
+  it("excludes a merged tag and keeps an unmerged one", async () => {
+    listTagEntries.mockResolvedValueOnce({
+      tags: [T("tag_mirror", "mirror", "tag:tag", "tag_mirrors"), T("tag_mirrors", "mirrors")],
+    });
+    await refreshTagNodes();
+    expect(get(liveTags).map((t) => t.id)).toEqual(["tag_mirrors"]);
+  });
+});
+
 describe("findTagByTitle (ADR-0082 §2 / F3)", () => {
   beforeEach(() => {
     listTagEntries.mockReset();
@@ -113,5 +190,14 @@ describe("findTagByTitle (ADR-0082 §2 / F3)", () => {
     expect(findTagByTitle("Editor", "tag:assistant_tag")?.id).toBe("tag_2");
     expect(findTagByTitle("Editor", "tag:tag")?.id).toBe("tag_1");
     expect(findTagByTitle("Editor")?.id).toBe("tag_1"); // omitted → first match
+  });
+
+  it("skips a merged tag by its old title (ADR-0082 §5)", async () => {
+    listTagEntries.mockResolvedValueOnce({
+      tags: [T("tag_mirror", "mirror", "tag:tag", "tag_mirrors"), T("tag_mirrors", "mirrors")],
+    });
+    await refreshTagNodes();
+    expect(findTagByTitle("mirror")).toBeUndefined();
+    expect(findTagByTitle("mirrors")?.id).toBe("tag_mirrors");
   });
 });

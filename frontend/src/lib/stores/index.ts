@@ -13,7 +13,6 @@ import { clearPlotBoard } from "@/lib/stores/plotBoard";
 import { refreshMutationSetEntries, clearMutationSets } from "@/lib/stores/mutationSets";
 import { refreshSchema, clearSchema } from "@/lib/stores/schema";
 import { refreshReferenceIndex, clearReferenceIndex } from "@/lib/stores/references";
-import { refreshKnownTags, clearKnownTags } from "@/lib/stores/tags";
 import { refreshTagNodes, clearTagNodes } from "@/lib/stores/tagNodes";
 import { refreshTodos, refreshEmbeddedTodos, clearTodos } from "@/lib/stores/todos";
 import { clearValidation } from "@/lib/stores/validation";
@@ -39,7 +38,6 @@ export async function loadProjectData(): Promise<void> {
     refreshMutationSetEntries(),
     refreshSchema(),
     refreshReferenceIndex(),
-    refreshKnownTags(),
     refreshTagNodes(),
     refreshTodos(),
     refreshEmbeddedTodos(),
@@ -59,7 +57,6 @@ export function clearProjectData(): void {
   clearMutationSets();
   clearSchema();
   clearReferenceIndex();
-  clearKnownTags();
   // Not a plain clear (review fix): the tag roster is machine-global
   // (ADR-0082 slice 1) — machine-layer tags remain valid with no project
   // open, same as the assistant roster (`clearAssistants` below has no such

@@ -17,7 +17,7 @@
   // identically (#1462).
   import { assistantEntriesStore } from "@/lib/stores/assistants";
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
-  import { tagNodesStore } from "@/lib/stores/tagNodes";
+  import { liveTags } from "@/lib/stores/tagNodes";
   import { decodePickerValue, isListShapedInputType } from "@/lib/utils/promptInputs";
   import { coerceStringList } from "@/lib/utils/schemaTypeHelpers";
   import type {
@@ -208,7 +208,7 @@
     promptEntries={promptEntries}
     plotEntries={$plotlineEntriesStore}
     assistantEntries={$assistantEntriesStore}
-    tagEntries={$tagNodesStore}
+    tagEntries={$liveTags}
     onChange={(detail) => onChange(JSON.stringify(detail.value))}
   />
 {:else if input.type === "multi_select" || input.type === "list" || input.type === "color"}

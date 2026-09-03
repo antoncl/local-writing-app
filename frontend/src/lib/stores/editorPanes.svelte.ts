@@ -77,7 +77,6 @@ import {
   reconcileOn409,
   RELOAD_GETTERS,
 } from "@/lib/stores/editorPaneSave";
-import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
 import { forwardRefsOf, sameRefSet } from "@/lib/views/referenceIndex";
 import { subordinatePanes } from "@/lib/stores/subordinatePanes";
@@ -683,9 +682,6 @@ class EditorPanesController {
         baselineBody,
         draftMarkdown: pane.draftMarkdown,
       });
-      // Fire-and-forget: any saved node can register tag vocabulary, but a
-      // roster-fetch blip must not fail an already-saved node (#247).
-      void refreshKnownTags();
       this.setStatus(`Saved ${savedDocument.title}`);
     } catch (caught) {
       this.setEditorPaneSaving(id, false);

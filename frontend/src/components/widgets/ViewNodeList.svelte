@@ -130,7 +130,7 @@
   // (`nodeById`) is the pane's kind, not a tag's, so grouping by a `tags`-style
   // field needs the tag roster store as the fallback — same reasoning as the
   // param strip's reference/tag pickers sourcing global stores directly above.
-  import { tagTitleById } from "@/lib/stores/tagNodes";
+  import { canonicalIdIn, tagById, tagTitleById } from "@/lib/stores/tagNodes";
   import { groupByHasRefLevel } from "@/lib/views/groupBy";
 
   let {
@@ -278,6 +278,11 @@
           // THIS run) when `groupsByRef` is true — conditional tracking, not
           // an unconditional inline read that would subscribe every view.
           resolveTitle: groupsByRef ? (id) => $tagTitleById.get(id) : undefined,
+          // Same gate (ADR-0082 §5): a merged tag's id folds onto the
+          // survivor's bucket before the title lookup runs. `$tagById`, not
+          // `canonicalTagId`'s `get()` snapshot, so this run re-tracks the
+          // roster exactly like the `resolveTitle` read above.
+          canonicalId: groupsByRef ? (id) => canonicalIdIn($tagById, id) : undefined,
         })
       : (result ?? nodeSet<T>([])),
   );

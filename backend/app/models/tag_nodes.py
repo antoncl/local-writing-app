@@ -27,6 +27,9 @@ class TagEntry(BaseModel):
     # Layer provenance, as `ViewNode`/`AssistantEntry` carry it.
     source_layer_id: str = ""
     source_layer_label: str = ""
+    # Set when this tag was merged into another (ADR-0082 §5); read off
+    # `metadata.merged_into`, kept as a top-level convenience like `title`.
+    merged_into: str | None = None
 
 
 class TagEntryList(BaseModel):
@@ -55,3 +58,10 @@ class SaveTagEntryRequest(BaseModel):
     # field (e.g. `merged_into`, §5) needs no request-model change.
     metadata: dict[str, Any] = Field(default_factory=dict)
     base_revision: str | None = None
+
+
+class MergeTagEntriesRequest(BaseModel):
+    """Body of `POST /api/tag-entries/{source_id}/merge` (ADR-0082 §5). The
+    source is the path parameter; `into` is the survivor's id."""
+
+    into: str = Field(min_length=1)

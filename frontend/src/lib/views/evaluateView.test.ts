@@ -294,6 +294,13 @@ describe("leaves", () => {
   it("hand_picked: explicit ids, in universe order", () => {
     expect(ids({ kind: "lore", expr: { hand_picked: ["e", "a"] } })).toEqual(["a", "e"]);
   });
+  it("tagged: <survivor> matches a node still carrying a merged tag's id through canonicalId (ADR-0082 §5)", () => {
+    const carrier: EvalNode = { id: "f", entry_type: "lore:character", title: "Carrier", metadata: { tags: ["tag_mirror"] } };
+    const ctx = { schema: SCHEMA, canonicalId: (id: string) => (id === "tag_mirror" ? "tag_mirrors" : id) };
+    expect(ids({ kind: "lore", expr: { tagged: "tag_mirrors" } }, [...NODES, carrier], ctx)).toEqual(["f"]);
+    // The merged id itself no longer matches — it left the roster's edges.
+    expect(ids({ kind: "lore", expr: { tagged: "tag_mirror" } }, [...NODES, carrier], ctx)).toEqual([]);
+  });
 
   // `title` is a top-level node property, not metadata — a field predicate on it
   // must read node.title, not the absent metadata.title (regression for the

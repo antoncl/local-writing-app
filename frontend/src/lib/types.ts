@@ -384,8 +384,7 @@ export type AssistantEntryList = {
 };
 
 // A tag node (ADR-0082 slice 1): a body-less node of kind `tag`. Mirrors
-// backend TagEntry (models/tag_nodes.py). Slice 1 registers the kind on the
-// read + create path only — no `merged_into` yet (§5 of the ADR).
+// backend TagEntry (models/tag_nodes.py).
 export type TagEntry = {
   id: string;
   title: string;
@@ -397,45 +396,14 @@ export type TagEntry = {
   computed_metadata?: EntryMetadata;
   source_layer_id?: string;
   source_layer_label?: string;
+  // Set when this tag was merged into another (ADR-0082 §5) — the id it
+  // redirects to. `tagNodesStore`'s `canonicalTagId`/`liveTags` follow it the
+  // same way the backend's `NodeIndex.canonical_id` does.
+  merged_into?: string | null;
 };
 
 export type TagEntryList = {
   tags: TagEntry[];
-};
-
-// A known tag with a scope (which kinds / sub-types it's suggested on).
-// Scope reuses NodePickerConfig; empty scope = suggested everywhere.
-// One layer that asserts a tag (#339). A tag does not shadow the way a node
-// does — the same name may be asserted at several layers and the merged record
-// unions their scopes — so provenance is a list, not one source_layer_id.
-export type TagLayerRef = {
-  id: string;
-  label: string;
-};
-
-export type ScopedTag = {
-  name: string;
-  scope: NodePickerConfig;
-  // Empty on a single-layer read; populated by the merged /api/tags read.
-  source_layers?: TagLayerRef[];
-  // A palette swatch id, or null/undefined when neutral. Unlike scope, colour
-  // does not union across layers — the nearest asserting layer wins (#247).
-  color?: string | null;
-};
-
-export type KnownTags = {
-  tags: ScopedTag[];
-};
-
-export type TagUsage = {
-  name: string;
-  scope: NodePickerConfig;
-  count: number;
-  color?: string | null;
-};
-
-export type TagsOverview = {
-  tags: TagUsage[];
 };
 
 export type MetadataValue = string | number | boolean | null | MetadataValue[] | { [key: string]: MetadataValue };

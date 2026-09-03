@@ -11,6 +11,7 @@ from fastapi import APIRouter
 
 from app.models import (
     CreateTagEntryRequest,
+    MergeTagEntriesRequest,
     SaveTagEntryRequest,
     TagEntry,
     TagEntryList,
@@ -48,3 +49,11 @@ def save_tag_entry(project: CurrentProject, tag_id: str, request: SaveTagEntryRe
 def delete_tag_entry(project: CurrentProject, tag_id: str) -> None:
     with translate_errors():
         project.delete_tag_entry(tag_id)
+
+
+@router.post("/api/tag-entries/{tag_id}/merge", response_model=TagEntry)
+def merge_tag_entry(project: CurrentProject, tag_id: str, request: MergeTagEntriesRequest) -> TagEntry:
+    """Merge `tag_id` into `request.into` — a `merged_into` redirect (ADR-0082
+    §5), returning the survivor."""
+    with translate_errors():
+        return project.merge_tag_entries(tag_id, request.into)

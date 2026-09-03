@@ -12,18 +12,37 @@
 
 export const PLOT_DND_MIME = "application/x-local-writing-plot";
 
-// A dragged beat: which beat of which plotline. `from` is the SOURCE card id when the
-// drag started on a card's badge (#941) — dropping on another card MOVES the link off
-// `from`; it is absent when the drag started on the plotline node (a fresh LINK, #824).
-export type PlotBeatDrag = { kind: "beat"; plotline: string; beat_id: string; from?: string };
+// Which plot:thread subtype holds the dragged beat (ADR-0080 §5 / Amendment 1): a
+// plotline (an event-beat) or a character arc (a change-beat). Absent on the wire ⇒
+// treat as a plotline (readPlotBeatDrag's default) — the pre-ADR-0080 payload shape.
+export type PlotBeatHolderKind = "plot:plotline" | "plot:character_arc";
 
-export function setPlotBeatDrag(event: DragEvent, plotline: string, beat_id: string, from?: string): void {
+// A dragged beat: which beat of which holder. `from` is the SOURCE card id when the
+// drag started on a card's badge (#941) — dropping on another card MOVES the link off
+// `from`; it is absent when the drag started on the holder node (a fresh LINK, #824).
+// `holder_kind` says which plot:thread subtype `plotline` names (ADR-0080 §5) — the
+// arc-as-primary guard (§4) reads it to skip primary-adoption on a change-beat drop.
+export type PlotBeatDrag = { kind: "beat"; plotline: string; beat_id: string; from?: string; holder_kind?: PlotBeatHolderKind };
+
+export function setPlotBeatDrag(
+  event: DragEvent,
+  plotline: string,
+  beat_id: string,
+  from?: string,
+  holder_kind: PlotBeatHolderKind = "plot:plotline",
+): void {
   const dt = event.dataTransfer;
   if (!dt) return;
-  const payload: PlotBeatDrag = from ? { kind: "beat", plotline, beat_id, from } : { kind: "beat", plotline, beat_id };
+  // `holder_kind` rides the wire only when it deviates from the plotline default —
+  // keeps the payload byte-identical to the pre-ADR-0080 shape for the (still
+  // far more common) plotline drag, so nothing downstream has to change to keep
+  // reading it.
+  const payload: PlotBeatDrag = { kind: "beat", plotline, beat_id };
+  if (from) payload.from = from;
+  if (holder_kind !== "plot:plotline") payload.holder_kind = holder_kind;
   dt.setData(PLOT_DND_MIME, JSON.stringify(payload));
   dt.setData("text/plain", `${plotline}:${beat_id}`);
-  // A badge drag MOVES the link off its source card; a plotline-node drag COPIES (links).
+  // A badge drag MOVES the link off its source card; a holder-node drag COPIES (links).
   dt.effectAllowed = from ? "move" : "copy";
 }
 
@@ -50,8 +69,14 @@ export function readPlotBeatDrag(event: DragEvent): PlotBeatDrag | null {
       (payload as PlotBeatDrag).beat_id
     ) {
       const p = payload as PlotBeatDrag;
+      const out: PlotBeatDrag = { kind: "beat", plotline: p.plotline, beat_id: p.beat_id };
       // `from` is optional; keep it only when it's a non-empty string (a card-badge drag).
-      return typeof p.from === "string" && p.from ? p : { kind: "beat", plotline: p.plotline, beat_id: p.beat_id };
+      if (typeof p.from === "string" && p.from) out.from = p.from;
+      // `holder_kind` is optional; keep it only when it's one of the known subtypes —
+      // absent (or malformed) reads as a plotline drag (ADR-0080 §5), the pre-ADR-0080
+      // default.
+      if (p.holder_kind === "plot:plotline" || p.holder_kind === "plot:character_arc") out.holder_kind = p.holder_kind;
+      return out;
     }
   } catch {
     // Malformed JSON in the drag channel — not one of ours; ignore.

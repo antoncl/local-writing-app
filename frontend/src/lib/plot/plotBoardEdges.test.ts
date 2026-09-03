@@ -16,7 +16,7 @@ import {
 import type { PlotBoardBeat, PlotBoardProjection } from "@/lib/types";
 
 function projection(cards: PlotBoardProjection["cards"]): PlotBoardProjection {
-  return { board_id: "b", board_revision: "r", layout: {}, plotlines: [], containers: [], cards, diagnostics: [] };
+  return { board_id: "b", board_revision: "r", layout: {}, plotlines: [], arcs: [], containers: [], cards, diagnostics: [] };
 }
 
 const beat = (plotline_id: string, beat_id: string): PlotBoardBeat => ({
@@ -26,6 +26,10 @@ const beat = (plotline_id: string, beat_id: string): PlotBoardBeat => ({
   beat_id,
   title: beat_id,
   number: 1,
+  holder_kind: "plot:plotline",
+  character_id: null,
+  character_name: null,
+  character_initial: null,
 });
 
 const card = (

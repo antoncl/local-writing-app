@@ -13,10 +13,13 @@ import {
   cardEditManyCommand,
   cardsReferencingCard,
   cardsReferencingPlotline,
+  createArcCommand,
   createCardCommand,
   createPlotlineCommand,
+  deleteArcCommand,
   deleteCardCommand,
   deletePlotlineCommand,
+  arcEditCommand,
   plotlineEditCommand,
   realizeCommand,
   seedCommand,
@@ -24,6 +27,7 @@ import {
 import { UndoCancelled } from "@/lib/stores/undoCaretaker.svelte";
 import type { CardState } from "@/lib/stores/plotBoard";
 import type { PlotlineState } from "@/lib/stores/plotlines";
+import type { ArcState } from "@/lib/stores/characterArcs";
 import type { PlotBoardCard, PlotBoardProjection } from "@/lib/types";
 
 const cardState = (title: string, metadata: CardState["metadata"] = {}, body = ""): CardState => ({
@@ -36,10 +40,16 @@ const plotlineState = (title: string, metadata: PlotlineState["metadata"] = {}, 
   body,
   metadata,
 });
+const arcState = (title: string, metadata: ArcState["metadata"] = {}, body = ""): ArcState => ({
+  title,
+  body,
+  metadata,
+});
 
 function fakePort() {
   const cards = new Map<string, CardState>();
   const plotlines = new Map<string, PlotlineState>();
+  const arcs = new Map<string, ArcState>();
   // Scene model for the realize tests: body per scene + which cards reference each.
   const scenes = new Map<string, { title: string; body: string }>();
   const sceneRefs = new Map<string, Set<string>>();
@@ -74,11 +84,27 @@ function fakePort() {
       calls.push(`recreatePlotline:${id}`);
       plotlines.set(id, structuredClone(s));
     },
+    deleteArc: async (id) => {
+      calls.push(`deleteArc:${id}`);
+      arcs.delete(id);
+    },
+    getArcState: async (id) => structuredClone(arcs.get(id)!),
+    restoreArcState: async (id, s) => {
+      calls.push(`restoreArc:${id}`);
+      arcs.set(id, structuredClone(s));
+    },
+    recreateArc: async (id, s) => {
+      calls.push(`recreateArc:${id}`);
+      arcs.set(id, structuredClone(s));
+    },
     refreshBoard: async () => {
       calls.push("refreshBoard");
     },
     refreshRoster: async () => {
       calls.push("refreshRoster");
+    },
+    refreshArcRoster: async () => {
+      calls.push("refreshArcRoster");
     },
     realizeCard: async (cardId, _parentId) => {
       const id = `scene_${++sceneCounter}`;
@@ -103,7 +129,7 @@ function fakePort() {
       return confirm.result;
     },
   };
-  return { port, cards, plotlines, scenes, sceneRefs, confirm, calls };
+  return { port, cards, plotlines, arcs, scenes, sceneRefs, confirm, calls };
 }
 
 // A projection with just the fields the finders / recorder read.
@@ -123,7 +149,7 @@ function card(id: string, extra: Partial<PlotBoardCard> = {}): PlotBoardCard {
   };
 }
 function projection(cards: PlotBoardCard[]): PlotBoardProjection {
-  return { board_id: "b", board_revision: "r", layout: {}, plotlines: [], containers: [], cards, diagnostics: [] };
+  return { board_id: "b", board_revision: "r", layout: {}, plotlines: [], arcs: [], containers: [], cards, diagnostics: [] };
 }
 
 describe("referrer finders", () => {
@@ -139,7 +165,22 @@ describe("referrer finders", () => {
   it("finds cards whose primary plotline OR a beat points at a plotline", () => {
     const proj = projection([
       card("primary", { plotline: "P" }),
-      card("beat-only", { beats: [{ plotline_id: "P", plotline_title: "", plotline_color: null, beat_id: "b1", title: "", number: 1 }] }),
+      card("beat-only", {
+        beats: [
+          {
+            plotline_id: "P",
+            plotline_title: "",
+            plotline_color: null,
+            beat_id: "b1",
+            title: "",
+            number: 1,
+            holder_kind: "plot:plotline",
+            character_id: null,
+            character_name: null,
+            character_initial: null,
+          },
+        ],
+      }),
       card("elsewhere", { plotline: "Q" }),
     ]);
     expect(cardsReferencingPlotline(proj, "P")).toEqual(["primary", "beat-only"]);
@@ -240,6 +281,49 @@ describe("plotline commands", () => {
     expect(plotlines.get("p1")).toEqual(plotlineState("Old", { color: "rose" }));
     await cmd.redo();
     expect(plotlines.get("p1")).toEqual(plotlineState("Renamed", { color: "moss" }));
+  });
+});
+
+describe("character-arc commands (ADR-0080 §5)", () => {
+  it("create: undo deletes, redo recreates with beats + lineage — through the ARC port methods", async () => {
+    const { port, arcs, calls } = fakePort();
+    const state = arcState("Elena's redemption", { color: "rose", character: "char_elena", instance_beats: [{ beat_id: "b1", title: "Denial" }] });
+    arcs.set("arc1", state);
+    const cmd = createArcCommand(port, "arc1", state);
+    await cmd.undo();
+    expect(arcs.has("arc1")).toBe(false);
+    await cmd.redo();
+    expect(arcs.get("arc1")).toEqual(state);
+    // The #3b-i correctness point: an arc's undo/redo call the ARC port methods, never
+    // deletePlotline/recreatePlotline (which would recreate it AS a plotline).
+    expect(calls).toEqual(["deleteArc:arc1", "recreateArc:arc1"]);
+  });
+
+  it("delete: undo recreates the arc then restores its cards' change-beat links", async () => {
+    const { port, calls } = fakePort();
+    const referrers: CardRef[] = [{ id: "card1", state: cardState("Fulfils a change-beat", { beat_links: [{ plotline: "arc1", beat_id: "b1" }] }) }];
+    const cmd = deleteArcCommand(port, "arc1", arcState("Elena's redemption"), referrers);
+    await cmd.undo();
+    expect(calls).toEqual(["recreateArc:arc1", "restoreCard:card1", "refreshArcRoster", "refreshBoard"]);
+    calls.length = 0;
+    await cmd.redo();
+    expect(calls).toEqual(["deleteArc:arc1"]);
+  });
+
+  it("edit: flips whole arc state (a rebind or recolour)", async () => {
+    const { port, arcs } = fakePort();
+    arcs.set("arc1", arcState("Elena's redemption", { character: "char_elena" }));
+    const cmd = arcEditCommand(
+      port,
+      "arc1",
+      arcState("Elena's redemption", { character: "" }),
+      arcState("Elena's redemption", { character: "char_elena" }),
+      "bind character",
+    );
+    await cmd.undo();
+    expect(arcs.get("arc1")).toEqual(arcState("Elena's redemption", { character: "" }));
+    await cmd.redo();
+    expect(arcs.get("arc1")).toEqual(arcState("Elena's redemption", { character: "char_elena" }));
   });
 });
 
@@ -348,6 +432,23 @@ describe("PlotUndoRecorder", () => {
     expect(recorded.map((c) => c.label)).toEqual(["reassign plotline"]);
   });
 
+  it("arcEdit records a command only when the op actually changed the arc", async () => {
+    const { port, arcs } = fakePort();
+    arcs.set("arc1", arcState("Elena's redemption", { character: "char_elena" }));
+    const recorded: { label?: string }[] = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c), () => projection([]));
+
+    // No-op.
+    await recorder.arcEdit("arc1", "bind character", async () => {});
+    expect(recorded).toEqual([]);
+
+    // Real change.
+    await recorder.arcEdit("arc1", "bind character", async () => {
+      arcs.set("arc1", arcState("Elena's redemption", { character: "char_marcus" }));
+    });
+    expect(recorded.map((c) => c.label)).toEqual(["bind character"]);
+  });
+
   it("createCard runs the forward op and records the new id + captured state", async () => {
     const { port, cards, calls } = fakePort();
     const recorded: Array<{ undo: () => unknown; redo: () => unknown }> = [];
@@ -362,6 +463,58 @@ describe("PlotUndoRecorder", () => {
     await recorded[0].undo();
     expect(cards.has("new1")).toBe(false);
     expect(calls).toContain("deleteCard:new1");
+  });
+
+  it("createArc runs the forward op and records the new id + captured state — never through createPlotline", async () => {
+    const { port, arcs, plotlines, calls } = fakePort();
+    const recorded: Array<{ undo: () => unknown; redo: () => unknown }> = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c), () => projection([]));
+
+    // Mirrors the instantiate-branch routing in PlotEditor: the ONE instantiate call
+    // already minted the entry (arcs.set below stands in for that), so the `create`
+    // callback just hands back the id already returned — it does not mint again.
+    arcs.set("arc1", arcState("Elena's redemption"));
+    const id = await recorder.createArc(async () => "arc1");
+    expect(id).toBe("arc1");
+    await recorded[0].undo();
+    expect(arcs.has("arc1")).toBe(false);
+    expect(plotlines.size).toBe(0); // never touched the plotline substrate
+    expect(calls).toEqual(["deleteArc:arc1"]);
+  });
+
+  it("deleteArc captures the projection's referrers (cards fulfilling a change-beat) before deleting", async () => {
+    const { port, arcs, cards } = fakePort();
+    arcs.set("gone", arcState("Gone"));
+    cards.set("card1", cardState("Fulfils a change-beat", { beat_links: [{ plotline: "gone", beat_id: "b1" }] }));
+    const proj = projection([
+      card("card1", {
+        beats: [
+          {
+            plotline_id: "gone",
+            plotline_title: "",
+            plotline_color: null,
+            beat_id: "b1",
+            title: "",
+            number: 1,
+            holder_kind: "plot:character_arc",
+            character_id: null,
+            character_name: null,
+            character_initial: null,
+          },
+        ],
+      }),
+    ]);
+    const recorded: Array<{ undo: () => Promise<void> }> = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c as { undo: () => Promise<void> }), () => proj);
+
+    await recorder.deleteArc("gone", async () => {
+      arcs.delete("gone");
+    });
+    // Undo restores the arc AND the card that fulfilled its change-beat.
+    cards.set("card1", cardState("Fulfils a change-beat", {})); // simulate the backend having purged the link
+    await recorded[0].undo();
+    expect(arcs.get("gone")).toEqual(arcState("Gone"));
+    expect(cards.get("card1")).toEqual(cardState("Fulfils a change-beat", { beat_links: [{ plotline: "gone", beat_id: "b1" }] }));
   });
 
   it("deleteCard captures the projection's referrers before deleting", async () => {

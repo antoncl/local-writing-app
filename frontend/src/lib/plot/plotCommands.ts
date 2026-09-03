@@ -44,6 +44,14 @@ import {
   refreshRoster,
   restorePlotlineState,
 } from "@/lib/stores/plotlines";
+import {
+  type ArcState,
+  deleteArc,
+  getArcState,
+  recreateArc,
+  refreshArcRoster,
+  restoreArcState,
+} from "@/lib/stores/characterArcs";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 
 // The backend inverses the commands replay through. Every method is async (a server
@@ -61,8 +69,15 @@ export interface PlotCommandPort {
   getPlotlineState(id: string): Promise<PlotlineState>;
   restorePlotlineState(id: string, state: PlotlineState, refresh?: boolean): Promise<void>;
   recreatePlotline(id: string, state: PlotlineState, refresh?: boolean): Promise<void>;
+  // The character-arc twins (ADR-0080 §5) — a SEPARATE holder kind, never routed
+  // through the plotline methods above (which would recreate an arc AS a plotline).
+  deleteArc(id: string): Promise<void>;
+  getArcState(id: string): Promise<ArcState>;
+  restoreArcState(id: string, state: ArcState, refresh?: boolean): Promise<void>;
+  recreateArc(id: string, state: ArcState, refresh?: boolean): Promise<void>;
   refreshBoard(): Promise<void>;
   refreshRoster(): Promise<void>;
+  refreshArcRoster(): Promise<void>;
   // Realize (S6b): mint a scene → returns its id; the undo/redo scene ops.
   realizeCard(cardId: string, parentId: string | null): Promise<string>;
   sceneReferents(sceneId: string): string[];
@@ -206,6 +221,52 @@ export function plotlineEditCommand(
   };
 }
 
+// The character-arc twins of the three plotline command builders above (ADR-0080 §5).
+// `cardsReferencingPlotline` is reused unchanged for an arc's referrers — it matches on
+// a card's `plotline` field / `beats[].plotline_id`, which hold the HOLDER's id
+// regardless of subtype (an arc is never a card's primary, so only the beats clause
+// ever matches, but the id-matching predicate itself is subtype-agnostic).
+
+export function createArcCommand(port: PlotCommandPort, id: string, state: ArcState, label = "add character arc"): Command {
+  return {
+    label,
+    undo: () => port.deleteArc(id),
+    redo: () => port.recreateArc(id, state),
+  };
+}
+
+export function deleteArcCommand(
+  port: PlotCommandPort,
+  id: string,
+  state: ArcState,
+  referrers: CardRef[],
+  label = "delete character arc",
+): Command {
+  return {
+    label,
+    undo: async () => {
+      await port.recreateArc(id, state, false);
+      await Promise.all(referrers.map((r) => port.restoreCardState(r.id, r.state, false)));
+      await Promise.all([port.refreshArcRoster(), port.refreshBoard()]);
+    },
+    redo: () => port.deleteArc(id),
+  };
+}
+
+export function arcEditCommand(
+  port: PlotCommandPort,
+  id: string,
+  before: ArcState,
+  after: ArcState,
+  label: string,
+): Command {
+  return {
+    label,
+    undo: () => port.restoreArcState(id, before),
+    redo: () => port.restoreArcState(id, after),
+  };
+}
+
 // Seed mints one card per un-carded scene — undo deletes them all, redo recreates
 // them under their ids. One command (the caretaker treats it as one step), not a
 // per-card transaction: the whole batch reverses or replays together.
@@ -268,9 +329,10 @@ export function realizeCommand(
 // port + record sink. A field edit that changed nothing records nothing (the
 // "a drag that went nowhere records no command" rule).
 
-// Whole-state equality (a no-op edit records nothing). One helper for both node
-// kinds — a CardState / PlotlineState is a JSON-serializable {title, body, metadata}.
-function statesEqual(a: CardState | PlotlineState, b: CardState | PlotlineState): boolean {
+// Whole-state equality (a no-op edit records nothing). One helper for every node
+// kind — a CardState / PlotlineState / ArcState is a JSON-serializable
+// {title, body, metadata}.
+function statesEqual(a: CardState | PlotlineState | ArcState, b: CardState | PlotlineState | ArcState): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -342,6 +404,19 @@ export class PlotUndoRecorder {
     return result;
   }
 
+  /** A character-arc rename / recolour / rebind-character / beat-roster edit
+   *  (ADR-0080 §5). Returns the op's own result, mirroring `plotlineEdit`. */
+  async arcEdit<T>(id: string, label: string, op: () => Promise<T>): Promise<T> {
+    await this.#whenIdle();
+    const before = await this.#port.getArcState(id);
+    const result = await op();
+    const after = await this.#port.getArcState(id);
+    if (!statesEqual(before, after)) {
+      this.#record(arcEditCommand(this.#port, id, before, after, label));
+    }
+    return result;
+  }
+
   /** Create a card via the given forward op (returns the new id); record it. */
   async createCard(create: () => Promise<string>, label?: string): Promise<string> {
     await this.#whenIdle();
@@ -359,6 +434,18 @@ export class PlotUndoRecorder {
     const id = await create();
     const state = await this.#port.getPlotlineState(id);
     this.#record(createPlotlineCommand(this.#port, id, state, label));
+    return id;
+  }
+
+  /** Create a character arc via the given forward op (returns the new id, already
+   *  minted — e.g. by the shared template-instantiate call, ADR-0080 §5); record it.
+   *  Mirrors `createPlotline` but on the ARC port methods, so undo/redo never route
+   *  through the plotline substrate (which would recreate it as a plotline). */
+  async createArc(create: () => Promise<string>, label?: string): Promise<string> {
+    await this.#whenIdle();
+    const id = await create();
+    const state = await this.#port.getArcState(id);
+    this.#record(createArcCommand(this.#port, id, state, label));
     return id;
   }
 
@@ -380,6 +467,18 @@ export class PlotUndoRecorder {
     const referrers = projection ? await this.#captureCards(cardsReferencingPlotline(projection, id)) : [];
     await del();
     this.#record(deletePlotlineCommand(this.#port, id, state, referrers));
+  }
+
+  /** Delete a character arc (ADR-0080 §5). Mirrors `deletePlotline`: captures the arc
+   *  + every card that fulfils one of its change-beats (never its primary — an arc is
+   *  never primary), runs the delete, records. */
+  async deleteArc(id: string, del: () => Promise<void>): Promise<void> {
+    await this.#whenIdle();
+    const state = await this.#port.getArcState(id);
+    const projection = this.#getProjection();
+    const referrers = projection ? await this.#captureCards(cardsReferencingPlotline(projection, id)) : [];
+    await del();
+    this.#record(deleteArcCommand(this.#port, id, state, referrers));
   }
 
   /** Seed cards from the manuscript. The forward op returns the ids it CREATED (the
@@ -416,8 +515,13 @@ export function defaultPlotCommandPort(): PlotCommandPort {
     getPlotlineState,
     restorePlotlineState,
     recreatePlotline,
+    deleteArc,
+    getArcState,
+    restoreArcState,
+    recreateArc,
     refreshBoard: refreshAfterMutation,
     refreshRoster,
+    refreshArcRoster,
     realizeCard,
     sceneReferents,
     readScene,

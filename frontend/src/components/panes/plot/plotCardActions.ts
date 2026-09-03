@@ -26,8 +26,11 @@ export type PlotCardActions = {
   onEditSynopsis: (cardId: string, synopsis: string) => void;
   // Reassign the card's plotline ("" → Unassigned) — the reflow trigger.
   onSetPlotline: (cardId: string, plotlineId: string) => void;
-  // Link a beat DROPPED onto the card (#824; from its plotline node in S4); deduped downstream.
-  onLinkBeat: (cardId: string, plotline: string, beatId: string) => void;
+  // Link a beat DROPPED onto the card (#824; from its plotline node in S4); deduped
+  // downstream. `holderKind` (ADR-0080 §4) is the dragged beat's holder subtype off the
+  // drag payload — undefined/"plot:plotline" for an event-beat, "plot:character_arc"
+  // for a change-beat (which must never adopt primary).
+  onLinkBeat: (cardId: string, plotline: string, beatId: string, holderKind?: string) => void;
   // Remove a linked beat via the × on its badge (#824).
   onUnlinkBeat: (cardId: string, plotline: string, beatId: string) => void;
   // Move a beat link from one card to another (#941) — drag a badge from card A onto

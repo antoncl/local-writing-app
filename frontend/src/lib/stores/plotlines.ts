@@ -8,7 +8,8 @@
 import { writable } from "svelte/store";
 import { api } from "@/lib/api";
 import { refreshPlotBoard, refreshAfterMutation } from "@/lib/stores/plotBoard";
-import type { PlotlineEntry, PlotlineSummary } from "@/lib/types";
+import { refreshCharacterArcs } from "@/lib/stores/characterArcs";
+import type { CharacterArcEntry, PlotlineEntry, PlotlineSummary } from "@/lib/types";
 
 export const plotlineEntriesStore = writable<PlotlineSummary[]>([]);
 
@@ -73,14 +74,18 @@ export async function createPlotlineOnBoard(): Promise<string> {
   return line.id;
 }
 
-// Instantiate a plot template into a plotline node (ADR-0053 §2, the S3 palette
-// gesture): the backend snapshots the template's beats into a new owned `plot:plotline`
-// and returns it. Same refresh shape as createPlotlineOnBoard; returns the new id so the
-// palette can expand the node for editing.
-export async function instantiateTemplateOnBoard(templateId: string): Promise<string> {
-  const line = await api.instantiatePlotTemplate(templateId);
-  await Promise.all([refreshPlotlines(), refreshAfterMutation()]);
-  return line.id;
+// Instantiate a plot template into a plot:thread node (ADR-0053 §2, the S3 palette
+// gesture; ADR-0080 §5 — a character-arc-family template yields a `plot:character_arc`
+// instead of a `plot:plotline`). The backend snapshots the template's beats into a new
+// owned holder and returns it. Returns the whole ENTRY (not just its id) — a plotline
+// call site that only ever gets a plotline back can still read `.id`, but the caller
+// here must read `entry_type` to route the returned node to the right band + roster.
+// Refreshes both rosters (whichever one changed) + the board, same shape as
+// createPlotlineOnBoard.
+export async function instantiateTemplateOnBoard(templateId: string): Promise<PlotlineEntry | CharacterArcEntry> {
+  const entry = await api.instantiatePlotTemplate(templateId);
+  await Promise.all([refreshPlotlines(), refreshCharacterArcs(), refreshAfterMutation()]);
+  return entry;
 }
 
 // ── Undo substrate (ADR-0053 §7) ────────────────────────────────────────────

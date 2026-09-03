@@ -326,6 +326,7 @@ export type {
   PlotBoardContainer,
   PlotBoardPlotline,
   PlotBoardPlotlineBeat,
+  PlotBoardCharacterArc,
   PlotBoardLayout,
   PlotBoard,
   PlotDiagnostic,
@@ -341,6 +342,9 @@ export type {
   PlotlineEntry,
   PlotlineSummary,
   PlotlineList,
+  CharacterArcEntry,
+  CharacterArcSummary,
+  CharacterArcList,
 } from "./plotCardTypes";
 
 export type AssistantEntrySummary = {

@@ -20,6 +20,10 @@ const beat = (over: Partial<PlotBoardBeat> = {}): PlotBoardBeat => ({
   beat_id: "b1",
   title: "Call to Adventure",
   number: 1,
+  holder_kind: "plot:plotline",
+  character_id: null,
+  character_name: null,
+  character_initial: null,
   ...over,
 });
 

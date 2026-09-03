@@ -8,6 +8,8 @@ import type {
   CardList,
   PlotlineEntry,
   PlotlineList,
+  CharacterArcEntry,
+  CharacterArcList,
 } from "@/lib/types";
 import { request } from "./core";
 
@@ -154,12 +156,43 @@ export const plotApi = {
   deletePlotline(entryId: string) {
     return request<PlotlineList>(`/plot/plotlines/${entryId}`, { method: "DELETE" });
   },
-  // Snapshot a Library template's beats into a new owned plotline (ADR-0048 §3;
-  // ADR-0053 §1/§2 — a plotline IS a template instance). Lives among the template
-  // routes backend-side; returns the created plotline so the caller can place + edit
-  // it on the board (the S3 palette's instantiate gesture). An ad-hoc plotline is a
-  // plain createPlotline (no template behind it).
+  // Character arcs (ADR-0080) — the plotline's sibling holder, same book-local flat
+  // CRUD, distinct sub-resource (`/plot/character-arcs`, not `/plotlines`) per the
+  // backend's family discriminator.
+  listCharacterArcs() {
+    return request<CharacterArcList>("/plot/character-arcs");
+  },
+  createCharacterArc(title: string, id?: string) {
+    return request<CharacterArcEntry>("/plot/character-arcs", {
+      method: "POST",
+      body: JSON.stringify(id ? { title, id } : { title }),
+    });
+  },
+  getCharacterArc(entryId: string) {
+    return request<CharacterArcEntry>(`/plot/character-arcs/${entryId}`);
+  },
+  saveCharacterArc(entry: CharacterArcEntry, body: string) {
+    return request<CharacterArcEntry>(`/plot/character-arcs/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        body,
+        metadata: entry.metadata,
+        base_revision: entry.revision,
+      }),
+    });
+  },
+  deleteCharacterArc(entryId: string) {
+    return request<CharacterArcList>(`/plot/character-arcs/${entryId}`, { method: "DELETE" });
+  },
+  // Snapshot a Library template's beats into a new owned plot:thread holder (ADR-0048
+  // §3; ADR-0053 §1/§2; ADR-0080 §5 — a character-arc-family template yields a
+  // plot:character_arc, any other family a plot:plotline). Lives among the template
+  // routes backend-side; returns the created entry so the caller can place + edit it
+  // on the board (the S3 palette's instantiate gesture) and — for the union — branch
+  // on `entry_type` to route it to the right band. An ad-hoc plotline is a plain
+  // createPlotline (no template behind it); there is no ad-hoc arc equivalent yet.
   instantiatePlotTemplate(templateId: string) {
-    return request<PlotlineEntry>(`/plot/templates/${templateId}/instantiate`, { method: "POST" });
+    return request<PlotlineEntry | CharacterArcEntry>(`/plot/templates/${templateId}/instantiate`, { method: "POST" });
   },
 };

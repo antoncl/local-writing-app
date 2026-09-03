@@ -4,14 +4,13 @@
 // resolves a title matching an EXISTING tag; an unmatched one rides through
 // as a plain string (never minted at validation — see the module note in
 // `entryProposal.svelte.ts`), so the candidate side can MIX resolved ids with
-// unresolved titles. Both must render sensibly: a known id as its title (the
-// candidate via `MetadataPanel`'s own tag-chip strip, `tagFlipItems`; the
-// "Current:" hint via `tagTitleById`), and an unresolved title as a visually
-// distinct "new tag" candidate (`data-testid="flip-new-tag"`) — accepting the
-// flip is what mints it (`resolveAdoptedTagFieldValue`, `tagNodes.ts`), never
-// this render.
+// unresolved titles. The candidate side itself (known-title chip vs "new tag"
+// pill) is `TagFlipChips`' own render, covered by `TagFlipChips.test.ts`
+// (round 2, Y7) — this file keeps only what's genuinely MetadataPanel-level:
+// that the strip is the widget USED for a tag-vocabulary flip, and the
+// "Current:" hint (MetadataPanel's own `flipCurrentHint`), which must resolve
+// ids to titles the same way the candidate side does.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { get } from "svelte/store";
 import { render, screen } from "@/lib/test/component";
 import MetadataPanel from "./MetadataPanel.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -74,23 +73,11 @@ describe("MetadataPanel — tag-vocabulary flip resolves both sides to titles (#
     expect(screen.getByText("Current: Old Tag")).toBeTruthy();
   });
 
-  it("renders a known id's title as an ordinary chip", () => {
-    mount([NEW.id]);
-    expect(screen.getByText("New Tag")).toBeTruthy();
-    expect(screen.queryByTestId("flip-new-tag")).toBeNull();
-  });
-
-  it('renders an unresolved title as a "new tag" candidate, marked and unminted', () => {
-    mount(["Brand New Tag"]);
-    const marker = screen.getByTestId("flip-new-tag");
-    expect(marker.textContent).toBe("+ Brand New Tag");
-    // Rendering the candidate never mints anything — the roster is untouched.
-    expect(get(tagNodesStore).some((t) => t.title === "Brand New Tag")).toBe(false);
-  });
-
-  it("a mixed proposal renders one of each", () => {
+  it("renders the tag-vocabulary flip through TagFlipChips (a known chip and a new-tag pill)", () => {
     mount([NEW.id, "Brand New Tag"]);
-    expect(screen.getByText("New Tag")).toBeTruthy();
-    expect(screen.getByTestId("flip-new-tag").textContent).toBe("+ Brand New Tag");
+    // Both testids are TagFlipChips' own — their presence pins that
+    // MetadataPanel routed this flip to the chip strip, not FieldValueEditor.
+    expect(screen.getByTestId("flip-tag-chip").textContent).toBe("New Tag");
+    expect(screen.getByTestId("flip-new-tag")).toBeTruthy();
   });
 });

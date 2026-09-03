@@ -18,6 +18,7 @@ import {
   liveTags,
   refreshTagNodes,
   resolveAdoptedTagFieldValue,
+  resolveOrCreateTag,
   tagById,
   tagNodesStore,
   tagTitleById,
@@ -207,6 +208,43 @@ describe("findTagByTitle (ADR-0082 §2 / F3)", () => {
   });
 });
 
+describe("resolveOrCreateTag (ADR-0082 §2, round 2 Y3 — the ONE resolve-or-mint sequence)", () => {
+  beforeEach(() => {
+    listTagEntries.mockReset();
+    createTagEntry.mockReset();
+    clearTagNodes();
+  });
+
+  it("an existing title (case-insensitive) wins over minting a duplicate", async () => {
+    // The invariant ReferencePicker's own "stale-roster" race test used to
+    // pin via a same-module function spy (no longer possible now that this
+    // sequence lives in ONE shared function, round 2 Y3) — tested directly
+    // here instead, at the layer that now owns it.
+    listTagEntries.mockResolvedValueOnce({ tags: [T("tag_existing", "Mystery")] });
+    await refreshTagNodes();
+    const tag = await resolveOrCreateTag("mystery", "tag:tag", null);
+    expect(tag.id).toBe("tag_existing");
+    expect(createTagEntry).not.toHaveBeenCalled();
+  });
+
+  it("mints and lands the response in the roster when nothing matches", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [] });
+    await refreshTagNodes();
+    createTagEntry.mockResolvedValueOnce(T("tag_new", "Seafaring"));
+    const tag = await resolveOrCreateTag("Seafaring", "tag:tag", "layer_1");
+    expect(tag.id).toBe("tag_new");
+    expect(createTagEntry).toHaveBeenCalledWith("Seafaring", "tag:tag", null, "layer_1");
+    expect(get(tagById).get("tag_new")?.title).toBe("Seafaring");
+  });
+
+  it("propagates a createTagEntry rejection — nothing is silently swallowed", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [] });
+    await refreshTagNodes();
+    createTagEntry.mockRejectedValueOnce(new Error("offline"));
+    await expect(resolveOrCreateTag("Seafaring", "tag:tag", null)).rejects.toThrow("offline");
+  });
+});
+
 describe("resolveAdoptedTagFieldValue (ADR-0082 §2 / #1797 / #1799 — accept-time mint)", () => {
   beforeEach(() => {
     listTagEntries.mockReset();
@@ -258,5 +296,21 @@ describe("resolveAdoptedTagFieldValue (ADR-0082 §2 / #1797 / #1799 — accept-t
     expect(resolved).toEqual([]);
     expect(createTagEntry).not.toHaveBeenCalled();
     expect(await resolveAdoptedTagFieldValue("not-an-array", "tag:tag", null)).toEqual([]);
+  });
+
+  it("round 2 (Y1): a rejection stops the loop — item before it stays minted, item after it is never attempted", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [] });
+    await refreshTagNodes();
+    createTagEntry
+      .mockResolvedValueOnce(T("tag_a", "A")) // item 1: succeeds and mints
+      .mockRejectedValueOnce(new Error("network down")); // item 2: rejects
+    await expect(resolveAdoptedTagFieldValue(["A", "B", "C"], "tag:tag", null)).rejects.toThrow(
+      "network down",
+    );
+    // Sequential + await-per-item means item 3 ("C") is never even attempted.
+    expect(createTagEntry).toHaveBeenCalledTimes(2);
+    // "A" already landed — a real, roster-visible node; nothing here rolls it
+    // back (there is nothing TO roll back).
+    expect(get(tagById).get("tag_a")?.title).toBe("A");
   });
 });

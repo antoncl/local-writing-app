@@ -15,6 +15,14 @@
   let { review }: { review: EntryProposalController } = $props();
 </script>
 
+{#if review.commitError}
+  <!-- #1797 round 2 (Y1): an accept-time step (a tag-vocabulary flip's
+       title→id resolve/mint) can fail partway through — `commit()` aborts,
+       keeps the review open with the flip still pending, and records the
+       message here. Shown above either review presentation so the author
+       sees why nothing saved and can just retry. -->
+  <p class="entry-review-error">{review.commitError}</p>
+{/if}
 {#key review.proposal}
   {#if review.proposal?.reviewMode === "replace"}
     <!-- `replace`: a whole-field swap (a scene summary regenerated from the
@@ -53,3 +61,11 @@
     />
   {/if}
 {/key}
+
+<style>
+  .entry-review-error {
+    margin: 0 0 8px;
+    font-size: var(--fs-sm);
+    color: var(--danger);
+  }
+</style>

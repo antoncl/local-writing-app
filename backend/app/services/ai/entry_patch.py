@@ -74,7 +74,7 @@ def tag_vocabulary_target(field: Any, schema: Any) -> str | None:
     return target[1]
 
 
-def is_proposable_field(field_id: str, field: Any, schema: Any = None) -> bool:
+def is_proposable_field(field_id: str, field: Any, schema: Any) -> bool:
     """Whether the AI may propose a value for ``field_id``.
 
     The single predicate both the prompt's field catalog and the
@@ -85,10 +85,13 @@ def is_proposable_field(field_id: str, field: Any, schema: Any = None) -> bool:
     one is dropped rather than written. ``field`` is the resolved
     ``MetadataFieldDefinition`` (or ``None`` when the id is unknown).
 
-    ``schema`` is optional (default ``None``) — only needed to resolve the
-    ADR-0082 §2 tag-vocabulary carve-out below; every other check is schema-
-    free, so existing callers that have no schema handy keep working
-    unchanged (an `entity_ref_list` just stays excluded).
+    ``schema`` is REQUIRED (round 2, Y4) — it is what resolves the ADR-0082
+    §2 tag-vocabulary carve-out below. It was briefly optional (default
+    ``None``, degrading an entity_ref_list to always-excluded); made required
+    so a future caller with no schema in hand fails loudly at the call site
+    instead of silently under-reporting a tag-vocabulary field as
+    non-proposable. Pass the resolved schema even where the caller doesn't
+    otherwise need it — every current call site already has one.
     """
     if field is None:
         return False

@@ -29,7 +29,10 @@ def _describe_field(f: dict[str, Any]) -> str:
     the value is TITLES, not ids, and appends the "prefer existing" guidance
     plus the live vocabulary in the SAME line — so the instruction is
     actionable right where the model reads what to propose, not a separate
-    paragraph it has to cross-reference."""
+    paragraph it has to cross-reference. `tag_vocabulary` is ranked by usage
+    (`_fields()`/`_tag_vocabulary_titles`) and capped; `tag_vocabulary_total`
+    (round 2, Y2) is the UNCAPPED count, so a truncated list says so rather
+    than silently reading as the whole vocabulary."""
     tag_titles = f.get("tag_vocabulary")
     is_tag_field = tag_titles is not None
     type_clause = "tag titles — a JSON array of strings" if is_tag_field else f["type"]
@@ -59,7 +62,13 @@ def _describe_field(f: dict[str, Any]) -> str:
             "would plausibly apply to other entries; propose at most two or "
             "three, never a keyword list."
         )
-        parts.append(f" Existing tags: {', '.join(tag_titles)}." if tag_titles else " No tags exist yet.")
+        if tag_titles:
+            parts.append(f" Existing tags: {', '.join(tag_titles)}.")
+            remaining = f.get("tag_vocabulary_total", len(tag_titles)) - len(tag_titles)
+            if remaining > 0:
+                parts.append(f" … and {remaining} more existing tags not listed.")
+        else:
+            parts.append(" No tags exist yet.")
     return "".join(parts)
 
 

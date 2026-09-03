@@ -395,8 +395,12 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         # AND dropped if smuggled in.
         yes = MetadataFieldDefinition(name="Yes", type="text")
         no = MetadataFieldDefinition(name="No", type="text", ai_proposable=False)
-        self.assertTrue(is_proposable_field("yes", yes))
-        self.assertFalse(is_proposable_field("no", no))
+        # `schema` is required (round 2, Y4); a plain `text` field never
+        # consults it (only the ADR-0082 §2 tag-vocabulary carve-out does),
+        # but the call site must still supply one.
+        schema = self.service.read_metadata_schema()
+        self.assertTrue(is_proposable_field("yes", yes, schema))
+        self.assertFalse(is_proposable_field("no", no, schema))
 
     def test_stray_fields_body_is_dropped(self) -> None:
         # ADR-0059 §B/§E: `body` is single-sourced via the top-level "body" key;
@@ -1002,7 +1006,10 @@ class TagVocabularyProposalTests(unittest.TestCase):
         # entries above were minted with must not appear anywhere in it.
         self.assertNotRegex(rendered, r"\btag_[0-9a-f]+\b")
 
-    def test_vocabulary_is_capped_and_alphabetical(self) -> None:
+    def test_vocabulary_is_capped_at_60_alphabetical_among_ties_and_carries_the_total(self) -> None:
+        # Round 2 (Y2): every candidate here has usage 0 (no backlinks), so
+        # ranking degrades entirely to the alphabetical tiebreak — this pins
+        # that degradation, plus the cap and the new `tag_vocabulary_total`.
         for i in range(70):
             self.service.create_tag_entry(CreateTagEntryRequest(title=f"Tag {i:02d}", entry_type="tag:tag"))
         schema = self.service.read_metadata_schema()
@@ -1011,6 +1018,42 @@ class TagVocabularyProposalTests(unittest.TestCase):
         self.assertEqual(len(vocabulary), 60)
         self.assertEqual(vocabulary, sorted(vocabulary))
         self.assertEqual(vocabulary[0], "Tag 00")
+        self.assertEqual(by_id["tags"]["tag_vocabulary_total"], 70)
+
+    def test_vocabulary_ranks_by_usage_before_the_alphabetical_tiebreak(self) -> None:
+        # Round 2 (Y2): "Zephyr" outranks the alphabetically-earlier "Alpha"/
+        # "Beta" once it has backlinks — usage beats alphabetical, which only
+        # decides ties.
+        zephyr = self.service.create_tag_entry(CreateTagEntryRequest(title="Zephyr", entry_type="tag:tag"))
+        self.service.create_tag_entry(CreateTagEntryRequest(title="Alpha", entry_type="tag:tag"))
+        self.service.create_tag_entry(CreateTagEntryRequest(title="Beta", entry_type="tag:tag"))
+        second = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Second", entry_type="lore:character")
+        )
+        for entry in (self.hero, second):
+            self.service.save_lore_entry(
+                entry.id,
+                SaveLoreEntryRequest(
+                    title=entry.title,
+                    body="",
+                    base_revision=entry.revision,
+                    entry_type="lore:character",
+                    metadata={"tags": [zephyr.id]},
+                ),
+            )
+        schema = self.service.read_metadata_schema()
+        by_id = {f["id"]: f for f in _fields(self.service, schema, self.hero.id)}
+        vocabulary = by_id["tags"]["tag_vocabulary"]
+        self.assertEqual(vocabulary[0], "Zephyr")
+        self.assertEqual(vocabulary[1:], ["Alpha", "Beta"])  # tied at 0 usage, alphabetical
+
+    def test_prompt_preview_notes_truncation_when_the_vocabulary_overflows_the_cap(self) -> None:
+        for i in range(65):
+            self.service.create_tag_entry(CreateTagEntryRequest(title=f"Tag {i:02d}", entry_type="tag:tag"))
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Revise entry"))
+        env = create_environment_for_project(self.service)
+        rendered = env.from_string(prompt.body).render(inputs={"entry": self.hero.id, "entry_type": ""})
+        self.assertIn("and 5 more existing tags not listed", rendered)
 
     def test_prompt_preview_token_cost_of_the_tags_guidance_line_is_bounded(self) -> None:
         # #1799: the "prefer existing" guidance plus a 60-title vocabulary ride

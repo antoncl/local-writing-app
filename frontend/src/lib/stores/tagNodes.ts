@@ -130,38 +130,62 @@ export function findTagByTitle(title: string, entryType?: string): TagEntry | un
     (tag) => tag.title.trim().toLowerCase() === needle && (!entryType || tag.entry_type === entryType),
   );
 }
+
+// ADR-0082 §2 (round 2, Y3): the ONE "resolve or mint" sequence — an existing
+// title wins over minting a duplicate (case-insensitive, `findTagByTitle`),
+// else POST and land the response in the roster (`upsertTagNode`) BEFORE
+// returning, so the caller's very next lookup already sees it. Two callers
+// share this exact sequence so neither can drift from the other's rule:
+// `ReferencePicker.handleCreate` (the picker's own "Create ‹x›" row) and
+// `resolveAdoptedTagItem` below (an accepted AI tag-title flip, #1797). Can
+// reject (a `createTagEntry` failure) — callers decide what "partial" means
+// for them; this makes no attempt to roll anything back (there is nothing TO
+// roll back — a landed create is a real node).
+export async function resolveOrCreateTag(
+  title: string,
+  entryType: string,
+  createLayerId: string | null,
+): Promise<TagEntry> {
+  const existing = findTagByTitle(title, entryType);
+  if (existing) return existing;
+  const created = await api.createTagEntry(title, entryType, null, createLayerId);
+  upsertTagNode(created);
+  return created;
+}
+
 // ADR-0082 §2 / #1797 / #1799: resolve one AI-proposed tag flip ITEM at
 // ACCEPT time — the validator only resolved titles matching an EXISTING tag
 // (leaving anything else as a plain string, never minting one), so an
-// accepted flip's value can still carry bare titles. Mirrors
-// `ReferencePicker`'s own "Create ‘x’" resolve-before-create rule
-// (`handleCreate`) exactly, so an accepted proposal mints through the
-// IDENTICAL path a hand-typed picker entry would: an existing title wins
-// over minting a duplicate, and the POST's own response lands in the roster
-// (`upsertTagNode`) before the id is used, so a second item in the same
-// field sees it immediately (no duplicate mint within one accept).
+// accepted flip's value can still carry bare titles. "Already an id" is
+// checked by ENTRY_TYPE, not mere roster membership (round 2, Y3): a bare
+// title that happens to collide with some OTHER vocabulary's real id must
+// still resolve/mint against `entryType`, not pass through as if it were
+// already the right tag.
 async function resolveAdoptedTagItem(
   item: string,
   entryType: string,
   createLayerId: string | null,
 ): Promise<string> {
-  if (get(tagById).has(item)) return item; // already a resolved id
-  const existing = findTagByTitle(item, entryType);
-  if (existing) return existing.id;
-  const created = await api.createTagEntry(item, entryType, null, createLayerId);
-  upsertTagNode(created);
-  return created.id;
+  if (get(tagById).get(item)?.entry_type === entryType) return item; // already a resolved id
+  const tag = await resolveOrCreateTag(item, entryType, createLayerId);
+  return tag.id;
 }
 
 // The field-level counterpart: every item of an ACCEPTED tag-vocabulary
 // flip's value, resolved to an id (minting what's still a bare title).
 // Sequential, not `Promise.all` — a low-cardinality list (a handful of tags),
-// and sequential means the second occurrence of a still-unminted title
+// and sequential means (a) the second occurrence of a still-unminted title
 // within the SAME field sees the first's mint via `upsertTagNode` rather than
-// racing it into a duplicate. Non-string items are dropped (defensive; the
-// validator already only ever leaves strings in this field). Called from the
-// host's `onAdoptFields` (`NodeEditor.svelte`) — REJECTING the flip never
-// calls this, so nothing is minted for a proposal the author didn't adopt.
+// racing it into a duplicate, and (b) a rejection stops the loop AT that item
+// — every item resolved before it stays resolved (any tag it minted is a
+// real, roster-visible node now; nothing here rolls it back), the ones after
+// it are never attempted, and the rejection propagates to the caller
+// (`onAdoptFields`, `NodeEditor.svelte`) so the WHOLE field writes nothing and
+// the review stays open (`EntryProposalController.commit`, round 2 Y1). Non-
+// string items are dropped (defensive; the validator already only ever
+// leaves strings in this field). Called from the host's `onAdoptFields` —
+// REJECTING the flip never calls this, so nothing is minted for a proposal
+// the author didn't adopt.
 export async function resolveAdoptedTagFieldValue(
   value: unknown,
   entryType: string,

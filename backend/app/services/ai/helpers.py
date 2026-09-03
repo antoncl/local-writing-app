@@ -285,20 +285,36 @@ def _coerce_effective_value(project: ProjectService, schema: Any, field: str, ra
 _TAG_VOCABULARY_CAP = 60
 
 
-def _tag_vocabulary_titles(project: ProjectService, entry_type: str, *, cap: int = _TAG_VOCABULARY_CAP) -> list[str]:
-    """Every `entry_type` tag's title in the merged layer chain, alphabetical
-    (case-insensitive) and capped at `cap` — the "prefer tags that already
-    exist" guidance (`_describe_field`, `field_contract.py`) needs the live
-    vocabulary in view to be actionable. A merged-away tag (`merged_into` set,
-    ADR-0082 §5) is excluded: its title is a stale redirect, not something to
-    propose."""
+def _tag_vocabulary_titles(
+    project: ProjectService, entry_type: str, *, cap: int = _TAG_VOCABULARY_CAP
+) -> tuple[list[str], int]:
+    """Every `entry_type` tag's title in the merged layer chain, ranked by
+    USAGE — backlink count, `index.edges_by_dst` — descending, then title
+    alphabetically (case-insensitive) for ties (round 2, Y2): the "prefer
+    tags that already exist" guidance is most actionable when the tags shown
+    are the ones actually in play, not just the alphabetically-first 60.
+    `edges_by_dst` is already folded through `canonical_id` (ADR-0082 §5), so
+    a merged tag's backlinks count toward its survivor with no extra work
+    here, and it holds only real `ReferenceEdge`s — a `merged_into` redirect
+    is metadata, not an edge, so it can never inflate a usage count on its
+    own ("redirect edges excluded" is a byproduct of the shape, not a filter
+    this function applies).
+
+    Capped at `cap`; returns `(titles, total)` so a caller can tell the model
+    the list is partial (`_describe_field`, `field_contract.py`) rather than
+    silently reading as the whole vocabulary. A merged-away tag itself
+    (`merged_into` set) is excluded from the candidates: its title is a stale
+    redirect, not something to propose. A duplicate title (a rare hand-edited
+    collision) keeps its highest usage count, so the list has no repeats."""
     index = project._build_assistant_index()
-    titles = {
-        entry.title
-        for entry in index.by_id.values()
-        if entry.kind == "tag" and entry.entry_type == entry_type and not entry.merged_into
-    }
-    return sorted(titles, key=str.lower)[:cap]
+    usage_by_title: dict[str, int] = {}
+    for entry in index.by_id.values():
+        if entry.kind != "tag" or entry.entry_type != entry_type or entry.merged_into:
+            continue
+        usage = len(index.edges_by_dst.get(entry.id, []))
+        usage_by_title[entry.title] = max(usage, usage_by_title.get(entry.title, 0))
+    ranked = sorted(usage_by_title, key=lambda title: (-usage_by_title[title], title.lower()))
+    return ranked[:cap], len(ranked)
 
 
 def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, Any]]:
@@ -375,11 +391,15 @@ def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, 
         # ADR-0082 §2 / #1799: a proposable tag-vocabulary field carries its
         # live vocabulary titles alongside the descriptor, so `field_contract`'s
         # "prefer tags that already exist" guidance (`_describe_field`) is
-        # actionable rather than abstract. Capped + alphabetical — an unbounded
-        # list would blow the prompt's token budget on a large project.
+        # actionable rather than abstract. Ranked by usage + capped (round 2,
+        # Y2) — an unbounded list would blow the prompt's token budget on a
+        # large project; `tag_vocabulary_total` is the uncapped count, so a
+        # truncated render can say how many more exist.
         tag_target = tag_vocabulary_target(field, schema)
         if tag_target is not None:
-            descriptor["tag_vocabulary"] = _tag_vocabulary_titles(project, tag_target)
+            titles, total = _tag_vocabulary_titles(project, tag_target)
+            descriptor["tag_vocabulary"] = titles
+            descriptor["tag_vocabulary_total"] = total
         # List fields (#698): describe the item shape so the model emits
         # legal items — flat scalars for item_type sugar, member-keyed maps
         # for a group shape. `items` mirrors the top-level descriptor shape

@@ -456,7 +456,10 @@
     // module note). Resolve/mint them now, only because the author accepted
     // this field — the same `createLayerId` the metadata panel's own picker
     // threads for its "Create ‹x›" (P5), so an AI-accepted tag lands at the
-    // identical layer a hand-typed one would.
+    // identical layer a hand-typed one would. A rejection here is left to
+    // propagate — deliberately not caught: `EntryProposalController.commit()`
+    // (round 2, Y1) is what turns it into `commitError` + an aborted commit
+    // that keeps the review open, so there's nothing to handle at this layer.
     for (const fieldId of Object.keys(next)) {
       const field = metadataSchema?.fields[fieldId];
       const target = field ? createTargetFor(field.picker_config, metadataSchema) : null;

@@ -10,9 +10,20 @@
 //         still shows one a field already uses so its shape stays valid.
 //   #1004 the editor carries an author `description`, threaded through the
 //         saved draft and seeded back when editing an existing field.
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
-import type { MetadataFieldDefinition, MetadataGroupDefinition } from "@/lib/types";
+
+// Round 2 (Y9): NodePickerConfigEditor (rendered for an entity_ref_list field
+// like the built-in `tags`) lists saved views on mount — mock the client so
+// the network guard stays quiet (#973 pattern, see NodePickerConfigEditor.test.ts).
+vi.mock("@/lib/api", () => ({
+  api: {
+    listViews: vi.fn(async () => ({ entries: [] })),
+  },
+}));
+
+import { metadataSchemaStore } from "@/lib/stores/schema";
+import type { MetadataFieldDefinition, MetadataGroupDefinition, MetadataSchema } from "@/lib/types";
 import SchemaFieldInlineEditor from "./SchemaFieldInlineEditor.svelte";
 
 function mount(sectionLabels: string[] = []) {
@@ -335,5 +346,130 @@ describe("SchemaFieldInlineEditor AI-authorship toggle (ADR-0059)", () => {
     // Computed/reference fields are never AI-proposed regardless of the flag,
     // so the control is not shown (it would be an inert switch).
     expect(screen.queryByLabelText("AI may write this field")).toBeNull();
+  });
+});
+
+describe("SchemaFieldInlineEditor picker_config seed carries every mechanic (round 2, Y9 bug fix)", () => {
+  const schema = {
+    entry_types: { "tag:tag": { name: "Tag", kind: "tag" } },
+    fields: {},
+  } as unknown as MetadataSchema;
+
+  const tagsField: MetadataFieldDefinition = {
+    name: "Tags",
+    type: "entity_ref_list",
+    options: [],
+    picker_config: {
+      sources: [{ kind: "tag", expr: { type: "tag:tag" } }],
+      create_missing: true,
+    },
+  } as unknown as MetadataFieldDefinition;
+
+  afterEach(() => metadataSchemaStore.set(null));
+
+  it("opening the built-in tags field shows the 'Offer to create' checkbox checked", () => {
+    metadataSchemaStore.set(schema);
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: tagsField,
+        selectedFieldId: "tags",
+        layerId: "proj",
+        onSave: vi.fn(),
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+    const checkbox = screen.getByTestId("picker-create-missing") as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+  });
+
+  it("Done emits a definition whose picker_config still has create_missing: true", async () => {
+    metadataSchemaStore.set(schema);
+    const onSave = vi.fn();
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: tagsField,
+        selectedFieldId: "tags",
+        layerId: "proj",
+        onSave,
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+    await fireEvent.click(screen.getByText("Done"));
+    expect(onSave).toHaveBeenCalled();
+    const saved = onSave.mock.calls[0][0] as { pickerConfig?: { create_missing?: boolean } };
+    expect(saved.pickerConfig?.create_missing).toBe(true);
+  });
+});
+
+describe("SchemaFieldInlineEditor 'Default for new entries' visibility (round 2, Y12 / #1809)", () => {
+  afterEach(() => metadataSchemaStore.set(null));
+
+  it("opening the built-in tags field (entity_ref_list) shows no default control", () => {
+    metadataSchemaStore.set({
+      entry_types: { "tag:tag": { name: "Tag", kind: "tag" } },
+      fields: {},
+    } as unknown as MetadataSchema);
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: {
+          name: "Tags",
+          type: "entity_ref_list",
+          options: [],
+          picker_config: { sources: [{ kind: "tag", expr: { type: "tag:tag" } }], create_missing: true },
+        } as unknown as MetadataFieldDefinition,
+        selectedFieldId: "tags",
+        layerId: "proj",
+        onSave: vi.fn(),
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+    expect(screen.queryByLabelText("Default for new entries")).toBeNull();
+  });
+
+  it("a text field still shows the default control", () => {
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: { name: "Epithet", type: "text", options: [] } as unknown as MetadataFieldDefinition,
+        selectedFieldId: "epithet",
+        layerId: "proj",
+        onSave: vi.fn(),
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+    expect(screen.queryByLabelText("Default for new entries")).toBeTruthy();
+  });
+
+  it("switching a field's type from text to Entry Reference hides the control and clears the emitted default", async () => {
+    const onSave = vi.fn();
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: { name: "Epithet", type: "text", options: [], default: "the Grey" } as unknown as MetadataFieldDefinition,
+        selectedFieldId: "epithet",
+        layerId: "proj",
+        onSave,
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+    // A populated default also renders a "Clear default" button, which the
+    // wrapping `<label>` implicitly labels too (`getAllBy*`, not `getBy*`).
+    const defaultInput = screen
+      .getAllByLabelText("Default for new entries")
+      .find((el) => el.tagName === "INPUT") as HTMLInputElement;
+    expect(defaultInput.value).toBe("the Grey");
+
+    await fireEvent.click(screen.getByLabelText("Change field type"));
+    await fireEvent.click(screen.getByRole("option", { name: "Entry Reference" }));
+
+    expect(screen.queryByLabelText("Default for new entries")).toBeNull();
+
+    await fireEvent.click(screen.getByText("Done"));
+    expect(onSave).toHaveBeenCalled();
+    const saved = onSave.mock.calls[0][0] as { defaultValue?: string };
+    expect(saved.defaultValue).toBeUndefined();
   });
 });

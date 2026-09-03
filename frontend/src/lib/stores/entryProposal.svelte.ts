@@ -219,6 +219,13 @@ export class EntryProposalController {
   // still distinguishable from "declined" (both would be null-valued otherwise).
   adoptedStructured = $state<Record<string, boolean>>({});
 
+  // #1797 (round 2, Y1): a failed accept-time step (today: an ADOPTED
+  // tag-vocabulary flip's title→id resolve/mint, `resolveAdoptedTagFieldValue`)
+  // surfaces here — the overlay (`EntryReviewOverlay`) renders it. Cleared at
+  // the start of every `commit()` attempt and by `resetResolution()`, so a
+  // retry (or a superseded proposal) doesn't show a stale message.
+  commitError = $state<string | null>(null);
+
   // ---- the judge axis: which whole version the prose flips render (#710) -----
   //
   // The same three-state view the snapshot compare drives (`SnapshotStripController
@@ -326,6 +333,7 @@ export class EntryProposalController {
     this.resolvedBody = null;
     this.resolvedText = {};
     this.adoptedStructured = {};
+    this.commitError = null;
     // A fresh review opens on the interleaved diff — the judge toggle is a
     // per-review reading choice, not carried across proposals (#710).
     this.view = "both";
@@ -345,6 +353,7 @@ export class EntryProposalController {
    *  (ADR-0046 §1). A commit with nothing adopted is a plain dismiss (no write),
    *  exactly like "Close". */
   async commit(): Promise<boolean> {
+    this.commitError = null;
     const fields: Record<string, MetadataValue> = {};
     for (const [fieldId, value] of Object.entries(this.resolvedText)) {
       if (value !== null) fields[fieldId] = value;
@@ -359,7 +368,23 @@ export class EntryProposalController {
     const body = this.resolvedBody;
     const hasFields = Object.keys(fields).length > 0;
     if (hasFields || body !== null) {
-      if (hasFields) await this.onAdoptFields?.(fields);
+      if (hasFields) {
+        try {
+          await this.onAdoptFields?.(fields);
+        } catch (err) {
+          // #1797 round 2 (Y1): an ADOPTED tag-vocabulary flip's accept-time
+          // title→id resolve/mint (`resolveAdoptedTagFieldValue`) can fail
+          // partway through a field's items (a `createTagEntry` rejects).
+          // Whatever it already minted before the failure STAYS — those are
+          // real, roster-visible tag nodes, nothing to roll back — but this
+          // field writes NOTHING (the merge into `metadata` below never
+          // runs) and the whole commit aborts here: no `onEmitChange`, no
+          // `onFlush`, the review stays open with the flip still pending so
+          // the author can retry. `commitError` is what the overlay renders.
+          this.commitError = err instanceof Error ? err.message : String(err);
+          return false;
+        }
+      }
       if (body !== null) await this.onAdoptBody?.(body);
       // Package body + metadata into the pane draft, then the single explicit
       // post. Unconditional so the fields-only path (no body) still writes.

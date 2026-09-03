@@ -15,7 +15,6 @@ import { render, screen, fireEvent } from "@/lib/test/component";
 import ReferencePicker from "./ReferencePicker.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { clearTagNodes, tagById, tagNodesStore } from "@/lib/stores/tagNodes";
-import * as tagNodesModule from "@/lib/stores/tagNodes";
 import { api } from "@/lib/api";
 import type { LoreEntrySummary, MetadataFieldDefinition, TagEntry } from "@/lib/types";
 
@@ -35,9 +34,8 @@ afterEach(() => {
   metadataSchemaStore.set(null);
   clearTagNodes();
   // Several create_missing tests spy on api.createTagEntry / api.listTagEntries
-  // / findTagByTitle without their own restore — a leftover mock (e.g. the
-  // stale-roster test's findTagByTitle stub) otherwise silently short-circuits
-  // a LATER test's real create path.
+  // without their own restore — a leftover mock otherwise silently short-
+  // circuits a LATER test's real create path.
   vi.restoreAllMocks();
 });
 
@@ -221,33 +219,20 @@ describe("ReferencePicker — create_missing wiring (ADR-0082 §2 / F2/F3)", () 
     expect(onChange).toHaveBeenCalledWith(["tag_new"]);
   });
 
-  it("a stale-roster case: when findTagByTitle resolves an existing tag, onCreate selects it instead of creating", async () => {
-    // The create row's own visibility gate (NodePicker's hasTitleMatch) and
-    // findTagByTitle read the same roster, so they can't statically disagree —
-    // the scenario F3 guards is a roster update landing BETWEEN the row's
-    // render and the click (a genuine timing race). Pinning the outcome
-    // directly is more reliable here than fighting that race through the DOM:
-    // findTagByTitle is stubbed to report the match it would have found mid-
-    // flight, and this asserts ReferencePicker's onCreate honours it — select,
-    // never create.
-    setSchema();
-    const onChange = vi.fn();
-    const createSpy = vi.spyOn(api, "createTagEntry");
-    const findSpy = vi.spyOn(tagNodesModule, "findTagByTitle").mockReturnValue({
-      id: "tag_existing",
-      title: "Mystery",
-      entry_type: "tag:tag",
-      metadata: {},
-    } as TagEntry);
-
-    const createRow = await openAndType({ onChange, createLayerId: null }, "Mystery");
-    await fireEvent.click(createRow);
-    await tick();
-
-    expect(findSpy).toHaveBeenCalledWith("Mystery", "tag:tag");
-    expect(createSpy).not.toHaveBeenCalled();
-    expect(onChange).toHaveBeenCalledWith(["tag_existing"]);
-  });
+  // F3's "stale-roster" race (a roster update landing between the create
+  // row's render and the click) used to be pinned here by mocking
+  // `findTagByTitle` to disagree with the picker's own live gate. Round 2
+  // (Y3) moved the resolve-before-create sequence into the shared
+  // `resolveOrCreateTag` (`tagNodes.ts`) — a same-module call `vi.spyOn` no
+  // longer intercepts, AND the picker's create-row visibility and
+  // `resolveOrCreateTag`'s own `findTagByTitle` now read the identical live
+  // `tagNodesStore` reactively in lockstep in this harness (a mid-test
+  // `tagNodesStore.set(...)` re-renders the row away before the click can
+  // land), so the race can no longer be staged through the DOM at all. The
+  // invariant it protected — an existing title wins over minting a
+  // duplicate — is unit-tested directly on `resolveOrCreateTag` itself in
+  // `tagNodes.test.ts`, which is the more precise place for it now that the
+  // sequence lives there as its own function.
 
   it("two rapid clicks call createTagEntry once (P2 in-flight guard)", async () => {
     setSchema();
@@ -266,6 +251,11 @@ describe("ReferencePicker — create_missing wiring (ADR-0082 §2 / F2/F3)", () 
     await fireEvent.click(createRow);
     await fireEvent.click(createRow);
     resolveCreate({ id: "tag_new", title: "mystery", entry_type: "tag:tag", metadata: {} });
+    // Two ticks: `handleCreate` now awaits the shared `resolveOrCreateTag`
+    // (round 2, Y3), one more promise hop than awaiting `api.createTagEntry`
+    // directly — a single `tick()` can land between that hop's microtask and
+    // `appendSelected`'s emit.
+    await tick();
     await tick();
 
     expect(createSpy).toHaveBeenCalledTimes(1);
@@ -311,11 +301,17 @@ describe("ReferencePicker — create_missing wiring (ADR-0082 §2 / F2/F3)", () 
   });
 
   it("dedupes on emit — a found-existing or a created id already selected is never appended twice (P4)", async () => {
+    // A real tag titled "Mystery" already exists AND is already selected
+    // (`value`) — the picker's own candidate list excludes an already-
+    // selected id, so the create row can still render (nothing UNSELECTED
+    // matches), but `resolveOrCreateTag`'s `findTagByTitle` reads the WHOLE
+    // roster and resolves it anyway. Real roster + real resolve (round 2, Y3
+    // — no same-module function spy), so this is the honest reproduction of
+    // the race, not a stub of it.
     setSchema();
+    tagNodesStore.set([{ id: "tag_existing", title: "Mystery", entry_type: "tag:tag", metadata: {} }]);
     const onChange = vi.fn();
-    const findSpy = vi
-      .spyOn(tagNodesModule, "findTagByTitle")
-      .mockReturnValue({ id: "tag_existing", title: "Mystery", entry_type: "tag:tag", metadata: {} } as TagEntry);
+    const createSpy = vi.spyOn(api, "createTagEntry");
 
     render(ReferencePicker, {
       props: { field: createMissingField, value: ["tag_existing"], ariaLabel: "Motifs", onChange, createLayerId: "layer_x" },
@@ -331,7 +327,7 @@ describe("ReferencePicker — create_missing wiring (ADR-0082 §2 / F2/F3)", () 
     if (createRow) await fireEvent.click(createRow);
     await tick();
 
-    expect(findSpy).toHaveBeenCalled();
+    expect(createSpy).not.toHaveBeenCalled();
     expect(onChange).not.toHaveBeenCalled();
   });
 });

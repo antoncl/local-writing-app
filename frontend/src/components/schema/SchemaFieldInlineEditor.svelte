@@ -152,10 +152,20 @@
       // computed field seeds word_count with no scope.
       computedFunction: f?.computed?.function ?? "word_count",
       computedScope: f?.computed?.scope ?? "",
+      // Carries every mechanic (round 2, Y9 bug fix) — `create_missing` /
+      // `multiple` / `allow_target_marking`, not just membership
+      // (`sources`/`presets`). Dropping them here meant opening the editor on
+      // an EXISTING create_missing field (the built-in `tags`/`assistant_tags`)
+      // showed "Offer to create…" unchecked, and Done would silently strip
+      // `create_missing` from the saved definition even if the author never
+      // touched that checkbox.
       pickerConfig: (f?.picker_config
         ? {
             sources: [...(f.picker_config.sources ?? [])],
             presets: [...(f.picker_config.presets ?? [])],
+            multiple: f.picker_config.multiple,
+            allow_target_marking: f.picker_config.allow_target_marking,
+            create_missing: f.picker_config.create_missing,
           }
         : { sources: [{ kind: "lore" }] }) as NodePickerConfig,
       // `list` item shape (#698): "group:<id>" or "scalar:<type>". A field
@@ -261,6 +271,18 @@
   ]);
   const sectionListId = `sfi-section-list-${(sectionListSeq += 1)}`;
 
+  // Types whose default has no meaning — a computed value is derived, a
+  // list's default can't carry structured items (v1, #698), and a reference
+  // default would be a typed node id no author knows ahead of time (round 2,
+  // Y12 / #1809). Shared by the visibility gate below and `chooseType`'s
+  // clear, so the two can't drift.
+  const NO_DEFAULT_TYPES: ReadonlySet<MetadataFieldType> = new Set([
+    "computed",
+    "list",
+    "entity_ref",
+    "entity_ref_list",
+  ]);
+
   // Keep the type-specific config blocks coherent when the user picks a
   // different type from the grid.
   function chooseType(next: MetadataFieldType) {
@@ -269,6 +291,11 @@
     if (next === "computed" && computedFunctionChoice(computedFunction) === undefined) {
       chooseFunction("word_count");
     }
+    // A default typed for the PREVIOUS type must not silently ride along
+    // into a type that can't hold one — clear it the moment the switch lands
+    // (SchemaPanes' save-time coercion is the second, persistence-side
+    // backstop; this is what keeps the editor's OWN draft honest too).
+    if (NO_DEFAULT_TYPES.has(next)) defaultValue = undefined;
   }
 
   // Switching the computed function resets the scope to that function's default
@@ -587,13 +614,16 @@
       onChange={(next) => (options = next)}
     />
   {/if}
-  {#if type !== "computed" && type !== "list"}
+  {#if !NO_DEFAULT_TYPES.has(type)}
     <!-- Default-value editor (#38). Shared with the prompt-inputs editor
          via DefaultValueEditor. Empty = no default (the historic
          behaviour). Computed fields omit this — their value is derived,
          not authored. `list` omits it too (v1, #698): the string-typed
          default contract can't carry structured items, and list defaults
-         are rare enough to defer rather than half-support. -->
+         are rare enough to defer rather than half-support. A reference
+         (round 2, Y12 / #1809) omits it too: a default would be a typed
+         node id, which no author knows ahead of time — the control here is
+         a raw text box, not a picker, so it could only ever hold garbage. -->
     <label class="sfi-field sfi-default-field">
       Default for new entries
       <DefaultValueEditor

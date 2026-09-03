@@ -71,7 +71,7 @@
       "name": "fields",
       "kind": "helper",
       "signature": "fields(x)",
-      "summary": "The **full** field roster of a node or an `entry_type` FQN — a list of descriptors, each `{id, label, type, options, description, group, proposable}` (plus `items` for list fields). `group` is the field's section label (an applied struct like `GMO`, or a manual header; `None` when ungrouped), so a template can group by it: `{% for f in fields(e) if f.group == \"GMO\" %}`. `proposable` is advisory; the template chooses what to show."
+      "summary": "The **full** field roster of a node or an `entry_type` FQN — a list of descriptors, each `{id, label, type, options, description, group, proposable}` (plus `items` for list fields; `tag_vocabulary` for a proposable tag-vocabulary field). `group` is the field's section label (an applied struct like `GMO`, or a manual header; `None` when ungrouped), so a template can group by it: `{% for f in fields(e) if f.group == \"GMO\" %}`. `proposable` is advisory; the template chooses what to show. `tag_vocabulary` is present only on a proposable tag-vocabulary `entity_ref_list` field (ADR-0082 §2) — the entry's existing tags, by usage, for a \"prefer tags that already exist\" prompt to point at."
     },
     {
       "name": "full_outline",

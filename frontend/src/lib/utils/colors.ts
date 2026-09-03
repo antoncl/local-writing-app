@@ -50,6 +50,10 @@ const KIND_DEFAULT_SWATCH: Record<string, string> = {
   prompt: "indigo",
   mutation_set: "violet",
   plot: "plum",
+  // A tag's own metadata.color (ADR-0082 slice 1) usually wins per-entry; this
+  // is the fallback stripe for a tag row/chip with none set — neutral, like
+  // the other tool/meta kinds (assistant/chat/preset) above.
+  tag: "graphite",
 };
 
 export function resolveColorForKind(kind: string | null | undefined): Swatch | null {

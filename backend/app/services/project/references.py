@@ -106,11 +106,19 @@ NODE_FAMILIES = [
     # here on (the `subject` entity_ref arrives in S2); today the type declares
     # only `color`, so it contributes no edges.
     NodeFamily("chat", "chats", "chat:chat_session"),
+    # Tags (ADR-0082 slice 1): body-less Node files under `tags/`, front matter
+    # only. Layered like lore/prompts — a vocabulary (and its entries) can live
+    # at any project level, and the machine layer contributes its own tag
+    # entries too (see MACHINE_LAYER_FAMILIES below).
+    NodeFamily("tag", "tags", "tag:tag"),
 ]
 
-# The one family the out-of-tree machine layer contributes. Looked up rather
-# than re-spelled as a literal — a second copy of the triple would drift.
-MACHINE_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind == "assistant"]
+# The families the out-of-tree machine layer contributes: assistants, and now
+# tags (the assistant-tag vocabulary, ADR-0082). Looked up rather than
+# re-spelled as a literal — a second copy of the triple would drift.
+MACHINE_LAYER_FAMILIES = [
+    family for family in NODE_FAMILIES if family.kind in ("assistant", "tag")
+]
 
 # The families the built-in Library ships (ADR-0049). Prompts were the first
 # tenant; plot templates are the second (ADR-0048 S4b) — proof the model is

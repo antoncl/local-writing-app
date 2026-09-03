@@ -14,6 +14,11 @@ import { asArray, fieldValue, isCollectionField, isEmpty } from "@/lib/views/fie
 export type GroupByContext<T extends EvalNode> = {
   schema?: MetadataSchema | null;
   nodeById: ReadonlyMap<string, T>;
+  // ADR-0082 slice 1 §3: fallback title lookup for a ref value outside the
+  // view's own roster — a tag id in a scene/lore view grouped by an
+  // `entity_ref_list` field, most commonly. Optional so a caller with no
+  // off-roster vocabulary (or an existing test) needs no change.
+  resolveTitle?: (id: string) => string | undefined;
 };
 
 // Apply the ordered `group_by` levels to already-denormalized rows. Each level
@@ -116,7 +121,7 @@ function segmentForField<T extends EvalNode>(
     if (field === "entry_type") {
       out.push(seg(value, ctx.schema?.entry_types?.[value]?.name ?? value, null));
     } else if (isRef) {
-      out.push(seg(value, ctx.nodeById.get(value)?.title ?? value, value));
+      out.push(seg(value, ctx.nodeById.get(value)?.title ?? ctx.resolveTitle?.(value) ?? value, value));
     } else if (options) {
       // Option-carrying field: stamp the declared-order index (null = a value
       // outside the vocabulary, ordered after the declared buckets).

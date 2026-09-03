@@ -207,6 +207,12 @@ export type EvalContext = {
   // backing the `references` field, threaded like `schema`. Absent ⇒ `field_of`
   // on `references` yields the empty set.
   referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>;
+  // ADR-0082 slice 1 §3: a ref-bucket title fallback for an id outside the
+  // view's own roster (`nodeById`) — a tag id in an `entity_ref_list` grouped
+  // view, most commonly, since a scene view's roster is scenes, not tags.
+  // Optional so every existing evaluateView caller/test is unchanged; callers
+  // that group panes thread one backed by the tag roster store.
+  resolveTitle?: (id: string) => string | undefined;
 };
 
 // The explicit "whole roster of `kind`" membership expr (ADR-0036 §3). Replaces
@@ -296,6 +302,7 @@ type RunState<T extends EvalNode> = {
   schema?: MetadataSchema | null;
   bindings?: EvalBindings; // #184: name → id-set|value-set (free variables)
   referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>; // #184: targetId → referrers
+  resolveTitle?: (id: string) => string | undefined; // ADR-0082 slice 1: off-roster ref titles (e.g. tags)
   diag: ViewDiagnostics; // nest accumulator (cycle/orphan/fan-out counts)
   nestRan: boolean; // whether any `nest` evaluated (gates `diagnostics` on result)
   // ADR-0028 Amendment 1 (#260): the single-sink-DAG support for a routed orphan
@@ -341,6 +348,7 @@ export function evaluateView<T extends EvalNode>(
     schema: ctx.schema,
     bindings: ctx.bindings,
     referenceIndex: ctx.referenceIndex,
+    resolveTitle: ctx.resolveTitle,
     diag: { cyclicLinksSkipped: 0, orphansDropped: 0, fanoutTruncated: false },
     nestRan: false,
     nestsById: new Map(),

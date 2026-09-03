@@ -126,6 +126,11 @@
   import { buildBindings } from "@/lib/views/viewParams";
   import { repairSpecCycles } from "@/lib/views/cycleCheck";
   import type { GroupValue } from "@/lib/views/groupTree";
+  // Off-roster ref title resolution (ADR-0082 slice 1 §3): a view's own roster
+  // (`nodeById`) is the pane's kind, not a tag's, so grouping by a `tags`-style
+  // field needs the tag roster store as the fallback — same reasoning as the
+  // param strip's reference/tag pickers sourcing global stores directly above.
+  import { tagTitleById } from "@/lib/stores/tagNodes";
 
   let {
     result,
@@ -260,6 +265,7 @@
           schema: view.schema,
           bindings,
           referenceIndex: view.referenceIndex,
+          resolveTitle: (id) => $tagTitleById.get(id),
         })
       : (result ?? nodeSet<T>([])),
   );

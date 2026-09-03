@@ -595,6 +595,8 @@ class EditorPanesController {
       } else if (documentKind === "assistant") {
         savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
         void refreshAssistantTags();
+      } else if (documentKind === "tag") {
+        savedDocument = await api.saveTagEntry(draftDocument as unknown as import("@/lib/types").TagEntry);
       } else if (documentKind === "project") {
         // Project node is the project.md singleton; round-trip via the
         // dedicated endpoint and re-shape into the editor pane's
@@ -1348,6 +1350,7 @@ class EditorPanesController {
         return this.openAssistant(nodeId);
       case "view":
         return this.openView(nodeId);
+      case "tag": return this.#openEntryDocument("tag", nodeId, "open tag", (id) => api.getTagEntry(id), { metadata: true });
       case "chat":
         return this.openChat(nodeId);
       case "plot":

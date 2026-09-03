@@ -14,6 +14,7 @@ import { refreshMutationSetEntries, clearMutationSets } from "@/lib/stores/mutat
 import { refreshSchema, clearSchema } from "@/lib/stores/schema";
 import { refreshReferenceIndex, clearReferenceIndex } from "@/lib/stores/references";
 import { refreshKnownTags, clearKnownTags } from "@/lib/stores/tags";
+import { refreshTagNodes, clearTagNodes } from "@/lib/stores/tagNodes";
 import { refreshTodos, refreshEmbeddedTodos, clearTodos } from "@/lib/stores/todos";
 import { clearValidation } from "@/lib/stores/validation";
 import { clearChats } from "@/lib/stores/chats";
@@ -39,6 +40,7 @@ export async function loadProjectData(): Promise<void> {
     refreshSchema(),
     refreshReferenceIndex(),
     refreshKnownTags(),
+    refreshTagNodes(),
     refreshTodos(),
     refreshEmbeddedTodos(),
   ]);
@@ -58,6 +60,7 @@ export function clearProjectData(): void {
   clearSchema();
   clearReferenceIndex();
   clearKnownTags();
+  clearTagNodes();
   clearTodos();
   clearValidation();
   clearChats();

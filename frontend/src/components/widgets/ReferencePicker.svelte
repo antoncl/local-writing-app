@@ -37,6 +37,9 @@
   // Plotlines read from the store too (#742), same reasoning as assistants (#257):
   // a `plot:plotline` ref resolves anywhere without the caller threading the roster.
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
+  // Tag nodes read from the store too (ADR-0082 slice 1), same reasoning: a ref
+  // pointing at a tag resolves anywhere without the caller threading the roster.
+  import { tagNodesStore } from "@/lib/stores/tagNodes";
 
   let {
     field,
@@ -132,6 +135,7 @@
   const promptIndex = $derived(new Map(promptEntries.map((e) => [e.id, e] as const)));
   const plotIndex = $derived(new Map($plotlineEntriesStore.map((e) => [e.id, e] as const)));
   const assistantIndex = $derived(new Map($assistantEntriesStore.map((e) => [e.id, e] as const)));
+  const tagIndex = $derived(new Map($tagNodesStore.map((e) => [e.id, e] as const)));
   const selectedRefs = $derived(selectedIds.map((id) => resolveRefById(id)));
   const refNodes = $derived(selectedRefs.map((ref): RefNode => ({ ...ref, entry_type: ref.entry_type ?? "" })));
 
@@ -166,6 +170,12 @@
     if (assistant) return { id, kind: "assistant", title: assistant.title, entry_type: assistant.entry_type };
     const plotline = plotIndex.get(id);
     if (plotline) return { id, kind: "plot", title: plotline.title, entry_type: plotline.entry_type };
+    // A tag node (ADR-0082 slice 1). `kind: "tag"` here names a MEMBER pick —
+    // note it carries no `selector`, which is how a selector ref (the same
+    // "tag" kind value, §4 of the ADR) is told apart; slice 2 disambiguates
+    // the literal itself.
+    const tag = tagIndex.get(id);
+    if (tag) return { id, kind: "tag", title: tag.title, entry_type: tag.entry_type };
     // Fall back to the picker's configured kind so a freshly-saved ref whose
     // index hasn't refreshed yet still shows the right type-pill color.
     const fallbackKind = (targetKind || "lore") as NodePickerRef["kind"];
@@ -297,6 +307,7 @@
         promptEntries={promptEntries}
         plotEntries={$plotlineEntriesStore}
         assistantEntries={$assistantEntriesStore}
+        tagEntries={$tagNodesStore}
         onChange={handlePickerChange}
       />
     </span>

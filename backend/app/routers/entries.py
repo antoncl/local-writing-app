@@ -23,6 +23,7 @@ from app.models import (
     SaveLoreEntryRequest,
     SavePromptEntryRequest,
     SaveSceneRequest,
+    SaveTagEntryRequest,
     SearchRequest,
     SearchResponse,
     TodoDocument,
@@ -182,6 +183,7 @@ _SAVE_NODE_REQUEST_BY_KIND: dict[str, type] = {
     "prompt": SavePromptEntryRequest,
     "assistant": SaveAssistantEntryRequest,
     "chat": SaveChatSessionRequest,
+    "tag": SaveTagEntryRequest,
 }
 
 

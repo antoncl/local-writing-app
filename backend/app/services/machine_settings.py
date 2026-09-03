@@ -399,6 +399,13 @@ def assistants_dir() -> Path:
     return config_path().parent / "assistants"
 
 
+def tags_dir() -> Path:
+    """Folder holding machine-layer tag entry files (ADR-0082 slice 1) — the
+    assistant-tag vocabulary lives here. Derived from `config_path()` so test
+    fixtures that patch the config path automatically isolate this too."""
+    return config_path().parent / "tags"
+
+
 def assistant_tags_path() -> Path:
     """The machine-global assistant-tag vocabulary file (#88). Derived from
     config_path() so test fixtures patching the config path isolate it too."""

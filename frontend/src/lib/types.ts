@@ -150,7 +150,7 @@ export type ResearchNote = {
   source_layer_label?: string;
 };
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotTemplate | CardEntry | PlotlineEntry;
+export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotTemplate | CardEntry | PlotlineEntry | TagEntry;
 
 // Document-kind discriminator: schema kinds plus synthetic editor shapes (chat / snippet / structure_node / plot_card / plotline).
 export type DocumentKind =
@@ -166,7 +166,8 @@ export type DocumentKind =
   | "plot_template"
   | "plot_card"
   | "plotline"
-  | "view";
+  | "view"
+  | "tag";
 
 export type LoreEntryList = {
   entries: LoreEntrySummary[];
@@ -382,6 +383,25 @@ export type AssistantEntryList = {
   entries: AssistantEntrySummary[];
 };
 
+// A tag node (ADR-0082 slice 1): a body-less node of kind `tag`. Mirrors
+// backend TagEntry (models/tag_nodes.py). Slice 1 registers the kind on the
+// read + create path only — no `merged_into` yet (§5 of the ADR).
+export type TagEntry = {
+  id: string;
+  title: string;
+  entry_type: string;
+  metadata: EntryMetadata;
+  revision?: string;
+  // EditableDocument compatibility — a tag carries no prose body or fields.
+  body?: string;
+  computed_metadata?: EntryMetadata;
+  source_layer_id?: string;
+  source_layer_label?: string;
+};
+
+export type TagEntryList = {
+  tags: TagEntry[];
+};
 
 // A known tag with a scope (which kinds / sub-types it's suggested on).
 // Scope reuses NodePickerConfig; empty scope = suggested everywhere.

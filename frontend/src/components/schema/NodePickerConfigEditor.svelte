@@ -155,11 +155,16 @@
     { value: "context_pick", label: "Context Picker" },
   ];
 
-  type Kind = "manuscript" | "lore" | "plot";
+  type Kind = "manuscript" | "lore" | "plot" | "tag";
   const KINDS: { id: Kind; label: string }[] = [
     { id: "manuscript", label: "Scenes" },
     { id: "lore", label: "Lore" },
     { id: "plot", label: "Plot" },
+    // ADR-0082 slice 1: a schema author can source an entity_ref(_list) field
+    // from a tag vocabulary (tag:tag, tag:assistant_tag, or a user-authored
+    // one) exactly like any other kind — the mechanism a `tags`-typed field
+    // migrates onto in a later slice.
+    { id: "tag", label: "Tags" },
   ];
   // Plot's non-content types: `plot:board` is a presentation singleton, `plot:template`
   // a Library lens — neither is a pickable source. Hidden from the offered tree so an
@@ -290,6 +295,7 @@
     manuscript: buildTree(metadataSchema, "manuscript"),
     lore: buildTree(metadataSchema, "lore"),
     plot: buildTree(metadataSchema, "plot", PLOT_EXCLUDE),
+    tag: buildTree(metadataSchema, "tag"),
   });
   // Pre-computed render lists per kind, including each node's checkbox
   // state. Runes `$derived` tracks reactive reads inside called functions
@@ -300,6 +306,7 @@
     manuscript: flattenForRender(trees.manuscript, selectionFor("manuscript"), collapsedIds),
     lore: flattenForRender(trees.lore, selectionFor("lore"), collapsedIds),
     plot: flattenForRender(trees.plot, selectionFor("plot"), collapsedIds),
+    tag: flattenForRender(trees.tag, selectionFor("tag"), collapsedIds),
   });
 
   // Per-kind picked-leaf totals (for the kind-bar count).
@@ -307,6 +314,7 @@
     manuscript: selectionFor("manuscript").size,
     lore: selectionFor("lore").size,
     plot: selectionFor("plot").size,
+    tag: selectionFor("tag").size,
   });
 
   // Chip projection.

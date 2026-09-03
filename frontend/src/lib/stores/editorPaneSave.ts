@@ -11,6 +11,7 @@ import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { refreshPlotlines } from "@/lib/stores/plotlines";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
+import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import { HttpError, setKeepaliveSaves, api } from "@/lib/api";
@@ -24,7 +25,7 @@ import {
   type DraftFields,
   type EditorPaneState,
 } from "@/lib/editor-core/editorPaneModel";
-import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEntry, EntryMetadata } from "@/lib/types";
+import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEntry, TagEntry, EntryMetadata } from "@/lib/types";
 
 // The document kinds a pane can reload from the server, and the per-kind getter.
 // Wrapped (not bare `api.getX`) so each getter reads the `api` property live at
@@ -32,7 +33,7 @@ import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEn
 // test's `vi.spyOn(api, …)`. Home is here (with the conflict recoveries) so both
 // the post-save reload path and the reconcile ladder's rung-1 re-fetch (#1621)
 // share one map.
-export type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry;
+export type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry | TagEntry;
 
 export const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDocument>> = {
   lore: (id) => api.getLoreEntry(id),
@@ -40,6 +41,7 @@ export const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDo
   plot_template: (id) => api.getPlotTemplate(id),
   plot_card: (id) => api.getCard(id),
   plotline: (id) => api.getPlotline(id),
+  tag: (id) => api.getTagEntry(id),
 };
 
 // The one thing the dispatch needs back from the controller: the project node's
@@ -81,6 +83,10 @@ export async function refreshAfterSave(host: SaveRefreshHost, args: SaveRefreshA
     await Promise.all([refreshPlotBoard(), refreshPlotlines()]);
   } else if (documentKind === "assistant") {
     await refreshAssistantEntries();
+  } else if (documentKind === "tag") {
+    // ADR-0082 slice 1: a rename/colour save — refresh the roster so open
+    // chips/buckets resolving through `tagTitleById` pick it up.
+    await refreshTagNodes();
   } else if (documentKind === "project") {
     // Title may have changed; reflect it on the top bar and pane.
     host.onProjectNodeSaved(args.savedTitle);

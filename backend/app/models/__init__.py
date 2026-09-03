@@ -266,6 +266,12 @@ from app.models.snapshots import (
     WitnessFieldDrift,
     WitnessFieldType,
 )
+from app.models.tag_nodes import (
+    CreateTagEntryRequest,
+    SaveTagEntryRequest,
+    TagEntry,
+    TagEntryList,
+)
 
 # Preserve the documented `from app.models import NodePickerConfig` contract
 # (the old flat module re-exported it from models_views; see models_views.py).
@@ -326,6 +332,7 @@ __all__ = [
     "CreatePromptEntryRequest",
     "CreateSceneRequest",
     "CreateStructureNodeRequest",
+    "CreateTagEntryRequest",
     "CreateTodoRequest",
     "DeleteMetadataEntryTypeRequest",
     "DeleteMetadataFieldRequest",
@@ -469,6 +476,7 @@ __all__ = [
     "SavePromptEntryRequest",
     "SaveResearchNoteRequest",
     "SaveSceneRequest",
+    "SaveTagEntryRequest",
     "Scene",
     "ScopedTag",
     "SearchHit",
@@ -491,6 +499,8 @@ __all__ = [
     "StructureNode",
     "StructureNodeDeletePreview",
     "Swatch",
+    "TagEntry",
+    "TagEntryList",
     "TagLayerRef",
     "TagUsage",
     "TagsOverview",

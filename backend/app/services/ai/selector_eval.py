@@ -90,6 +90,7 @@ def evaluate_selector_membership(
     is_descendant: Callable[[str, str], bool],
     collection_fields: frozenset[str] = frozenset(),
     numeric_fields: frozenset[str] = frozenset(),
+    canonical_id: Callable[[str], str] | None = None,
 ) -> list[str]:
     """Member node ids for `expr` over `nodes`, in roster order (deduped).
 
@@ -97,9 +98,15 @@ def evaluate_selector_membership(
     when `entry_type` equals or descends from `target` (the backend
     `_entry_type_matches`). `collection_fields`/`numeric_fields` tune the `field`
     predicate for multi-value and number fields; both may be empty (list-valued
-    data is still detected at runtime)."""
+    data is still detected at runtime). `canonical_id` (ADR-0082 §5, #1805) follows
+    a merged tag's id to its survivor and, when given, is applied to every
+    `tagged:` leaf's OPERAND ids before the set intersection — the mirror of the
+    node-side canonicalisation the caller already applies to `SelectorNode.references`
+    (`preview.py`'s `_canonical_references`), so a `tagged:` operand written before a
+    merge still matches. Identity (no-op) when omitted, so every existing caller is
+    unchanged."""
     universe = {n.id for n in nodes}
-    member = _eval(expr, nodes, universe, is_descendant, collection_fields, numeric_fields)
+    member = _eval(expr, nodes, universe, is_descendant, collection_fields, numeric_fields, canonical_id)
     return [n.id for n in nodes if n.id in member]
 
 
@@ -110,6 +117,7 @@ def _eval(
     is_desc: Callable[[str, str], bool],
     coll: frozenset[str],
     numf: frozenset[str],
+    canon: Callable[[str], str] | None,
 ) -> set[str]:
     """The set combinators; leaves delegate to `_eval_leaf`."""
     if not isinstance(expr, Mapping):
@@ -117,7 +125,7 @@ def _eval(
     expr = _lower_filter(expr)
 
     def rec(child: Any) -> set[str]:
-        return _eval(child, nodes, universe, is_desc, coll, numf)
+        return _eval(child, nodes, universe, is_desc, coll, numf, canon)
 
     if _has(expr, "union"):
         out: set[str] = set()
@@ -134,7 +142,7 @@ def _eval(
     if _has(expr, "annotate"):
         # Color-only pass-through: its members are its `of` operand unchanged.
         return rec(expr.get("of"))
-    return _eval_leaf(expr, nodes, is_desc, coll, numf)
+    return _eval_leaf(expr, nodes, is_desc, coll, numf, canon)
 
 
 def _eval_intersect(children: Any, rec: Callable[[Any], set[str]]) -> set[str]:
@@ -154,6 +162,7 @@ def _eval_leaf(
     is_desc: Callable[[str, str], bool],
     coll: frozenset[str],
     numf: frozenset[str],
+    canon: Callable[[str], str] | None,
 ) -> set[str]:
     if _has(expr, "type"):
         want = _leaf_operand(expr["type"])
@@ -163,6 +172,8 @@ def _eval_leaf(
         return {n.id for n in nodes if any(is_desc(n.entry_type, t) for t in want)}
     if _has(expr, "tagged"):
         want = _leaf_operand(expr["tagged"])
+        if canon is not None:
+            want = {canon(w) for w in want}
         return {n.id for n in nodes if want & n.references}
     if _has(expr, "hand_picked"):
         want = set(expr["hand_picked"] or [])

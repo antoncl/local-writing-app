@@ -202,9 +202,13 @@ def _selector_member_picks(
     def is_descendant(entry_type: str, target: str) -> bool:
         return project_service._entry_type_matches(entry_type, target, schema)
 
+    # `_build_node_index()` is memoized (#392) — a warm hit here (the roster this
+    # kind already built above went through the same funnel) costs no disk work,
+    # so this is just the accessor for `canonical_id`, not a second index build.
+    index = project_service._build_node_index()
     try:
         member_ids = evaluate_selector_membership(
-            selector.get("expr"), nodes, is_descendant=is_descendant
+            selector.get("expr"), nodes, is_descendant=is_descendant, canonical_id=index.canonical_id
         )
     except UnsupportedSelectorExpr as exc:
         logger.warning(

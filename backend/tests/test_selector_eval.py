@@ -214,7 +214,9 @@ def test_tagged_matches_a_carrier_still_holding_a_merged_tags_id():
     metadata = {"motifs": ["tag_mirror"]}
     node = SelectorNode("lore_a", "lore:note", _canonical_references(index, metadata), metadata)
     assert _run({"tagged": "tag_mirrors"}, [node]) == ["lore_a"]
-    # The merged id itself no longer matches — it left the roster's edges.
+    # Without the `canonical_id` kwarg the OPERAND is taken literally — the
+    # merged id itself doesn't match a roster whose references are already
+    # canonical (the default/today's behaviour, #1805).
     assert _run({"tagged": "tag_mirror"}, [node]) == []
 
 
@@ -224,3 +226,43 @@ def test_canonical_references_is_identity_when_nothing_is_merged():
     index = _FakeIndex({})
     metadata = {"motifs": ["tag_a", "tag_b"]}
     assert _canonical_references(index, metadata) == frozenset({"tag_a", "tag_b"})
+
+
+# --- `canonical_id` kwarg: OPERAND-side canonicalisation (#1805) -----------
+
+
+def test_canonical_id_kwarg_follows_a_tagged_operand_to_the_survivor():
+    from app.services.ai.preview import _canonical_references
+
+    index = _FakeIndex({"tag_mirror": "tag_mirrors"})
+    metadata = {"motifs": ["tag_mirror"]}
+    node = SelectorNode("lore_a", "lore:note", _canonical_references(index, metadata), metadata)
+    # The stored operand still names the merged id; with `canonical_id` given it
+    # is followed to the survivor before the intersection, matching the roster's
+    # already-canonical reference.
+    assert _run({"tagged": "tag_mirror"}, [node], canonical_id=index.canonical_id) == ["lore_a"]
+
+
+def test_canonical_id_kwarg_is_a_two_hop_chain():
+    # `canonical_id` is called ONCE per operand id (no chain-walking inside
+    # `_eval_leaf`) — the contract, matching `NodeIndex.canonical_id`, is that
+    # the callable itself already resolves a multi-hop `merged_into` chain to
+    # its end, so this stand-in walks the chain rather than doing one hop.
+    redirects = {"tag_a": "tag_b", "tag_b": "tag_c"}
+
+    def canonical_id(node_id: str) -> str:
+        seen: set[str] = set()
+        current = node_id
+        while current in redirects and current not in seen:
+            seen.add(current)
+            current = redirects[current]
+        return current
+
+    node = SelectorNode("x", "lore:note", frozenset({"tag_c"}), {"tags": ["tag_c"]})
+    assert _run({"tagged": "tag_a"}, [node], canonical_id=canonical_id) == ["x"]
+
+
+def test_canonical_id_kwarg_defaults_to_none_unchanged_behaviour():
+    node = SelectorNode("x", "lore:note", frozenset({"tag_t"}), {"tags": ["tag_t"]})
+    assert _run({"tagged": "tag_t"}, [node]) == ["x"]
+    assert _run({"tagged": "tag_t"}, [node], canonical_id=None) == ["x"]

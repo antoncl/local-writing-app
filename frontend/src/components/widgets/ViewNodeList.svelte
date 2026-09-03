@@ -131,7 +131,7 @@
   // field needs the tag roster store as the fallback — same reasoning as the
   // param strip's reference/tag pickers sourcing global stores directly above.
   import { canonicalIdIn, tagById, tagTitleById } from "@/lib/stores/tagNodes";
-  import { groupByHasRefLevel } from "@/lib/views/groupBy";
+  import { viewUsesTagIds } from "@/lib/views/groupBy";
 
   let {
     result,
@@ -258,13 +258,15 @@
     }
     return spec;
   });
-  // Whether `safeSpec`'s `group_by` ever touches a ref-shaped field — gates
-  // the reactive tag-roster read below (ADR-0082 slice 1 review fix F7): a
-  // view that never groups by a ref field never subscribes to the tag
-  // roster (so an unrelated tag save doesn't re-evaluate it), while one that
-  // does correctly re-evaluates on a tag rename. A plain `$derived`, not
-  // itself reading `$tagTitleById` — only structural, off `safeSpec`/schema.
-  const groupsByRef = $derived(safeSpec ? groupByHasRefLevel(safeSpec, view?.schema) : false);
+  // Whether `safeSpec` touches a tag id AT ALL — either `group_by` groups on a
+  // ref-shaped field, or the expr tree carries a `tagged:` leaf anywhere —
+  // gates the reactive tag-roster reads below (ADR-0082 slice 1 review fix F7,
+  // widened by #1805): a view that touches no tag ids never subscribes to the
+  // tag roster (so an unrelated tag save doesn't re-evaluate it), while one
+  // that groups by a ref OR filters by `tagged:` correctly re-evaluates on a
+  // tag rename/merge. A plain `$derived`, not itself reading `$tagTitleById`/
+  // `$tagById` — only structural, off `safeSpec`/schema.
+  const usesTagIds = $derived(safeSpec ? viewUsesTagIds(safeSpec, view?.schema) : false);
 
   // The rendered result: evaluated from `view` (re-runs on override/spec change),
   // or the pre-resolved `result`, or an empty set when neither is wired.
@@ -275,14 +277,15 @@
           bindings,
           referenceIndex: view.referenceIndex,
           // The `$tagTitleById` read only happens (and so only subscribes
-          // THIS run) when `groupsByRef` is true — conditional tracking, not
+          // THIS run) when `usesTagIds` is true — conditional tracking, not
           // an unconditional inline read that would subscribe every view.
-          resolveTitle: groupsByRef ? (id) => $tagTitleById.get(id) : undefined,
-          // Same gate (ADR-0082 §5): a merged tag's id folds onto the
-          // survivor's bucket before the title lookup runs. `$tagById`, not
-          // `canonicalTagId`'s `get()` snapshot, so this run re-tracks the
-          // roster exactly like the `resolveTitle` read above.
-          canonicalId: groupsByRef ? (id) => canonicalIdIn($tagById, id) : undefined,
+          resolveTitle: usesTagIds ? (id) => $tagTitleById.get(id) : undefined,
+          // Same gate (ADR-0082 §5 / #1805): a merged tag's id folds onto the
+          // survivor — both for a ref-group bucket and for a `tagged:`
+          // OPERAND. `$tagById`, not `canonicalTagId`'s `get()` snapshot, so
+          // this run re-tracks the roster exactly like the `resolveTitle`
+          // read above.
+          canonicalId: usesTagIds ? (id) => canonicalIdIn($tagById, id) : undefined,
         })
       : (result ?? nodeSet<T>([])),
   );

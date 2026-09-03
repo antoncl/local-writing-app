@@ -16,7 +16,11 @@ import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
 
 type CorpusNode = { id: string; entry_type: string; metadata?: Record<string, unknown> | null };
 type CorpusCase = { name: string; expr: unknown; nodes: CorpusNode[]; expected: string[] };
-type Corpus = { schema: { entry_types: Record<string, { parent?: string }> }; cases: CorpusCase[] };
+type Corpus = {
+  schema: { entry_types: Record<string, { parent?: string }> };
+  cases: CorpusCase[];
+  redirects?: Record<string, string>;
+};
 
 const here = dirname(fileURLToPath(import.meta.url));
 const corpusPath = resolve(here, "../../../../spec/selector-eval-corpus.json");
@@ -31,10 +35,26 @@ const schema = {
   fields: {},
 } as unknown as MetadataSchema;
 
+// A merged-tag redirect follower built from the corpus's `redirects` map
+// (identity when a case's id isn't a key), chain-walked to its end — mirrors
+// `NodeIndex.canonical_id` (ADR-0082 §5 / #1805). `evaluateView` applies it to
+// BOTH the `tagged:` operand and each node's own references (`nodeReferences`),
+// so passing it unconditionally is a no-op for every pre-existing case.
+const redirects = corpus.redirects ?? {};
+function canonicalId(id: string): string {
+  const seen = new Set<string>();
+  let current = id;
+  while (Object.hasOwn(redirects, current) && !seen.has(current)) {
+    seen.add(current);
+    current = redirects[current];
+  }
+  return current;
+}
+
 // `kind` does not scope evaluateView — the nodes array IS the universe — so a
 // constant kind is fine; each case's `type` leaves do any entry_type narrowing.
 const memberIds = (expr: unknown, nodes: EvalNode[]): string[] =>
-  evaluateView({ kind: "lore", expr } as ViewSpec, nodes, { schema }).nodes.map((n) => n.id);
+  evaluateView({ kind: "lore", expr } as ViewSpec, nodes, { schema, canonicalId }).nodes.map((n) => n.id);
 
 describe("selector evaluator parity (shared corpus)", () => {
   for (const testCase of corpus.cases) {

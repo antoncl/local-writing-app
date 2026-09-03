@@ -7,6 +7,7 @@
 import type { EvalNode, PathSegment, ViewRow } from "@/lib/views/evaluateView";
 import type { MetadataSchema, ViewGroupByLevel, ViewSpec } from "@/lib/types";
 import { asArray, fieldValue, isCollectionField, isEmpty, isNodeSetField } from "@/lib/views/fieldAccess";
+import { walkViewExpr } from "@/lib/views/walkViewExpr";
 
 // Whether ANY `group_by` level in `spec` groups on a node-set field —
 // entity_ref(_list), or a computed field the schema declares node-set-valued
@@ -23,6 +24,30 @@ export function groupByHasRefLevel(
   const levels = spec?.group_by;
   if (!levels || levels.length === 0) return false;
   return levels.some((level) => isNodeSetField(schema?.fields?.[level.field]));
+}
+
+// Whether ANY signal in `spec` touches a tag id: a `group_by` ref-level
+// (`groupByHasRefLevel`, above) OR the expr tree contains a `tagged:` leaf
+// anywhere (ADR-0082 §5 / #1805 — the OPERAND canonicalisation `evalLeaf`'s
+// `tagged` branch applies needs the same merged-tag redirect the ref-group
+// bucket does). Callers gate BOTH the reactive tag-roster `resolveTitle` AND
+// `canonicalId` readers on this (widened from the group_by-only F7 gate): a
+// view that touches no tag ids at all never subscribes to the tag store, but
+// EITHER a ref group_by OR a plain `tagged:` filter with no grouping does.
+export function viewUsesTagIds(
+  spec: Pick<ViewSpec, "group_by" | "expr"> | null | undefined,
+  schema: MetadataSchema | null | undefined,
+): boolean {
+  if (groupByHasRefLevel(spec, schema)) return true;
+  let found = false;
+  walkViewExpr(spec?.expr, (e) => {
+    // Same null-check style as `evalLeaf` — the backend serializes every
+    // slot with unset ones as explicit `null` (Pydantic default dump), so
+    // `!= null` (not a truthiness/`in` check) is the correct "is this leaf
+    // set" test.
+    if (e.tagged != null) found = true;
+  });
+  return found;
 }
 
 // The slice of the evaluator's run state ν-by-attribute reads: the schema (per-

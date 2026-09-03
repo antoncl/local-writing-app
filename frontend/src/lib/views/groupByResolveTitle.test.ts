@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MetadataSchema, ViewSpec } from "@/lib/types";
 import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
-import { groupByHasRefLevel } from "@/lib/views/groupBy";
+import { groupByHasRefLevel, viewUsesTagIds } from "@/lib/views/groupBy";
 
 // ADR-0082 slice 1 §3: grouping by an `entity_ref_list` field whose value id
 // is not in the view's own roster (a tag reference, most commonly — a scene
@@ -102,5 +102,61 @@ describe("groupByHasRefLevel — gates the reactive tag-roster subscription (rev
     const spec = { ...SPEC, group_by: undefined } as ViewSpec;
     expect(groupByHasRefLevel(spec, SCHEMA)).toBe(false);
     expect(groupByHasRefLevel(null, SCHEMA)).toBe(false);
+  });
+});
+
+describe("viewUsesTagIds — widens the gate to a plain tagged: filter too (#1805)", () => {
+  it("is true for a tagged: leaf with no group_by at all", () => {
+    const spec = { kind: "lore", expr: { tagged: "tag_1" } } as ViewSpec;
+    expect(viewUsesTagIds(spec, SCHEMA)).toBe(true);
+  });
+
+  it("is true for a tagged: leaf nested under set algebra", () => {
+    const spec = {
+      kind: "lore",
+      expr: { intersect: [{ tagged: "tag_1" }, { type: "lore:note" }] },
+    } as ViewSpec;
+    expect(viewUsesTagIds(spec, SCHEMA)).toBe(true);
+  });
+
+  it("is true for a ref group_by level with no tagged: leaf (unchanged from groupByHasRefLevel)", () => {
+    expect(viewUsesTagIds(SPEC, SCHEMA)).toBe(true);
+  });
+
+  it("is false when neither a tagged: leaf nor a ref group_by level is present", () => {
+    const spec = { kind: "lore", expr: { type: "lore:note" }, group_by: [{ field: "status" }] } as ViewSpec;
+    expect(viewUsesTagIds(spec, SCHEMA)).toBe(false);
+  });
+
+  it("is false for an absent/null spec", () => {
+    expect(viewUsesTagIds(null, SCHEMA)).toBe(false);
+    expect(viewUsesTagIds(undefined, SCHEMA)).toBe(false);
+  });
+});
+
+describe("a plain tagged: filter with no ref grouping canonicalises through the widened gate (#1805)", () => {
+  // The issue's main case: a saved view/plot filter whose ONLY tag touch is a
+  // `tagged: <merged id>` leaf — no group_by at all — must still fold through
+  // a merged tag's redirect when evaluated with a ctx gated by `viewUsesTagIds`
+  // (mirroring how ViewNodeList.svelte/ViewBodyView.svelte now gate both
+  // `resolveTitle` and `canonicalId`).
+  const carrier: EvalNode = {
+    id: "lore_a",
+    entry_type: "lore:note",
+    title: "Carrier",
+    metadata: { tags: ["tag_survivor"] },
+  };
+  const spec = { kind: "lore", expr: { tagged: "tag_merged_old" } } as ViewSpec;
+  const canonicalId = (id: string) => (id === "tag_merged_old" ? "tag_survivor" : id);
+
+  it("selects the carrier when the gate gives evaluateView a canonicalId", () => {
+    expect(viewUsesTagIds(spec, SCHEMA)).toBe(true);
+    const result = evaluateView(spec, [carrier], { schema: SCHEMA, canonicalId });
+    expect(result.nodes.map((n) => n.id)).toEqual(["lore_a"]);
+  });
+
+  it("selects nothing when the gate withholds canonicalId (the pre-widened behaviour)", () => {
+    const result = evaluateView(spec, [carrier], { schema: SCHEMA });
+    expect(result.nodes.map((n) => n.id)).toEqual([]);
   });
 });

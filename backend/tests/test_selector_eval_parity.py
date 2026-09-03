@@ -44,13 +44,42 @@ def _make_is_descendant(entry_types: dict[str, Any]):
 _IS_DESCENDANT = _make_is_descendant(_CORPUS["schema"]["entry_types"])
 
 
+def _make_canonical_id(redirects: dict[str, str]):
+    """A merged-tag redirect follower built from the corpus's `redirects` map
+    (identity when a case's id isn't a key), chain-walked to its end — the test
+    double for `NodeIndex.canonical_id` (ADR-0082 §5 / #1805)."""
+
+    def canonical_id(node_id: str) -> str:
+        seen: set[str] = set()
+        current = node_id
+        while current in redirects and current not in seen:
+            seen.add(current)
+            current = redirects[current]
+        return current
+
+    return canonical_id
+
+
+_CANONICAL_ID = _make_canonical_id(_CORPUS.get("redirects") or {})
+
+
 @pytest.mark.parametrize("case", _CORPUS["cases"], ids=lambda c: c["name"])
 def test_selector_eval_parity(case: dict[str, Any]) -> None:
+    # Node-side references are canonicalised by the CALLER (`preview.py`'s
+    # `_canonical_references`), not by `evaluate_selector_membership` itself —
+    # this mirrors that here so the corpus exercises the same contract.
     nodes = [
-        SelectorNode(n["id"], n["entry_type"], selector_references(n.get("metadata")), n.get("metadata") or {})
+        SelectorNode(
+            n["id"],
+            n["entry_type"],
+            frozenset(_CANONICAL_ID(ref) for ref in selector_references(n.get("metadata"))),
+            n.get("metadata") or {},
+        )
         for n in case["nodes"]
     ]
-    result = evaluate_selector_membership(case["expr"], nodes, is_descendant=_IS_DESCENDANT)
+    result = evaluate_selector_membership(
+        case["expr"], nodes, is_descendant=_IS_DESCENDANT, canonical_id=_CANONICAL_ID
+    )
     assert result == case["expected"]
 
 

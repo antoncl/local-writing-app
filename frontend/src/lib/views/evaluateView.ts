@@ -736,9 +736,14 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutra
   if (expr.tagged != null) {
     const set = resolveLeafOperand(state, expr.tagged);
     if (set === OPERAND_INACTIVE) return neutralUniverse ? new Set(state.order.keys()) : new Set<string>();
+    // ADR-0082 §5 / #1805: the OPERAND follows the same redirect the node side
+    // does — a `tagged: <merged id>` leaf written before a merge still matches a
+    // node now carrying the survivor's id, mirroring the backend
+    // `evaluate_selector_membership`'s `canonical_id` kwarg.
+    const want = state.canonicalId ? canonicalizeIds(set, state.canonicalId) : set;
     return idsWhere(state, (n) => {
       const refs = nodeReferences(n, state.canonicalId);
-      for (const t of set) if (refs.has(t)) return true;
+      for (const t of want) if (refs.has(t)) return true;
       return false;
     });
   }
@@ -1077,9 +1082,17 @@ function nodeReferences(node: EvalNode, canonicalId?: (id: string) => string): S
   const out = new Set<string>();
   collectReferences(node.metadata, out);
   if (!canonicalId) return out;
-  const canonical = new Set<string>();
-  for (const ref of out) canonical.add(canonicalId(ref));
-  return canonical;
+  return canonicalizeIds(out, canonicalId);
+}
+
+// Map every id in `ids` through `canonicalId` (ADR-0082 §5). Shared by the
+// node-reference reader above and the `tagged:` leaf OPERAND (#1805) — whichever
+// side still names a merged tag's id, the other side's already-canonical form is
+// what it is compared against.
+function canonicalizeIds(ids: Set<string>, canonicalId: (id: string) => string): Set<string> {
+  const out = new Set<string>();
+  for (const id of ids) out.add(canonicalId(id));
+  return out;
 }
 
 function collectReferences(value: unknown, out: Set<string>): void {

@@ -298,8 +298,20 @@ describe("leaves", () => {
     const carrier: EvalNode = { id: "f", entry_type: "lore:character", title: "Carrier", metadata: { tags: ["tag_mirror"] } };
     const ctx = { schema: SCHEMA, canonicalId: (id: string) => (id === "tag_mirror" ? "tag_mirrors" : id) };
     expect(ids({ kind: "lore", expr: { tagged: "tag_mirrors" } }, [...NODES, carrier], ctx)).toEqual(["f"]);
-    // The merged id itself no longer matches — it left the roster's edges.
-    expect(ids({ kind: "lore", expr: { tagged: "tag_mirror" } }, [...NODES, carrier], ctx)).toEqual([]);
+  });
+
+  // #1805: the OPERAND follows the same redirect the node side does — a
+  // `tagged: <merged id>` leaf written before a merge still matches a node
+  // now carrying the survivor's id, not just the reverse (above).
+  it("tagged: <merged id> operand follows canonicalId to match a node carrying the survivor", () => {
+    const carrier: EvalNode = { id: "f", entry_type: "lore:character", title: "Carrier", metadata: { tags: ["tag_mirrors"] } };
+    const ctx = { schema: SCHEMA, canonicalId: (id: string) => (id === "tag_mirror" ? "tag_mirrors" : id) };
+    expect(ids({ kind: "lore", expr: { tagged: "tag_mirror" } }, [...NODES, carrier], ctx)).toEqual(["f"]);
+  });
+
+  it("tagged: without canonicalId is unaffected — no redirect follow", () => {
+    const carrier: EvalNode = { id: "f", entry_type: "lore:character", title: "Carrier", metadata: { tags: ["tag_mirrors"] } };
+    expect(ids({ kind: "lore", expr: { tagged: "tag_mirror" } }, [...NODES, carrier])).toEqual([]);
   });
 
   // `title` is a top-level node property, not metadata — a field predicate on it

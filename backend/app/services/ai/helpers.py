@@ -31,6 +31,7 @@ from jinja2.sandbox import SandboxedEnvironment
 
 from app.services.ai.entry_patch import (
     is_proposable_field,
+    tag_vocabulary_target,
 )
 from app.services.ai.entry_ref import EntryRef
 from app.services.ai.field_contract import FieldContract
@@ -278,6 +279,28 @@ def _coerce_effective_value(project: ProjectService, schema: Any, field: str, ra
     return project._coerce_mutation_value(raw, field_type)
 
 
+# The vocabulary line is meant to fit in one field-contract row, not become
+# its own budget line — capped well below what a large project's tag roster
+# could otherwise dump into every revise-entry render (#1799).
+_TAG_VOCABULARY_CAP = 60
+
+
+def _tag_vocabulary_titles(project: ProjectService, entry_type: str, *, cap: int = _TAG_VOCABULARY_CAP) -> list[str]:
+    """Every `entry_type` tag's title in the merged layer chain, alphabetical
+    (case-insensitive) and capped at `cap` — the "prefer tags that already
+    exist" guidance (`_describe_field`, `field_contract.py`) needs the live
+    vocabulary in view to be actionable. A merged-away tag (`merged_into` set,
+    ADR-0082 §5) is excluded: its title is a stale redirect, not something to
+    propose."""
+    index = project._build_assistant_index()
+    titles = {
+        entry.title
+        for entry in index.by_id.values()
+        if entry.kind == "tag" and entry.entry_type == entry_type and not entry.merged_into
+    }
+    return sorted(titles, key=str.lower)[:cap]
+
+
 def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, Any]]:
     """Backing the `fields()` Jinja global (ADR-0060 §3, was `field_catalog`).
 
@@ -347,8 +370,16 @@ def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, 
             # compute a value — `false` for computed / reference / hidden fields.
             # The template decides what to do with it; the roster is never
             # pre-filtered on it (retires the old `is_proposable_field` gate).
-            "proposable": is_proposable_field(field_id, field),
+            "proposable": is_proposable_field(field_id, field, schema),
         }
+        # ADR-0082 §2 / #1799: a proposable tag-vocabulary field carries its
+        # live vocabulary titles alongside the descriptor, so `field_contract`'s
+        # "prefer tags that already exist" guidance (`_describe_field`) is
+        # actionable rather than abstract. Capped + alphabetical — an unbounded
+        # list would blow the prompt's token budget on a large project.
+        tag_target = tag_vocabulary_target(field, schema)
+        if tag_target is not None:
+            descriptor["tag_vocabulary"] = _tag_vocabulary_titles(project, tag_target)
         # List fields (#698): describe the item shape so the model emits
         # legal items — flat scalars for item_type sugar, member-keyed maps
         # for a group shape. `items` mirrors the top-level descriptor shape

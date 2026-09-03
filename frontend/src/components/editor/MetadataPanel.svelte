@@ -20,6 +20,8 @@
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
+  import { tagTitleById } from "@/lib/stores/tagNodes";
+  import { createTargetFor } from "@/lib/utils/pickerCreate";
   import { inheritedLayerLabel, fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
   import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 
@@ -413,11 +415,46 @@
     return compare?.resolve?.adopted(fieldId) ?? false;
   }
 
+  /** Whether a flipped field is the ADR-0082 §2 / #1797 tag-vocabulary carve-out
+   *  — the only `entity_ref_list` shape that ever reaches a flip. Its `was`
+   *  value can MIX resolved ids with unmatched titles (the backend never mints
+   *  at validation), so it renders through a small dedicated chip strip
+   *  (below) instead of the generic `FieldValueEditor`/`ReferencePicker` path,
+   *  which only knows ids. */
+  function isTagFlipField(fieldId: string): boolean {
+    const field = metadataSchema.fields[fieldId];
+    if (!field || field.type !== "entity_ref_list") return false;
+    return createTargetFor(field.picker_config, metadataSchema)?.kind === "tag";
+  }
+
+  /** The flip candidate's tag items, each tagged with whether it's a known id
+   *  (renders its title) or a still-unresolved title (renders as a "new tag"
+   *  candidate — accepting the flip is what mints it, never this render). */
+  function tagFlipItems(fieldId: string): { key: string; label: string; isNew: boolean }[] {
+    const value = displayValue(fieldId);
+    const items = Array.isArray(value) ? value : [];
+    return items.map((item) => {
+      const id = String(item);
+      const known = $tagTitleById.get(id);
+      return known !== undefined
+        ? { key: id, label: known, isNew: false }
+        : { key: id, label: id, isNew: true };
+    });
+  }
+
   /** The entry's current value of a flipped field, for the "Current: …" hint —
    *  the row shows the proposed candidate, so the author needs to see what it
-   *  would replace. */
+   *  would replace. A tag-vocabulary `entity_ref_list` flip (#1797 — the only
+   *  `entity_ref_list` type that ever reaches a flip, ADR-0082 §2) resolves its
+   *  ids to titles through `tagTitleById` — the candidate side already reads as
+   *  titles (known ids) or "new tag" candidates (unmatched titles) above, so
+   *  the "Current:" side must match rather than fall back to a bare id. */
   function flipCurrentHint(fieldId: string): string {
-    return metadataValueString(compare?.fields[fieldId]?.now as MetadataValue);
+    const value = compare?.fields[fieldId]?.now as MetadataValue;
+    if (metadataSchema.fields[fieldId]?.type === "entity_ref_list" && Array.isArray(value)) {
+      return value.map((id) => $tagTitleById.get(String(id)) ?? String(id)).join(", ");
+    }
+    return metadataValueString(value);
   }
 
   function updateAssistantProvider(provider: string, tier: string, model: string) {
@@ -601,21 +638,40 @@
               <div class="fr-flip">
                 <div class="fr-flip-candidate">
                   <div class="fr-flip-value" inert>
-                    <FieldValueEditor
-                      {field}
-                      readOnly={true}
-                      allowUnset={true}
-                      embedded={true}
-                      value={displayValue(fieldId)}
-                      ariaLabel={fieldLabel}
-                      loreEntries={loreEntries}
-                      promptEntries={promptEntries}
-                      structure={structure}
-                      researchStructure={researchStructure}
-                      implicitContextMatcher={implicitContextMatcher}
-                      excludeId={excludeId}
-                      onChange={() => {}}
-                    />
+                    {#if isTagFlipField(fieldId)}
+                      <!-- #1797: the candidate can mix resolved ids with
+                           still-unminted titles — the generic ReferencePicker
+                           path only knows ids, so this renders its own chip
+                           strip: a known tag shows its title, an unresolved
+                           one shows as a "new tag" candidate (accepting the
+                           flip is what mints it, ADR-0082 §2 — never here). -->
+                      <div class="fr-flip-tags" aria-label={fieldLabel}>
+                        {#each tagFlipItems(fieldId) as item (item.key)}
+                          <span
+                            class="fr-flip-tag-chip"
+                            class:fr-flip-tag-chip-new={item.isNew}
+                            data-testid={item.isNew ? "flip-new-tag" : undefined}
+                            title={item.isNew ? `New tag — created if adopted` : item.label}
+                          >{item.isNew ? `+ ${item.label}` : item.label}</span>
+                        {/each}
+                      </div>
+                    {:else}
+                      <FieldValueEditor
+                        {field}
+                        readOnly={true}
+                        allowUnset={true}
+                        embedded={true}
+                        value={displayValue(fieldId)}
+                        ariaLabel={fieldLabel}
+                        loreEntries={loreEntries}
+                        promptEntries={promptEntries}
+                        structure={structure}
+                        researchStructure={researchStructure}
+                        implicitContextMatcher={implicitContextMatcher}
+                        excludeId={excludeId}
+                        onChange={() => {}}
+                      />
+                    {/if}
                   </div>
                   <button
                     type="button"
@@ -1159,6 +1215,31 @@
   .fr-flip-from {
     font-size: var(--fs-sm);
     color: var(--text-3);
+  }
+  /* #1797: the tag-vocabulary flip's own chip strip — a static pill per item,
+     mirroring FieldValueEditor's `.multi-select-chip` shape/tokens (no click
+     affordance of its own; the row's `.fr-flip-hit` overlay is the one hit
+     target). `-new` marks an unresolved title as a "will be created" candidate
+     — dashed, accent-tinted, `+`-prefixed — never the read/broken-reference
+     treatment a real missing id gets elsewhere. */
+  .fr-flip-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .fr-flip-tag-chip {
+    padding: 2px 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+  .fr-flip-tag-chip-new {
+    border-style: dashed;
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-emphasis);
   }
 
   .fr-computed {

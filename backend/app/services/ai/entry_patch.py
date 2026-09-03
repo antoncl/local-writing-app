@@ -16,11 +16,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.services.project.schema_definition_validation import single_concrete_target
+
 __all__ = [
     "NON_PROPOSABLE_FIELD_IDS",
     "NON_PROPOSABLE_FIELD_TYPES",
     "is_proposable_field",
     "parse_entry_patch_json",
+    "tag_vocabulary_target",
 ]
 
 # The fields the AI is never asked to propose, and never allowed to write, even
@@ -29,11 +32,49 @@ __all__ = [
 # (derived, not stored). The identity `id`/`entry_type` are structural. `title`
 # is deliberately NOT here — an AI-proposed rename is a legitimate, adoptable
 # change (the review flips it and the save applies the rename).
+#
+# ADR-0082 §2 / #1797: a NARROW carve-out exists for `entity_ref_list` — see
+# `tag_vocabulary_target` — so this set alone is no longer the whole story for
+# that type; `is_proposable_field` consults both.
 NON_PROPOSABLE_FIELD_TYPES = frozenset({"computed", "entity_ref", "entity_ref_list"})
 NON_PROPOSABLE_FIELD_IDS = frozenset({"id", "entry_type"})
 
 
-def is_proposable_field(field_id: str, field: Any) -> bool:
+def tag_vocabulary_target(field: Any, schema: Any) -> str | None:
+    """The `tag:*` entry_type FQN an `entity_ref_list` field's `picker_config`
+    resolves to, when the field is a proposable tag vocabulary — `None`
+    otherwise.
+
+    ADR-0082 §2 / #1797: unlike an ordinary `entity_ref`/`entity_ref_list`
+    (excluded above — no reliable way to name the right node id), a field
+    whose `picker_config` sets `create_missing` and resolves
+    (`single_concrete_target`) to exactly one concrete `tag:*` entry type has
+    an unambiguous target: the AI proposes plain TITLES, exactly as a writer
+    would type them into the picker. The validator resolves a title matching
+    an EXISTING tag (case-insensitive, within the vocabulary) to its id;
+    an unmatched title is left as a plain string, never minted at validation
+    — minting is deferred to the author's ACCEPT (mirroring the picker's own
+    `create_missing`, which mints on the user's click, not while a typed name
+    is merely under consideration), so a proposal the author rejects leaves
+    the vocabulary untouched. Never an id in the prompt or the proposal.
+
+    The one place `is_proposable_field` and the prompt roster (`_fields` in
+    `helpers.py`, which surfaces the vocabulary alongside the field) resolve
+    this, so they can't disagree on what counts as tag-shaped. `schema` may be
+    `None` (a caller with no schema in hand) — then this is always `None`,
+    matching the old exclude-everything behaviour."""
+    if schema is None or getattr(field, "type", None) != "entity_ref_list":
+        return None
+    picker_config = getattr(field, "picker_config", None)
+    if picker_config is None or not picker_config.create_missing:
+        return None
+    target = single_concrete_target(picker_config, schema)
+    if target is None or target[0] != "tag":
+        return None
+    return target[1]
+
+
+def is_proposable_field(field_id: str, field: Any, schema: Any = None) -> bool:
     """Whether the AI may propose a value for ``field_id``.
 
     The single predicate both the prompt's field catalog and the
@@ -43,12 +84,17 @@ def is_proposable_field(field_id: str, field: Any) -> bool:
     from the author should not be shown to the model, and a stray proposal for
     one is dropped rather than written. ``field`` is the resolved
     ``MetadataFieldDefinition`` (or ``None`` when the id is unknown).
+
+    ``schema`` is optional (default ``None``) — only needed to resolve the
+    ADR-0082 §2 tag-vocabulary carve-out below; every other check is schema-
+    free, so existing callers that have no schema handy keep working
+    unchanged (an `entity_ref_list` just stays excluded).
     """
     if field is None:
         return False
     if field_id in NON_PROPOSABLE_FIELD_IDS:
         return False
-    if field.type in NON_PROPOSABLE_FIELD_TYPES:
+    if field.type in NON_PROPOSABLE_FIELD_TYPES and tag_vocabulary_target(field, schema) is None:
         return False
     # ADR-0059 §E: a field can declare itself off-limits to AI authorship
     # (default True). `body` never reaches here — it enforces the flag at its

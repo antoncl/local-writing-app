@@ -130,3 +130,48 @@ export function findTagByTitle(title: string, entryType?: string): TagEntry | un
     (tag) => tag.title.trim().toLowerCase() === needle && (!entryType || tag.entry_type === entryType),
   );
 }
+// ADR-0082 §2 / #1797 / #1799: resolve one AI-proposed tag flip ITEM at
+// ACCEPT time — the validator only resolved titles matching an EXISTING tag
+// (leaving anything else as a plain string, never minting one), so an
+// accepted flip's value can still carry bare titles. Mirrors
+// `ReferencePicker`'s own "Create ‘x’" resolve-before-create rule
+// (`handleCreate`) exactly, so an accepted proposal mints through the
+// IDENTICAL path a hand-typed picker entry would: an existing title wins
+// over minting a duplicate, and the POST's own response lands in the roster
+// (`upsertTagNode`) before the id is used, so a second item in the same
+// field sees it immediately (no duplicate mint within one accept).
+async function resolveAdoptedTagItem(
+  item: string,
+  entryType: string,
+  createLayerId: string | null,
+): Promise<string> {
+  if (get(tagById).has(item)) return item; // already a resolved id
+  const existing = findTagByTitle(item, entryType);
+  if (existing) return existing.id;
+  const created = await api.createTagEntry(item, entryType, null, createLayerId);
+  upsertTagNode(created);
+  return created.id;
+}
+
+// The field-level counterpart: every item of an ACCEPTED tag-vocabulary
+// flip's value, resolved to an id (minting what's still a bare title).
+// Sequential, not `Promise.all` — a low-cardinality list (a handful of tags),
+// and sequential means the second occurrence of a still-unminted title
+// within the SAME field sees the first's mint via `upsertTagNode` rather than
+// racing it into a duplicate. Non-string items are dropped (defensive; the
+// validator already only ever leaves strings in this field). Called from the
+// host's `onAdoptFields` (`NodeEditor.svelte`) — REJECTING the flip never
+// calls this, so nothing is minted for a proposal the author didn't adopt.
+export async function resolveAdoptedTagFieldValue(
+  value: unknown,
+  entryType: string,
+  createLayerId: string | null,
+): Promise<string[]> {
+  if (!Array.isArray(value)) return [];
+  const resolved: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !item.trim()) continue;
+    resolved.push(await resolveAdoptedTagItem(item.trim(), entryType, createLayerId));
+  }
+  return resolved;
+}

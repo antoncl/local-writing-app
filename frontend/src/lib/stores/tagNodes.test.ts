@@ -2,9 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 
 // Mock the HTTP client so refreshTagNodes is tested against a controlled
-// response, not the network (ADR-0082 slice 1).
-const { listTagEntries } = vi.hoisted(() => ({ listTagEntries: vi.fn() }));
-vi.mock("@/lib/api", () => ({ api: { listTagEntries } }));
+// response, not the network (ADR-0082 slice 1). `createTagEntry` backs
+// `resolveAdoptedTagFieldValue` (#1797 — accept-time mint).
+const { listTagEntries, createTagEntry } = vi.hoisted(() => ({
+  listTagEntries: vi.fn(),
+  createTagEntry: vi.fn(),
+}));
+vi.mock("@/lib/api", () => ({ api: { listTagEntries, createTagEntry } }));
 
 import type { TagEntry } from "@/lib/types";
 import {
@@ -13,6 +17,7 @@ import {
   findTagByTitle,
   liveTags,
   refreshTagNodes,
+  resolveAdoptedTagFieldValue,
   tagById,
   tagNodesStore,
   tagTitleById,
@@ -199,5 +204,59 @@ describe("findTagByTitle (ADR-0082 §2 / F3)", () => {
     await refreshTagNodes();
     expect(findTagByTitle("mirror")).toBeUndefined();
     expect(findTagByTitle("mirrors")?.id).toBe("tag_mirrors");
+  });
+});
+
+describe("resolveAdoptedTagFieldValue (ADR-0082 §2 / #1797 / #1799 — accept-time mint)", () => {
+  beforeEach(() => {
+    listTagEntries.mockReset();
+    createTagEntry.mockReset();
+    clearTagNodes();
+  });
+
+  it("passes an already-known id through unchanged", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [T("tag_1", "Coastal")] });
+    await refreshTagNodes();
+    const resolved = await resolveAdoptedTagFieldValue(["tag_1"], "tag:tag", null);
+    expect(resolved).toEqual(["tag_1"]);
+    expect(createTagEntry).not.toHaveBeenCalled();
+  });
+
+  it("resolves a bare title matching an existing tag — never creates a duplicate", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [T("tag_1", "Politics")] });
+    await refreshTagNodes();
+    const resolved = await resolveAdoptedTagFieldValue(["politics"], "tag:tag", null);
+    expect(resolved).toEqual(["tag_1"]);
+    expect(createTagEntry).not.toHaveBeenCalled();
+  });
+
+  it("mints exactly once for an unmatched title, at the given layer, and lands it in the roster", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [] });
+    await refreshTagNodes();
+    createTagEntry.mockResolvedValueOnce(T("tag_new", "Seafaring"));
+    const resolved = await resolveAdoptedTagFieldValue(["Seafaring"], "tag:tag", "layer_1");
+    expect(resolved).toEqual(["tag_new"]);
+    expect(createTagEntry).toHaveBeenCalledTimes(1);
+    expect(createTagEntry).toHaveBeenCalledWith("Seafaring", "tag:tag", null, "layer_1");
+    // The POST's own response lands in the roster immediately (P3 parity).
+    expect(get(tagById).get("tag_new")?.title).toBe("Seafaring");
+  });
+
+  it("a repeated unmatched title within one field mints once, not twice", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [] });
+    await refreshTagNodes();
+    createTagEntry.mockResolvedValueOnce(T("tag_new", "Seafaring"));
+    const resolved = await resolveAdoptedTagFieldValue(["Seafaring", "seafaring"], "tag:tag", null);
+    expect(resolved).toEqual(["tag_new", "tag_new"]);
+    expect(createTagEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops non-string and blank items, and a non-array value resolves to []", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [] });
+    await refreshTagNodes();
+    const resolved = await resolveAdoptedTagFieldValue(["  ", 5, null], "tag:tag", null);
+    expect(resolved).toEqual([]);
+    expect(createTagEntry).not.toHaveBeenCalled();
+    expect(await resolveAdoptedTagFieldValue("not-an-array", "tag:tag", null)).toEqual([]);
   });
 });

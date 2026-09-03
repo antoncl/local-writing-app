@@ -35,6 +35,34 @@ const schema = {
   },
 } as unknown as MetadataSchema;
 
+// A tag-vocabulary entity_ref_list (`create_missing` resolving to exactly one
+// concrete `tag:*` type, ADR-0082 §2) alongside a plain reference list, so the
+// carve-out's schema-driven predicate (`isTagVocabularyField`) has both a
+// field that should flip and one that must stay excluded like any other
+// `entity_ref_list`.
+const tagSchema = {
+  entry_types: {
+    "tag:tag": { name: "Tag", kind: "tag" },
+  },
+  fields: {
+    tags: {
+      name: "Tags",
+      type: "entity_ref_list",
+      options: [],
+      picker_config: {
+        create_missing: true,
+        sources: [{ kind: "tag", expr: { type: "tag:tag" } }],
+      },
+    },
+    refs: {
+      name: "Related",
+      type: "entity_ref_list",
+      options: [],
+      picker_config: { sources: [{ kind: "lore" }] },
+    },
+  },
+} as unknown as MetadataSchema;
+
 const patch = (body: string | null, fields: EntryPatch["fields"] = {}): EntryPatch => ({
   body,
   fields,
@@ -416,6 +444,82 @@ describe("EntryProposalController — structured field flips (slice 3b)", () => 
     c.resetResolution();
     expect(c.isStructuredAdopted("allegiance")).toBe(false);
     expect(c.hasPendingChanges).toBe(false);
+  });
+});
+
+describe("EntryProposalController — tag-vocabulary flip (ADR-0082 §2 / #1797)", () => {
+  beforeEach(() => {
+    for (const id of ["e1", "e2"]) entryBrainstorm.clear(id);
+  });
+
+  function tagController(nodeId: string): EntryProposalController {
+    const c = new EntryProposalController();
+    c.nodeId = nodeId;
+    c.schema = tagSchema;
+    return c;
+  }
+
+  it("renders a tags flip, its value possibly MIXING ids and unresolved titles — a plain ref list stays excluded", () => {
+    // The backend only resolves a title matching an EXISTING tag; an unknown
+    // one rides through as a plain string (never minted at validation) — the
+    // controller passes it through untouched either way, agnostic to which.
+    const c = tagController("e1");
+    c.metadata = { tags: ["tag_old"], refs: ["lore_x"] };
+    entryBrainstorm.propose("e1", patch(null, { tags: ["tag_new1", "Brand New Title"], refs: ["lore_y"] }));
+    expect(c.structuredFlips).toEqual([
+      { fieldId: "tags", was: ["tag_new1", "Brand New Title"], now: ["tag_old"] },
+    ]);
+  });
+
+  it("adopting a tags flip hands the host the value AS-IS — the controller never resolves/mints", async () => {
+    // Resolving a still-bare title to an id (finding or minting) is the
+    // HOST's job on ACCEPT (`onAdoptFields`, NodeEditor.svelte /
+    // `resolveAdoptedTagFieldValue`, tagNodes.ts) — the controller only
+    // accumulates the resolution and hands off the raw proposed value.
+    const c = tagController("e1");
+    const onAdoptFields = vi.fn();
+    c.onAdoptFields = onAdoptFields;
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    entryBrainstorm.propose("e1", patch(null, { tags: ["tag_new1", "Brand New Title"] }));
+
+    c.toggleStructured("tags");
+    await c.commit();
+
+    expect(onAdoptFields).toHaveBeenCalledWith({ tags: ["tag_new1", "Brand New Title"] });
+  });
+
+  it("commit awaits an async onAdoptFields before flushing — so a resolve-then-mint step lands first", async () => {
+    const c = tagController("e1");
+    const order: string[] = [];
+    c.onAdoptFields = async () => {
+      order.push("adopt-start");
+      await Promise.resolve();
+      order.push("adopt-end");
+    };
+    c.onEmitChange = () => order.push("emit");
+    c.onFlush = async () => {
+      order.push("flush");
+      return true;
+    };
+    entryBrainstorm.propose("e1", patch(null, { tags: ["Brand New Title"] }));
+    c.toggleStructured("tags");
+    await c.commit();
+    expect(order).toEqual(["adopt-start", "adopt-end", "emit", "flush"]);
+  });
+
+  it("proposesTagField flags a proposal touching a tag-vocabulary field, not a plain ref list", () => {
+    const plainRef = tagController("e1");
+    entryBrainstorm.propose("e1", patch(null, { refs: ["lore_y"] }));
+    expect(plainRef.proposesTagField).toBe(false);
+
+    const tagField = tagController("e2");
+    entryBrainstorm.propose("e2", patch(null, { tags: ["tag_new1"] }));
+    expect(tagField.proposesTagField).toBe(true);
+  });
+
+  it("proposesTagField is false with no proposal", () => {
+    expect(tagController("e1").proposesTagField).toBe(false);
   });
 });
 

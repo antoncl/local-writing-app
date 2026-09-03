@@ -74,16 +74,49 @@ def _entry_type_group_application_errors(entry_type_id: str, entry_type, schema:
     ]
 
 
+def single_concrete_target(
+    picker_config: NodePickerConfig, schema: MetadataSchema
+) -> tuple[str, str] | None:
+    """The single `(kind, entry_type)` a config's `sources` reduce to, or
+    `None` when they don't: more than one kind, that kind not reducing to
+    exactly one entry_type, or the entry_type being abstract/unknown.
+    Independent of `create_missing` itself — this is the SHAPE rule alone,
+    mirroring the frontend `singleConcreteTarget` (`pickerCreate.ts`).
+
+    Two consumers: `_create_missing_shape_errors` below (does a
+    `create_missing` config have a legal target) and
+    `is_proposable_field`/`tag_vocabulary_target` (`entry_patch.py`) — does an
+    `entity_ref_list` field name one concrete `tag:*` vocabulary an AI
+    proposal can resolve titles against. Both must agree on what "one
+    concrete target" means, so this is the one place that decides it."""
+    kinds = picker_config.kinds
+    if len(kinds) != 1:
+        return None
+    kind = kinds[0]
+    fqns = picker_config.entry_types.get(kind) or []
+    if len(fqns) != 1:
+        return None
+    entry_type = fqns[0]
+    definition = schema.entry_types.get(entry_type)
+    if definition is None or definition.abstract:
+        return None
+    return (kind, entry_type)
+
+
 def _create_missing_shape_errors(
     field_id: str, picker_config: NodePickerConfig, schema: MetadataSchema
 ) -> list[str]:
     """ADR-0082 §2: `create_missing: true` needs an unambiguous target, so the
     minted entry has one certain type — `picker_config.sources` must resolve
-    (via `NodePickerConfig.kinds` / `entry_types`) to exactly ONE kind with
-    exactly ONE concrete (non-abstract) entry type. Shared by a field's own
+    (via `single_concrete_target`) to exactly ONE kind with exactly ONE
+    concrete (non-abstract) entry type. Shared by a field's own
     `picker_config` and a list field's `item_group` member `picker_config`
-    (`_list_field_schema_errors`)."""
+    (`_list_field_schema_errors`). The shape check itself is delegated to
+    `single_concrete_target`; the branches below only exist to name WHICH
+    part of the shape failed, for a diagnosable message."""
     if not picker_config.create_missing:
+        return []
+    if single_concrete_target(picker_config, schema) is not None:
         return []
     kinds = picker_config.kinds
     if len(kinds) != 1:
@@ -98,13 +131,10 @@ def _create_missing_shape_errors(
             f"{len(fqns)} entry type(s) of kind {kinds[0]!r}; create_missing requires exactly "
             "one concrete entry type."
         ]
-    entry_type = schema.entry_types.get(fqns[0])
-    if entry_type is None or entry_type.abstract:
-        return [
-            f"Metadata field {field_id} sets create_missing but its entry type {fqns[0]!r} is "
-            "abstract or unknown; create_missing requires one concrete entry type."
-        ]
-    return []
+    return [
+        f"Metadata field {field_id} sets create_missing but its entry type {fqns[0]!r} is "
+        "abstract or unknown; create_missing requires one concrete entry type."
+    ]
 
 
 def _field_shape_errors(field_id: str, field: MetadataFieldDefinition, schema: MetadataSchema) -> list[str]:

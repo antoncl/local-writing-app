@@ -54,6 +54,7 @@ from app.models import (
     PlotBoard,
     PlotBoardBeat,
     PlotBoardCard,
+    PlotBoardCharacterArc,
     PlotBoardContainer,
     PlotBoardPlotline,
     PlotBoardPlotlineBeat,
@@ -159,6 +160,20 @@ class _PlotBoardLayout(StructureVisitor):
             self.containers[node.id] = PlotBoardContainer(
                 id=node.id, title=node.title, parent=parent_container
             )
+
+
+class _ThreadCatalogEntry(NamedTuple):
+    """One `plot:thread` holder (plotline or arc) as the beat-badge catalog resolves
+    it (ADR-0080 §5): title, colour, beat roster (id -> title), holder subtype, and —
+    for an arc — the bound character's identity triple (None for a plotline)."""
+
+    title: str
+    color: str | None
+    beat_titles: dict[str, str]
+    holder_kind: str
+    character_id: str | None
+    character_name: str | None
+    character_initial: str | None
 
 
 class PlotMixin:
@@ -989,11 +1004,12 @@ class PlotMixin:
         self._atomic_write(path, f"---\n{front_matter}\n---\n")
 
     def read_plot_board_projection(self) -> PlotBoardProjection:
-        """The board's render model in one read (ADR-0048 S7a + Slice 4; ADR-0053):
-        the plotlines with their beat rosters, the manuscript containers a card lays
-        out inside, the cards with their plotline/scene refs + resolved container, and
-        the board's opaque layout. Read-only and computed — card + plotline + structure
-        + board data only, never the read-only Library templates.
+        """The board's render model in one read (ADR-0048 S7a + Slice 4; ADR-0053;
+        ADR-0080 §5): plotlines AND character arcs — sibling `plot:thread` holders,
+        projected as separate bands (`plotlines` / `arcs`) with their beat rosters —
+        the manuscript containers a card lays out inside, the cards with their
+        refs + resolved container + beat badges (tagged by holder subtype), and the
+        board's opaque layout. Read-only and computed — never the Library templates.
 
         Card refs need no dangling-resolution here: deleting a scene or a plotline
         purges the referencing cards (delete_scene / delete_plotline →
@@ -1007,12 +1023,15 @@ class PlotMixin:
         """
         board = self.read_plot_board()
         plotline_entries = self.list_plotlines().entries
+        # ADR-0080 §5: character arcs enumerate alongside plotlines — their own band,
+        # resolved through the same beat machinery (both are `plot:thread` holders).
+        arc_entries = self.list_character_arcs().entries
         card_entries = self.list_cards().entries
         # One pass over every card's beat links yields two things with no extra I/O:
-        # the per-(plotline, beat) USE-COUNT a plotline node shows (0 = a gap the
-        # structure exposes; ADR-0053 §6 / S5a), and the set of plotlines some card
-        # links. A plotline lands in `use_counts` iff a card links a beat of it, so its
-        # keys ARE the referenced set the badge catalog resolves from.
+        # the per-(holder, beat) USE-COUNT a plotline/arc node shows (0 = a gap the
+        # structure exposes; ADR-0053 §6 / S5a), and the set of holders some card
+        # links — this already covers arc holder ids, unchanged, since beat_links are
+        # keyed by holder id.
         use_counts: dict[str, Counter[str]] = {}
         for card in card_entries:
             for plotline_id, beat_id in self._iter_valid_beat_link_pairs(card.metadata.get(_BEAT_LINK_FIELD)):
@@ -1026,13 +1045,25 @@ class PlotMixin:
             )
             for line in plotline_entries
         ]
+        # Built once for character resolution — reused by the arc list AND the beat
+        # catalog below, so no second full node-index build.
+        index = self._build_node_index()
+        arcs = []
+        for arc in arc_entries:
+            character_id, character_name, character_initial = self._resolve_arc_character(
+                arc.metadata.get("character"), index
+            )
+            arcs.append(PlotBoardCharacterArc(
+                id=arc.id, title=arc.title, color=arc.metadata.get("color") or None,
+                character_id=character_id, character_name=character_name, character_initial=character_initial,
+                beats=self._plotline_board_beats(arc.metadata, use_counts.get(arc.id)),
+            ))
         containers, scene_to_container, scene_to_order = self._board_container_map()
-        # Resolve card→beat badges against the live plotlines once per projection
-        # (Slice 5b; ADR-0053): the stored links carry only ids, so this catalog turns
-        # each into a titled badge with a map lookup instead of a read per link. Built
-        # from the plotlines already listed above — no second front-matter read — and
-        # limited to the plotlines some card links (the use_counts keys).
-        beat_catalog = self._plotline_beat_catalog(plotline_entries, set(use_counts))
+        # Resolve card→beat badges against the live plotlines AND arcs once per
+        # projection (Slice 5b; ADR-0053; ADR-0080 §5): a titled, subtype-tagged
+        # badge per link via map lookup, built from the lists already fetched above,
+        # limited to the holders some card links (the use_counts keys).
+        beat_catalog = self._thread_beat_catalog(plotline_entries, arc_entries, set(use_counts), index)
         # The live card ids, so authored causal links resolve to real edge endpoints
         # (Slice 6b) — the display side of `_heal_causal_links`, symmetric with the
         # beat catalog above.
@@ -1070,6 +1101,7 @@ class PlotMixin:
             board_revision=board.revision,
             layout=board.layout,
             plotlines=plotlines,
+            arcs=arcs,
             containers=board_containers,
             cards=cards,
         )
@@ -1141,10 +1173,11 @@ class PlotMixin:
     def _plotline_board_beats(
         self, metadata: dict[str, Any], use_counts: Mapping[str, int] | None = None
     ) -> list[PlotBoardPlotlineBeat]:
-        """A plotline's beat roster as the board node renders it (ADR-0053 §3): each
-        beat's stable id + title, in stored order, with its `use_count` (how many cards
-        fulfil it; ADR-0053 §6 / S5a). `use_counts` maps this plotline's beat ids to
-        their counts — a beat absent from it (nothing links it) is a 0."""
+        """A `plot:thread` holder's beat roster as the board node renders it (ADR-0053
+        §3; ADR-0080 §5): each beat's stable id + title, in stored order, with its
+        `use_count` (how many cards fulfil it). Shared by plotlines (event-beats) and
+        character arcs (change-beats) — both read `instance_beats` the same way.
+        `use_counts` maps this holder's beat ids to their counts — absent is 0."""
         counts = use_counts or {}
         return [
             PlotBoardPlotlineBeat(
@@ -1155,52 +1188,88 @@ class PlotMixin:
             for beat in self._iter_roster_beats(metadata)
         ]
 
-    def _plotline_beat_catalog(
-        self, plotline_entries: list[PlotlineSummary], referenced: set[str]
-    ) -> dict[str, tuple[str, str | None, dict[str, str]]]:
-        """`plotline_id -> (plotline title, plotline colour, {beat_id: beat title})` for
-        each `referenced` plotline (ADR-0048 S7 Slice 5b; ADR-0053), so a card's beat
+    def _resolve_arc_character(
+        self, character_id: str | None, index: Any
+    ) -> tuple[str | None, str | None, str | None]:
+        """(id, display name, single-letter avatar) for an arc's bound character, or
+        (None, None, None) when unbound. Name is the character node's title from the
+        already-built node index (no extra read); avatar is its first character,
+        upper-cased. A bound-but-gone character still returns the id, unresolved."""
+        if not character_id:
+            return (None, None, None)
+        entry = index.by_id.get(character_id)
+        if entry is None:
+            return (character_id, None, None)  # bound but the character is gone
+        name = entry.title or ""
+        return (character_id, name or None, (name[:1].upper() or None))
+
+    def _thread_beat_catalog(
+        self,
+        plotline_entries: list[PlotlineSummary],
+        arc_entries: list[CharacterArcSummary],
+        referenced: set[str],
+        index: Any,
+    ) -> dict[str, _ThreadCatalogEntry]:
+        """`thread holder id -> _ThreadCatalogEntry` for each `referenced` plotline OR
+        character arc (ADR-0080 §5; ADR-0048 S7 Slice 5b; ADR-0053), so a card's beat
         badges resolve by map lookup rather than a read per link. Built from the
-        plotline summaries the projection already listed — no second front-matter read;
-        an unreadable plotline never enters that list, so its links drop, matching
-        `_heal_beat_links`. The colour lets the board tint a card's badges by plotline."""
-        catalog: dict[str, tuple[str, str | None, dict[str, str]]] = {}
-        for entry in plotline_entries:
+        plotline/arc summaries already listed — no second front-matter read; an
+        unreadable holder never enters those lists, so its links drop, matching
+        `_heal_beat_links`. An arc's entry also resolves its bound character."""
+        catalog: dict[str, _ThreadCatalogEntry] = {}
+        tagged = [(e, PLOT_PLOTLINE_ENTRY_TYPE) for e in plotline_entries]
+        tagged += [(e, PLOT_CHARACTER_ARC_ENTRY_TYPE) for e in arc_entries]
+        for entry, holder_kind in tagged:
             if entry.id not in referenced:
                 continue
             titles = {beat["id"]: str(beat.get("title") or "") for beat in self._iter_roster_beats(entry.metadata)}
-            catalog[entry.id] = (entry.title, entry.metadata.get("color") or None, titles)
+            character_id, character_name, character_initial = self._resolve_arc_character(
+                entry.metadata.get("character"), index
+            ) if holder_kind == PLOT_CHARACTER_ARC_ENTRY_TYPE else (None, None, None)
+            catalog[entry.id] = _ThreadCatalogEntry(
+                title=entry.title,
+                color=entry.metadata.get("color") or None,
+                beat_titles=titles,
+                holder_kind=holder_kind,
+                character_id=character_id,
+                character_name=character_name,
+                character_initial=character_initial,
+            )
         return catalog
 
     def _resolve_card_beats(
-        self, metadata: dict[str, Any], catalog: dict[str, tuple[str, str | None, dict[str, str]]]
+        self, metadata: dict[str, Any], catalog: dict[str, _ThreadCatalogEntry]
     ) -> list[PlotBoardBeat]:
         """Resolve a card's stored `beat_links` (id pairs) into board badges (ADR-0048
-        S7 Slice 5b; ADR-0053), dropping any link whose plotline or beat is gone (the
-        display side of `_heal_beat_links`). Well-formedness + dedup are the shared
-        `_iter_valid_beat_link_pairs`; this adds the catalog lookup + title resolution.
-        Badge order follows the stored list, so it is stable across reads and the
-        writer's arrangement holds."""
+        S7 Slice 5b; ADR-0053; ADR-0080 §5), dropping any link whose holder or beat is
+        gone (the display side of `_heal_beat_links`). Well-formedness + dedup are the
+        shared `_iter_valid_beat_link_pairs`; this adds the catalog lookup + title
+        resolution, tagging each beat with its holder's subtype and — for an arc —
+        the bound character's identity, so the frontend renders a change-beat pill
+        distinctly from an event-beat one. Order follows the stored list."""
         resolved: list[PlotBoardBeat] = []
         for plotline_id, beat_id in self._iter_valid_beat_link_pairs(metadata.get(_BEAT_LINK_FIELD)):
             entry = catalog.get(plotline_id)
             if entry is None:
-                continue  # plotline gone / not referenced → drop (display-side heal)
-            plotline_title, plotline_color, beat_titles = entry
-            title = beat_titles.get(beat_id)
+                continue  # holder gone / not referenced → drop (display-side heal)
+            title = entry.beat_titles.get(beat_id)
             if title is None:
                 continue  # beat left the roster → drop
             resolved.append(
                 PlotBoardBeat(
                     plotline_id=plotline_id,
-                    plotline_title=plotline_title,
-                    plotline_color=plotline_color,
+                    plotline_title=entry.title,
+                    plotline_color=entry.color,
                     beat_id=beat_id,
                     title=title,
-                    # 1-based position in the plotline's roster (#941). `beat_titles` is
+                    # 1-based position in the holder's roster (#941). `beat_titles` is
                     # built from `_iter_roster_beats` in order, so its key order IS the
                     # roster order; the pair is already validated present above.
-                    number=list(beat_titles).index(beat_id) + 1,
+                    number=list(entry.beat_titles).index(beat_id) + 1,
+                    holder_kind=entry.holder_kind,
+                    character_id=entry.character_id,
+                    character_name=entry.character_name,
+                    character_initial=entry.character_initial,
                 )
             )
         return resolved

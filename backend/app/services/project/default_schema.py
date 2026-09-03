@@ -260,20 +260,23 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "plot:thread": {
             # Abstract beat-holder base (ADR-0080 §1): the contract a plotline and a
-            # character arc SHARE — an instantiated beat roster (`instance_beats`)
-            # plus the template-lineage snapshot (`source_template_*`). Never
-            # instantiated (like plot:base). Its two concrete children are
-            # plot:plotline (external events; + colour; can be a card's primary
-            # thread) and plot:character_arc (a character's internal change; +
-            # character binding; never primary, §4). What they share lives HERE, not
-            # in one inheriting from the other, so an arc reuses the beat machinery
-            # without being an `is_a` plotline (ADR-0080 §1/§4). `has_body` here so
-            # both children inherit the prose description body.
+            # character arc SHARE — a colour (`color`, hoisted here per Amendment
+            # 1 §1 so both subtypes tint), an instantiated beat roster
+            # (`instance_beats`) plus the template-lineage snapshot
+            # (`source_template_*`). Never instantiated (like plot:base). Its two
+            # concrete children are plot:plotline (external events; can be a
+            # card's primary thread) and plot:character_arc (a character's
+            # internal change; + character binding; never primary, §4). What they
+            # share lives HERE, not in one inheriting from the other, so an arc
+            # reuses the beat machinery without being an `is_a` plotline
+            # (ADR-0080 §1/§4). `has_body` here so both children inherit the
+            # prose description body.
             "name": "Thread",
             "kind": "plot",
             "abstract": True,
             "parent": "plot:base",
             "fields": [
+                "color",
                 "instance_beats",
                 "source_template_id",
                 "source_template_name",
@@ -286,21 +289,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "plot:plotline": {
             # A story thread — and, per ADR-0053, an instance of a plot template:
             # one node kind, no separate "arc". The intrinsic title is its name;
-            # `color` tints its chips + the cards it is primary on; the prose body
-            # is its description. The beat roster (`instance_beats`) and
-            # template-lineage snapshot (`source_template_*`) are inherited from
-            # the shared abstract `plot:thread` base (ADR-0080 §1) — this type adds
-            # only `color` (the primary/tint axis) and `genre`. Cards reference one
-            # as their primary plotline and fulfil its beats (card `beat_links`).
-            # An ordinary flat Node under `plot/`, layered like lore.
+            # `color` (inherited from the shared `plot:thread` base, Amendment 1
+            # §1) tints its chips + the cards it is primary on; the prose body is
+            # its description. The beat roster (`instance_beats`) and
+            # template-lineage snapshot (`source_template_*`) are also inherited
+            # from `plot:thread` (ADR-0080 §1) — this type adds only `genre`.
+            # Cards reference one as their primary plotline and fulfil its beats
+            # (card `beat_links`). An ordinary flat Node under `plot/`, layered
+            # like lore.
             "name": "Plotline",
             "icon": "route",
             "kind": "plot",
             "parent": "plot:thread",
-            # `color` first so the swatch sits under the type header, not below the
-            # beat list, when the plotline is edited.
             "fields": [
-                "color",
                 "genre",
             ],
             "has_body": True,
@@ -317,7 +318,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # `plotline` ref targets plot:plotline exactly, so an arc is excluded by
             # type). Its own glyph (seedling — growth/becoming) so the writer meets
             # it as a distinct object. `instance_beats` + `source_template_*` +
-            # `has_body` are inherited from plot:thread; it adds only `character`.
+            # `has_body` + `color` are inherited from plot:thread (Amendment 1 §1:
+            # an arc's colour default resolves to the bound character's, on the
+            # frontend, when unset here — still overridable per arc); it adds
+            # only `character`.
             "name": "Character arc",
             "icon": "seedling",
             "kind": "plot",

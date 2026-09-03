@@ -116,6 +116,11 @@ character-attributed change-pills, not two identical "arc" chips. The pill row *
 from change-pills rather than interleaving them. Any new colour or treatment comes from design tokens,
 per ADR-0030 and the style-token guard — not literals.
 
+> **Amended by Amendment 1 (2026-09-03):** the "different channel, *not a recolour*" clause is superseded —
+> an arc **does** carry colour (its bound character's, overridable); the **glyph** is the discriminator, not
+> the absence of colour. §4's "takes neither [colour]" is likewise narrowed to the *card's* stripe. See
+> Amendment 1 below.
+
 ### 6. Share the mechanism, deliberately not the UI surface
 
 The shared beat machinery (§3) will tempt a *"these are so similar, use one pane"* re-collapse — the same
@@ -232,3 +237,36 @@ sketch acquires authority it has not earned).
 - **Presentation (in-app; SvelteFlow not headless-testable):** a card carrying both an event-beat and a
   change-beat renders two distinct, segmented pill kinds; a card causing two characters' changes shows two
   character-attributed change-pills.
+
+## Amendment 1 — arcs carry colour (2026-09-03)
+
+Dogfooding the slice-3 mockup surfaced an error in **§5** (and the colour clause of **§4**). §5 said the
+arc distinction rides glyph + character **"not a recolour"**, and §4 that an arc **"takes neither"** colour.
+That framing is wrong: nothing rendered on a screen is colourless — an "arc with no colour" is just an arc
+coloured by omission. The real question is **which** colour, not **whether**. Revised:
+
+1. **An arc has colour.** Its default is its **bound character's** resolved colour (the normal resolver:
+   instance override → type → the `lore`/character kind default), and the arc **keeps its own colour
+   picker** to override — an optional `color` field, exactly as a plotline has one. So colour answers
+   **"whose change"** for an arc as it answers **"which plotline"** for a plotline.
+2. **Colour is not the discriminator** between the two subtypes — the **seedling glyph** (vs the plotline's
+   icon), the `Character arc` type tag, and the character-binding row are. That is *why* colour is free to
+   carry "which / whose" on both without the two colliding: the glyph already tells the reader the kind.
+   (This is the correction to §5's "different channel, not a recolour": the *distinguishing* channel is the
+   glyph, but colour is still present, re-referented to the character.)
+3. **§4 holds where it matters.** A *card's* stripe/tint — its one colour axis — still comes from its
+   **primary plotline**, never an arc; an arc is still never a card's primary/colour thread. What Amendment 1
+   changes is only that the arc **node** and its **change-pills** are themselves character-coloured.
+4. **Change-pill treatment (settles §5's "mockup detail").** An event-pill = plotline colour + a dot; a
+   change-pill = character colour + the seedling + the bound character's **single-letter avatar** + label
+   (single letters suffice — a story has few change arcs). The pill row **segments** `Events` from `Changes`,
+   and a segment's label shows **only when that segment has a pill** (no divider between the synopsis and the
+   first segment).
+5. **Board layout (extends §6 to the canvas).** Plotline holder-nodes and arc holder-nodes render in
+   **separate bands** on the board — the same arc/plotline separation §6 applied to the template list, now
+   applied to the on-canvas holder layout.
+
+Delivery: **3a** (backend — the arc `color` field, arc HTTP routes, and the board projection widened to
+enumerate arcs and carry per-beat holder-subtype + character) then **3b** (frontend — the arc board node in
+its own band, the change-pill treatment above, the character + colour pickers, and closing the
+instantiate-an-arc dead-end the type split left).

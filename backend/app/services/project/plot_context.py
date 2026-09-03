@@ -42,6 +42,13 @@ from app.models import (
     PlotContextPlotline,
 )
 
+# The shared card-beat catalog entry + the plotline holder-kind (ADR-0080 §5): the AI
+# context builds the same `_ThreadCatalogEntry` the board projection does, so both feed
+# PlotMixin's one `_resolve_card_beats`. plot.py does not import this module, so this is
+# a one-directional import. The AI context lists only plotlines today (arc change-tracks
+# reaching the AI is a later item), so every entry it builds is a plotline holder.
+from app.services.project.plot import PLOT_PLOTLINE_ENTRY_TYPE, _ThreadCatalogEntry
+
 # On-disk metadata field keys this mixin reads a card / plotline's metadata by — the
 # same schema field-name literals plot.py reads them by; named here for legibility.
 # The card→beat and card→causal resolutions, which key off plot.py's own
@@ -125,20 +132,20 @@ class PlotContextMixin:
 
     def _context_plotlines(
         self,
-    ) -> tuple[list[PlotContextPlotline], dict[str, str], dict[str, tuple[str, str | None, dict[str, str]]]]:
+    ) -> tuple[list[PlotContextPlotline], dict[str, str], dict[str, _ThreadCatalogEntry]]:
         """All plotlines with their FULL beat rosters (ADR-0053 §1) — ungated
         scaffolding, so a beat no card fulfils still appears (a gap for the AI to
         name). One traversal of `list_plotlines` builds three things at once: the
         `PlotContextPlotline` list (thread + beats + lineage), a `{id: title}` map the
         cards resolve their primary plotline name by, and a `{plotline_id:
-        (title, colour, {beat_id: beat title})}` catalog — the shape
-        `_resolve_card_beats` consumes so a card's beat links resolve to titled badges
-        by a map lookup rather than a re-read. The board projection fills the colour so
-        a card can tint its badges; the AI context never renders colour, so the catalog
-        holds the slot as None rather than shipping an unused swatch id."""
+        _ThreadCatalogEntry}` catalog — the shape `_resolve_card_beats` consumes so a
+        card's beat links resolve to titled badges by a map lookup rather than a re-read.
+        Every entry here is a plotline holder (`holder_kind` = plot:plotline, no
+        character); the board projection fills the colour + arc characters, but the AI
+        context renders no pills, so it leaves colour/character None."""
         plotlines: list[PlotContextPlotline] = []
         plotline_titles: dict[str, str] = {}
-        catalog: dict[str, tuple[str, str | None, dict[str, str]]] = {}
+        catalog: dict[str, _ThreadCatalogEntry] = {}
         for line in self.list_plotlines().entries:
             plotline_titles[line.id] = line.title
             beats: list[PlotContextBeat] = []
@@ -170,7 +177,17 @@ class PlotContextMixin:
                     beats=beats,
                 )
             )
-            catalog[line.id] = (line.title, None, titles)  # colour unused in AI context
+            # A plotline holder; colour is unused in the AI context (it renders no
+            # pills), and character fields are None — an arc never enters this list.
+            catalog[line.id] = _ThreadCatalogEntry(
+                title=line.title,
+                color=None,
+                beat_titles=titles,
+                holder_kind=PLOT_PLOTLINE_ENTRY_TYPE,
+                character_id=None,
+                character_name=None,
+                character_initial=None,
+            )
         return plotlines, plotline_titles, catalog
 
     def _context_card(
@@ -178,7 +195,7 @@ class PlotContextMixin:
         card: Any,
         scene_to_order: dict[str, int],
         plotline_titles: dict[str, str],
-        beat_catalog: dict[str, tuple[str, str | None, dict[str, str]]],
+        beat_catalog: dict[str, _ThreadCatalogEntry],
         admitted_ids: set[str],
     ) -> PlotContextCard:
         """Project one admitted card for the AI: synopsis + plotline + reveal rank

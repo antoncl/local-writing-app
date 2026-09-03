@@ -82,6 +82,14 @@ export type PlotBoardBeat = {
   character_initial: string | null;
 };
 
+// A card beat as the board LAYOUT resolves it for rendering (ADR-0080 slice
+// 3b-ii): the projected `PlotBoardBeat` plus its effective colour, denormalised
+// once in `buildBoardNodes` — an event-beat's plotline swatch, or a change-beat's
+// resolved arc colour (own → bound character → the lore kind default, the same
+// resolution `PlotArcData.resolvedColorHex` uses) — so `PlotCardNode` never
+// re-resolves a colour, it just reads one.
+export type PlotCardBeat = PlotBoardBeat & { resolvedColorHex: string | null };
+
 // A card as the board renders it: identity, the synopsis (the card body), the
 // plotline + scene it points at (each null when unset), and its innermost
 // manuscript `container` (the box it lays out inside — null when homeless, i.e.

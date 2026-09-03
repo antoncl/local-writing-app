@@ -9,11 +9,12 @@ import { render, screen, fireEvent } from "@/lib/test/component";
 import PlotCardNode from "./PlotCardNode.svelte";
 import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
 import type { PlotCardData } from "@/lib/plot/plotBoardLayout";
-import type { PlotBoardBeat } from "@/lib/types";
+import type { PlotCardBeat } from "@/lib/types";
 import { PLOT_DND_MIME } from "@/lib/plot/plotDnd";
-import { setPalette } from "@/lib/utils/colors";
 
-const beat = (over: Partial<PlotBoardBeat> = {}): PlotBoardBeat => ({
+// `resolvedColorHex` defaults null (as an event-beat with no plotline colour would
+// resolve) — tests that care about the change-pill's colour pass it explicitly.
+const beat = (over: Partial<PlotCardBeat> = {}): PlotCardBeat => ({
   plotline_id: "i1",
   plotline_title: "Hero's Journey",
   plotline_color: null,
@@ -24,8 +25,25 @@ const beat = (over: Partial<PlotBoardBeat> = {}): PlotBoardBeat => ({
   character_id: null,
   character_name: null,
   character_initial: null,
+  resolvedColorHex: null,
   ...over,
 });
+
+// A character-arc (change) beat: same shape, defaulted to the arc holder kind + a
+// bound character, so tests opt into the plotline defaults above only when needed.
+const changeBeat = (over: Partial<PlotCardBeat> = {}): PlotCardBeat =>
+  beat({
+    plotline_id: "arc1",
+    plotline_title: "Elena's arc",
+    beat_id: "cb1",
+    title: "Learns to trust",
+    holder_kind: "plot:character_arc",
+    character_id: "char_elena",
+    character_name: "Elena",
+    character_initial: "E",
+    resolvedColorHex: "#b0567a",
+    ...over,
+  });
 
 const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
   title: "She leaves home",
@@ -423,14 +441,15 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     expect(screen.getByText("+2")).toBeInTheDocument(); // the overflow is visible
   });
 
-  it("tints a beat badge by its arc's colour and leaves a colourless arc neutral", () => {
-    setPalette([{ id: "rose", label: "Rose", hex: "#b0567a" }]);
+  it("tints an event-pill by its resolvedColorHex and leaves a colourless one neutral", () => {
+    // The colour is resolved upstream (buildBoardNodes, plotBoardLayout.test.ts) —
+    // the card just reads `beat.resolvedColorHex` back out, no re-resolution here.
     const { container } = render(PlotCardNode, {
       props: {
         data: data({
           beats: [
-            beat({ beat_id: "b1", title: "Call to Adventure", plotline_color: "rose" }),
-            beat({ beat_id: "b2", title: "Refusal", plotline_color: null }),
+            beat({ beat_id: "b1", title: "Call to Adventure", resolvedColorHex: "#b0567a" }),
+            beat({ beat_id: "b2", title: "Refusal", resolvedColorHex: null }),
           ],
         }),
       },
@@ -439,18 +458,7 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     expect(badges[0].classList.contains("coloured")).toBe(true);
     expect((badges[0] as HTMLElement).style.getPropertyValue("--beat-accent")).toBe("#b0567a");
     expect(badges[1].classList.contains("coloured")).toBe(false);
-  });
-
-  it("falls back to a neutral badge when the arc's swatch is no longer in the palette", () => {
-    // A swatch the writer deleted after colouring the arc: getSwatch returns null,
-    // so the badge degrades to neutral rather than throwing or emitting an accent.
-    setPalette([{ id: "rose", label: "Rose", hex: "#b0567a" }]);
-    const { container } = render(PlotCardNode, {
-      props: { data: data({ beats: [beat({ beat_id: "b1", title: "Setup", plotline_color: "ghost" })] }) },
-    });
-    const badge = container.querySelector(".beat-badge") as HTMLElement;
-    expect(badge.classList.contains("coloured")).toBe(false);
-    expect(badge.style.getPropertyValue("--beat-accent")).toBe("");
+    expect((badges[1] as HTMLElement).style.getPropertyValue("--beat-accent")).toBe("");
   });
 
   it("shows the on-page marker when page_status is on_page", () => {
@@ -572,5 +580,62 @@ describe("PlotCardNode — beat linking by drag (S7 #824)", () => {
     // All six carry an × (no beat hidden behind a non-removable +N chip).
     expect(container.querySelectorAll(".beat-badge-x")).toHaveLength(6);
     expect(screen.queryByText(/^\+\d/)).toBeNull();
+  });
+});
+
+describe("PlotCardNode — segmented event/change pills (ADR-0080 slice 3b-ii)", () => {
+  it("renders an Events segment and a Changes segment for a mixed card", () => {
+    render(PlotCardNode, {
+      props: { data: data({ beats: [beat(), changeBeat()] }) },
+    });
+    expect(screen.getByText("Events")).toBeInTheDocument();
+    expect(screen.getByText("Changes")).toBeInTheDocument();
+    expect(screen.getByText("Call to Adventure")).toBeInTheDocument();
+    expect(screen.getByText("Learns to trust")).toBeInTheDocument();
+  });
+
+  it("shows only the Events segment for a card with only event-beats", () => {
+    render(PlotCardNode, { props: { data: data({ beats: [beat()] }) } });
+    expect(screen.getByText("Events")).toBeInTheDocument();
+    expect(screen.queryByText("Changes")).toBeNull();
+  });
+
+  it("shows only the Changes segment for a card with only change-beats", () => {
+    render(PlotCardNode, { props: { data: data({ beats: [changeBeat()] }) } });
+    expect(screen.getByText("Changes")).toBeInTheDocument();
+    expect(screen.queryByText("Events")).toBeNull();
+  });
+
+  it("renders the seedling glyph + the character_initial avatar on a change-pill", () => {
+    const { container } = render(PlotCardNode, {
+      props: { data: data({ beats: [changeBeat({ character_initial: "E" })] }) },
+    });
+    const pill = container.querySelector(".beat-badge.change")!;
+    expect(pill.querySelector(".seed i.ti-seedling")).not.toBeNull();
+    expect(pill.querySelector(".avatar")?.textContent).toBe("E");
+  });
+
+  it("shows two change-pills with their two distinct initials for two characters", () => {
+    render(PlotCardNode, {
+      props: {
+        data: data({
+          beats: [
+            changeBeat({ beat_id: "cb1", character_id: "char_a", character_name: "Ada", character_initial: "A" }),
+            changeBeat({ beat_id: "cb2", character_id: "char_b", character_name: "Ben", character_initial: "B" }),
+          ],
+        }),
+      },
+    });
+    const initials = [...document.querySelectorAll(".beat-badge.change .avatar")].map((el) => el.textContent);
+    expect(initials).toEqual(["A", "B"]);
+  });
+
+  it("tints a change-pill by its resolvedColorHex (the resolved arc colour)", () => {
+    const { container } = render(PlotCardNode, {
+      props: { data: data({ beats: [changeBeat({ resolvedColorHex: "#334455" })] }) },
+    });
+    const pill = container.querySelector(".beat-badge.change") as HTMLElement;
+    expect(pill.classList.contains("coloured")).toBe(true);
+    expect(pill.style.getPropertyValue("--beat-accent")).toBe("#334455");
   });
 });

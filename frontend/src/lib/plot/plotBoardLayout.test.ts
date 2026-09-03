@@ -836,6 +836,56 @@ describe("character-arc nodes (ADR-0080 §5 / Amendment 1)", () => {
   });
 });
 
+describe("card-beat colour denormalisation (ADR-0080 slice 3b-ii)", () => {
+  const rawBeat = (over: Partial<PlotBoardProjection["cards"][number]["beats"][number]> = {}) => ({
+    plotline_id: "line_1",
+    plotline_title: "Main",
+    plotline_color: null,
+    beat_id: "b1",
+    title: "Setup",
+    number: 1,
+    holder_kind: "plot:plotline",
+    character_id: null,
+    character_name: null,
+    character_initial: null,
+    ...over,
+  });
+
+  it("gives an event-beat its resolvedColorHex from the plotline swatch", () => {
+    setPalette([{ id: "rose", label: "Rose", hex: "#b0567a" }]);
+    const nodes = buildBoardNodes(projection({ cards: [card("c1", { beats: [rawBeat({ plotline_color: "rose" })] })] }));
+    expect((dataOf(nodes, "c1") as PlotCardData).beats[0].resolvedColorHex).toBe("#b0567a");
+  });
+
+  it("gives an event-beat a null resolvedColorHex when the plotline is colourless", () => {
+    const nodes = buildBoardNodes(projection({ cards: [card("c1", { beats: [rawBeat({ plotline_color: null })] })] }));
+    expect((dataOf(nodes, "c1") as PlotCardData).beats[0].resolvedColorHex).toBeNull();
+  });
+
+  it("gives a change-beat its resolvedColorHex from its arc's OWN colour", () => {
+    setPalette([{ id: "rose", label: "Rose", hex: "#b0567a" }]);
+    const nodes = buildBoardNodes(
+      projection({
+        arcs: [arc("a1", "Elena's redemption", { color: "rose" })],
+        cards: [card("c1", { beats: [rawBeat({ plotline_id: "a1", holder_kind: "plot:character_arc" })] })],
+      }),
+    );
+    expect((dataOf(nodes, "c1") as PlotCardData).beats[0].resolvedColorHex).toBe("#b0567a");
+  });
+
+  it("falls back to the bound character's colour for a change-beat when the arc has none", () => {
+    setPalette([{ id: "moss", label: "Moss", hex: "#5a7a4a" }]);
+    loreEntriesStore.set([{ id: "char_1", title: "Elena", body: "", entry_type: "lore:character", metadata: { color: "moss" } }]);
+    const nodes = buildBoardNodes(
+      projection({
+        arcs: [arc("a1", "Elena's redemption", { character_id: "char_1" })],
+        cards: [card("c1", { beats: [rawBeat({ plotline_id: "a1", holder_kind: "plot:character_arc" })] })],
+      }),
+    );
+    expect((dataOf(nodes, "c1") as PlotCardData).beats[0].resolvedColorHex).toBe("#5a7a4a");
+  });
+});
+
 describe("boardIsEmpty (arcs)", () => {
   it("is NOT empty when it has arcs but no cards/plotlines (ADR-0080: an arc is a node too)", () => {
     expect(boardIsEmpty(projection({ arcs: [arc("a1", "Elena's redemption")] }))).toBe(false);

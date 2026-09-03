@@ -530,11 +530,20 @@
         ? computedSpecFor(payload.computedFunction, payload.computedScope)
         : null;
     // Coerce the editor-side string default into the field-type's wire shape
-    // (#38). Computed fields never carry a default. undefined / "" → omit the
-    // key entirely so the field stays defaultless rather than seeding a falsy
-    // value into new entries.
+    // (#38). Computed and reference fields never carry a default (round 2,
+    // Y12 / #1809: a reference default would be a typed node id, which no
+    // author knows ahead of time) — the editor already hides the control for
+    // these types (SchemaFieldInlineEditor's own `{#if}`), but the type CAN
+    // have switched since a stale `payload.defaultValue` was typed, so this
+    // is what actually clears it: the CURRENT type at save time decides,
+    // never whatever string happens to still sit in the draft. undefined /
+    // "" → omit the key entirely so the field stays defaultless rather than
+    // seeding a falsy value into new entries.
     const defaultValue =
-      payload.type === "computed" || payload.type === "list"
+      payload.type === "computed" ||
+      payload.type === "list" ||
+      payload.type === "entity_ref" ||
+      payload.type === "entity_ref_list"
         ? undefined
         : schemaFieldDefaultForStorage(payload.type, payload.defaultValue);
     const nextField: MetadataFieldDefinition = {

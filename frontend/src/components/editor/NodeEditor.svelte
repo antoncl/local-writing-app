@@ -16,6 +16,8 @@
   import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
+  import { refreshTagNodes, resolveAdoptedTagFieldValue } from "@/lib/stores/tagNodes";
+  import { createTargetFor } from "@/lib/utils/pickerCreate";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
   import { notchWhen } from "@/lib/utils/snapshotTime";
@@ -434,7 +436,7 @@
     // as unset. Adoption routes them back out (onAdoptFields below).
     entryReview.metadata = { ...metadata, title, status };
   });
-  entryReview.onAdoptFields = (fields) => {
+  entryReview.onAdoptFields = async (fields) => {
     // `title`/`status` are proposable but stored off `metadata` (saved via the
     // top-level payload fields, and the backend applies a rename on post), so
     // route an adopted flip to the matching shell state and keep it out of the
@@ -448,6 +450,21 @@
     if ("status" in next) {
       status = String(next.status ?? "");
       delete next.status;
+    }
+    // ADR-0082 §2 / #1797: an ADOPTED tag-vocabulary flip may still carry
+    // unresolved titles (the validator never mints — see entryProposal's
+    // module note). Resolve/mint them now, only because the author accepted
+    // this field — the same `createLayerId` the metadata panel's own picker
+    // threads for its "Create ‹x›" (P5), so an AI-accepted tag lands at the
+    // identical layer a hand-typed one would. A rejection here is left to
+    // propagate — deliberately not caught: `EntryProposalController.commit()`
+    // (round 2, Y1) is what turns it into `commitError` + an aborted commit
+    // that keeps the review open, so there's nothing to handle at this layer.
+    for (const fieldId of Object.keys(next)) {
+      const field = metadataSchema?.fields[fieldId];
+      const target = field ? createTargetFor(field.picker_config, metadataSchema) : null;
+      if (target?.kind !== "tag") continue;
+      next[fieldId] = await resolveAdoptedTagFieldValue(next[fieldId], target.entryType, createLayerId ?? null);
     }
     metadata = { ...metadata, ...next };
   };
@@ -539,6 +556,15 @@
   $effect(() => {
     entryReview.proposal;
     entryReview.resetResolution();
+  });
+  // A patch touching a tag-vocabulary field (#1797/#1799) may name a tag that
+  // was created elsewhere since this pane last refreshed its roster — pull it
+  // so a title the backend DID resolve to a real id (`tagTitleById` just
+  // stale) renders as that tag's title, not a false "new tag" candidate
+  // (`MetadataPanel`'s flip-chip strip tells the two apart by roster
+  // membership alone). Never mints anything itself — only ACCEPT does that.
+  $effect(() => {
+    if (entryReview.proposesTagField) refreshTagNodes();
   });
 
   // Editor-pane handle exports — forwarded to ProseBodyView and called by the

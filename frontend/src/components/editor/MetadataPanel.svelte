@@ -1,12 +1,13 @@
 <script lang="ts">
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
+  import TagFlipChips, { isTagFlipField, tagFlipItemsFor } from "@/components/widgets/TagFlipChips.svelte";
   import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
   import { aiSettings } from "@/lib/stores/aiSettings.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import { fieldIconClass, entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { resolveColor } from "@/lib/utils/colors";
-  import { effectiveFieldLabel, effectiveFieldHidden, metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
+  import { effectiveFieldLabel, effectiveFieldHidden, isMetadataValuePresent, metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
   import type {
     DocumentKind,
     EntryMetadata,
@@ -20,6 +21,7 @@
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
+  import { tagTitleById } from "@/lib/stores/tagNodes";
   import { inheritedLayerLabel, fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
   import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 
@@ -250,10 +252,19 @@
   // Wide field types take the full rail width (control wraps below the
   // name); compact types keep their control inline on the right. A single
   // `entity_ref` is one pill and stays inline; only the list wraps wide.
-  function isWide(field: MetadataFieldDefinition): boolean {
+  // #1810: an EMPTY `entity_ref_list` is just a lone "+" icon — the same
+  // compact, single-row shape `entity_ref` renders when empty — so it only
+  // goes wide once it actually holds pills to wrap; otherwise the wide
+  // `.fr-val` layout (flex-basis: 100%, justify-content: stretch) stretches
+  // that lone icon into its own left-aligned row. `multi_select` doesn't
+  // share this: it always renders every option as a chip, never a bare add
+  // control, so it's never visually empty. `list`'s "+ Add item" is its own
+  // permanent, labelled row by design (a growing collection), not a bare
+  // icon standing in for the whole row — not the same asymmetry.
+  function isWide(field: MetadataFieldDefinition, fieldId: string): boolean {
     return (
       field.type === "long_text" ||
-      field.type === "entity_ref_list" ||
+      (field.type === "entity_ref_list" && isMetadataValuePresent(displayValue(fieldId))) ||
       field.type === "list" ||
       (field.type === "multi_select" && field.options.length > 0)
     );
@@ -415,9 +426,17 @@
 
   /** The entry's current value of a flipped field, for the "Current: …" hint —
    *  the row shows the proposed candidate, so the author needs to see what it
-   *  would replace. */
+   *  would replace. A tag-vocabulary `entity_ref_list` flip (#1797 — the only
+   *  `entity_ref_list` type that ever reaches a flip, ADR-0082 §2) resolves its
+   *  ids to titles through `tagTitleById` — the candidate side already reads as
+   *  titles (known ids) or "new tag" candidates (unmatched titles) above, so
+   *  the "Current:" side must match rather than fall back to a bare id. */
   function flipCurrentHint(fieldId: string): string {
-    return metadataValueString(compare?.fields[fieldId]?.now as MetadataValue);
+    const value = compare?.fields[fieldId]?.now as MetadataValue;
+    if (metadataSchema.fields[fieldId]?.type === "entity_ref_list" && Array.isArray(value)) {
+      return value.map((id) => $tagTitleById.get(String(id)) ?? String(id)).join(", ");
+    }
+    return metadataValueString(value);
   }
 
   function updateAssistantProvider(provider: string, tier: string, model: string) {
@@ -514,7 +533,7 @@
       {#if metadataSchema.fields[fieldId] && (!metadataSchema.fields[fieldId].intrinsic || isFlipResolve(fieldId)) && !effectiveFieldHidden(metadataSchema, entryType, fieldId) && (metadataSchema.fields[fieldId].type !== "computed" || computedFieldString(fieldId) !== "")}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")}>
+        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")}>
           <!-- Disclosure gutter — reserved so the field glyph lines up with the
                collapsible sections' glyph column (RailSectionHeader): caret ·
                glyph on every rail line (#1438). Reference fields no longer
@@ -601,21 +620,35 @@
               <div class="fr-flip">
                 <div class="fr-flip-candidate">
                   <div class="fr-flip-value" inert>
-                    <FieldValueEditor
-                      {field}
-                      readOnly={true}
-                      allowUnset={true}
-                      embedded={true}
-                      value={displayValue(fieldId)}
-                      ariaLabel={fieldLabel}
-                      loreEntries={loreEntries}
-                      promptEntries={promptEntries}
-                      structure={structure}
-                      researchStructure={researchStructure}
-                      implicitContextMatcher={implicitContextMatcher}
-                      excludeId={excludeId}
-                      onChange={() => {}}
-                    />
+                    {#if isTagFlipField(field, metadataSchema)}
+                      <!-- #1797: the candidate can mix resolved ids with
+                           still-unminted titles — the generic ReferencePicker
+                           path only knows ids, so this renders its own chip
+                           strip (`TagFlipChips`, round 2 Y7): a known tag
+                           shows its title, an unresolved one shows as a "new
+                           tag" candidate (accepting the flip is what mints
+                           it, ADR-0082 §2 — never here). -->
+                      <TagFlipChips
+                        items={tagFlipItemsFor(displayValue(fieldId), $tagTitleById)}
+                        ariaLabel={fieldLabel}
+                      />
+                    {:else}
+                      <FieldValueEditor
+                        {field}
+                        readOnly={true}
+                        allowUnset={true}
+                        embedded={true}
+                        value={displayValue(fieldId)}
+                        ariaLabel={fieldLabel}
+                        loreEntries={loreEntries}
+                        promptEntries={promptEntries}
+                        structure={structure}
+                        researchStructure={researchStructure}
+                        implicitContextMatcher={implicitContextMatcher}
+                        excludeId={excludeId}
+                        onChange={() => {}}
+                      />
+                    {/if}
                   </div>
                   <button
                     type="button"

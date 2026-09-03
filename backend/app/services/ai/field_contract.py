@@ -22,8 +22,21 @@ def _describe_field(f: dict[str, Any]) -> str:
     ``- allegiance (Allegiance) — select; one of: order, chaos``. The item-shape
     clause for a `list` field mirrors the member descriptors so the model emits
     legal array items. Identical to the shape the extraction contract has always
-    used — this is now its single source."""
-    parts = [f"- {f['id']} ({f['label']}) — {f['type']}"]
+    used — this is now its single source.
+
+    ADR-0082 §2 / #1799: a `tag_vocabulary` key (a proposable tag-vocabulary
+    `entity_ref_list`, stamped by `_fields()`) overrides the type clause to say
+    the value is TITLES, not ids, and appends the "prefer existing" guidance
+    plus the live vocabulary in the SAME line — so the instruction is
+    actionable right where the model reads what to propose, not a separate
+    paragraph it has to cross-reference. `tag_vocabulary` is ranked by usage
+    (`_fields()`/`_tag_vocabulary_titles`) and capped; `tag_vocabulary_total`
+    (round 2, Y2) is the UNCAPPED count, so a truncated list says so rather
+    than silently reading as the whole vocabulary."""
+    tag_titles = f.get("tag_vocabulary")
+    is_tag_field = tag_titles is not None
+    type_clause = "tag titles — a JSON array of strings" if is_tag_field else f["type"]
+    parts = [f"- {f['id']} ({f['label']}) — {type_clause}"]
     if f.get("options"):
         parts.append(f"; one of: {', '.join(f['options'])}")
     if f.get("description"):
@@ -42,6 +55,20 @@ def _describe_field(f: dict[str, Any]) -> str:
                 for m in items
             )
             parts.append(f"; a JSON array of objects, each with keys: {members}")
+    if is_tag_field:
+        parts.append(
+            " Tags are shared labels for grouping across entries. Prefer tags "
+            "that already exist (listed below); propose a new one only if it "
+            "would plausibly apply to other entries; propose at most two or "
+            "three, never a keyword list."
+        )
+        if tag_titles:
+            parts.append(f" Existing tags: {', '.join(tag_titles)}.")
+            remaining = f.get("tag_vocabulary_total", len(tag_titles)) - len(tag_titles)
+            if remaining > 0:
+                parts.append(f" … and {remaining} more existing tags not listed.")
+        else:
+            parts.append(" No tags exist yet.")
     return "".join(parts)
 
 

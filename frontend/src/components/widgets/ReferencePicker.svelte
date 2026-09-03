@@ -39,8 +39,7 @@
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   // Tag nodes read from the store too (ADR-0082 slice 1), same reasoning: a ref
   // pointing at a tag resolves anywhere without the caller threading the roster.
-  import { canonicalIdIn, liveTags, tagById, refreshTagNodes, findTagByTitle, upsertTagNode } from "@/lib/stores/tagNodes";
-  import { api } from "@/lib/api";
+  import { canonicalIdIn, liveTags, tagById, refreshTagNodes, resolveOrCreateTag } from "@/lib/stores/tagNodes";
 
   let {
     field,
@@ -239,20 +238,18 @@
     createError = "";
     creating = true;
     try {
-      const existing = findTagByTitle(title, entryType);
-      if (existing) {
-        appendSelected(existing.id);
-        return;
-      }
-      const created = await api.createTagEntry(title.trim(), entryType, null, createLayerId ?? null);
-      // Land the POST's own response in the roster before emitting (P3) — the
-      // picker (and any other reader of tagById/tagTitleById) sees the new
-      // tag immediately, without waiting on a second round trip.
-      upsertTagNode(created);
-      appendSelected(created.id);
+      // The shared resolve-or-mint sequence (round 2, Y3) — lands the POST's
+      // own response in the roster (P3) before this returns, so `tagById`/
+      // `tagTitleById` see the new tag immediately, without waiting on a
+      // second round trip. Same sequence `resolveAdoptedTagItem`
+      // (`tagNodes.ts`) uses for an accepted AI tag-title flip, so the two
+      // can't drift on the "existing title wins over a duplicate" rule.
+      const tag = await resolveOrCreateTag(title.trim(), entryType, createLayerId ?? null);
+      appendSelected(tag.id);
       // Best-effort follow-up only — reconciles the roster with whatever else
-      // may have changed server-side, but the upsert above already made this
-      // create correct on its own; a failure here must not undo it.
+      // may have changed server-side, but the upsert inside `resolveOrCreateTag`
+      // already made this create correct on its own; a failure here must not
+      // undo it.
       void refreshTagNodes();
     } catch (e) {
       createError = e instanceof Error ? e.message : String(e);
@@ -319,9 +316,12 @@
          `entity_ref_list` share one vocabulary, differing only in how many pills
          show; the empty state is the picker's own add trigger, so an empty field
          reads as a slot a reference goes into. The section is a flex-wrap row
-         (see .controlled): inline and right-aligned for a single ref, stretched
-         to a full-width wrapping line for a list (the rail's `.fr-val.wide`
-         stretch), pills at natural width either way. -->
+         (see .controlled): inline and right-aligned when compact, stretched to a
+         full-width wrapping line when the rail marks the row `.fr-val.wide`
+         (#1810: MetadataPanel only does that for a list once it actually HOLDS
+         pills — an empty list stays compact, the add trigger right-aligned like
+         a single ref's, not stretched into its own left-aligned row), pills at
+         natural width either way. -->
     {#each refNodes as ref (ref.id)}
       {@render refPill(ref)}
     {/each}

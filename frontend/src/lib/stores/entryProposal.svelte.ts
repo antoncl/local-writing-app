@@ -28,9 +28,10 @@
 // callbacks are: the controller decides only WHAT the patch touches and WHEN to
 // write, never how. The host merges the fields into its own metadata state,
 // adopts the body through its prose buffer, and issues the explicit flush.
-import type { DiffView, EntryMetadata, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
+import type { DiffView, EntryMetadata, MetadataFieldDefinition, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
 import type { FieldFlip } from "@/lib/utils/entryRevision";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
+import { createTargetFor } from "@/lib/utils/pickerCreate";
 
 /** One structured (non-prose) field the patch proposes, reviewed as an atomic
  *  `{was, now}` flip in the frozen rail (ADR-0046 §2 / slice 3b): the value is
@@ -52,12 +53,35 @@ export type StructuredFlip = {
 // presentation is a #698 follow-up, the backend already salvages per item).
 // Dispatch by type alone, so a user-added field is indistinguishable from a
 // built-in one (§2).
+//
+// ADR-0082 §2 / #1797: a NARROW carve-out on `entity_ref_list` — a field whose
+// `picker_config` is a `create_missing` vocabulary resolving to exactly one
+// concrete `tag:*` type IS a structured flip (`isTagVocabularyField` below).
+// The backend resolves a title matching an EXISTING tag to its id but leaves
+// an unmatched title as a plain string (it never mints at validation — a
+// rejected proposal must leave the vocabulary untouched), so the value here
+// can be a MIXED array of ids and new-candidate titles. `MetadataPanel`'s
+// flip-candidate rendering tells the two apart via `tagTitleById` (a known id
+// renders its title; an unresolved string renders as a "new tag" candidate).
+// Minting happens only on ACCEPT — `resolveAdoptedTagFieldValue` (`tagNodes.ts`),
+// called from the host's `onAdoptFields` before the value reaches the buffer.
 const NON_STRUCTURED_TYPES: ReadonlySet<MetadataFieldType> = new Set<MetadataFieldType>([
   "long_text",
   "computed",
   "entity_ref",
   "entity_ref_list",
 ]);
+
+/** Whether `field` is an entity_ref_list into a tag vocabulary — a
+ *  `create_missing` picker_config resolving to exactly one concrete `tag:*`
+ *  entry type (ADR-0082 §2). Reuses `createTargetFor` (`pickerCreate.ts`) so
+ *  this can't disagree with the picker's own "Create ‹x›" gate or the
+ *  backend's mirrored predicate (`is_proposable_field`/`tag_vocabulary_target`,
+ *  `entry_patch.py`). */
+function isTagVocabularyField(field: MetadataFieldDefinition, schema: MetadataSchema): boolean {
+  if (field.type !== "entity_ref_list") return false;
+  return createTargetFor(field.picker_config, schema)?.kind === "tag";
+}
 
 // Structural identity fields that can never flip: `id` (opaque) and `entry_type`
 // (retyping is a different gesture). Mirrors the backend's non-proposable ids so
@@ -74,7 +98,11 @@ export class EntryProposalController {
   metadata = $state<EntryMetadata>({});
 
   // Wired by the host — the write side of a commit (see the module note).
-  onAdoptFields: ((fields: Record<string, MetadataValue>) => void) | null = null;
+  // May return a promise (#1797): a tag-vocabulary flip's adopted value can
+  // still carry unresolved titles (the backend never mints at validation),
+  // so the host's resolve-then-mint/find step is async — `commit()` awaits it
+  // before packaging + flushing, so a newly-minted id is what actually saves.
+  onAdoptFields: ((fields: Record<string, MetadataValue>) => void | Promise<void>) | null = null;
   onAdoptBody: ((body: string) => void | Promise<void>) | null = null;
   onEmitChange: (() => void) | null = null;
   // Wired by the host — the ONE explicit post that ends the transaction: cancel
@@ -118,10 +146,13 @@ export class EntryProposalController {
 
   /** The structured (non-prose) fields the patch proposes, each an atomic flip
    *  reviewed in the frozen rail (slice 3b). Excluded: `long_text` (run-diff,
-   *  above) and the body (separate); the non-proposable value types; the
-   *  structural `id`/`entry_type`; and `hidden` fields — the backend already
-   *  neither offers nor accepts a hidden field, and the rail can't render one, so
-   *  a stray proposal for one is simply ignored. `title` DOES flip — an adopted
+   *  above) and the body (separate); the non-proposable value types EXCEPT a
+   *  tag-vocabulary `entity_ref_list` (#1797 — `isTagVocabularyField`; its
+   *  `was` may mix resolved ids with unmatched titles, since the backend
+   *  never mints at validation — see the module note above); the structural
+   *  `id`/`entry_type`; and `hidden` fields — the backend already neither
+   *  offers nor accepts a hidden field, and the rail can't render one, so a
+   *  stray proposal for one is simply ignored. `title` DOES flip — an adopted
    *  rename rides through like any field (§host routes it to the title state).
    *  `now` reads the frozen `metadata` (fed title/status too), so the diff can't
    *  drift. */
@@ -133,10 +164,28 @@ export class EntryProposalController {
     for (const [fieldId, proposedValue] of Object.entries(proposal.fields)) {
       const field = schema.fields[fieldId];
       if (!field || field.hidden || NON_FLIPPABLE_FIELD_IDS.has(fieldId)) continue;
-      if (NON_STRUCTURED_TYPES.has(field.type)) continue;
+      if (NON_STRUCTURED_TYPES.has(field.type) && !isTagVocabularyField(field, schema)) continue;
       flips.push({ fieldId, was: proposedValue, now: this.metadata[fieldId] ?? null });
     }
     return flips;
+  });
+
+  /** Whether the open proposal touches a tag-vocabulary field (#1799) — the
+   *  host refreshes the tag-node roster (`refreshTagNodes()`) when true, so a
+   *  title the backend DID resolve to a real (but locally stale) id renders as
+   *  that tag's title rather than a false "new tag" candidate — the flip's
+   *  own chip strip tells known ids from unresolved titles purely by roster
+   *  membership (`MetadataPanel`'s `tagFlipItems`). Refreshing never mints
+   *  anything itself — only an ACCEPTED flip's `resolveAdoptedTagFieldValue`
+   *  does that. */
+  proposesTagField = $derived.by((): boolean => {
+    const proposal = this.proposal;
+    const schema = this.schema;
+    if (!proposal || !schema) return false;
+    return Object.keys(proposal.fields).some((fieldId) => {
+      const field = schema.fields[fieldId];
+      return !!field && isTagVocabularyField(field, schema);
+    });
   });
 
   /** The structured flips as MetadataPanel's `compare.fields` map — the same
@@ -169,6 +218,13 @@ export class EntryProposalController {
   // A boolean, not the value, so a proposal that clears a field to `null` is
   // still distinguishable from "declined" (both would be null-valued otherwise).
   adoptedStructured = $state<Record<string, boolean>>({});
+
+  // #1797 (round 2, Y1): a failed accept-time step (today: an ADOPTED
+  // tag-vocabulary flip's title→id resolve/mint, `resolveAdoptedTagFieldValue`)
+  // surfaces here — the overlay (`EntryReviewOverlay`) renders it. Cleared at
+  // the start of every `commit()` attempt and by `resetResolution()`, so a
+  // retry (or a superseded proposal) doesn't show a stale message.
+  commitError = $state<string | null>(null);
 
   // ---- the judge axis: which whole version the prose flips render (#710) -----
   //
@@ -277,6 +333,7 @@ export class EntryProposalController {
     this.resolvedBody = null;
     this.resolvedText = {};
     this.adoptedStructured = {};
+    this.commitError = null;
     // A fresh review opens on the interleaved diff — the judge toggle is a
     // per-review reading choice, not carried across proposals (#710).
     this.view = "both";
@@ -296,6 +353,7 @@ export class EntryProposalController {
    *  (ADR-0046 §1). A commit with nothing adopted is a plain dismiss (no write),
    *  exactly like "Close". */
   async commit(): Promise<boolean> {
+    this.commitError = null;
     const fields: Record<string, MetadataValue> = {};
     for (const [fieldId, value] of Object.entries(this.resolvedText)) {
       if (value !== null) fields[fieldId] = value;
@@ -310,7 +368,23 @@ export class EntryProposalController {
     const body = this.resolvedBody;
     const hasFields = Object.keys(fields).length > 0;
     if (hasFields || body !== null) {
-      if (hasFields) this.onAdoptFields?.(fields);
+      if (hasFields) {
+        try {
+          await this.onAdoptFields?.(fields);
+        } catch (err) {
+          // #1797 round 2 (Y1): an ADOPTED tag-vocabulary flip's accept-time
+          // title→id resolve/mint (`resolveAdoptedTagFieldValue`) can fail
+          // partway through a field's items (a `createTagEntry` rejects).
+          // Whatever it already minted before the failure STAYS — those are
+          // real, roster-visible tag nodes, nothing to roll back — but this
+          // field writes NOTHING (the merge into `metadata` below never
+          // runs) and the whole commit aborts here: no `onEmitChange`, no
+          // `onFlush`, the review stays open with the flip still pending so
+          // the author can retry. `commitError` is what the overlay renders.
+          this.commitError = err instanceof Error ? err.message : String(err);
+          return false;
+        }
+      }
       if (body !== null) await this.onAdoptBody?.(body);
       // Package body + metadata into the pane draft, then the single explicit
       // post. Unconditional so the fields-only path (no body) still writes.

@@ -25,11 +25,15 @@ from app.models import (
     CreateLoreEntryRequest,
     CreateSceneRequest,
     CreateStructureNodeRequest,
+    CreateTagEntryRequest,
     SaveLoreEntryRequest,
     SaveSceneRequest,
 )
 from app.models.schema import MetadataFieldDefinition
+from app.services import machine_settings as ms
+from app.services.ai import tokens as token_service
 from app.services.ai.entry_patch import is_proposable_field, parse_entry_patch_json
+from app.services.ai.field_contract import FieldContract
 from app.services.ai.helpers import (
     _fields,
     _type_name,
@@ -37,6 +41,19 @@ from app.services.ai.helpers import (
 )
 from app.services.machine_settings import palette as machine_palette
 from app.services.project.errors import ProjectServiceError
+
+
+def _ai_settings() -> ms.MachineSettings:
+    # No real keys — token counting falls back to the bake-in estimator.
+    return ms.MachineSettings(
+        providers=ms.ProviderCredentials(
+            anthropic_api_key="",
+            openai_api_key="",
+            openrouter_api_key="",
+            ollama_host="http://127.0.0.1:11434",
+        ),
+        default_provider="anthropic",
+    )
 
 
 def add_character_patch_fields(service, root: Path) -> None:
@@ -341,13 +358,13 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         # color's guidance explicitly steers off a hex code — the reported bug
         # was the model inventing a hex value + rationale for this field.
         self.assertIn("hex", by_id["color"]["description"].lower())
-        # ADR-0082 §2: `tags` is an entity_ref_list now — ADR-0046 §4 already
-        # excludes entity_ref/entity_ref_list from AI proposal (no reliable way
-        # to name the right node id), so `tags` moved from proposable to the
-        # same not-proposable-but-listed treatment `context_policy` gets below.
-        # It still carries its description.
+        # ADR-0082 §2 / #1797: `tags` is an entity_ref_list now, but its
+        # `picker_config` is a `create_missing` vocabulary of exactly one
+        # concrete `tag:*` type — the narrow carve-out that keeps it
+        # proposable (as TITLES, resolved to ids on validate), unlike an
+        # ordinary reference field (ADR-0046 §4 still excludes those).
         self.assertIn("tags", by_id)
-        self.assertFalse(by_id["tags"]["proposable"], "tags is a reference field now — not proposable")
+        self.assertTrue(by_id["tags"]["proposable"], "tags is a proposable tag vocabulary")
         self.assertTrue(
             (by_id["tags"].get("description") or "").strip(),
             "built-in field tags should carry a default description",
@@ -378,8 +395,12 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         # AND dropped if smuggled in.
         yes = MetadataFieldDefinition(name="Yes", type="text")
         no = MetadataFieldDefinition(name="No", type="text", ai_proposable=False)
-        self.assertTrue(is_proposable_field("yes", yes))
-        self.assertFalse(is_proposable_field("no", no))
+        # `schema` is required (round 2, Y4); a plain `text` field never
+        # consults it (only the ADR-0082 §2 tag-vocabulary carve-out does),
+        # but the call site must still supply one.
+        schema = self.service.read_metadata_schema()
+        self.assertTrue(is_proposable_field("yes", yes, schema))
+        self.assertFalse(is_proposable_field("no", no, schema))
 
     def test_stray_fields_body_is_dropped(self) -> None:
         # ADR-0059 §B/§E: `body` is single-sourced via the top-level "body" key;
@@ -867,6 +888,193 @@ class ColorFieldSnapTests(unittest.TestCase):
         snapped = patch.fields.get("hue")
         self.assertIn(snapped, self.palette_ids)
         self.assertNotIn(snapped, {"#0b6", "#00bb66"})
+
+
+class TagVocabularyProposalTests(unittest.TestCase):
+    """ADR-0082 §2 / #1797 / #1799 — a proposable tag-vocabulary
+    `entity_ref_list` field (`tags`, `assistant_tags`) proposes TITLES, exactly
+    as a writer would type them into the picker; the validator resolves a
+    title matching an EXISTING tag (case-insensitive) to its id and leaves an
+    unmatched title as a plain string — it NEVER mints a tag node here.
+    Minting is deferred to the author's ACCEPT (mirrors the picker's own
+    `create_missing`, which mints on the user's click): a proposal the author
+    rejects must leave the vocabulary untouched, never an orphan tag node."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Tag Proposal Tests")
+        self.hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
+        )
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_tags_is_proposable_but_a_plain_ref_list_stays_excluded(self) -> None:
+        # `single_concrete_target` requires exactly one concrete kind+type; a
+        # picker_config with no create_missing (an ordinary lore reference)
+        # must NOT pick up the carve-out.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["allies"] = {
+            "name": "Allies",
+            "type": "entity_ref_list",
+            "picker_config": {"sources": [{"kind": "lore"}]},
+        }
+        character = data["entry_types"].get("lore:character") or {}
+        own = list(character.get("fields") or [])
+        if "allies" not in own:
+            own.append("allies")
+        character["fields"] = own
+        data["entry_types"]["lore:character"] = character
+        self.service._write_yaml(schema_path, data)
+
+        schema = self.service.read_metadata_schema()
+        by_id = {f["id"]: f for f in _fields(self.service, schema, self.hero.id)}
+        self.assertTrue(by_id["tags"]["proposable"])
+        self.assertFalse(by_id["allies"]["proposable"])
+
+    def test_resolves_an_existing_title_case_insensitively(self) -> None:
+        existing = self.service.create_tag_entry(CreateTagEntryRequest(title="Politics", entry_type="tag:tag"))
+        patch = self.service.validate_ai_entry_patch(self.hero.id, '{"fields": {"tags": ["politics"]}}')
+        self.assertEqual(patch.dropped, [])
+        self.assertEqual(patch.fields["tags"], [existing.id])
+
+    def test_leaves_an_unknown_title_as_a_plain_string_and_mints_nothing(self) -> None:
+        # The core of the correction: validation is a REVIEW, not a write. A
+        # title matching nothing in the vocabulary rides through as-is, and no
+        # tag node is minted — an author who rejects this proposal must leave
+        # the vocabulary exactly as it was.
+        before = {t.id for t in self.service.list_tag_entries().tags}
+        patch = self.service.validate_ai_entry_patch(self.hero.id, '{"fields": {"tags": ["Seafaring"]}}')
+        self.assertEqual(patch.dropped, [])
+        self.assertEqual(patch.fields["tags"], ["Seafaring"])
+        after = {t.id for t in self.service.list_tag_entries().tags}
+        self.assertEqual(before, after)
+
+    def test_resolves_through_a_merged_into_redirect_to_the_survivor(self) -> None:
+        source = self.service.create_tag_entry(CreateTagEntryRequest(title="mirror", entry_type="tag:tag"))
+        target = self.service.create_tag_entry(CreateTagEntryRequest(title="mirrors", entry_type="tag:tag"))
+        self.service.merge_tag_entries(source.id, target.id)
+        patch = self.service.validate_ai_entry_patch(self.hero.id, '{"fields": {"tags": ["mirror"]}}')
+        self.assertEqual(patch.fields["tags"], [target.id])
+
+    def test_dedupes_repeated_and_case_variant_titles_that_match_an_existing_tag(self) -> None:
+        existing = self.service.create_tag_entry(CreateTagEntryRequest(title="Politics", entry_type="tag:tag"))
+        patch = self.service.validate_ai_entry_patch(
+            self.hero.id, '{"fields": {"tags": ["Politics", "politics", "POLITICS"]}}'
+        )
+        self.assertEqual(patch.dropped, [])
+        self.assertEqual(patch.fields["tags"], [existing.id])
+
+    def test_dedupes_repeated_and_case_variant_titles_that_match_nothing(self) -> None:
+        # Unmatched titles dedupe on their own axis (case-insensitive), and the
+        # FIRST casing seen wins — no id involved since nothing was minted.
+        patch = self.service.validate_ai_entry_patch(
+            self.hero.id, '{"fields": {"tags": ["Seafaring", "seafaring", "SEAFARING"]}}'
+        )
+        self.assertEqual(patch.dropped, [])
+        self.assertEqual(patch.fields["tags"], ["Seafaring"])
+        self.assertEqual(self.service.list_tag_entries().tags, [])
+
+    def test_drops_empty_strings_and_skips_unresolvable_non_string_items(self) -> None:
+        patch = self.service.validate_ai_entry_patch(
+            self.hero.id, '{"fields": {"tags": ["Politics", "  ", 5, null, "Politics"]}}'
+        )
+        # The field itself is NOT dropped whole — a non-string/blank item is
+        # skipped individually, like the picker ignoring a blank typed name.
+        # "Politics" matches no existing tag, so it survives as a bare title,
+        # deduped to one occurrence.
+        self.assertEqual(patch.dropped, [])
+        self.assertEqual(patch.fields["tags"], ["Politics"])
+
+    def test_a_non_list_proposal_drops_the_whole_field(self) -> None:
+        patch = self.service.validate_ai_entry_patch(self.hero.id, '{"fields": {"tags": "Politics"}}')
+        self.assertEqual(patch.fields, {})
+        self.assertIn("tags", patch.dropped)
+
+    def test_prompt_preview_carries_the_guidance_and_the_vocabulary(self) -> None:
+        for title in ["Action", "Betrayal", "Politics"]:
+            self.service.create_tag_entry(CreateTagEntryRequest(title=title, entry_type="tag:tag"))
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Revise entry"))
+        env = create_environment_for_project(self.service)
+        rendered = env.from_string(prompt.body).render(inputs={"entry": self.hero.id, "entry_type": ""})
+        self.assertIn("Prefer tags that already exist", rendered)
+        self.assertIn("Action, Betrayal, Politics", rendered)
+        # No id ever reaches the prompt (anti-goal): the raw tag ids the
+        # entries above were minted with must not appear anywhere in it.
+        self.assertNotRegex(rendered, r"\btag_[0-9a-f]+\b")
+
+    def test_vocabulary_is_capped_at_60_alphabetical_among_ties_and_carries_the_total(self) -> None:
+        # Round 2 (Y2): every candidate here has usage 0 (no backlinks), so
+        # ranking degrades entirely to the alphabetical tiebreak — this pins
+        # that degradation, plus the cap and the new `tag_vocabulary_total`.
+        for i in range(70):
+            self.service.create_tag_entry(CreateTagEntryRequest(title=f"Tag {i:02d}", entry_type="tag:tag"))
+        schema = self.service.read_metadata_schema()
+        by_id = {f["id"]: f for f in _fields(self.service, schema, self.hero.id)}
+        vocabulary = by_id["tags"]["tag_vocabulary"]
+        self.assertEqual(len(vocabulary), 60)
+        self.assertEqual(vocabulary, sorted(vocabulary))
+        self.assertEqual(vocabulary[0], "Tag 00")
+        self.assertEqual(by_id["tags"]["tag_vocabulary_total"], 70)
+
+    def test_vocabulary_ranks_by_usage_before_the_alphabetical_tiebreak(self) -> None:
+        # Round 2 (Y2): "Zephyr" outranks the alphabetically-earlier "Alpha"/
+        # "Beta" once it has backlinks — usage beats alphabetical, which only
+        # decides ties.
+        zephyr = self.service.create_tag_entry(CreateTagEntryRequest(title="Zephyr", entry_type="tag:tag"))
+        self.service.create_tag_entry(CreateTagEntryRequest(title="Alpha", entry_type="tag:tag"))
+        self.service.create_tag_entry(CreateTagEntryRequest(title="Beta", entry_type="tag:tag"))
+        second = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Second", entry_type="lore:character")
+        )
+        for entry in (self.hero, second):
+            self.service.save_lore_entry(
+                entry.id,
+                SaveLoreEntryRequest(
+                    title=entry.title,
+                    body="",
+                    base_revision=entry.revision,
+                    entry_type="lore:character",
+                    metadata={"tags": [zephyr.id]},
+                ),
+            )
+        schema = self.service.read_metadata_schema()
+        by_id = {f["id"]: f for f in _fields(self.service, schema, self.hero.id)}
+        vocabulary = by_id["tags"]["tag_vocabulary"]
+        self.assertEqual(vocabulary[0], "Zephyr")
+        self.assertEqual(vocabulary[1:], ["Alpha", "Beta"])  # tied at 0 usage, alphabetical
+
+    def test_prompt_preview_notes_truncation_when_the_vocabulary_overflows_the_cap(self) -> None:
+        for i in range(65):
+            self.service.create_tag_entry(CreateTagEntryRequest(title=f"Tag {i:02d}", entry_type="tag:tag"))
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Revise entry"))
+        env = create_environment_for_project(self.service)
+        rendered = env.from_string(prompt.body).render(inputs={"entry": self.hero.id, "entry_type": ""})
+        self.assertIn("and 5 more existing tags not listed", rendered)
+
+    def test_prompt_preview_token_cost_of_the_tags_guidance_line_is_bounded(self) -> None:
+        # #1799: the "prefer existing" guidance plus a 60-title vocabulary ride
+        # in the SAME roster line every revise-mode render pays for. Measured
+        # here so a future wording/cap change can't silently blow the budget —
+        # the number is reported (not just asserted) so a reviewer can judge it.
+        for i in range(60):
+            self.service.create_tag_entry(CreateTagEntryRequest(title=f"Tag {i:02d}", entry_type="tag:tag"))
+        schema = self.service.read_metadata_schema()
+        tags_descriptor = next(f for f in _fields(self.service, schema, self.hero.id) if f["id"] == "tags")
+        fc = FieldContract()
+        fc.store(tags_descriptor)
+        rendered = fc.render
+        tokens = token_service.count_tokens(
+            rendered, provider="anthropic", model="claude-sonnet-4-6", settings=_ai_settings()
+        )
+        self.assertGreater(tokens, 0)
+        # A loose ceiling: one field's worth of guidance, not a second prompt.
+        # A regression here should be a deliberate wording/cap change, not a
+        # silent creep as the built-in field's description text grows.
+        self.assertLess(tokens, 400)
 
 
 if __name__ == "__main__":

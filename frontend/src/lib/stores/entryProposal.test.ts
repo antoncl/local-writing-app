@@ -1,7 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// Mocked so the round 2 (Y1/Y8) host-simulation tests can control
+// `api.createTagEntry` without hitting the network — the controller itself
+// never imports `@/lib/api` (writes route through host callbacks), so this
+// mock only matters to the tests that stub a host's `onAdoptFields`.
+const { listTagEntries, createTagEntry } = vi.hoisted(() => ({
+  listTagEntries: vi.fn(),
+  createTagEntry: vi.fn(),
+}));
+vi.mock("@/lib/api", () => ({ api: { listTagEntries, createTagEntry } }));
+
 import { EntryProposalController } from "./entryProposal.svelte";
 import { entryBrainstorm } from "./entryBrainstorm.svelte";
+import { clearTagNodes, resolveAdoptedTagFieldValue, tagNodesStore } from "./tagNodes";
+import { createTargetFor } from "@/lib/utils/pickerCreate";
 import type { EntryPatch, MetadataSchema } from "@/lib/types";
 
 // The controller is the entry-pane end of the ADR-0046 review: it derives which
@@ -32,6 +44,34 @@ const schema = {
     id: { name: "ID", type: "text", intrinsic: true, hidden: true, options: [] },
     mentor: { name: "Mentor", type: "entity_ref", options: [] },
     score: { name: "Score", type: "computed", options: [] },
+  },
+} as unknown as MetadataSchema;
+
+// A tag-vocabulary entity_ref_list (`create_missing` resolving to exactly one
+// concrete `tag:*` type, ADR-0082 §2) alongside a plain reference list, so the
+// carve-out's schema-driven predicate (`isTagVocabularyField`) has both a
+// field that should flip and one that must stay excluded like any other
+// `entity_ref_list`.
+const tagSchema = {
+  entry_types: {
+    "tag:tag": { name: "Tag", kind: "tag" },
+  },
+  fields: {
+    tags: {
+      name: "Tags",
+      type: "entity_ref_list",
+      options: [],
+      picker_config: {
+        create_missing: true,
+        sources: [{ kind: "tag", expr: { type: "tag:tag" } }],
+      },
+    },
+    refs: {
+      name: "Related",
+      type: "entity_ref_list",
+      options: [],
+      picker_config: { sources: [{ kind: "lore" }] },
+    },
   },
 } as unknown as MetadataSchema;
 
@@ -416,6 +456,191 @@ describe("EntryProposalController — structured field flips (slice 3b)", () => 
     c.resetResolution();
     expect(c.isStructuredAdopted("allegiance")).toBe(false);
     expect(c.hasPendingChanges).toBe(false);
+  });
+});
+
+describe("EntryProposalController — tag-vocabulary flip (ADR-0082 §2 / #1797)", () => {
+  beforeEach(() => {
+    for (const id of ["e1", "e2"]) entryBrainstorm.clear(id);
+  });
+
+  function tagController(nodeId: string): EntryProposalController {
+    const c = new EntryProposalController();
+    c.nodeId = nodeId;
+    c.schema = tagSchema;
+    return c;
+  }
+
+  it("renders a tags flip, its value possibly MIXING ids and unresolved titles — a plain ref list stays excluded", () => {
+    // The backend only resolves a title matching an EXISTING tag; an unknown
+    // one rides through as a plain string (never minted at validation) — the
+    // controller passes it through untouched either way, agnostic to which.
+    const c = tagController("e1");
+    c.metadata = { tags: ["tag_old"], refs: ["lore_x"] };
+    entryBrainstorm.propose("e1", patch(null, { tags: ["tag_new1", "Brand New Title"], refs: ["lore_y"] }));
+    expect(c.structuredFlips).toEqual([
+      { fieldId: "tags", was: ["tag_new1", "Brand New Title"], now: ["tag_old"] },
+    ]);
+  });
+
+  it("adopting a tags flip hands the host the value AS-IS — the controller never resolves/mints", async () => {
+    // Resolving a still-bare title to an id (finding or minting) is the
+    // HOST's job on ACCEPT (`onAdoptFields`, NodeEditor.svelte /
+    // `resolveAdoptedTagFieldValue`, tagNodes.ts) — the controller only
+    // accumulates the resolution and hands off the raw proposed value.
+    const c = tagController("e1");
+    const onAdoptFields = vi.fn();
+    c.onAdoptFields = onAdoptFields;
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    entryBrainstorm.propose("e1", patch(null, { tags: ["tag_new1", "Brand New Title"] }));
+
+    c.toggleStructured("tags");
+    await c.commit();
+
+    expect(onAdoptFields).toHaveBeenCalledWith({ tags: ["tag_new1", "Brand New Title"] });
+  });
+
+  it("commit awaits an async onAdoptFields before flushing — so a resolve-then-mint step lands first", async () => {
+    const c = tagController("e1");
+    const order: string[] = [];
+    c.onAdoptFields = async () => {
+      order.push("adopt-start");
+      await Promise.resolve();
+      order.push("adopt-end");
+    };
+    c.onEmitChange = () => order.push("emit");
+    c.onFlush = async () => {
+      order.push("flush");
+      return true;
+    };
+    entryBrainstorm.propose("e1", patch(null, { tags: ["Brand New Title"] }));
+    c.toggleStructured("tags");
+    await c.commit();
+    expect(order).toEqual(["adopt-start", "adopt-end", "emit", "flush"]);
+  });
+
+  it("proposesTagField flags a proposal touching a tag-vocabulary field, not a plain ref list", () => {
+    const plainRef = tagController("e1");
+    entryBrainstorm.propose("e1", patch(null, { refs: ["lore_y"] }));
+    expect(plainRef.proposesTagField).toBe(false);
+
+    const tagField = tagController("e2");
+    entryBrainstorm.propose("e2", patch(null, { tags: ["tag_new1"] }));
+    expect(tagField.proposesTagField).toBe(true);
+  });
+
+  it("proposesTagField is false with no proposal", () => {
+    expect(tagController("e1").proposesTagField).toBe(false);
+  });
+
+  it("Y1: a failed onAdoptFields keeps the review open, writes nothing, and surfaces the error", async () => {
+    const c = tagController("e1");
+    const onEmitChange = vi.fn();
+    const onFlush = vi.fn();
+    c.onAdoptFields = vi.fn().mockRejectedValue(new Error("network down"));
+    c.onEmitChange = onEmitChange;
+    c.onFlush = onFlush;
+    entryBrainstorm.propose("e1", patch(null, { tags: ["A", "B", "C"] }));
+    c.toggleStructured("tags");
+
+    const ok = await c.commit();
+
+    expect(ok).toBe(false);
+    // The whole commit aborts at the failed step — no emit, no flush (a tag
+    // that DID mint before the failure is still a real node; there's simply
+    // no PUT for this field's value).
+    expect(onEmitChange).not.toHaveBeenCalled();
+    expect(onFlush).not.toHaveBeenCalled();
+    expect(c.commitError).toBe("network down");
+    // The review stays open with the flip still pending, so a retry is just
+    // clicking Done again.
+    expect(c.proposal).not.toBeNull();
+    expect(c.isStructuredAdopted("tags")).toBe(true);
+  });
+
+  it("commitError clears on a fresh commit attempt and on resetResolution", async () => {
+    const c = tagController("e1");
+    c.onAdoptFields = vi.fn().mockRejectedValue(new Error("boom"));
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    entryBrainstorm.propose("e1", patch(null, { tags: ["A"] }));
+    c.toggleStructured("tags");
+    await c.commit();
+    expect(c.commitError).toBe("boom");
+
+    c.resetResolution();
+    expect(c.commitError).toBeNull();
+  });
+});
+
+describe("EntryProposalController — host accept/reject rule (ADR-0082 §2, round 2 Y8)", () => {
+  // A minimal stand-in for NodeEditor.svelte's `onAdoptFields` (#1797): for
+  // each field whose picker_config is a tag vocabulary, resolve its value
+  // through the SAME `resolveAdoptedTagFieldValue` the real host calls. Not a
+  // mock of the host — the real resolve/mint function, with only `api`
+  // mocked underneath — so this proves the CONTRACT (reject creates nothing,
+  // accept mints once per new title) end to end from the controller's own
+  // commit(), not just that a stub was invoked.
+  function wireHost(c: EntryProposalController, schema: MetadataSchema, createLayerId: string | null): void {
+    c.onAdoptFields = async (fields) => {
+      const next = { ...fields };
+      for (const fieldId of Object.keys(next)) {
+        const field = schema.fields[fieldId];
+        const target = field ? createTargetFor(field.picker_config, schema) : null;
+        if (target?.kind !== "tag") continue;
+        next[fieldId] = await resolveAdoptedTagFieldValue(next[fieldId], target.entryType, createLayerId);
+      }
+    };
+  }
+
+  function tagController(nodeId: string): EntryProposalController {
+    const c = new EntryProposalController();
+    c.nodeId = nodeId;
+    c.schema = tagSchema;
+    return c;
+  }
+
+  beforeEach(() => {
+    for (const id of ["e1", "e2"]) entryBrainstorm.clear(id);
+    listTagEntries.mockReset();
+    createTagEntry.mockReset();
+    clearTagNodes();
+  });
+
+  it("rejecting a tag flip never calls api.createTagEntry", async () => {
+    const c = tagController("e1");
+    wireHost(c, tagSchema, null);
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    entryBrainstorm.propose("e1", patch(null, { tags: ["Brand New Title"] }));
+    // Deliberately NOT toggled adopted — "Close"/discard, not accept.
+
+    await c.commit();
+
+    expect(createTagEntry).not.toHaveBeenCalled();
+  });
+
+  it("accepting a tag flip mints once per new title, resolving an already-known id without a call", async () => {
+    // Seed the roster with an already-resolved id (the validator's own kind
+    // of resolution, from an EXISTING tag) alongside two bare new titles.
+    tagNodesStore.set([{ id: "tag_known", title: "Known", entry_type: "tag:tag", metadata: {} }]);
+    const c = tagController("e1");
+    wireHost(c, tagSchema, "layer_1");
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    createTagEntry
+      .mockResolvedValueOnce({ id: "tag_a", title: "Alpha", entry_type: "tag:tag", metadata: {} })
+      .mockResolvedValueOnce({ id: "tag_b", title: "Beta", entry_type: "tag:tag", metadata: {} });
+    entryBrainstorm.propose("e1", patch(null, { tags: ["tag_known", "Alpha", "Beta"] }));
+    c.toggleStructured("tags");
+
+    const ok = await c.commit();
+
+    expect(ok).toBe(true);
+    expect(createTagEntry).toHaveBeenCalledTimes(2);
+    expect(createTagEntry).toHaveBeenNthCalledWith(1, "Alpha", "tag:tag", null, "layer_1");
+    expect(createTagEntry).toHaveBeenNthCalledWith(2, "Beta", "tag:tag", null, "layer_1");
   });
 });
 

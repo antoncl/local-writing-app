@@ -32,6 +32,7 @@ from app.models import (
 from app.services.ai.entry_patch import (
     is_proposable_field,
     parse_entry_patch_json,
+    tag_vocabulary_target,
 )
 from app.services.color_snap import nearest_swatch_id
 from app.services.machine_settings import palette as machine_palette
@@ -46,6 +47,10 @@ from app.services.project.node_index import NodeIndex, NodeIndexEntry
 from app.services.project.references import REFERENCE_BEARING_KINDS
 
 log = logging.getLogger(__name__)
+
+# Sentinel for "`_resolve_ai_field_value` could not adopt this field" — never
+# `None`, which is itself a legal proposed value (clearing a field).
+_AI_FIELD_DROPPED = object()
 
 
 @dataclass(frozen=True)
@@ -452,40 +457,115 @@ class MetadataValuesMixin:
                 if (
                     field is None
                     or field_id not in allowed_field_ids
-                    or not is_proposable_field(field_id, field)
+                    or not is_proposable_field(field_id, field, schema)
                 ):
                     dropped.append(field_id)
                     continue
-                # References are excluded above, so no node index is needed.
-                errors = self._validate_metadata_field_value(
-                    "AI patch", field_id, value, field, node_index=None
-                )
-                if errors:
-                    # A field with any illegal value drops WHOLE — for `list`
-                    # fields too (#698). The prompt asks the model for the
-                    # complete replacement list, so keeping only the valid
-                    # items and letting the author adopt that partial list
-                    # would silently delete the entry's other items while the
-                    # UI reports the field as merely "ignored". Dropping whole
-                    # leaves the current value untouched; per-item validation
-                    # still names the offending item in the error the author
-                    # can act on (`field[2].status must be one of …`).
+                resolved = self._resolve_ai_field_value(field_id, value, field, schema)
+                if resolved is _AI_FIELD_DROPPED:
                     dropped.append(field_id)
                     continue
-                if field.type == "color":
-                    # A colour field's value space IS the palette (#696). The AI
-                    # can emit a raw hex or an unknown name, which would surface
-                    # as a literal in the review card and resolve to no swatch
-                    # once adopted (the colour silently lost). Snap it back into
-                    # the palette; drop the field if it can't be mapped at all.
-                    snapped = nearest_swatch_id(value, self._palette()) if isinstance(value, str) else None
-                    if snapped is None:
-                        dropped.append(field_id)
-                        continue
-                    value = snapped
-                fields[field_id] = value
+                fields[field_id] = resolved
 
         return AIEntryPatch(body=body_value, fields=fields, dropped=dropped)
+
+    def _resolve_ai_field_value(
+        self, field_id: str, value: Any, field: MetadataFieldDefinition, schema: MetadataSchema
+    ) -> Any:
+        """The value `validate_ai_entry_patch_for_type` adopts for one already-
+        proposable field, or the `_AI_FIELD_DROPPED` sentinel (never `None` —
+        a proposed `None`/`""` is itself a legal "clear this field" value, so
+        it can't double as "drop"). Split out of the main loop to keep it under
+        the complexity gate (#76); each branch is a self-contained per-type
+        adoption rule, in the same order the inline version used to run them.
+
+        ADR-0082 §2 / #1797: a tag-vocabulary `entity_ref_list` proposes
+        TITLES, never ids — resolved here (case-insensitive match in the
+        vocabulary; an unmatched title is left as a plain string, NEVER
+        minted here — see `_resolve_ai_tag_titles`) ahead of the generic
+        reference validator, which would otherwise read every title as an
+        unknown node id and drop the field whole.
+        """
+        tag_target = tag_vocabulary_target(field, schema) if field.type == "entity_ref_list" else None
+        if tag_target is not None:
+            resolved = self._resolve_ai_tag_titles(value, tag_target)
+            return _AI_FIELD_DROPPED if resolved is None else resolved
+        # References are excluded above, so no node index is needed.
+        errors = self._validate_metadata_field_value("AI patch", field_id, value, field, node_index=None)
+        if errors:
+            # A field with any illegal value drops WHOLE — for `list` fields
+            # too (#698). The prompt asks the model for the complete
+            # replacement list, so keeping only the valid items and letting
+            # the author adopt that partial list would silently delete the
+            # entry's other items while the UI reports the field as merely
+            # "ignored". Dropping whole leaves the current value untouched;
+            # per-item validation still names the offending item in the error
+            # the author can act on (`field[2].status must be one of …`).
+            return _AI_FIELD_DROPPED
+        if field.type == "color":
+            # A colour field's value space IS the palette (#696). The AI can
+            # emit a raw hex or an unknown name, which would surface as a
+            # literal in the review card and resolve to no swatch once
+            # adopted (the colour silently lost). Snap it back into the
+            # palette; drop the field if it can't be mapped at all.
+            snapped = nearest_swatch_id(value, self._palette()) if isinstance(value, str) else None
+            return _AI_FIELD_DROPPED if snapped is None else snapped
+        return value
+
+    def _resolve_ai_tag_titles(self, value: Any, target_entry_type: str) -> list[str] | None:
+        """Resolve a proposed tag-vocabulary value — a list of TITLES, exactly
+        as a writer would type them into the picker — against the EXISTING
+        vocabulary only (#1797). ``None`` when ``value`` isn't a list at all
+        (the whole field drops, like any other shape error); a non-string or
+        blank-after-trim item is silently skipped rather than failing the
+        field, mirroring how the picker itself ignores a blank typed name.
+
+        Matching is case-insensitive against every `target_entry_type` tag's
+        title in the merged layer chain (`_build_assistant_index`, the same
+        index `TagNodesMixin` reads) — including a merged-away title, which
+        resolves through `canonical_id` to its survivor (ADR-0082 §5) exactly
+        as an ordinary reference read does. A title matching nothing is left
+        as the plain proposed string, verbatim — validation NEVER mints a tag
+        node. Minting is an ACCEPT-time action, mirroring the picker's own
+        `create_missing`: the picker mints on the user's click, not while the
+        typed name is merely being considered, and a proposal the author
+        rejects must leave the vocabulary untouched (no orphan tag nodes from
+        a review nobody adopted). The frontend resolves any string surviving
+        in the field's ADOPTED value the same way (`resolveAdoptedTagFieldValue`,
+        `tagNodes.ts`) when the author accepts that flip.
+
+        The result is a list that MIXES known ids and new-candidate titles,
+        each deduped on its own axis (first occurrence wins) — a match dedupes
+        by id, an unmatched title dedupes case-insensitively by its own text —
+        so a model proposing the same tag twice, under two castings, writes it
+        once either way."""
+        if not isinstance(value, list):
+            return None
+        index = self._build_assistant_index()
+        title_to_id: dict[str, str] = {}
+        for entry in index.by_id.values():
+            if entry.kind == "tag" and entry.entry_type == target_entry_type:
+                title_to_id.setdefault(entry.title.strip().lower(), index.canonical_id(entry.id))
+        resolved: list[str] = []
+        seen_ids: set[str] = set()
+        seen_new_titles: set[str] = set()
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            title = item.strip()
+            if not title:
+                continue
+            key = title.lower()
+            tag_id = title_to_id.get(key)
+            if tag_id is not None:
+                if tag_id not in seen_ids:
+                    seen_ids.add(tag_id)
+                    resolved.append(tag_id)
+                continue
+            if key not in seen_new_titles:
+                seen_new_titles.add(key)
+                resolved.append(title)
+        return resolved
 
     def _strip_unknown_metadata_fields(
         self,

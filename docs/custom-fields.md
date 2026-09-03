@@ -26,7 +26,8 @@ what you'll see in the type picker.
 - A colour to tint the Entry in lists and on boards → **Colour**
 - **One** choice from a set you decide — a status of *Alive / Dead / Missing* → **Select**
 - **Several** choices from a set you decide — roles from *Protagonist / Ally / Villain* → **Select, Multiple**
-- Loose labels you invent as you go and reuse for filtering — themes, moods → **Tags**
+- Loose labels you invent as you go and reuse for filtering — themes, moods →
+  **Entry Reference, Multiple**, sourced from **Tags** (see below)
 - A link to **one** other Entry — a character's home → **Entry Reference**
 - Links to **several** other Entries — a character's allies → **Entry Reference, Multiple**
 - A growing list you keep adding to — aliases, goals, relationships → **List**
@@ -46,13 +47,12 @@ ones apart.
 | **Colour** | a swatch to tint the Entry | the character's colour on the board |
 | **Select** | one option from a fixed set | "Status": *Alive* |
 | **Select, Multiple** | several options from a fixed set | "Roles": *Ally*, *Comic relief* |
-| **Tags** | free labels you make up and reuse | "protagonist", "arc-2" |
 | **Entry Reference** | a link to one other Entry | "Home" → a location |
 | **Entry Reference, Multiple** | links to several Entries | "Allies" → other characters |
 | **List** | a list you keep adding to, in order | "Aliases", "Goals" |
 | **Computed** | a value the app fills in | "Word count" |
 
-## Select, Tags, and List — telling the "list-like" types apart
+## Select, a Tags reference list, and List — telling the "list-like" types apart
 
 Several types can all look like "a list of things." The difference is *where the
 choices come from* and *whether the list grows*:
@@ -63,10 +63,15 @@ choices come from* and *whether the list grows*:
   choices are known and shared — a status, a set of roles, the factions in your
   world. When you define the field you also write the options (and can give each
   a colour).
-- **Tags** are **free labels with no fixed set** — you type a new one whenever you
-  need it, and it becomes available to reuse everywhere. Reach for Tags when you
-  want to sprinkle loose, evolving labels across many Entries and filter by them
-  later, without committing to a list of allowed values up front.
+- A **Tags reference list** — an **Entry Reference, Multiple** field sourced from
+  **Tags** — has **no fixed set**: pick from tags that already exist, and if the
+  name you type matches nothing, tick **Offer to create a new entry when the
+  typed name matches nothing** and the picker mints it on the spot, right there in
+  the field. That's exactly what the built-in **Tags** field is; you can also
+  source a field from a tag type of your own (a **vocabulary**, defined under the
+  Tag kind in Custom Data) to keep a second, separate set of labels. Reach for
+  this when you want to sprinkle loose, evolving labels across many Entries and
+  filter by them later, without committing to a list of allowed values up front.
 - **List** is for a collection that **keeps growing and whose order
   matters** — a character's aliases in the order they were used, a plotline's
   beats in sequence. Unlike the Select types it isn't a pick-from-options control;
@@ -75,8 +80,8 @@ choices come from* and *whether the list grows*:
 
 A quick way to choose: *Is there a fixed set of allowed values?* If yes and you
 pick one, **Select**; if yes and you pick several, **Select, Multiple**. If the
-labels are open-ended, **Tags**. If it's an open, ordered collection you build up
-over time, **List**.
+labels are open-ended, an **Entry Reference, Multiple** sourced from **Tags**. If
+it's an open, ordered collection you build up over time, **List**.
 
 ## Lists and their item shape
 
@@ -99,7 +104,8 @@ Groups are defined **once**, under **Groups**, and reused — so the same shape
 elsewhere without redrawing it each time. In the *Items are…* dropdown your
 existing groups appear together, above the single-value options. If a group
 isn't offered, it's because one of its sub-fields is a type that can't sit inside
-a list yet (links to other Entries and Tags are the exceptions in this version).
+a list yet (a Select, Multiple or a Computed field, for instance — a link to
+another Entry, single or multiple, is fine inside a group).
 
 You can't leave the item shape unset — a list has to know what its items are
 before you can save it.
@@ -116,7 +122,10 @@ A few more options round out a field, and none of them are technical:
 - **Section** — an optional heading that groups related fields together in the
   Entry's panel, so a long list of fields stays tidy.
 - **Default for new entries** — an optional starting value every new Entry of this
-  type begins with, so you're not filling the same thing in each time.
+  type begins with, so you're not filling the same thing in each time. Applies to
+  value fields (Text, Number, Select, and the like); a reference field — an Entry
+  Reference or a Tags field — has no default, since there's no id you could type
+  in ahead of time.
 
 ## A note on Computed fields
 

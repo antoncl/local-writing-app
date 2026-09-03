@@ -218,7 +218,7 @@
   mode={appearance?.mode ?? paneViews.defaultModeFor("lore")}
   density={appearance?.density ?? undefined}
   frameParents
-  searchPlaceholder="Search entries, tags, aliases"
+  searchPlaceholder="Search entries, #tags, aliases"
   bind:searchValue={searchQuery}
   filter={loreSearchFilter}
   active={(entry) => focusedDocument?.type === "lore" && focusedDocument.id === entry.id}

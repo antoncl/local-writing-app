@@ -14,7 +14,7 @@ fields is the **[Custom fields](#guide:custom-fields)** guide; letting a fact
 
 Open the **Lore** pane and you'll see your entries, grouped by type — all your
 Characters together, then Locations, and so on, each group showing a count. A
-**Search entries, tags, aliases** box at the top filters as you type. A fresh
+**Search entries, #tags, aliases** box at the top filters as you type. A fresh
 project shows *"No entries yet."*
 
 The way entries are grouped and ordered is itself a **view**, and the pane's view
@@ -86,13 +86,16 @@ aliases current so nicknames are caught.
 ## Tags
 
 Tags are a light, cross-cutting way to organise — *protagonist*, *chapter-3*,
-*needs-revision*. In an entry's **Details**, the tag field lets you type a tag and
-press Enter (or comma) to add it, and Backspace to remove the last one; the **+**
-button (*Add known tags*) offers tags already used elsewhere, so they stay
-consistent.
+*needs-revision*. A tag is an entry in its own right, of its own kind — a Tags
+field on an entry just holds references to them. Open a Tags field's picker and
+pick from the tags that already exist; type a name that matches nothing (case is
+ignored) and the picker offers **Create "‹name›"** to mint it on the spot.
 
-To rename, merge, or recolour tags across the whole project, use **≡ menu →
-Manage all tags…**.
+The **Tags** pane (**≡ menu → Manage all tags…**) lists every tag, grouped by
+vocabulary, each with a count of how many entries carry it. From there you can
+open a tag to rename it, recolour it, merge it into another tag, or delete it.
+Merging keeps every entry that carried the old tag — they now read, filter, and
+count as the tag you merged into.
 
 ## Organising a large world
 

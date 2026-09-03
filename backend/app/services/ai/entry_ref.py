@@ -108,13 +108,17 @@ class EntryRef:
         if kind == "research":
             return self._project.read_research_note(self._id)
         if kind == "plot":
-            # A plot node — card or plotline — is a first-class Node a prompt
-            # can pull in (revise-plot-card / revise-plotline). Board and
-            # template are not revisable subjects, so they stay unresolved.
+            # A plot node — card, plotline, or character arc — is a first-class
+            # Node a prompt can pull in (revise-plot-card / revise-plotline /
+            # revise-character-arc). The arc is a plot:thread SIBLING of the
+            # plotline (ADR-0080), so it needs its own branch. Board and template
+            # are not revisable subjects, so they stay unresolved.
             if idx_entry.entry_type == "plot:plotline":
                 return self._project.read_plotline(self._id)
             if idx_entry.entry_type == "plot:card":
                 return self._project.read_card(self._id)
+            if idx_entry.entry_type == "plot:character_arc":
+                return self._project.read_character_arc(self._id)
             return _MISSING
         return _MISSING
 

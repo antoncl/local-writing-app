@@ -270,3 +270,57 @@ Delivery: **3a** (backend — the arc `color` field, arc HTTP routes, and the bo
 enumerate arcs and carry per-beat holder-subtype + character) then **3b** (frontend — the arc board node in
 its own band, the change-pill treatment above, the character + colour pickers, and closing the
 instantiate-an-arc dead-end the type split left).
+
+## Amendment 2 — arc reasoning is a transformation + causation lens (2026-09-03)
+
+The Consequences noted that an arc reaches the AI "as a character's change-track bound to a named character
+— richer context, on the existing path." That is the *data* (delivered as the `<character_arc>` element in
+the plot-context). This amendment records the *reasoning* the AI does with it, which the plotline prompts do
+not already cover.
+
+A plotline prompt reasons about **event structure** — is the beat sequence complete, where are the gaps,
+what pays off out of order. A character arc needs a different read on two axes, and neither is expressible as
+"a plotline with different beats":
+
+1. **Transformation coherence.** The question of an arc is not *is the sequence complete* but *is the change
+   earned* — the want and the lie shaping it, pressure the old belief cannot solve, the truth glimpsed, the
+   lie made costly, the choice from the changed belief, the changed self shown in action. This vocabulary is
+   the arc template's own (`ai_use_guidance` / `global_diagnostic_questions` / `common_weak_spots`), and it
+   already reaches the model per-arc through `<character_arc>`'s `use_guidance` / `diagnostic_questions` /
+   `weak_spots`. The prompt's job is to tell the model to *read in that register* — transformation, not
+   sequence — and to use each arc's carried guidance.
+
+2. **Causation, which is inherently cross-thread.** An arc's change is *earned by the plotline events that
+   cause it* — the ADR's own cause→effect thesis (§Context, "a character arc = the change those events
+   cause"). The board already expresses this in the data: a single card can fulfil **both** a plotline
+   event-beat and an arc change-beat, and the card's rendered `<fulfils>` shows both. So the causal evidence
+   is legible — a change-beat fulfilled by a card that *also* advances an external event is earned; a
+   change-beat **no card fulfils** is a change the prose asserts but never dramatizes; a change that lands
+   *before* the events that would cause it is unearned.
+
+**This lives across the existing plot prompts, not in a new subsystem.** Because causation is cross-thread,
+a siloed arc-only diagnostic would be blind to what earns the change — so the *whole-board* diagnostic is
+where the arc read belongs. Three surfaces, all user-authorable `.md` under `builtin_library/prompts/` (the
+diagnose-plot / revise-per-family split already exists):
+
+- **`diagnose-plot.md` gains an arc section** — the whole-board diagnostic reads arcs alongside the
+  plotlines and cards that cause their changes; it judges each arc as earned-by-causation and groups arc
+  findings under the character.
+- **A new `revise-character-arc.md`** — the missing sibling to `revise-plotline.md` (`offer_on:
+  plot:character_arc`, the same extract-to-node commit loop and field machinery), carrying the deep
+  single-arc transformation lens toward a committable change-beat roster and description.
+- **`revise-plot-card.md` gains an arc-advancement read** — a card can advance both an event and a change,
+  so a card revision asks whether this card moves the want→need / tests the lie for any arc it touches, and
+  whether that change is earned by what the card actually dramatizes. (This also corrects the paragraph's
+  pre-ADR-0080 loose use of "arcs" for plotlines.)
+
+**Anti-goals.** No invented psychology the board does not show — the arc prompts hold the same discipline the
+plotline prompts already state ("never invent cards, beats, or events that aren't there"); reason from the
+cards, beats, and causation the board carries. And no separate arc-reasoning machinery — same plot-context,
+same commit loop, same teaching-artifact standard (a reader learns the arc read by copying these, and
+`revise-character-arc.md` stands as the worked sibling to `revise-plotline.md`).
+
+Delivery: one slice — the `diagnose-plot.md` arc section, the new `revise-character-arc.md`, and the
+`revise-plot-card.md` update, with tests that the arc reasoning renders and the new prompt ships and routes.
+No model or transport change (Amendment-2 is prompt prose over the data Amendment-1's delivery already
+carries).

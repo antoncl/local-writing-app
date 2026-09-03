@@ -509,15 +509,16 @@ export const LIST_ITEM_SCALAR_TYPES = ["text", "long_text", "number", "boolean",
 export type ListItemScalarType = (typeof LIST_ITEM_SCALAR_TYPES)[number];
 
 // The types an item_group MEMBER may be (ADR-0081): the scalars above plus the
-// reference types. Broader than the item_type sugar (which stays scalar-only) —
-// a named group member can hold a reference, because the reference lifecycle
-// reaches a nested ref (indexed / scrubbed / healed like a top-level one). `tags`
-// joins in slice 3 (with its lifecycle descent). Used for group-shape filtering
-// in the schema editor. Mirrors the backend LIST_ITEM_GROUP_MEMBER_TYPES.
+// reference/tag types. Broader than the item_type sugar (which stays scalar-only)
+// — a named group member can hold a reference or tags, because their lifecycles
+// reach a nested value (a ref indexed / scrubbed / healed, a tag canonicalised /
+// renamed, like a top-level one). Used for group-shape filtering in the schema
+// editor. Mirrors the backend LIST_ITEM_GROUP_MEMBER_TYPES.
 export const LIST_ITEM_GROUP_MEMBER_TYPES = [
   ...LIST_ITEM_SCALAR_TYPES,
   "entity_ref",
   "entity_ref_list",
+  "tags",
 ] as const;
 
 // One choice in a select / multi_select field, or a select prompt input.

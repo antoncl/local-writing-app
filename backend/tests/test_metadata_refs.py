@@ -135,6 +135,31 @@ def test_strip_hides_a_nested_dangling_ref_and_keeps_a_live_one() -> None:
     assert cleaned["pov"] == "char_a"                # live top-level ref kept
 
 
+def test_traversal_reaches_a_nested_tags_member() -> None:
+    # ADR-0081 slice 3: the tag lifecycle (canonicalise/rename) rides the same
+    # traversal, so it must yield + rewrite a tags value inside a group member.
+    schema = MetadataSchema(
+        fields={
+            "meta": MetadataFieldDefinition(
+                name="Meta",
+                type="list",
+                item_group="m",
+                item_scalar=False,
+                item_members=[GroupMember(key="topic", name="Topic", type="tags")],
+            ),
+        },
+    )
+    metadata = {"meta": [{"topic": ["a", "b"]}, {"topic": ["c"]}]}
+    occ = [(o.field_id, o.member_key, o.field.type, o.value) for o in iter_ref_occurrences(metadata, schema)]
+    assert occ == [("meta", "topic", "tags", ["a", "b"]), ("meta", "topic", "tags", ["c"])]
+
+    cleaned, changed = rewrite_ref_occurrences(metadata, schema, lambda o: [t.upper() for t in o.value])
+    assert changed is True
+    assert cleaned["meta"][0]["topic"] == ["A", "B"]
+    assert cleaned["meta"][1]["topic"] == ["C"]
+    assert metadata["meta"][0]["topic"] == ["a", "b"]  # input unmutated
+
+
 def test_resolve_reference_titles_swaps_a_nested_id_for_its_title() -> None:
     # ADR-0081 slice 2: display resolution reaches a nested ref, so it shows the
     # target's title, not a raw id.

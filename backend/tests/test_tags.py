@@ -176,6 +176,68 @@ class LayeredTagsTests(unittest.TestCase):
         self.assertEqual([tag["name"] for tag in self._raw_tags(self.root)], ["grayson"])
         self.assertEqual([tag["name"] for tag in self._raw_tags(self.universe)], ["treecat"])
 
+    def _seed_tags_group_field(self) -> None:
+        """Give lore:character a `notes` list field whose item_group has a tags
+        member, so a tag can live nested (ADR-0081 slice 3)."""
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("groups", {})["topics"] = {
+            "name": "Topics",
+            "members": [{"key": "topic", "name": "Topic", "type": "tags"}],
+        }
+        data.setdefault("fields", {})["notes"] = {"name": "Notes", "type": "list", "item_group": "topics"}
+        et = data.setdefault("entry_types", {}).setdefault(
+            "lore:character", {"name": "Character", "kind": "lore", "fields": []}
+        )
+        et.setdefault("fields", []).append("notes")
+        self.service._write_yaml(schema_path, data)
+
+    def test_a_tag_inside_a_group_member_is_registered_and_canonicalised(self) -> None:
+        # ADR-0081 slice 3: the tag lifecycle descends into an item_group member —
+        # a nested tag is registered in this layer and casing-canonicalised on
+        # save, exactly as a top-level tag. A top-level-only walk leaves it
+        # unregistered (the tag silent mis-link).
+        self._seed_tags_group_field()
+        entry = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Zed", entry_type="lore:character")
+        )
+        saved = self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title="Zed",
+                body="x",
+                base_revision=entry.revision,
+                entry_type="lore:character",
+                metadata={"notes": [{"topic": ["Hero", "hero"]}]},
+            ),
+        )
+        # Registered in this layer's tags.yaml (invisible to a top-level-only walk).
+        self.assertIn("Hero", [tag["name"] for tag in self._raw_tags(self.root)])
+        # Canonicalised in the saved node: dup casing collapses to first-seen "Hero".
+        self.assertEqual(saved.metadata["notes"][0]["topic"], ["Hero"])
+
+    def test_renaming_a_tag_descends_into_a_group_member(self) -> None:
+        # ADR-0081 slice 3: a tag rename (merge) rewrites a nested tag value, not
+        # just top-level tags fields. A top-level-only rename leaves the nested tag
+        # pointing at the old name (a stale/mis-linked tag).
+        self._seed_tags_group_field()
+        entry = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Ripley", entry_type="lore:character")
+        )
+        self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title="Ripley",
+                body="x",
+                base_revision=entry.revision,
+                entry_type="lore:character",
+                metadata={"notes": [{"topic": ["Hero"]}]},
+            ),
+        )
+        self.service.merge_tags(MergeTagsRequest(sources=["hero"], target="Protagonist"))
+        updated = self.service.read_lore_entry(entry.id)
+        self.assertEqual(updated.metadata["notes"][0]["topic"], ["Protagonist"])
+
     def test_reusing_an_inherited_tag_writes_only_the_local_assertion(self) -> None:
         # The tag is known (merged), so it is not re-registered as new; the
         # broadening it triggers is recorded HERE as this layer's assertion, and

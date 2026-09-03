@@ -91,10 +91,14 @@ def _cost_rank(bucket: AICostBucket) -> tuple[float, int, str]:
     return (-(bucket.cost_usd or 0.0), -bucket.count, bucket.key)
 
 
-def _bucket_targets(record: dict[str, Any], label_for: Any) -> list[tuple[str, str, str]]:
-    """The (breakdown, key, label) buckets one row lands in."""
+def _bucket_targets(
+    record: dict[str, Any], resolve_node: Any
+) -> list[tuple[str, str, str, bool]]:
+    """The (breakdown, key, label, openable) buckets one row lands in.
+    `openable` is True only for a node-keyed bucket whose id resolves to a
+    live node; the non-node breakdowns (model, day) are never openable."""
     model = _str_field(record, "model")
-    targets = [("by_model", model, model or "unknown model")]
+    targets = [("by_model", model, model or "unknown model", False)]
     for name, key_field in (
         ("by_chat", "chat_session_id"),
         ("by_scene", "scene_id"),
@@ -102,10 +106,11 @@ def _bucket_targets(record: dict[str, Any], label_for: Any) -> list[tuple[str, s
     ):
         node_id = _str_field(record, key_field)
         if node_id:
-            targets.append((name, node_id, label_for(node_id)))
+            label, openable = resolve_node(node_id)
+            targets.append((name, node_id, label, openable))
     day = _day_of(record)
     if day:
-        targets.append(("by_day", day, day))
+        targets.append(("by_day", day, day, False))
     return targets
 
 
@@ -215,12 +220,19 @@ class AiInvocationsMixin:
         # never pays for it.
         index: Any = None
 
-        def label_for(node_id: str) -> str:
+        def resolve_node(node_id: str) -> tuple[str, bool]:
+            """(label, openable) for a node-keyed bucket. `openable` is True
+            when the id still resolves to a live indexed node — a deleted /
+            never-a-node id is inert (the frontend labels it "(deleted …)").
+            A live but title-less node stays openable, falling back to its id
+            as the label."""
             nonlocal index
             if index is None:
                 index = self._build_node_index()
             entry = index.by_id.get(node_id)
-            return entry.title if entry is not None and entry.title else node_id
+            if entry is None:
+                return node_id, False
+            return (entry.title or node_id), True
 
         names = ("by_model", "by_chat", "by_scene", "by_prompt", "by_day")
         breakdowns: dict[str, dict[str, AICostBucket]] = {name: {} for name in names}
@@ -235,8 +247,10 @@ class AiInvocationsMixin:
             if cost is None:
                 totals.unpriced_count += 1
             totals.total_cost_usd = _add_cost(totals.total_cost_usd, cost)
-            for name, key, label in _bucket_targets(record, label_for):
-                bucket = breakdowns[name].setdefault(key, AICostBucket(key=key, label=label))
+            for name, key, label, openable in _bucket_targets(record, resolve_node):
+                bucket = breakdowns[name].setdefault(
+                    key, AICostBucket(key=key, label=label, openable=openable)
+                )
                 bucket.count += 1
                 bucket.input_tokens += input_tokens
                 bucket.output_tokens += output_tokens

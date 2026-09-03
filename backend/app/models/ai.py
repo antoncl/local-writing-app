@@ -806,6 +806,11 @@ class AICostBucket(BaseModel):
     unknown stays distinct from 0.0 on the wire, the same `saw_priced` policy
     `ChatSession.cost_usd_total` follows (#697). `unpriced_count` says how
     many rows in the bucket had no price (unknown-cost models).
+
+    `openable` is True only for a node-keyed bucket (by_chat / by_scene /
+    by_prompt) whose `key` still resolves to a live node — the frontend opens
+    those on click and renders the rest ("(deleted chat)", etc.) as inert
+    (#1709). by_model / by_day are not nodes, so it stays False for them.
     """
     key: str
     label: str
@@ -814,6 +819,7 @@ class AICostBucket(BaseModel):
     unpriced_count: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    openable: bool = False
 
 
 class AICostSummary(BaseModel):

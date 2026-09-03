@@ -1,13 +1,19 @@
 <script lang="ts">
   // AI Spend pane (#10): project-wide AI cost rollup — headline total plus
   // by-model / by-chat / by-scene / by-prompt / by-day breakdowns over the
-  // invocation ledger. Aggregate buckets, not Nodes, so this is a bespoke
-  // stats surface rather than a NodeList (the widget-taxonomy carve-out for
-  // non-node data). Cost fields arrive nullable: null means "no priced row
-  // in this scope" and renders as — via formatCostEur, never €0.00 (#697).
+  // invocation ledger. The by-model / by-day breakdowns are aggregate labels,
+  // not nodes, so they stay a bespoke stats surface (the widget-taxonomy
+  // carve-out for non-node data). The by-chat / by-scene / by-prompt rows ARE
+  // nodes, so they render as NodeRows that open on click (#1709) — a bucket
+  // whose node was deleted comes back `openable: false` and renders inert as
+  // "(deleted …)". Cost fields arrive nullable: null means "no priced row in
+  // this scope" and renders as — via formatCostEur, never €0.00 (#697).
   import { untrack } from "svelte";
   import { aiSpend, SPEND_RANGES } from "@/lib/stores/aiSpend.svelte";
+  import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import SegmentedControl from "@/components/widgets/SegmentedControl.svelte";
+  import NodeList from "@/components/widgets/NodeList.svelte";
+  import NodeRow from "@/components/widgets/NodeRow.svelte";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import type { AICostBucket } from "@/lib/types";
 
@@ -36,6 +42,14 @@
     ];
     if (bucket.unpriced_count > 0) parts.push(`${bucket.unpriced_count} unpriced`);
     return parts.join(" · ");
+  }
+
+  async function openNode(nodeId: string, kind: string): Promise<void> {
+    try {
+      await editorPanes.openNodeOfKind(nodeId, kind);
+    } catch (e) {
+      editorPanes.setError(e instanceof Error ? e.message : "Couldn't open that item.");
+    }
   }
 </script>
 
@@ -77,32 +91,80 @@
         </small>
       </div>
 
-      {@render bucketSection("By model", summary.by_model, "ai-spend-by-model")}
-      {@render bucketSection("By chat", summary.by_chat, "ai-spend-by-chat")}
-      {@render bucketSection("By scene", summary.by_scene, "ai-spend-by-scene")}
-      {@render bucketSection("By prompt", summary.by_prompt, "ai-spend-by-prompt")}
-      {@render bucketSection("By day", summary.by_day, "ai-spend-by-day")}
+      {@render statSection("By model", summary.by_model, "ai-spend-by-model")}
+      {@render nodeSection("By chat", summary.by_chat, "ai-spend-by-chat", "chat", "chat")}
+      {@render nodeSection("By scene", summary.by_scene, "ai-spend-by-scene", "manuscript", "scene")}
+      {@render nodeSection("By prompt", summary.by_prompt, "ai-spend-by-prompt", "prompt", "prompt")}
+      {@render statSection("By day", summary.by_day, "ai-spend-by-day")}
     </div>
   {:else if !aiSpend.error}
     <p class="muted">Loading…</p>
   {/if}
 </div>
 
-{#snippet bucketSection(label: string, buckets: AICostBucket[], testid: string)}
+{#snippet costTrailing(bucket: AICostBucket)}
+  {#if bucket.unpriced_count > 0}
+    <span class="spend-row-note">{bucket.unpriced_count} unpriced</span>
+  {/if}
+  <span class="spend-row-cost">{formatCostEur(bucket.cost_usd)}</span>
+{/snippet}
+
+<!-- Non-node breakdowns (model, day): aggregate labels, so plain stat rows. -->
+{#snippet statSection(label: string, buckets: AICostBucket[], testid: string)}
   {#if buckets.length > 0}
     <section class="spend-section">
       <div class="spend-section-label">{label}</div>
-      <ul class="spend-rows" data-testid={testid}>
-        {#each buckets as bucket (bucket.key)}
-          <li class="spend-row" title={bucketTitle(bucket)}>
-            <span class="spend-row-label">{bucket.label}</span>
-            {#if bucket.unpriced_count > 0}
-              <span class="spend-row-note">{bucket.unpriced_count} unpriced</span>
+      <div class="spend-rows-scroll">
+        <ul class="spend-rows" data-testid={testid}>
+          {#each buckets as bucket (bucket.key)}
+            <li class="spend-row" title={bucketTitle(bucket)}>
+              <span class="spend-row-label">{bucket.label}</span>
+              {@render costTrailing(bucket)}
+            </li>
+          {/each}
+        </ul>
+      </div>
+    </section>
+  {/if}
+{/snippet}
+
+<!-- Node breakdowns (chat, scene, prompt): rows ARE nodes → NodeRow that
+     opens on click; a bucket whose node was deleted renders inert (#1709). -->
+{#snippet nodeSection(
+  label: string,
+  buckets: AICostBucket[],
+  testid: string,
+  kind: string,
+  noun: string,
+)}
+  {#if buckets.length > 0}
+    <section class="spend-section">
+      <div class="spend-section-label">{label}</div>
+      <div class="spend-rows-scroll" data-testid={testid}>
+        <NodeList mode="tree" density="dense">
+          {#each buckets as bucket (bucket.key)}
+            {#if bucket.openable}
+              <NodeRow
+                title={bucket.label}
+                dataNodeId={bucket.key}
+                ariaLabel={`${bucket.label} — ${bucketTitle(bucket)}`}
+                onClick={() => void openNode(bucket.key, kind)}
+              >
+                {#snippet trailing()}{@render costTrailing(bucket)}{/snippet}
+              </NodeRow>
+            {:else}
+              <NodeRow
+                title={`(deleted ${noun})`}
+                clickable={false}
+                dimmed
+                ariaLabel={`Deleted ${noun} — ${bucketTitle(bucket)}`}
+              >
+                {#snippet trailing()}{@render costTrailing(bucket)}{/snippet}
+              </NodeRow>
             {/if}
-            <span class="spend-row-cost">{formatCostEur(bucket.cost_usd)}</span>
-          </li>
-        {/each}
-      </ul>
+          {/each}
+        </NodeList>
+      </div>
     </section>
   {/if}
 {/snippet}
@@ -174,6 +236,15 @@
     letter-spacing: 0.07em;
     text-transform: uppercase;
     margin-bottom: var(--sp-1);
+  }
+
+  /* Bound each section's height so a long breakdown (by_day grows ~365
+     rows/year, by_chat one per chat ever used) scrolls within itself
+     instead of stacking unbounded and burying the sections below it
+     (#1709). Short sections never reach the cap, so no scrollbar shows. */
+  .spend-rows-scroll {
+    max-height: 15rem;
+    overflow-y: auto;
   }
 
   .spend-rows {

@@ -9,15 +9,19 @@ costs, so the surfaces can never disagree about which rows count.
 
 from __future__ import annotations
 
+import csv
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import yaml
 from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
 from app.main import app
+from app.services.project.ai_invocations import (
+    INVOCATION_CSV_COLUMNS,
+    invocation_record_to_csv_row,
+)
 
 
 class AICostSummaryEndpointTests(unittest.TestCase):
@@ -33,17 +37,18 @@ class AICostSummaryEndpointTests(unittest.TestCase):
     def _write_rows(self, rows: list[dict]) -> None:
         """Hand-craft the sidecar log so tests can control `ts` and
         `chat_session_id`/`scene_id` freely — the append endpoint always
-        stamps `ts` itself.
+        stamps `ts` itself. Emits the ledger's CSV format through the same
+        shared flattener the writer and the v9 migration use, so a test row
+        is byte-for-byte a real one.
         """
-        path = self.root / "ai_invocations.yaml"
-        existing: list[dict] = []
-        if path.exists():
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            existing = list(data.get("invocations", []))
-        path.write_text(
-            yaml.safe_dump({"invocations": existing + rows}, sort_keys=False),
-            encoding="utf-8",
-        )
+        path = self.root / "ai_invocations.csv"
+        is_new = not path.exists() or path.stat().st_size == 0
+        with path.open("a", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=INVOCATION_CSV_COLUMNS)
+            if is_new:
+                writer.writeheader()
+            for record in rows:
+                writer.writerow(invocation_record_to_csv_row(record))
 
     def test_empty_project_has_zero_totals_and_empty_buckets(self) -> None:
         response = self.client.get("/api/ai/invocations/summary")

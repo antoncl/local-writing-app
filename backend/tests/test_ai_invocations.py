@@ -59,7 +59,7 @@ class AIInvocationLogEndpointTests(unittest.TestCase):
         self.assertEqual(body["usage"]["input_tokens"], 1000)
         self.assertAlmostEqual(body["cost_usd"], 0.0123, places=6)
         # File on disk.
-        log_path = self.root / "ai_invocations.yaml"
+        log_path = self.root / "ai_invocations.csv"
         self.assertTrue(log_path.exists())
 
     def test_list_filters_by_scene_id(self) -> None:
@@ -105,23 +105,21 @@ class AIInvocationLogEndpointTests(unittest.TestCase):
         costs = sorted(inv["cost_usd"] for inv in body["invocations"])
         self.assertEqual(costs, [0.01, 0.02, 0.03])
 
-    def test_malformed_log_records_are_skipped_gracefully(self) -> None:
+    def test_truncated_final_line_is_skipped_gracefully(self) -> None:
         self.client.post(
             "/api/ai/invocations",
             json={"scene_id": "scene_1", "cost_usd": 0.04},
         )
-        # Hand-corrupt one record in the YAML.
-        path = self.root / "ai_invocations.yaml"
-        import yaml as _yaml
-        data = _yaml.safe_load(path.read_text(encoding="utf-8"))
-        data["invocations"].append("not a dict")
-        data["invocations"].append({"id": "missing required fields"})
-        path.write_text(
-            _yaml.safe_dump(data, sort_keys=False), encoding="utf-8"
-        )
-        # The valid record still comes back; the bad ones are dropped.
+        # A crash mid-append leaves a truncated final line (fewer columns than
+        # the header). The reader skips it whole rather than erroring, and the
+        # real row survives — the append-only ledger loses at most that partial
+        # last line (#1801).
+        path = self.root / "ai_invocations.csv"
+        with path.open("a", encoding="utf-8", newline="") as handle:
+            handle.write("inv_truncated,2026-09-03T00:00:00Z,,\n")
         body = self.client.get("/api/ai/invocations").json()
         self.assertEqual(len(body["invocations"]), 1)
+        self.assertAlmostEqual(body["invocations"][0]["cost_usd"], 0.04, places=6)
 
 
 class CostComputedFieldTests(unittest.TestCase):
@@ -467,6 +465,158 @@ class ChatSessionCostViaLogTests(unittest.TestCase):
         row = self._last_row(chat_id)
         self.assertEqual(row["model"], "config-model")
         self.assertEqual(row["provider"], "config-prov")
+
+
+class InvocationCsvSerializationTests(unittest.TestCase):
+    """The CSV row contract (#1801): flatten/reconstitute round-trips, the
+    empty-cell = None sentinels (unpriced cost, uncaptured usage), and
+    tolerance (a truncated line is dropped; a bad value degrades). Drives the
+    shared module helpers directly — no project on disk."""
+
+    def _readback(self, csv_text: str) -> list[dict]:
+        import csv
+        import io
+
+        from app.services.project.ai_invocations import csv_row_to_invocation_record
+
+        rows = [
+            csv_row_to_invocation_record(row)
+            for row in csv.DictReader(io.StringIO(csv_text))
+        ]
+        return [row for row in rows if row is not None]
+
+    def _round_trip(self, record: dict) -> dict:
+        import csv
+        import io
+
+        from app.services.project.ai_invocations import (
+            INVOCATION_CSV_COLUMNS,
+            invocation_record_to_csv_row,
+        )
+
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=INVOCATION_CSV_COLUMNS)
+        writer.writeheader()
+        writer.writerow(invocation_record_to_csv_row(record))
+        (back,) = self._readback(buffer.getvalue())
+        return back
+
+    def _header(self) -> str:
+        from app.services.project.ai_invocations import INVOCATION_CSV_COLUMNS
+
+        return ",".join(INVOCATION_CSV_COLUMNS)
+
+    def test_columns_match_the_documented_schema(self) -> None:
+        from app.services.project.ai_invocations import INVOCATION_CSV_COLUMNS
+
+        self.assertEqual(
+            list(INVOCATION_CSV_COLUMNS),
+            [
+                "id",
+                "ts",
+                "prompt_entry_id",
+                "prompt_entry_type",
+                "scene_id",
+                "character_id",
+                "chat_session_id",
+                "provider",
+                "model",
+                "cost_usd",
+                "usage_input_tokens",
+                "usage_cached_input_tokens",
+                "usage_cache_write_tokens",
+                "usage_output_tokens",
+            ],
+        )
+
+    def test_full_record_round_trips(self) -> None:
+        record = {
+            "id": "inv_1",
+            "ts": "2026-09-03T10:00:00.000000Z",
+            "prompt_entry_id": "prompt_9",
+            "prompt_entry_type": "prompt:general",
+            "scene_id": "manuscript_7",
+            "character_id": "lore_a",
+            "chat_session_id": "chat_5",
+            "provider": "anthropic",
+            "model": "claude-sonnet-5",
+            "cost_usd": 0.049,
+            "usage": {
+                "input_tokens": 4200,
+                "cached_input_tokens": 1300,
+                "cache_write_tokens": 800,
+                "output_tokens": 1100,
+            },
+        }
+        back = self._round_trip(record)
+        for field in (
+            "id",
+            "ts",  # byte-for-byte: day filtering keys off ts[:10]
+            "prompt_entry_id",
+            "prompt_entry_type",
+            "scene_id",
+            "character_id",
+            "chat_session_id",
+            "provider",
+            "model",
+        ):
+            self.assertEqual(back[field], record[field], field)
+        self.assertAlmostEqual(back["cost_usd"], 0.049, places=6)
+        self.assertEqual(back["usage"], record["usage"])
+
+    def test_none_cost_reads_back_as_none_not_zero(self) -> None:
+        back = self._round_trip({"id": "inv_1", "ts": "t", "cost_usd": None})
+        self.assertIsNone(back["cost_usd"])
+
+    def test_absent_usage_reads_back_absent_not_zeroed(self) -> None:
+        back = self._round_trip({"id": "inv_1", "ts": "t", "cost_usd": 0.01})
+        self.assertNotIn("usage", back)
+
+    def test_captured_zero_usage_stays_distinct_from_absent(self) -> None:
+        # An all-zero usage block is a real capture (e.g. a fully cache-served
+        # turn), not "no usage recorded" — the four empty-cells sentinel is
+        # reserved for the latter.
+        record = {
+            "id": "inv_1",
+            "ts": "t",
+            "cost_usd": 0.0,
+            "usage": {
+                "input_tokens": 0,
+                "cached_input_tokens": 0,
+                "cache_write_tokens": 0,
+                "output_tokens": 0,
+            },
+        }
+        back = self._round_trip(record)
+        self.assertEqual(back["usage"], record["usage"])
+
+    def test_token_counts_round_trip_as_ints_not_floats(self) -> None:
+        back = self._round_trip(
+            {"id": "inv_1", "ts": "t", "usage": {"input_tokens": 4200}}
+        )
+        self.assertEqual(back["usage"]["input_tokens"], 4200)
+        self.assertIsInstance(back["usage"]["input_tokens"], int)
+
+    def test_garbage_cost_cell_degrades_to_unpriced_not_dropped(self) -> None:
+        # The old YAML reader let a non-numeric cost fall through to unpriced
+        # rather than dropping the row; the CSV reader keeps that tolerance.
+        text = f"{self._header()}\ninv_1,t,,,,,,,,not-a-number,,,,\n"
+        (back,) = self._readback(text)
+        self.assertEqual(back["id"], "inv_1")
+        self.assertIsNone(back["cost_usd"])
+
+    def test_truncated_final_line_is_the_only_drop(self) -> None:
+        text = f"{self._header()}\ninv_ok,t,,,,,,,,0.05,,,,\ninv_cut,t,,\n"
+        rows = self._readback(text)
+        self.assertEqual([row["id"] for row in rows], ["inv_ok"])
+
+    def test_unknown_extra_column_is_ignored_additively(self) -> None:
+        # Readers key by header name, so a column a newer writer adds never
+        # breaks an older reader — the known fields still resolve (#1801).
+        text = f"{self._header()},future_flag\ninv_1,t,,,,,,,,0.05,,,,,X\n"
+        (back,) = self._readback(text)
+        self.assertEqual(back["id"], "inv_1")
+        self.assertAlmostEqual(back["cost_usd"], 0.05, places=6)
 
 
 if __name__ == "__main__":

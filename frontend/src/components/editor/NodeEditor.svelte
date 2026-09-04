@@ -16,8 +16,7 @@
   import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
-  import { refreshTagNodes, resolveAdoptedTagFieldValue } from "@/lib/stores/tagNodes";
-  import { createTargetFor } from "@/lib/utils/pickerCreate";
+  import { refreshTagNodes, resolveAdoptedTagFields } from "@/lib/stores/tagNodes";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
   import { notchWhen } from "@/lib/utils/snapshotTime";
@@ -460,12 +459,9 @@
     // propagate — deliberately not caught: `EntryProposalController.commit()`
     // (round 2, Y1) is what turns it into `commitError` + an aborted commit
     // that keeps the review open, so there's nothing to handle at this layer.
-    for (const fieldId of Object.keys(next)) {
-      const field = metadataSchema?.fields[fieldId];
-      const target = field ? createTargetFor(field.picker_config, metadataSchema) : null;
-      if (target?.kind !== "tag") continue;
-      next[fieldId] = await resolveAdoptedTagFieldValue(next[fieldId], target.entryType, createLayerId ?? null);
-    }
+    // Shared with treeActions' create-from-draft accept moment (#1821) —
+    // see `resolveAdoptedTagFields`'s doc comment.
+    await resolveAdoptedTagFields(next, metadataSchema, createLayerId ?? null);
     metadata = { ...metadata, ...next };
   };
   // Body adopt/read route to the ACTIVE body view: the raw editor for a code body

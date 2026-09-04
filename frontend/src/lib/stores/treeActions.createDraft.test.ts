@@ -11,11 +11,34 @@ import { treeActions } from "./treeActions.svelte";
 import { api } from "@/lib/api";
 import { editorPanes } from "./editorPanes.svelte";
 import { metadataSchemaStore } from "./schema";
-import type { CardEntry, LoreEntry, LoreEntryList, MetadataSchema } from "@/lib/types";
+import { clearTagNodes, refreshTagNodes } from "./tagNodes";
+import type { CardEntry, LoreEntry, LoreEntryList, MetadataSchema, TagEntry } from "@/lib/types";
 
 const SCHEMA = {
   entry_types: { "lore:character": { name: "Character" }, "plot:card": { name: "Card" } },
   fields: {},
+} as unknown as MetadataSchema;
+
+// #1821 — a tag-vocabulary field (create_missing resolving to exactly one
+// concrete `tag:*` type), same shape entryProposal.test.ts's tagSchema uses,
+// so createTargetFor resolves { kind: "tag", entryType: "tag:tag" } off it.
+const SCHEMA_WITH_TAGS = {
+  entry_types: {
+    "lore:character": { name: "Character" },
+    "plot:card": { name: "Card" },
+    "tag:tag": { name: "Tag", kind: "tag" },
+  },
+  fields: {
+    tags: {
+      name: "Tags",
+      type: "entity_ref_list",
+      options: [],
+      picker_config: {
+        create_missing: true,
+        sources: [{ kind: "tag", expr: { type: "tag:tag" } }],
+      },
+    },
+  },
 } as unknown as MetadataSchema;
 
 function mintedEntry(title: string): LoreEntry {
@@ -162,5 +185,98 @@ describe("treeActions.createNodeFromDraft (ADR-0046 §6.4 / ADR-0048 §5)", () =
       fields: { title: "   " },
     });
     expect(api.createLoreEntry).toHaveBeenCalledWith("New Character", "lore:character");
+  });
+});
+
+// #1821 — the create-from-draft path resolves a tag-vocabulary field's
+// proposed titles through the SAME resolveAdoptedTagFieldValue NodeEditor's
+// onAdoptFields uses, so a title the vocabulary doesn't hold mints as an id
+// before the entry is created, never lands in the PUT as a bare string.
+describe("treeActions.createNodeFromDraft — tag-vocabulary fields (#1821, ADR-0082 §2)", () => {
+  function tagEntry(id: string, title: string): TagEntry {
+    return { id, title, entry_type: "tag:tag", metadata: {} };
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    metadataSchemaStore.set(SCHEMA_WITH_TAGS);
+    clearTagNodes();
+    treeActions.run = async (action) => {
+      try {
+        await action();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    vi.spyOn(api, "createLoreEntry").mockImplementation(async (title: string) =>
+      mintedEntry(title),
+    );
+    vi.spyOn(api, "saveLoreEntry").mockImplementation(async (entry: LoreEntry) => entry);
+    vi.spyOn(api, "listLoreEntries").mockResolvedValue({ entries: [] } as LoreEntryList);
+    vi.spyOn(editorPanes, "openLore").mockResolvedValue(undefined as never);
+    vi.spyOn(api, "listTagEntries").mockResolvedValue({ tags: [tagEntry("tag_setting01", "Setting")] });
+    vi.spyOn(api, "createTagEntry").mockImplementation(async (title: string) => tagEntry("tag_elysian01", title));
+  });
+
+  it("resolves a mix of an existing (case-insensitive) title and a new one before the PUT", async () => {
+    await refreshTagNodes();
+    const createdId = await treeActions.createNodeFromDraft("lore:character", {
+      body: "b",
+      fields: { title: "Seren", tags: ["setting", "elysian"] },
+    });
+
+    expect(createdId).toEqual({ id: "lore_new", title: "Seren" });
+    const [savedEntry] = vi.mocked(api.saveLoreEntry).mock.calls[0];
+    expect(savedEntry.metadata.tags).toEqual(["tag_setting01", "tag_elysian01"]);
+    expect(api.createTagEntry).toHaveBeenCalledTimes(1);
+    expect(api.createTagEntry).toHaveBeenCalledWith("elysian", "tag:tag", null, null);
+    expect(api.listTagEntries).toHaveBeenCalled();
+  });
+
+  it("mints the tag(s) BEFORE the entry is created", async () => {
+    await refreshTagNodes();
+    await treeActions.createNodeFromDraft("lore:character", {
+      body: "b",
+      fields: { title: "Seren", tags: ["elysian"] },
+    });
+
+    const mintOrder = vi.mocked(api.createTagEntry).mock.invocationCallOrder[0];
+    const createOrder = vi.mocked(api.createLoreEntry).mock.invocationCallOrder[0];
+    expect(mintOrder).toBeLessThan(createOrder);
+  });
+
+  it("a rejected mint aborts the create — createLoreEntry is never called", async () => {
+    await refreshTagNodes();
+    vi.mocked(api.createTagEntry).mockRejectedValueOnce(new Error("offline"));
+
+    const createdId = await treeActions.createNodeFromDraft("lore:character", {
+      body: "b",
+      fields: { title: "Seren", tags: ["elysian"] },
+    });
+
+    expect(createdId).toBeNull();
+    expect(api.createLoreEntry).not.toHaveBeenCalled();
+  });
+
+  it("a draft with no tag field, or one already holding only ids, mints nothing", async () => {
+    await refreshTagNodes();
+    const createdId = await treeActions.createNodeFromDraft("lore:character", {
+      body: "b",
+      fields: { title: "Seren", allegiance: "order" },
+    });
+    expect(createdId).toEqual({ id: "lore_new", title: "Seren" });
+    let [savedEntry] = vi.mocked(api.saveLoreEntry).mock.calls[0];
+    expect(savedEntry.metadata).toEqual({ allegiance: "order" });
+    expect(api.createTagEntry).not.toHaveBeenCalled();
+
+    vi.mocked(api.saveLoreEntry).mockClear();
+    await treeActions.createNodeFromDraft("lore:character", {
+      body: "b",
+      fields: { title: "Seren", tags: ["tag_setting01"] },
+    });
+    [savedEntry] = vi.mocked(api.saveLoreEntry).mock.calls[0];
+    expect(savedEntry.metadata.tags).toEqual(["tag_setting01"]);
+    expect(api.createTagEntry).not.toHaveBeenCalled();
   });
 });

@@ -10,13 +10,14 @@ const { listTagEntries, createTagEntry } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api", () => ({ api: { listTagEntries, createTagEntry } }));
 
-import type { TagEntry } from "@/lib/types";
+import type { MetadataSchema, TagEntry } from "@/lib/types";
 import {
   canonicalTagId,
   clearTagNodes,
   findTagByTitle,
   liveTags,
   refreshTagNodes,
+  resolveAdoptedTagFields,
   resolveAdoptedTagFieldValue,
   resolveOrCreateTag,
   tagById,
@@ -312,5 +313,54 @@ describe("resolveAdoptedTagFieldValue (ADR-0082 §2 / #1797 / #1799 — accept-t
     // "A" already landed — a real, roster-visible node; nothing here rolls it
     // back (there is nothing TO roll back).
     expect(get(tagById).get("tag_a")?.title).toBe("A");
+  });
+});
+
+describe("resolveAdoptedTagFields (#1821 — the shared field-loop both accept paths call)", () => {
+  // Same fixture shape as treeActions.createDraft.test.ts's SCHEMA_WITH_TAGS,
+  // plus a non-tag entity_ref field (a plain lore-entry picker) and a text
+  // field, to pin that only the tag-shaped field gets rewritten.
+  const SCHEMA = {
+    entry_types: { "lore:character": { name: "Character" }, "tag:tag": { name: "Tag", kind: "tag" } },
+    fields: {
+      tags: {
+        name: "Tags",
+        type: "entity_ref_list",
+        options: [],
+        picker_config: { create_missing: true, sources: [{ kind: "tag", expr: { type: "tag:tag" } }] },
+      },
+      companion: {
+        name: "Companion",
+        type: "entity_ref",
+        options: [],
+        picker_config: { create_missing: true, sources: [{ kind: "lore", expr: { type: "lore:character" } }] },
+      },
+      bio: { name: "Bio", type: "text", options: [] },
+    },
+  } as unknown as MetadataSchema;
+
+  beforeEach(() => {
+    listTagEntries.mockReset();
+    createTagEntry.mockReset();
+    clearTagNodes();
+  });
+
+  it("resolves only the tag field, leaving a non-tag ref and a plain field untouched", async () => {
+    listTagEntries.mockResolvedValueOnce({ tags: [T("tag_1", "Coastal")] });
+    await refreshTagNodes();
+    createTagEntry.mockResolvedValueOnce(T("tag_new", "Seafaring"));
+
+    const fields = {
+      tags: ["coastal", "Seafaring"],
+      companion: "lore_someone",
+      bio: "unrelated text",
+    };
+    await resolveAdoptedTagFields(fields, SCHEMA, null);
+
+    expect(fields.tags).toEqual(["tag_1", "tag_new"]);
+    expect(fields.companion).toBe("lore_someone");
+    expect(fields.bio).toBe("unrelated text");
+    expect(createTagEntry).toHaveBeenCalledTimes(1);
+    expect(createTagEntry).toHaveBeenCalledWith("Seafaring", "tag:tag", null, null);
   });
 });

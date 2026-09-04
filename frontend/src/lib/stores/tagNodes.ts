@@ -6,7 +6,8 @@
 
 import { derived, get, writable } from "svelte/store";
 import { api } from "@/lib/api";
-import type { TagEntry } from "@/lib/types";
+import type { MetadataSchema, MetadataValue, TagEntry } from "@/lib/types";
+import { createTargetFor } from "@/lib/utils/pickerCreate";
 
 export const tagNodesStore = writable<TagEntry[]>([]);
 
@@ -198,4 +199,27 @@ export async function resolveAdoptedTagFieldValue(
     resolved.push(await resolveAdoptedTagItem(item.trim(), entryType, createLayerId));
   }
   return resolved;
+}
+
+// The ONE accept-time tag resolution every proposal→metadata path calls: for
+// each field in `fields` that is a `create_missing`-tag-shaped picker field
+// (`createTargetFor` — kind `"tag"`), resolves/mints its value in place via
+// `resolveAdoptedTagFieldValue` above; every other field is left untouched.
+// Mutates `fields` (the caller's own draft/proposal object) rather than
+// returning a copy, matching both callers' existing loop shape. Two callers
+// share this: `NodeEditor.svelte`'s `onAdoptFields` (adopting a flip into an
+// EXISTING entry) and `treeActions.svelte.ts`'s `#mintFromDraft` (#1821 —
+// the same resolution at create-from-draft time). A third accept path must
+// call this too, not re-derive the loop.
+export async function resolveAdoptedTagFields(
+  fields: Record<string, MetadataValue>,
+  schema: MetadataSchema | null | undefined,
+  createLayerId: string | null,
+): Promise<void> {
+  for (const key of Object.keys(fields)) {
+    const field = schema?.fields[key];
+    const target = field ? createTargetFor(field.picker_config, schema) : null;
+    if (target?.kind !== "tag") continue;
+    fields[key] = await resolveAdoptedTagFieldValue(fields[key], target.entryType, createLayerId);
+  }
 }

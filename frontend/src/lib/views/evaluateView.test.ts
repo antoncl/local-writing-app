@@ -1113,7 +1113,10 @@ describe("nest — merged tag redirect (ADR-0082 §5 / #1813)", () => {
     expect(tagB?.children.map((c) => c.node?.id).sort()).toEqual(["lore_1", "lore_2", "lore_3"]);
     // tag_a never groups anything — every link redirected to tag_b instead.
     const tagA = res.groups?.find((g) => g.nodeId === "tag_a");
-    expect(tagA?.children ?? []).toEqual([]);
+    // tag_a is still a seeded parent (a childless root stays, ADR-0028), so it
+    // must be PRESENT with no children — not merely absent from the tree.
+    expect(tagA).toBeTruthy();
+    expect(tagA?.children).toEqual([]);
   });
 
   it("(b) without canonicalId, behaviour is unchanged — entries split between the two tag rows", () => {

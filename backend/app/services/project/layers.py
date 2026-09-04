@@ -55,6 +55,7 @@ from typing import Protocol
 
 from app.models import MetadataSchema
 from app.services.project.errors import ProjectServiceError
+from app.services.project.node_families import MACHINE_LAYER_FAMILIES
 from app.services.project.node_index import IndexLayer
 
 log = logging.getLogger(__name__)
@@ -474,7 +475,7 @@ class LayerWalkMixin:
 
     def _machine_layer_folder(self) -> Path | None:
         """The machine config dir, when it carries any `MACHINE_LAYER_FAMILIES`
-        folder (`references.py`) — `assistants/` or `tags/` today. Any one
+        folder (`node_families.py`) — `assistants/` or `tags/` today. Any one
         alone is enough: a fresh machine dir whose first-ever node is a tag (no
         assistant created yet) must still resolve a machine layer, or its tag
         never becomes visible to `list_tag_entries` with no project open.
@@ -483,13 +484,10 @@ class LayerWalkMixin:
         folder names spelled out here a second time — a future machine family
         joining that list is picked up with no edit to this method.
 
-        Both imported lazily: `machine_settings` reaches back into
-        service-level config, and `references` (the module this class's own
-        `references.py` mixin lives beside) would close an import cycle at
-        module scope — importing it at call time avoids both.
+        `machine_settings` is imported lazily: it reaches back into
+        service-level config, which would close an import cycle at module scope.
         """
         from app.services import machine_settings as ms_service
-        from app.services.project.references import MACHINE_LAYER_FAMILIES
 
         machine_dir = ms_service.assistants_dir().parent
         if not any((machine_dir / family.folder_name).exists() for family in MACHINE_LAYER_FAMILIES):

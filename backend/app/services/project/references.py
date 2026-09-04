@@ -14,6 +14,16 @@ that once lived here was retired in #325. This mixin owns that subsystem; almost
 every other slice consumes `_build_node_index` / `_node_id_for_path` /
 `_path_for_node_id` via `self` → MRO, so they keep resolving unchanged.
 
+Two concerns this slice used to hold moved out (#1806), each to its own
+sibling module: the node-family constants (`NODE_FAMILIES`,
+`MACHINE_LAYER_FAMILIES`, `LIBRARY_LAYER_FAMILIES`, `REFERENCE_BEARING_KINDS`)
+now live in `node_families.py`, a pure module, and are re-exported here so
+every existing import path keeps resolving; the per-layer node-file collectors
+(`_collect_project_node_entry`, `_collect_layer_entries`, `_collect_entry_file`,
+`_collect_machine_layer_assistants`, `_forked_from_layer_id`, `_merged_into`)
+now live on `IndexCollectMixin` (`index_collect.py`), composed onto
+`ProjectService` alongside this mixin.
+
 Method bodies moved verbatim. Shared helpers they call (`self._require_project`,
 `self._read_yaml`, `self._read_markdown_with_front_matter`,
 `self._read_front_matter_only`, `self.read_metadata_schema`,
@@ -39,11 +49,19 @@ from app.models import (
     ReferenceResolveResponse,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.index_collect import IndexCollectMixin
 from app.services.project.layers import MANIFEST_FILENAME, SCHEMA_FILENAME, LayerVisitor
 from app.services.project.metadata_refs import RefOccurrence, iter_ref_occurrences
+
+# re-exported: importers use this path (see `__all__` below)
+from app.services.project.node_families import (
+    LIBRARY_LAYER_FAMILIES,
+    MACHINE_LAYER_FAMILIES,
+    NODE_FAMILIES,
+    REFERENCE_BEARING_KINDS,
+)
 from app.services.project.node_index import (
     IndexLayer,
-    NodeFamily,
     NodeIndex,
     NodeIndexEntry,
     ReferenceEdge,
@@ -62,6 +80,19 @@ from app.services.project.node_index_snapshot import serialize as snapshot_seria
 
 log = logging.getLogger(__name__)
 
+# `NODE_FAMILIES` / `MACHINE_LAYER_FAMILIES` / `LIBRARY_LAYER_FAMILIES` /
+# `REFERENCE_BEARING_KINDS` live in `node_families.py` (#1806); listed here so
+# `app.services.project.references.<name>` keeps resolving for every existing
+# importer without a lint false-positive on the re-export.
+__all__ = [
+    "INCLUDE_FIELD_ID",
+    "LIBRARY_LAYER_FAMILIES",
+    "MACHINE_LAYER_FAMILIES",
+    "NODE_FAMILIES",
+    "REFERENCE_BEARING_KINDS",
+    "ReferencesMixin",
+]
+
 # The reserved `field_id` a `{% include %}` reference edge carries (ADR-0061 §5).
 # The include is a template-composition relationship, not an `entity_ref`, so the
 # entity-ref surfaces exclude it — the entity-ref backlinks skip it
@@ -72,79 +103,6 @@ log = logging.getLogger(__name__)
 # can never collide with a real field — a field a user *did* name "include" would
 # otherwise be silently dropped from the reference view by that same filter.
 INCLUDE_FIELD_ID = "@include"
-
-# The Node-shaped kinds the index walks, once per layer of the chain.
-NODE_FAMILIES = [
-    NodeFamily("manuscript", "scenes", "manuscript:scene"),
-    # Research notes walk `research/notes/`. Treated like lore (cross-layer)
-    # rather than scenes (book-scoped) — universe- or series-level research
-    # notes are a natural use case.
-    NodeFamily("research", "research/notes", "research:note"),
-    NodeFamily("lore", "lore", "lore:note"),
-    NodeFamily("prompt", "prompts", "prompt:base"),
-    NodeFamily("assistant", "assistants", "assistant:assistant"),
-    # Reusable mutation sets (#62): body-less Node files under `mutation-sets/`.
-    # Layered like lore/prompts (a werewolf transform can live at any project
-    # level).
-    NodeFamily("mutation_set", "mutation-sets", "mutation_set:mutation_set"),
-    # Saved views (0.5.0, #35/#78): body-less Node files under `views/`, each
-    # carrying a ViewSpec in front matter. Layered like mutation sets — a view
-    # can live at any project level.
-    NodeFamily("view", "views", "view:view"),
-    # Plot planning (ADR-0048): plotlines (and, from S4b, templates + their
-    # instances) as flat Node files under `plot/`. Layered — NOT book-scoped
-    # like scenes — because S4b ships the diagnostic templates through the
-    # ADR-0049 Library, an ancestor layer; book-scoping would exclude them.
-    # The plot *board* is a separate per-project singleton (`plot-board.md`),
-    # deliberately NOT in this family so an ancestor's board never leaks into
-    # the resolved set (one board per open book, ADR-0048 §3).
-    NodeFamily("plot", "plot", "plot:plotline"),
-    # Chats (ADR-0051 S1): body-less Node files under `chats/`, each carrying
-    # the ChatSession payload (messages/journal/inputs/…) in front matter. Root-
-    # scoped like scenes (see `_families_for_layer`) — a chat belongs to the open
-    # project, an ancestor's chats never resolve into it. Reference-bearing from
-    # here on (the `subject` entity_ref arrives in S2); today the type declares
-    # only `color`, so it contributes no edges.
-    NodeFamily("chat", "chats", "chat:chat_session"),
-    # Tags (ADR-0082 slice 1): body-less Node files under `tags/`, front matter
-    # only. Layered like lore/prompts — a vocabulary (and its entries) can live
-    # at any project level, and the machine layer contributes its own tag
-    # entries too (see MACHINE_LAYER_FAMILIES below).
-    NodeFamily("tag", "tags", "tag:tag"),
-]
-
-# The families the out-of-tree machine layer contributes: assistants, and now
-# tags (the assistant-tag vocabulary, ADR-0082). Looked up rather than
-# re-spelled as a literal — a second copy of the triple would drift.
-MACHINE_LAYER_FAMILIES = [
-    family for family in NODE_FAMILIES if family.kind in ("assistant", "tag")
-]
-
-# The families the built-in Library ships (ADR-0049). Prompts were the first
-# tenant; plot templates are the second (ADR-0048 S4b) — proof the model is
-# kind-agnostic, exactly as the design intended: a later kind joins by adding its
-# family here and a folder in `builtin_library/`, no new mechanism. Deliberately
-# a subset, not "everything a project layer carries": the Library is not a
-# project, and scoping it to what actually ships keeps the walk from globbing
-# folders that will never exist (the vertical-slice discipline in §4). The
-# Library's `plot/` folder ships only `plot:template` nodes, so no plotline or
-# board resolves from this layer.
-LIBRARY_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind in ("prompt", "plot")]
-
-# Every kind whose files the index extracts reference edges from: the node
-# families above, plus the per-layer project node (#334), which lives at the
-# layer root rather than in a kind folder and so is collected separately.
-# Chats joined the families in ADR-0051 S1 — they are now ordinary Node files,
-# so they are reference-bearing like every other kind (contributing no edges
-# until the `subject` entity_ref lands in S2).
-#
-# Derived rather than re-spelled, because the two consumers that must agree
-# with edge extraction are destructive-adjacent: `_purge_references_to` rewrites
-# the user's files, and `_strip_dangling_references` hides values on read. A
-# hand-maintained allow-list drifting from this set is exactly #345 — it said
-# `{"scene", "lore"}` while the index had grown six more families, so every
-# other kind kept its dangling references forever.
-REFERENCE_BEARING_KINDS = frozenset({family.kind for family in NODE_FAMILIES} | {"project"})
 
 
 class _NodeIndexBuilder(LayerVisitor):
@@ -158,7 +116,7 @@ class _NodeIndexBuilder(LayerVisitor):
 
     def __init__(
         self,
-        service: ReferencesMixin,
+        service: IndexCollectMixin,
         *,
         index: NodeIndex,
         root: Path,
@@ -201,7 +159,7 @@ class _ManifestBuilder(LayerVisitor):
     what it says.
     """
 
-    def __init__(self, service: ReferencesMixin) -> None:
+    def __init__(self, service: IndexCollectMixin) -> None:
         self._service = service
         self.manifest: Manifest = {}
 
@@ -817,316 +775,6 @@ class ReferencesMixin:
                 path.unlink()
         if paths:
             self._apply_index_write(paths, structural=True)
-
-    def _collect_project_node_entry(
-        self, *, layer: IndexLayer, index: NodeIndex, schema: MetadataSchema | None = None
-    ) -> None:
-        """Index the layer's `project.md` (#334).
-
-        The project node sits at the layer root rather than in a kind-folder, so
-        `_collect_layer_entries`' `folder/folder_name/*.md` glob never reached
-        it — the one Node-shaped file the index did not see.
-
-        Its identity is read off the file like every other node's. The file
-        *name* is the same word at every layer, which is exactly why the id must
-        not be (#343) — `_require_node_id` refuses the filename-stem fallback
-        here, because the stem would hand every layer the same id.
-
-        `project.md` is required to exist (`create_project` writes it first, and
-        `validate_project` / `repair_project` own the damaged case since #343), so
-        a layer without one contributes no entry rather than an entry pointing at
-        a file that isn't there.
-        """
-        path = layer.folder / PROJECT_NODE_FILENAME
-        if not path.exists():
-            return
-        try:
-            front_matter = self._read_front_matter_only(path, strict=True)
-            node_id = self._require_node_id(path, front_matter)
-        except ProjectServiceError as exc:
-            index.add_diagnostic(layer_id=layer.id, path=path, message=exc.message, is_error=True)
-            # The file is here; its identity is not. See `has_unparsed_nodes`.
-            index.has_unparsed_nodes = True
-            return
-        duplicate = index.entry_for_layer(node_id, layer.id)
-        if duplicate is not None:
-            # The same guard every other collector applies. Without it the
-            # `(layer, id)` edge key stops being a key, and two files at one
-            # layer fight over one edge list.
-            #
-            # `blocks_patch`: only the first claimant is in `candidates`, so a
-            # per-file patch that dropped the winner would leave nothing to
-            # promote — retracting this needs a rebuild (#382).
-            index.add_diagnostic(
-                layer_id=layer.id,
-                path=path,
-                message=(
-                    f"Duplicate front matter id {node_id} in "
-                    f"{self._safe_relative(duplicate.path, layer.folder)} and "
-                    f"{self._safe_relative(path, layer.folder)}."
-                ),
-                is_error=True,
-                blocks_patch=True,
-            )
-            return
-        raw_entry_type = front_matter.get("entry_type") or "project:project"
-        entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project:project"
-        raw_title = front_matter.get("title")
-        title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else layer.label
-        entry = NodeIndexEntry(
-            id=node_id,
-            kind="project",
-            entry_type=entry_type,
-            path=path,
-            title=title,
-            source_layer_id=layer.id,
-            source_layer_label=layer.label,
-        )
-        index.add(entry)
-        try:
-            edges = self._reference_edges_for_entry(entry, schema, front_matter=front_matter)
-        except ProjectServiceError as exc:
-            index.add_diagnostic(
-                layer_id=layer.id,
-                path=path,
-                message=f"{self._safe_relative(path, layer.folder)}: {exc.message} Its references were not indexed.",
-                is_error=True,
-            )
-            edges = []
-        if edges:
-            index.edges_by_layer_src[(layer.id, node_id)] = edges
-
-    def _families_for_layer(self, layer: IndexLayer) -> list[NodeFamily]:
-        """Which node families this layer contributes — the per-layer logic the
-        index walk used to inline (#329).
-
-        The machine layer is out-of-tree: assistants and tags
-        (`MACHINE_LAYER_FAMILIES`, ADR-0082 slice 1). The Library is
-        out-of-tree too and ships only its tenant kinds (prompts, ADR-0049).
-        Scenes stay book-scoped, so they come from the open project alone.
-        """
-        if layer.is_machine:
-            return MACHINE_LAYER_FAMILIES
-        if layer.is_library:
-            return LIBRARY_LAYER_FAMILIES
-        return [family for family in NODE_FAMILIES if family.kind not in ("manuscript", "chat") or layer.is_root]
-
-    def _collect_machine_layer_assistants(
-        self,
-        index: NodeIndex,
-        *,
-        duplicate_relative_to: Path,
-        schema: MetadataSchema | None = None,
-    ) -> None:
-        """Collect the machine layer on its own, for the no-project-open case.
-
-        With a project open the machine layer is an ordinary layer in the walk
-        (`visit_layers(..., include_machine=True)`); this stays for
-        `_build_assistant_index`, which serves the assistant roster before any
-        project has been opened and so has no chain to walk.
-        """
-        layer = self.machine_layer()
-        if layer is None:
-            return
-        for family in self._families_for_layer(layer):
-            self._collect_layer_entries(
-                layer=layer,
-                family=family,
-                index=index,
-                duplicate_relative_to=duplicate_relative_to,
-                schema=schema,
-            )
-
-    def _collect_layer_entries(
-        self,
-        *,
-        layer: IndexLayer,
-        family: NodeFamily,
-        index: NodeIndex,
-        duplicate_relative_to: Path,
-        schema: MetadataSchema | None = None,
-    ) -> None:
-        for path in sorted((layer.folder / family.folder_name).glob("*.md")):
-            self._collect_entry_file(
-                path,
-                layer=layer,
-                family=family,
-                index=index,
-                duplicate_relative_to=duplicate_relative_to,
-                schema=schema,
-            )
-
-    def _collect_entry_file(
-        self,
-        path: Path,
-        *,
-        layer: IndexLayer,
-        family: NodeFamily,
-        index: NodeIndex,
-        duplicate_relative_to: Path,
-        schema: MetadataSchema | None = None,
-    ) -> None:
-        """Collect exactly one node file into `index`.
-
-        Split out of the folder glob so #307 can re-parse **the file that
-        changed** rather than its whole folder — the difference between ~4x and
-        ~30x on a folder holding a few hundred entries. The loop above is now
-        this called per path, so there is one definition of what collecting a
-        node file means and no chance of the incremental path drifting from the
-        cold one.
-        """
-        folder = layer.folder
-        try:
-            front_matter = self._read_front_matter_only(path, strict=True)
-        except ProjectServiceError as exc:
-            index.add_diagnostic(layer_id=layer.id, path=path, message=exc.message, is_error=True)
-            # A file on disk whose id we could not read — so `by_id` stops
-            # being a complete answer to "does this id exist" (#379).
-            index.has_unparsed_nodes = True
-            return
-        except OSError as exc:
-            # We could not *read* the file at all — a cloud-sync placeholder, an
-            # AV lock, a concurrent checkout — as opposed to malformed content.
-            # Degrade so this build is not cached: the file is unchanged, so a
-            # cached snapshot missing this node would match the manifest and be
-            # served on every later open (ADR-0051 S1 generalised this from the
-            # chat collector; same rule as the schema read, `_resolve_index`).
-            index.add_diagnostic(
-                layer_id=layer.id,
-                path=path,
-                message=f"Failed to read {family.kind} file {path.name}: {exc}",
-                is_error=True,
-            )
-            index.has_unparsed_nodes = True
-            index.degraded = True
-            return
-
-        node_id = self._front_matter_id(path, front_matter)
-        if node_id is None:
-            # The extractor collapses "no id key" and "id present but not text"
-            # into one `None`; the diagnostics keep them apart — a missing id is
-            # a legacy file we accept (warning), a malformed one is an error.
-            node_id = path.stem
-            if front_matter.get("id") is None:
-                index.add_diagnostic(
-                    layer_id=layer.id,
-                    path=path,
-                    message=(
-                        f"{family.kind.title()} file {self._safe_relative(path, folder)} is missing "
-                        f"front matter id; using filename stem as legacy id."
-                    ),
-                    is_error=False,
-                )
-            else:
-                index.add_diagnostic(
-                    layer_id=layer.id,
-                    path=path,
-                    message=(
-                        f"{family.kind.title()} file {self._safe_relative(path, folder)} has invalid "
-                        f"front matter id; it must be text."
-                    ),
-                    is_error=True,
-                )
-
-        raw_entry_type = front_matter.get("entry_type") or family.default_entry_type
-        entry_type = raw_entry_type if isinstance(raw_entry_type, str) else family.default_entry_type
-        raw_title = front_matter.get("title")
-        title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else node_id
-        entry = NodeIndexEntry(
-            id=node_id,
-            kind=family.kind,
-            entry_type=entry_type,
-            path=path,
-            title=title,
-            source_layer_id=layer.id,
-            source_layer_label=layer.label,
-            is_library=layer.is_library,
-            forked_from_layer_id=self._forked_from_layer_id(front_matter.get("forked_from")),
-            merged_into=self._merged_into(family.kind, front_matter),
-        )
-        duplicate = index.entry_for_layer(node_id, layer.id)
-        if duplicate is not None:
-            # Two files claiming one id *at the same layer* — an error, not a
-            # shadow. Shadowing is a relationship between layers; within one
-            # layer there is no order to resolve by.
-            #
-            # `blocks_patch`: this file is rejected and never enters
-            # `candidates`, so a per-file patch that dropped the winner would
-            # leave nothing to promote where a cold build promotes this sibling.
-            # Retracting it needs a rebuild (#382).
-            index.add_diagnostic(
-                layer_id=layer.id,
-                path=path,
-                message=(
-                    f"Duplicate front matter id {node_id} in "
-                    f"{self._safe_relative(duplicate.path, duplicate_relative_to)} and "
-                    f"{self._safe_relative(path, duplicate_relative_to)}."
-                ),
-                is_error=True,
-                blocks_patch=True,
-            )
-            return
-        # A descendant claiming an ancestor's id joins the candidate list;
-        # nothing is overwritten. The shadow warning is emitted once, by
-        # `index.resolve()`, where the whole list is visible.
-        index.add(entry)
-        # Same front matter, no second read: the edges this node declares
-        # are extracted here rather than in a later per-entry pass (#305).
-        # Keyed by (layer, id) for the same reason the entry is: a shadowed
-        # ancestor must keep its edges, or un-shadowing it on delete (#307)
-        # would restore the node with its references silently missing.
-        try:
-            edges = self._reference_edges_for_entry(entry, schema, front_matter=front_matter)
-        except ProjectServiceError as exc:
-            # `metadata:` that isn't a mapping. The node still indexes — it
-            # just contributes no edges — but that has to be *said*, or its
-            # references vanish from the graph and the backlinks panel with
-            # no signal anywhere.
-            index.add_diagnostic(
-                layer_id=layer.id,
-                path=path,
-                message=(
-                    f"{self._safe_relative(path, duplicate_relative_to)}: {exc.message} "
-                    f"Its references were not indexed."
-                ),
-                is_error=True,
-            )
-            edges = []
-        if edges:
-            index.edges_by_layer_src[(layer.id, node_id)] = edges
-
-    def _forked_from_layer_id(self, raw_forked_from: object) -> str:
-        """Resolve a fork's `forked_from` front-matter value — a path relative to
-        the base folder — to the layer id it names (#313 / ADR-0039).
-
-        Stored on disk as a relative path rather than a layer id because layer
-        ids are `sha256(resolved absolute path)`, so machine- and location-
-        dependent (`_layer_id_for_folder`); a relative path survives a moved or
-        renamed shelf. It is reversed to an id here, at collection, so
-        `NodeIndex.resolve()` can compare plain ids and never touch the
-        filesystem. "" for anything that did not fork.
-        """
-        if not isinstance(raw_forked_from, str) or not raw_forked_from.strip():
-            return ""
-        base = self._metadata_schema_base_folder(self.root_path)
-        if base is None:
-            return ""
-        return self._metadata_schema_layer_id(base / raw_forked_from.strip())
-
-    def _merged_into(self, kind: str, front_matter: dict[str, Any]) -> str | None:
-        """A tag's `metadata.merged_into`, read straight off the parsed front
-        matter (ADR-0082 §5) — not through `_reference_edges_for_entry`, which
-        needs a loaded schema and runs later. Reading it here at collection
-        time means `NodeIndex.resolve()` can fold every reference-lifecycle
-        pass onto the survivor even when the schema failed to load. `None` for
-        every non-`tag` kind and for an ordinary (unmerged) tag."""
-        if kind != "tag":
-            return None
-        metadata = front_matter.get("metadata")
-        if not isinstance(metadata, dict):
-            return None
-        raw = metadata.get("merged_into")
-        return raw.strip() if isinstance(raw, str) and raw.strip() else None
 
     def _safe_relative(self, path: Path, anchor: Path) -> Path | str:
         try:

@@ -33,6 +33,7 @@ from app.services.project.embedded_todos import EmbeddedTodosMixin
 # Re-exported so the historic import path
 # `from app.services.project_service import ProjectServiceError` keeps working.
 from app.services.project.errors import ProjectServiceError
+from app.services.project.index_collect import IndexCollectMixin
 from app.services.project.layers import MANIFEST_FILENAME as INDEX_MANIFEST_FILENAME
 from app.services.project.layers import SCHEMA_FILENAME as INDEX_SCHEMA_FILENAME
 from app.services.project.layers import LayerWalkMixin
@@ -109,6 +110,7 @@ class ProjectService(
     ProjectNodeMixin,
     PromotionMixin,
     PromptEntriesMixin,
+    IndexCollectMixin,
     ReferencesMixin,
     ResearchNotesMixin,
     SceneSnapshotsMixin,

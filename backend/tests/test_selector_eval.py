@@ -269,8 +269,8 @@ def test_canonical_id_kwarg_defaults_to_none_unchanged_behaviour():
 
 
 # --- `field` on a REFERENCE field canonicalises too (#1805 X1) -------------
-# The shipped assistant view's TAG param filter is exactly this shape:
-# `field: {key: assistant_tags, op: overlap, value: {var: TAG}}`.
+# A `field`-over-tag-ref filter is exactly this shape (e.g. a view filtering
+# assistants by `field: {key: assistant_tags, op: overlap, value: {var: TAG}}`).
 
 
 def test_field_overlap_on_a_ref_field_follows_the_OPERAND_redirect():

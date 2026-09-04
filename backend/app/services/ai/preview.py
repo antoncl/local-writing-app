@@ -186,8 +186,8 @@ def _ref_fields(schema: Any) -> frozenset[str]:
     """The `entity_ref`/`entity_ref_list` field keys in `schema` — derived the
     same way `preview.py` would derive `collection_fields`/`numeric_fields`,
     passed to `evaluate_selector_membership`'s `ref_fields` so a `field`
-    predicate over a reference key (the shipped assistant view's TAG param
-    filter, `field: {key: assistant_tags, op: overlap, value: {var: TAG}}`) is
+    predicate over a reference key (e.g. a view filtering assistants by
+    `field: {key: assistant_tags, op: overlap, value: {var: TAG}}`) is
     canonicalised through a merged tag's redirect (ADR-0082 §5, #1805 X1)."""
     fields = getattr(schema, "fields", None) or {}
     return frozenset(key for key, field in fields.items() if getattr(field, "type", None) in ("entity_ref", "entity_ref_list"))

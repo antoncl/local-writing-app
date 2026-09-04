@@ -26,7 +26,6 @@ from app.models_views import (
     ViewNode,
     ViewNodeList,
     ViewNodeSummary,
-    ViewParam,
     ViewSort,
     ViewSpec,
     ViewUiState,
@@ -440,31 +439,19 @@ class ViewsMixin:
             # holds for any persisted or duplicated copy of this spec too.
             return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="disposition")])
         if kind == "assistant":
-            # #333. Two changes, both consequences of #332 making priority ONE
-            # merged sequence:
-            #  - group on `listed`, not `source_layer`. Layer was structure only
-            #    while layer *was* the ordering; now it would re-cluster the
-            #    author's single dragged list by an accident of which folder each
-            #    file sits in. Provenance survives as a row annotation.
-            #  - born tag-scoped (ADR-0024): `assistant_tags` is the soft scope
-            #    that decides which assistants are relevant (ADR-0082 §2 renamed
-            #    the field off `tags`, which no built-in binds anymore). The
-            #    formal ships UNBOUND, so the predicate is inactive and the pane
-            #    opens on the whole roster (ADR-0031 §B) — nothing is decided for
-            #    the author, the control is simply already there.
-            # `field`-on-assistant_tags rather than the `tagged` leaf: identical
-            # OR-over-tags semantics, but it stays designer-authorable and its
-            # strip control resolves the real schema `assistant_tags` field, so a
-            # duplicate of this view can be edited instead of being a one-way door.
+            # #333: group on `listed`, not `source_layer`. Layer was structure
+            # only while layer *was* the ordering; grouping on it now would
+            # re-cluster the author's single dragged list by an accident of which
+            # folder each file sits in. Provenance survives as a row annotation.
+            #
+            # #1816: tag-filtering is the Assistants pane's SEARCH field
+            # (client-side, `nodeSearch` over `assistant_tags` titles), not a view
+            # formal, so this default ships no runtime parameter — a plain grouped
+            # roster, no parameter strip. The `assistant_tags` field still feeds
+            # the chat assistant picker's tag scope (ADR-0024), a separate surface.
             return ViewSpec(
                 kind=kind,
-                expr=ViewExpr(
-                    filter=FilterOp(
-                        of=roster,
-                        pred=ViewExpr(field=FieldPredicate(key="assistant_tags", op="overlap", value={"var": "TAG"})),
-                    )
-                ),
-                params=[ViewParam(name="TAG", label="Tag")],
+                expr=roster,
                 group_by=[ViewGroupByLevel(field="listed", show_empty=True)],
             )
         return ViewSpec(kind=kind, expr=roster)

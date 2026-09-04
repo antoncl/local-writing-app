@@ -21,8 +21,8 @@
     "group_by": [{ "field": "disposition" }]
   },
   "assistant": {
-    "expr": { "filter": { "of": { "descendants_of": "assistant:base" }, "pred": { "field": { "key": "assistant_tags", "op": "overlap", "value": { "var": "TAG" } } } } },
-    "params": [{ "name": "TAG", "label": "Tag" }],
+    "expr": { "descendants_of": "assistant:base" },
+    "params": null,
     "group_by": [{ "field": "listed", "show_empty": true }]
   },
   "chat": {

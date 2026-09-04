@@ -11,6 +11,7 @@
   import { isAssistantListed } from "@/lib/stores/assistants";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
   import { liveTags, tagTitleById } from "@/lib/stores/tagNodes";
+  import { makeNodeSearchFilter } from "@/lib/utils/nodeSearch";
   import { tagChipHexByTitle } from "@/lib/utils/pickerStripes";
   import { api } from "@/lib/api";
   import type { AIHealthResponse } from "@/lib/aiTypes";
@@ -57,6 +58,13 @@
   // ADR-0082 §2: `assistant_tags` now holds tag-node ids — resolve to titles
   // through the tag roster store for display (F4).
   const tagTitles = $derived($tagTitleById);
+  // #1816: tag-filtering the roster is the pane's SEARCH field (the shared
+  // generic node filter), not a view formal. `#tag` restricts to tag titles;
+  // a plain query also matches the assistant's own title. Rebuilds when the tag
+  // roster changes so a rename reflects in search. Lore keeps its own broader
+  // filter — this is opt-in per pane, not on everywhere.
+  let searchQuery = $state("");
+  const searchFilter = $derived(makeNodeSearchFilter(tagTitles));
   // ADR-0082 §3/F2: the tag's own instance colour, through the same resolver
   // the picker chip uses — title-keyed since `tags` below is titles.
   const tagColorByTitle = $derived(tagChipHexByTitle($liveTags, schema, "tag:assistant_tag"));
@@ -195,13 +203,16 @@
   onClick={(entry) => onOpenEntry(entry.id)}
   onReorder={canReorder ? reorder : undefined}
   onGroupDrop={canReorder ? groupDrop : undefined}
+  searchPlaceholder="Search assistants, #tags"
+  bind:searchValue={searchQuery}
+  filter={searchFilter}
   row={assistantRow}
 >
   {#snippet whenEmpty()}
     {#if entries.length === 0}
       <p class="muted">No assistants defined yet. Click + to create one.</p>
     {:else}
-      <p class="muted">No assistants match this view.</p>
+      <p class="muted">No assistants match your search.</p>
     {/if}
   {/snippet}
 </ViewNodeList>

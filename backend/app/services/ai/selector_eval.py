@@ -112,7 +112,7 @@ def evaluate_selector_membership(
     the `entity_ref`/`entity_ref_list` keys — derived from the schema the caller
     has, the same way `collection_fields`/`numeric_fields` are — a `field`
     predicate over one of them canonicalises BOTH its operand and the node's own
-    value (the shipped assistant view's TAG param filter,
+    value (a `field`-over-tag-ref filter, e.g.
     `field: {key: assistant_tags, op: overlap, value: {var: TAG}}`, is exactly
     this shape). `canonical_id` (ADR-0082 §5, #1805) follows a merged tag's id to
     its survivor and, when given, is applied to every `tagged:` leaf's OPERAND ids

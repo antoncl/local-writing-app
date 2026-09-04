@@ -68,6 +68,18 @@ describe("Assistants pane — default view (#642)", () => {
   });
 });
 
+describe("Assistants pane — roster search field, not a tag param strip (#1816)", () => {
+  it("renders the search field and no runtime parameter strip", () => {
+    const { container } = renderPane([assistant("a1", "Editor Bot", ["tag_hero"])]);
+    // Tag-filtering is the search field (its `filter` logic is unit-tested in
+    // nodeSearch.test.ts), so the pane wires `searchPlaceholder`…
+    expect(screen.getByPlaceholderText("Search assistants, #tags")).toBeInTheDocument();
+    // …and the default view declares no formal, so no parameter strip renders
+    // (the "tags header" this fixes).
+    expect(container.querySelector(".param-strip")).toBeNull();
+  });
+});
+
 describe("Assistants pane — tag chip title resolution (ADR-0082 §2)", () => {
   it("resolves an assistant_tags id to its title through the tag roster store, uncoloured", async () => {
     tagNodesStore.set([

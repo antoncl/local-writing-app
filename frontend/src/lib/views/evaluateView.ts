@@ -291,20 +291,15 @@ export function defaultView(kind: string, schema?: MetadataSchema | null): ViewS
   }
   if (kind === "assistant") {
     // #333 — mirrors `_default_view_spec`; see there for why `listed` replaces
-    // `source_layer` and why the tag formal ships unbound (inactive ⇒ the whole
-    // roster). `field`-on-assistant_tags (ADR-0082 §2 renamed the field off
-    // `tags`) rather than the retired-for-authoring `tagged` leaf, so a
-    // duplicate of this view stays editable in the designer.
+    // `source_layer`. #1816: tag-filtering is the Assistants pane's SEARCH field
+    // (client-side, over `assistant_tags` titles), not a view formal, so this
+    // default ships no runtime parameter — a plain grouped roster, no parameter
+    // strip. Kept byte-identical to the backend's `exclude_none` dump so the
+    // golden compares the two directly.
     return {
       kind,
-      expr: {
-        filter: { of: roster, pred: { field: { key: "assistant_tags", op: "overlap", value: { var: "TAG" } } } },
-      },
+      expr: roster,
       sort,
-      // No `default` — an absent authored default IS the unbound state, and
-      // omitting it keeps this byte-identical to the backend's `exclude_none`
-      // dump so the golden compares the two directly.
-      params: [{ name: "TAG", label: "Tag" }],
       // show_empty: a roster with nothing listed yet must still show an
       // Active bucket, or there is nowhere to drop the first assistant.
       group_by: [{ field: "listed", show_empty: true }],

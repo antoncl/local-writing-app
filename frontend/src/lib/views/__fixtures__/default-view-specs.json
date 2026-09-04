@@ -1,5 +1,5 @@
 {
-  "_comment": "Canonical per-kind system default view shape (expr + params + group_by), roots fixed at <kind>:base. The FRONTEND defaultView() is the source of truth; the backend _default_view_spec() must match. Asserted by frontend defaultView.golden.test.ts AND backend test_views.py::test_default_view_specs_match_frontend so the two hand-written builders can't drift (#271 / finding-2). `params` joined the comparison with #333, when a default first carried a declared formal. Update this when the default shape intentionally changes.",
+  "_comment": "Canonical per-kind system default view shape (expr + params + group_by), roots fixed at <kind>:base. The FRONTEND defaultView() is the source of truth; the backend _default_view_spec() must match. Asserted by frontend defaultView.golden.test.ts AND backend test_views.py::test_default_view_specs_match_frontend so the two hand-written builders can't drift (#271 / finding-2). `params` is compared so a default that declares a runtime formal can't drift between the two builders; no default declares one today (#1816 moved the assistants tag filter to the pane's search field), but the guard stays for the next. Update this when the default shape intentionally changes.",
   "manuscript": {
     "expr": { "nest": { "parents": { "filter": { "of": { "descendants_of": "manuscript:base" }, "pred": { "field": { "key": "parent", "op": "unset" } } } }, "children": { "descendants_of": "manuscript:base" }, "match": { "field": "parent", "direction": "child_to_parent", "by": "ref" }, "recursive": true } },
     "params": null,
@@ -21,8 +21,8 @@
     "group_by": [{ "field": "disposition" }]
   },
   "assistant": {
-    "expr": { "filter": { "of": { "descendants_of": "assistant:base" }, "pred": { "field": { "key": "assistant_tags", "op": "overlap", "value": { "var": "TAG" } } } } },
-    "params": [{ "name": "TAG", "label": "Tag" }],
+    "expr": { "descendants_of": "assistant:base" },
+    "params": null,
     "group_by": [{ "field": "listed", "show_empty": true }]
   },
   "chat": {

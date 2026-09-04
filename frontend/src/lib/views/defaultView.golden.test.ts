@@ -14,10 +14,12 @@ describe("system default view golden (backend/frontend drift guard)", () => {
       const spec = defaultView(kind);
       expect({
         expr: spec.expr,
-        // `params` joined the golden with #333 — the assistants default is the
-        // first to declare a formal, and a formal that drifts between the two
-        // builders means the pane's parameter strip appears or vanishes across
-        // the first fold.
+        // `params` is compared so a default that declares a runtime formal can't
+        // drift between the two builders (a formal appearing/vanishing across the
+        // first fold flips whether a pane shows a parameter strip). No default
+        // currently declares one — the assistants default carried the only formal
+        // until #1816 moved its tag-filtering to the pane's search field — but the
+        // guard stays for the next one.
         params: spec.params ?? null,
         group_by: spec.group_by ?? null,
       }).toEqual(expected);

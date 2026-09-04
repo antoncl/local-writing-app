@@ -486,13 +486,16 @@ class BuiltinLibraryTests(unittest.TestCase):
         self.assertFalse(lore_input.required)
 
     def test_relevant_lore_is_wired_into_plotting_and_prose_prompts(self) -> None:
-        """#1725: the plotting and prose-enrichment prompts include the snippet, so
-        each gains the "Lore" picker for free via the effective-inputs resolver;
-        the mechanical revise prompts deliberately stay lore-free (a picker there
-        is noise)."""
+        """#1725: the plotting, ideation, and prose-enrichment prompts include the
+        snippet, so each gains the "Lore" picker for free via the effective-inputs
+        resolver; the mechanical text-op prompts (Rephrase/Shorten/Tighten grammar)
+        deliberately stay lore-free (a picker there is noise). "Revise entry" is an
+        ideation prompt like its revise-* siblings and belongs with them, not with
+        the mechanical ops."""
         summaries = self._summaries()
         for title in (
             "Diagnose plot",
+            "Revise entry",
             "Revise plot card",
             "Revise plotline",
             "Revise character arc",

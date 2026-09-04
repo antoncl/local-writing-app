@@ -67,5 +67,10 @@ The {{ type_name(draft_type) }} has these fields to develop:
    always-in-context) is selected and placed by the backend; use_lore() just
    turns that on for this prompt. #}
 {{ use_lore() }}
+{# An optional author-picked "Lore" input for pulling in EXTRA specific entries
+   as background — the entry being revised is the subject; this is supporting
+   lore around it (e.g. a character's faction). Inert until the author picks
+   something, like the revise-plotline/character-arc/plot-card prompts. #}
+{% include "Relevant lore" %}
 {% include "Project settings" %}
 {% endrole %}

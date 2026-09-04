@@ -286,7 +286,8 @@ be opinionated rather than exhaustive:
 ## 7. #317 — the vocabulary, and why the mechanism is the *settings walk*, not the index
 
 The `project` node is **already a fully-indexed kind**. `_collect_project_node_entry`
-(`references.py:750-811`) indexes each layer's `project.md` — a separate collector (#334), because
+(`index_collect.py:43-119`, since #1806 moved it out of `references.py`)
+indexes each layer's `project.md` — a separate collector (#334), because
 the family glob (`<layer>/<folder>/*.md`) never reached a file sitting at the layer *root*. Its id is
 **unique** (`_new_id("project")` → `project_<uuid>`, `project_node.py:67`), deliberately: #343
 refuses the filename-stem fallback because "the *name* is the same word at every layer, which is

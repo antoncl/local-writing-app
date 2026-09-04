@@ -14,9 +14,10 @@ same name in `node_families.py`, kept here so `layers.py` and
 unchanged.
 
 `ProjectService` composes this mixin. Shared helpers these methods reach on the
-composed class (`self._read_front_matter_only`, `self._require_node_id`,
-`self._front_matter_id`, `self._safe_relative`, `self._reference_edges_for_entry`
-— the node-identity and edge-extraction helpers, still in `references.py`;
+composed class (`self._require_node_id`, `self._front_matter_id`,
+`self._safe_relative`, `self._reference_edges_for_entry` — the node-identity and
+edge-extraction helpers, still in `references.py`; `self._read_front_matter_only`
+— the front-matter reader, in `project_service.py`;
 `self._metadata_schema_base_folder`, `self._metadata_schema_layer_id`,
 `self.machine_layer` — the layer walk, in `layers.py`; `self.root_path`) live
 elsewhere on the composed class and resolve through the MRO at call time.

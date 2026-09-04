@@ -57,15 +57,32 @@
   // is constant — build it once, not on every roster/hide recompute.
   const viewSpec = defaultView("plot");
 
-  // ADR-0080 slice 2: section arc templates apart from plotline templates. `family` isn't
-  // a schema field the view evaluator reads, so the split is a plain array partition, each
-  // half rendered through its own ViewNodeList sharing the same `plot` view spec — not a
-  // view group_by.
-  let plotlineTemplates = $derived(visibleEntries.filter((e) => e.template?.family !== "character_arc"));
+  // ADR-0080 slice 2 sectioned arc templates apart from plotline templates; this splits the
+  // plotline half again so a newcomer meets a few labelled buckets, not a flat wall of ~11
+  // names. `family` isn't a schema field the view evaluator reads, so — like the arc split —
+  // it's a plain array partition, each bucket its own ViewNodeList sharing the same `plot`
+  // view spec, never a view group_by. Grouping by raw `family` would strand four singleton
+  // families (cycle/puzzle/genre/relationship) under lone headers, so the buckets are the
+  // one distinction a newcomer can act on: a genre-shaped spine (mystery/thriller/romance)
+  // is a "Genre pattern"; everything else — act/journey/cycle, an author's `custom`, an
+  // unknown family — is a genre-agnostic "Story structure".
+  const GENRE_FAMILIES = new Set(["puzzle", "genre", "relationship"]);
   let arcTemplates = $derived(visibleEntries.filter((e) => e.template?.family === "character_arc"));
-  let plotlineView = $derived({
+  let genreTemplates = $derived(visibleEntries.filter((e) => GENRE_FAMILIES.has(e.template?.family ?? "")));
+  let structureTemplates = $derived(
+    visibleEntries.filter(
+      (e) => e.template?.family !== "character_arc" && !GENRE_FAMILIES.has(e.template?.family ?? ""),
+    ),
+  );
+  let structureView = $derived({
     spec: viewSpec,
-    universe: plotlineTemplates,
+    universe: structureTemplates,
+    schema,
+    referenceIndex: $referenceIndexStore,
+  });
+  let genreView = $derived({
+    spec: viewSpec,
+    universe: genreTemplates,
     schema,
     referenceIndex: $referenceIndexStore,
   });
@@ -93,15 +110,19 @@
   </button>
 
   <div class="palette-list">
-    {#if plotlineTemplates.length}
-      <div class="section-head"><span>Plotlines</span></div>
-      <ViewNodeList view={plotlineView} onClick={(entry) => onInstantiate(entry.id)} row={templateRow} />
+    {#if structureTemplates.length}
+      <div class="section-head"><span>Story structures</span></div>
+      <ViewNodeList view={structureView} onClick={(entry) => onInstantiate(entry.id)} row={templateRow} />
+    {/if}
+    {#if genreTemplates.length}
+      <div class="section-head"><span>Genre patterns</span></div>
+      <ViewNodeList view={genreView} onClick={(entry) => onInstantiate(entry.id)} row={templateRow} />
     {/if}
     {#if arcTemplates.length}
       <div class="section-head"><i class="ti ti-seedling" aria-hidden="true"></i><span>Character arcs</span></div>
       <ViewNodeList view={arcView} onClick={(entry) => onInstantiate(entry.id)} row={templateRow} />
     {/if}
-    {#if !plotlineTemplates.length && !arcTemplates.length}
+    {#if !structureTemplates.length && !genreTemplates.length && !arcTemplates.length}
       <p class="muted palette-empty">No plot templates.</p>
     {/if}
   </div>

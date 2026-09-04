@@ -146,10 +146,11 @@ describe("PlotTemplatePalette", () => {
     expect(screen.getByRole("button", { name: /Empty plotline/i })).toBeTruthy();
   });
 
-  // ADR-0080 slice 2: arc templates get their own section, seedling glyph and all —
-  // the split is a plain array partition (family isn't a schema field), not a view
-  // group_by, so both sections still ride the same `plot` view spec.
-  it("sections character-arc templates apart from plotlines", async () => {
+  // ADR-0080 slice 2 gave arc templates their own section; the plotline half is split
+  // again into "Story structures" and "Genre patterns" so a newcomer meets a few labelled
+  // buckets, not a flat wall. All splits are plain array partitions (family isn't a schema
+  // field), not a view group_by, so every section still rides the same `plot` view spec.
+  it("sections character-arc templates apart from story structures", async () => {
     mount({
       entries: [
         tpl({ id: "p1", title: "Three-Act" }),
@@ -157,14 +158,35 @@ describe("PlotTemplatePalette", () => {
       ],
     });
     await tick();
-    const plotlinesHeader = screen.getByText("Plotlines");
+    const structuresHeader = screen.getByText("Story structures");
     const arcsHeader = screen.getByText("Character arcs");
-    expect(plotlinesHeader).toBeTruthy();
+    expect(structuresHeader).toBeTruthy();
     expect(arcsHeader).toBeTruthy();
     expect(screen.getByText("Three-Act")).toBeTruthy();
     expect(screen.getByText("Positive Change Arc")).toBeTruthy();
-    // Plotlines first.
-    const position = plotlinesHeader.compareDocumentPosition(arcsHeader);
+    // Story structures first.
+    const position = structuresHeader.compareDocumentPosition(arcsHeader);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // A genre-shaped spine (puzzle/genre/relationship family) buckets under "Genre patterns",
+  // between story structures and character arcs.
+  it("sections a genre-family template into Genre patterns", async () => {
+    mount({
+      entries: [
+        tpl({ id: "p1", title: "Three-Act" }),
+        tpl({ id: "g1", title: "Thriller Escalation", template: { slug: "thriller-escalation-arc", display_name: "Thriller Escalation", family: "genre" } }),
+      ],
+    });
+    await tick();
+    const structuresHeader = screen.getByText("Story structures");
+    const genreHeader = screen.getByText("Genre patterns");
+    expect(genreHeader).toBeTruthy();
+    expect(screen.getByText("Thriller Escalation")).toBeTruthy();
+    // Three-Act stays under Story structures, not Genre patterns.
+    expect(screen.queryByText("Plotlines")).toBeNull();
+    // Story structures precede Genre patterns.
+    const position = structuresHeader.compareDocumentPosition(genreHeader);
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -172,7 +194,7 @@ describe("PlotTemplatePalette", () => {
     mount({ entries: [tpl({ id: "p1", title: "Three-Act" })] });
     await tick();
     expect(screen.queryByText("Character arcs")).toBeNull();
-    expect(screen.getByText("Plotlines")).toBeTruthy();
+    expect(screen.getByText("Story structures")).toBeTruthy();
   });
 
   it("shows the seedling glyph on the Character arcs header", async () => {

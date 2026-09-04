@@ -34,6 +34,7 @@ import { refreshPlotlines } from "@/lib/stores/plotlines";
 import { refreshTodos } from "@/lib/stores/todos";
 import { refreshChatSessions } from "@/lib/stores/chats";
 import { metadataSchemaStore } from "@/lib/stores/schema";
+import { resolveAdoptedTagFields } from "@/lib/stores/tagNodes";
 import {
   collectNodeIdSet,
   collectSceneIdSet,
@@ -155,6 +156,18 @@ class TreeActions {
       delete fields.title;
       const finalTitle =
         proposedTitle || `New ${entryTypeName(entryType, get(metadataSchemaStore))}`;
+      // ADR-0082 §2 / #1797 / #1821: the validator never mints (title-preserving
+      // by design), so a draft's tag-vocabulary field may still carry bare
+      // proposed titles the vocabulary doesn't hold. This is the create path's
+      // accept moment — the exact counterpart of NodeEditor's `onAdoptFields`
+      // (adopting into an EXISTING entry) — so it resolves/mints the same way,
+      // through the shared `resolveAdoptedTagFields`. It runs BEFORE
+      // `ops.create` below so a rejected mint leaves no half-minted entry
+      // behind (the create+save pair stays otherwise unchanged). `createLayerId`
+      // is `null` — the open project's own layer, same default NodeEditor uses
+      // when no rail layer is chosen (`CreateTagEntryRequest.layer_id`,
+      // `models/tag_nodes.py`).
+      await resolveAdoptedTagFields(fields, get(metadataSchemaStore), null);
       const created = await ops.create(finalTitle);
       const merged: T = { ...created, metadata: { ...created.metadata, ...fields } };
       const saved = await ops.save(merged, patch.body ?? "");

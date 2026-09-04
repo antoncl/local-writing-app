@@ -1085,6 +1085,93 @@ describe("nest — other match modes", () => {
   });
 });
 
+describe("nest — merged tag redirect (ADR-0082 §5 / #1813)", () => {
+  // tag_a was merged into tag_b: `canonicalId` maps the retired id to its
+  // survivor, exactly as the tag store's `merged_into` redirect resolves it.
+  const canonicalId = (id: string) => (id === "tag_a" ? "tag_b" : id);
+
+  const TAG_NODES: EvalNode[] = [
+    { id: "tag_a", entry_type: "tag:tag", title: "Tag A", metadata: {} },
+    { id: "tag_b", entry_type: "tag:tag", title: "Tag B", metadata: {} },
+    { id: "lore_1", entry_type: "lore:note", title: "Lore One", metadata: { tags: ["tag_a"] } },
+    { id: "lore_2", entry_type: "lore:note", title: "Lore Two", metadata: { tags: ["tag_b"] } },
+    { id: "lore_3", entry_type: "lore:note", title: "Lore Three", metadata: { tags: ["tag_a", "tag_b"] } },
+  ];
+  const childToParentNest: ViewSpec = {
+    kind: "lore",
+    expr: {
+      nest: {
+        parents: { type: "tag:tag" },
+        match: { field: "tags", direction: "child_to_parent", by: "ref" },
+      },
+    },
+  };
+
+  it("(a) with canonicalId, every entry lands under the survivor tag_b — the double-tagged entry once", () => {
+    const res = evaluateView(childToParentNest, TAG_NODES, { canonicalId });
+    const tagB = res.groups?.find((g) => g.nodeId === "tag_b");
+    expect(tagB?.children.map((c) => c.node?.id).sort()).toEqual(["lore_1", "lore_2", "lore_3"]);
+    // tag_a never groups anything — every link redirected to tag_b instead.
+    const tagA = res.groups?.find((g) => g.nodeId === "tag_a");
+    expect(tagA?.children ?? []).toEqual([]);
+  });
+
+  it("(b) without canonicalId, behaviour is unchanged — entries split between the two tag rows", () => {
+    const res = evaluateView(childToParentNest, TAG_NODES);
+    const tagA = res.groups?.find((g) => g.nodeId === "tag_a");
+    const tagB = res.groups?.find((g) => g.nodeId === "tag_b");
+    expect(tagA?.children.map((c) => c.node?.id).sort()).toEqual(["lore_1", "lore_3"]);
+    expect(tagB?.children.map((c) => c.node?.id).sort()).toEqual(["lore_2", "lore_3"]);
+  });
+
+  it("(c) parent_to_children: the parent's link to a merged child id lands on the survivor", () => {
+    const RELATED_NODES: EvalNode[] = [
+      { id: "tag_a", entry_type: "tag:tag", title: "Tag A", metadata: {} },
+      { id: "tag_b", entry_type: "tag:tag", title: "Tag B", metadata: {} },
+      { id: "lore_x", entry_type: "lore:note", title: "Lore X", metadata: { related: ["tag_a"] } },
+    ];
+    const parentToChildrenNest: ViewSpec = {
+      kind: "lore",
+      expr: {
+        nest: {
+          parents: { type: "lore:note" },
+          children: { type: "tag:tag" },
+          match: { field: "related", direction: "parent_to_children", by: "ref" },
+        },
+      },
+    };
+    const res = evaluateView(parentToChildrenNest, RELATED_NODES, { canonicalId });
+    const loreX = res.groups?.find((g) => g.nodeId === "lore_x");
+    expect(loreX?.children.map((c) => c.node?.id)).toEqual(["tag_b"]);
+  });
+
+  it("(d) by: title is untouched by canonicalId — title match still resolves by title only", () => {
+    // Titles deliberately equal the OTHER node's id string, so an incorrect
+    // canonicalId application on the title path (rather than the resolved
+    // ref path) would be caught: a stored value of "tag_a" must resolve to
+    // whichever node is TITLED "tag_a", not redirect as if it were an id.
+    const TITLE_NODES: EvalNode[] = [
+      { id: "tag_a", entry_type: "tag:tag", title: "tag_a", metadata: {} },
+      { id: "tag_b", entry_type: "tag:tag", title: "tag_b", metadata: {} },
+      { id: "lore_y", entry_type: "lore:note", title: "Lore Y", metadata: { tags: ["tag_a"] } },
+    ];
+    const byTitleNest: ViewSpec = {
+      kind: "lore",
+      expr: {
+        nest: {
+          parents: { type: "tag:tag" },
+          match: { field: "tags", direction: "child_to_parent", by: "title" },
+        },
+      },
+    };
+    const res = evaluateView(byTitleNest, TITLE_NODES, { canonicalId });
+    const tagA = res.groups?.find((g) => g.nodeId === "tag_a");
+    const tagB = res.groups?.find((g) => g.nodeId === "tag_b");
+    expect(tagA?.children.map((c) => c.node?.id)).toEqual(["lore_y"]);
+    expect(tagB?.children ?? []).toEqual([]);
+  });
+});
+
 // --- nest: orphans as a routable second output (ADR-0028 Amendment 1, #260) ---
 
 // The Aleph/Bet/Gimmel case from the ADR. Three acts, each with a chapter and a

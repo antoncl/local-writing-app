@@ -92,12 +92,12 @@
   //
   // #333 retired the old whole-roster guard. It existed because a drag on a
   // FILTERED view could persist a partial order and silently demote the hidden
-  // ids — which is no longer a hazard now that being outside the view IS being
-  // outside the roster: the tag filter narrows what you curate, and `onSetOrder`
-  // rebuilds the sequence from the entries the view actually yielded. It also no
-  // longer keys off `group_by`, which #333 re-pointed from provenance to
-  // curation — the levels are what the drop TARGETS, not a precondition for
-  // dragging at all.
+  // ids. That hazard is gone regardless of what narrows the display: `reorder` /
+  // `groupDrop` rebuild from `listedIds` (the FULL listed roster), repositioning
+  // only the moved id, so a drop while the search field (#1816) hides rows never
+  // touches a hidden assistant's place. It also no longer keys off `group_by`,
+  // which #333 re-pointed from provenance to curation — the levels are what the
+  // drop TARGETS, not a precondition for dragging at all.
   const canReorder = $derived((viewSpec.sort?.by ?? "manual") === "manual" && !viewSpec.groups?.length);
 
   // The listed sequence, in the order the roster presents it. `onSetOrder`

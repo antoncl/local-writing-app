@@ -952,7 +952,10 @@ function evalOrphansOf<T extends EvalNode>(state: RunState<T>, id: string): Set<
 // `by` picks whether that value identifies the other card by id (`ref`) or by
 // title (`title`, matched case-insensitively). Potential parents are the whole
 // universe (recursion promotes attached children to parents); the parent *seed*
-// set only decides where the BFS starts.
+// set only decides where the BFS starts. A `ref` join follows `state.canonicalId`
+// (ADR-0082 §5, #1813) — a stored link to a merged tag's id still lands the row
+// under the survivor, the same redirect `evalLeaf`'s `tagged` branch and
+// `evalField` already honor for their own id-carrying slots.
 function buildNestAdjacency<T extends EvalNode>(
   state: RunState<T>,
   match: ViewNestOp["match"],
@@ -980,8 +983,12 @@ function buildNestAdjacency<T extends EvalNode>(
     }
     return titleIndex.get(title.trim().toLowerCase()) ?? [];
   };
-  // Resolve a stored field value to the node id(s) it identifies.
-  const resolve = (value: string): string[] => (byTitle ? idsForTitle(value) : [value]);
+  // Resolve a stored field value to the node id(s) it identifies. A `ref` value
+  // is redirected through `canonicalId` when supplied — a merged tag's id still
+  // resolves to its survivor; a node's own id (`child.id`/`parent.id`) is never
+  // canonicalised, only the stored reference value.
+  const resolve = (value: string): string[] =>
+    byTitle ? idsForTitle(value) : [state.canonicalId ? state.canonicalId(value) : value];
 
   if (match.direction === "child_to_parent") {
     // The child card holds the link to its parent(s).

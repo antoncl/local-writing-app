@@ -146,6 +146,50 @@ describe("viewUsesTagIds — widens the gate to a plain tagged: filter too (#180
     expect(viewUsesTagIds(null, SCHEMA)).toBe(false);
     expect(viewUsesTagIds(undefined, SCHEMA)).toBe(false);
   });
+
+  // #1813: a Nest joined `by: "ref"` on a node-set field carries ids too —
+  // `buildNestAdjacency` follows `canonicalId` for it, so the gate must catch it.
+  it("is true for a nest joined by: ref on a node-set field", () => {
+    const spec = {
+      kind: "lore",
+      expr: {
+        nest: {
+          parents: { type: "lore:note" },
+          children: { type: "lore:note" },
+          match: { field: "motifs", direction: "child_to_parent", by: "ref" },
+        },
+      },
+    } as ViewSpec;
+    expect(viewUsesTagIds(spec, SCHEMA)).toBe(true);
+  });
+
+  it("is false for the same nest joined by: ref on a NON-node-set field", () => {
+    const spec = {
+      kind: "lore",
+      expr: {
+        nest: {
+          parents: { type: "lore:note" },
+          children: { type: "lore:note" },
+          match: { field: "status", direction: "child_to_parent", by: "ref" },
+        },
+      },
+    } as ViewSpec;
+    expect(viewUsesTagIds(spec, SCHEMA)).toBe(false);
+  });
+
+  it("is false for a nest joined by: title on a node-set field (a title join never carries an id)", () => {
+    const spec = {
+      kind: "lore",
+      expr: {
+        nest: {
+          parents: { type: "lore:note" },
+          children: { type: "lore:note" },
+          match: { field: "motifs", direction: "child_to_parent", by: "title" },
+        },
+      },
+    } as ViewSpec;
+    expect(viewUsesTagIds(spec, SCHEMA)).toBe(false);
+  });
 });
 
 describe("a plain tagged: filter with no ref grouping canonicalises through the widened gate (#1805)", () => {

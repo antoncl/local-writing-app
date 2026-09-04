@@ -129,3 +129,24 @@ export function effectiveFieldType(def: MetadataFieldDefinition | null | undefin
   if (!def) return undefined;
   return def.type === "computed" ? def.computed?.value_type : def.type;
 }
+
+// Map every id in `ids` through `canonicalId` (ADR-0082 §5). Shared by every
+// tag-id-bearing read that needs to fold a merged tag's id onto its survivor —
+// the node-reference reader (`nodeReferences`), a `tagged:` leaf's operand, and
+// a reference-field `field` predicate's operand/values (#1805 X1) — whichever
+// side still names the merged id, the other side's already-canonical form is
+// what it is compared against.
+export function canonicalizeIds(ids: Iterable<string>, canonicalId: (id: string) => string): Set<string> {
+  const out = new Set<string>();
+  for (const id of ids) out.add(canonicalId(id));
+  return out;
+}
+
+// The scalar counterpart to `canonicalizeIds` — a single `entity_ref` field's
+// raw value, canonicalised before a `field` predicate's whole-value compare
+// (#1805 X1). Non-ref/empty values pass through untouched (the caller only
+// calls this for a ref field's own raw value).
+export function canonicalizeRefValue(raw: unknown, canonicalId: (id: string) => string): unknown {
+  if (isEmpty(raw)) return raw;
+  return canonicalId(String(raw).trim());
+}

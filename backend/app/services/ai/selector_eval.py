@@ -28,6 +28,15 @@ verbatim from `evalExpr`/`evalLeaf`:
   `difference{keep: of, remove: pred}`.
 - An absent/empty/unrecognized expr selects **nothing** (ADR-0036) — "everything"
   must be stated explicitly.
+- `canonical_id` (ADR-0082 §5, #1805), when given, follows a merged tag's
+  `merged_into` chain to its survivor and is applied everywhere a stored id could
+  predate a merge: a `tagged:` leaf's operand ids, a reference-field (`field`
+  predicate over an `entity_ref`/`entity_ref_list` key, per `ref_fields`)
+  predicate's operand AND the node's own values, and — by the caller, not this
+  module — `SelectorNode.references` itself (`preview.py`'s
+  `_canonical_references`). The shared parity corpus's `redirects` map
+  (`spec/selector-eval-corpus.json`) is what both runners build their
+  `canonical_id` double from, so a drift here fails on BOTH sides.
 
 Only this flat-membership subset is supported — the shapes the picker emits plus
 safe set algebra. The relational/projection operators that can appear only in a
@@ -90,6 +99,8 @@ def evaluate_selector_membership(
     is_descendant: Callable[[str, str], bool],
     collection_fields: frozenset[str] = frozenset(),
     numeric_fields: frozenset[str] = frozenset(),
+    ref_fields: frozenset[str] = frozenset(),
+    canonical_id: Callable[[str], str] | None = None,
 ) -> list[str]:
     """Member node ids for `expr` over `nodes`, in roster order (deduped).
 
@@ -97,9 +108,22 @@ def evaluate_selector_membership(
     when `entry_type` equals or descends from `target` (the backend
     `_entry_type_matches`). `collection_fields`/`numeric_fields` tune the `field`
     predicate for multi-value and number fields; both may be empty (list-valued
-    data is still detected at runtime)."""
+    data is still detected at runtime). `ref_fields` (ADR-0082 §5, #1805 X1) names
+    the `entity_ref`/`entity_ref_list` keys — derived from the schema the caller
+    has, the same way `collection_fields`/`numeric_fields` are — a `field`
+    predicate over one of them canonicalises BOTH its operand and the node's own
+    value (the shipped assistant view's TAG param filter,
+    `field: {key: assistant_tags, op: overlap, value: {var: TAG}}`, is exactly
+    this shape). `canonical_id` (ADR-0082 §5, #1805) follows a merged tag's id to
+    its survivor and, when given, is applied to every `tagged:` leaf's OPERAND ids
+    (including a resolved `{var}` binding's ids) and, per `ref_fields`, every
+    reference-field predicate's operand/values — the mirror of the node-side
+    canonicalisation the caller already applies to `SelectorNode.references`
+    (`preview.py`'s `_canonical_references`), so an operand written before a merge
+    still matches. Identity (no-op) when omitted, so every existing caller is
+    unchanged."""
     universe = {n.id for n in nodes}
-    member = _eval(expr, nodes, universe, is_descendant, collection_fields, numeric_fields)
+    member = _eval(expr, nodes, universe, is_descendant, collection_fields, numeric_fields, ref_fields, canonical_id)
     return [n.id for n in nodes if n.id in member]
 
 
@@ -110,6 +134,8 @@ def _eval(
     is_desc: Callable[[str, str], bool],
     coll: frozenset[str],
     numf: frozenset[str],
+    reff: frozenset[str],
+    canon: Callable[[str], str] | None,
 ) -> set[str]:
     """The set combinators; leaves delegate to `_eval_leaf`."""
     if not isinstance(expr, Mapping):
@@ -117,7 +143,7 @@ def _eval(
     expr = _lower_filter(expr)
 
     def rec(child: Any) -> set[str]:
-        return _eval(child, nodes, universe, is_desc, coll, numf)
+        return _eval(child, nodes, universe, is_desc, coll, numf, reff, canon)
 
     if _has(expr, "union"):
         out: set[str] = set()
@@ -134,7 +160,7 @@ def _eval(
     if _has(expr, "annotate"):
         # Color-only pass-through: its members are its `of` operand unchanged.
         return rec(expr.get("of"))
-    return _eval_leaf(expr, nodes, is_desc, coll, numf)
+    return _eval_leaf(expr, nodes, is_desc, coll, numf, reff, canon)
 
 
 def _eval_intersect(children: Any, rec: Callable[[Any], set[str]]) -> set[str]:
@@ -154,6 +180,8 @@ def _eval_leaf(
     is_desc: Callable[[str, str], bool],
     coll: frozenset[str],
     numf: frozenset[str],
+    reff: frozenset[str],
+    canon: Callable[[str], str] | None,
 ) -> set[str]:
     if _has(expr, "type"):
         want = _leaf_operand(expr["type"])
@@ -163,12 +191,20 @@ def _eval_leaf(
         return {n.id for n in nodes if any(is_desc(n.entry_type, t) for t in want)}
     if _has(expr, "tagged"):
         want = _leaf_operand(expr["tagged"])
+        # Runs on `want` AFTER `_leaf_operand` resolves it, so this covers a
+        # `{var}`-bound operand's ids too (not reachable here today — a bound
+        # `tagged` raises `UnsupportedSelectorExpr` below via `_leaf_operand` —
+        # but correct and idempotent if that support is ever added; #1805 X5
+        # mirrors this same "runs after resolution" property on the frontend,
+        # where a promoted-formal `tagged` DOES reach `evalLeaf`).
+        if canon is not None:
+            want = {canon(w) for w in want}
         return {n.id for n in nodes if want & n.references}
     if _has(expr, "hand_picked"):
         want = set(expr["hand_picked"] or [])
         return {n.id for n in nodes if n.id in want}
     if _has(expr, "field"):
-        return _eval_field(expr["field"], nodes, coll, numf)
+        return _eval_field(expr["field"], nodes, coll, numf, reff, canon)
     for unsupported in ("nest", "field_of", "var", "orphans_of", "orphans_nest"):
         if _has(expr, unsupported):
             raise UnsupportedSelectorExpr(unsupported)
@@ -210,6 +246,8 @@ def _eval_field(
     nodes: Sequence[SelectorNode],
     coll: frozenset[str],
     numf: frozenset[str],
+    reff: frozenset[str],
+    canon: Callable[[str], str] | None,
 ) -> set[str]:
     """The `field` predicate, mirroring the frontend `evalField`."""
     key = pred.get("key")
@@ -222,15 +260,26 @@ def _eval_field(
         raise UnsupportedSelectorExpr(f"field-op:{op}")
     is_coll = key in coll
     operand = _operand_set(pred.get("value"), is_coll)
+    # ADR-0082 §5 / #1805 X1: a reference field (`entity_ref`/`entity_ref_list`,
+    # per `reff`) follows the same merged-tag redirect `tagged:` does — BOTH the
+    # operand and each node's own value fold through `canon`, mirroring the
+    # frontend `evalField`.
+    is_ref = key in reff
+    if is_ref and canon is not None:
+        operand = {canon(w) for w in operand}
     numeric = key in numf
     want = op == "overlap"
     out: set[str] = set()
     for node in nodes:
         raw = node.metadata.get(key)
         if is_coll or isinstance(raw, (list, tuple, set)):
-            overlaps = bool(_to_str_set(raw) & operand)
+            values = _to_str_set(raw)
+            if is_ref and canon is not None:
+                values = {canon(v) for v in values}
+            overlaps = bool(values & operand)
         else:
-            overlaps = _scalar_overlap(raw, operand, numeric)
+            value = canon(str(raw).strip()) if is_ref and canon is not None and not _is_empty(raw) else raw
+            overlaps = _scalar_overlap(value, operand, numeric)
         if overlaps == want:
             out.add(node.id)
     return out

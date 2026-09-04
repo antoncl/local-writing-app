@@ -1,5 +1,5 @@
 {
-  "_comment": "Cross-runtime parity corpus for the context-pick selector evaluator (ADR-0074 slice 5 / ADR-0082 slice 2b). The SAME cases are run by backend/tests/test_selector_eval_parity.py (Python: evaluate_selector_membership) and frontend/src/lib/views/selectorEvalParity.test.ts (TypeScript: evaluateView). Both must return `expected` verbatim. `expected` is in node-array (roster) order, deduped. A change to either evaluator that breaks parity turns its runtime's gate red. `tagged` names a tag NODE by id and matches when that id appears anywhere in a node's metadata (any field, any depth) — schema-free, not keyed to a conventional `tags` field; the `schema.entry_types[*].parent` chain drives type/descendants_of.",
+  "_comment": "Cross-runtime parity corpus for the context-pick selector evaluator (ADR-0074 slice 5 / ADR-0082 slice 2b). The SAME cases are run by backend/tests/test_selector_eval_parity.py (Python: evaluate_selector_membership) and frontend/src/lib/views/selectorEvalParity.test.ts (TypeScript: evaluateView). Both must return `expected` verbatim. `expected` is in node-array (roster) order, deduped. A change to either evaluator that breaks parity turns its runtime's gate red. `tagged` names a tag NODE by id and matches when that id appears anywhere in a node's metadata (any field, any depth) — schema-free, not keyed to a conventional `tags` field; the `schema.entry_types[*].parent` chain drives type/descendants_of. `schema.fields` (optional, `{key: {type}}`) declares field TYPES for the `field` predicate — `entity_ref`/`entity_ref_list` keys are reference fields (canonicalised, below); an undeclared key falls back to scalar/list auto-detection at runtime, unaffected. The optional top-level `redirects` map (`{\"<merged id>\": \"<survivor id>\"}`, ADR-0082 §5 / #1805) models a merged tag's `merged_into` chain; both runners build a canonical function from it (chain-walked to its terminal survivor, identity when absent, a case's ids don't appear in it, or the chain revisits an id already on its OWN walk — a cycle or cycle-adjacent id resolves to ITSELF, mirroring `NodeIndex._walk_merge_chain`, never to an arbitrary cycle member) and pass it to their evaluator — mirroring the backend `canonical_id` kwarg and the frontend `EvalContext.canonicalId`. It follows EVERY `tagged:` operand id, a reference-field `field` predicate's operand AND the node's own value (per `schema.fields`), and — per each runner's own node-reference construction — every node's metadata references too, so a merged id matches through the redirect from either side.",
   "schema": {
     "entry_types": {
       "lore:base": {},
@@ -9,7 +9,18 @@
       "lore:hero": { "parent": "lore:character" },
       "plot:base": {},
       "plot:card": { "parent": "plot:base" }
+    },
+    "fields": {
+      "plotline": { "type": "entity_ref_list" }
     }
+  },
+  "redirects": {
+    "tag_merged_old": "tag_survivor",
+    "tag_hop1": "tag_hop2",
+    "tag_hop2": "tag_hop3",
+    "a": "b",
+    "b": "a",
+    "c": "a"
   },
   "cases": [
     {
@@ -179,6 +190,62 @@
         { "id": "b", "entry_type": "lore:note", "metadata": {} }
       ],
       "expected": ["b"]
+    },
+    {
+      "name": "tagged operand follows a merged tag's redirect to the survivor",
+      "expr": { "tagged": "tag_merged_old" },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["tag_survivor"] } },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "tags": ["tag_other"] } }
+      ],
+      "expected": ["a"]
+    },
+    {
+      "name": "tagged survivor still matches a node carrying the merged id (node-side canonicalisation)",
+      "expr": { "tagged": "tag_survivor" },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["tag_merged_old"] } },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "tags": ["tag_other"] } }
+      ],
+      "expected": ["a"]
+    },
+    {
+      "name": "tagged operand follows a two-hop redirect chain to its final survivor",
+      "expr": { "tagged": "tag_hop1" },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["tag_hop3"] } },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "tags": ["tag_hop2"] } },
+        { "id": "c", "entry_type": "lore:note", "metadata": { "tags": ["tag_other"] } }
+      ],
+      "expected": ["a", "b"]
+    },
+    {
+      "name": "field overlap on a ref-list field follows the OPERAND's redirect to the survivor (#1805 X1)",
+      "expr": { "field": { "key": "plotline", "op": "overlap", "value": "tag_merged_old" } },
+      "nodes": [
+        { "id": "c1", "entry_type": "plot:card", "metadata": { "plotline": ["tag_survivor"] } },
+        { "id": "c2", "entry_type": "plot:card", "metadata": { "plotline": ["tag_other"] } }
+      ],
+      "expected": ["c1"]
+    },
+    {
+      "name": "field overlap on a ref-list field follows the NODE's value redirect to the survivor (#1805 X1)",
+      "expr": { "field": { "key": "plotline", "op": "overlap", "value": "tag_survivor" } },
+      "nodes": [
+        { "id": "c1", "entry_type": "plot:card", "metadata": { "plotline": ["tag_merged_old"] } },
+        { "id": "c2", "entry_type": "plot:card", "metadata": { "plotline": ["tag_other"] } }
+      ],
+      "expected": ["c1"]
+    },
+    {
+      "name": "a merge cycle resolves the operand id to itself, never an arbitrary cycle member (#1805 X6)",
+      "expr": { "tagged": "c" },
+      "nodes": [
+        { "id": "x", "entry_type": "lore:note", "metadata": { "tags": ["c"] } },
+        { "id": "y", "entry_type": "lore:note", "metadata": { "tags": ["a"] } },
+        { "id": "z", "entry_type": "lore:note", "metadata": { "tags": ["b"] } }
+      ],
+      "expected": ["x"]
     }
   ]
 }

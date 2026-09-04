@@ -298,8 +298,20 @@ describe("leaves", () => {
     const carrier: EvalNode = { id: "f", entry_type: "lore:character", title: "Carrier", metadata: { tags: ["tag_mirror"] } };
     const ctx = { schema: SCHEMA, canonicalId: (id: string) => (id === "tag_mirror" ? "tag_mirrors" : id) };
     expect(ids({ kind: "lore", expr: { tagged: "tag_mirrors" } }, [...NODES, carrier], ctx)).toEqual(["f"]);
-    // The merged id itself no longer matches — it left the roster's edges.
-    expect(ids({ kind: "lore", expr: { tagged: "tag_mirror" } }, [...NODES, carrier], ctx)).toEqual([]);
+  });
+
+  // #1805: the OPERAND follows the same redirect the node side does — a
+  // `tagged: <merged id>` leaf written before a merge still matches a node
+  // now carrying the survivor's id, not just the reverse (above).
+  it("tagged: <merged id> operand follows canonicalId to match a node carrying the survivor", () => {
+    const carrier: EvalNode = { id: "f", entry_type: "lore:character", title: "Carrier", metadata: { tags: ["tag_mirrors"] } };
+    const ctx = { schema: SCHEMA, canonicalId: (id: string) => (id === "tag_mirror" ? "tag_mirrors" : id) };
+    expect(ids({ kind: "lore", expr: { tagged: "tag_mirror" } }, [...NODES, carrier], ctx)).toEqual(["f"]);
+  });
+
+  it("tagged: without canonicalId is unaffected — no redirect follow", () => {
+    const carrier: EvalNode = { id: "f", entry_type: "lore:character", title: "Carrier", metadata: { tags: ["tag_mirrors"] } };
+    expect(ids({ kind: "lore", expr: { tagged: "tag_mirror" } }, [...NODES, carrier])).toEqual([]);
   });
 
   // `title` is a top-level node property, not metadata — a field predicate on it
@@ -439,6 +451,53 @@ describe("field predicates (op enum 6→4: overlap/disjoint/set/unset)", () => {
   it("set / unset (presence, operand ignored)", () => {
     expect(ids({ kind: "lore", expr: { field: { key: "power", op: "set" } } })).toEqual(["c", "e"]);
     expect(ids({ kind: "lore", expr: { field: { key: "power", op: "unset" } } })).toEqual(["a", "b", "d"]);
+  });
+});
+
+// #1805 X1: a `field` predicate over a REFERENCE field (entity_ref/entity_ref_list)
+// canonicalises like `tagged:` does — the shipped assistant view's TAG param
+// filter (`field: {key: assistant_tags, op: overlap, value: {var: TAG}}`) is
+// exactly this shape, and `viewGraph.test.ts` uses the same shape on `tags`.
+describe("field predicate on a REFERENCE field follows a merged tag's redirect (ADR-0082 §5 / #1805 X1)", () => {
+  const refFieldSchema = {
+    version: 1,
+    entry_types: { "plot:base": { name: "Plot", kind: "plot", abstract: true, fields: [] }, "plot:card": { name: "Card", kind: "plot", parent: "plot:base", fields: [] } },
+    fields: { plotline: { name: "Plotline", type: "entity_ref_list" } },
+  } as unknown as MetadataSchema;
+  const canonicalId = (id: string) => (id === "tag_merged_old" ? "tag_survivor" : id);
+
+  const refIds = (spec: ViewSpec, nodes: EvalNode[], schema: MetadataSchema, withCanonicalId: boolean) =>
+    evaluateView(spec, nodes, withCanonicalId ? { schema, canonicalId } : { schema }).nodes.map((n) => n.id);
+
+  it("the OPERAND follows the redirect to match a node carrying the survivor", () => {
+    const nodes: EvalNode[] = [
+      { id: "c1", entry_type: "plot:card", title: "Card 1", metadata: { plotline: ["tag_survivor"] } },
+      { id: "c2", entry_type: "plot:card", title: "Card 2", metadata: { plotline: ["tag_other"] } },
+    ];
+    const spec = { kind: "plot", expr: { field: { key: "plotline", op: "overlap", value: "tag_merged_old" } } } as ViewSpec;
+    expect(refIds(spec, nodes, refFieldSchema, true)).toEqual(["c1"]);
+  });
+
+  it("the NODE's own value follows the redirect to match a survivor operand", () => {
+    const nodes: EvalNode[] = [
+      { id: "c1", entry_type: "plot:card", title: "Card 1", metadata: { plotline: ["tag_merged_old"] } },
+      { id: "c2", entry_type: "plot:card", title: "Card 2", metadata: { plotline: ["tag_other"] } },
+    ];
+    const spec = { kind: "plot", expr: { field: { key: "plotline", op: "overlap", value: "tag_survivor" } } } as ViewSpec;
+    expect(refIds(spec, nodes, refFieldSchema, true)).toEqual(["c1"]);
+  });
+
+  it("without canonicalId, a merged operand does NOT match a survivor value (unchanged behaviour)", () => {
+    const nodes: EvalNode[] = [{ id: "c1", entry_type: "plot:card", title: "Card 1", metadata: { plotline: ["tag_survivor"] } }];
+    const spec = { kind: "plot", expr: { field: { key: "plotline", op: "overlap", value: "tag_merged_old" } } } as ViewSpec;
+    expect(refIds(spec, nodes, refFieldSchema, false)).toEqual([]);
+  });
+
+  it("a NON-reference field is never canonicalised, even with canonicalId present", () => {
+    const nonRefSchema = { ...refFieldSchema, fields: { plotline: { name: "Plotline", type: "text" } } } as unknown as MetadataSchema;
+    const nodes: EvalNode[] = [{ id: "c1", entry_type: "plot:card", title: "Card 1", metadata: { plotline: "tag_survivor" } }];
+    const spec = { kind: "plot", expr: { field: { key: "plotline", op: "overlap", value: "tag_merged_old" } } } as ViewSpec;
+    expect(refIds(spec, nodes, nonRefSchema, true)).toEqual([]);
   });
 });
 
@@ -682,6 +741,19 @@ describe("promoted leaf slots resolve from bindings (ADR-0038 §C, #222)", () =>
   });
   it("a bound tagged leaf matches nodes carrying the tag (array + CSV)", () => {
     expect(leafIds({ tagged: { var: "TAG" } }, { TAG: ["gotham"] })).toEqual(["b", "c"]);
+  });
+  // #1805 X5: the operand canonicalisation runs AFTER `resolveLeafOperand`
+  // resolves the binding, so a `{var}`-bound tagged leaf's bound id ALSO
+  // follows a merged tag's redirect — a strict widening over the retired
+  // `pickerSelectors.canonicalizedSpec` clone, which only rewrote a literal
+  // string operand and left a promoted formal untouched.
+  it("a bound tagged leaf's BOUND id also follows canonicalId to the survivor", () => {
+    const carrier: EvalNode = { id: "f", entry_type: "lore:character", title: "Carrier", metadata: { tags: ["tag_mirrors"] } };
+    const ctx = { schema: SCHEMA, canonicalId: (id: string) => (id === "tag_mirror" ? "tag_mirrors" : id), bindings: { TAG: ["tag_mirror"] } };
+    const ids = evaluateView({ kind: "lore", expr: { tagged: { var: "TAG" } } } as ViewSpec, [...NODES, carrier], ctx).nodes.map(
+      (n) => n.id,
+    );
+    expect(ids).toEqual(["f"]);
   });
   it("an UNBOUND type leaf is inactive — shows everything at top level (#198)", () => {
     expect(leafIds({ type: { var: "T" } })).toEqual(["a", "b", "c", "d", "e"]);

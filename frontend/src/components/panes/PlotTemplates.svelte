@@ -13,6 +13,7 @@
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
+  import { groupPlotTemplates } from "@/lib/plot/plotTemplateGroups";
   import type { ViewSpec } from "@/lib/types";
 
   let {
@@ -58,30 +59,27 @@
   // roster + data env) to ViewNodeList, which owns evaluation. Grouping (none
   // here) comes from the spec, never synthesized in the pane.
   //
-  // ADR-0080 slice 2: section arc templates apart from plotline templates. `family` isn't
-  // a schema field the view evaluator reads, so the split is a plain array partition, each
-  // half rendered through its own ViewNodeList sharing the same view spec — not a view
-  // group_by.
-  const plotlineEntries = $derived(visibleEntries.filter((e) => e.template?.family !== "character_arc"));
-  const arcEntries = $derived(visibleEntries.filter((e) => e.template?.family === "character_arc"));
-  const plotlineView = $derived({
+  // ADR-0080 slice 2 sectioned arc templates apart; the plotline half splits again into
+  // "Story structures" and "Genre patterns" — the same buckets, and the same shared
+  // partition, the spawn palette uses (see plotTemplateGroups), so the two surfaces that
+  // list these templates stay in step. `family` isn't a schema field the evaluator reads,
+  // so this is a plain partition, never a view group_by.
+  const groups = $derived(groupPlotTemplates(visibleEntries));
+  const toView = (universe: PlotTemplateSummary[]) => ({
     spec: viewSpec,
-    universe: plotlineEntries,
+    universe,
     schema,
     referenceIndex: $referenceIndexStore,
   });
-  const arcView = $derived({
-    spec: viewSpec,
-    universe: arcEntries,
-    schema,
-    referenceIndex: $referenceIndexStore,
-  });
+  const structureView = $derived(toView(groups.structures));
+  const genreView = $derived(toView(groups.genre));
+  const arcView = $derived(toView(groups.arcs));
 </script>
 
-{#if plotlineEntries.length}
-  <div class="section-head"><span>Plotlines</span></div>
+{#if groups.structures.length}
+  <div class="section-head"><span>Story structures</span></div>
   <ViewNodeList
-    view={plotlineView}
+    view={structureView}
     active={(entry) => focusedDocument?.type === "plot_template" && focusedDocument.id === entry.id}
     onClick={(entry) => onOpenEntry(entry.id)}
     row={entryRow}
@@ -90,11 +88,24 @@
       <!-- A raw partition can be non-empty while its evaluated view is (e.g. the schema
            doesn't root plot:template under plot:base, #724) — keep the pane's own copy
            rather than falling through to ViewNodeList's generic "No entries." -->
-      <p class="muted">{entries.length === 0 ? "No plot templates." : "No plot templates match this view."}</p>
+      <p class="muted">No plot templates match this view.</p>
     {/snippet}
   </ViewNodeList>
 {/if}
-{#if arcEntries.length}
+{#if groups.genre.length}
+  <div class="section-head"><span>Genre patterns</span></div>
+  <ViewNodeList
+    view={genreView}
+    active={(entry) => focusedDocument?.type === "plot_template" && focusedDocument.id === entry.id}
+    onClick={(entry) => onOpenEntry(entry.id)}
+    row={entryRow}
+  >
+    {#snippet whenEmpty()}
+      <p class="muted">No plot templates match this view.</p>
+    {/snippet}
+  </ViewNodeList>
+{/if}
+{#if groups.arcs.length}
   <div class="section-head"><i class="ti ti-seedling" aria-hidden="true"></i><span>Character arcs</span></div>
   <ViewNodeList
     view={arcView}
@@ -107,7 +118,7 @@
     {/snippet}
   </ViewNodeList>
 {/if}
-{#if !plotlineEntries.length && !arcEntries.length}
+{#if !groups.structures.length && !groups.genre.length && !groups.arcs.length}
   <p class="muted">{entries.length === 0 ? "No plot templates." : "No plot templates match this view."}</p>
 {/if}
 

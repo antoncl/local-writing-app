@@ -1,13 +1,15 @@
 ---
 id: builtin-plot-steadfast-character-arc
-title: Flat (Steadfast) Arc
+title: Flat Arc
 entry_type: plot:template
 template:
   version: 1
   slug: steadfast-character-arc
-  display_name: Flat (Steadfast) Arc
+  display_name: Flat Arc
   aliases:
+  - Steadfast Arc
   - Steadfast Character Arc
+  - Flat (Steadfast) Arc
   family: character_arc
   description: A generic arc for a character whose stable truth changes the surrounding
     world.
@@ -66,7 +68,7 @@ metadata:
     id: world_changed
 ---
 
-# Flat (Steadfast) Arc
+# Flat Arc
 
 Use this template for a character whose core truth remains stable while the
 surrounding world changes. The movement is not internal reversal but tested

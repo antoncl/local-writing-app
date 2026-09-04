@@ -22,6 +22,7 @@
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
+  import { groupPlotTemplates } from "@/lib/plot/plotTemplateGroups";
   import type { PlotTemplateSummary } from "@/lib/types";
 
   let {
@@ -57,41 +58,24 @@
   // is constant — build it once, not on every roster/hide recompute.
   const viewSpec = defaultView("plot");
 
-  // ADR-0080 slice 2 sectioned arc templates apart from plotline templates; this splits the
-  // plotline half again so a newcomer meets a few labelled buckets, not a flat wall of ~11
-  // names. `family` isn't a schema field the view evaluator reads, so — like the arc split —
-  // it's a plain array partition, each bucket its own ViewNodeList sharing the same `plot`
-  // view spec, never a view group_by. Grouping by raw `family` would strand four singleton
-  // families (cycle/puzzle/genre/relationship) under lone headers, so the buckets are the
-  // one distinction a newcomer can act on: a genre-shaped spine (mystery/thriller/romance)
-  // is a "Genre pattern"; everything else — act/journey/cycle, an author's `custom`, an
-  // unknown family — is a genre-agnostic "Story structure".
-  const GENRE_FAMILIES = new Set(["puzzle", "genre", "relationship"]);
-  let arcTemplates = $derived(visibleEntries.filter((e) => e.template?.family === "character_arc"));
-  let genreTemplates = $derived(visibleEntries.filter((e) => GENRE_FAMILIES.has(e.template?.family ?? "")));
-  let structureTemplates = $derived(
-    visibleEntries.filter(
-      (e) => e.template?.family !== "character_arc" && !GENRE_FAMILIES.has(e.template?.family ?? ""),
-    ),
-  );
-  let structureView = $derived({
+  // ADR-0080 slice 2 sectioned arc templates apart from plotline templates; the plotline half
+  // splits again into "Story structures" and "Genre patterns" so a newcomer meets a few
+  // labelled buckets, not a flat wall of ~11 names. Grouping by raw `family` would strand four
+  // singleton families (cycle/puzzle/genre/relationship) under lone headers, so the taxonomy
+  // collapses to the one distinction a newcomer can act on. The partition (and the genre-family
+  // set) lives in one place, shared with the management pane — see plotTemplateGroups.
+  let groups = $derived(groupPlotTemplates(visibleEntries));
+  // Each bucket rides its own ViewNodeList sharing the one `plot` view spec (never a view
+  // group_by — `family` isn't a schema field the evaluator reads).
+  const toView = (universe: PlotTemplateSummary[]) => ({
     spec: viewSpec,
-    universe: structureTemplates,
+    universe,
     schema,
     referenceIndex: $referenceIndexStore,
   });
-  let genreView = $derived({
-    spec: viewSpec,
-    universe: genreTemplates,
-    schema,
-    referenceIndex: $referenceIndexStore,
-  });
-  let arcView = $derived({
-    spec: viewSpec,
-    universe: arcTemplates,
-    schema,
-    referenceIndex: $referenceIndexStore,
-  });
+  let structureView = $derived(toView(groups.structures));
+  let genreView = $derived(toView(groups.genre));
+  let arcView = $derived(toView(groups.arcs));
 </script>
 
 <aside class="tpl-palette" aria-label="Plot template palette">
@@ -110,19 +94,19 @@
   </button>
 
   <div class="palette-list">
-    {#if structureTemplates.length}
+    {#if groups.structures.length}
       <div class="section-head"><span>Story structures</span></div>
       <ViewNodeList view={structureView} onClick={(entry) => onInstantiate(entry.id)} row={templateRow} />
     {/if}
-    {#if genreTemplates.length}
+    {#if groups.genre.length}
       <div class="section-head"><span>Genre patterns</span></div>
       <ViewNodeList view={genreView} onClick={(entry) => onInstantiate(entry.id)} row={templateRow} />
     {/if}
-    {#if arcTemplates.length}
+    {#if groups.arcs.length}
       <div class="section-head"><i class="ti ti-seedling" aria-hidden="true"></i><span>Character arcs</span></div>
       <ViewNodeList view={arcView} onClick={(entry) => onInstantiate(entry.id)} row={templateRow} />
     {/if}
-    {#if !structureTemplates.length && !genreTemplates.length && !arcTemplates.length}
+    {#if !groups.structures.length && !groups.genre.length && !groups.arcs.length}
       <p class="muted palette-empty">No plot templates.</p>
     {/if}
   </div>

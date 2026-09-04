@@ -83,30 +83,37 @@ describe("PlotTemplates pane render (#724)", () => {
     expect(screen.getByText("No plot templates match this view.")).toBeInTheDocument();
   });
 
-  // ADR-0080 slice 2: arc templates get their own section, seedling glyph and all —
-  // the split is a plain array partition (family isn't a schema field), not a view
-  // group_by, so both sections still ride the same view spec.
-  it("sections character-arc templates apart from plotlines", async () => {
+  // ADR-0080 slice 2 gave arcs their own section; the plotline half splits again into
+  // "Story structures" and "Genre patterns" (shared with the spawn palette via
+  // groupPlotTemplates). All splits are plain array partitions (family isn't a schema
+  // field), not a view group_by, so every section rides the same view spec.
+  it("sections story structures, genre patterns, and character arcs apart", async () => {
     renderPane([
       libraryTemplate("t-three-act", "Three-Act Story Arc"),
+      libraryTemplate("t-mystery", "Mystery / Fair-Play Investigation", "puzzle"),
       libraryTemplate("t-arc", "Positive Change Arc", "character_arc"),
     ]);
     await tick();
-    const plotlinesHeader = screen.getByText("Plotlines");
+    const structuresHeader = screen.getByText("Story structures");
+    const genreHeader = screen.getByText("Genre patterns");
     const arcsHeader = screen.getByText("Character arcs");
-    expect(plotlinesHeader).toBeInTheDocument();
+    expect(structuresHeader).toBeInTheDocument();
+    expect(genreHeader).toBeInTheDocument();
     expect(arcsHeader).toBeInTheDocument();
     expect(screen.getByText("Three-Act Story Arc")).toBeInTheDocument();
+    expect(screen.getByText("Mystery / Fair-Play Investigation")).toBeInTheDocument();
     expect(screen.getByText("Positive Change Arc")).toBeInTheDocument();
-    const position = plotlinesHeader.compareDocumentPosition(arcsHeader);
-    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Plotlines")).toBeNull();
+    // Story structures, then genre patterns, then character arcs.
+    expect(structuresHeader.compareDocumentPosition(genreHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(genreHeader.compareDocumentPosition(arcsHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("hides the Character arcs section when no arc template exists", async () => {
     renderPane([libraryTemplate("t-three-act", "Three-Act Story Arc")]);
     await tick();
     expect(screen.queryByText("Character arcs")).toBeNull();
-    expect(screen.getByText("Plotlines")).toBeInTheDocument();
+    expect(screen.getByText("Story structures")).toBeInTheDocument();
   });
 
   it("shows the seedling glyph on the Character arcs header", async () => {

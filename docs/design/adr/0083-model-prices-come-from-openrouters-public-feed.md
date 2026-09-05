@@ -124,3 +124,27 @@ It is the one real correctness surface in this change and is tested in isolation
 - Whether OpenRouter's feed carries `pricing.input_cache_read` / `input_cache_write` for Anthropic routes and if adopting them later beats the baked `cache_read_multiplier` (out of scope now). An oracle-only model (no baked row) currently keeps `cache_read_multiplier=None` → priced at full rate on the cached slice; the effect is negligible (hundreds of cached tokens) but noted.
 - The construction seam for the key-less oracle fetch (`OpenRouterProfile("")` directly vs. `capability_profile_for`, `registry.py:70`).
 - Mythos 5: OpenRouter does not list it. It is covered by a user override (§4) rather than a baked pin; decide separately whether it stays in the sampling-family list until it is a real, priced model.
+
+## Amendment 1 (2026-09-05): the override is a per-assistant *fill* field, not a machine-level *replace* map
+
+Slice 2 revised §1 (precedence) and §4 (override) after two findings in planning. **This amendment supersedes §4's machine-level `price_overrides` map and the §1 "override wins" precedence; §2 (oracle), §3 (refresh), §5 (warning), and §6 (fail-soft) stand.**
+
+### Why the original §4 didn't survive contact
+
+- **No per-model UI, and no overridable-computed field.** The override has to be authored somewhere, and the assistant is the only Node that carries a model selection. But modelling the price as a *computed, overridable* field fights the grain: this codebase enforces that computed fields are derived and never stored (validation rejects a stored value for a computed field, `strip_computed_fields` drops them on save, the metadata rail renders them read-only). Making one writable — even to the machine layer — is a new exception at four pipeline stages, the opposite of reuse.
+- **"Replace" semantics go stale.** An override that *wins over* the oracle silently shadows the real price forever once OpenRouter announces the model. Keeping it safe would require a visible, clearable override-over-live-base mechanism — real machinery to build. Flipping the precedence removes the problem instead of managing it.
+
+### The decision
+
+The override is **two optional stored `number` fields on the assistant node** — `ai_price_in_usd_per_mtok` / `ai_price_out_usd_per_mtok`, USD per 1M tokens (matching how providers publish pricing; no EUR conversion on the field — display currency is a rendering concern elsewhere). Because they are ordinary stored fields they **auto-render in the metadata rail** — no bespoke editor, no computed-field surgery.
+
+- **Fill semantics — precedence becomes `oracle → baked → manual → warn`.** The manual price prices a call only when neither the oracle nor the baked seed does (an unlisted or local model). The oracle always wins when present, so a manual value **auto-heals**: the moment OpenRouter lists the model, the oracle takes over. Implemented at the cost site by `apply_manual_fill` (`services/ai/tokens.py`), threaded from the resolved assistant via `ResolvedCall.manual_price_{in,out}_usd_per_mtok` (`call_resolver.py`) into `translate_usage_to_cost` and the streaming descriptor pre-fetch.
+- **Scope is per-assistant.** Two assistants on the same unlisted model set the price independently. Acceptable: the real case is one niche/local model on an assistant being configured, and there is no per-model surface to key a shared value to.
+- **Reset (Slice 2b).** Because a filled value goes dormant once the oracle lists the model, an oracle refresh sweeps the open project's assistants and clears the manual price fields of any whose model the oracle now prices — so a value entered while a model was unlisted doesn't linger. Fires on the refresh event (manual "update prices" button, assistant add/model-change), not on every read.
+
+### Slices restated
+
+- **Slice 2a — this PR:** the assistant price fields + the `apply_manual_fill` cost path + this amendment. Fill precedence `oracle → baked → manual`.
+- **Slice 2b — #1824:** the no-price warning, the manual "update prices" button + refresh endpoint, and the reset sweep + assistant add/change trigger.
+
+The Slice-1 machine-level store is not built; §4's `MachineSettings.price_overrides` is withdrawn in favour of the assistant fields above.

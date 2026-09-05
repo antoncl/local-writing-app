@@ -446,6 +446,8 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
         provider=result.provider,
         model=result.model,
         settings=settings,
+        manual_price_in_usd_per_mtok=resolved.manual_price_in_usd_per_mtok,
+        manual_price_out_usd_per_mtok=resolved.manual_price_out_usd_per_mtok,
     )
 
     return AIGenerateResponse(
@@ -534,6 +536,13 @@ async def ai_chat_stream(
     descriptor = await ai_tokens.descriptor_for(
         provider=resolved.provider, model=resolved.model, settings=settings
     )
+    descriptor = ai_tokens.apply_manual_fill(
+        descriptor,
+        provider=resolved.provider,
+        model=resolved.model,
+        manual_in=resolved.manual_price_in_usd_per_mtok,
+        manual_out=resolved.manual_price_out_usd_per_mtok,
+    )
 
     events = ai_providers.chat_stream(
         resolved.to_call(
@@ -619,6 +628,13 @@ async def ai_generate_stream(
 
     descriptor = await ai_tokens.descriptor_for(
         provider=resolved.provider, model=resolved.model, settings=settings
+    )
+    descriptor = ai_tokens.apply_manual_fill(
+        descriptor,
+        provider=resolved.provider,
+        model=resolved.model,
+        manual_in=resolved.manual_price_in_usd_per_mtok,
+        manual_out=resolved.manual_price_out_usd_per_mtok,
     )
     # Shares the exact system-block wrap with the non-streaming path so the
     # two can't drift into caching in one mode but not the other.

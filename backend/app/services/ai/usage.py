@@ -23,10 +23,16 @@ async def translate_usage_to_cost(
     provider: str,
     model: str,
     settings: MachineSettings,
+    manual_price_in_usd_per_mtok: float | None = None,
+    manual_price_out_usd_per_mtok: float | None = None,
 ) -> tuple[ChatUsage | None, float | None]:
     """Convert dispatch-layer UsageMetrics + a (provider, model) lookup into
     wire-format ChatUsage and USD cost. Returns (None, None) when usage is
-    missing; cost stays None when pricing isn't known."""
+    missing; cost stays None when pricing isn't known.
+
+    An author-set per-assistant price (ADR-0083 Amendment 1) is applied as a
+    FILL: it prices the call only when neither the oracle nor the baked seed
+    does, so the oracle auto-heals once it lists the model."""
     if usage is None:
         return None, None
     wire_usage = ChatUsage(
@@ -38,6 +44,13 @@ async def translate_usage_to_cost(
     if not provider or not model:
         return wire_usage, None
     descriptor = await ai_tokens.descriptor_for(provider=provider, model=model, settings=settings)
+    descriptor = ai_tokens.apply_manual_fill(
+        descriptor,
+        provider=provider,
+        model=model,
+        manual_in=manual_price_in_usd_per_mtok,
+        manual_out=manual_price_out_usd_per_mtok,
+    )
     if descriptor is None:
         return wire_usage, None
     cost = compute_cost(usage, descriptor)

@@ -86,6 +86,26 @@ async def descriptor_for(
     return next((d for d in descriptors if d.id == model), None)
 
 
+async def priced_descriptor_for(
+    *,
+    provider: str,
+    model: str,
+    settings: MachineSettings,
+    manual_in: float | None = None,
+    manual_out: float | None = None,
+) -> ModelDescriptor | None:
+    """The pricing descriptor for one call: `descriptor_for` (oracle/baked) with
+    the assistant's manual price filled in (ADR-0083 Amendment 1). The single
+    choke point every cost site resolves through, so none can silently skip the
+    fill — the recurrence guard for a feature that already shipped one missed
+    site."""
+
+    descriptor = await descriptor_for(provider=provider, model=model, settings=settings)
+    return apply_manual_fill(
+        descriptor, provider=provider, model=model, manual_in=manual_in, manual_out=manual_out
+    )
+
+
 def apply_manual_fill(
     descriptor: ModelDescriptor | None,
     *,
@@ -191,4 +211,5 @@ __all__ = [
     "descriptor_for",
     "estimate_input_cost",
     "estimate_send_cost",
+    "priced_descriptor_for",
 ]

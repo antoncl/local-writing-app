@@ -43,11 +43,10 @@ async def translate_usage_to_cost(
     )
     if not provider or not model:
         return wire_usage, None
-    descriptor = await ai_tokens.descriptor_for(provider=provider, model=model, settings=settings)
-    descriptor = ai_tokens.apply_manual_fill(
-        descriptor,
+    descriptor = await ai_tokens.priced_descriptor_for(
         provider=provider,
         model=model,
+        settings=settings,
         manual_in=manual_price_in_usd_per_mtok,
         manual_out=manual_price_out_usd_per_mtok,
     )

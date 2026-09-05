@@ -105,6 +105,22 @@ def test_baked_price_wins_over_manual() -> None:
     assert cost == pytest.approx(15.0)  # baked opus-4-8 input rate, not 999
 
 
+def test_priced_descriptor_for_is_the_choke_point() -> None:
+    # descriptor_for + manual fill in one call — the single site every cost path
+    # resolves through. Unlisted model + manual price → a synthesized priced row.
+    descriptor = asyncio.run(
+        ai_tokens.priced_descriptor_for(
+            provider="anthropic",
+            model="claude-mythos-5",
+            settings=MachineSettings(),
+            manual_in=2.0,
+            manual_out=8.0,
+        )
+    )
+    assert descriptor is not None
+    assert (descriptor.cost_in_per_mtok, descriptor.cost_out_per_mtok) == (2.0, 8.0)
+
+
 # ---- resolve_call_params reads the fields onto ResolvedCall ----------------
 
 

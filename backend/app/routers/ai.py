@@ -532,14 +532,11 @@ async def ai_chat_stream(
 
     # Pre-fetch the pricing descriptor so the sync stream generator can
     # compute cost when the terminal StreamDone arrives, without needing
-    # an await mid-stream.
-    descriptor = await ai_tokens.descriptor_for(
-        provider=resolved.provider, model=resolved.model, settings=settings
-    )
-    descriptor = ai_tokens.apply_manual_fill(
-        descriptor,
+    # an await mid-stream. One choke point (descriptor + manual-price fill).
+    descriptor = await ai_tokens.priced_descriptor_for(
         provider=resolved.provider,
         model=resolved.model,
+        settings=settings,
         manual_in=resolved.manual_price_in_usd_per_mtok,
         manual_out=resolved.manual_price_out_usd_per_mtok,
     )
@@ -626,13 +623,10 @@ async def ai_generate_stream(
     except ProjectServiceError:
         policy = "off"
 
-    descriptor = await ai_tokens.descriptor_for(
-        provider=resolved.provider, model=resolved.model, settings=settings
-    )
-    descriptor = ai_tokens.apply_manual_fill(
-        descriptor,
+    descriptor = await ai_tokens.priced_descriptor_for(
         provider=resolved.provider,
         model=resolved.model,
+        settings=settings,
         manual_in=resolved.manual_price_in_usd_per_mtok,
         manual_out=resolved.manual_price_out_usd_per_mtok,
     )

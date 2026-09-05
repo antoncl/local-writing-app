@@ -98,14 +98,15 @@ def apply_manual_fill(
     prices the model (ADR-0083 Amendment 1 — fill semantics: oracle → baked →
     manual).
 
-    No-op when no manual price is set, or when the descriptor already carries a
-    price: the oracle or baked seed wins, so a manual value is a fallback that
-    auto-heals the moment the oracle lists the model. When the model has no
-    catalogue entry at all (e.g. a local Ollama model), synthesize a minimal
-    priced descriptor so `compute_cost` can still bill the call.
+    No-op when the manual price is incomplete (a half-set price is treated as
+    "unknown", not a confident $0 on the blank side), or when the descriptor
+    already carries a price: the oracle or baked seed wins, so a manual value is
+    a fallback that auto-heals the moment the oracle lists the model. When the
+    model has no catalogue entry at all (e.g. a local Ollama model), synthesize a
+    minimal priced descriptor so `compute_cost` can still bill the call.
     """
 
-    if manual_in is None and manual_out is None:
+    if manual_in is None or manual_out is None:
         return descriptor
     already_priced = descriptor is not None and not (
         descriptor.cost_in_per_mtok is None and descriptor.cost_out_per_mtok is None

@@ -61,6 +61,15 @@ def test_manual_fill_synthesizes_when_no_descriptor() -> None:
     assert out.verified is False
 
 
+def test_manual_fill_requires_both_sides() -> None:
+    # A half-set manual price is "unknown", not a confident $0 on the blank side:
+    # it does not fill and does not synthesize a descriptor.
+    priceless = _desc(cost_in=None, cost_out=None)
+    assert ai_tokens.apply_manual_fill(priceless, provider="anthropic", model="m", manual_in=2.0, manual_out=None) is priceless
+    assert ai_tokens.apply_manual_fill(priceless, provider="anthropic", model="m", manual_in=None, manual_out=8.0) is priceless
+    assert ai_tokens.apply_manual_fill(None, provider="ollama", model="x", manual_in=2.0, manual_out=None) is None
+
+
 # ---- translate_usage_to_cost end-to-end ------------------------------------
 
 
@@ -133,3 +142,16 @@ def test_resolve_blank_or_invalid_price_is_none() -> None:
     resolved = _resolve({"ai_provider": "ollama", "ai_model": "x", "ai_price_in_usd_per_mtok": "", "ai_price_out_usd_per_mtok": "nope"})
     assert resolved.manual_price_in_usd_per_mtok is None
     assert resolved.manual_price_out_usd_per_mtok is None
+
+
+def test_resolve_rejects_negative_and_nonfinite_price() -> None:
+    resolved = _resolve({"ai_provider": "ollama", "ai_model": "x", "ai_price_in_usd_per_mtok": -1, "ai_price_out_usd_per_mtok": "inf"})
+    assert resolved.manual_price_in_usd_per_mtok is None
+    assert resolved.manual_price_out_usd_per_mtok is None
+
+
+def test_resolve_keeps_zero_price() -> None:
+    # A genuinely free (local) model: 0 is a real price, kept distinct from unset.
+    resolved = _resolve({"ai_provider": "ollama", "ai_model": "x", "ai_price_in_usd_per_mtok": 0, "ai_price_out_usd_per_mtok": 0})
+    assert resolved.manual_price_in_usd_per_mtok == 0.0
+    assert resolved.manual_price_out_usd_per_mtok == 0.0

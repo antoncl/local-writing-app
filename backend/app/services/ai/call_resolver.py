@@ -8,6 +8,7 @@ the HTTP layer as a free function taking the project service, matching the
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -78,7 +79,9 @@ def _optional_price(value: object) -> float | None:
         price = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
-    return price if price >= 0 else None
+    if not math.isfinite(price) or price < 0:
+        return None  # reject nan / inf / negative
+    return price
 
 
 @dataclass

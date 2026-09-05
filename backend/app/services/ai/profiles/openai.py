@@ -1,8 +1,9 @@
 """OpenAI profile.
 
 Mirrors AnthropicProfile: live `/v1/models` confirms existence; bake-in
-supplies tier + cost + capability data because OpenAI doesn't publish
-pricing on the models endpoint.
+supplies tier + capability data because OpenAI doesn't publish pricing on the
+models endpoint. Per-token COST is overlaid from OpenRouter's public feed via
+the price oracle (ADR-0083); `_baked_in.yaml` is the offline price seed.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from app.services.ai.profiles.base import (
     default_token_count,
 )
 from app.services.ai.profiles.openai_compatible import OpenAICompatibleProfile
+from app.services.ai.profiles.price_oracle import priced_with_oracle
 
 if TYPE_CHECKING:
     from app.services.machine_settings import MachineSettings
@@ -49,31 +51,33 @@ class OpenAIProfile(OpenAICompatibleProfile):
             return self._cache
         baked = baked_in_for("openai")
         if not self._api_key:
-            self._cache = baked
-            return baked
-        try:
-            async with httpx.AsyncClient(timeout=6.0) as client:
-                response = await client.get(
-                    "https://api.openai.com/v1/models",
-                    headers={"Authorization": f"Bearer {self._api_key}"},
+            result = baked
+        else:
+            try:
+                async with httpx.AsyncClient(timeout=6.0) as client:
+                    response = await client.get(
+                        "https://api.openai.com/v1/models",
+                        headers={"Authorization": f"Bearer {self._api_key}"},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                log.warning("OpenAI /v1/models failed (%s); using bake-in", exc)
+                result = baked
+            else:
+                # Bake-in stays the tier truth; live_catalog (ADR-0073 S4)
+                # surfaces models newer than the audit file as unverified rows.
+                result = merge_live_catalogue(
+                    "openai",
+                    baked,
+                    payload.get("data") or [],
+                    surface_live_only=self.live_catalog,
                 )
-                response.raise_for_status()
-                payload = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            log.warning("OpenAI /v1/models failed (%s); using bake-in", exc)
-            self._cache = baked
-            return baked
 
-        # Bake-in stays the tier/cost truth; live_catalog (ADR-0073 S4) surfaces
-        # models newer than the audit file as unverified rows.
-        merged = merge_live_catalogue(
-            "openai",
-            baked,
-            payload.get("data") or [],
-            surface_live_only=self.live_catalog,
-        )
-        self._cache = merged
-        return merged
+        # Overlay per-token COST from the OpenRouter price oracle (ADR-0083);
+        # fail-soft to the baked seed when the oracle is cold/offline.
+        self._cache = await priced_with_oracle(result)
+        return self._cache
 
     def caching_style(self, model_id: str) -> CachingStyle:
         # OpenAI caches input transparently for prompts ≥ 1024 tokens;

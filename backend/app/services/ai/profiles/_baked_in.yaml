@@ -1,18 +1,25 @@
 # Fallback model catalogue per provider.
 #
 # Used when live discovery fails (offline, API down). For providers that
-# don't publish pricing via /v1/models (Anthropic, OpenAI), this file is
-# ALSO the source of tier + cost data even when discovery succeeds —
-# discovery only confirms which model ids exist; tier/cost gets merged
-# from here.
+# don't publish pricing via /v1/models (Anthropic, OpenAI), this file supplies
+# TIER data even when discovery succeeds — discovery only confirms which model
+# ids exist.
 #
-# Per [docs/ai-model-selection.md](../../../../../docs/ai-model-selection.md).
+# COST is normally sourced LIVE from OpenRouter's public feed via the price
+# oracle (ADR-0083): those prices overlay whatever is baked here, so the
+# `cost_*` numbers below are the OFFLINE SEED / fallback, not the source of
+# truth. A model OpenRouter doesn't list is priced by a per-model user override,
+# not by editing this file. So `cost_*` can lag real prices without affecting
+# online costing — they answer only when the oracle is cold or offline.
 #
-# Maintenance: when a new model drops, add a line here. When a model
-# sunsets, set `deprecated: true` and add `sunset_date` + `successor`.
-# Prices in USD per 1M tokens; check provider pricing pages before edits.
-# `max_output_tokens` is the model's published max OUTPUT cap (not the context
-# window); the resolver clamps a request's max_tokens down to it (#1591).
+# Per [docs/ai-model-selection.md](../../../../../docs/ai-model-selection.md)
+# and docs/design/adr/0083-model-prices-come-from-openrouters-public-feed.md.
+#
+# Maintenance: when a new model drops, add a line here for its TIER/capabilities
+# (offline seed). When a model sunsets, set `deprecated: true` and add
+# `sunset_date` + `successor`. `cost_*` are USD per 1M tokens (offline fallback
+# only). `max_output_tokens` is the model's published max OUTPUT cap (not the
+# context window); the resolver clamps a request's max_tokens down to it (#1591).
 # Last hand-audit: 2026-06-20 (max_output_tokens added 2026-08-29).
 
 anthropic:

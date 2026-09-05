@@ -276,6 +276,15 @@
     Boolean(provider) && !providers.some((p) => p.name === provider),
   );
 
+  // The selected model carries no automatic price (not in the live catalogue's
+  // pricing, and not a genuinely-free route). Spend for it is only tracked if a
+  // manual price is set on the assistant — surfaced as a quiet nudge (ADR-0083).
+  // `free` is a real 0 price, so it's excluded; `cost_in_per_mtok == null` is the
+  // "unknown" case. Reuses `selectedModelInfo` (the catalogue row) declared above.
+  const selectedModelUnpriced = $derived(
+    !!selectedModelInfo && selectedModelInfo.cost_in_per_mtok == null && !selectedModelInfo.free,
+  );
+
   // ADR-0073 S3: the "Advanced" exact-model list is a fixed, read-only built-in
   // View over the provider's live catalogue — the app's own View machinery, not
   // a bespoke dropdown. Grouped by family, searchable (the ~300-model OpenRouter
@@ -364,6 +373,9 @@
         {#if resolvedModelName}<code class="ptp-model-id">{model}</code>{/if}
       </span>
     </div>
+    {#if selectedModelUnpriced}
+      <p class="ptp-noprice">No live price for this model — set a manual price on the assistant, or use "Update prices" in Settings.</p>
+    {/if}
   {/if}
 
   <details bind:open={advancedOpen} class="ptp-advanced">
@@ -546,5 +558,11 @@
 
   .ptp-orphan code {
     font-family: var(--mono);
+  }
+
+  .ptp-noprice {
+    margin: 4px 0 0;
+    font-size: var(--fs-sm);
+    color: var(--warn);
   }
 </style>

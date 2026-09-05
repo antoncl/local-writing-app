@@ -79,6 +79,42 @@ def test_refresh_rewrites_the_cache(monkeypatch) -> None:
     assert price_oracle._read_cache() == {"claude-opus-5": (5.0, 25.0)}  # replaced, not merged
 
 
+def test_empty_feed_keeps_previous_and_does_not_persist(monkeypatch) -> None:
+    # A "successful" fetch that yields no native prices (soft outage: a 200 with a
+    # bad-shape body -> _fetch_rows returns []) must NOT overwrite a good cache
+    # with {} — that would poison every future cold start.
+    _feed(monkeypatch)
+    asyncio.run(price_oracle.refresh())
+    assert price_oracle._read_cache() == {"claude-opus-5": (5.0, 25.0)}
+
+    async def empty() -> list[dict]:
+        return []
+
+    monkeypatch.setattr(price_oracle, "_fetch_rows", empty)
+    asyncio.run(price_oracle.refresh())
+    assert price_oracle.price_for("claude-opus-5") == (5.0, 25.0)  # index untouched
+    assert price_oracle._read_cache() == {"claude-opus-5": (5.0, 25.0)}  # file untouched
+
+
+def test_empty_cache_file_refetches(monkeypatch) -> None:
+    # A degenerate {} file is not trusted — treated as no cache so we refetch.
+    path = price_oracle._cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}", encoding="utf-8")
+    assert price_oracle._read_cache() is None
+    _feed(monkeypatch)
+    asyncio.run(price_oracle.ensure_loaded())
+    assert price_oracle.price_for("claude-opus-5") == (5.0, 25.0)  # refetched, not stuck on {}
+
+
+def test_malformed_cache_file_is_ignored() -> None:
+    path = price_oracle._cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for bad in ("not json", "[1, 2]", '{"m": [1]}', '{"m": "x"}'):
+        path.write_text(bad, encoding="utf-8")
+        assert price_oracle._read_cache() is None, bad
+
+
 def test_failed_refresh_keeps_previous_cache(monkeypatch) -> None:
     _feed(monkeypatch)
     asyncio.run(price_oracle.refresh())  # writes the good cache

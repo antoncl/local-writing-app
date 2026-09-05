@@ -164,7 +164,10 @@ def _read_cache() -> dict[str, tuple[float | None, float | None]] | None:
     for key, value in raw.items():
         if isinstance(value, list) and len(value) == 2:
             out[str(key)] = (_cache_float(value[0]), _cache_float(value[1]))
-    return out
+    # An empty result (empty file, or every row wrong-shaped) is not a usable
+    # cache — return None so the caller refetches instead of trusting a degenerate
+    # file that would otherwise poison every cold start.
+    return out or None
 
 
 def _write_cache(index: dict[str, tuple[float | None, float | None]]) -> None:
@@ -208,6 +211,13 @@ async def refresh() -> None:
         rebuilt = _build_index(await _fetch_rows())
     except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
         log.warning("price oracle: refresh failed (%s); keeping previous prices", exc)
+        return
+    if not rebuilt:
+        # A "successful" fetch that yields no native prices (a soft outage: a 200
+        # with a bad-shape body — `_fetch_rows` returns [] rather than raising) is
+        # not a real result. Keep the previous index and cache rather than
+        # persisting `{}`, which would poison every future cold start.
+        log.warning("price oracle: refresh returned no native prices; keeping previous")
         return
     _index = rebuilt
     _write_cache(rebuilt)

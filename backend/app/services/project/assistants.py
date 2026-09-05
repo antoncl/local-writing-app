@@ -42,6 +42,7 @@ from app.models import (
     SaveAssistantEntryRequest,
     UnlistAssistantRequest,
 )
+from app.services.ai.profiles import price_oracle
 from app.services.ai.providers import policy_permits
 from app.services.project.computed_metadata import strip_computed_fields
 from app.services.project.errors import ProjectServiceError
@@ -51,6 +52,11 @@ from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntr
 log = logging.getLogger(__name__)
 
 ASSISTANT_BASE_ENTRY_TYPE = "assistant:assistant"
+
+# The author-set price fields on an assistant (ADR-0083 Amendment 1). Cleared by
+# the reset sweep once the oracle prices the model, so a value entered while a
+# model was unlisted doesn't linger dormant.
+_MANUAL_PRICE_KEYS = ("ai_price_in_usd_per_mtok", "ai_price_out_usd_per_mtok")
 
 
 def normalize_assistant_entry_type(raw: object) -> str:
@@ -512,6 +518,41 @@ class AssistantEntriesMixin:
         # nothing registers them on save (`create_missing` mints on the picker's
         # own create path instead).
         return self.read_assistant_entry(node_id)
+
+    def reset_stale_manual_prices(self) -> int:
+        """Clear the author-set price fields (ADR-0083 Amendment 1) from every
+        assistant in the roster whose model the price oracle now prices —
+        including inherited machine-layer assistants, whose files are shared
+        across projects. A manual price is a FILL (§1: oracle -> baked -> manual),
+        so once the oracle lists the model the stored value is already inert; this
+        deletes it. Returns the count cleared. Call after `price_oracle.refresh()`
+        so the index is current.
+
+        Clears the keys from the metadata `list_assistant_entries` already read
+        (the assistant's own file front matter) rather than re-reading through
+        `read_assistant_entry`, so the save carries no side effect beyond dropping
+        the two price keys.
+        """
+        cleared = 0
+        for summary in self.list_assistant_entries().entries:
+            meta = summary.metadata or {}
+            model = meta.get("ai_model")
+            has_manual = any(meta.get(key) not in (None, "") for key in _MANUAL_PRICE_KEYS)
+            if not (has_manual and isinstance(model, str) and model):
+                continue
+            if price_oracle.price_for(model) is None:
+                continue  # oracle still can't price it — keep the manual fill
+            new_meta = {k: v for k, v in meta.items() if k not in _MANUAL_PRICE_KEYS}
+            self.save_assistant_entry(
+                summary.id,
+                SaveAssistantEntryRequest(
+                    title=summary.title,
+                    entry_type=summary.entry_type,
+                    metadata=new_meta,
+                ),
+            )
+            cleared += 1
+        return cleared
 
     def delete_assistant_entry(self, entry_id: str) -> AssistantEntryList:
         index_entry = self._build_assistant_index().by_id.get(entry_id)

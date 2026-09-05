@@ -148,6 +148,17 @@ class AIHealthResponse(BaseModel):
     assistant_name: str | None = None
 
 
+class PriceRefreshResponse(BaseModel):
+    """Result of a manual price refresh (ADR-0083 Slice 2b).
+
+    The OpenRouter price oracle is refetched, then `cleared` counts assistant
+    manual price overrides dropped because the oracle now prices their model (a
+    value entered while a model was unlisted, no longer needed). Success/failure
+    rides on the HTTP status, so there is no `ok` flag to misread."""
+
+    cleared: int = 0
+
+
 class OllamaHostHealthRequest(BaseModel):
     # The host to probe — the value typed into the Ollama-host field, so a user
     # can test connectivity before saving. Blank falls back to the default host.

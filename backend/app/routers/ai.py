@@ -37,6 +37,7 @@ from app.models import (
     PreviewContentBlock,
     PreviewErrorInfo,
     PreviewMessage,
+    PriceRefreshResponse,
     PromptInputConflict,
     PromptInputDefinition,
     ValidateEntryDraftRequest,
@@ -60,7 +61,12 @@ from app.services.ai.preview import (
     build_preview,
     estimate_preview_tokens_and_cost,
 )
-from app.services.ai.profiles import Capability, CapabilityTier, ModelDescriptor
+from app.services.ai.profiles import (
+    Capability,
+    CapabilityTier,
+    ModelDescriptor,
+    price_oracle,
+)
 from app.services.ai.profiles.registry import known_provider_names, profile_for
 from app.services.ai.streaming import transform_provider_events_to_ndjson
 from app.services.ai.usage import translate_usage_to_cost
@@ -129,6 +135,21 @@ def ai_health(project: CurrentProject, request: AIHealthRequest) -> AIHealthResp
         result.assistant_id = assistant.id
         result.assistant_name = assistant.title
     return result
+
+
+@router.post("/api/ai/prices/refresh", response_model=PriceRefreshResponse)
+async def refresh_prices(project: CurrentProject) -> PriceRefreshResponse:
+    """Refetch the OpenRouter price oracle, then clear now-redundant assistant
+    manual prices (ADR-0083 Slice 2b). The oracle refresh is machine-global; the
+    reset sweep clears every assistant in the roster whose model the oracle now
+    prices — inherited machine-layer assistants included (their files are shared
+    across projects)."""
+    await price_oracle.refresh()
+    with translate_errors():
+        # The sweep saves assistants; translate_errors maps any domain error to
+        # its HTTP status, matching every other assistant route.
+        cleared = project.reset_stale_manual_prices()
+    return PriceRefreshResponse(cleared=cleared)
 
 
 @router.post("/api/ai/ollama/health", response_model=OllamaHostHealth)

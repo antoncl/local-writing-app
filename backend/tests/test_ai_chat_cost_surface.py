@@ -231,5 +231,71 @@ class StreamingChatCostTests(unittest.TestCase):
         self.assertNotIn("cost_usd", done)
 
 
+class ManualPriceFillEndpointTests(unittest.TestCase):
+    """ADR-0083 Amendment 1: an assistant's manual price fills the cost for a
+    model the oracle can't price, end-to-end through the non-stream chat turn
+    (`run_chat_turn`) — the wiring a missed cost site would silently break."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Manual Price Tests")
+        self.service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
+        )
+        self.client = TestClient(app)
+        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        folder = self.config_dir / "assistants"
+        folder.mkdir(parents=True)
+        # An assistant on a model the oracle/baked seed can't price, carrying a
+        # manual USD price of 2 in / 8 out per 1M tokens.
+        (folder / "priced.md").write_text(
+            "---\n"
+            "id: priced\n"
+            "title: Priced\n"
+            "entry_type: assistant\n"
+            "metadata:\n"
+            "  ai_provider: anthropic\n"
+            "  ai_model: claude-no-such-model\n"
+            "  ai_price_in_usd_per_mtok: 2\n"
+            "  ai_price_out_usd_per_mtok: 8\n"
+            "---\n",
+            encoding="utf-8",
+        )
+        ms.save_settings(
+            ms.MachineSettings(
+                providers=ms.ProviderCredentials(anthropic_api_key="sk-ant-test"),
+                default_provider="anthropic",
+            )
+        )
+        default_registry.clear()
+
+    def tearDown(self) -> None:
+        default_registry.clear()
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def test_manual_price_fills_cost_for_unlisted_model(self) -> None:
+        raw = SimpleNamespace(usage=SimpleNamespace(input_tokens=1_000_000, output_tokens=1_000_000))
+        with patch(_ANTHROPIC_CHAT, return_value=ChatOutcome("Reply.", "end_turn", raw)):
+            response = self.client.post(
+                "/api/ai/chat",
+                json={"assistant_id": "priced", "messages": [{"role": "user", "content": "hi"}]},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        # The unlisted model has no oracle/baked price, but the assistant's
+        # manual 2/8 fills it: 1M input @2 + 1M output @8 = $10.
+        self.assertIsNotNone(body["cost_usd"])
+        self.assertAlmostEqual(body["cost_usd"], 10.0, places=6)
+
+
 if __name__ == "__main__":
     unittest.main()

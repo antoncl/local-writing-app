@@ -416,6 +416,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "ai_temperature",
                 "ai_max_tokens",
                 "ai_thinking",
+                "ai_price_in_usd_per_mtok",
+                "ai_price_out_usd_per_mtok",
                 "summary",
                 "assistant_tags",
                 "color",
@@ -1243,6 +1245,30 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "alongside its answer."
             ),
             "type": "boolean",
+        },
+        # Author-set prices for a model the price oracle can't reach — an unlisted
+        # or local model (ADR-0083 Amendment 1). USD per 1M tokens, matching how
+        # providers publish pricing. A FILL, not an override: they price this
+        # assistant's calls only while neither OpenRouter nor the baked seed does,
+        # so once the oracle lists the model it takes over and these go dormant
+        # (a refresh then clears them — Slice 2b). Leave blank to price normally.
+        "ai_price_in_usd_per_mtok": {
+            "name": "Input price (USD / 1M tokens)",
+            "description": (
+                "Only for a model the app can't price automatically (an unlisted "
+                "or local model). USD per 1 million input tokens. Leave blank "
+                "otherwise — the app uses the live price."
+            ),
+            "type": "number",
+        },
+        "ai_price_out_usd_per_mtok": {
+            "name": "Output price (USD / 1M tokens)",
+            "description": (
+                "Only for a model the app can't price automatically (an unlisted "
+                "or local model). USD per 1 million output tokens. Leave blank "
+                "otherwise — the app uses the live price."
+            ),
+            "type": "number",
         },
         "preferred_assistant_id": {
             "name": "Preferred assistant",

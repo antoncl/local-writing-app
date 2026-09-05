@@ -12,8 +12,10 @@ this facade.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from app.services.ai.profiles import ModelDescriptor
-from app.services.ai.profiles.base import _CACHE_WRITE_MULTIPLIER
+from app.services.ai.profiles.base import _CACHE_WRITE_MULTIPLIER, CapabilityTier
 from app.services.ai.profiles.registry import profile_for
 from app.services.machine_settings import MachineSettings
 
@@ -84,6 +86,67 @@ async def descriptor_for(
     return next((d for d in descriptors if d.id == model), None)
 
 
+async def priced_descriptor_for(
+    *,
+    provider: str,
+    model: str,
+    settings: MachineSettings,
+    manual_in: float | None = None,
+    manual_out: float | None = None,
+) -> ModelDescriptor | None:
+    """The pricing descriptor for one call: `descriptor_for` (oracle/baked) with
+    the assistant's manual price filled in (ADR-0083 Amendment 1). The single
+    choke point every cost site resolves through, so none can silently skip the
+    fill — the recurrence guard for a feature that already shipped one missed
+    site."""
+
+    descriptor = await descriptor_for(provider=provider, model=model, settings=settings)
+    return apply_manual_fill(
+        descriptor, provider=provider, model=model, manual_in=manual_in, manual_out=manual_out
+    )
+
+
+def apply_manual_fill(
+    descriptor: ModelDescriptor | None,
+    *,
+    provider: str,
+    model: str,
+    manual_in: float | None,
+    manual_out: float | None,
+) -> ModelDescriptor | None:
+    """Fill an author-set price into the pricing descriptor when nothing else
+    prices the model (ADR-0083 Amendment 1 — fill semantics: oracle → baked →
+    manual).
+
+    No-op when the manual price is incomplete (a half-set price is treated as
+    "unknown", not a confident $0 on the blank side), or when the descriptor
+    already carries a price: the oracle or baked seed wins, so a manual value is
+    a fallback that auto-heals the moment the oracle lists the model. When the
+    model has no catalogue entry at all (e.g. a local Ollama model), synthesize a
+    minimal priced descriptor so `compute_cost` can still bill the call.
+    """
+
+    if manual_in is None or manual_out is None:
+        return descriptor
+    already_priced = descriptor is not None and not (
+        descriptor.cost_in_per_mtok is None and descriptor.cost_out_per_mtok is None
+    )
+    if already_priced:
+        return descriptor
+    if descriptor is not None:
+        return replace(descriptor, cost_in_per_mtok=manual_in, cost_out_per_mtok=manual_out)
+    return ModelDescriptor(
+        id=model,
+        display_name=model,
+        provider=provider,
+        context_window=0,
+        tier=CapabilityTier.BALANCED,
+        cost_in_per_mtok=manual_in,
+        cost_out_per_mtok=manual_out,
+        verified=False,
+    )
+
+
 def estimate_input_cost(
     tokens: int,
     descriptor: ModelDescriptor | None,
@@ -142,9 +205,11 @@ def estimate_send_cost(
 
 
 __all__ = [
+    "apply_manual_fill",
     "count_tokens",
     "count_tokens_per_block",
     "descriptor_for",
     "estimate_input_cost",
     "estimate_send_cost",
+    "priced_descriptor_for",
 ]

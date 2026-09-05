@@ -446,6 +446,8 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
         provider=result.provider,
         model=result.model,
         settings=settings,
+        manual_price_in_usd_per_mtok=resolved.manual_price_in_usd_per_mtok,
+        manual_price_out_usd_per_mtok=resolved.manual_price_out_usd_per_mtok,
     )
 
     return AIGenerateResponse(
@@ -530,9 +532,13 @@ async def ai_chat_stream(
 
     # Pre-fetch the pricing descriptor so the sync stream generator can
     # compute cost when the terminal StreamDone arrives, without needing
-    # an await mid-stream.
-    descriptor = await ai_tokens.descriptor_for(
-        provider=resolved.provider, model=resolved.model, settings=settings
+    # an await mid-stream. One choke point (descriptor + manual-price fill).
+    descriptor = await ai_tokens.priced_descriptor_for(
+        provider=resolved.provider,
+        model=resolved.model,
+        settings=settings,
+        manual_in=resolved.manual_price_in_usd_per_mtok,
+        manual_out=resolved.manual_price_out_usd_per_mtok,
     )
 
     events = ai_providers.chat_stream(
@@ -617,8 +623,12 @@ async def ai_generate_stream(
     except ProjectServiceError:
         policy = "off"
 
-    descriptor = await ai_tokens.descriptor_for(
-        provider=resolved.provider, model=resolved.model, settings=settings
+    descriptor = await ai_tokens.priced_descriptor_for(
+        provider=resolved.provider,
+        model=resolved.model,
+        settings=settings,
+        manual_in=resolved.manual_price_in_usd_per_mtok,
+        manual_out=resolved.manual_price_out_usd_per_mtok,
     )
     # Shares the exact system-block wrap with the non-streaming path so the
     # two can't drift into caching in one mode but not the other.

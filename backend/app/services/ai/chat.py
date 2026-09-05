@@ -369,6 +369,8 @@ async def run_chat_turn(project: ProjectService, request: AIChatRequest) -> AICh
         provider=result.provider,
         model=result.model,
         settings=settings,
+        manual_price_in_usd_per_mtok=resolved.manual_price_in_usd_per_mtok,
+        manual_price_out_usd_per_mtok=resolved.manual_price_out_usd_per_mtok,
     )
     return AIChatResponse(
         role="assistant",

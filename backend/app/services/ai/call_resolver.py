@@ -8,6 +8,7 @@ the HTTP layer as a free function taking the project service, matching the
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -68,6 +69,21 @@ def _clamp_to_model_max(desired: int, provider: str, model: str) -> int:
     return min(desired, cap) if cap else desired
 
 
+def _optional_price(value: object) -> float | None:
+    """Parse an author-set per-Mtok price from assistant metadata: a non-negative
+    float, or None when unset/blank/invalid. A blank field (the common case)
+    resolves to None so pricing falls through to the oracle/baked seed."""
+    if value is None or value == "":
+        return None
+    try:
+        price = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(price) or price < 0:
+        return None  # reject nan / inf / negative
+    return price
+
+
 @dataclass
 class ResolvedCall:
     provider: str
@@ -79,6 +95,12 @@ class ResolvedCall:
     temperature: float | None
     max_tokens: int
     thinking_enabled: bool = False
+    # Optional author-set price for this assistant's model, USD per 1M tokens
+    # (ADR-0083 Amendment 1). A FILL, applied at the cost site only when neither
+    # the oracle nor the baked seed prices the model — for an unlisted/local
+    # model the oracle can't reach. `None` = not set → resolve as usual.
+    manual_price_in_usd_per_mtok: float | None = None
+    manual_price_out_usd_per_mtok: float | None = None
 
     def to_call(
         self,
@@ -149,6 +171,8 @@ def resolve_call_params(
             temperature=temperature,
             max_tokens=_clamp_to_model_max(max_tokens, provider, model),
             thinking_enabled=bool(meta.get("ai_thinking", False)),
+            manual_price_in_usd_per_mtok=_optional_price(meta.get("ai_price_in_usd_per_mtok")),
+            manual_price_out_usd_per_mtok=_optional_price(meta.get("ai_price_out_usd_per_mtok")),
         )
     provider = provider_override or settings.default_provider
     model = model_override or settings.default_models.get(provider or "", "")

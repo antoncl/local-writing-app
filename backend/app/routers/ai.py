@@ -143,7 +143,11 @@ async def refresh_prices(project: CurrentProject) -> PriceRefreshResponse:
     manual prices (ADR-0083 Slice 2b). The oracle refresh is machine-global; the
     reset sweep tidies the open project's assistants whose model it now prices."""
     await price_oracle.refresh()
-    cleared = project.reset_stale_manual_prices()
+    with translate_errors():
+        # A concurrent modify/delete of an assistant mid-sweep raises a domain
+        # 404/409; translate_errors turns it into the right HTTP status (a bare
+        # sweep would surface it as a 500), matching every other assistant route.
+        cleared = project.reset_stale_manual_prices()
     return PriceRefreshResponse(ok=True, cleared=cleared)
 
 

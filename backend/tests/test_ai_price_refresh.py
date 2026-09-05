@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import httpx
 from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
@@ -77,6 +78,36 @@ def test_reset_ignores_assistant_without_a_manual_price() -> None:
         )
         price_oracle._index = {"claude-mythos-5": (5.0, 25.0)}
         assert service.reset_stale_manual_prices() == 0
+
+
+def test_reset_sweeps_a_mixed_roster() -> None:
+    # One assistant the oracle now prices is cleared; another on a still-unlisted
+    # model is kept — and the count reflects only the cleared one.
+    with TemporaryDirectory() as tmp:
+        service = open_test_project(Path(tmp) / "project", "Mixed Roster")
+        listed = _priced_assistant(service, model="claude-mythos-5")
+        unlisted = _priced_assistant(service, model="local-still-unlisted")
+        price_oracle._index = {"claude-mythos-5": (5.0, 25.0)}
+        assert service.reset_stale_manual_prices() == 1
+        assert "ai_price_in_usd_per_mtok" not in service.read_assistant_entry(listed).metadata
+        assert "ai_price_in_usd_per_mtok" in service.read_assistant_entry(unlisted).metadata
+
+
+def test_refresh_endpoint_offline_keeps_prices(monkeypatch) -> None:
+    # A failed refetch (offline) leaves the index cold → nothing is cleared and
+    # manual prices survive; the endpoint still returns 200.
+    with TemporaryDirectory() as tmp:
+        service = open_test_project(Path(tmp) / "project", "Offline")
+        aid = _priced_assistant(service)
+
+        async def boom() -> list[dict]:
+            raise httpx.ConnectError("offline")
+
+        monkeypatch.setattr(price_oracle, "_fetch_rows", boom)
+        response = TestClient(app).post("/api/ai/prices/refresh")
+        assert response.status_code == 200, response.text
+        assert response.json()["cleared"] == 0
+        assert "ai_price_in_usd_per_mtok" in service.read_assistant_entry(aid).metadata
 
 
 def test_refresh_endpoint_refetches_then_clears(monkeypatch) -> None:

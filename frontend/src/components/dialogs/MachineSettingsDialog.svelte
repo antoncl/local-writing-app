@@ -143,16 +143,18 @@
   // per-assistant manual price the live feed now covers, reporting the count.
   let pricesRefreshing = $state(false);
   let pricesCleared = $state<number | null>(null);
-  let pricesError = $state(false);
+  let pricesError = $state<string | null>(null);
   async function runPriceRefresh() {
     if (pricesRefreshing) return;
     pricesRefreshing = true;
     pricesCleared = null;
-    pricesError = false;
+    pricesError = null;
     try {
       pricesCleared = (await api.refreshPrices()).cleared;
-    } catch {
-      pricesError = true;
+    } catch (e) {
+      // Surface the real reason (a domain error / no project scope), not a
+      // hardcoded "check your connection" that misattributes a backend failure.
+      pricesError = (e as Error)?.message || "Couldn't update prices.";
     } finally {
       pricesRefreshing = false;
     }
@@ -202,12 +204,15 @@
   ];
   let activeTab = $state<SettingsTab>("ai");
   // Land on the first tab whenever the dialog reopens, never a stale one, and
-  // drop any update-check readout so a reopen never shows a stale verdict.
+  // drop any transient readout (update-check AND price-refresh) so a reopen never
+  // shows a stale verdict.
   $effect(() => {
     if (!open) {
       activeTab = "ai";
       updateResult = null;
       updateError = false;
+      pricesCleared = null;
+      pricesError = null;
     }
   });
 
@@ -343,7 +348,7 @@
               >{pricesRefreshing ? "Updating…" : "Update prices"}</button>
             </div>
             {#if pricesError}
-              <p class="ai-health-result fail">✗ Couldn't update prices — check your connection.</p>
+              <p class="ai-health-result fail">✗ {pricesError}</p>
             {:else if pricesCleared !== null}
               <p class="ai-health-result ok">✓ Prices updated{#if pricesCleared > 0} · cleared {pricesCleared} manual {pricesCleared === 1 ? "price" : "prices"}{/if}.</p>
             {/if}

@@ -1,9 +1,10 @@
 """Anthropic profile.
 
-Live discovery via `/v1/models` confirms which model ids exist; tier +
-cost data come from `_baked_in.yaml` (Anthropic doesn't publish pricing
-on the models endpoint). When discovery fails (offline, bad key), fall
-back to the bake-in catalogue alone.
+Live discovery via `/v1/models` confirms which model ids exist; tier comes
+from `_baked_in.yaml` (Anthropic doesn't publish pricing on the models
+endpoint). Per-token COST is overlaid from OpenRouter's public feed via the
+price oracle (ADR-0083); `_baked_in.yaml` is the offline price seed. When
+discovery fails (offline, bad key), fall back to the bake-in catalogue alone.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from app.services.ai.profiles.base import (
     family_supports_temperature,
 )
 from app.services.ai.profiles.explicit_cache import TIER_TTL, cache_control_indices
+from app.services.ai.profiles.price_oracle import priced_with_oracle
 
 # Default Anthropic extended-thinking budget when ai_thinking is enabled.
 # Anthropic requires budget_tokens >= 1024 and budget_tokens < max_tokens.
@@ -89,35 +91,37 @@ class AnthropicProfile(ProviderProfile):
         baked = baked_in_for("anthropic")
         if not self._api_key:
             # No key → can't discover, just use bake-in.
-            self._cache = baked
-            return baked
-        try:
-            async with httpx.AsyncClient(timeout=6.0) as client:
-                response = await client.get(
-                    "https://api.anthropic.com/v1/models",
-                    headers={
-                        "x-api-key": self._api_key,
-                        "anthropic-version": "2023-06-01",
-                    },
+            result = baked
+        else:
+            try:
+                async with httpx.AsyncClient(timeout=6.0) as client:
+                    response = await client.get(
+                        "https://api.anthropic.com/v1/models",
+                        headers={
+                            "x-api-key": self._api_key,
+                            "anthropic-version": "2023-06-01",
+                        },
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                log.warning("Anthropic /v1/models failed (%s); using bake-in", exc)
+                result = baked
+            else:
+                # Bake-in confirms tier; live confirms existence and (ADR-0073 S4,
+                # live_catalog) surfaces models newer than the audit file as
+                # unverified rows instead of hiding them.
+                result = merge_live_catalogue(
+                    "anthropic",
+                    baked,
+                    payload.get("data") or [],
+                    surface_live_only=self.live_catalog,
                 )
-                response.raise_for_status()
-                payload = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            log.warning("Anthropic /v1/models failed (%s); using bake-in", exc)
-            self._cache = baked
-            return baked
 
-        # Bake-in is the source of tier/cost truth; live confirms existence and
-        # (ADR-0073 S4, live_catalog) surfaces models newer than the audit file
-        # as unverified rows instead of hiding them.
-        merged = merge_live_catalogue(
-            "anthropic",
-            baked,
-            payload.get("data") or [],
-            surface_live_only=self.live_catalog,
-        )
-        self._cache = merged
-        return merged
+        # Overlay per-token COST from the OpenRouter price oracle (ADR-0083);
+        # fail-soft to the baked seed when the oracle is cold/offline.
+        self._cache = await priced_with_oracle(result)
+        return self._cache
 
     def caching_style(self, model_id: str) -> CachingStyle:
         # All current Anthropic models support explicit prompt caching via

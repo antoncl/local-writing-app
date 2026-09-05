@@ -11,6 +11,12 @@ rides the wire (`X-Project-Root`), it injects the current test's scope header on
 every `TestClient` request, so routes resolve their project from the request
 exactly as in production. It also resets the scope per-test so one test's open
 project never leaks into the next.
+
+`_neutralize_price_oracle` stops the ADR-0083 price oracle from reaching the
+network: it warms inside every native profile's `list_models`, so without this
+the suite would fetch OpenRouter's live feed and overlay real (drifting) prices
+onto baked descriptors, making native cost assertions non-deterministic. Stubbed
+to an empty feed by default; oracle tests re-stub `_fetch_rows` themselves.
 """
 
 from __future__ import annotations
@@ -25,6 +31,20 @@ def _isolate_machine_settings(tmp_path, monkeypatch):
     fake = tmp_path / "machine" / "config.yaml"
     monkeypatch.setattr(ms, "config_path", lambda: fake)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_price_oracle(monkeypatch):
+    from app.services.ai.profiles import price_oracle
+
+    price_oracle.reset_cache()
+
+    async def _empty_feed() -> list[dict]:
+        return []
+
+    monkeypatch.setattr(price_oracle, "_fetch_rows", _empty_feed)
+    yield
+    price_oracle.reset_cache()
 
 
 @pytest.fixture(autouse=True)

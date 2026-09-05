@@ -153,9 +153,9 @@ class PriceRefreshResponse(BaseModel):
 
     The OpenRouter price oracle is refetched, then `cleared` counts assistant
     manual price overrides dropped because the oracle now prices their model (a
-    value entered while a model was unlisted, no longer needed)."""
+    value entered while a model was unlisted, no longer needed). Success/failure
+    rides on the HTTP status, so there is no `ok` flag to misread."""
 
-    ok: bool = True
     cleared: int = 0
 
 

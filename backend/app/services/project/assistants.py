@@ -520,14 +520,18 @@ class AssistantEntriesMixin:
         return self.read_assistant_entry(node_id)
 
     def reset_stale_manual_prices(self) -> int:
-        """Clear the author-set price fields (ADR-0083 Amendment 1) from any
-        assistant whose model the price oracle now prices — a value entered while
-        the model was unlisted, made redundant once OpenRouter lists it. Returns
-        the count cleared.
+        """Clear the author-set price fields (ADR-0083 Amendment 1) from every
+        assistant in the roster whose model the price oracle now prices —
+        including inherited machine-layer assistants, whose files are shared
+        across projects. A manual price is a FILL (§1: oracle -> baked -> manual),
+        so once the oracle lists the model the stored value is already inert; this
+        deletes it. Returns the count cleared. Call after `price_oracle.refresh()`
+        so the index is current.
 
-        Fill semantics mean the cost was already correct (the oracle wins); this
-        only tidies the dormant field. Call after `price_oracle.refresh()` so the
-        index is current.
+        Clears the keys from the metadata `list_assistant_entries` already read
+        (the assistant's own file front matter) rather than re-reading through
+        `read_assistant_entry`, so the save carries no side effect beyond dropping
+        the two price keys.
         """
         cleared = 0
         for summary in self.list_assistant_entries().entries:
@@ -538,16 +542,12 @@ class AssistantEntriesMixin:
                 continue
             if price_oracle.price_for(model) is None:
                 continue  # oracle still can't price it — keep the manual fill
-            entry = self.read_assistant_entry(summary.id)
-            new_meta = {k: v for k, v in (entry.metadata or {}).items() if k not in _MANUAL_PRICE_KEYS}
-            if new_meta == (entry.metadata or {}):
-                continue
+            new_meta = {k: v for k, v in meta.items() if k not in _MANUAL_PRICE_KEYS}
             self.save_assistant_entry(
                 summary.id,
                 SaveAssistantEntryRequest(
-                    title=entry.title,
-                    entry_type=entry.entry_type,
-                    base_revision=entry.revision,
+                    title=summary.title,
+                    entry_type=summary.entry_type,
                     metadata=new_meta,
                 ),
             )

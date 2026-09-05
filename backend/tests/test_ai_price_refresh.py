@@ -8,6 +8,7 @@ oracle wins); the sweep only tidies the dormant field.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -18,6 +19,9 @@ from project_fixtures import open_test_project
 from app.main import app
 from app.models import CreateAssistantEntryRequest, SaveAssistantEntryRequest
 from app.services.ai.profiles import price_oracle
+from app.services.ai.profiles.base import UsageMetrics
+from app.services.ai.usage import translate_usage_to_cost
+from app.services.machine_settings import MachineSettings
 
 
 def _priced_assistant(service, model: str = "claude-mythos-5") -> str:
@@ -61,6 +65,23 @@ def test_reset_keeps_manual_when_oracle_still_cannot_price() -> None:
         cleared = service.reset_stale_manual_prices()
         assert cleared == 0
         assert "ai_price_in_usd_per_mtok" in service.read_assistant_entry(aid).metadata
+
+
+def test_cleared_runnable_model_is_still_priced() -> None:
+    # The invariant behind the sweep: clearing a manual on a runnable (baked)
+    # model does NOT unprice it — the baked seed / oracle still prices it.
+    with TemporaryDirectory() as tmp:
+        service = open_test_project(Path(tmp) / "project", "Still Priced")
+        aid = _priced_assistant(service, model="claude-opus-4-8")
+        price_oracle._index = {"claude-opus-4.8": (5.0, 25.0)}  # oracle now prices it too
+        assert service.reset_stale_manual_prices() == 1
+        assert "ai_price_in_usd_per_mtok" not in service.read_assistant_entry(aid).metadata
+        # Resolve cost through the real pipeline with the manual gone: still priced.
+        usage = UsageMetrics(input_tokens=1_000_000, output_tokens=0)
+        _wire, cost = asyncio.run(
+            translate_usage_to_cost(usage, provider="anthropic", model="claude-opus-4-8", settings=MachineSettings())
+        )
+        assert cost is not None and cost > 0
 
 
 def test_reset_ignores_assistant_without_a_manual_price() -> None:

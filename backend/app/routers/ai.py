@@ -141,14 +141,15 @@ def ai_health(project: CurrentProject, request: AIHealthRequest) -> AIHealthResp
 async def refresh_prices(project: CurrentProject) -> PriceRefreshResponse:
     """Refetch the OpenRouter price oracle, then clear now-redundant assistant
     manual prices (ADR-0083 Slice 2b). The oracle refresh is machine-global; the
-    reset sweep tidies the open project's assistants whose model it now prices."""
+    reset sweep clears every assistant in the roster whose model the oracle now
+    prices — inherited machine-layer assistants included (their files are shared
+    across projects)."""
     await price_oracle.refresh()
     with translate_errors():
-        # A concurrent modify/delete of an assistant mid-sweep raises a domain
-        # 404/409; translate_errors turns it into the right HTTP status (a bare
-        # sweep would surface it as a 500), matching every other assistant route.
+        # The sweep saves assistants; translate_errors maps any domain error to
+        # its HTTP status, matching every other assistant route.
         cleared = project.reset_stale_manual_prices()
-    return PriceRefreshResponse(ok=True, cleared=cleared)
+    return PriceRefreshResponse(cleared=cleared)
 
 
 @router.post("/api/ai/ollama/health", response_model=OllamaHostHealth)

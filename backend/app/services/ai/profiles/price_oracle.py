@@ -12,16 +12,24 @@ Precedence (ADR-0083 §1): a user override wins over this oracle, which wins ove
 the baked-in seed. This module is the oracle layer only; the override layer
 lands in Slice 2.
 
-Refresh is event-driven (ADR-0083 §3): the index warms lazily on first use and
-is otherwise rebuilt only by `refresh()` (an author action). No TTL. Every
-failure falls soft to the caller's existing baked-in price.
+Refresh is event-driven (ADR-0083 §3): the index is **file-backed**. On a cold
+start `ensure_loaded()` loads the persisted cache with no network; only a
+first-ever start (no cache file) fetches, and only `refresh()` (an author action
+— the "update prices" command, assistant add/change) refetches and rewrites the
+cache. No TTL, no per-restart refetch — prices move rarely and the cached file is
+authoritative until an explicit refresh. Every failure falls soft to the caller's
+existing baked-in price.
 """
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
+import os
 import re
 from dataclasses import replace
+from pathlib import Path
 
 import httpx
 
@@ -124,23 +132,79 @@ def _build_index(rows: list[dict]) -> dict[str, tuple[float | None, float | None
     return out
 
 
+_CACHE_FILENAME = "price_oracle_cache.json"
+
+
+def _cache_path() -> Path:
+    """The machine-level cache file for the price index. Lives beside the machine
+    settings (the oracle is machine-global). Imported lazily to avoid an
+    import-time cycle with `machine_settings`."""
+
+    from app.services.machine_settings import config_path
+
+    return config_path().parent / _CACHE_FILENAME
+
+
+def _cache_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _read_cache() -> dict[str, tuple[float | None, float | None]] | None:
+    """Load the persisted index, or None when there is no usable cache file."""
+
+    try:
+        raw = json.loads(_cache_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, tuple[float | None, float | None]] = {}
+    for key, value in raw.items():
+        if isinstance(value, list) and len(value) == 2:
+            out[str(key)] = (_cache_float(value[0]), _cache_float(value[1]))
+    # An empty result (empty file, or every row wrong-shaped) is not a usable
+    # cache — return None so the caller refetches instead of trusting a degenerate
+    # file that would otherwise poison every cold start.
+    return out or None
+
+
+def _write_cache(index: dict[str, tuple[float | None, float | None]]) -> None:
+    """Persist the index atomically (temp + replace). Best-effort — a write
+    failure just means the next cold start refetches."""
+
+    try:
+        path = _cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {key: list(value) for key, value in index.items()}
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as exc:
+        log.warning("price oracle: cache write failed (%s)", exc)
+
+
 async def ensure_loaded() -> None:
-    """Warm the index once (lazy cold-start). A failed fetch leaves the index
-    cold so the next call retries; never raises."""
+    """Warm the index once, preferring the on-disk cache (ADR-0083 §3: cached,
+    refreshed on command). Loads the cache file with NO network; only a first-ever
+    start (no cache file) fetches and persists. A failed first fetch leaves the
+    index cold so the next call retries; never raises."""
 
     global _index
     if _index is not None:
         return
-    try:
-        _index = _build_index(await _fetch_rows())
-    except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
-        # Any malformed-feed shape (ADR-0083 §6) leaves the index cold → retry.
-        log.warning("price oracle: feed fetch failed (%s); using baked-in prices", exc)
+    cached = _read_cache()
+    if cached is not None:
+        _index = cached
+        return
+    await refresh()  # first-ever: fetch and write the cache
 
 
 async def refresh() -> None:
-    """Force a rebuild — an author action (assistant add/change, manual button).
-    A failed fetch keeps the previous index rather than clearing it."""
+    """Refetch the feed and rewrite the cache — an author action (the "update
+    prices" command, assistant add/change). A failed fetch keeps the previous
+    index and cache rather than clearing them."""
 
     global _index
     try:
@@ -148,7 +212,15 @@ async def refresh() -> None:
     except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
         log.warning("price oracle: refresh failed (%s); keeping previous prices", exc)
         return
+    if not rebuilt:
+        # A "successful" fetch that yields no native prices (a soft outage: a 200
+        # with a bad-shape body — `_fetch_rows` returns [] rather than raising) is
+        # not a real result. Keep the previous index and cache rather than
+        # persisting `{}`, which would poison every future cold start.
+        log.warning("price oracle: refresh returned no native prices; keeping previous")
+        return
     _index = rebuilt
+    _write_cache(rebuilt)
 
 
 def price_for(model_id: str) -> tuple[float | None, float | None] | None:
@@ -190,8 +262,10 @@ async def priced_with_oracle(descriptors: list[ModelDescriptor]) -> list[ModelDe
 
 
 def reset_cache() -> None:
-    """Test hook: drop the process-level index so the next `ensure_loaded`
-    refetches."""
+    """Test hook: drop the in-memory index AND the on-disk cache file so the next
+    `ensure_loaded` starts truly cold."""
 
     global _index
     _index = None
+    with contextlib.suppress(OSError):
+        _cache_path().unlink(missing_ok=True)

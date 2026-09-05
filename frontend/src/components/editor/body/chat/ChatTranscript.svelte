@@ -115,7 +115,7 @@
             {@const cachePct = totalIn > 0 ? Math.round((message.usage.cached_input_tokens / totalIn) * 100) : 0}
             <span>{totalIn} → {message.usage.output_tokens} tok</span>
             {#if cachePct > 0}<span> · {cachePct}% cached</span>{/if}
-            {#if message.cost_usd != null}<span> · {formatCostEur(message.cost_usd)}</span>{/if}
+            {#if message.cost_usd != null}<span> · {formatCostEur(message.cost_usd)}</span>{:else}<span title="No price is known for this model — set one on the assistant, or Update prices in Settings."> · price unknown</span>{/if}
           {/if}
           {#if provenance}<span>{#if message.usage} · {/if}{provenance}</span>{/if}
         </div>

@@ -137,6 +137,28 @@
     // Reading channelDirty registers the dep; clear a now-stale result.
     if (channelDirty) updateResult = null;
   });
+
+  // Force a refetch of the live price catalogue (ADR-0083). On demand — cached
+  // prices are otherwise authoritative until asked to refresh. Also clears any
+  // per-assistant manual price the live feed now covers, reporting the count.
+  let pricesRefreshing = $state(false);
+  let pricesCleared = $state<number | null>(null);
+  let pricesError = $state<string | null>(null);
+  async function runPriceRefresh() {
+    if (pricesRefreshing) return;
+    pricesRefreshing = true;
+    pricesCleared = null;
+    pricesError = null;
+    try {
+      pricesCleared = (await api.refreshPrices()).cleared;
+    } catch (e) {
+      // Surface the real reason (a domain error / no project scope), not a
+      // hardcoded "check your connection" that misattributes a backend failure.
+      pricesError = (e as Error)?.message || "Couldn't update prices.";
+    } finally {
+      pricesRefreshing = false;
+    }
+  }
   // Snapshot the stored policy on each open→shown transition only; our own apply
   // re-syncs `settings` from the parent, and re-seeding on that would be a no-op
   // anyway (draft already equals the saved value).
@@ -182,12 +204,15 @@
   ];
   let activeTab = $state<SettingsTab>("ai");
   // Land on the first tab whenever the dialog reopens, never a stale one, and
-  // drop any update-check readout so a reopen never shows a stale verdict.
+  // drop any transient readout (update-check AND price-refresh) so a reopen never
+  // shows a stale verdict.
   $effect(() => {
     if (!open) {
       activeTab = "ai";
       updateResult = null;
       updateError = false;
+      pricesCleared = null;
+      pricesError = null;
     }
   });
 
@@ -311,6 +336,23 @@
               {/if}
             </section>
           {/if}
+
+          <section class="price-refresh">
+            <h3>Model prices</h3>
+            <p class="muted">Model prices come from the live catalogue and are cached. Update to pick up new or changed prices; this also clears any manual price you set on an assistant whose model the catalogue now prices.</p>
+            <div class="button-row">
+              <button
+                type="button"
+                disabled={pricesRefreshing}
+                onclick={runPriceRefresh}
+              >{pricesRefreshing ? "Updating…" : "Update prices"}</button>
+            </div>
+            {#if pricesError}
+              <p class="ai-health-result fail">✗ {pricesError}</p>
+            {:else if pricesCleared !== null}
+              <p class="ai-health-result ok">✓ Prices updated{#if pricesCleared > 0} · cleared {pricesCleared} manual {pricesCleared === 1 ? "price" : "prices"}{/if}.</p>
+            {/if}
+          </section>
         {:else if activeTab === "writing"}
           <section class="writing-surface">
             <h3>Writing surface</h3>
@@ -539,18 +581,21 @@
     font-size: var(--fs-sm);
   }
 
-  .health-check {
+  .health-check,
+  .price-refresh {
     display: grid;
     gap: 6px;
   }
 
-  .health-check h3 {
+  .health-check h3,
+  .price-refresh h3 {
     margin: 0;
     font-size: var(--fs-md);
     font-weight: 600;
   }
 
-  .health-check p.muted {
+  .health-check p.muted,
+  .price-refresh p.muted {
     margin: 0;
     font-size: var(--fs-sm);
   }

@@ -53,6 +53,12 @@ export const aiApi = {
       body: JSON.stringify({ host }),
     });
   },
+  // Force a refetch of the live price catalogue (machine-global) and clear
+  // now-redundant per-assistant manual prices (ADR-0083). Returns how many
+  // manual prices were cleared because the live feed now prices their model.
+  refreshPrices() {
+    return request<{ cleared: number }>("/ai/prices/refresh", { method: "POST" });
+  },
   aiPreview(payload: AIPreviewRequest) {
     return request<AIPreviewResponse>("/ai/preview", {
       method: "POST",

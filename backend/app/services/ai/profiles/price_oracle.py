@@ -39,6 +39,9 @@ _NATIVE_PREFIXES = ("anthropic/", "openai/")
 # call retries. A successful fetch sets a dict (possibly empty = "loaded").
 _index: dict[str, tuple[float | None, float | None]] | None = None
 
+# A trailing dated-snapshot suffix on a model id: `-YYYY-MM-DD` or `-YYYYMMDD`.
+_DATE_SUFFIX_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$|-\d{8}$")
+
 
 def _normalize_id(model_id: str) -> str:
     """Native model id -> oracle index key (ADR-0083).
@@ -47,12 +50,21 @@ def _normalize_id(model_id: str) -> str:
     version dash *between two digits* to a dot so `claude-opus-4-8` matches
     OpenRouter's `claude-opus-4.8` and `claude-fable-5-1` matches
     `claude-fable-5.1`. A dash not between digits (`o3-mini`) is left alone.
+
+    The dash→dot uses a zero-width lookaround, not `(\\d)-(\\d)`, so it does not
+    consume the boundary digit — consecutive segments all convert
+    (`x-4-5-6` -> `x-4.5.6`), where a capture-group sub would miss every other gap.
     """
 
     ident = model_id.split("/", 1)[-1]
-    ident = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", ident)  # -YYYY-MM-DD snapshot
-    ident = re.sub(r"-\d{8}$", "", ident)  # -YYYYMMDD snapshot
-    return re.sub(r"(\d)-(\d)", r"\1.\2", ident)
+    ident = _DATE_SUFFIX_RE.sub("", ident)
+    return re.sub(r"(?<=\d)-(?=\d)", ".", ident)
+
+
+def _is_dated(ident: str) -> bool:
+    """Whether a bare (prefix-stripped) id ends in a dated snapshot suffix."""
+
+    return bool(_DATE_SUFFIX_RE.search(ident))
 
 
 def _per_mtok(raw: object) -> float | None:
@@ -71,28 +83,44 @@ def _per_mtok(raw: object) -> float | None:
 
 
 async def _fetch_rows() -> list[dict]:
-    """GET the public feed. Raises on any network/parse failure; the caller
-    treats a raise as 'stay cold and retry next time'."""
+    """GET the public feed. Raises on network/JSON failure; returns [] for a
+    well-formed-but-unexpected payload shape (top-level not an object, or `data`
+    not a list) so `_build_index` always gets a list."""
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         response = await client.get(_MODELS_URL)
         response.raise_for_status()
         payload = response.json()
-    return payload.get("data") or []
+    data = payload.get("data") if isinstance(payload, dict) else None
+    return data if isinstance(data, list) else []
 
 
 def _build_index(rows: list[dict]) -> dict[str, tuple[float | None, float | None]]:
+    """Index the native (anthropic/openai) rows of the feed by normalized id.
+
+    Defensive against a malformed feed (ADR-0083 §6): a row that isn't a dict, or
+    whose `pricing` isn't a dict, is skipped rather than raised on. When a
+    canonical id and a dated snapshot of it collapse to the same key, the undated
+    row wins regardless of feed order."""
+
     out: dict[str, tuple[float | None, float | None]] = {}
     for row in rows:
+        if not isinstance(row, dict):
+            continue
         model_id = str(row.get("id") or "")
         if not any(model_id.startswith(prefix) for prefix in _NATIVE_PREFIXES):
             continue
-        pricing = row.get("pricing") or {}
+        pricing = row.get("pricing")
+        if not isinstance(pricing, dict):
+            continue
         cost_in = _per_mtok(pricing.get("prompt"))
         cost_out = _per_mtok(pricing.get("completion"))
         if cost_in is None and cost_out is None:
             continue
-        out[_normalize_id(model_id)] = (cost_in, cost_out)
+        key = _normalize_id(model_id)
+        if key in out and _is_dated(model_id.split("/", 1)[-1]):
+            continue  # keep the canonical (undated) price over a dated snapshot
+        out[key] = (cost_in, cost_out)
     return out
 
 
@@ -104,11 +132,10 @@ async def ensure_loaded() -> None:
     if _index is not None:
         return
     try:
-        rows = await _fetch_rows()
-    except (httpx.HTTPError, ValueError) as exc:
+        _index = _build_index(await _fetch_rows())
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
+        # Any malformed-feed shape (ADR-0083 §6) leaves the index cold → retry.
         log.warning("price oracle: feed fetch failed (%s); using baked-in prices", exc)
-        return
-    _index = _build_index(rows)
 
 
 async def refresh() -> None:
@@ -117,11 +144,11 @@ async def refresh() -> None:
 
     global _index
     try:
-        rows = await _fetch_rows()
-    except (httpx.HTTPError, ValueError) as exc:
+        rebuilt = _build_index(await _fetch_rows())
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
         log.warning("price oracle: refresh failed (%s); keeping previous prices", exc)
         return
-    _index = _build_index(rows)
+    _index = rebuilt
 
 
 def price_for(model_id: str) -> tuple[float | None, float | None] | None:

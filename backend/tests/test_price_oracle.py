@@ -80,6 +80,8 @@ def _stub_feed(monkeypatch, rows: list[dict] | None = None) -> None:
         ("gpt-4o", "gpt-4o"),
         ("gpt-4o-2024-11-20", "gpt-4o"),  # dated snapshot stripped
         ("anthropic/claude-opus-4-8", "claude-opus-4.8"),  # route prefix stripped
+        ("claude-3-5-sonnet", "claude-3.5-sonnet"),  # two-segment version
+        ("claude-x-4-5-6", "claude-x-4.5.6"),  # 3 consecutive segments all convert
     ],
 )
 def test_normalize_id_corpus(native: str, key: str) -> None:
@@ -181,3 +183,79 @@ def test_refresh_keeps_previous_prices_on_failure(monkeypatch) -> None:
     monkeypatch.setattr(price_oracle, "_fetch_rows", boom)
     asyncio.run(price_oracle.refresh())
     assert price_oracle.price_for("claude-opus-5") == (5.0, 25.0)  # previous kept
+
+
+# ---- malformed feed is skipped, not fatal (ADR-0083 §6) -------------------
+
+
+def test_build_index_skips_malformed_rows() -> None:
+    idx = price_oracle._build_index(
+        [
+            "junk",  # not a dict
+            {"id": "anthropic/x", "pricing": "not-a-dict"},  # pricing wrong type
+            {"id": "anthropic/y"},  # no pricing key
+            {"id": "anthropic/claude-opus-5", "pricing": {"prompt": "0.000005", "completion": "0.000025"}},
+        ]
+    )
+    assert idx == {"claude-opus-5": (5.0, 25.0)}  # only the good row survives
+
+
+# ---- dated snapshot never overrides the canonical price (order-independent) -
+
+
+def test_dated_snapshot_does_not_override_canonical() -> None:
+    dated = {"id": "anthropic/claude-3.5-sonnet-20240620", "pricing": {"prompt": "0.000009", "completion": "0.00009"}}
+    canonical = {"id": "anthropic/claude-3.5-sonnet", "pricing": {"prompt": "0.000003", "completion": "0.000015"}}
+    assert price_oracle._build_index([dated, canonical])["claude-3.5-sonnet"] == (3.0, 15.0)
+    assert price_oracle._build_index([canonical, dated])["claude-3.5-sonnet"] == (3.0, 15.0)
+
+
+# ---- partial price keeps the baked value for the missing side --------------
+
+
+def test_partial_oracle_price_keeps_baked_for_missing_side() -> None:
+    price_oracle._index = {"claude-opus-5": (7.0, None)}
+    [priced] = price_oracle.apply_prices([_desc("claude-opus-5", cost_in=1.0, cost_out=99.0)])
+    assert priced.cost_in_per_mtok == 7.0  # oracle fills the input rate
+    assert priced.cost_out_per_mtok == 99.0  # baked output rate preserved
+
+
+# ---- a genuinely free route is a real 0.0, not "unknown" -------------------
+
+
+def test_build_index_keeps_free_zero_price() -> None:
+    idx = price_oracle._build_index([{"id": "openai/gpt-free", "pricing": {"prompt": "0", "completion": "0"}}])
+    assert idx["gpt-free"] == (0.0, 0.0)
+
+
+# ---- end-to-end through a real profile's list_models -----------------------
+
+
+def test_list_models_overlays_oracle_price_through_profile(monkeypatch) -> None:
+    # No key → the profile returns the baked catalogue; the oracle still overlays.
+    # Baked `claude-opus-4-8` is a stale 15/75; the oracle's 5/25 must win.
+    from app.services.ai.profiles.anthropic import AnthropicProfile
+
+    _stub_feed(monkeypatch)
+    models = asyncio.run(AnthropicProfile("").list_models())
+    opus48 = next(m for m in models if m.id == "claude-opus-4-8")
+    assert opus48.cost_in_per_mtok == 5.0
+    assert opus48.cost_out_per_mtok == 25.0
+
+
+def test_malformed_feed_does_not_break_list_models(monkeypatch) -> None:
+    # A malformed feed must not take the whole catalogue down (ADR-0083 §6):
+    # list_models returns, the good row is still overlaid, the bad rows ignored.
+    from app.services.ai.profiles.anthropic import AnthropicProfile
+
+    _stub_feed(
+        monkeypatch,
+        [
+            "junk",
+            {"id": "anthropic/x", "pricing": "nope"},
+            {"id": "anthropic/claude-opus-4.8", "pricing": {"prompt": "0.000005", "completion": "0.000025"}},
+        ],
+    )
+    models = asyncio.run(AnthropicProfile("").list_models())
+    opus48 = next(m for m in models if m.id == "claude-opus-4-8")
+    assert opus48.cost_in_per_mtok == 5.0

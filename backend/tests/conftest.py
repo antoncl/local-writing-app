@@ -34,7 +34,11 @@ def _isolate_machine_settings(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _neutralize_price_oracle(monkeypatch):
+def _neutralize_price_oracle(_isolate_machine_settings, monkeypatch):
+    # Depends on _isolate_machine_settings so config_path is ALREADY redirected to
+    # tmp before reset_cache() runs — reset_cache now deletes the cache file, and
+    # that file's path derives from config_path. Without this ordering a setup-time
+    # reset could unlink the developer's real price_oracle_cache.json.
     from app.services.ai.profiles import price_oracle
 
     price_oracle.reset_cache()

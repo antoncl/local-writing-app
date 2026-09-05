@@ -1,6 +1,6 @@
 # ADR-0083: Model prices come from OpenRouter's public feed; baked-in is the offline seed
 
-- Status: **Accepted** — 2026-09-05, Anton Lauridsen, PR #TBD.
+- Status: **Accepted** — 2026-09-05, Anton Lauridsen, PR #1825.
 - **Issue:** #1823 (Slice 1, backend), #1824 (Slice 2, UI)
 - **Relates to:** ADR-0073 (live catalogue merge), ADR-0058 (provider call path off the ABC), `docs/ai-model-selection.md`
 

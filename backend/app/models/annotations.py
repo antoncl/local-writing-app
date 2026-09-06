@@ -206,8 +206,61 @@ class SearchHit(BaseModel):
     end: int = 0
     revision: str = ""
     owned: bool = True
+    # The matched text itself (ADR-0085 §4 rule 2): `body[start:end]` for a body
+    # hit, so a replace can verify the range still matches what the query found
+    # before writing through it. Empty for a metadata hit — those never replace.
+    text: str = ""
 
 
 class SearchResponse(BaseModel):
     query: str
     hits: list[SearchHit] = Field(default_factory=list)
+
+
+class ReplaceHitRef(BaseModel):
+    """One hit the pane asks to replace — the anchor a `SearchHit` carried back
+    to it (ADR-0085 §4). `field` is carried so a metadata hit sent by mistake
+    (or a stale client) reports `not_replaceable/metadata` rather than being
+    silently dropped."""
+
+    file_id: str
+    field: Literal["body", "metadata"] = "body"
+    start: int
+    end: int
+    text: str
+    revision: str
+
+
+class ReplaceRequest(BaseModel):
+    """ADR-0085 §4. `replacement` is the literal text every hit is replaced
+    with; empty deletes the matches. `hits` may span many nodes — one write per
+    node, through that node's own save."""
+
+    replacement: str = ""
+    hits: list[ReplaceHitRef] = Field(default_factory=list)
+
+
+ReplaceStatus = Literal["replaced", "stale", "not_replaceable"]
+
+
+class ReplaceOutcome(BaseModel):
+    """One hit's fate (ADR-0085 §4): `reason` names why a `not_replaceable` or
+    `stale` hit didn't write — `"inherited" | "metadata" | "kind" | "unknown" |
+    "overlap"` for `not_replaceable`, `"changed"` for `stale`. `revision` is the
+    node's new save revision after a `replaced` write, else `None`."""
+
+    file_id: str
+    start: int
+    end: int
+    status: ReplaceStatus
+    reason: str | None = None
+    revision: str | None = None
+
+
+class ReplaceResponse(BaseModel):
+    """Per-hit outcomes, always 200 (ADR-0085 §4) — a mixed batch has no single
+    status to 409 on. `replaced_nodes` is the number of distinct nodes that
+    actually got a write, for the pane's "twelve hits across seven nodes" tally."""
+
+    outcomes: list[ReplaceOutcome] = Field(default_factory=list)
+    replaced_nodes: int = 0

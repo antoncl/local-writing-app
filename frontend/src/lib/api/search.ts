@@ -2,6 +2,8 @@ import type {
   ReferenceCandidatesResponse,
   ReferenceGraphResponse,
   ReferenceResolveResponse,
+  ReplaceHitRef,
+  ReplaceResponse,
   SearchHit,
 } from "@/lib/types";
 import { request } from "./core";
@@ -14,9 +16,22 @@ export type SearchParams = {
   include_open_todos?: boolean;
 };
 
+export type ReplaceParams = {
+  replacement: string;
+  hits: ReplaceHitRef[];
+};
+
 export const searchApi = {
   search(params: SearchParams) {
     return request<{ query: string; hits: SearchHit[] }>("/search", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  },
+  // ADR-0085 §4: one write per hit's node, through that node's own save — this
+  // endpoint is the whole mechanism, always 200 with a per-hit outcome.
+  replace(params: ReplaceParams) {
+    return request<ReplaceResponse>("/search/replace", {
       method: "POST",
       body: JSON.stringify(params),
     });

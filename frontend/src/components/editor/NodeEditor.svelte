@@ -565,10 +565,16 @@
 
   // Editor-pane handle exports — forwarded to ProseBodyView and called by the
   // editorPanes controller via `editorPaneComponents[pane.id].xxx(...)`.
-  // reloadScene re-seeds the TipTap doc from a server scene (the controller
-  // calls it to reconcile an open pane after an out-of-band embedded-TODO
-  // mutation, GH #45); highlightEmbeddedTodo scrolls to a marker.
+  // reloadScene re-seeds whichever body the shape mounts — TipTap for prose,
+  // `rawBody` for code — from a server scene, so a reconcile after an
+  // out-of-band write (embedded-TODO, ADR-0085 replace) redraws both;
+  // highlightEmbeddedTodo scrolls to a marker.
   export function reloadScene(nextScene: EditableDocument, mode: "boundary" | "reconcile" = "boundary") {
+    if (rawBodyMode) {
+      rawBody = nextScene.body ?? "";
+      lastEmittedRawBody = rawBody;
+      return;
+    }
     return proseBodyView?.loadScene(nextScene, mode);
   }
 

@@ -216,6 +216,7 @@ class SearchMixin:
                     end=match.end(),
                     revision=entry.revision,
                     owned=entry.owned,
+                    text=match.group(),
                 )
             )
         return hits

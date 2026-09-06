@@ -18,6 +18,8 @@ from app.models import (
     ReferenceResolveRequest,
     ReferenceResolveResponse,
     ReorderAssistantsRequest,
+    ReplaceRequest,
+    ReplaceResponse,
     SaveAssistantEntryRequest,
     SaveChatSessionRequest,
     SaveLoreEntryRequest,
@@ -298,5 +300,13 @@ def reference_graph(project: CurrentProject) -> ReferenceGraphResponse:
 def search(project: CurrentProject, request: SearchRequest) -> SearchResponse:
     with translate_errors():
         return project.search(request)
+
+
+@router.post("/api/search/replace", response_model=ReplaceResponse)
+def search_replace(project: CurrentProject, request: ReplaceRequest) -> ReplaceResponse:
+    # Per-hit outcomes are data (200), never a 409: a mixed batch of
+    # replaced/stale/not_replaceable hits has no single status (ADR-0085 §4).
+    with translate_errors():
+        return project.replace(request)
 
 

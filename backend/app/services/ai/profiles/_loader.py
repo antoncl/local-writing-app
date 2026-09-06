@@ -12,13 +12,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from app.services.ai.profiles.base import (
     Capability,
     CapabilityTier,
     ModelDescriptor,
 )
+from app.services.yaml_io import load_yaml
 
 
 def mark_deprecated(descriptor: ModelDescriptor) -> ModelDescriptor:
@@ -121,7 +120,7 @@ def baked_in_catalogue() -> dict[str, list[ModelDescriptor]]:
     list of descriptors. Empty list when the provider key exists but
     has no entries (Ollama)."""
 
-    raw = yaml.safe_load(_BAKED_IN_PATH.read_text(encoding="utf-8")) or {}
+    raw = load_yaml(_BAKED_IN_PATH.read_text(encoding="utf-8")) or {}
     out: dict[str, list[ModelDescriptor]] = {}
     for provider_name, rows in raw.items():
         out[provider_name] = [_row_to_descriptor(provider_name, r) for r in (rows or [])]

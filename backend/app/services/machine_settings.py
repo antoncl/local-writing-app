@@ -18,6 +18,7 @@ from app.models import (
     UpdateChannel,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.yaml_io import load_yaml
 
 APP_NAME = "local-writing-app"
 CONFIG_FILENAME = "config.yaml"
@@ -239,7 +240,7 @@ def projects_root() -> Path | None:
     if not path.exists():
         return None
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = load_yaml(path.read_text(encoding="utf-8")) or {}
     except (yaml.YAMLError, OSError, UnicodeDecodeError):
         return None
     if not isinstance(data, dict):
@@ -265,7 +266,7 @@ def bind_address() -> tuple[str | None, int | None]:
     if not path.exists():
         return (None, None)
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = load_yaml(path.read_text(encoding="utf-8")) or {}
     except (yaml.YAMLError, OSError, UnicodeDecodeError):
         return (None, None)
     if not isinstance(data, dict):
@@ -291,7 +292,7 @@ def update_channel() -> UpdateChannel:
     if not path.exists():
         return "stable"
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = load_yaml(path.read_text(encoding="utf-8")) or {}
     except (yaml.YAMLError, OSError, UnicodeDecodeError):
         return "stable"
     if not isinstance(data, dict):
@@ -313,7 +314,7 @@ def palette() -> list[Swatch]:
     if not path.exists():
         return _seed_palette()
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = load_yaml(path.read_text(encoding="utf-8")) or {}
     except (yaml.YAMLError, OSError, UnicodeDecodeError):
         return _seed_palette()
     raw = data.get("palette") if isinstance(data, dict) else None
@@ -346,7 +347,7 @@ def default_ai_policy() -> AIPolicy:
     if not path.exists():
         return "off"
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = load_yaml(path.read_text(encoding="utf-8")) or {}
     except (yaml.YAMLError, OSError, UnicodeDecodeError):
         return "off"
     if not isinstance(data, dict):
@@ -441,7 +442,7 @@ def _mint_machine_tags_from_yaml_registry(tags_folder: Path, name_to_id: dict[st
     if not yaml_path.exists():
         return
     try:
-        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        data = load_yaml(yaml_path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         data = {}
     raw = data.get("tags") if isinstance(data, dict) else None
@@ -533,7 +534,7 @@ def load_settings() -> MachineSettings:
         settings = MachineSettings()
     else:
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            data = load_yaml(path.read_text(encoding="utf-8")) or {}
         except yaml.YAMLError:
             settings = MachineSettings()
         else:

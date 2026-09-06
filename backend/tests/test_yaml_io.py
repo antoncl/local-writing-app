@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import importlib
 import io
 from datetime import date
+from pathlib import Path
 
 import pytest
 import yaml
 
+import app
+from app.services import yaml_io
 from app.services.yaml_io import SAFE_LOADER, load_yaml
 
 # The YAML shapes the app writes: `safe_dump(sort_keys=False, allow_unicode=True)`
@@ -78,10 +82,19 @@ def test_malformed_input_raises_the_same_error_family(text: str) -> None:
         load_yaml(text)
 
 
-def test_arbitrary_python_objects_stay_refused() -> None:
-    # "Safe" is the invariant; speed is the feature.
+@pytest.mark.parametrize(
+    "text",
+    [
+        # `FullLoader` refuses the first but constructs the other two; only a
+        # *safe* loader refuses all three. "Safe" is the invariant; speed is the feature.
+        "!!python/object/apply:os.system ['echo x']\n",
+        "!!python/name:os.getcwd\n",
+        "!!python/tuple [1, 2]\n",
+    ],
+)
+def test_arbitrary_python_objects_stay_refused(text: str) -> None:
     with pytest.raises(yaml.YAMLError):
-        load_yaml("!!python/object/apply:os.system ['echo x']\n")
+        load_yaml(text)
 
 
 def test_uses_libyaml_when_the_build_has_it() -> None:
@@ -91,3 +104,48 @@ def test_uses_libyaml_when_the_build_has_it() -> None:
         assert SAFE_LOADER is yaml.CSafeLoader
     else:
         assert SAFE_LOADER is yaml.SafeLoader
+
+
+def test_load_yaml_actually_runs_the_selected_engine() -> None:
+    # The one place the two scanners visibly disagree on a plausible hand edit: a
+    # stray tab after a value. libyaml reads it, the pure scanner refuses it. So
+    # `load_yaml` reading it proves the C engine is what runs — a `load_yaml` that
+    # quietly went back to `yaml.safe_load` would raise here. Without libyaml the
+    # same document must be refused, so the test is meaningful on both builds.
+    with pytest.raises(yaml.YAMLError):
+        yaml.safe_load("a: b\t\n")
+    if yaml.__with_libyaml__:
+        assert load_yaml("a: b\t\n") == {"a": "b"}
+    else:
+        with pytest.raises(yaml.YAMLError):
+            load_yaml("a: b\t\n")
+
+
+def test_falls_back_to_the_pure_loader_without_libyaml(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(yaml, "__with_libyaml__", False)
+    try:
+        importlib.reload(yaml_io)
+        assert yaml_io.SAFE_LOADER is yaml.SafeLoader
+        assert yaml_io.load_yaml("a: 1\n") == {"a": 1}
+    finally:
+        monkeypatch.undo()
+        importlib.reload(yaml_io)
+    assert yaml_io.SAFE_LOADER is SAFE_LOADER
+
+
+def test_every_backend_read_goes_through_the_one_loader() -> None:
+    # One engine, one answer: a `yaml.safe_load(` creeping back in means the index
+    # and a migration could disagree about whether a hand-edited file parses.
+    app_root = Path(app.__file__).parent
+    offenders = [
+        str(path.relative_to(app_root))
+        for path in app_root.rglob("*.py")
+        if path.name != "yaml_io.py"
+        and (
+            "yaml.safe_load(" in path.read_text(encoding="utf-8")
+            or "yaml.load(" in path.read_text(encoding="utf-8")
+        )
+    ]
+    assert offenders == []

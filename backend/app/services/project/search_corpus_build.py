@@ -20,6 +20,7 @@ from app.models import MetadataSchema
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import NodeIndex, NodeIndexEntry
 from app.services.project.node_index_gate import node_index_gate
+from app.services.project.overrides import OVERRIDES_FOLDER
 from app.services.project.search_corpus import CorpusEntry, search_corpus
 
 
@@ -27,25 +28,42 @@ class SearchCorpusMixin:
     def _search_corpus(self) -> dict[str, CorpusEntry]:
         """The held corpus for the open project, built cold on the first call
         after it is empty. Built from the resolved node index's winners view
-        (`NodeIndex.by_id`) — never a second `rglob` of the project files."""
+        (`NodeIndex.by_id`) — never a second `rglob` of the project files.
+
+        The build itself (the loop below) runs outside the corpus lock and
+        takes hundreds of ms, so a save landing mid-build must not have its
+        own patch published over. Read the generation before building, then
+        publish conditioned on it — a mismatch means `note_write`/a mutator
+        bumped it while this build ran, so retry against a fresh read.
+        Bounded at 3 attempts: a busy project must never wedge a search, so
+        after three misses serve this query from the freshly built dict
+        WITHOUT publishing it; the next query tries the cold build again.
+        """
         root = self._require_project().resolve()
         held = search_corpus.peek(root)
         if held is not None:
             return held
-        index = self._build_node_index(root)
-        schema = self.read_metadata_schema()
-        root_layer_id = self._metadata_schema_layer_id(root)
         entries: list[CorpusEntry] = []
-        for entry in index.by_id.values():
-            if entry.kind == "chat":
-                # ADR-0085 §1: a chat body is a serialised transcript, not
-                # prose — a substring match would report YAML structure.
-                continue
-            corpus_entry = self._corpus_entry_for(entry, index, schema, root_layer_id)
-            if corpus_entry is not None:
-                entries.append(corpus_entry)
-        search_corpus.publish(root, entries)
-        return search_corpus.peek(root)
+        for _attempt in range(3):
+            held = search_corpus.peek(root)
+            if held is not None:
+                return held
+            generation = search_corpus.generation()
+            index = self._build_node_index(root)
+            schema = self.read_metadata_schema()
+            root_layer_id = self._metadata_schema_layer_id(root)
+            entries = []
+            for entry in index.by_id.values():
+                if entry.kind == "chat":
+                    # ADR-0085 §1: a chat body is a serialised transcript, not
+                    # prose — a substring match would report YAML structure.
+                    continue
+                corpus_entry = self._corpus_entry_for(entry, index, schema, root_layer_id)
+                if corpus_entry is not None:
+                    entries.append(corpus_entry)
+            if search_corpus.publish(root, entries, generation=generation):
+                return search_corpus.peek(root)
+        return {entry.id: entry for entry in entries}
 
     def _corpus_entry_for(
         self,
@@ -113,7 +131,19 @@ class SearchCorpusMixin:
         root = self.root_path.resolve()
         held = search_corpus.peek(root)
         if held is None:
-            return  # empty — the next query rebuilds; nothing to patch
+            # Empty — nothing to patch directly, but an in-flight cold build
+            # may be mid-read right now; bump the generation so it sees this
+            # write happened and rebuilds instead of publishing a stale read.
+            search_corpus.note_write()
+            return
+        if any(path.parent.name == OVERRIDES_FOLDER for path in paths):
+            # An override changes a *target's* effective content and composite
+            # revision without touching the target's own file — a write to an
+            # override reaches `_maintain_index_after_write`, which drops the
+            # whole memo for exactly this reason; a *delete* (a full revert)
+            # reaches this seam directly instead, so mirror that fan-out here.
+            search_corpus.drop()
+            return
         resolved = node_index_gate.peek(root)
         if resolved is None:
             # No index to derive kind/layer from — rebuild cold later.
@@ -122,31 +152,40 @@ class SearchCorpusMixin:
         schema = resolved.schema or self.read_metadata_schema()
         root_layer_id = self._metadata_schema_layer_id(root)
         for path in paths:
-            if not path.exists():
-                search_corpus.drop_path(path)
-                continue
-            # A path the corpus already files resolves through its reverse
-            # map; only a NEW file (create, rename target) needs the scan.
-            known_id = search_corpus.id_for_path(path)
-            entry = resolved.index.by_id.get(known_id) if known_id else None
-            if entry is None or entry.path.resolve() != path:
-                entry = next(
-                    (e for e in resolved.index.by_id.values() if e.path.resolve() == path),
-                    None,
-                )
-            if entry is None:
-                # A file the index does not list is not searchable.
-                search_corpus.drop_path(path)
-                continue
-            if entry.kind == "chat":
-                continue
-            corpus_entry = self._corpus_entry_for(entry, resolved.index, schema, root_layer_id)
-            if corpus_entry is None:
-                search_corpus.drop_path(path)
-                continue
-            existing_id = search_corpus.id_for_path(path)
-            if existing_id is not None and existing_id != corpus_entry.id:
-                # Ids are stable, so this should not happen — guard anyway
-                # rather than leave a stale entry under the old id.
-                search_corpus.drop_path(path)
-            search_corpus.upsert(root, corpus_entry)
+            self._patch_search_corpus_path(root, path, resolved.index, schema, root_layer_id)
+
+    def _patch_search_corpus_path(
+        self,
+        root: Path,
+        path: Path,
+        index: NodeIndex,
+        schema: MetadataSchema,
+        root_layer_id: str,
+    ) -> None:
+        """One path's worth of `_patch_search_corpus`'s loop — split out so
+        the caller's own branching stays under the complexity gate."""
+        if not path.exists():
+            search_corpus.drop_path(path)
+            return
+        # A path the corpus already files resolves through its reverse
+        # map; only a NEW file (create, rename target) needs the scan.
+        known_id = search_corpus.id_for_path(path)
+        entry = index.by_id.get(known_id) if known_id else None
+        if entry is None or entry.path.resolve() != path:
+            entry = next((e for e in index.by_id.values() if e.path.resolve() == path), None)
+        if entry is None:
+            # A file the index does not list is not searchable.
+            search_corpus.drop_path(path)
+            return
+        if entry.kind == "chat":
+            return
+        corpus_entry = self._corpus_entry_for(entry, index, schema, root_layer_id)
+        if corpus_entry is None:
+            search_corpus.drop_path(path)
+            return
+        existing_id = search_corpus.id_for_path(path)
+        if existing_id is not None and existing_id != corpus_entry.id:
+            # Ids are stable, so this should not happen — guard anyway
+            # rather than leave a stale entry under the old id.
+            search_corpus.drop_path(path)
+        search_corpus.upsert(root, corpus_entry)

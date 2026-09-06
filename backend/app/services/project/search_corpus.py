@@ -59,6 +59,12 @@ class SearchCorpus:
     peeked keeps a consistent snapshot while a save patches the corpus from
     the request thread-pool's other worker — no "dictionary changed size
     during iteration".
+
+    `_generation` is what makes a cold build's check-build-publish safe
+    without holding the lock across the build itself (hundreds of ms): a
+    caller reads the generation before building, and `publish` refuses to
+    replace the corpus when a write bumped the generation in the meantime —
+    that write's own patch is newer than the read the build started from.
     """
 
     def __init__(self) -> None:
@@ -66,6 +72,7 @@ class SearchCorpus:
         self._entries: dict[str, CorpusEntry] = {}
         self._by_path: dict[Path, str] = {}
         self._lock = threading.Lock()
+        self._generation = 0
 
     def peek(self, root: Path) -> dict[str, CorpusEntry] | None:
         """The held corpus for `root`, or None when empty or held for a
@@ -76,17 +83,27 @@ class SearchCorpus:
                 return self._entries
             return None
 
-    def publish(self, root: Path, entries: Iterable[CorpusEntry]) -> None:
-        """Replace the held corpus wholesale — a cold build's result."""
+    def publish(self, root: Path, entries: Iterable[CorpusEntry], *, generation: int) -> bool:
+        """Replace the held corpus wholesale with a cold build's result — but
+        only when `generation` (read via `generation()` before the build
+        started) still matches: a write landing mid-build calls `note_write`,
+        which bumps `_generation` and means this build's result is stale
+        relative to that write. Returns whether the publish actually
+        happened, so the caller knows to retry instead of serving a corpus
+        that just silently dropped a concurrent save."""
         with self._lock:
+            if self._generation != generation:
+                return False
             self._root = root
             self._entries = {entry.id: entry for entry in entries}
             self._by_path = {entry.path: entry.id for entry in self._entries.values()}
+            return True
 
     def upsert(self, root: Path, entry: CorpusEntry) -> None:
         """Patch one node's entry in place. A no-op when the held corpus
         belongs to a different root — a project switch drops instead."""
         with self._lock:
+            self._generation += 1
             if self._root != root:
                 return
             self._entries = {**self._entries, entry.id: entry}
@@ -97,6 +114,7 @@ class SearchCorpus:
         maintenance seam after the file is gone, so this drops by path
         instead of re-reading it. A no-op for an unknown path."""
         with self._lock:
+            self._generation += 1
             node_id = self._by_path.get(path)
             if node_id is None:
                 return
@@ -107,10 +125,25 @@ class SearchCorpus:
         with self._lock:
             return self._by_path.get(path)
 
+    def generation(self) -> int:
+        """The current generation, to pass back into `publish` after a cold
+        build started from it."""
+        with self._lock:
+            return self._generation
+
+    def note_write(self) -> None:
+        """Record that a write happened while the corpus held nothing to
+        patch (`_patch_search_corpus` saw `peek` return None) — bumping the
+        generation so an in-flight cold build sees it moved and rebuilds
+        instead of publishing a snapshot the write predates."""
+        with self._lock:
+            self._generation += 1
+
     def drop(self) -> None:
         """Forget everything. Rides the node index's own invalidate — the
         corpus has no lifecycle of its own (ADR-0085 §1)."""
         with self._lock:
+            self._generation += 1
             self._root = None
             self._entries = {}
             self._by_path = {}

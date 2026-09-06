@@ -29,6 +29,7 @@ from app.models import (
     CreatePromptEntryRequest,
     CreateSceneRequest,
     CreateStructureNodeRequest,
+    LoreEntry,
     MetadataFieldDefinition,
     SaveCardRequest,
     SaveChatSessionRequest,
@@ -39,7 +40,9 @@ from app.models import (
     SearchRequest,
     UpsertMetadataFieldRequest,
 )
+from app.scope import WorkScope
 from app.services.project.node_index_gate import node_index_gate
+from app.services.project.overrides import OVERRIDES_FOLDER
 from app.services.project.search_corpus import CorpusEntry, SearchCorpus, search_corpus
 from app.services.project_service import ProjectService
 
@@ -239,6 +242,99 @@ class InheritedLoreTests(unittest.TestCase):
         self.assertTrue(lore_hits[entry.id].owned)
 
 
+class OverrideRevisionRefreshTests(unittest.TestCase):
+    """Chain fixture (mirrors `InheritedLoreTests`): an override *write*
+    already fans out to a full corpus drop via `_maintain_index_after_write`
+    (it sees the `overrides/` folder and invalidates the node-index memo,
+    which drops the corpus too). An override *delete* — a full revert to
+    canon — reaches `_patch_search_corpus` directly instead, and must refresh
+    the target's composite revision the same way (ADR-0085 §1, Acceptance 4).
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.universe = self.base / "honorverse"
+        self.series = self.universe / "honor-harrington"
+        self.root = self.series / "book01"
+        self.service = ProjectService.created_at(self.root, "Book 1")
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        declare_full_chain(self.service, self.root, self.base)
+        self.service._write_yaml(
+            self.base / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "fields": {"rank": {"name": "rank", "type": "text", "label": "Rank"}},
+                "entry_types": {"lore:character": {"fields": ["rank"]}},
+            },
+        )
+        node_index_gate.invalidate()
+
+    def tearDown(self) -> None:
+        node_index_gate.invalidate()
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def _layer_id(self, folder: Path) -> str:
+        return next(layer.id for layer in self.service.collect_layers(self.root) if layer.folder == folder)
+
+    def _fresh_revision(self, entry_id: str) -> str:
+        path = self.service._path_for_node_id(entry_id, "lore")
+        index = self.service._build_node_index(self.root)
+        return self.service._composite_revision(
+            [path, *self.service._override_paths_for_target(index, entry_id)]
+        )
+
+    def test_override_write_and_delete_both_refresh_the_target_revision(self) -> None:
+        writer = ProjectService(WorkScope(root=self.series))
+        writer._write_lore_entry_file(
+            self.series / "lore" / "honor.md",
+            LoreEntry(
+                id="honor", title="Honor Harrington", body="Aetheria service record",
+                revision="", entry_type="lore:character", metadata={"rank": "Commodore"},
+            ),
+        )
+
+        hits = self.service.search(SearchRequest(query="aetheria")).hits
+        self.assertIn("honor", {h.file_id for h in hits if h.kind == "lore"})
+
+        # Write an override — the target's composite revision changes.
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Aetheria service record",
+                entry_type="lore:character", metadata={"rank": "Captain"},
+                authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+        hits = self.service.search(SearchRequest(query="aetheria")).hits
+        lore_hit = next(h for h in hits if h.file_id == "honor")
+        self.assertEqual(lore_hit.revision, self._fresh_revision("honor"))
+
+        # Revert: saving the canon value back drops the delta file — this is
+        # the override *delete* path (`_save_lore_override` ->
+        # `_delete_node_file`), which must refresh the revision too.
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Aetheria service record",
+                entry_type="lore:character", metadata={"rank": "Commodore"},
+                authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        self.assertFalse(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+        hits = self.service.search(SearchRequest(query="aetheria")).hits
+        lore_hit = next(h for h in hits if h.file_id == "honor")
+        self.assertEqual(lore_hit.revision, self._fresh_revision("honor"))
+
+
 class MaintenanceTests(SearchCorpusTestCase):
     def test_save_updates_the_next_query_without_reopen(self) -> None:
         scene_id = self._new_scene("Scene", "Old aetheria text")
@@ -348,6 +444,49 @@ class ColdBuildReadCountTests(SearchCorpusTestCase):
         self.assertNotIn(chat.id, corpus)
 
 
+class ColdBuildRaceTests(SearchCorpusTestCase):
+    """A save landing in the window between a cold build's read and its
+    publish must not be published over (ADR-0085 §1): `_search_corpus`
+    retries on a generation mismatch rather than serving the pre-save read."""
+
+    def test_write_during_cold_build_is_not_published_over(self) -> None:
+        scene_id = self._new_scene("Scene", "old text")
+        search_corpus.drop()
+        node_index_gate.invalidate()
+
+        original = ProjectService._corpus_entry_for
+        calls = 0
+
+        def racing(self, entry, index, schema, root_layer_id, _original=original):  # type: ignore[no-untyped-def]
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                # Simulate a save landing mid-build: it runs
+                # `_apply_index_write` -> `_patch_search_corpus`, whose `peek`
+                # is None (the corpus was dropped above), so it calls
+                # `note_write` and bumps the generation this build started from.
+                current = self.read_scene(scene_id)
+                self.save_scene(
+                    scene_id,
+                    SaveSceneRequest(title="Scene", body="new text", base_revision=current.revision),
+                )
+            return _original(self, entry, index, schema, root_layer_id)
+
+        ProjectService._corpus_entry_for = racing  # type: ignore[assignment]
+        try:
+            hits = self._search("text")
+        finally:
+            ProjectService._corpus_entry_for = original  # type: ignore[assignment]
+
+        body_hits = [h for h in hits if h.field == "body" and h.file_id == scene_id]
+        self.assertTrue(body_hits, hits)
+        self.assertIn("new text", body_hits[0].excerpt)
+
+        corpus = search_corpus.peek(self.root.resolve())
+        self.assertIsNotNone(corpus)
+        self.assertIn("new text", corpus[scene_id].body)
+
+
 class NoRglobGuardTests(unittest.TestCase):
     def test_search_py_has_no_rglob(self) -> None:
         path = PROJECT_SERVICE_DIR / "search.py"
@@ -377,7 +516,7 @@ class PublishedDictIsImmutableTests(unittest.TestCase):
     def test_upsert_and_drop_publish_new_dicts(self) -> None:
         corpus = SearchCorpus()
         root = Path("/x")
-        corpus.publish(root, [self._entry("a", "alpha"), self._entry("b", "beta")])
+        corpus.publish(root, [self._entry("a", "alpha"), self._entry("b", "beta")], generation=corpus.generation())
         seen = corpus.peek(root)
         self.assertEqual(len(seen), 2)
         corpus.upsert(root, self._entry("c", "gamma"))
@@ -391,6 +530,19 @@ class PublishedDictIsImmutableTests(unittest.TestCase):
         for _ in snapshot:
             corpus.upsert(root, self._entry("d", "delta"))
         self.assertEqual(set(corpus.peek(root)), {"b", "c", "d"})
+
+    def test_publish_with_a_stale_generation_is_refused(self) -> None:
+        corpus = SearchCorpus()
+        root = Path("/x")
+        gen = corpus.generation()
+        corpus.note_write()  # a write landed after the generation was read
+
+        self.assertFalse(corpus.publish(root, [self._entry("a", "alpha")], generation=gen))
+        self.assertIsNone(corpus.peek(root))
+
+        fresh = corpus.generation()
+        self.assertTrue(corpus.publish(root, [self._entry("a", "alpha")], generation=fresh))
+        self.assertIsNotNone(corpus.peek(root))
 
 
 if __name__ == "__main__":

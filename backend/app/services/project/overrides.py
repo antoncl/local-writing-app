@@ -267,8 +267,10 @@ class LayerOverridesMixin:
     def _override_files_for_target(self, layer_folder: Path, target_id: str) -> list[Path]:
         """EVERY override file this layer holds for `target_id`, sorted. Normally
         one; more when a file has been duplicated outside the app (a "conflicted
-        copy", an Explorer "- Copy"). The collector folds all of them, so a seam
-        that settles a layer's override for a target must settle all of them."""
+        copy", an Explorer "- Copy"). The collector folds only the first (#1856),
+        but a gesture that UNLINKS a layer's override for a target must unlink
+        all of them — `_drop_layer_overrides_for_target` — or the survivor is the
+        one file on the next build and a value the author just removed is back."""
         folder = layer_folder / OVERRIDES_FOLDER
         if not folder.is_dir():
             return []
@@ -277,6 +279,19 @@ class LayerOverridesMixin:
             for path in sorted(folder.glob("*.md"))
             if self._read_front_matter_only(path).get("target") == target_id
         ]
+
+    def _drop_layer_overrides_for_target(self, layer_folder: Path, target_id: str) -> None:
+        """Unlink this layer's override for `target_id` — every file carrying it.
+
+        The one way an override file leaves the disk through the app: a revert to
+        canon or a field reset (`_save_lore_override` / `_save_prompt_override`),
+        a fork-to-here that baked the folded values into the copy
+        (`fork_lore_entry`), and a promotion settling the origin's leftover
+        (`_settle_origin_override`). Routed through `_delete_node_files` so the
+        memo stays coherent (an override-bearing chain rebuilds cold)."""
+        files = tuple(self._override_files_for_target(layer_folder, target_id))
+        if files:
+            self._delete_node_files(files)
 
     # --- the fold -----------------------------------------------------------
 

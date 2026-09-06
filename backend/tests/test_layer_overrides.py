@@ -353,11 +353,21 @@ class LayerOverrideTests(unittest.TestCase):
         self.assertEqual(entry.overridden_fields, ["rank"])
 
         # An edit through the app rewrites that same file and takes effect; the
-        # other is never promoted to the fold and never unlinked (files-are-truth).
+        # other is never promoted to the fold and an edit never unlinks it.
         self._save_override("honor", {"rank": "Commander"})
         self.assertEqual(self.service.read_lore_entry("honor").metadata.get("rank"), "Commander")
         self.assertEqual(self.service._read_front_matter_only(first)["rows"][0]["value"], "Commander")
         self.assertTrue(second.exists())
+
+        # Reverting to canon unlinks BOTH: dropping only the folded file would make
+        # the copy the one file on the next build, and a value the author just
+        # removed would be back.
+        self._save_override("honor", {"rank": "Commodore"})
+        self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
+        node_index_gate.invalidate()
+        entry = self.service.read_lore_entry("honor")
+        self.assertEqual(entry.metadata.get("rank"), "Commodore")
+        self.assertEqual(entry.overridden_fields, [])
 
     def test_an_orphan_override_is_ignored_with_a_warning(self) -> None:
         from app.services.project.node_index_gate import node_index_gate

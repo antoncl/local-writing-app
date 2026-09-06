@@ -356,9 +356,9 @@ class PromoteLoreTests(unittest.TestCase):
         opened = self.service.read_lore_entry("alice")
         self.assertEqual(opened.metadata.get("mood"), "serene")
         self.assertEqual(opened.overridden_fields, [])
-        # A sync tool's conflict copy duplicates the leftover. The collector folds
-        # every file with the target, so settling only the first would leave one
-        # to activate — the promotion has to settle all of them.
+        # A sync tool's conflict copy duplicates the leftover. Every gesture that
+        # unlinks a layer's override must unlink all of them (#1856): a survivor
+        # is the one file the collector folds on the next build, and activates.
         leftover = next((self.root / OVERRIDES_FOLDER).glob("*.md"))
         shutil.copy(leftover, leftover.with_name("Alice (override) (conflicted copy).md"))
         node_index_gate.invalidate()
@@ -425,6 +425,29 @@ class PromoteLoreTests(unittest.TestCase):
         self.assertEqual(promoted.metadata.get("mood"), "teal")
         self.assertEqual(promoted.overridden_fields, ["mood"])
         self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
+
+    def test_plan_omits_an_ancestor_override_row_the_fold_would_not_apply(self) -> None:
+        # The series override writes `mood`, then `mood` is retired from the base
+        # schema. The read strips the field after the fold, so nothing changes on
+        # commit — and the plan must not promise that it does (ADR-0078 §9).
+        from app.models import DeleteMetadataFieldRequest
+
+        self._define_field_at(self.universe, "mood", "text")
+        self._write_ancestor_lore(self.universe, "alice", "Alice", metadata={"mood": "calm"}, entry_type="lore:character")
+        self._save_alice({"mood": "teal"}, authoring_layer=self.series)
+        (self.root / "lore").mkdir(exist_ok=True)
+        shutil.move(self.universe / "lore" / "alice.md", self.root / "lore" / "alice.md")
+        node_index_gate.invalidate()
+        self.service.delete_metadata_field(DeleteMetadataFieldRequest(field_id="mood", entry_type="lore:character"))
+        node_index_gate.invalidate()
+        self.assertTrue(any((self.series / OVERRIDES_FOLDER).glob("*.md")), "the row is still on disk")
+
+        plan = self.service.preview_lore_promotion("alice", self.series_layer_id)
+        self.assertEqual(plan.folds_after_promotion, [])
+
+        promoted = self.service.promote_lore_entry("alice", self.series_layer_id)
+        self.assertNotIn("mood", promoted.metadata)
+        self.assertEqual(promoted.overridden_fields, [])
 
     def test_plan_lists_no_fold_when_no_ancestor_overrides_the_node(self) -> None:
         self._hand_moved_with_a_leftover_override()

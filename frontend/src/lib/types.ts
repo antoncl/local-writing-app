@@ -202,6 +202,9 @@ export type PromotionFoldItem = {
   field: string;
   // Label of the layer whose override applies.
   layer: string;
+  // Title of the cascaded include member it applies to, or null for the
+  // promoted node itself.
+  node: string | null;
 };
 
 // The dry-run preview of a promotion (ADR-0078 §9), returned by both the

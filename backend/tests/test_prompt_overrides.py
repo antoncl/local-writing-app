@@ -328,6 +328,23 @@ class PromptOverrideTests(unittest.TestCase):
         self.assertFalse(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
         self.assertEqual(self.service.read_prompt_entry("revise").metadata["color"], "slate")
 
+    def test_reverting_to_canon_drops_a_duplicated_delta_file_too(self) -> None:
+        # #1856: a sync tool's conflict copy of the override. The revert must unlink
+        # every file for (layer, target), or the copy is the override on the next
+        # build and the value the author just removed comes back.
+        self._write_prompt_at(self.series, "revise", "Revise plotline", {"color": "slate"})
+        self._save_override("revise", {"color": "amber"})
+        original = next((self.root / OVERRIDES_FOLDER).glob("*.md"))
+        shutil.copy(original, original.with_name(original.stem + " (conflicted copy).md"))
+        node_index_gate.invalidate()
+        self.assertEqual(self.service.read_prompt_entry("revise").metadata["color"], "amber")
+
+        self._save_override("revise", {"color": "slate"})
+
+        self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
+        node_index_gate.invalidate()
+        self.assertEqual(self.service.read_prompt_entry("revise").metadata["color"], "slate")
+
     def test_clearing_a_field_reverts_it_while_other_overrides_stay(self) -> None:
         beta, romance = self._tag("Beta"), self._tag("Romance")
         self._write_prompt_at(

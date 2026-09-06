@@ -704,6 +704,9 @@ class PromotionFoldItem(BaseModel):
     field: str
     # The label of the layer whose override applies.
     layer: str
+    # The title of the cascaded include member this applies to (ADR-0078 §6), or
+    # None when it is the promoted node itself.
+    node: str | None = None
 
 
 class PromotionPlan(BaseModel):

@@ -229,8 +229,11 @@
             <section class="promote-bucket">
               <h3>Changes after promotion</h3>
               <ul>
-                {#each plan.folds_after_promotion as item (item.layer + ":" + item.field)}
-                  <li><span class="promote-field">{item.field}</span> — overridden at {item.layer}</li>
+                {#each plan.folds_after_promotion as item ((item.node ?? "") + "/" + item.layer + ":" + item.field)}
+                  <li>
+                    <span class="promote-field">{item.field}</span> — overridden at {item.layer}{#if item.node}
+                      (on {item.node}){/if}
+                  </li>
                 {/each}
               </ul>
               <p class="promote-note">An ancestor's override for this node applies again once it is inherited from {plan.destination.label}.</p>

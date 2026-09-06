@@ -354,12 +354,9 @@ class LoreEntriesMixin:
             self._write_override_file(authoring_layer.folder, entry_id, request.title, rows)
         else:
             # An empty delta means the author reverted to canon: drop this layer's
-            # override rather than leave an inert file (files-are-truth). Routed
-            # through `_delete_node_file` so the memo stays coherent — for an
-            # override-bearing chain that rebuilds cold (`_mutate_index_for_write`).
-            existing = self._override_file_for_target(authoring_layer.folder, entry_id)
-            if existing is not None:
-                self._delete_node_file(existing)
+            # override rather than leave an inert file (files-are-truth) — every
+            # file carrying it, or a sync tool's copy is the override tomorrow (#1856).
+            self._drop_layer_overrides_for_target(authoring_layer.folder, entry_id)
         return self.read_lore_entry(entry_id)
 
     @staticmethod
@@ -429,9 +426,7 @@ class LoreEntriesMixin:
         # not resurface if the local copy is later deleted (the value fold already
         # ignores it while the local copy wins). An ancestor's override stays: it
         # belongs to that layer and its other descendants.
-        own_override = self._override_file_for_target(root, entry_id)
-        if own_override is not None:
-            self._delete_node_file(own_override)
+        self._drop_layer_overrides_for_target(root, entry_id)
         return self.read_lore_entry(entry_id)
 
     def delete_lore_entry(self, entry_id: str) -> LoreEntryList:

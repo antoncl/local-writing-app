@@ -33,7 +33,10 @@ const relatedPlan: PromotionPlan = { ...plan, related: ["Full Moon Transformatio
 // (#1857): the value on screen changes on commit, so the plan says so.
 const foldPlan: PromotionPlan = {
   ...plan,
-  folds_after_promotion: [{ field: "mood", layer: "Honor Harrington" }],
+  folds_after_promotion: [
+    { field: "mood", layer: "Honor Harrington", node: null },
+    { field: "color", layer: "Honor Harrington", node: "Snip" },
+  ],
 };
 
 // A prompt's plan (slice 3): the two lore-always-empty buckets populated, and
@@ -300,7 +303,10 @@ describe("PromoteModal", () => {
 
     expect(await screen.findByText("Changes after promotion")).toBeTruthy();
     expect(screen.getByText("mood")).toBeTruthy();
-    expect(screen.getByText(/overridden at Honor Harrington/)).toBeTruthy();
+    expect(screen.getAllByText(/overridden at Honor Harrington/).length).toBe(2);
+    // A cascaded member's fold names the member.
+    expect(screen.getByText("color")).toBeTruthy();
+    expect(screen.getByText(/\(on Snip\)/)).toBeTruthy();
   });
 
   it("omits the 'Changes after promotion' bucket when nothing folds", async () => {

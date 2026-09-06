@@ -99,7 +99,7 @@ export type AIPreviewRequest = {
   // from it as the lowest-priority `{{ scene }}` binding, so a resumed chat
   // renders its scene without the frontend knowing which subjects are scenes.
   subject?: string;
-  // V2: when set, preview response includes estimated_cost_usd + caching_style.
+  // V2: when set, preview response includes estimated_cost_usd + cached.
   assistant_id?: string | null;
   // ADR-0061 S2: the open prompt's own input definitions, sent so the resolver
   // can union them with the live body's `{% include %}`d snippets. Only the
@@ -142,6 +142,11 @@ export type PreviewCacheBlock = {
   // ADR-0076 S7: per-entry rendered XML keyed by entry_id, for the Context
   // door's per-entry drill leaf. Additive; empty/absent for non-lore blocks.
   entry_xml?: Record<string, string>;
+  // ADR-0084 §6: the resolved provider's cache-plan projection for this
+  // block — whether it's expected to be served from cache, and for how long
+  // (null = unknown/uncached).
+  cached?: boolean;
+  ttl_seconds?: number | null;
 };
 
 // Populated on AIPreviewResponse.error when the render failed. The preview
@@ -185,7 +190,9 @@ export type AIPreviewResponse = {
   estimated_first_cost_usd?: number | null;
   provider?: string | null;
   model?: string | null;
-  caching_style?: "none" | "auto" | "explicit" | null;
+  // Whether the resolved provider caches the prefix at all (the plan's
+  // `cached`); null when no assistant is bound.
+  cached?: boolean | null;
   // ADR-0057 §2: whether relevant_lore() executed during this render — the
   // lore gate. Captured at the lock render and persisted as the chat's
   // lore_enabled.
@@ -396,11 +403,17 @@ export type ChatSessionMessage = {
 export type ChatEstimate = {
   tokens: number;
   cost_usd: number | null;
-  caching_style: "none" | "auto" | "explicit" | null;
+  cached: boolean | null;
   // Block summaries for the readout — label + size (+ tier). Deliberately
   // narrower than PreviewCacheBlock: no role/text, this is telemetry about
   // the payload, not the payload.
-  cache_blocks: { label: string; tokens: number; tier?: string | null }[];
+  cache_blocks: {
+    label: string;
+    tokens: number;
+    tier?: string | null;
+    cached?: boolean;
+    ttl_seconds?: number | null;
+  }[];
 };
 
 export type ChatSessionContextItem = {

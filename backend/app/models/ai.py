@@ -294,11 +294,14 @@ class PreviewCacheBlock(BaseModel):
     (ADR-0060 §6): the system prefix, the tier-tagged lore the backend places
     (now visible in the preview again), then the uncached conversation turns.
 
-    `tier` is the volatility class the send path assigns — `"stable"` (cached at
-    1h on explicit-cache providers), `"volatile"` (5m), or `None` (uncached, e.g.
-    a conversation turn). `text` is the block's content, so the author can *see*
-    the lore that will be sent (not just its token size). The author cannot control
-    placement but can now see it.
+    `tier` is the volatility class the send path assigns — `"stable"` or
+    `"volatile"`, or `None` (uncached, e.g. a conversation turn). `cached` and
+    `ttl_seconds` are the resolved provider's projection from its cache plan
+    (ADR-0084 §6): `ttl_seconds` is the planned lifetime of a marked/covered
+    block (`None` = unknown or uncached), and `cached` is whether the provider
+    is expected to serve this block from cache. `text` is the block's content,
+    so the author can *see* the lore that will be sent (not just its token
+    size). The author cannot control placement but can now see it.
     """
 
     label: str
@@ -306,6 +309,8 @@ class PreviewCacheBlock(BaseModel):
     tokens: int
     tier: str | None = None
     text: str = ""
+    cached: bool = False
+    ttl_seconds: int | None = None
     # ADR-0076 S2: the tier's member entry ids, for the Context door's
     # drill-down ("12 entries" → which twelve, by title). Additive; empty
     # for non-lore blocks (system, conversation turns).
@@ -374,10 +379,9 @@ class AIPreviewResponse(BaseModel):
     # frontend can label the estimate. Null otherwise.
     provider: str | None = None
     model: str | None = None
-    # caching_style from the resolved provider (`none` / `auto` /
-    # `explicit`). Drives whether the cache strip shows in the UI.
-    # Null when no assistant is bound.
-    caching_style: str | None = None
+    # Whether the resolved provider caches the prefix at all (the plan's
+    # `cached`); null when no assistant is bound.
+    cached: bool | None = None
     # ADR-0057 §2: whether the lore gate (`use_lore()` / `use()`) actually executed
     # during this render — the execution-derived lore gate. The frontend captures
     # this at the lock render and persists it as the chat's `lore_enabled`, so the

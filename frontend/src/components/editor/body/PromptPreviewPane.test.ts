@@ -33,7 +33,7 @@ const PREVIEW = {
   estimated_cost_usd: null,
   provider: null,
   model: null,
-  caching_style: null,
+  cached: null,
   lore_enabled: true,
   used_node_ids: [],
   used_node_hints: {},

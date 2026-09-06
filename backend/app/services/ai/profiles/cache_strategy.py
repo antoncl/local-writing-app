@@ -180,9 +180,3 @@ NO_CACHE = NoCache()
 PREFIX_CACHE = PrefixCache()
 ANTHROPIC_BREAKPOINTS = AnthropicBreakpoints()
 GEMINI_BREAKPOINT = GeminiBreakpoint()
-
-# Slice 1: `caching_style()` stays a concrete base method (retires in Slice 3)
-# so `preview.py`, `_row_to_descriptor`'s capability, and the frontend don't
-# move yet. This is the only place that projects a strategy's `kind` onto the
-# three-value enum.
-STYLE_BY_KIND = {"none": "none", "prefix": "auto", "anthropic": "explicit", "gemini": "explicit"}

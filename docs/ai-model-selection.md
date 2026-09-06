@@ -82,7 +82,7 @@ class ProviderProfile(ABC):
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelDescriptor]: ...
 
     @abstractmethod
-    def caching_style(self, model_id: str) -> Literal["none", "auto", "explicit"]: ...
+    def cache_strategy(self, model_id: str) -> CacheStrategy: ...
 ```
 
 ## Provider implementations
@@ -92,7 +92,7 @@ class ProviderProfile(ABC):
 | `AnthropicProfile` | `GET /v1/models` + bake-in tier + cost map | Caching is `explicit` — wrap stable content with `cache_control: ephemeral` |
 | `OpenAIProfile` | `GET /v1/models` + bake-in tier + cost map | Caching is `auto` — no markup needed |
 | `OpenRouterProfile` | `GET /api/v1/models` (carries pricing, context, capabilities) | Caching style per-model; OpenRouter routes through to underlying provider. Pass `session_id` for sticky routing across turns |
-| `OllamaProfile` | `GET /api/tags` (local install) | All models tier=`LOCAL`; no auto-rank, picker just lists them. `caching_style: none` |
+| `OllamaProfile` | `GET /api/tags` (local install) | All models tier=`LOCAL`; no auto-rank, picker just lists them. `cache_strategy: NoCache` |
 
 The bake-in tier + cost map for Anthropic/OpenAI lives in
 `backend/app/services/ai/profiles/_baked_in.yaml`. Refresh process is manual:
@@ -118,18 +118,14 @@ all local models are free).
 
 ## Caching strategy
 
-The dispatch layer ([providers.py](../backend/app/services/ai/providers.py))
-consults `profile.caching_style(model_id)` for each request:
+Each provider profile picks a `CacheStrategy` per model via
+`cache_strategy(model_id) -> CacheStrategy` (ADR-0084). The strategy's
+`plan(blocks)` decides markers; its projection (`cached`, per-block
+`ttl_seconds`) rides the preview response to the UI (ADR-0084).
 
-- `"none"` — no markup. Send normally.
-- `"auto"` — no markup. Provider caches transparently (OpenAI, DeepSeek,
-  Gemini 2.5 via OpenRouter).
-- `"explicit"` — wrap the system message and any large stable user-block
-  content with `{"cache_control": {"type": "ephemeral"}}`. Anthropic
-  direct, plus Anthropic/Alibaba/Gemini via OpenRouter.
-
-Cost win is immediate and silent. No UI surface in v1 — `prompt_tokens_details.cached_tokens`
-in responses is the only feedback. v2 surfaces this.
+Cost win is immediate and silent. `prompt_tokens_details.cached_tokens` in
+responses is the actuals feedback; the preview's `cached`/`ttl_seconds`
+fields are the pre-send projection.
 
 OpenRouter's `session_id` (passed as request header `x-session-id`) pins
 sticky routing across turns within a chat session, which keeps the cache
@@ -245,7 +241,7 @@ New:
 
 Modified:
 
-- `backend/app/services/ai/providers.py` — consult `caching_style` per
+- `backend/app/services/ai/providers.py` — consult `cache_strategy` per
   request; add `session_id` header for OpenRouter
 - `backend/app/main.py` — `/api/ai/providers` listing, `/api/ai/providers/<name>/models`,
   `/api/ai/providers/<name>/resolve-tier`

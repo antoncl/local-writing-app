@@ -3,18 +3,7 @@
 // and are unit-testable in isolation.
 import { effectivePromptInputs } from "@/lib/editor-core/promptResolution";
 import { coerceInputValue, decodePickerValue, isListShapedInputType } from "@/lib/utils/promptInputs";
-import type { NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
-
-// ---- cost-estimate + TTL strip state ----
-// Per-slot TTL in seconds; drives the TTL countdown chips. Slots not in this
-// table get 5 min. Single source of truth (the App.svelte copy was retired).
-// Only slots that are actually stamped (`cache_write_times[slot]`) ever render a
-// chip — today just `system` (the turn handler stamps only that). Don't add a
-// slot here without a code path that stamps it, or it defines a chip that can
-// never count down (the dead `lore: 300` slot removed in #815).
-export const SLOT_TTL_SECONDS: Record<string, number> = {
-  system: 3600,
-};
+import type { ChatEstimate, NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
 export function defaultDraftFor(input: PromptInputDefinition): string {
   if (input.default !== undefined && input.default !== null) return String(input.default);
@@ -190,21 +179,47 @@ export type TtlChip = {
   remainingSec: number;
 };
 
+// ADR-0084 §6: the countdown's TERM comes from the plan's stable blocks (the
+// resolved provider's real projection); its START stays the persisted
+// `cache_write_times`. The first stable block with a known `ttl_seconds` is
+// the term for every stamped slot — there's still only one stamped `system`
+// slot, so one term suffices.
+export function cacheTermSecondsFor(estimate: ChatEstimate | null): number | null {
+  if (!estimate) return null;
+  const stable = estimate.cache_blocks.find(
+    (b) => b.tier === "stable" && b.ttl_seconds != null,
+  );
+  return stable?.ttl_seconds ?? null;
+}
+
+// Seconds → the provider's own label shape ("1h" / "5m"), rounded to the
+// nearest unit. No hard-coded TTL number lives here — the seconds come from
+// the plan.
+export function formatCacheTerm(sec: number): string {
+  return sec >= 3600 ? `${Math.round(sec / 3600)}h` : `${Math.round(sec / 60)}m`;
+}
+
 // Per-slot TTL chips. The caller threads a live `_tick` (unused in the body) as
 // a reactive dependency so the chips recompute each second; `times` refreshes
-// them when a new turn stamps a slot.
-export function ttlChipsFor(times: Record<string, string>, _tick: number): TtlChip[] {
-  if (!times || Object.keys(times).length === 0) return [];
+// them when a new turn stamps a slot. `termSeconds` is the plan's stable-block
+// term (`cacheTermSecondsFor`) — null means the plan carries no term, so there
+// is nothing to count down (no chips).
+export function ttlChipsFor(
+  times: Record<string, string>,
+  _tick: number,
+  termSeconds: number | null,
+): TtlChip[] {
+  if (termSeconds == null || !times || Object.keys(times).length === 0) return [];
   const now = Date.now();
+  const ttl = termSeconds * 1000;
+  const ttlLabel = formatCacheTerm(termSeconds);
   return Object.entries(times).map(([slot, iso]) => {
     const writtenAt = Date.parse(iso);
-    const ttl = (SLOT_TTL_SECONDS[slot] ?? 300) * 1000;
     // A malformed/empty stored timestamp parses to NaN; treat it as expired
     // rather than rendering a "NaNs" chip that never counts down.
     const remainingMs = Number.isNaN(writtenAt) ? 0 : writtenAt + ttl - now;
     const remainingSec = Math.max(0, Math.round(remainingMs / 1000));
     const label = slot.charAt(0).toUpperCase() + slot.slice(1);
-    const ttlLabel = ttl >= 3600_000 ? "1h" : "5m";
     let formatted: string;
     if (remainingSec <= 0) formatted = "expired";
     else if (remainingSec >= 60) formatted = `${Math.floor(remainingSec / 60)}m`;

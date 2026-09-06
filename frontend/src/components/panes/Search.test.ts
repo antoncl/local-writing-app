@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 // Search pane render contract (#979), rewritten for as-you-type (ADR-0085 §3,
-// slice 2): the Find button is gone, so every trigger below is either typing
-// (debounced by `SearchInput`, advanced with fake timers) or Enter (immediate).
-// This still guards the #724 "fetches fine, renders nothing" class — hits must
-// actually reach the DOM, a click must open one, and an empty query must never
-// waste a request.
+// slice 2) and replace (§4/§5, slice 3): the Find button is gone, so every
+// search trigger below is either typing (debounced by `SearchInput`, advanced
+// with fake timers) or Enter (immediate). This still guards the #724 "fetches
+// fine, renders nothing" class — hits must actually reach the DOM, a click
+// must open one, and an empty query must never waste a request.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
 import { render, screen, fireEvent } from "@/lib/test/component";
@@ -12,14 +12,32 @@ import Search from "./Search.svelte";
 import { api } from "@/lib/api";
 import type { SearchHit } from "@/lib/types";
 
-// Search imports `api` and calls `api.search` directly; mock the module so the
-// pane runs offline and we control the hits.
-vi.mock("@/lib/api", () => ({ api: { search: vi.fn() } }));
+// Search imports `api` and calls `api.search`/`api.replace` directly; mock the
+// module so the pane runs offline and we control the hits/outcomes.
+vi.mock("@/lib/api", () => ({ api: { search: vi.fn(), replace: vi.fn() } }));
+// The pane's replace deps (ADR-0085 §5) resolve through these two stores —
+// mocked the same way `api` is, so the render tests never touch the real
+// editor-pane surface or the confirm modal.
+vi.mock("@/lib/stores/editorPanes.svelte", () => ({
+  editorPanes: {
+    isNodeOpenDirty: vi.fn(() => false),
+    reconcileNodeFromServer: vi.fn(async () => {}),
+  },
+}));
+vi.mock("@/lib/stores/confirmService.svelte", () => ({
+  confirmService: { request: vi.fn() },
+}));
 
 // App's error-catching async wrapper — here a passthrough that just runs the action.
 const run = (action: () => Promise<void>) => action().then(() => true);
 
-function hit(path: string, line: number, excerpt: string, kind = "manuscript"): SearchHit {
+function hit(
+  path: string,
+  line: number,
+  excerpt: string,
+  kind = "manuscript",
+  overrides: Partial<SearchHit> = {},
+): SearchHit {
   return {
     kind,
     file_id: `f_${path}`,
@@ -28,14 +46,17 @@ function hit(path: string, line: number, excerpt: string, kind = "manuscript"): 
     excerpt,
     field: "body",
     start: 0,
-    end: 0,
-    revision: "",
+    end: excerpt.length,
+    revision: "rev1",
     owned: true,
+    text: excerpt,
+    ...overrides,
   };
 }
 
 beforeEach(() => {
   vi.mocked(api.search).mockReset();
+  vi.mocked(api.replace).mockReset();
   vi.useFakeTimers();
 });
 
@@ -239,5 +260,121 @@ describe("Search pane — results render", () => {
     vi.advanceTimersByTime(300);
     await tick();
     expect(api.search).not.toHaveBeenCalled();
+  });
+});
+
+describe("Search pane — replace (ADR-0085 §4/§5)", () => {
+  it("shows the eligible count on Replace all and disables it at zero", async () => {
+    render(Search, { props: { run, onOpenHit: () => {} } });
+    expect(screen.getByRole("button", { name: "Replace all (0)" })).toBeDisabled();
+
+    vi.mocked(api.search).mockResolvedValue({
+      query: "aetheria",
+      hits: [hit("scenes/act-1/arrival.md", 12, "Aetheria at dawn.")],
+    });
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "aetheria" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    expect(screen.getByRole("button", { name: "Replace all (1)" })).not.toBeDisabled();
+  });
+
+  it("previews <del>+<ins> for an eligible hit and leaves <mark> for an inherited one", async () => {
+    vi.mocked(api.search).mockResolvedValue({
+      query: "aetheria",
+      hits: [
+        hit("scenes/act-1/arrival.md", 12, "Aetheria at dawn.", "manuscript"),
+        hit("lore/places/aetheria.md", 1, "Aetheria the city", "lore", { owned: false }),
+      ],
+    });
+    const { container } = render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "aetheria" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    await fireEvent.input(screen.getByPlaceholderText("Replace with"), {
+      target: { value: "Aetherion" },
+    });
+    await tick();
+
+    expect(container.querySelectorAll(".search-ins")).toHaveLength(1);
+    expect(container.querySelector(".search-ins")?.textContent).toBe("Aetherion");
+    expect(container.querySelectorAll(".search-del")).toHaveLength(1);
+    // The inherited hit still shows the plain highlight, not a preview.
+    expect(container.querySelectorAll("mark")).toHaveLength(1);
+  });
+
+  it("shows the inherited note instead of a Replace button", async () => {
+    vi.mocked(api.search).mockResolvedValue({
+      query: "aetheria",
+      hits: [hit("lore/places/aetheria.md", 1, "Aetheria the city", "lore", { owned: false })],
+    });
+    render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "aetheria" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    expect(screen.getByText("inherited — not replaceable here")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Replace" })).not.toBeInTheDocument();
+  });
+
+  it("clicking a hit's Replace posts to api.replace and does not open the hit", async () => {
+    const h = hit("scenes/act-1/arrival.md", 12, "Aetheria at dawn.");
+    vi.mocked(api.search).mockResolvedValue({ query: "aetheria", hits: [h] });
+    vi.mocked(api.replace).mockResolvedValue({
+      outcomes: [{ file_id: h.file_id, start: h.start, end: h.end, status: "replaced", revision: "rev2" }],
+      replaced_nodes: 1,
+    });
+    const onOpenHit = vi.fn();
+    render(Search, { props: { run, onOpenHit } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "aetheria" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    vi.mocked(api.search).mockResolvedValue({ query: "aetheria", hits: [] });
+    await fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    await tick();
+
+    expect(api.replace).toHaveBeenCalledWith({
+      replacement: "",
+      hits: [{ file_id: h.file_id, field: "body", start: h.start, end: h.end, text: h.text, revision: h.revision }],
+    });
+    expect(onOpenHit).not.toHaveBeenCalled();
+  });
+
+  it("shows a rejected outcome's detail in the summary line", async () => {
+    // Fix 2 (#1846): a save's own refusal (e.g. a 422 the scene's own save
+    // raised) becomes a `not_replaceable/rejected` outcome, with the save's
+    // human message as `detail` — surfaced in the summary line, not swallowed
+    // into the generic "not replaceable" count.
+    const h = hit("scenes/act-1/arrival.md", 12, "Aetheria at dawn.");
+    vi.mocked(api.search).mockResolvedValue({ query: "aetheria", hits: [h] });
+    vi.mocked(api.replace).mockResolvedValue({
+      outcomes: [
+        { file_id: h.file_id, start: h.start, end: h.end, status: "not_replaceable", reason: "rejected", detail: "Scene Markdown must not contain raw HTML." },
+      ],
+      replaced_nodes: 0,
+    });
+    render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "aetheria" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    vi.mocked(api.search).mockResolvedValue({ query: "aetheria", hits: [] });
+    await fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    await tick();
+
+    expect(
+      screen.getByText("1 rejected: Scene Markdown must not contain raw HTML."),
+    ).toBeInTheDocument();
   });
 });

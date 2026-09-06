@@ -65,6 +65,10 @@ import {
   openNodeOfKind as runOpenNodeOfKind,
   openResearchNote as runOpenResearchNote,
 } from "./editorPaneOpen";
+import {
+  isNodeOpenDirty as runIsNodeOpenDirty,
+  reconcileNodeFromServer as runReconcileNodeFromServer,
+} from "./editorPaneReconcile";
 import { clearImplicitContext, implicitContextFor } from "@/lib/stores/implicitContext.svelte";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -1066,6 +1070,17 @@ class EditorPanesController {
     const pane = this.panes.find((candidate) => candidate.scene?.id === sceneId);
     if (!pane) return;
     this.editorPaneComponents[pane.id]?.highlightEmbeddedTodo(todoId);
+  }
+
+  // The generic post-write reconcile entry point (ADR-0085 §5) — extracted to
+  // editorPaneReconcile.ts (the file-size guard) as thin delegates, mirroring
+  // openNodeOfKind. The Search pane is today's only caller.
+  isNodeOpenDirty(nodeId: string, kind: string, entryType?: string): boolean {
+    return runIsNodeOpenDirty(this, nodeId, kind, entryType);
+  }
+
+  reconcileNodeFromServer(nodeId: string, kind: string, entryType?: string): Promise<void> {
+    return runReconcileNodeFromServer(this, nodeId, kind, entryType);
   }
 }
 

@@ -25,15 +25,16 @@ import {
   type DraftFields,
   type EditorPaneState,
 } from "@/lib/editor-core/editorPaneModel";
-import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEntry, TagEntry, EntryMetadata } from "@/lib/types";
+import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEntry, TagEntry, ResearchNote, EntryMetadata } from "@/lib/types";
 
 // The document kinds a pane can reload from the server, and the per-kind getter.
 // Wrapped (not bare `api.getX`) so each getter reads the `api` property live at
 // call time — a bare reference captured at module load can't be intercepted by a
 // test's `vi.spyOn(api, …)`. Home is here (with the conflict recoveries) so both
 // the post-save reload path and the reconcile ladder's rung-1 re-fetch (#1621)
-// share one map.
-export type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry | TagEntry;
+// share one map — and now the generic reconcile entry point (ADR-0085 §5,
+// editorPaneReconcile.ts).
+export type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry | TagEntry | ResearchNote;
 
 export const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDocument>> = {
   lore: (id) => api.getLoreEntry(id),
@@ -42,6 +43,7 @@ export const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDo
   plot_card: (id) => api.getCard(id),
   plotline: (id) => api.getPlotline(id),
   tag: (id) => api.getTagEntry(id),
+  research: (id) => api.getResearchNote(id),
 };
 
 // The one thing the dispatch needs back from the controller: the project node's

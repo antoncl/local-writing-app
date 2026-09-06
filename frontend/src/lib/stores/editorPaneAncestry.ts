@@ -40,12 +40,22 @@ function defaultAuthoringLayerId(entry: LoreEntry): string | null {
   return authoringDefaultLayerId(entry.source_layer_id, projectSchemaLayerId());
 }
 
+// The one field resetLorePane/resetPromptPane actually touch — narrower than
+// LoreAncestryHost's full fork/promote surface, so the reconcile entry point
+// (ADR-0085 §5, editorPaneReconcile.ts) can reuse them against its own minimal
+// host without pulling in save/autosave/openPrompt it doesn't need. Both
+// `LoreAncestryHost` and `PaneReconcileHost` satisfy this structurally.
+type PaneListHost = { panes: EditorPaneState[] };
+
 // Reset the open lore pane to a server entry after a fork/promote swapped the
 // file underneath it — clears the draft/dirty state and re-seeds the pane
 // from `entry`. `authoringLayerId` is the one axis fork (local → `null`) and
-// promote (inherited → project default) differ on.
-function resetLorePane(
-  host: LoreAncestryHost,
+// promote (inherited → project default) differ on. Exported: the reconcile
+// entry point (ADR-0085 §5) reuses it to re-baseline a clean open lore pane
+// after a replace, passing the pane's CURRENT authoringLayerId through
+// unchanged — a replace never moves a layer.
+export function resetLorePane(
+  host: PaneListHost,
   matchId: string,
   entry: LoreEntry,
   authoringLayerId: string | null,
@@ -128,7 +138,8 @@ export async function applyPromotedLoreEntry(host: LoreAncestryHost, entry: Lore
 // draftInputs/draftOfferOn/draftContextStrategy fields (ADR-0054/0065) that
 // lore doesn't, and have no authoring-layer rail (ADR-0042 is lore-only), so
 // this is a distinct — not shared — reset rather than a parameterized one.
-function resetPromptPane(host: LoreAncestryHost, matchId: string, entry: PromptEntry): void {
+// Exported for the same reconcile reuse as resetLorePane (ADR-0085 §5).
+export function resetPromptPane(host: PaneListHost, matchId: string, entry: PromptEntry): void {
   host.panes = host.panes.map((pane) =>
     pane.document?.type === "prompt" && pane.document.id === matchId
       ? {

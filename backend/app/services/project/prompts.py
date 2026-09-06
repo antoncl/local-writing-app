@@ -405,7 +405,7 @@ class PromptEntriesMixin:
         # ordinary in-place save to the prompt's own file. The layer walk is
         # deferred to the inherited path, so a flat owned save never pays for it.
         if winner is None or winner.kind != "prompt" or winner.source_layer_id == open_layer_id:
-            return self._save_owned_prompt_entry(entry_id, request)
+            return self._save_owned_prompt_entry(entry_id, request, index)
         # Inherited: the winner is a built-in Library node or an ancestor project's
         # prompt (#1738). Its body and `inputs` stay fork-only, but its metadata is
         # saved as a sparse ADR-0039 layer override at the consuming layer rather
@@ -519,7 +519,7 @@ class PromptEntriesMixin:
         # path instead). `preview`/`effective_at_layer` are no longer needed here.
         return self.read_prompt_entry(entry_id)
 
-    def _save_owned_prompt_entry(self, entry_id: str, request: SavePromptEntryRequest) -> PromptEntry:
+    def _save_owned_prompt_entry(self, entry_id: str, request: SavePromptEntryRequest, index) -> PromptEntry:
         """The ordinary in-place save to a prompt's own file (owned by this
         project). Reached only for an owned winner; the inherited path routes to
         `_save_prompt_override`. `_reject_inherited_library_write` stays as a
@@ -529,7 +529,12 @@ class PromptEntriesMixin:
         path = self._path_for_node_id(entry_id, "prompt")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
-        current_revision = self._revision(path)
+        # The same composite the read hands out (#1850): the owning file plus every
+        # override in the chain targeting it. An override can target an OWNED
+        # prompt — one left behind when the prompt moved into this layer — and the
+        # collector admits it, so checking the plain file revision here would 409
+        # every save of that prompt forever. Reproduces `_revision(path)` when none.
+        current_revision = self._composite_revision([path, *self._override_paths_for_target(index, node_id)])
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Prompt changed on disk after it was opened.", 409)
         self._check_entry_type_kind(request.entry_type, "prompt")

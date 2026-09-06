@@ -15,6 +15,7 @@ The chain is the four layers the lore suite uses:
 
 from __future__ import annotations
 
+import shutil
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -30,6 +31,7 @@ from app.models import (
     SavePromptEntryRequest,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.node_index_gate import node_index_gate
 from app.services.project.overrides import OVERRIDES_FOLDER
 from app.services.project_service import ProjectService
 
@@ -210,6 +212,48 @@ class PromptOverrideTests(unittest.TestCase):
         self._save_override("revise", {"color": "amber"})
         with self.assertRaises(ProjectServiceError) as caught:
             self._save_override("revise", {"color": "moss"}, base_revision=opened.revision)
+        self.assertEqual(caught.exception.status_code, 409)
+
+    def test_owned_prompt_with_a_leftover_override_saves_with_the_revision_it_was_read_with(self) -> None:
+        # #1850: the book overrides a series prompt, then the prompt moves into the
+        # book (promoted/forked/hand-moved) — the override file is left behind,
+        # still targeting an id the book now OWNS. The collector admits it, so the
+        # read hands out the composite revision; the owned save must check the
+        # same composite, or every save of this prompt 409s forever.
+        self._write_prompt_at(self.series, "revise", "Revise plotline", {"color": "slate"})
+        self._save_override("revise", {"color": "amber"})
+        (self.root / "prompts").mkdir(exist_ok=True)
+        shutil.move(self.series / "prompts" / "revise.md", self.root / "prompts" / "revise.md")
+        node_index_gate.invalidate()
+        self.assertTrue(list((self.root / OVERRIDES_FOLDER).glob("*.md")), "the leftover override is the setup")
+
+        opened = self.service.read_prompt_entry("revise")
+        self.assertNotEqual(opened.revision, self.service._revision(self.root / "prompts" / "revise.md"))
+
+        saved = self.service.save_prompt_entry(
+            "revise",
+            SavePromptEntryRequest(
+                title="Revise plotline",
+                body="Edited body.",
+                entry_type="prompt:general",
+                metadata={"color": "moss"},
+                base_revision=opened.revision,
+            ),
+        )
+        self.assertEqual(saved.body.strip(), "Edited body.")
+        # Saving with a revision from BEFORE the write is still refused — the
+        # composite check is a real check, not a bypass.
+        with self.assertRaises(ProjectServiceError) as caught:
+            self.service.save_prompt_entry(
+                "revise",
+                SavePromptEntryRequest(
+                    title="Revise plotline",
+                    body="Third body.",
+                    entry_type="prompt:general",
+                    metadata={"color": "moss"},
+                    base_revision=opened.revision,
+                ),
+            )
         self.assertEqual(caught.exception.status_code, 409)
 
     # --- the write safety ----------------------------------------------

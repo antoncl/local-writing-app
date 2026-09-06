@@ -10,9 +10,12 @@
 // the pane entirely: portal it to `<body>` (via `portalToBody`) and pin it at
 // coords derived from the trigger's `getBoundingClientRect()`.
 //
-// This is the ONLY positioning mechanism for in-pane popovers: SwatchPicker,
+// The one home for body-portaled popover positioning: SwatchPicker,
 // ColoredSelect, the schema icon and type-grid popovers, and NodePickerPopover
-// all use it (#1586/#1587 retired the last inline copies of this maths).
+// all use it (#1586/#1587 retired their inline copies of this maths). Known
+// holdout: `treeAddMenu.svelte.ts` still hand-rolls a rect + flip estimate
+// (#1839). `chrome/Popover.svelte` is a different, deliberate mechanism — an
+// in-flow popover against a `position: relative` wrapper, never portaled.
 //
 // Contract (mirrors portalToBody's): mount this only while the popover is open
 // (behind an `{#if}`); give the popover a stable class so the caller's
@@ -88,7 +91,9 @@ export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams
     let left: number;
     if ((current.align ?? "left") === "right") {
       left = r.right - w;
-      if (left < 8) left = Math.min(r.left, Math.max(8, window.innerWidth - w - 8));
+      // Fallback keeps the same 8px floor as the left branch, so an anchor that
+      // itself sits within 8px of the edge can't drag the popover under it.
+      if (left < 8) left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
     } else {
       left = r.left;
       if (left + w + 8 > window.innerWidth) left = Math.max(8, r.right - w);

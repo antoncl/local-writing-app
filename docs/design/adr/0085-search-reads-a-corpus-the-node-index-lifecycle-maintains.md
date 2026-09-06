@@ -1,6 +1,6 @@
 # ADR-0085: Search reads a corpus the node-index lifecycle maintains; a hit is an anchored range, and replace is a conflict-checked write through the node's own save
 
-- Status: **Proposed** — 2026-09-06, authored by Claude for Anton Lauridsen's review.
+- Status: **Accepted** — 2026-09-06, Anton Lauridsen, PR #1843 (authored by Claude). Both judgement calls raised at review — chats excluded from the corpus outright; no replace into inherited nodes via the override path — were confirmed.
 - **Issue:** #1605 (search-and-replace + incremental search; both need an index)
 - **Relates to:** ADR-0040 (the node index is persisted, incremental, and not SQLite), ADR-0039 (per-field layer overrides; the composite revision), ADR-0045 (scope is the unit of work), ADR-0049 §5 (the owned-here predicate), ADR-0071 (storage-shape changes owe a migration — this one owes none, §8), #1332 (the Search pane is a `NodeList` of `NodeRow`s), `CLAUDE.md` § Project format ("caches and indexes (`.cache/`) are always rebuildable")
 

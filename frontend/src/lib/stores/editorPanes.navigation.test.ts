@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { FOREIGN_PROJECT_NODE, editorPanes } from "./editorPanes.svelte";
-import { plotlineReveal } from "./plotlines";
+import { plotlineReveal, plotBoardRequested } from "./plotlines";
 import { mutationSetEditorStore } from "./mutationSets";
 import { api } from "@/lib/api";
 import type { MutationSetEntry, ProjectNode } from "@/lib/types";
@@ -78,6 +78,22 @@ describe("editorPanes.openNodeOfKind (#344)", () => {
     expect(get(plotlineReveal)).toBe("line_1");
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
     plotlineReveal.set(null);
+  });
+
+  it("brings the board into view for a plot entry_type with no per-node reveal yet", async () => {
+    // A card (or arc/template) has no per-node reveal yet (ADR-0085 slice 1), so
+    // the backlink just asks the board pane into view — it must NOT be mistaken
+    // for a plotline (plotlineReveal stays null) and no pane opener fires.
+    plotlineReveal.set(null);
+    plotBoardRequested.set(false);
+    const spies = ROUTES.map(([, name]) => vi.spyOn(editorPanes, name).mockResolvedValue(undefined));
+
+    await editorPanes.openNodeOfKind("card_1", "plot", "plot:card");
+
+    expect(get(plotlineReveal)).toBeNull();
+    expect(get(plotBoardRequested)).toBe(true);
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    plotBoardRequested.set(false);
   });
 
   it("refuses an unknown kind instead of falling back to openScene", async () => {

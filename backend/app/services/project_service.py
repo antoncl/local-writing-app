@@ -69,6 +69,7 @@ from app.services.project.schema_definition_validation import (
 from app.services.project.schema_groups import MetadataSchemaGroupsMixin
 from app.services.project.schema_inheritance import MetadataSchemaInheritanceMixin
 from app.services.project.search import SearchMixin
+from app.services.project.search_corpus_build import SearchCorpusMixin
 from app.services.project.snapshot_diff import SnapshotDiffMixin
 from app.services.project.snapshot_witness import SnapshotWitnessMixin
 from app.services.project.tag_nodes import TagNodesMixin
@@ -118,6 +119,7 @@ class ProjectService(
     SnapshotDiffMixin,
     SnapshotWitnessMixin,
     SearchMixin,
+    SearchCorpusMixin,
     TagNodesMixin,
     TodosMixin,
     MutationSetEntriesMixin,

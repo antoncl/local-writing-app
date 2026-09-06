@@ -23,7 +23,7 @@ import { api } from "@/lib/api";
 import { chatSessionsStore } from "@/lib/stores/chats";
 import { structureStore } from "@/lib/stores/structure";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
-import { revealPlotline } from "@/lib/stores/plotlines";
+import { revealPlotline, revealPlotBoard } from "@/lib/stores/plotlines";
 import { openEditMutationSet } from "@/lib/stores/mutationSets";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { authoringDefaultLayerId } from "@/lib/utils/layerAuthoring";
@@ -488,7 +488,12 @@ export async function openLore(host: PaneOpenHost, entryId: string): Promise<voi
 // that opens the wrong document is worse than one that says it cannot. The
 // caller's `run()` puts the message in the error banner, and nothing has
 // claimed a pane by then.
-export async function openNodeOfKind(host: PaneOpenHost, nodeId: string, kind: string): Promise<void> {
+export async function openNodeOfKind(
+  host: PaneOpenHost,
+  nodeId: string,
+  kind: string,
+  entryType?: string,
+): Promise<void> {
   switch (kind) {
     case "manuscript":
       return host.openScene(nodeId);
@@ -506,12 +511,14 @@ export async function openNodeOfKind(host: PaneOpenHost, nodeId: string, kind: s
     case "chat":
       return host.openChat(nodeId);
     case "plot":
-      // Only plot:plotline is ever a reference target (a card's `plotline` ref is
-      // the sole plot entity_ref in the schema), so a `plot` backlink is always a
-      // plotline. A plotline is edited on its board node now (ADR-0053 §3), not in a
-      // pane, so the backlink REVEALS it on the board rather than opening an editor.
-      // A future plot ref target would need its entry_type here.
-      revealPlotline(nodeId);
+      // A plotline is edited on its board node (ADR-0053 §3), so it is REVEALED —
+      // the backlink expands the matching node once the board projection is in.
+      // Other plot entry types (card, character arc, template) have no per-node
+      // reveal yet, so this just brings the board into view (ADR-0085 slice 1); a
+      // focused card reveal is future board work. Existing callers pass no
+      // entryType and keep today's plotline-reveal behaviour.
+      if (!entryType || entryType === "plot:plotline") revealPlotline(nodeId);
+      else revealPlotBoard();
       return;
     case "project":
       // Singleton per layer, so the id is checked rather than assumed —

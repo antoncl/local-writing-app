@@ -18,8 +18,19 @@ vi.mock("@/lib/api", () => ({ api: { search: vi.fn() } }));
 // App's error-catching async wrapper — here a passthrough that just runs the action.
 const run = (action: () => Promise<void>) => action().then(() => true);
 
-function hit(path: string, line: number, excerpt: string): SearchHit {
-  return { kind: "manuscript", file_id: `f_${path}`, path, line, excerpt };
+function hit(path: string, line: number, excerpt: string, kind = "manuscript"): SearchHit {
+  return {
+    kind,
+    file_id: `f_${path}`,
+    path,
+    line,
+    excerpt,
+    field: "body",
+    start: 0,
+    end: 0,
+    revision: "",
+    owned: true,
+  };
 }
 
 beforeEach(() => {
@@ -104,6 +115,33 @@ describe("Search pane — results render", () => {
 
     await fireEvent.click(screen.getByText("lore/places/citadel.md:3"));
     expect(onOpenHit).toHaveBeenCalledWith(h);
+  });
+
+  it("groups hits by kind, data-driven, with project last and an unknown kind still shown", async () => {
+    // ADR-0085 §2: `kind` is the index's kind, not a closed three-entry set —
+    // a plot/research/other hit must render under its own group, and an
+    // entirely unrecognised kind must still show up (title-cased) rather than
+    // vanish, with "project" (the synthetic TODO bucket) always last.
+    vi.mocked(api.search).mockResolvedValue({
+      query: "aetheria",
+      hits: [
+        hit("Project TODO", 1, "Ship the thing", "project"),
+        hit("scenes/act-1/arrival.md", 12, "Aetheria at dawn.", "manuscript"),
+        hit("Plot / Card A", 1, "Aetheria happens here", "plot"),
+        hit("Research / Notes", 1, "Aetheria research", "research"),
+        hit("Widget / Thing", 1, "Aetheria widget", "widget"),
+      ],
+    });
+    render(Search, { props: { run, onOpenHit: () => {} } });
+
+    await fireEvent.input(screen.getByPlaceholderText("Find in scenes and lore"), {
+      target: { value: "aetheria" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Find" }));
+    await tick();
+
+    const labels = screen.getAllByText(/^(Scenes|Plot|Research|Project|Widget)$/).map((el) => el.textContent);
+    expect(labels).toEqual(["Scenes", "Plot", "Research", "Widget", "Project"]);
   });
 
   it("does not query on an empty search with TODOs off", async () => {

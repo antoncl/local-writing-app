@@ -134,11 +134,10 @@ class TodoActions {
   async openSearchHit(hit: SearchHit): Promise<void> {
     if (hit.file_id === "project") return;
     await this.run(async () => {
-      if (hit.kind === "lore") {
-        await editorPanes.openLore(hit.file_id);
-      } else {
-        await editorPanes.openScene(hit.file_id);
-      }
+      // ADR-0085 §2: hits carry the index's kind now; open through the one
+      // cross-kind opener so a prompt/plot/research hit no longer lands in
+      // the scene opener.
+      await editorPanes.openNodeOfKind(hit.file_id, hit.kind, hit.entry_type);
       if (hit.kind === "manuscript" && hit.todo_id) {
         window.setTimeout(() => editorPanes.highlightEmbeddedTodoInOpenPane(hit.file_id, hit.todo_id!), 0);
       }

@@ -77,6 +77,7 @@ from pathlib import Path
 from app.models import MetadataSchema
 from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project.node_index_snapshot import Manifest
+from app.services.project.search_corpus import search_corpus
 
 
 @dataclass(frozen=True)
@@ -216,6 +217,9 @@ class NodeIndexGate:
         with self._lock:
             self._flush_locked()
             self._current = None
+            # ADR-0085 §1: the search corpus shares this lifecycle and has
+            # none of its own.
+            search_corpus.drop()
 
 
 # The one process-global memo. Imported by `references.py` (resolve + write

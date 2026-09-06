@@ -850,8 +850,8 @@ class EditorPanesController {
     return runOpenLore(this, entryId);
   }
 
-  openNodeOfKind(nodeId: string, kind: string): Promise<void> {
-    return runOpenNodeOfKind(this, nodeId, kind);
+  openNodeOfKind(nodeId: string, kind: string, entryType?: string): Promise<void> {
+    return runOpenNodeOfKind(this, nodeId, kind, entryType);
   }
 
   openResearchNote(noteId: string): Promise<void> {

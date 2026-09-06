@@ -10,6 +10,8 @@
 //         still shows one a field already uses so its shape stays valid.
 //   #1004 the editor carries an author `description`, threaded through the
 //         saved draft and seeded back when editing an existing field.
+//   #1586 the field-type grid is body-portaled + `anchoredPopover`-anchored,
+//         like the icon popover (#1573), instead of `position: absolute`.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 
@@ -89,6 +91,21 @@ describe("SchemaFieldInlineEditor field-editor fixes", () => {
     expect(pop!.parentElement).toBe(document.body);
     await fireEvent.click(pop!.querySelector(".ip-search") as HTMLElement);
     expect(screen.queryByRole("dialog")).toBeTruthy();
+  });
+
+  it("#1586: the field-type grid is body-portaled so the pane's overflow can't clip it", async () => {
+    mount();
+    await fireEvent.click(screen.getByLabelText("Change field type"));
+    const grid = document.querySelector(".sfi-type-grid");
+    expect(grid).not.toBeNull();
+    expect(grid!.parentElement).toBe(document.body);
+    // A click inside the portaled grid must still count as "inside": the
+    // listbox stays open until a cell is chosen.
+    await fireEvent.click(grid!); // the container, not a cell
+    expect(document.querySelector(".sfi-type-grid")).not.toBeNull();
+    // Choosing a cell closes it.
+    await fireEvent.click(grid!.querySelector(".sfi-type-cell") as HTMLElement);
+    expect(document.querySelector(".sfi-type-grid")).toBeNull();
   });
 
   it("ADR-0082 slice 2b: the field-type picker no longer offers 'Tags'", async () => {

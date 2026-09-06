@@ -10,9 +10,9 @@
 // the pane entirely: portal it to `<body>` (via `portalToBody`) and pin it at
 // coords derived from the trigger's `getBoundingClientRect()`.
 //
-// SwatchPicker and TagPicker each already carry an inline copy of this
-// rect-anchoring logic; this generalises it so any future in-pane popover has
-// one home rather than a fourth copy.
+// This is the ONLY positioning mechanism for in-pane popovers: SwatchPicker,
+// ColoredSelect, the schema icon and type-grid popovers, and NodePickerPopover
+// all use it (#1586/#1587 retired the last inline copies of this maths).
 //
 // Contract (mirrors portalToBody's): mount this only while the popover is open
 // (behind an `{#if}`); give the popover a stable class so the caller's
@@ -37,6 +37,17 @@ export interface AnchoredPopoverParams {
    *  RAF loop is needless work for every other host. Mirrors the tracking
    *  loop TagPicker carried before ADR-0082 slice 2b generalised it here. */
   track?: boolean;
+  /** Horizontal alignment against the trigger (default "left"): "left" puts
+   *  the popover's left edge on the trigger's left edge and right-aligns only
+   *  when that would overrun the viewport; "right" puts the popover's right
+   *  edge on the trigger's right edge and left-aligns only when THAT would
+   *  overrun (#1586 — the field-type grid hangs off a chip at the pane's right
+   *  edge, so left-aligned it would run off-screen far more often than not). */
+  align?: "left" | "right";
+  /** Give the popover `min-width` equal to the trigger's width, re-applied on
+   *  every reposition (#1587 — ColoredSelect's menu must never be narrower than
+   *  the pill it drops from). Off by default. */
+  matchWidth?: boolean;
 }
 
 export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams) {
@@ -63,15 +74,25 @@ export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams
     if (!anchor.isConnected) return;
     const gap = current.gap ?? 6;
     const r = anchor.getBoundingClientRect();
+    // Applied before the offsetWidth read below so the measured width already
+    // includes the floor (#1587); re-applied on every reposition since the
+    // anchor can re-render wider after the popover first opened.
+    if (current.matchWidth) node.style.minWidth = `${r.width}px`;
     // The node is already in the DOM (portalToBody appended it), so reading its
     // offset size forces one sync layout and returns real dimensions — no
     // one-frame flash at (0,0) that a deferred measure would show.
     const w = node.offsetWidth;
     const h = node.offsetHeight;
-    // Open below + left-aligned with the trigger; right-align under it when the
-    // left edge would overrun the viewport.
-    let left = r.left;
-    if (left + w + 8 > window.innerWidth) left = Math.max(8, r.right - w);
+    // Open below, aligned per `align` (default "left"); flip alignment only
+    // when the preferred edge would overrun the viewport (#1586).
+    let left: number;
+    if ((current.align ?? "left") === "right") {
+      left = r.right - w;
+      if (left < 8) left = Math.min(r.left, Math.max(8, window.innerWidth - w - 8));
+    } else {
+      left = r.left;
+      if (left + w + 8 > window.innerWidth) left = Math.max(8, r.right - w);
+    }
     // Flip above when there isn't room below, clamping into view (8px margin)
     // rather than refusing the flip — so a popover shorter than the viewport is
     // always fully visible instead of hanging a few px past the bottom edge.

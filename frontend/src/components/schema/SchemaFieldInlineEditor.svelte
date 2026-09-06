@@ -243,25 +243,6 @@
   let iconPickerOpen = $state(false);
   let iconBtnEl: HTMLButtonElement | undefined = $state();
   let typeChipEl: HTMLButtonElement | undefined = $state();
-  // Flip the type-grid popover above its trigger when there isn't room below
-  // (#1001) — opened from a field low in a tall editor it would otherwise run
-  // past the fold. (The icon popover no longer needs this: it's body-portaled
-  // and viewport-anchored via `anchoredPopover` (#1573), so the pane can't clip
-  // it at all — a strictly better fix than this viewport-based estimate, which
-  // is blind to the pane's own `overflow` box.)
-  function flipUp(el: HTMLElement | undefined, estHeight: number): boolean {
-    if (!el) return false;
-    const rect = el.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    // Flip only when below is too tight AND above has more room, so it never
-    // makes things worse. estHeight ≈ the popover's max height + chrome.
-    return spaceBelow < estHeight && rect.top > spaceBelow;
-  }
-  // The type grid caps at ~260px (2 cols × ~6 rows); flips off its own trigger.
-  let typeFlipUp = $state(false);
-  $effect(() => {
-    typeFlipUp = typeMenuOpen && flipUp(typeChipEl, 260);
-  });
 
   // Section datalist (#1000): distinct, non-empty labels already used on this
   // type. The freeform input lists them so it doubles as a pick-from-existing
@@ -332,13 +313,14 @@
   // mousedown but no click, so scrolling the popover no longer dismisses it.
   function handleDocumentClick(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
-    // The icon popover is body-portaled (#1573), so a click inside it is no
-    // longer under `.sfi-icon-anchor` — allow `.sfi-icon-pop` too, or selecting
-    // an icon would dismiss the picker.
+    // The icon popover and the type grid are both body-portaled (#1573,
+    // #1586), so a click inside either is no longer under its own anchor —
+    // allow `.sfi-icon-pop`/`.sfi-type-grid` too, or selecting an option
+    // would dismiss the picker.
     if (iconPickerOpen && !target?.closest(".sfi-icon-anchor") && !target?.closest(".sfi-icon-pop")) {
       iconPickerOpen = false;
     }
-    if (typeMenuOpen && !target?.closest(".sfi-type-anchor")) typeMenuOpen = false;
+    if (typeMenuOpen && !target?.closest(".sfi-type-anchor") && !target?.closest(".sfi-type-grid")) typeMenuOpen = false;
   }
 
   function emitSave() {
@@ -444,7 +426,12 @@
         <GroupCaret size="xs" />
       </button>
       {#if typeMenuOpen}
-        <div class="sfi-type-grid" class:up={typeFlipUp} role="listbox" aria-label="Field type">
+        <div
+          class="sfi-type-grid"
+          role="listbox"
+          aria-label="Field type"
+          use:anchoredPopover={{ anchor: typeChipEl, align: "right" }}
+        >
           {#each FIELD_TYPE_CHOICES as choice (choice)}
             <button
               type="button"
@@ -693,8 +680,8 @@
   }
   /* Body-portaled + viewport-anchored by `anchoredPopover` (#1573); the action
      owns position/left/top, this carries only the portaled elevation tier (must
-     clear the modal layer, matching SwatchPicker/TagPicker — not `z-index: 60`,
-     which would open behind a dialog embedding this editor). */
+     clear the modal layer, matching every other portaled popover — not
+     `z-index: 60`, which would open behind a dialog embedding this editor). */
   .sfi-icon-pop {
     z-index: 10000;
   }
@@ -744,11 +731,12 @@
   .sfi-type-chip-label {
     font-weight: 500;
   }
+  /* Body-portaled + viewport-anchored by `anchoredPopover` (#1586); the action
+     owns position/left/top, this carries only the portaled elevation tier (must
+     clear the modal layer, matching every other portaled popover — not
+     `z-index: 60`, which would open behind a dialog embedding this editor). */
   .sfi-type-grid {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: 60;
+    z-index: 10000;
     display: grid;
     grid-template-columns: repeat(2, minmax(120px, 1fr));
     gap: 4px;
@@ -757,11 +745,6 @@
     border-radius: 10px;
     background: var(--surface);
     box-shadow: var(--elev-2);
-  }
-  /* Flipped above the chip when there's no room below (#1001). */
-  .sfi-type-grid.up {
-    top: auto;
-    bottom: calc(100% + 6px);
   }
   .sfi-type-cell {
     display: flex;

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date as _date_cls
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -84,7 +84,9 @@ def _find_marked_target_scene_id(inputs: dict[str, Any]) -> str | None:
     return None
 
 
-def _coerce_inputs(project_service, schema: Any, inputs: dict[str, Any]) -> dict[str, Any]:
+def _coerce_inputs(
+    project_service, schema: Any, inputs: dict[str, Any], *, warnings: list[str]
+) -> dict[str, Any]:
     """ADR-0060 §2: coerce `context_pick` input values to `list[EntryRef]` at the
     bind layer, so the template author never learns the picks arrived as JSON on
     the wire (no `fromjson` filter — rejected alternative). A picker value is a
@@ -93,12 +95,14 @@ def _coerce_inputs(project_service, schema: Any, inputs: dict[str, Any]) -> dict
     Non-picker values (plain strings, numbers, bools) pass through unchanged, so
     `entry(inputs.x)` still works for a single pick (it takes `[0]`)."""
     return {
-        name: _coerce_input_value(project_service, schema, value)
+        name: _coerce_input_value(project_service, schema, value, warnings=warnings)
         for name, value in inputs.items()
     }
 
 
-def _coerce_input_value(project_service, schema: Any, value: Any) -> Any:
+def _coerce_input_value(
+    project_service, schema: Any, value: Any, *, warnings: list[str]
+) -> Any:
     """One input value, coerced: a JSON-list string of picked refs becomes a
     `list[EntryRef]`; anything else is returned untouched.
 
@@ -126,7 +130,7 @@ def _coerce_input_value(project_service, schema: Any, value: Any) -> Any:
     # views / plotlines → member nodes) first, then manuscript containers
     # (chapter/act/root → descendant scenes). Selectors run first so a selector
     # that resolves to a manuscript container still gets container-expanded.
-    expanded = _expand_selector_picks(project_service, parsed)
+    expanded = _expand_selector_picks(project_service, parsed, warnings=warnings)
     expanded = _expand_container_picks(project_service, expanded)
     refs: list[EntryRef] = []
     for item in expanded:
@@ -144,7 +148,7 @@ _GENERIC_ROSTER_KINDS = frozenset({"plot", "assistant"})
 
 
 def _expand_selector_picks(
-    project_service, items: list[dict[str, Any]]
+    project_service, items: list[dict[str, Any]], *, warnings: list[str]
 ) -> list[dict[str, Any]]:
     """Replace a selector pick (a tag / saved view / plotline — `ADR-0074` slice
     5) with its member node picks, evaluated against the *current* roster at
@@ -175,7 +179,7 @@ def _expand_selector_picks(
         if not _is_selector_pick(item):
             out.append(item)
             continue
-        out.extend(_selector_member_picks(project_service, item, schema, roster_for))
+        out.extend(_selector_member_picks(project_service, item, schema, roster_for, warnings=warnings))
     return out
 
 
@@ -194,12 +198,29 @@ def _ref_fields(schema: Any) -> frozenset[str]:
     return frozenset(key for key, field in fields.items() if getattr(field, "type", None) in ("entity_ref", "entity_ref_list"))
 
 
+def _pick_label(item: Mapping[str, Any]) -> str:
+    return str(item.get("title") or item.get("id") or "context pick")
+
+
 def _selector_member_picks(
     project_service,
     item: dict[str, Any],
     schema: Any,
     roster_for: Callable[[Any], list[SelectorNode] | None],
+    *,
+    warnings: list[str],
 ) -> list[dict[str, Any]]:
+    """Resolve one selector pick's members, or contribute nothing when the
+    selector is outside what the send path can evaluate. The backend evaluator
+    (`selector_eval.evaluate_selector_membership`) covers the flat-membership
+    subset only — `type`/`tagged`/`hand_picked`/`field` predicates and
+    `union`/`intersect`/`difference`/`filter` over them (#1544 option c); the
+    parity gate (`spec/selector-eval-corpus.json`) keeps that subset correct
+    against the frontend evaluator. A saved view using a relational or
+    projection operator (`nest`, `field_of`, `var`, `orphans_of`,
+    `orphans_nest`), or a selector over a roster kind this module doesn't
+    build, still works as a *view* but contributes no members here — the
+    `warnings` sink below is what keeps that remainder from failing silently."""
     selector = item["selector"]
     kind = selector.get("kind")
     nodes = roster_for(kind)
@@ -208,6 +229,10 @@ def _selector_member_picks(
             "context selector pick %r: unsupported roster kind %r; contributes no members",
             item.get("id"),
             kind,
+        )
+        label = _pick_label(item)
+        warnings.append(
+            f'Context pick "{label}" selects {kind!r} nodes, which the send path cannot resolve — it contributed nothing.'
         )
         return []
 
@@ -231,6 +256,11 @@ def _selector_member_picks(
             "context selector pick %r: unsupported expr (%s); contributes no members",
             item.get("id"),
             exc,
+        )
+        label = _pick_label(item)
+        op = str(exc)
+        warnings.append(
+            f'Context pick "{label}" is a saved view using `{op}`, which the send path cannot evaluate — it contributed nothing. Hand-pick its members or restrict the view to type/tag/field filters.'
         )
         return []
     return [{"id": member_id, "kind": kind} for member_id in member_ids]
@@ -558,13 +588,14 @@ def build_preview(
         else None
     )
 
+    coercion_warnings: list[str] = []
     context = {
         "scene": scene,
         "project": project_ref,
         # ADR-0060 §7: `inputs` (plural — "the inputs, named"). Values are coerced
         # at this bind layer so a `context_pick` reaches the template as a
         # `list[EntryRef]`, not the raw JSON string it travels as on the wire.
-        "inputs": _coerce_inputs(project_service, schema, inputs),
+        "inputs": _coerce_inputs(project_service, schema, inputs, warnings=coercion_warnings),
         "text_before": text_before,
         "text_after": text_after,
         "selection": selection,
@@ -578,9 +609,27 @@ def build_preview(
     except TemplateError as exc:
         _raise_preview_error_from_template(exc, context, template_source)
 
+    # #1544 option c: the coercion chain's soft-fail warnings (an unsupported
+    # selector expr / roster kind contributed no members) ride along on the
+    # rendered result so the preview pane's existing "Warnings" section surfaces
+    # them, instead of only the server log line. Placed here (not inside the
+    # try) so it also runs when a later step raises after a successful render.
+    rendered.warnings.extend(coercion_warnings)
+
     if session is not None and commit:
         session.commit()
 
+    _annotate_rendered_from_env(rendered, env, project_service, scene)
+
+    return rendered, session_id
+
+
+def _annotate_rendered_from_env(rendered: RenderedTemplate, env, project_service, scene) -> None:
+    """Copy the env-side execution state the render's helpers (`use()`,
+    `use_lore()`, `field_contract.store()`) recorded during the template render
+    onto `rendered`, and compute the send-path lore tiers when lore was
+    invoked. Split out of `build_preview` (#1544) so that function's own
+    statement count stays under the complexity gate."""
     # ADR-0057 §2: carry the execution-derived lore gate off the env (set by the
     # `use_lore()` / `use()` helpers) onto the rendered result, so the preview
     # route can surface it and the chat can persist `lore_enabled`. The default
@@ -603,8 +652,6 @@ def build_preview(
     # lore-enabled prompt; `scene` is the same as-of anchor the send path resolves.
     if rendered.lore_invoked:
         _apply_preview_lore_tiers(rendered, _preview_lore_tiers(project_service, scene, rendered))
-
-    return rendered, session_id
 
 
 def _apply_preview_lore_tiers(rendered: RenderedTemplate, tiers: _PreviewLoreTiers) -> None:

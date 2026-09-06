@@ -97,6 +97,15 @@ template renders, so you iterate a flat list of nodes:
 {% endfor %}
 ```
 
+**Saved views on the send path.** The backend resolves a saved view's
+membership with a flat-membership evaluator: `type`, `tagged`, `hand_picked`,
+`field` predicates and `union`/`intersect`/`difference`/`filter` over them.
+A view that uses the relational or projection operators (`nest`, `field_of`,
+`var`, `orphans_of`) still works as a view, but as a *context pick* it
+contributes no members, and the preview lists a warning naming the pick and
+the operator. Hand-pick the members or restrict the view to the flat
+operators if you need it in a prompt.
+
 For a mixed picker, dispatch on `item.kind`:
 
 ```jinja

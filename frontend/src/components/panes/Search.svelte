@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import type { SearchHit } from "@/lib/types";
-  import { api } from "@/lib/api";
   import { kindLabel, orderKinds } from "@/lib/kindLabels";
+  import { SearchPaneController } from "@/lib/stores/searchPane.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import SearchInput from "@/components/widgets/SearchInput.svelte";
@@ -18,16 +19,12 @@
     onOpenHit: (hit: SearchHit) => void;
   } = $props();
 
-  // All search state is local to this feature — nothing else in the app reads it.
-  let query = $state("");
-  let includeOpenTodos = $state(false);
-  let hits: SearchHit[] = $state([]);
-  // The query the current `hits` were found with — drives excerpt highlighting
-  // and the "no matches" line. Find-only: search never fires on keystroke,
-  // because `/api/search` is an un-indexed full scan (an index is the
-  // prerequisite for as-you-type / replace — GH #1605).
-  let lastQuery = $state("");
-  let searched = $state(false);
+  // Domain state (query, options, hits, in-flight token) lives in the
+  // controller, not this component (ADR-0085 §3) — one instance per pane.
+  // `run` is read once at construction (App passes a stable wrapper); `untrack`
+  // silences the state_referenced_locally warning that comes with reading a
+  // prop outside a reactive context.
+  const ctrl = new SearchPaneController(untrack(() => run));
 
   // Hits are heterogeneous — every kind the node index lists, plus the
   // synthetic "project" bucket for a TODO with no scene (ADR-0085 §2). `kind`
@@ -37,54 +34,89 @@
   // sorts last — it is the TODO catch-all, not a content kind.
   const PANE_LABEL: Record<string, string> = { manuscript: "Scenes", project: "Project" };
   const groups = $derived(
-    orderKinds(new Set(hits.map((hit) => hit.kind)))
+    orderKinds(new Set(ctrl.hits.map((hit) => hit.kind)))
       .sort((a, b) => (a === "project" ? 1 : 0) - (b === "project" ? 1 : 0))
       .map((kind) => ({
         label: PANE_LABEL[kind] ?? kindLabel(kind),
-        hits: hits.filter((hit) => hit.kind === kind),
+        hits: ctrl.hits.filter((hit) => hit.kind === kind),
       })),
   );
 
-  // Split an excerpt around case-insensitive matches of `q` so the match can be
-  // wrapped in <mark>. Only the excerpt is highlighted — never the path/line.
-  function segments(text: string, q: string): { text: string; hit: boolean }[] {
+  // Split an excerpt around matches of `q` so the match can be wrapped in
+  // <mark>. Only the excerpt is highlighted — never the path/line. The regex
+  // is built the same way the backend builds its search pattern (`_compile_query`
+  // in `search.py`): the mark must show exactly what the backend matched
+  // (ADR-0085 §3 options) — a case-insensitive substring mark under Match case
+  // highlights the very occurrences the toggle excluded.
+  function segments(
+    text: string,
+    q: string,
+    matchCase: boolean,
+    wholeWord: boolean,
+  ): { text: string; hit: boolean }[] {
     if (!q) return [{ text, hit: false }];
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const source = wholeWord ? `(?<!\\w)${escaped}(?!\\w)` : escaped;
+    const re = new RegExp(source, matchCase ? "g" : "gi");
     const out: { text: string; hit: boolean }[] = [];
-    const lower = text.toLowerCase();
-    const needle = q.toLowerCase();
     let from = 0;
-    for (;;) {
-      const at = lower.indexOf(needle, from);
-      if (at < 0) {
-        if (from < text.length) out.push({ text: text.slice(from), hit: false });
-        break;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(text))) {
+      const at = match.index;
+      const matched = match[0];
+      if (matched.length === 0) {
+        re.lastIndex += 1;
+        continue;
       }
       if (at > from) out.push({ text: text.slice(from, at), hit: false });
-      out.push({ text: text.slice(at, at + q.length), hit: true });
-      from = at + q.length;
+      out.push({ text: matched, hit: true });
+      from = at + matched.length;
     }
+    if (from < text.length) out.push({ text: text.slice(from), hit: false });
     return out;
   }
 
-  async function runSearch() {
-    const q = query.trim();
-    if (!q && !includeOpenTodos) return;
-    await run(async () => {
-      hits = (await api.search(q, includeOpenTodos)).hits;
-      lastQuery = q;
-      searched = true;
-    });
-  }
+  // Search fires on input, debounced by `SearchInput` (`/api/search` reads
+  // the corpus now — ADR-0085 §3, no longer an un-indexed full scan); the
+  // controller drops any response superseded by a later keystroke. Enter
+  // fires immediately, bypassing the debounce.
 </script>
 
 <div class="search-bar">
-  <SearchInput bind:value={query} placeholder="Find in scenes and lore" onEnter={runSearch} />
-  <button class="search-find" type="button" onclick={runSearch}>Find</button>
+  <SearchInput
+    bind:value={ctrl.query}
+    placeholder="Find in the project"
+    debounceMs={150}
+    onChange={() => ctrl.fire()}
+    onEnter={() => ctrl.fire()}
+  />
 </div>
-<label class="inline-check">
-  <input type="checkbox" bind:checked={includeOpenTodos} />
-  Include open TODOs
-</label>
+<div class="search-options">
+  <label class="inline-check">
+    <input
+      type="checkbox"
+      checked={ctrl.matchCase}
+      onchange={(e) => ctrl.setMatchCase((e.currentTarget as HTMLInputElement).checked)}
+    />
+    Match case
+  </label>
+  <label class="inline-check">
+    <input
+      type="checkbox"
+      checked={ctrl.wholeWord}
+      onchange={(e) => ctrl.setWholeWord((e.currentTarget as HTMLInputElement).checked)}
+    />
+    Whole word
+  </label>
+  <label class="inline-check">
+    <input
+      type="checkbox"
+      checked={ctrl.includeOpenTodos}
+      onchange={(e) => ctrl.setIncludeOpenTodos((e.currentTarget as HTMLInputElement).checked)}
+    />
+    Include open TODOs
+  </label>
+</div>
 
 {#if groups.length > 0}
   {#each groups as group (group.label)}
@@ -98,14 +130,14 @@
         <NodeRow title={`${hit.path}:${hit.line}`} onClick={() => onOpenHit(hit)}>
           {#snippet detailSlot()}
             <small class="search-excerpt"
-              >{#each segments(hit.excerpt, lastQuery) as seg}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</small
+              >{#each segments(hit.excerpt, ctrl.lastQuery, ctrl.lastMatchCase, ctrl.lastWholeWord) as seg}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</small
             >
           {/snippet}
         </NodeRow>
       {/each}
     </NodeList>
   {/each}
-{:else if searched}
+{:else if ctrl.searched}
   <p class="search-empty">No matches.</p>
 {/if}
 
@@ -116,22 +148,10 @@
     gap: var(--sp-2);
   }
 
-  .search-find {
-    flex: none;
-    padding: 7px 16px;
-    border: 1px solid var(--accent);
-    border-radius: var(--r-md);
-    background: var(--accent);
-    color: var(--surface);
-    font-family: inherit;
-    font-size: var(--fs-md);
-    font-weight: var(--w-semibold);
-    cursor: pointer;
-  }
-
-  .search-find:hover {
-    background: var(--accent-strong);
-    border-color: var(--accent-strong);
+  .search-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
   }
 
   .inline-check {

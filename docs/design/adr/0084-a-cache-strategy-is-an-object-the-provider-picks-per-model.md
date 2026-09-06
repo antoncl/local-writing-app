@@ -1,6 +1,6 @@
 # ADR-0084: A cache strategy is an object the provider picks per model; the transport encodes its plan
 
-- Status: **Proposed** — 2026-09-06, authored by Claude, not yet approved by Anton.
+- Status: **Accepted** — 2026-09-06, Anton Lauridsen, PR #1831 (authored by Claude).
 - **Issue:** #1064 (the narrowed residual: `realize_cache` + the bidirectional up-seam)
 - **Relates to:** ADR-0058 (a provider is a class), ADR-0060 §5/§6 (volatility is a provider-neutral ordering; the preview is cache-aware), ADR-0057 (one lore selection), ADR-0065 (a class registered once; earn a method when two need it), `docs/design/context-caching.md`
 

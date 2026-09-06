@@ -485,6 +485,9 @@ class ReferencesMixin:
             lambda current: self._mutate_index_for_write(current, resolved, structural),
             self._flush_resolved_index,
         )
+        # ADR-0085 §1: the corpus is patched here, on the one seam every
+        # writer already passes.
+        self._patch_search_corpus(resolved)
 
     def _flush_resolved_index(self, resolved: ResolvedIndex) -> None:
         """Write the deferred snapshot for a patched memo (#476).

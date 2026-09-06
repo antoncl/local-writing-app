@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SearchHit } from "@/lib/types";
   import { api } from "@/lib/api";
+  import { kindLabel, orderKinds } from "@/lib/kindLabels";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import SearchInput from "@/components/widgets/SearchInput.svelte";
@@ -28,19 +29,20 @@
   let lastQuery = $state("");
   let searched = $state(false);
 
-  // Hits are heterogeneous (scene content/metadata/TODOs, lore, project TODOs);
-  // `kind` buckets them. Synthetic buckets are tool labels → sans headers.
-  const KIND_ORDER: SearchHit["kind"][] = ["manuscript", "lore", "project"];
-  const KIND_LABEL: Record<SearchHit["kind"], string> = {
-    manuscript: "Scenes",
-    lore: "Lore",
-    project: "Project",
-  };
+  // Hits are heterogeneous — every kind the node index lists, plus the
+  // synthetic "project" bucket for a TODO with no scene (ADR-0085 §2). `kind`
+  // buckets them; the label table is data-driven (`kindLabels.ts`) rather than
+  // a fixed three-entry constant, so an unrendered kind still shows up under
+  // its title-cased kind name instead of being dropped. `project` always
+  // sorts last — it is the TODO catch-all, not a content kind.
+  const PANE_LABEL: Record<string, string> = { manuscript: "Scenes", project: "Project" };
   const groups = $derived(
-    KIND_ORDER.map((kind) => ({
-      label: KIND_LABEL[kind],
-      hits: hits.filter((hit) => hit.kind === kind),
-    })).filter((group) => group.hits.length > 0),
+    orderKinds(new Set(hits.map((hit) => hit.kind)))
+      .sort((a, b) => (a === "project" ? 1 : 0) - (b === "project" ? 1 : 0))
+      .map((kind) => ({
+        label: PANE_LABEL[kind] ?? kindLabel(kind),
+        hits: hits.filter((hit) => hit.kind === kind),
+      })),
   );
 
   // Split an excerpt around case-insensitive matches of `q` so the match can be

@@ -23,6 +23,15 @@ export function revealPlotline(id: string): void {
   plotlineReveal.set(id);
 }
 
+// A one-shot cross-pane signal to bring the board pane into view WITHOUT
+// expanding a node — for a plot node that has no per-node reveal yet (cards,
+// arcs, templates; ADR-0085 slice 1).
+export const plotBoardRequested = writable(false);
+
+export function revealPlotBoard(): void {
+  plotBoardRequested.set(true);
+}
+
 export async function refreshPlotlines(): Promise<void> {
   plotlineEntriesStore.set((await api.listPlotlines()).entries);
 }

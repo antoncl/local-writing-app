@@ -69,7 +69,7 @@
   } from "@/lib/stores/prompts";
   import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
   import { refreshPlotBoard } from "@/lib/stores/plotBoard";
-  import { plotlineReveal } from "@/lib/stores/plotlines";
+  import { plotlineReveal, plotBoardRequested } from "@/lib/stores/plotlines";
   import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
   import {
     assistantEntriesStore,
@@ -417,6 +417,16 @@
   // expands the target node and clears the one-shot once its projection is in.
   $effect(() => {
     if ($plotlineReveal) openPlotBoardPane();
+  });
+
+  // A plot node with no per-node reveal yet (card, arc, template; ADR-0085 slice
+  // 1) just needs the board pane in view — no node to expand. Clear the one-shot
+  // immediately since there is nothing further for a projection to clear.
+  $effect(() => {
+    if ($plotBoardRequested) {
+      openPlotBoardPane();
+      plotBoardRequested.set(false);
+    }
   });
 
   // Noun for the pane's delete button, keyed by document kind (was a

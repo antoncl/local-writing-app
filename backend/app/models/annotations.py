@@ -183,12 +183,24 @@ class SearchRequest(BaseModel):
 
 
 class SearchHit(BaseModel):
-    kind: Literal["manuscript", "lore", "project"] = "manuscript"
+    """One search result (ADR-0085 §2): a node, a field, and — for a body hit
+    — the anchored character range a future replace writes through. `kind` is
+    the index's kind (or the synthetic `"project"` bucket for a TODO not tied
+    to a scene), not the closed `manuscript|lore|project` set of before, so a
+    hit always opens through the node's own kind."""
+
+    kind: str = "manuscript"
+    entry_type: str = ""
     file_id: str
     path: str
     line: int
     excerpt: str
     todo_id: str | None = None
+    field: Literal["body", "metadata"] = "body"
+    start: int = 0
+    end: int = 0
+    revision: str = ""
+    owned: bool = True
 
 
 class SearchResponse(BaseModel):

@@ -48,19 +48,29 @@ class EmbeddedTodosMixin(MarkerMixin):
             front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
             scene_id = self._node_id_for_path(path, front_matter)
             scene_path = scene_paths.get(scene_id, str(path.relative_to(root)))
-            yield from self._scan_body_markers(
-                body,
-                EMBEDDED_TODO_PATTERN,
-                lambda match, line, scene_id=scene_id, scene_path=scene_path: EmbeddedTodo(
-                    todo_id=match.group(1),
-                    scene_id=scene_id,
-                    status=match.group(2),
-                    note=unquote(match.group(3)),
-                    text=re.sub(r"\s+", " ", match.group(4)).strip(),
-                    line=line,
-                    scene_path=scene_path,
-                ),
-            )
+            yield from self._scan_embedded_todos_in_body(scene_id, body, scene_path)
+
+    def _scan_embedded_todos_in_body(
+        self, scene_id: str, body: str, scene_path: str
+    ) -> Iterator[EmbeddedTodo]:
+        """The per-body half of the scan, factored out so both the file-scanning
+        `_scan_embedded_todos` and the search corpus's `_search_open_todos`
+        (`search.py`, ADR-0085 §2 — the corpus already holds the body, so
+        search must not `rglob` the scenes a second time) run the one marker
+        scan rather than two copies of it."""
+        yield from self._scan_body_markers(
+            body,
+            EMBEDDED_TODO_PATTERN,
+            lambda match, line, scene_id=scene_id, scene_path=scene_path: EmbeddedTodo(
+                todo_id=match.group(1),
+                scene_id=scene_id,
+                status=match.group(2),
+                note=unquote(match.group(3)),
+                text=re.sub(r"\s+", " ", match.group(4)).strip(),
+                line=line,
+                scene_path=scene_path,
+            ),
+        )
 
     def read_embedded_todos(self) -> EmbeddedTodoList:
         """The rebuildable embedded-todo index — editor-pane independent."""

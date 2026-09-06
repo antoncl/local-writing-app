@@ -1359,12 +1359,20 @@ export type PathProbe = {
 };
 
 export type SearchHit = {
-  kind: "manuscript" | "lore" | "project";
+  // ADR-0085 §2: the index's kind (or the synthetic "project" TODO bucket),
+  // not a closed set — a hit always opens through the node's own kind.
+  kind: string;
+  entry_type?: string;
   file_id: string;
   path: string;
   line: number;
   excerpt: string;
   todo_id?: string | null;
+  field: "body" | "metadata";
+  start: number;
+  end: number;
+  revision: string;
+  owned: boolean;
 };
 
 export type ReferenceCandidate = {

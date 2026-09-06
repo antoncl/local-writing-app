@@ -1,24 +1,24 @@
-"""Full-text / metadata search slice of ProjectService (#14 backend split).
+"""Full-text / metadata search slice of ProjectService (#14 backend split;
+ADR-0085 §§2-3 for slice 1).
 
-`search` scans scene + lore markdown (body lines and resolved metadata
-values) and, optionally, open TODOs — both the todo.yaml list and the
-in-scene embedded-todo comments. This mixin owns that query path plus its
-search-only helpers; `ProjectService` composes it.
+`search` reads the search corpus (`search_corpus.py` / `SearchCorpusMixin`,
+`search_corpus_build.py`) instead of scanning files — the corpus is built
+once from the resolved node index's winners view and kept current by the
+write funnel (`_apply_index_write`), so this module never globs a folder
+itself (a guard test bans `rglob` from this file the way
+`test_node_index_memo.py:554` bans `.unlink(`). This mixin owns the query
+path plus its search-only helpers; `ProjectService` composes it.
 
-Method bodies moved verbatim. Shared helpers they call (`self._require_project`,
-`self._scene_display_paths` [moved here], `self.read_todos`,
-`self._read_markdown_with_front_matter`, `self._node_id_for_path`,
-`self.read_metadata_schema`, `self._build_node_index`,
-`self._normalise_metadata`, `self.read_structure`) resolve through the MRO at
-call time. The embedded-todo scan now delegates to `self._scan_embedded_todos()`
-(EmbeddedTodosMixin), which owns `EMBEDDED_TODO_PATTERN` alongside the marker
-mutators (GH #45).
+Shared helpers it calls (`self._require_project`, `self._search_corpus`
+[`SearchCorpusMixin`], `self.read_todos`, `self._scan_embedded_todos_in_body`
+[`EmbeddedTodosMixin`], `self.read_structure`) resolve through the MRO at
+call time.
 """
 
 from __future__ import annotations
 
+import bisect
 import re
-from pathlib import Path
 from typing import Any
 
 from app.models import (
@@ -34,6 +34,7 @@ from app.services.project.metadata_refs import (
     rewrite_ref_occurrences,
 )
 from app.services.project.node_index import NodeIndex
+from app.services.project.search_corpus import CorpusEntry
 from app.services.tree_structure import StructureVisitor, TreeStructureService
 
 
@@ -57,7 +58,7 @@ class _SceneDisplayPaths(StructureVisitor):
 
 class SearchMixin:
     def search(self, request: SearchRequest) -> SearchResponse:
-        root = self._require_project()
+        self._require_project()
         hits: list[SearchHit] = []
         query = request.query.strip()
 
@@ -70,19 +71,17 @@ class SearchMixin:
             hits.extend(self._search_open_todos(pattern, scene_paths))
 
         if pattern is not None:
-            schema = self.read_metadata_schema()
-            node_index = self._build_node_index(root)
-            if request.include_scenes:
-                hits.extend(self._search_scene_content(root, pattern, scene_paths, schema, node_index))
-            if request.include_lore:
-                hits.extend(self._search_lore_content(root, pattern, schema, node_index))
+            entries = self._search_corpus()
+            hits.extend(self._search_corpus_entries(entries, pattern, request, scene_paths))
         return SearchResponse(query=request.query, hits=hits)
 
     def _search_open_todos(
         self, pattern: re.Pattern[str] | None, scene_paths: dict[str, str]
     ) -> list[SearchHit]:
         """Open TODOs matching `pattern` (or all open ones when `pattern` is
-        None) — both the todo.yaml list and the in-scene embedded-todo comments."""
+        None) — both the todo.yaml list and the in-scene embedded-todo
+        comments, the latter scanned from the corpus's manuscript bodies
+        rather than a second `rglob` of the scenes."""
         hits: list[SearchHit] = []
         for item in self.read_todos().items:
             if item.status != "open":
@@ -99,123 +98,122 @@ class SearchMixin:
                     )
                 )
 
-        for todo in self._scan_embedded_todos():
-            if todo.status != "open":
+        for entry in self._search_corpus().values():
+            if entry.kind != "manuscript":
                 continue
-            excerpt = todo.note or todo.text
-            if pattern is None or pattern.search(f"{todo.note} {todo.text}"):
-                hits.append(
-                    SearchHit(
-                        kind="manuscript",
-                        file_id=todo.scene_id,
-                        path=todo.scene_path,
-                        line=todo.line,
-                        excerpt=excerpt,
-                        todo_id=todo.todo_id,
+            scene_path = scene_paths.get(entry.id, entry.path.name)
+            for todo in self._scan_embedded_todos_in_body(entry.id, entry.body, scene_path):
+                if todo.status != "open":
+                    continue
+                excerpt = todo.note or todo.text
+                if pattern is None or pattern.search(f"{todo.note} {todo.text}"):
+                    hits.append(
+                        SearchHit(
+                            kind="manuscript",
+                            file_id=todo.scene_id,
+                            path=todo.scene_path,
+                            line=todo.line,
+                            excerpt=excerpt,
+                            todo_id=todo.todo_id,
+                            field="body",
+                            start=0,
+                            end=0,
+                            revision=entry.revision,
+                            owned=entry.owned,
+                        )
                     )
-                )
         return hits
 
-    def _search_scene_content(
+    def _search_corpus_entries(
         self,
-        root: Path,
+        entries: dict[str, CorpusEntry],
         pattern: re.Pattern[str],
+        request: SearchRequest,
         scene_paths: dict[str, str],
-        schema: MetadataSchema,
-        node_index: NodeIndex,
     ) -> list[SearchHit]:
-        """Scene metadata + body lines matching `pattern`."""
+        """Metadata hits then body hits for every corpus entry `request`
+        selects (today's two flags; slice 2 replaces them with a `kinds`
+        filter), ordered manuscript first (in `scene_paths` order where
+        known), then lore, then every other kind by kind then title —
+        today's grouping, generalised to every corpus kind."""
+        scene_order = {scene_id: index for index, scene_id in enumerate(scene_paths)}
+
+        def _sort_key(entry: CorpusEntry) -> tuple[int, int, str]:
+            if entry.kind == "manuscript":
+                return (0, scene_order.get(entry.id, len(scene_order)), entry.title)
+            if entry.kind == "lore":
+                return (1, 0, entry.title)
+            return (2, 0, f"{entry.kind}:{entry.title}")
+
+        selected = [
+            entry
+            for entry in entries.values()
+            if (entry.kind != "manuscript" or request.include_scenes)
+            and (entry.kind != "lore" or request.include_lore)
+        ]
+
         hits: list[SearchHit] = []
-        for path in (root / "scenes").rglob("*.md"):
-            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-            scene_id = self._node_id_for_path(path, front_matter)
-            title = str(front_matter.get("title") or scene_id)
-            status = str(front_matter.get("status") or "draft")
-            entry_type = str(front_matter.get("entry_type") or "manuscript:scene")
-            metadata = self._resolve_reference_titles(
-                self._normalise_metadata(front_matter.get("metadata"), path),
-                entry_type,
-                schema,
-                node_index,
-            )
-            searchable_metadata = {
-                "title": title,
-                "status": status,
-                "entry_type": entry_type,
-                **metadata,
-            }
-            for label, value in self._iter_metadata_search_values(searchable_metadata):
+        for entry in sorted(selected, key=_sort_key):
+            display = self._corpus_display_path(entry, scene_paths)
+            for label, value in entry.metadata_values:
                 if pattern.search(value):
                     hits.append(
                         SearchHit(
-                            kind="manuscript",
-                            file_id=scene_id,
-                            path=f"{scene_paths.get(scene_id, str(path.relative_to(root)))} metadata",
+                            kind=entry.kind,
+                            entry_type=entry.entry_type,
+                            file_id=entry.id,
+                            path=f"{display} metadata",
                             line=1,
                             excerpt=f"{label}: {value}",
+                            field="metadata",
+                            start=0,
+                            end=0,
+                            revision=entry.revision,
+                            owned=entry.owned,
                         )
                     )
-            for index, line in enumerate(body.splitlines(), start=1):
-                if pattern.search(line):
-                    hits.append(
-                        SearchHit(
-                            kind="manuscript",
-                            file_id=scene_id,
-                            path=scene_paths.get(scene_id, str(path.relative_to(root))),
-                            line=index,
-                            excerpt=line.strip(),
-                        )
-                    )
+            hits.extend(self._corpus_body_hits(entry, pattern, display))
         return hits
 
-    def _search_lore_content(
-        self,
-        root: Path,
-        pattern: re.Pattern[str],
-        schema: MetadataSchema,
-        node_index: NodeIndex,
+    def _corpus_body_hits(
+        self, entry: CorpusEntry, pattern: re.Pattern[str], display: str
     ) -> list[SearchHit]:
-        """Lore metadata + body lines matching `pattern`."""
+        """One hit per occurrence in `entry.body` (ADR-0085 §2 — a replace
+        needs each match, not each matching line). Line starts are computed
+        once per entry so a many-match body stays linear rather than
+        re-scanning from the top for every match."""
+        body = entry.body
+        line_starts = [0] + [index + 1 for index, char in enumerate(body) if char == "\n"]
         hits: list[SearchHit] = []
-        for path in (root / "lore").rglob("*.md"):
-            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-            entry_id = self._node_id_for_path(path, front_matter)
-            title = str(front_matter.get("title") or entry_id)
-            entry_type = str(front_matter.get("entry_type") or "lore:note")
-            metadata = self._resolve_reference_titles(
-                self._normalise_metadata(front_matter.get("metadata"), path),
-                entry_type,
-                schema,
-                node_index,
+        for match in pattern.finditer(body):
+            line = bisect.bisect_right(line_starts, match.start())
+            line_start = line_starts[line - 1]
+            line_end = body.find("\n", line_start)
+            if line_end == -1:
+                line_end = len(body)
+            hits.append(
+                SearchHit(
+                    kind=entry.kind,
+                    entry_type=entry.entry_type,
+                    file_id=entry.id,
+                    path=display,
+                    line=line,
+                    excerpt=body[line_start:line_end].strip(),
+                    field="body",
+                    start=match.start(),
+                    end=match.end(),
+                    revision=entry.revision,
+                    owned=entry.owned,
+                )
             )
-            searchable_metadata = {
-                "title": title,
-                "entry_type": entry_type,
-                **metadata,
-            }
-            for label, value in self._iter_metadata_search_values(searchable_metadata):
-                if pattern.search(value):
-                    hits.append(
-                        SearchHit(
-                            kind="lore",
-                            file_id=entry_id,
-                            path=f"Lore / {title} metadata",
-                            line=1,
-                            excerpt=f"{label}: {value}",
-                        )
-                    )
-            for index, line in enumerate(body.splitlines(), start=1):
-                if pattern.search(line):
-                    hits.append(
-                        SearchHit(
-                            kind="lore",
-                            file_id=entry_id,
-                            path=f"Lore / {title}",
-                            line=index,
-                            excerpt=line.strip(),
-                        )
-                    )
         return hits
+
+    def _corpus_display_path(self, entry: CorpusEntry, scene_paths: dict[str, str]) -> str:
+        if entry.kind == "manuscript":
+            return scene_paths.get(entry.id, entry.path.name)
+        if entry.kind == "lore":
+            return f"Lore / {entry.title}"
+        return f"{entry.kind.capitalize()} / {entry.title}"
 
     def _iter_metadata_search_values(self, metadata: dict[str, Any], prefix: str = "") -> list[tuple[str, str]]:
         values: list[tuple[str, str]] = []
@@ -226,8 +224,8 @@ class SearchMixin:
             if isinstance(raw_value, dict):
                 values.extend(self._iter_metadata_search_values(raw_value, label))
             elif isinstance(raw_value, list):
-                # A list may hold record items (#698): one searchable pair per
-                # record item (member values joined), scalars batched as
+                # A list may hold record items (#698): one searchable pair
+                # per record item (member values joined), scalars batched as
                 # before — never str(dict), which buries the text in a Python
                 # repr, and never one pair per member, which floods the hit
                 # list from a single entry.
@@ -260,8 +258,8 @@ class SearchMixin:
             return metadata
 
         # One traversal reaches every ref — top-level or inside an item_group
-        # member (ADR-0081) — so a nested ref shows its target's title, not a raw
-        # id. Display-only: this returns a copy for search/rendering.
+        # member (ADR-0081) — so a nested ref shows its target's title, not a
+        # raw id. Display-only: this returns a copy for search/rendering.
         def _to_title(occ: RefOccurrence) -> Any:
             if occ.field.type == "entity_ref" and isinstance(occ.value, str):
                 target = node_index.by_id.get(node_index.canonical_id(occ.value))

@@ -32,19 +32,7 @@
 
 import type { MetadataSchema } from "@/lib/types";
 import { buildTree, type SchemaNode } from "@/components/schema/pickerTree";
-
-// Kinds in fixed render order first; any kind not listed here (a new schema
-// kind, or one of the wider "editor" set like assistant/chat/view/project) is
-// appended alphabetically by `orderedEligibleKinds` below.
-const KIND_ORDER = ["lore", "manuscript", "plot", "research", "prompt"];
-
-// Title-case a raw schema kind for the section header ("manuscript" → "Manuscript").
-// No general kind→label table spans every kind here (assistant/chat/view/project
-// included) — the existing ones (SCHEMA_KIND_META, NodePickerConfigEditor's KINDS)
-// are narrower, purpose-built lists — so this stays a plain, deterministic fallback.
-function kindLabel(kind: string): string {
-  return kind.length === 0 ? kind : kind[0].toUpperCase() + kind.slice(1);
-}
+import { kindLabel, orderKinds } from "@/lib/kindLabels";
 
 export type OfferOnState = "checked" | "covered" | "indeterminate" | "unchecked";
 
@@ -107,9 +95,7 @@ function orderedEligibleKinds(schema: MetadataSchema): string[] {
       eligible.add(def.kind);
     }
   }
-  const known = KIND_ORDER.filter((k) => eligible.has(k));
-  const rest = [...eligible].filter((k) => !KIND_ORDER.includes(k)).sort((a, b) => a.localeCompare(b));
-  return [...known, ...rest];
+  return orderKinds(eligible);
 }
 
 // The depth-indented rows for one kind's is-a tree: abstract nodes are always

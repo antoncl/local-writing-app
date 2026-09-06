@@ -36,14 +36,10 @@ dispatch table below IS the mapping ADR-0085 §4 names: one `(read, save,
 to_request)` triple per replaceable kind, mirroring `_SAVE_NODE_DISPATCH`
 (`node_ops.py`) plus the plot family it does not cover.
 
-Known edge, not fixed here: `read_prompt_entry`'s revision is the composite
-over the owning file plus every override in the chain (`prompts.py:329`),
-while `_save_owned_prompt_entry`'s conflict check is the plain `_revision` of
-the owning file alone (`prompts.py:530`). They coincide unless a leftover
-per-field override targets a prompt this project has since come to own
-outright — an unusual, transient state — in which case the save 409s and the
-outcome here is `stale`: honest (the file DID move relative to what the
-override implies), if not maximally specific.
+Every kind's read and save agree on what a revision covers — for lore and
+prompts that is the composite over the owning file plus every override in the
+chain targeting it, on the owned path as well as the override path (#1850) —
+so a hit's revision from the corpus is exactly what the save compares against.
 """
 
 from __future__ import annotations
@@ -311,8 +307,9 @@ class SearchReplaceMixin:
             saved = dispatch.save(file_id, dispatch.to_request(read, new_body))
         except ProjectServiceError as exc:
             if exc.status_code == 409:
-                # The save's own conflict check is the backstop (see the
-                # prompt-revision edge in the module docstring).
+                # The save's own conflict check is the backstop: it compares the
+                # same revision the read handed out (module docstring), so a 409
+                # here is a real move on disk between the read above and the save.
                 return [_stale(hit) for hit in body_hits], False
             # Any other refusal (e.g. a 422 from validate_scene_markdown when
             # the replacement introduces raw HTML or a broken table) is this

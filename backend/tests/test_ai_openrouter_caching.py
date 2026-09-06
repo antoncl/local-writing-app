@@ -10,6 +10,7 @@ from __future__ import annotations
 from app.services.ai.profiles.base import ChatCall
 from app.services.ai.profiles.cache_strategy import (
     ANTHROPIC_BREAKPOINTS,
+    GEMINI_BREAKPOINT,
     NO_CACHE,
     PREFIX_CACHE,
 )
@@ -29,11 +30,9 @@ def test_cache_strategy_anthropic_is_anthropic_breakpoints():
     assert profile.cache_strategy("anthropic/claude-sonnet-4-6") is ANTHROPIC_BREAKPOINTS
 
 
-def test_cache_strategy_google_is_anthropic_breakpoints():
-    # Gemini 2.5 routes are the known carry-over — Slice 2 (#1064) gives them
-    # their own strategy.
+def test_cache_strategy_google_is_gemini_breakpoint():
     profile = OpenRouterProfile(api_key="")
-    assert profile.cache_strategy("google/gemini-2.5-flash") is ANTHROPIC_BREAKPOINTS
+    assert profile.cache_strategy("google/gemini-2.5-flash") is GEMINI_BREAKPOINT
 
 
 def test_cache_strategy_openai_is_prefix_cache():
@@ -207,6 +206,53 @@ def test_all_empty_blocks_falls_back_to_system_prompt():
     plan = OpenRouterProfile(api_key="").cache_plan_for(call)
     out = _openrouter_system_messages(plan)
     assert out == [{"role": "system", "content": "P"}]
+
+
+# ---- Gemini wire test (ADR-0084 Slice 2, #1834) ----------------------------
+
+
+def _gemini_system_blocks():
+    return [
+        {"text": "S", "tier": "stable"},
+        {"text": "STAGED", "tier": "stable"},
+        {"text": "LORE", "tier": "stable"},
+        {"text": "VOL", "tier": "volatile"},
+    ]
+
+
+def test_gemini_route_gets_exactly_one_marker_on_last_stable_block():
+    call = ChatCall(
+        model="google/gemini-2.5-pro",
+        system_prompt="S",
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=1,
+        system_blocks=_gemini_system_blocks(),
+    )
+    messages = OpenRouterProfile(api_key="")._build_messages(call)
+    parts = messages[0]["content"]
+    assert len(parts) == 4
+    marked = [p for p in parts if "cache_control" in p]
+    assert len(marked) == 1
+    part = marked[0]
+    assert part["text"] == "LORE"
+    assert part["cache_control"] == {"type": "ephemeral"}
+    assert "ttl" not in part["cache_control"]
+
+
+def test_anthropic_route_still_gets_four_markers_with_ttl():
+    call = ChatCall(
+        model="anthropic/claude-sonnet-4-6",
+        system_prompt="S",
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=1,
+        system_blocks=_gemini_system_blocks(),
+    )
+    messages = OpenRouterProfile(api_key="")._build_messages(call)
+    parts = messages[0]["content"]
+    assert len(parts) == 4
+    marked = [p for p in parts if "cache_control" in p]
+    assert len(marked) == 4
+    assert all("ttl" in p["cache_control"] for p in marked)
 
 
 # ---- _openrouter_extra_body (session_id) ----------------------------------

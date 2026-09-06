@@ -6,11 +6,19 @@ import type {
 } from "@/lib/types";
 import { request } from "./core";
 
+export type SearchParams = {
+  query: string;
+  match_case?: boolean;
+  whole_word?: boolean;
+  kinds?: string[] | null;
+  include_open_todos?: boolean;
+};
+
 export const searchApi = {
-  search(query: string, includeOpenTodos = false) {
+  search(params: SearchParams) {
     return request<{ query: string; hits: SearchHit[] }>("/search", {
       method: "POST",
-      body: JSON.stringify({ query, include_open_todos: includeOpenTodos }),
+      body: JSON.stringify(params),
     });
   },
   resolveReferences(ids: string[]) {

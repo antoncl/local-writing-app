@@ -192,6 +192,74 @@ class ChatExclusionTests(SearchCorpusTestCase):
         self.assertNotIn(chat.id, self.service._search_corpus())
 
 
+class QueryOptionsTests(SearchCorpusTestCase):
+    """ADR-0085 §3 (slice 2): `match_case`, `whole_word`, and `kinds` on
+    `_compile_query` / `_search_corpus_entries`."""
+
+    BODY = "Aetheria rose. aetheria fell. The Aetherian guard slept."
+
+    def _seed(self) -> tuple[str, str]:
+        scene_id = self._new_scene("Scene", self.BODY)
+        lore_id = self._new_lore("Notes", "Aetheria")
+        return scene_id, lore_id
+
+    def test_default_finds_every_case_and_prefix_variant(self) -> None:
+        self._seed()
+        hits = [h for h in self._search("aetheria") if h.field == "body"]
+
+        scene_hits = [h for h in hits if h.kind == "manuscript"]
+        lore_hits = [h for h in hits if h.kind == "lore"]
+        self.assertEqual(len(scene_hits), 3, scene_hits)
+        self.assertEqual(len(lore_hits), 1, lore_hits)
+
+    def test_match_case_excludes_the_lowercase_occurrence(self) -> None:
+        self._seed()
+        hits = self.service.search(SearchRequest(query="Aetheria", match_case=True)).hits
+
+        scene_hits = [h for h in hits if h.kind == "manuscript" and h.field == "body"]
+        expected_starts = {self.BODY.index("Aetheria"), self.BODY.index("Aetherian")}
+        self.assertEqual({h.start for h in scene_hits}, expected_starts)
+        self.assertEqual(len(scene_hits), 2, scene_hits)
+
+    def test_whole_word_excludes_the_prefix_match(self) -> None:
+        self._seed()
+        hits = self.service.search(SearchRequest(query="Aetheria", whole_word=True)).hits
+
+        scene_hits = [h for h in hits if h.kind == "manuscript" and h.field == "body"]
+        self.assertEqual(len(scene_hits), 2, scene_hits)
+        for hit in scene_hits:
+            self.assertEqual(self.BODY[hit.start : hit.end].lower(), "aetheria")
+
+    def test_kinds_filters_hits_to_the_listed_kinds(self) -> None:
+        self._seed()
+
+        lore_only = self.service.search(SearchRequest(query="aetheria", kinds=["lore"])).hits
+        self.assertTrue(lore_only, lore_only)
+        self.assertTrue(all(h.kind == "lore" for h in lore_only), lore_only)
+
+        manuscript_only = self.service.search(SearchRequest(query="aetheria", kinds=["manuscript"])).hits
+        self.assertTrue(manuscript_only, manuscript_only)
+        self.assertTrue(all(h.kind == "manuscript" for h in manuscript_only), manuscript_only)
+
+        no_kinds = self.service.search(SearchRequest(query="aetheria", kinds=[])).hits
+        self.assertEqual(no_kinds, [])
+
+        every_kind = self.service.search(SearchRequest(query="aetheria", kinds=None)).hits
+        self.assertTrue(any(h.kind == "lore" for h in every_kind), every_kind)
+        self.assertTrue(any(h.kind == "manuscript" for h in every_kind), every_kind)
+
+    def test_include_open_todos_still_matches_through_the_compiled_pattern(self) -> None:
+        self._new_scene(
+            "Scene With Todo",
+            "<!-- embedded-todo:id=t1;status=open;note=buy -->Buy milk<!-- /embedded-todo -->",
+        )
+
+        hits = self.service.search(SearchRequest(query="milk", include_open_todos=True)).hits
+
+        todo_hits = {h.todo_id: h for h in hits if h.todo_id}
+        self.assertIn("t1", todo_hits)
+
+
 class InheritedLoreTests(unittest.TestCase):
     """A chain fixture: universe > series > book, mirroring `test_fork_lore.py`'s
     setUp (config_path patched before `declare_full_chain`, which writes the

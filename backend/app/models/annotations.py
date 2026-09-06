@@ -176,9 +176,14 @@ class StructureNodeDeletePreview(BaseModel):
 
 
 class SearchRequest(BaseModel):
+    """ADR-0085 §3. Literal substring query (never regex); `match_case` and
+    `whole_word` are the only options; `kinds` filters hits to those node kinds
+    (None = every kind the corpus holds)."""
+
     query: str = ""
-    include_scenes: bool = True
-    include_lore: bool = True
+    match_case: bool = False
+    whole_word: bool = False
+    kinds: list[str] | None = None
     include_open_todos: bool = False
 
 

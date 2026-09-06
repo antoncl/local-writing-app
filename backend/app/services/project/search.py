@@ -38,6 +38,17 @@ from app.services.project.search_corpus import CorpusEntry
 from app.services.tree_structure import StructureVisitor, TreeStructureService
 
 
+def _compile_query(query: str, *, match_case: bool, whole_word: bool) -> re.Pattern[str]:
+    """A query stays a literal substring, never a regex (ADR-0085 anti-goal).
+    `whole_word` brackets the escaped literal in lookarounds rather than `\\b`
+    so a query starting or ending in punctuation still bounds correctly."""
+    escaped = re.escape(query)
+    if whole_word:
+        escaped = rf"(?<!\w){escaped}(?!\w)"
+    flags = 0 if match_case else re.IGNORECASE
+    return re.compile(escaped, flags)
+
+
 class _SceneDisplayPaths(StructureVisitor):
     """`scene_id → "Act / Chapter / Scene"` title breadcrumb (root title
     omitted) for every node carrying a scene_id."""
@@ -66,7 +77,11 @@ class SearchMixin:
             return SearchResponse(query=query, hits=[])
 
         scene_paths = self._scene_display_paths()
-        pattern = re.compile(re.escape(query), re.IGNORECASE) if query else None
+        pattern = (
+            _compile_query(query, match_case=request.match_case, whole_word=request.whole_word)
+            if query
+            else None
+        )
         if request.include_open_todos:
             hits.extend(self._search_open_todos(pattern, scene_paths))
 
@@ -131,11 +146,11 @@ class SearchMixin:
         request: SearchRequest,
         scene_paths: dict[str, str],
     ) -> list[SearchHit]:
-        """Metadata hits then body hits for every corpus entry `request`
-        selects (today's two flags; slice 2 replaces them with a `kinds`
-        filter), ordered manuscript first (in `scene_paths` order where
-        known), then lore, then every other kind by kind then title —
-        today's grouping, generalised to every corpus kind."""
+        """Metadata hits then body hits for every corpus entry `request.kinds`
+        selects (None = every kind), ordered manuscript first (in
+        `scene_paths` order where known), then lore, then every other kind by
+        kind then title — today's grouping, generalised to every corpus
+        kind."""
         scene_order = {scene_id: index for index, scene_id in enumerate(scene_paths)}
 
         def _sort_key(entry: CorpusEntry) -> tuple[int, int, str]:
@@ -146,10 +161,7 @@ class SearchMixin:
             return (2, 0, f"{entry.kind}:{entry.title}")
 
         selected = [
-            entry
-            for entry in entries.values()
-            if (entry.kind != "manuscript" or request.include_scenes)
-            and (entry.kind != "lore" or request.include_lore)
+            entry for entry in entries.values() if request.kinds is None or entry.kind in request.kinds
         ]
 
         hits: list[SearchHit] = []

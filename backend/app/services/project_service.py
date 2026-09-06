@@ -76,6 +76,7 @@ from app.services.project.snapshot_witness import SnapshotWitnessMixin
 from app.services.project.tag_nodes import TagNodesMixin
 from app.services.project.todos import TodosMixin
 from app.services.project.views import ViewsMixin
+from app.services.yaml_io import load_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -396,7 +397,7 @@ class ProjectService(
             return {}
         with path.open("r", encoding="utf-8") as handle:
             try:
-                data = yaml.safe_load(handle) or {}
+                data = load_yaml(handle) or {}
             except yaml.YAMLError as exc:
                 # Same contract as the front-matter readers below: a syntax
                 # error in a hand-edited file is a 422 with the parser's
@@ -473,7 +474,7 @@ class ProjectService(
         # then gets written back with the writer's own separator on top.
         body = body.lstrip("\n")
         try:
-            data = yaml.safe_load(front) or {}
+            data = load_yaml(front) or {}
         except yaml.YAMLError as exc:
             if strict:
                 raise ProjectServiceError(f"Malformed front matter in {path.name}: {exc}", 422) from exc
@@ -506,7 +507,7 @@ class ProjectService(
                     raise ProjectServiceError(f"Malformed front matter in {path.name}: missing closing ---.", 422)
                 return {}
         try:
-            data = yaml.safe_load("".join(lines)) or {}
+            data = load_yaml("".join(lines)) or {}
         except yaml.YAMLError as exc:
             if strict:
                 raise ProjectServiceError(f"Malformed front matter in {path.name}: {exc}", 422) from exc

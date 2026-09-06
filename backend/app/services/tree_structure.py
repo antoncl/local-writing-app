@@ -30,6 +30,7 @@ import yaml
 
 from app.models import StructureDocument, StructureNode
 from app.services.atomic_io import atomic_write_text
+from app.services.yaml_io import load_yaml
 
 
 class TreeStructureError(Exception):
@@ -127,7 +128,7 @@ class TreeStructureService:
         if not self.yaml_path.exists():
             raise TreeStructureError(f"Missing {self.config.yaml_filename}.")
         with self.yaml_path.open("r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
+            data = load_yaml(handle) or {}
         if not isinstance(data, dict):
             raise TreeStructureError(
                 f"{self.config.yaml_filename} must contain a YAML object."

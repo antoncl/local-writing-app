@@ -12,10 +12,9 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from app.services.ai.profiles.cache_strategy import (
-    STYLE_BY_KIND,
     CachePlan,
     CacheStrategy,
 )
@@ -53,15 +52,6 @@ class Capability(str, Enum):
     # (#1554).
     TEMPERATURE = "temperature"
 
-
-CachingStyle = Literal["none", "auto", "explicit"]
-"""How the dispatch layer should mark cacheable content for a given model.
-
-- `none`: provider does not cache; no markup
-- `auto`: provider caches transparently (most OpenRouter routes, OpenAI direct)
-- `explicit`: wrap stable content with `cache_control: ephemeral` (Anthropic
-  direct, Anthropic/Alibaba/Gemini via OpenRouter)
-"""
 
 
 def family_from_id(model_id: str) -> str:
@@ -490,13 +480,6 @@ class ProviderProfile(ABC):
         """The `CacheStrategy` this provider uses for `model_id` (ADR-0084 §4).
         Stateless strategies are module-level singletons — return the
         instance, never construct one."""
-
-    def caching_style(self, model_id: str) -> CachingStyle:
-        """How the dispatch layer should mark cacheable content for this
-        model, derived from `cache_strategy`. Kept for this slice (ADR-0084
-        Slice 1) for `preview.py`'s cache-cost gate and the `CACHING`
-        capability; retires in Slice 3 once those read the plan directly."""
-        return STYLE_BY_KIND[self.cache_strategy(model_id).kind]
 
     @abstractmethod
     def count_tokens(self, text: str, model_id: str) -> int:

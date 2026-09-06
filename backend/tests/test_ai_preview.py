@@ -1046,7 +1046,7 @@ class PreviewEndpointTests(unittest.TestCase):
 
 class PreviewCostEstimateTests(unittest.TestCase):
     """Step 3 of V2: AIPreviewResponse now includes estimated_tokens,
-    cache_blocks[], estimated_cost_usd, provider/model, caching_style.
+    cache_blocks[], estimated_cost_usd, provider/model, cached.
     """
 
     def setUp(self) -> None:
@@ -1117,7 +1117,7 @@ class PreviewCostEstimateTests(unittest.TestCase):
         self.assertIsNone(body["estimated_cost_usd"])
         self.assertIsNone(body["provider"])
         self.assertIsNone(body["model"])
-        self.assertIsNone(body["caching_style"])
+        self.assertIsNone(body["cached"])
 
     def test_cache_blocks_are_the_send_path_composition(self) -> None:
         # ADR-0060 §6: cache_blocks are the send-path composition, tier-tagged, each
@@ -1144,7 +1144,7 @@ class PreviewCostEstimateTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["provider"], "anthropic")
         self.assertEqual(body["model"], "claude-sonnet-4-6")
-        self.assertEqual(body["caching_style"], "explicit")
+        self.assertTrue(body["cached"])
         # claude-sonnet-4-6 has positive cost_in_per_mtok in the bake-in →
         # cost > 0 for non-empty input.
         self.assertIsNotNone(body["estimated_cost_usd"])
@@ -1157,7 +1157,7 @@ class PreviewCostEstimateTests(unittest.TestCase):
 
     def test_unknown_model_yields_null_cost_but_keeps_provider_model(self) -> None:
         # phantom assistant references a model not in the bake-in.
-        # Provider/model/caching_style still surface (we know the provider);
+        # Provider/model/cached still surface (we know the provider);
         # cost stays null because descriptor lookup fails.
         response = self.client.post(
             "/api/ai/preview", json=self._basic_preview_body(assistant_id="phantom")
@@ -1166,11 +1166,37 @@ class PreviewCostEstimateTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["provider"], "anthropic")
         self.assertEqual(body["model"], "not-a-real-model")
-        self.assertEqual(body["caching_style"], "explicit")
+        self.assertTrue(body["cached"])
         self.assertIsNone(body["estimated_cost_usd"])
         self.assertIsNone(body["estimated_first_cost_usd"])
         # Tokens still count even when cost can't be calculated.
         self.assertGreater(body["estimated_tokens"], 0)
+
+    def test_bound_preview_projects_cache_plan_onto_blocks(self) -> None:
+        # ADR-0084 §6: an Anthropic-bound preview's cache_blocks carry the
+        # plan's projection — the stable system block gets a 1h term, the
+        # uncached user turn gets none.
+        response = self.client.post(
+            "/api/ai/preview", json=self._basic_preview_body(assistant_id="sonnet")
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        system_block, user_block = body["cache_blocks"]
+        self.assertEqual(system_block["role"], "system")
+        self.assertTrue(system_block["cached"])
+        self.assertEqual(system_block["ttl_seconds"], 3600)
+        self.assertEqual(user_block["role"], "user")
+        self.assertFalse(user_block["cached"])
+        self.assertIsNone(user_block["ttl_seconds"])
+
+        # Unbound: no provider resolved, so no plan — every block is
+        # cached=False, ttl_seconds=None.
+        unbound = self.client.post("/api/ai/preview", json=self._basic_preview_body())
+        unbound_body = unbound.json()
+        self.assertIsNone(unbound_body["cached"])
+        for block in unbound_body["cache_blocks"]:
+            self.assertFalse(block["cached"])
+            self.assertIsNone(block["ttl_seconds"])
 
     def test_existing_fields_unchanged(self) -> None:
         # Smoke: V2 additions don't break v1 callers — old fields still in shape.

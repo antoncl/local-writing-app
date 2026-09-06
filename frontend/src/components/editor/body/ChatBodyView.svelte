@@ -68,6 +68,7 @@
     topmostMatchingAssistant,
   } from "@/lib/chat/assistantScope";
   import {
+    cacheTermSecondsFor,
     carrySubjectSeeds,
     decodeChatInputDrafts,
     displayInputValues,
@@ -217,7 +218,7 @@
   let chatInputDrafts: Record<string, string> = $state({});
 
   // ---- cost-estimate + TTL strip state ----
-  // SLOT_TTL_SECONDS + ttlChipsFor moved to chat/chatInputs.ts (#99).
+  // ttlChipsFor + cacheTermSecondsFor live in chat/chatInputs.ts (#99, ADR-0084 §6).
   // Tick counter — bumped every second by an onMount interval — so the
   // TTL chips' "remaining" recompute live. Anything else that wants a
   // 1Hz refresh can read this too.
@@ -1001,11 +1002,17 @@
       chatEstimate = {
         tokens: preview.estimated_tokens ?? 0,
         cost_usd: preview.estimated_cost_usd ?? null,
-        caching_style: preview.caching_style ?? null,
-        // The chat's meta line reads only tokens/cost/caching_style; the door
-        // reads the FULL blocks via chatPreviewCacheBlocks above. Nothing chat-
-        // side consumes this field (it exists for InputsDialog's shared type).
-        cache_blocks: [],
+        cached: preview.cached ?? null,
+        // The meta line now reads these summaries for the cache term
+        // (ADR-0084 §6, `cacheTermSecondsFor`) — the door still reads the
+        // FULL blocks via chatPreviewCacheBlocks above for text/entries.
+        cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
+          label: b.label,
+          tokens: b.tokens,
+          tier: b.tier,
+          cached: b.cached,
+          ttl_seconds: b.ttl_seconds,
+        })),
       };
     } catch {
       // Non-render failure — same UX.
@@ -1141,7 +1148,9 @@
   // later drift (a prompt edited to add a required input) must not brick a
   // locked chat whose inputs form is no longer mounted (S2 review).
   let sendBlockingInputs = $derived(isLocked ? [] : missingRequiredInputs);
-  let ttlChips = $derived(ttlChipsFor(activeChatCacheWriteTimes, ttlTick));
+  let ttlChips = $derived(
+    ttlChipsFor(activeChatCacheWriteTimes, ttlTick, cacheTermSecondsFor(chatEstimate)),
+  );
   // The session-cost line's number (ADR-0076 decision 6): the persisted
   // projection plus the not-yet-persisted delta. A stream `done` sets
   // pendingTurnCost before the persist round-trip starts, and persistActiveChat

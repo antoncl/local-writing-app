@@ -30,6 +30,7 @@ from app.services.ai.helpers import (
     _coerce_entry_ref,
     create_environment_for_project,
 )
+from app.services.ai.profiles.cache_strategy import CachePlan
 from app.services.ai.profiles.registry import profile_for
 from app.services.ai.selector_eval import (
     SelectorNode,
@@ -790,7 +791,7 @@ class PreviewEstimate:
 
     provider: str | None
     model: str | None
-    caching_style: str | None
+    cached: bool | None
     estimated_tokens: int
     cache_blocks: list[PreviewCacheBlock]
     # `estimated_cost_usd` is the SETTLED input cost — a repeat send with a warm
@@ -851,6 +852,24 @@ def _preview_send_blocks(
     return blocks
 
 
+def _stamp_cache_plan(blocks: list[PreviewCacheBlock], plan: CachePlan) -> None:
+    """Set `cached`/`ttl_seconds` on `blocks` from the resolved provider's
+    `plan` (ADR-0084 §6). `_preview_send_blocks` only adds non-blank-text
+    blocks and `plan()` only drops empty-text blocks, so the two lists line
+    up one-to-one — a mismatch is a programming error, not a data issue."""
+    assert len(plan.blocks) == len(blocks)
+    for block, planned in zip(blocks, plan.blocks, strict=True):
+        if plan.mode == "markers":
+            block.ttl_seconds = planned.ttl_seconds
+            block.cached = planned.ttl_seconds is not None
+        else:
+            # Collapse mode: no per-block markers, so no per-block ttl. The
+            # system prefix is what an automatic prefix cache serves;
+            # conversation turns are not projected as cached.
+            block.ttl_seconds = None
+            block.cached = plan.cached and block.tier is not None
+
+
 async def estimate_preview_tokens_and_cost(
     project_service,
     rendered: RenderedTemplate,
@@ -860,8 +879,8 @@ async def estimate_preview_tokens_and_cost(
 ) -> PreviewEstimate:
     """Estimate tokens + input cost for a rendered preview (V2).
 
-    When an assistant is named, resolve its provider/model to pick the caching
-    style and price the input; without one, tokens are still counted (the
+    When an assistant is named, resolve its provider/model to pick the cache
+    strategy and price the input; without one, tokens are still counted (the
     tokenizer choice is provider-agnostic in v1) but cost/caching stay unknown.
 
     `cache_blocks` is the send-path composition the model will receive (ADR-0060
@@ -872,7 +891,7 @@ async def estimate_preview_tokens_and_cost(
     """
     provider: str | None = None
     model: str | None = None
-    caching_style: str | None = None
+    profile = None
     descriptor: ModelDescriptor | None = None
     if assistant_id is not None:
         resolved = resolve_call_params(
@@ -888,9 +907,8 @@ async def estimate_preview_tokens_and_cost(
         if provider:
             try:
                 profile = profile_for(provider, settings)
-                caching_style = profile.caching_style(model or "")
             except ValueError:
-                caching_style = None
+                profile = None
         if provider and model:
             descriptor = await ai_tokens.descriptor_for(
                 provider=provider, model=model, settings=settings
@@ -904,6 +922,13 @@ async def estimate_preview_tokens_and_cost(
         )
 
     cache_blocks = _preview_send_blocks(rendered, _count)
+    plan = None
+    if profile is not None:
+        plan = profile.cache_strategy(model or "").plan(
+            [{"text": b.text, "tier": b.tier} for b in cache_blocks]
+        )
+        _stamp_cache_plan(cache_blocks, plan)
+    caches = bool(plan.cached) if plan is not None else False
     estimated_tokens = sum(b.tokens for b in cache_blocks)
     # Cache-aware cost (#1052): the stable prefix (system + stable lore) is the
     # cacheable part; volatile lore and the conversation turns are never cached.
@@ -912,7 +937,6 @@ async def estimate_preview_tokens_and_cost(
     # None — the UI shows "€0.0000" rather than "—" (a known-free call, #697).
     stable_tokens = sum(b.tokens for b in cache_blocks if b.tier == "stable")
     other_tokens = estimated_tokens - stable_tokens
-    caches = caching_style in ("auto", "explicit")
     estimated_cost_usd, estimated_first_cost_usd = ai_tokens.estimate_send_cost(
         stable_tokens, other_tokens, descriptor, caches
     )
@@ -920,7 +944,7 @@ async def estimate_preview_tokens_and_cost(
     return PreviewEstimate(
         provider=provider,
         model=model,
-        caching_style=caching_style,
+        cached=plan.cached if plan is not None else None,
         estimated_tokens=estimated_tokens,
         cache_blocks=cache_blocks,
         estimated_cost_usd=estimated_cost_usd,

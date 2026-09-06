@@ -9,7 +9,7 @@
 -->
 <script lang="ts">
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
-  import type { TtlChip } from "@/components/editor/body/chat/chatInputs";
+  import { cacheTermSecondsFor, type TtlChip } from "@/components/editor/body/chat/chatInputs";
   import type { ChatEstimate } from "@/lib/aiTypes";
 
   interface Props {
@@ -20,7 +20,14 @@
 
   let { estimate, ttlChips, sessionCostUsd }: Props = $props();
 
-  let showCacheTerm = $derived(estimate?.caching_style === "explicit" && ttlChips.length > 0);
+  // ADR-0084 §6: chips only exist when the plan carries a term for the
+  // stamped slot — no more equality-testing a retired style string.
+  let showCacheTerm = $derived(ttlChips.length > 0);
+  // The provider caches the prefix but the plan states no fixed term
+  // (PrefixCache — "cached, no stated term").
+  let cachedNoTerm = $derived(
+    estimate?.cached === true && ttlChips.length === 0 && cacheTermSecondsFor(estimate) == null,
+  );
   // ANY expired slot means the next send pays a cache re-write — the term
   // must not read as warm because a sibling slot is still live. The per-slot
   // detail stays in the tooltip.
@@ -50,9 +57,12 @@
       {:else if soonestChip}
         <span title={cacheTitle}>cache <span class="cbv-meta-num">{soonestChip.formatted}</span></span>
       {/if}
+    {:else if cachedNoTerm}
+      {#if estimate}<span class="cbv-meta-sep">·</span>{/if}
+      <span title="The provider caches the prompt prefix automatically and publishes no fixed term.">cached · no stated term</span>
     {/if}
     {#if sessionCostUsd != null}
-      {#if estimate || showCacheTerm}<span class="cbv-meta-sep">·</span>{/if}
+      {#if estimate || showCacheTerm || cachedNoTerm}<span class="cbv-meta-sep">·</span>{/if}
       <span>session <span class="cbv-meta-num">{formatCostEur(sessionCostUsd)}</span></span>
     {/if}
   </div>

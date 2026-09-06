@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 import {
+  cacheTermSecondsFor,
   carrySubjectSeeds,
   decodeChatInputDrafts,
   displayInputValues,
   encodeChatInputDrafts,
   endsInUserTurn,
+  formatCacheTerm,
   seedPickInput,
   seedPickInputDraft,
   seedSubjectEntryInput,
   subjectRefFromEntryType,
   ttlChipsFor,
 } from "./chatInputs";
+import type { ChatEstimate } from "@/lib/types";
 import { isInputMissing } from "@/lib/utils/promptInputs";
 
 // Minimal input factory — only the fields the helpers read.
@@ -289,13 +292,18 @@ describe("endsInUserTurn (#1436 — self-submittable prompt)", () => {
 
 describe("ttlChipsFor", () => {
   it("returns [] for empty/absent maps", () => {
-    expect(ttlChipsFor({}, 0)).toEqual([]);
-    expect(ttlChipsFor(undefined as unknown as Record<string, string>, 0)).toEqual([]);
+    expect(ttlChipsFor({}, 0, 3600)).toEqual([]);
+    expect(ttlChipsFor(undefined as unknown as Record<string, string>, 0, 3600)).toEqual([]);
   });
 
-  it("system slot uses the 1h TTL and formats remaining minutes", () => {
+  it("no term → no chips (a PrefixCache/unbound plan carries no term)", () => {
+    const writtenAt = new Date().toISOString();
+    expect(ttlChipsFor({ system: writtenAt }, 0, null)).toEqual([]);
+  });
+
+  it("a 3600s term formats remaining minutes with an '1h' label", () => {
     const writtenAt = new Date(Date.now() - 60_000).toISOString(); // 1 min ago
-    const [chip] = ttlChipsFor({ system: writtenAt }, 0);
+    const [chip] = ttlChipsFor({ system: writtenAt }, 0, 3600);
     expect(chip.slot).toBe("system");
     expect(chip.label).toBe("System"); // capitalized
     expect(chip.ttlLabel).toBe("1h"); // 3600s → "1h"
@@ -307,26 +315,69 @@ describe("ttlChipsFor", () => {
     expect(chip.remainingSec).toBeLessThanOrEqual(3540);
   });
 
-  it("unknown slot defaults to 5m TTL and can expire", () => {
+  it("a 300s term labels '5m' and can expire", () => {
     const long_ago = new Date(Date.now() - 10 * 60_000).toISOString(); // 10 min ago
-    const [chip] = ttlChipsFor({ lore: long_ago }, 0);
+    const [chip] = ttlChipsFor({ lore: long_ago }, 0, 300);
     expect(chip.ttlLabel).toBe("5m");
     expect(chip.expired).toBe(true);
     expect(chip.formatted).toBe("expired");
   });
 
   it("formats sub-minute remaining in seconds", () => {
-    // 5m TTL slot written 4m30s ago → ~30s remaining
+    // 300s term slot written 4m30s ago → ~30s remaining
     const writtenAt = new Date(Date.now() - (4 * 60 + 30) * 1000).toISOString();
-    const [chip] = ttlChipsFor({ lore: writtenAt }, 0);
+    const [chip] = ttlChipsFor({ lore: writtenAt }, 0, 300);
     expect(chip.expired).toBe(false);
     expect(chip.formatted).toMatch(/^\d+s$/);
   });
 
   it("treats a malformed timestamp as expired (no 'NaNs' chip)", () => {
-    const [chip] = ttlChipsFor({ system: "" }, 0);
+    const [chip] = ttlChipsFor({ system: "" }, 0, 3600);
     expect(chip.expired).toBe(true);
     expect(chip.formatted).toBe("expired");
+  });
+});
+
+describe("cacheTermSecondsFor", () => {
+  const estimateWith = (cache_blocks: ChatEstimate["cache_blocks"]): ChatEstimate => ({
+    tokens: 0,
+    cost_usd: null,
+    cached: true,
+    cache_blocks,
+  });
+
+  it("returns the stable block's ttl_seconds (Anthropic-shaped)", () => {
+    const estimate = estimateWith([{ label: "system", tokens: 10, tier: "stable", ttl_seconds: 3600 }]);
+    expect(cacheTermSecondsFor(estimate)).toBe(3600);
+  });
+
+  it("returns the stable term over a null volatile term (Gemini-shaped)", () => {
+    const estimate = estimateWith([
+      { label: "system", tokens: 10, tier: "stable", ttl_seconds: 300 },
+      { label: "volatile lore", tokens: 5, tier: "volatile", ttl_seconds: null },
+    ]);
+    expect(cacheTermSecondsFor(estimate)).toBe(300);
+  });
+
+  it("returns null when no block carries a term (PrefixCache-shaped)", () => {
+    const estimate = estimateWith([
+      { label: "system", tokens: 10, tier: "stable", ttl_seconds: null, cached: true },
+    ]);
+    expect(cacheTermSecondsFor(estimate)).toBeNull();
+  });
+
+  it("returns null for a null estimate", () => {
+    expect(cacheTermSecondsFor(null)).toBeNull();
+  });
+});
+
+describe("formatCacheTerm", () => {
+  it("formats minutes below an hour", () => {
+    expect(formatCacheTerm(300)).toBe("5m");
+  });
+
+  it("formats hours at/above 3600s", () => {
+    expect(formatCacheTerm(3600)).toBe("1h");
   });
 });
 

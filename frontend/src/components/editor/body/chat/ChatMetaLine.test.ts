@@ -11,7 +11,7 @@ import type { TtlChip } from "./chatInputs";
 const ESTIMATE = {
   tokens: 1500,
   cost_usd: 2,
-  caching_style: null as "none" | "auto" | "explicit" | null,
+  cached: null as boolean | null,
   cache_blocks: [],
 };
 
@@ -41,7 +41,7 @@ describe("ChatMetaLine", () => {
   });
 
   it("renders a cache term for a live TTL chip under explicit caching", () => {
-    const estimate = { ...ESTIMATE, caching_style: "explicit" as const };
+    const estimate = { ...ESTIMATE, cached: true };
     const { container } = render(ChatMetaLine, {
       estimate,
       ttlChips: [liveChip({ formatted: "57m" })],
@@ -52,7 +52,7 @@ describe("ChatMetaLine", () => {
   });
 
   it("renders 'cache expired' with the danger class when every chip has expired", () => {
-    const estimate = { ...ESTIMATE, caching_style: "explicit" as const };
+    const estimate = { ...ESTIMATE, cached: true };
     const { container } = render(ChatMetaLine, {
       estimate,
       ttlChips: [liveChip({ expired: true, formatted: "expired", remainingSec: 0 })],
@@ -65,7 +65,7 @@ describe("ChatMetaLine", () => {
   it("renders 'cache expired' when ANY chip has expired — a live sibling must not mask a cold slot", () => {
     // system expired + lore live: the next send pays a cache re-write, so the
     // term must not read as warm (ADR-0076 S1 review).
-    const estimate = { ...ESTIMATE, caching_style: "explicit" as const };
+    const estimate = { ...ESTIMATE, cached: true };
     const { container } = render(ChatMetaLine, {
       estimate,
       ttlChips: [
@@ -80,7 +80,7 @@ describe("ChatMetaLine", () => {
   });
 
   it("shows the soonest-to-evict chip by raw remaining time when all are live", () => {
-    const estimate = { ...ESTIMATE, caching_style: "explicit" as const };
+    const estimate = { ...ESTIMATE, cached: true };
     const { container } = render(ChatMetaLine, {
       estimate,
       ttlChips: [
@@ -93,12 +93,27 @@ describe("ChatMetaLine", () => {
     expect(container.textContent).not.toContain("cache 57m");
   });
 
-  it("renders no cache term when caching_style is not explicit", () => {
+  it("renders no cache term when there are no chips", () => {
+    const estimate = { ...ESTIMATE, cached: false };
     const { container } = render(ChatMetaLine, {
-      estimate: ESTIMATE,
-      ttlChips: [liveChip()],
+      estimate,
+      ttlChips: [],
       sessionCostUsd: null,
     });
     expect(container.textContent).not.toContain("cache");
+  });
+
+  it("renders 'cached · no stated term' when cached and no term", () => {
+    const estimate = {
+      ...ESTIMATE,
+      cached: true,
+      cache_blocks: [{ label: "system", tokens: 10, tier: "stable", ttl_seconds: null }],
+    };
+    const { container } = render(ChatMetaLine, {
+      estimate,
+      ttlChips: [],
+      sessionCostUsd: null,
+    });
+    expect(container.textContent).toContain("cached · no stated term");
   });
 });

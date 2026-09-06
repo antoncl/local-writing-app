@@ -11,7 +11,6 @@ from app.services.ai.profiles.cache_strategy import (
     MAX_BREAKPOINTS,
     NO_CACHE,
     PREFIX_CACHE,
-    STYLE_BY_KIND,
     TIER_TTL,
     AnthropicBreakpoints,
     CacheStrategy,
@@ -109,18 +108,13 @@ def test_no_cache_empty_input_collapses_to_empty_string():
     assert plan.collapsed_text() == ""
 
 
-# ---- kind / caches class attrs + STYLE_BY_KIND coverage --------------------
+# ---- kind / caches class attrs ---------------------------------------------
 
 
-def test_style_by_kind_covers_every_strategy_kind():
+def test_every_strategy_has_a_kind_and_a_bool_caches():
     for strategy in (NO_CACHE, PREFIX_CACHE, ANTHROPIC_BREAKPOINTS, GEMINI_BREAKPOINT):
-        assert strategy.kind in STYLE_BY_KIND
-    assert STYLE_BY_KIND == {
-        "none": "none",
-        "prefix": "auto",
-        "anthropic": "explicit",
-        "gemini": "explicit",
-    }
+        assert isinstance(strategy.kind, str) and strategy.kind
+        assert isinstance(strategy.caches, bool)
 
 
 def test_strategies_are_cache_strategy_instances_with_expected_kind_and_caches():
@@ -183,9 +177,8 @@ def test_gemini_single_stable_block_is_marked():
     assert plan.blocks[0].ttl_seconds == 300
 
 
-def test_gemini_kind_caches_and_style():
+def test_gemini_kind_and_caches():
     assert isinstance(GEMINI_BREAKPOINT, CacheStrategy)
     assert isinstance(GEMINI_BREAKPOINT, GeminiBreakpoint)
     assert GEMINI_BREAKPOINT.kind == "gemini"
     assert GEMINI_BREAKPOINT.caches is True
-    assert STYLE_BY_KIND["gemini"] == "explicit"

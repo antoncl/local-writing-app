@@ -1,4 +1,4 @@
-"""Concrete-profile behaviour: caching style per provider, offline
+"""Concrete-profile behaviour: cache strategy per provider, offline
 fallback to bake-in, OpenRouter pricing parsing, Ollama caching=none.
 
 We avoid hitting real APIs by injecting a fake httpx.AsyncClient via
@@ -86,20 +86,20 @@ def _patch_async_client(monkeypatch, module, *, payload=None, raise_exc=None, ca
 # --- Tests -------------------------------------------------------------
 
 
-def test_anthropic_caching_style_is_explicit():
+def test_anthropic_cache_strategy_caches():
     profile = AnthropicProfile(api_key="")
-    assert profile.caching_style("claude-sonnet-4-6") == "explicit"
+    assert profile.cache_strategy("claude-sonnet-4-6").caches is True
 
 
 def test_anthropic_cache_strategy_is_anthropic_breakpoints():
-    # ADR-0084: caching_style is now derived from cache_strategy.
+    # ADR-0084: identity, not a string label.
     profile = AnthropicProfile(api_key="")
     assert profile.cache_strategy("claude-sonnet-4-6") is ANTHROPIC_BREAKPOINTS
 
 
-def test_openai_caching_style_is_auto():
+def test_openai_cache_strategy_caches():
     profile = OpenAIProfile(api_key="")
-    assert profile.caching_style("gpt-4o") == "auto"
+    assert profile.cache_strategy("gpt-4o").caches is True
 
 
 def test_openai_cache_strategy_is_prefix_cache():
@@ -107,9 +107,9 @@ def test_openai_cache_strategy_is_prefix_cache():
     assert profile.cache_strategy("gpt-4o") is PREFIX_CACHE
 
 
-def test_ollama_caching_style_is_none():
+def test_ollama_cache_strategy_does_not_cache():
     profile = OllamaProfile(host="http://localhost:11434")
-    assert profile.caching_style("llama3.2") == "none"
+    assert profile.cache_strategy("llama3.2").caches is False
 
 
 def test_ollama_cache_strategy_is_no_cache():
@@ -117,16 +117,15 @@ def test_ollama_cache_strategy_is_no_cache():
     assert profile.cache_strategy("llama3.2") is NO_CACHE
 
 
-def test_openrouter_caching_style_by_prefix():
+def test_openrouter_cache_strategy_caches_by_prefix():
     profile = OpenRouterProfile(api_key="")
-    # Anthropic / Google routes need explicit markup.
-    assert profile.caching_style("anthropic/claude-sonnet-4") == "explicit"
-    assert profile.caching_style("google/gemini-2.5-pro") == "explicit"
-    # OpenAI / DeepSeek / Groq route through to auto-cache providers.
-    assert profile.caching_style("openai/gpt-4o") == "auto"
-    assert profile.caching_style("deepseek/deepseek-chat") == "auto"
+    # Anthropic / Google routes carry markers; OpenAI / DeepSeek auto-cache.
+    assert profile.cache_strategy("anthropic/claude-sonnet-4").caches is True
+    assert profile.cache_strategy("google/gemini-2.5-pro").caches is True
+    assert profile.cache_strategy("openai/gpt-4o").caches is True
+    assert profile.cache_strategy("deepseek/deepseek-chat").caches is True
     # Unknown prefix: safe default.
-    assert profile.caching_style("totallymadeup/x") == "none"
+    assert profile.cache_strategy("totallymadeup/x").caches is False
 
 
 def test_openrouter_cache_strategy_by_prefix():

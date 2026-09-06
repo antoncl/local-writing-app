@@ -90,8 +90,14 @@
   let estimate: {
     tokens: number;
     cost_usd: number | null;
-    caching_style: "none" | "auto" | "explicit" | null;
-    cache_blocks: { label: string; tokens: number; tier?: string | null }[];
+    cached: boolean | null;
+    cache_blocks: {
+      label: string;
+      tokens: number;
+      tier?: string | null;
+      cached?: boolean;
+      ttl_seconds?: number | null;
+    }[];
   } | null = $state(null);
   // Monotonic token guarding async preview races — bumps on every fetch; late
   // responses with a stale token drop their result.
@@ -189,11 +195,13 @@
       estimate = {
         tokens: preview.estimated_tokens ?? 0,
         cost_usd: preview.estimated_cost_usd ?? null,
-        caching_style: preview.caching_style ?? null,
+        cached: preview.cached ?? null,
         cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
           label: b.label,
           tokens: b.tokens,
           tier: b.tier,
+          cached: b.cached,
+          ttl_seconds: b.ttl_seconds,
         })),
       };
     } catch {

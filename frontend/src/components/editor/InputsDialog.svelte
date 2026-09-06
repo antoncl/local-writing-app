@@ -135,7 +135,7 @@
           <span class="chat-estimate-sep">·</span>
           <span class="chat-estimate-cost">{formatCostEur(estimate.cost_usd)}</span>
         {/if}
-        {#if estimate.caching_style === "explicit" && estimate.cache_blocks.length > 1}
+        {#if estimate.cache_blocks.some((b) => b.ttl_seconds != null) && estimate.cache_blocks.length > 1}
           <span class="chat-estimate-sep">·</span>
           {#each estimate.cache_blocks as block, i}
             <span class="chat-estimate-chip">{block.label} {formatTokens(block.tokens)}</span>

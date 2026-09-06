@@ -159,6 +159,39 @@ class PromotePromptTests(unittest.TestCase):
         self.assertEqual(promoted.overridden_fields, [])
         self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
 
+    def test_leftover_override_on_a_cascaded_include_member_is_settled_too(self) -> None:
+        # The cascade promotes each include-closure member through the same
+        # single-node write, so a member's leftover is settled like the prompt's own.
+        self._write_ancestor_prompt(
+            self.series, "snip", "Snip", body="Voice guidance.", entry_type="prompt:snippet", metadata={"color": "slate"}
+        )
+        self.service.save_prompt_entry(
+            "snip",
+            SavePromptEntryRequest(
+                title="Snip", body="Voice guidance.", entry_type="prompt:snippet", metadata={"color": "amber"}
+            ),
+        )
+        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+        (self.root / "prompts").mkdir(exist_ok=True)
+        shutil.move(self.series / "prompts" / "snip.md", self.root / "prompts" / "snip.md")
+        node_index_gate.invalidate()
+        self.service.save_prompt_entry(
+            "snip",
+            SavePromptEntryRequest(
+                title="Snip", body="Voice guidance.", entry_type="prompt:snippet", metadata={"color": "moss"}
+            ),
+        )
+        self._write_ancestor_prompt(self.root, "prompta", "Prompt A", body='{% include "snip" %}\n')
+        self.assertEqual(self.service.preview_prompt_promotion("prompta", self.series_layer_id).also_promoted, ["Snip"])
+
+        self.service.promote_prompt_entry("prompta", self.series_layer_id)
+
+        snip = self.service.read_prompt_entry("snip")
+        self.assertEqual(snip.source_layer_id, self.series_layer_id)
+        self.assertEqual(snip.metadata.get("color"), "moss")
+        self.assertEqual(snip.overridden_fields, [])
+        self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
+
     def test_promote_prompt_refuses_inherited(self) -> None:
         self._write_ancestor_prompt(self.universe, "genprompt", "General Prompt")
 

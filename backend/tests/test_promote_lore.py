@@ -356,7 +356,13 @@ class PromoteLoreTests(unittest.TestCase):
         opened = self.service.read_lore_entry("alice")
         self.assertEqual(opened.metadata.get("mood"), "serene")
         self.assertEqual(opened.overridden_fields, [])
-        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")), "the leftover is the setup")
+        # A sync tool's conflict copy duplicates the leftover. The collector folds
+        # every file with the target, so settling only the first would leave one
+        # to activate — the promotion has to settle all of them.
+        leftover = next((self.root / OVERRIDES_FOLDER).glob("*.md"))
+        shutil.copy(leftover, leftover.with_name("Alice (override) (conflicted copy).md"))
+        node_index_gate.invalidate()
+        self.assertEqual(len(list((self.root / OVERRIDES_FOLDER).glob("*.md"))), 2, "the leftovers are the setup")
 
     def test_leftover_override_is_removed_when_nothing_stays_behind(self) -> None:
         self._hand_moved_with_a_leftover_override()

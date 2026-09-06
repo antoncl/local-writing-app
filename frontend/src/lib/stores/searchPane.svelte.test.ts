@@ -54,8 +54,10 @@ describe("SearchPaneController", () => {
     vi.mocked(api.search).mockReturnValueOnce(first).mockReturnValueOnce(second);
 
     const c = new SearchPaneController(run);
-    c.setQuery("a");
-    c.setQuery("ab");
+    c.query = "a";
+    void c.fire();
+    c.query = "ab";
+    void c.fire();
 
     // The SECOND fire's response lands first...
     resolveSecond({ query: "ab", hits: [hit("y")] });
@@ -67,6 +69,57 @@ describe("SearchPaneController", () => {
     await Promise.resolve();
 
     expect(c.hits).toEqual([hit("y")]);
+  });
+
+  it("swallows a superseded rejection but rethrows a current one to run", async () => {
+    // `run` here is a wrapper that catches and records, so the assertions can
+    // tell "no error reached run" apart from "an error reached run".
+    const calls: Array<"ok" | "error"> = [];
+    const recordingRun = async (action: () => Promise<void>) => {
+      try {
+        await action();
+        calls.push("ok");
+        return true;
+      } catch {
+        calls.push("error");
+        return false;
+      }
+    };
+
+    let rejectFirst!: (error: Error) => void;
+    let resolveSecond!: (value: { query: string; hits: SearchHit[] }) => void;
+    const first = new Promise<{ query: string; hits: SearchHit[] }>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    const second = new Promise<{ query: string; hits: SearchHit[] }>((resolve) => {
+      resolveSecond = resolve;
+    });
+    vi.mocked(api.search).mockReturnValueOnce(first).mockReturnValueOnce(second);
+
+    const c = new SearchPaneController(recordingRun);
+    c.query = "a";
+    const firstFire = c.fire();
+    c.query = "ab";
+    const secondFire = c.fire();
+
+    // The current (second) query resolves...
+    resolveSecond({ query: "ab", hits: [hit("y")] });
+    await secondFire;
+    // ...then the superseded (first) query rejects late — swallowed, not
+    // surfaced through `run`.
+    rejectFirst(new Error("boom"));
+    await firstFire;
+
+    expect(calls).toEqual(["ok", "ok"]);
+
+    // A rejection of the CURRENT call still reaches `run`.
+    vi.mocked(api.search).mockReset();
+    vi.mocked(api.search).mockRejectedValueOnce(new Error("boom again"));
+    const c2 = new SearchPaneController(recordingRun);
+    c2.query = "z";
+    await c2.fire();
+
+    expect(calls).toEqual(["ok", "ok", "error"]);
   });
 
   it("setMatchCase(true) fires with match_case: true", async () => {

@@ -42,24 +42,37 @@
       })),
   );
 
-  // Split an excerpt around case-insensitive matches of `q` so the match can be
-  // wrapped in <mark>. Only the excerpt is highlighted — never the path/line.
-  function segments(text: string, q: string): { text: string; hit: boolean }[] {
+  // Split an excerpt around matches of `q` so the match can be wrapped in
+  // <mark>. Only the excerpt is highlighted — never the path/line. The regex
+  // is built the same way the backend builds its search pattern (`_compile_query`
+  // in `search.py`): the mark must show exactly what the backend matched
+  // (ADR-0085 §3 options) — a case-insensitive substring mark under Match case
+  // highlights the very occurrences the toggle excluded.
+  function segments(
+    text: string,
+    q: string,
+    matchCase: boolean,
+    wholeWord: boolean,
+  ): { text: string; hit: boolean }[] {
     if (!q) return [{ text, hit: false }];
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const source = wholeWord ? `(?<!\\w)${escaped}(?!\\w)` : escaped;
+    const re = new RegExp(source, matchCase ? "g" : "gi");
     const out: { text: string; hit: boolean }[] = [];
-    const lower = text.toLowerCase();
-    const needle = q.toLowerCase();
     let from = 0;
-    for (;;) {
-      const at = lower.indexOf(needle, from);
-      if (at < 0) {
-        if (from < text.length) out.push({ text: text.slice(from), hit: false });
-        break;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(text))) {
+      const at = match.index;
+      const matched = match[0];
+      if (matched.length === 0) {
+        re.lastIndex += 1;
+        continue;
       }
       if (at > from) out.push({ text: text.slice(from, at), hit: false });
-      out.push({ text: text.slice(at, at + q.length), hit: true });
-      from = at + q.length;
+      out.push({ text: matched, hit: true });
+      from = at + matched.length;
     }
+    if (from < text.length) out.push({ text: text.slice(from), hit: false });
     return out;
   }
 
@@ -117,7 +130,7 @@
         <NodeRow title={`${hit.path}:${hit.line}`} onClick={() => onOpenHit(hit)}>
           {#snippet detailSlot()}
             <small class="search-excerpt"
-              >{#each segments(hit.excerpt, ctrl.lastQuery) as seg}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</small
+              >{#each segments(hit.excerpt, ctrl.lastQuery, ctrl.lastMatchCase, ctrl.lastWholeWord) as seg}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</small
             >
           {/snippet}
         </NodeRow>

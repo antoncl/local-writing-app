@@ -93,6 +93,21 @@ describe("Search pane — results render", () => {
     expect(screen.getByText("scenes/act-1/arrival.md:12")).toBeInTheDocument();
   });
 
+  it("Enter cancels the pending debounce so the delayed onChange never double-fires", async () => {
+    vi.mocked(api.search).mockResolvedValue({ query: "arrival", hits: [] });
+    render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "arrival" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    // No tick between input and Enter: the debounced onChange is still
+    // pending when Enter fires. It must be cancelled, not merely raced.
+    vi.advanceTimersByTime(300);
+    await tick();
+
+    expect(api.search).toHaveBeenCalledTimes(1);
+  });
+
   it("re-fires with match_case: true when Match case is toggled", async () => {
     vi.mocked(api.search).mockResolvedValue({ query: "arrival", hits: [] });
     render(Search, { props: { run, onOpenHit: () => {} } });
@@ -178,6 +193,45 @@ describe("Search pane — results render", () => {
 
     const labels = screen.getAllByText(/^(Scenes|Plot|Research|Project|Widget)$/).map((el) => el.textContent);
     expect(labels).toEqual(["Scenes", "Plot", "Research", "Widget", "Project"]);
+  });
+
+  it("highlights only the exact match under Match case + Whole word (ADR-0085 §3)", async () => {
+    // "Aetherian" contains "Aetheria" as a prefix — Match case alone would
+    // still mark it, so this exercises both toggles together.
+    const excerpt = "Aetheria rose. aetheria fell. The Aetherian guard slept.";
+    vi.mocked(api.search).mockResolvedValue({
+      query: "Aetheria",
+      hits: [hit("scenes/act-1/arrival.md", 12, excerpt)],
+    });
+    const { container } = render(Search, { props: { run, onOpenHit: () => {} } });
+
+    await fireEvent.click(screen.getByRole("checkbox", { name: "Match case" }));
+    await fireEvent.click(screen.getByRole("checkbox", { name: "Whole word" }));
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "Aetheria" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    const marks = container.querySelectorAll("mark");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe("Aetheria");
+  });
+
+  it("highlights every case/prefix variant with neither toggle on", async () => {
+    const excerpt = "Aetheria rose. aetheria fell. The Aetherian guard slept.";
+    vi.mocked(api.search).mockResolvedValue({
+      query: "aetheria",
+      hits: [hit("scenes/act-1/arrival.md", 12, excerpt)],
+    });
+    const { container } = render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "aetheria" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    const marks = container.querySelectorAll("mark");
+    expect(marks).toHaveLength(3);
   });
 
   it("does not query on an empty search with TODOs off", async () => {

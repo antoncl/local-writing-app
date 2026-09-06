@@ -248,6 +248,23 @@ class QueryOptionsTests(SearchCorpusTestCase):
         self.assertTrue(any(h.kind == "lore" for h in every_kind), every_kind)
         self.assertTrue(any(h.kind == "manuscript" for h in every_kind), every_kind)
 
+    def test_whole_word_matches_a_punctuation_bounded_occurrence(self) -> None:
+        # `\bfoo!\b` degenerates: the trailing "!" is itself a non-word char,
+        # so `\b` finds no boundary between "!" and a following space (both
+        # non-word) — missing the standalone "foo!" entirely — while it DOES
+        # find a boundary between "!" and the "b" of "foo!bar" (non-word to
+        # word), wrongly matching there instead. The lookarounds
+        # (`(?<!\w)...(?!\w)`) test the query's own edges against \w, so they
+        # get both right: standalone "foo!" matches, "foo!bar" doesn't.
+        self._new_scene("Scene", "Say foo! now, and foo!bar")
+
+        hits = self.service.search(SearchRequest(query="foo!", whole_word=True)).hits
+
+        body_hits = [h for h in hits if h.field == "body"]
+        self.assertEqual(len(body_hits), 1, body_hits)
+        hit = body_hits[0]
+        self.assertEqual(hit.excerpt[hit.start : hit.end], "foo!")
+
     def test_include_open_todos_still_matches_through_the_compiled_pattern(self) -> None:
         self._new_scene(
             "Scene With Todo",

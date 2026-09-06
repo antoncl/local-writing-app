@@ -83,6 +83,12 @@
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === "Enter" && onEnter) {
       event.preventDefault();
+      // Enter fires the consumer immediately; a still-pending debounced
+      // `onChange` would otherwise fire a duplicate ~150 ms later.
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = undefined;
+      }
       onEnter();
       return;
     }

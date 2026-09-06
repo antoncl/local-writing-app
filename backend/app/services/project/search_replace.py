@@ -307,8 +307,9 @@ class SearchReplaceMixin:
             saved = dispatch.save(file_id, dispatch.to_request(read, new_body))
         except ProjectServiceError as exc:
             if exc.status_code == 409:
-                # The save's own conflict check is the backstop (see the
-                # prompt-revision edge in the module docstring).
+                # The save's own conflict check is the backstop: it compares the
+                # same revision the read handed out (module docstring), so a 409
+                # here is a real move on disk between the read above and the save.
                 return [_stale(hit) for hit in body_hits], False
             # Any other refusal (e.g. a 422 from validate_scene_markdown when
             # the replacement introduces raw HTML or a broken table) is this

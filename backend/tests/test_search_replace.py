@@ -7,6 +7,7 @@ single-layer project) and `OverrideRevisionRefreshTests`/`InheritedLoreTests`
 
 from __future__ import annotations
 
+import shutil
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -306,6 +307,56 @@ class InheritedReplaceTests(unittest.TestCase):
         self.assertEqual(response.outcomes[0].status, "not_replaceable")
         self.assertEqual(response.outcomes[0].reason, "inherited")
         self.assertEqual(response.replaced_nodes, 0)
+
+    def test_owned_prompt_with_a_leftover_override_replaces_with_the_corpus_revision(self) -> None:
+        # #1850 end to end: the book overrode a series prompt, then the prompt moved
+        # into the book and the override file stayed behind, still targeting an id
+        # the book now OWNS. Corpus revision, read revision and the owned save's
+        # conflict check must all be the same composite, or the replace is `stale`
+        # forever (the save used to check the plain file revision).
+        (self.series / "prompts").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            self.series / "prompts" / "revise.md",
+            "revise",
+            "Revise plotline",
+            "prompt:general",
+            {"color": "slate"},
+            "Aetheria needs revising.",
+            extra={"inputs": []},
+            omit_empty_metadata=True,
+        )
+        self.service.save_prompt_entry(
+            "revise",
+            SavePromptEntryRequest(
+                title="Revise plotline",
+                body="Aetheria needs revising.",
+                entry_type="prompt:general",
+                metadata={"color": "amber"},
+            ),
+        )
+        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+        (self.root / "prompts").mkdir(exist_ok=True)
+        shutil.move(self.series / "prompts" / "revise.md", self.root / "prompts" / "revise.md")
+        node_index_gate.invalidate()
+
+        opened = self.service.read_prompt_entry("revise")
+        self.assertTrue(opened.editable)
+        self.assertNotEqual(opened.revision, self.service._revision(self.root / "prompts" / "revise.md"))
+        hit = next(
+            h
+            for h in self.service.search(SearchRequest(query="aetheria")).hits
+            if h.file_id == "revise" and h.field == "body"
+        )
+        self.assertEqual(hit.revision, opened.revision)
+        self.assertTrue(hit.owned)
+
+        response = self.service.replace(ReplaceRequest(replacement="Aetherion", hits=[_hit_ref(hit)]))
+
+        self.assertEqual(response.outcomes[0].status, "replaced")
+        self.assertEqual(response.replaced_nodes, 1)
+        after = self.service.read_prompt_entry("revise")
+        self.assertEqual(after.body.strip(), "Aetherion needs revising.")
+        self.assertEqual(after.revision, response.outcomes[0].revision)
 
 
 class UndispatchedKindTests(SearchReplaceTestCase):

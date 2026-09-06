@@ -359,22 +359,54 @@ class PromotionMixin:
         # `dest` — the precondition the override write below depends on.
         node_index_gate.invalidate()
 
+        self._settle_origin_override(root, entry_id, full.title, travels_metadata, stays_metadata)
+        return self.read_lore_entry(entry_id)
+
+    def _settle_origin_override(
+        self,
+        root,
+        entry_id: str,
+        title: str,
+        travels_metadata: dict[str, Any],
+        stays_metadata: dict[str, Any],
+    ) -> None:
+        """The origin's override files for `entry_id` are the promotion's to
+        settle (#1854): every one of them removed, then the stay-behind written
+        fresh if there is one.
+
+        Until this moment the node was owned here, and a read at the owning
+        scope ignores any override targeting it (`read_lore_entry` /
+        `read_prompt_entry` fold onto an inherited winner only), so a file under
+        `<root>/overrides/` aimed at this id was inert here: left behind when
+        the node's file was moved into this layer outside the app (fork-to-here
+        drops its own override for exactly this reason, `fork_lore_entry`). The
+        node is inherited again from here on, and that file would fold onto it —
+        a delta the author never saw, activating silently. Removing ALL matching
+        files, not the first, is what makes this hold when a sync tool's
+        conflict copy has duplicated the leftover: the collector folds every
+        file with the target, so one survivor would activate just the same.
+
+        Only the origin's own files. An override for this id at a layer above
+        the origin belongs to that project; it folded for that layer's other
+        descendants before and folds for this one after — so the "what you saw
+        is what you get" of ADR-0078 §9 holds for the origin's own leftover,
+        not against an ancestor's override the author could not see from here.
+
+        `_delete_node_files` patches the index/corpus through the write funnel
+        and `_write_override_file` invalidates outright; the explicit invalidate
+        makes the post-state cold regardless of which branch ran.
+        """
+        leftovers = tuple(self._override_files_for_target(root, entry_id))
+        if leftovers:
+            self._delete_node_files(leftovers)
         if stays_metadata:
             rows = self._diff_metadata_to_override_rows(
                 base=travels_metadata,
                 submitted={**travels_metadata, **stays_metadata},
                 field_types=self._schema_field_types(self.read_metadata_schema()),
             )
-            self._write_override_file(root, entry_id, full.title, rows)
-            # `_write_override_file` writes under `<root>/overrides/`, which
-            # `_maintain_index_after_write` already routes to a full
-            # `node_index_gate.invalidate()` (an override fans out like a
-            # schema edit) — this second call is a harmless no-op belt-and-
-            # braces, kept explicit so the ordering here does not depend on
-            # reading that unrelated module's internals to trust.
-            node_index_gate.invalidate()
-
-        return self.read_lore_entry(entry_id)
+            self._write_override_file(root, entry_id, title, rows)
+        node_index_gate.invalidate()
 
     # --- prompt promotion (ADR-0078 slice 3, #1663) --------------------------
 
@@ -529,14 +561,7 @@ class PromotionMixin:
         # resolves this id as inherited from `dest`.
         node_index_gate.invalidate()
 
-        if stays_metadata:
-            rows = self._diff_metadata_to_override_rows(
-                base=travels_metadata,
-                submitted={**travels_metadata, **stays_metadata},
-                field_types=self._schema_field_types(self.read_metadata_schema()),
-            )
-            self._write_override_file(root, entry_id, full.title, rows)
-            node_index_gate.invalidate()
+        self._settle_origin_override(root, entry_id, full.title, travels_metadata, stays_metadata)
 
     def promote_prompt_entry(self, entry_id: str, target_layer_id: str) -> PromptEntry:
         """Commit the promotion computed by `_partition_prompt_promotion`

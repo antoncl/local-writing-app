@@ -12,6 +12,7 @@ Same fixture chain as `test_promote_lore.py`:
 
 from __future__ import annotations
 
+import shutil
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -20,7 +21,10 @@ from unittest.mock import patch
 from _builtins import builtin_prompt_id
 from layer_fixtures import declare_full_chain
 
+from app.models import SavePromptEntryRequest
 from app.services.project.errors import ProjectServiceError
+from app.services.project.node_index_gate import node_index_gate
+from app.services.project.overrides import OVERRIDES_FOLDER
 from app.services.project.references import INCLUDE_FIELD_ID
 from app.services.project_service import ProjectService
 
@@ -124,6 +128,69 @@ class PromotePromptTests(unittest.TestCase):
         self.assertEqual(promoted.source_layer_id, self.series_layer_id)
         self._find_prompt_path(self.series, "genprompt")  # raises if absent
         self.assertEqual(list((self.root / "prompts").glob("*.md")), [])
+
+    def test_leftover_override_is_removed_by_the_promotion(self) -> None:
+        # #1854: the book overrode a series prompt's colour, then the prompt moved
+        # into the book (a prompt clone mints a new id, so for prompts this is a
+        # hand move) and the override file stayed behind. Owned, the prompt ignores
+        # it; promoted back up, the leftover would fold onto it again.
+        self._write_ancestor_prompt(self.series, "revise", "Revise plotline", metadata={"color": "slate"})
+        def save(color: str) -> None:
+            self.service.save_prompt_entry(
+                "revise",
+                SavePromptEntryRequest(
+                    title="Revise plotline", body="", entry_type="prompt:general", metadata={"color": color}
+                ),
+            )
+
+        save("amber")
+        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+        (self.root / "prompts").mkdir(exist_ok=True)
+        shutil.move(self.series / "prompts" / "revise.md", self.root / "prompts" / "revise.md")
+        node_index_gate.invalidate()
+        save("moss")
+        opened = self.service.read_prompt_entry("revise")
+        self.assertEqual(opened.metadata.get("color"), "moss")
+        self.assertEqual(opened.overridden_fields, [])
+
+        promoted = self.service.promote_prompt_entry("revise", self.series_layer_id)
+
+        self.assertEqual(promoted.metadata.get("color"), "moss")
+        self.assertEqual(promoted.overridden_fields, [])
+        self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
+
+    def test_leftover_override_on_a_cascaded_include_member_is_settled_too(self) -> None:
+        # The cascade promotes each include-closure member through the same
+        # single-node write, so a member's leftover is settled like the prompt's own.
+        self._write_ancestor_prompt(
+            self.series, "snip", "Snip", body="Voice guidance.", entry_type="prompt:snippet", metadata={"color": "slate"}
+        )
+        self.service.save_prompt_entry(
+            "snip",
+            SavePromptEntryRequest(
+                title="Snip", body="Voice guidance.", entry_type="prompt:snippet", metadata={"color": "amber"}
+            ),
+        )
+        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+        (self.root / "prompts").mkdir(exist_ok=True)
+        shutil.move(self.series / "prompts" / "snip.md", self.root / "prompts" / "snip.md")
+        node_index_gate.invalidate()
+        self.service.save_prompt_entry(
+            "snip",
+            SavePromptEntryRequest(
+                title="Snip", body="Voice guidance.", entry_type="prompt:snippet", metadata={"color": "moss"}
+            ),
+        )
+        self._write_ancestor_prompt(self.root, "prompta", "Prompt A", body='{% include "snip" %}\n')
+        self.assertEqual(self.service.preview_prompt_promotion("prompta", self.series_layer_id).also_promoted, ["Snip"])
+
+        self.service.promote_prompt_entry("prompta", self.series_layer_id)
+
+        snip = self.service.read_prompt_entry("snip")
+        self.assertEqual(snip.source_layer_id, self.series_layer_id)
+        self.assertEqual(snip.metadata.get("color"), "moss")
+        self.assertEqual(snip.overridden_fields, [])
+        self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
 
     def test_promote_prompt_refuses_inherited(self) -> None:
         self._write_ancestor_prompt(self.universe, "genprompt", "General Prompt")

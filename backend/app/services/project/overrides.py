@@ -233,15 +233,25 @@ class LayerOverridesMixin:
 
     def _override_file_for_target(self, layer_folder: Path, target_id: str) -> Path | None:
         """The existing override file this layer holds for `target_id`, matched on
-        the `target` front-matter key, or None."""
+        the `target` front-matter key, or None. One file per (layer, target) is the
+        writer's shape; when a sync tool's conflict copy has broken it, this is the
+        first in sorted order — the one `_write_override_file` reuses."""
+        files = self._override_files_for_target(layer_folder, target_id)
+        return files[0] if files else None
+
+    def _override_files_for_target(self, layer_folder: Path, target_id: str) -> list[Path]:
+        """EVERY override file this layer holds for `target_id`, sorted. Normally
+        one; more when a file has been duplicated outside the app (a "conflicted
+        copy", an Explorer "- Copy"). The collector folds all of them, so a seam
+        that settles a layer's override for a target must settle all of them."""
         folder = layer_folder / OVERRIDES_FOLDER
         if not folder.is_dir():
-            return None
-        for path in sorted(folder.glob("*.md")):
-            front_matter = self._read_front_matter_only(path)
-            if front_matter.get("target") == target_id:
-                return path
-        return None
+            return []
+        return [
+            path
+            for path in sorted(folder.glob("*.md"))
+            if self._read_front_matter_only(path).get("target") == target_id
+        ]
 
     # --- the fold -----------------------------------------------------------
 

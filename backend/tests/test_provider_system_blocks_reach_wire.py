@@ -20,11 +20,21 @@ import json
 import pytest
 
 from app.services.ai.profiles.base import ChatCall
+from app.services.ai.profiles.cache_strategy import (
+    ANTHROPIC_BREAKPOINTS,
+    NO_CACHE,
+    PREFIX_CACHE,
+)
 
 # A distinctive string that only appears in the "lore" (non-first) system block,
 # so its presence in the wire proves the block was not dropped.
 LORE = "LORE-SENTINEL-9f3a2c"
 BASE = "BASE SYSTEM PROMPT"
+
+# ADR-0084 Slice 1: the old caching_style string param is now a CacheStrategy
+# instance; this table keeps the parametrization's cases the same three shapes
+# (markers / collapse-cached / collapse-uncached).
+_STRATEGY_BY_STYLE = {"explicit": ANTHROPIC_BREAKPOINTS, "auto": PREFIX_CACHE, "none": NO_CACHE}
 
 
 def _blocks() -> list[dict]:
@@ -54,8 +64,9 @@ def _wire(obj) -> str:
 def test_openrouter_system_messages_carry_every_block(style: str) -> None:
     from app.services.ai.profiles.openrouter import openrouter_system_messages
 
-    wire = _wire(openrouter_system_messages(BASE, _blocks(), style))
-    assert LORE in wire, f"lore system block dropped for caching_style={style!r}"
+    plan = _STRATEGY_BY_STYLE[style].plan(_blocks())
+    wire = _wire(openrouter_system_messages(plan))
+    assert LORE in wire, f"lore system block dropped for cache strategy kind={style!r}"
     assert BASE in wire
 
 
@@ -87,6 +98,7 @@ def test_profile_build_messages_carry_lore(cls_path: str) -> None:
 def test_anthropic_system_blocks_carry_every_block() -> None:
     from app.services.ai.profiles.anthropic import anthropic_system_blocks
 
-    wire = _wire(anthropic_system_blocks(_blocks()))
+    plan = ANTHROPIC_BREAKPOINTS.plan(_blocks())
+    wire = _wire(anthropic_system_blocks(plan))
     assert LORE in wire, "anthropic system payload dropped the lore block"
     assert BASE in wire

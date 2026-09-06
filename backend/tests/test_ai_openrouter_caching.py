@@ -1,15 +1,19 @@
 """OpenRouter dispatch path — system message construction and session
 stickiness. We can't call the live API in tests, so we pin the pure
-body-builder functions instead. If OpenRouter's caching protocol
-changes (or a routed-to provider's caching_style changes), these
-red-line clearly.
+plan-encoder function instead (ADR-0084 Slice 1: it takes a `CachePlan`, not
+raw blocks + a style string). If OpenRouter's caching protocol changes (or a
+routed-to provider's cache strategy changes), these red-line clearly.
 """
 
 from __future__ import annotations
 
-from app.services.ai.profiles.openrouter import (
-    caching_style_for_model,
+from app.services.ai.profiles.base import ChatCall
+from app.services.ai.profiles.cache_strategy import (
+    ANTHROPIC_BREAKPOINTS,
+    NO_CACHE,
+    PREFIX_CACHE,
 )
+from app.services.ai.profiles.openrouter import OpenRouterProfile
 from app.services.ai.profiles.openrouter import (
     openrouter_extra_body as _openrouter_extra_body,
 )
@@ -17,55 +21,65 @@ from app.services.ai.profiles.openrouter import (
     openrouter_system_messages as _openrouter_system_messages,
 )
 
-# ---- caching_style_for_model (prefix lookup) ------------------------------
+# ---- cache_strategy (prefix lookup) ----------------------------------------
 
 
-def test_caching_style_anthropic_is_explicit():
-    assert caching_style_for_model("anthropic/claude-sonnet-4-6") == "explicit"
+def test_cache_strategy_anthropic_is_anthropic_breakpoints():
+    profile = OpenRouterProfile(api_key="")
+    assert profile.cache_strategy("anthropic/claude-sonnet-4-6") is ANTHROPIC_BREAKPOINTS
 
 
-def test_caching_style_google_is_explicit():
-    # Gemini 2.5 routes need explicit breakpoints per the OpenRouter doc.
-    assert caching_style_for_model("google/gemini-2.5-flash") == "explicit"
+def test_cache_strategy_google_is_anthropic_breakpoints():
+    # Gemini 2.5 routes are the known carry-over — Slice 2 (#1064) gives them
+    # their own strategy.
+    profile = OpenRouterProfile(api_key="")
+    assert profile.cache_strategy("google/gemini-2.5-flash") is ANTHROPIC_BREAKPOINTS
 
 
-def test_caching_style_openai_is_auto():
-    assert caching_style_for_model("openai/gpt-4.1") == "auto"
+def test_cache_strategy_openai_is_prefix_cache():
+    profile = OpenRouterProfile(api_key="")
+    assert profile.cache_strategy("openai/gpt-4.1") is PREFIX_CACHE
+    assert profile.cache_strategy("deepseek/deepseek-chat") is PREFIX_CACHE
 
 
-def test_caching_style_unknown_prefix_is_none():
-    assert caching_style_for_model("unknown/some-model") == "none"
+def test_cache_strategy_unknown_prefix_is_no_cache():
+    profile = OpenRouterProfile(api_key="")
+    assert profile.cache_strategy("unknown/some-model") is NO_CACHE
 
 
-def test_caching_style_empty_id_is_none():
-    assert caching_style_for_model("") == "none"
+def test_cache_strategy_empty_id_is_no_cache():
+    profile = OpenRouterProfile(api_key="")
+    assert profile.cache_strategy("") is NO_CACHE
 
 
 # ---- _openrouter_system_messages (the meaty part) -------------------------
 
 
 def test_no_system_returns_empty_list():
-    assert _openrouter_system_messages("", None, "explicit") == []
-    assert _openrouter_system_messages("", [], "explicit") == []
+    assert _openrouter_system_messages(ANTHROPIC_BREAKPOINTS.plan([])) == []
+    assert _openrouter_system_messages(NO_CACHE.plan([])) == []
 
 
 def test_plain_string_system_yields_string_content():
-    out = _openrouter_system_messages("You are helpful.", None, "auto")
+    call = ChatCall(
+        model="openai/gpt-4.1", system_prompt="You are helpful.", messages=[], max_tokens=1
+    )
+    plan = OpenRouterProfile(api_key="").cache_plan_for(call)
+    out = _openrouter_system_messages(plan)
     assert out == [{"role": "system", "content": "You are helpful."}]
 
 
 def test_blocks_with_explicit_caching_emit_cache_control():
-    # ADR-0060 §5: blocks carry only a `tier`; this adapter maps it to cache_control
+    # ADR-0060 §5: blocks carry only a `tier`; this strategy maps it to cache_control
     # + ttl (stable → 1h, volatile → 5m); a tier-less block gets no marker.
-    out = _openrouter_system_messages(
-        "",
+    plan = ANTHROPIC_BREAKPOINTS.plan(
         [
             {"text": "stable header", "tier": "stable"},
             {"text": "lore block", "tier": "volatile"},
             {"text": "no tier", "tier": None},
-        ],
-        "explicit",
+        ]
     )
+    out = _openrouter_system_messages(plan)
     assert len(out) == 1
     msg = out[0]
     assert msg["role"] == "system"
@@ -89,66 +103,110 @@ def test_blocks_with_explicit_caching_emit_cache_control():
 def test_blocks_with_auto_caching_collapse_to_string():
     # Auto-cache providers (OpenAI/DeepSeek/Grok) index on prefix bytes,
     # so cache_control markers would be wire bloat with no upside.
-    out = _openrouter_system_messages(
-        "",
+    plan = PREFIX_CACHE.plan(
         [
             {"text": "stable", "tier": "stable"},
             {"text": "volatile", "tier": "volatile"},
-        ],
-        "auto",
+        ]
     )
+    out = _openrouter_system_messages(plan)
     assert out == [{"role": "system", "content": "stable\n\nvolatile"}]
 
 
 def test_blocks_with_none_caching_also_collapse():
-    out = _openrouter_system_messages(
-        "",
-        [{"text": "stable", "tier": "stable"}],
-        "none",
-    )
+    plan = NO_CACHE.plan([{"text": "stable", "tier": "stable"}])
+    out = _openrouter_system_messages(plan)
     assert out == [{"role": "system", "content": "stable"}]
 
 
 def test_explicit_blocks_drop_empty_text():
-    out = _openrouter_system_messages(
-        "",
+    plan = ANTHROPIC_BREAKPOINTS.plan(
         [
             {"text": "real", "tier": "stable"},
             {"text": "", "tier": "stable"},
-        ],
-        "explicit",
+        ]
     )
+    out = _openrouter_system_messages(plan)
     parts = out[0]["content"]
     assert len(parts) == 1
     assert parts[0]["text"] == "real"
 
 
 def test_explicit_all_empty_blocks_returns_empty_list():
-    out = _openrouter_system_messages(
-        "",
-        [{"text": "", "tier": "stable"}],
-        "explicit",
-    )
+    plan = ANTHROPIC_BREAKPOINTS.plan([{"text": "", "tier": "stable"}])
+    out = _openrouter_system_messages(plan)
     assert out == []
 
 
 def test_unknown_tier_gets_no_marker():
-    out = _openrouter_system_messages(
-        "",
-        [{"text": "x", "tier": "bogus"}],
-        "explicit",
-    )
+    plan = ANTHROPIC_BREAKPOINTS.plan([{"text": "x", "tier": "bogus"}])
+    out = _openrouter_system_messages(plan)
     parts = out[0]["content"]
     # A tier the adapter doesn't recognise isn't cached — no garbage to the API.
     assert "cache_control" not in parts[0]
 
 
-def test_system_prompt_used_when_blocks_absent_explicit():
-    # No blocks → string path still works even with explicit caching style.
-    out = _openrouter_system_messages(
-        "fallback string", None, "explicit"
+def test_system_prompt_used_when_blocks_absent_auto():
+    # No blocks → string path still works on a non-marker (auto/prefix-cache) route.
+    call = ChatCall(
+        model="openai/gpt-4.1",
+        system_prompt="fallback string",
+        messages=[],
+        max_tokens=1,
     )
+    plan = OpenRouterProfile(api_key="").cache_plan_for(call)
+    out = _openrouter_system_messages(plan)
     assert out == [{"role": "system", "content": "fallback string"}]
+
+
+def test_system_prompt_wrapped_and_marked_when_blocks_absent_on_explicit_route():
+    # DEPARTURE from the pre-split pure-function test (ADR-0084 Slice 1, #1832):
+    # the old `openrouter_system_messages(system_prompt, None, "explicit")` never
+    # wrapped a bare prompt into a marker — only a non-empty `system_blocks` list
+    # took the markers branch. `cache_plan_for` is now the ONE place that builds
+    # a strategy's input (ADR-0084 §2), shared verbatim with the Anthropic native
+    # profile, which already wrapped-and-marked a bare system prompt via
+    # `anthropic_system_with_cache`. Unifying the two fixes a real inconsistency
+    # between "the same effective strategy" on two transports; it does not change
+    # production wire, because both live call sites (`chat.py`,
+    # `system_prompt_cache_blocks`) already pre-wrap the prompt into
+    # `system_blocks` before it reaches a profile — `system_blocks=None` here is
+    # a synthetic case the profile has never received from the app in practice.
+    call = ChatCall(
+        model="anthropic/claude-sonnet-4-6",
+        system_prompt="fallback string",
+        messages=[],
+        max_tokens=1,
+    )
+    plan = OpenRouterProfile(api_key="").cache_plan_for(call)
+    out = _openrouter_system_messages(plan)
+    assert out == [
+        {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "fallback string",
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"},
+                }
+            ],
+        }
+    ]
+
+
+def test_all_empty_blocks_falls_back_to_system_prompt():
+    # OpenRouter's fall-back to the bare prompt when every block is empty
+    # (ADR-0084 §2) — built once in `cache_plan_for`, not re-implemented here.
+    call = ChatCall(
+        model="deepseek/deepseek-chat",
+        system_prompt="P",
+        system_blocks=[{"text": "", "tier": "stable"}],
+        messages=[],
+        max_tokens=1,
+    )
+    plan = OpenRouterProfile(api_key="").cache_plan_for(call)
+    out = _openrouter_system_messages(plan)
+    assert out == [{"role": "system", "content": "P"}]
 
 
 # ---- _openrouter_extra_body (session_id) ----------------------------------

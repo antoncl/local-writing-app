@@ -92,6 +92,9 @@ Sources: OpenRouter's prompt-caching guide and the baked-in profile data
 | **OpenAI** | automatic | none | Auto-caches prefixes ≥1024 tokens. `system_blocks` are **collapsed to a string** — breakpoints/TTLs stripped. Placement changes nothing on the wire; only prefix *stability* matters. |
 | **Ollama** | none | none | No network cache. Blocks collapsed to a string. |
 
+Since ADR-0084 Slice 1 the per-provider realisation is a `CacheStrategy` object
+(`profiles/cache_strategy.py`); this table is descriptive.
+
 ### 3b. Cost multipliers (what a cache write/read costs vs. a normal input token)
 
 | Provider | Cache **write** | Cache **read** | TTL |

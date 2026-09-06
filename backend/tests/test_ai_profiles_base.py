@@ -18,6 +18,7 @@ from app.services.ai.profiles.base import (
     ProviderProfile,
     family_supports_temperature,
 )
+from app.services.ai.profiles.cache_strategy import NO_CACHE
 
 
 class _DummyProfile(ProviderProfile):
@@ -34,8 +35,8 @@ class _DummyProfile(ProviderProfile):
     async def list_models(self, *, force_refresh: bool = False):
         return []
 
-    def caching_style(self, model_id: str):
-        return "none"
+    def cache_strategy(self, model_id: str):
+        return NO_CACHE
 
     def count_tokens(self, text: str, model_id: str) -> int:
         return len(text)

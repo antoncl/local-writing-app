@@ -359,6 +359,17 @@ describe("cacheTermSecondsFor", () => {
     expect(cacheTermSecondsFor(estimate)).toBe(300);
   });
 
+  it("picks the stable-tier block's term, not the first non-null one", () => {
+    // A volatile block can carry its own ttl_seconds (e.g. Gemini's 300s
+    // prefix term also covers the trailing volatile lore) — the countdown
+    // must still key off the STABLE tier, not whichever block comes first.
+    const estimate = estimateWith([
+      { label: "volatile lore", tokens: 1, tier: "volatile", ttl_seconds: 300 },
+      { label: "system", tokens: 1, tier: "stable", ttl_seconds: 3600 },
+    ]);
+    expect(cacheTermSecondsFor(estimate)).toBe(3600);
+  });
+
   it("returns null when no block carries a term (PrefixCache-shaped)", () => {
     const estimate = estimateWith([
       { label: "system", tokens: 10, tier: "stable", ttl_seconds: null, cached: true },

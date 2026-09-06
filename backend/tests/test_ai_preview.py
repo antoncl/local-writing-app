@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
@@ -1197,6 +1197,74 @@ class PreviewCostEstimateTests(unittest.TestCase):
         for block in unbound_body["cache_blocks"]:
             self.assertFalse(block["cached"])
             self.assertIsNone(block["ttl_seconds"])
+
+    def _write_assistant(self, filename: str, *, provider: str, model: str) -> str:
+        assistant_id = filename
+        folder = self.config_dir / "assistants"
+        (folder / f"{filename}.md").write_text(
+            "---\n"
+            f"id: {assistant_id}\n"
+            f"title: {assistant_id}\n"
+            "entry_type: assistant:assistant\n"
+            "metadata:\n"
+            f"  ai_provider: {provider}\n"
+            f"  ai_model: {model}\n"
+            "---\n",
+            encoding="utf-8",
+        )
+        return assistant_id
+
+    def test_bound_preview_projects_gemini_cache_plan_onto_blocks(self) -> None:
+        # ADR-0084 §3/§6: an OpenRouter-bound Gemini assistant projects the
+        # fixed 5-minute Gemini term onto the stable system block; the
+        # uncached user turn carries no ttl. `list_models` is stubbed so the
+        # test never reaches OpenRouter's live catalogue.
+        assistant_id = self._write_assistant(
+            "gemini", provider="openrouter", model="google/gemini-2.5-pro"
+        )
+        with patch(
+            "app.services.ai.profiles.openrouter.OpenRouterProfile.list_models",
+            new=AsyncMock(return_value=[]),
+        ):
+            response = self.client.post(
+                "/api/ai/preview", json=self._basic_preview_body(assistant_id=assistant_id)
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["cached"])
+        system_block, user_block = body["cache_blocks"]
+        self.assertEqual(system_block["role"], "system")
+        self.assertTrue(system_block["cached"])
+        self.assertEqual(system_block["ttl_seconds"], 300)
+        self.assertEqual(user_block["role"], "user")
+        self.assertFalse(user_block["cached"])
+        self.assertIsNone(user_block["ttl_seconds"])
+
+    def test_bound_preview_projects_deepseek_cache_plan_onto_blocks(self) -> None:
+        # ADR-0084 §3/§6: DeepSeek routes through OpenRouter's auto/prefix
+        # cache strategy (collapse mode, no per-block ttl) — `cached` is True
+        # but no block projects a `ttl_seconds`; the user turn still reads
+        # uncached because it carries no tier.
+        assistant_id = self._write_assistant(
+            "deepseek", provider="openrouter", model="deepseek/deepseek-chat"
+        )
+        with patch(
+            "app.services.ai.profiles.openrouter.OpenRouterProfile.list_models",
+            new=AsyncMock(return_value=[]),
+        ):
+            response = self.client.post(
+                "/api/ai/preview", json=self._basic_preview_body(assistant_id=assistant_id)
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["cached"])
+        system_block, user_block = body["cache_blocks"]
+        self.assertEqual(system_block["role"], "system")
+        self.assertTrue(system_block["cached"])
+        self.assertIsNone(system_block["ttl_seconds"])
+        self.assertEqual(user_block["role"], "user")
+        self.assertFalse(user_block["cached"])
+        self.assertIsNone(user_block["ttl_seconds"])
 
     def test_existing_fields_unchanged(self) -> None:
         # Smoke: V2 additions don't break v1 callers — old fields still in shape.

@@ -143,6 +143,13 @@
           {/each}
         {/if}
       </div>
+      {#if estimate.warnings.length > 0}
+        <div class="chat-estimate-warnings">
+          {#each estimate.warnings as warning}
+            <p class="chat-estimate-warning">{warning}</p>
+          {/each}
+        </div>
+      {/if}
     {/if}
     <div class="inputs-dialog-actions">
       <button type="button" onclick={() => onCancel()}>Cancel</button>
@@ -280,4 +287,7 @@
     font-variant-numeric: tabular-nums;
     opacity: 0.85;
   }
+
+  .chat-estimate-warnings { padding: 0 8px 4px; }
+  .chat-estimate-warning { margin: 2px 0 0; font-size: var(--fs-xs); color: var(--danger); }
 </style>

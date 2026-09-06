@@ -56,3 +56,20 @@ describe("InputsDialog — callback props (runes port of its CustomEvents)", () 
     expect(onUpdateAssistant).toHaveBeenCalledWith({ assistantId: "asst_1" });
   });
 });
+
+describe("InputsDialog — soft-fail warnings (#1544)", () => {
+  it("shows the preview's soft-fail warnings under the estimate strip (#1544)", () => {
+    const estimate = {
+      tokens: 120,
+      cost_usd: null,
+      cached: null,
+      cache_blocks: [],
+      warnings: [
+        'Context pick "Arc tracker" is a saved view using `nest`, which the send path cannot evaluate — it contributed nothing.',
+      ],
+    };
+    const { container } = render(InputsDialog, { props: { entry, estimate } });
+    expect(container.querySelectorAll(".chat-estimate-warning").length).toBe(1);
+    expect(container.textContent).toContain("Arc tracker");
+  });
+});

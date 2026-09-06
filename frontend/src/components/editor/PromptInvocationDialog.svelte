@@ -26,6 +26,7 @@
   import { api } from "@/lib/api";
   import type {
     AssistantEntrySummary,
+    ChatEstimate,
     EditableDocument,
     LoreEntrySummary,
     PromptEntrySummary,
@@ -87,18 +88,7 @@
   let lastInvokedInputs: Record<string, unknown> = {};
   // V2: token + cost estimate for the about-to-fire continuation. Recomputed
   // when the dialog's prompt / drafts / assistant change. Null when closed.
-  let estimate: {
-    tokens: number;
-    cost_usd: number | null;
-    cached: boolean | null;
-    cache_blocks: {
-      label: string;
-      tokens: number;
-      tier?: string | null;
-      cached?: boolean;
-      ttl_seconds?: number | null;
-    }[];
-  } | null = $state(null);
+  let estimate: ChatEstimate | null = $state(null);
   // Monotonic token guarding async preview races — bumps on every fetch; late
   // responses with a stale token drop their result.
   let estimateToken = 0;
@@ -196,6 +186,7 @@
         tokens: preview.estimated_tokens ?? 0,
         cost_usd: preview.estimated_cost_usd ?? null,
         cached: preview.cached ?? null,
+        warnings: preview.warnings ?? [],
         cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
           label: b.label,
           tokens: b.tokens,

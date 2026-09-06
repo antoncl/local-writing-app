@@ -12,6 +12,7 @@ const ESTIMATE = {
   tokens: 1500,
   cost_usd: 2,
   cached: null as boolean | null,
+  warnings: [] as string[],
   cache_blocks: [],
 };
 
@@ -115,5 +116,25 @@ describe("ChatMetaLine", () => {
       sessionCostUsd: null,
     });
     expect(container.textContent).toContain("cached · no stated term");
+  });
+
+  it("renders one line per soft-fail warning (#1544)", () => {
+    const estimate = {
+      ...ESTIMATE,
+      warnings: [
+        'Context pick "Arc tracker" is a saved view using `nest`, which the send path cannot evaluate — it contributed nothing.',
+        "Context pick \"Scenes\" selects 'scene' nodes, which the send path cannot resolve — it contributed nothing.",
+      ],
+    };
+    const { container } = render(ChatMetaLine, { estimate, ttlChips: [], sessionCostUsd: null });
+    expect(container.querySelectorAll(".cbv-meta-warning").length).toBe(2);
+    expect(container.textContent).toContain("Arc tracker");
+    expect(container.textContent).toContain("'scene'");
+    expect(container.querySelector(".cbv-meta-line")).toBeInTheDocument();
+  });
+
+  it("renders no warning block when the list is empty", () => {
+    const { container } = render(ChatMetaLine, { estimate: ESTIMATE, ttlChips: [], sessionCostUsd: null });
+    expect(container.querySelector(".cbv-meta-warnings")).not.toBeInTheDocument();
   });
 });

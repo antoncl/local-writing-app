@@ -404,6 +404,10 @@ export type ChatEstimate = {
   tokens: number;
   cost_usd: number | null;
   cached: boolean | null;
+  // Soft-fail sentences from the preview's coercion chain (#1544): a context
+  // pick that contributed nothing (unsupported saved-view operator / roster
+  // kind). Shown on the send surface so the writer sees the loss BEFORE sending.
+  warnings: string[];
   // Block summaries for the readout — label + size (+ tier). Deliberately
   // narrower than PreviewCacheBlock: no role/text, this is telemetry about
   // the payload, not the payload.

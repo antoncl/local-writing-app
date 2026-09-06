@@ -42,7 +42,8 @@ Only this flat-membership subset is supported — the shapes the picker emits pl
 safe set algebra. The relational/projection operators that can appear only in a
 hand-built saved view (`nest`, `field_of`, `var`, `orphans_of`) raise
 `UnsupportedSelectorExpr`; the AI-context caller fails soft (the pick contributes
-no members rather than a wrong set).
+no members rather than a wrong set), and, since #1544, surfaces that on the
+preview's warnings so the writer sees the loss.
 """
 
 from __future__ import annotations

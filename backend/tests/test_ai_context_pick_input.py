@@ -466,6 +466,97 @@ def test_tag_selector_pick_materializes_to_tagged_lore_end_to_end(tmp_path, monk
     assert rendered.lore_invoked is True
 
 
+def test_unsupported_saved_view_pick_surfaces_a_preview_warning(tmp_path, monkeypatch):
+    # #1544 option c: a saved-view pick whose expr uses an operator outside the
+    # flat-membership subset (`nest` here) still fails soft — it contributes no
+    # members — but now that loss rides along on `rendered.warnings` instead of
+    # only a server log line.
+    monkeypatch.setattr(
+        "app.services.machine_settings.config_path",
+        lambda: tmp_path / "machine_settings.yaml",
+    )
+    from app.services.ai.preview import PreviewRequest, build_preview
+    from app.services.project_service import ProjectService
+
+    service = ProjectService.created_at(tmp_path / "project", "Picks")
+
+    picks = json.dumps(
+        [
+            {
+                "id": "view:arc",
+                "kind": "view",
+                "title": "Arc tracker",
+                "selector": {
+                    "kind": "lore",
+                    "expr": {"nest": {"of": {"type": "lore:note"}, "by": "parent"}},
+                },
+            }
+        ]
+    )
+    rendered, _ = build_preview(
+        service,
+        PreviewRequest(
+            template_source='{% role "system" %}count={{ inputs.picks | length }}{% endrole %}',
+            target_scene_id="",
+            session_id=None,
+            inputs={"picks": picks},
+            text_before="",
+            text_after="",
+            commit=False,
+        ),
+    )
+    text = "".join(m.text for m in rendered.messages)
+    assert "count=0" in text
+    assert len(rendered.warnings) == 1
+    warning = rendered.warnings[0]
+    assert "Arc tracker" in warning
+    assert "`nest`" in warning
+    assert "contributed nothing" in warning
+
+
+def test_unsupported_roster_kind_pick_surfaces_a_preview_warning(tmp_path, monkeypatch):
+    # A selector over a roster kind the backend can't build (here `scene`, which
+    # isn't `lore` or in `_GENERIC_ROSTER_KINDS`) fails soft the same way — and
+    # now warns rather than silently dropping the pick.
+    monkeypatch.setattr(
+        "app.services.machine_settings.config_path",
+        lambda: tmp_path / "machine_settings.yaml",
+    )
+    from app.services.ai.preview import PreviewRequest, build_preview
+    from app.services.project_service import ProjectService
+
+    service = ProjectService.created_at(tmp_path / "project", "Picks")
+
+    picks = json.dumps(
+        [
+            {
+                "id": "view:scenes",
+                "kind": "view",
+                "title": "All scenes",
+                "selector": {"kind": "scene", "expr": {"type": "scene"}},
+            }
+        ]
+    )
+    rendered, _ = build_preview(
+        service,
+        PreviewRequest(
+            template_source='{% role "system" %}count={{ inputs.picks | length }}{% endrole %}',
+            target_scene_id="",
+            session_id=None,
+            inputs={"picks": picks},
+            text_before="",
+            text_after="",
+            commit=False,
+        ),
+    )
+    text = "".join(m.text for m in rendered.messages)
+    assert "count=0" in text
+    assert len(rendered.warnings) == 1
+    warning = rendered.warnings[0]
+    assert "'scene'" in warning
+    assert "contributed nothing" in warning
+
+
 def test_tag_pick_lore_reaches_the_send_lore_tiers_end_to_end(tmp_path, monkeypatch):
     # The FAITHFUL reproduction (field report): the real chat renders lore via
     # `{% do use(inputs.lore) %}{{ use_lore() }}` — use_lore() emits nothing; the

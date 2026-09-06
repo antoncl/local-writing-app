@@ -11,11 +11,11 @@
 // coords derived from the trigger's `getBoundingClientRect()`.
 //
 // The one home for body-portaled popover positioning: SwatchPicker,
-// ColoredSelect, the schema icon and type-grid popovers, and NodePickerPopover
-// all use it (#1586/#1587 retired their inline copies of this maths). Known
-// holdout: `treeAddMenu.svelte.ts` still hand-rolls a rect + flip estimate
-// (#1839). `chrome/Popover.svelte` is a different, deliberate mechanism — an
-// in-flow popover against a `position: relative` wrapper, never portaled.
+// ColoredSelect, the schema icon and type-grid popovers, NodePickerPopover, and
+// the tree add-menu shell in ViewNodeList all use it (#1586/#1587/#1839 retired
+// their inline copies of this maths). `chrome/Popover.svelte` is a different,
+// deliberate mechanism — an in-flow popover against a `position: relative`
+// wrapper, never portaled.
 //
 // Contract (mirrors portalToBody's): mount this only while the popover is open
 // (behind an `{#if}`); give the popover a stable class so the caller's

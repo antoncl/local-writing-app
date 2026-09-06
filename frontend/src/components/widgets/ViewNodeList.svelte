@@ -120,6 +120,7 @@
   import { TreeDrag } from "@/components/widgets/treeDrag.svelte";
   import { TreeRename } from "@/components/widgets/treeRename.svelte";
   import { TreeAddMenu } from "@/components/widgets/treeAddMenu.svelte";
+  import { anchoredPopover } from "@/lib/actions/anchoredPopover";
   import { CollapseGuard } from "@/components/widgets/treeCollapseGuard";
   import { evaluateView, filterGroups, type EvalBindings, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
   import { leafGroup, nodeSet } from "@/lib/views/viewResult";
@@ -536,12 +537,12 @@
 </div>
 
 {#if addMenu && add && add.key !== null}
-  <!-- Add-child popover shell: wrapper-owned open-state/position/dismissal; the
-       consumer's `addMenu` snippet supplies the heading + type choices. -->
-  <div
-    class="row-add-popover"
-    style={add.pos ? `top: ${add.pos.top}px; right: ${add.pos.right}px` : ""}
-  >
+  <!-- Add-child popover shell: wrapper-owned open-state/anchor/dismissal, positioned
+       by `anchoredPopover` (body-portaled, right-aligned to the "+" that opened it,
+       #1839); the consumer's `addMenu` snippet supplies the heading + type choices.
+       The dismissal handlers below match `.row-add-popover` by ancestry, so the
+       portal does not affect them. -->
+  <div class="row-add-popover" use:anchoredPopover={{ anchor: add.anchor, align: "right", gap: 4 }}>
     {@render addMenu({ parentId: add.parentId, close: () => add.close() })}
   </div>
 {/if}

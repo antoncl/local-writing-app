@@ -197,14 +197,39 @@ class LayerOverridesMixin:
         """Collect one layer's override files into `index.overrides_by_target`.
 
         Called per layer from the index builder — a parallel pass to the node
-        collectors, so overrides never join `candidates`/`by_id`/edges as nodes."""
+        collectors, so overrides never join `candidates`/`by_id`/edges as nodes.
+
+        **One file per (layer, target)** is the writer's shape
+        (`_write_override_file` reuses the existing file), and every reader of
+        "this layer's override for X" (`_override_file_for_target`) takes the
+        first in sorted order. The collector enforces the same (#1856): when a
+        sync tool's "conflicted copy" or an Explorer "- Copy" has duplicated a
+        file, only the first is folded and each later one is a warning naming
+        both — before this, every copy folded and the later filename silently
+        won, so an edit through the app (which rewrites the first) appeared not
+        to take."""
         folder = layer.folder / OVERRIDES_FOLDER
         if not folder.is_dir():
             return
+        first_for_target: dict[str, Path] = {}
         for path in sorted(folder.glob("*.md")):
             record = self._read_override_record(path, layer)
-            if record is not None:
-                index.overrides_by_target.setdefault(record.target_id, []).append(record)
+            if record is None:
+                continue
+            first = first_for_target.get(record.target_id)
+            if first is not None:
+                index.add_diagnostic(
+                    layer_id=layer.id,
+                    path=path,
+                    message=(
+                        f"Layer override {path.name} duplicates {first.name} for {record.target_id} "
+                        f"at {layer.label}; only {first.name} is applied — remove or merge the copy."
+                    ),
+                    is_error=False,
+                )
+                continue
+            first_for_target[record.target_id] = path
+            index.overrides_by_target.setdefault(record.target_id, []).append(record)
 
     def _write_override_file(
         self, layer_folder: Path, target_id: str, target_title: str, rows: list[MutationSetRow]

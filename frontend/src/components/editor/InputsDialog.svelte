@@ -144,7 +144,7 @@
         {/if}
       </div>
       {#if estimate.warnings.length > 0}
-        <div class="chat-estimate-warnings" role="status">
+        <div class="chat-estimate-warnings">
           {#each estimate.warnings as warning}
             <p class="chat-estimate-warning">{warning}</p>
           {/each}

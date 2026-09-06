@@ -71,7 +71,7 @@
     <!-- #1544: a context pick the send path could not resolve. Same quiet
          metadata register as the line above, in the danger colour so it is
          not mistaken for a cost readout. One sentence per dropped pick. -->
-    <div class="cbv-meta-warnings" role="status">
+    <div class="cbv-meta-warnings">
       {#each estimate.warnings as warning}
         <p class="cbv-meta-warning">{warning}</p>
       {/each}

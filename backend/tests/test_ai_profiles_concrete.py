@@ -16,6 +16,11 @@ import pytest
 
 from app.services.ai.profiles import CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.anthropic import AnthropicProfile
+from app.services.ai.profiles.cache_strategy import (
+    ANTHROPIC_BREAKPOINTS,
+    NO_CACHE,
+    PREFIX_CACHE,
+)
 from app.services.ai.profiles.ollama import OllamaProfile
 from app.services.ai.profiles.openai import OpenAIProfile
 from app.services.ai.profiles.openrouter import OpenRouterProfile
@@ -85,14 +90,30 @@ def test_anthropic_caching_style_is_explicit():
     assert profile.caching_style("claude-sonnet-4-6") == "explicit"
 
 
+def test_anthropic_cache_strategy_is_anthropic_breakpoints():
+    # ADR-0084: caching_style is now derived from cache_strategy.
+    profile = AnthropicProfile(api_key="")
+    assert profile.cache_strategy("claude-sonnet-4-6") is ANTHROPIC_BREAKPOINTS
+
+
 def test_openai_caching_style_is_auto():
     profile = OpenAIProfile(api_key="")
     assert profile.caching_style("gpt-4o") == "auto"
 
 
+def test_openai_cache_strategy_is_prefix_cache():
+    profile = OpenAIProfile(api_key="")
+    assert profile.cache_strategy("gpt-4o") is PREFIX_CACHE
+
+
 def test_ollama_caching_style_is_none():
     profile = OllamaProfile(host="http://localhost:11434")
     assert profile.caching_style("llama3.2") == "none"
+
+
+def test_ollama_cache_strategy_is_no_cache():
+    profile = OllamaProfile(host="http://localhost:11434")
+    assert profile.cache_strategy("llama3.2") is NO_CACHE
 
 
 def test_openrouter_caching_style_by_prefix():
@@ -105,6 +126,19 @@ def test_openrouter_caching_style_by_prefix():
     assert profile.caching_style("deepseek/deepseek-chat") == "auto"
     # Unknown prefix: safe default.
     assert profile.caching_style("totallymadeup/x") == "none"
+
+
+def test_openrouter_cache_strategy_by_prefix():
+    profile = OpenRouterProfile(api_key="")
+    # Anthropic / Google routes need explicit markup — Google is the known
+    # carry-over (Slice 2 gives it its own strategy).
+    assert profile.cache_strategy("anthropic/claude-sonnet-4") is ANTHROPIC_BREAKPOINTS
+    assert profile.cache_strategy("google/gemini-2.5-pro") is ANTHROPIC_BREAKPOINTS
+    # OpenAI / DeepSeek / Groq route through to auto-cache providers.
+    assert profile.cache_strategy("openai/gpt-4o") is PREFIX_CACHE
+    assert profile.cache_strategy("deepseek/deepseek-chat") is PREFIX_CACHE
+    # Unknown prefix: safe default.
+    assert profile.cache_strategy("totallymadeup/x") is NO_CACHE
 
 
 def test_anthropic_falls_back_to_bakein_without_key():

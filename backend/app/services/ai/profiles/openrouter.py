@@ -21,7 +21,6 @@ import httpx
 
 from app.services.ai.profiles._loader import baked_in_for, looks_like_reasoning
 from app.services.ai.profiles.base import (
-    CachingStyle,
     Capability,
     CapabilityTier,
     ChatCall,
@@ -32,7 +31,13 @@ from app.services.ai.profiles.base import (
     UsageMetrics,
     default_token_count,
 )
-from app.services.ai.profiles.explicit_cache import TIER_TTL, cache_control_indices
+from app.services.ai.profiles.cache_strategy import (
+    ANTHROPIC_BREAKPOINTS,
+    NO_CACHE,
+    PREFIX_CACHE,
+    CachePlan,
+    CacheStrategy,
+)
 from app.services.ai.profiles.openai_compatible import OpenAICompatibleProfile
 
 if TYPE_CHECKING:
@@ -41,20 +46,21 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# Provider-prefix → caching style. Drawn from OpenRouter's caching guide
+# Provider-prefix → cache strategy. Drawn from OpenRouter's caching guide
 # (https://openrouter.ai/docs/guides/best-practices/prompt-caching).
 # Prefix is the slash-separated leading segment of the OpenRouter model id.
-_CACHING_BY_PREFIX: dict[str, CachingStyle] = {
-    "anthropic": "explicit",
-    "alibaba": "explicit",
-    "qwen": "explicit",       # alias used by some routes
-    "google": "explicit",     # Gemini 2.5 needs explicit breakpoints
-    "openai": "auto",
-    "deepseek": "auto",
-    "x-ai": "auto",
-    "xai": "auto",
-    "groq": "auto",
-    "moonshotai": "auto",
+_STRATEGY_BY_PREFIX: dict[str, CacheStrategy] = {
+    "anthropic": ANTHROPIC_BREAKPOINTS,
+    "alibaba": ANTHROPIC_BREAKPOINTS,
+    "qwen": ANTHROPIC_BREAKPOINTS,       # alias used by some routes
+    # known carry-over — Slice 2 (#1064) gives Gemini its own strategy
+    "google": ANTHROPIC_BREAKPOINTS,     # Gemini 2.5 needs explicit breakpoints
+    "openai": PREFIX_CACHE,
+    "deepseek": PREFIX_CACHE,
+    "x-ai": PREFIX_CACHE,
+    "xai": PREFIX_CACHE,
+    "groq": PREFIX_CACHE,
+    "moonshotai": PREFIX_CACHE,
 }
 
 
@@ -78,13 +84,7 @@ class OpenRouterProfile(OpenAICompatibleProfile):
     def _build_messages(self, call: ChatCall) -> list[dict]:
         # Pass Anthropic-style cache_control markers through to routes that
         # cache explicitly; collapse to a plain string otherwise.
-        messages = list(
-            openrouter_system_messages(
-                call.system_prompt,
-                call.system_blocks,
-                self.caching_style(call.model),
-            )
-        )
+        messages = list(openrouter_system_messages(self.cache_plan_for(call)))
         messages.extend(call.messages)
         return messages
 
@@ -137,8 +137,11 @@ class OpenRouterProfile(OpenAICompatibleProfile):
         self._cache = descriptors
         return descriptors
 
-    def caching_style(self, model_id: str) -> CachingStyle:
-        return caching_style_for_model(model_id)
+    def cache_strategy(self, model_id: str) -> CacheStrategy:
+        if not model_id:
+            return NO_CACHE
+        prefix = model_id.split("/", 1)[0].lower()
+        return _STRATEGY_BY_PREFIX.get(prefix, NO_CACHE)
 
     def count_tokens(self, text: str, model_id: str) -> int:
         # OpenRouter routes to many providers; cl100k_base is wrong for
@@ -174,64 +177,27 @@ class OpenRouterProfile(OpenAICompatibleProfile):
         )
 
 
-def caching_style_for_model(model_id: str) -> CachingStyle:
-    """Module-level helper so the streaming dispatcher can branch without
-    instantiating a ProviderProfile. Mirrors the prefix lookup the
-    OpenRouterProfile.caching_style method does."""
-    if not model_id:
-        return "none"
-    prefix = model_id.split("/", 1)[0].lower()
-    return _CACHING_BY_PREFIX.get(prefix, "none")
+def openrouter_system_messages(plan: CachePlan) -> list[dict]:
+    """Render a `CachePlan` onto the OpenRouter `[system]` message list
+    (ADR-0084 §5). Never inspects `tier` — the plan already decided which
+    blocks carry a marker and what it says.
 
-
-def openrouter_system_messages(
-    system_prompt: str,
-    system_blocks: list[dict] | None,
-    caching_style: str,
-) -> list[dict]:
-    """Build the [system] message list for an OpenRouter chat call.
-
-    OpenRouter accepts Anthropic-style `cache_control` markers on individual
-    content blocks when the routed-to provider needs them explicitly
-    (anthropic/google/qwen). For auto-cache providers (openai/deepseek/grok)
-    markers are ignored, so we collapse to a plain string to keep the wire
-    small. Returns [] when there's nothing to send. Pure — no network/SDK.
-
-    ADR-0060 §5: the shared blocks carry only `{text, tier}`; the explicit routes
-    are the Anthropic family, so this uses the shared `explicit_cache` mapping
-    (tier → cache_control ttl, ≤4-marker cap) — the same translation the Anthropic
-    adapter uses.
+    In `markers` mode: one system message whose `content` is the block list,
+    with `cache_control` attached where the plan set one. In `collapse` mode:
+    one system message with the joined string. Returns [] when there's
+    nothing to send. Pure — no network/SDK.
     """
-    if system_blocks and caching_style == "explicit":
-        budget = cache_control_indices(system_blocks)
-        parts: list[dict] = []
-        for i, block in enumerate(system_blocks):
-            text = block.get("text") or ""
-            if not text:
-                continue
-            part: dict = {"type": "text", "text": text}
-            if i in budget:
-                part["cache_control"] = {
-                    "type": "ephemeral",
-                    "ttl": TIER_TTL[block["tier"]],
-                }
-            parts.append(part)
-        if parts:
-            return [{"role": "system", "content": parts}]
+    if not plan.blocks:
         return []
-    # caching_style != "explicit": collapse blocks to a single string
-    # (auto-cache providers index on prefix bytes, no markers needed;
-    # "none" providers don't cache anyway). The blocks already include the
-    # system prompt as their first block, so when present they are the whole
-    # system message — collapse ALL of them, not just fall back to the bare
-    # `system_prompt` (which would silently drop the lore + every later block
-    # on auto-cache providers like deepseek/openai/grok).
-    collapsed = system_prompt
-    if system_blocks:
-        collapsed = (
-            "\n\n".join(b.get("text", "") for b in system_blocks if b.get("text"))
-            or system_prompt
-        )
+    if plan.mode == "markers":
+        parts: list[dict] = []
+        for block in plan.blocks:
+            part: dict = {"type": "text", "text": block.text}
+            if block.marker:
+                part["cache_control"] = block.marker
+            parts.append(part)
+        return [{"role": "system", "content": parts}]
+    collapsed = plan.collapsed_text()
     if not collapsed:
         return []
     return [{"role": "system", "content": collapsed}]
@@ -270,7 +236,7 @@ def _row_to_descriptor(row: dict) -> ModelDescriptor:
     # heuristic. Anything we route to a known-cacheable provider gets
     # the capability flag for picker hints.
     prefix = model_id.split("/", 1)[0].lower()
-    if _CACHING_BY_PREFIX.get(prefix, "none") != "none":
+    if _STRATEGY_BY_PREFIX.get(prefix, NO_CACHE).caches:
         capabilities.add(Capability.CACHING)
     return ModelDescriptor(
         id=model_id,

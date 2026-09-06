@@ -152,7 +152,7 @@ class OpenAICompatibleProfile(ProviderProfile):
     """A provider reachable through the `openai` SDK against a base URL.
 
     Concrete subclasses implement the metadata methods (`list_models`,
-    `caching_style`, `count_tokens`, `extract_usage`, `from_settings`) and
+    `cache_strategy`, `count_tokens`, `extract_usage`, `from_settings`) and
     supply `_chat_base_url` / `_chat_api_key`. They inherit one `chat` and one
     `chat_stream`; OpenRouter overrides `_build_messages` / `_extra_body`
     (and `_stream_delta_events` / `_stream_timeout` for its plainer stream).
@@ -176,17 +176,14 @@ class OpenAICompatibleProfile(ProviderProfile):
     def _build_messages(self, call: ChatCall) -> list[dict]:
         """Default: prepend the system prompt as a single system message.
 
-        The plain OpenAI wire doesn't understand multi-block cache markers,
-        so when `system_blocks` are supplied they're collapsed to one string
-        (matching the pre-reshape dispatcher). OpenRouter overrides this to
-        pass the markers through on explicit-cache routes.
+        The plain OpenAI wire doesn't understand multi-block cache markers, so
+        `cache_plan_for`'s collapsed text is used regardless of strategy —
+        with `NoCache`/`PrefixCache` (every current OpenAI-compatible non-
+        OpenRouter provider) the output is byte-identical to the old join.
+        OpenRouter overrides this to pass markers through on `markers`-mode
+        strategies.
         """
-        system = call.system_prompt
-        if call.system_blocks:
-            collapsed = "\n\n".join(
-                b.get("text", "") for b in call.system_blocks if b.get("text")
-            )
-            system = collapsed or call.system_prompt
+        system = self.cache_plan_for(call).collapsed_text()
         messages: list[dict] = []
         if system:
             messages.append({"role": "system", "content": system})

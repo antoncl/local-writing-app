@@ -13,13 +13,13 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from app.services.ai.profiles.base import (
-    CachingStyle,
     Capability,
     CapabilityTier,
     ModelDescriptor,
     UsageMetrics,
     default_token_count,
 )
+from app.services.ai.profiles.cache_strategy import NO_CACHE, CacheStrategy
 from app.services.ai.profiles.openai_compatible import OpenAICompatibleProfile
 
 if TYPE_CHECKING:
@@ -115,9 +115,9 @@ class OllamaProfile(OpenAICompatibleProfile):
         version = str(payload.get("version") or "") or None
         return True, version, None
 
-    def caching_style(self, model_id: str) -> CachingStyle:
+    def cache_strategy(self, model_id: str) -> CacheStrategy:
         # Ollama doesn't cache server-side via the OpenAI-compat shim.
-        return "none"
+        return NO_CACHE
 
     def count_tokens(self, text: str, model_id: str) -> int:
         # Ollama hosts many model families (llama, mistral, qwen, ...).

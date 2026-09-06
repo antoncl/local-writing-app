@@ -15,11 +15,11 @@ import httpx
 
 from app.services.ai.profiles._loader import baked_in_for, merge_live_catalogue
 from app.services.ai.profiles.base import (
-    CachingStyle,
     ModelDescriptor,
     UsageMetrics,
     default_token_count,
 )
+from app.services.ai.profiles.cache_strategy import PREFIX_CACHE, CacheStrategy
 from app.services.ai.profiles.openai_compatible import OpenAICompatibleProfile
 from app.services.ai.profiles.price_oracle import priced_with_oracle
 
@@ -79,10 +79,10 @@ class OpenAIProfile(OpenAICompatibleProfile):
         self._cache = await priced_with_oracle(result)
         return self._cache
 
-    def caching_style(self, model_id: str) -> CachingStyle:
+    def cache_strategy(self, model_id: str) -> CacheStrategy:
         # OpenAI caches input transparently for prompts ≥ 1024 tokens;
         # no request markup needed. Dispatch layer sends as-is.
-        return "auto"
+        return PREFIX_CACHE
 
     def count_tokens(self, text: str, model_id: str) -> int:
         return default_token_count(text)

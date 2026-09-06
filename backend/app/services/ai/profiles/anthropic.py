@@ -17,7 +17,6 @@ import httpx
 
 from app.services.ai.profiles._loader import baked_in_for, merge_live_catalogue
 from app.services.ai.profiles.base import (
-    CachingStyle,
     ChatCall,
     ChatOutcome,
     ModelDescriptor,
@@ -30,7 +29,11 @@ from app.services.ai.profiles.base import (
     default_token_count,
     family_supports_temperature,
 )
-from app.services.ai.profiles.explicit_cache import TIER_TTL, cache_control_indices
+from app.services.ai.profiles.cache_strategy import (
+    ANTHROPIC_BREAKPOINTS,
+    CachePlan,
+    CacheStrategy,
+)
 from app.services.ai.profiles.price_oracle import priced_with_oracle
 
 # Default Anthropic extended-thinking budget when ai_thinking is enabled.
@@ -123,11 +126,11 @@ class AnthropicProfile(ProviderProfile):
         self._cache = await priced_with_oracle(result)
         return self._cache
 
-    def caching_style(self, model_id: str) -> CachingStyle:
+    def cache_strategy(self, model_id: str) -> CacheStrategy:
         # All current Anthropic models support explicit prompt caching via
         # `cache_control: ephemeral`. We don't gate per-model because every
         # production model in the bake-in supports it.
-        return "explicit"
+        return ANTHROPIC_BREAKPOINTS
 
     def count_tokens(self, text: str, model_id: str) -> int:
         # Anthropic's SDK has an async count_tokens endpoint that's accurate
@@ -184,14 +187,13 @@ class AnthropicProfile(ProviderProfile):
         # save-time validation; new incompatible combos are refused at save.
         if call.temperature is not None and anthropic_supports_temperature(call.model):
             _set_temperature(kwargs, call.temperature)
-        # system_blocks (multi-block, per-block cache markers) overrides the
-        # single-string system_prompt. Caller picks one or the other.
-        if call.system_blocks:
-            system_payload = anthropic_system_blocks(call.system_blocks)
-            if system_payload:
-                kwargs["system"] = system_payload
-        elif call.system_prompt:
-            kwargs["system"] = anthropic_system_with_cache(call.system_prompt)
+        # ADR-0084 §2/§5: `cache_plan_for` builds the strategy's input (the
+        # system-prompt-only wrap included) and picks the strategy; the encoder
+        # only renders the resulting plan onto the wire.
+        plan = self.cache_plan_for(call)
+        payload = anthropic_system_blocks(plan)
+        if payload:
+            kwargs["system"] = payload
         return kwargs
 
     def _apply_thinking(self, kwargs: dict, call: ChatCall) -> None:
@@ -291,45 +293,22 @@ class AnthropicProfile(ProviderProfile):
         yield StreamFinal(stop_reason=stop_reason, usage=usage)
 
 
-def anthropic_system_with_cache(system_prompt: str):
-    """Wrap a single system prompt as one cacheable (stable-tier) content block —
-    the single-block path for the plain-system-string case. A system prompt is the
-    most stable content, so it caches at the stable (1h) ttl."""
+def anthropic_system_blocks(plan: CachePlan) -> list[dict] | str:
+    """Render a `CachePlan` onto Anthropic's `system` content-array (ADR-0084 §5).
 
-    if not system_prompt:
-        return ""
-    return anthropic_system_blocks([{"text": system_prompt, "tier": "stable"}])
-
-
-def anthropic_system_blocks(blocks: list[dict]):
-    """Convert the shared volatility-ordered blocks into Anthropic's content-array.
-
-    Each input block is `{"text": str, "tier": "stable"|"volatile"|None}` (ADR-0060
-    §5): the shared layer carries only the volatility tier, never Anthropic's ttl or
-    breakpoint vocabulary. The adapter-side mapping (`explicit_cache`) turns a tier
-    into a `cache_control` ephemeral marker at the tier's ttl (`stable` → 1h,
-    `volatile` → 5m) and enforces Anthropic's ≤4-marker cap; a block with no tier,
-    or beyond the cap, gets none. Anthropic caches the prefix UP TO each marker, so
-    markers between stable sections let later turns reuse the cached prefix up to
-    the last unchanged marker.
-
-    Empty blocks (no text) are dropped. Empty input returns "" so the caller can
-    skip the `system` kwarg entirely.
+    Never inspects `tier` — the plan already decided which blocks carry a
+    marker and what it says. Empty input returns "" so the caller can skip
+    the `system` kwarg entirely. Anthropic caches the prefix UP TO each
+    marker, so markers between stable sections let later turns reuse the
+    cached prefix up to the last unchanged marker.
     """
 
-    if not blocks:
+    if not plan.blocks:
         return ""
-    budget = cache_control_indices(blocks)
     out: list[dict] = []
-    for i, block in enumerate(blocks):
-        text = block.get("text") or ""
-        if not text:
-            continue
-        sdk_block: dict = {"type": "text", "text": text}
-        if i in budget:
-            sdk_block["cache_control"] = {
-                "type": "ephemeral",
-                "ttl": TIER_TTL[block["tier"]],
-            }
+    for block in plan.blocks:
+        sdk_block: dict = {"type": "text", "text": block.text}
+        if block.marker:
+            sdk_block["cache_control"] = block.marker
         out.append(sdk_block)
-    return out if out else ""
+    return out

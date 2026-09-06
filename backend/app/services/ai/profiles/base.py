@@ -14,6 +14,12 @@ from datetime import date
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal
 
+from app.services.ai.profiles.cache_strategy import (
+    STYLE_BY_KIND,
+    CachePlan,
+    CacheStrategy,
+)
+
 if TYPE_CHECKING:
     from app.services.machine_settings import MachineSettings
 
@@ -480,9 +486,17 @@ class ProviderProfile(ABC):
         """
 
     @abstractmethod
+    def cache_strategy(self, model_id: str) -> CacheStrategy:
+        """The `CacheStrategy` this provider uses for `model_id` (ADR-0084 §4).
+        Stateless strategies are module-level singletons — return the
+        instance, never construct one."""
+
     def caching_style(self, model_id: str) -> CachingStyle:
-        """Tell the dispatch layer how to mark cacheable content for this
-        model. See `CachingStyle` for the contract."""
+        """How the dispatch layer should mark cacheable content for this
+        model, derived from `cache_strategy`. Kept for this slice (ADR-0084
+        Slice 1) for `preview.py`'s cache-cost gate and the `CACHING`
+        capability; retires in Slice 3 once those read the plan directly."""
+        return STYLE_BY_KIND[self.cache_strategy(model_id).kind]
 
     @abstractmethod
     def count_tokens(self, text: str, model_id: str) -> int:
@@ -532,6 +546,16 @@ class ProviderProfile(ABC):
         `ProviderError` for an expected failure; the dispatch layer wraps the
         events into its public StreamDone/StreamError.
         """
+
+    def cache_plan_for(self, call: ChatCall) -> CachePlan:
+        """The one place that builds a strategy's input (ADR-0084 §2): the
+        system-prompt-only wrap and OpenRouter's all-empty-blocks fallback to
+        the bare prompt live here and nowhere else. Both transports call this,
+        then hand the resulting `CachePlan` to their own encoder."""
+        blocks = [b for b in (call.system_blocks or []) if (b.get("text") or "")]
+        if not blocks and call.system_prompt:
+            blocks = [{"text": call.system_prompt, "tier": "stable"}]
+        return self.cache_strategy(call.model).plan(blocks)
 
     def supports_temperature(self, model_id: str) -> bool:
         """Whether the model accepts a `temperature` parameter on the

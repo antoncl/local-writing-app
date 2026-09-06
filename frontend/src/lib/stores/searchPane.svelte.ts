@@ -37,7 +37,18 @@ export type SearchPaneDeps = {
 // same as a stale hit — the pane never guesses a kind's dispatch itself.
 export type ReplaceEligibility = "ok" | "inherited" | "metadata" | "dirty" | "todo";
 
-export type LastReplace = { replaced: number; stale: number; skipped: number; nodes: number };
+// `rejected`/`detail` split out `not_replaceable/rejected` (a save that
+// refused the new content, e.g. a 422 from `validate_scene_markdown`) from
+// the generic `skipped` bucket — `detail` is the FIRST rejected outcome's
+// human message, for the summary line's `· 1 rejected: <detail>` clause.
+export type LastReplace = {
+  replaced: number;
+  stale: number;
+  skipped: number;
+  rejected: number;
+  detail: string | null;
+  nodes: number;
+};
 
 export class SearchPaneController {
   query = $state("");
@@ -163,12 +174,17 @@ export class SearchPaneController {
         let replaced = 0;
         let stale = 0;
         let skipped = 0;
+        let rejected = 0;
+        let detail: string | null = null;
         for (const outcome of res.outcomes) {
           if (outcome.status === "replaced") replaced += 1;
           else if (outcome.status === "stale") stale += 1;
-          else skipped += 1;
+          else if (outcome.reason === "rejected") {
+            rejected += 1;
+            if (detail === null && outcome.detail) detail = outcome.detail;
+          } else skipped += 1;
         }
-        this.lastReplace = { replaced, stale, skipped, nodes: res.replaced_nodes };
+        this.lastReplace = { replaced, stale, skipped, rejected, detail, nodes: res.replaced_nodes };
         await this.fire();
       });
     } finally {

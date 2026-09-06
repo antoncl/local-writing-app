@@ -34,12 +34,14 @@ from app.models import (
     SaveLoreEntryRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
+    SaveProjectNodeRequest,
     SavePromptEntryRequest,
     SaveResearchNoteRequest,
     SaveSceneRequest,
     SearchHit,
     SearchRequest,
 )
+from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project.overrides import OVERRIDES_FOLDER
 from app.services.project_service import ProjectService
@@ -472,6 +474,27 @@ class EveryReplaceableKindRoundTripsTests(SearchReplaceTestCase):
         self.assertEqual(after.metadata, before.metadata)
         self.assertEqual(after.template, before.template)
 
+    def test_project_node_round_trips(self) -> None:
+        node = self.service.read_project_node()
+        self.service.save_project_node(
+            SaveProjectNodeRequest(
+                title=node.title,
+                body="Aetheria project blurb",
+                base_revision=node.revision,
+                metadata={"author": "Ada"},
+            )
+        )
+        before = self.service.read_project_node()
+
+        self._replace_only_hit(before.id)
+
+        after = self.service.read_project_node()
+        self.assertEqual(after.body, "Aetherion project blurb\n")
+        self.assertEqual(after.title, before.title)
+        self.assertEqual(after.entry_type, before.entry_type)
+        self.assertEqual(after.metadata, before.metadata)
+        self.assertNotEqual(after.revision, before.revision)
+
 
 class OverlapTests(SearchReplaceTestCase):
     def test_hand_built_overlapping_hits_are_not_replaceable(self) -> None:
@@ -490,6 +513,62 @@ class OverlapTests(SearchReplaceTestCase):
         self.assertTrue(
             all(o.status == "not_replaceable" and o.reason == "overlap" for o in response.outcomes), response.outcomes
         )
+        self.assertEqual(response.replaced_nodes, 0)
+        unchanged = self.service.read_scene(scene_id)
+        self.assertEqual(unchanged.body, "Aetheria rose.\n")
+
+
+class SaveRejectionIsNodeOutcomeTests(SearchReplaceTestCase):
+    """A save that refuses the new content (a non-409 `ProjectServiceError`,
+    e.g. a 422 from `validate_scene_markdown`) is that node's outcome, not an
+    exception — earlier nodes in the same batch stay written."""
+
+    def test_second_nodes_save_rejection_does_not_orphan_the_first_nodes_write(self) -> None:
+        scene_a = self._new_scene("Scene A", "Aetheria rose.")
+        scene_b = self._new_scene("Scene B", "Aetheria fell.")
+        hit_a = self._body_hits("aetheria", scene_a)[0]
+        hit_b = self._body_hits("aetheria", scene_b)[0]
+
+        real_save_scene = self.service.save_scene
+
+        def side_effect(scene_id, request):
+            if scene_id == scene_a:
+                return real_save_scene(scene_id, request)
+            raise ProjectServiceError("no", 422)
+
+        with patch.object(ProjectService, "save_scene", side_effect=side_effect) as _spy:
+            response = self.service.replace(
+                ReplaceRequest(replacement="Aetherion", hits=[_hit_ref(hit_a), _hit_ref(hit_b)])
+            )
+
+        self.assertEqual(response.replaced_nodes, 1)
+        outcome_a = next(o for o in response.outcomes if o.file_id == scene_a)
+        outcome_b = next(o for o in response.outcomes if o.file_id == scene_b)
+        self.assertEqual(outcome_a.status, "replaced")
+        self.assertIsNotNone(outcome_a.revision)
+        self.assertEqual(outcome_b.status, "not_replaceable")
+        self.assertEqual(outcome_b.reason, "rejected")
+        self.assertEqual(outcome_b.detail, "no")
+
+        after_a = self.service.read_scene(scene_a)
+        after_b = self.service.read_scene(scene_b)
+        self.assertEqual(after_a.body, "Aetherion rose.\n")
+        self.assertEqual(after_b.body, "Aetheria fell.\n")
+
+    def test_raw_html_replacement_is_genuinely_rejected_by_the_scenes_own_save(self) -> None:
+        # A real trigger, not a patched one: `validate_scene_markdown` refuses
+        # raw HTML, so a replacement that introduces it is refused by the
+        # scene's own save, and that refusal becomes this node's outcome.
+        scene_id = self._new_scene("Scene", "Aetheria rose.")
+        [hit] = self._body_hits("aetheria", scene_id)
+
+        response = self.service.replace(ReplaceRequest(replacement="<b>x</b>", hits=[_hit_ref(hit)]))
+
+        self.assertEqual(len(response.outcomes), 1)
+        outcome = response.outcomes[0]
+        self.assertEqual(outcome.status, "not_replaceable")
+        self.assertEqual(outcome.reason, "rejected")
+        self.assertIn("raw HTML", outcome.detail or "")
         self.assertEqual(response.replaced_nodes, 0)
         unchanged = self.service.read_scene(scene_id)
         self.assertEqual(unchanged.body, "Aetheria rose.\n")

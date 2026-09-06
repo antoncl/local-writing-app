@@ -1402,6 +1402,7 @@ export type ReplaceOutcome = {
   end: number;
   status: ReplaceStatus;
   reason?: string | null;
+  detail?: string | null;
   revision?: string | null;
 };
 

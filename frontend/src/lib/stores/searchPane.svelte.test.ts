@@ -226,7 +226,7 @@ describe("SearchPaneController.replaceOne / replace (ADR-0085 §4)", () => {
     expect(deps.reconcile).toHaveBeenCalledTimes(1);
     expect(deps.reconcile).toHaveBeenCalledWith("a", "lore", "lore:character");
     expect(api.search).toHaveBeenCalled();
-    expect(c.lastReplace).toEqual({ replaced: 1, stale: 1, skipped: 0, nodes: 1 });
+    expect(c.lastReplace).toEqual({ replaced: 1, stale: 1, skipped: 0, rejected: 0, detail: null, nodes: 1 });
   });
 
   it("counts a not_replaceable outcome as skipped", async () => {
@@ -243,8 +243,47 @@ describe("SearchPaneController.replaceOne / replace (ADR-0085 §4)", () => {
 
     await c.replaceOne(hit("a"));
 
-    expect(c.lastReplace).toEqual({ replaced: 0, stale: 0, skipped: 1, nodes: 0 });
+    expect(c.lastReplace).toEqual({ replaced: 0, stale: 0, skipped: 1, rejected: 0, detail: null, nodes: 0 });
     expect(deps.reconcile).not.toHaveBeenCalled();
+  });
+
+  it("counts a not_replaceable/rejected outcome separately and carries its detail", async () => {
+    const deps = fakeDeps();
+    const c = new SearchPaneController(run, deps);
+    c.query = "old";
+    vi.mocked(api.search).mockResolvedValue({ query: "old", hits: [] });
+    vi.mocked(api.replace).mockResolvedValue(
+      response({
+        outcomes: [
+          { file_id: "a", start: 0, end: 3, status: "not_replaceable", reason: "rejected", detail: "no" },
+        ],
+        replaced_nodes: 0,
+      }),
+    );
+
+    await c.replaceOne(hit("a"));
+
+    expect(c.lastReplace).toEqual({ replaced: 0, stale: 0, skipped: 0, rejected: 1, detail: "no", nodes: 0 });
+  });
+
+  it("carries the FIRST rejected outcome's detail when several nodes are rejected", async () => {
+    const deps = fakeDeps();
+    const c = new SearchPaneController(run, deps);
+    c.query = "old";
+    vi.mocked(api.search).mockResolvedValue({ query: "old", hits: [] });
+    vi.mocked(api.replace).mockResolvedValue(
+      response({
+        outcomes: [
+          { file_id: "a", start: 0, end: 3, status: "not_replaceable", reason: "rejected", detail: "first" },
+          { file_id: "b", start: 0, end: 3, status: "not_replaceable", reason: "rejected", detail: "second" },
+        ],
+        replaced_nodes: 0,
+      }),
+    );
+
+    await c.replace([hit("a"), hit("b")]);
+
+    expect(c.lastReplace).toEqual({ replaced: 0, stale: 0, skipped: 0, rejected: 2, detail: "first", nodes: 0 });
   });
 
   it("replace([]) is a no-op", async () => {

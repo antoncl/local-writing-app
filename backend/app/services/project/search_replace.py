@@ -21,7 +21,11 @@ outcomes; only a metadata hit is refused individually):
    goes through the SAME save the editor uses, with `base_revision` set to the
    revision just verified. Revision, node index, and search-corpus maintenance
    then happen exactly as for any other save (`_atomic_write` / the write
-   funnel) — nothing here writes a file directly.
+   funnel) — nothing here writes a file directly. The save's own refusal
+   (conflict or validation) becomes that node's outcome — `stale` on a 409,
+   `not_replaceable/rejected` with the save's message as `detail` on anything
+   else — rather than propagating out of `replace()`; nothing here lets a
+   batch orphan an already-written earlier node from its response.
 
 Rejected alternative: a body-only save endpoint. The save request models
 (`SaveSceneRequest`, `SaveLoreEntryRequest`, …) all require the whole node, so
@@ -56,6 +60,7 @@ from app.models import (
     LoreEntry,
     PlotlineEntry,
     PlotTemplate,
+    ProjectNode,
     PromptEntry,
     ReplaceHitRef,
     ReplaceOutcome,
@@ -67,6 +72,7 @@ from app.models import (
     SaveLoreEntryRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
+    SaveProjectNodeRequest,
     SavePromptEntryRequest,
     SaveResearchNoteRequest,
     SaveSceneRequest,
@@ -194,8 +200,23 @@ def _plot_template_to_request(read: PlotTemplate, new_body: str) -> SavePlotTemp
     )
 
 
-def _not_replaceable(hit: ReplaceHitRef, reason: str) -> ReplaceOutcome:
-    return ReplaceOutcome(file_id=hit.file_id, start=hit.start, end=hit.end, status="not_replaceable", reason=reason)
+def _project_to_request(read: ProjectNode, new_body: str) -> SaveProjectNodeRequest:
+    # Dropped: computed_metadata — read-only/derived. No node_id argument: the
+    # project node is a path-addressed singleton, not id-addressed like every
+    # other kind here (`read_project_node`/`save_project_node` take none).
+    return SaveProjectNodeRequest(
+        title=read.title,
+        body=new_body,
+        base_revision=read.revision,
+        entry_type=read.entry_type,
+        metadata=read.metadata,
+    )
+
+
+def _not_replaceable(hit: ReplaceHitRef, reason: str, detail: str | None = None) -> ReplaceOutcome:
+    return ReplaceOutcome(
+        file_id=hit.file_id, start=hit.start, end=hit.end, status="not_replaceable", reason=reason, detail=detail
+    )
 
 
 def _stale(hit: ReplaceHitRef) -> ReplaceOutcome:
@@ -293,7 +314,11 @@ class SearchReplaceMixin:
                 # The save's own conflict check is the backstop (see the
                 # prompt-revision edge in the module docstring).
                 return [_stale(hit) for hit in body_hits], False
-            raise
+            # Any other refusal (e.g. a 422 from validate_scene_markdown when
+            # the replacement introduces raw HTML or a broken table) is this
+            # node's outcome, not an exception — a batch must never orphan an
+            # already-written earlier node from its response (rule 3).
+            return [_not_replaceable(hit, "rejected", detail=exc.message) for hit in body_hits], False
 
         return [
             ReplaceOutcome(file_id=file_id, start=hit.start, end=hit.end, status="replaced", revision=saved.revision)
@@ -303,10 +328,14 @@ class SearchReplaceMixin:
     def _replace_dispatch_for(self, kind: str, entry_type: str) -> _ReplaceDispatch | None:
         """The mapping table ADR-0085 §4 names — one triple per replaceable
         kind, mirroring `_SAVE_NODE_DISPATCH` (`node_ops.py:45`) plus the plot
-        family it does not cover. `assistant`, `view`, `tag`, `chat`,
-        `mutation_set`, and `project` are absent: none of them go through this
-        endpoint (chats have no editable body here; tags/assistants/views are
-        find-only per the ADR's table)."""
+        family it does not cover. `assistant`, `view`, `tag`, `chat`, and
+        `mutation_set` are absent: none of them go through this endpoint
+        (chats have no editable body here; tags/assistants/views are find-only
+        per the ADR's table). `project` IS dispatched — its `project.md` body
+        is corpus-indexed like any other prose-bodied node, and
+        `read_project_node`/`save_project_node` are a real `base_revision`
+        save; the wrappers below just drop the unused node-id argument since
+        the project node is a path-addressed singleton, not id-addressed."""
         if kind == "plot":
             plot_table: dict[str, _ReplaceDispatch] = {
                 "plot:card": _ReplaceDispatch(self.read_card, self.save_card, _card_to_request),
@@ -324,5 +353,10 @@ class SearchReplaceMixin:
             "lore": _ReplaceDispatch(self.read_lore_entry, self.save_lore_entry, _lore_to_request),
             "prompt": _ReplaceDispatch(self.read_prompt_entry, self.save_prompt_entry, _prompt_to_request),
             "research": _ReplaceDispatch(self.read_research_note, self.save_research_note, _research_to_request),
+            "project": _ReplaceDispatch(
+                lambda _file_id: self.read_project_node(),
+                lambda _file_id, req: self.save_project_node(req),
+                _project_to_request,
+            ),
         }
         return table.get(kind)

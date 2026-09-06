@@ -348,4 +348,33 @@ describe("Search pane — replace (ADR-0085 §4/§5)", () => {
     });
     expect(onOpenHit).not.toHaveBeenCalled();
   });
+
+  it("shows a rejected outcome's detail in the summary line", async () => {
+    // Fix 2 (#1846): a save's own refusal (e.g. a 422 the scene's own save
+    // raised) becomes a `not_replaceable/rejected` outcome, with the save's
+    // human message as `detail` — surfaced in the summary line, not swallowed
+    // into the generic "not replaceable" count.
+    const h = hit("scenes/act-1/arrival.md", 12, "Aetheria at dawn.");
+    vi.mocked(api.search).mockResolvedValue({ query: "aetheria", hits: [h] });
+    vi.mocked(api.replace).mockResolvedValue({
+      outcomes: [
+        { file_id: h.file_id, start: h.start, end: h.end, status: "not_replaceable", reason: "rejected", detail: "Scene Markdown must not contain raw HTML." },
+      ],
+      replaced_nodes: 0,
+    });
+    render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "aetheria" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    vi.mocked(api.search).mockResolvedValue({ query: "aetheria", hits: [] });
+    await fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    await tick();
+
+    expect(
+      screen.getByText("1 rejected: Scene Markdown must not contain raw HTML."),
+    ).toBeInTheDocument();
+  });
 });

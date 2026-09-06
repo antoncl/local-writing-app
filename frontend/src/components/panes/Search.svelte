@@ -47,13 +47,25 @@
   // The Replace-all summary line's parts, in order, omitting whatever is zero
   // (a batch that replaced everything shows no "not replaceable" clause at
   // all) — joined with the same "·" separator the pane uses elsewhere.
-  function replaceSummary(counts: { replaced: number; stale: number; skipped: number; nodes: number }): string {
+  // `rejected` (a save that refused the new content) shows the first
+  // outcome's `detail` when the server sent one.
+  function replaceSummary(counts: {
+    replaced: number;
+    stale: number;
+    skipped: number;
+    rejected: number;
+    detail: string | null;
+    nodes: number;
+  }): string {
     const parts: string[] = [];
     if (counts.replaced > 0) {
       parts.push(`Replaced ${counts.replaced} in ${counts.nodes} node${counts.nodes === 1 ? "" : "s"}`);
     }
     if (counts.stale > 0) parts.push(`${counts.stale} changed since the search`);
     if (counts.skipped > 0) parts.push(`${counts.skipped} not replaceable`);
+    if (counts.rejected > 0) {
+      parts.push(counts.detail ? `${counts.rejected} rejected: ${counts.detail}` : `${counts.rejected} rejected`);
+    }
     return parts.join(" · ");
   }
 

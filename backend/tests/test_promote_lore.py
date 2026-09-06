@@ -394,6 +394,43 @@ class PromoteLoreTests(unittest.TestCase):
         rows = self.service._read_front_matter_only(override_files[0], strict=True).get("rows") or []
         self.assertEqual([row["field"] for row in rows], ["haunt"])
 
+    # --- 6c: an ancestor's override that applies again is in the plan (#1857) --
+
+    def test_plan_names_the_ancestor_override_that_applies_after_promotion(self) -> None:
+        # The series overrides a universe entry's `mood`; the universe file is
+        # moved into the book by hand and edited there. Owned, the book ignores
+        # the series override. Promoted to the universe, it folds again — the
+        # value on screen changes, so the plan must say so, naming the layer.
+        self._define_field_at(self.universe, "mood", "text")
+        self._write_ancestor_lore(self.universe, "alice", "Alice", metadata={"mood": "calm"}, entry_type="lore:character")
+        self._save_alice({"mood": "teal"}, authoring_layer=self.series)
+        self.assertTrue(any((self.series / OVERRIDES_FOLDER).glob("*.md")))
+        # The book's own override too — settled by the promotion, so NOT in the plan.
+        self._save_alice({"mood": "stormy"}, authoring_layer=self.root)
+        (self.root / "lore").mkdir(exist_ok=True)
+        shutil.move(self.universe / "lore" / "alice.md", self.root / "lore" / "alice.md")
+        node_index_gate.invalidate()
+        self._save_alice({"mood": "serene"})
+        self.assertEqual(self.service.read_lore_entry("alice").metadata.get("mood"), "serene")
+        universe_layer_id = self.service._metadata_schema_layer_id(self.universe)
+        series_label = self.service.layer_by_id(self.root, self.series_layer_id).label
+
+        plan = self.service.preview_lore_promotion("alice", universe_layer_id)
+
+        self.assertEqual([(item.field, item.layer) for item in plan.folds_after_promotion], [("mood", series_label)])
+
+        promoted = self.service.promote_lore_entry("alice", universe_layer_id)
+
+        # The plan told the truth: the series' override applies again.
+        self.assertEqual(promoted.metadata.get("mood"), "teal")
+        self.assertEqual(promoted.overridden_fields, ["mood"])
+        self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
+
+    def test_plan_lists_no_fold_when_no_ancestor_overrides_the_node(self) -> None:
+        self._hand_moved_with_a_leftover_override()
+        plan = self.service.preview_lore_promotion("alice", self.series_layer_id)
+        self.assertEqual(plan.folds_after_promotion, [])
+
     # --- 7 (★): override written after inheritance --------------------------
 
     def test_override_written_after_inheritance(self) -> None:

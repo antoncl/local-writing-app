@@ -694,6 +694,18 @@ class PromotionStayItem(BaseModel):
     reason: str
 
 
+class PromotionFoldItem(BaseModel):
+    """A field of the promoted node that an ANCESTOR layer's override will write
+    once the node is inherited again (#1857). Owned here, the node ignored that
+    override; promoted, it folds — so the author sees the change in the plan
+    rather than after the fact. The origin's own override for the node is not
+    listed: the promotion settles that file itself (#1854)."""
+
+    field: str
+    # The label of the layer whose override applies.
+    layer: str
+
+
 class PromotionPlan(BaseModel):
     """The dry-run preview of a promotion (ADR-0078 §9). The same partition backs
     both preview and commit, so what the author confirms is what runs."""
@@ -726,6 +738,10 @@ class PromotionPlan(BaseModel):
     # origin (keep-id) and are promoted separately, not cascaded. Titles; empty
     # unless the promoted node has pinned staged sets.
     related: list[str] = Field(default_factory=list)
+    # Fields an ancestor layer's override will write once the node is inherited
+    # again (#1857) — information the author needs before confirming, since the
+    # value on screen changes. Empty when no layer above the origin overrides it.
+    folds_after_promotion: list[PromotionFoldItem] = Field(default_factory=list)
 
 
 class PromoteLoreEntryRequest(BaseModel):

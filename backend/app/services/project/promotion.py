@@ -23,6 +23,7 @@ from typing import Any
 from app.models import (
     LoreEntry,
     MutationSetEntry,
+    PromotionFoldItem,
     PromotionPlan,
     PromotionStayItem,
     PromotionTarget,
@@ -275,6 +276,28 @@ class PromotionMixin:
 
         return entry, dest, index, root
 
+    def _folds_after_promotion(self, index: NodeIndex, node_id: str, root) -> list[PromotionFoldItem]:
+        """The fields an ancestor layer's override will write onto `node_id` once
+        it is inherited again (#1857), outermost layer first, fields in row order.
+
+        Owned here, the node ignores every override targeting it (the fold gate
+        is "inherited winner only"); promoted, the read folds every record in the
+        chain — so a value the author sees now can change on commit. The plan
+        says which and from where. The origin's own record is skipped: the
+        promotion settles that file (`_settle_origin_override`), it never folds.
+        """
+        open_layer_id = self._metadata_schema_layer_id(root)
+        items: list[PromotionFoldItem] = []
+        records = sorted(index.overrides_by_target.get(node_id, []), key=lambda record: record.layer_rank)
+        for record in records:
+            if record.layer_id == open_layer_id:
+                continue
+            for row in record.rows:
+                item = PromotionFoldItem(field=row.field, layer=record.layer_label)
+                if item not in items:
+                    items.append(item)
+        return items
+
     def _pinned_staged_sets(self, index: NodeIndex, node_id: str) -> list[str]:
         """Staged mutation sets pinned (`target_entity`) to `node_id` (ADR-0078
         §7) — surfaced on the node's promotion plan as `related`, NOT cascaded:
@@ -317,6 +340,7 @@ class PromotionMixin:
             invisible_at_destination=sorted(invisible),
             related=self._pinned_staged_sets(index, entry_id),
             blocked_reason="; ".join(blocked) or None,
+            folds_after_promotion=self._folds_after_promotion(index, entry_id, root),
         )
         return full, dest, travels, stays, plan
 
@@ -521,6 +545,7 @@ class PromotionMixin:
             ),
             resolves_differently=resolves_differently,
             blocked_reason=blocked_reason,
+            folds_after_promotion=self._folds_after_promotion(index, entry_id, root),
         )
         return full, dest, travels_metadata, stays_metadata, to_promote, plan
 

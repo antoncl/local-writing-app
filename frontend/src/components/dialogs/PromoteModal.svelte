@@ -222,6 +222,21 @@
             </section>
           {/if}
 
+          {#if plan.folds_after_promotion.length > 0}
+            <!-- #1857: an ancestor layer's override for this node, ignored while
+                 the node was owned here, applies again once it is inherited —
+                 the value on screen changes on commit, so say so first. -->
+            <section class="promote-bucket">
+              <h3>Changes after promotion</h3>
+              <ul>
+                {#each plan.folds_after_promotion as item (item.layer + ":" + item.field)}
+                  <li><span class="promote-field">{item.field}</span> — overridden at {item.layer}</li>
+                {/each}
+              </ul>
+              <p class="promote-note">An ancestor's override for this node applies again once it is inherited from {plan.destination.label}.</p>
+            </section>
+          {/if}
+
           {#if plan.invisible_at_destination.length > 0}
             <section class="promote-bucket">
               <h3>Hidden at {plan.destination.label} until promoted</h3>

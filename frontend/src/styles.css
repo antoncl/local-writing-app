@@ -628,8 +628,8 @@ h3 {
 }
 
 .row-add-popover {
-  position: fixed;
-  z-index: 1000;
+  /* Body-portaled by anchoredPopover (#1839): must clear the modal layer like every other portaled popover. */
+  z-index: 10000;
   min-width: 200px;
   padding: 8px;
   border: 1px solid var(--border);

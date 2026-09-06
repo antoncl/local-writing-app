@@ -5,7 +5,7 @@
 // renders one ReferencePicker per ref field, so that dead weight adds up.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
-import { render, screen } from "@/lib/test/component";
+import { fireEvent, render, screen } from "@/lib/test/component";
 import Fixture from "./ViewNodeListGateFixture.svelte";
 
 // ViewNodeList's own add-menu dismissal listener is a direct
@@ -38,5 +38,30 @@ describe("ViewNodeList — editing machinery gated on wired handlers (#268)", ()
     render(Fixture, { props: { withAddMenu: true } });
     await tick();
     expect(ownMousedownListeners(spy)).toBe(1);
+  });
+});
+
+describe("add-menu shell is body-portaled (#1839)", () => {
+  it("opens body-portaled and fixed-positioned, ignores clicks inside, closes on outside click", async () => {
+    render(Fixture, { props: { withAddMenu: true } });
+    const trigger = document.querySelector(".fixture-add-trigger");
+    expect(trigger).toBeTruthy();
+    await fireEvent.click(trigger as HTMLElement);
+    await tick();
+
+    const popover = document.querySelector(".row-add-popover");
+    expect(popover).toBeTruthy();
+    expect(popover?.parentElement).toBe(document.body);
+    expect((popover as HTMLElement).style.position).toBe("fixed");
+
+    // Dismissal ignores clicks inside the portaled shell.
+    const innerButton = popover?.querySelector("button");
+    expect(innerButton).toBeTruthy();
+    await fireEvent.mouseDown(innerButton as HTMLElement);
+    expect(document.querySelector(".row-add-popover")).toBeTruthy();
+
+    // An outside click dismisses it.
+    await fireEvent.mouseDown(document.body);
+    expect(document.querySelector(".row-add-popover")).toBeFalsy();
   });
 });

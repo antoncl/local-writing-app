@@ -4,29 +4,24 @@
 // mutually exclusive, a latent bug). Threaded through the recursion like TreeDrag
 // so a per-container "+" in any row can toggle it.
 //
-// This is pure open/position state: `key` is the open identity (a node id for a
-// per-container button, or a caller-chosen root key), `parentId` is the create
-// target (null = add at root), `pos` are fixed-position coords. The wrapper renders
-// the popover SHELL from this and defers its CONTENT (headings + type choices) to a
-// consumer snippet.
-
-export type AddMenuPosition = { top: number; right: number };
-
-// Popover flips above the anchor when there isn't this much room below it.
-const POPOVER_HEIGHT = 180;
+// This is pure open/anchor state: `key` (open identity), `parentId` (create
+// target), `anchor` (the trigger; the wrapper hands it to `anchoredPopover`,
+// which owns positioning: body-portal, right-aligned, flips above by measured
+// height, re-pins on scroll/resize — #1839 retired the last hand-rolled copy
+// of that maths). The wrapper renders the popover SHELL from this and defers
+// its CONTENT (headings + type choices) to a consumer snippet.
 
 export class TreeAddMenu {
   key = $state<string | null>(null);
   parentId = $state<string | null>(null);
-  pos = $state<AddMenuPosition | null>(null);
+  anchor = $state<HTMLElement | null>(null);
 
   isOpen(key: string): boolean {
     return this.key === key;
   }
 
-  // Toggle the menu for `key` (create target `parentId`), positioning it off the
-  // clicked anchor's right edge — dropping below, or flipping above near the
-  // viewport bottom (mirrors the old treeActions.toggleAddMenu geometry).
+  // Toggle the menu for `key` (create target `parentId`), tracking the clicked
+  // anchor element so the wrapper can position the popover against it.
   toggle(parentId: string | null, key: string, event?: MouseEvent): void {
     if (this.key === key) {
       this.close();
@@ -34,22 +29,12 @@ export class TreeAddMenu {
     }
     this.key = key;
     this.parentId = parentId;
-    const anchor = event?.currentTarget;
-    if (anchor instanceof HTMLElement) {
-      const rect = anchor.getBoundingClientRect();
-      const fitsBelow = window.innerHeight - rect.bottom > POPOVER_HEIGHT;
-      this.pos = {
-        top: fitsBelow ? rect.bottom + 4 : rect.top - POPOVER_HEIGHT - 4,
-        right: window.innerWidth - rect.right,
-      };
-    } else {
-      this.pos = null;
-    }
+    this.anchor = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   }
 
   close(): void {
     this.key = null;
     this.parentId = null;
-    this.pos = null;
+    this.anchor = null;
   }
 }

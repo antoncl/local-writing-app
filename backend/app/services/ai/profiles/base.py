@@ -551,7 +551,15 @@ class ProviderProfile(ABC):
         """The one place that builds a strategy's input (ADR-0084 §2): the
         system-prompt-only wrap and OpenRouter's all-empty-blocks fallback to
         the bare prompt live here and nowhere else. Both transports call this,
-        then hand the resulting `CachePlan` to their own encoder."""
+        then hand the resulting `CachePlan` to their own encoder.
+
+        Because the wrap is shared, a bare prompt on a `markers`-mode strategy
+        gets the marked one-block plan Anthropic-native always produced — the
+        pre-split OpenRouter path only fell back to the prompt on its collapse
+        branch. Every app call site pre-wraps the prompt into `system_blocks`
+        (`system_prompt_cache_blocks`, `expand_and_prepare_chat_blocks`), so no
+        request the app constructs reaches this branch; a future caller that
+        passes a bare prompt gets the marked wrap, by design."""
         blocks = [b for b in (call.system_blocks or []) if (b.get("text") or "")]
         if not blocks and call.system_prompt:
             blocks = [{"text": call.system_prompt, "tier": "stable"}]

@@ -618,11 +618,12 @@ h3 {
   cursor: grabbing;
 }
 
-/* Add-menu popover chrome. Global because two panes now host it: the
-   manuscript/research Tree add-child menus and the Lore pane's "+ Entry"
-   type-picker (#67). Anchor is `position: relative`; the popover is `fixed`
-   with top/right set inline at click time so an ancestor `overflow: hidden`
-   can't clip it. Hosts a NodeList of NodeRows so creation reuses the widget. */
+/* Add-menu popover chrome. Global because several panes host it: the
+   manuscript/research Tree add-child menus and the Lore/Prompts "+" type
+   pickers (#67). `.tree-menu-anchor` is only the dismissal handler's "inside"
+   marker for the "+" button; the popover itself is body-portaled and
+   positioned by `anchoredPopover` (#1839), so no ancestor `overflow` can clip
+   it. Hosts a NodeList of NodeRows so creation reuses the widget. */
 .tree-menu-anchor {
   position: relative;
 }

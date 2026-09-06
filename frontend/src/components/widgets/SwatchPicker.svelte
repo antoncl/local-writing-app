@@ -8,7 +8,7 @@
   // `paletteStore` that App.svelte fills on settings load.
 
   import { paletteStore, getSwatch } from "@/lib/utils/colors";
-  import { portalToBody } from "@/lib/actions/portal";
+  import { anchoredPopover } from "@/lib/actions/anchoredPopover";
 
   interface Props {
     value?: string | null;
@@ -29,52 +29,19 @@
 
   let open = $state(false);
   let anchor: HTMLButtonElement | undefined = $state();
-  // Viewport-relative popover position. Computed from the trigger's
-  // bounding rect each time the popover opens (and on scroll/resize while
-  // open) so the popover floats above ANY pane regardless of its overflow
-  // — necessary because the schema_type pane and the metadata pane both
-  // clip their content, which otherwise hides or squashes the popover.
-  let popoverLeft = $state(0);
-  let popoverTop = $state(0);
-
-  const POPOVER_WIDTH = 180;   // matches CSS min-width
-  const POPOVER_GAP = 4;       // visual gap below the trigger
+  // Body-portaled + viewport-anchored by `anchoredPopover` (#1587), so the
+  // schema_type and metadata panes' overflow can't clip it.
 
   const palette = $derived($paletteStore);
   const current = $derived(getSwatch(value));
 
-  function positionPopover() {
-    if (!anchor) return;
-    const r = anchor.getBoundingClientRect();
-    // Default: open below + left-aligned with the trigger. Flip to the
-    // right edge of the trigger when there isn't room on the left; flip
-    // above when there isn't room below.
-    let left = r.left;
-    if (left + POPOVER_WIDTH + 8 > window.innerWidth) {
-      left = Math.max(8, r.right - POPOVER_WIDTH);
-    }
-    let top = r.bottom + POPOVER_GAP;
-    // Rough height check — popover holds ~5 rows of 22px + padding.
-    const approxHeight = 160;
-    if (top + approxHeight + 8 > window.innerHeight) {
-      top = Math.max(8, r.top - approxHeight - POPOVER_GAP);
-    }
-    popoverLeft = left;
-    popoverTop = top;
-  }
-
   function toggle() {
     if (readOnly) return;
-    if (!open) positionPopover();
     open = !open;
   }
 
   function close() {
     open = false;
-  }
-
-  function onScrollOrResize() {
-    if (open) positionPopover();
   }
 
   function select(id: string | null) {
@@ -100,12 +67,7 @@
   }
 </script>
 
-<svelte:window
-  onclick={onDocClick}
-  onkeydown={onKey}
-  onscroll={onScrollOrResize}
-  onresize={onScrollOrResize}
-/>
+<svelte:window onclick={onDocClick} onkeydown={onKey} />
 
 <span class="swatch-picker">
   <button
@@ -137,8 +99,7 @@
       class="swatch-picker-popover"
       role="dialog"
       aria-label="Choose a color"
-      style={`left: ${popoverLeft}px; top: ${popoverTop}px;`}
-      use:portalToBody
+      use:anchoredPopover={{ anchor, gap: 4 }}
     >
       {#if allowNone}
         <button
@@ -216,14 +177,13 @@
   }
 
   .swatch-picker-popover {
-    /* Anchored at viewport coords by the component — `position: fixed`
-       so pane overflow can never clip the popover. Portaled to <body>
-       (`use:portalToBody`), so it escapes its invoker's stacking context and
-       must clear the modal layer itself (Modal 2000, DirectoryPicker 2200) or
-       it opens BEHIND a dialog that embeds this picker — e.g. the create-project
-       wizard's review step (#556). Matches TagPicker's portaled-popover z-index;
-       NOT `--z-dropdown` (100), which also drives non-portaled nodes. */
-    position: fixed;
+    /* `anchoredPopover` owns position/left/top (body-portaled + viewport-
+       anchored, #1587); this carries only the chrome + the portaled elevation
+       tier, which must clear the modal layer itself (Modal 2000,
+       DirectoryPicker 2200) or it opens BEHIND a dialog that embeds this
+       picker — e.g. the create-project wizard's review step (#556). Matches
+       every other portaled popover's z-index; NOT `--z-dropdown` (100), which
+       also drives non-portaled nodes. */
     z-index: 10000;
     background: var(--surface);
     border: 1px solid var(--border);

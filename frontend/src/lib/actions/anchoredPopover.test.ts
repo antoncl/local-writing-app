@@ -65,6 +65,66 @@ describe("anchoredPopover", () => {
     handle.destroy();
   });
 
+  // #1586/#1587: the two options SwatchPicker/ColoredSelect/the schema
+  // type-grid needed to retire their own inline rect-anchoring copies.
+  // happy-dom reports zero rects and zero offsetWidth, so both are stubbed.
+  describe("align / matchWidth (#1586, #1587)", () => {
+    const origInnerWidth = window.innerWidth;
+
+    afterEach(() => {
+      Object.defineProperty(window, "innerWidth", { value: origInnerWidth, configurable: true });
+    });
+
+    function makeAnchorAndPop(rect: Partial<DOMRect>) {
+      const anchor = document.createElement("button");
+      const pop = document.createElement("div");
+      document.body.append(anchor, pop);
+      anchor.getBoundingClientRect = () =>
+        ({ left: 400, right: 500, top: 20, bottom: 40, width: 100, height: 20, x: 400, y: 20, toJSON: () => ({}), ...rect }) as DOMRect;
+      Object.defineProperty(pop, "offsetWidth", { value: 200, configurable: true });
+      Object.defineProperty(pop, "offsetHeight", { value: 50, configurable: true });
+      return { anchor, pop };
+    }
+
+    it('align: "right" puts the popover\'s right edge on the trigger\'s right edge', () => {
+      Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+      const { anchor, pop } = makeAnchorAndPop({});
+      const handle = anchoredPopover(pop, { anchor, align: "right" });
+      expect(pop.style.left).toBe("300px"); // r.right 500 - w 200
+      handle.destroy();
+    });
+
+    it("default align left-aligns with the trigger", () => {
+      Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+      const { anchor, pop } = makeAnchorAndPop({});
+      const handle = anchoredPopover(pop, { anchor });
+      expect(pop.style.left).toBe("400px");
+      handle.destroy();
+    });
+
+    it('align: "right" falls back to left-aligning (clamped) when right-aligning would overrun the left edge', () => {
+      Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+      const { anchor, pop } = makeAnchorAndPop({ left: 50, right: 150 });
+      const handle = anchoredPopover(pop, { anchor, align: "right" });
+      // 150 - 200 < 8, so falls back to min(r.left, innerWidth - w - 8) = min(50, 992) = 50
+      expect(pop.style.left).toBe("50px");
+      handle.destroy();
+    });
+
+    it("matchWidth sets min-width to the anchor's width; off by default leaves it unset", () => {
+      Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+      const { anchor, pop } = makeAnchorAndPop({});
+      const handle = anchoredPopover(pop, { anchor, matchWidth: true });
+      expect(pop.style.minWidth).toBe("100px");
+      handle.destroy();
+
+      const { anchor: anchor2, pop: pop2 } = makeAnchorAndPop({});
+      const handle2 = anchoredPopover(pop2, { anchor: anchor2 });
+      expect(pop2.style.minWidth).toBe("");
+      handle2.destroy();
+    });
+  });
+
   // #245 (ADR-0082 slice 2b generalised TagPicker's inline copy here): under a
   // zoomed/panned SvelteFlow canvas the anchor moves on screen WITHOUT firing
   // scroll/resize (the canvas transform moves it, not the page), so `track`

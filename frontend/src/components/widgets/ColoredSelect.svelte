@@ -8,7 +8,7 @@
   // widget is safe to use even when only SOME options are colored.
 
   import { getSwatch } from "@/lib/utils/colors";
-  import { portalToBody } from "@/lib/actions/portal";
+  import { anchoredPopover } from "@/lib/actions/anchoredPopover";
   import type { SelectOption } from "@/lib/types";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
@@ -34,10 +34,10 @@
   } = $props();
 
   let open = $state(false);
-  let anchor: HTMLButtonElement | undefined;
-  // Popover is fixed-positioned (computed from the anchor) so it escapes the
-  // metadata rail's overflow clipping. Mirrors TagPicker.
-  let menuPos = $state<{ x: number; y: number; width: number } | null>(null);
+  // Reactive (not a plain `let`): the action reads it via the `use:` param,
+  // and a plain `let` bound with `bind:this` isn't tracked under Svelte 5
+  // runes, so the param would still be stale/undefined at first open.
+  let anchor: HTMLButtonElement | undefined = $state();
 
   const current = $derived(options.find((o) => o.value === value) ?? null);
   // Resolve the swatch hex when the selected option carries a color id.
@@ -49,10 +49,6 @@
   function toggle() {
     if (readOnly) return;
     open = !open;
-    if (open && anchor) {
-      const r = anchor.getBoundingClientRect();
-      menuPos = { x: r.left, y: r.bottom + 4, width: r.width };
-    }
   }
   function close() { open = false; }
 
@@ -128,12 +124,11 @@
     {/if}
   </button>
 
-  {#if open && menuPos}
+  {#if open}
     <div
       class="colored-select-popover"
       role="listbox"
-      style={`left: ${menuPos.x}px; top: ${menuPos.y}px; min-width: ${menuPos.width}px;`}
-      use:portalToBody
+      use:anchoredPopover={{ anchor, gap: 4, matchWidth: true }}
     >
       {#if allowBlank}
         <button
@@ -263,13 +258,14 @@
   }
 
   .colored-select-popover {
-    position: fixed;
-    /* Portaled to <body>, so this must clear the modal layer (Modal is 2000,
-       DirectoryPicker 2200) or the menu opens BEHIND a dialog that embeds this
-       select — e.g. the create-project wizard's review step (#556). Matches the
-       portaled-popover convention TagPicker already uses (z-index 10000).
-       Deliberately NOT `--z-dropdown`: that token (100) also drives non-portaled
-       nodes (WorkspaceNode), which must stay in the normal stack. */
+    /* `anchoredPopover` owns position/left/top (body-portaled + viewport-
+       anchored, #1587); this carries only the chrome + the portaled elevation
+       tier, which must clear the modal layer itself (Modal 2000, DirectoryPicker
+       2200) or the menu opens BEHIND a dialog that embeds this select — e.g.
+       the create-project wizard's review step (#556). Matches every other
+       portaled popover's z-index. Deliberately NOT `--z-dropdown`: that token
+       (100) also drives non-portaled nodes (WorkspaceNode), which must stay in
+       the normal stack. */
     z-index: 10000;
     background: var(--surface);
     border: 1px solid var(--border);

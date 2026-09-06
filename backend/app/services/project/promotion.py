@@ -359,22 +359,52 @@ class PromotionMixin:
         # `dest` — the precondition the override write below depends on.
         node_index_gate.invalidate()
 
+        self._settle_origin_override(root, entry_id, full.title, travels_metadata, stays_metadata)
+        return self.read_lore_entry(entry_id)
+
+    def _settle_origin_override(
+        self,
+        root,
+        entry_id: str,
+        title: str,
+        travels_metadata: dict[str, Any],
+        stays_metadata: dict[str, Any],
+    ) -> None:
+        """The origin's override file for `entry_id` is the promotion's to write —
+        or to remove (#1854).
+
+        Until this moment the node was owned here, and an owned node's read
+        ignores any override targeting it (`read_lore_entry` / `read_prompt_entry`),
+        so a file under `<root>/overrides/` aimed at this id was inert: left
+        behind when the node's file was moved into this layer outside the app
+        (fork-to-here drops its own override for exactly this reason,
+        `fork_lore_entry`). The node is inherited again from here on, and that
+        file would fold onto it — a delta the author never saw, activating
+        silently. So the file is settled by the promotion: a
+        non-empty stay-behind overwrites it (`_write_override_file` keeps one file
+        per (layer, target)), an empty one removes it. Either way the effective
+        values the author saw before promotion are the ones they see after.
+
+        Only the origin's own file: an override at an intermediate layer belongs
+        to that project and stays what it is.
+
+        Both writers route an `overrides/` path to a full
+        `node_index_gate.invalidate()` already (an override fans out like a schema
+        edit) — the explicit call keeps the ordering readable without trusting
+        that module's internals.
+        """
         if stays_metadata:
             rows = self._diff_metadata_to_override_rows(
                 base=travels_metadata,
                 submitted={**travels_metadata, **stays_metadata},
                 field_types=self._schema_field_types(self.read_metadata_schema()),
             )
-            self._write_override_file(root, entry_id, full.title, rows)
-            # `_write_override_file` writes under `<root>/overrides/`, which
-            # `_maintain_index_after_write` already routes to a full
-            # `node_index_gate.invalidate()` (an override fans out like a
-            # schema edit) — this second call is a harmless no-op belt-and-
-            # braces, kept explicit so the ordering here does not depend on
-            # reading that unrelated module's internals to trust.
-            node_index_gate.invalidate()
-
-        return self.read_lore_entry(entry_id)
+            self._write_override_file(root, entry_id, title, rows)
+        else:
+            leftover = self._override_file_for_target(root, entry_id)
+            if leftover is not None:
+                self._delete_node_file(leftover)
+        node_index_gate.invalidate()
 
     # --- prompt promotion (ADR-0078 slice 3, #1663) --------------------------
 
@@ -529,14 +559,7 @@ class PromotionMixin:
         # resolves this id as inherited from `dest`.
         node_index_gate.invalidate()
 
-        if stays_metadata:
-            rows = self._diff_metadata_to_override_rows(
-                base=travels_metadata,
-                submitted={**travels_metadata, **stays_metadata},
-                field_types=self._schema_field_types(self.read_metadata_schema()),
-            )
-            self._write_override_file(root, entry_id, full.title, rows)
-            node_index_gate.invalidate()
+        self._settle_origin_override(root, entry_id, full.title, travels_metadata, stays_metadata)
 
     def promote_prompt_entry(self, entry_id: str, target_layer_id: str) -> PromptEntry:
         """Commit the promotion computed by `_partition_prompt_promotion`

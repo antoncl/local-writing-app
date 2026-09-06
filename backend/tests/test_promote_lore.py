@@ -15,6 +15,7 @@ The chain mirrors `test_fork_lore.py` / `test_layer_overrides.py`:
 
 from __future__ import annotations
 
+import shutil
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,10 +26,12 @@ from layer_fixtures import declare_full_chain
 from app.models import (
     CreateTagEntryRequest,
     MetadataFieldDefinition,
+    SaveLoreEntryRequest,
     UpsertMetadataFieldRequest,
 )
 from app.scope import WorkScope
 from app.services.project.errors import ProjectServiceError
+from app.services.project.node_index_gate import node_index_gate
 from app.services.project.overrides import OVERRIDES_FOLDER
 from app.services.project_service import ProjectService
 
@@ -319,6 +322,71 @@ class PromoteLoreTests(unittest.TestCase):
         index = self.service._build_node_index()
         inbound = index.edges_by_dst.get("alice", [])
         self.assertIn("bob", [edge.src for edge in inbound])
+
+    # --- 6b: a leftover override is the promotion's to settle (#1854) --------
+
+    def _save_alice(self, metadata: dict, *, authoring_layer: Path | None = None) -> None:
+        self.service.save_lore_entry(
+            "alice",
+            SaveLoreEntryRequest(
+                title="Alice",
+                body="",
+                entry_type="lore:character",
+                metadata=metadata,
+                authoring_layer_id=(
+                    self.service._metadata_schema_layer_id(authoring_layer) if authoring_layer is not None else None
+                ),
+            ),
+        )
+
+    def _hand_moved_with_a_leftover_override(self) -> None:
+        """The book overrides an inherited entry's field, then the entry's file is
+        moved down into the book by hand (fork-to-here would have dropped the
+        book's own override; a move outside the app does not). The override file
+        under book01/overrides/ still targets an id the book now owns — inert,
+        because an owned read ignores it. The author then edits the entry."""
+        self._define_field_at(self.universe, "mood", "text")
+        self._write_ancestor_lore(self.universe, "alice", "Alice", metadata={"mood": "calm"}, entry_type="lore:character")
+        self._save_alice({"mood": "stormy"}, authoring_layer=self.root)
+        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+        (self.root / "lore").mkdir(exist_ok=True)
+        shutil.move(self.universe / "lore" / "alice.md", self.root / "lore" / "alice.md")
+        node_index_gate.invalidate()
+        self._save_alice({"mood": "serene"})
+        opened = self.service.read_lore_entry("alice")
+        self.assertEqual(opened.metadata.get("mood"), "serene")
+        self.assertEqual(opened.overridden_fields, [])
+        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")), "the leftover is the setup")
+
+    def test_leftover_override_is_removed_when_nothing_stays_behind(self) -> None:
+        self._hand_moved_with_a_leftover_override()
+
+        promoted = self.service.promote_lore_entry("alice", self.series_layer_id)
+
+        # What the author saw before promotion is what they see after — the
+        # leftover's `stormy` never activates.
+        self.assertEqual(promoted.metadata.get("mood"), "serene")
+        self.assertEqual(promoted.overridden_fields, [])
+        self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
+        self.assertEqual(self._raw_metadata(self.series, "alice").get("mood"), "serene")
+
+    def test_leftover_override_is_replaced_by_the_stay_behind(self) -> None:
+        self._hand_moved_with_a_leftover_override()
+        # An origin-local ref must stay behind, so the promotion writes an
+        # override of its own — into the one file per (layer, target).
+        self._define_field_at(self.universe, "haunt", "entity_ref")
+        self._write_ancestor_lore(self.root, "rustyanchor", "The Rusty Anchor", entry_type="lore:note")
+        self._save_alice({"mood": "serene", "haunt": "rustyanchor"})
+
+        promoted = self.service.promote_lore_entry("alice", self.series_layer_id)
+
+        self.assertEqual(promoted.metadata.get("mood"), "serene")
+        self.assertEqual(promoted.metadata.get("haunt"), "rustyanchor")
+        self.assertEqual(promoted.overridden_fields, ["haunt"])
+        override_files = list((self.root / OVERRIDES_FOLDER).glob("*.md"))
+        self.assertEqual(len(override_files), 1)
+        rows = self.service._read_front_matter_only(override_files[0], strict=True).get("rows") or []
+        self.assertEqual([row["field"] for row in rows], ["haunt"])
 
     # --- 7 (★): override written after inheritance --------------------------
 

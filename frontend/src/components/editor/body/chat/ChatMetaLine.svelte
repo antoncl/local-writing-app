@@ -5,7 +5,8 @@
   those read as a UI element (border, background, all-caps label); this reads
   as metadata, mirroring InputsDialog's chat-estimate-strip comment idiom.
   Purely presentational: the parent owns the estimate fetch, the TTL tick,
-  and the session-cost derivation.
+  and the session-cost derivation — and, since #1544, the preview's soft-fail
+  warnings.
 -->
 <script lang="ts">
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
@@ -66,6 +67,16 @@
       <span>session <span class="cbv-meta-num">{formatCostEur(sessionCostUsd)}</span></span>
     {/if}
   </div>
+  {#if estimate && estimate.warnings.length > 0}
+    <!-- #1544: a context pick the send path could not resolve. Same quiet
+         metadata register as the line above, in the danger colour so it is
+         not mistaken for a cost readout. One sentence per dropped pick. -->
+    <div class="cbv-meta-warnings" role="status">
+      {#each estimate.warnings as warning}
+        <p class="cbv-meta-warning">{warning}</p>
+      {/each}
+    </div>
+  {/if}
 {/if}
 
 <style>
@@ -79,4 +90,6 @@
   .cbv-meta-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .cbv-meta-sep { opacity: 0.6; }
   .cbv-meta-danger { color: var(--danger); font-weight: 600; }
+  .cbv-meta-warnings { flex: 0 0 auto; padding: 0 2px; }
+  .cbv-meta-warning { margin: 2px 0 0; font-size: var(--fs-xs); color: var(--danger); }
 </style>

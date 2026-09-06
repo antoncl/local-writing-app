@@ -102,9 +102,10 @@ membership with a flat-membership evaluator: `type`, `tagged`, `hand_picked`,
 `field` predicates and `union`/`intersect`/`difference`/`filter` over them.
 A view that uses the relational or projection operators (`nest`, `field_of`,
 `var`, `orphans_of`) still works as a view, but as a *context pick* it
-contributes no members, and the preview lists a warning naming the pick and
-the operator. Hand-pick the members or restrict the view to the flat
-operators if you need it in a prompt.
+contributes no members, and a warning naming the pick and the operator
+appears in the prompt preview, on the chat's estimate line, and in the run
+dialog. Hand-pick the members or restrict the view to the flat operators if
+you need it in a prompt.
 
 For a mixed picker, dispatch on `item.kind`:
 

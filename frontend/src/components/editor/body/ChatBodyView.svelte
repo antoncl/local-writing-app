@@ -1003,6 +1003,7 @@
         tokens: preview.estimated_tokens ?? 0,
         cost_usd: preview.estimated_cost_usd ?? null,
         cached: preview.cached ?? null,
+        warnings: preview.warnings ?? [],
         // The meta line now reads these summaries for the cache term
         // (ADR-0084 §6, `cacheTermSecondsFor`) — the door still reads the
         // FULL blocks via chatPreviewCacheBlocks above for text/entries.

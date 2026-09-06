@@ -343,6 +343,7 @@ describe("cacheTermSecondsFor", () => {
     tokens: 0,
     cost_usd: null,
     cached: true,
+    warnings: [],
     cache_blocks,
   });
 

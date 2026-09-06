@@ -34,6 +34,7 @@ from app.models import (
 )
 from app.services.project.ai_invocations import _add_cost
 from app.services.project.errors import ProjectServiceError
+from app.services.yaml_io import load_yaml
 
 
 class ChatSessionsMixin:
@@ -189,7 +190,7 @@ class ChatSessionsMixin:
                 data["staged_set"] = str(meta.get("staged_set") or "")
         # The transcript lives in the body (ADR-0051 S2), serialized as YAML.
         if body.strip():
-            parsed = yaml.safe_load(body)
+            parsed = load_yaml(body)
             if isinstance(parsed, dict):
                 data["messages"] = parsed.get("messages") or []
         session = ChatSession.model_validate(data)

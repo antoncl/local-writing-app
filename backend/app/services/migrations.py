@@ -55,6 +55,7 @@ from typing import Any
 import yaml
 
 from app.services.atomic_io import atomic_write_text
+from app.services.yaml_io import load_yaml
 
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
@@ -192,7 +193,7 @@ def _ensure_cascade_fields(root: Path, field_ids: tuple[str, ...]) -> None:
     schema_path = root / "metadata.schema.yaml"
     data: dict[str, Any] = {}
     if schema_path.exists():
-        loaded = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+        loaded = load_yaml(schema_path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             data = loaded
     existing = data.get("cascade_fields")
@@ -267,7 +268,7 @@ def _migrate_invocations_to_csv(root: Path) -> None:
         return
     if not yaml_path.exists():
         return
-    loaded = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    loaded = load_yaml(yaml_path.read_text(encoding="utf-8")) or {}
     if isinstance(loaded, list):
         rows: Any = loaded
     elif isinstance(loaded, dict) and isinstance(loaded.get("invocations"), list):
@@ -365,7 +366,7 @@ def _read_front_matter(path: Path) -> tuple[dict[str, Any], str]:
     front, body = rest.split("\n---\n", 1)
     body = body.lstrip("\n")
     try:
-        data = yaml.safe_load(front) or {}
+        data = load_yaml(front) or {}
     except yaml.YAMLError:
         return {}, text
     if not isinstance(data, dict):
@@ -529,7 +530,7 @@ def _read_legacy_tags_yaml(path: Path) -> list[tuple[str, str | None]]:
     if not path.exists():
         return []
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = load_yaml(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         return []
     raw = data.get("tags") if isinstance(data, dict) else None
@@ -925,7 +926,7 @@ def _migrate_schema_tags_type(schema_path: Path) -> None:
     if not schema_path.exists():
         return
     try:
-        data = yaml.safe_load(schema_path.read_text(encoding="utf-8")) or {}
+        data = load_yaml(schema_path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         return
     if not isinstance(data, dict):
@@ -1100,7 +1101,7 @@ def read_project_version(root: Path) -> int:
     if not manifest_path.exists():
         return 0
     try:
-        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        data = load_yaml(manifest_path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         return 0
     if not isinstance(data, dict):
@@ -1113,7 +1114,7 @@ def read_project_version(root: Path) -> int:
 
 def write_project_version(root: Path, version: int) -> None:
     manifest_path = root / "project.yaml"
-    data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    data = load_yaml(manifest_path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
         raise RuntimeError("project.yaml is not a YAML mapping; refusing to stamp schema_version.")
     data["schema_version"] = version

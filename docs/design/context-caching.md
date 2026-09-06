@@ -88,7 +88,7 @@ Sources: OpenRouter's prompt-caching guide and the baked-in profile data
 | Provider | Style | Breakpoints | Notes |
 | --- | --- | --- | --- |
 | **Anthropic** | explicit | `cache_control:{type:ephemeral, ttl?}` | Always explicit. `_anthropic_system_blocks` emits the markers; `ttl` passed through when `"5m"`/`"1h"`. Max **4** breakpoints (not enforced in code; the send path emits ≤3 by construction). |
-| **OpenRouter** | per-route | explicit for anthropic/google/qwen/alibaba routes; auto for openai/deepseek/x-ai/groq/moonshotai; else none | Gets the structured block list; also passes `session_id` for sticky routing so the prefix survives across turns. |
+| **OpenRouter** | per-route | explicit for anthropic/google/qwen/alibaba routes; auto for openai/deepseek/x-ai/groq/moonshotai; else none | Gets the structured block list; also passes `session_id` for sticky routing so the prefix survives across turns. Gemini routes: one marker on the last stable block, no `ttl`, fixed 5-minute term (`GeminiBreakpoint`). |
 | **OpenAI** | automatic | none | Auto-caches prefixes ≥1024 tokens. `system_blocks` are **collapsed to a string** — breakpoints/TTLs stripped. Placement changes nothing on the wire; only prefix *stability* matters. |
 | **Ollama** | none | none | No network cache. Blocks collapsed to a string. |
 

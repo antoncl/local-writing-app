@@ -10,6 +10,8 @@ interpreting it — see `ProviderProfile.cache_plan_for` (base.py).
 
 This is where the 4-breakpoint cap and the `1h`/`5m` ttl tokens live, moved
 here from `explicit_cache.py` (ADR-0060 §5); that module retires with this one.
+
+Strategies: `NoCache`, `PrefixCache`, `AnthropicBreakpoints`, `GeminiBreakpoint`.
 """
 
 from __future__ import annotations
@@ -26,6 +28,10 @@ _TIER_TTL_SECONDS = {"stable": 3600, "volatile": 300}
 
 # Anthropic's hard cap on `cache_control` markers per request.
 MAX_BREAKPOINTS = 4
+
+# Gemini's implicit cache is a fixed, non-renewing term (OpenRouter's guide,
+# read 2026-09-06) — unlike Anthropic's, a hit does not extend it.
+GEMINI_TTL_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -136,9 +142,44 @@ class AnthropicBreakpoints(CacheStrategy):
         return CachePlan(mode="markers", cached=self.caches, blocks=planned)
 
 
+class GeminiBreakpoint(CacheStrategy):
+    """Gemini via OpenRouter honours ONE `cache_control` breakpoint (the last), no `ttl`,
+    and caches the prefix up to it for a fixed five minutes that does not renew.
+    So: one marker, on the last stable-tier non-empty block; blocks up to and including
+    it project `ttl_seconds=300`; blocks after it (volatile) project None.
+    No stable block → no marker, no projections."""
+
+    kind = "gemini"
+    caches = True
+
+    def plan(self, blocks: Sequence[Mapping[str, Any]]) -> CachePlan:
+        blocks = list(blocks)
+        stable_indices = [
+            i
+            for i, block in enumerate(blocks)
+            if (block.get("text") or "") and block.get("tier") == "stable"
+        ]
+        breakpoint_index = stable_indices[-1] if stable_indices else None
+        planned: list[PlannedBlock] = []
+        for i, block in enumerate(blocks):
+            text = block.get("text") or ""
+            if not text:
+                continue
+            tier = block.get("tier")
+            marker: dict | None = None
+            ttl_seconds: int | None = None
+            if breakpoint_index is not None and i <= breakpoint_index:
+                ttl_seconds = GEMINI_TTL_SECONDS
+                if i == breakpoint_index:
+                    marker = {"type": "ephemeral"}
+            planned.append(PlannedBlock(text=text, tier=tier, marker=marker, ttl_seconds=ttl_seconds))
+        return CachePlan(mode="markers", cached=self.caches, blocks=planned)
+
+
 NO_CACHE = NoCache()
 PREFIX_CACHE = PrefixCache()
 ANTHROPIC_BREAKPOINTS = AnthropicBreakpoints()
+GEMINI_BREAKPOINT = GeminiBreakpoint()
 
 # Slice 1: `caching_style()` stays a concrete base method (retires in Slice 3)
 # so `preview.py`, `_row_to_descriptor`'s capability, and the frontend don't

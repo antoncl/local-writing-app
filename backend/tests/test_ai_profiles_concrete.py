@@ -18,6 +18,7 @@ from app.services.ai.profiles import CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.anthropic import AnthropicProfile
 from app.services.ai.profiles.cache_strategy import (
     ANTHROPIC_BREAKPOINTS,
+    GEMINI_BREAKPOINT,
     NO_CACHE,
     PREFIX_CACHE,
 )
@@ -130,10 +131,9 @@ def test_openrouter_caching_style_by_prefix():
 
 def test_openrouter_cache_strategy_by_prefix():
     profile = OpenRouterProfile(api_key="")
-    # Anthropic / Google routes need explicit markup — Google is the known
-    # carry-over (Slice 2 gives it its own strategy).
+    # Anthropic needs explicit markup; Google gets its own strategy (ADR-0084 Slice 2).
     assert profile.cache_strategy("anthropic/claude-sonnet-4") is ANTHROPIC_BREAKPOINTS
-    assert profile.cache_strategy("google/gemini-2.5-pro") is ANTHROPIC_BREAKPOINTS
+    assert profile.cache_strategy("google/gemini-2.5-pro") is GEMINI_BREAKPOINT
     # OpenAI / DeepSeek / Groq route through to auto-cache providers.
     assert profile.cache_strategy("openai/gpt-4o") is PREFIX_CACHE
     assert profile.cache_strategy("deepseek/deepseek-chat") is PREFIX_CACHE

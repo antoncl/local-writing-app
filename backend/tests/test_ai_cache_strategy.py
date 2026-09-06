@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from app.services.ai.profiles.cache_strategy import (
     ANTHROPIC_BREAKPOINTS,
+    GEMINI_BREAKPOINT,
     MAX_BREAKPOINTS,
     NO_CACHE,
     PREFIX_CACHE,
@@ -14,6 +15,7 @@ from app.services.ai.profiles.cache_strategy import (
     TIER_TTL,
     AnthropicBreakpoints,
     CacheStrategy,
+    GeminiBreakpoint,
     NoCache,
     PrefixCache,
 )
@@ -111,9 +113,8 @@ def test_no_cache_empty_input_collapses_to_empty_string():
 
 
 def test_style_by_kind_covers_every_strategy_kind():
-    for strategy in (NO_CACHE, PREFIX_CACHE, ANTHROPIC_BREAKPOINTS):
+    for strategy in (NO_CACHE, PREFIX_CACHE, ANTHROPIC_BREAKPOINTS, GEMINI_BREAKPOINT):
         assert strategy.kind in STYLE_BY_KIND
-    # Gemini's kind is reserved for Slice 2 but the projection is pinned now.
     assert STYLE_BY_KIND == {
         "none": "none",
         "prefix": "auto",
@@ -130,3 +131,61 @@ def test_strategies_are_cache_strategy_instances_with_expected_kind_and_caches()
     assert isinstance(ANTHROPIC_BREAKPOINTS, CacheStrategy)
     assert isinstance(ANTHROPIC_BREAKPOINTS, AnthropicBreakpoints)
     assert ANTHROPIC_BREAKPOINTS.kind == "anthropic" and ANTHROPIC_BREAKPOINTS.caches is True
+
+
+# ---- GeminiBreakpoint.plan (ADR-0084 Slice 2) ------------------------------
+
+
+def test_gemini_marks_only_the_last_stable_block():
+    blocks = [
+        {"text": "system", "tier": "stable"},
+        {"text": "staged", "tier": "stable"},
+        {"text": "stable lore", "tier": "stable"},
+        {"text": "volatile lore", "tier": "volatile"},
+    ]
+    plan = GEMINI_BREAKPOINT.plan(blocks)
+    assert plan.mode == "markers"
+    assert plan.cached is True
+    marked = [i for i, b in enumerate(plan.blocks) if b.marker]
+    assert marked == [2]
+    assert plan.blocks[2].marker == {"type": "ephemeral"}
+    assert "ttl" not in plan.blocks[2].marker
+    assert [b.ttl_seconds for b in plan.blocks] == [300, 300, 300, None]
+
+
+def test_gemini_no_stable_block_means_no_marker_or_projection():
+    blocks = [
+        {"text": "volatile 1", "tier": "volatile"},
+        {"text": "volatile 2", "tier": "volatile"},
+    ]
+    plan = GEMINI_BREAKPOINT.plan(blocks)
+    assert all(b.marker is None for b in plan.blocks)
+    assert all(b.ttl_seconds is None for b in plan.blocks)
+
+
+def test_gemini_empty_block_between_stables_is_dropped_and_marker_lands_on_last_stable():
+    blocks = [
+        {"text": "stable 1", "tier": "stable"},
+        {"text": "", "tier": "stable"},
+        {"text": "stable 2", "tier": "stable"},
+    ]
+    plan = GEMINI_BREAKPOINT.plan(blocks)
+    assert [b.text for b in plan.blocks] == ["stable 1", "stable 2"]
+    marked = [i for i, b in enumerate(plan.blocks) if b.marker]
+    assert marked == [1]
+    assert plan.blocks[1].marker == {"type": "ephemeral"}
+    assert [b.ttl_seconds for b in plan.blocks] == [300, 300]
+
+
+def test_gemini_single_stable_block_is_marked():
+    plan = GEMINI_BREAKPOINT.plan([{"text": "only", "tier": "stable"}])
+    assert plan.blocks[0].marker == {"type": "ephemeral"}
+    assert plan.blocks[0].ttl_seconds == 300
+
+
+def test_gemini_kind_caches_and_style():
+    assert isinstance(GEMINI_BREAKPOINT, CacheStrategy)
+    assert isinstance(GEMINI_BREAKPOINT, GeminiBreakpoint)
+    assert GEMINI_BREAKPOINT.kind == "gemini"
+    assert GEMINI_BREAKPOINT.caches is True
+    assert STYLE_BY_KIND["gemini"] == "explicit"

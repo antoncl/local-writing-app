@@ -33,6 +33,7 @@ from app.services.ai.profiles.base import (
 )
 from app.services.ai.profiles.cache_strategy import (
     ANTHROPIC_BREAKPOINTS,
+    GEMINI_BREAKPOINT,
     NO_CACHE,
     PREFIX_CACHE,
     CachePlan,
@@ -53,8 +54,8 @@ _STRATEGY_BY_PREFIX: dict[str, CacheStrategy] = {
     "anthropic": ANTHROPIC_BREAKPOINTS,
     "alibaba": ANTHROPIC_BREAKPOINTS,
     "qwen": ANTHROPIC_BREAKPOINTS,       # alias used by some routes
-    # known carry-over — Slice 2 (#1064) gives Gemini its own strategy
-    "google": ANTHROPIC_BREAKPOINTS,     # Gemini 2.5 needs explicit breakpoints
+    # Gemini: ONE marker (last breakpoint wins), no ttl, fixed 5-min term (ADR-0084 §3)
+    "google": GEMINI_BREAKPOINT,
     "openai": PREFIX_CACHE,
     "deepseek": PREFIX_CACHE,
     "x-ai": PREFIX_CACHE,

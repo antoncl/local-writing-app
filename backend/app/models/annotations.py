@@ -200,6 +200,11 @@ class SearchHit(BaseModel):
     path: str
     line: int
     excerpt: str
+    # The excerpt is a window around the match (#1868); these say whether text
+    # was clipped before/after it. The pane draws the ellipses itself, outside
+    # the highlighted text, so a query of "…" can never mark them.
+    clipped_before: bool = False
+    clipped_after: bool = False
     todo_id: str | None = None
     field: Literal["body", "metadata"] = "body"
     start: int = 0

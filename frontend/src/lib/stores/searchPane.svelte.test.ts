@@ -352,3 +352,155 @@ describe("SearchPaneController.replaceAll (ADR-0085 §4)", () => {
     );
   });
 });
+
+describe("SearchPaneController reveal window (#1868)", () => {
+  // 150 manuscript + 5 lore hits — manuscript's own window fills a full
+  // REVEAL_BATCH, lore's window (5) doesn't, so lore is fully visible from
+  // the first render (review finding A).
+  function mixedHits(): SearchHit[] {
+    return [
+      ...Array.from({ length: 150 }, (_, i) => hit("m" + i)),
+      ...Array.from({ length: 5 }, (_, i) => hit("l" + i, { kind: "lore" })),
+    ];
+  }
+
+  it("every kind gets its own group + window from the first render", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: mixedHits() });
+    c.query = "a";
+
+    await c.fire();
+
+    // `orderKinds`' KIND_ORDER lists lore before manuscript; the order isn't
+    // the point of this test — both groups being present with the right
+    // per-group window/total is.
+    expect(c.groups.map((g) => g.kind).sort()).toEqual(["lore", "manuscript"]);
+    const manuscript = c.groups.find((g) => g.kind === "manuscript");
+    const lore = c.groups.find((g) => g.kind === "lore");
+    expect(manuscript?.hits.length).toBe(100);
+    expect(manuscript?.total).toBe(150);
+    expect(lore?.hits.length).toBe(5);
+    expect(lore?.total).toBe(5);
+    expect(c.eligibleHits.length).toBe(155);
+  });
+
+  it("revealMore(kind) extends only that kind's window and clamps; a further call and an already-full kind are no-ops", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: mixedHits() });
+    c.query = "a";
+    await c.fire();
+
+    c.revealMore("manuscript");
+    expect(c.groups.find((g) => g.kind === "manuscript")?.hits.length).toBe(150);
+    expect(c.groups.find((g) => g.kind === "lore")?.hits.length).toBe(5);
+
+    c.revealMore("manuscript");
+    expect(c.groups.find((g) => g.kind === "manuscript")?.hits.length).toBe(150);
+
+    c.revealMore("lore");
+    expect(c.groups.find((g) => g.kind === "lore")?.hits.length).toBe(5);
+  });
+
+  it("revealMore(kind) extends by REVEAL_BATCH, not to everything at once", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: Array.from({ length: 250 }, (_, i) => hit("f" + i)) });
+    c.query = "a";
+    await c.fire();
+
+    c.revealMore("manuscript");
+    expect(c.groups[0].hits.length).toBe(200);
+    c.revealMore("manuscript");
+    expect(c.groups[0].hits.length).toBe(250);
+  });
+
+  it("a changed query resets every group's window back to REVEAL_BATCH", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: mixedHits() });
+    c.query = "a";
+    await c.fire();
+    c.revealMore("manuscript");
+    expect(c.groups.find((g) => g.kind === "manuscript")?.hits.length).toBe(150);
+
+    vi.mocked(api.search).mockResolvedValue({ query: "b", hits: mixedHits() });
+    c.query = "b";
+    await c.fire();
+
+    expect(c.groups.find((g) => g.kind === "manuscript")?.hits.length).toBe(100);
+  });
+
+  it("re-firing the SAME query/options (a replace re-run) keeps the revealed window", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: mixedHits() });
+    c.query = "a";
+    await c.fire();
+    c.revealMore("manuscript");
+    expect(c.groups.find((g) => g.kind === "manuscript")?.hits.length).toBe(150);
+
+    // Same query text and options as the previous fire.
+    await c.fire();
+
+    expect(c.groups.find((g) => g.kind === "manuscript")?.hits.length).toBe(150);
+  });
+
+  it("setMatchCase(true) with the same text resets the revealed window", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: mixedHits() });
+    c.query = "a";
+    await c.fire();
+    c.revealMore("manuscript");
+    expect(c.groups.find((g) => g.kind === "manuscript")?.hits.length).toBe(150);
+
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: mixedHits() });
+    c.setMatchCase(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(c.groups.find((g) => g.kind === "manuscript")?.hits.length).toBe(100);
+  });
+
+  it("setIncludeOpenTodos(true) with the same text resets the revealed window (finding C)", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: mixedHits() });
+    c.query = "a";
+    await c.fire();
+    c.revealMore("manuscript");
+    expect(c.groups.find((g) => g.kind === "manuscript")?.hits.length).toBe(150);
+
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: mixedHits() });
+    c.setIncludeOpenTodos(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(c.groups.find((g) => g.kind === "manuscript")?.hits.length).toBe(100);
+  });
+
+  it("the empty-query short-circuit branch resets visibleByKind and groups", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: mixedHits() });
+    c.query = "a";
+    await c.fire();
+    c.revealMore("manuscript");
+    expect(c.groups.find((g) => g.kind === "manuscript")?.hits.length).toBe(150);
+
+    c.query = "";
+    await c.fire();
+
+    expect(c.visibleByKind).toEqual({});
+    expect(c.groups).toEqual([]);
+  });
+
+  it("the project kind sorts last even when its hits come first in the response", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({
+      query: "a",
+      // "widget" is unknown to orderKinds and sorts after "project" alphabetically,
+      // so only the explicit project-last rule puts project at the end.
+      hits: [hit("p1", { kind: "project" }), hit("w1", { kind: "widget" }), hit("m1", { kind: "manuscript" })],
+    });
+    c.query = "a";
+
+    await c.fire();
+
+    expect(c.groups.map((g) => g.kind)).toEqual(["manuscript", "widget", "project"]);
+  });
+});

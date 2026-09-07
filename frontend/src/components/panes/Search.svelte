@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import type { Action } from "svelte/action";
   import type { SearchHit } from "@/lib/types";
-  import { kindLabel, orderKinds } from "@/lib/kindLabels";
+  import { kindLabel } from "@/lib/kindLabels";
   import { SearchPaneController } from "@/lib/stores/searchPane.svelte";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
@@ -76,14 +77,30 @@
   // its title-cased kind name instead of being dropped. `project` always
   // sorts last — it is the TODO catch-all, not a content kind.
   const PANE_LABEL: Record<string, string> = { manuscript: "Scenes", project: "Project" };
-  const groups = $derived(
-    orderKinds(new Set(ctrl.hits.map((hit) => hit.kind)))
-      .sort((a, b) => (a === "project" ? 1 : 0) - (b === "project" ? 1 : 0))
-      .map((kind) => ({
-        label: PANE_LABEL[kind] ?? kindLabel(kind),
-        hits: ctrl.hits.filter((hit) => hit.kind === kind),
-      })),
-  );
+  // The ordering/windowing itself lives on the controller now (`ctrl.groups`,
+  // #1868 per-group windows — review finding A): every kind present in the
+  // FULL hit list gets a group from the first render, each with its OWN
+  // `REVEAL_BATCH` window, so a query with 150 manuscript hits and 5 lore hits
+  // still shows the Lore group instead of burying it under a flat 100-hit
+  // slice. The pane only adds the display label.
+  const groups = $derived(ctrl.groups.map((g) => ({ ...g, label: PANE_LABEL[g.kind] ?? kindLabel(g.kind) })));
+
+  // Reveal the group's next batch when its footer scrolls into view. The
+  // footer is re-mounted (`{#key}`) after every reveal, so the observer is
+  // re-created and its initial callback fires again — if the footer is STILL
+  // on screen (a tall pane), the next batch follows without a scroll, until
+  // the footer is below the fold or the group is fully shown.
+  // IntersectionObserver respects ancestor clipping, so the pane needn't know
+  // which container scrolls it. Where the API is missing (tests), the Show
+  // more button is the whole mechanism.
+  const revealOnView: Action<HTMLElement, () => void> = (node, reveal) => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) reveal();
+    });
+    observer.observe(node);
+    return { destroy: () => observer.disconnect() };
+  };
 
   // Split an excerpt around matches of `q` so the match can be wrapped in
   // <mark>. Only the excerpt is highlighted — never the path/line. The regex
@@ -131,6 +148,23 @@
   // TODO, or unsaved edits in an open pane — is computed client-side for the
   // note text; the actual write is always the backend's ownership/revision/
   // dispatch check (§4), never guessed here.
+  //
+  // Reveal window (#1868, per-group — review finding A): rendering every hit
+  // as a NodeRow froze the tab on a short/common query (thousands of hits),
+  // and the backend sorts manuscript hits first, so a single flat window
+  // could bury the Lore/Research/etc. groups entirely. The pane now renders
+  // each group's own first `REVEAL_BATCH` hits and reveals more per group as
+  // its footer scrolls into view (or via that group's own "Show more" where
+  // IntersectionObserver is unavailable). The controller's `hits`/
+  // `eligibleHits` stay complete throughout — Replace all still acts on every
+  // eligible hit, not just the visible ones.
+  //
+  // Ellipsis outside the highlight (#1868 finding B): the backend used to bake
+  // a literal "…" into a clipped excerpt, which the pane's own regex-based
+  // highlighter could then match and wrap in <mark> (a query of "…" marked the
+  // edge ellipses). The backend now sends a bare excerpt window plus
+  // `clipped_before`/`clipped_after`, and the pane renders the ellipsis spans
+  // itself, outside `segments()`'s input, so no query can ever highlight them.
 </script>
 
 <div class="search-bar">
@@ -191,8 +225,9 @@
 {/if}
 
 {#if groups.length > 0}
+  <p class="search-count">{ctrl.hits.length} {ctrl.hits.length === 1 ? "match" : "matches"}</p>
   {#each groups as group (group.label)}
-    <div class="search-group-label">{group.label}</div>
+    <div class="search-group-label">{group.label} <span class="search-group-count">{group.total}</span></div>
     <!-- Unkeyed: hits are ephemeral and fully replaced each search, and are
          NOT unique on (file_id, line, path) — an entry matching in two metadata
          fields (title + aliases) yields two hits identical on those, so a keyed
@@ -204,9 +239,11 @@
         <NodeRow title={`${hit.path}:${hit.line}`} onClick={() => onOpenHit(hit)}>
           {#snippet detailSlot()}
             <small class="search-excerpt"
-              >{#each segments(hit.excerpt, ctrl.lastQuery, ctrl.lastMatchCase, ctrl.lastWholeWord) as seg}{#if seg.hit}{#if previewReplace}<del
+              >{#if hit.clipped_before}<span class="search-clip">…</span>{/if}{#each segments(hit.excerpt, ctrl.lastQuery, ctrl.lastMatchCase, ctrl.lastWholeWord) as seg}{#if seg.hit}{#if previewReplace}<del
                     class="search-del">{seg.text}</del
-                  ><ins class="search-ins">{ctrl.replacement}</ins>{:else}<mark>{seg.text}</mark>{/if}{:else}{seg.text}{/if}{/each}</small
+                  ><ins class="search-ins">{ctrl.replacement}</ins>{:else}<mark>{seg.text}</mark>{/if}{:else}{seg.text}{/if}{/each}{#if hit.clipped_after}<span
+                  class="search-clip">…</span
+                >{/if}</small
             >
             {#if elig === "inherited"}
               <span class="search-hit-note">inherited — not replaceable here</span>
@@ -234,6 +271,14 @@
         </NodeRow>
       {/each}
     </NodeList>
+    {#if group.hits.length < group.total}
+      {#key group.hits.length}
+        <div class="search-more" use:revealOnView={() => ctrl.revealMore(group.kind)}>
+          <span class="search-more-count">Showing {group.hits.length} of {group.total}</span>
+          <button type="button" class="search-show-more" onclick={() => ctrl.revealMore(group.kind)}>Show more</button>
+        </div>
+      {/key}
+    {/if}
   {/each}
 {:else if ctrl.searched}
   <p class="search-empty">No matches.</p>
@@ -313,6 +358,49 @@
     text-transform: uppercase;
   }
 
+  .search-group-count {
+    color: var(--text-3);
+    font-weight: var(--w-regular);
+    letter-spacing: 0;
+    text-transform: none;
+    margin-left: var(--sp-1);
+  }
+
+  .search-count {
+    margin-top: var(--sp-3);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+
+  .search-more {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin-top: var(--sp-3);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+
+  .search-show-more {
+    padding: 3px 10px;
+    font-size: var(--fs-xs);
+    font-weight: var(--w-semibold);
+    border-radius: var(--r-sm);
+    border: 1px solid var(--accent);
+    background: var(--surface);
+    color: var(--accent-emphasis);
+    cursor: pointer;
+  }
+
+  .search-show-more:hover:not(:disabled) {
+    background: var(--accent-soft);
+  }
+
+  .search-show-more:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
   .search-excerpt {
     color: var(--text-2);
     line-height: 1.35;
@@ -323,6 +411,10 @@
     color: var(--accent-emphasis);
     padding: 0 2px;
     border-radius: var(--r-sm);
+  }
+
+  .search-clip {
+    color: var(--text-3);
   }
 
   .search-del {

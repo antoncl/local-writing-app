@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import bisect
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from app.models import (
@@ -47,6 +48,48 @@ def _compile_query(query: str, *, match_case: bool, whole_word: bool) -> re.Patt
         escaped = rf"(?<!\w){escaped}(?!\w)"
     flags = 0 if match_case else re.IGNORECASE
     return re.compile(escaped, flags)
+
+
+# The excerpt is a display field (ADR-0085 §2) — a window around the match,
+# not the whole line. A hit is emitted per occurrence, so a long paragraph with
+# fifty matches used to ship fifty copies of itself (#1868: 24k hits, 14 MB,
+# a frozen tab). The window keeps the payload linear in hits. Lines at or
+# under `EXCERPT_MAX_LINE` are still sent whole, so a short line reads as it
+# always did; a clipped edge snaps outward to a word boundary. The match itself
+# is never clipped, however long. The ellipsis is NOT baked into the string:
+# the pane re-matches the query over the excerpt to place its highlight, so a
+# literal "…" here would be marked by a query of "…". The two flags let the
+# pane draw the ellipses outside the highlighted text.
+EXCERPT_MAX_LINE = 160
+EXCERPT_BEFORE = 60
+EXCERPT_AFTER = 100
+
+
+@dataclass(frozen=True)
+class ExcerptWindow:
+    text: str
+    clipped_before: bool
+    clipped_after: bool
+
+
+def excerpt_window(line: str, start: int, end: int) -> ExcerptWindow:
+    """`line[start:end]` is the match; returns the display excerpt for it."""
+    if len(line) <= EXCERPT_MAX_LINE:
+        return ExcerptWindow(line.strip(), False, False)
+    left = max(0, start - EXCERPT_BEFORE)
+    right = min(len(line), end + EXCERPT_AFTER)
+    if left > 0:
+        # Start on a word: skip forward to just past the next space, if one
+        # lies before the match.
+        space = line.find(" ", left, start)
+        if space != -1:
+            left = space + 1
+    if right < len(line):
+        # End on a word: pull back to the last space after the match.
+        space = line.rfind(" ", end, right)
+        if space != -1:
+            right = space
+    return ExcerptWindow(line[left:right].strip(), left > 0, right < len(line))
 
 
 class _SceneDisplayPaths(StructureVisitor):
@@ -168,7 +211,9 @@ class SearchMixin:
         for entry in sorted(selected, key=_sort_key):
             display = self._corpus_display_path(entry, scene_paths)
             for label, value in entry.metadata_values:
-                if pattern.search(value):
+                match = pattern.search(value)
+                if match:
+                    window = excerpt_window(value, match.start(), match.end())
                     hits.append(
                         SearchHit(
                             kind=entry.kind,
@@ -176,7 +221,9 @@ class SearchMixin:
                             file_id=entry.id,
                             path=f"{display} metadata",
                             line=1,
-                            excerpt=f"{label}: {value}",
+                            excerpt=f"{label}: {window.text}",
+                            clipped_before=window.clipped_before,
+                            clipped_after=window.clipped_after,
                             field="metadata",
                             start=0,
                             end=0,
@@ -193,7 +240,8 @@ class SearchMixin:
         """One hit per occurrence in `entry.body` (ADR-0085 §2 — a replace
         needs each match, not each matching line). Line starts are computed
         once per entry so a many-match body stays linear rather than
-        re-scanning from the top for every match."""
+        re-scanning from the top for every match; the excerpt is a window
+        around the match (`excerpt_window`) so the payload is too."""
         body = entry.body
         line_starts = [0] + [index + 1 for index, char in enumerate(body) if char == "\n"]
         hits: list[SearchHit] = []
@@ -203,6 +251,9 @@ class SearchMixin:
             line_end = body.find("\n", line_start)
             if line_end == -1:
                 line_end = len(body)
+            window = excerpt_window(
+                body[line_start:line_end], match.start() - line_start, match.end() - line_start
+            )
             hits.append(
                 SearchHit(
                     kind=entry.kind,
@@ -210,7 +261,9 @@ class SearchMixin:
                     file_id=entry.id,
                     path=display,
                     line=line,
-                    excerpt=body[line_start:line_end].strip(),
+                    excerpt=window.text,
+                    clipped_before=window.clipped_before,
+                    clipped_after=window.clipped_after,
                     field="body",
                     start=match.start(),
                     end=match.end(),

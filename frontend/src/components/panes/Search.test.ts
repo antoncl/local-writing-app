@@ -62,6 +62,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
 });
 
 describe("Search pane — results render", () => {
@@ -212,7 +213,21 @@ describe("Search pane — results render", () => {
     await fireEvent.keyDown(input, { key: "Enter" });
     await tick();
 
-    const labels = screen.getAllByText(/^(Scenes|Plot|Research|Project|Widget)$/).map((el) => el.textContent);
+    // `getAllByText` already matches on the element's OWN text nodes (not its
+    // descendants, per dom-testing-library's `getNodeText`), so it still finds
+    // exactly the label divs and ignores the count span (#1868) added inside
+    // them. `.textContent`, unlike the query, DOES include that span's text
+    // (e.g. "Scenes 1"), so the assertion reads the same own-text-only slice
+    // the query used, instead of the label element's full `textContent`.
+    const labels = screen
+      .getAllByText(/^(Scenes|Plot|Research|Project|Widget)$/)
+      .map((el) =>
+        Array.from(el.childNodes)
+          .filter((n) => n.nodeType === Node.TEXT_NODE)
+          .map((n) => n.textContent)
+          .join("")
+          .trim(),
+      );
     expect(labels).toEqual(["Scenes", "Plot", "Research", "Widget", "Project"]);
   });
 
@@ -376,5 +391,169 @@ describe("Search pane — replace (ADR-0085 §4/§5)", () => {
     expect(
       screen.getByText("1 rejected: Scene Markdown must not contain raw HTML."),
     ).toBeInTheDocument();
+  });
+});
+
+describe("Search pane — lazy reveal (#1868)", () => {
+  function manyHits(n: number): SearchHit[] {
+    return Array.from({ length: n }, (_, i) => hit(`s${i}`, i, `excerpt ${i}`, "manuscript"));
+  }
+
+  // A minimal IntersectionObserver stub: the constructor stores the callback
+  // and every instance is tracked, so a test can grab the LATEST one (the
+  // pane's effect re-creates the observer after every reveal) and fire it by
+  // hand — happy-dom has no real IntersectionObserver.
+  class FakeIntersectionObserver {
+    static instances: FakeIntersectionObserver[] = [];
+    callback: (entries: { isIntersecting: boolean }[]) => void;
+    constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+      this.callback = callback;
+      FakeIntersectionObserver.instances.push(this);
+    }
+    observe(): void {}
+    disconnect(): void {}
+  }
+
+  it("renders only the first 100 rows of 250 hits, with the counts visible", async () => {
+    vi.mocked(api.search).mockResolvedValue({ query: "s", hits: manyHits(250) });
+    const { container } = render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "s" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    expect(screen.getAllByText(/^s\d+:\d+$/)).toHaveLength(100);
+    expect(container.querySelectorAll(".node-row")).toHaveLength(100);
+    expect(screen.getByText("250 matches")).toBeInTheDocument();
+    expect(screen.getByText("Showing 100 of 250")).toBeInTheDocument();
+    expect(container.querySelector(".search-group-count")?.textContent).toBe("250");
+  });
+
+  it("Show more reveals the next batch, then the rest, and the sentinel/button disappears", async () => {
+    vi.mocked(api.search).mockResolvedValue({ query: "s", hits: manyHits(250) });
+    const { container } = render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "s" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    await tick();
+    expect(container.querySelectorAll(".node-row")).toHaveLength(200);
+    expect(screen.getByText("Showing 200 of 250")).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    await tick();
+    expect(container.querySelectorAll(".node-row")).toHaveLength(250);
+    expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+    expect(container.querySelector(".search-more")).not.toBeInTheDocument();
+  });
+
+  it("a single hit shows '1 match' and no Show more", async () => {
+    vi.mocked(api.search).mockResolvedValue({ query: "s", hits: manyHits(1) });
+    render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "s" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    expect(screen.getByText("1 match")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+  });
+
+  it("reveals the next batch when the footer intersects, via IntersectionObserver, and re-arms after the reveal", async () => {
+    FakeIntersectionObserver.instances = [];
+    (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = FakeIntersectionObserver;
+    vi.mocked(api.search).mockResolvedValue({ query: "s", hits: manyHits(250) });
+    const { container } = render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "s" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    const first = FakeIntersectionObserver.instances[FakeIntersectionObserver.instances.length - 1];
+    first.callback([{ isIntersecting: true }]);
+    await tick();
+
+    expect(container.querySelectorAll(".node-row")).toHaveLength(200);
+
+    // The footer is re-mounted (`{#key}`) after every reveal, so the
+    // observer is re-created — fire the NEW latest instance to cover the
+    // re-arm, not the stale first one.
+    const second = FakeIntersectionObserver.instances[FakeIntersectionObserver.instances.length - 1];
+    second.callback([{ isIntersecting: true }]);
+    await tick();
+
+    expect(container.querySelectorAll(".node-row")).toHaveLength(250);
+    expect(container.querySelector(".search-more")).not.toBeInTheDocument();
+  });
+
+  it("windows each kind independently: a small lore group is fully visible while a large manuscript group has its own Show more (finding A)", async () => {
+    vi.mocked(api.search).mockResolvedValue({
+      query: "s",
+      hits: [...manyHits(250), hit("Lore / X0", 1, "text", "lore"), hit("Lore / X1", 1, "text", "lore"), hit("Lore / X2", 1, "text", "lore")],
+    });
+    const { container } = render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "s" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    expect(screen.getByText("Scenes")).toBeInTheDocument();
+    expect(screen.getByText("Lore")).toBeInTheDocument();
+    expect(screen.getByText("Lore / X0:1")).toBeInTheDocument();
+    expect(screen.getByText("Lore / X1:1")).toBeInTheDocument();
+    expect(screen.getByText("Lore / X2:1")).toBeInTheDocument();
+    expect(container.querySelectorAll(".node-row")).toHaveLength(103);
+    expect(screen.getByText("Showing 100 of 250")).toBeInTheDocument();
+
+    const showMoreButtons = screen.getAllByRole("button", { name: "Show more" });
+    expect(showMoreButtons).toHaveLength(1);
+
+    await fireEvent.click(showMoreButtons[0]);
+    await tick();
+
+    expect(container.querySelectorAll(".node-row")).toHaveLength(203);
+    expect(screen.getByText("Lore / X0:1")).toBeInTheDocument();
+  });
+
+  it("renders the clip ellipses outside the highlight, never marked (finding B)", async () => {
+    vi.mocked(api.search).mockResolvedValue({
+      query: "…",
+      hits: [
+        hit("s0", 0, "lorem wait no ipsum", "manuscript", { clipped_before: true, clipped_after: true }),
+      ],
+    });
+    const { container } = render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "…" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    const excerpt = container.querySelector(".search-excerpt");
+    expect(excerpt?.textContent).toBe("…lorem wait no ipsum…");
+    expect(container.querySelectorAll(".search-clip")).toHaveLength(2);
+    expect(container.querySelector("mark")).not.toBeInTheDocument();
+
+    vi.mocked(api.search).mockResolvedValue({
+      query: "wait",
+      hits: [
+        hit("s0", 0, "lorem wait no ipsum", "manuscript", { clipped_before: true, clipped_after: true }),
+      ],
+    });
+    await fireEvent.input(input, { target: { value: "wait" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    const marks = container.querySelectorAll("mark");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe("wait");
+    expect(container.querySelectorAll(".search-clip")).toHaveLength(2);
   });
 });

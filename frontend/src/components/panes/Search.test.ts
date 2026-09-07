@@ -464,7 +464,7 @@ describe("Search pane — lazy reveal (#1868)", () => {
     expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
   });
 
-  it("reveals the next batch when the sentinel intersects, via IntersectionObserver", async () => {
+  it("reveals the next batch when the footer intersects, via IntersectionObserver, and re-arms after the reveal", async () => {
     FakeIntersectionObserver.instances = [];
     (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = FakeIntersectionObserver;
     vi.mocked(api.search).mockResolvedValue({ query: "s", hits: manyHits(250) });
@@ -475,10 +475,85 @@ describe("Search pane — lazy reveal (#1868)", () => {
     await fireEvent.keyDown(input, { key: "Enter" });
     await tick();
 
-    const latest = FakeIntersectionObserver.instances[FakeIntersectionObserver.instances.length - 1];
-    latest.callback([{ isIntersecting: true }]);
+    const first = FakeIntersectionObserver.instances[FakeIntersectionObserver.instances.length - 1];
+    first.callback([{ isIntersecting: true }]);
     await tick();
 
     expect(container.querySelectorAll(".node-row")).toHaveLength(200);
+
+    // The footer is re-mounted (`{#key}`) after every reveal, so the
+    // observer is re-created — fire the NEW latest instance to cover the
+    // re-arm, not the stale first one.
+    const second = FakeIntersectionObserver.instances[FakeIntersectionObserver.instances.length - 1];
+    second.callback([{ isIntersecting: true }]);
+    await tick();
+
+    expect(container.querySelectorAll(".node-row")).toHaveLength(250);
+    expect(container.querySelector(".search-more")).not.toBeInTheDocument();
+  });
+
+  it("windows each kind independently: a small lore group is fully visible while a large manuscript group has its own Show more (finding A)", async () => {
+    vi.mocked(api.search).mockResolvedValue({
+      query: "s",
+      hits: [...manyHits(250), hit("Lore / X0", 1, "text", "lore"), hit("Lore / X1", 1, "text", "lore"), hit("Lore / X2", 1, "text", "lore")],
+    });
+    const { container } = render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "s" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    expect(screen.getByText("Scenes")).toBeInTheDocument();
+    expect(screen.getByText("Lore")).toBeInTheDocument();
+    expect(screen.getByText("Lore / X0:1")).toBeInTheDocument();
+    expect(screen.getByText("Lore / X1:1")).toBeInTheDocument();
+    expect(screen.getByText("Lore / X2:1")).toBeInTheDocument();
+    expect(container.querySelectorAll(".node-row")).toHaveLength(103);
+    expect(screen.getByText("Showing 100 of 250")).toBeInTheDocument();
+
+    const showMoreButtons = screen.getAllByRole("button", { name: "Show more" });
+    expect(showMoreButtons).toHaveLength(1);
+
+    await fireEvent.click(showMoreButtons[0]);
+    await tick();
+
+    expect(container.querySelectorAll(".node-row")).toHaveLength(203);
+    expect(screen.getByText("Lore / X0:1")).toBeInTheDocument();
+  });
+
+  it("renders the clip ellipses outside the highlight, never marked (finding B)", async () => {
+    vi.mocked(api.search).mockResolvedValue({
+      query: "…",
+      hits: [
+        hit("s0", 0, "lorem wait no ipsum", "manuscript", { clipped_before: true, clipped_after: true }),
+      ],
+    });
+    const { container } = render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "…" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    const excerpt = container.querySelector(".search-excerpt");
+    expect(excerpt?.textContent).toBe("…lorem wait no ipsum…");
+    expect(container.querySelectorAll(".search-clip")).toHaveLength(2);
+    expect(container.querySelector("mark")).not.toBeInTheDocument();
+
+    vi.mocked(api.search).mockResolvedValue({
+      query: "wait",
+      hits: [
+        hit("s0", 0, "lorem wait no ipsum", "manuscript", { clipped_before: true, clipped_after: true }),
+      ],
+    });
+    await fireEvent.input(input, { target: { value: "wait" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    const marks = container.querySelectorAll("mark");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe("wait");
+    expect(container.querySelectorAll(".search-clip")).toHaveLength(2);
   });
 });

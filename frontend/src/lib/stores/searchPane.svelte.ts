@@ -20,15 +20,19 @@
 // inherited/dirty), never trusted from a prior render — the backend's own
 // `not_replaceable`/`stale` outcomes are the real backstop.
 //
-// Reveal window (#1868): the controller still keeps the COMPLETE hit list —
-// `eligibleHits` and replace stay on `hits` because Replace all needs every
-// hit's ref — but the pane only renders `visibleHits`, a `REVEAL_BATCH`-sized
-// prefix, revealed further on scroll/"Show more". A re-run of the SAME query
-// (a replace, or re-pressing Enter) keeps how far the writer had scrolled; a
-// changed query or option resets to the first batch.
+// Reveal window (#1868, per-group per review finding A): the controller still
+// keeps the COMPLETE hit list — `eligibleHits` and replace stay on `hits`
+// because Replace all needs every hit's ref — but `groups` (the one derived
+// the pane renders from) windows each KIND independently, `REVEAL_BATCH` hits
+// at a time, so a kind with few hits is fully visible even when another kind
+// has thousands (the backend sorts manuscript first, so a flat window used to
+// bury Lore/Research/etc. entirely). A re-run of the SAME query (a replace, or
+// re-pressing Enter) keeps how far the writer had scrolled in each group; a
+// changed query or option resets every group back to the first batch.
 
 import { api } from "@/lib/api";
 import type { ReplaceHitRef, SearchHit } from "@/lib/types";
+import { orderKinds } from "@/lib/kindLabels";
 
 // The number of hits the pane renders up front and reveals per batch — an
 // unbounded render of thousands of NodeRows is what froze the tab (#1868).
@@ -72,13 +76,31 @@ export class SearchPaneController {
   lastQuery = $state("");
   lastMatchCase = $state(false);
   lastWholeWord = $state(false);
+  lastIncludeOpenTodos = $state(false);
   searched = $state(false);
   replacement = $state("");
   replacing = $state(false);
   lastReplace = $state<LastReplace | null>(null);
-  // The reveal window (#1868) — see the class comment above.
-  visibleCount = $state(REVEAL_BATCH);
-  visibleHits = $derived(this.hits.slice(0, this.visibleCount));
+  // The reveal window (#1868) — see the class comment above. A kind absent
+  // from the record shows `REVEAL_BATCH` (its first batch, unrevealed).
+  visibleByKind = $state<Record<string, number>>({});
+
+  visibleCountFor(kind: string): number {
+    return this.visibleByKind[kind] ?? REVEAL_BATCH;
+  }
+
+  // ONE derived the pane renders from — every kind present in `hits` gets an
+  // entry from the first render (not just the kinds that fit in a flat
+  // window), ordered `orderKinds`-first with `project` (the synthetic TODO
+  // catch-all) sorted last.
+  groups = $derived(
+    orderKinds(new Set(this.hits.map((hit) => hit.kind)))
+      .sort((a, b) => (a === "project" ? 1 : 0) - (b === "project" ? 1 : 0))
+      .map((kind) => {
+        const kindHits = this.hits.filter((hit) => hit.kind === kind);
+        return { kind, hits: kindHits.slice(0, this.visibleCountFor(kind)), total: kindHits.length };
+      }),
+  );
 
   #token = 0;
 
@@ -115,10 +137,14 @@ export class SearchPaneController {
     void this.fire();
   }
 
-  // Reveal the next batch of hits (#1868) — a no-op once everything is
-  // already visible.
-  revealMore(): void {
-    this.visibleCount = Math.min(this.hits.length, this.visibleCount + REVEAL_BATCH);
+  // Reveal the next batch of hits for ONE kind (#1868) — a no-op once that
+  // kind's hits are all already visible; other kinds' windows are untouched.
+  revealMore(kind: string): void {
+    const total = this.hits.filter((hit) => hit.kind === kind).length;
+    this.visibleByKind = {
+      ...this.visibleByKind,
+      [kind]: Math.min(total, this.visibleCountFor(kind) + REVEAL_BATCH),
+    };
   }
 
   async fire(): Promise<void> {
@@ -128,15 +154,20 @@ export class SearchPaneController {
     // (a replace, or re-pressing Enter) keeps how far the writer had
     // scrolled; a changed query or option starts back at the first batch.
     const sameQuery =
-      this.searched && q === this.lastQuery && this.matchCase === this.lastMatchCase && this.wholeWord === this.lastWholeWord;
+      this.searched &&
+      q === this.lastQuery &&
+      this.matchCase === this.lastMatchCase &&
+      this.wholeWord === this.lastWholeWord &&
+      this.includeOpenTodos === this.lastIncludeOpenTodos;
     if (!q && !this.includeOpenTodos) {
       this.hits = [];
       this.lastQuery = "";
       this.lastMatchCase = false;
       this.lastWholeWord = false;
+      this.lastIncludeOpenTodos = false;
       this.searched = false;
       this.lastReplace = null;
-      this.visibleCount = REVEAL_BATCH;
+      this.visibleByKind = {};
       return;
     }
     await this.run(async () => {
@@ -163,8 +194,9 @@ export class SearchPaneController {
       this.lastQuery = q;
       this.lastMatchCase = this.matchCase;
       this.lastWholeWord = this.wholeWord;
+      this.lastIncludeOpenTodos = this.includeOpenTodos;
       this.searched = true;
-      if (!sameQuery) this.visibleCount = REVEAL_BATCH;
+      if (!sameQuery) this.visibleByKind = {};
     });
   }
 

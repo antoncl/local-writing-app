@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import bisect
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from app.models import (
@@ -54,18 +55,27 @@ def _compile_query(query: str, *, match_case: bool, whole_word: bool) -> re.Patt
 # fifty matches used to ship fifty copies of itself (#1868: 24k hits, 14 MB,
 # a frozen tab). The window keeps the payload linear in hits. Lines at or
 # under `EXCERPT_MAX_LINE` are still sent whole, so a short line reads as it
-# always did; a clipped edge snaps outward to a word boundary and is marked
-# with an ellipsis. The match itself is never clipped, however long.
+# always did; a clipped edge snaps outward to a word boundary. The match itself
+# is never clipped, however long. The ellipsis is NOT baked into the string:
+# the pane re-matches the query over the excerpt to place its highlight, so a
+# literal "…" here would be marked by a query of "…". The two flags let the
+# pane draw the ellipses outside the highlighted text.
 EXCERPT_MAX_LINE = 160
 EXCERPT_BEFORE = 60
 EXCERPT_AFTER = 100
-ELLIPSIS = "…"
 
 
-def excerpt_window(line: str, start: int, end: int) -> str:
+@dataclass(frozen=True)
+class ExcerptWindow:
+    text: str
+    clipped_before: bool
+    clipped_after: bool
+
+
+def excerpt_window(line: str, start: int, end: int) -> ExcerptWindow:
     """`line[start:end]` is the match; returns the display excerpt for it."""
     if len(line) <= EXCERPT_MAX_LINE:
-        return line.strip()
+        return ExcerptWindow(line.strip(), False, False)
     left = max(0, start - EXCERPT_BEFORE)
     right = min(len(line), end + EXCERPT_AFTER)
     if left > 0:
@@ -79,12 +89,7 @@ def excerpt_window(line: str, start: int, end: int) -> str:
         space = line.rfind(" ", end, right)
         if space != -1:
             right = space
-    excerpt = line[left:right].strip()
-    if left > 0:
-        excerpt = ELLIPSIS + excerpt
-    if right < len(line):
-        excerpt = excerpt + ELLIPSIS
-    return excerpt
+    return ExcerptWindow(line[left:right].strip(), left > 0, right < len(line))
 
 
 class _SceneDisplayPaths(StructureVisitor):
@@ -208,6 +213,7 @@ class SearchMixin:
             for label, value in entry.metadata_values:
                 match = pattern.search(value)
                 if match:
+                    window = excerpt_window(value, match.start(), match.end())
                     hits.append(
                         SearchHit(
                             kind=entry.kind,
@@ -215,7 +221,9 @@ class SearchMixin:
                             file_id=entry.id,
                             path=f"{display} metadata",
                             line=1,
-                            excerpt=f"{label}: {excerpt_window(value, match.start(), match.end())}",
+                            excerpt=f"{label}: {window.text}",
+                            clipped_before=window.clipped_before,
+                            clipped_after=window.clipped_after,
                             field="metadata",
                             start=0,
                             end=0,
@@ -243,6 +251,9 @@ class SearchMixin:
             line_end = body.find("\n", line_start)
             if line_end == -1:
                 line_end = len(body)
+            window = excerpt_window(
+                body[line_start:line_end], match.start() - line_start, match.end() - line_start
+            )
             hits.append(
                 SearchHit(
                     kind=entry.kind,
@@ -250,11 +261,9 @@ class SearchMixin:
                     file_id=entry.id,
                     path=display,
                     line=line,
-                    excerpt=excerpt_window(
-                        body[line_start:line_end],
-                        match.start() - line_start,
-                        match.end() - line_start,
-                    ),
+                    excerpt=window.text,
+                    clipped_before=window.clipped_before,
+                    clipped_after=window.clipped_after,
                     field="body",
                     start=match.start(),
                     end=match.end(),

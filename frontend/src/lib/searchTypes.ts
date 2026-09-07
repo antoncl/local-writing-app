@@ -11,6 +11,11 @@ export type SearchHit = {
   path: string;
   line: number;
   excerpt: string;
+  // The excerpt is a window around the match (#1868); these say whether the
+  // backend clipped text before/after it. The pane renders the ellipses itself,
+  // OUTSIDE the highlighted text, so a query of "…" can't mark them.
+  clipped_before?: boolean;
+  clipped_after?: boolean;
   todo_id?: string | null;
   field: "body" | "metadata";
   start: number;

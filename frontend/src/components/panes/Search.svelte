@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import type { Action } from "svelte/action";
   import type { SearchHit } from "@/lib/types";
-  import { kindLabel, orderKinds } from "@/lib/kindLabels";
+  import { kindLabel } from "@/lib/kindLabels";
   import { SearchPaneController } from "@/lib/stores/searchPane.svelte";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
@@ -76,24 +77,30 @@
   // its title-cased kind name instead of being dropped. `project` always
   // sorts last — it is the TODO catch-all, not a content kind.
   const PANE_LABEL: Record<string, string> = { manuscript: "Scenes", project: "Project" };
-  // Grouped from `visibleHits` (#1868) — the render window, not the full hit
-  // list — but each group still carries `total`, the count of that kind across
-  // the FULL `ctrl.hits`, so the group label reads correctly before every hit
-  // of that kind has been revealed. Order follows the kinds present in the
-  // VISIBLE slice, same orderKinds + project-last logic as before.
-  const groups = $derived(
-    orderKinds(new Set(ctrl.visibleHits.map((hit) => hit.kind)))
-      .sort((a, b) => (a === "project" ? 1 : 0) - (b === "project" ? 1 : 0))
-      .map((kind) => ({
-        label: PANE_LABEL[kind] ?? kindLabel(kind),
-        hits: ctrl.visibleHits.filter((hit) => hit.kind === kind),
-        total: ctrl.hits.filter((hit) => hit.kind === kind).length,
-      })),
-  );
+  // The ordering/windowing itself lives on the controller now (`ctrl.groups`,
+  // #1868 per-group windows — review finding A): every kind present in the
+  // FULL hit list gets a group from the first render, each with its OWN
+  // `REVEAL_BATCH` window, so a query with 150 manuscript hits and 5 lore hits
+  // still shows the Lore group instead of burying it under a flat 100-hit
+  // slice. The pane only adds the display label.
+  const groups = $derived(ctrl.groups.map((g) => ({ ...g, label: PANE_LABEL[g.kind] ?? kindLabel(g.kind) })));
 
-  // The reveal-more sentinel — an IntersectionObserver target below the last
-  // group, only rendered while more hits remain (#1868).
-  let moreSentinel = $state<HTMLElement | null>(null);
+  // Reveal the group's next batch when its footer scrolls into view. The
+  // footer is re-mounted (`{#key}`) after every reveal, so the observer is
+  // re-created and its initial callback fires again — if the footer is STILL
+  // on screen (a tall pane), the next batch follows without a scroll, until
+  // the footer is below the fold or the group is fully shown.
+  // IntersectionObserver respects ancestor clipping, so the pane needn't know
+  // which container scrolls it. Where the API is missing (tests), the Show
+  // more button is the whole mechanism.
+  const revealOnView: Action<HTMLElement, () => void> = (node, reveal) => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) reveal();
+    });
+    observer.observe(node);
+    return { destroy: () => observer.disconnect() };
+  };
 
   // Split an excerpt around matches of `q` so the match can be wrapped in
   // <mark>. Only the excerpt is highlighted — never the path/line. The regex
@@ -129,25 +136,6 @@
     return out;
   }
 
-  // Reveal the next batch when the sentinel scrolls into view. Reading
-  // `ctrl.visibleCount` makes the effect re-run after every reveal, so the
-  // observer is re-created and its initial callback fires again — if the
-  // sentinel is STILL on screen (a tall pane), the next batch follows without
-  // a scroll, until the sentinel is below the fold or everything is shown.
-  // IntersectionObserver respects ancestor clipping, so the pane needn't know
-  // which container scrolls it. Where the API is missing (tests), the Show
-  // more button is the whole mechanism.
-  $effect(() => {
-    const el = moreSentinel;
-    void ctrl.visibleCount;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) ctrl.revealMore();
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  });
-
   // Search fires on input, debounced by `SearchInput` (`/api/search` reads
   // the corpus now — ADR-0085 §3, no longer an un-indexed full scan); the
   // controller drops any response superseded by a later keystroke. Enter
@@ -161,12 +149,22 @@
   // note text; the actual write is always the backend's ownership/revision/
   // dispatch check (§4), never guessed here.
   //
-  // Reveal window (#1868): rendering every hit as a NodeRow froze the tab on
-  // a short/common query (thousands of hits) — the pane now renders only the
-  // first `REVEAL_BATCH` hits and reveals more as the sentinel scrolls into
-  // view (or via "Show more" where IntersectionObserver is unavailable). The
-  // controller's `hits`/`eligibleHits` stay complete throughout — Replace all
-  // still acts on every eligible hit, not just the visible ones.
+  // Reveal window (#1868, per-group — review finding A): rendering every hit
+  // as a NodeRow froze the tab on a short/common query (thousands of hits),
+  // and the backend sorts manuscript hits first, so a single flat window
+  // could bury the Lore/Research/etc. groups entirely. The pane now renders
+  // each group's own first `REVEAL_BATCH` hits and reveals more per group as
+  // its footer scrolls into view (or via that group's own "Show more" where
+  // IntersectionObserver is unavailable). The controller's `hits`/
+  // `eligibleHits` stay complete throughout — Replace all still acts on every
+  // eligible hit, not just the visible ones.
+  //
+  // Ellipsis outside the highlight (#1868 finding B): the backend used to bake
+  // a literal "…" into a clipped excerpt, which the pane's own regex-based
+  // highlighter could then match and wrap in <mark> (a query of "…" marked the
+  // edge ellipses). The backend now sends a bare excerpt window plus
+  // `clipped_before`/`clipped_after`, and the pane renders the ellipsis spans
+  // itself, outside `segments()`'s input, so no query can ever highlight them.
 </script>
 
 <div class="search-bar">
@@ -241,9 +239,11 @@
         <NodeRow title={`${hit.path}:${hit.line}`} onClick={() => onOpenHit(hit)}>
           {#snippet detailSlot()}
             <small class="search-excerpt"
-              >{#each segments(hit.excerpt, ctrl.lastQuery, ctrl.lastMatchCase, ctrl.lastWholeWord) as seg}{#if seg.hit}{#if previewReplace}<del
+              >{#if hit.clipped_before}<span class="search-clip">…</span>{/if}{#each segments(hit.excerpt, ctrl.lastQuery, ctrl.lastMatchCase, ctrl.lastWholeWord) as seg}{#if seg.hit}{#if previewReplace}<del
                     class="search-del">{seg.text}</del
-                  ><ins class="search-ins">{ctrl.replacement}</ins>{:else}<mark>{seg.text}</mark>{/if}{:else}{seg.text}{/if}{/each}</small
+                  ><ins class="search-ins">{ctrl.replacement}</ins>{:else}<mark>{seg.text}</mark>{/if}{:else}{seg.text}{/if}{/each}{#if hit.clipped_after}<span
+                  class="search-clip">…</span
+                >{/if}</small
             >
             {#if elig === "inherited"}
               <span class="search-hit-note">inherited — not replaceable here</span>
@@ -271,13 +271,15 @@
         </NodeRow>
       {/each}
     </NodeList>
+    {#if group.hits.length < group.total}
+      {#key group.hits.length}
+        <div class="search-more" use:revealOnView={() => ctrl.revealMore(group.kind)}>
+          <span class="search-more-count">Showing {group.hits.length} of {group.total}</span>
+          <button type="button" class="search-show-more" onclick={() => ctrl.revealMore(group.kind)}>Show more</button>
+        </div>
+      {/key}
+    {/if}
   {/each}
-  {#if ctrl.visibleHits.length < ctrl.hits.length}
-    <div class="search-more" bind:this={moreSentinel}>
-      <span class="search-more-count">Showing {ctrl.visibleHits.length} of {ctrl.hits.length}</span>
-      <button type="button" class="search-show-more" onclick={() => ctrl.revealMore()}>Show more</button>
-    </div>
-  {/if}
 {:else if ctrl.searched}
   <p class="search-empty">No matches.</p>
 {/if}
@@ -409,6 +411,10 @@
     color: var(--accent-emphasis);
     padding: 0 2px;
     border-radius: var(--r-sm);
+  }
+
+  .search-clip {
+    color: var(--text-3);
   }
 
   .search-del {

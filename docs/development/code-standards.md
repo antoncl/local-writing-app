@@ -35,13 +35,16 @@ bisecting when something breaks.
 
 **The file-size guard fails on the merge with master, not your branch alone.**
 A branch locally under the cap can still fail CI when master advanced a shared
-near-cap file while you worked. `frontend/src/lib/types.ts` is the chronic
-offender — a flat wire-types module every feature touches. When CI's file-size
-check fails but your local one passes: `git fetch`, merge `origin/master`,
-re-count, and **split for real margin** — don't shave one line and re-land at the
-cap, or master will push it over again before the next merge. The cheap split:
-move a self-contained block to a sibling module and re-export it
-(`export type { … } from "./…"`) so the original stays the single import surface.
+near-cap file while you worked. `frontend/src/lib/types.ts` was the chronic
+offender — a flat wire-types module every feature touched — until #1859 split
+it into sibling `<domain>Types.ts` modules behind a re-export barrel; a new
+wire type now goes in its domain's module, never in the barrel. When CI's
+file-size check fails but your local one passes: `git fetch`, merge
+`origin/master`, re-count, and **split for real margin** — don't shave one line
+and re-land at the cap, or master will push it over again before the next
+merge. The cheap split: move a self-contained block to a sibling module and
+re-export it (`export * from "./…"` or `export type { … } from "./…"`) so the
+original stays the single import surface.
 
 The guard warns at ≥1200 lines and fails at ≥1500 (`.py`/`.svelte`/`.ts`).
 

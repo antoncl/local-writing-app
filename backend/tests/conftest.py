@@ -21,7 +21,24 @@ to an empty feed by default; oracle tests re-stub `_fetch_rows` themselves.
 
 from __future__ import annotations
 
+import os
+import tempfile
+
 import pytest
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Floor isolation for `machine_settings.config_dir()` (#1862).
+
+    Set the `LWA_CONFIG_DIR` seam to a throwaway dir before collection, so:
+    (a) any import-time or fixture-ordering resolution of the config dir lands in
+    tmp, never the developer's real `%APPDATA%`; (b) the `config_dir()` guard
+    never trips under pytest; and (c) subprocesses a test spawns inherit an
+    isolated config dir. The per-test `_isolate_machine_settings` fixture still
+    narrows `config_path` to a fresh dir for each test."""
+    os.environ.setdefault(
+        "LWA_CONFIG_DIR", tempfile.mkdtemp(prefix="lwa-test-cfg-")
+    )
 
 
 @pytest.fixture(autouse=True)

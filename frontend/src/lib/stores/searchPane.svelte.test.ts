@@ -8,7 +8,7 @@ import type { ReplaceResponse, SearchHit } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({ api: { search: vi.fn(), replace: vi.fn() } }));
 import { api } from "@/lib/api";
-import { SearchPaneController, type SearchPaneDeps } from "./searchPane.svelte";
+import { REVEAL_BATCH, SearchPaneController, type SearchPaneDeps } from "./searchPane.svelte";
 
 const run = (action: () => Promise<void>) => action().then(() => true);
 
@@ -350,5 +350,96 @@ describe("SearchPaneController.replaceAll (ADR-0085 §4)", () => {
     expect(api.replace).toHaveBeenCalledWith(
       expect.objectContaining({ hits: [expect.objectContaining({ file_id: "ok1" })] }),
     );
+  });
+});
+
+describe("SearchPaneController reveal window (#1868)", () => {
+  function hits(n: number): SearchHit[] {
+    return Array.from({ length: n }, (_, i) => hit("f" + i));
+  }
+
+  it("renders only REVEAL_BATCH visible hits while eligibleHits/hits stay complete", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: hits(REVEAL_BATCH + 50) });
+    c.query = "a";
+
+    await c.fire();
+
+    expect(c.visibleHits.length).toBe(REVEAL_BATCH);
+    expect(c.hits.length).toBe(REVEAL_BATCH + 50);
+    expect(c.eligibleHits.length).toBe(REVEAL_BATCH + 50);
+  });
+
+  it("revealMore() extends by REVEAL_BATCH and clamps at hits.length; a further call is a no-op", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: hits(REVEAL_BATCH + 50) });
+    c.query = "a";
+    await c.fire();
+
+    c.revealMore();
+    expect(c.visibleCount).toBe(REVEAL_BATCH + 50);
+    expect(c.visibleHits.length).toBe(REVEAL_BATCH + 50);
+
+    c.revealMore();
+    expect(c.visibleCount).toBe(REVEAL_BATCH + 50);
+  });
+
+  it("a changed query resets visibleCount to REVEAL_BATCH after revealing", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: hits(REVEAL_BATCH + 50) });
+    c.query = "a";
+    await c.fire();
+    c.revealMore();
+    expect(c.visibleCount).toBe(REVEAL_BATCH + 50);
+
+    vi.mocked(api.search).mockResolvedValue({ query: "b", hits: hits(REVEAL_BATCH + 50) });
+    c.query = "b";
+    await c.fire();
+
+    expect(c.visibleCount).toBe(REVEAL_BATCH);
+  });
+
+  it("re-firing the SAME query/options (a replace re-run) keeps the revealed count", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: hits(REVEAL_BATCH + 50) });
+    c.query = "a";
+    await c.fire();
+    c.revealMore();
+    expect(c.visibleCount).toBe(REVEAL_BATCH + 50);
+
+    // Same query text and options as the previous fire.
+    await c.fire();
+
+    expect(c.visibleCount).toBe(REVEAL_BATCH + 50);
+  });
+
+  it("a toggled option with the same text resets the revealed count", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: hits(REVEAL_BATCH + 50) });
+    c.query = "a";
+    await c.fire();
+    c.revealMore();
+    expect(c.visibleCount).toBe(REVEAL_BATCH + 50);
+
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: hits(REVEAL_BATCH + 50) });
+    c.setMatchCase(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(c.visibleCount).toBe(REVEAL_BATCH);
+  });
+
+  it("the empty-query short-circuit branch resets visibleCount", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    vi.mocked(api.search).mockResolvedValue({ query: "a", hits: hits(REVEAL_BATCH + 50) });
+    c.query = "a";
+    await c.fire();
+    c.revealMore();
+    expect(c.visibleCount).toBe(REVEAL_BATCH + 50);
+
+    c.query = "";
+    await c.fire();
+
+    expect(c.visibleCount).toBe(REVEAL_BATCH);
   });
 });

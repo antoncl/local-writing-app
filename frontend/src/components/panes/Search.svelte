@@ -76,14 +76,24 @@
   // its title-cased kind name instead of being dropped. `project` always
   // sorts last — it is the TODO catch-all, not a content kind.
   const PANE_LABEL: Record<string, string> = { manuscript: "Scenes", project: "Project" };
+  // Grouped from `visibleHits` (#1868) — the render window, not the full hit
+  // list — but each group still carries `total`, the count of that kind across
+  // the FULL `ctrl.hits`, so the group label reads correctly before every hit
+  // of that kind has been revealed. Order follows the kinds present in the
+  // VISIBLE slice, same orderKinds + project-last logic as before.
   const groups = $derived(
-    orderKinds(new Set(ctrl.hits.map((hit) => hit.kind)))
+    orderKinds(new Set(ctrl.visibleHits.map((hit) => hit.kind)))
       .sort((a, b) => (a === "project" ? 1 : 0) - (b === "project" ? 1 : 0))
       .map((kind) => ({
         label: PANE_LABEL[kind] ?? kindLabel(kind),
-        hits: ctrl.hits.filter((hit) => hit.kind === kind),
+        hits: ctrl.visibleHits.filter((hit) => hit.kind === kind),
+        total: ctrl.hits.filter((hit) => hit.kind === kind).length,
       })),
   );
+
+  // The reveal-more sentinel — an IntersectionObserver target below the last
+  // group, only rendered while more hits remain (#1868).
+  let moreSentinel = $state<HTMLElement | null>(null);
 
   // Split an excerpt around matches of `q` so the match can be wrapped in
   // <mark>. Only the excerpt is highlighted — never the path/line. The regex
@@ -119,6 +129,25 @@
     return out;
   }
 
+  // Reveal the next batch when the sentinel scrolls into view. Reading
+  // `ctrl.visibleCount` makes the effect re-run after every reveal, so the
+  // observer is re-created and its initial callback fires again — if the
+  // sentinel is STILL on screen (a tall pane), the next batch follows without
+  // a scroll, until the sentinel is below the fold or everything is shown.
+  // IntersectionObserver respects ancestor clipping, so the pane needn't know
+  // which container scrolls it. Where the API is missing (tests), the Show
+  // more button is the whole mechanism.
+  $effect(() => {
+    const el = moreSentinel;
+    void ctrl.visibleCount;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) ctrl.revealMore();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
+
   // Search fires on input, debounced by `SearchInput` (`/api/search` reads
   // the corpus now — ADR-0085 §3, no longer an un-indexed full scan); the
   // controller drops any response superseded by a later keystroke. Enter
@@ -131,6 +160,13 @@
   // TODO, or unsaved edits in an open pane — is computed client-side for the
   // note text; the actual write is always the backend's ownership/revision/
   // dispatch check (§4), never guessed here.
+  //
+  // Reveal window (#1868): rendering every hit as a NodeRow froze the tab on
+  // a short/common query (thousands of hits) — the pane now renders only the
+  // first `REVEAL_BATCH` hits and reveals more as the sentinel scrolls into
+  // view (or via "Show more" where IntersectionObserver is unavailable). The
+  // controller's `hits`/`eligibleHits` stay complete throughout — Replace all
+  // still acts on every eligible hit, not just the visible ones.
 </script>
 
 <div class="search-bar">
@@ -191,8 +227,9 @@
 {/if}
 
 {#if groups.length > 0}
+  <p class="search-count">{ctrl.hits.length} {ctrl.hits.length === 1 ? "match" : "matches"}</p>
   {#each groups as group (group.label)}
-    <div class="search-group-label">{group.label}</div>
+    <div class="search-group-label">{group.label} <span class="search-group-count">{group.total}</span></div>
     <!-- Unkeyed: hits are ephemeral and fully replaced each search, and are
          NOT unique on (file_id, line, path) — an entry matching in two metadata
          fields (title + aliases) yields two hits identical on those, so a keyed
@@ -235,6 +272,12 @@
       {/each}
     </NodeList>
   {/each}
+  {#if ctrl.visibleHits.length < ctrl.hits.length}
+    <div class="search-more" bind:this={moreSentinel}>
+      <span class="search-more-count">Showing {ctrl.visibleHits.length} of {ctrl.hits.length}</span>
+      <button type="button" class="search-show-more" onclick={() => ctrl.revealMore()}>Show more</button>
+    </div>
+  {/if}
 {:else if ctrl.searched}
   <p class="search-empty">No matches.</p>
 {/if}
@@ -311,6 +354,49 @@
     font-weight: var(--w-bold);
     letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+
+  .search-group-count {
+    color: var(--text-3);
+    font-weight: var(--w-regular);
+    letter-spacing: 0;
+    text-transform: none;
+    margin-left: var(--sp-1);
+  }
+
+  .search-count {
+    margin-top: var(--sp-3);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+
+  .search-more {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin-top: var(--sp-3);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+
+  .search-show-more {
+    padding: 3px 10px;
+    font-size: var(--fs-xs);
+    font-weight: var(--w-semibold);
+    border-radius: var(--r-sm);
+    border: 1px solid var(--accent);
+    background: var(--surface);
+    color: var(--accent-emphasis);
+    cursor: pointer;
+  }
+
+  .search-show-more:hover:not(:disabled) {
+    background: var(--accent-soft);
+  }
+
+  .search-show-more:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .search-excerpt {

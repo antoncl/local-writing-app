@@ -19,9 +19,20 @@
 // mounting the shell. A hit's eligibility is computed here (todo/metadata/
 // inherited/dirty), never trusted from a prior render — the backend's own
 // `not_replaceable`/`stale` outcomes are the real backstop.
+//
+// Reveal window (#1868): the controller still keeps the COMPLETE hit list —
+// `eligibleHits` and replace stay on `hits` because Replace all needs every
+// hit's ref — but the pane only renders `visibleHits`, a `REVEAL_BATCH`-sized
+// prefix, revealed further on scroll/"Show more". A re-run of the SAME query
+// (a replace, or re-pressing Enter) keeps how far the writer had scrolled; a
+// changed query or option resets to the first batch.
 
 import { api } from "@/lib/api";
 import type { ReplaceHitRef, SearchHit } from "@/lib/types";
+
+// The number of hits the pane renders up front and reveals per batch — an
+// unbounded render of thousands of NodeRows is what froze the tab (#1868).
+export const REVEAL_BATCH = 100;
 
 // The pane's one seam onto the editor-pane store and the confirm modal.
 export type SearchPaneDeps = {
@@ -65,6 +76,9 @@ export class SearchPaneController {
   replacement = $state("");
   replacing = $state(false);
   lastReplace = $state<LastReplace | null>(null);
+  // The reveal window (#1868) — see the class comment above.
+  visibleCount = $state(REVEAL_BATCH);
+  visibleHits = $derived(this.hits.slice(0, this.visibleCount));
 
   #token = 0;
 
@@ -101,9 +115,20 @@ export class SearchPaneController {
     void this.fire();
   }
 
+  // Reveal the next batch of hits (#1868) — a no-op once everything is
+  // already visible.
+  revealMore(): void {
+    this.visibleCount = Math.min(this.hits.length, this.visibleCount + REVEAL_BATCH);
+  }
+
   async fire(): Promise<void> {
     const ours = ++this.#token;
     const q = this.query.trim();
+    // The reveal follows the query (#1868): a re-run of the SAME query/options
+    // (a replace, or re-pressing Enter) keeps how far the writer had
+    // scrolled; a changed query or option starts back at the first batch.
+    const sameQuery =
+      this.searched && q === this.lastQuery && this.matchCase === this.lastMatchCase && this.wholeWord === this.lastWholeWord;
     if (!q && !this.includeOpenTodos) {
       this.hits = [];
       this.lastQuery = "";
@@ -111,6 +136,7 @@ export class SearchPaneController {
       this.lastWholeWord = false;
       this.searched = false;
       this.lastReplace = null;
+      this.visibleCount = REVEAL_BATCH;
       return;
     }
     await this.run(async () => {
@@ -138,6 +164,7 @@ export class SearchPaneController {
       this.lastMatchCase = this.matchCase;
       this.lastWholeWord = this.wholeWord;
       this.searched = true;
+      if (!sameQuery) this.visibleCount = REVEAL_BATCH;
     });
   }
 

@@ -54,7 +54,7 @@ class EntryTypeIsNotSearchableTests(SearchCorpusTestCase):
         self.assertEqual(self._search("prompt:general"), [])
         self.assertEqual(self._search("manuscript:scene"), [])
 
-    def test_title_and_schema_metadata_still_match(self) -> None:
+    def test_the_title_still_matches_as_a_metadata_hit(self) -> None:
         prompt = self.service.create_prompt_entry(
             CreatePromptEntryRequest(title="Prompt Aetheria", entry_type="prompt:general")
         )

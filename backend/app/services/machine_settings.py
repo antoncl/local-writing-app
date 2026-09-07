@@ -22,6 +22,12 @@ from app.services.yaml_io import load_yaml
 
 APP_NAME = "local-writing-app"
 CONFIG_FILENAME = "config.yaml"
+# The single, explicit isolation seam for the machine config dir. Set it to a
+# throwaway folder and every read/write of config.yaml (and its siblings that
+# derive from config_path()) redirects there — the way a test harness, an E2E
+# webServer, or a script keeps its hands off the developer's real machine
+# settings. Checked first in config_dir(), so it wins on every platform.
+CONFIG_DIR_ENV = "LWA_CONFIG_DIR"
 MASK = "********"
 RECENT_PROJECTS_MAX = 10
 
@@ -133,7 +139,40 @@ class MachineSettings(BaseModel):
     update_channel: UpdateChannel = "stable"
 
 
+def _guard_against_unisolated_test_config() -> None:
+    """Refuse to resolve the developer's REAL machine config dir from a test
+    process that has not isolated itself (#1862, the recurrence of #1358).
+
+    Machine-config isolation used to live only in the pytest autouse fixture
+    (`conftest._isolate_machine_settings`), which patches `config_path`. But the
+    machine-settings tests are `unittest.TestCase` subclasses, runnable outside
+    pytest (`python -m unittest`, an IDE's test runner) — where that fixture
+    never fires and `save_settings()` silently clobbered the real config.yaml.
+
+    So the guard lives at the resolution seam instead of in one runner's fixture:
+    when a test runner is loaded (`pytest`/`unittest` imported) and no
+    `CONFIG_DIR_ENV` override is set, fail LOUD rather than hand back the real
+    dir. The production entrypoint (`app.server`) imports neither module — a
+    verified invariant, covered by `test_guard_does_not_trip_production` — and
+    the frozen build is exempted regardless, so a stray transitive
+    `unittest.mock` import can never refuse startup for a shipped app.
+    """
+    if getattr(sys, "frozen", False):
+        return
+    if "pytest" in sys.modules or "unittest" in sys.modules:
+        raise RuntimeError(
+            "Refusing to resolve the real machine config dir from a test process "
+            f"without isolation. Set ${CONFIG_DIR_ENV} to a throwaway folder "
+            "(conftest.pytest_configure does this for pytest; a unittest.TestCase "
+            "run outside pytest must set it in setUp/setUpModule). See #1862."
+        )
+
+
 def config_dir() -> Path:
+    override = os.environ.get(CONFIG_DIR_ENV)
+    if override:
+        return Path(override).expanduser()
+    _guard_against_unisolated_test_config()
     if sys.platform == "win32":
         base = os.environ.get("APPDATA")
         if base:

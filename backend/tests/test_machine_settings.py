@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,6 +17,32 @@ from project_fixtures import clear_test_scope
 from app.main import app
 from app.routers import machine_settings as machine_settings_router
 from app.services import machine_settings as ms
+
+_MODULE_CFG: TemporaryDirectory | None = None
+_PREV_CFG: str | None = None
+
+
+def setUpModule() -> None:
+    """Isolate the machine config dir regardless of test runner (#1862).
+
+    These are `unittest.TestCase` classes and thus runnable outside pytest, where
+    the autouse `_isolate_machine_settings` fixture never fires. Honored by both
+    unittest and pytest, this sets the `LWA_CONFIG_DIR` seam so the whole module's
+    machine-settings writes land in a throwaway dir and never clobber the real
+    config.yaml — the exact regression that motivated this file's guard."""
+    global _MODULE_CFG, _PREV_CFG
+    _MODULE_CFG = TemporaryDirectory(prefix="lwa-mcfg-")
+    _PREV_CFG = os.environ.get(ms.CONFIG_DIR_ENV)
+    os.environ[ms.CONFIG_DIR_ENV] = _MODULE_CFG.name
+
+
+def tearDownModule() -> None:
+    if _PREV_CFG is None:
+        os.environ.pop(ms.CONFIG_DIR_ENV, None)
+    else:
+        os.environ[ms.CONFIG_DIR_ENV] = _PREV_CFG
+    if _MODULE_CFG is not None:
+        _MODULE_CFG.cleanup()
 
 
 class RecentProjectsServiceTests(unittest.TestCase):
@@ -558,6 +585,52 @@ class TestRevealLogsRoute:
 
         assert exc.value.status_code == 403
         assert called == []  # the reveal never ran for a non-local caller
+
+
+class TestConfigDirIsolationGuard:
+    """The #1862 seam + guard: a test process must isolate the machine config dir
+    (via CONFIG_DIR_ENV) or be refused it — the isolation can no longer be
+    silently skipped by choosing a non-pytest runner."""
+
+    def test_override_wins(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(ms.CONFIG_DIR_ENV, str(tmp_path / "cfg"))
+        assert ms.config_dir() == (tmp_path / "cfg")
+
+    def test_raises_under_test_runner_without_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # `unittest` is imported by this module and `pytest` by the runner, so the
+        # guard must fire once the override is removed — no silent real-dir write.
+        monkeypatch.delenv(ms.CONFIG_DIR_ENV, raising=False)
+        with pytest.raises(RuntimeError, match="1862"):
+            ms.config_dir()
+
+    def test_frozen_build_is_exempt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A shipped app must boot even if a transitive import dragged in unittest.
+        monkeypatch.delenv(ms.CONFIG_DIR_ENV, raising=False)
+        monkeypatch.setattr(ms.sys, "frozen", True, raising=False)
+        assert isinstance(ms.config_dir(), Path)  # returns a real dir, never raises
+
+    def test_guard_does_not_trip_production(self, tmp_path: Path) -> None:
+        # The guard is safe only because the production entrypoint imports neither
+        # pytest nor unittest. Verify that invariant in a clean subprocess with no
+        # test runner loaded and CONFIG_DIR_ENV removed, so the guard branch runs:
+        # config_dir() must resolve without raising. The platform config-home vars
+        # are pointed at tmp_path so config_dir() resolves there, not the
+        # developer's real machine config, even though no LWA_CONFIG_DIR is set.
+        import subprocess
+        import sys as _sys
+
+        env = {k: v for k, v in os.environ.items() if k != ms.CONFIG_DIR_ENV}
+        env.update(APPDATA=str(tmp_path), XDG_CONFIG_HOME=str(tmp_path), HOME=str(tmp_path))
+        code = (
+            "import sys, app.server, app.services.machine_settings as ms\n"
+            "assert 'pytest' not in sys.modules and 'unittest' not in sys.modules, "
+            "'production import pulled in a test runner'\n"
+            "ms.config_dir()\n"  # must not raise (no test runner loaded)
+        )
+        result = subprocess.run(
+            [_sys.executable, "-c", code], env=env, capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
 
 
 if __name__ == "__main__":

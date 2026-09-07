@@ -52,7 +52,7 @@ export interface ChatCommitDeps {
    *  picks ride along as lore — never the implicit world selection (#1874). */
   getChatId: () => string;
   /** The server recorded the extraction's own `ai_invocations` row(s) (#1872);
-   *  re-persist so the host's cost-total snapshot picks the new total up. */
+   *  re-read the chat so the host's cost-total snapshot picks the new total up. */
   refreshCostTotal: () => Promise<void>;
   /** Set / clear the chat error line (component-owned). */
   setError: (message: string | null) => void;
@@ -200,11 +200,10 @@ export class ChatCommitController {
     garbledMessage: string,
   ): Promise<AIEntryPatch | null> {
     const result = await extract();
-    // A billed call left a row on the server; re-persist so the footer's total
-    // catches up. #986: the chat switched during the extraction — don't touch
-    // the now-active chat.
-    if (typeof result.cost_usd === "number" && this.chatUnchanged())
-      await this.deps.refreshCostTotal();
+    // A successful call left its row on the server (priced or not); refresh
+    // the host's snapshot so the footer's total catches up. #986: the chat
+    // switched during the extraction — don't touch the now-active chat.
+    if (result.ok && this.chatUnchanged()) await this.deps.refreshCostTotal();
     if (!result.ok || !result.patch) {
       this.deps.setError(result.error || "The model returned nothing to commit.");
       return null;

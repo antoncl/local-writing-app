@@ -10,7 +10,7 @@ the two share only the system-prompt cache-block via `system_prompt_cache_blocks
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from app.models import (
     AIChatRequest,
@@ -23,6 +23,13 @@ from app.services.ai import providers as ai_providers
 from app.services.ai.call_resolver import resolve_call_params
 from app.services.ai.usage import translate_usage_to_cost
 from app.services.project.errors import ProjectServiceError
+
+# How a turn selects lore (#1874, ADR-0067 Amendment 2): an ordinary turn runs
+# the implicit selection (detection, world, tiering, persistence); the commit's
+# read-only transcription turn sends only the chat's own `use()` picks and
+# touches no chat state. A closed type, not a free string, so a typo can't
+# silently pick a branch.
+LoreMode = Literal["implicit", "used"]
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
@@ -187,7 +194,6 @@ def _lore_cache_blocks(
     chat_id: str,
     journal_for_send: list[Any],
     scene: Any,
-    lore_mode: str = "implicit",
 ) -> tuple[list[dict], dict[str, str]]:
     """The chat's one deduped lore set, placed once *per volatility tier*
     (docs/design/context-caching.md §4). `_relevant_lore_ids` — the single selector
@@ -226,7 +232,7 @@ def _lore_cache_blocks(
     # `never`-filtered); their `use(node, hint)` priors bias placement only.
     used_ids = list(chat.used_node_ids)
     hints = dict(chat.used_node_hints)
-    ids = _relevant_lore_ids(project, scene, lore_mode, journal_for_send, used_ids)
+    ids = _relevant_lore_ids(project, scene, "implicit", journal_for_send, used_ids)
     stable_ids, volatile_ids = _tier_lore_ids(project, ids, session, hints)
     session.commit()
 
@@ -246,7 +252,7 @@ def expand_and_prepare_chat_blocks(
     system_prompt: str,
     messages_list: list[dict],
     *,
-    lore_mode: str = "implicit",
+    lore_mode: LoreMode = "implicit",
 ) -> tuple[list[dict] | None, str | None, list[Any]]:
     """When chat_id is bound, assemble the ordered system cache-blocks the
     provider call sends, and return:
@@ -313,9 +319,9 @@ def expand_and_prepare_chat_blocks(
     # (stable, then volatile). Only for a lore-enabled chat. The provider adapter
     # caps breakpoints (Anthropic: ≤4) and assigns each tier its ttl — the shared
     # layer only orders stable-first (ADR-0060 §5).
-    if chat.lore_enabled:
+    if chat.lore_enabled and lore_mode == "implicit":
         lore_blocks, seen_revisions = _lore_cache_blocks(
-            project, chat, chat_id, journal_for_send, scene, lore_mode
+            project, chat, chat_id, journal_for_send, scene
         )
         blocks.extend(lore_blocks)
         # #1635: persist the last-seen revisions if they changed, so the door's
@@ -329,12 +335,31 @@ def expand_and_prepare_chat_blocks(
                     chat, journal=journal_for_send, seen_revisions=seen_revisions
                 ),
             )
+    elif chat.lore_enabled:
+        # The read-only turn (#1874): the chat's own `use()` picks, rendered
+        # as-of the chat's scene like any lore, in ONE untiered block — the
+        # one-shot form preview uses. It never touches the chat's lore session
+        # or persisted state: no detection, no baseline promotion (which would
+        # demote every settled world entry to volatile on the next ordinary
+        # turn), no seen-revisions save (whose empty journal would trip the
+        # append-only guard). Tier is nominal — a one-off call caches nothing.
+        from app.services.ai.lore_selection import _relevant_lore
+
+        picks_xml = _relevant_lore(
+            project,
+            scene,
+            "used",
+            index=project.build_mutations_index() if scene is not None else None,
+            used_ids=list(chat.used_node_ids),
+        )
+        if picks_xml:
+            blocks.append({"text": picks_xml, "tier": "volatile"})
 
     return (blocks or None), chat_id, list(new_entries)
 
 
 async def run_chat_turn(
-    project: ProjectService, request: AIChatRequest, *, lore_mode: str = "implicit"
+    project: ProjectService, request: AIChatRequest, *, lore_mode: LoreMode = "implicit"
 ) -> AIChatResponse:
     """Run one chat-completion turn: resolve provider/model, prepare the bound
     chat's context blocks, call the provider, and shape the response with usage +

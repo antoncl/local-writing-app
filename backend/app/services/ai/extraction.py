@@ -23,6 +23,7 @@
 # it reliable (ADR-0067 §"The list must not drift").
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from app.models import (
@@ -40,6 +41,8 @@ from app.services.project.errors import ProjectServiceError
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
+
+logger = logging.getLogger(__name__)
 
 # The firmer cue for the one retry after a garbled first reply (below). Shown
 # alongside the model's own failed reply so it can see what it did wrong — a
@@ -242,16 +245,22 @@ def _record_extraction_call(
 ) -> None:
     """One `ai_invocations` row per provider call the extraction made, carrying
     THAT call's usage + provenance (#1872). A failed call (`ok=False`) returned
-    no usage and cost nothing — nothing to record."""
+    no usage and cost nothing — nothing to record. The row is telemetry and the
+    patch is the deliverable: a ledger that can't be written (the CSV held open
+    by another process on Windows, a read-only folder) is logged, never allowed
+    to turn an already-billed, successful call into a failed commit."""
     if not reply.ok:
         return
-    project.record_chat_turn_invocation(
-        chat,
-        provider=reply.provider or "",
-        model=reply.model or "",
-        usage=reply.usage,
-        cost_usd=reply.cost_usd,
-    )
+    try:
+        project.record_chat_turn_invocation(
+            chat,
+            provider=reply.provider,
+            model=reply.model,
+            usage=reply.usage,
+            cost_usd=reply.cost_usd,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Couldn't record the commit extraction's invocation row")
 
 
 async def run_entry_patch_extraction(
@@ -284,7 +293,8 @@ async def run_entry_patch_extraction(
     and provenance (#1872) — the server ran the call and knows the chat, so the
     client no longer round-trips a cost delta the save path then has to pin
     on the transcript's last message. `cost_usd` still rides back on the
-    response for display."""
+    response, informational only — the client refreshes its total rather
+    than adding it in."""
 
     try:
         chat = project.read_chat_session(request.chat_id)

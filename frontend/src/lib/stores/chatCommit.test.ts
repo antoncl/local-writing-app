@@ -309,9 +309,9 @@ describe("ChatCommitController — commitToEntry", () => {
     expect(deps.setNotice).toHaveBeenLastCalledWith("Committed — review it on the scene.");
   });
 
-  it("refreshes the cost total after a billed extraction, and skips it when unbilled", async () => {
-    // #1872: the server records the extraction's own invocation row; the
-    // controller only asks the host to re-persist so its total catches up.
+  it("refreshes the cost total after a successful extraction, and skips it when the call failed", async () => {
+    // #1872: the server records the extraction's own invocation row (priced or
+    // not); the controller only asks the host to re-read so its total catches up.
     const { c, deps } = reviseController();
     extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }, 0.05));
     await c.commitToEntry();
@@ -319,7 +319,13 @@ describe("ChatCommitController — commitToEntry", () => {
 
     vi.mocked(deps.refreshCostTotal).mockClear();
     entryBrainstorm.clear("lore-1");
-    extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }, null)); // no usage returned
+    extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }, null)); // unpriced, still a row
+    await c.commitToEntry();
+    expect(deps.refreshCostTotal).toHaveBeenCalledTimes(1);
+
+    vi.mocked(deps.refreshCostTotal).mockClear();
+    entryBrainstorm.clear("lore-1");
+    extractPatch.mockResolvedValue(failResult("boom")); // no call succeeded → no row
     await c.commitToEntry();
     expect(deps.refreshCostTotal).not.toHaveBeenCalled();
   });

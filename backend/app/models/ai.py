@@ -917,11 +917,12 @@ class ExtractEntryDraftRequest(ExtractEntryPatchRequest):
 
 class EntryPatchExtraction(BaseModel):
     """Result of a fresh extraction (ADR-0051 S4): the validated, review-ready
-    `patch` plus the `cost_usd` of the extraction turn, which the caller
-    attributes to the session the same way a streamed turn's cost is. `patch` is
-    null and `ok` false when the extraction model call itself failed or returned
-    nothing (distinct from a `garbled` patch, which still round-trips as a patch
-    so the author is told to finalize again)."""
+    `patch` plus the `cost_usd` of the extraction turn(s), informational — the
+    server already attributed each call to the chat as its own `ai_invocations`
+    row (#1872), so the client refreshes its total rather than adding this in.
+    `patch` is null and `ok` false when the extraction model call itself failed
+    or returned nothing (distinct from a `garbled` patch, which still
+    round-trips as a patch so the author is told to finalize again)."""
 
     patch: AIEntryPatch | None = None
     cost_usd: float | None = None

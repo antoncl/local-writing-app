@@ -279,7 +279,6 @@ class ChatSessionsMixin:
         existing = self.read_chat_session(chat_id)
         self._guard_chat_preset_lock(existing, request)
         next_journal = self._resolved_chat_journal(existing, request)
-        self._record_chat_cost_delta(existing, request)
         # The save response must carry the same projection read_chat_session
         # computes — the UI keeps the returned session as its live copy, and a
         # hardcoded 0.0 here zeroed its session-cost display on every save
@@ -355,6 +354,9 @@ class ChatSessionsMixin:
                 else request.seen_revisions
             ),
         )
+        # The row is tagged from `updated` — the prompt/subject this save
+        # persists — so it never disagrees with the file it accompanies.
+        self._record_chat_cost_delta(updated, request)
         self._write_chat_session(path, updated)
         return updated
 
@@ -411,7 +413,7 @@ class ChatSessionsMixin:
         return list(request.journal)
 
     def _record_chat_cost_delta(
-        self, existing: ChatSession, request: SaveChatSessionRequest
+        self, chat: ChatSession, request: SaveChatSessionRequest
     ) -> None:
         """Phase C2 Slice B: per-turn cost no longer lives on the chat YAML
         — it lands as an ai_invocations row tagged with chat_session_id.
@@ -455,11 +457,7 @@ class ChatSessionsMixin:
                     model = message.model
                 break
         self.record_chat_turn_invocation(
-            existing.model_copy(update={"prompt_entry_id": request.prompt_entry_id}),
-            provider=provider,
-            model=model,
-            usage=last_usage,
-            cost_usd=delta,
+            chat, provider=provider, model=model, usage=last_usage, cost_usd=delta
         )
 
     def record_chat_turn_invocation(

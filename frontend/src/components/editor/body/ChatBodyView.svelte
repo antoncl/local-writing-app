@@ -248,10 +248,14 @@
     // of this chat, so the server reads back the field set its lock render
     // registered instead of rebuilding a separate contract.
     getChatId: () => scene?.id ?? "",
-    // #1872: the server attributed the extraction's cost to this chat itself; a
-    // plain re-save refreshes `chatSession.cost_usd_total` for the footer.
+    // #1872: the server attributed the extraction's cost to this chat itself;
+    // re-read the node so `chatSession.cost_usd_total` (projected from the
+    // invocation log on read) catches up — a GET, not a transcript re-save.
     refreshCostTotal: async () => {
-      await persistActiveChat();
+      const chatId = scene?.id;
+      if (!chatId) return;
+      const fresh = await api.readNode<ChatSession>(chatId);
+      if (scene?.id === chatId) chatSession = fresh;
     },
     setError: (message) => (chatError = message),
     setNotice: (message) => (chatNotice = message),

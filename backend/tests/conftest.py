@@ -30,15 +30,14 @@ import pytest
 def pytest_configure(config: pytest.Config) -> None:
     """Floor isolation for `machine_settings.config_dir()` (#1862).
 
-    Set the `LWA_CONFIG_DIR` seam to a throwaway dir before collection, so:
+    Point the `LWA_CONFIG_DIR` seam at a throwaway dir before collection, so:
     (a) any import-time or fixture-ordering resolution of the config dir lands in
     tmp, never the developer's real `%APPDATA%`; (b) the `config_dir()` guard
     never trips under pytest; and (c) subprocesses a test spawns inherit an
-    isolated config dir. The per-test `_isolate_machine_settings` fixture still
-    narrows `config_path` to a fresh dir for each test."""
-    os.environ.setdefault(
-        "LWA_CONFIG_DIR", tempfile.mkdtemp(prefix="lwa-test-cfg-")
-    )
+    isolated config dir. Set unconditionally (not `setdefault`) so a stray real
+    value already in the environment can't defeat the floor. The per-test
+    `_isolate_machine_settings` fixture narrows it to a fresh dir per test."""
+    os.environ["LWA_CONFIG_DIR"] = tempfile.mkdtemp(prefix="lwa-test-cfg-")
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +45,11 @@ def _isolate_machine_settings(tmp_path, monkeypatch):
     from app.services import machine_settings as ms
 
     fake = tmp_path / "machine" / "config.yaml"
+    # Redirect BOTH seams to the same per-test dir so config_path() and
+    # config_dir() never diverge: config_path()==config_dir()/config.yaml, the
+    # real relationship. config_path is patched (tests assert on it directly);
+    # config_dir() reads the env override.
+    monkeypatch.setenv("LWA_CONFIG_DIR", str(fake.parent))
     monkeypatch.setattr(ms, "config_path", lambda: fake)
     yield
 

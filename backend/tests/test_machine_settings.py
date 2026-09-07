@@ -609,20 +609,23 @@ class TestConfigDirIsolationGuard:
         monkeypatch.setattr(ms.sys, "frozen", True, raising=False)
         assert isinstance(ms.config_dir(), Path)  # returns a real dir, never raises
 
-    def test_guard_does_not_trip_production(self) -> None:
+    def test_guard_does_not_trip_production(self, tmp_path: Path) -> None:
         # The guard is safe only because the production entrypoint imports neither
         # pytest nor unittest. Verify that invariant in a clean subprocess with no
-        # test runner loaded and no override set: config_dir() must resolve without
-        # raising. (It only reads a path — no write to the real config.)
+        # test runner loaded and CONFIG_DIR_ENV removed, so the guard branch runs:
+        # config_dir() must resolve without raising. The platform config-home vars
+        # are pointed at tmp_path so config_dir() resolves there, not the
+        # developer's real machine config, even though no LWA_CONFIG_DIR is set.
         import subprocess
         import sys as _sys
 
         env = {k: v for k, v in os.environ.items() if k != ms.CONFIG_DIR_ENV}
+        env.update(APPDATA=str(tmp_path), XDG_CONFIG_HOME=str(tmp_path), HOME=str(tmp_path))
         code = (
             "import sys, app.server, app.services.machine_settings as ms\n"
             "assert 'pytest' not in sys.modules and 'unittest' not in sys.modules, "
             "'production import pulled in a test runner'\n"
-            "ms.config_dir()\n"
+            "ms.config_dir()\n"  # must not raise (no test runner loaded)
         )
         result = subprocess.run(
             [_sys.executable, "-c", code], env=env, capture_output=True, text=True

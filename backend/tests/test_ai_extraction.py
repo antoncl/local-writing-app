@@ -34,6 +34,7 @@ from app.main import app
 from app.models import (
     AIChatResponse,
     ChatMessage,
+    ChatUsage,
     CreateChatSessionRequest,
     CreateLoreEntryRequest,
     CreateSceneRequest,
@@ -48,7 +49,13 @@ from app.services.ai.helpers import _fields, create_environment_for_project
 from app.services.project.errors import ProjectServiceError
 
 
-def _chat_reply(content: str, *, ok: bool = True, cost_usd: float | None = 0.01) -> AIChatResponse:
+def _chat_reply(
+    content: str,
+    *,
+    ok: bool = True,
+    cost_usd: float | None = 0.01,
+    usage: ChatUsage | None = None,
+) -> AIChatResponse:
     """A canned assistant reply, standing in for the extraction turn so the tests
     exercise the endpoint's render→validate wiring without a provider."""
     return AIChatResponse(
@@ -61,6 +68,7 @@ def _chat_reply(content: str, *, ok: bool = True, cost_usd: float | None = 0.01)
         ok=ok,
         error=None if ok else "boom",
         truncated=False,
+        usage=usage,
         cost_usd=cost_usd,
     )
 
@@ -459,6 +467,58 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertEqual(sent.messages[0].content, "make it grand")
         self.assertIn("allegiance", sent.messages[-1].content)
         self.assertIn("Extract the final result", sent.messages[-1].content)
+
+    def test_extract_turn_narrows_lore_to_the_chats_picks_and_records_its_own_row(self) -> None:
+        # #1874 / ADR-0067 Amendment 2: the commit turn asks for `lore_mode="used"`
+        # — the chat's own `use()` picks, never the implicit world selection that
+        # swamped a real transcript. #1872: the call's ai_invocations row carries
+        # THIS reply's usage + provenance, not a copy of the transcript's last turn.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        reply = _chat_reply(
+            '{"fields": {"bio": "New bio."}}',
+            cost_usd=0.03,
+            usage=ChatUsage(input_tokens=1234, cached_input_tokens=0, cache_write_tokens=0, output_tokens=56),
+        )
+        with self._mock_chat(reply) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={
+                    "messages": [{"role": "user", "content": "make it grand"}],
+                    "assistant_id": None,
+                    "chat_id": chat_id,
+                },
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(mock_chat.call_args.kwargs.get("lore_mode"), "used")
+        rows = self.service.list_ai_invocations(chat_session_id=chat_id).invocations
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual((row.provider, row.model), ("anthropic", "claude-test"))
+        self.assertEqual(row.cost_usd, 0.03)
+        self.assertIsNotNone(row.usage)
+        assert row.usage is not None
+        self.assertEqual((row.usage.input_tokens, row.usage.output_tokens), (1234, 56))
+        self.assertEqual(row.prompt_entry_type, "chat:chat_session")
+
+    def test_garbled_retry_records_a_row_per_call(self) -> None:
+        # #1872: the retry is a second billed call — a second row, its own usage.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        first = _chat_reply("Sure! Here you go, no JSON though.", cost_usd=0.02)
+        second = _chat_reply(
+            '{"fields": {"bio": "New bio."}}',
+            cost_usd=0.03,
+            usage=ChatUsage(input_tokens=99, cached_input_tokens=0, cache_write_tokens=0, output_tokens=9),
+        )
+        with self._mock_chat_sequence(first, second):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["patch"]["fields"], {"bio": "New bio."})
+        rows = self.service.list_ai_invocations(chat_session_id=chat_id).invocations
+        self.assertEqual([r.cost_usd for r in rows], [0.02, 0.03])
+        self.assertEqual([r.usage.input_tokens if r.usage else None for r in rows], [None, 99])
 
     def test_write_ceiling_drops_off_contract_fields_and_body(self) -> None:
         # ADR-0067 §4: `stored` is the WHOLE write ceiling — a model can still

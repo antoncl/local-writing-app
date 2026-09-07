@@ -27,8 +27,10 @@ from typing import TYPE_CHECKING, Any
 
 from app.models import (
     AIChatRequest,
+    AIChatResponse,
     AIEntryPatch,
     ChatMessage,
+    ChatSession,
     EntryPatchExtraction,
     ExtractEntryPatchRequest,
 )
@@ -235,6 +237,23 @@ def _constrain_to_registered_fields(patch: AIEntryPatch, allowed_ids: set[str]) 
     )
 
 
+def _record_extraction_call(
+    project: ProjectService, chat: ChatSession, reply: AIChatResponse
+) -> None:
+    """One `ai_invocations` row per provider call the extraction made, carrying
+    THAT call's usage + provenance (#1872). A failed call (`ok=False`) returned
+    no usage and cost nothing — nothing to record."""
+    if not reply.ok:
+        return
+    project.record_chat_turn_invocation(
+        chat,
+        provider=reply.provider or "",
+        model=reply.model or "",
+        usage=reply.usage,
+        cost_usd=reply.cost_usd,
+    )
+
+
 async def run_entry_patch_extraction(
     project: ProjectService,
     *,
@@ -252,10 +271,20 @@ async def run_entry_patch_extraction(
     turn is run, costed, or constrained. `creating` selects the envelope's
     wording; the validated patch is scoped to `entry_type` either way
     (kind-neutral, ADR-0048 §5). `request.chat_id` is the chat's real id
-    (ADR-0067 S2) — `expand_and_prepare_chat_blocks` reuses its cached system
-    prefix + lore, so only the appended envelope + transcript are freshly
-    billed. The extraction turn's cost rides back on `cost_usd` for the caller
-    to attribute to the session, exactly as a streamed turn's delta is."""
+    (ADR-0067 S2) — the turn continues the chat under its own system prompt
+    (so the registered contract is read back), but with `lore_mode="used"`
+    (#1874, ADR-0067 Amendment 2): only the chat's explicit `use()` picks —
+    the entry under revision, an author-picked "Relevant lore" — ride along.
+    The implicit world selection does not; a 36k-token lore block in front of
+    a 3k-token transcript made a cheap model answer the system prompt against
+    the lore and never read the draft it was asked to transcribe.
+
+    Each provider call the extraction makes (the turn, and the one garbled
+    retry) is recorded as its own `ai_invocations` row here, with ITS usage
+    and provenance (#1872) — the server ran the call and knows the chat, so the
+    client no longer round-trips a cost delta the save path then has to pin
+    on the transcript's last message. `cost_usd` still rides back on the
+    response for display."""
 
     try:
         chat = project.read_chat_session(request.chat_id)
@@ -305,7 +334,9 @@ async def run_entry_patch_extraction(
             messages=turn_messages,
             chat_id=request.chat_id,
         ),
+        lore_mode="used",
     )
+    _record_extraction_call(project, chat, chat_reply)
     if not chat_reply.ok or not (chat_reply.content or "").strip():
         return EntryPatchExtraction(
             patch=None,
@@ -336,7 +367,9 @@ async def run_entry_patch_extraction(
                 ),
                 chat_id=request.chat_id,
             ),
+            lore_mode="used",
         )
+        _record_extraction_call(project, chat, retry)
         cost = _sum_costs(cost, retry.cost_usd)
         if retry.ok and (retry.content or "").strip():
             patch = project.validate_ai_entry_patch_for_type(entry_type, retry.content)

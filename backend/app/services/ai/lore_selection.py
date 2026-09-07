@@ -52,6 +52,10 @@ def _relevant_lore_ids(
       slice 3, via `_scene_prose_ids`), and (c) one-hop expansion through the
       entries collected in (a)+(b).
     - `"explicit"`: only the lore directly referenced via entity_ref fields.
+    - `"used"`: only the chat's own `use()` picks (`used_ids`) — no scene refs,
+      no journal, no always-policy, no fan-out. The commit's transcription turn
+      runs on this (#1874, ADR-0067 Amendment 2): it needs the transcript and
+      the entry under revision, not the world.
     - `"pinned_only"`: empty for now (pin UI ships in a later milestone).
 
     `use()` selections (`used_ids`) are EXACT — deduped by id and subject to the
@@ -64,7 +68,9 @@ def _relevant_lore_ids(
     scene_metadata = _attr_or_item(scene, "metadata")
     scene_refs = _collect_lore_refs_from_metadata(scene_metadata)
     used = set(used_ids or [])
-    if mode == "explicit":
+    if mode == "used":
+        ids = sorted(used)
+    elif mode == "explicit":
         ids = sorted(scene_refs | used)
     else:
         # `use()`'d ids are EXACT: they join the final set but are NOT fan-out

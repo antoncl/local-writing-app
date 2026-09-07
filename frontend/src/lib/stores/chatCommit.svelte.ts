@@ -46,13 +46,14 @@ export interface ChatCommitDeps {
   /** The visible transcript, mapped to the extraction request's message shape —
    *  the extraction reads it as pure input (ADR-0051 S4). */
   getHistory: () => Pick<ChatMessage, "role" | "content">[];
-  /** The chat's own node id (ADR-0067 S2): the commit runs as a cached
-   *  CONTINUATION of this chat, so the server can read back the field set its
-   *  lock render registered and reuse the cached system prefix + lore. */
+  /** The chat's own node id (ADR-0067 S2): the commit runs as a CONTINUATION
+   *  of this chat under its own system prompt, so the server can read back the
+   *  field set its lock render registered. Only the chat's explicit `use()`
+   *  picks ride along as lore — never the implicit world selection (#1874). */
   getChatId: () => string;
-  /** Attribute the (always-billed) extraction turn's cost to the session and
-   *  persist — the host owns `pendingTurnCost`, so the delta rides its next save. */
-  addTurnCost: (usd: number) => Promise<void>;
+  /** The server recorded the extraction's own `ai_invocations` row(s) (#1872);
+   *  re-persist so the host's cost-total snapshot picks the new total up. */
+  refreshCostTotal: () => Promise<void>;
   /** Set / clear the chat error line (component-owned). */
   setError: (message: string | null) => void;
   /** Set / clear the non-error commit notice (component-owned). */
@@ -187,8 +188,8 @@ export class ChatCommitController {
       !!this.subjectEntryType,
   );
 
-  // The commit preamble both modes share: run the extraction, attribute the
-  // (always-billed) turn's cost like a streamed one, and surface the two failure
+  // The commit preamble both modes share: run the extraction, refresh the cost
+  // total the server already attributed (#1872), and surface the two failure
   // shapes — the turn returned nothing (ok=false / no patch), or the reply
   // couldn't be read as a patch (garbled). Returns the validated patch, or null
   // when the caller should stop (a message was already set). This is the seam the
@@ -199,10 +200,11 @@ export class ChatCommitController {
     garbledMessage: string,
   ): Promise<AIEntryPatch | null> {
     const result = await extract();
-    // #986: the chat switched during the extraction — attributing this
-    // extraction's cost to the now-active chat is the corruption; skip it.
+    // A billed call left a row on the server; re-persist so the footer's total
+    // catches up. #986: the chat switched during the extraction — don't touch
+    // the now-active chat.
     if (typeof result.cost_usd === "number" && this.chatUnchanged())
-      await this.deps.addTurnCost(result.cost_usd);
+      await this.deps.refreshCostTotal();
     if (!result.ok || !result.patch) {
       this.deps.setError(result.error || "The model returned nothing to commit.");
       return null;

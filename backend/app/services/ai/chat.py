@@ -187,6 +187,7 @@ def _lore_cache_blocks(
     chat_id: str,
     journal_for_send: list[Any],
     scene: Any,
+    lore_mode: str = "implicit",
 ) -> tuple[list[dict], dict[str, str]]:
     """The chat's one deduped lore set, placed once *per volatility tier*
     (docs/design/context-caching.md §4). `_relevant_lore_ids` — the single selector
@@ -225,7 +226,7 @@ def _lore_cache_blocks(
     # `never`-filtered); their `use(node, hint)` priors bias placement only.
     used_ids = list(chat.used_node_ids)
     hints = dict(chat.used_node_hints)
-    ids = _relevant_lore_ids(project, scene, "implicit", journal_for_send, used_ids)
+    ids = _relevant_lore_ids(project, scene, lore_mode, journal_for_send, used_ids)
     stable_ids, volatile_ids = _tier_lore_ids(project, ids, session, hints)
     session.commit()
 
@@ -244,6 +245,8 @@ def expand_and_prepare_chat_blocks(
     chat_id: str | None,
     system_prompt: str,
     messages_list: list[dict],
+    *,
+    lore_mode: str = "implicit",
 ) -> tuple[list[dict] | None, str | None, list[Any]]:
     """When chat_id is bound, assemble the ordered system cache-blocks the
     provider call sends, and return:
@@ -268,6 +271,12 @@ def expand_and_prepare_chat_blocks(
     volatile 5m block, so a settled entity is a cheap cache read instead of being
     re-billed every turn.
 
+    `lore_mode` is the selector mode (`_relevant_lore_ids`): `"implicit"` — the
+    ordinary turn — detects mentions into the journal and sends the world
+    selection; `"used"` — the commit's transcription turn (#1874, ADR-0067
+    Amendment 2) — runs no detection and sends only the chat's own `use()`
+    picks, so a large world selection can't swamp the transcript it must read.
+
     Returns (None, None, []) when chat_id is empty or the chat doesn't
     exist — caller falls back to the legacy single-string system path.
     """
@@ -284,7 +293,7 @@ def expand_and_prepare_chat_blocks(
     # (ADR-0075 slice 3 scans its prose) and lore rendering, so a lore-enabled
     # turn does exactly one `read_scene` for its resolution scene.
     scene = _chat_resolution_scene(project, chat) if chat.lore_enabled else None
-    if chat.lore_enabled:
+    if chat.lore_enabled and lore_mode == "implicit":
         new_entries = _detect_and_persist_journal(
             project, chat, chat_id, messages_list, scene, system_prompt
         )
@@ -306,7 +315,7 @@ def expand_and_prepare_chat_blocks(
     # layer only orders stable-first (ADR-0060 §5).
     if chat.lore_enabled:
         lore_blocks, seen_revisions = _lore_cache_blocks(
-            project, chat, chat_id, journal_for_send, scene
+            project, chat, chat_id, journal_for_send, scene, lore_mode
         )
         blocks.extend(lore_blocks)
         # #1635: persist the last-seen revisions if they changed, so the door's
@@ -324,12 +333,16 @@ def expand_and_prepare_chat_blocks(
     return (blocks or None), chat_id, list(new_entries)
 
 
-async def run_chat_turn(project: ProjectService, request: AIChatRequest) -> AIChatResponse:
+async def run_chat_turn(
+    project: ProjectService, request: AIChatRequest, *, lore_mode: str = "implicit"
+) -> AIChatResponse:
     """Run one chat-completion turn: resolve provider/model, prepare the bound
     chat's context blocks, call the provider, and shape the response with usage +
     cost. The `/api/ai/chat` route is a thin shim over this, and the fresh-extraction
     commit (`services/ai/extraction`) runs its turn through it too — rather than
-    reaching back into the HTTP layer for the chat orchestration.
+    reaching back into the HTTP layer for the chat orchestration. `lore_mode` is
+    passed straight to `expand_and_prepare_chat_blocks`; the commit turn narrows
+    it to `"used"` (#1874).
     """
     settings = machine_settings_service.load_settings()
     resolved = resolve_call_params(
@@ -348,7 +361,8 @@ async def run_chat_turn(project: ProjectService, request: AIChatRequest) -> AICh
     messages_list = [m.model_dump() for m in request.messages]
     system_blocks, session_id, journal_added = expand_and_prepare_chat_blocks(
         project,
-        request.chat_id, request.system_prompt, messages_list
+        request.chat_id, request.system_prompt, messages_list,
+        lore_mode=lore_mode,
     )
 
     result = ai_providers.chat(

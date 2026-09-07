@@ -199,6 +199,35 @@ class LoreCacheBlockTests(unittest.TestCase):
         self.assertIn('name="Sidebar"', text)
         self.assertIn("A picked aside", text)
 
+    def test_used_mode_sends_only_the_chats_own_picks_and_detects_nothing(self) -> None:
+        # #1874 / ADR-0067 Amendment 2: the commit's transcription turn narrows
+        # the selector to the chat's `use()` picks. The always-policy Premise
+        # (which an implicit turn places, see the tests above) stays out, a
+        # mention in the message is NOT journal-detected, and nothing is
+        # persisted onto the chat — the commit turn reads the chat, never grows it.
+        picked = self._make_note("Sidebar", body="A picked aside.")
+        self.service.save_chat_session(
+            self.chat_id,
+            SaveChatSessionRequest(
+                title="Brainstorm",
+                prompt_entry_id="prompt_x",
+                lore_enabled=True,
+                used_node_ids=[picked],
+            ),
+        )
+        blocks, _sid, added = expand_and_prepare_chat_blocks(
+            self.service,
+            self.chat_id,
+            "SYSTEM PROMPT",
+            [{"role": "user", "content": "Premise please"}],
+            lore_mode="used",
+        )
+        text = "".join(b["text"] for b in blocks or [])
+        self.assertIn("A picked aside", text)
+        self.assertNotIn("A hidden world", text)
+        self.assertEqual(added, [])
+        self.assertEqual(self.service.read_chat_session(self.chat_id).journal, [])
+
     def test_use_selected_never_policy_node_stays_excluded(self) -> None:
         # `use()` joins the SAME direct channel, so it still obeys the one `never`
         # chokepoint — a selection cannot override a `never`-policy entry.

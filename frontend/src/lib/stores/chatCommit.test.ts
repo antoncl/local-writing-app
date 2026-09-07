@@ -94,7 +94,7 @@ function makeDeps(over: Partial<ChatCommitDeps> = {}): ChatCommitDeps {
     getAssistantId: () => "asst-1",
     getHistory: () => [{ role: "user", content: "brainstorm turn" }],
     getChatId: () => "chat_1",
-    addTurnCost: vi.fn(async () => {}),
+    refreshCostTotal: vi.fn(async () => {}),
     setError: vi.fn(),
     setNotice: vi.fn(),
     entryTitle: vi.fn(() => null),
@@ -309,17 +309,19 @@ describe("ChatCommitController — commitToEntry", () => {
     expect(deps.setNotice).toHaveBeenLastCalledWith("Committed — review it on the scene.");
   });
 
-  it("attributes the billed extraction turn's cost, and skips it when unbilled", async () => {
+  it("refreshes the cost total after a billed extraction, and skips it when unbilled", async () => {
+    // #1872: the server records the extraction's own invocation row; the
+    // controller only asks the host to re-persist so its total catches up.
     const { c, deps } = reviseController();
     extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }, 0.05));
     await c.commitToEntry();
-    expect(deps.addTurnCost).toHaveBeenCalledWith(0.05);
+    expect(deps.refreshCostTotal).toHaveBeenCalledTimes(1);
 
-    vi.mocked(deps.addTurnCost).mockClear();
+    vi.mocked(deps.refreshCostTotal).mockClear();
     entryBrainstorm.clear("lore-1");
     extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }, null)); // no usage returned
     await c.commitToEntry();
-    expect(deps.addTurnCost).not.toHaveBeenCalled();
+    expect(deps.refreshCostTotal).not.toHaveBeenCalled();
   });
 
   it("surfaces an extraction that returned nothing", async () => {
@@ -451,7 +453,7 @@ describe("ChatCommitController — #986 chat switch during an in-flight commit",
 
     expect(createSet).not.toHaveBeenCalled();
     expect(deps.onStaged).not.toHaveBeenCalled();
-    expect(deps.addTurnCost).not.toHaveBeenCalled();
+    expect(deps.refreshCostTotal).not.toHaveBeenCalled();
   });
 
   it("commitToEntry: a chat switch mid-extraction skips the cost attribution", async () => {
@@ -468,7 +470,7 @@ describe("ChatCommitController — #986 chat switch during an in-flight commit",
 
     await c.commitToEntry();
 
-    expect(deps.addTurnCost).not.toHaveBeenCalled();
+    expect(deps.refreshCostTotal).not.toHaveBeenCalled();
   });
 
   it("createDraft: a chat switch mid-create skips the subject stamp; no switch still stamps it", async () => {
@@ -594,7 +596,7 @@ describe("ChatCommitController — stageToPendingSet", () => {
 
     await c.stageToPendingSet();
 
-    expect(deps.addTurnCost).toHaveBeenCalledWith(0.03);
+    expect(deps.refreshCostTotal).toHaveBeenCalledTimes(1);
     expect(deps.setNotice).toHaveBeenLastCalledWith(
       "Staged a mutation set for Mira (1 change) — review it under Mutation sets on the card, then place it in a scene to make it active." +
         " Ignored 1 field(s) the model couldn't set legally: id.",

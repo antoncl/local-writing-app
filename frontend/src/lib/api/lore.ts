@@ -85,11 +85,12 @@ export const loreApi = {
       body: JSON.stringify({ target_layer_id: targetLayerId }),
     });
   },
-  // ADR-0051 S4 / ADR-0067 S2: the commit runs as a cached CONTINUATION of the
-  // chat itself — `chat_id` is the chat's real id, so the server reads back the
+  // ADR-0051 S4 / ADR-0067 S2: the commit runs as a CONTINUATION of the chat
+  // itself — `chat_id` is the chat's real id, so the server reads back the
   // field set its lock render registered (ChatSession.field_contract_stored)
-  // instead of rebuilding a separate contract, and reuses the cached system
-  // prefix + lore rather than re-shipping the transcript fresh. Returns the
+  // instead of rebuilding a separate contract. The transcript is posted as
+  // history; the server sends only the chat's explicit `use()` picks as lore
+  // (#1874) and records the call's own invocation row (#1872). Returns the
   // patch + cost.
   extractEntryPatch(
     nodeId: string,

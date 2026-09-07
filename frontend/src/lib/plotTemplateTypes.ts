@@ -10,7 +10,7 @@
 // provenance fields mirror PromptEntry exactly, so the same read-only-in-place lock,
 // clone, and hide affordances apply.
 
-import type { EntryMetadata } from "./types";
+import type { EntryMetadata } from "./metadataTypes";
 
 export type PlotTemplateSourceRef = {
   id: string;

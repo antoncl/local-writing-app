@@ -10,7 +10,7 @@
 // backend (`_PlotFolder*`). The endpoint is
 // the only family discriminator.
 
-import type { EntryMetadata } from "./types";
+import type { EntryMetadata } from "./metadataTypes";
 
 // The list-row shape (no revision / computed_metadata) — what list_cards /
 // list_plotlines return per entry.

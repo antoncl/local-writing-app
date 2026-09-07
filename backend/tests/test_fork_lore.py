@@ -9,6 +9,7 @@ collision at two layers is still a warning.
 
 from __future__ import annotations
 
+import shutil
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,8 +17,14 @@ from unittest.mock import patch
 
 from layer_fixtures import declare_full_chain
 
-from app.models import MetadataFieldDefinition, UpsertMetadataFieldRequest
+from app.models import (
+    MetadataFieldDefinition,
+    SaveLoreEntryRequest,
+    UpsertMetadataFieldRequest,
+)
 from app.services.project.errors import ProjectServiceError
+from app.services.project.node_index_gate import node_index_gate
+from app.services.project.overrides import OVERRIDES_FOLDER
 from app.services.project_service import ProjectService
 
 
@@ -77,6 +84,32 @@ class ForkLoreTests(unittest.TestCase):
         self.assertEqual(index.by_id["honor"].source_layer_id, self.service._metadata_schema_layer_id(self.root))
         # The ancestor is still reachable as a shadowed candidate.
         self.assertEqual(len(index.candidates["honor"]), 2)
+
+    def test_fork_drops_every_copy_of_its_own_override(self) -> None:
+        # The fork bakes the folded values into the copy, so the book's own
+        # override for the id is redundant and dropped — every file carrying it
+        # (#1856): a sync tool's conflict copy left behind would be the one file
+        # the collector folds on the next build, and resurface if the fork is
+        # later deleted.
+        self._write_ancestor_lore(self.universe, "honor", "Honor Harrington", entry_type="lore:character")
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington",
+                body="",
+                entry_type="lore:character",
+                metadata={"color": "amber"},
+                authoring_layer_id=self.service._metadata_schema_layer_id(self.root),
+            ),
+        )
+        original = next((self.root / OVERRIDES_FOLDER).glob("*.md"))
+        shutil.copy(original, original.with_name(original.stem + " (conflicted copy).md"))
+        node_index_gate.invalidate()
+
+        forked = self.service.fork_lore_entry("honor")
+
+        self.assertEqual(forked.metadata.get("color"), "amber")
+        self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
 
     def test_fork_records_a_relative_forked_from(self) -> None:
         self._write_ancestor_lore(self.universe, "honor", "Honor Harrington")

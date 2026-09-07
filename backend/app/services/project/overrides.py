@@ -197,14 +197,39 @@ class LayerOverridesMixin:
         """Collect one layer's override files into `index.overrides_by_target`.
 
         Called per layer from the index builder — a parallel pass to the node
-        collectors, so overrides never join `candidates`/`by_id`/edges as nodes."""
+        collectors, so overrides never join `candidates`/`by_id`/edges as nodes.
+
+        **One file per (layer, target)** is the writer's shape
+        (`_write_override_file` reuses the existing file), and every reader of
+        "this layer's override for X" (`_override_file_for_target`) takes the
+        first in sorted order. The collector enforces the same (#1856): when a
+        sync tool's "conflicted copy" or an Explorer "- Copy" has duplicated a
+        file, only the first is folded and each later one is a warning naming
+        both — before this, every copy folded and the later filename silently
+        won, so an edit through the app (which rewrites the first) appeared not
+        to take."""
         folder = layer.folder / OVERRIDES_FOLDER
         if not folder.is_dir():
             return
+        first_for_target: dict[str, Path] = {}
         for path in sorted(folder.glob("*.md")):
             record = self._read_override_record(path, layer)
-            if record is not None:
-                index.overrides_by_target.setdefault(record.target_id, []).append(record)
+            if record is None:
+                continue
+            first = first_for_target.get(record.target_id)
+            if first is not None:
+                index.add_diagnostic(
+                    layer_id=layer.id,
+                    path=path,
+                    message=(
+                        f"Layer override {path.name} duplicates {first.name} for {record.target_id} "
+                        f"at {layer.label}; only {first.name} is applied — remove or merge the copy."
+                    ),
+                    is_error=False,
+                )
+                continue
+            first_for_target[record.target_id] = path
+            index.overrides_by_target.setdefault(record.target_id, []).append(record)
 
     def _write_override_file(
         self, layer_folder: Path, target_id: str, target_title: str, rows: list[MutationSetRow]
@@ -242,8 +267,10 @@ class LayerOverridesMixin:
     def _override_files_for_target(self, layer_folder: Path, target_id: str) -> list[Path]:
         """EVERY override file this layer holds for `target_id`, sorted. Normally
         one; more when a file has been duplicated outside the app (a "conflicted
-        copy", an Explorer "- Copy"). The collector folds all of them, so a seam
-        that settles a layer's override for a target must settle all of them."""
+        copy", an Explorer "- Copy"). The collector folds only the first (#1856),
+        but a gesture that UNLINKS a layer's override for a target must unlink
+        all of them — `_drop_layer_overrides_for_target` — or the survivor is the
+        one file on the next build and a value the author just removed is back."""
         folder = layer_folder / OVERRIDES_FOLDER
         if not folder.is_dir():
             return []
@@ -252,6 +279,19 @@ class LayerOverridesMixin:
             for path in sorted(folder.glob("*.md"))
             if self._read_front_matter_only(path).get("target") == target_id
         ]
+
+    def _drop_layer_overrides_for_target(self, layer_folder: Path, target_id: str) -> None:
+        """Unlink this layer's override for `target_id` — every file carrying it.
+
+        The one way an override file leaves the disk through the app: a revert to
+        canon or a field reset (`_save_lore_override` / `_save_prompt_override`),
+        a fork-to-here that baked the folded values into the copy
+        (`fork_lore_entry`), and a promotion settling the origin's leftover
+        (`_settle_origin_override`). Routed through `_delete_node_files` so the
+        memo stays coherent (an override-bearing chain rebuilds cold)."""
+        files = tuple(self._override_files_for_target(layer_folder, target_id))
+        if files:
+            self._delete_node_files(files)
 
     # --- the fold -----------------------------------------------------------
 

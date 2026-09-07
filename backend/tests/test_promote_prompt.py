@@ -192,6 +192,52 @@ class PromotePromptTests(unittest.TestCase):
         self.assertEqual(snip.overridden_fields, [])
         self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
 
+    def test_plan_names_an_ancestor_override_on_a_cascaded_member(self) -> None:
+        # #1857 for the include cascade: the series overrides a universe snippet's
+        # colour; the snippet's file is hand-moved into the book and edited; the
+        # promoted prompt includes it. Promoting to the universe cascades the
+        # snippet, and the series override applies to it again — so the plan
+        # names the member alongside the field and layer.
+        universe_layer_id = self.service._metadata_schema_layer_id(self.universe)
+        series_label = self.service.layer_by_id(self.root, self.series_layer_id).label
+        self._write_ancestor_prompt(
+            self.universe, "snip", "Snip", body="Voice guidance.", entry_type="prompt:snippet", metadata={"color": "slate"}
+        )
+        self.service.save_prompt_entry(
+            "snip",
+            SavePromptEntryRequest(
+                title="Snip",
+                body="Voice guidance.",
+                entry_type="prompt:snippet",
+                metadata={"color": "amber"},
+                authoring_layer_id=self.series_layer_id,
+            ),
+        )
+        self.assertTrue(any((self.series / OVERRIDES_FOLDER).glob("*.md")))
+        (self.root / "prompts").mkdir(exist_ok=True)
+        shutil.move(self.universe / "prompts" / "snip.md", self.root / "prompts" / "snip.md")
+        node_index_gate.invalidate()
+        self.service.save_prompt_entry(
+            "snip",
+            SavePromptEntryRequest(
+                title="Snip", body="Voice guidance.", entry_type="prompt:snippet", metadata={"color": "moss"}
+            ),
+        )
+        self._write_ancestor_prompt(self.root, "prompta", "Prompt A", body='{% include "snip" %}\n')
+
+        plan = self.service.preview_prompt_promotion("prompta", universe_layer_id)
+
+        self.assertEqual(plan.also_promoted, ["Snip"])
+        self.assertEqual(
+            [(item.field, item.layer, item.node) for item in plan.folds_after_promotion],
+            [("color", series_label, "Snip")],
+        )
+
+        self.service.promote_prompt_entry("prompta", universe_layer_id)
+        snip = self.service.read_prompt_entry("snip")
+        self.assertEqual(snip.metadata.get("color"), "amber")
+        self.assertEqual(snip.overridden_fields, ["color"])
+
     def test_promote_prompt_refuses_inherited(self) -> None:
         self._write_ancestor_prompt(self.universe, "genprompt", "General Prompt")
 

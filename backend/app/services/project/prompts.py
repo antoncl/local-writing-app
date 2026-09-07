@@ -507,10 +507,9 @@ class PromptEntriesMixin:
             self._write_override_file(authoring_layer.folder, entry_id, request.title, rows)
         else:
             # An empty delta means the author reverted to canon: drop this layer's
-            # override rather than leave an inert file (files-are-truth).
-            existing = self._override_file_for_target(authoring_layer.folder, entry_id)
-            if existing is not None:
-                self._delete_node_file(existing)
+            # override rather than leave an inert file (files-are-truth) — every
+            # file carrying it, or a sync tool's copy is the override tomorrow (#1856).
+            self._drop_layer_overrides_for_target(authoring_layer.folder, entry_id)
 
         # ADR-0082 §2: `assistant_tags` is now an `entity_ref_list` of tag-node
         # ids, not free-text names — registering ids into the legacy (dead,

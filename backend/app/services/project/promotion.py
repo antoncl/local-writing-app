@@ -23,6 +23,7 @@ from typing import Any
 from app.models import (
     LoreEntry,
     MutationSetEntry,
+    PromotionFoldItem,
     PromotionPlan,
     PromotionStayItem,
     PromotionTarget,
@@ -275,6 +276,46 @@ class PromotionMixin:
 
         return entry, dest, index, root
 
+    def _folds_after_promotion(
+        self,
+        index: NodeIndex,
+        node_id: str,
+        root,
+        metadata: dict[str, Any],
+        *,
+        node_title: str | None = None,
+    ) -> list[PromotionFoldItem]:
+        """The fields an ancestor layer's override will write onto `node_id` once
+        it is inherited again (#1857), outermost layer first.
+
+        Owned here, the node ignores every override targeting it (the fold gate
+        is "inherited winner only"); promoted, the read folds every record in the
+        chain — so a value the author sees now can change on commit. The plan
+        says which and from where. The origin's own record is skipped: the
+        promotion settles that file (`_settle_origin_override`), it never folds.
+
+        Only rows the fold would actually APPLY are listed — the same
+        `materialize_override_metadata` the read runs, one record at a time onto
+        the running result, then the read's unknown-field strip. A row for a
+        field the schema has since retired, or an `add` on a scalar, changes
+        nothing on commit and so promises nothing here (ADR-0078 §9).
+        `node_title` names a cascaded include member; None is the node itself.
+        """
+        open_layer_id = self._metadata_schema_layer_id(root)
+        field_types = self._schema_field_types(self.read_metadata_schema())
+        items: list[PromotionFoldItem] = []
+        running = dict(metadata)
+        records = sorted(index.overrides_by_target.get(node_id, []), key=lambda record: record.layer_rank)
+        for record in records:
+            if record.layer_id == open_layer_id:
+                continue
+            running, touched = self.materialize_override_metadata(running, [record], field_types)
+            for field in touched:
+                item = PromotionFoldItem(field=field, layer=record.layer_label, node=node_title)
+                if field in field_types and item not in items:
+                    items.append(item)
+        return items
+
     def _pinned_staged_sets(self, index: NodeIndex, node_id: str) -> list[str]:
         """Staged mutation sets pinned (`target_entity`) to `node_id` (ADR-0078
         §7) — surfaced on the node's promotion plan as `related`, NOT cascaded:
@@ -317,6 +358,7 @@ class PromotionMixin:
             invisible_at_destination=sorted(invisible),
             related=self._pinned_staged_sets(index, entry_id),
             blocked_reason="; ".join(blocked) or None,
+            folds_after_promotion=self._folds_after_promotion(index, entry_id, root, full.metadata),
         )
         return full, dest, travels, stays, plan
 
@@ -383,8 +425,9 @@ class PromotionMixin:
         node is inherited again from here on, and that file would fold onto it —
         a delta the author never saw, activating silently. Removing ALL matching
         files, not the first, is what makes this hold when a sync tool's
-        conflict copy has duplicated the leftover: the collector folds every
-        file with the target, so one survivor would activate just the same.
+        conflict copy has duplicated the leftover: the collector folds the first
+        file in sorted order (#1856), so one survivor would be that file on the
+        next build and activate just the same.
 
         Only the origin's own files. An override for this id at a layer above
         the origin belongs to that project; it folded for that layer's other
@@ -396,9 +439,7 @@ class PromotionMixin:
         and `_write_override_file` invalidates outright; the explicit invalidate
         makes the post-state cold regardless of which branch ran.
         """
-        leftovers = tuple(self._override_files_for_target(root, entry_id))
-        if leftovers:
-            self._delete_node_files(leftovers)
+        self._drop_layer_overrides_for_target(root, entry_id)
         if stays_metadata:
             rows = self._diff_metadata_to_override_rows(
                 base=travels_metadata,
@@ -521,6 +562,22 @@ class PromotionMixin:
             ),
             resolves_differently=resolves_differently,
             blocked_reason=blocked_reason,
+            # The promoted prompt's own folds, then each cascaded member's named by
+            # title — a member is promoted by the same gesture, so an ancestor
+            # override on it changes the screen just the same (#1857).
+            folds_after_promotion=(
+                self._folds_after_promotion(index, entry_id, root, full.metadata)
+                + [
+                    item
+                    for member_id in to_promote
+                    for member in [self.read_prompt_entry(member_id)]
+                    for item in self._folds_after_promotion(
+                        index, member_id, root, member.metadata, node_title=member.title
+                    )
+                ]
+                if blocked_reason is None
+                else []
+            ),
         )
         return full, dest, travels_metadata, stays_metadata, to_promote, plan
 

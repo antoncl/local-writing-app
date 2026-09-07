@@ -196,6 +196,17 @@ export type PromotionStayItem = {
   reason: string;
 };
 
+// A field an ANCESTOR layer's override will write once the promoted node is
+// inherited again (#1857): owned, the node ignored it; promoted, it folds.
+export type PromotionFoldItem = {
+  field: string;
+  // Label of the layer whose override applies.
+  layer: string;
+  // Title of the cascaded include member it applies to, or null for the
+  // promoted node itself.
+  node: string | null;
+};
+
 // The dry-run preview of a promotion (ADR-0078 §9), returned by both the
 // preview and (implicitly) the commit endpoint — the same partition backs
 // both, so what the author confirms is what runs.
@@ -219,6 +230,9 @@ export type PromotionPlan = {
   // surfaced, not cascaded — they keep working from the origin and are
   // promoted separately. Titles; empty unless the node has pinned staged sets.
   related: string[];
+  // Fields an ancestor layer's override will write once the node is inherited
+  // again (#1857) — the value on screen changes on commit, so the plan says so.
+  folds_after_promotion: PromotionFoldItem[];
 };
 
 export type PromptEntrySummary = {

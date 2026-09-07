@@ -322,6 +322,53 @@ class LayerOverrideTests(unittest.TestCase):
 
     # --- orphans -------------------------------------------------------
 
+    def test_a_duplicated_override_file_folds_once_with_a_warning(self) -> None:
+        # #1856: a sync tool's conflict copy of the override file. Before, every
+        # copy folded and the later filename won, so an edit through the app —
+        # which rewrites the FIRST file — appeared not to take. Now the first in
+        # sorted order is the one file for (layer, target), the copy is a warning.
+        import shutil
+
+        from app.services.project.node_index_gate import node_index_gate
+
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+        self._save_override("honor", {"rank": "Captain"})
+        original = next((self.root / OVERRIDES_FOLDER).glob("*.md"))
+        copy = original.with_name(original.stem + " (conflicted copy).md")
+        shutil.copy(original, copy)
+        copy.write_text(copy.read_text(encoding="utf-8").replace("Captain", "Admiral"), encoding="utf-8")
+        node_index_gate.invalidate()
+        # Which file is "first" is a property of the names — a real conflict copy
+        # (`… (conflicted copy).md`, `…-PCNAME.md`) sorts BEFORE the original, so
+        # the test pins the rule, not a particular winner: the first in sorted
+        # order is the one file, and it is the one the writer rewrites.
+        first, second = sorted((self.root / OVERRIDES_FOLDER).glob("*.md"))
+        first_rank = self.service._read_front_matter_only(first)["rows"][0]["value"]
+
+        index = self.service._build_node_index()
+        self.assertEqual([record.path for record in index.overrides_by_target["honor"]], [first])
+        self.assertTrue(any(second.name in w and first.name in w for w in index.warnings), index.warnings)
+        entry = self.service.read_lore_entry("honor")
+        self.assertEqual(entry.metadata.get("rank"), first_rank)
+        self.assertEqual(entry.overridden_fields, ["rank"])
+
+        # An edit through the app rewrites that same file and takes effect; the
+        # other is never promoted to the fold and an edit never unlinks it.
+        self._save_override("honor", {"rank": "Commander"})
+        self.assertEqual(self.service.read_lore_entry("honor").metadata.get("rank"), "Commander")
+        self.assertEqual(self.service._read_front_matter_only(first)["rows"][0]["value"], "Commander")
+        self.assertTrue(second.exists())
+
+        # Reverting to canon unlinks BOTH: dropping only the folded file would make
+        # the copy the one file on the next build, and a value the author just
+        # removed would be back.
+        self._save_override("honor", {"rank": "Commodore"})
+        self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
+        node_index_gate.invalidate()
+        entry = self.service.read_lore_entry("honor")
+        self.assertEqual(entry.metadata.get("rank"), "Commodore")
+        self.assertEqual(entry.overridden_fields, [])
+
     def test_an_orphan_override_is_ignored_with_a_warning(self) -> None:
         from app.services.project.node_index_gate import node_index_gate
 

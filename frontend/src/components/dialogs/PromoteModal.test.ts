@@ -22,11 +22,22 @@ const plan: PromotionPlan = {
   resolves_differently: [],
   blocked_reason: null,
   related: [],
+  folds_after_promotion: [],
 };
 
 // A lore plan with pinned staged mutation sets (ADR-0078 §7): the "related —
 // promote separately" bucket, which only ever populates for a lore promotion.
 const relatedPlan: PromotionPlan = { ...plan, related: ["Full Moon Transformation"] };
+
+// A plan where an ancestor layer's override applies again after promotion
+// (#1857): the value on screen changes on commit, so the plan says so.
+const foldPlan: PromotionPlan = {
+  ...plan,
+  folds_after_promotion: [
+    { field: "mood", layer: "Honor Harrington", node: null },
+    { field: "color", layer: "Honor Harrington", node: "Snip" },
+  ],
+};
 
 // A prompt's plan (slice 3): the two lore-always-empty buckets populated, and
 // no lore-only buckets (stays_in_origin / invisible_at_destination are lore's
@@ -40,6 +51,7 @@ const promptPlan: PromotionPlan = {
   resolves_differently: ["setting_context"],
   blocked_reason: null,
   related: [],
+  folds_after_promotion: [],
 };
 
 const blockedPlan: PromotionPlan = {
@@ -59,6 +71,7 @@ const mutationSetPlan: PromotionPlan = {
   resolves_differently: [],
   blocked_reason: null,
   related: [],
+  folds_after_promotion: [],
 };
 
 const mutationSetBlockedPlan: PromotionPlan = {
@@ -282,6 +295,25 @@ describe("PromoteModal", () => {
 
     expect(await screen.findByText("Related — promote separately")).toBeTruthy();
     expect(screen.getByText("Full Moon Transformation")).toBeTruthy();
+  });
+
+  it("renders the 'Changes after promotion' bucket when an ancestor's override will apply again (#1857)", async () => {
+    previewLorePromotion.mockResolvedValueOnce(foldPlan);
+    render(PromoteModal, { props: { ...base } });
+
+    expect(await screen.findByText("Changes after promotion")).toBeTruthy();
+    expect(screen.getByText("mood")).toBeTruthy();
+    expect(screen.getAllByText(/overridden at Honor Harrington/).length).toBe(2);
+    // A cascaded member's fold names the member.
+    expect(screen.getByText("color")).toBeTruthy();
+    expect(screen.getByText(/\(on Snip\)/)).toBeTruthy();
+  });
+
+  it("omits the 'Changes after promotion' bucket when nothing folds", async () => {
+    render(PromoteModal, { props: { ...base } });
+
+    await screen.findByText("Moves to Series");
+    expect(screen.queryByText("Changes after promotion")).toBeNull();
   });
 });
 

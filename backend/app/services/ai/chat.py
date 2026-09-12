@@ -19,11 +19,13 @@ from app.models import (
     AIChatResponse,
     ChatSession,
     ChatUsage,
+    LoreFit,
     SaveChatSessionRequest,
 )
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai.call_resolver import resolve_call_params
+from app.services.ai.lore_budget import LoreLimits, fit_lore_budget
 from app.services.ai.usage import translate_usage_to_cost
 from app.services.project.errors import ProjectServiceError
 
@@ -44,12 +46,16 @@ class PreparedChatTurn:
     newly journaled on this turn — and the bound `ChatSession` it read, so
     the caller that later records the turn's row (#1877) attributes it to the
     chat it already holds instead of re-reading transcript + ledger inside
-    the stream. `chat` is None for a chat-less call or a missing chat."""
+    the stream. `chat` is None for a chat-less call or a missing chat.
+    `lore_fit` (ADR-0086 §5) is what the turn's lore budget kept and left
+    out; None when no implicit selection ran (chat-less, lore off, the
+    commit's `used` turn)."""
 
     system_blocks: list[dict] | None
     session_id: str | None
     journal_added: list[Any]
     chat: ChatSession | None
+    lore_fit: LoreFit | None = None
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
@@ -214,25 +220,33 @@ def _lore_cache_blocks(
     chat_id: str,
     journal_for_send: list[Any],
     scene: Any,
-) -> tuple[list[dict], dict[str, str]]:
-    """The chat's one deduped lore set, placed once *per volatility tier*
-    (docs/design/context-caching.md §4). `_relevant_lore_ids` — the single selector
-    — computes `{direct ∪ auto(journal) ∪ always} − {never, manual_only}`;
-    `_tier_lore_ids` splits it against the chat's in-memory session baseline: entries
-    unchanged since last turn → the stable block, new or changed → the volatile
-    block, biased by any `use(node, hint)` prior. Both resolve as-of the chat's
-    scene. `commit()` promotes this turn's set to next turn's baseline. A fresh
-    process starts cold (empty baseline → all volatile), which re-settles on the next
-    turn — deliberately not persisted (§6). The blocks carry only a `tier`; the
-    provider adapter maps it to a ttl/breakpoint (ADR-0060 §5).
+    limits: LoreLimits,
+) -> tuple[list[dict], dict[str, str], LoreFit]:
+    """The chat's one deduped lore set, fitted to the assistant's budget and
+    placed once *per volatility tier* (docs/design/context-caching.md §4).
+    `_select_lore` — the single selector — computes the declared set (`use()`
+    picks, scene refs, `always`) and the inferred candidates (journal, structural
+    hop) minus `never`/`manual_only`; every candidate is rendered once;
+    `fit_lore_budget` keeps the declared set whole and as much of the inferred
+    set as fits, in fit order (ADR-0086 §3); `_tier_lore_ids` splits the kept ids
+    against the chat's in-memory session baseline: entries unchanged since last
+    turn → the stable block, new or changed → the volatile block, biased by any
+    `use(node, hint)` prior. Both resolve as-of the chat's scene. `commit()`
+    promotes this turn's set to next turn's baseline. A fresh process starts cold
+    (empty baseline → all volatile), which re-settles on the next turn —
+    deliberately not persisted (§6). The blocks carry only a `tier`; the provider
+    adapter maps it to a ttl/breakpoint (ADR-0060 §5). Wire order within a tier
+    stays id-sorted, so a settled block is byte-identical when the kept set is.
 
     `scene` is the chat's resolution scene, already loaded once by the caller
     (`_chat_resolution_scene`) and shared with `_detect_and_persist_journal` —
-    avoids a second `read_scene` for the same turn.
+    avoids a second `read_scene` for the same turn. Returns the blocks, the
+    session baseline after commit, and the fit report the send hands back (§5).
     """
-    from app.services.ai.lore_block import _format_lore_block
+    from app.services.ai.lore_block import _render_lore_entries, _wrap_lore_block
     from app.services.ai.lore_selection import (
-        _relevant_lore_ids,
+        _lore_title,
+        _select_lore,
         _tier_lore_ids,
     )
     from app.services.ai.sessions import default_registry
@@ -252,18 +266,30 @@ def _lore_cache_blocks(
     # `never`-filtered); their `use(node, hint)` priors bias placement only.
     used_ids = list(chat.used_node_ids)
     hints = dict(chat.used_node_hints)
-    ids = _relevant_lore_ids(project, scene, "implicit", journal_for_send, used_ids)
-    stable_ids, volatile_ids = _tier_lore_ids(project, ids, session, hints)
+    selection = _select_lore(
+        project, scene, journal_for_send, used_ids, expansion=limits.expansion
+    )
+    # ADR-0086 §4: render every candidate once — the fit decides on rendered
+    # size, and the tiers below wrap the same pairs, so nothing is rendered
+    # twice and the wire carries exactly what was measured.
+    rendered = dict(_render_lore_entries(project, selection.ids, scene=scene, index=index))
+    fitted = fit_lore_budget(
+        selection,
+        rendered,
+        limits.budget_tokens,
+        title_of=lambda entry_id: _lore_title(project, entry_id),
+    )
+    stable_ids, volatile_ids = _tier_lore_ids(project, fitted.kept_ids, session, hints)
     session.commit()
 
     blocks: list[dict] = []
-    stable_xml = _format_lore_block(project, stable_ids, scene=scene, index=index)
+    stable_xml = _wrap_lore_block([(i, rendered[i]) for i in stable_ids if i in rendered])
     if stable_xml:
         blocks.append({"text": stable_xml, "tier": "stable"})
-    volatile_xml = _format_lore_block(project, volatile_ids, scene=scene, index=index)
+    volatile_xml = _wrap_lore_block([(i, rendered[i]) for i in volatile_ids if i in rendered])
     if volatile_xml:
         blocks.append({"text": volatile_xml, "tier": "volatile"})
-    return blocks, dict(session.baseline)
+    return blocks, dict(session.baseline), fitted.report
 
 
 def expand_and_prepare_chat_blocks(
@@ -273,6 +299,7 @@ def expand_and_prepare_chat_blocks(
     messages_list: list[dict],
     *,
     lore_mode: LoreMode = "implicit",
+    lore_limits: LoreLimits | None = None,
 ) -> PreparedChatTurn:
     """When chat_id is bound, assemble the ordered system cache-blocks the
     provider call sends, and return a `PreparedChatTurn` carrying:
@@ -302,6 +329,11 @@ def expand_and_prepare_chat_blocks(
     selection; `"used"` — the commit's transcription turn (#1874, ADR-0067
     Amendment 2) — runs no detection and sends only the chat's own `use()`
     picks, so a large world selection can't swamp the transcript it must read.
+
+    `lore_limits` (ADR-0086 §2/§2b) is the assistant's budget for inferred
+    lore and its reach, from `ResolvedCall.lore_limits`; None means the
+    resolver's defaults. It shapes only the implicit turn — the commit turn
+    has nothing inferred to budget.
 
     Returns an empty `PreparedChatTurn` (no blocks, no session, no chat) when
     chat_id is empty or the chat doesn't exist — caller falls back to the
@@ -340,9 +372,10 @@ def expand_and_prepare_chat_blocks(
     # (stable, then volatile). Only for a lore-enabled chat. The provider adapter
     # caps breakpoints (Anthropic: ≤4) and assigns each tier its ttl — the shared
     # layer only orders stable-first (ADR-0060 §5).
+    lore_fit: LoreFit | None = None
     if chat.lore_enabled and lore_mode == "implicit":
-        lore_blocks, seen_revisions = _lore_cache_blocks(
-            project, chat, chat_id, journal_for_send, scene
+        lore_blocks, seen_revisions, lore_fit = _lore_cache_blocks(
+            project, chat, chat_id, journal_for_send, scene, lore_limits or LoreLimits()
         )
         blocks.extend(lore_blocks)
         # #1635: persist the last-seen revisions if they changed, so the door's
@@ -376,7 +409,7 @@ def expand_and_prepare_chat_blocks(
         if picks_xml:
             blocks.append({"text": picks_xml, "tier": "volatile"})
 
-    return PreparedChatTurn(blocks or None, chat_id, list(new_entries), chat)
+    return PreparedChatTurn(blocks or None, chat_id, list(new_entries), chat, lore_fit)
 
 
 def record_stream_turn(
@@ -430,6 +463,7 @@ async def run_chat_turn(
         project,
         request.chat_id, request.system_prompt, messages_list,
         lore_mode=lore_mode,
+        lore_limits=resolved.lore_limits,
     )
 
     result = ai_providers.chat(
@@ -481,4 +515,5 @@ async def run_chat_turn(
         usage=usage_wire,
         cost_usd=cost_usd,
         cost_usd_total=cost_usd_total,
+        lore_fit=prepared.lore_fit,
     )

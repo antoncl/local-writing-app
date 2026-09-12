@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from app.services.ai.assistant_validation import coerce_optional_temperature
+from app.services.ai.lore_budget import DEFAULT_LORE_BUDGET_TOKENS, LoreLimits
 from app.services.ai.profiles.base import ChatCall
 
 if TYPE_CHECKING:
@@ -84,6 +85,34 @@ def _optional_price(value: object) -> float | None:
     return price
 
 
+def _lore_budget_tokens(value: object) -> int:
+    """Parse the assistant's `ai_lore_budget_tokens` (ADR-0086 §2): a
+    non-negative whole number of tokens, or the default for a blank, missing,
+    non-numeric or negative value. `0` is legal and means "declared entries
+    only"; there is no unbounded sentinel — a large number is the way to say
+    it."""
+    if value is None or value == "" or isinstance(value, bool):
+        return DEFAULT_LORE_BUDGET_TOKENS
+    try:
+        budget = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return DEFAULT_LORE_BUDGET_TOKENS
+    if not math.isfinite(budget) or budget < 0:
+        return DEFAULT_LORE_BUDGET_TOKENS
+    return int(budget)
+
+
+def _lore_limits(meta: dict) -> LoreLimits:
+    """The assistant's two lore knobs (ADR-0086 §2/§2b), resolved the way
+    `max_tokens` is: from its metadata, with the resolver's defaults for
+    anything blank or unrecognised."""
+    expansion = meta.get("ai_lore_expansion")
+    return LoreLimits(
+        budget_tokens=_lore_budget_tokens(meta.get("ai_lore_budget_tokens")),
+        expansion="named" if expansion == "named" else "one_hop",
+    )
+
+
 @dataclass
 class ResolvedCall:
     provider: str
@@ -101,6 +130,10 @@ class ResolvedCall:
     # model the oracle can't reach. `None` = not set → resolve as usual.
     manual_price_in_usd_per_mtok: float | None = None
     manual_price_out_usd_per_mtok: float | None = None
+    # ADR-0086 §2/§2b: what an ordinary turn's inferred lore may cost and by
+    # which routes the app may reach it. Not part of the provider `ChatCall` —
+    # the send path reads it when it assembles the lore blocks.
+    lore_limits: LoreLimits = LoreLimits()
 
     def to_call(
         self,
@@ -173,6 +206,7 @@ def resolve_call_params(
             thinking_enabled=bool(meta.get("ai_thinking", False)),
             manual_price_in_usd_per_mtok=_optional_price(meta.get("ai_price_in_usd_per_mtok")),
             manual_price_out_usd_per_mtok=_optional_price(meta.get("ai_price_out_usd_per_mtok")),
+            lore_limits=_lore_limits(meta),
         )
     provider = provider_override or settings.default_provider
     model = model_override or settings.default_models.get(provider or "", "")

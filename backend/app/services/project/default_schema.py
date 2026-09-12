@@ -416,6 +416,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "ai_temperature",
                 "ai_max_tokens",
                 "ai_thinking",
+                "ai_lore_budget_tokens",
+                "ai_lore_expansion",
                 "ai_price_in_usd_per_mtok",
                 "ai_price_out_usd_per_mtok",
                 "summary",
@@ -1245,6 +1247,34 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "alongside its answer."
             ),
             "type": "boolean",
+        },
+        # ADR-0086 §2/§2b: what an ordinary chat turn's INFERRED lore may cost
+        # and by which routes the app may reach it. Both live on the assistant
+        # because the tolerable lore load is a property of the model it names.
+        # Lore the author declared (a prompt's picks, a scene's refs, an
+        # `always` policy) is never counted or dropped.
+        "ai_lore_budget_tokens": {
+            "name": "Lore budget (tokens)",
+            "description": (
+                "Upper bound on the lore the app adds on its own to a chat turn "
+                "— what it noticed in the conversation, the prompt, the scene, "
+                "and one hop out from those — in tokens. Leave blank for 16000. "
+                "Entries the prompt picked, the scene references, or an "
+                "always-include policy names are sent whole regardless. 0 "
+                "sends only those."
+            ),
+            "type": "number",
+        },
+        "ai_lore_expansion": {
+            "name": "Lore reach",
+            "description": (
+                "How far the app reaches for lore it adds on its own. One hop "
+                "(the default) also follows each noticed entry's links and "
+                "mentions one step out; Named only sends entries the "
+                "conversation, the prompt, or the scene actually named."
+            ),
+            "type": "select",
+            "options": ["one_hop", "named"],
         },
         # Author-set prices for a model the price oracle can't reach — an unlisted
         # or local model (ADR-0083 Amendment 1). USD per 1M tokens, matching how

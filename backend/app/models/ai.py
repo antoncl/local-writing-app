@@ -366,6 +366,13 @@ class AIPreviewResponse(BaseModel):
     # longer emit it), then the uncached conversation turns — as the model receives
     # it. Powers the cache strip UI. Empty when there is nothing to send.
     cache_blocks: list[PreviewCacheBlock] = Field(default_factory=list)
+    # ADR-0086 §4/§5: the turn-0 preview applies the same budget fit as the
+    # send, so a fresh chat's door is honest before the first send. `lore_fit`
+    # is the report (None when the prompt is not lore-enabled); `lore_left_out_
+    # xml` is each left-out entry's rendered element, keyed by id, for the same
+    # per-entry drill the tier blocks offer (`entry_xml`).
+    lore_fit: LoreFit | None = None
+    lore_left_out_xml: dict[str, str] = Field(default_factory=dict)
     # Pre-send input-side cost in USD. Frontend converts to EUR for
     # display (see decisions_currency_display). Null when no assistant
     # is bound or pricing is unknown (Ollama, live discovery failure).
@@ -453,6 +460,36 @@ class ChatUsage(BaseModel):
     output_tokens: int = 0
 
 
+class LoreFitEntry(BaseModel):
+    """One inferred lore entry the per-turn budget left out (ADR-0086 §5):
+    which, why it was a candidate, and how big it was — enough for the meta
+    line to count it and the Context door to list and drill it (S2)."""
+
+    id: str
+    title: str = ""
+    # The fit's own closed set: the journal's `JournalSource` values plus
+    # `structural_hop` (which the journal never records).
+    source: Literal[
+        "user_message", "rendered_prompt", "scene_prose", "depth1_expansion", "structural_hop"
+    ]
+    tokens: int
+
+
+class LoreFit(BaseModel):
+    """What the per-turn lore budget did on one send — or on the turn-0 preview
+    (ADR-0086 §4/§5). Sizes are the budget's own per-entry sums under the one
+    estimator (`default_token_count`), so they can differ from the door's
+    per-tier block counts by the `<lore>` wrapper and separators. `declared_
+    tokens` is reported, never bounded: a declared set alone larger than the
+    budget is the author's to shrink, not the budget's."""
+
+    budget_tokens: int
+    used_tokens: int
+    declared_tokens: int
+    kept: int
+    left_out: list[LoreFitEntry] = Field(default_factory=list)
+
+
 class AIChatResponse(BaseModel):
     role: Literal["assistant"] = "assistant"
     content: str
@@ -479,6 +516,10 @@ class AIChatResponse(BaseModel):
     # number the client shows, delivered on the event that changed it. None
     # for a chat-less call or an unknown (never-priced) total (#697).
     cost_usd_total: float | None = None
+    # ADR-0086 §5: what this turn's lore budget kept and left out — reported
+    # by the send that did the leaving out, the one caller that knows. None on
+    # a chat-less call, a lore-disabled chat, or the commit's `used` turn.
+    lore_fit: LoreFit | None = None
 
 
 class AIGenerateRequest(BaseModel):
@@ -577,6 +618,10 @@ class ChatSessionMessage(BaseModel):
     # partial content is kept as-is — a deliberate stop, not an error/rewind
     # (#1037). Additive-optional, mirrors `truncated` above.
     stopped: bool = False
+    # ADR-0086 §5: the send's lore-budget report, persisted beside the usage
+    # and provenance it renders with so it survives reload. Additive-optional
+    # (the ADR-0076 decision 3 shape): older messages simply lack it.
+    lore_fit: LoreFit | None = None
 
 
 class ChatSessionContextItem(BaseModel):

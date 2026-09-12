@@ -889,6 +889,95 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertIn(nimitz.id, all_ids)
         self.assertIn(pavel.id, all_ids)
 
+    def test_preview_applies_the_assistants_lore_budget_to_its_turn0_selection(self) -> None:
+        # ADR-0086 §4/§5: the turn-0 preview fits its own selection by the same
+        # rule as the send. Honor is a scene ref (declared) and is sent whatever
+        # the budget; Nimitz is only named in the scene's prose (inferred:
+        # `scene_prose`). With the bound assistant's budget at 0, Nimitz is left
+        # out of the tier blocks and reported — with his rendered element beside
+        # the report for the door's drill — and the estimate no longer counts him.
+        from app.models import CreateAssistantEntryRequest, SaveAssistantEntryRequest
+
+        nimitz = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character")
+        )
+        self.service.save_lore_entry(
+            nimitz.id,
+            SaveLoreEntryRequest(
+                title="Nimitz",
+                body="A treecat.",
+                base_revision=self.service.read_lore_entry(nimitz.id).revision,
+                entry_type="lore:character",
+                metadata={},
+            ),
+        )
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body="Nimitz perched on Honor's shoulder.",
+                base_revision=scene.revision,
+                status="draft",
+                entry_type="manuscript:scene",
+                metadata=scene.metadata,
+            ),
+        )
+        created = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Frugal", entry_type="assistant:assistant")
+        )
+        self.service.save_assistant_entry(
+            created.id,
+            SaveAssistantEntryRequest(
+                title="Frugal",
+                base_revision=created.revision,
+                entry_type="assistant:assistant",
+                metadata={
+                    "ai_provider": "anthropic",
+                    "ai_model": "claude-haiku-4-5-20251001",
+                    "ai_lore_budget_tokens": 0,
+                },
+            ),
+        )
+        template = '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}'
+        unbudgeted = self.client.post(
+            "/api/ai/preview",
+            json={"template_source": template, "target_scene_id": self.scene_id},
+        ).json()
+        unbudgeted_ids = [
+            i for b in unbudgeted["cache_blocks"] if "lore" in b["label"] for i in b["entry_ids"]
+        ]
+        self.assertEqual(sorted(unbudgeted_ids), sorted([self.honor_id, nimitz.id]))
+        self.assertEqual(unbudgeted["lore_fit"]["left_out"], [])
+        self.assertEqual(unbudgeted["lore_fit"]["kept"], 2)
+
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": template,
+                "target_scene_id": self.scene_id,
+                "assistant_id": created.id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        budgeted_ids = [
+            i for b in body["cache_blocks"] if "lore" in b["label"] for i in b["entry_ids"]
+        ]
+        self.assertEqual(budgeted_ids, [self.honor_id])  # declared: sent whole regardless
+        fit = body["lore_fit"]
+        self.assertEqual(fit["budget_tokens"], 0)
+        self.assertEqual(fit["kept"], 1)
+        self.assertGreater(fit["declared_tokens"], 0)
+        self.assertEqual(
+            [(e["id"], e["title"], e["source"]) for e in fit["left_out"]],
+            [(nimitz.id, "Nimitz", "scene_prose")],
+        )
+        self.assertGreater(fit["left_out"][0]["tokens"], 0)
+        self.assertEqual(list(body["lore_left_out_xml"]), [nimitz.id])
+        self.assertIn("A treecat", body["lore_left_out_xml"][nimitz.id])
+        self.assertLess(body["estimated_tokens"], unbudgeted["estimated_tokens"])
+
     def test_marked_target_in_context_pick_overrides_target_scene_id(self) -> None:
         # NC-style ★ target: a scene flagged target=true in a context_pick
         # input wins over the caller's implicit target_scene_id. Templates

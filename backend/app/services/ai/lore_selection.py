@@ -5,6 +5,11 @@ surface: scene-relevant lore id selection (`_relevant_lore_ids`/
 `_never_lore_ids`/`_manual_only_lore_ids`), and per-turn stable/volatile
 tiering (`_tier_lore_ids`). Extracted from `helpers.py` for size (#1497);
 sibling to `name_matcher.py`.
+
+ADR-0086: the implicit selection is built by `_select_lore`, which says for
+every id whether the author *declared* it or the app *inferred* it (and by
+which route, when); `_relevant_lore_ids(mode="implicit")` is its id-sorted
+face. The fit against the assistant's budget is `lore_budget.fit_lore_budget`.
 """
 
 from __future__ import annotations
@@ -18,6 +23,12 @@ from app.services.ai.helpers import (
     _get_field,
     _safe_read_node,
     _scene_id_of,
+)
+from app.services.ai.lore_budget import (
+    NAMED_SOURCES,
+    InferredCandidate,
+    LoreExpansion,
+    LoreSelection,
 )
 from app.services.ai.name_matcher import (
     CompiledNameMatcher,
@@ -50,7 +61,9 @@ def _relevant_lore_ids(
       any alias appears in the scene's own prose surface — its body plus
       every `long_text` field (`summary`, `description`, ... — ADR-0075 §2/
       slice 3, via `_scene_prose_ids`), and (c) one-hop expansion through the
-      entries collected in (a)+(b).
+      entries collected in (a)+(b). Built by `_select_lore` (ADR-0086 §1),
+      whose provenance the send path's budget fit reads; this face is the
+      unbudgeted id-sorted union.
     - `"explicit"`: only the lore directly referenced via entity_ref fields.
     - `"used"`: only the chat's own `use()` picks (`used_ids`) — no scene refs,
       no journal, no always-policy, no fan-out. The commit's transcription turn
@@ -65,25 +78,20 @@ def _relevant_lore_ids(
     """
     if mode == "pinned_only":
         return []
+    if mode not in ("used", "explicit"):
+        # The `never` chokepoint is applied once, inside the struct builder.
+        return _select_lore(project, scene, journal, used_ids).ids
     scene_metadata = _attr_or_item(scene, "metadata")
     scene_refs = _collect_lore_refs_from_metadata(scene_metadata)
     used = set(used_ids or [])
-    if mode == "used":
-        ids = sorted(used)
-    elif mode == "explicit":
-        ids = sorted(scene_refs | used)
-    else:
-        # `use()`'d ids are EXACT: they join the final set but are NOT fan-out
-        # seeds. Only the scene's own structural/textual refs expand one hop —
-        # that stays the implicit `use_lore()` path's job. An author who wants a
-        # use()'d node's neighbours loops its refs and use()s them in the template.
-        ids = sorted(_implicit_lore_ids(project, scene, scene_refs, journal) | used)
+    ids = sorted(used) if mode == "used" else sorted(scene_refs | used)
     # Chokepoint filter: drop any "never"-policy entries that may have arrived via
-    # explicit refs or structural expansion. `never` is excluded from EVERY route —
-    # even an explicit scene ref or use(). `manual_only` is NOT filtered here: it
-    # stays reachable via the scene's own refs and use() (the explicit picker), and
-    # is instead kept out of the AUTOMATIC one-hop fan-out in `_implicit_lore_ids`
-    # (#1024). Single source of authority for the `never` rule.
+    # explicit refs or use(). `never` is excluded from EVERY route — even an
+    # explicit scene ref or use(). `manual_only` is NOT filtered here: it stays
+    # reachable via the scene's own refs and use() (the explicit picker), and is
+    # instead kept out of the AUTOMATIC one-hop fan-out in `_inferred_candidates`
+    # (#1024). Single source of authority for the `never` rule, shared with
+    # `_select_lore`.
     never_ids = _never_lore_ids(project)
     if never_ids:
         ids = [eid for eid in ids if eid not in never_ids]
@@ -115,55 +123,158 @@ def _relevant_lore(
     return _format_lore_block(project, ids, scene=scene, index=index)
 
 
-def _implicit_lore_ids(
-    project: ProjectService, scene: Any, direct: set[str], journal: list[Any] | None
-) -> set[str]:
-    """The implicit-mode id set: always-included + direct refs + textual alias
-    scan (or the chat journal's pre-detected ids) + one structural hop through
-    each collected entry's own refs (+ a textual hop when there's no journal).
+def _select_lore(
+    project: ProjectService,
+    scene: Any = None,
+    journal: list[Any] | None = None,
+    used_ids: list[str] | None = None,
+    *,
+    expansion: LoreExpansion = "one_hop",
+) -> LoreSelection:
+    """The implicit selection with provenance (ADR-0086 §1): every id is
+    **declared** — the chat's `use()` picks, the scene's structural refs, every
+    `always`-policy entry — or **inferred** — the journal's detections (or, with
+    no journal, the scene's own prose scan and the textual hop) and the
+    structural one-hop. An id reachable both ways is declared. The inferred
+    candidates come back in fit order, and the one `never` chokepoint is
+    applied here, once, to both sets.
+
+    `expansion` (§2b) is the assistant's reach: `one_hop` takes both hops as
+    today; `named` keeps only what was actually named — no `depth1_expansion`
+    entry is offered and the structural hop is not walked. Applied at
+    selection, never in detection: the journal still records the depth-1
+    detections, and the door still shows them as noticed.
+
+    `use()`'d ids are EXACT: they join the declared set but are NOT fan-out
+    seeds. Only the scene's own refs, the `always` entries and the detections
+    expand one hop — that stays the implicit `use_lore()` path's job. An author
+    who wants a use()'d node's neighbours loops its refs and use()s them.
     """
+    scene_refs = _collect_lore_refs_from_metadata(_attr_or_item(scene, "metadata"))
     # Always-included entries (context_policy = "always") feed every implicit
-    # render regardless of mention.
-    found = set(direct) | _always_included_lore_ids(project)
+    # render regardless of mention — and, with the scene's refs, seed the hops.
+    roots = set(scene_refs) | _always_included_lore_ids(project)
+    declared = roots | set(used_ids or [])
+    candidates = _inferred_candidates(project, scene, roots, declared, journal, expansion)
+    # Chokepoint filter: drop any "never"-policy entries regardless of route —
+    # even an explicit scene ref or use(). `manual_only` is NOT filtered here:
+    # it stays reachable via the scene's own refs and use(), and is instead
+    # kept out of the AUTOMATIC one-hop fan-out below (#1024).
+    never_ids = _never_lore_ids(project)
+    inferred = sorted(
+        (c for c in candidates.values() if c.id not in never_ids), key=lambda c: c.fit_key
+    )
+    return LoreSelection(frozenset(declared - never_ids), tuple(inferred))
+
+
+def _inferred_candidates(
+    project: ProjectService,
+    scene: Any,
+    roots: set[str],
+    declared: set[str],
+    journal: list[Any] | None,
+    expansion: LoreExpansion,
+) -> dict[str, InferredCandidate]:
+    """The inferred half of `_select_lore`, keyed by id and minus `declared`:
+    the journal's entries with their source and first-noticed turn (or, with no
+    journal, the scene-prose scan as `scene_prose` and the textual hop as
+    `depth1_expansion`), plus one structural hop through `roots` and every
+    detection as `structural_hop`. An id offered by two routes keeps the one
+    that fits first."""
+    found = _Candidates(declared)
     matcher: CompiledNameMatcher | None = None
     if journal is None:
         # No chat-session journal — helper is the producer of detected context
-        # (one-shot generates, preview, tests). Built once here and threaded
-        # through both the prose scan and the textual one-hop below — the
-        # lore set is fixed for this one detection pass, so there's no need
-        # to recompile the matcher per surface. Run the textual scan on the
+        # (one-shot generates, tests). Built once here and threaded through
+        # both the prose scan and the textual one-hop below — the lore set is
+        # fixed for this one detection pass. Run the textual scan on the
         # scene's own prose surface: body + every long_text field (ADR-0075
-        # slice 3) — a superset of the old summary-only scan.
+        # slice 3).
         matcher = _build_scene_matcher(project, scene)
-        found |= _scene_prose_ids(project, scene, matcher=matcher)
+        found.offer_all(_scene_prose_ids(project, scene, matcher=matcher), "scene_prose")
     else:
-        # Chat-session use: the send-time context expander has already populated
-        # the journal with textual detections (incl. depth-1). Trust it.
-        for entry in journal:
-            jid = _attr_or_item(entry, "entry_id")
-            if isinstance(jid, str) and jid:
-                found.add(jid)
-
-    # One structural hop through each found entry's own entity_ref metadata. Like
-    # the alias/textual scans (which run through `_alias_match`), this AUTOMATIC
-    # route honors `manual_only` ("explicit picker only"): a transitive ref to such
-    # an entry is NOT fanned in — it stays reachable via the scene's own refs
-    # (already in `found`) or use() (#1024). `never` needs no filter here: the
-    # chokepoint in `_relevant_lore_ids` is its single enforcement point and drops
-    # it from the final set regardless of route. One lore scan, computed once.
-    manual_only_ids = _manual_only_lore_ids(project)
-    expanded = set(found)
-    for entry_id in list(found):
-        entry = _safe_read_node(project, entry_id)
-        if entry is None:
-            continue
-        hop_refs = _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"))
-        expanded |= hop_refs - manual_only_ids
+        found.offer_journal(journal, expansion)
+    if expansion == "named":
+        return found.by_id
+    seeds = roots | set(found.by_id)
+    found.offer_structural_hop(project, seeds)
     # Textual depth-1 only runs when the journal is absent; otherwise the
     # journal already carries those expansions.
     if journal is None:
-        expanded |= _textual_one_hop(project, found, scene=scene, matcher=matcher)
-    return expanded
+        found.offer_all(
+            _textual_one_hop(project, seeds, scene=scene, matcher=matcher), "depth1_expansion"
+        )
+    return found.by_id
+
+
+_JOURNAL_SOURCES = frozenset(
+    {"user_message", "rendered_prompt", "scene_prose", "depth1_expansion"}
+)
+
+
+class _Candidates:
+    """The inferred candidates being collected by `_inferred_candidates`: one
+    per id, never a declared id, and — when two routes offer the same id — the
+    candidate that fits first (the lower fit key)."""
+
+    def __init__(self, declared: set[str]) -> None:
+        self._declared = declared
+        self.by_id: dict[str, InferredCandidate] = {}
+
+    def offer(self, entry_id: Any, source: Any, turn: Any = 0, title: Any = "") -> None:
+        if not isinstance(entry_id, str) or not entry_id or entry_id in self._declared:
+            return
+        if source not in _JOURNAL_SOURCES and source != "structural_hop":
+            source = "user_message"
+        candidate = InferredCandidate(
+            entry_id, source, int(turn or 0), title if isinstance(title, str) else ""
+        )
+        current = self.by_id.get(entry_id)
+        if current is None or candidate.fit_key < current.fit_key:
+            self.by_id[entry_id] = candidate
+
+    def offer_all(self, entry_ids: set[str], source: str) -> None:
+        for entry_id in entry_ids:
+            self.offer(entry_id, source)
+
+    def offer_journal(self, journal: list[Any], expansion: LoreExpansion) -> None:
+        """Chat-session use: the send-time context expander has already
+        populated the journal with textual detections (incl. depth-1). Trust
+        it — but under `named`, don't offer what only a hop reached."""
+        for entry in journal:
+            source = _attr_or_item(entry, "source") or "user_message"
+            if expansion == "named" and source not in NAMED_SOURCES:
+                continue
+            self.offer(
+                _attr_or_item(entry, "entry_id"),
+                source,
+                _attr_or_item(entry, "added_at_turn"),
+                _attr_or_item(entry, "title"),
+            )
+
+    def offer_structural_hop(self, project: ProjectService, seeds: set[str]) -> None:
+        """One structural hop through each seed's own entity_ref metadata.
+        Like the alias/textual scans, this AUTOMATIC route honors
+        `manual_only` ("explicit picker only"): a transitive ref to such an
+        entry is NOT fanned in — it stays reachable via the scene's own refs
+        or use() (#1024). `never` needs no filter here: `_select_lore` applies
+        the chokepoint once, to every route. One lore scan, computed once."""
+        manual_only_ids = _manual_only_lore_ids(project)
+        for entry_id in sorted(seeds):
+            entry = _safe_read_node(project, entry_id)
+            if entry is None:
+                continue
+            hop_refs = _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"))
+            self.offer_all(hop_refs - manual_only_ids, "structural_hop")
+
+
+def _lore_title(project: ProjectService, entry_id: str) -> str:
+    """A node's title for the budget report's left-out list, or "" when it
+    can't be read — used only for an entry the selection couldn't name (a
+    structural-hop id carries no journal snapshot)."""
+    entry = _safe_read_node(project, entry_id)
+    title = _attr_or_item(entry, "title") if entry is not None else None
+    return title if isinstance(title, str) else ""
 
 
 def _tier_lore_ids(

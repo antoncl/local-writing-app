@@ -10,6 +10,14 @@
 <script lang="ts">
   import { renderChatContent, containsMath, ensureKatexLoaded } from "@/lib/utils/chatMessageRender";
   import { formatCostEur } from "@/lib/utils/money";
+
+  // ADR-0086 §5 meta-line sizes: one decimal in the thousands so a budget
+  // fit reads "15.8k/16k" — `formatTokens` rounds ≥10k to whole thousands,
+  // which would make a 15.8k fit and its 16k budget look identical.
+  function formatK(n: number): string {
+    if (!Number.isFinite(n) || n < 1000) return String(Math.max(0, Math.round(n)));
+    return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  }
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import type { ChatMessage } from "@/lib/types";
 
@@ -74,6 +82,16 @@
       message.model,
       message.latency_ms != null ? `${(message.latency_ms / 1000).toFixed(1)} s` : null,
     ].filter(Boolean).join(" · ")}
+    <!-- ADR-0086 §5: the lore-budget segment. An over-budget world is a
+         routine fact about the send, so it sits in the line's ordinary
+         register, never the danger one — that is for a pick that failed
+         (#1544). Silent when everything fitted. The one case worded as a
+         warning: the declared set alone is larger than the budget, which
+         only the author's picks/policies (or the assistant's budget) can
+         change. -->
+    {@const fit = message.role === "assistant" ? message.lore_fit ?? null : null}
+    {@const fitLeftOut = fit != null && fit.left_out.length > 0}
+    {@const fitDeclaredOver = fit != null && fit.declared_tokens > fit.budget_tokens}
     <div class="cbv-message cbv-message-{message.role}">
       <header class="cbv-message-role">
         {#if message.role === "assistant"}{assistantName}<span class="cbv-role-dot" aria-hidden="true"></span>{:else}You{/if}
@@ -108,7 +126,7 @@
           {/each}
         </div>
       {/if}
-      {#if message.role === "assistant" && (message.usage || provenance)}
+      {#if message.role === "assistant" && (message.usage || provenance || fitLeftOut || fitDeclaredOver)}
         <div class="cbv-turn-meta">
           {#if message.usage}
             {@const totalIn = message.usage.input_tokens + message.usage.cached_input_tokens + message.usage.cache_write_tokens}
@@ -118,6 +136,12 @@
             {#if message.cost_usd != null}<span> · {formatCostEur(message.cost_usd)}</span>{:else}<span title="No price is known for this model — set one on the assistant, or Update prices in Settings."> · price unknown</span>{/if}
           {/if}
           {#if provenance}<span>{#if message.usage} · {/if}{provenance}</span>{/if}
+          {#if fit != null && fitLeftOut}
+            <span class="cbv-lore-fit" title="Lore the app added on its own that did not fit this turn's budget. Pick an entry in the prompt, mark it always-include, or raise the assistant's lore budget.">{#if message.usage || provenance} · {/if}lore {formatK(fit.used_tokens)}/{formatK(fit.budget_tokens)} · {fit.left_out.length} left out</span>
+          {/if}
+          {#if fit != null && fitDeclaredOver}
+            <span class="cbv-lore-fit" title="Entries the prompt picked, the scene references, or an always-include policy names are always sent whole; only the assistant's budget for lore the app adds on its own applies.">{#if message.usage || provenance || fitLeftOut} · {/if}declared lore {formatK(fit.declared_tokens)}, over the {formatK(fit.budget_tokens)} budget</span>
+          {/if}
         </div>
       {/if}
     </div>

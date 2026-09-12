@@ -650,9 +650,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "Free-form prose for what the structured fields do not capture — "
                 "the entry's narrative, notes, or main text. Do NOT restate values "
                 "that already live in the fields (aliases, tags, appearance, etc.); "
-                "the body is for what has no field of its own. A few paragraphs "
-                "for a new entry; when revising, keep it at about the length it "
-                "already has."
+                "the body is for what has no field of its own. Typically a few "
+                "paragraphs."
             ),
         },
         "status": {

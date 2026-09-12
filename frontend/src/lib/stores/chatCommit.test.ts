@@ -636,6 +636,22 @@ describe("ChatCommitController — stageToPendingSet", () => {
     );
   });
 
+  it("appends the extraction's output-token count to the stage notice too", async () => {
+    // #1899: the stage destination shares the extraction — and its readout.
+    const { c, deps } = stageController({ entryTitle: () => "Mira" });
+    extractPatch.mockResolvedValue({
+      ...okResult({ fields: { condition: "werewolf" } }),
+      usage: { input_tokens: 1, cached_input_tokens: 0, cache_write_tokens: 0, output_tokens: 2500 },
+    });
+    createSet.mockResolvedValue(madeSet("set-9"));
+
+    await c.stageToPendingSet();
+
+    expect(deps.setNotice).toHaveBeenLastCalledWith(
+      "Staged a mutation set for Mira (1 change) — review it under Mutation sets on the card, then place it in a scene to make it active. · 2.5k tok out",
+    );
+  });
+
   it("refines the SAME set in place when the chat already owns one (singular edge)", async () => {
     // The chat owns set-9; a re-stage must UPDATE it, not mint a second orphan.
     const { c, deps } = stageController({ entryTitle: () => "Mira", getStagedSetId: () => "set-9" });

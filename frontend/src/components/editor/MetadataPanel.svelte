@@ -247,7 +247,7 @@
     for (const [group, groupIds] of groups) out.push({ group, ids: groupIds });
     return out;
   }
-  const sections = $derived(buildSections(visibleFieldIds, metadataSchema));
+  const sections = $derived(buildSections(visibleFieldIds.filter(rendersRow), metadataSchema));
 
   // Every block folds the same way once there is anything to fold: when a type
   // has at least one L1 group, the ungrouped fields get a header too (#1884
@@ -293,7 +293,27 @@
   // ever "empty" to the eye.
   function isRowEmpty(field: MetadataFieldDefinition, fieldId: string): boolean {
     if (field.type === "color" || field.type === "computed") return false;
+    // `status` is stored off `metadata` (shell state) — read the prop this row
+    // itself renders, not the metadata bag.
+    if (fieldId === "status") return !status;
+    // A field with a declared default shows that default when unset
+    // (FieldValueEditor's required-select rule, #1421; writeField pops the key
+    // when the default is re-picked) — a value is on screen, so not empty.
+    if (field.default !== undefined && field.default !== null && field.default !== "") return false;
     return !isMetadataValuePresent(displayValue(fieldId));
+  }
+
+  // The one rule for "this field gets a row" — shared by the row loop and the
+  // section builder, so a block never shows a head over zero rows (#1884 slice
+  // 3): intrinsic identity fields have dedicated controls (unless one is an
+  // active flip, ADR-0046 3b), per-type hidden fields stay hidden, and a
+  // valueless computed field is rail noise (#1684).
+  function rendersRow(fieldId: string): boolean {
+    const field = metadataSchema.fields[fieldId];
+    if (!field) return false;
+    if (field.intrinsic && !isFlipResolve(fieldId)) return false;
+    if (effectiveFieldHidden(metadataSchema, entryType, fieldId)) return false;
+    return field.type !== "computed" || computedFieldString(fieldId) !== "";
   }
 
   // A folding list field (#1884 slice 2): a non-empty `entity_ref_list` gets the
@@ -569,7 +589,7 @@
            would be a padlock beside nothing (a scene's cost before any
            invocation, a non-runnable prompt's `runnable`), which is rail noise,
            not information. The field stays in the schema/type editor. -->
-      {#if metadataSchema.fields[fieldId] && (!metadataSchema.fields[fieldId].intrinsic || isFlipResolve(fieldId)) && !effectiveFieldHidden(metadataSchema, entryType, fieldId) && (metadataSchema.fields[fieldId].type !== "computed" || computedFieldString(fieldId) !== "")}
+      {#if rendersRow(fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
         <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")} class:empty={isRowEmpty(field, fieldId)}>
@@ -1060,6 +1080,12 @@
   .field-row.empty .fr-name,
   .field-row.empty .fr-icon {
     color: var(--text-3);
+  }
+  /* Inherited AND empty takes the tertiary ink alone — stacking the 62% dim
+     above on top of it would fade the label past legibility. */
+  .field-row.inherited.empty .fr-name,
+  .field-row.inherited.empty .fr-icon {
+    opacity: 1;
   }
 
   /* Mutated-by-here rows (#64): the in-prose mutation pill's vocabulary —

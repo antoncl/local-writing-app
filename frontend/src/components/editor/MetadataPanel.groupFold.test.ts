@@ -109,6 +109,37 @@ describe("MetadataPanel — L1 groups fold (#1884 slice 3)", () => {
     expect(railSectionCollapse.isExpanded("group:Voice", false)).toBe(false); // nothing stored — the component's default did it
   });
 
+  it("no General head when the only ungrouped fields are intrinsic (they render no row)", () => {
+    // The backend prepends title/entry_type/id to every type's field list; a
+    // type whose every real field is grouped must not show "General ▾" over
+    // nothing. Sections are built from the fields that actually get a row.
+    const schema = {
+      ...SCHEMA,
+      fields: { ...SCHEMA.fields, title: { name: "Title", type: "text", intrinsic: true } },
+      entry_types: { "lore:character": { name: "Character", kind: "lore", fields: ["title", "want", "need"] } },
+    } as unknown as MetadataSchema;
+    metadataSchemaStore.set(schema);
+    mount(schema, ["title", "want", "need"]);
+    expect(screen.queryByText("General")).toBeNull();
+    expect(headFor("Arc")).toBeTruthy();
+  });
+
+  it("a group whose only field is hidden renders no head — and no heads at all when it was the only group", () => {
+    const schema = {
+      ...SCHEMA,
+      fields: {
+        alias: SCHEMA.fields.alias,
+        want: { name: "Want", type: "long_text", group: "Arc", hidden: true },
+      },
+      entry_types: { "lore:character": { name: "Character", kind: "lore", fields: ["alias", "want"] } },
+    } as unknown as MetadataSchema;
+    metadataSchemaStore.set(schema);
+    mount(schema, ["alias", "want"]);
+    expect(document.querySelector(".rail-group-head")).toBeNull();
+    expect(screen.getByText("Alias")).toBeTruthy();
+    expect(screen.queryByText("Want")).toBeNull();
+  });
+
   it("a schema whose fields have no group renders no rail-group-head at all", () => {
     metadataSchemaStore.set(UNGROUPED_SCHEMA);
     mount(UNGROUPED_SCHEMA, ["alias"]);

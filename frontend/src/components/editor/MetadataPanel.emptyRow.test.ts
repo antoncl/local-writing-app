@@ -10,9 +10,24 @@ import type { EntryMetadata, MetadataSchema } from "@/lib/types";
 
 const SCHEMA = {
   version: 1,
-  entry_types: { "lore:character": { name: "Character", kind: "lore", fields: ["alias", "tone", "hue", "kin"] } },
+  entry_types: { "lore:character": { name: "Character", kind: "lore", fields: ["status", "alias", "tone", "mood", "hue", "kin"] } },
   fields: {
+    // `status` is stored OFF metadata (NodeEditor shell state) and reaches the
+    // rail as its own prop — the row must read that prop, not the metadata bag.
+    status: {
+      name: "Status",
+      type: "select",
+      options: [{ value: "draft", label: "Draft" }, { value: "complete", label: "Complete" }],
+    },
     alias: { name: "Alias", type: "text" },
+    // A select with a declared default shows the default when unset (#1421) —
+    // a value is on screen, so the row is never empty.
+    mood: {
+      name: "Mood",
+      type: "select",
+      default: "warm",
+      options: [{ value: "warm", label: "Warm" }, { value: "cool", label: "Cool" }],
+    },
     tone: {
       name: "Tone",
       type: "select",
@@ -33,16 +48,16 @@ const SCHEMA = {
 
 beforeEach(() => metadataSchemaStore.set(SCHEMA));
 
-function mount(metadata: EntryMetadata) {
+function mount(metadata: EntryMetadata, status = "") {
   render(MetadataPanel, {
     props: {
       entryType: "lore:character",
-      status: "",
+      status,
       metadata,
       documentKind: "lore",
       documentLabel: "Entry",
       documentEntryTypes: [["lore:character", SCHEMA.entry_types["lore:character"]]] as never,
-      metadataFieldIds: ["alias", "tone", "hue", "kin"],
+      metadataFieldIds: ["status", "alias", "tone", "mood", "hue", "kin"],
       onMetadataChange: vi.fn(),
     },
   });
@@ -55,6 +70,21 @@ function rowFor(label: string): HTMLElement {
 }
 
 describe("MetadataPanel — empty rows recede (#1884 slice 3)", () => {
+  it("the status row reads the `status` prop, not the metadata bag: set → not empty, blank → empty", () => {
+    mount({}, "complete");
+    expect(rowFor("Status").classList.contains("empty")).toBe(false);
+  });
+
+  it("a blank status is empty", () => {
+    mount({}, "");
+    expect(rowFor("Status").classList.contains("empty")).toBe(true);
+  });
+
+  it("a select with a declared default is never empty — the default is on screen", () => {
+    mount({});
+    expect(rowFor("Mood").classList.contains("empty")).toBe(false);
+  });
+
   it("empty metadata: alias, tone, kin are .empty; hue is not (always an effective swatch)", () => {
     mount({});
     expect(rowFor("Alias").classList.contains("empty")).toBe(true);

@@ -10,7 +10,7 @@
   let { label, expanded = true, onToggle = undefined }: { label: string; expanded?: boolean; onToggle?: () => void } = $props();
 </script>
 
-<div class="rail-group-head" class:foldable={!!onToggle}>
+<div class="rail-group-head">
   {#if onToggle}
     <button type="button" class="rgh-toggle" aria-expanded={expanded}
       aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
@@ -41,12 +41,12 @@
     font-weight: var(--w-semibold);
     letter-spacing: 0.07em;
     text-transform: uppercase;
-    color: var(--text-3, var(--text-3));
+    color: var(--text-3);
   }
   .rail-group-rule {
     flex: 1;
     height: 1px;
-    background: var(--divider, var(--divider));
+    background: var(--divider);
   }
 
   /* Foldable (rail) toggle: caret + label share the disclosure column. The

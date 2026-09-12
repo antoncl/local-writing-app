@@ -337,10 +337,13 @@
     flex: 1 1 auto;
     min-width: 0;
   }
-  /* Inside the (resizable) mutation dialogs the long-text editor may use real
-     estate; the 260px cap is for the metadata rail. */
+  /* Inside the (resizable) mutation dialogs the long-text editor is capped so
+     a long Body scrolls within the row instead of pushing the buttons off the
+     dialog. The widget itself no longer caps or scrolls (#1884: in the rail it
+     takes its natural height), so the overflow is this host's to set. */
   .mrow-value :global(.metadata-long-text-body) {
     max-height: 48vh;
+    overflow: auto;
   }
   .mrow-chips {
     display: flex;

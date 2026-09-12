@@ -549,9 +549,20 @@
     background: var(--surface);
   }
 
-  /* Give the long-text description room to breathe within the fixed frame. */
+  /* Give the long-text description room to breathe within the fixed frame.
+     The widget's own border/background is gone (#1884: rail fields read as
+     bare prose) — this dialog is a field in a form, not a rail row, so the
+     frame belongs to the host here. */
   .describe-editor {
-    min-height: 180px;
+    border: 1px solid var(--divider);
+    border-radius: var(--r-md);
+    background: var(--surface);
+  }
+  /* The room goes on the editable surface itself, not the frame — a click
+     anywhere in the box must place the caret, and the widget's own min-height
+     is one prose line. */
+  .describe-editor :global(.metadata-long-text-body) {
+    min-height: 172px;
   }
 
   /* ---- AI step ---- */

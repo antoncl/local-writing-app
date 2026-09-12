@@ -6,6 +6,42 @@
 // grouped submenus. The presentational ProseSelectionToolbar renders buttons,
 // one-level dropdowns, and the Table menu's nested submenus from these types.
 
+export type EdgeRect = { top: number; bottom: number; left: number; right: number };
+
+/** Where the floating toolbar goes for a selection anchored at `anchor`, inside
+ *  a frame with viewport bounds `frame` (and inner width `frameWidth`), on a
+ *  viewport of `viewport`. Pure — no DOM. Same numbers the body has used since #1223. */
+export function placeSelectionToolbar(
+  anchor: EdgeRect,
+  frame: EdgeRect,
+  frameWidth: number,
+  viewport: { width: number; height: number },
+  { toolbarHeight = 42, margin = 10 }: { toolbarHeight?: number; margin?: number } = {},
+): { x: number; y: number; placement: "above" | "below" } {
+  const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+  const visibleTop = Math.max(frame.top, 0) + margin;
+  const visibleBottom = Math.min(frame.bottom, viewport.height) - margin;
+  const anchorTop = anchor.top;
+  const anchorBottom = anchor.bottom;
+  const hasRoomAbove = anchorTop - toolbarHeight - margin >= visibleTop;
+  const placement = hasRoomAbove ? "above" : "below";
+  const preferredY = placement === "above" ? anchorTop - margin : anchorBottom + margin;
+  const minY = placement === "above" ? visibleTop + toolbarHeight : visibleTop;
+  const maxY = placement === "above" ? visibleBottom : visibleBottom - toolbarHeight;
+  const toolbarHalfWidth = Math.min(360, Math.max(140, frameWidth / 2 - margin));
+  const unclampedX = (anchor.left + anchor.right) / 2;
+  const minX = Math.max(frame.left, 0) + toolbarHalfWidth;
+  const maxX = Math.min(frame.right, viewport.width) - toolbarHalfWidth;
+  return {
+    x:
+      minX <= maxX
+        ? clamp(unclampedX, minX, maxX)
+        : (Math.max(frame.left, 0) + Math.min(frame.right, viewport.width)) / 2,
+    y: clamp(preferredY, minY, maxY),
+    placement,
+  };
+}
+
 export type FloatingMenuState = {
   visible: boolean;
   x: number;

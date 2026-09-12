@@ -970,6 +970,16 @@ class PlotKindRegistrationTests(PlotTestCase):
         self.assertEqual(schema.entry_types["plot:template"].kind, "plot")
         self.assertEqual(schema.entry_types["plot:card"].kind, "plot")
 
+    def test_page_status_is_a_required_select_that_reads_unwritten_when_blank(self) -> None:
+        # #1903: the schema default is the sparse blank the healer and the board
+        # already read as unwritten; the labels are the board's own words.
+        field = self.service.read_metadata_schema().fields["page_status"]
+        self.assertEqual(field.default, "unwritten")
+        self.assertEqual(
+            [(option.value, option.label) for option in field.options],
+            [("unwritten", "Unwritten"), ("off_page", "Off the page"), ("on_page", "On the page")],
+        )
+
     def test_card_type_is_shown_and_editable_in_detail_types(self) -> None:
         # ADR-0048 §1 / #738: the card must appear in Detail Types (a `plot`-kind
         # entry type, so #729's Plot tab surfaces it) with editable fields. The

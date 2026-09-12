@@ -1053,10 +1053,13 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Page status",
             "type": "select",
             "options": [
-                {"value": "unwritten", "color": "stone"},
-                {"value": "off_page", "color": "graphite"},
-                {"value": "on_page", "color": "moss"},
+                {"value": "unwritten", "label": "Unwritten", "color": "stone"},
+                {"value": "off_page", "label": "Off the page", "color": "graphite"},
+                {"value": "on_page", "label": "On the page", "color": "moss"},
             ],
+            # A required select, like `context_policy` (#1421): the rail shows the
+            # sparse default named above instead of offering "(none)" (#1903).
+            "default": "unwritten",
         },
         "beat_links": {
             # A card's beat links (ADR-0048 S7 Slice 3b; ADR-0053): the beats this card

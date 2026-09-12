@@ -1072,7 +1072,9 @@
         MutationMark,
         MutationCloseMark,
         TodoAnchor,
-        Table.configure({ resizable: true }),
+        // Not resizable (#1896): the markdown table carries no column widths, so a
+        // dragged width never survived a reload — an affordance that lied.
+        Table,
         TableRow,
         AlignedTableHeader,
         AlignedTableCell,

@@ -835,6 +835,12 @@ button.row-action-add.active {
   font-weight: 700;
 }
 
+/* A cell selection (drag across cells) — prosemirror-tables marks the cells,
+   the app paints them (#1896). */
+.editor-body .selectedCell {
+  background: var(--accent-soft);
+}
+
 .editor-body th p,
 .editor-body td p {
   margin: 0;

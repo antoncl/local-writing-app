@@ -1,4 +1,3 @@
-/// <reference types="node" />
 // Frontend half of the cross-runtime selector-evaluator parity gate.
 //
 // Runs the shared corpus (spec/selector-eval-corpus.json) through the canonical

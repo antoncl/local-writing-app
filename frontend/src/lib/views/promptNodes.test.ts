@@ -1,4 +1,3 @@
-/// <reference types="node" />
 // The disposition VALUES are computed backend-side since #1684
 // (services/project/prompts.py, covered by backend test_prompt_disposition.py);
 // what the frontend still owns is a handful of label/key constants named in

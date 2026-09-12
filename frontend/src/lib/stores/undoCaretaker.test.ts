@@ -1,4 +1,3 @@
-/// <reference types="node" />
 /**
  * The caretaker's whole contract (ADR-0050 §8 slice 0, #678; async support
  * ADR-0053 §7, #902).

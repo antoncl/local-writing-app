@@ -465,5 +465,33 @@ class LoreBudgetSendTests(_LoreCacheFixture):
         self.assertIn("A picked aside", self._wire_text(prepared))
 
 
+class ChatLoreXmlTests(_LoreCacheFixture):
+    """ADR-0086 S2: a sent turn's `lore_fit` names what was left out but carries
+    no XML; the door renders an entry on request, as-of the chat's scene, through
+    the same per-node render the send places."""
+
+    def test_renders_one_entry_for_the_doors_drill_and_404s_the_rest(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+        from app.services.ai.chat import render_chat_lore_entry_xml
+
+        gaslamp = self._make_note("Gaslamp", body="Lit by whale oil.")
+        xml = render_chat_lore_entry_xml(self.service, self.chat_id, gaslamp)
+        assert xml is not None
+        self.assertIn(f'id="{gaslamp}"', xml)
+        self.assertIn("Lit by whale oil", xml)
+        self.assertIsNone(render_chat_lore_entry_xml(self.service, self.chat_id, "lore_missing"))
+
+        client = TestClient(app)
+        response = client.get(f"/api/chats/{self.chat_id}/lore-xml/{gaslamp}")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"entry_id": gaslamp, "xml": xml})
+        self.assertEqual(
+            client.get(f"/api/chats/{self.chat_id}/lore-xml/lore_missing").status_code, 404
+        )
+        self.assertEqual(client.get(f"/api/chats/chat_missing/lore-xml/{gaslamp}").status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

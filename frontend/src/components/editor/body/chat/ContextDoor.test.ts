@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@/lib/test/component";
 import ContextDoor from "./ContextDoor.svelte";
-import type { ChangedPick, ChatSessionJournalEntry, PreviewCacheBlock } from "@/lib/types";
+import type { ChangedPick, ChatSessionJournalEntry, LoreFit, PreviewCacheBlock } from "@/lib/types";
 
 const BASE = "BASE-SYSTEM-PROMPT";
 const XML_A = '<character id="lore_a" name="A">…A…</character>';
@@ -167,6 +167,122 @@ describe("ContextDoor", () => {
       chatPreviewMessages: null,
     });
     expect(screen.queryByText("System")).not.toBeInTheDocument();
+  });
+
+  // ADR-0086 S2: the "Left out" section — what the last send's lore budget
+  // left out (or the turn-0 preview's, before the first send), each entry with
+  // its source and size, drillable to its element like a tier's entry.
+  const LEFT_OUT_FIT: LoreFit = {
+    budget_tokens: 16000,
+    used_tokens: 15800,
+    declared_tokens: 2100,
+    kept: 21,
+    left_out: [
+      { id: "lore_c", title: "Keros's tolls", source: "depth1_expansion", tokens: 900 },
+      { id: "lore_d", title: "The Honey Jar", source: "structural_hop", tokens: 400 },
+    ],
+  };
+  const XML_C = '<place id="lore_c" name="Keros\'s tolls">…C…</place>';
+
+  it("shows no Left out row when the fit left nothing out and the declared set fits", () => {
+    const fitted: LoreFit = { ...LEFT_OUT_FIT, left_out: [], declared_tokens: 100 };
+    render(ContextDoor, { ...baseProps, loreFit: fitted });
+    expect(screen.queryByText("Left out")).not.toBeInTheDocument();
+  });
+
+  it("lists the left-out entries with source and size behind a drill, using the preview's XML when it has it", async () => {
+    render(ContextDoor, {
+      ...baseProps,
+      loreFit: LEFT_OUT_FIT,
+      loreLeftOutXml: { lore_c: XML_C },
+    });
+    // Root: the row with its count and total size; the entries themselves are
+    // behind the drill, not in the DOM.
+    expect(screen.getByText("Left out")).toBeInTheDocument();
+    expect(screen.getByText(/2 entries · 1\.3k tok/)).toBeInTheDocument();
+    expect(screen.queryByText("Keros's tolls")).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByText("Left out"));
+    expect(screen.getByText(/lore 15\.8k\/16k/)).toBeInTheDocument();
+    expect(screen.getByText("Keros's tolls")).toBeInTheDocument();
+    expect(screen.getByText(/one hop · mention · 900 tok/)).toBeInTheDocument();
+    expect(screen.getByText("The Honey Jar")).toBeInTheDocument();
+    expect(screen.getByText(/one hop · link · 400 tok/)).toBeInTheDocument();
+    // The two moves the author has, named in the door.
+    expect(screen.getByText(/Always include/)).toBeInTheDocument();
+    // Not a warning: the declared set fits, so no "over the budget" line.
+    expect(screen.queryByText(/over the/)).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByText("Keros's tolls"));
+    expect(screen.getByText(XML_C)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByText("The Honey Jar")).toBeInTheDocument();
+  });
+
+  it("renders a sent turn's left-out entry on request through fetchLeftOutXml", async () => {
+    const asked: string[] = [];
+    const fetchLeftOutXml = async (id: string) => {
+      asked.push(id);
+      return `<place id="${id}" name="fetched">…</place>`;
+    };
+    render(ContextDoor, { ...baseProps, loreFit: LEFT_OUT_FIT, fetchLeftOutXml });
+    await fireEvent.click(screen.getByText("Left out"));
+    await fireEvent.click(screen.getByText("The Honey Jar"));
+    expect(await screen.findByText('<place id="lore_d" name="fetched">…</place>')).toBeInTheDocument();
+    expect(asked).toEqual(["lore_d"]);
+    // Drilling the same entry again does not ask again.
+    await fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await fireEvent.click(screen.getByText("The Honey Jar"));
+    expect(asked).toEqual(["lore_d"]);
+  });
+
+  it("says a render that failed could not be done, and asks again on the next drill", async () => {
+    let calls = 0;
+    const fetchLeftOutXml = async (id: string) => {
+      calls += 1;
+      if (calls === 1) throw new Error("backend restarting");
+      return `<place id="${id}" name="second try">…</place>`;
+    };
+    render(ContextDoor, { ...baseProps, loreFit: LEFT_OUT_FIT, fetchLeftOutXml });
+    await fireEvent.click(screen.getByText("Left out"));
+    await fireEvent.click(screen.getByText("The Honey Jar"));
+    expect(await screen.findByText(/Couldn't render this entry right now/)).toBeInTheDocument();
+    // Never the empty-render wording for a failure.
+    expect(screen.queryByText("This entry rendered no XML.")).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await fireEvent.click(screen.getByText("The Honey Jar"));
+    expect(await screen.findByText('<place id="lore_d" name="second try">…</place>')).toBeInTheDocument();
+    expect(calls).toBe(2);
+  });
+
+  it("falls through an empty title to the id, and labels the journal's hop with the same words", async () => {
+    const untitled: LoreFit = {
+      ...LEFT_OUT_FIT,
+      left_out: [{ id: "lore_zz", title: "", source: "structural_hop", tokens: 10 }],
+    };
+    const journal = [
+      { entry_id: "lore_j", title: "Journaled", added_at_turn: 1, source: "depth1_expansion" },
+    ] as ChatSessionJournalEntry[];
+    render(ContextDoor, { ...baseProps, loreFit: untitled, journal });
+    await fireEvent.click(screen.getByText("Left out"));
+    expect(screen.getByText("lore_zz")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await fireEvent.click(screen.getByText("Auto-added this conversation"));
+    expect(screen.getByText(/one hop · mention/)).toBeInTheDocument();
+  });
+
+  it("states a declared set over a non-zero budget, and never for a budget of 0", async () => {
+    const over: LoreFit = { ...LEFT_OUT_FIT, left_out: [], declared_tokens: 30200 };
+    render(ContextDoor, { ...baseProps, loreFit: over });
+    expect(screen.getByText("declared over budget")).toBeInTheDocument();
+    await fireEvent.click(screen.getByText("Left out"));
+    expect(screen.getByText(/declared lore 30\.2k, over the 16k budget/)).toBeInTheDocument();
+
+    const declaredOnly: LoreFit = { ...over, budget_tokens: 0, used_tokens: 0 };
+    // Scoped to this render's container — the first render above is still
+    // mounted with "Left out" as its drilled panel title.
+    const zero = render(ContextDoor, { ...baseProps, loreFit: declaredOnly });
+    expect(zero.container.textContent).not.toContain("Left out");
   });
 
   it("shows a defensive message when an entry carries no XML", async () => {

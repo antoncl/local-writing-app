@@ -99,6 +99,7 @@ export type {
   ChatUsage,
   LoreFit,
   LoreFitEntry,
+  LoreSource,
   AIChatResponse,
   AIGenerateRequest,
   AIContextPresetResponse,

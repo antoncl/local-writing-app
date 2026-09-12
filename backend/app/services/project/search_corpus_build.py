@@ -24,6 +24,24 @@ from app.services.project.overrides import OVERRIDES_FOLDER
 from app.services.project.search_corpus import CorpusEntry, search_corpus
 
 
+def outside_corpus(entry: NodeIndexEntry, root_layer_id: str) -> bool:
+    """ADR-0085 §1's exclusions — the ONE predicate both the cold build and
+    the write patch apply, so the two paths can never disagree about what is
+    searchable.
+
+    - A chat: its body is a serialised transcript, not prose — a substring
+      match would report YAML structure.
+    - An ANCESTOR layer's project node (#1871): addressable since #334 so
+      backlinks can name it, but the open project cannot open it
+      (`FOREIGN_PROJECT_NODE`) and a replace never writes an inherited node,
+      so a hit on it is a dead end. The open project's own `project.md` stays
+      searchable.
+    """
+    if entry.kind == "chat":
+        return True
+    return entry.kind == "project" and entry.source_layer_id != root_layer_id
+
+
 class SearchCorpusMixin:
     def _search_corpus(self) -> dict[str, CorpusEntry]:
         """The held corpus for the open project, built cold on the first call
@@ -54,9 +72,7 @@ class SearchCorpusMixin:
             root_layer_id = self._metadata_schema_layer_id(root)
             entries = []
             for entry in index.by_id.values():
-                if entry.kind == "chat":
-                    # ADR-0085 §1: a chat body is a serialised transcript, not
-                    # prose — a substring match would report YAML structure.
+                if outside_corpus(entry, root_layer_id):
                     continue
                 corpus_entry = self._corpus_entry_for(entry, index, schema, root_layer_id)
                 if corpus_entry is not None:
@@ -91,7 +107,10 @@ class SearchCorpusMixin:
             schema,
             index,
         )
-        searchable: dict[str, object] = {"title": title, "entry_type": entry_type, **metadata}
+        # `entry_type` is deliberately NOT here (#1870): it is machine identity
+        # (`kind:key`), not text the writer wrote, so a prose query matching
+        # inside "prompt:general" was noise — and never replaceable anyway.
+        searchable: dict[str, object] = {"title": title, **metadata}
         if entry.kind == "manuscript":
             # Today's scene search includes status; lore does not — keep parity.
             searchable["status"] = str(front_matter.get("status") or "draft")
@@ -177,7 +196,7 @@ class SearchCorpusMixin:
             # A file the index does not list is not searchable.
             search_corpus.drop_path(path)
             return
-        if entry.kind == "chat":
+        if outside_corpus(entry, root_layer_id):
             return
         corpus_entry = self._corpus_entry_for(entry, index, schema, root_layer_id)
         if corpus_entry is None:

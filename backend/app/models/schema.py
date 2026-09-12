@@ -37,7 +37,7 @@ class DerivedSelectState(BaseModel):
     """A select state the app holds, never the author (#1911): the field takes
     `value` on a node whenever the reference field `when_set` is set, and a
     stale `value` is cleared when it is not. Declared once on the FIELD, so
-    the read-side healer (`_derive_select_states`), the rail's pick list and
+    the select canon (`_canonicalise_metadata_selects`), the rail's pick list and
     the type editor read one rule — "a plot card is `on_page` iff its `scene`
     is attached" is the built-in instance, and a user can author the same
     shape for a field of their own (`status: filmed` iff `footage` is set).

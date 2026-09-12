@@ -121,6 +121,12 @@ A few more options round out a field, and none of them are technical:
   field in for you. Turn it off for anything you'd rather own by hand.
 - **Section** — an optional heading that groups related fields together in the
   Entry's panel, so a long list of fields stays tidy.
+- **App-set state … while this reference is set** — on a Select only: one option
+  the app holds for you whenever a chosen Entry Reference on the same type is
+  filled in, and lets go of when it is cleared. A plot card is *On the page*
+  exactly while its scene is attached; you can declare the same for a field of
+  your own ("Filmed" while "Footage" is set). That option is never offered in
+  the Entry's panel and is never the default.
 - **Default for new entries** — an optional starting value every new Entry of this
   type begins with, so you're not filling the same thing in each time. Applies to
   value fields (Text, Number, Select, and the like); a reference field — an Entry

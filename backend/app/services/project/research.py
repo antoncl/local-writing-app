@@ -307,7 +307,7 @@ class ResearchNotesMixin:
         clean_metadata = self._strip_unknown_metadata_fields(
             request.metadata, entry_type, schema
         )
-        clean_metadata = self._derive_select_states(clean_metadata, entry_type, schema)
+        clean_metadata = self._canonicalise_metadata_selects(clean_metadata, entry_type, schema)
         note = ResearchNote(
             id=node_id,
             title=request.title,

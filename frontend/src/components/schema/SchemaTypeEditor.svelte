@@ -59,6 +59,7 @@
     MetadataSchemaLayer,
     MetadataSchemaOverview,
   } from "@/lib/types";
+  import { isRefField } from "@/lib/metadataTypes";
 
   // Props (#14 — first runes component). The save layer + the inline-editor
   // reveal/drag state are two-way bound by the parent, so they're `$bindable`;
@@ -164,11 +165,13 @@
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   const metadataSchema = $derived($metadataSchemaStore);
-  // The reference fields a select's derived state can watch (#1911).
+  // The reference fields a select's derived state can watch (#1911): those the
+  // open type carries, since the rule only fires beside its reference.
   const refFieldChoices = $derived(
-    Object.entries(metadataSchema?.fields ?? {})
-      .filter(([, f]) => f.type === "entity_ref" || f.type === "entity_ref_list")
-      .map(([id, f]) => ({ id, name: f.name || id })),
+    (selectedSchemaTypeId ? (metadataSchema?.entry_types[selectedSchemaTypeId]?.fields ?? []) : [])
+      .map((id) => [id, metadataSchema?.fields[id]] as const)
+      .filter(([, f]) => isRefField(f))
+      .map(([id, f]) => ({ id, name: f?.name || id })),
   );
 
   // Section labels already used on this type (#1000) — the datalist behind the

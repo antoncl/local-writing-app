@@ -531,6 +531,24 @@ describe("SchemaFieldInlineEditor derived select state (#1911)", () => {
     expect(onSave.mock.calls[0][0].derived).toEqual({ value: "on_page", when_set: "scene" });
   });
 
+  it("an option-value rename carries the declaration along", async () => {
+    const onSave = mountSelect(PAGE_STATUS);
+    const valueInputs = screen.getAllByLabelText("Option value") as HTMLInputElement[];
+    const onPage = valueInputs.find((input) => input.value === "on_page") as HTMLInputElement;
+    await fireEvent.input(onPage, { target: { value: "onpage" } });
+    expect((screen.getByLabelText("App-set state") as HTMLSelectElement).value).toBe("onpage");
+    await fireEvent.click(screen.getByText("Done"));
+    expect(onSave.mock.calls[0][0].derived).toEqual({ value: "onpage", when_set: "scene" });
+  });
+
+  it("choosing the default as the app-set state clears the default", async () => {
+    const onSave = mountSelect({ ...PAGE_STATUS, derived: null });
+    await fireEvent.change(screen.getByLabelText("App-set state"), { target: { value: "unwritten" } });
+    expect((screen.getByLabelText("Default for new entries") as HTMLSelectElement).value).toBe("");
+    await fireEvent.click(screen.getByText("Done"));
+    expect(onSave.mock.calls[0][0].defaultValue).toBeUndefined();
+  });
+
   it("a half-chosen rule saves as none", async () => {
     const onSave = mountSelect({ ...PAGE_STATUS, derived: null });
     await fireEvent.change(screen.getByLabelText("App-set state"), { target: { value: "on_page" } });

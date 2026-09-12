@@ -230,7 +230,7 @@
           <span class="colored-select-row-label muted">{placeholder}</span>
         </button>
       {/if}
-      {#each omitFromPick.length ? options.filter((o) => !omitFromPick.includes(o.value)) : options as opt}
+      {#each options.filter((o) => !omitFromPick.includes(o.value)) as opt}
         <button
           type="button"
           class="colored-select-row"

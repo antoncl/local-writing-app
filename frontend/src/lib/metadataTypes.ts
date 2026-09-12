@@ -70,7 +70,15 @@ export type DerivedSelectState = {
 /** The option value a field's derived state holds, or null when it declares
  * none — the one reader every pick list and the rail's read-only gate use. */
 export function derivedSelectValue(field: MetadataFieldDefinition | null | undefined): string | null {
-  return field?.type === "select" && field.derived ? field.derived.value : null;
+  const value = field?.type === "select" ? (field.derived?.value ?? null) : null;
+  // A declaration naming no option is inert (the backend derives nothing for it).
+  return value !== null && field?.options.some((option) => option.value === value) ? value : null;
+}
+
+/** A field that stores node references — the `when_set` half of a derived
+ * state can only watch one of these (mirrors the backend's `REF_FIELD_TYPES`). */
+export function isRefField(field: { type: string } | null | undefined): boolean {
+  return field?.type === "entity_ref" || field?.type === "entity_ref_list";
 }
 
 /** A required select (#1421): a select with a non-blank default. A blank value

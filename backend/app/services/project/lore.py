@@ -320,6 +320,12 @@ class LoreEntriesMixin:
             key: self._strip_unknown_list_members(schema.fields[key], value) if key in schema.fields else value
             for key, value in base_above_layer.items()
         }
+        # The same symmetry for the rest of the read canon (#1911/#1912): the
+        # echo had its stale keys stripped, its dangling refs healed, its derived
+        # state applied and its literal default popped — a base that still
+        # carries them would mint a row (or a blank the save then refuses) for a
+        # field the author never touched.
+        base_above_layer = self._repair_metadata_on_read(base_above_layer, request.entry_type, schema, index)
         # Diff raw-vs-raw: `base_above_layer` comes from the raw owning file, so
         # canonicalising `submitted` first would diff a canonical value against a
         # raw one and mint spurious tag rows (and defeat revert-to-canon). Tag

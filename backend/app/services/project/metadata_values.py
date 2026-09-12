@@ -35,6 +35,7 @@ from app.services.ai.entry_patch import (
     parse_entry_patch_json,
     tag_vocabulary_target,
 )
+from app.services.ai.selector_eval import is_empty
 from app.services.color_snap import nearest_swatch_id
 from app.services.machine_settings import palette as machine_palette
 from app.services.project.errors import ProjectServiceError
@@ -54,24 +55,21 @@ log = logging.getLogger(__name__)
 _AI_FIELD_DROPPED = object()
 
 
-def _ref_is_set(value: Any) -> bool:
-    """Whether a reference field holds a target — a non-blank id, or a
-    non-empty id list (`entity_ref_list`)."""
-    if isinstance(value, str):
-        return value.strip() != ""
-    return isinstance(value, list) and len(value) > 0
-
-
 def derived_select_value(field: MetadataFieldDefinition, metadata: Mapping[str, Any]) -> str | None:
     """The state `field` DERIVES on a node with this metadata (#1911): its
     declared `derived.value` while the reference field `derived.when_set` is
-    set, else None — nothing derived, an authored value stands. The one rule
-    the read-side healer (`_derive_select_states`) and the plot-board
-    projection (`_board_page_status`) both read, so "what makes a card
-    on_page" is defined once and can't drift."""
-    if field.derived is None or not _ref_is_set(metadata.get(field.derived.when_set)):
+    set (the selector's own emptiness rule, so a `set` predicate and the
+    healer agree), else None — nothing derived, an authored value stands.
+    Tolerates a declaration the soft schema validator only reports (a value
+    outside the options, `derived` on a non-select): it derives nothing
+    rather than write a value the field's own validation would reject on
+    every read."""
+    derived = field.derived
+    if derived is None or field.type != "select" or is_empty(metadata.get(derived.when_set)):
         return None
-    return field.derived.value
+    if field.options and all(option.value != derived.value for option in field.options):
+        return None
+    return derived.value
 
 
 @dataclass(frozen=True)
@@ -188,6 +186,10 @@ class MetadataValuesMixin:
         # mutation is what a book scene's next save actually writes to disk.
         if node_index is not None:
             self._canonicalise_metadata_refs(metadata, schema, node_index)
+        # The select canon rides the same seam (#1911/#1912): a derived state is
+        # applied and a stored literal default popped in place, so the file a
+        # save writes is canonical rather than repaired on the next read.
+        self._canonicalise_metadata_selects(metadata, entry_type, schema)
         errors: list[str] = []
         entry_type_definition = schema.entry_types.get(entry_type)
         if not entry_type_definition:
@@ -633,13 +635,12 @@ class MetadataValuesMixin:
                 continue
             # A required select (one with a schema default) storing a blank is
             # stale from before the "no blank" rule (#1421) — the old picker let
-            # you choose "(none)" — and one storing its default LITERALLY is the
-            # same value under a different provenance (#1912): the rail would
-            # show a reset chip whose gesture pops a key to no visible effect.
-            # Drop both on read so the node resolves to the default like a fresh
-            # sparse entry, instead of 422-ing the whole read; the sparse form
-            # is written back on the next save.
-            if field.required_select and value in (None, "", field.default):
+            # you choose "(none)". Drop the key on read so it resolves to the
+            # default like a fresh sparse entry, instead of 422-ing the whole
+            # read; the sparse form is written back on the next save. (A stored
+            # LITERAL default is the select canon's business — #1912,
+            # `_canonicalise_metadata_selects`.)
+            if field.required_select and value in (None, ""):
                 continue
             cleaned[field_id] = self._strip_unknown_list_members(field, value)
         return cleaned
@@ -677,35 +678,49 @@ class MetadataValuesMixin:
         """The read-side canon every node kind applies before its metadata is
         shown or validated: drop keys the schema no longer knows
         (`_strip_unknown_metadata_fields`), heal dangling references
-        (`_strip_dangling_references`), then apply the derived select states
-        (`_derive_select_states`) — last, so a state whose reference was just
-        healed away is cleared with it. The file keeps its stale shape until the
-        next save writes the repaired form back."""
+        (`_strip_dangling_references`), then the select canon
+        (`_canonicalise_metadata_selects`) — last, so a derived state whose
+        reference was just healed away is cleared with it. The file keeps its
+        stale shape until the next save writes the repaired form back."""
         metadata = self._strip_unknown_metadata_fields(metadata, entry_type, schema)
         metadata = self._strip_dangling_references(metadata, schema, index)
-        return self._derive_select_states(metadata, entry_type, schema)
+        return self._canonicalise_metadata_selects(metadata, entry_type, schema)
 
-    def _derive_select_states(
+    def _canonicalise_metadata_selects(
         self, metadata: dict[str, Any], entry_type: str, schema: MetadataSchema
     ) -> dict[str, Any]:
-        """Apply every derived select state the entry type carries (#1911): a
-        field whose `derived.when_set` reference is set holds `derived.value`,
-        overriding any authored value; when the reference is not set a stale
-        `derived.value` is popped, so the field falls back to its default —
-        sparse, like a fresh node. An authored non-derived value stands. Runs
-        on every read (`_repair_metadata_on_read`) and on the saves that
-        normalise before writing (a plot card), in place on `metadata`,
-        returned for chaining. Reads the declaration, never a field name: the
-        built-in `page_status` ← `scene` rule and a user's own are one case."""
+        """The select canon, in place on `metadata` (returned for chaining), for
+        the fields the entry type carries:
+
+        - a derived state (#1911): a field whose `derived.when_set` reference is
+          set holds `derived.value`, overriding any authored value; when the
+          reference is not set a stale `derived.value` is popped. Inert when the
+          type carries the field but not the reference it watches — the rule
+          can never fire there, so an authored value stands. Reads the
+          declaration, never a field name: the built-in `page_status` ← `scene`
+          rule and a user's own are one case.
+        - a required select never stores its default (#1912): a literal default
+          is the sparse blank under a different provenance, so the rail would
+          show a reset chip whose gesture changes nothing; popped so the node
+          reads like a fresh one.
+
+        Runs on every read (`_repair_metadata_on_read`) and at the write-side
+        seam every save validates through (`_validate_entry_metadata`)."""
         entry_type_definition = schema.entry_types.get(entry_type)
-        for field_id in entry_type_definition.fields if entry_type_definition else []:
+        if entry_type_definition is None:
+            return metadata
+        allowed = entry_type_definition.fields
+        for field_id in allowed:
             field = schema.fields.get(field_id)
-            if field is None or field.derived is None:
+            if field is None:
                 continue
-            derived = derived_select_value(field, metadata)
-            if derived is not None:
-                metadata[field_id] = derived
-            elif metadata.get(field_id) == field.derived.value:
+            if field.derived is not None and field.derived.when_set in allowed:
+                derived = derived_select_value(field, metadata)
+                if derived is not None:
+                    metadata[field_id] = derived
+                elif metadata.get(field_id) == field.derived.value:
+                    metadata.pop(field_id, None)
+            if field.required_select and metadata.get(field_id) == field.default:
                 metadata.pop(field_id, None)
         return metadata
 
@@ -983,6 +998,10 @@ class MetadataValuesMixin:
         cleaned, changed = self._purge_metadata_refs(normalised, schema, purge_ids)
         if not changed:
             return
+        # A purged reference may be the one a derived state watched (#1911):
+        # re-run the select canon so the file lands without a stale `on_page`
+        # beside its now-blank `scene`.
+        cleaned = self._canonicalise_metadata_selects(cleaned, entry.entry_type, schema)
         # Only a changed node pays for its body: re-read the whole file so
         # everything below the front matter is preserved, then write the cleaned
         # mapping back over it.

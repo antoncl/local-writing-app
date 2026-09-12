@@ -94,14 +94,13 @@ PLOT_CARD_ENTRY_TYPE = "plot:card"
 # plot-locally because v1 bars refs from list-item shapes. `page_status` is the
 # on/off-page vs unwritten marker; `on_page` is derived from the scene link by
 # the schema's own declaration (`derived: {value: on_page, when_set: scene}`,
-# #1911), applied by the generic `_derive_select_states` healer.
+# #1911), applied by the generic select canon (`_canonicalise_metadata_selects`).
 _BEAT_LINK_FIELD = "beat_links"
 # The authored card→card causal edges (ADR-0048 S7 Slice 6b) — each a single
 # `target` card node id as text, healed plot-locally (drop dangling / self /
 # duplicate) for the same v1-bars-refs-from-item-shapes reason as `beat_links`.
 _CAUSAL_LINK_FIELD = "causal_links"
 _PAGE_STATUS_FIELD = "page_status"
-_SCENE_FIELD = "scene"
 
 
 class _PlotNodeRead(NamedTuple):
@@ -178,6 +177,7 @@ class PlotMixin:
         # the Library's templates, none of which belong in this list. A sub-type
         # would need is-a filtering, but S5a ships none.
         index = self._build_node_index()
+        schema = self.read_metadata_schema()
         entries = []
         for entry in index.by_id.values():
             if entry.entry_type != entry_type:
@@ -187,6 +187,10 @@ class PlotMixin:
             except ProjectServiceError:
                 continue
             metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+            # The same read-side canon a single read applies (#1911): a listed
+            # card's dangling scene is healed and its `page_status` derived here,
+            # so the board projection reads what the rail would show.
+            metadata = self._repair_metadata_on_read(metadata, entry_type, schema, index)
             entries.append(
                 summary_cls(
                     id=entry.id,
@@ -356,9 +360,6 @@ class PlotMixin:
         # lists cards by exact type), so both consistently skip any subtype.
         if request.entry_type == PLOT_CARD_ENTRY_TYPE:
             metadata = self._normalise_card_metadata(metadata, index, node_id)
-            # The save-side twin of the read canon (#1911): the file lands with
-            # `page_status` already derived from the scene it is saved with.
-            metadata = self._derive_select_states(metadata, request.entry_type, self.read_metadata_schema())
         metadata_errors = self._validate_entry_metadata(
             label=f"{noun.capitalize()} {node_id}",
             entry_type=request.entry_type,
@@ -429,8 +430,8 @@ class PlotMixin:
         ref already has (purge-on-delete + heal-on-read). Heals the card→beat links
         and the authored card→card causal links (drops any that no longer resolve).
         `page_status` is not card-only business any more: its `on_page` follows
-        the schema's derived-state declaration through the generic healer
-        (`_derive_select_states`, #1911) like any field's. `plot:card` is the only
+        the schema's derived-state declaration through the select canon
+        (`_canonicalise_metadata_selects`, #1911) like any field's. `plot:card` is the only
         plot node carrying these fields, so the save/read callers gate this to cards;
         `card_id` is the healing card's own node id, needed to drop a self-link.
         """

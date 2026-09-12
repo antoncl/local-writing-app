@@ -98,10 +98,7 @@
   const label = $derived(ariaLabel ?? field.name);
   const currentValue = $derived(metadataValueString(value));
   // The derived state an authoring host keeps out of the pick list (#1911).
-  const derivedOmitted = $derived.by((): string[] => {
-    const held = derivedSelectValue(field);
-    return held === null ? [] : [held];
-  });
+  const derivedState = $derived(derivedSelectValue(field));
 
   // A select whose schema declares a `default` is "required" (#1421): it never
   // offers a "(none)" pick, and an absent value shows the default rather than a
@@ -240,7 +237,7 @@
   <ColoredSelect
     value={selectDisplayValue}
     options={field.options}
-    omitFromPick={pickDerived ? [] : derivedOmitted}
+    omitFromPick={!pickDerived && derivedState ? [derivedState] : []}
     allowBlank={!selectRequired}
     ariaLabel={label}
     onChange={(v) => emit(v)}

@@ -760,3 +760,54 @@ class TagMigrationHelperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DropOptionDerivedFlagTests(unittest.TestCase):
+    """v10→v11 (#1911): the per-option `derived: true` flag is retired for a
+    field-level declaration; a layer that persisted it loses the dead key."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.layer_root = Path(self.temp_dir.name).resolve() / "layer"
+        self.layer_root.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_the_option_flag_is_dropped_and_the_field_declaration_kept(self) -> None:
+        schema_path = self.layer_root / "metadata.schema.yaml"
+        schema_path.write_text(
+            yaml.safe_dump(
+                {
+                    "fields": {
+                        "page_status": {
+                            "name": "Page status",
+                            "type": "select",
+                            "options": [
+                                {"value": "unwritten", "label": "Not yet"},
+                                {"value": "on_page", "label": "On", "derived": True},
+                            ],
+                        },
+                        "mood": {"name": "Mood", "type": "select", "options": ["calm", "tense"]},
+                    }
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        migrations._drop_option_derived_flags(self.layer_root, migrations.ChainContext())
+        data = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            data["fields"]["page_status"]["options"],
+            [{"value": "unwritten", "label": "Not yet"}, {"value": "on_page", "label": "On"}],
+        )
+        self.assertEqual(data["fields"]["mood"]["options"], ["calm", "tense"])
+        # Idempotent, and a clean file is left untouched.
+        stamp = schema_path.stat().st_mtime_ns
+        migrations._drop_option_derived_flags(self.layer_root, migrations.ChainContext())
+        self.assertEqual(schema_path.stat().st_mtime_ns, stamp)
+
+    def test_a_layer_without_a_schema_is_skipped(self) -> None:
+        migrations._drop_option_derived_flags(self.layer_root, migrations.ChainContext())
+        self.assertFalse((self.layer_root / "metadata.schema.yaml").exists())
+

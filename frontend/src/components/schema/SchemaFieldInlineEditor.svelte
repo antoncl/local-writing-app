@@ -201,8 +201,23 @@
   let defaultValue: string | undefined = $state(seed.defaultValue);
   let options: OptionDraft[] = $state(seed.options);
   // The two halves of a select's derived state (#1911); "" = not chosen.
+  // `derivedValue` names an option DRAFT (by its loaded `originalValue`, else
+  // its current value), so an option-value rename carries the declaration
+  // along and a deleted option clears it — `derivedOption` is what is shown
+  // and emitted.
   let derivedValue: string = $state(seed.derivedValue);
   let derivedWhenSet: string = $state(seed.derivedWhenSet);
+  const derivedOption = $derived(
+    derivedValue
+      ? (options.find((o) => o.originalValue === derivedValue) ?? options.find((o) => o.value === derivedValue))?.value.trim() || ""
+      : "",
+  );
+  function chooseDerived(next: string | undefined) {
+    derivedValue = next ?? "";
+    // The derived state is never a default (#1911): a default that just became
+    // the app-set state is cleared rather than left invisibly stored.
+    if (derivedValue && defaultValue === derivedValue) defaultValue = undefined;
+  }
   let computedFunction: string = $state(seed.computedFunction);
   let computedScope: string = $state(seed.computedScope);
   // The scope choices the current function offers (empty for word_count, or for
@@ -347,8 +362,8 @@
       defaultValue,
       options,
       derived:
-        type === "select" && derivedValue && derivedWhenSet
-          ? { value: derivedValue, when_set: derivedWhenSet }
+        type === "select" && derivedOption && derivedWhenSet
+          ? { value: derivedOption, when_set: derivedWhenSet }
           : null,
       computedFunction,
       computedScope,
@@ -627,12 +642,13 @@
     <div class="sfi-derived-row">
       <label class="sfi-field">
         App-set state
-        <select bind:value={derivedValue} aria-label="App-set state">
-          <option value="">(none)</option>
-          {#each options.filter((o) => o.value.trim() !== "") as opt (opt.value)}
-            <option value={opt.value}>{opt.label || opt.value}</option>
-          {/each}
-        </select>
+        <DefaultValueEditor
+          type="select"
+          value={derivedOption}
+          options={options}
+          ariaLabel="App-set state"
+          onChange={chooseDerived}
+        />
       </label>
       <label class="sfi-field">
         while this reference is set
@@ -661,7 +677,7 @@
       <DefaultValueEditor
         type={type}
         value={defaultValue}
-        options={options.filter((o) => o.value !== derivedValue)}
+        options={options.filter((o) => o.value !== derivedOption)}
         ariaLabel="Default for new entries"
         onChange={(next) => (defaultValue = next)}
       />

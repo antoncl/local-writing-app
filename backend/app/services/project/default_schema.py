@@ -1044,7 +1044,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "page_status": {
             # A card's page status (ADR-0048 S7 Slice 3b): whether its story beat is
             # realized in prose. `on_page` is DERIVED — declared below (#1911), so the
-            # generic healer (`_derive_select_states`, on card save + every read)
+            # select canon (`_canonicalise_metadata_selects`, on save + every read)
             # forces it while a `scene` is attached and clears a stale `on_page` when
             # the scene is removed. Absent (the sparse default) reads as `unwritten` —
             # a placeholder to promote; `off_page` is the writer's deliberate "this

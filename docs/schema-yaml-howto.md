@@ -147,8 +147,11 @@ What follows from the declaration, with no further code:
 - The type editor shows the rule under the field's options as "App-set
   state … while this reference is set".
 - The value must be one of the field's options and must not be its
-  `default`; `when_set` must name a reference field. A declaration that
-  breaks these is reported when the layer is saved, like a bad default.
+  `default`; `when_set` must name a reference field, and every entry type
+  that carries the select must carry that reference too (the rule only fires
+  beside it). A declaration that breaks these is reported when the layer is
+  saved, like a bad default; a hand-edited layer that breaks them stays
+  readable and simply derives nothing.
 
 Field definitions merge per attribute up the layer chain, so a layer that
 only relabels or recolours the options keeps an ancestor's `derived`.

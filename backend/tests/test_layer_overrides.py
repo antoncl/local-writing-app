@@ -198,6 +198,19 @@ class LayerOverrideTests(unittest.TestCase):
         self.assertEqual(saved.metadata["rank"], "Midshipman")
         self.assertEqual(saved.overridden_fields, [])
 
+    def test_a_literal_default_in_the_ancestor_does_not_mint_an_override_row(self) -> None:
+        # #1912: the read drops a required select's literal default; the base an
+        # override diffs against must do the same, or a save that never touched
+        # the field mints a blank row the save then refuses.
+        self._write_lore_at(
+            self.series, "lore_honor", "Honor Harrington", {"rank": "Commander", "context_policy": "auto"}
+        )
+        read = self.service.read_lore_entry("lore_honor")
+        self.assertNotIn("context_policy", read.metadata)
+        saved = self._save_override("lore_honor", {**read.metadata, "rank": "Captain"})
+        self.assertEqual(saved.metadata["rank"], "Captain")
+        self.assertEqual(saved.overridden_fields, ["rank"])
+
     def test_reverting_an_override_to_canon_drops_the_delta_file(self) -> None:
         self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
         self._save_override("honor", {"rank": "Captain"})

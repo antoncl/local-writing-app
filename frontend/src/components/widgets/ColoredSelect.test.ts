@@ -30,4 +30,24 @@ describe("ColoredSelect popover (#1587)", () => {
     await fireEvent.click(screen.getByText("B"));
     expect(document.querySelector(".colored-select-popover")).toBeNull();
   });
+
+  it("a derived option shows at rest but is never offered (#1906)", async () => {
+    const { container } = render(ColoredSelect, {
+      props: {
+        value: "on_page",
+        allowBlank: false,
+        options: [
+          { value: "unwritten", label: "Unwritten" },
+          { value: "off_page", label: "Off the page" },
+          { value: "on_page", label: "On the page", derived: true },
+        ],
+      },
+    });
+    // The trigger names the held (derived) value…
+    expect(container.querySelector(".colored-select-trigger")?.textContent).toContain("On the page");
+    await fireEvent.click(container.querySelector(".colored-select-trigger") as HTMLElement);
+    // …and the list offers only the author's two.
+    const rows = [...document.querySelectorAll('[role="option"]')].map((r) => r.textContent?.trim());
+    expect(rows).toEqual(["Unwritten", "Off the page"]);
+  });
 });

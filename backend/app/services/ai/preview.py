@@ -38,6 +38,7 @@ from app.services.ai.selector_eval import (
     UnsupportedSelectorExpr,
     evaluate_selector_membership,
     selector_references,
+    with_select_defaults,
 )
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
@@ -199,6 +200,18 @@ def _ref_fields(schema: Any) -> frozenset[str]:
     return frozenset(key for key, field in fields.items() if getattr(field, "type", None) in ("entity_ref", "entity_ref_list"))
 
 
+def _select_defaults(schema: Any) -> dict[str, Any]:
+    """`{key: default}` for every select field in `schema` that declares one —
+    a required select (#1421) reads as its default when blank, and the roster a
+    selector evaluates must say so too (#1908)."""
+    fields = getattr(schema, "fields", None) or {}
+    return {
+        key: field.default
+        for key, field in fields.items()
+        if getattr(field, "type", None) == "select" and getattr(field, "default", None) not in (None, "")
+    }
+
+
 def _pick_label(item: Mapping[str, Any]) -> str:
     return str(item.get("title") or item.get("id") or "context pick")
 
@@ -236,6 +249,11 @@ def _selector_member_picks(
             f'Context pick "{label}" selects {kind!r} nodes, which the send path cannot resolve — it contributed nothing.'
         )
         return []
+
+    # A required select reads as its schema default when blank (#1908) — the
+    # reader's rule, so a `field` predicate sees what the rail shows.
+    defaults = _select_defaults(schema)
+    nodes = [node._replace(metadata=with_select_defaults(node.metadata, defaults)) for node in nodes]
 
     def is_descendant(entry_type: str, target: str) -> bool:
         return project_service._entry_type_matches(entry_type, target, schema)

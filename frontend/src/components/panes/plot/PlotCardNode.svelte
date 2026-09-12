@@ -58,16 +58,10 @@
   );
 
   // The 3-state page marker (Slice 5b): on_page (scene attached) / off_page / unwritten.
-  // Null page_status is the sparse default → unwritten. The dot colour comes from the
-  // page_status option swatches (moss/graphite/stone), applied as a CSS var (no hex in style).
-  const STATUS_META: Record<string, { swatch: string; label: string }> = {
-    on_page: { swatch: "moss", label: "On the page" },
-    off_page: { swatch: "graphite", label: "Off the page" },
-    unwritten: { swatch: "stone", label: "Unwritten" },
-  };
-  let pageStatus = $derived(data.pageStatus ?? "unwritten");
-  let statusInfo = $derived(STATUS_META[pageStatus] ?? STATUS_META.unwritten);
-  let statusColor = $derived(getSwatch(statusInfo.swatch)?.hex ?? null);
+  // The layout resolves the value, its label and its swatch from the schema's
+  // `page_status` options (#1907); the dot colour is applied as a CSS var (no hex in style).
+  let pageStatus = $derived(data.pageStatus);
+  let statusColor = $derived(data.pageStatusSwatch ? (getSwatch(data.pageStatusSwatch)?.hex ?? null) : null);
 
   // Two segmented pill kinds (ADR-0080 slice 3b-ii): an event-pill (a plotline beat)
   // and a change-pill (a character-arc beat) render in their own labelled row, so a
@@ -452,7 +446,7 @@
         style={statusColor ? `--status-color: ${statusColor}` : undefined}
       >
         <span class="status-dot" aria-hidden="true"></span>
-        {statusInfo.label}
+        {data.pageStatusLabel}
       </span>
     </div>
   </article>

@@ -148,7 +148,9 @@
           <span class="colored-select-row-label muted">{placeholder}</span>
         </button>
       {/if}
-      {#each options as opt}
+      <!-- A derived option (#1906) is the app's to set, never the author's:
+           it shows at rest (`current` still resolves it) but is not offered. -->
+      {#each options.filter((o) => !o.derived) as opt}
         <button
           type="button"
           class="colored-select-row"

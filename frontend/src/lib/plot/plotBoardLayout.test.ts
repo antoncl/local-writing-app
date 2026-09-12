@@ -28,6 +28,7 @@ import {
 } from "./plotBoardLayout";
 import { setPalette } from "@/lib/utils/colors";
 import { loreEntriesStore } from "@/lib/stores/lore";
+import { metadataSchemaStore } from "@/lib/stores/schema";
 import type { PlotBoardProjection } from "@/lib/types";
 
 function projection(over: Partial<PlotBoardProjection> = {}): PlotBoardProjection {
@@ -929,5 +930,38 @@ describe("reconcileArcUiState (mirrors reconcilePlotlineUiState, #928)", () => {
   it("leaves a null (loading / failed) projection untouched", () => {
     const state = { expandedArcId: "a1" };
     expect(reconcileArcUiState(null, state)).toBe(state);
+  });
+});
+
+// #1907: a card's page-status label and swatch come from the schema's
+// `page_status` options — the rail's words and colours, spelled once — and a
+// sparse blank resolves to the schema default.
+describe("buildBoardNodes — page status from the schema", () => {
+  const withPageStatus = (options: Array<{ value: string; label?: string; color?: string }>, def = "unwritten") =>
+    metadataSchemaStore.set({
+      version: 1,
+      entry_types: {},
+      groups: {},
+      fields: { page_status: { name: "Page status", type: "select", default: def, options } },
+    } as never);
+
+  it("resolves the value, label and swatch from the options; a blank reads as the default", () => {
+    withPageStatus([
+      { value: "unwritten", label: "Unwritten", color: "stone" },
+      { value: "off_page", label: "Off the page", color: "graphite" },
+      { value: "on_page", label: "On the page", color: "moss" },
+    ]);
+    const nodes = buildBoardNodes(
+      projection({ cards: [card("blank"), card("off", { page_status: "off_page" }), card("on", { page_status: "on_page", scene: "s1" })] }),
+    );
+    expect(dataOf(nodes, "blank")).toMatchObject({ pageStatus: "unwritten", pageStatusLabel: "Unwritten", pageStatusSwatch: "stone" });
+    expect(dataOf(nodes, "off")).toMatchObject({ pageStatus: "off_page", pageStatusLabel: "Off the page", pageStatusSwatch: "graphite" });
+    expect(dataOf(nodes, "on")).toMatchObject({ pageStatus: "on_page", pageStatusLabel: "On the page", pageStatusSwatch: "moss" });
+  });
+
+  it("without the field in the schema, the value stands in for the label and there is no swatch", () => {
+    metadataSchemaStore.set(null);
+    const nodes = buildBoardNodes(projection({ cards: [card("c", { page_status: "off_page" })] }));
+    expect(dataOf(nodes, "c")).toMatchObject({ pageStatus: "off_page", pageStatusLabel: "off_page", pageStatusSwatch: null });
   });
 });

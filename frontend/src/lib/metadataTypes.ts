@@ -47,12 +47,15 @@ export const LIST_ITEM_GROUP_MEMBER_TYPES = [
 ] as const;
 
 // One choice in a select / multi_select field, or a select prompt input.
-// Stored as `{value, label?, color?}`. Bare strings are accepted on the
-// wire (the backend normalizes) but emitted as objects.
+// Stored as `{value, label?, color?, derived?}`. Bare strings are accepted on
+// the wire (the backend normalizes) but emitted as objects. A `derived` option
+// is a state the app holds, not the author (#1906): shown at rest, absent from
+// the pick list, and a field holding it is read-only.
 export type SelectOption = {
   value: string;
   label?: string | null;
   color?: string | null;
+  derived?: boolean;
 };
 
 export type MetadataFieldDefinition = {

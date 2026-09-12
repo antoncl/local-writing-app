@@ -181,7 +181,16 @@
       !assistantModelCapabilities.includes("temperature"),
   );
   function fieldReadOnly(fieldId: string): boolean {
-    return readOnly || (fieldId === "ai_temperature" && temperatureUnsupported);
+    return readOnly || (fieldId === "ai_temperature" && temperatureUnsupported) || holdsDerivedOption(fieldId);
+  }
+  // A select holding a `derived` option (#1906) — a state the app set, e.g. a
+  // plot card's On the page from its scene link — is read-only: the author
+  // cannot leave it by hand (the save healer would put it straight back).
+  function holdsDerivedOption(fieldId: string): boolean {
+    const field = metadataSchema.fields[fieldId];
+    if (field?.type !== "select") return false;
+    const held = metadataValueString(displayValue(fieldId));
+    return field.options.some((option) => option.derived === true && option.value === held);
   }
   // #1579: which model discarded a stored temperature, so the note can TELL the
   // user it happened rather than stripping the value silently. Null while the

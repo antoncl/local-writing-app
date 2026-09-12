@@ -21,6 +21,7 @@ from app.services.ai.selector_eval import (
     SelectorNode,
     evaluate_selector_membership,
     selector_references,
+    with_select_defaults,
 )
 
 _CORPUS_PATH = Path(__file__).resolve().parents[2] / "spec" / "selector-eval-corpus.json"
@@ -85,17 +86,30 @@ def _make_ref_fields(fields: dict[str, Any]) -> frozenset[str]:
 _REF_FIELDS = _make_ref_fields(_CORPUS["schema"].get("fields") or {})
 
 
+def _make_select_defaults(fields: dict[str, Any]) -> dict[str, Any]:
+    """`{key: default}` for the corpus's select fields that declare one — the
+    test double for `preview.py`'s `_select_defaults` (#1908)."""
+    return {
+        key: f["default"] for key, f in fields.items() if (f or {}).get("type") == "select" and (f or {}).get("default")
+    }
+
+
+_SELECT_DEFAULTS = _make_select_defaults(_CORPUS["schema"].get("fields") or {})
+
+
 @pytest.mark.parametrize("case", _CORPUS["cases"], ids=lambda c: c["name"])
 def test_selector_eval_parity(case: dict[str, Any]) -> None:
     # Node-side references are canonicalised by the CALLER (`preview.py`'s
     # `_canonical_references`), not by `evaluate_selector_membership` itself —
-    # this mirrors that here so the corpus exercises the same contract.
+    # this mirrors that here so the corpus exercises the same contract. So is
+    # a required select's default (#1908): the caller fills a blank before the
+    # evaluator reads it.
     nodes = [
         SelectorNode(
             n["id"],
             n["entry_type"],
             frozenset(_CANONICAL_ID(ref) for ref in selector_references(n.get("metadata"))),
-            n.get("metadata") or {},
+            with_select_defaults(n.get("metadata") or {}, _SELECT_DEFAULTS),
         )
         for n in case["nodes"]
     ]

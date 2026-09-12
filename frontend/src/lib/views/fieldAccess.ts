@@ -35,8 +35,17 @@ export function fieldValue(node: EvalNode, key: string, schema: MetadataSchema |
   // round-trips to disk). Routing on the declared category — the same rule
   // intrinsic already uses — is what lets #333 group the assistants roster on
   // `listed` with no key-specific branch anywhere in the evaluator.
-  if (schema?.fields?.[key]?.category === "computed") return node.computed_metadata?.[key];
-  return node.metadata?.[key];
+  const field = schema?.fields?.[key];
+  if (field?.category === "computed") return node.computed_metadata?.[key];
+  const raw = node.metadata?.[key];
+  // A required select — one with a schema default (#1421) — reads as its
+  // default when blank: the rail shows the default, so Views group and filter
+  // what the rail shows (#1908). The backend evaluator fills the same blank
+  // (`selector_eval.with_select_defaults`); the parity corpus holds both to it.
+  if (field?.type === "select" && field.default != null && field.default !== "" && (raw == null || raw === "")) {
+    return field.default;
+  }
+  return raw;
 }
 
 // A node's link-field values as a list of trimmed strings — entity_ref (a bare

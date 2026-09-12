@@ -144,6 +144,7 @@
         value: o.value,
         label: o.label ?? "",
         color: o.color ?? null,
+        derived: o.derived === true,
         originalValue: o.value,
       })) as OptionDraft[],
       // Preserve the stored function/scope exactly (#353) — a `cost` field

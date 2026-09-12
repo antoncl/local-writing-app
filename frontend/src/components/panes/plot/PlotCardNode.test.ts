@@ -52,7 +52,9 @@ const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
   color: null,
   plotlineId: null,
   plotlineName: null,
-  pageStatus: null,
+  pageStatus: "unwritten",
+  pageStatusLabel: "Unwritten",
+  pageStatusSwatch: "stone",
   beats: [],
   causalLinks: [],
   ...over,
@@ -131,12 +133,14 @@ describe("PlotCardNode", () => {
   });
 
   it("shows the on-page marker for an attached card", () => {
-    render(PlotCardNode, { props: { data: data({ attached: true, pageStatus: "on_page" }) } });
+    render(PlotCardNode, {
+      props: { data: data({ attached: true, pageStatus: "on_page", pageStatusLabel: "On the page", pageStatusSwatch: "moss" }) },
+    });
     expect(screen.getByText("On the page")).toBeInTheDocument();
   });
 
   it("shows the unwritten marker for a fresh unattached card", () => {
-    render(PlotCardNode, { props: { data: data({ attached: false, pageStatus: null }) } });
+    render(PlotCardNode, { props: { data: data({ attached: false, pageStatus: "unwritten" }) } });
     expect(screen.getByText("Unwritten")).toBeInTheDocument();
   });
 
@@ -461,24 +465,28 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     expect((badges[1] as HTMLElement).style.getPropertyValue("--beat-accent")).toBe("");
   });
 
-  it("shows the on-page marker when page_status is on_page", () => {
-    render(PlotCardNode, { props: { data: data({ pageStatus: "on_page" }) } });
+  it("renders the page-status label and swatch the layout resolved from the schema (#1907)", () => {
+    const { container } = render(PlotCardNode, {
+      props: { data: data({ pageStatus: "on_page", pageStatusLabel: "On the page", pageStatusSwatch: "moss" }) },
+    });
     expect(screen.getByText("On the page")).toBeInTheDocument();
+    const status = container.querySelector(".card-status") as HTMLElement;
+    expect(status.classList.contains("hollow")).toBe(false);
   });
 
-  it("shows the off-page marker when page_status is off_page", () => {
-    render(PlotCardNode, { props: { data: data({ pageStatus: "off_page" }) } });
-    expect(screen.getByText("Off the page")).toBeInTheDocument();
-  });
-
-  it("falls back to the unwritten marker when page_status is null", () => {
-    render(PlotCardNode, { props: { data: data({ pageStatus: null }) } });
+  it("an unwritten card is the hollow marker; a swatch-less status carries no colour var", () => {
+    const { container } = render(PlotCardNode, {
+      props: { data: data({ pageStatus: "unwritten", pageStatusLabel: "Unwritten", pageStatusSwatch: null }) },
+    });
     expect(screen.getByText("Unwritten")).toBeInTheDocument();
+    const status = container.querySelector(".card-status") as HTMLElement;
+    expect(status.classList.contains("hollow")).toBe(true);
+    expect(status.getAttribute("style")).toBeNull();
   });
 
   it("offers Mark off-page for an unattached unwritten card", async () => {
     const acts = actions();
-    renderWithActions({ attached: false, pageStatus: null }, acts, "card_p1");
+    renderWithActions({ attached: false, pageStatus: "unwritten" }, acts, "card_p1");
     await fireEvent.click(screen.getByLabelText("Card actions"));
     await fireEvent.click(screen.getByRole("menuitem", { name: "Mark off-page" }));
     expect(acts.onSetPageStatus).toHaveBeenCalledWith("card_p1", "off_page");

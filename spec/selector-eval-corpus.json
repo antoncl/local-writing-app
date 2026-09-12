@@ -11,7 +11,8 @@
       "plot:card": { "parent": "plot:base" }
     },
     "fields": {
-      "plotline": { "type": "entity_ref_list" }
+      "plotline": { "type": "entity_ref_list" },
+      "page_status": { "type": "select", "default": "unwritten" }
     }
   },
   "redirects": {
@@ -246,6 +247,25 @@
         { "id": "z", "entry_type": "lore:note", "metadata": { "tags": ["b"] } }
       ],
       "expected": ["x"]
+    },
+    {
+      "name": "a blank required select reads as its schema default (#1908)",
+      "expr": { "field": { "key": "page_status", "op": "overlap", "value": "unwritten" } },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": {} },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "page_status": "off_page" } },
+        { "id": "c", "entry_type": "lore:note", "metadata": { "page_status": "" } }
+      ],
+      "expected": ["a", "c"]
+    },
+    {
+      "name": "a required select is never unset — the default is always in force (#1908)",
+      "expr": { "field": { "key": "page_status", "op": "unset" } },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": {} },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "page_status": "off_page" } }
+      ],
+      "expected": []
     }
   ]
 }

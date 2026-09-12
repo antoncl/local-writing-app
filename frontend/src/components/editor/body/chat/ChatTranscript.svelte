@@ -15,9 +15,9 @@
     LEFT_OUT_HINT,
     declaredOverBudget,
     declaredOverLine,
-    journalEntryKey,
     leftOutSegment,
   } from "@/lib/chat/loreFit";
+  import { journalEntryKey } from "@/lib/chat/journal";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import type { ChatMessage } from "@/lib/types";
 

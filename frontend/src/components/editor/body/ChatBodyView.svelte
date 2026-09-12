@@ -20,7 +20,8 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { api } from "@/lib/api";
-  import { journalEntryKey, lastReportedTurn } from "@/lib/chat/loreFit";
+  import { lastReportedTurn } from "@/lib/chat/loreFit";
+  import { journalEntryKey } from "@/lib/chat/journal";
   import {
     chatPromptPickList,
     effectivePromptInputs,
@@ -656,8 +657,8 @@
 
   function appendToActiveChatJournal(added: ChatSessionJournalEntry[]): void {
     if (!added.length) return;
-    // Keyed by (id, source, turn), not id: an entry the hop noticed and the
-    // author later named is journaled twice (ADR-0086 Amendment 1).
+    // Keyed by (id, source), not id: a better-ranked re-mention is a second
+    // journal entry for the same id (ADR-0086 Amendment 1).
     const existing = new Set(activeChatJournal.map(journalEntryKey));
     const fresh = added.filter((e) => !existing.has(journalEntryKey(e)));
     if (!fresh.length) return;

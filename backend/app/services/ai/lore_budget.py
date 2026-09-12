@@ -48,6 +48,18 @@ HOP_SOURCES: frozenset[str] = frozenset({"depth1_expansion", "structural_hop"})
 NAMED_SOURCES: frozenset[str] = frozenset(_SOURCE_RANK) - HOP_SOURCES
 
 
+def source_rank(source: str) -> int:
+    """The fit rank of a source — lower fits first. The one precedence the
+    journal's promotion rule (ADR-0086 Amendment 1) and the fit share; a
+    source outside the closed set is a programming error."""
+    try:
+        return _SOURCE_RANK[source]
+    except KeyError:
+        raise ValueError(
+            f"unknown lore source {source!r}; the fit knows {sorted(_SOURCE_RANK)}"
+        ) from None
+
+
 @dataclass(frozen=True)
 class LoreLimits:
     """What the assistant allows an ordinary turn's inferred lore: the token
@@ -67,10 +79,12 @@ DEFAULT_LORE_LIMITS = LoreLimits()
 @dataclass(frozen=True)
 class InferredCandidate:
     """One id the app inferred, with why (`source`) and when it was first
-    noticed (`added_at_turn` — the journal records no re-mentions; a
-    structural-hop id carries no turn and orders by id). A source outside the
-    fit's closed set is a programming error and fails here, loudly — never a
-    silent re-rank."""
+    noticed under that source (`added_at_turn`; the journal holds at most one
+    entry per (id, source) — a better-ranked re-mention is a second entry,
+    ADR-0086 Amendment 1 — and the selector keeps the best-ranked candidate
+    per id; a structural-hop id carries no turn and orders by id). A source
+    outside the fit's closed set is a programming error and fails here,
+    loudly — never a silent re-rank."""
 
     id: str
     source: LoreSource

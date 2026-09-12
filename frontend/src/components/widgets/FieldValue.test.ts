@@ -22,6 +22,23 @@ describe("FieldValue (#1108)", () => {
     expect(screen.queryByText("alive")).toBeNull(); // the raw value never leaks
   });
 
+  it("select with a declared default: an absent value shows the DEFAULT's label, not a placeholder (#1421 / #1884 slice 4)", () => {
+    mount(
+      field("select", {
+        default: "auto",
+        options: [{ value: "auto", label: "Automatic" }, { value: "manual", label: "Manual" }],
+      }),
+      null,
+    );
+    expect(screen.getByText("Automatic")).toBeTruthy();
+    expect(screen.queryByText("(none)")).toBeNull();
+  });
+
+  it("select without a default: an absent value still shows the placeholder", () => {
+    mount(field("select", { options: [{ value: "auto", label: "Automatic" }] }), null);
+    expect(screen.queryByText("Automatic")).toBeNull();
+  });
+
   it("boolean: renders a switch reflecting the value (never `true`/`false` text)", () => {
     mount(field("boolean"), true);
     expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");

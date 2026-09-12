@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
-  import TagFlipChips, { isTagFlipField, tagFlipItemsFor } from "@/components/widgets/TagFlipChips.svelte";
+  import RailScalarCell, { leavesRow } from "@/components/editor/RailScalarCell.svelte";
+  import RailFlipCandidate from "@/components/editor/RailFlipCandidate.svelte";
+  import { isTagFlipField, tagFlipItemsFor } from "@/components/widgets/TagFlipChips.svelte";
   import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
   import { aiSettings } from "@/lib/stores/aiSettings.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
@@ -296,10 +299,12 @@
     // `status` is stored off `metadata` (shell state) — read the prop this row
     // itself renders, not the metadata bag.
     if (fieldId === "status") return !status;
-    // A field with a declared default shows that default when unset
-    // (FieldValueEditor's required-select rule, #1421; writeField pops the key
-    // when the default is re-picked) — a value is on screen, so not empty.
-    if (field.default !== undefined && field.default !== null && field.default !== "") return false;
+    // A SELECT with a declared default shows that default when unset
+    // (FieldValue/FieldValueEditor's required-select rule, #1421; writeField
+    // pops the key when the default is re-picked) — a value is on screen, so
+    // not empty. Only selects render a default this way: a text/number default
+    // is seeded into new entries, never displayed for an absent value.
+    if (field.type === "select" && field.default !== undefined && field.default !== null && field.default !== "") return false;
     return !isMetadataValuePresent(displayValue(fieldId));
   }
 
@@ -499,6 +504,60 @@
   function updateAssistantProvider(provider: string, tier: string, model: string) {
     onMetadataChange?.({ ...metadata, ai_provider: provider, ai_capability_tier: tier, ai_model: model });
   }
+
+  // Read at rest, edit on demand (#1884 slice 4): `RailScalarCell` owns the two
+  // widgets (rest display + live control) for one scalar row; this component
+  // owns only WHICH row is "open" at a time and the document-level
+  // outside-click listener that closes it. Transient UI state — never
+  // persisted, resets with the node.
+  let openFieldId = $state<string | null>(null);
+  const SCALAR_TYPES = new Set(["text", "number", "boolean", "select", "multi_select", "date"]);
+  function isScalarRow(field: MetadataFieldDefinition, fieldId: string): boolean {
+    // A field-level read-only (e.g. ai_temperature on a no-sampling model) has
+    // no edit state to toggle into — it stays the plain read-only editor.
+    if (fieldReadOnly(fieldId) || isFlipResolve(fieldId)) return false;
+    return fieldId === "status" || SCALAR_TYPES.has(field.type);
+  }
+  function isEditing(fieldId: string): boolean { return openFieldId === fieldId; }
+  // Single-pick controls: the pick IS the edit, so the row returns to rest on change.
+  function closesOnPick(field: MetadataFieldDefinition, fieldId: string): boolean {
+    return fieldId === "status" || field.type === "select" || field.type === "boolean";
+  }
+  let openRowEl: HTMLElement | null = null;
+  async function openField(fieldId: string, rowEl: HTMLElement) {
+    openFieldId = fieldId;
+    openRowEl = rowEl;
+    await tick();
+    // Focus the first control the editor rendered, so Enter on the hit target
+    // lands the writer in the input without a second click.
+    const first = rowEl.querySelector<HTMLElement>(".fr-val input, .fr-val select, .fr-val textarea, .fr-val button:not(.fr-override-marker)");
+    first?.focus();
+  }
+  function closeField(fieldId: string) { if (openFieldId === fieldId) openFieldId = null; }
+
+  // Reset the open row whenever the shown node changes. MetadataPanel is not
+  // remounted per node by NodeEditor (only the Backlinks/Conversations/Pinned-
+  // sets panels are keyed on `scene.id`), so the open row has to be reset here
+  // — `excludeId` is NodeEditor's `scene?.id`, the node identity this panel is
+  // fed for.
+  $effect(() => {
+    void excludeId;
+    openFieldId = null;
+  });
+
+  // Outside click (while a row is open): close it when the pointerdown lands
+  // outside the open row and outside a body-portaled ColoredSelect popover.
+  // `capture: true` so a click on a control that stops propagation still closes.
+  $effect(() => {
+    if (openFieldId === null) return;
+    const rowEl = openRowEl;
+    const fieldId = openFieldId;
+    function onPointerDown(event: PointerEvent) {
+      if (rowEl && leavesRow(rowEl, event.target)) closeField(fieldId);
+    }
+    document.addEventListener("pointerdown", onPointerDown, { capture: true });
+    return () => document.removeEventListener("pointerdown", onPointerDown, { capture: true });
+  });
 </script>
 
 <section class="scene-metadata" aria-label={`${documentLabel} details`}>
@@ -576,7 +635,7 @@
       />
     {/if}
     {#if !showGroupHeads || groupExpanded(section)}
-    {#each section.ids as fieldId}
+    {#each section.ids as fieldId (fieldId)}
       <!-- Intrinsic identity fields (id/title/entry_type, #116) are surfaced
            via dedicated rail controls (the type select above, the shell title
            header) and stored off `metadata`, so skip them in the generic
@@ -592,7 +651,7 @@
       {#if rendersRow(fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")} class:empty={isRowEmpty(field, fieldId)}>
+        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")} class:empty={isRowEmpty(field, fieldId)} class:scalar={isScalarRow(field, fieldId)} class:editing={isEditing(fieldId)}>
           <!-- Disclosure gutter — reserved so the field glyph lines up with the
                collapsible sections' glyph column (RailSectionHeader): caret ·
                glyph on every rail line (#1438). Reference fields no longer
@@ -638,7 +697,12 @@
           {:else}
             <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           {/if}
-          <span class="fr-name" title={field.description || undefined}>{fieldLabel}</span>
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <span
+            class="fr-name"
+            title={field.description || undefined}
+            onclick={(e) => { if (isScalarRow(field, fieldId) && !isEditing(fieldId)) openField(fieldId, e.currentTarget.closest(".field-row") as HTMLElement); }}
+          >{fieldLabel}</span>
           <div class="fr-val" title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : isCascadeInherited(fieldId) ? `Inherited from ${cascadeSourceLabel(fieldId)}` : undefined}>
             {#if isOverridden(fieldId)}
               {#if canResetOverride}
@@ -680,76 +744,50 @@
               {/if}
             {/if}
             {#if isFlipResolve(fieldId)}
-              <!-- AI lore-proposal review (ADR-0046 slice 3b): an atomic
-                   structured flip. The proposed value renders read-only (inert,
-                   so its own widgets never steal the click or focus), the whole
-                   value is one click-to-adopt hit target — the rail twin of
-                   "click the dotted wording to adopt it" — and a muted line shows
-                   the current value the adopt would replace. The `.flipped` /
-                   `.flip-was` row tint (cool pending, warm adopted) is reused
-                   as-is; nothing new-coloured here. -->
-              <div class="fr-flip">
-                <div class="fr-flip-candidate">
-                  <div class="fr-flip-value" inert>
-                    {#if isTagFlipField(field, metadataSchema)}
-                      <!-- #1797: the candidate can mix resolved ids with
-                           still-unminted titles — the generic ReferencePicker
-                           path only knows ids, so this renders its own chip
-                           strip (`TagFlipChips`, round 2 Y7): a known tag
-                           shows its title, an unresolved one shows as a "new
-                           tag" candidate (accepting the flip is what mints
-                           it, ADR-0082 §2 — never here). -->
-                      <TagFlipChips
-                        items={tagFlipItemsFor(displayValue(fieldId), $tagTitleById)}
-                        ariaLabel={fieldLabel}
-                      />
-                    {:else}
-                      <FieldValueEditor
-                        {field}
-                        readOnly={true}
-                        allowUnset={true}
-                        embedded={true}
-                        value={displayValue(fieldId)}
-                        ariaLabel={fieldLabel}
-                        loreEntries={loreEntries}
-                        promptEntries={promptEntries}
-                        structure={structure}
-                        researchStructure={researchStructure}
-                        implicitContextMatcher={implicitContextMatcher}
-                        excludeId={excludeId}
-                        onChange={() => {}}
-                      />
-                    {/if}
-                  </div>
-                  <button
-                    type="button"
-                    class="fr-flip-hit"
-                    aria-pressed={isFlipAdopted(fieldId)}
-                    title={isFlipAdopted(fieldId)
-                      ? `Adopted — click to keep the current ${fieldLabel}`
-                      : `Adopt this proposed ${fieldLabel}`}
-                    aria-label={isFlipAdopted(fieldId)
-                      ? `Adopted proposed ${fieldLabel}; click to keep the current value`
-                      : `Adopt proposed ${fieldLabel}`}
-                    onclick={() => compare?.resolve?.onToggle(fieldId)}
-                  ></button>
-                </div>
-                <small class="fr-flip-from">Current: {flipCurrentHint(fieldId) || "unset"}</small>
-              </div>
+              <RailFlipCandidate
+                {field} {fieldLabel}
+                value={displayValue(fieldId)}
+                adopted={isFlipAdopted(fieldId)}
+                onToggle={() => compare?.resolve?.onToggle(fieldId)}
+                currentHint={flipCurrentHint(fieldId)}
+                tagItems={isTagFlipField(field, metadataSchema) ? tagFlipItemsFor(displayValue(fieldId), $tagTitleById) : null}
+                loreEntries={loreEntries}
+                promptEntries={promptEntries}
+                structure={structure}
+                researchStructure={researchStructure}
+                implicitContextMatcher={implicitContextMatcher}
+                excludeId={excludeId}
+              />
             {:else if fieldId === "status"}
               <!-- status is stored off `metadata` and edited via onStatusChange. -->
-              <ColoredSelect
-                value={isMutated("status")
-                  ? metadataValueString(effectiveOverrides?.["status"])
-                  : isFlipped("status")
-                    ? metadataValueString(compare?.fields["status"]?.[compare.side] as MetadataValue)
-                    : status}
-                options={field.options}
-                ariaLabel={fieldLabel}
-                placeholder="(no status)"
-                {readOnly}
-                onChange={(value) => onStatusChange?.(value)}
-              />
+              {@const statusValue = isMutated("status")
+                ? metadataValueString(effectiveOverrides?.["status"])
+                : isFlipped("status")
+                  ? metadataValueString(compare?.fields["status"]?.[compare.side] as MetadataValue)
+                  : status}
+              {#if !isScalarRow(field, fieldId)}
+                <ColoredSelect
+                  value={statusValue}
+                  options={field.options}
+                  ariaLabel={fieldLabel}
+                  placeholder="(no status)"
+                  {readOnly}
+                  onChange={(value) => onStatusChange?.(value)}
+                />
+              {:else}
+                <RailScalarCell
+                  {field}
+                  {fieldId}
+                  {fieldLabel}
+                  value={statusValue}
+                  empty={isRowEmpty(field, fieldId)}
+                  editing={isEditing(fieldId)}
+                  closesOnPick={closesOnPick(field, fieldId)}
+                  onOpen={openField}
+                  onClose={closeField}
+                  onChange={(v) => onStatusChange?.(String(v))}
+                />
+              {/if}
             {:else if field.type === "computed"}
               {@const computedRaw = computedFieldString(fieldId)}
               {@const computedValue = (field.options ?? []).find((option) => option.value === computedRaw)?.label ?? computedRaw}
@@ -776,7 +814,7 @@
               {#if !metadataValueString(displayValue(fieldId))}
                 <small class="muted">inherited</small>
               {/if}
-            {:else}
+            {:else if !isScalarRow(field, fieldId)}
               <FieldValueEditor
                 {field}
                 readOnly={fieldReadOnly(fieldId)}
@@ -796,6 +834,19 @@
                 createLayerId={createLayerId}
                 onChange={(v) => writeField(fieldId, v)}
                 onNavigate={(payload) => onNavigate?.(payload)}
+              />
+            {:else}
+              <RailScalarCell
+                {field}
+                {fieldId}
+                {fieldLabel}
+                value={displayValue(fieldId)}
+                empty={isRowEmpty(field, fieldId)}
+                editing={isEditing(fieldId)}
+                closesOnPick={closesOnPick(field, fieldId)}
+                onOpen={openField}
+                onClose={closeField}
+                onChange={(v) => writeField(fieldId, v)}
               />
             {/if}
             {#if isMutated(fieldId)}
@@ -1276,43 +1327,11 @@
     box-shadow: none;
   }
 
-  /* Interactive lore-proposal flip (ADR-0046 slice 3b). The `.fr-val` tint above
-     already carries adopted (warm) vs pending (cool dotted); this only lays out
-     the click-to-adopt candidate + the current-value hint. */
-  .fr-flip {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    width: 100%;
-  }
-  /* The hit target overlays the read-only value so the *value* is what you click
-     (the atomic twin of the body flip's "click the wording"). The candidate's
-     own widgets are `inert`, so this button is the row's only interactive part. */
-  .fr-flip-candidate {
-    position: relative;
-  }
-  .fr-flip-value {
-    pointer-events: none;
-  }
-  .fr-flip-hit {
-    position: absolute;
-    inset: -1px -4px;
-    width: calc(100% + 8px);
-    background: transparent;
-    border: 0;
-    padding: 0;
-    margin: 0;
-    border-radius: var(--r-sm);
-    cursor: pointer;
-  }
-  .fr-flip-hit:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-  }
-  .fr-flip-from {
-    font-size: var(--fs-sm);
-    color: var(--text-3);
-  }
+  /* Read at rest (#1884 slice 4): the rest/edit cell itself is
+     `RailScalarCell` (extracted to stay under the file-size budget); these two
+     rules key off `.field-row` state, which is this component's own class. */
+  .field-row.scalar:not(.editing) .fr-name { cursor: pointer; }
+  .field-row.editing { background: var(--inset); box-shadow: inset 2px 0 0 var(--accent); }
 
   .fr-computed {
     display: inline-flex;

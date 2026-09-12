@@ -21,8 +21,7 @@ let latest = 0;
 // not listening yet — and leaves the previous roster in place, matching
 // `refreshAssistantEntries` (`stores/assistants.ts`). A throw here would
 // otherwise abort `rehydrate()`/`startCreateWizard()` before the wizard even
-// opens, and make `clearProjectData`'s fire-and-forget call an unhandled
-// rejection.
+// opens.
 export async function refreshTagNodes(): Promise<void> {
   const seq = ++latest;
   try {

@@ -28,10 +28,12 @@ vi.mock("@/lib/stores/chats", () => ({ clearChats: vi.fn() }));
 vi.mock("@/lib/stores/assistants", () => ({ refreshAssistantEntries: vi.fn(async () => {}), clearAssistants: vi.fn() }));
 vi.mock("@/lib/stores/aiSpend.svelte", () => ({ aiSpend: { reset: vi.fn() } }));
 
-import { refreshAssistantEntries } from "@/lib/stores/assistants";
-import { refreshTagNodes } from "@/lib/stores/tagNodes";
-import { refreshStructure } from "@/lib/stores/structure";
-import { loadProjectData } from "@/lib/stores/index";
+import { clearAssistants, refreshAssistantEntries } from "@/lib/stores/assistants";
+import { clearTagNodes, refreshTagNodes } from "@/lib/stores/tagNodes";
+import { clearStructure, refreshStructure } from "@/lib/stores/structure";
+import { clearChats } from "@/lib/stores/chats";
+import { aiSpend } from "@/lib/stores/aiSpend.svelte";
+import { clearProjectData, loadProjectData } from "@/lib/stores/index";
 
 describe("loadProjectData (project-open fan-out)", () => {
   it("re-reads the layered rosters — assistants (#1878) and tags — under the project's scope", async () => {
@@ -40,5 +42,26 @@ describe("loadProjectData (project-open fan-out)", () => {
     expect(refreshAssistantEntries).toHaveBeenCalledTimes(1);
     expect(refreshTagNodes).toHaveBeenCalledTimes(1);
     expect(refreshStructure).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #1881: the switch half. Before it, this had no caller and App hand-cleared
+// tags, chats and spend on a switch — but not assistants, so project A's
+// roster stayed on offer under project B until B's GET landed.
+describe("clearProjectData (project-switch fan-out)", () => {
+  it("clears every domain slice including both layered rosters, and refreshes nothing", () => {
+    vi.mocked(refreshTagNodes).mockClear();
+    vi.mocked(refreshAssistantEntries).mockClear();
+
+    clearProjectData();
+
+    expect(clearAssistants).toHaveBeenCalledTimes(1);
+    expect(clearTagNodes).toHaveBeenCalledTimes(1);
+    expect(clearChats).toHaveBeenCalledTimes(1);
+    expect(clearStructure).toHaveBeenCalledTimes(1);
+    expect(aiSpend.reset).toHaveBeenCalledTimes(1);
+    // The open path re-reads everything next; a stray refresh here would race it.
+    expect(refreshTagNodes).not.toHaveBeenCalled();
+    expect(refreshAssistantEntries).not.toHaveBeenCalled();
   });
 });

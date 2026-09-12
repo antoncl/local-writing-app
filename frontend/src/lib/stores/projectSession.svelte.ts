@@ -25,7 +25,7 @@ import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { createWizard } from "@/lib/stores/createWizard.svelte";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
-import { loadProjectData } from "@/lib/stores/index";
+import { clearProjectData, loadProjectData } from "@/lib/stores/index";
 import type {
   AIPolicy,
   MachineSettingsDraft,
@@ -328,6 +328,7 @@ class ProjectSession {
       await this.#applyProjectNodeDraft(nodeMetadata, description);
       this.rememberLastProject(openedProject.root_path);
       this.onOpenWorkspace(openedProject);
+      clearProjectData();
       await loadProjectData();
       this.onProjectDataLoaded();
       const initialSceneId = findFirstSceneId(get(structureStore)?.root);
@@ -374,6 +375,7 @@ class ProjectSession {
       const openedProject = await api.openProject(path);
       this.rememberLastProject(openedProject.root_path);
       this.onOpenWorkspace(openedProject);
+      clearProjectData();
       await loadProjectData();
       this.onProjectDataLoaded();
       await this.refreshRecents();

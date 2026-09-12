@@ -45,14 +45,13 @@
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
   import { declarationRows, toggledDeclaration } from "@/lib/utils/projectChain";
   import { get } from "svelte/store";
-  import { chatSessionsStore, setChatSessions } from "@/lib/stores/chats";
+  import { chatSessionsStore } from "@/lib/stores/chats";
   import {
     todosStore,
     embeddedTodosStore,
     refreshTodos as storeRefreshTodos,
     refreshEmbeddedTodos as storeRefreshEmbeddedTodos,
   } from "@/lib/stores/todos";
-  import { clearTagNodes } from "@/lib/stores/tagNodes";
   import { validationStore, setValidation, clearValidation } from "@/lib/stores/validation";
   import {
     structureStore,
@@ -358,11 +357,9 @@
     // loadForProject re-seeds it (openProjectWorkspace calls this first).
     workspaceLayout.closeForProject();
     paneViews.reset();
-    clearTagNodes();
-    setChatSessions([]);
-    // The AI Spend singleton would otherwise paint the previous project's
-    // totals under the next one until its refetch lands.
-    aiSpend.reset();
+    // The domain stores (lists, the tag/assistant rosters, chats, AI spend)
+    // are cleared by `clearProjectData` on the open path itself, right after
+    // this runs (#1881) — one fan-out, the mirror of `loadProjectData`.
     // Preserve all pane configs. An earlier version stripped chat/preview/
     // prompts/assistants/chats out of `panes`, which made `panes.chats` etc.
     // undefined after a project switch — focusPane then created `{ z }` entries

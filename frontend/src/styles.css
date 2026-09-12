@@ -836,9 +836,21 @@ button.row-action-add.active {
 }
 
 /* A cell selection (drag across cells) — prosemirror-tables marks the cells,
-   the app paints them (#1896). */
-.editor-body .selectedCell {
-  background: var(--accent-soft);
+   the app paints them (#1896). An overlay rather than a background, so a
+   header cell tints as visibly as a body cell; scoped to the ProseMirror root,
+   so every prose editor (the body, the rail's long_text fields) gets it. */
+.ProseMirror td,
+.ProseMirror th {
+  position: relative;
+}
+
+.ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
 }
 
 .editor-body th p,

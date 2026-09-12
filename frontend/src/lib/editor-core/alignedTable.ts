@@ -7,8 +7,10 @@
 // table geometry directly rather than TipTap's single-cell setCellAttribute.
 import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import Table from "@tiptap/extension-table";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
+import TableRow from "@tiptap/extension-table-row";
 
 export const AlignedTableCell = TableCell.extend({
   addAttributes() {
@@ -78,3 +80,9 @@ export function setColumnAlign(editor: Editor, align: "left" | "center" | "right
   view.dispatch(tr);
   editor.commands.focus();
 }
+
+/** The table extension set every prose editor installs — spelled once, so the
+ *  two hosts cannot drift. Not resizable (#1896): the markdown table carries no
+ *  column widths, so a dragged width never survived a reload — an affordance
+ *  that lied. */
+export const tableExtensions = [Table, TableRow, AlignedTableHeader, AlignedTableCell];

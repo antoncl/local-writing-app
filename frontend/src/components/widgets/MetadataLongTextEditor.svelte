@@ -2,14 +2,12 @@
   import { onMount, untrack } from "svelte";
   import { Editor } from "@tiptap/core";
   import StarterKit from "@tiptap/starter-kit";
-  import Table from "@tiptap/extension-table";
-  import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
-  import { AlignedTableCell, AlignedTableHeader } from "@/lib/editor-core/alignedTable";
+  import { tableExtensions } from "@/lib/editor-core/alignedTable";
   import { placeSelectionToolbar, type FloatingMenuState, type ToolbarAction } from "@/lib/editor-core/selectionToolbar";
   import { visibleSelectionRect, selectionEndpointRect } from "@/lib/editor-core/selectionRects";
   import { formattingToolbarActions } from "@/lib/editor-core/formattingToolbarActions";
@@ -145,12 +143,7 @@
       element: editorElement,
       extensions: [
         StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
-        // Not resizable (#1896): the markdown table carries no column widths, so a
-        // dragged width never survived a reload — an affordance that lied.
-        Table,
-        TableRow,
-        AlignedTableHeader,
-        AlignedTableCell,
+        ...tableExtensions,
         ImplicitContextHighlight.configure({ matcher }),
       ],
       content: "",

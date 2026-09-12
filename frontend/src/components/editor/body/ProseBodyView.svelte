@@ -25,8 +25,6 @@
   import { TextSelection, type Transaction } from "@tiptap/pm/state";
   import type { EditorView } from "@tiptap/pm/view";
   import StarterKit from "@tiptap/starter-kit";
-  import Table from "@tiptap/extension-table";
-  import TableRow from "@tiptap/extension-table-row";
   import {
     minimalReplaceTransaction,
     parseHtmlToDoc,
@@ -84,7 +82,7 @@
   } from "@/lib/editor-core/selectionToolbar";
   import { formattingToolbarParts } from "@/lib/editor-core/formattingToolbarActions";
   import { visibleSelectionRect, selectionEndpointRect } from "@/lib/editor-core/selectionRects";
-  import { AlignedTableCell, AlignedTableHeader } from "@/lib/editor-core/alignedTable";
+  import { tableExtensions } from "@/lib/editor-core/alignedTable";
   import ProseSlashMenu from "./ProseSlashMenu.svelte";
   import ProseSelectionToolbar from "./ProseSelectionToolbar.svelte";
   import ProseAIToolbar from "./ProseAIToolbar.svelte";
@@ -1072,12 +1070,7 @@
         MutationMark,
         MutationCloseMark,
         TodoAnchor,
-        // Not resizable (#1896): the markdown table carries no column widths, so a
-        // dragged width never survived a reload — an affordance that lied.
-        Table,
-        TableRow,
-        AlignedTableHeader,
-        AlignedTableCell,
+        ...tableExtensions,
         ImplicitContextHighlight.configure({ matcher: implicitContextMatcher }),
         InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],

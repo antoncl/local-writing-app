@@ -123,7 +123,21 @@
       await command();
     } finally {
       editor?.commands.focus();
+      // A no-op command (Style → Paragraph on a paragraph) dispatches nothing,
+      // so no selectionUpdate closes the dropdown — close it here, as the body
+      // does, and let the menu re-derive from the current selection.
+      openMenuId = null;
+      updateMenu();
     }
+  }
+
+  // "Empty" for the `+` placeholder = one blank paragraph, the doc that
+  // setContent("<p></p>") produces. TipTap's `editor.isEmpty` recurses into
+  // children, so a freshly inserted 3×3 table with nothing typed would count
+  // as empty and draw the `+` over its first cell.
+  function isBlankDocument(ed: Editor): boolean {
+    const { doc } = ed.state;
+    return doc.childCount === 1 && doc.firstChild!.type.name === "paragraph" && doc.firstChild!.content.size === 0;
   }
 
   onMount(() => {
@@ -150,7 +164,7 @@
         if (!editor || applyingExternalValue) return;
         loadedValue = editorHtmlToSceneMarkdown(editor.getHTML());
         pendingLocalValue = loadedValue;
-        isEmpty = editor.isEmpty;
+        isEmpty = isBlankDocument(editor);
         updateMenu();
         onChange(loadedValue);
       },
@@ -178,7 +192,7 @@
     lastExternalValue = nextValue || "";
     pendingLocalValue = null;
     applyingExternalValue = false;
-    isEmpty = editor.isEmpty;
+    isEmpty = isBlankDocument(editor);
   }
 </script>
 

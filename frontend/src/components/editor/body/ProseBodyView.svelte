@@ -731,10 +731,6 @@
     // with an empty selection). visibleSelectionRect returns null for an
     // empty range, so the caret endpoint is the fallback.
     const anchorRect = (hasText ? visibleSelectionRect(editorFrame) : null) ?? selectionEndpointRect(editor);
-    if (!anchorRect) {
-      hideSelectionMenu();
-      return;
-    }
 
     const wordCount = hasText ? countWords(selectedText) : 0;
     const placed = placeSelectionToolbar(

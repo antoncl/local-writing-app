@@ -409,6 +409,13 @@
   .lv-member-value :global(textarea) {
     width: 100%;
   }
+  /* The long-text widget has no chrome of its own to give it width (#1884), so
+     the row hands it the full value column — as MetadataPanel's wide field-row
+     and MutationFieldRows already do for their children. */
+  .lv-member-value :global(.metadata-long-text) {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
   .lv-flat {
     padding: 4px 6px;
   }

@@ -46,7 +46,7 @@ function mount(metadata: EntryMetadata) {
 async function pick(optionLabel: string) {
   // #1884 slice 4: the row reads at rest until opened — open it first, THEN
   // its live ColoredSelect trigger (same "Context" name) becomes interactive.
-  await fireEvent.click(screen.getByRole("button", { name: "Edit Context" }));
+  await fireEvent.click(screen.getByRole("button", { name: /^Edit Context/ }));
   await fireEvent.click(screen.getByRole("button", { name: "Context" })); // open
   await fireEvent.click(screen.getByRole("option", { name: optionLabel }));
 }

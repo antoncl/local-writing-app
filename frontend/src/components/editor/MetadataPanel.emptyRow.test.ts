@@ -10,7 +10,7 @@ import type { EntryMetadata, MetadataSchema } from "@/lib/types";
 
 const SCHEMA = {
   version: 1,
-  entry_types: { "lore:character": { name: "Character", kind: "lore", fields: ["status", "alias", "tone", "mood", "hue", "kin"] } },
+  entry_types: { "lore:character": { name: "Character", kind: "lore", fields: ["status", "alias", "nick", "tone", "mood", "hue", "kin"] } },
   fields: {
     // `status` is stored OFF metadata (NodeEditor shell state) and reaches the
     // rail as its own prop — the row must read that prop, not the metadata bag.
@@ -20,6 +20,9 @@ const SCHEMA = {
       options: [{ value: "draft", label: "Draft" }, { value: "complete", label: "Complete" }],
     },
     alias: { name: "Alias", type: "text" },
+    // A TEXT default is only seeded into new entries — an absent value shows
+    // nothing, so the row IS empty (the default rule is select-only).
+    nick: { name: "Nick", type: "text", default: "n/a" },
     // A select with a declared default shows the default when unset (#1421) —
     // a value is on screen, so the row is never empty.
     mood: {
@@ -57,7 +60,7 @@ function mount(metadata: EntryMetadata, status = "") {
       documentKind: "lore",
       documentLabel: "Entry",
       documentEntryTypes: [["lore:character", SCHEMA.entry_types["lore:character"]]] as never,
-      metadataFieldIds: ["status", "alias", "tone", "mood", "hue", "kin"],
+      metadataFieldIds: ["status", "alias", "nick", "tone", "mood", "hue", "kin"],
       onMetadataChange: vi.fn(),
     },
   });
@@ -83,6 +86,11 @@ describe("MetadataPanel — empty rows recede (#1884 slice 3)", () => {
   it("a select with a declared default is never empty — the default is on screen", () => {
     mount({});
     expect(rowFor("Mood").classList.contains("empty")).toBe(false);
+  });
+
+  it("a TEXT field with a declared default is still empty when unset — nothing renders the default", () => {
+    mount({});
+    expect(rowFor("Nick").classList.contains("empty")).toBe(true);
   });
 
   it("empty metadata: alias, tone, kin are .empty; hue is not (always an effective swatch)", () => {

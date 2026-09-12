@@ -18,12 +18,14 @@
   // (status → ColoredSelect, everything else → FieldValueEditor) so a call
   // site only hands over data, not markup twice. MetadataPanel owns WHICH row
   // is open (`openFieldId`) and the document-level outside-click listener.
-  // Same overlay-hit-button recipe as MetadataPanel's own `.fr-flip` (the
-  // display widgets are themselves buttons — ColoredSelect, ToggleSwitch — so
-  // they can't nest inside another button).
+  // Same overlay-hit-button recipe as RailFlipCandidate (the display widgets
+  // are themselves buttons — ColoredSelect, ToggleSwitch — so they can't nest
+  // inside another button). The inert display leaves the accessibility tree,
+  // so the hit button's name carries the value: "Edit Alias: The Painted".
   import { tick } from "svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
+  import { metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
   import type { MetadataFieldDefinition, MetadataValue } from "@/lib/types";
 
   interface Props {
@@ -34,8 +36,6 @@
     value: MetadataValue;
     empty: boolean;
     editing: boolean;
-    /** Field-level read-only (e.g. ai_temperature on a no-sampling model) — the live control renders read-only too. */
-    readOnly?: boolean;
     /** Single-pick controls return to rest right after the pick. */
     closesOnPick: boolean;
     onOpen: (fieldId: string, rowEl: HTMLElement) => void;
@@ -43,21 +43,45 @@
     onChange: (value: MetadataValue) => void;
   }
 
-  let { field, fieldId, fieldLabel, value, empty, editing, readOnly = false, closesOnPick, onOpen, onClose, onChange }: Props = $props();
+  let { field, fieldId, fieldLabel, value, empty, editing, closesOnPick, onOpen, onClose, onChange }: Props = $props();
 
   function noop() {}
+
+  // What a screen reader hears for the value the inert display shows: the
+  // option's label for a select/status, on/off for a boolean, the display
+  // string otherwise.
+  const restText = $derived.by(() => {
+    if (fieldId === "status" || field.type === "select") {
+      const raw = String(value ?? "");
+      return field.options.find((o) => o.value === raw)?.label ?? raw;
+    }
+    if (field.type === "boolean") return value ? "on" : "off";
+    return metadataValueDisplayString(value);
+  });
+
+  // Returning to rest hands focus back to the hit target after the DOM has
+  // flipped, so a keyboard user's place in the rail survives the swap — the
+  // live control they were on is gone.
+  async function restoreFocus(rowEl: HTMLElement | null) {
+    await tick();
+    rowEl?.querySelector<HTMLElement>(".fr-rest-hit")?.focus();
+  }
+  let editEl = $state<HTMLDivElement | null>(null);
   function pick(v: MetadataValue) {
     onChange(v);
-    if (closesOnPick) onClose(fieldId);
+    if (closesOnPick) {
+      const rowEl = editEl?.closest<HTMLElement>(".field-row") ?? null;
+      onClose(fieldId);
+      void restoreFocus(rowEl);
+    }
   }
 
   // Escape closes the row AND hands focus back to its rest-state hit target
   // (after the DOM has flipped back to rest), so a keyboard user doesn't lose
   // their place in the rail.
-  async function closeViaEscape(rowEl: HTMLElement) {
+  function closeViaEscape(rowEl: HTMLElement) {
     onClose(fieldId);
-    await tick();
-    rowEl.querySelector<HTMLElement>(".fr-rest-hit")?.focus();
+    void restoreFocus(rowEl);
   }
 </script>
 
@@ -65,13 +89,14 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="fr-edit"
-    onkeydown={(e) => { if (e.key === "Escape") { e.stopPropagation(); void closeViaEscape(e.currentTarget.closest(".field-row") as HTMLElement); } }}
+    bind:this={editEl}
+    onkeydown={(e) => { if (e.key === "Escape") { e.stopPropagation(); closeViaEscape(e.currentTarget.closest(".field-row") as HTMLElement); } }}
     onfocusout={(e) => { if (leavesRow(e.currentTarget.closest(".field-row") as HTMLElement, e.relatedTarget)) onClose(fieldId); }}
   >
     {#if fieldId === "status"}
       <ColoredSelect value={String(value ?? "")} options={field.options} ariaLabel={fieldLabel} placeholder="(no status)" onChange={pick} />
     {:else}
-      <FieldValueEditor {field} {readOnly} allowUnset={true} embedded={true} {value} ariaLabel={fieldLabel} onChange={pick} />
+      <FieldValueEditor {field} allowUnset={true} embedded={true} {value} ariaLabel={fieldLabel} onChange={pick} />
     {/if}
   </div>
 {:else}
@@ -88,7 +113,7 @@
     <button
       type="button"
       class="fr-rest-hit"
-      aria-label={`Edit ${fieldLabel}`}
+      aria-label={empty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}: ${restText}`}
       title={empty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}`}
       onclick={(e) => onOpen(fieldId, e.currentTarget.closest(".field-row") as HTMLElement)}
     ></button>

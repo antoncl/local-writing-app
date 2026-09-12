@@ -118,9 +118,9 @@ describe("MetadataPanel — Temperature read-only for no-sampling models (#1554)
     // #1884 slice 4: an unset scalar reads at rest (a "+" affordance) until
     // opened — open the row first, THEN the live control carries the label.
     await vi.waitFor(() =>
-      expect(container.querySelector("[aria-label='Edit Temperature']")).not.toBeNull(),
+      expect(container.querySelector("[aria-label='Set Temperature']")).not.toBeNull(),
     );
-    await fireEvent.click(container.querySelector("[aria-label='Edit Temperature']") as HTMLElement);
+    await fireEvent.click(container.querySelector("[aria-label='Set Temperature']") as HTMLElement);
     await vi.waitFor(() =>
       expect(container.querySelector("[aria-label='Temperature']")).not.toBeNull(),
     );

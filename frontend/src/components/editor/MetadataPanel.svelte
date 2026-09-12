@@ -299,10 +299,12 @@
     // `status` is stored off `metadata` (shell state) — read the prop this row
     // itself renders, not the metadata bag.
     if (fieldId === "status") return !status;
-    // A field with a declared default shows that default when unset
-    // (FieldValueEditor's required-select rule, #1421; writeField pops the key
-    // when the default is re-picked) — a value is on screen, so not empty.
-    if (field.default !== undefined && field.default !== null && field.default !== "") return false;
+    // A SELECT with a declared default shows that default when unset
+    // (FieldValue/FieldValueEditor's required-select rule, #1421; writeField
+    // pops the key when the default is re-picked) — a value is on screen, so
+    // not empty. Only selects render a default this way: a text/number default
+    // is seeded into new entries, never displayed for an absent value.
+    if (field.type === "select" && field.default !== undefined && field.default !== null && field.default !== "") return false;
     return !isMetadataValuePresent(displayValue(fieldId));
   }
 
@@ -633,7 +635,7 @@
       />
     {/if}
     {#if !showGroupHeads || groupExpanded(section)}
-    {#each section.ids as fieldId}
+    {#each section.ids as fieldId (fieldId)}
       <!-- Intrinsic identity fields (id/title/entry_type, #116) are surfaced
            via dedicated rail controls (the type select above, the shell title
            header) and stored off `metadata`, so skip them in the generic
@@ -780,7 +782,6 @@
                   value={statusValue}
                   empty={isRowEmpty(field, fieldId)}
                   editing={isEditing(fieldId)}
-                  readOnly={fieldReadOnly(fieldId)}
                   closesOnPick={closesOnPick(field, fieldId)}
                   onOpen={openField}
                   onClose={closeField}
@@ -842,7 +843,6 @@
                 value={displayValue(fieldId)}
                 empty={isRowEmpty(field, fieldId)}
                 editing={isEditing(fieldId)}
-                readOnly={fieldReadOnly(fieldId)}
                 closesOnPick={closesOnPick(field, fieldId)}
                 onOpen={openField}
                 onClose={closeField}

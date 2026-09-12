@@ -81,7 +81,7 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
     const row = rowFor("Alias");
     expect(row.querySelector("input")).toBeNull();
     expect(row.querySelector(".fr-rest-value")?.textContent).toContain("The Painted");
-    expect(screen.getByRole("button", { name: "Edit Alias" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Edit Alias/ })).toBeTruthy();
 
     expect(rowFor("Notes").querySelector(".fr-rest-hit")).toBeNull();
     expect(rowFor("Kin").querySelector(".fr-rest-hit")).toBeNull();
@@ -97,7 +97,7 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
 
   it("click the hit opens the row: input appears, focused, .editing set; typing writes through", async () => {
     const { onMetadataChange } = mount({ alias: "The Painted" });
-    await fireEvent.click(screen.getByRole("button", { name: "Edit Alias" }));
+    await fireEvent.click(screen.getByRole("button", { name: /^Edit Alias/ }));
 
     const row = rowFor("Alias");
     expect(row.classList.contains("editing")).toBe(true);
@@ -107,6 +107,22 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
 
     await fireEvent.input(input, { target: { value: "X" } });
     expect(onMetadataChange).toHaveBeenCalledWith(expect.objectContaining({ alias: "X" }));
+  });
+
+  it("the hit's name carries the value for assistive tech — the inert display is out of the a11y tree", () => {
+    mount({ alias: "The Painted", tone: "warm", flag: true });
+    expect(screen.getByRole("button", { name: "Edit Alias: The Painted" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit Tone: Warm" })).toBeTruthy(); // the option LABEL, not the raw value
+    expect(screen.getByRole("button", { name: "Edit Flag: on" })).toBeTruthy();
+  });
+
+  it("a single pick returns focus to the row's hit target — the control it was on is gone", async () => {
+    mount({ tone: "warm" });
+    await fireEvent.click(screen.getByRole("button", { name: /^Edit Tone/ }));
+    await fireEvent.click(screen.getByRole("button", { name: "Tone" }));
+    await fireEvent.click(screen.getByRole("option", { name: "Cool" }));
+    await vi.waitFor(() => expect(rowFor("Tone").classList.contains("editing")).toBe(false));
+    await vi.waitFor(() => expect(document.activeElement).toBe(rowFor("Tone").querySelector(".fr-rest-hit")));
   });
 
   it("clicking the LABEL opens the row too (a convenience; the hit button is the keyboard path)", async () => {
@@ -119,7 +135,7 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
 
   it("Escape returns the open row to rest", async () => {
     mount({ alias: "The Painted" });
-    await fireEvent.click(screen.getByRole("button", { name: "Edit Alias" }));
+    await fireEvent.click(screen.getByRole("button", { name: /^Edit Alias/ }));
     const row = rowFor("Alias");
     const input = row.querySelector("input") as HTMLInputElement;
 
@@ -132,10 +148,11 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
 
   it("one row edits at a time: opening Tone closes Alias", async () => {
     mount({ alias: "The Painted" });
-    await fireEvent.click(screen.getByRole("button", { name: "Edit Alias" }));
+    await fireEvent.click(screen.getByRole("button", { name: /^Edit Alias/ }));
     expect(rowFor("Alias").classList.contains("editing")).toBe(true);
 
-    await fireEvent.click(screen.getByRole("button", { name: "Edit Tone" }));
+    // Tone is unset here, so its hit is named "Set Tone".
+    await fireEvent.click(screen.getByRole("button", { name: "Set Tone" }));
 
     expect(rowFor("Alias").classList.contains("editing")).toBe(false);
     expect(rowFor("Tone").classList.contains("editing")).toBe(true);
@@ -143,7 +160,7 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
 
   it("single pick (select): picking an option writes through and returns Tone to rest", async () => {
     const { onMetadataChange } = mount({ tone: "warm" });
-    await fireEvent.click(screen.getByRole("button", { name: "Edit Tone" }));
+    await fireEvent.click(screen.getByRole("button", { name: /^Edit Tone/ }));
     expect(rowFor("Tone").classList.contains("editing")).toBe(true);
 
     // Open the live ColoredSelect trigger (named "Tone") and pick "Cool".
@@ -158,9 +175,9 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
     const { onStatusChange } = mount({}, "draft");
     const statusRow = rowFor("Status");
     expect(statusRow.querySelector(".fr-rest-hit")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Edit Status" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Edit Status/ })).toBeTruthy();
 
-    await fireEvent.click(screen.getByRole("button", { name: "Edit Status" }));
+    await fireEvent.click(screen.getByRole("button", { name: /^Edit Status/ }));
     expect(statusRow.classList.contains("editing")).toBe(true);
 
     await fireEvent.click(screen.getByRole("button", { name: "Status" }));
@@ -178,7 +195,7 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
 
   it("focus leaving the row closes it; focus into a colored-select-popover keeps it open", async () => {
     mount({ alias: "The Painted" });
-    await fireEvent.click(screen.getByRole("button", { name: "Edit Alias" }));
+    await fireEvent.click(screen.getByRole("button", { name: /^Edit Alias/ }));
     const row = rowFor("Alias");
     const input = row.querySelector("input") as HTMLInputElement;
 
@@ -189,7 +206,7 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
     outside.remove();
 
     // Re-open, then focus out into a body-portaled popover — stays editing.
-    await fireEvent.click(screen.getByRole("button", { name: "Edit Alias" }));
+    await fireEvent.click(screen.getByRole("button", { name: /^Edit Alias/ }));
     const input2 = rowFor("Alias").querySelector("input") as HTMLInputElement;
     const popover = document.createElement("div");
     popover.className = "colored-select-popover";

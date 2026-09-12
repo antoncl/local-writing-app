@@ -28,6 +28,7 @@ const field = {
 const loreEntries = [
   { id: "lore_1", title: "Mira", entry_type: "lore:character" },
   { id: "lore_2", title: "Jonas", entry_type: "lore:character" },
+  { id: "lore_3", title: "Cato", entry_type: "lore:character" },
 ] as unknown as LoreEntrySummary[];
 
 afterEach(() => {
@@ -92,7 +93,9 @@ describe("ReferencePicker — embedded header (#1216)", () => {
 describe("ReferencePicker — controlled rail mode (#1732)", () => {
   // In the rail a reference renders as an inline pill, always visible — no
   // title, no caret, no expand. A single `entity_ref` and an `entity_ref_list`
-  // render identical pills; `expanded` is vestigial (ref rows no longer collapse).
+  // render identical pills. `expanded` now drives the fold (#1884 slice 2) for a
+  // `multi` field — see the "fold to first row" describe block below; for a
+  // single `entity_ref` it stays vestigial (never folds).
   it("controlled: renders no title and no caret/toggle button", () => {
     render(ReferencePicker, {
       props: { field, value: [], ariaLabel: "Characters", readOnly: true, embedded: true, controlled: true },
@@ -137,6 +140,175 @@ describe("ReferencePicker — controlled rail mode (#1732)", () => {
     });
     await fireEvent.click(screen.getByLabelText("Remove Mira"));
     expect(onChange).toHaveBeenCalledWith(["lore_2"]);
+  });
+});
+
+describe("ReferencePicker — fold to first row (#1884 slice 2)", () => {
+  const singleField = {
+    name: "Home Place",
+    type: "entity_ref",
+    options: [],
+    picker_config: { sources: [{ kind: "lore" }] },
+  } as unknown as MetadataFieldDefinition;
+
+  it("no layout (happy-dom, all rects zero) degrades to everything fits: no chip, all pills, add trigger", () => {
+    render(ReferencePicker, {
+      props: {
+        field,
+        value: ["lore_1", "lore_2", "lore_3"],
+        ariaLabel: "Characters",
+        loreEntries,
+        embedded: true,
+        controlled: true,
+        expanded: false,
+      },
+    });
+    expect(screen.getByText("Mira")).toBeInTheDocument();
+    expect(screen.getByText("Jonas")).toBeInTheDocument();
+    expect(screen.getByText("Cato")).toBeInTheDocument();
+    expect(document.querySelector(".ref-pill-more")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add Characters" })).toBeInTheDocument();
+  });
+
+  it("no layout: a value that grows after mount still fits — the action re-reads its params on update", async () => {
+    // Pins `update(next)` taking the NEW total: with the stale total (2) the
+    // no-layout fallback would report 2 visible of 3 and conjure a `+1` chip.
+    const props = {
+      field,
+      value: ["lore_1", "lore_2"],
+      ariaLabel: "Characters",
+      loreEntries,
+      embedded: true,
+      controlled: true,
+      expanded: false,
+    };
+    const { rerender } = render(ReferencePicker, { props });
+    await rerender({ ...props, value: ["lore_1", "lore_2", "lore_3"] });
+    expect(document.querySelectorAll(".ref-pill-slot")).toHaveLength(3);
+    expect(document.querySelectorAll(".ref-pill-slot.overflow")).toHaveLength(0);
+    expect(document.querySelector(".ref-pill-more")).toBeNull();
+  });
+
+  it("single entity_ref never folds, whatever expanded says", () => {
+    render(ReferencePicker, {
+      props: {
+        field: singleField,
+        value: "lore_1",
+        ariaLabel: "Home Place",
+        loreEntries,
+        embedded: true,
+        controlled: true,
+        expanded: false,
+      },
+    });
+    expect(screen.getByText("Mira")).toBeInTheDocument();
+    expect(document.querySelector(".ref-pill-more")).toBeNull();
+    expect(screen.getByRole("button", { name: "Change Home Place" })).toBeInTheDocument();
+  });
+
+  describe("with a stubbed layout", () => {
+    // happy-dom reports every rect at zero, so the fold degrades to "everything
+    // fits" (above) — this pins the real fold arithmetic by stubbing
+    // getBoundingClientRect per element: the row is 200px wide; pills 0 and 1
+    // sit on the first line (rights 60, 120), pill 2 wraps to a second line
+    // (top 24) — with a 40px fallback chip width and a 0 gap, 2 pills leave
+    // room for the chip (120 + 40 = 160 ≤ 200), so the fold keeps 2 and hides 1.
+    afterEach(() => vi.restoreAllMocks());
+
+    function stubLayout() {
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        const zero = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON() {} };
+        if (this.classList.contains("ref-pill-row")) {
+          return { ...zero, right: 200, width: 200, bottom: 24, height: 24 };
+        }
+        if (this.classList.contains("ref-pill") && !this.classList.contains("ref-pill-more")) {
+          const pills = [...document.querySelectorAll(".ref-pill:not(.ref-pill-more)")];
+          const idx = pills.indexOf(this);
+          const defs = [
+            { top: 0, right: 60 },
+            { top: 0, right: 120 },
+            { top: 24, right: 180 },
+          ];
+          const def = defs[idx] ?? { top: 0, right: 0 };
+          return { ...zero, top: def.top, right: def.right, width: def.right, bottom: def.top + 24, height: 24 };
+        }
+        return zero;
+      });
+    }
+
+    it("folds to 2 pills + a +1 chip; clicking the chip calls onToggleExpanded", async () => {
+      stubLayout();
+      const onToggleExpanded = vi.fn();
+      render(ReferencePicker, {
+        props: {
+          field,
+          value: ["lore_1", "lore_2", "lore_3"],
+          ariaLabel: "Characters",
+          loreEntries,
+          embedded: true,
+          controlled: true,
+          expanded: false,
+          onToggleExpanded,
+        },
+      });
+      // happy-dom doesn't enforce `display: none` for text queries, so assert
+      // the fold's own bookkeeping (the `overflow` class) rather than visibility.
+      const slots = document.querySelectorAll(".ref-pill-slot");
+      expect(slots).toHaveLength(3);
+      expect(slots[0].classList.contains("overflow")).toBe(false);
+      expect(slots[1].classList.contains("overflow")).toBe(false);
+      expect(slots[2].classList.contains("overflow")).toBe(true);
+      const chip = screen.getByText("+1");
+      await fireEvent.click(chip);
+      expect(onToggleExpanded).toHaveBeenCalledOnce();
+    });
+
+    it("flipping `expanded` after mount re-measures: unfold shows all, fold hides again (the action's update path)", async () => {
+      stubLayout();
+      const props = {
+        field,
+        value: ["lore_1", "lore_2", "lore_3"],
+        ariaLabel: "Characters",
+        loreEntries,
+        embedded: true,
+        controlled: true,
+        expanded: false,
+      };
+      const { rerender } = render(ReferencePicker, { props });
+      expect(document.querySelectorAll(".ref-pill-slot.overflow")).toHaveLength(1);
+      expect(document.querySelector(".ref-pill-more")).not.toBeNull();
+
+      await rerender({ ...props, expanded: true });
+      expect(document.querySelectorAll(".ref-pill-slot.overflow")).toHaveLength(0);
+      expect(document.querySelector(".ref-pill-more")).toBeNull();
+      expect(screen.getByRole("button", { name: "Add Characters" })).toBeInTheDocument();
+
+      await rerender({ ...props, expanded: false });
+      expect(document.querySelectorAll(".ref-pill-slot.overflow")).toHaveLength(1);
+      expect(screen.getByText("+1")).toBeInTheDocument();
+    });
+
+    it("expanded: true shows every pill, no chip, add trigger present", () => {
+      stubLayout();
+      render(ReferencePicker, {
+        props: {
+          field,
+          value: ["lore_1", "lore_2", "lore_3"],
+          ariaLabel: "Characters",
+          loreEntries,
+          embedded: true,
+          controlled: true,
+          expanded: true,
+        },
+      });
+      expect(screen.getByText("Mira")).toBeInTheDocument();
+      expect(screen.getByText("Jonas")).toBeInTheDocument();
+      expect(screen.getByText("Cato")).toBeInTheDocument();
+      expect(document.querySelector(".ref-pill-more")).toBeNull();
+      expect(screen.getByRole("button", { name: "Add Characters" })).toBeInTheDocument();
+    });
   });
 });
 

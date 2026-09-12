@@ -164,6 +164,38 @@ def _field_shape_errors(field_id: str, field: MetadataFieldDefinition, schema: M
                 f"Select metadata field {field_id} has default {field.default!r}, "
                 f"which is not one of its options ({', '.join(sorted(allowed))})."
             )
+    errors.extend(_derived_select_errors(field_id, field, schema))
+    return errors
+
+
+def _derived_select_errors(field_id: str, field: MetadataFieldDefinition, schema: MetadataSchema) -> list[str]:
+    """A derived select state (#1911) must sit on a select, name one of its
+    options, and watch a reference field the schema declares — otherwise the
+    healer would write a value the field can never hold, or never fire. Soft,
+    like the rest here: a hand-edited layer stays readable."""
+    derived = field.derived
+    if derived is None:
+        return []
+    errors: list[str] = []
+    if field.type != "select":
+        errors.append(f"Metadata field {field_id} declares a derived state but is not type select.")
+    elif field.options and derived.value not in {opt.value for opt in field.options}:
+        allowed = sorted(opt.value for opt in field.options)
+        errors.append(
+            f"Select metadata field {field_id} derives {derived.value!r}, "
+            f"which is not one of its options ({', '.join(allowed)})."
+        )
+    if field.default is not None and field.default == derived.value:
+        errors.append(
+            f"Select metadata field {field_id} derives {derived.value!r}, which is also its "
+            "default — a fresh node would hold a state only the app should set."
+        )
+    watched = schema.fields.get(derived.when_set)
+    if watched is None or watched.type not in ("entity_ref", "entity_ref_list"):
+        errors.append(
+            f"Metadata field {field_id} derives its state from {derived.when_set!r}, "
+            "which is not a reference field in the schema."
+        )
     return errors
 
 

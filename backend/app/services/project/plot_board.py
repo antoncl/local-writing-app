@@ -29,10 +29,12 @@ from app.models import (
     StructureNode,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.metadata_values import derived_select_value
 from app.services.project.plot import (
     _BEAT_LINK_FIELD,
     _CAUSAL_LINK_FIELD,
     _PAGE_STATUS_FIELD,
+    _SCENE_FIELD,
     PLOT_BOARD_FILENAME,
     PLOT_CHARACTER_ARC_ENTRY_TYPE,
     PLOT_PLOTLINE_ENTRY_TYPE,
@@ -292,27 +294,29 @@ class PlotBoardMixin:
         )
         return layout.containers, layout.scene_to_container, layout.scene_to_order
 
-    def _page_status_default(self) -> str | None:
-        """The schema default a blank `page_status` reads as (#1421/#1908) — the
-        one place the projection asks; `read_metadata_schema()` is cached."""
-        field = self.read_metadata_schema().fields.get(_PAGE_STATUS_FIELD)
-        return field.default if field is not None and field.required_select else None
-
     def _board_page_status(self, metadata: dict[str, Any], scene: str | None) -> str | None:
         """The card's page status as the board shows it (ADR-0048 S7 Slice 5b):
-        `on_page` when a scene is attached (the shared `_page_status_from_scene` rule,
-        overriding any stored value), else the authored `off_page` / `unwritten`, else
-        the schema `default` — the sparse blank resolved once here (#1908), so the
-        board, its prompt context and the rail agree on what a fresh card is.
-        Derived from the CURRENT scene, so a stale stored `on_page` on a
-        since-detached card (the card list skips read-side healing) never reaches
-        the board. The valid-value filter is a read-time defense (write-time schema
-        validation is what strips a bad value)."""
-        derived = self._page_status_from_scene(scene)
+        the schema's derived state while a scene is attached (the one
+        `derived_select_value` rule the healer reads too, #1911 — overriding any
+        stored value), else the authored `off_page` / `unwritten`, else the schema
+        `default` — the sparse blank resolved once here (#1908), so the board, its
+        prompt context and the rail agree on what a fresh card is. Derived from the
+        CURRENT scene, so a stale stored `on_page` on a since-detached card (the
+        card list skips read-side healing) never reaches the board. The
+        authored-value filter is a read-time defense (write-time schema validation
+        is what strips a bad value); `read_metadata_schema()` is cached."""
+        field = self.read_metadata_schema().fields.get(_PAGE_STATUS_FIELD)
+        if field is None:
+            return None
+        derived = derived_select_value(field, {**metadata, _SCENE_FIELD: scene})
         if derived is not None:
             return derived
         stored = metadata.get(_PAGE_STATUS_FIELD)
-        return stored if stored in ("off_page", "unwritten") else self._page_status_default()
+        derived_state = field.derived.value if field.derived is not None else None
+        authored = {option.value for option in field.options if option.value != derived_state}
+        if stored in authored:
+            return stored
+        return field.default if field.required_select else None
 
     @staticmethod
     def _iter_roster_beats(metadata: dict[str, Any]) -> Iterator[dict[str, Any]]:

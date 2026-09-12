@@ -18,6 +18,7 @@ Method bodies moved verbatim. Shared helpers resolve through the MRO:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,26 @@ log = logging.getLogger(__name__)
 # Sentinel for "`_resolve_ai_field_value` could not adopt this field" — never
 # `None`, which is itself a legal proposed value (clearing a field).
 _AI_FIELD_DROPPED = object()
+
+
+def _ref_is_set(value: Any) -> bool:
+    """Whether a reference field holds a target — a non-blank id, or a
+    non-empty id list (`entity_ref_list`)."""
+    if isinstance(value, str):
+        return value.strip() != ""
+    return isinstance(value, list) and len(value) > 0
+
+
+def derived_select_value(field: MetadataFieldDefinition, metadata: Mapping[str, Any]) -> str | None:
+    """The state `field` DERIVES on a node with this metadata (#1911): its
+    declared `derived.value` while the reference field `derived.when_set` is
+    set, else None — nothing derived, an authored value stands. The one rule
+    the read-side healer (`_derive_select_states`) and the plot-board
+    projection (`_board_page_status`) both read, so "what makes a card
+    on_page" is defined once and can't drift."""
+    if field.derived is None or not _ref_is_set(metadata.get(field.derived.when_set)):
+        return None
+    return field.derived.value
 
 
 @dataclass(frozen=True)
@@ -612,10 +633,13 @@ class MetadataValuesMixin:
                 continue
             # A required select (one with a schema default) storing a blank is
             # stale from before the "no blank" rule (#1421) — the old picker let
-            # you choose "(none)". Drop the key on read so it resolves to the
-            # default like a fresh sparse entry, instead of 422-ing the whole
-            # read; the sparse form is written back on the next save.
-            if field.required_select and value in (None, ""):
+            # you choose "(none)" — and one storing its default LITERALLY is the
+            # same value under a different provenance (#1912): the rail would
+            # show a reset chip whose gesture pops a key to no visible effect.
+            # Drop both on read so the node resolves to the default like a fresh
+            # sparse entry, instead of 422-ing the whole read; the sparse form
+            # is written back on the next save.
+            if field.required_select and value in (None, "", field.default):
                 continue
             cleaned[field_id] = self._strip_unknown_list_members(field, value)
         return cleaned
@@ -642,6 +666,48 @@ class MetadataValuesMixin:
             else:
                 cleaned_items.append(item)
         return cleaned_items if changed else value
+
+    def _repair_metadata_on_read(
+        self,
+        metadata: dict[str, Any],
+        entry_type: str,
+        schema: MetadataSchema,
+        index: NodeIndex,
+    ) -> dict[str, Any]:
+        """The read-side canon every node kind applies before its metadata is
+        shown or validated: drop keys the schema no longer knows
+        (`_strip_unknown_metadata_fields`), heal dangling references
+        (`_strip_dangling_references`), then apply the derived select states
+        (`_derive_select_states`) — last, so a state whose reference was just
+        healed away is cleared with it. The file keeps its stale shape until the
+        next save writes the repaired form back."""
+        metadata = self._strip_unknown_metadata_fields(metadata, entry_type, schema)
+        metadata = self._strip_dangling_references(metadata, schema, index)
+        return self._derive_select_states(metadata, entry_type, schema)
+
+    def _derive_select_states(
+        self, metadata: dict[str, Any], entry_type: str, schema: MetadataSchema
+    ) -> dict[str, Any]:
+        """Apply every derived select state the entry type carries (#1911): a
+        field whose `derived.when_set` reference is set holds `derived.value`,
+        overriding any authored value; when the reference is not set a stale
+        `derived.value` is popped, so the field falls back to its default —
+        sparse, like a fresh node. An authored non-derived value stands. Runs
+        on every read (`_repair_metadata_on_read`) and on the saves that
+        normalise before writing (a plot card), in place on `metadata`,
+        returned for chaining. Reads the declaration, never a field name: the
+        built-in `page_status` ← `scene` rule and a user's own are one case."""
+        entry_type_definition = schema.entry_types.get(entry_type)
+        for field_id in entry_type_definition.fields if entry_type_definition else []:
+            field = schema.fields.get(field_id)
+            if field is None or field.derived is None:
+                continue
+            derived = derived_select_value(field, metadata)
+            if derived is not None:
+                metadata[field_id] = derived
+            elif metadata.get(field_id) == field.derived.value:
+                metadata.pop(field_id, None)
+        return metadata
 
     def _strip_dangling_references(
         self,

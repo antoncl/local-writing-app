@@ -490,3 +490,51 @@ describe("SchemaFieldInlineEditor 'Default for new entries' visibility (round 2,
     expect(saved.defaultValue).toBeUndefined();
   });
 });
+
+describe("SchemaFieldInlineEditor derived select state (#1911)", () => {
+  function mountSelect(field: MetadataFieldDefinition, onSave = vi.fn()) {
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field,
+        selectedFieldId: "page_status",
+        layerId: "proj",
+        refFieldChoices: [
+          { id: "scene", name: "Scene" },
+          { id: "plotline", name: "Plotline" },
+        ],
+        onSave,
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+    return onSave;
+  }
+  const PAGE_STATUS: MetadataFieldDefinition = {
+    name: "Page status",
+    type: "select",
+    options: [
+      { value: "unwritten", label: "Unwritten" },
+      { value: "off_page", label: "Off the page" },
+      { value: "on_page", label: "On the page" },
+    ],
+    default: "unwritten",
+    derived: { value: "on_page", when_set: "scene" },
+  };
+
+  it("shows the declaration as an app-set state while a reference is set, and round-trips it", async () => {
+    const onSave = mountSelect(PAGE_STATUS);
+    expect((screen.getByLabelText("App-set state") as HTMLSelectElement).value).toBe("on_page");
+    expect((screen.getByLabelText("While this reference is set") as HTMLSelectElement).value).toBe("scene");
+    // The derived state is never offered as the default.
+    expect(optionValues("Default for new entries")).toEqual(["", "unwritten", "off_page"]);
+    await fireEvent.click(screen.getByText("Done"));
+    expect(onSave.mock.calls[0][0].derived).toEqual({ value: "on_page", when_set: "scene" });
+  });
+
+  it("a half-chosen rule saves as none", async () => {
+    const onSave = mountSelect({ ...PAGE_STATUS, derived: null });
+    await fireEvent.change(screen.getByLabelText("App-set state"), { target: { value: "on_page" } });
+    await fireEvent.click(screen.getByText("Done"));
+    expect(onSave.mock.calls[0][0].derived).toBeNull();
+  });
+});

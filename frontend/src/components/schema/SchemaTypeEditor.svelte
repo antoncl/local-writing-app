@@ -164,6 +164,12 @@
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   const metadataSchema = $derived($metadataSchemaStore);
+  // The reference fields a select's derived state can watch (#1911).
+  const refFieldChoices = $derived(
+    Object.entries(metadataSchema?.fields ?? {})
+      .filter(([, f]) => f.type === "entity_ref" || f.type === "entity_ref_list")
+      .map(([id, f]) => ({ id, name: f.name || id })),
+  );
 
   // Section labels already used on this type (#1000) — the datalist behind the
   // field editor's freeform Section input. Distinct non-empty group names in
@@ -449,6 +455,7 @@
         groups={metadataSchema?.groups ?? {}}
         sectionLabels={typeSectionLabels}
         metadataSchemaLayers={metadataSchemaLayers}
+        refFieldChoices={refFieldChoices}
         onSave={onSaveField}
         onCancel={onCancelField}
         onRemove={onRemoveField}

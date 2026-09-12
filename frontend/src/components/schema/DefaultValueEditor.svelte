@@ -76,8 +76,7 @@
     onchange={(e) => emit((e.currentTarget as HTMLSelectElement).value)}
   >
     <option value="">Unset</option>
-    <!-- A derived option (#1906) is never a default: the app sets it per node. -->
-    {#each options.filter((o) => o.value.trim() !== "" && !o.derived) as opt (opt.value)}
+    {#each options.filter((o) => o.value.trim() !== "") as opt (opt.value)}
       <option value={opt.value}>{opt.label || opt.value}</option>
     {/each}
   </select>

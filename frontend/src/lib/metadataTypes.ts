@@ -47,16 +47,31 @@ export const LIST_ITEM_GROUP_MEMBER_TYPES = [
 ] as const;
 
 // One choice in a select / multi_select field, or a select prompt input.
-// Stored as `{value, label?, color?, derived?}`. Bare strings are accepted on
-// the wire (the backend normalizes) but emitted as objects. A `derived` option
-// is a state the app holds, not the author (#1906): shown at rest, absent from
-// the pick list, and a field holding it is read-only.
+// Stored as `{value, label?, color?}`. Bare strings are accepted on the wire
+// (the backend normalizes) but emitted as objects. A state the app holds
+// rather than the author is not an option attribute — the FIELD declares it
+// (`MetadataFieldDefinition.derived`, #1911).
 export type SelectOption = {
   value: string;
   label?: string | null;
   color?: string | null;
-  derived?: boolean;
 };
+
+/** A select state the app holds, never the author (#1911): the field takes
+ * `value` on a node whenever the reference field `when_set` is set, and a
+ * stale `value` is cleared when it is not. The backend healer applies it on
+ * read and save; the rail never offers `value` and locks a row holding it;
+ * a view filter or a param may still name it. */
+export type DerivedSelectState = {
+  value: string;
+  when_set: string;
+};
+
+/** The option value a field's derived state holds, or null when it declares
+ * none — the one reader every pick list and the rail's read-only gate use. */
+export function derivedSelectValue(field: MetadataFieldDefinition | null | undefined): string | null {
+  return field?.type === "select" && field.derived ? field.derived.value : null;
+}
 
 /** A required select (#1421): a select with a non-blank default. A blank value
  *  MEANS the default everywhere — the rail shows it, an edit back to it pops
@@ -104,6 +119,9 @@ export type MetadataFieldDefinition = {
   // carries this field (#38). Type-matched per `type`; computed fields
   // never carry a default.
   default?: MetadataValue | null;
+  // A select state the app derives from a reference field (#1911) — see
+  // `DerivedSelectState`. Selects only; `value` names one of `options`.
+  derived?: DerivedSelectState | null;
   // Intrinsic (#116): value lives on the node's top-level front matter
   // (`id` / `title` / `entry_type`), not in `metadata`. Consumers read it
   // from the node property keyed by the field id — but prefer `category`

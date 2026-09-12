@@ -495,8 +495,7 @@ class ManuscriptMixin:
         # Heal stale fields (retired by a schema change) and dangling
         # references (e.g. POV character was deleted) before validation;
         # see _strip_unknown_metadata_fields / _strip_dangling_references.
-        metadata = self._strip_unknown_metadata_fields(metadata, entry_type, schema)
-        metadata = self._strip_dangling_references(metadata, schema, index)
+        metadata = self._repair_metadata_on_read(metadata, entry_type, schema, index)
         metadata_errors = self._validate_scene_metadata(node_id, entry_type, status, metadata, schema, index)
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)

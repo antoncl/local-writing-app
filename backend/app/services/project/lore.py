@@ -132,8 +132,7 @@ class LoreEntriesMixin:
         # Heal stale fields (retired by a schema change) and dangling
         # references before validation — see _strip_unknown_metadata_fields
         # / _strip_dangling_references for the rationale.
-        metadata = self._strip_unknown_metadata_fields(metadata, entry_type, schema)
-        metadata = self._strip_dangling_references(metadata, schema, index)
+        metadata = self._repair_metadata_on_read(metadata, entry_type, schema, index)
         # A field the fold touched but the strips then removed is no longer a
         # value to mark — keep `overridden_fields` in step with what shipped.
         overridden_fields = [field for field in overridden_fields if field in metadata]

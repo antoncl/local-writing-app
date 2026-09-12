@@ -251,8 +251,7 @@ class SnapshotDiffMixin:
         schema = self.read_metadata_schema()
         entry_type = str(front_matter.get("entry_type") or "manuscript:scene")
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
-        metadata = self._strip_unknown_metadata_fields(metadata, entry_type, schema)
-        metadata = self._strip_dangling_references(metadata, schema, self._build_node_index())
+        metadata = self._repair_metadata_on_read(metadata, entry_type, schema, self._build_node_index())
         return {
             "title": str(front_matter.get("title") or node_id),
             "status": str(front_matter.get("status") or "draft"),

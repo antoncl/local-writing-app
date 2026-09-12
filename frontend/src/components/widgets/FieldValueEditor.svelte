@@ -10,7 +10,7 @@
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
-  import { isRequiredSelect } from "@/lib/metadataTypes";
+  import { derivedSelectValue, isRequiredSelect } from "@/lib/metadataTypes";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ToggleSwitch from "@/components/widgets/ToggleSwitch.svelte";
   import FieldValue from "@/components/widgets/FieldValue.svelte";
@@ -97,6 +97,11 @@
 
   const label = $derived(ariaLabel ?? field.name);
   const currentValue = $derived(metadataValueString(value));
+  // The derived state an authoring host keeps out of the pick list (#1911).
+  const derivedOmitted = $derived.by((): string[] => {
+    const held = derivedSelectValue(field);
+    return held === null ? [] : [held];
+  });
 
   // A select whose schema declares a `default` is "required" (#1421): it never
   // offers a "(none)" pick, and an absent value shows the default rather than a
@@ -229,13 +234,13 @@
     {/each}
   </div>
 {:else if field.type === "select"}
-  <!-- A derived option (#1906) is the app's to set on a NODE, so an authoring
-       host never offers it; a host that references a value (a view filter, a
-       param) may, via `pickDerived`. -->
+  <!-- The field's derived state (#1911) is the app's to set on a NODE, so an
+       authoring host never offers it; a host that references a value (a view
+       filter, a param) may, via `pickDerived`. -->
   <ColoredSelect
     value={selectDisplayValue}
     options={field.options}
-    hideDerived={!pickDerived}
+    omitFromPick={pickDerived ? [] : derivedOmitted}
     allowBlank={!selectRequired}
     ariaLabel={label}
     onChange={(v) => emit(v)}

@@ -110,6 +110,49 @@ parent's field list.
 
 ---
 
+## An app-set select state — "filmed while footage is attached"
+
+A `select` field can declare one option the **app** holds rather than the
+author: the field takes that value on a node whenever a reference field is
+set, and drops it again when the reference is cleared. The built-in plot
+card works this way — a card is *On the page* exactly while its `scene` is
+attached — and the same declaration works for a field of your own:
+
+```yaml
+fields:
+  footage:
+    name: Footage
+    type: entity_ref
+    picker_config:
+      sources:
+        - kind: lore
+  filmed:
+    name: Filmed
+    type: select
+    options: [planned, filmed, scrapped]
+    default: planned
+    derived:
+      value: filmed        # one of the options
+      when_set: footage    # an entity_ref / entity_ref_list field
+```
+
+What follows from the declaration, with no further code:
+
+- On every read and on save, a node whose `footage` is set holds
+  `filmed: filmed`; a node whose `footage` is empty has a stale `filmed`
+  cleared back to the default. Any other option you picked stands.
+- The rail never offers `filmed` in the pick list and shows the row
+  read-only while the node holds it. A view filter or a prompt parameter can
+  still name it.
+- The type editor shows the rule under the field's options as "App-set
+  state … while this reference is set".
+- The value must be one of the field's options and must not be its
+  `default`; `when_set` must name a reference field. A declaration that
+  breaks these is reported when the layer is saved, like a bad default.
+
+Field definitions merge per attribute up the layer chain, so a layer that
+only relabels or recolours the options keeps an ancestor's `derived`.
+
 ## File naming
 
 Scene, container, and lore entry files are named by their **title**, not

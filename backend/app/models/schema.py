@@ -109,6 +109,14 @@ class MetadataFieldDefinition(BaseModel):
     # id (or list of ids for entity_ref_list). Computed fields never carry
     # a default — they're derived at read time.
     default: MetadataValue | None = None
+
+    @property
+    def required_select(self) -> bool:
+        """A select with a non-blank default (#1421): a blank value MEANS the
+        default everywhere — the rail shows it, a save of an explicit blank is
+        refused, a stale blank is dropped on read, and Views / the selector
+        roster read it (#1908). The one spelling on this side."""
+        return self.type == "select" and isinstance(self.default, str) and self.default != ""
     # Intrinsic (#116): the field's value lives on the node's TOP-LEVEL
     # front matter (`id` / `title` / `entry_type`), not in the `metadata`
     # dict. These are the identity triple every node carries; declaring them

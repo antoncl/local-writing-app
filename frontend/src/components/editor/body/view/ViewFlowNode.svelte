@@ -557,6 +557,7 @@
     <FieldValueEditor
       field={valueFieldDef}
       value={(value ?? null) as MetadataValue}
+      pickDerived={true}
       onChange={(v) => onSet(v)}
       loreEntries={ctx.loreEntries}
       promptEntries={ctx.promptEntries}

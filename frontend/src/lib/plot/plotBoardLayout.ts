@@ -23,6 +23,7 @@ import type { CoordinateExtent, Node } from "@xyflow/svelte";
 import type {
   BoardSize,
   BoardXY,
+  MetadataFieldDefinition,
   PlotBoardCharacterArc,
   PlotBoardLayout,
   PlotBoardPlotlineBeat,
@@ -64,9 +65,13 @@ export type PlotCardData = {
   // by more than its colour. Both null for the Unassigned lane.
   plotlineId: string | null;
   plotlineName: string | null;
-  // Page status (Slice 5b): on_page (scene attached) / off_page / unwritten. null =
-  // the sparse default, rendered as unwritten. Drives the card's 3-state marker.
-  pageStatus: string | null;
+  // Page status (Slice 5b): on_page (scene attached) / off_page / unwritten, a
+  // sparse blank resolved to the schema default. Its label and swatch come from
+  // the schema's `page_status` options (#1907) — the rail's words and colours,
+  // spelled once — so the card renders what it is given.
+  pageStatus: string;
+  pageStatusLabel: string;
+  pageStatusSwatch: string | null;
   // The resolved beats this card fulfils (Slice 5b) — the badges it wears, each
   // carrying its denormalised effective colour (ADR-0080 slice 3b-ii): an
   // event-beat's plotline swatch, or a change-beat's resolved arc colour.
@@ -75,6 +80,20 @@ export type PlotCardData = {
   // seeding the "Leads to…" picker's checked state.
   causalLinks: string[];
 };
+
+/** A card's page status as the board shows it (#1907): the projected value
+ *  (the backend already resolves a sparse blank to the schema default), with
+ *  the label and swatch the schema's `page_status` options declare. Without
+ *  the field in the schema (not loaded yet, or a layer without it) the value
+ *  stands in for its label and there is no swatch. */
+export function pageStatusOf(
+  stored: string | null,
+  field: MetadataFieldDefinition | undefined,
+): Pick<PlotCardData, "pageStatus" | "pageStatusLabel" | "pageStatusSwatch"> {
+  const pageStatus = stored || (typeof field?.default === "string" ? field.default : "");
+  const option = field?.options.find((o) => o.value === pageStatus);
+  return { pageStatus, pageStatusLabel: option?.label ?? pageStatus, pageStatusSwatch: option?.color ?? null };
+}
 
 // A plotline node (ADR-0053 §3): a plotline IS a plot-template instance, drawn as a
 // free-floating board node holding its beat roster. `color` tints it (the #863
@@ -456,7 +475,7 @@ export function buildBoardNodes(
         color: line?.color ?? null,
         plotlineId: line?.id ?? null,
         plotlineName: line?.title ?? null,
-        pageStatus: card.page_status,
+        ...pageStatusOf(card.page_status, schema?.fields?.page_status),
         beats: card.beats.map((beat) => ({
           ...beat,
           resolvedColorHex:

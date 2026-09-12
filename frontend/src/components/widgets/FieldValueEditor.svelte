@@ -10,6 +10,7 @@
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
+  import { isRequiredSelect } from "@/lib/metadataTypes";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ToggleSwitch from "@/components/widgets/ToggleSwitch.svelte";
   import FieldValue from "@/components/widgets/FieldValue.svelte";
@@ -35,6 +36,9 @@
      *  through the same widget vocabulary (chips, pills, swatch, toggle) —
      *  never a raw string dump. `onChange` is never called. */
     readOnly?: boolean;
+    // Offer `derived` options too (#1906) — for a host that REFERENCES a value
+    // (a view filter, a param), never for one that authors a node's value.
+    pickDerived?: boolean;
     /** Whether "unset" is a distinct, reachable state (#522). Only the metadata
      *  rail sets this — there a cleared field genuinely has no value and a
      *  `boolean` must show tri-state (a set `false` reads "off", an absent value
@@ -77,6 +81,7 @@
     allowUnset = false,
     embedded = false,
     controlled = false,
+    pickDerived = false,
     expanded = false,
     onToggleExpanded = () => {},
     ariaLabel,
@@ -96,12 +101,8 @@
   // A select whose schema declares a `default` is "required" (#1421): it never
   // offers a "(none)" pick, and an absent value shows the default rather than a
   // blank placeholder. Selects with no default stay optional (blank = unset).
-  const selectRequired = $derived(
-    field.type === "select" && field.default != null && field.default !== "",
-  );
-  const selectDisplayValue = $derived(
-    selectRequired ? currentValue || String(field.default) : currentValue,
-  );
+  const selectRequired = $derived(isRequiredSelect(field));
+  const selectDisplayValue = $derived(selectRequired ? currentValue || String(field.default) : currentValue);
 
   function metadataValueString(v: MetadataValue | undefined): string {
     if (Array.isArray(v)) return v.join(", ");
@@ -228,9 +229,13 @@
     {/each}
   </div>
 {:else if field.type === "select"}
+  <!-- A derived option (#1906) is the app's to set on a NODE, so an authoring
+       host never offers it; a host that references a value (a view filter, a
+       param) may, via `pickDerived`. -->
   <ColoredSelect
     value={selectDisplayValue}
     options={field.options}
+    hideDerived={!pickDerived}
     allowBlank={!selectRequired}
     ariaLabel={label}
     onChange={(v) => emit(v)}

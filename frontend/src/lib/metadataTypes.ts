@@ -47,13 +47,33 @@ export const LIST_ITEM_GROUP_MEMBER_TYPES = [
 ] as const;
 
 // One choice in a select / multi_select field, or a select prompt input.
-// Stored as `{value, label?, color?}`. Bare strings are accepted on the
-// wire (the backend normalizes) but emitted as objects.
+// Stored as `{value, label?, color?, derived?}`. Bare strings are accepted on
+// the wire (the backend normalizes) but emitted as objects. A `derived` option
+// is a state the app holds, not the author (#1906): shown at rest, absent from
+// the pick list, and a field holding it is read-only.
 export type SelectOption = {
   value: string;
   label?: string | null;
   color?: string | null;
+  derived?: boolean;
 };
+
+/** A required select (#1421): a select with a non-blank default. A blank value
+ *  MEANS the default everywhere — the rail shows it, an edit back to it pops
+ *  the key, Views and the selector roster read it (#1908). The one spelling. */
+export function isRequiredSelect(
+  field: MetadataFieldDefinition | null | undefined,
+): field is MetadataFieldDefinition & { default: string } {
+  return field?.type === "select" && typeof field.default === "string" && field.default !== "";
+}
+
+/** The value a select is in force with: the stored value, or — for a required
+ *  select holding nothing (absent, "", or an empty list) — its default. */
+export function effectiveSelectValue(field: MetadataFieldDefinition | null | undefined, raw: unknown): unknown {
+  if (!isRequiredSelect(field)) return raw;
+  const blank = raw == null || raw === "" || (Array.isArray(raw) && raw.length === 0);
+  return blank ? field.default : raw;
+}
 
 export type MetadataFieldDefinition = {
   name: string;

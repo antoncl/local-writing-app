@@ -1055,7 +1055,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "options": [
                 {"value": "unwritten", "label": "Unwritten", "color": "stone"},
                 {"value": "off_page", "label": "Off the page", "color": "graphite"},
-                {"value": "on_page", "label": "On the page", "color": "moss"},
+                # Derived (#1906): the scene link sets and clears it (the healer
+                # above), so the rail never offers it and a card holding it is
+                # read-only there — the board's own menu already knew.
+                {"value": "on_page", "label": "On the page", "color": "moss", "derived": True},
             ],
             # A required select, like `context_policy` (#1421): the rail shows the
             # sparse default named above instead of offering "(none)" (#1903).

@@ -61,6 +61,17 @@ class SelectorNode(NamedTuple):
     metadata: Mapping[str, Any]
 
 
+def with_select_defaults(metadata: Mapping[str, Any], defaults: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A node's metadata with a required select's schema default filled in
+    where the stored value is blank (#1908) — the reader's rule (the rail shows
+    the default), so a `field` predicate sees what the reader shows and the
+    frontend evaluator (`fieldAccess.fieldValue`) agrees. `defaults` is
+    `{key: default}` for the select fields that declare one. Returns the input
+    itself when nothing is blank."""
+    fill = {key: value for key, value in defaults.items() if _is_empty(metadata.get(key))}
+    return {**metadata, **fill} if fill else metadata
+
+
 class UnsupportedSelectorExpr(Exception):
     """A ViewExpr operator outside the flat-membership subset. Raised so the
     caller can fail soft rather than silently resolve to an empty (wrong) set."""

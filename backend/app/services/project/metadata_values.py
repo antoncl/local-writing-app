@@ -218,7 +218,7 @@ class MetadataValuesMixin:
             # never in this loop, and resolves to the default at evaluation; this
             # only rejects an explicit blank. Every other field treats blank/None
             # as "unset", which is always valid.
-            if field.type == "select" and field.default is not None:
+            if field.required_select:
                 allowed = ", ".join(opt.value for opt in field.options)
                 return [
                     f"{label} metadata field {field_id} is required and must be "
@@ -615,7 +615,7 @@ class MetadataValuesMixin:
             # you choose "(none)". Drop the key on read so it resolves to the
             # default like a fresh sparse entry, instead of 422-ing the whole
             # read; the sparse form is written back on the next save.
-            if field.type == "select" and field.default is not None and value in (None, ""):
+            if field.required_select and value in (None, ""):
                 continue
             cleaned[field_id] = self._strip_unknown_list_members(field, value)
         return cleaned

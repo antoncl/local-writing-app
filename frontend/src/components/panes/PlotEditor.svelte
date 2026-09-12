@@ -15,7 +15,7 @@
   bit lives outside it and the custom nodes carry their own mount tests.
 -->
 <script lang="ts">
-  import { onDestroy, setContext } from "svelte";
+  import { onDestroy, setContext, untrack } from "svelte";
   import "@xyflow/svelte/dist/style.css";
   import { SvelteFlow, Controls, type ColorMode, type Edge } from "@xyflow/svelte";
   import { themePreference } from "@/lib/utils/theme";
@@ -40,6 +40,7 @@
   import { moveNodesCommand, type GraphPort } from "@/lib/graph/graphCommands";
   import { PlotUndoRecorder, defaultPlotCommandPort } from "@/lib/plot/plotCommands";
   import { keepsOwnFocus } from "@/lib/plot/boardFocus";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
   import {
     savePlotBoardLayout,
     detachCardScene,
@@ -794,6 +795,13 @@
   function rebuildLayoutNodes(): void {
     if (projection) flowNodes = buildBoardNodes(projection, overriddenNodePositions(flowNodes, overriddenIds), containerSizes);
   }
+  // The cards' page-status words and swatches (and the arcs' colours) come from
+  // the schema, read at build (#1907): rebuild when it lands or changes, keeping
+  // dragged positions. `untrack` so the rebuild's own reads don't re-arm it.
+  $effect(() => {
+    void $metadataSchemaStore;
+    untrack(() => rebuildLayoutNodes());
+  });
 </script>
 
 <!-- The keydown is board-scoped (ADR-0050 §3): it rides BUBBLING from whatever

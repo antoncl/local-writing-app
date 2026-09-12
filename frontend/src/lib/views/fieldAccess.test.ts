@@ -124,3 +124,41 @@ describe("isNodeSetField (#204 generic node-set dispatch)", () => {
     expect(isNodeSetField(undefined)).toBe(false);
   });
 });
+
+// #1908: a required select (one with a schema default, #1421) reads as its
+// default when blank — the rail shows the default, so Views must group and
+// filter what the rail shows. The backend evaluator fills the same blank
+// (`with_select_defaults`); the parity corpus holds both to it.
+describe("fieldValue resolves a required select's default", () => {
+  const schema = {
+    version: 1,
+    // The resolved schema's `fields` lists carry the parent chain already.
+    entry_types: { "plot:card": { fields: ["page_status", "mood", "nick"] }, "plot:plotline": { fields: [] } },
+    groups: {},
+    fields: {
+      page_status: def("select", { default: "unwritten", options: [{ value: "unwritten" }, { value: "off_page" }] }),
+      mood: def("select", { options: [{ value: "warm" }, { value: "cool" }] }),
+      nick: def("text", { default: "n/a" }),
+    },
+  } as unknown as Parameters<typeof fieldValue>[2];
+  const node = (metadata: Record<string, unknown>, entryType = "plot:card") => ({ id: "c1", entry_type: entryType, title: "", metadata });
+
+  it("a blank or absent value reads as the default; a stored value wins", () => {
+    expect(fieldValue(node({}), "page_status", schema)).toBe("unwritten");
+    expect(fieldValue(node({ page_status: "" }), "page_status", schema)).toBe("unwritten");
+    expect(fieldValue(node({ page_status: [] }), "page_status", schema)).toBe("unwritten");
+    expect(fieldValue(node({ page_status: "off_page" }), "page_status", schema)).toBe("off_page");
+  });
+
+  it("a node whose type does not carry the field never holds its default", () => {
+    // A plotline has no page status: it stays bare in a grouped view and
+    // outside a `page_status = unwritten` filter.
+    expect(fieldValue(node({}, "plot:plotline"), "page_status", schema)).toBeUndefined();
+    expect(fieldValue(node({}, "lore:note"), "page_status", schema)).toBeUndefined();
+  });
+
+  it("a select without a default, and a non-select with one, stay blank", () => {
+    expect(fieldValue(node({}), "mood", schema)).toBeUndefined();
+    expect(fieldValue(node({}), "nick", schema)).toBeUndefined();
+  });
+});

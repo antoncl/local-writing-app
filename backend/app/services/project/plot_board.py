@@ -292,19 +292,27 @@ class PlotBoardMixin:
         )
         return layout.containers, layout.scene_to_container, layout.scene_to_order
 
+    def _page_status_default(self) -> str | None:
+        """The schema default a blank `page_status` reads as (#1421/#1908) — the
+        one place the projection asks; `read_metadata_schema()` is cached."""
+        field = self.read_metadata_schema().fields.get(_PAGE_STATUS_FIELD)
+        return field.default if field is not None and field.required_select else None
+
     def _board_page_status(self, metadata: dict[str, Any], scene: str | None) -> str | None:
         """The card's page status as the board shows it (ADR-0048 S7 Slice 5b):
         `on_page` when a scene is attached (the shared `_page_status_from_scene` rule,
         overriding any stored value), else the authored `off_page` / `unwritten`, else
-        None — the sparse default, which reads as unwritten. Derived from the CURRENT
-        scene, so a stale stored `on_page` on a since-detached card (the card list
-        skips read-side healing) never reaches the board. The valid-value filter is a
-        read-time defense (write-time schema validation is what strips a bad value)."""
+        the schema `default` — the sparse blank resolved once here (#1908), so the
+        board, its prompt context and the rail agree on what a fresh card is.
+        Derived from the CURRENT scene, so a stale stored `on_page` on a
+        since-detached card (the card list skips read-side healing) never reaches
+        the board. The valid-value filter is a read-time defense (write-time schema
+        validation is what strips a bad value)."""
         derived = self._page_status_from_scene(scene)
         if derived is not None:
             return derived
         stored = metadata.get(_PAGE_STATUS_FIELD)
-        return stored if stored in ("off_page", "unwritten") else None
+        return stored if stored in ("off_page", "unwritten") else self._page_status_default()
 
     @staticmethod
     def _iter_roster_beats(metadata: dict[str, Any]) -> Iterator[dict[str, Any]]:

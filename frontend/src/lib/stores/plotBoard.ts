@@ -11,6 +11,7 @@ import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
 import { setStructure } from "@/lib/stores/structure";
 import { refreshCards } from "@/lib/stores/plotCards";
+import { metadataSchemaStore } from "@/lib/stores/schema";
 import type { CardEntry, PlotBoardLayout, PlotBoardProjection, Scene } from "@/lib/types";
 
 export const plotBoardStore = writable<PlotBoardProjection | null>(null);
@@ -326,13 +327,16 @@ export function unlinkCardCausal(cardId: string, targetId: string): Promise<void
 
 // Set the card's authored page status (ADR-0048 S7 Slice 5b) — only off_page vs
 // unwritten; on_page is derived by the backend from the scene, so this is offered
-// only for an unattached card. `unwritten` is the sparse default, so it drops the
-// key rather than materializing a value (a save on an attached card would be
-// overridden back to on_page regardless).
+// only for an unattached card. The schema default (unwritten, unless a layer says
+// otherwise) is the sparse blank — the rail's rule (#1421): picking it drops the
+// key rather than materializing a value, so reader and writer agree on what a
+// blank means (a save on an attached card would be overridden back to on_page
+// regardless).
 export function setCardPageStatus(cardId: string, status: "off_page" | "unwritten"): Promise<void> {
+  const schemaDefault = get(metadataSchemaStore)?.fields?.page_status?.default ?? "unwritten";
   return mutateCardMetadata(cardId, (metadata) => {
-    if (status === "off_page") metadata.page_status = "off_page";
-    else delete metadata.page_status;
+    if (status === schemaDefault) delete metadata.page_status;
+    else metadata.page_status = status;
   });
 }
 

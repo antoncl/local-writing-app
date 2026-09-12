@@ -512,6 +512,9 @@
         // cosmetic; value is the macro contract).
         if (label && label !== draft.value) out.label = label;
         if (draft.color) out.color = draft.color;
+        // A derived option (#1906) round-trips untouched — the editor never
+        // sets it; only an app-side deriver gives it meaning.
+        if (draft.derived) out.derived = true;
         return out;
       });
     // Migration: a row whose value changed from its loaded `originalValue`

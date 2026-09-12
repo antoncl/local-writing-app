@@ -439,7 +439,11 @@
   // gesture "shows what the default is" (#522). Empty when the field defines no
   // default — reverting then simply unsets it.
   function defaultHint(fieldId: string): string {
-    return metadataValueString(metadataSchema.fields[fieldId]?.default ?? undefined);
+    const field = metadataSchema.fields[fieldId];
+    const raw = metadataValueString(field?.default ?? undefined);
+    // A select's default is named by its option label, as the row shows it —
+    // "One hop", not "one_hop" (#1900).
+    return field?.options?.find((option) => option.value === raw)?.label ?? raw;
   }
 
   // Persist a single field edit. A required select (one that declares a default,
@@ -651,10 +655,7 @@
       {#if rendersRow(fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <!-- The field's description is the row's tooltip (#1900): hovering the
-             name or the value control shows it. An inner element with its own
-             title (an inherited value, the reset chip) still wins there. -->
-        <div class="field-row" title={field.description || undefined} class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")} class:empty={isRowEmpty(field, fieldId)} class:scalar={isScalarRow(field, fieldId)} class:editing={isEditing(fieldId)}>
+        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")} class:empty={isRowEmpty(field, fieldId)} class:scalar={isScalarRow(field, fieldId)} class:editing={isEditing(fieldId)}>
           <!-- Disclosure gutter — reserved so the field glyph lines up with the
                collapsible sections' glyph column (RailSectionHeader): caret ·
                glyph on every rail line (#1438). Reference fields no longer
@@ -701,8 +702,12 @@
             <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           {/if}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <!-- The description is the tooltip of the name AND of the at-rest
+               value control (RailScalarCell's hit target) — #1900 — not of the
+               whole row, which would hover it over a long_text's prose. -->
           <span
             class="fr-name"
+            title={field.description || undefined}
             onclick={(e) => { if (isScalarRow(field, fieldId) && !isEditing(fieldId)) openField(fieldId, e.currentTarget.closest(".field-row") as HTMLElement); }}
           >{fieldLabel}</span>
           <div class="fr-val" title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : isCascadeInherited(fieldId) ? `Inherited from ${cascadeSourceLabel(fieldId)}` : undefined}>

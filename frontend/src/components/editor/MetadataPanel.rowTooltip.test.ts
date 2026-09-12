@@ -1,21 +1,9 @@
 // @vitest-environment happy-dom
-// #1900 — a field's description is the whole row's tooltip: hovering the name
-// OR the value control shows it. A field without a description has no title.
+// #1900 — a field's description is the tooltip of its name AND of its at-rest
+// value control (the thing the author is about to change). A field without a
+// description keeps the control's plain "Set / Edit <name>" title.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@/lib/test/component";
-
-// An assistant-kind panel reads the machine's providers on mount; tests never
-// touch the network (#973).
-vi.mock("@/lib/api", () => ({
-  api: {
-    getMachineSettings: vi.fn(async () => ({
-      providers: { anthropic_api_key: "", openai_api_key: "", openrouter_api_key: "", ollama_host: "" },
-      default_provider: "anthropic",
-    })),
-    listAIProviderModels: vi.fn(async () => ({ models: [] })),
-  },
-}));
-
 import MetadataPanel from "./MetadataPanel.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import type { EntryMetadata, MetadataSchema } from "@/lib/types";
@@ -24,7 +12,7 @@ const REACH = "How far the app reaches for lore it adds on its own.";
 
 const SCHEMA = {
   version: 1,
-  entry_types: { "assistant:assistant": { name: "Assistant", kind: "assistant", fields: ["reach", "alias"] } },
+  entry_types: { "lore:note": { name: "Note", kind: "lore", fields: ["reach", "alias"] } },
   fields: {
     reach: {
       name: "Lore reach",
@@ -45,12 +33,12 @@ beforeEach(() => metadataSchemaStore.set(SCHEMA));
 function mount(metadata: EntryMetadata) {
   render(MetadataPanel, {
     props: {
-      entryType: "assistant:assistant",
+      entryType: "lore:note",
       status: "",
       metadata,
-      documentKind: "assistant",
-      documentLabel: "Assistant",
-      documentEntryTypes: [["assistant:assistant", SCHEMA.entry_types["assistant:assistant"]]] as never,
+      documentKind: "lore",
+      documentLabel: "Entry",
+      documentEntryTypes: [["lore:note", SCHEMA.entry_types["lore:note"]]] as never,
       metadataFieldIds: ["reach", "alias"],
       onMetadataChange: vi.fn(),
     },
@@ -63,20 +51,20 @@ function rowFor(label: string): HTMLElement {
   return row as HTMLElement;
 }
 
-describe("MetadataPanel — the description is the row's tooltip (#1900)", () => {
-  it("a described field's row carries the description; the name span does not repeat it", () => {
+describe("MetadataPanel — the description is the name's and the control's tooltip (#1900)", () => {
+  it("a described field: the name and the at-rest control both carry the description; the row does not", () => {
     mount({});
     const row = rowFor("Lore reach");
-    expect(row.getAttribute("title")).toBe(REACH);
-    expect(screen.getByText("Lore reach").getAttribute("title")).toBeNull();
-    // The value control sits inside the row, so hovering it shows the same text.
-    expect(row.querySelector(".fr-val")).not.toBeNull();
-    expect(row.querySelector(".fr-val")?.closest("[title]")).toBe(row);
+    expect(screen.getByText("Lore reach").getAttribute("title")).toBe(REACH);
+    expect(row.querySelector(".fr-rest-hit")?.getAttribute("title")).toBe(REACH);
+    expect(row.hasAttribute("title")).toBe(false);
   });
 
-  it("a field without a description has no tooltip", () => {
+  it("a field without a description: no title on the name; the control keeps its plain verb", () => {
     mount({});
-    expect(rowFor("Alias").hasAttribute("title")).toBe(false);
+    const row = rowFor("Alias");
+    expect(screen.getByText("Alias").hasAttribute("title")).toBe(false);
+    expect(row.querySelector(".fr-rest-hit")?.getAttribute("title")).toBe("Set Alias");
   });
 
   it("a select with a default shows the default at rest, not (none)", () => {

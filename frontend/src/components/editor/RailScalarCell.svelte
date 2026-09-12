@@ -114,7 +114,7 @@
       type="button"
       class="fr-rest-hit"
       aria-label={empty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}: ${restText}`}
-      title={empty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}`}
+      title={field.description || (empty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}`)}
       onclick={(e) => onOpen(fieldId, e.currentTarget.closest(".field-row") as HTMLElement)}
     ></button>
   </div>

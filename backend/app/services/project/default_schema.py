@@ -18,6 +18,7 @@ from typing import Any
 # The prompt disposition vocabulary (#951/#1684) — one module owns the shelf
 # labels AND the handler keys the computation reads; the `disposition`/`runnable`
 # field defs below reference the labels so declared option order IS shelf order.
+from app.services.ai.lore_budget import DEFAULT_LORE_BUDGET_TOKENS, DEFAULT_LORE_LIMITS
 from app.services.project.prompt_disposition import (
     PROMPT_DISPOSITIONS,
     PROMPT_RUNNABLE_VALUE,
@@ -1253,12 +1254,16 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         # because the tolerable lore load is a property of the model it names.
         # Lore the author declared (a prompt's picks, a scene's refs, an
         # `always` policy) is never counted or dropped.
+        # No schema default here on purpose: a number default is SEEDED into a
+        # new entry's front matter (`_initial_metadata_from_defaults`), which
+        # would pin today's constant into every assistant file. Blank resolves
+        # to the constant at call time; the description names it.
         "ai_lore_budget_tokens": {
             "name": "Lore budget (tokens)",
             "description": (
                 "Upper bound on the lore the app adds on its own to a chat turn "
                 "— what it noticed in the conversation, the prompt, the scene, "
-                "and one hop out from those — in tokens. Leave blank for 16000. "
+                f"and one hop out from those — in tokens. Leave blank for {DEFAULT_LORE_BUDGET_TOKENS}. "
                 "Entries the prompt picked, the scene references, or an "
                 "always-include policy names are sent whole regardless. 0 "
                 "sends only those."
@@ -1278,10 +1283,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 {"value": "one_hop", "label": "One hop"},
                 {"value": "named", "label": "Named only"},
             ],
-            # A select with a default is required in the rail (#1421): no
-            # "(none)" pick, and an untouched assistant reads "One hop" — the
-            # resolver's own blank→one_hop default, made visible (#1900).
-            "default": "one_hop",
+            # A required select, like `context_policy` above (#1421): the default
+            # is what the resolver applies to a blank, spelled once (#1900).
+            "default": DEFAULT_LORE_LIMITS.expansion,
         },
         # Author-set prices for a model the price oracle can't reach — an unlisted
         # or local model (ADR-0083 Amendment 1). USD per 1M tokens, matching how

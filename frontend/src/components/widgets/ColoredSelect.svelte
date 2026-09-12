@@ -65,11 +65,32 @@
   // A select with no colors shows no dots at all (no "no color" placeholder).
   const anyColored = $derived(options.some((o) => !!o.color));
 
+  // The open popover, for focus management (#1904 review). The popover is
+  // body-portaled, so without this a keyboard user who opens the list finds
+  // focus still on the trigger and Tab walking away from the rows: focus
+  // moves INTO the list on open (the selected row; the footer action when the
+  // rows are inert), Arrow keys walk rows + footer, and closing hands focus
+  // back to the trigger when it was inside the list.
+  let popEl: HTMLDivElement | undefined = $state();
+
   function toggle() {
     if (readOnly && !footer) return;
     open = !open;
   }
-  function close() { open = false; }
+  function close() {
+    const active = document.activeElement;
+    const inside = !!popEl && (popEl.contains(active) || active === document.body);
+    open = false;
+    if (inside) anchor?.focus();
+  }
+
+  $effect(() => {
+    if (!open || !popEl) return;
+    const target = readOnly
+      ? popEl.querySelector<HTMLElement>(".colored-select-footer button")
+      : (popEl.querySelector<HTMLElement>(".colored-select-row.selected") ?? popEl.querySelector<HTMLElement>("button"));
+    target?.focus();
+  });
 
   function select(opt: SelectOption) {
     if (readOnly) return;
@@ -92,12 +113,33 @@
     }
   }
 
+  // Arrow keys walk every button in the popover — rows and footer actions —
+  // wrapping at both ends, like a native <select>'s list.
+  function onPopKey(event: KeyboardEvent) {
+    if (!popEl || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
+    const items = Array.from(popEl.querySelectorAll<HTMLElement>("button"));
+    if (items.length === 0) return;
+    const idx = items.indexOf(document.activeElement as HTMLElement);
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    const next = idx < 0 ? (step > 0 ? 0 : items.length - 1) : (idx + step + items.length) % items.length;
+    event.preventDefault();
+    items[next].focus();
+  }
+
+  // Tab out of the popover (or focus otherwise leaving it and the trigger)
+  // closes it — the body-portaled list must not stay open behind the page.
+  function onPopFocusOut(event: FocusEvent) {
+    if (!open) return;
+    const to = event.relatedTarget as Node | null;
+    if (to && ((popEl && popEl.contains(to)) || (anchor && anchor.contains(to)))) return;
+    open = false;
+  }
+
   function onDocClick(event: MouseEvent) {
     if (!open) return;
     const target = event.target as Node | null;
     if (target && anchor && anchor.contains(target)) return;
-    const pop = document.querySelector(".colored-select-popover");
-    if (pop && target && pop.contains(target)) return;
+    if (popEl && target && popEl.contains(target)) return;
     close();
   }
 
@@ -150,11 +192,18 @@
   </button>
 
   {#if open}
+    <!-- The listbox holds only options; a footer action is its SIBLING, not a
+         child — a non-option inside role="listbox" is an ARIA authoring error.
+         Keyboard handling lives on the shared wrapper so it spans both. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="colored-select-popover"
-      role="listbox"
+      bind:this={popEl}
       use:anchoredPopover={{ anchor, gap: 4, matchWidth: true }}
+      onkeydown={onPopKey}
+      onfocusout={onPopFocusOut}
     >
+    <div class="colored-select-list" role="listbox">
       {#if allowBlank}
         <button
           type="button"
@@ -197,6 +246,7 @@
           <span class="colored-select-row-label">{opt.label ?? opt.value}</span>
         </button>
       {/each}
+    </div>
       {#if footer}
         <div class="colored-select-footer">{@render footer({ close })}</div>
       {/if}
@@ -325,6 +375,13 @@
     padding: 4px;
     box-shadow: var(--elev-2);
     min-width: 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  /* The option rows' listbox; the footer stacks under it inside the popover. */
+  .colored-select-list {
     display: flex;
     flex-direction: column;
     gap: 2px;

@@ -3,7 +3,7 @@
 // instead of an inline rect-anchoring copy (#1587) — body-portaled, fixed,
 // and floor-widthed to the trigger pill.
 import { describe, expect, it, vi } from "vitest";
-import { createRawSnippet } from "svelte";
+import { createRawSnippet, tick } from "svelte";
 import { render, fireEvent, screen } from "@/lib/test/component";
 import ColoredSelect from "./ColoredSelect.svelte";
 
@@ -126,6 +126,72 @@ describe("ColoredSelect head abilities (#1904)", () => {
     expect(document.querySelector(".colored-select-popover")).not.toBeNull();
 
     await fireEvent.click(pop.querySelector(".t-footer") as HTMLElement);
+    expect(document.querySelector(".colored-select-popover")).toBeNull();
+  });
+
+  it("the footer is the listbox's sibling, not an option inside it", async () => {
+    const footer = createRawSnippet<[{ close: () => void }]>(() => ({
+      render: () => `<button type="button" class="t-footer">Edit…</button>`,
+    }));
+    const { container } = render(ColoredSelect, {
+      props: { value: "a", options: [{ value: "a", label: "A" }], footer },
+    });
+    await fireEvent.click(container.querySelector(".colored-select-trigger") as HTMLElement);
+    const listbox = document.querySelector('.colored-select-popover [role="listbox"]') as HTMLElement;
+    expect(listbox).not.toBeNull();
+    expect(listbox.querySelectorAll('[role="option"]').length).toBe(2); // blank + A
+    expect(listbox.querySelector(".t-footer")).toBeNull();
+    expect(document.querySelector(".colored-select-popover .t-footer")).not.toBeNull();
+  });
+
+  it("keyboard: opening focuses the selected row, arrows walk rows + footer, Escape returns focus to the trigger", async () => {
+    const footer = createRawSnippet<[{ close: () => void }]>(() => ({
+      render: () => `<button type="button" class="t-footer">Edit…</button>`,
+    }));
+    const { container } = render(ColoredSelect, {
+      props: {
+        value: "b",
+        options: [{ value: "a", label: "A" }, { value: "b", label: "B" }],
+        allowBlank: false,
+        footer,
+      },
+    });
+    const trigger = container.querySelector(".colored-select-trigger") as HTMLButtonElement;
+    trigger.focus();
+    await fireEvent.click(trigger);
+    await tick();
+    const pop = document.querySelector(".colored-select-popover") as HTMLElement;
+    const rows = Array.from(pop.querySelectorAll<HTMLElement>('[role="option"]'));
+    const footerButton = pop.querySelector(".t-footer") as HTMLElement;
+    expect(document.activeElement).toBe(rows[1]); // the selected row, B
+
+    await fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(footerButton);
+    await fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rows[0]); // wraps
+    await fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(footerButton); // wraps back
+
+    await fireEvent.keyDown(window, { key: "Escape" });
+    expect(document.querySelector(".colored-select-popover")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("keyboard: readOnly + footer opens with focus on the footer action; Tab out closes", async () => {
+    const footer = createRawSnippet<[{ close: () => void }]>(() => ({
+      render: () => `<button type="button" class="t-footer">Edit…</button>`,
+    }));
+    const { container } = render(ColoredSelect, {
+      props: { value: "a", options: [{ value: "a", label: "A" }], allowBlank: false, readOnly: true, footer },
+    });
+    const trigger = container.querySelector(".colored-select-trigger") as HTMLButtonElement;
+    await fireEvent.click(trigger);
+    await tick();
+    const footerButton = document.querySelector(".colored-select-popover .t-footer") as HTMLElement;
+    expect(document.activeElement).toBe(footerButton);
+
+    // Focus leaving the popover for somewhere that is neither it nor the trigger.
+    await fireEvent.focusOut(footerButton, { relatedTarget: document.body });
     expect(document.querySelector(".colored-select-popover")).toBeNull();
   });
 

@@ -48,8 +48,9 @@ An open entry has three parts:
 
 The **Details** rail is where an entry's structured information lives.
 
-- **Type** — the rail's head shows the entry's type as one line: its icon and
-  name (Character, Location…) with a small caret. You set the type when you
+- **Type** — the rail's head shows the entry's type as one line: its name
+  (Character, Location…), its icon when the type has one, and a small caret.
+  You set the type when you
   create the entry, but you can **change it any time**: click the head and pick
   another type; the fields below update to match. **Edit type…** at the foot of
   that list takes you to the type's definition (that's

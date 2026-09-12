@@ -591,7 +591,7 @@
       icon={railTypeIcon}
       quiet
       {readOnly}
-      ariaLabel={`${documentLabel} type`}
+      ariaLabel={`${documentLabel} type: ${typeOptions.find((o) => o.value === entryType)?.label ?? entryType}`}
       onChange={(next) => onEntryTypeChange?.(next)}
       footer={editTypeAction}
     />

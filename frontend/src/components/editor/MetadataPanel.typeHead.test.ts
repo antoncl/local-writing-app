@@ -61,7 +61,10 @@ describe("MetadataPanel — the rail head is one control (#1904)", () => {
     expect(triggers).toHaveLength(1);
     expect(triggers[0].textContent).toContain("Character");
     expect(triggers[0].querySelector(".colored-select-icon.ti-user")).not.toBeNull();
-    expect(triggers[0].getAttribute("aria-label")).toBe("Entry type");
+    // The accessible name carries the VALUE too — the old <label>+<select>
+    // announced "Entry type, Character"; a bare "Entry type" would make a
+    // screen-reader user open the list to learn the type (#1904 review).
+    expect(triggers[0].getAttribute("aria-label")).toBe("Entry type: Character");
     expect(document.querySelector(".rail-type select")).toBeNull();
     expect(screen.queryByText("Edit type…")).toBeNull();
   });

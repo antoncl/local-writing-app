@@ -187,8 +187,6 @@ export function inputDefinitionToDraft(
       value: o.value,
       label: o.label ?? "",
       color: o.color ?? null,
-      // A prompt input has no app-side deriver, so nothing here is derived.
-      derived: false,
       originalValue: o.value,
     })),
     required: Boolean(input.required),

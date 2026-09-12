@@ -1043,23 +1043,26 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "page_status": {
             # A card's page status (ADR-0048 S7 Slice 3b): whether its story beat is
-            # realized in prose. `on_page` is DERIVED — a card with a `scene` link is
-            # on the page, so plot.py forces it on card save + read and clears a stale
-            # `on_page` when the scene is removed. Absent (the sparse default) reads as
-            # `unwritten` — a placeholder to promote; `off_page` is the writer's
-            # deliberate "this happens off-screen, no scene ever" (diagnostics must not
-            # nag it toward a scene). So a writer only authors off_page vs unwritten;
-            # on_page is the app's business, driven by the scene attachment.
+            # realized in prose. `on_page` is DERIVED — declared below (#1911), so the
+            # select canon (`_canonicalise_metadata_selects`, on save + every read)
+            # forces it while a `scene` is attached and clears a stale `on_page` when
+            # the scene is removed. Absent (the sparse default) reads as `unwritten` —
+            # a placeholder to promote; `off_page` is the writer's deliberate "this
+            # happens off-screen, no scene ever" (diagnostics must not nag it toward
+            # a scene). So a writer only authors off_page vs unwritten; on_page is
+            # the app's business, driven by the scene attachment.
             "name": "Page status",
             "type": "select",
             "options": [
                 {"value": "unwritten", "label": "Unwritten", "color": "stone"},
                 {"value": "off_page", "label": "Off the page", "color": "graphite"},
-                # Derived (#1906): the scene link sets and clears it (the healer
-                # above), so the rail never offers it and a card holding it is
-                # read-only there — the board's own menu already knew.
-                {"value": "on_page", "label": "On the page", "color": "moss", "derived": True},
+                {"value": "on_page", "label": "On the page", "color": "moss"},
             ],
+            # The one declaration the healer, the rail (never offers on_page; a card
+            # holding it is read-only) and the type editor all read (#1911). A layer
+            # that redeclares this field's options keeps it: field definitions merge
+            # per attribute up the chain.
+            "derived": {"value": "on_page", "when_set": "scene"},
             # A required select, like `context_policy` (#1421): the rail shows the
             # sparse default named above instead of offering "(none)" (#1903).
             "default": "unwritten",

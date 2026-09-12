@@ -60,7 +60,7 @@ from app.services.yaml_io import load_yaml
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 10
+CURRENT_VERSION = 11
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -945,6 +945,36 @@ def _migrate_schema_tags_type(schema_path: Path) -> None:
         atomic_write_text(schema_path, yaml.safe_dump(data, sort_keys=False, allow_unicode=True))
 
 
+def _drop_option_derived_flags(root: Path, _ctx: ChainContext) -> None:
+    """v10→v11 (#1911): the per-option `derived: true` flag (#1906, live for one
+    release) is retired — a derived select state is a FIELD-level declaration
+    (`derived: {value, when_set}`), which the built-in `page_status` carries
+    and every layer inherits per attribute. Drop the dead key from every
+    select option in this layer's own `metadata.schema.yaml`; the file is
+    rewritten only when something changed. Idempotent."""
+    schema_path = root / "metadata.schema.yaml"
+    if not schema_path.exists():
+        return
+    try:
+        data = load_yaml(schema_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return
+    fields = data.get("fields") if isinstance(data, dict) else None
+    if not isinstance(fields, dict):
+        return
+    changed = False
+    for field_def in fields.values():
+        options = field_def.get("options") if isinstance(field_def, dict) else None
+        if not isinstance(options, list):
+            continue
+        for option in options:
+            if isinstance(option, dict) and "derived" in option:
+                del option["derived"]
+                changed = True
+    if changed:
+        atomic_write_text(schema_path, yaml.safe_dump(data, sort_keys=False, allow_unicode=True))
+
+
 def _migrate_one_node_document(
     path: Path, *, kind: str, layer_root: Path, machine_root: Path, ctx: ChainContext, unresolved_log: list[str]
 ) -> None:
@@ -1092,6 +1122,11 @@ MIGRATIONS: list[MigrationStep] = [
         "convert tags.yaml + tags/assistant_tags occurrences into tag-kind node "
         "references, per declared chain layer (ADR-0082 slice 4, #1785)",
         _migrate_layer_tags,
+    ),
+    ChainMigration(
+        11,
+        "drop the retired per-option derived flag from select options in metadata.schema.yaml (#1911)",
+        _drop_option_derived_flags,
     ),
 ]
 

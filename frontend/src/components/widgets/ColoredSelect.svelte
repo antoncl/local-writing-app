@@ -34,10 +34,11 @@
     // value, so there is still something to open the list for (#1904). The
     // option rows render disabled/inert in that case; the footer works.
     readOnly = false,
-    // Leave `derived` options (#1906) out of the list — the trigger still
-    // names one that is held. An authoring host sets this; a host that
-    // references a value (a view filter) keeps every option pickable.
-    hideDerived = false,
+    // Option values shown at rest but never offered — the trigger still names
+    // one that is held. An authoring host lists the field's derived state here
+    // (#1911); a host that references a value (a view filter) keeps every
+    // option pickable.
+    omitFromPick = [],
     // Leading glyph on the trigger (Tabler class list), e.g. "ti ti-user".
     icon = null,
     // Trigger reads as rest text: no border/surface until hover (#1904).
@@ -51,7 +52,7 @@
     ariaLabel?: string;
     onChange?: (value: string) => void;
     readOnly?: boolean;
-    hideDerived?: boolean;
+    omitFromPick?: string[];
     icon?: string | null;
     quiet?: boolean;
     footer?: Snippet<[{ close: () => void }]>;
@@ -229,7 +230,7 @@
           <span class="colored-select-row-label muted">{placeholder}</span>
         </button>
       {/if}
-      {#each hideDerived ? options.filter((o) => !o.derived) : options as opt}
+      {#each options.filter((o) => !omitFromPick.includes(o.value)) as opt}
         <button
           type="button"
           class="colored-select-row"

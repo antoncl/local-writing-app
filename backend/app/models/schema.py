@@ -33,6 +33,24 @@ LIST_ITEM_GROUP_MEMBER_TYPES: Final[frozenset[str]] = LIST_ITEM_SCALAR_TYPES | f
 )
 
 
+class DerivedSelectState(BaseModel):
+    """A select state the app holds, never the author (#1911): the field takes
+    `value` on a node whenever the reference field `when_set` is set, and a
+    stale `value` is cleared when it is not. Declared once on the FIELD, so
+    the select canon (`_canonicalise_metadata_selects`), the rail's pick list and
+    the type editor read one rule — "a plot card is `on_page` iff its `scene`
+    is attached" is the built-in instance, and a user can author the same
+    shape for a field of their own (`status: filmed` iff `footage` is set).
+    An author's own pick can never be `value`: the healer would put the
+    state straight back, so the rail never offers it and locks a row holding
+    it; a view filter or a param may still name it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    value: str
+    when_set: str
+
+
 class MetadataFieldDefinition(BaseModel):
     name: str
     type: Literal[
@@ -109,6 +127,11 @@ class MetadataFieldDefinition(BaseModel):
     # id (or list of ids for entity_ref_list). Computed fields never carry
     # a default — they're derived at read time.
     default: MetadataValue | None = None
+
+    # A select state the app derives from a reference field (#1911) — see
+    # `DerivedSelectState`. Only meaningful on a `select`; `value` must name
+    # one of `options` (the schema-definition validator checks both).
+    derived: DerivedSelectState | None = None
 
     @property
     def required_select(self) -> bool:

@@ -7,9 +7,6 @@
     value: string;
     label: string;
     color: string | null;
-    // Carried through untouched (#1906): the editor neither shows nor sets it —
-    // a derived option only means something with an app-side deriver.
-    derived: boolean;
     originalValue: string | null;
   };
 </script>
@@ -48,7 +45,7 @@
   }
 
   function addOption() {
-    emit([...options, { value: "", label: "", color: null, derived: false, originalValue: null }]);
+    emit([...options, { value: "", label: "", color: null, originalValue: null }]);
   }
 
   function removeOption(index: number) {

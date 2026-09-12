@@ -42,7 +42,9 @@ class ProjectNodeMixin:
         # Same read-side healing every other node kind gets (#345): the project
         # node has carried schema-driven metadata since #334, so it can hold a
         # reference whose target was deleted.
-        metadata = self._strip_dangling_references(metadata, self.read_metadata_schema(), self._build_node_index())
+        schema = self.read_metadata_schema()
+        metadata = self._strip_dangling_references(metadata, schema, self._build_node_index())
+        metadata = self._canonicalise_metadata_selects(metadata, entry_type, schema)
         computed_metadata = self._computed_entry_metadata(body, node_id=node_id, entry_type=entry_type)
         # The project folder's path is a project-node fact, not body-derived, so
         # the body dispatch has no input for it — its resolver lives here, where

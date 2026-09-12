@@ -271,8 +271,7 @@ class ResearchNotesMixin:
         entry_type = raw_entry_type
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
         schema = self.read_metadata_schema()
-        metadata = self._strip_unknown_metadata_fields(metadata, entry_type, schema)
-        metadata = self._strip_dangling_references(metadata, schema, index)
+        metadata = self._repair_metadata_on_read(metadata, entry_type, schema, index)
         return ResearchNote(
             id=node_id,
             title=title,
@@ -308,6 +307,7 @@ class ResearchNotesMixin:
         clean_metadata = self._strip_unknown_metadata_fields(
             request.metadata, entry_type, schema
         )
+        clean_metadata = self._canonicalise_metadata_selects(clean_metadata, entry_type, schema)
         note = ResearchNote(
             id=node_id,
             title=request.title,

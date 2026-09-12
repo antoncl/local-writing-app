@@ -9,6 +9,7 @@
     NodePickerConfig,
   } from "@/lib/types";
   import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
+  import type { DerivedSelectState } from "@/lib/metadataTypes";
 
   // The assembled field draft emitted on save. The parent (App.saveSchemaField)
   // owns persistence (option migration, removed-value confirm, rename, refresh);
@@ -22,6 +23,9 @@
     group: string;
     defaultValue: string | undefined;
     options: OptionDraft[];
+    // A select's derived state (#1911): the option the app holds while a
+    // reference field is set. Null unless both halves are chosen.
+    derived: DerivedSelectState | null;
     // Computed-field settings. Both are free strings so the editor round-trips
     // any function/scope the backend authorises — including `cost` — and never
     // coerces one it doesn't recognize (#353). Vocabulary + on-disk mapping
@@ -100,6 +104,9 @@
     // seeds it from field_sources[fieldId].layer_id), so it's excluded from the
     // picker rather than threading a separate "current layer" prop.
     metadataSchemaLayers?: MetadataSchemaLayer[];
+    // Reference fields the schema declares (#1911) — the `while this reference
+    // is set` choices behind a select's derived state.
+    refFieldChoices?: { id: string; name: string }[];
     // --- Callback props (parent owns persistence) ---
     onSave?: (payload: FieldDraftPayload) => void;
     onCancel?: () => void;
@@ -115,6 +122,7 @@
     groups = {},
     sectionLabels = [],
     metadataSchemaLayers = [],
+    refFieldChoices = [],
     onSave = () => {},
     onCancel = () => {},
     onRemove = () => {},
@@ -144,9 +152,10 @@
         value: o.value,
         label: o.label ?? "",
         color: o.color ?? null,
-        derived: o.derived === true,
         originalValue: o.value,
       })) as OptionDraft[],
+      derivedValue: f?.derived?.value ?? "",
+      derivedWhenSet: f?.derived?.when_set ?? "",
       // Preserve the stored function/scope exactly (#353) — a `cost` field
       // (or any function the frontend doesn't yet mirror) round-trips
       // unchanged rather than being coerced to word_count. A fresh / non-
@@ -191,6 +200,24 @@
   let group: string = $state(seed.group);
   let defaultValue: string | undefined = $state(seed.defaultValue);
   let options: OptionDraft[] = $state(seed.options);
+  // The two halves of a select's derived state (#1911); "" = not chosen.
+  // `derivedValue` names an option DRAFT (by its loaded `originalValue`, else
+  // its current value), so an option-value rename carries the declaration
+  // along and a deleted option clears it — `derivedOption` is what is shown
+  // and emitted.
+  let derivedValue: string = $state(seed.derivedValue);
+  let derivedWhenSet: string = $state(seed.derivedWhenSet);
+  const derivedOption = $derived(
+    derivedValue
+      ? (options.find((o) => o.originalValue === derivedValue) ?? options.find((o) => o.value === derivedValue))?.value.trim() || ""
+      : "",
+  );
+  function chooseDerived(next: string | undefined) {
+    derivedValue = next ?? "";
+    // The derived state is never a default (#1911): a default that just became
+    // the app-set state is cleared rather than left invisibly stored.
+    if (derivedValue && defaultValue === derivedValue) defaultValue = undefined;
+  }
   let computedFunction: string = $state(seed.computedFunction);
   let computedScope: string = $state(seed.computedScope);
   // The scope choices the current function offers (empty for word_count, or for
@@ -334,6 +361,10 @@
       group,
       defaultValue,
       options,
+      derived:
+        type === "select" && derivedOption && derivedWhenSet
+          ? { value: derivedOption, when_set: derivedWhenSet }
+          : null,
       computedFunction,
       computedScope,
       pickerConfig,
@@ -602,6 +633,34 @@
       onChange={(next) => (options = next)}
     />
   {/if}
+  {#if type === "select"}
+    <!-- A derived state (#1911): the app holds one option while a reference
+         field is set — a plot card is On the page while its scene is attached.
+         The backend healer sets and clears it; the rail never offers it and
+         locks a row holding it. Both halves or neither: a half-chosen rule
+         saves as none. -->
+    <div class="sfi-derived-row">
+      <label class="sfi-field">
+        App-set state
+        <DefaultValueEditor
+          type="select"
+          value={derivedOption}
+          options={options}
+          ariaLabel="App-set state"
+          onChange={chooseDerived}
+        />
+      </label>
+      <label class="sfi-field">
+        while this reference is set
+        <select bind:value={derivedWhenSet} aria-label="While this reference is set">
+          <option value="">— choose —</option>
+          {#each refFieldChoices as choice (choice.id)}
+            <option value={choice.id}>{choice.name}</option>
+          {/each}
+        </select>
+      </label>
+    </div>
+  {/if}
   {#if !NO_DEFAULT_TYPES.has(type)}
     <!-- Default-value editor (#38). Shared with the prompt-inputs editor
          via DefaultValueEditor. Empty = no default (the historic
@@ -614,10 +673,11 @@
          a raw text box, not a picker, so it could only ever hold garbage. -->
     <label class="sfi-field sfi-default-field">
       Default for new entries
+      <!-- The derived state is never a default (#1911): the app sets it per node. -->
       <DefaultValueEditor
         type={type}
         value={defaultValue}
-        options={options}
+        options={options.filter((o) => o.value !== derivedOption)}
         ariaLabel="Default for new entries"
         onChange={(next) => (defaultValue = next)}
       />
@@ -846,7 +906,8 @@
   }
   /* "Move to layer…" (#1667, ADR-0078 §8) — sits directly above the footer's
      Remove/Cancel/Done row so it reads as a sibling action on the same field. */
-  .sfi-move-row {
+  .sfi-move-row,
+  .sfi-derived-row {
     display: flex;
     align-items: center;
     gap: 10px;

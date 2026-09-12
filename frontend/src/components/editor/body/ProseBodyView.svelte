@@ -27,8 +27,6 @@
   import type { EditorView } from "@tiptap/pm/view";
   import StarterKit from "@tiptap/starter-kit";
   import Table from "@tiptap/extension-table";
-  import TableCell from "@tiptap/extension-table-cell";
-  import TableHeader from "@tiptap/extension-table-header";
   import TableRow from "@tiptap/extension-table-row";
   import {
     minimalReplaceTransaction,
@@ -80,10 +78,13 @@
     type SlashMenuState,
   } from "@/lib/editor-core/slashMenu";
   import {
+    placeSelectionToolbar,
     type FloatingMenuState,
     type ToolbarAction,
   } from "@/lib/editor-core/selectionToolbar";
   import { buildTableMenuAction } from "@/lib/editor-core/tableMenuActions";
+  import { visibleSelectionRect, selectionEndpointRect } from "@/lib/editor-core/selectionRects";
+  import { AlignedTableCell, AlignedTableHeader, setColumnAlign } from "@/lib/editor-core/alignedTable";
   import ProseSlashMenu from "./ProseSlashMenu.svelte";
   import ProseSelectionToolbar from "./ProseSelectionToolbar.svelte";
   import ProseAIToolbar from "./ProseAIToolbar.svelte";
@@ -414,10 +415,6 @@
   }
 
   // ---------- Helpers ----------
-  function clamp(value: number, min: number, max: number) {
-    return Math.min(Math.max(value, min), max);
-  }
-
   function updateLiveWordCount() {
     if (!editor) {
       liveWordCount = 0;
@@ -709,43 +706,7 @@
 
   // ---------- Table toolbar ----------
   function setCellAlign(align: "left" | "center" | "right") {
-    if (!editor) return;
-    const { state, view } = editor;
-    const { $from: fromR } = state.selection;
-    let tablePos = -1;
-    let tableNode: ProseMirrorNode | null = null;
-    let tableDepth = -1;
-    for (let d = fromR.depth; d >= 0; d--) {
-      const node = fromR.node(d);
-      if (node.type.name === "table") {
-        tablePos = fromR.before(d);
-        tableNode = node;
-        tableDepth = d;
-        break;
-      }
-    }
-    if (!tableNode || tablePos < 0 || fromR.depth < tableDepth + 2) {
-      editor.chain().focus().setCellAttribute("align", align).run();
-      return;
-    }
-    const cellIndex = fromR.index(tableDepth + 1);
-    let tr = state.tr;
-    let rowPos = tablePos + 1;
-    for (let i = 0; i < tableNode.childCount; i++) {
-      const row = tableNode.child(i);
-      let cellPos = rowPos + 1;
-      for (let j = 0; j < row.childCount; j++) {
-        const cell = row.child(j);
-        if (j === cellIndex) {
-          tr = tr.setNodeMarkup(cellPos, null, { ...cell.attrs, align });
-          break;
-        }
-        cellPos += cell.nodeSize;
-      }
-      rowPos += row.nodeSize;
-    }
-    view.dispatch(tr);
-    editor.commands.focus();
+    if (editor) setColumnAlign(editor, align);
   }
 
   // ---------- Selection toolbar ----------
@@ -767,71 +728,25 @@
     }
 
     // Anchor to the selection when there is one, else to the caret (in-table
-    // with an empty selection). getVisibleSelectionRect returns null for an
+    // with an empty selection). visibleSelectionRect returns null for an
     // empty range, so the caret endpoint is the fallback.
-    const anchorRect = (hasText ? getVisibleSelectionRect() : null) ?? getSelectionEndpointRect();
+    const anchorRect = (hasText ? visibleSelectionRect(editorFrame) : null) ?? selectionEndpointRect(editor);
     if (!anchorRect) {
       hideSelectionMenu();
       return;
     }
 
-    const frameBounds = editorFrame.getBoundingClientRect();
-    const toolbarHeight = 42;
-    const toolbarMargin = 10;
-    const visibleTop = Math.max(frameBounds.top, 0) + toolbarMargin;
-    const visibleBottom = Math.min(frameBounds.bottom, window.innerHeight) - toolbarMargin;
-    const anchorTop = anchorRect.top;
-    const anchorBottom = anchorRect.bottom;
-    const hasRoomAbove = anchorTop - toolbarHeight - toolbarMargin >= visibleTop;
-    const placement = hasRoomAbove ? "above" : "below";
-    const preferredY = placement === "above" ? anchorTop - toolbarMargin : anchorBottom + toolbarMargin;
-    const minY = placement === "above" ? visibleTop + toolbarHeight : visibleTop;
-    const maxY = placement === "above" ? visibleBottom : visibleBottom - toolbarHeight;
-    const toolbarHalfWidth = Math.min(360, Math.max(140, editorFrame.clientWidth / 2 - toolbarMargin));
-    const unclampedX = (anchorRect.left + anchorRect.right) / 2;
-    const minX = Math.max(frameBounds.left, 0) + toolbarHalfWidth;
-    const maxX = Math.min(frameBounds.right, window.innerWidth) - toolbarHalfWidth;
     const wordCount = hasText ? countWords(selectedText) : 0;
-    selectionMenu = {
-      visible: true,
-      x: minX <= maxX ? clamp(unclampedX, minX, maxX) : (Math.max(frameBounds.left, 0) + Math.min(frameBounds.right, window.innerWidth)) / 2,
-      y: clamp(preferredY, minY, maxY),
-      wordCount,
-      placement,
-    };
+    const placed = placeSelectionToolbar(
+      anchorRect,
+      editorFrame.getBoundingClientRect(),
+      editorFrame.clientWidth,
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    selectionMenu = { visible: true, ...placed, wordCount };
     selectionToolbarActions = getSelectionToolbarActions(hasText, inTable);
     openToolbarMenuId = null;
     closeSlashMenu();
-  }
-
-  function getVisibleSelectionRect() {
-    if (!editorFrame) return null;
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return null;
-    const frameBounds = editorFrame.getBoundingClientRect();
-    const visibleRects = Array.from(selection.getRangeAt(0).getClientRects()).filter(
-      (rect) =>
-        rect.width > 0 &&
-        rect.height > 0 &&
-        rect.bottom >= frameBounds.top &&
-        rect.top <= frameBounds.bottom &&
-        rect.right >= frameBounds.left &&
-        rect.left <= frameBounds.right,
-    );
-    return visibleRects[0] ?? null;
-  }
-
-  function getSelectionEndpointRect() {
-    if (!editor) return null;
-    const { selection } = editor.state;
-    const start = editor.view.coordsAtPos(selection.from);
-    const end = editor.view.coordsAtPos(selection.to);
-    return {
-      top: Math.min(start.top, end.top),
-      bottom: Math.max(start.bottom, end.bottom),
-      left: Math.min(start.left, end.left),
-      right: Math.max(start.right, end.right),
-    };
   }
 
   function hideSelectionMenu() {
@@ -1265,32 +1180,6 @@
 
 
   onMount(() => {
-    const AlignedTableCell = TableCell.extend({
-      addAttributes() {
-        return {
-          ...this.parent?.(),
-          align: {
-            default: null,
-            parseHTML: (element: HTMLElement) => element.style.textAlign || element.getAttribute("align") || null,
-            renderHTML: (attributes: { align?: string | null }) =>
-              attributes.align ? { style: `text-align: ${attributes.align}` } : {},
-          },
-        };
-      },
-    });
-    const AlignedTableHeader = TableHeader.extend({
-      addAttributes() {
-        return {
-          ...this.parent?.(),
-          align: {
-            default: null,
-            parseHTML: (element: HTMLElement) => element.style.textAlign || element.getAttribute("align") || null,
-            renderHTML: (attributes: { align?: string | null }) =>
-              attributes.align ? { style: `text-align: ${attributes.align}` } : {},
-          },
-        };
-      },
-    });
     editor = new Editor({
       element: editorElement,
       extensions: [

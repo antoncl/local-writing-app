@@ -3,14 +3,18 @@
   import { Editor } from "@tiptap/core";
   import StarterKit from "@tiptap/starter-kit";
   import Table from "@tiptap/extension-table";
-  import TableCell from "@tiptap/extension-table-cell";
-  import TableHeader from "@tiptap/extension-table-header";
   import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
+  import { AlignedTableCell, AlignedTableHeader } from "@/lib/editor-core/alignedTable";
+  import { placeSelectionToolbar, type FloatingMenuState, type ToolbarAction } from "@/lib/editor-core/selectionToolbar";
+  import { visibleSelectionRect, selectionEndpointRect } from "@/lib/editor-core/selectionRects";
+  import { buildLongTextToolbarActions } from "@/lib/editor-core/longTextToolbarActions";
+  import { countWords } from "@/lib/utils/wordCount";
+  import ProseSelectionToolbar from "@/components/editor/body/ProseSelectionToolbar.svelte";
 
   let {
     value = "",
@@ -28,6 +32,7 @@
     onChange?: (value: string) => void;
   } = $props();
 
+  let root = $state<HTMLDivElement | null>(null);
   let editorElement: HTMLDivElement;
   let editor = $state<Editor | null>(null);
   // Bookkeeping for the external/local value guard — mutated across the TipTap
@@ -38,6 +43,14 @@
   let lastExternalValue = $state("");
   let pendingLocalValue = $state<string | null>(null);
   let applyingExternalValue = $state(false);
+
+  // Floating selection toolbar (#1884 slice 1): the field reads as prose at
+  // rest — formatting lives in the same toolbar the prose body uses, shown on
+  // a text selection or with the caret in a table.
+  let menu = $state<FloatingMenuState>({ visible: false, x: 0, y: 0, wordCount: 0, placement: "above" });
+  let actions = $state<ToolbarAction[]>([]);
+  let openMenuId = $state<string | null>(null);
+  let isEmpty = $state(true);
 
   // External value changes — sync into the editor without re-emitting change.
   // Only `value` (and `editor`) drive this; the bookkeeping reads/writes are
@@ -74,6 +87,45 @@
     view.dispatch(tr);
   }
 
+  // Mirrors the body's updateSelectionMenu (ProseBodyView), minus the
+  // manuscript gate — the rail field always allows the Table menu.
+  function updateMenu() {
+    if (!editor || !root) return;
+    const { selection } = editor.state;
+    const inTable = editor.isActive("table");
+    const selectedText = selection.empty ? "" : editor.state.doc.textBetween(selection.from, selection.to, " ").trim();
+    const hasText = selectedText.length > 0;
+    if (!editor.isFocused || (!hasText && !inTable)) {
+      hideMenu();
+      return;
+    }
+    const anchor = (hasText ? visibleSelectionRect(root) : null) ?? selectionEndpointRect(editor);
+    const placed = placeSelectionToolbar(anchor, root.getBoundingClientRect(), root.clientWidth, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    });
+    menu = { visible: true, ...placed, wordCount: hasText ? countWords(selectedText) : 0 };
+    actions = buildLongTextToolbarActions(editor, hasText, inTable);
+    openMenuId = null;
+  }
+
+  function hideMenu() {
+    menu = { ...menu, visible: false };
+    openMenuId = null;
+  }
+
+  function toggleMenu(id: string) {
+    openMenuId = openMenuId === id ? null : id;
+  }
+
+  async function focusAndRun(command: () => void | Promise<void>) {
+    try {
+      await command();
+    } finally {
+      editor?.commands.focus();
+    }
+  }
+
   onMount(() => {
     editor = new Editor({
       element: editorElement,
@@ -81,8 +133,8 @@
         StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
         Table.configure({ resizable: true }),
         TableRow,
-        TableHeader,
-        TableCell,
+        AlignedTableHeader,
+        AlignedTableCell,
         ImplicitContextHighlight.configure({ matcher }),
       ],
       content: "",
@@ -98,8 +150,13 @@
         if (!editor || applyingExternalValue) return;
         loadedValue = editorHtmlToSceneMarkdown(editor.getHTML());
         pendingLocalValue = loadedValue;
+        isEmpty = editor.isEmpty;
+        updateMenu();
         onChange(loadedValue);
       },
+      onSelectionUpdate: updateMenu,
+      onFocus: updateMenu,
+      onBlur: hideMenu,
     });
 
     void loadValue(value);
@@ -121,64 +178,54 @@
     lastExternalValue = nextValue || "";
     pendingLocalValue = null;
     applyingExternalValue = false;
-  }
-
-  function run(command: () => void) {
-    command();
-    editor?.commands.focus();
+    isEmpty = editor.isEmpty;
   }
 </script>
 
-<div class="metadata-long-text">
-  <div class="metadata-long-text-toolbar" aria-label={`${ariaLabel} formatting`}>
-    <button type="button" title="Bold" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleBold().run()); }}>B</button>
-    <button type="button" title="Italic" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleItalic().run()); }}>I</button>
-    <button type="button" title="Heading 1" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleHeading({ level: 1 }).run()); }}>H1</button>
-    <button type="button" title="Heading 2" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleHeading({ level: 2 }).run()); }}>H2</button>
-    <button type="button" title="Bullet list" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleBulletList().run()); }}>List</button>
-    <button type="button" title="Numbered list" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleOrderedList().run()); }}>1.</button>
-    <button type="button" title="Quote" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleBlockquote().run()); }}>Quote</button>
-    <button type="button" title="Table" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()); }}>Table</button>
-  </div>
+<div class="metadata-long-text" class:is-empty={isEmpty} bind:this={root}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div onmousedown={() => editor?.commands.focus()} bind:this={editorElement}></div>
 </div>
+<ProseSelectionToolbar {menu} {actions} {openMenuId} onRun={focusAndRun} onToggleMenu={toggleMenu} />
 
 <style>
+  /* #1884: the container chrome (border, toolbar, scrollbox cap) is gone — the
+     field reads as prose at rest, a quiet inset marks focus, and formatting
+     happens through the same floating toolbar the body uses (ProseSelectionToolbar),
+     shown on a text selection or with the caret in a table. Despite the shared
+     TipTap document model, this field previously inherited the sans UI font at
+     --fs-md, so long_text prose — the intrinsic Body field included — read as
+     chrome, not prose (#546); it now matches the body editor's serif /
+     prose-size / 1.65 typography. */
   .metadata-long-text {
-    display: grid;
-    border: 1px solid var(--divider);
-    border-radius: 6px;
-    background: var(--surface);
+    position: relative;
+    border-radius: var(--r-md);
     color: var(--text);
-    overflow: hidden;
+    transition: background var(--t-fast), box-shadow var(--t-fast);
   }
 
-  .metadata-long-text-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    padding: 5px;
-    border-bottom: 1px solid var(--divider);
+  /* Editing: a quiet inset and the accent stripe the rail's open row uses. */
+  .metadata-long-text:focus-within {
     background: var(--inset);
+    box-shadow: inset 2px 0 0 var(--accent);
   }
 
-  .metadata-long-text-toolbar button {
-    padding: 3px 6px;
-    font-size: var(--fs-sm);
+  /* Empty at rest: a bare + where the first line would start — the empties rule (#1884). */
+  .metadata-long-text.is-empty:not(:focus-within)::before {
+    content: "+";
+    position: absolute;
+    left: 8px;
+    top: 2px;
+    color: var(--text-3);
+    font-family: var(--sans);
+    font-size: var(--fs-lg);
+    line-height: 1.65;
+    pointer-events: none;
   }
 
-  /* The prose surface reads like the manuscript body editor (#546). Despite the
-     shared TipTap document model, this field previously inherited the sans UI
-     font at --fs-md, so long_text prose — the intrinsic Body field included —
-     read as chrome, not prose. Match the body editor's serif / prose-size / 1.65
-     typography; the container chrome (border, toolbar, scrollbox cap) stays, as
-     that frames it as a rail field rather than making it a different editor. */
   :global(.metadata-long-text-body) {
-    min-height: 96px;
-    max-height: 260px;
-    padding: 8px 10px;
-    overflow: auto;
+    min-height: calc(1.65 * var(--fs-prose));   /* one prose line, so an empty field stays clickable */
+    padding: 4px 8px;
     outline: none;
     font-family: var(--serif);
     font-size: var(--fs-prose);
@@ -203,6 +250,7 @@
 
   :global(.metadata-long-text-body table) {
     width: 100%;
+    margin: 4px 0;
     border-collapse: collapse;
     font-family: var(--sans);
     font-size: var(--fs-lg);

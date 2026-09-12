@@ -506,6 +506,23 @@
   .reference-picker.controlled {
     display: block;
   }
+  /* Rail pill mode (#1884 slice 3): the add / change trigger is a bare quiet
+     glyph on the row, not the picker's dashed tile — the tile is the context
+     picker's vocabulary (a labelled container of its own); in the rail the ROW
+     is the labelled container, so the bare `+` / `⇄` carries (design-language
+     §4, the `+` anchor rule). Accent returns on hover/focus. */
+  .reference-picker.controlled :global(.ctx-add.ctx-add-glyph) {
+    padding: 2px 6px;
+    border-color: transparent;
+    background: none;
+    color: var(--text-3);
+    font-weight: var(--w-medium);
+  }
+  .reference-picker.controlled :global(.ctx-add.ctx-add-glyph:hover),
+  .reference-picker.controlled :global(.ctx-add.ctx-add-glyph:focus-visible) {
+    color: var(--accent-emphasis);
+    background: none;
+  }
   .ref-pill-row {
     display: flex;
     flex-direction: row;

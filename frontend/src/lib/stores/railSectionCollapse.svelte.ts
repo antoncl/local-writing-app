@@ -13,8 +13,11 @@
 //
 // Global — one key, not per-project (mirroring how a collapsed section reads as a
 // "how I like my rail" preference, not project data). Keys are a stable section
-// id (`references`, `conversations`, `staged-changes`) or `field:<fieldId>` for a
-// reference field.
+// id (`references`, `conversations`, `staged-changes`), `field:<fieldId>` for a
+// folding list field (#1884 slice 2), or `group:<name>` / `group:~ungrouped` for
+// an L1 group block (#1884 slice 3). A group key is per LABEL, not per type —
+// fold "Arc" on characters and it is folded on every type that has an "Arc"
+// group; the General block is one key across all types.
 
 const STORAGE_KEY = "lwa.railSectionCollapse";
 

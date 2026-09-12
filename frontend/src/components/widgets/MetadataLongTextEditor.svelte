@@ -181,6 +181,11 @@
     if (!editor) return;
     applyingExternalValue = true;
     const html = await sceneMarkdownToHtml(nextValue || "");
+    // The field can unmount while the markdown parse above is in flight (#1884
+    // slice 3: a group fold now removes a long_text row from the DOM
+    // synchronously) — `editor` itself isn't nulled by the onMount cleanup, so
+    // re-check `isDestroyed` rather than crash into a torn-down ProseMirror view.
+    if (editor.isDestroyed) return;
     editor.commands.setContent(html || "<p></p>", false);
     // An external value push is a boundary, not an edit: rebuild the state so
     // undo history starts empty. Without this, a same-id external replacement —

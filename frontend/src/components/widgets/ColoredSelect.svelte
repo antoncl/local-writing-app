@@ -6,10 +6,17 @@
   //
   // Falls back to the neutral chip when an option has no color, so this
   // widget is safe to use even when only SOME options are colored.
+  //
+  // Three optional, additive abilities (#1904) for a head-of-panel use like
+  // the Details rail's type control: `icon` renders a leading glyph on the
+  // trigger, `quiet` makes the trigger read as rest text (no border/surface
+  // until hover), and `footer` renders a trailing action row under a divider
+  // inside the popover.
 
   import { getSwatch } from "@/lib/utils/colors";
   import { anchoredPopover } from "@/lib/actions/anchoredPopover";
   import type { SelectOption } from "@/lib/types";
+  import type { Snippet } from "svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   let {
@@ -22,7 +29,16 @@
     onChange = undefined,
     // Read-only display (#64): the trigger pill renders identically (dot +
     // label + tint) but is inert — no popover, no hover affordance, no caret.
+    // Exception: when a `footer` is also provided, the trigger still opens —
+    // readOnly locks the VALUE, but a footer action is independent of the
+    // value, so there is still something to open the list for (#1904). The
+    // option rows render disabled/inert in that case; the footer works.
     readOnly = false,
+    // Leading glyph on the trigger (Tabler class list), e.g. "ti ti-user".
+    icon = null,
+    // Trigger reads as rest text: no border/surface until hover (#1904).
+    quiet = false,
+    footer = undefined,
   }: {
     value?: string;
     options?: SelectOption[];
@@ -31,6 +47,9 @@
     ariaLabel?: string;
     onChange?: (value: string) => void;
     readOnly?: boolean;
+    icon?: string | null;
+    quiet?: boolean;
+    footer?: Snippet<[{ close: () => void }]>;
   } = $props();
 
   let open = $state(false);
@@ -47,18 +66,20 @@
   const anyColored = $derived(options.some((o) => !!o.color));
 
   function toggle() {
-    if (readOnly) return;
+    if (readOnly && !footer) return;
     open = !open;
   }
   function close() { open = false; }
 
   function select(opt: SelectOption) {
+    if (readOnly) return;
     value = opt.value;
     onChange?.(opt.value);
     close();
   }
 
   function clear() {
+    if (readOnly) return;
     value = "";
     onChange?.("");
     close();
@@ -98,12 +119,13 @@
     type="button"
     class="colored-select-trigger"
     class:has-color={!!currentSwatch}
-    class:read-only={readOnly}
+    class:read-only={readOnly && !footer}
+    class:quiet
     aria-label={ariaLabel || current?.label || current?.value || placeholder}
     title={current ? (current.label ?? current.value) : undefined}
-    aria-haspopup={readOnly ? undefined : "listbox"}
+    aria-haspopup={readOnly && !footer ? undefined : "listbox"}
     aria-expanded={open}
-    disabled={readOnly}
+    disabled={readOnly && !footer}
     bind:this={anchor}
     style={pillStyle()}
     onclick={(e) => {
@@ -111,6 +133,9 @@
       toggle();
     }}
   >
+    {#if icon}
+      <i class={`colored-select-icon ${icon}`} aria-hidden="true"></i>
+    {/if}
     {#if current}
       {#if currentSwatch}
         <span class="colored-select-dot" style={`background: ${currentSwatch.hex}`}></span>
@@ -119,7 +144,7 @@
     {:else}
       <span class="colored-select-placeholder">{placeholder}</span>
     {/if}
-    {#if !readOnly}
+    {#if !readOnly || footer}
       <span class="colored-select-caret" aria-hidden="true"><GroupCaret size="xs" /></span>
     {/if}
   </button>
@@ -135,8 +160,10 @@
           type="button"
           class="colored-select-row"
           class:selected={value === ""}
+          class:disabled={readOnly}
           role="option"
           aria-selected={value === ""}
+          aria-disabled={readOnly ? "true" : undefined}
           onclick={(e) => {
             e.stopPropagation();
             clear();
@@ -153,8 +180,10 @@
           type="button"
           class="colored-select-row"
           class:selected={opt.value === value}
+          class:disabled={readOnly}
           role="option"
           aria-selected={opt.value === value}
+          aria-disabled={readOnly ? "true" : undefined}
           onclick={(e) => {
             e.stopPropagation();
             select(opt);
@@ -168,6 +197,9 @@
           <span class="colored-select-row-label">{opt.label ?? opt.value}</span>
         </button>
       {/each}
+      {#if footer}
+        <div class="colored-select-footer">{@render footer({ close })}</div>
+      {/if}
     </div>
   {/if}
 </span>
@@ -214,6 +246,18 @@
   .colored-select-trigger.read-only.has-color:hover {
     border-color: color-mix(in srgb, var(--chip-base) 40%, var(--border) 60%);
   }
+  /* Quiet face (#1904): the trigger reads as rest text — no border/surface —
+     until hover shows the rail's inset (RailScalarCell's `.fr-rest-hit:hover`
+     recipe). Declared BEFORE `.has-color` so a coloured option's tint still
+     wins the cascade (not the case for types today, but keeps it sane). */
+  .colored-select-trigger.quiet {
+    background: transparent;
+    border-color: transparent;
+  }
+  .colored-select-trigger.quiet:hover {
+    background: color-mix(in srgb, var(--inset) 70%, transparent);
+    border-color: transparent;
+  }
   /* When the selected option has a color, render the whole trigger as a
      soft-tinted pill so the status is loud at a glance. */
   .colored-select-trigger.has-color {
@@ -237,6 +281,14 @@
   .colored-select-dot-spacer {
     background: none;
     border-color: transparent;
+  }
+
+  /* Leading glyph (#1904) — same recipe as the old `.rail-type-icon`. */
+  .colored-select-icon {
+    flex: none;
+    color: var(--text-3);
+    font-size: var(--fs-lg);
+    line-height: 1;
   }
 
   .colored-select-label,
@@ -299,8 +351,47 @@
   .colored-select-row.selected {
     background: var(--accent-soft);
   }
+  /* readOnly + footer (#1904): rows stay visible but inert — readOnly locks
+     the value, the footer action below them is what the popover is for. */
+  .colored-select-row.disabled {
+    color: var(--text-3);
+    cursor: default;
+  }
+  .colored-select-row.disabled:hover {
+    background: transparent;
+  }
   .colored-select-row-label.muted {
     color: var(--text-3);
     font-style: italic;
+  }
+
+  /* Trailing footer action (#1904), e.g. "Edit type…" under the option rows. */
+  .colored-select-footer {
+    margin-top: 2px;
+    padding-top: 4px;
+    border-top: 1px solid var(--divider);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .colored-select-footer :global(button) {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--fs-md);
+    color: var(--text-2);
+    text-align: left;
+    width: 100%;
+  }
+  .colored-select-footer :global(button):hover {
+    background: var(--panel);
+    color: var(--text);
   }
 </style>

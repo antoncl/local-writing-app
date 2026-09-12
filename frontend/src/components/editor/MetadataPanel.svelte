@@ -24,6 +24,7 @@
     MetadataValue,
     PromptEntrySummary,
     ResolvedCascadeField,
+    SelectOption,
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
@@ -214,6 +215,15 @@
   const entryTypeDef = $derived(metadataSchema.entry_types[entryType] ?? null);
   // The open entry's resolved type icon (#316), computed once for the rail header.
   const railTypeIcon = $derived(entryTypeIconClass(entryType, metadataSchema));
+  // The head's option list: every type this document kind offers, plus the bare
+  // stored value when it is not in the resolved schema (#87 — the warning below
+  // explains it; the option keeps the value selectable/visible, as the old
+  // <select> did).
+  const typeOptions = $derived.by((): SelectOption[] => {
+    const known = documentEntryTypes.map(([typeId, definition]) => ({ value: typeId, label: definition.name }));
+    if (entryType && !metadataSchema.entry_types[entryType]) return [{ value: entryType, label: entryType }, ...known];
+    return known;
+  });
   // Inheritance: a field present on the type but not in its own_fields is
   // inherited from the kind / parent. We only mark when own_fields is
   // explicitly present (older schemas omit it → treat all as own).
@@ -564,32 +574,27 @@
   });
 </script>
 
+{#snippet editTypeAction({ close }: { close: () => void })}
+  <button type="button" class="rail-type-action" onclick={() => { close(); onCustomData?.(); }}>Edit type…</button>
+{/snippet}
+
 <section class="scene-metadata" aria-label={`${documentLabel} details`}>
-  <!-- Type header: kind/type identity + colour swatch + jump to schema. -->
+  <!-- The head is one fact — the entry's type — and reads as one (#1904, #1884):
+       glyph + name + caret, the rail's own ColoredSelect in its quiet face. The
+       type list opens on click; "Edit type…" lives behind it as the trailing
+       action. readOnly locks the pick; the jump stays reachable. -->
   <div class="rail-type">
-    {#if railTypeIcon}
-      <!-- The open entry's type icon (#316): the rail twin of the type icon
-           shown on list rows. Quiet, leads the type selector. -->
-      <i class={`rail-type-icon ${railTypeIcon}`} aria-hidden="true"></i>
-    {/if}
-    <label class="rail-type-select">
-      <span class="rail-type-label">{documentLabel} type</span>
-      <select
-        value={entryType}
-        disabled={readOnly}
-        onchange={(event) => onEntryTypeChange?.(event.currentTarget.value)}
-      >
-        {#if entryType && !metadataSchema.entry_types[entryType]}
-          <option value={entryType}>{entryType}</option>
-        {/if}
-        {#each documentEntryTypes as [typeId, definition]}
-          <option value={typeId}>{definition.name}</option>
-        {/each}
-      </select>
-    </label>
-    <button class="rail-edit-type" type="button" onclick={() => onCustomData?.()}>
-      Edit type…
-    </button>
+    <ColoredSelect
+      value={entryType}
+      options={typeOptions}
+      allowBlank={false}
+      icon={railTypeIcon}
+      quiet
+      {readOnly}
+      ariaLabel={`${documentLabel} type`}
+      onChange={(next) => onEntryTypeChange?.(next)}
+      footer={editTypeAction}
+    />
   </div>
 
   {#if entryType && !metadataSchema.entry_types[entryType]}
@@ -898,8 +903,8 @@
   /* Generic form-control styling for the metadata subtree, co-located from
      styles.css (#14). The controls are rendered by child pickers (SwatchPicker
      / ColoredSelect / ReferencePicker / TagPicker / ProviderTierPicker /
-     MetadataLongTextEditor) plus the own .rail-type select, so the element
-     targets are :global; the .scene-metadata ancestor keeps this scope. */
+     MetadataLongTextEditor), so the element targets are :global; the
+     .scene-metadata ancestor keeps this scope. */
   .scene-metadata :global(label) {
     color: var(--text-2);
     font-size: var(--fs-sm);
@@ -920,19 +925,10 @@
   /* Type header */
   .rail-type {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     gap: 8px;
     padding: 8px 12px 10px;
     border-bottom: 1px solid var(--divider);
-  }
-  /* The open entry's type icon (#316) — muted, aligned to the selector control
-     it leads. Only present when the type declares an icon. */
-  .rail-type-icon {
-    flex: none;
-    align-self: center;
-    color: var(--text-3);
-    font-size: var(--fs-lg);
-    line-height: 1;
   }
   /* Provenance treatment (#313) — the --star axis, matching the level pill and
      the inherited-entry banner. Sits directly under the type header. */
@@ -970,44 +966,6 @@
     font-family: var(--mono);
     font-weight: 700;
   }
-  .rail-type-select {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    flex: 1;
-    min-width: 0;
-  }
-  .rail-type-label {
-    font-size: var(--fs-xs);
-    font-weight: var(--w-semibold);
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    color: var(--text-3);
-  }
-  .rail-type-select select {
-    width: 100%;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
-    font-size: var(--fs-md);
-    color: var(--text);
-  }
-  .rail-edit-type {
-    flex: 0 0 auto;
-    padding: 5px 9px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-    cursor: pointer;
-  }
-  .rail-edit-type:hover {
-    border-color: var(--accent);
-    color: var(--accent-strong);
-  }
-
   .rail-assistant {
     padding: 10px 12px;
     border-bottom: 1px solid var(--divider);

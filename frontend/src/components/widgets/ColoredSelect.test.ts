@@ -2,7 +2,8 @@
 // ColoredSelect's popover goes through the shared `anchoredPopover` action
 // instead of an inline rect-anchoring copy (#1587) — body-portaled, fixed,
 // and floor-widthed to the trigger pill.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createRawSnippet } from "svelte";
 import { render, fireEvent, screen } from "@/lib/test/component";
 import ColoredSelect from "./ColoredSelect.svelte";
 
@@ -28,6 +29,119 @@ describe("ColoredSelect popover (#1587)", () => {
     expect(rows).toHaveLength(3); // blank row (default allowBlank) + A + B
 
     await fireEvent.click(screen.getByText("B"));
+    expect(document.querySelector(".colored-select-popover")).toBeNull();
+  });
+});
+
+describe("ColoredSelect head abilities (#1904)", () => {
+  it("renders the icon and the quiet face", () => {
+    const { container } = render(ColoredSelect, {
+      props: {
+        value: "a",
+        options: [{ value: "a", label: "A" }],
+        icon: "ti ti-user",
+        quiet: true,
+      },
+    });
+    const trigger = container.querySelector(".colored-select-trigger") as HTMLElement;
+    expect(trigger.classList.contains("quiet")).toBe(true);
+    expect(trigger.querySelector(".colored-select-icon.ti-user")).not.toBeNull();
+
+    const { container: defaultContainer } = render(ColoredSelect, {
+      props: {
+        value: "a",
+        options: [{ value: "a", label: "A" }],
+      },
+    });
+    const defaultTrigger = defaultContainer.querySelector(".colored-select-trigger") as HTMLElement;
+    expect(defaultTrigger.classList.contains("quiet")).toBe(false);
+    expect(defaultTrigger.querySelector(".colored-select-icon")).toBeNull();
+  });
+
+  it("renders the footer under the rows and its close() closes the popover", async () => {
+    const footer = createRawSnippet<[{ close: () => void }]>((getArgs) => ({
+      render: () => `<button type="button" class="t-footer">Edit…</button>`,
+      setup(el) {
+        el.addEventListener("click", () => getArgs().close());
+      },
+    }));
+    const { container } = render(ColoredSelect, {
+      props: {
+        value: "a",
+        options: [{ value: "a", label: "A" }],
+        footer,
+      },
+    });
+    await fireEvent.click(container.querySelector(".colored-select-trigger") as HTMLElement);
+
+    const pop = document.querySelector(".colored-select-popover") as HTMLElement;
+    expect(pop).not.toBeNull();
+    const footerButton = pop.querySelector(".colored-select-footer .t-footer");
+    expect(footerButton).not.toBeNull();
+    const options = pop.querySelectorAll('[role="option"]');
+    const lastOption = options[options.length - 1];
+    // The footer button must come AFTER the last option row in DOM order.
+    expect(
+      lastOption.compareDocumentPosition(footerButton as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    await fireEvent.click(footerButton as HTMLElement);
+    expect(document.querySelector(".colored-select-popover")).toBeNull();
+  });
+
+  it("readOnly with a footer still opens; the rows are inert; the footer works", async () => {
+    const onChange = vi.fn();
+    const footer = createRawSnippet<[{ close: () => void }]>((getArgs) => ({
+      render: () => `<button type="button" class="t-footer">Edit…</button>`,
+      setup(el) {
+        el.addEventListener("click", () => getArgs().close());
+      },
+    }));
+    const { container } = render(ColoredSelect, {
+      props: {
+        value: "a",
+        options: [{ value: "a", label: "A" }, { value: "b", label: "B" }],
+        allowBlank: false,
+        readOnly: true,
+        footer,
+        onChange,
+      },
+    });
+    const trigger = container.querySelector(".colored-select-trigger") as HTMLButtonElement;
+    expect(trigger.disabled).toBe(false);
+    // Openable means it LOOKS openable: caret shown, no inert face.
+    expect(trigger.querySelector(".colored-select-caret")).not.toBeNull();
+    expect(trigger.classList.contains("read-only")).toBe(false);
+
+    await fireEvent.click(trigger);
+    const pop = document.querySelector(".colored-select-popover") as HTMLElement;
+    expect(pop).not.toBeNull();
+
+    const options = pop.querySelectorAll('[role="option"]');
+    expect(options.length).toBeGreaterThan(0);
+    options.forEach((opt) => expect(opt.getAttribute("aria-disabled")).toBe("true"));
+
+    await fireEvent.click(options[0]);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(document.querySelector(".colored-select-popover")).not.toBeNull();
+
+    await fireEvent.click(pop.querySelector(".t-footer") as HTMLElement);
+    expect(document.querySelector(".colored-select-popover")).toBeNull();
+  });
+
+  it("readOnly without a footer stays inert", async () => {
+    const { container } = render(ColoredSelect, {
+      props: {
+        value: "a",
+        options: [{ value: "a", label: "A" }],
+        readOnly: true,
+      },
+    });
+    const trigger = container.querySelector(".colored-select-trigger") as HTMLButtonElement;
+    expect(trigger.disabled).toBe(true);
+    expect(trigger.querySelector(".colored-select-caret")).toBeNull();
+
+    await fireEvent.click(trigger);
     expect(document.querySelector(".colored-select-popover")).toBeNull();
   });
 });

@@ -48,10 +48,12 @@ An open entry has three parts:
 
 The **Details** rail is where an entry's structured information lives.
 
-- **Type** — a select near the top shows the entry's type (Character, Location…).
-  You set it when you create the entry, but you can **change it any time** here;
-  the fields below update to match. **Edit type…** takes you to the type's
-  definition (that's **[Custom fields](#guide:custom-fields)** territory).
+- **Type** — the rail's head shows the entry's type as one line: its icon and
+  name (Character, Location…) with a small caret. You set the type when you
+  create the entry, but you can **change it any time**: click the head and pick
+  another type; the fields below update to match. **Edit type…** at the foot of
+  that list takes you to the type's definition (that's
+  **[Custom fields](#guide:custom-fields)** territory).
 - **Fields** — everything the type defines: tags, references, a colour, and any
   custom fields, grouped into sections.
 - **Aliases** — a list of alternate names ("The Salamander" for a character named

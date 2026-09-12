@@ -45,6 +45,7 @@
     ChatSessionMessage,
     EditableDocument,
     LoreEntrySummary,
+    LoreFit,
     PreviewCacheBlock,
     PreviewMessage,
     PromptEntrySummary,
@@ -210,6 +211,23 @@
   // the model actually receives. The preview popover renders these so the lore
   // is visible; it lives only in a cache block, never the rendered template.
   let chatPreviewCacheBlocks: PreviewCacheBlock[] = $state([]);
+  // ADR-0086 S2: the turn-0 preview's own budget fit and its left-out entries'
+  // rendered elements — what the door's "Left out" section reads before the
+  // first send. After a send, the last sent turn's `lore_fit` takes over and a
+  // left-out entry's XML is rendered on request instead (chatLoreXml).
+  let chatPreviewLoreFit: LoreFit | null = $state(null);
+  let chatPreviewLoreLeftOutXml: Record<string, string> = $state({});
+  const lastSentTurn = $derived(
+    [...chatHistory].reverse().find((m) => m.role === "assistant" && m.content) ?? null,
+  );
+  const doorLoreFit = $derived(lastSentTurn ? (lastSentTurn.lore_fit ?? null) : chatPreviewLoreFit);
+  const doorLoreLeftOutXml = $derived(lastSentTurn ? {} : chatPreviewLoreLeftOutXml);
+  const fetchLeftOutXml = $derived.by(() => {
+    const chatId = chatSession?.id;
+    if (!chatId) return null;
+    return (entryId: string) =>
+      api.chatLoreXml(chatId, entryId).then((r) => r.xml).catch(() => null);
+  });
 
   // ---- declared-inputs state (filled before first send for prompt-bound chats) ----
   // Per-input draft values keyed by input.name. JSON-encoded for list-shaped
@@ -375,6 +393,8 @@
     chatSystemPrompt = "";
     chatPreviewMessages = null;
     chatPreviewCacheBlocks = [];
+    chatPreviewLoreFit = null;
+    chatPreviewLoreLeftOutXml = {};
     chatPromptEntryId = "";
     chatAssistantId = "";
     chatSubject = "";
@@ -946,6 +966,7 @@
       chatEstimate = null;
       chatPreviewMessages = null;
       chatPreviewCacheBlocks = [];
+      chatPreviewLoreFit = null;
       return;
     }
     const entry = promptEntries.find((p) => p.id === chatPromptEntryId);
@@ -953,6 +974,7 @@
       chatEstimate = null;
       chatPreviewMessages = null;
       chatPreviewCacheBlocks = [];
+      chatPreviewLoreFit = null;
       return;
     }
     const inputs: Record<string, unknown> = {};
@@ -981,12 +1003,15 @@
         chatEstimate = null;
         chatPreviewMessages = null;
         chatPreviewCacheBlocks = [];
+        chatPreviewLoreFit = null;
         return;
       }
       chatPreviewMessages = preview.messages ?? null;
       // Keep the block TEXT (the estimate strip strips it to label/tokens); the
       // preview popover needs it to show the attached lore.
       chatPreviewCacheBlocks = preview.cache_blocks ?? [];
+      chatPreviewLoreFit = preview.lore_fit ?? null;
+      chatPreviewLoreLeftOutXml = preview.lore_left_out_xml ?? {};
       // ADR-0076 S2: pre-lock, this fetch is the only place the lore gate is
       // known — mirror the lock render's capture (renderAndLockPromptTemplate)
       // so the Context door's "lore-enabled" annotation is live while the
@@ -1190,6 +1215,9 @@
       {chatSystemPrompt}
       {chatPreviewMessages}
       previewCacheBlocks={chatPreviewCacheBlocks}
+      loreFit={doorLoreFit}
+      loreLeftOutXml={doorLoreLeftOutXml}
+      {fetchLeftOutXml}
       loreEnabled={chatLoreEnabled}
       journal={activeChatJournal}
       changedPicks={activeChatChangedPicks}

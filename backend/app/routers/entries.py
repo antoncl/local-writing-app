@@ -7,6 +7,7 @@ from app.models import (
     AssistantEntry,
     AssistantEntryList,
     ChatChangedPicksResponse,
+    ChatLoreXmlResponse,
     ChatSession,
     ChatSessionList,
     CreateAssistantEntryRequest,
@@ -41,6 +42,7 @@ from app.models_views import (
 )
 from app.runtime import CurrentProject, translate_errors
 from app.services.ai.assistant_validation import validate_assistant_temperature
+from app.services.ai.chat import render_chat_lore_entry_xml
 
 router = APIRouter()
 
@@ -155,6 +157,17 @@ def get_chat_session(project: CurrentProject, chat_id: str) -> ChatSession:
 def chat_changed_picks(project: CurrentProject, chat_id: str) -> ChatChangedPicksResponse:
     with translate_errors():
         return ChatChangedPicksResponse(picks=project.chat_changed_picks(chat_id))
+
+
+@router.get("/api/chats/{chat_id}/lore-xml/{entry_id}", response_model=ChatLoreXmlResponse)
+def chat_lore_entry_xml(project: CurrentProject, chat_id: str, entry_id: str) -> ChatLoreXmlResponse:
+    """ADR-0086 S2: one lore entry rendered as-of the chat's scene, for the
+    Context door's drill into an entry the last sent turn left out."""
+    with translate_errors():
+        xml = render_chat_lore_entry_xml(project, chat_id, entry_id)
+    if xml is None:
+        raise HTTPException(status_code=404, detail="Lore entry not found")
+    return ChatLoreXmlResponse(entry_id=entry_id, xml=xml)
 
 
 @router.put("/api/chats/{chat_id}", response_model=ChatSession)

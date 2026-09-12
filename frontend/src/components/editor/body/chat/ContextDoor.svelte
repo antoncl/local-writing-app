@@ -15,12 +15,38 @@
   language — but this is NOT a picker: no tri-state, no selection, no writes.
 -->
 <script lang="ts">
-  import { formatTokens } from "@/lib/utils/money";
+  import { formatTokens, formatTokensPrecise } from "@/lib/utils/money";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-  import type { ChangedPick, ChatSessionJournalEntry, PreviewCacheBlock, PreviewMessage } from "@/lib/types";
+  import type {
+    ChangedPick,
+    ChatSessionJournalEntry,
+    LoreFit,
+    PreviewCacheBlock,
+    PreviewMessage,
+  } from "@/lib/types";
+
+  // ADR-0086 §1 sources, in the reader's words. The two hops are what the
+  // assistant's "Lore reach: Named only" setting turns off.
+  const SOURCE_LABEL: Record<string, string> = {
+    user_message: "your message",
+    rendered_prompt: "the prompt",
+    scene_prose: "scene prose",
+    depth1_expansion: "one hop · mention",
+    structural_hop: "one hop · link",
+  };
 
   interface Props {
     previewCacheBlocks: PreviewCacheBlock[];
+    // ADR-0086 S2: the lore-budget report the "Left out" section reads — the
+    // LAST SENT turn's (`ChatSessionMessage.lore_fit`), or, before the first
+    // send, the turn-0 preview's own fit. Null when no implicit selection ran.
+    loreFit?: LoreFit | null;
+    // The preview's left-out entries, each rendered (keyed by id) — only the
+    // turn-0 fit has these on the wire; a sent turn's are fetched on request.
+    loreLeftOutXml?: Record<string, string>;
+    // Renders one left-out entry as-of the chat's scene, on request (the
+    // chat-scoped lore-xml route). Null when there is no chat to ask.
+    fetchLeftOutXml?: ((entryId: string) => Promise<string | null>) | null;
     // The bound prompt id (or ""). Drives the System panel's pre-send guidance:
     // a prompt is bound but nothing has rendered yet → "fill the inputs".
     chatPromptEntryId: string;
@@ -41,6 +67,9 @@
 
   let {
     previewCacheBlocks,
+    loreFit = null,
+    loreLeftOutXml = {},
+    fetchLeftOutXml = null,
     chatPromptEntryId,
     chatSystemPrompt,
     chatPreviewMessages,
@@ -67,8 +96,9 @@
   // drill is fully testable and mirrors the picker's own grammar (ADR-0074).
   type Panel =
     | { kind: "root" }
-    | { kind: "section"; key: string } // "system" | "tier:<label>" | "turn:<i>" | "inputs" | "journal"
-    | { kind: "entry"; tierLabel: string; entryId: string };
+    | { kind: "section"; key: string } // "system" | "tier:<label>" | "turn:<i>" | "inputs" | "journal" | "leftout"
+    | { kind: "entry"; tierLabel: string; entryId: string }
+    | { kind: "leftout-entry"; entryId: string; title: string };
   let stack = $state<Panel[]>([{ kind: "root" }]);
   const current = $derived(stack[stack.length - 1]);
   function drill(panel: Panel) {
@@ -78,9 +108,42 @@
     stack = stack.slice(0, -1);
   }
 
+  // ADR-0086 §5: the "Left out" section exists when the last fit left
+  // something out, or when the declared set alone exceeded a non-zero budget
+  // (a budget of 0 is "declared only" — never "over").
+  const leftOut = $derived(loreFit?.left_out ?? []);
+  const declaredOver = $derived(
+    loreFit != null && loreFit.budget_tokens > 0 && loreFit.declared_tokens > loreFit.budget_tokens,
+  );
+  const showLeftOut = $derived(leftOut.length > 0 || declaredOver);
+  const leftOutTokens = $derived(leftOut.reduce((sum, e) => sum + e.tokens, 0));
+
+  // A sent turn's left-out entries carry no XML on the wire; each is rendered
+  // on request the first time it is drilled and remembered for the session.
+  let fetchedXml = $state<Record<string, string | null>>({});
+  let fetching = $state<Record<string, boolean>>({});
+  function drillLeftOut(entryId: string, title: string) {
+    drill({ kind: "leftout-entry", entryId, title });
+    if (loreLeftOutXml[entryId] !== undefined || entryId in fetchedXml || fetching[entryId]) return;
+    if (!fetchLeftOutXml) return;
+    fetching = { ...fetching, [entryId]: true };
+    void fetchLeftOutXml(entryId)
+      .then((xml) => {
+        fetchedXml = { ...fetchedXml, [entryId]: xml };
+      })
+      .catch(() => {
+        fetchedXml = { ...fetchedXml, [entryId]: null };
+      })
+      .finally(() => {
+        fetching = { ...fetching, [entryId]: false };
+      });
+  }
+
   function panelTitle(panel: Panel): string {
     if (panel.kind === "root") return "Context";
     if (panel.kind === "entry") return titleFor(panel.entryId) ?? panel.entryId;
+    if (panel.kind === "leftout-entry") return panel.title;
+    if (panel.key === "leftout") return "Left out";
     if (panel.key === "system") return "System";
     if (panel.key.startsWith("tier:")) return panel.key.slice("tier:".length);
     if (panel.key.startsWith("turn:")) {
@@ -145,6 +208,22 @@
       <button type="button" class="ctx-row" onclick={() => drill({ kind: "section", key: "journal" })}>
         <span class="ctx-row-label">Auto-added this conversation</span>
         <span class="ctx-row-sub">{journal.length + changedPicks.length}</span>
+        <GroupCaret size="xs" collapsed />
+      </button>
+    {/if}
+    {#if showLeftOut}
+      <!-- ADR-0086 §5: what the lore budget left out of the last send (or,
+           before the first send, of the turn-0 preview). A routine fact about
+           the send in the door's ordinary register, not a warning. -->
+      <button type="button" class="ctx-row" onclick={() => drill({ kind: "section", key: "leftout" })}>
+        <span class="ctx-row-label">Left out</span>
+        <span class="ctx-row-sub">
+          {#if leftOut.length > 0}
+            {leftOut.length} {leftOut.length === 1 ? "entry" : "entries"} · {formatTokens(leftOutTokens)} tok
+          {:else}
+            declared over budget
+          {/if}
+        </span>
         <GroupCaret size="xs" collapsed />
       </button>
     {/if}
@@ -223,11 +302,47 @@
         {pick.title || pick.id} · <span class="ctx-edited">edited</span>
       </div>
     {/each}
+  {:else if current.kind === "section" && current.key === "leftout" && loreFit}
+    <!-- The fit's own figures first, then each left-out entry by fit order
+         (the report's order), drillable to its element like a tier's entry. -->
+    <div class="cbv-ctx-kv-line">
+      <strong>lore {formatTokensPrecise(loreFit.used_tokens)}/{formatTokensPrecise(loreFit.budget_tokens)}</strong>
+      · {loreFit.kept} sent
+    </div>
+    {#if declaredOver}
+      <div class="cbv-ctx-kv-line" title="Entries the prompt picked, the scene references, or an always-include policy names are always sent whole; the budget applies only to lore the app adds on its own.">
+        declared lore {formatTokensPrecise(loreFit.declared_tokens)}, over the {formatTokensPrecise(loreFit.budget_tokens)} budget
+      </div>
+    {/if}
+    {#each leftOut as entry (entry.id)}
+      <button
+        type="button"
+        class="ctx-row"
+        onclick={() => drillLeftOut(entry.id, titleFor(entry.id) ?? entry.title ?? entry.id)}
+      >
+        <span class="ctx-row-label">{titleFor(entry.id) ?? entry.title ?? entry.id}</span>
+        <span class="ctx-row-sub">{SOURCE_LABEL[entry.source] ?? entry.source} · {formatTokens(entry.tokens)} tok</span>
+        <GroupCaret size="xs" collapsed />
+      </button>
+    {/each}
+    <p class="cbv-meta ctx-hint">
+      To send one of these: pick it in the prompt's Lore input, set its context policy to
+      Always include, or raise the assistant's lore budget.
+    </p>
   {:else if current.kind === "entry"}
     {@const block = tierBlocks.find((b) => b.label === current.tierLabel)}
     {@const xml = block?.entry_xml?.[current.entryId]}
     {#if xml}
       <pre class="ctx-pre">{xml}</pre>
+    {:else}
+      <p class="cbv-meta">This entry rendered no XML.</p>
+    {/if}
+  {:else if current.kind === "leftout-entry"}
+    {@const xml = loreLeftOutXml[current.entryId] ?? fetchedXml[current.entryId] ?? null}
+    {#if xml}
+      <pre class="ctx-pre">{xml}</pre>
+    {:else if fetching[current.entryId]}
+      <p class="cbv-meta">Rendering…</p>
     {:else}
       <p class="cbv-meta">This entry rendered no XML.</p>
     {/if}

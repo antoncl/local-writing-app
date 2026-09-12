@@ -741,6 +741,16 @@ class ChatChangedPicksResponse(BaseModel):
     picks: list[ChangedPick] = Field(default_factory=list)
 
 
+class ChatLoreXmlResponse(BaseModel):
+    """ADR-0086 S2: one lore entry rendered as-of a chat's scene — the exact
+    element the send would have placed — for the Context door's drill into an
+    entry the last sent turn's budget left out (its `lore_fit` carries ids,
+    titles and sizes, never the XML)."""
+
+    entry_id: str
+    xml: str
+
+
 class ChatSessionSummary(BaseModel):
     id: str
     title: str

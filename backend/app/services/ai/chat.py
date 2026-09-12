@@ -188,6 +188,23 @@ def _detect_and_persist_journal(
     return new_entries
 
 
+def render_chat_lore_entry_xml(project: ProjectService, chat_id: str, entry_id: str) -> str | None:
+    """ADR-0086 S2: one lore entry's rendered element as-of `chat_id`'s
+    resolution scene — the same per-node render the send places
+    (`_render_lore_entries`), produced on request for the Context door's drill
+    into an entry a sent turn's budget left out. The persisted `lore_fit`
+    carries ids, titles and sizes; the XML is rendered here, live, so the
+    door shows what the model would see now. None when the entry can't be
+    read; a missing chat raises `ProjectServiceError` for the route's 404."""
+    from app.services.ai.lore_block import _render_lore_entries
+
+    chat = project.read_chat_session(chat_id)
+    scene = _chat_resolution_scene(project, chat) if chat.lore_enabled else None
+    index = project.build_mutations_index() if scene is not None else None
+    pairs = _render_lore_entries(project, [entry_id], scene=scene, index=index)
+    return pairs[0][1] if pairs else None
+
+
 def _chat_resolution_scene(project: ProjectService, chat: ChatSession) -> Any:
     """The chat's anchored scene wrapped as an EntryRef, or None for a scene-less
     chat. Send-time lore must resolve as-of the same scene as the lock render

@@ -21,4 +21,12 @@ export const chatsApi = {
   chatChangedPicks(chatId: string) {
     return request<{ picks: ChangedPick[] }>(`/chats/${encodeURIComponent(chatId)}/changed-picks`);
   },
+  // ADR-0086 S2: one lore entry rendered as-of the chat's scene — the Context
+  // door's drill into an entry the last sent turn's budget left out (the
+  // persisted report carries ids/titles/sizes, never the XML).
+  chatLoreXml(chatId: string, entryId: string) {
+    return request<{ entry_id: string; xml: string }>(
+      `/chats/${encodeURIComponent(chatId)}/lore-xml/${encodeURIComponent(entryId)}`,
+    );
+  },
 };

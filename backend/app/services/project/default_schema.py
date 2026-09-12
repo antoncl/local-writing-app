@@ -1278,6 +1278,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 {"value": "one_hop", "label": "One hop"},
                 {"value": "named", "label": "Named only"},
             ],
+            # A select with a default is required in the rail (#1421): no
+            # "(none)" pick, and an untouched assistant reads "One hop" — the
+            # resolver's own blank→one_hop default, made visible (#1900).
+            "default": "one_hop",
         },
         # Author-set prices for a model the price oracle can't reach — an unlisted
         # or local model (ADR-0083 Amendment 1). USD per 1M tokens, matching how

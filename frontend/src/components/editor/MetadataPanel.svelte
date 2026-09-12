@@ -651,7 +651,10 @@
       {#if rendersRow(fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")} class:empty={isRowEmpty(field, fieldId)} class:scalar={isScalarRow(field, fieldId)} class:editing={isEditing(fieldId)}>
+        <!-- The field's description is the row's tooltip (#1900): hovering the
+             name or the value control shows it. An inner element with its own
+             title (an inherited value, the reset chip) still wins there. -->
+        <div class="field-row" title={field.description || undefined} class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")} class:empty={isRowEmpty(field, fieldId)} class:scalar={isScalarRow(field, fieldId)} class:editing={isEditing(fieldId)}>
           <!-- Disclosure gutter — reserved so the field glyph lines up with the
                collapsible sections' glyph column (RailSectionHeader): caret ·
                glyph on every rail line (#1438). Reference fields no longer
@@ -700,7 +703,6 @@
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <span
             class="fr-name"
-            title={field.description || undefined}
             onclick={(e) => { if (isScalarRow(field, fieldId) && !isEditing(fieldId)) openField(fieldId, e.currentTarget.closest(".field-row") as HTMLElement); }}
           >{fieldLabel}</span>
           <div class="fr-val" title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : isCascadeInherited(fieldId) ? `Inherited from ${cascadeSourceLabel(fieldId)}` : undefined}>

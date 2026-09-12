@@ -388,6 +388,14 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         self.assertTrue(by_id["body"]["proposable"])
         self.assertTrue((by_id["body"].get("description") or "").strip())
 
+    def test_body_description_anchors_revision_length_to_current_body(self) -> None:
+        # #1899: the body description is what steers the extraction envelope's
+        # body clause, so its own wording is where the revise-length anchor is
+        # taught to the model, once, for every consumer of the roster.
+        schema = self.service.read_metadata_schema()
+        by_id = {f["id"]: f for f in _fields(self.service, schema, self.hero.id)}
+        self.assertIn("length it already has", by_id["body"]["description"])
+
     def test_is_proposable_field_honors_ai_proposable(self) -> None:
         # ADR-0059 §E: the single predicate gates on `ai_proposable` (default
         # True). This is the one place the contract loop and the validate-time

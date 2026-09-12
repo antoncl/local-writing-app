@@ -2,6 +2,7 @@
 // barrel under the file-size cap; re-exported from `@/lib/types` so it stays
 // the single import surface.
 
+import type { ChatUsage } from "./aiTypes";
 import type { MetadataValue } from "./metadataTypes";
 
 // ADR-0046 §1: a proposed entry state committed by a brainstorm — the entry's
@@ -42,6 +43,9 @@ export type AIEntryPatch = EntryPatch & {
 export type EntryPatchExtraction = {
   patch: AIEntryPatch | null;
   cost_usd: number | null;
+  // #1899: the extraction turn(s)' summed token usage, informational — like
+  // cost_usd, the server already attributed it to the chat's own rows.
+  usage?: ChatUsage | null;
   // #1877: the chat's cost total after the last recorded extraction call.
   cost_usd_total?: number | null;
   ok: boolean;

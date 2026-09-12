@@ -994,6 +994,9 @@ class EntryPatchExtraction(BaseModel):
 
     patch: AIEntryPatch | None = None
     cost_usd: float | None = None
+    # #1899: the extraction turn(s)' token usage, summed over the retry like
+    # cost_usd — so the commit's output volume is visible where it happens.
+    usage: ChatUsage | None = None
     # #1877: the chat's total after the last recorded extraction call — the
     # client assigns its snapshot from this, no refresh round-trip.
     cost_usd_total: float | None = None

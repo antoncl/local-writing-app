@@ -650,7 +650,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "Free-form prose for what the structured fields do not capture — "
                 "the entry's narrative, notes, or main text. Do NOT restate values "
                 "that already live in the fields (aliases, tags, appearance, etc.); "
-                "the body is for what has no field of its own."
+                "the body is for what has no field of its own. A few paragraphs "
+                "for a new entry; when revising, keep it at about the length it "
+                "already has."
             ),
         },
         "status": {
@@ -716,6 +718,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # hidden): author-facing, unlike the source_* lineage snapshots.
             "name": "Genre",
             "type": "long_text",
+            "description": (
+                "The genre and premise this structure or plotline is written "
+                "for — a sentence or two, enough to steer the AI."
+            ),
         },
         "source_template_id": {
             # Lineage snapshot (ADR-0048 S7 Slice 2, #776; ADR-0053): the stable id of
@@ -782,7 +788,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "description": (
                 "Scene-current beats for the characters in this scene — how each is "
                 "behaving and what's driving them right now. Read verbatim by the "
-                "roleplay AI as direction; present-tense, not backstory."
+                "roleplay AI as direction; present-tense, not backstory. A few "
+                "lines per character, not a scene."
             ),
             "type": "long_text",
         },

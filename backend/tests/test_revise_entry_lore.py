@@ -103,6 +103,18 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
         self.assertIn("these fields to develop", rendered)
         self.assertIn("body (Body)", rendered)  # enumerated in the field list
         self.assertIn("do not restate", rendered.lower())  # body's steering description
+        # #1899: create anchors length to the field's own description — there
+        # is no "current" entry yet to anchor to.
+        self.assertIn("the length its description calls for", rendered)
+
+    def test_revise_seed_anchors_length_to_the_current_entry(self) -> None:
+        # #1899: the mirror case — revising an EXISTING entry anchors length to
+        # what it already has, not a token cap or the field's description.
+        hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
+        )
+        rendered, _ = self._render({"entry": hero.id, "entry_type": ""})
+        self.assertIn("change the content, not the volume", rendered)
 
     def test_revise_render_delivers_subject_via_use_not_inline_body(self) -> None:
         # #1220: the subject is delivered via use() — a backend-placed context

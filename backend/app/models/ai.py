@@ -474,6 +474,11 @@ class AIChatResponse(BaseModel):
     # to EUR for display (see decisions_currency_display).
     usage: ChatUsage | None = None
     cost_usd: float | None = None
+    # #1877: when the turn was chat-bound, the server recorded its
+    # ai_invocations row and this is the chat's total AFTER it — the one
+    # number the client shows, delivered on the event that changed it. None
+    # for a chat-less call or an unknown (never-priced) total (#697).
+    cost_usd_total: float | None = None
 
 
 class AIGenerateRequest(BaseModel):
@@ -775,10 +780,6 @@ class SaveChatSessionRequest(BaseModel):
     # a list (even []) is the new value. Only the lock-render save carries it
     # (from the preview response's `field_contract_stored`).
     field_contract_stored: list[dict[str, Any]] | None = None
-    # V2: optional incremental cost update. When provided (typically by
-    # the chat panel after a successful AI turn), it's ADDED to the
-    # persisted cost_usd_total. Omit on plain renames / message-list saves.
-    cost_delta_usd: float | None = None
     # V2: when provided, each slot name has its cache_write_times entry
     # set to the server's current ISO timestamp. Frontend sends the labels
     # for any slot whose `cache_write_tokens` was > 0 in the response.
@@ -926,6 +927,9 @@ class EntryPatchExtraction(BaseModel):
 
     patch: AIEntryPatch | None = None
     cost_usd: float | None = None
+    # #1877: the chat's total after the last recorded extraction call — the
+    # client assigns its snapshot from this, no refresh round-trip.
+    cost_usd_total: float | None = None
     ok: bool = True
     error: str | None = None
 

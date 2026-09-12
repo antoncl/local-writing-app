@@ -134,10 +134,10 @@ class ChatStagedSetTests(unittest.TestCase):
         # AI continues refining the same change.
         set_id = self._make_set()
         chat_id = self._make_chat(staged_set=set_id)
-        blocks, _, _ = expand_and_prepare_chat_blocks(
+        prepared = expand_and_prepare_chat_blocks(
             self.service, chat_id, "System brief.", [{"role": "user", "content": "hi"}]
         )
-        texts = "\n".join(block["text"] for block in (blocks or []))
+        texts = "\n".join(block["text"] for block in (prepared.system_blocks or []))
         self.assertIn("<staged_change", texts)
         self.assertIn('field="condition"', texts)
 
@@ -145,10 +145,10 @@ class ChatStagedSetTests(unittest.TestCase):
         # A ref to a set that no longer resolves seeds no block and does not fail
         # the send (deleting a set normally purges this pin anyway).
         chat_id = self._make_chat(staged_set="mutation_set_deleted")
-        blocks, _, _ = expand_and_prepare_chat_blocks(
+        prepared = expand_and_prepare_chat_blocks(
             self.service, chat_id, "System brief.", [{"role": "user", "content": "hi"}]
         )
-        texts = "\n".join(block["text"] for block in (blocks or []))
+        texts = "\n".join(block["text"] for block in (prepared.system_blocks or []))
         self.assertNotIn("<staged_change", texts)
 
 

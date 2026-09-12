@@ -74,10 +74,10 @@ class LoreCacheBlockTests(unittest.TestCase):
         return chat.id
 
     def _blocks(self, chat_id: str, messages: list[dict]) -> list[dict]:
-        blocks, _sid, _added = expand_and_prepare_chat_blocks(
+        prepared = expand_and_prepare_chat_blocks(
             self.service, chat_id, "SYSTEM PROMPT", messages
         )
-        return blocks or []
+        return prepared.system_blocks or []
 
     def test_first_turn_places_lore_in_the_volatile_tier(self) -> None:
         # Empty baseline → everything is new → volatile. So: the system 1h block,
@@ -225,7 +225,7 @@ class LoreCacheBlockTests(unittest.TestCase):
         self.assertTrue(before.seen_revisions)
         baseline_before = dict(default_registry.get_or_create(f"chatlore:{self.chat_id}").baseline)
 
-        blocks, _sid, added = expand_and_prepare_chat_blocks(
+        prepared = expand_and_prepare_chat_blocks(
             self.service,
             self.chat_id,
             "SYSTEM PROMPT",
@@ -236,11 +236,11 @@ class LoreCacheBlockTests(unittest.TestCase):
             ],
             lore_mode="used",
         )
-        text = "".join(b["text"] for b in blocks or [])
+        text = "".join(b["text"] for b in prepared.system_blocks or [])
         self.assertIn("A picked aside", text)
         self.assertNotIn("A hidden world", text)  # always-policy: out
         self.assertNotIn("Lit by whale oil", text)  # journaled mention: out
-        self.assertEqual(added, [])
+        self.assertEqual(prepared.journal_added, [])
         after = self.service.read_chat_session(self.chat_id)
         self.assertEqual(after.journal, before.journal)
         self.assertEqual(after.seen_revisions, before.seen_revisions)

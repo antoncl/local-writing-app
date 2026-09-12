@@ -190,11 +190,11 @@
   // lore edits made since the last preview.
   let activeChatChangedPicks: ChangedPick[] = $state([]);
   let activeChatCacheWriteTimes: Record<string, string> = $state({});
-  // V2 cost accounting — pluck the delta off the streaming `done` event
-  // and forward it to the backend on the next persistActiveChat. $state (not
-  // a plain let) so sessionCostUsd below reacts the instant the stream lands
-  // the delta, not only after the round-trip persist resolves (ADR-0076 §6).
-  let pendingTurnCost: number | null = $state(null);
+  // Cost is never held here (#1877): the server records each turn's row and
+  // hands back the chat's total on the event that changed it (`done`, the
+  // save response, the extraction response); `chatSession.cost_usd_total`
+  // is assigned from that and the footer reads it. Only the cache-write
+  // slot stamps still ride the next persist.
   let pendingTurnCacheWriteSlots: string[] = [];
 
   // The composer instance, for the imperative clear on send (#1083).
@@ -239,8 +239,8 @@
   // feeds the controller its reactive inputs (further down, next to activeOutput).
   // Declared here — above the functions that call commit.reset() — so it is
   // defined before first use. The controller reaches back through `deps` for
-  // history/cost/status, so `pendingTurnCost` and the chat status lines stay
-  // component-owned.
+  // history/cost/status, so the cost-total snapshot and the chat status lines
+  // stay component-owned.
   const commit = new ChatCommitController({
     getAssistantId: () => chatAssistantId,
     getHistory: () => chatHistory.map(({ role, content }) => ({ role, content })),
@@ -248,14 +248,10 @@
     // of this chat, so the server reads back the field set its lock render
     // registered instead of rebuilding a separate contract.
     getChatId: () => scene?.id ?? "",
-    // #1872: the server attributed the extraction's cost to this chat itself;
-    // re-read the node so `chatSession.cost_usd_total` (projected from the
-    // invocation log on read) catches up — a GET, not a transcript re-save.
-    refreshCostTotal: async () => {
-      const chatId = scene?.id;
-      if (!chatId) return;
-      const fresh = await api.readNode<ChatSession>(chatId);
-      if (scene?.id === chatId) chatSession = fresh;
+    // #1872/#1877: the server attributed the extraction's rows to this chat
+    // and reported the total after them on the response — assign it.
+    setCostTotal: (total) => {
+      if (chatSession) chatSession = { ...chatSession, cost_usd_total: total };
     },
     setError: (message) => (chatError = message),
     setNotice: (message) => (chatNotice = message),
@@ -392,7 +388,6 @@
     activeChatJournal = [];
     activeChatChangedPicks = [];
     activeChatCacheWriteTimes = {};
-    pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
     chatInputDrafts = {};
     commit.reset();
@@ -434,7 +429,6 @@
     chatError = null;
     chatInput = "";
     chatRewound = false;
-    pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
     commit.reset();
     // Restore per-prompt input drafts (#654) — the exact inverse of the
@@ -534,7 +528,6 @@
       const derived = deriveChatTitleFromHistory();
       if (derived) title = derived;
     }
-    const cost_delta_usd = pendingTurnCost ?? undefined;
     const cache_write_slots =
       pendingTurnCacheWriteSlots.length > 0 ? [...pendingTurnCacheWriteSlots] : undefined;
     return {
@@ -580,7 +573,6 @@
       // (a revise brainstorm's `entry`, a create brainstorm's `entry_type`) to
       // component state only. `applyChatSession` decodes these back into drafts.
       inputs: encodeChatInputDrafts(chatInputDrafts),
-      cost_delta_usd,
       cache_write_slots,
     };
   }
@@ -588,17 +580,13 @@
   async function persistActiveChat(): Promise<void> {
     const chatId = scene?.id;
     if (!chatId) return;
-    // #1564: CONSUME the pending cost delta + cache slots synchronously — build the
-    // payload (which reads them) and clear them BEFORE the await. Otherwise a second
-    // persist racing this one (e.g. setTitleFromPane's debounced rename, ungated by
-    // chatRunning) reads the same still-set `pendingTurnCost` and re-sends the delta;
-    // the backend appends an ai_invocations row per accepted delta, so the chat's cost
-    // total is permanently inflated by a turn. Cleared here (not after the save) so the
-    // race window closes; restored on failure so a failed save doesn't drop the cost.
+    // #1564: CONSUME the pending cache slots synchronously — build the payload
+    // (which reads them) and clear them BEFORE the await, so a second persist
+    // racing this one (e.g. setTitleFromPane's debounced rename, ungated by
+    // chatRunning) can't re-send them; restored on failure so a failed save
+    // doesn't drop the stamp. Cost no longer rides the save at all (#1877).
     const payload = currentChatSessionPayload();
-    const consumedCost = pendingTurnCost;
     const consumedSlots = pendingTurnCacheWriteSlots;
-    pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
     try {
       const saved = await api.saveNode<ChatSession>(chatId, payload);
@@ -606,13 +594,13 @@
       activeChatPinned = saved.pinned;
       activeChatCacheWriteTimes = { ...(saved.cache_write_times ?? {}) };
       // Refresh our local snapshot of the persisted session — keeps the
-      // cost-total footer accurate without re-fetching.
+      // cost-total footer accurate without re-fetching (its total is the
+      // log projection, every server-recorded row included).
       chatSession = saved;
       onBodyChange?.();
     } catch (e) {
-      // The save failed — put the consumed delta/slots back (merging anything accrued
+      // The save failed — put the consumed slots back (merging anything accrued
       // meanwhile) so the next persist re-sends them rather than silently losing a turn.
-      if (consumedCost != null) pendingTurnCost = (pendingTurnCost ?? 0) + consumedCost;
       if (consumedSlots.length > 0) {
         pendingTurnCacheWriteSlots = [...new Set([...consumedSlots, ...pendingTurnCacheWriteSlots])];
       }
@@ -708,14 +696,14 @@
             appendToActiveChatJournal(ev.journal_added);
           }
           if (ev.usage) chatHistory[idx].usage = ev.usage;
-          if (typeof ev.cost_usd === "number") {
-            chatHistory[idx].cost_usd = ev.cost_usd;
-            // Only a POSITIVE delta accrues toward the session total — the
-            // backend refuses <= 0 deltas (`_record_chat_cost_delta`), and a
-            // zero-priced turn must not fabricate a "session €0.00" for a chat
-            // whose true total is unknown/None (#697). The per-message stamp
-            // above keeps the honest 0 for the turn itself.
-            if (ev.cost_usd > 0) pendingTurnCost = (pendingTurnCost ?? 0) + ev.cost_usd;
+          if (typeof ev.cost_usd === "number") chatHistory[idx].cost_usd = ev.cost_usd;
+          // #1877: the server recorded this turn's row before emitting `done`
+          // and hands back the chat's total on the same line — assign the
+          // snapshot from it. One number, one source, delivered on the event
+          // that changed it; nothing to bridge, nothing to reconcile. The
+          // None-vs-0 rule (#697) lives in the server's projection alone.
+          if (chatSession && ev.cost_usd_total !== undefined) {
+            chatSession = { ...chatSession, cost_usd_total: ev.cost_usd_total };
           }
           if (ev.usage && ev.usage.cache_write_tokens > 0) {
             if (!pendingTurnCacheWriteSlots.includes("system")) {
@@ -908,8 +896,7 @@
   const runClear = async () => {
     chatHistory = [];
     chatError = null;
-    // Reset cost-delta + cache-slot stamping so the next persist starts clean.
-    pendingTurnCost = null;
+    // Reset cache-slot stamping so the next persist starts clean.
     pendingTurnCacheWriteSlots = [];
     // Persist the clear so a reload doesn't resurrect the messages.
     await persistActiveChat();
@@ -1157,19 +1144,11 @@
   let ttlChips = $derived(
     ttlChipsFor(activeChatCacheWriteTimes, ttlTick, cacheTermSecondsFor(chatEstimate)),
   );
-  // The session-cost line's number (ADR-0076 decision 6): the persisted
-  // projection plus the not-yet-persisted delta. A stream `done` sets
-  // pendingTurnCost before the persist round-trip starts, and persistActiveChat
-  // swaps in the save response's total (which now carries the same log
-  // projection the read path computes) while nulling the pending delta in the
-  // same tick — so the display never lags the transcript. Known residual
-  // (#1564): two persists in flight at once can each carry the same
-  // cost_delta_usd to the backend; that is a persistence race, not a display
-  // one — this derived shows whatever the backend recorded.
-  let sessionCostUsd = $derived.by(() => {
-    const persisted = chatSession?.cost_usd_total ?? null;
-    return persisted != null || pendingTurnCost != null ? (persisted ?? 0) + (pendingTurnCost ?? 0) : null;
-  });
+  // The session-cost line's number (ADR-0076 decision 6, Amendment 3): the
+  // snapshot's total, which every server response that changed it assigns —
+  // the stream's `done`, the save response, the extraction response — so the
+  // display never lags the transcript and can never double-count (#1877).
+  let sessionCostUsd = $derived.by(() => chatSession?.cost_usd_total ?? null);
   // Re-fetch estimate when any input that drives it changes. Each dep
   // read on its own line so Svelte tracks them (see
   // [[feedback-svelte5-reactivity-traps]]).

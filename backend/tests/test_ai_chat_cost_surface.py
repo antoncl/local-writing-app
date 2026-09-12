@@ -102,6 +102,51 @@ class NonStreamingChatCostTests(unittest.TestCase):
         self.assertGreater(body["cost_usd"], 0.0)
         self.assertLess(body["cost_usd"], 1.0)
 
+    def test_chat_bound_turn_records_its_row_and_reports_the_total(self) -> None:
+        # #1877: the turn seam itself records a chat-bound call's ai_invocations
+        # row — the non-streamed route and the commit extraction both run
+        # through here — and the response carries the chat's total after it.
+        from app.models import CreateChatSessionRequest
+
+        loaded = _set_machine_keys(anthropic="sk-ant-test")
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Costed", system_prompt="s")
+        )
+        raw = _anthropic_raw_with_usage()
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(_ANTHROPIC_CHAT, return_value=ChatOutcome("Reply.", "end_turn", raw)):
+            response = self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "chat_id": chat.id,
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        rows = self.service.list_ai_invocations(chat_session_id=chat.id).invocations
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0].provider, rows[0].model), ("anthropic", "claude-haiku-4-5-20251001"))
+        assert rows[0].usage is not None
+        self.assertEqual(rows[0].usage.input_tokens, 1_000)
+        self.assertAlmostEqual(rows[0].cost_usd or 0.0, body["cost_usd"])
+        self.assertAlmostEqual(body["cost_usd_total"], body["cost_usd"])
+        # A chat-less call attributes to nothing and reports no total.
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(_ANTHROPIC_CHAT, return_value=ChatOutcome("Reply.", "end_turn", raw)):
+            loose = self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            ).json()
+        self.assertIsNone(loose["cost_usd_total"])
+        self.assertEqual(len(self.service.list_ai_invocations().invocations), 1)
+
     def test_chat_response_with_unknown_model_returns_null_cost(self) -> None:
         loaded = _set_machine_keys(anthropic="sk-ant-test")
         raw = _anthropic_raw_with_usage()
@@ -202,6 +247,79 @@ class StreamingChatCostTests(unittest.TestCase):
         self.assertEqual(done["usage"]["output_tokens"], 500)
         self.assertIn("cost_usd", done)
         self.assertGreater(done["cost_usd"], 0.0)
+
+    def test_stream_records_the_turns_own_invocation_row_before_done(self) -> None:
+        # #1877: the server that ran the streamed turn records its ai_invocations
+        # row — tagged with the chat, carrying THIS call's provider/model/usage/
+        # cost — before the `done` line is emitted, so the client's next read of
+        # the chat already projects it. No client delta is involved.
+        from app.models import CreateChatSessionRequest
+
+        loaded = _set_machine_keys(anthropic="sk-ant-test")
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Costed", system_prompt="s")
+        )
+        usage = UsageMetrics(input_tokens=1_000, output_tokens=500)
+
+        def fake_stream(call):
+            yield ai_providers.StreamDelta(text="Hi")
+            yield ai_providers.StreamFinal(stop_reason="end_turn", usage=usage)
+
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                "app.services.ai.profiles.anthropic.AnthropicProfile.chat_stream",
+                side_effect=fake_stream,
+             ):
+            response = self.client.post(
+                "/api/ai/chat/stream",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "chat_id": chat.id,
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        done = next(e for e in self._parse_ndjson(response.text) if e["type"] == "done")
+        rows = self.service.list_ai_invocations(chat_session_id=chat.id).invocations
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual((row.provider, row.model), ("anthropic", "claude-haiku-4-5-20251001"))
+        self.assertEqual(row.prompt_entry_type, "chat:chat_session")
+        assert row.usage is not None
+        self.assertEqual((row.usage.input_tokens, row.usage.output_tokens), (1_000, 500))
+        self.assertAlmostEqual(row.cost_usd or 0.0, done["cost_usd"])
+        # And the chat's total is that row, with no save in between — and it
+        # rides the `done` line itself, so the client learns the one number on
+        # the event that changed it.
+        self.assertAlmostEqual(
+            self.service.read_chat_session(chat.id).cost_usd_total or 0.0, done["cost_usd"]
+        )
+        self.assertAlmostEqual(done["cost_usd_total"], done["cost_usd"])
+
+    def test_chatless_stream_records_no_row(self) -> None:
+        # A stream without a chat_id has no session to attribute to — no row.
+        loaded = _set_machine_keys(anthropic="sk-ant-test")
+
+        def fake_stream(call):
+            yield ai_providers.StreamFinal(
+                stop_reason="end_turn", usage=UsageMetrics(input_tokens=10, output_tokens=5)
+            )
+
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                "app.services.ai.profiles.anthropic.AnthropicProfile.chat_stream",
+                side_effect=fake_stream,
+             ):
+            self.client.post(
+                "/api/ai/chat/stream",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        self.assertEqual(self.service.list_ai_invocations().invocations, [])
 
     def test_stream_done_without_usage_omits_cost(self) -> None:
         # Some stream variants don't return usage (e.g. when include_usage

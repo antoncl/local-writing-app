@@ -126,7 +126,7 @@ field, its value the field's content:
 
 ## Amendment 2 — the commit turn continues the chat, but carries only the chat's own picks as lore
 
-- Status: **Proposed** — 2026-09-07. Issue: #1874.
+- Status: **Accepted** — 2026-09-12 (Anton). Issue: #1874. Shipped in PR #1875.
 - Closes open question (b) ("cached continuation vs. fresh pass"), which was left *"pending a reliability check on the noisier continuation context"*. This is that check, and the continuation failed it.
 
 **What was observed.** A create brainstorm whose last assistant turn was a complete, explicit draft (7.5k chars, every field named) committed to a *different* character — a different name, aliases, backstory and body — assembled from the first user message plus the world lore. A read-only replay of the real transcript through `run_entry_patch_extraction` reproduced it: with the implicit lore selection in the system blocks (157k chars, ~36k tokens, in front of a ~3.5k-token transcript) the model invented a character every time, and a firmer "transcribe, don't author" cue only made it transcribe the *first user message*. With the lore block removed and nothing else changed, the same model returned the draft verbatim, at a tenth of the input tokens. Capping `max_tokens` changed nothing. The wire carried all four turns intact throughout.

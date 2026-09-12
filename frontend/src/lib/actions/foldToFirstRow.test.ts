@@ -4,8 +4,10 @@
 import { describe, expect, it } from "vitest";
 import { firstRowFit, type PillBox } from "./foldToFirstRow";
 
-function box(left: number, right: number, top: number): PillBox {
-  return { left, right, top };
+// (left, right, top) reads like a rect in the cases below; the fit only needs
+// where a pill ENDS and which line it sits on.
+function box(_left: number, right: number, top: number): PillBox {
+  return { right, top };
 }
 
 describe("firstRowFit", () => {

@@ -341,7 +341,6 @@
          component: `expanded` / `onToggleExpanded`, persisted by MetadataPanel. -->
     <span
       class="ref-pill-row"
-      class:folded
       use:foldToFirstRow={{ enabled: folded, total: refNodes.length, onFit: (n) => (visibleCount = n) }}
     >
       {#each refNodes as ref, i (ref.id)}
@@ -528,7 +527,11 @@
   .reference-picker.controlled .ref-pill-row:global([data-measuring]) .ref-pill-slot.overflow {
     display: contents;
   }
-  .ref-pill-more {
+  /* The `+N` chip: the pill's shape without its border/inset, accent text.
+     Two classes so it out-specifies the `.ref-pill` base declared below —
+     with equal specificity the later base rule would win and the chip would
+     read as a reference titled "+3". */
+  .ref-pill.ref-pill-more {
     padding: 2px 8px 2px 6px;
     border-color: transparent;
     background: none;
@@ -537,8 +540,12 @@
     line-height: 1.5;
     cursor: pointer;
   }
-  .ref-pill-more:hover {
+  .ref-pill.ref-pill-more:hover {
     text-decoration: underline;
+  }
+  .ref-pill.ref-pill-more:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   /* A reference pill (#1732): entity colour-dot + title, always visible, in the

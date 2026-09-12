@@ -75,6 +75,38 @@ describe("MetadataPanel — folding list gutter caret (#1884 slice 2)", () => {
     expect(railSectionCollapse.isExpanded("field:allies", false)).toBe(true);
   });
 
+  it("the caret's state reaches the picker: with a stubbed layout the +N chip goes away on click (expanded threaded through FieldValueEditor)", async () => {
+    // Same stub as ReferencePicker.test.ts: a 200px row, pills 0/1 on the
+    // first line, pill 2 wrapped — folded shows 2 + `+1`; expanded shows 3.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const zero = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON() {} };
+      if (this.classList.contains("ref-pill-row")) return { ...zero, right: 200, width: 200, bottom: 24, height: 24 };
+      if (this.classList.contains("ref-pill") && !this.classList.contains("ref-pill-more")) {
+        const idx = [...document.querySelectorAll(".ref-pill:not(.ref-pill-more)")].indexOf(this);
+        const def = [{ top: 0, right: 60 }, { top: 0, right: 120 }, { top: 24, right: 180 }][idx] ?? { top: 0, right: 0 };
+        return { ...zero, top: def.top, right: def.right, width: def.right, bottom: def.top + 24, height: 24 };
+      }
+      return zero;
+    });
+    try {
+      mount({ allies: ["lore_1", "lore_2", "lore_3"] });
+      const row = rowFor("Allies");
+      expect(row.querySelectorAll(".ref-pill-slot.overflow")).toHaveLength(1);
+      expect(row.querySelector(".ref-pill-more")?.textContent).toBe("+1");
+      await fireEvent.click(row.querySelector(".fr-disc-toggle") as HTMLElement);
+      expect(row.querySelectorAll(".ref-pill-slot.overflow")).toHaveLength(0);
+      expect(row.querySelector(".ref-pill-more")).toBeNull();
+      // And the chip itself flips the same persisted state.
+      await fireEvent.click(row.querySelector(".fr-disc-toggle") as HTMLElement);
+      expect(row.querySelector(".ref-pill-more")?.textContent).toBe("+1");
+      await fireEvent.click(row.querySelector(".ref-pill-more") as HTMLElement);
+      expect(row.querySelector(".ref-pill-more")).toBeNull();
+      expect(railSectionCollapse.isExpanded("field:allies", false)).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it("an empty entity_ref_list row has no gutter button — a plain span", () => {
     mount({ allies: [] });
     const gutter = rowFor("Allies").querySelector(".fr-disc") as HTMLElement;

@@ -170,6 +170,25 @@ describe("ReferencePicker — fold to first row (#1884 slice 2)", () => {
     expect(screen.getByRole("button", { name: "Add Characters" })).toBeInTheDocument();
   });
 
+  it("no layout: a value that grows after mount still fits — the action re-reads its params on update", async () => {
+    // Pins `update(next)` taking the NEW total: with the stale total (2) the
+    // no-layout fallback would report 2 visible of 3 and conjure a `+1` chip.
+    const props = {
+      field,
+      value: ["lore_1", "lore_2"],
+      ariaLabel: "Characters",
+      loreEntries,
+      embedded: true,
+      controlled: true,
+      expanded: false,
+    };
+    const { rerender } = render(ReferencePicker, { props });
+    await rerender({ ...props, value: ["lore_1", "lore_2", "lore_3"] });
+    expect(document.querySelectorAll(".ref-pill-slot")).toHaveLength(3);
+    expect(document.querySelectorAll(".ref-pill-slot.overflow")).toHaveLength(0);
+    expect(document.querySelector(".ref-pill-more")).toBeNull();
+  });
+
   it("single entity_ref never folds, whatever expanded says", () => {
     render(ReferencePicker, {
       props: {
@@ -244,6 +263,31 @@ describe("ReferencePicker — fold to first row (#1884 slice 2)", () => {
       const chip = screen.getByText("+1");
       await fireEvent.click(chip);
       expect(onToggleExpanded).toHaveBeenCalledOnce();
+    });
+
+    it("flipping `expanded` after mount re-measures: unfold shows all, fold hides again (the action's update path)", async () => {
+      stubLayout();
+      const props = {
+        field,
+        value: ["lore_1", "lore_2", "lore_3"],
+        ariaLabel: "Characters",
+        loreEntries,
+        embedded: true,
+        controlled: true,
+        expanded: false,
+      };
+      const { rerender } = render(ReferencePicker, { props });
+      expect(document.querySelectorAll(".ref-pill-slot.overflow")).toHaveLength(1);
+      expect(document.querySelector(".ref-pill-more")).not.toBeNull();
+
+      await rerender({ ...props, expanded: true });
+      expect(document.querySelectorAll(".ref-pill-slot.overflow")).toHaveLength(0);
+      expect(document.querySelector(".ref-pill-more")).toBeNull();
+      expect(screen.getByRole("button", { name: "Add Characters" })).toBeInTheDocument();
+
+      await rerender({ ...props, expanded: false });
+      expect(document.querySelectorAll(".ref-pill-slot.overflow")).toHaveLength(1);
+      expect(screen.getByText("+1")).toBeInTheDocument();
     });
 
     it("expanded: true shows every pill, no chip, add trigger present", () => {

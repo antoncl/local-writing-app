@@ -6,7 +6,7 @@
 
 import type { Action } from "svelte/action";
 
-export type PillBox = { left: number; right: number; top: number };
+export type PillBox = { right: number; top: number };
 
 /** How many leading pills stay visible on the first line when the row is
  *  folded. `chipWidth` is the measured width of the `+N` chip that must also
@@ -27,9 +27,10 @@ export function firstRowFit(pills: PillBox[], containerRight: number, chipWidth:
 
 export type FoldToFirstRowParams = { enabled: boolean; total: number; onFit: (visible: number) => void };
 
-// A rendered `+NN` chip at --fs-sm is ~36px; used only on the first measure
-// after a value change, before the chip itself exists to measure (nothing is
-// hidden yet, so nothing has rendered one) — see the module doc above.
+// The chip's width when there is no chip in the DOM to measure — every
+// measure that starts from "nothing hidden" (first render, a fold after an
+// expand, a value change while everything fit). A rendered `+NN` chip at
+// --fs-sm is ~37px; reserving 40 keeps the fit conservative by a few px.
 const FALLBACK_CHIP_WIDTH = 40;
 
 /** Measures the node's `.ref-pill` children (in DOM order) and the `.ref-pill-more`

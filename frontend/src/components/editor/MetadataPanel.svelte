@@ -928,7 +928,12 @@
     flex: none;
     width: 22px;
   }
-  /* Folding-list caret (#1884 slice 2) — same 22px slot as the empty `.fr-disc`. */
+  /* Folding-list caret (#1884 slice 2) — same 22px slot as the empty `.fr-disc`.
+     It is only a control when there is something to unfold or fold back: the
+     picker renders its `+N` chip exactly when pills are hidden, so the caret
+     shows for a row that HAS the chip, or one already expanded (to fold it
+     back). Otherwise it stays in the slot but invisible — out of the tab order
+     and the a11y tree, not a no-op button announcing "Show all". */
   .fr-disc-toggle {
     display: inline-flex;
     align-items: center;
@@ -938,9 +943,20 @@
     background: none;
     color: var(--text-3);
     cursor: pointer;
+    visibility: hidden;
+  }
+  /* The chip is ReferencePicker's, so it needs `:global` inside `:has()` —
+     a scoped `.ref-pill-more` would carry this component's hash and never match. */
+  .field-row:has(:global(.ref-pill-more)) .fr-disc-toggle,
+  .fr-disc-toggle[aria-expanded="true"] {
+    visibility: visible;
   }
   .fr-disc-toggle:hover {
     color: var(--text);
+  }
+  .fr-disc-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   .fr-icon {
     flex: none;

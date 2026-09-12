@@ -193,3 +193,66 @@ def test_dedup_is_set_union(project):
     assert project._honor_id not in ids   # shadowed by journal
     assert project._nimitz_id not in ids  # shadowed by pick
     assert project._pavel_id in ids       # truly new
+
+
+# ---- ADR-0086 Amendment 1 (#1887): a direct mention promotes a hop entry ----
+
+
+def test_naming_an_entry_the_journal_knows_only_by_the_hop_journals_it_again(project):
+    # Turn 1 journaled Pavel through Honor's body (depth-1). On turn 3 the
+    # author names him: a SECOND entry, under the author's message and that
+    # turn — append-only, the hop entry untouched.
+    existing = [
+        ChatSessionJournalEntry(
+            entry_id=project._pavel_id, title="Pavel Young",
+            added_at_turn=1, source="depth1_expansion",
+        ),
+    ]
+    out = expand_context(project, "What does Pavel Young want?", existing_journal=existing, turn=3)
+    assert [(e.entry_id, e.source, e.added_at_turn) for e in out] == [
+        (project._pavel_id, "user_message", 3)
+    ]
+
+
+def test_a_directly_journaled_entry_is_not_journaled_again(project):
+    # A re-mention of an entry the journal holds by a direct source adds
+    # nothing — no refresh, no duplicate (the ADR's rejected alternative).
+    for source in ("user_message", "rendered_prompt", "scene_prose"):
+        existing = [
+            ChatSessionJournalEntry(
+                entry_id=project._pavel_id, title="Pavel Young", added_at_turn=1, source=source,
+            ),
+        ]
+        out = expand_context(project, "Pavel Young again.", existing_journal=existing, turn=3)
+        assert [e.entry_id for e in out] == [], source
+
+
+def test_a_hop_rehit_does_not_promote(project):
+    # Honor's body mentions Pavel; naming HONOR re-finds Pavel through the hop
+    # only. The journal already knows Pavel that way, so nothing is added for
+    # him — a hop cannot promote a hop.
+    existing = [
+        ChatSessionJournalEntry(
+            entry_id=project._pavel_id, title="Pavel Young",
+            added_at_turn=1, source="depth1_expansion",
+        ),
+    ]
+    out = expand_context(project, "Honor paces the bridge.", existing_journal=existing, turn=3)
+    ids = [e.entry_id for e in out]
+    assert project._honor_id in ids
+    assert project._pavel_id not in ids
+
+
+def test_a_picked_entry_is_never_promoted(project):
+    # A pick is already sent through its own channel: naming it journals nothing.
+    existing = [
+        ChatSessionJournalEntry(
+            entry_id=project._pavel_id, title="Pavel Young",
+            added_at_turn=1, source="depth1_expansion",
+        ),
+    ]
+    out = expand_context(
+        project, "Pavel Young.", existing_journal=existing,
+        picked_ids=[project._pavel_id], turn=3,
+    )
+    assert out == []

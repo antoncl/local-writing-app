@@ -116,6 +116,23 @@ describe("ContextDoor", () => {
     expect(screen.getByText(/turn 2/)).toBeInTheDocument();
   });
 
+  // ADR-0086 Amendment 1: an entry the hop noticed and the author later named
+  // is journaled twice; the roster lists both lines (keyed by id+source+turn,
+  // so the duplicate id is not a keyed-each collision).
+  it("lists an entry journaled by the hop and again by name as two lines", async () => {
+    render(ContextDoor, {
+      ...baseProps,
+      journal: [
+        { entry_id: "lore_n", title: "Nimitz", added_at_turn: 1, source: "depth1_expansion" },
+        { entry_id: "lore_n", title: "Nimitz", added_at_turn: 3, source: "user_message" },
+      ] as ChatSessionJournalEntry[],
+    });
+    expect(screen.getByText("2")).toBeInTheDocument();
+    await fireEvent.click(screen.getByText("Auto-added this conversation"));
+    expect(screen.getByText(/turn 1.*one hop · mention/)).toBeInTheDocument();
+    expect(screen.getByText(/Nimitz.*turn 3$/)).toBeInTheDocument();
+  });
+
   it("#1635: changedPicks alone (no journal) shows the auto-added row with count 1, and drilling shows the edited marker", async () => {
     render(ContextDoor, {
       ...baseProps,

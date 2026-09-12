@@ -3,6 +3,7 @@ import type { LoreFit } from "@/lib/types";
 import {
   declaredOverBudget,
   declaredOverLine,
+  journalEntryKey,
   lastReportedTurn,
   leftOutSegment,
   loreSourceLabel,
@@ -27,6 +28,15 @@ describe("loreFit", () => {
     expect(loreSourceLabel("depth1_expansion")).toBe("one hop · mention");
     expect(loreSourceLabel("structural_hop")).toBe("one hop · link");
     expect(loreSourceLabel("elsewhere")).toBe("elsewhere");
+  });
+
+  it("keys a journal entry by id, source and turn — the same id twice is two entries", () => {
+    const hop = { entry_id: "lore_n", title: "Nimitz", added_at_turn: 1, source: "depth1_expansion" as const };
+    const named = { entry_id: "lore_n", title: "Nimitz", added_at_turn: 3, source: "user_message" as const };
+    expect(journalEntryKey(hop)).not.toBe(journalEntryKey(named));
+    expect(journalEntryKey({ ...named })).toBe(journalEntryKey(named));
+    // Older persisted entries lack the fields; they default the way the wire does.
+    expect(journalEntryKey({ entry_id: "lore_x" } as never)).toBe("lore_x|user_message|0");
   });
 
   it("finds the last assistant turn that carries a report, past a stopped or streaming one", () => {

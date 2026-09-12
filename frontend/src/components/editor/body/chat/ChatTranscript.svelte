@@ -15,6 +15,7 @@
     LEFT_OUT_HINT,
     declaredOverBudget,
     declaredOverLine,
+    journalEntryKey,
     leftOutSegment,
   } from "@/lib/chat/loreFit";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
@@ -122,7 +123,7 @@
       {#if message.journal_added && message.journal_added.length > 0}
         <div class="cbv-journal-added" title="Lore auto-detected from this turn.">
           <span class="cbv-journal-label">Auto-added context:</span>
-          {#each message.journal_added as entry (entry.entry_id)}
+          {#each message.journal_added as entry (journalEntryKey(entry))}
             <span class="cbv-journal-chip">{entry.title || entry.entry_id}</span>
           {/each}
         </div>

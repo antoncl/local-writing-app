@@ -92,6 +92,12 @@ def expand_context(
     `turn` is the message index at which the detection fires (the new
     user message's index). Recorded on each entry for the audit UI.
 
+    An id the journal holds only as `depth1_expansion` is not "in scope" for
+    a DIRECT mention: naming it re-journals it under the direct source and
+    this turn (ADR-0086 Amendment 1, #1887). The journal therefore may hold
+    one id twice — once as noticed by the hop, once as named — and stays
+    append-only; readers key entries by (id, source, turn), not by id.
+
     Returns an empty list when nothing new was detected. Caller is
     responsible for appending the returned entries to the session
     journal and saving — the expander is pure.
@@ -128,20 +134,28 @@ def expand_context(
     combined_direct = direct_ids | rendered_ids | prose_ids
     depth1_ids = _textual_one_hop(project, combined_direct, scene=scene, matcher=matcher)
 
-    # What's already in context via a picker or an earlier journal turn?
-    in_scope: set[str] = set()
+    # What's already in context via a picker or an earlier journal turn? Two
+    # views of the journal (ADR-0086 Amendment 1, #1887): every id it holds
+    # keeps the HOP out (a depth-1 re-hit adds nothing), but only an id it
+    # holds by a DIRECT source keeps a direct mention out. An id the journal
+    # knows only through the depth-1 hop that the author, the prompt, or the
+    # scene now names is journaled AGAIN under that direct source — a second
+    # entry for the same id, append-only — so a selection that trusts sources
+    # (`named`) sends it and the fit ranks it where a named entry belongs.
+    picked: set[str] = {picked_id for picked_id in picked_ids if picked_id}
+    in_scope: set[str] = set(picked)
+    directly_in_scope: set[str] = set(picked)
     for entry in existing_journal:
         in_scope.add(entry.entry_id)
-    for picked_id in picked_ids:
-        if picked_id:
-            in_scope.add(picked_id)
+        if entry.source != "depth1_expansion":
+            directly_in_scope.add(entry.entry_id)
 
     # Sorted so the persisted journal's entry order is deterministic run-to-run
     # (these are sets; the final lore set is order-independent, but a stable
     # journal keeps the chat node's front-matter free of spurious byte diffs).
-    new_direct = sorted(direct_ids - in_scope)
-    new_rendered = sorted(rendered_ids - in_scope)
-    new_prose = sorted(prose_ids - in_scope)
+    new_direct = sorted(direct_ids - directly_in_scope)
+    new_rendered = sorted(rendered_ids - directly_in_scope)
+    new_prose = sorted(prose_ids - directly_in_scope)
     new_depth1 = sorted(depth1_ids - combined_direct - in_scope)
 
     entries: list[ChatSessionJournalEntry] = []

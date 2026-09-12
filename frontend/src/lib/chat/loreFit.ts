@@ -1,8 +1,16 @@
 // ADR-0086 §5: the one place the lore-budget report is worded and judged, so
 // the transcript's meta line and the Context door's "Left out" section cannot
 // disagree about the same turn.
-import type { LoreFit, LoreSource } from "@/lib/types";
+import type { ChatSessionJournalEntry, LoreFit, LoreSource } from "@/lib/types";
 import { formatTokensPrecise } from "@/lib/utils/money";
+
+// ADR-0086 Amendment 1: the journal may hold one id twice — once as the hop
+// noticed it, once as the author later named it — so a journal entry's
+// identity is (id, source, turn), never the id alone. Every keyed list and
+// every dedup of journal entries reads this.
+export function journalEntryKey(entry: ChatSessionJournalEntry): string {
+  return `${entry.entry_id}|${entry.source ?? "user_message"}|${entry.added_at_turn ?? 0}`;
+}
 
 // ADR-0086 §1 sources in the reader's words. The two hops are what the
 // assistant's "Lore reach: Named only" setting turns off.

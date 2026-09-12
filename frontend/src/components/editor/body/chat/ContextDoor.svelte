@@ -21,6 +21,7 @@
     LEFT_OUT_HINT,
     declaredOverBudget,
     declaredOverLine,
+    journalEntryKey,
     loreFitSummary,
     loreSourceLabel,
   } from "@/lib/chat/loreFit";
@@ -293,7 +294,9 @@
       <div class="cbv-ctx-kv-line"><strong>{pair.label}</strong> · <span class="cbv-ctx-value">{pair.value}</span></div>
     {/each}
   {:else if current.kind === "section" && current.key === "journal"}
-    {#each journal as entry (entry.entry_id)}
+    <!-- Keyed by (id, source, turn): an entry the hop noticed and the author
+         later named appears twice, honestly (ADR-0086 Amendment 1). -->
+    {#each journal as entry (journalEntryKey(entry))}
       <div class="cbv-ctx-kv-line">
         {entry.title || entry.entry_id}{#if entry.added_at_turn != null} · turn {entry.added_at_turn}{/if}{#if entry.source === "depth1_expansion"} · {loreSourceLabel(entry.source)}{/if}
       </div>

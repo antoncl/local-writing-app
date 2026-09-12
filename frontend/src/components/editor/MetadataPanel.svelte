@@ -6,6 +6,7 @@
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import RailGroupHead from "@/components/editor/RailGroupHead.svelte";
   import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
   import { fieldIconClass, entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { resolveColor } from "@/lib/utils/colors";
@@ -220,7 +221,12 @@
   }
 
   // L1 grouping: ungrouped fields render first (no header), then each
-  // group in first-appearance order under a labelled section header.
+  // group in first-appearance order. A head only renders per block when the
+  // type has at least one group (#1884 slice 3) — a type with no groups is
+  // one block, a header would be noise. Once there IS anything to fold, every
+  // block folds the same way, including the ungrouped one (labelled
+  // "General"), and each block's open/closed state persists through
+  // `railSectionCollapse`.
   type RailSection = { group: string | null; ids: string[] };
   function buildSections(ids: string[], schema: MetadataSchema): RailSection[] {
     const ungrouped: string[] = [];
@@ -242,6 +248,15 @@
     return out;
   }
   const sections = $derived(buildSections(visibleFieldIds, metadataSchema));
+
+  // Every block folds the same way once there is anything to fold: when a type
+  // has at least one L1 group, the ungrouped fields get a header too (#1884
+  // slice 3). A type with no groups is one block — no header at all.
+  const UNGROUPED_LABEL = "General";
+  const showGroupHeads = $derived(sections.some((s) => s.group !== null));
+  const GROUP_DEFAULT = true;
+  function groupKey(section: RailSection): string { return `group:${section.group ?? "~ungrouped"}`; }
+  function groupExpanded(section: RailSection): boolean { return railSectionCollapse.isExpanded(groupKey(section), GROUP_DEFAULT); }
 
   // Reference fields render inline pills through the controlled ReferencePicker
   // (#1732): a single `entity_ref` sits compact on the value line, an
@@ -270,6 +285,15 @@
       field.type === "list" ||
       (field.type === "multi_select" && field.options.length > 0)
     );
+  }
+
+  // An empty row recedes (#1884 slice 3): label + glyph in --text-3. `color`
+  // always shows an effective swatch (the placeholder resolves through the type
+  // chain) and a valueless `computed` row is not rendered at all, so neither is
+  // ever "empty" to the eye.
+  function isRowEmpty(field: MetadataFieldDefinition, fieldId: string): boolean {
+    if (field.type === "color" || field.type === "computed") return false;
+    return !isMetadataValuePresent(displayValue(fieldId));
   }
 
   // A folding list field (#1884 slice 2): a non-empty `entity_ref_list` gets the
@@ -524,12 +548,14 @@
   {/if}
 
   {#each sections as section}
-    {#if section.group}
-      <div class="rail-group-head">
-        <span class="rail-group-label">{section.group}</span>
-        <span class="rail-group-rule"></span>
-      </div>
+    {#if showGroupHeads}
+      <RailGroupHead
+        label={section.group ?? UNGROUPED_LABEL}
+        expanded={groupExpanded(section)}
+        onToggle={() => railSectionCollapse.toggle(groupKey(section), GROUP_DEFAULT)}
+      />
     {/if}
+    {#if !showGroupHeads || groupExpanded(section)}
     {#each section.ids as fieldId}
       <!-- Intrinsic identity fields (id/title/entry_type, #116) are surfaced
            via dedicated rail controls (the type select above, the shell title
@@ -546,7 +572,7 @@
       {#if metadataSchema.fields[fieldId] && (!metadataSchema.fields[fieldId].intrinsic || isFlipResolve(fieldId)) && !effectiveFieldHidden(metadataSchema, entryType, fieldId) && (metadataSchema.fields[fieldId].type !== "computed" || computedFieldString(fieldId) !== "")}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")}>
+        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")} class:empty={isRowEmpty(field, fieldId)}>
           <!-- Disclosure gutter — reserved so the field glyph lines up with the
                collapsible sections' glyph column (RailSectionHeader): caret ·
                glyph on every rail line (#1438). Reference fields no longer
@@ -780,6 +806,7 @@
         </div>
       {/if}
     {/each}
+    {/if}
   {/each}
 </section>
 
@@ -1023,6 +1050,16 @@
   .field-row.inherited .fr-icon,
   .field-row.inherited .fr-name {
     opacity: 0.62;
+  }
+
+  /* Empty at rest (#1884 slice 3): the row is still there — a schema field is a
+     prompt to fill — but its label and glyph step back to the tertiary ink.
+     Declared before the mutated/layer-inherited/flipped rules below, at equal
+     selector specificity, so an active mark on an empty field still wins the
+     cascade and reads as a mark, not as empty. */
+  .field-row.empty .fr-name,
+  .field-row.empty .fr-icon {
+    color: var(--text-3);
   }
 
   /* Mutated-by-here rows (#64): the in-prose mutation pill's vocabulary —

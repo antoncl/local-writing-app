@@ -31,6 +31,7 @@
   import { untrack } from "svelte";
   import SchemaFieldInlineEditor, { type FieldDraftPayload } from "@/components/schema/SchemaFieldInlineEditor.svelte";
   import SchemaFieldRow from "@/components/schema/SchemaFieldRow.svelte";
+  import RailGroupHead from "@/components/editor/RailGroupHead.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import IconPicker from "@/components/widgets/IconPicker.svelte";
   import { anchoredPopover } from "@/lib/actions/anchoredPopover";
@@ -170,6 +171,12 @@
   const typeSectionLabels = $derived(
     typeFieldSections.map((s) => s.group).filter((g): g is string => Boolean(g)),
   );
+
+  // Group heads render only once the type actually has a group (#1884 slice
+  // 3) — a type with no groups is one block, a header would be noise. Unlike
+  // the rail, the type editor's heads are never collapsible ("define looks
+  // like display" holds for the label + rule, not the fold).
+  const showGroupHeads = $derived(typeFieldSections.some((s) => s.group));
 
   // --- Scoped draft state (#14 Step 4), seeded ONCE from the init* props. The
   // host remounts this component per opened/created type (a draft-token
@@ -497,11 +504,8 @@
            onFieldDrop, which persists the full display_order. -->
       <div class="schema-field-rows">
         {#each typeFieldSections as section}
-          {#if section.group}
-            <div class="rail-group-head">
-              <span class="rail-group-label">{section.group}</span>
-              <span class="rail-group-rule"></span>
-            </div>
+          {#if showGroupHeads}
+            <RailGroupHead label={section.group ?? "General"} />
           {/if}
           {#each section.entries as [fieldId, field]}
             {@const isOwn = ownFieldIds.has(fieldId)}
@@ -789,8 +793,8 @@
     color: var(--k-lore-text);
   }
 
-  /* Type-editor layout chrome co-located from styles.css (#14). The shared
-     `.rail-group-*` L1 group header (also used by MetadataPanel) and the
+  /* Type-editor layout chrome co-located from styles.css (#14). The L1 group
+     header is `RailGroupHead` (also used by MetadataPanel, #1884 slice 3); the
      `.sfi-*`/`.sfr-tile`/`.sfr-cog` form atoms stay global; the
      `.group-apply-form .sfi-*` rules below are own-markup overrides. */
   .schema-editor {

@@ -890,28 +890,10 @@ button.row-action-add.active {
 /* .schema-type-fields / -header / .schema-type-identity / .kind-pill /
    .extends-label / .extends-pill co-located into SchemaTypeEditor.svelte (#14). */
 
-/* L1 group section header — shared between the MetadataPanel rail and the
-   type editor's field list. "Define looks like display." Padding
-   matches the per-row horizontal padding used by both .field-row and
-   .schema-field-row. */
-.rail-group-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 12px 4px;
-}
-.rail-group-label {
-  font-size: var(--fs-xs);
-  font-weight: var(--w-semibold);
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-3, var(--text-3));
-}
-.rail-group-rule {
-  flex: 1;
-  height: 1px;
-  background: var(--divider, var(--divider));
-}
+/* .rail-group-head / .rail-group-label / .rail-group-rule co-located into
+   RailGroupHead.svelte (#1884 slice 3) — one atom shared by the
+   MetadataPanel rail and the type editor, instead of duplicated markup
+   against this shared global CSS. */
 
 /* .schema-field-rows (the mockup-B field-row container) co-located into
    SchemaTypeEditor.svelte (#14). */

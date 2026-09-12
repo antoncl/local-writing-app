@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { editorPanes, type ReviewCommitter } from "./editorPanes.svelte";
 import { confirmService } from "./confirmService.svelte";
@@ -52,8 +52,8 @@ function plotCardPane(id: string, entryId: string): void {
   editorPanes.panes = [...editorPanes.panes, pane];
 }
 
-function committer(hasChanges: boolean): ReviewCommitter & { commit: ReturnType<typeof vi.fn>; discard: ReturnType<typeof vi.fn> } {
-  return { hasChanges: () => hasChanges, commit: vi.fn().mockResolvedValue(undefined), discard: vi.fn() };
+function committer(hasChanges: boolean): ReviewCommitter & { commit: Mock<ReviewCommitter["commit"]>; discard: Mock<ReviewCommitter["discard"]> } {
+  return { hasChanges: () => hasChanges, commit: vi.fn<ReviewCommitter["commit"]>().mockResolvedValue(true), discard: vi.fn<ReviewCommitter["discard"]>() };
 }
 
 describe("editorPanes review freeze (#634)", () => {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 // §7 of #746: where the wizard's AI-step policy lands depends on the run.
 // On FIRST run (no machine root yet) it establishes the APP-WIDE default and the
@@ -23,8 +23,8 @@ async function driveToSubmit() {
   await createWizard.submit();
 }
 
-let onCreateProject: ReturnType<typeof vi.fn>;
-let onSaveAppPolicy: ReturnType<typeof vi.fn>;
+let onCreateProject: Mock<typeof createWizard.onCreateProject>;
+let onSaveAppPolicy: Mock<typeof createWizard.onSaveAppPolicy>;
 
 beforeEach(() => {
   prospectiveProjectNode.mockReset().mockResolvedValue({
@@ -34,8 +34,8 @@ beforeEach(() => {
   });
   prospectiveAncestorCandidates.mockReset().mockResolvedValue([]);
   createWizard.close();
-  onCreateProject = vi.fn().mockResolvedValue(undefined);
-  onSaveAppPolicy = vi.fn().mockResolvedValue(undefined);
+  onCreateProject = vi.fn<typeof createWizard.onCreateProject>().mockResolvedValue(undefined);
+  onSaveAppPolicy = vi.fn<typeof createWizard.onSaveAppPolicy>().mockResolvedValue(undefined);
   createWizard.onCreateProject = onCreateProject;
   createWizard.onSaveAppPolicy = onSaveAppPolicy;
   createWizard.onError = () => {};

@@ -11,6 +11,7 @@ the two share only the system-prompt cache-block via `system_prompt_cache_blocks
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from app.models import (
@@ -34,6 +35,21 @@ from app.services.project.errors import ProjectServiceError
 LoreMode = Literal["implicit", "used"]
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PreparedChatTurn:
+    """What `expand_and_prepare_chat_blocks` assembled for one send: the
+    ordered system cache-blocks, the provider session id, the lore entries
+    newly journaled on this turn — and the bound `ChatSession` it read, so
+    the caller that later records the turn's row (#1877) attributes it to the
+    chat it already holds instead of re-reading transcript + ledger inside
+    the stream. `chat` is None for a chat-less call or a missing chat."""
+
+    system_blocks: list[dict] | None
+    session_id: str | None
+    journal_added: list[Any]
+    chat: ChatSession | None
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
@@ -257,9 +273,9 @@ def expand_and_prepare_chat_blocks(
     messages_list: list[dict],
     *,
     lore_mode: LoreMode = "implicit",
-) -> tuple[list[dict] | None, str | None, list[Any]]:
+) -> PreparedChatTurn:
     """When chat_id is bound, assemble the ordered system cache-blocks the
-    provider call sends, and return:
+    provider call sends, and return a `PreparedChatTurn` carrying:
       - system_blocks, in stable-first order (ADR-0060 §5): [{system_prompt,
         stable}, {staged_change, stable}?, {stable_lore, stable}?, {volatile_lore,
         volatile}?] — the staged_change block (ADR-0055 S4) is present only when the
@@ -287,15 +303,16 @@ def expand_and_prepare_chat_blocks(
     Amendment 2) — runs no detection and sends only the chat's own `use()`
     picks, so a large world selection can't swamp the transcript it must read.
 
-    Returns (None, None, []) when chat_id is empty or the chat doesn't
-    exist — caller falls back to the legacy single-string system path.
+    Returns an empty `PreparedChatTurn` (no blocks, no session, no chat) when
+    chat_id is empty or the chat doesn't exist — caller falls back to the
+    legacy single-string system path.
     """
     if not chat_id:
-        return None, None, []
+        return PreparedChatTurn(None, None, [], None)
     try:
         chat = project.read_chat_session(chat_id)
     except ProjectServiceError:
-        return None, None, []
+        return PreparedChatTurn(None, None, [], None)
 
     new_entries: list[Any] = []
     journal_for_send: list[Any] = []
@@ -359,31 +376,28 @@ def expand_and_prepare_chat_blocks(
         if picks_xml:
             blocks.append({"text": picks_xml, "tier": "volatile"})
 
-    return (blocks or None), chat_id, list(new_entries)
+    return PreparedChatTurn(blocks or None, chat_id, list(new_entries), chat)
 
 
 def record_stream_turn(
     project: ProjectService,
-    chat_id: str | None,
+    chat: ChatSession | None,
     ev: ai_providers.StreamDone,
     usage: ChatUsage | None,
     cost_usd: float | None,
-) -> None:
-    """The streamed turn's own `ai_invocations` row (#1877), recorded by the
-    server that ran the call — the stream transform's `on_done` hook. Mirrors
-    the commit extraction's `_record_extraction_call`: the row carries THIS
-    call's usage and provenance, never a copy of the transcript's last message,
-    and a ledger that can't be written is logged, never allowed to disrupt the
-    stream. A chat-less call (no `chat_id`) has no session to attribute to."""
-    if not chat_id:
-        return
-    try:
-        chat = project.read_chat_session(chat_id)
-        project.record_chat_turn_invocation(
-            chat, provider=ev.provider, model=ev.model, usage=usage, cost_usd=cost_usd
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("Couldn't record the streamed chat turn's invocation row")
+) -> dict[str, Any] | None:
+    """The stream's finaliser (#1877): record the turn's own `ai_invocations`
+    row against the chat the route already holds (`PreparedChatTurn.chat`) —
+    THIS call's provenance and usage, never a copy of the transcript's last
+    message, and no transcript or ledger re-read inside the stream — and hand
+    the chat's new `cost_usd_total` back to ride the `done` line. A chat-less
+    call has no session to attribute to and adds nothing to the line."""
+    if chat is None:
+        return None
+    total = project.record_chat_turn_invocation(
+        chat, provider=ev.provider, model=ev.model, usage=usage, cost_usd=cost_usd
+    )
+    return {"cost_usd_total": total}
 
 
 async def run_chat_turn(
@@ -412,7 +426,7 @@ async def run_chat_turn(
         policy = "off"
 
     messages_list = [m.model_dump() for m in request.messages]
-    system_blocks, session_id, journal_added = expand_and_prepare_chat_blocks(
+    prepared = expand_and_prepare_chat_blocks(
         project,
         request.chat_id, request.system_prompt, messages_list,
         lore_mode=lore_mode,
@@ -422,8 +436,8 @@ async def run_chat_turn(
         resolved.to_call(
             system_prompt=request.system_prompt,
             messages=messages_list,
-            system_blocks=system_blocks,
-            session_id=session_id,
+            system_blocks=prepared.system_blocks,
+            session_id=prepared.session_id,
         ),
         provider_name=resolved.provider,
         settings=settings,
@@ -439,6 +453,19 @@ async def run_chat_turn(
         manual_price_in_usd_per_mtok=resolved.manual_price_in_usd_per_mtok,
         manual_price_out_usd_per_mtok=resolved.manual_price_out_usd_per_mtok,
     )
+    # #1877: a chat-bound call that completed leaves its own ai_invocations
+    # row, recorded here on the turn seam — so the non-streamed route and the
+    # commit extraction (which runs its turns through here) can't diverge on
+    # whether a row exists. A failed call returned no usage and cost nothing.
+    cost_usd_total: float | None = None
+    if prepared.chat is not None and result.ok:
+        cost_usd_total = project.record_chat_turn_invocation(
+            prepared.chat,
+            provider=result.provider,
+            model=result.model,
+            usage=usage_wire,
+            cost_usd=cost_usd,
+        )
     return AIChatResponse(
         role="assistant",
         content=result.content,
@@ -450,7 +477,8 @@ async def run_chat_turn(
         error=result.error,
         stop_reason=result.stop_reason,
         truncated=truncated,
-        journal_added=journal_added,
+        journal_added=prepared.journal_added,
         usage=usage_wire,
         cost_usd=cost_usd,
+        cost_usd_total=cost_usd_total,
     )

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.models import ChatUsage
 from app.services.ai import providers as ai_providers
-from app.services.ai.usage import chat_usage_from_metrics
+from app.services.ai.usage import price_usage
 
 if TYPE_CHECKING:
     from app.services.ai.profiles import ModelDescriptor
@@ -33,20 +33,9 @@ def _ndjson(line: dict[str, Any]) -> str:
     return json.dumps(line, ensure_ascii=False) + "\n"
 
 
-def _price_done(
-    ev: ai_providers.StreamDone, descriptor: ModelDescriptor | None
-) -> tuple[ChatUsage | None, float | None]:
-    """The terminal event's usage in wire shape, and its USD cost when a
-    pricing descriptor is available. Computed ONCE per stream and shared by
-    the `done` line and the `on_done` ledger hook, so the two can't disagree."""
-    if ev.usage is None:
-        return None, None
-    usage = chat_usage_from_metrics(ev.usage)
-    if descriptor is None:
-        return usage, None
-    from app.services.ai.profiles import compute_cost
-
-    return usage, compute_cost(ev.usage, descriptor)
+OnDone = Callable[
+    [ai_providers.StreamDone, ChatUsage | None, float | None], dict[str, Any] | None
+]
 
 
 def _done_line(
@@ -83,17 +72,21 @@ def _finish(
     policy: str,
     extra_done: dict[str, Any],
     descriptor: ModelDescriptor | None,
-    on_done: Callable[[ai_providers.StreamDone, ChatUsage | None, float | None], None] | None,
+    on_done: OnDone | None,
 ) -> str:
-    """Price the terminal event once, hand it to the ledger hook, then render
-    the `done` line — in that order, so the row exists before the client sees
-    `done`. A failing hook never disrupts the stream (mirrors `on_error`)."""
-    usage, cost_usd = _price_done(ev, descriptor)
+    """Price the terminal event once, hand it to the finaliser, then render
+    the `done` line — in that order, so the ledger row exists before the
+    client sees `done`, and whatever the finaliser returns (the chat's new
+    `cost_usd_total`, #1877) rides on that same line: the one number the
+    client shows, delivered on the event that changed it. A failing finaliser
+    never disrupts the stream (mirrors `on_error`)."""
+    usage, cost_usd = price_usage(ev.usage, descriptor)
+    merged = dict(extra_done)
     if on_done is not None:
         with contextlib.suppress(Exception):
-            on_done(ev, usage, cost_usd)
+            merged.update(on_done(ev, usage, cost_usd) or {})
     return _ndjson(
-        _done_line(ev, policy=policy, extra_done=extra_done, usage=usage, cost_usd=cost_usd)
+        _done_line(ev, policy=policy, extra_done=merged, usage=usage, cost_usd=cost_usd)
     )
 
 
@@ -118,8 +111,7 @@ def transform_provider_events_to_ndjson(
     extra_done: dict[str, Any] | None = None,
     descriptor: ModelDescriptor | None = None,
     on_error: Callable[[ai_providers.StreamError], None] | None = None,
-    on_done: Callable[[ai_providers.StreamDone, ChatUsage | None, float | None], None]
-    | None = None,
+    on_done: OnDone | None = None,
 ) -> Iterator[str]:
     """Adapt provider events to NDJSON lines. Suppresses empty deltas.
 
@@ -133,11 +125,12 @@ def transform_provider_events_to_ndjson(
     `detail`) to the project's errors.log (#1601). The wire line carries only the
     user-facing `error`, never `detail`.
 
-    `on_done`, when given, is called with the terminal `StreamDone` plus the
-    priced usage BEFORE the `done` line is emitted — the endpoint uses it to
-    record the turn's own `ai_invocations` row (#1877), so the row exists by
-    the time the client sees `done` and its next read of the chat already
-    projects it. Like `on_error`, a failing hook never disrupts the stream.
+    `on_done`, when given, is the turn's finaliser: called with the terminal
+    `StreamDone` plus the priced usage BEFORE the `done` line is emitted, and
+    whatever dict it returns is merged onto that line. The endpoint uses it to
+    record the turn's own `ai_invocations` row and hand back the chat's new
+    `cost_usd_total` (#1877), so the client learns the total on the event
+    that changed it. Like `on_error`, a failing hook never disrupts the stream.
     """
     extra_done = extra_done or {}
     try:

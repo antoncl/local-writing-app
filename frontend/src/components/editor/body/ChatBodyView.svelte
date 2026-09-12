@@ -190,12 +190,11 @@
   // lore edits made since the last preview.
   let activeChatChangedPicks: ChangedPick[] = $state([]);
   let activeChatCacheWriteTimes: Record<string, string> = $state({});
-  // Display bridge only (#1877): the server records each turn's cost row
-  // itself, before `done` reaches us, so nothing is ever sent back. This holds
-  // the turn's cost from `done` until the next persisted snapshot (which
-  // already projects that row) replaces it — $state so sessionCostUsd reacts
-  // the instant the stream lands, not after the round trip (ADR-0076 §6).
-  let pendingTurnCost: number | null = $state(null);
+  // Cost is never held here (#1877): the server records each turn's row and
+  // hands back the chat's total on the event that changed it (`done`, the
+  // save response, the extraction response); `chatSession.cost_usd_total`
+  // is assigned from that and the footer reads it. Only the cache-write
+  // slot stamps still ride the next persist.
   let pendingTurnCacheWriteSlots: string[] = [];
 
   // The composer instance, for the imperative clear on send (#1083).
@@ -249,14 +248,10 @@
     // of this chat, so the server reads back the field set its lock render
     // registered instead of rebuilding a separate contract.
     getChatId: () => scene?.id ?? "",
-    // #1872: the server attributed the extraction's cost to this chat itself;
-    // re-read the node so `chatSession.cost_usd_total` (projected from the
-    // invocation log on read) catches up — a GET, not a transcript re-save.
-    refreshCostTotal: async () => {
-      const chatId = scene?.id;
-      if (!chatId) return;
-      const fresh = await api.readNode<ChatSession>(chatId);
-      if (scene?.id === chatId) chatSession = fresh;
+    // #1872/#1877: the server attributed the extraction's rows to this chat
+    // and reported the total after them on the response — assign it.
+    setCostTotal: (total) => {
+      if (chatSession) chatSession = { ...chatSession, cost_usd_total: total };
     },
     setError: (message) => (chatError = message),
     setNotice: (message) => (chatNotice = message),
@@ -393,7 +388,6 @@
     activeChatJournal = [];
     activeChatChangedPicks = [];
     activeChatCacheWriteTimes = {};
-    pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
     chatInputDrafts = {};
     commit.reset();
@@ -435,7 +429,6 @@
     chatError = null;
     chatInput = "";
     chatRewound = false;
-    pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
     commit.reset();
     // Restore per-prompt input drafts (#654) — the exact inverse of the
@@ -601,11 +594,9 @@
       activeChatPinned = saved.pinned;
       activeChatCacheWriteTimes = { ...(saved.cache_write_times ?? {}) };
       // Refresh our local snapshot of the persisted session — keeps the
-      // cost-total footer accurate without re-fetching. Its total already
-      // projects every row the server recorded (each turn's row lands before
-      // its `done` reaches us), so the display bridge is spent.
+      // cost-total footer accurate without re-fetching (its total is the
+      // log projection, every server-recorded row included).
       chatSession = saved;
-      pendingTurnCost = null;
       onBodyChange?.();
     } catch (e) {
       // The save failed — put the consumed slots back (merging anything accrued
@@ -705,14 +696,14 @@
             appendToActiveChatJournal(ev.journal_added);
           }
           if (ev.usage) chatHistory[idx].usage = ev.usage;
-          if (typeof ev.cost_usd === "number") {
-            chatHistory[idx].cost_usd = ev.cost_usd;
-            // Bridge the footer until the next persisted snapshot (#1877): the
-            // server already wrote this turn's row. Only a POSITIVE cost shows —
-            // a zero-priced turn must not fabricate a "session €0.00" for a chat
-            // whose true total is unknown/None (#697). The per-message stamp
-            // above keeps the honest 0 for the turn itself.
-            if (ev.cost_usd > 0) pendingTurnCost = (pendingTurnCost ?? 0) + ev.cost_usd;
+          if (typeof ev.cost_usd === "number") chatHistory[idx].cost_usd = ev.cost_usd;
+          // #1877: the server recorded this turn's row before emitting `done`
+          // and hands back the chat's total on the same line — assign the
+          // snapshot from it. One number, one source, delivered on the event
+          // that changed it; nothing to bridge, nothing to reconcile. The
+          // None-vs-0 rule (#697) lives in the server's projection alone.
+          if (chatSession && ev.cost_usd_total !== undefined) {
+            chatSession = { ...chatSession, cost_usd_total: ev.cost_usd_total };
           }
           if (ev.usage && ev.usage.cache_write_tokens > 0) {
             if (!pendingTurnCacheWriteSlots.includes("system")) {
@@ -905,8 +896,7 @@
   const runClear = async () => {
     chatHistory = [];
     chatError = null;
-    // Reset the cost display bridge + cache-slot stamping so the next persist starts clean.
-    pendingTurnCost = null;
+    // Reset cache-slot stamping so the next persist starts clean.
     pendingTurnCacheWriteSlots = [];
     // Persist the clear so a reload doesn't resurrect the messages.
     await persistActiveChat();
@@ -1154,17 +1144,11 @@
   let ttlChips = $derived(
     ttlChipsFor(activeChatCacheWriteTimes, ttlTick, cacheTermSecondsFor(chatEstimate)),
   );
-  // The session-cost line's number (ADR-0076 decision 6): the persisted
-  // projection plus the display bridge for a turn whose row the server has
-  // recorded (#1877) but whose snapshot we haven't fetched yet. A stream
-  // `done` sets pendingTurnCost before the persist round-trip starts, and
-  // persistActiveChat swaps in the save response's total (the log projection,
-  // row included) while nulling the bridge in the same tick — so the display
-  // never lags the transcript and never double-counts.
-  let sessionCostUsd = $derived.by(() => {
-    const persisted = chatSession?.cost_usd_total ?? null;
-    return persisted != null || pendingTurnCost != null ? (persisted ?? 0) + (pendingTurnCost ?? 0) : null;
-  });
+  // The session-cost line's number (ADR-0076 decision 6, Amendment 3): the
+  // snapshot's total, which every server response that changed it assigns —
+  // the stream's `done`, the save response, the extraction response — so the
+  // display never lags the transcript and can never double-count (#1877).
+  let sessionCostUsd = $derived.by(() => chatSession?.cost_usd_total ?? null);
   // Re-fetch estimate when any input that drives it changes. Each dep
   // read on its own line so Svelte tracks them (see
   // [[feedback-svelte5-reactivity-traps]]).

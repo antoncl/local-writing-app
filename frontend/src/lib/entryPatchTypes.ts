@@ -42,6 +42,8 @@ export type AIEntryPatch = EntryPatch & {
 export type EntryPatchExtraction = {
   patch: AIEntryPatch | null;
   cost_usd: number | null;
+  // #1877: the chat's cost total after the last recorded extraction call.
+  cost_usd_total?: number | null;
   ok: boolean;
   error: string | null;
 };

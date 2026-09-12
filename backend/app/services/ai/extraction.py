@@ -23,15 +23,12 @@
 # it reliable (ADR-0067 §"The list must not drift").
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
 
 from app.models import (
     AIChatRequest,
-    AIChatResponse,
     AIEntryPatch,
     ChatMessage,
-    ChatSession,
     EntryPatchExtraction,
     ExtractEntryPatchRequest,
 )
@@ -41,8 +38,6 @@ from app.services.project.errors import ProjectServiceError
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
-
-logger = logging.getLogger(__name__)
 
 # The firmer cue for the one retry after a garbled first reply (below). Shown
 # alongside the model's own failed reply so it can see what it did wrong — a
@@ -240,29 +235,6 @@ def _constrain_to_registered_fields(patch: AIEntryPatch, allowed_ids: set[str]) 
     )
 
 
-def _record_extraction_call(
-    project: ProjectService, chat: ChatSession, reply: AIChatResponse
-) -> None:
-    """One `ai_invocations` row per provider call the extraction made, carrying
-    THAT call's usage + provenance (#1872). A failed call (`ok=False`) returned
-    no usage and cost nothing — nothing to record. The row is telemetry and the
-    patch is the deliverable: a ledger that can't be written (the CSV held open
-    by another process on Windows, a read-only folder) is logged, never allowed
-    to turn an already-billed, successful call into a failed commit."""
-    if not reply.ok:
-        return
-    try:
-        project.record_chat_turn_invocation(
-            chat,
-            provider=reply.provider,
-            model=reply.model,
-            usage=reply.usage,
-            cost_usd=reply.cost_usd,
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("Couldn't record the commit extraction's invocation row")
-
-
 async def run_entry_patch_extraction(
     project: ProjectService,
     *,
@@ -289,12 +261,11 @@ async def run_entry_patch_extraction(
     the lore and never read the draft it was asked to transcribe.
 
     Each provider call the extraction makes (the turn, and the one garbled
-    retry) is recorded as its own `ai_invocations` row here, with ITS usage
-    and provenance (#1872) — the server ran the call and knows the chat, so the
-    client no longer round-trips a cost delta the save path then has to pin
-    on the transcript's last message. `cost_usd` still rides back on the
-    response, informational only — the client refreshes its total rather
-    than adding it in."""
+    retry) runs through `run_chat_turn`, which records it as its own
+    `ai_invocations` row with ITS usage and provenance (#1872, #1877) and
+    reports the chat's total after it; the last call's total rides back as
+    `cost_usd_total`, so the client assigns its snapshot from the response
+    instead of round-tripping a cost or refreshing."""
 
     try:
         chat = project.read_chat_session(request.chat_id)
@@ -346,7 +317,6 @@ async def run_entry_patch_extraction(
         ),
         lore_mode="used",
     )
-    _record_extraction_call(project, chat, chat_reply)
     if not chat_reply.ok or not (chat_reply.content or "").strip():
         return EntryPatchExtraction(
             patch=None,
@@ -357,6 +327,9 @@ async def run_entry_patch_extraction(
     patch = project.validate_ai_entry_patch_for_type(entry_type, chat_reply.content)
     patch = _constrain_to_registered_fields(patch, allowed_ids)
     cost = chat_reply.cost_usd
+    # #1877: `run_chat_turn` recorded this call's row and reports the chat's
+    # total after it; a retry below supersedes it with its own.
+    cost_usd_total = chat_reply.cost_usd_total
 
     # One firm retry on a garbled reply (#1036): re-run with the model's own
     # failed reply plus a stricter cue, so a chatty / cheap model that buried or
@@ -379,12 +352,15 @@ async def run_entry_patch_extraction(
             ),
             lore_mode="used",
         )
-        _record_extraction_call(project, chat, retry)
         cost = _sum_costs(cost, retry.cost_usd)
+        if retry.ok:
+            cost_usd_total = retry.cost_usd_total
         if retry.ok and (retry.content or "").strip():
             patch = project.validate_ai_entry_patch_for_type(entry_type, retry.content)
             patch = _constrain_to_registered_fields(patch, allowed_ids)
-    return EntryPatchExtraction(patch=patch, cost_usd=cost, ok=True)
+    return EntryPatchExtraction(
+        patch=patch, cost_usd=cost, cost_usd_total=cost_usd_total, ok=True
+    )
 
 
 def _sum_costs(a: float | None, b: float | None) -> float | None:

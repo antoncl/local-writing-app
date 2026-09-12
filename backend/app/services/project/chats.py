@@ -16,6 +16,7 @@ ai_invocations writer also uses (not chat CRUD).
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
@@ -35,6 +36,8 @@ from app.models import (
 from app.services.project.ai_invocations import _add_cost
 from app.services.project.errors import ProjectServiceError
 from app.services.yaml_io import load_yaml
+
+logger = logging.getLogger(__name__)
 
 
 class ChatSessionsMixin:
@@ -112,6 +115,9 @@ class ChatSessionsMixin:
         if not folder.exists():
             return ChatSessionList(sessions=[])
         summaries: list[ChatSessionSummary] = []
+        # #1877: the roster's cost is the same ledger projection the single
+        # read computes — one scan for every chat, never the YAML snapshot.
+        totals = self._chat_cost_totals()
         for entry in folder.iterdir():
             if not entry.is_file() or entry.suffix.lower() != ".md":
                 continue
@@ -129,11 +135,7 @@ class ChatSessionsMixin:
                 message_count = int(raw_count)
             except (TypeError, ValueError):
                 message_count = 0
-            raw_cost = data.get("cost_usd_total", 0.0)
-            try:
-                cost_usd_total = float(raw_cost) if raw_cost is not None else 0.0
-            except (TypeError, ValueError):
-                cost_usd_total = 0.0
+            cost_usd_total = totals.get(str(data.get("id") or "")) or 0.0
             # `metadata` is a mapping on every app-written chat; stay total on
             # the shape rather than assuming it, like the `str(...)` reads around
             # it — a non-dict value yields no subject instead of raising here,
@@ -194,21 +196,31 @@ class ChatSessionsMixin:
             if isinstance(parsed, dict):
                 data["messages"] = parsed.get("messages") or []
         session = ChatSession.model_validate(data)
-        # Phase C2 Slice B: cost_usd_total is now a projection of the
-        # unified ai_invocations log. The persisted YAML value is kept
-        # for round-trip back-compat but never consulted — sum log rows
-        # tagged with this chat_session_id for the live display value.
-        #
-        # A chat with no priced row — fresh, or one whose turns all ran an
-        # unpriced model (those record no positive-cost row) — has an UNKNOWN
-        # total, surfaced as None → "—"/hidden, not a fabricated €0.00 (#697).
-        total: float | None = None
-        for record, cost, _input, _output in self._iter_invocation_rows():
-            if str(record.get("chat_session_id") or "") != chat_id:
-                continue
-            total = _add_cost(total, cost)
-        session.cost_usd_total = total
+        # Phase C2 Slice B: cost_usd_total is a projection of the unified
+        # ai_invocations log — the persisted YAML value is written for
+        # round-trip back-compat but never consulted.
+        session.cost_usd_total = self.chat_cost_total(chat_id)
         return session
+
+    def _chat_cost_totals(self) -> dict[str, float | None]:
+        """ONE scan of the ledger → every chat's cost projection, keyed by
+        chat_session_id (#1877). The roster and the single-chat read both go
+        through here, so they can never disagree. A chat with no priced row —
+        fresh, or every turn on an unpriced model (those record a cost-None
+        row, which `_add_cost` skips) — has an UNKNOWN total: None → "—",
+        never a fabricated €0.00 (#697). A turn on a known free model prices
+        as 0.0 and shows as €0.00 — that is a real, known number."""
+        totals: dict[str, float | None] = {}
+        for record, cost, _input, _output in self._iter_invocation_rows():
+            chat_id = str(record.get("chat_session_id") or "")
+            if not chat_id:
+                continue
+            totals[chat_id] = _add_cost(totals.get(chat_id), cost)
+        return totals
+
+    def chat_cost_total(self, chat_id: str) -> float | None:
+        """This chat's cost projection (see `_chat_cost_totals`)."""
+        return self._chat_cost_totals().get(chat_id)
 
     def chat_changed_picks(self, chat_id: str) -> list[ChangedPick]:
         """Picked lore entries whose current revision differs from what the AI
@@ -415,25 +427,35 @@ class ChatSessionsMixin:
         model: str,
         usage: ChatUsage | None,
         cost_usd: float | None,
-    ) -> None:
+    ) -> float | None:
         """The one place a chat-attributed `ai_invocations` row is shaped: tagged
         with the chat's id, prompt and anchored scene. Every turn kind reaches it
         from the server that ran the call, with that call's own usage and
-        provenance — the streamed turn via the stream's `on_done` hook (#1877),
-        the commit extraction directly (#1872). The client never round-trips a
-        cost; `cost_usd_total` is the log's projection on read."""
-        self.append_ai_invocation(
-            CreateAIInvocationRequest(
-                prompt_entry_id=chat.prompt_entry_id,
-                prompt_entry_type="chat:chat_session",
-                scene_id=self._subject_scene_id(chat.subject),
-                chat_session_id=chat.id,
-                provider=provider,
-                model=model,
-                usage=usage,
-                cost_usd=cost_usd,
+        provenance — a streamed turn via the stream's finaliser, a non-streamed
+        turn and the commit extraction via `run_chat_turn` (#1877, #1872). The
+        client never round-trips a cost.
+
+        Returns the chat's `cost_usd_total` AFTER this row — the one number the
+        client shows, handed back on the event that changed it. The row is
+        telemetry and the turn is the deliverable: a ledger that can't be
+        written (the CSV held open by another process on Windows, a read-only
+        folder) is logged, never allowed to fail an already-billed call."""
+        try:
+            self.append_ai_invocation(
+                CreateAIInvocationRequest(
+                    prompt_entry_id=chat.prompt_entry_id,
+                    prompt_entry_type="chat:chat_session",
+                    scene_id=self._subject_scene_id(chat.subject),
+                    chat_session_id=chat.id,
+                    provider=provider,
+                    model=model,
+                    usage=usage,
+                    cost_usd=cost_usd,
+                )
             )
-        )
+        except Exception:  # noqa: BLE001
+            logger.exception("Couldn't record the chat turn's invocation row")
+        return self.chat_cost_total(chat.id)
 
     def _touched_cache_write_times(
         self, existing: ChatSession, request: SaveChatSessionRequest

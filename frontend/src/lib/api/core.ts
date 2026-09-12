@@ -195,6 +195,9 @@ export type AIStreamEvent =
       char_count?: number;
       usage?: ChatUsage | null;
       cost_usd?: number | null;
+      // #1877: the chat's cost total after this turn's row — recorded by the
+      // server before `done` was emitted. Absent on a chat-less stream.
+      cost_usd_total?: number | null;
       journal_added?: ChatSessionJournalEntry[];
     }
   | {

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from app.models import ChatUsage
 from app.services.ai import tokens as ai_tokens
-from app.services.ai.profiles import UsageMetrics, compute_cost
+from app.services.ai.profiles import ModelDescriptor, UsageMetrics, compute_cost
 
 if TYPE_CHECKING:
     from app.services.machine_settings import MachineSettings
@@ -48,9 +48,8 @@ async def translate_usage_to_cost(
     does, so the oracle auto-heals once it lists the model."""
     if usage is None:
         return None, None
-    wire_usage = chat_usage_from_metrics(usage)
     if not provider or not model:
-        return wire_usage, None
+        return chat_usage_from_metrics(usage), None
     descriptor = await ai_tokens.priced_descriptor_for(
         provider=provider,
         model=model,
@@ -58,7 +57,20 @@ async def translate_usage_to_cost(
         manual_in=manual_price_in_usd_per_mtok,
         manual_out=manual_price_out_usd_per_mtok,
     )
+    return price_usage(usage, descriptor)
+
+
+def price_usage(
+    usage: UsageMetrics | None, descriptor: ModelDescriptor | None
+) -> tuple[ChatUsage | None, float | None]:
+    """The one pricing policy, sync, for a caller that already holds the
+    descriptor (the stream pre-fetches it so its sync generator can price the
+    terminal event without an await): no usage → nothing; no descriptor → the
+    usage, unpriced (None, never a fabricated 0.0 — #697); else `compute_cost`
+    (an explicit 0-rate descriptor is a KNOWN free call and prices as 0.0)."""
+    if usage is None:
+        return None, None
+    wire_usage = chat_usage_from_metrics(usage)
     if descriptor is None:
         return wire_usage, None
-    cost = compute_cost(usage, descriptor)
-    return wire_usage, cost
+    return wire_usage, compute_cost(usage, descriptor)

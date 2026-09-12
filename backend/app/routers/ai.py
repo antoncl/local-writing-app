@@ -547,7 +547,7 @@ async def ai_chat_stream(
         policy = "off"
 
     messages_list = [m.model_dump() for m in request.messages]
-    system_blocks, session_id, journal_added = expand_and_prepare_chat_blocks(
+    prepared = expand_and_prepare_chat_blocks(
         project,
         request.chat_id, request.system_prompt, messages_list
     )
@@ -567,8 +567,8 @@ async def ai_chat_stream(
         resolved.to_call(
             system_prompt=request.system_prompt,
             messages=messages_list,
-            system_blocks=system_blocks,
-            session_id=session_id,
+            system_blocks=prepared.system_blocks,
+            session_id=prepared.session_id,
         ),
         provider_name=resolved.provider,
         settings=settings,
@@ -579,15 +579,16 @@ async def ai_chat_stream(
             transform_provider_events_to_ndjson(
                 events, policy=policy,
                 extra_done=(
-                    {"journal_added": [e.model_dump() for e in journal_added]}
-                    if journal_added else None
+                    {"journal_added": [e.model_dump() for e in prepared.journal_added]}
+                    if prepared.journal_added else None
                 ),
                 descriptor=descriptor,
                 on_error=lambda ev: _record_stream_error(project, ev),
                 # #1877: the server ran the turn, so the server records its
-                # ai_invocations row — before `done` reaches the client.
+                # ai_invocations row against the chat it already holds — before
+                # `done` reaches the client, with the new total riding on it.
                 on_done=lambda ev, usage, cost_usd: record_stream_turn(
-                    project, request.chat_id, ev, usage, cost_usd
+                    project, prepared.chat, ev, usage, cost_usd
                 ),
             ),
             http_request,

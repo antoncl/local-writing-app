@@ -474,6 +474,11 @@ class AIChatResponse(BaseModel):
     # to EUR for display (see decisions_currency_display).
     usage: ChatUsage | None = None
     cost_usd: float | None = None
+    # #1877: when the turn was chat-bound, the server recorded its
+    # ai_invocations row and this is the chat's total AFTER it — the one
+    # number the client shows, delivered on the event that changed it. None
+    # for a chat-less call or an unknown (never-priced) total (#697).
+    cost_usd_total: float | None = None
 
 
 class AIGenerateRequest(BaseModel):
@@ -922,6 +927,9 @@ class EntryPatchExtraction(BaseModel):
 
     patch: AIEntryPatch | None = None
     cost_usd: float | None = None
+    # #1877: the chat's total after the last recorded extraction call — the
+    # client assigns its snapshot from this, no refresh round-trip.
+    cost_usd_total: float | None = None
     ok: bool = True
     error: str | None = None
 

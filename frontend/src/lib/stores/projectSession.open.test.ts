@@ -21,7 +21,7 @@ import type { ProjectInfo } from "@/lib/types";
 const PROJECT_B = { title: "Book Two", root_path: "/w/book-two" } as ProjectInfo;
 
 describe("project open fan-out order (#1881)", () => {
-  let workspaceResets: number;
+  const onOpenWorkspace = vi.fn();
 
   beforeEach(() => {
     api.openProject.mockReset().mockResolvedValue(PROJECT_B);
@@ -29,10 +29,8 @@ describe("project open fan-out order (#1881)", () => {
     api.getMachineSettings.mockReset().mockResolvedValue({ recent_projects: [] });
     fanOut.loadProjectData.mockReset().mockResolvedValue(undefined);
     fanOut.clearProjectData.mockReset();
-    workspaceResets = 0;
-    projectSession.onOpenWorkspace = () => {
-      workspaceResets += 1;
-    };
+    onOpenWorkspace.mockReset();
+    projectSession.onOpenWorkspace = onOpenWorkspace;
     projectSession.onProjectDataLoaded = () => {};
     projectSession.setStatus = () => {};
   });
@@ -44,9 +42,11 @@ describe("project open fan-out order (#1881)", () => {
   it("openProjectAt resets the workspace, clears the domain stores, then loads", async () => {
     expect(await projectSession.openProjectAt("/w/book-two")).toBe(true);
 
-    expect(workspaceResets).toBe(1);
+    expect(onOpenWorkspace).toHaveBeenCalledTimes(1);
     expect(fanOut.clearProjectData).toHaveBeenCalledTimes(1);
     expect(fanOut.loadProjectData).toHaveBeenCalledTimes(1);
+    // App's pane/layout reset first, then the domain clear, then the load.
+    expect(order(onOpenWorkspace)).toBeLessThan(order(fanOut.clearProjectData));
     expect(order(fanOut.clearProjectData)).toBeLessThan(order(fanOut.loadProjectData));
   });
 
@@ -55,6 +55,7 @@ describe("project open fan-out order (#1881)", () => {
 
     expect(fanOut.clearProjectData).toHaveBeenCalledTimes(1);
     expect(fanOut.loadProjectData).toHaveBeenCalledTimes(1);
+    expect(order(onOpenWorkspace)).toBeLessThan(order(fanOut.clearProjectData));
     expect(order(fanOut.clearProjectData)).toBeLessThan(order(fanOut.loadProjectData));
   });
 });

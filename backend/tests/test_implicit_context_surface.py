@@ -1,7 +1,7 @@
 """ADR-0075 slice 3 (#1495): the backend send path scans a scene's own **prose
 surface** — its body + every `long_text` field, NOT single-line `text` fields
 or `aliases` — for implicit-context detection, on both the one-shot/preview
-path (`_implicit_lore_ids`) and the chat send path (`expand_context`). Both
+path (`_inferred_candidates`) and the chat send path (`expand_context`). Both
 funnel through the single `_scene_prose_ids` helper, which scans each
 field/body text SEPARATELY through `_alias_match` and unions the id sets, so a
 multi-word name can't false-match across a field boundary.
@@ -104,7 +104,7 @@ class _SurfaceFixtureBase(unittest.TestCase):
 
 
 class OneShotSurfaceTests(_SurfaceFixtureBase):
-    """`_implicit_lore_ids` (via `_relevant_lore_ids(..., "implicit")`) scans
+    """`_inferred_candidates` (via `_relevant_lore_ids(..., "implicit")`) scans
     the scene's body + every long_text field — not just `summary`."""
 
     def test_body_and_custom_long_text_field_both_detected(self) -> None:

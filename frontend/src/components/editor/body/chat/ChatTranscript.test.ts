@@ -99,6 +99,18 @@ describe("ChatTranscript", () => {
     ] as ChatMessage[];
     const silent = render(ChatTranscript, { chatHistory: fitted, chatRunning: false });
     expect(silent.container.querySelector(".cbv-turn-meta")).not.toBeInTheDocument();
+
+    // A budget of 0 means "declared entries only" (ADR-0086 §2) — the declared
+    // set is never "over" it, so no warning renders for that legal setting.
+    const declaredOnly = [
+      {
+        role: "assistant",
+        content: "C.",
+        lore_fit: { budget_tokens: 0, used_tokens: 0, declared_tokens: 2100, kept: 2, left_out: [] },
+      },
+    ] as ChatMessage[];
+    const zero = render(ChatTranscript, { chatHistory: declaredOnly, chatRunning: false });
+    expect(zero.container.querySelector(".cbv-turn-meta")).not.toBeInTheDocument();
   });
 
   // Regression: old persisted chats have no provenance fields — the meta line

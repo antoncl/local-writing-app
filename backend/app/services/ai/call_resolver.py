@@ -70,19 +70,27 @@ def _clamp_to_model_max(desired: int, provider: str, model: str) -> int:
     return min(desired, cap) if cap else desired
 
 
+def _non_negative_number(value: object) -> float | None:
+    """The one parser for a non-negative number an author typed into assistant
+    metadata: None for unset/blank/invalid (a bool, nan, inf, a negative, or
+    something that isn't a number at all). The price and the lore budget both
+    read through here so they can't disagree on the same input."""
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or number < 0:
+        return None
+    return number
+
+
 def _optional_price(value: object) -> float | None:
     """Parse an author-set per-Mtok price from assistant metadata: a non-negative
     float, or None when unset/blank/invalid. A blank field (the common case)
     resolves to None so pricing falls through to the oracle/baked seed."""
-    if value is None or value == "":
-        return None
-    try:
-        price = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(price) or price < 0:
-        return None  # reject nan / inf / negative
-    return price
+    return _non_negative_number(value)
 
 
 def _lore_budget_tokens(value: object) -> int:
@@ -91,15 +99,8 @@ def _lore_budget_tokens(value: object) -> int:
     non-numeric or negative value. `0` is legal and means "declared entries
     only"; there is no unbounded sentinel — a large number is the way to say
     it."""
-    if value is None or value == "" or isinstance(value, bool):
-        return DEFAULT_LORE_BUDGET_TOKENS
-    try:
-        budget = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return DEFAULT_LORE_BUDGET_TOKENS
-    if not math.isfinite(budget) or budget < 0:
-        return DEFAULT_LORE_BUDGET_TOKENS
-    return int(budget)
+    budget = _non_negative_number(value)
+    return DEFAULT_LORE_BUDGET_TOKENS if budget is None else int(budget)
 
 
 def _lore_limits(meta: dict) -> LoreLimits:

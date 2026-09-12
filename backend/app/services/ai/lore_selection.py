@@ -25,10 +25,14 @@ from app.services.ai.helpers import (
     _scene_id_of,
 )
 from app.services.ai.lore_budget import (
+    HOP_SOURCES,
     NAMED_SOURCES,
+    BudgetedLoreTiers,
     InferredCandidate,
     LoreExpansion,
+    LoreLimits,
     LoreSelection,
+    fit_lore_budget,
 )
 from app.services.ai.name_matcher import (
     CompiledNameMatcher,
@@ -151,20 +155,66 @@ def _select_lore(
     who wants a use()'d node's neighbours loops its refs and use()s them.
     """
     scene_refs = _collect_lore_refs_from_metadata(_attr_or_item(scene, "metadata"))
+    # The three context policies from ONE lore scan (not one scan per policy).
+    policies = _lore_policy_ids(project)
     # Always-included entries (context_policy = "always") feed every implicit
     # render regardless of mention — and, with the scene's refs, seed the hops.
-    roots = set(scene_refs) | _always_included_lore_ids(project)
+    roots = set(scene_refs) | policies["always"]
     declared = roots | set(used_ids or [])
-    candidates = _inferred_candidates(project, scene, roots, declared, journal, expansion)
+    candidates = _inferred_candidates(
+        project, scene, roots, declared, journal, expansion, manual_only=policies["manual_only"]
+    )
     # Chokepoint filter: drop any "never"-policy entries regardless of route —
     # even an explicit scene ref or use(). `manual_only` is NOT filtered here:
     # it stays reachable via the scene's own refs and use(), and is instead
-    # kept out of the AUTOMATIC one-hop fan-out below (#1024).
-    never_ids = _never_lore_ids(project)
+    # kept out of the AUTOMATIC one-hop fan-out (#1024).
+    never_ids = policies["never"]
     inferred = sorted(
         (c for c in candidates.values() if c.id not in never_ids), key=lambda c: c.fit_key
     )
     return LoreSelection(frozenset(declared - never_ids), tuple(inferred))
+
+
+def _budgeted_lore_tiers(
+    project: ProjectService,
+    scene: Any,
+    journal: list[Any] | None,
+    used_ids: list[str],
+    *,
+    session: AISession,
+    hints: dict[str, str],
+    limits: LoreLimits,
+) -> BudgetedLoreTiers:
+    """The one composition the send and the preview share (ADR-0086 §4):
+    select with provenance → render every candidate once → fit the inferred
+    set to the budget → tier the kept ids against `session` → hand back the
+    kept `(id, xml)` pairs per tier, the left-out entries' elements, and the
+    report. The same rule at two times is one function, not two truths.
+
+    Rendering once is the point: the fit decides on rendered size, the tiers
+    reuse the same pairs, and a left-out entry is named from the node the
+    render already read. The caller owns what happens to `session` afterwards
+    (the send commits it; the preview's throwaway session is dropped)."""
+    # Function-level import, as in `_relevant_lore`: `lore_block` imports leaf
+    # accessors from `helpers`, so this stays out of the module header.
+    from app.services.ai.lore_block import _render_lore_entries
+
+    selection = _select_lore(project, scene, journal, used_ids, expansion=limits.expansion)
+    index = project.build_mutations_index() if scene is not None else None
+    titles: dict[str, str] = {}
+    rendered = dict(
+        _render_lore_entries(project, selection.ids, scene=scene, index=index, titles=titles)
+    )
+    fitted = fit_lore_budget(selection, rendered, limits.budget_tokens, titles=titles)
+    stable_ids, volatile_ids = _tier_lore_ids(project, fitted.kept_ids, session, hints)
+    return BudgetedLoreTiers(
+        stable_entries=[(i, rendered[i]) for i in stable_ids if i in rendered],
+        volatile_entries=[(i, rendered[i]) for i in volatile_ids if i in rendered],
+        left_out_entries={
+            e.id: rendered[e.id] for e in fitted.report.left_out if e.id in rendered
+        },
+        report=fitted.report,
+    )
 
 
 def _inferred_candidates(
@@ -174,13 +224,17 @@ def _inferred_candidates(
     declared: set[str],
     journal: list[Any] | None,
     expansion: LoreExpansion,
+    *,
+    manual_only: set[str],
 ) -> dict[str, InferredCandidate]:
     """The inferred half of `_select_lore`, keyed by id and minus `declared`:
     the journal's entries with their source and first-noticed turn (or, with no
     journal, the scene-prose scan as `scene_prose` and the textual hop as
     `depth1_expansion`), plus one structural hop through `roots` and every
     detection as `structural_hop`. An id offered by two routes keeps the one
-    that fits first."""
+    that fits first. Every detection seeds the hops — including one that is
+    also a `use()` pick and so lands in the declared set rather than here —
+    exactly as the pre-budget selector seeded from the whole journal."""
     found = _Candidates(declared)
     matcher: CompiledNameMatcher | None = None
     if journal is None:
@@ -196,8 +250,8 @@ def _inferred_candidates(
         found.offer_journal(journal, expansion)
     if expansion == "named":
         return found.by_id
-    seeds = roots | set(found.by_id)
-    found.offer_structural_hop(project, seeds)
+    seeds = roots | found.detected
+    found.offer_structural_hop(project, seeds, manual_only)
     # Textual depth-1 only runs when the journal is absent; otherwise the
     # journal already carries those expansions.
     if journal is None:
@@ -207,28 +261,26 @@ def _inferred_candidates(
     return found.by_id
 
 
-_JOURNAL_SOURCES = frozenset(
-    {"user_message", "rendered_prompt", "scene_prose", "depth1_expansion"}
-)
-
-
 class _Candidates:
     """The inferred candidates being collected by `_inferred_candidates`: one
     per id, never a declared id, and — when two routes offer the same id — the
-    candidate that fits first (the lower fit key)."""
+    candidate that fits first (the lower fit key). `detected` remembers every
+    id a detection route offered, declared or not, because every detection
+    seeds the hops. An unknown source fails in `InferredCandidate`, loudly."""
 
     def __init__(self, declared: set[str]) -> None:
         self._declared = declared
         self.by_id: dict[str, InferredCandidate] = {}
+        self.detected: set[str] = set()
 
-    def offer(self, entry_id: Any, source: Any, turn: Any = 0, title: Any = "") -> None:
-        if not isinstance(entry_id, str) or not entry_id or entry_id in self._declared:
+    def offer(self, entry_id: Any, source: str, turn: int = 0) -> None:
+        if not isinstance(entry_id, str) or not entry_id:
             return
-        if source not in _JOURNAL_SOURCES and source != "structural_hop":
-            source = "user_message"
-        candidate = InferredCandidate(
-            entry_id, source, int(turn or 0), title if isinstance(title, str) else ""
-        )
+        if source not in HOP_SOURCES:
+            self.detected.add(entry_id)
+        if entry_id in self._declared:
+            return
+        candidate = InferredCandidate(entry_id, source, turn)  # type: ignore[arg-type]
         current = self.by_id.get(entry_id)
         if current is None or candidate.fit_key < current.fit_key:
             self.by_id[entry_id] = candidate
@@ -248,33 +300,24 @@ class _Candidates:
             self.offer(
                 _attr_or_item(entry, "entry_id"),
                 source,
-                _attr_or_item(entry, "added_at_turn"),
-                _attr_or_item(entry, "title"),
+                int(_attr_or_item(entry, "added_at_turn") or 0),
             )
 
-    def offer_structural_hop(self, project: ProjectService, seeds: set[str]) -> None:
+    def offer_structural_hop(
+        self, project: ProjectService, seeds: set[str], manual_only: set[str]
+    ) -> None:
         """One structural hop through each seed's own entity_ref metadata.
         Like the alias/textual scans, this AUTOMATIC route honors
         `manual_only` ("explicit picker only"): a transitive ref to such an
         entry is NOT fanned in — it stays reachable via the scene's own refs
         or use() (#1024). `never` needs no filter here: `_select_lore` applies
-        the chokepoint once, to every route. One lore scan, computed once."""
-        manual_only_ids = _manual_only_lore_ids(project)
+        the chokepoint once, to every route."""
         for entry_id in sorted(seeds):
             entry = _safe_read_node(project, entry_id)
             if entry is None:
                 continue
             hop_refs = _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"))
-            self.offer_all(hop_refs - manual_only_ids, "structural_hop")
-
-
-def _lore_title(project: ProjectService, entry_id: str) -> str:
-    """A node's title for the budget report's left-out list, or "" when it
-    can't be read — used only for an entry the selection couldn't name (a
-    structural-hop id carries no journal snapshot)."""
-    entry = _safe_read_node(project, entry_id)
-    title = _attr_or_item(entry, "title") if entry is not None else None
-    return title if isinstance(title, str) else ""
+            self.offer_all(hop_refs - manual_only, "structural_hop")
 
 
 def _tier_lore_ids(
@@ -435,24 +478,35 @@ def _never_lore_ids(project: ProjectService) -> set[str]:
 def _manual_only_lore_ids(project: ProjectService) -> set[str]:
     """Return lore IDs whose context_policy is `manual_only` — "explicit picker
     only". Kept OUT of the automatic transitive routes: the alias/textual scans
-    exclude it via `_alias_match`, and `_implicit_lore_ids` subtracts this set
+    exclude it via `_alias_match`, and `_inferred_candidates` subtracts this set
     from the structural one-hop fan-out (#1024). It stays reachable via the
     scene's own entity_refs and via use() — the explicit picks."""
     return _lore_ids_with_policy(project, "manual_only")
 
 
 def _lore_ids_with_policy(project: ProjectService, policy: str) -> set[str]:
+    return _lore_policy_ids(project).get(policy, set())
+
+
+_POLICIES = ("always", "manual_only", "never")
+
+
+def _lore_policy_ids(project: ProjectService) -> dict[str, set[str]]:
+    """Every entry id per non-default context policy — `always`,
+    `manual_only`, `never` — from ONE listing scan, so a selection that needs
+    all three (`_select_lore`) pays for one scan, not three."""
+    ids: dict[str, set[str]] = {policy: set() for policy in _POLICIES}
     try:
         listing = project.list_lore_entries()
     except Exception:
-        return set()
-    ids: set[str] = set()
+        return ids
     for summary in listing.entries:
-        if _entry_context_policy(summary) != policy:
+        policy = _entry_context_policy(summary)
+        if policy not in ids:
             continue
         entry_id = _attr_or_item(summary, "id")
         if entry_id:
-            ids.add(entry_id)
+            ids[policy].add(entry_id)
     return ids
 
 

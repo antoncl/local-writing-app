@@ -45,6 +45,7 @@ def _render_lore_entries(
     scene: Any = None,
     position: int | None = None,
     index: Any = None,
+    titles: dict[str, str] | None = None,
 ) -> list[tuple[str, str]]:
     """Render each node to its own XML element, returning [(entry_id, element_xml)]
     in the given order. Skips ids whose node can't be read (same as the old blob
@@ -52,6 +53,10 @@ def _render_lore_entries(
     the single per-node render; `_format_lore_block` wraps the concatenation, and
     the preview surfaces the pairs for the Context door's per-entry drill
     (ADR-0076 S7).
+
+    `titles`, when given, is filled with `{entry_id: title}` from the node this
+    render already read — so a caller that names entries afterwards (the budget
+    report's left-out list, ADR-0086 §5) does it from the one read, not a second.
 
     When `scene` is given, every rendered field is resolved to its **effective
     value at that (scene, position)** via `effective_state`, so an earlier scene
@@ -77,6 +82,9 @@ def _render_lore_entries(
         entry = _safe_read_node(project, entry_id)
         if entry is None:
             continue
+        if titles is not None:
+            title = _attr_or_item(entry, "title")
+            titles[entry_id] = title if isinstance(title, str) else ""
         overrides: dict[str, Any] = {}
         if scene_id and index is not None:
             try:

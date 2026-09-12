@@ -25,7 +25,7 @@ from app.models import (
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai.call_resolver import resolve_call_params
-from app.services.ai.lore_budget import LoreLimits, fit_lore_budget
+from app.services.ai.lore_budget import DEFAULT_LORE_LIMITS, LoreLimits
 from app.services.ai.usage import translate_usage_to_cost
 from app.services.project.errors import ProjectServiceError
 
@@ -243,15 +243,10 @@ def _lore_cache_blocks(
     avoids a second `read_scene` for the same turn. Returns the blocks, the
     session baseline after commit, and the fit report the send hands back (§5).
     """
-    from app.services.ai.lore_block import _render_lore_entries, _wrap_lore_block
-    from app.services.ai.lore_selection import (
-        _lore_title,
-        _select_lore,
-        _tier_lore_ids,
-    )
+    from app.services.ai.lore_block import _wrap_lore_block
+    from app.services.ai.lore_selection import _budgeted_lore_tiers
     from app.services.ai.sessions import default_registry
 
-    index = project.build_mutations_index() if scene is not None else None
     session = default_registry.get_or_create(f"chatlore:{chat_id}")
     # #1635: on a cold process the in-memory baseline is empty; seed it from the
     # chat's persisted last-seen revisions so tiering (and the door's "edited"
@@ -264,32 +259,25 @@ def _lore_cache_blocks(
     # in exactly one tier and the selector isn't re-run per partition. The chat's
     # `use(node)` selections join the selector's SAME direct channel (deduped by id,
     # `never`-filtered); their `use(node, hint)` priors bias placement only.
-    used_ids = list(chat.used_node_ids)
-    hints = dict(chat.used_node_hints)
-    selection = _select_lore(
-        project, scene, journal_for_send, used_ids, expansion=limits.expansion
+    tiers = _budgeted_lore_tiers(
+        project,
+        scene,
+        journal_for_send,
+        list(chat.used_node_ids),
+        session=session,
+        hints=dict(chat.used_node_hints),
+        limits=limits,
     )
-    # ADR-0086 §4: render every candidate once — the fit decides on rendered
-    # size, and the tiers below wrap the same pairs, so nothing is rendered
-    # twice and the wire carries exactly what was measured.
-    rendered = dict(_render_lore_entries(project, selection.ids, scene=scene, index=index))
-    fitted = fit_lore_budget(
-        selection,
-        rendered,
-        limits.budget_tokens,
-        title_of=lambda entry_id: _lore_title(project, entry_id),
-    )
-    stable_ids, volatile_ids = _tier_lore_ids(project, fitted.kept_ids, session, hints)
     session.commit()
 
     blocks: list[dict] = []
-    stable_xml = _wrap_lore_block([(i, rendered[i]) for i in stable_ids if i in rendered])
+    stable_xml = _wrap_lore_block(tiers.stable_entries)
     if stable_xml:
         blocks.append({"text": stable_xml, "tier": "stable"})
-    volatile_xml = _wrap_lore_block([(i, rendered[i]) for i in volatile_ids if i in rendered])
+    volatile_xml = _wrap_lore_block(tiers.volatile_entries)
     if volatile_xml:
         blocks.append({"text": volatile_xml, "tier": "volatile"})
-    return blocks, dict(session.baseline), fitted.report
+    return blocks, dict(session.baseline), tiers.report
 
 
 def expand_and_prepare_chat_blocks(
@@ -299,7 +287,7 @@ def expand_and_prepare_chat_blocks(
     messages_list: list[dict],
     *,
     lore_mode: LoreMode = "implicit",
-    lore_limits: LoreLimits | None = None,
+    lore_limits: LoreLimits = DEFAULT_LORE_LIMITS,
 ) -> PreparedChatTurn:
     """When chat_id is bound, assemble the ordered system cache-blocks the
     provider call sends, and return a `PreparedChatTurn` carrying:
@@ -331,7 +319,7 @@ def expand_and_prepare_chat_blocks(
     picks, so a large world selection can't swamp the transcript it must read.
 
     `lore_limits` (ADR-0086 §2/§2b) is the assistant's budget for inferred
-    lore and its reach, from `ResolvedCall.lore_limits`; None means the
+    lore and its reach, from `ResolvedCall.lore_limits`; the default is the
     resolver's defaults. It shapes only the implicit turn — the commit turn
     has nothing inferred to budget.
 
@@ -375,7 +363,7 @@ def expand_and_prepare_chat_blocks(
     lore_fit: LoreFit | None = None
     if chat.lore_enabled and lore_mode == "implicit":
         lore_blocks, seen_revisions, lore_fit = _lore_cache_blocks(
-            project, chat, chat_id, journal_for_send, scene, lore_limits or LoreLimits()
+            project, chat, chat_id, journal_for_send, scene, lore_limits
         )
         blocks.extend(lore_blocks)
         # #1635: persist the last-seen revisions if they changed, so the door's

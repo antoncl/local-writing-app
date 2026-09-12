@@ -27,7 +27,10 @@ from app.services.ai.chat import expand_and_prepare_chat_blocks
 from app.services.ai.sessions import default_registry
 
 
-class LoreCacheBlockTests(unittest.TestCase):
+class _LoreCacheFixture(unittest.TestCase):
+    """The project + lore-enabled chat every case below starts from. Test-less,
+    so the two suites that extend it don't re-run each other's cases."""
+
     def setUp(self) -> None:
         # The baseline lives in the process-wide in-memory registry; isolate it.
         default_registry.clear()
@@ -43,14 +46,23 @@ class LoreCacheBlockTests(unittest.TestCase):
         default_registry.clear()
         self.temp_dir.cleanup()
 
-    def _make_note(self, title: str, *, policy: str | None = None, body: str = "") -> str:
+    def _make_note(
+        self,
+        title: str,
+        *,
+        policy: str | None = None,
+        body: str = "",
+        refs: list[str] | None = None,
+    ) -> str:
         created = self.service.create_lore_entry(
             CreateLoreEntryRequest(title=title, entry_type="lore:note")
         )
         existing = self.service.read_lore_entry(created.id)
-        metadata: dict[str, str] = {}
+        metadata: dict[str, object] = {}
         if policy is not None:
             metadata["context_policy"] = policy
+        if refs:
+            metadata["related_entries"] = list(refs)
         self.service.save_lore_entry(
             created.id,
             SaveLoreEntryRequest(
@@ -79,6 +91,8 @@ class LoreCacheBlockTests(unittest.TestCase):
         )
         return prepared.system_blocks or []
 
+
+class LoreCacheBlockTests(_LoreCacheFixture):
     def test_first_turn_places_lore_in_the_volatile_tier(self) -> None:
         # Empty baseline → everything is new → volatile. So: the system 1h block,
         # and one 5m lore block carrying the premise. No stable lore block yet.
@@ -289,10 +303,34 @@ class LoreCacheBlockTests(unittest.TestCase):
         self.assertNotEqual(in_stable, in_volatile)  # exactly one, never both
 
 
-class LoreBudgetSendTests(LoreCacheBlockTests):
+class LoreBudgetSendTests(_LoreCacheFixture):
     """ADR-0086 S1 on the send path: the inferred selection fits the assistant's
     budget, the declared set never does, and the turn reports what it left out.
-    Inherits the fixture (an `always` Premise = declared) and the helpers."""
+    Shares the fixture (an `always` Premise = declared) and the helpers."""
+
+    def test_a_detected_entry_that_is_also_a_pick_still_seeds_the_hop(self) -> None:
+        # Parity with the pre-budget selector: EVERY detection seeds the
+        # structural hop — including one that lands in the declared set because
+        # it is also a use() pick. The pick itself is exact (not a seed); the
+        # detection of it is.
+        from app.models import ChatSessionJournalEntry
+        from app.services.ai.lore_selection import _select_lore
+
+        sidekick = self._make_note("Sidekick", body="Loyal.")
+        hero = self._make_note("Hero", body="Brave.", refs=[sidekick])
+        journal = [
+            ChatSessionJournalEntry(
+                entry_id=hero, title="Hero", source="user_message", added_at_turn=1
+            )
+        ]
+        selection = _select_lore(self.service, None, journal, [hero])
+        self.assertIn(hero, selection.declared)
+        self.assertEqual(
+            [(c.id, c.source) for c in selection.inferred], [(sidekick, "structural_hop")]
+        )
+        # Whereas a bare pick with no detection stays exact: no hop through it.
+        bare = _select_lore(self.service, None, [], [hero])
+        self.assertEqual(bare.inferred, ())
 
     _PROSE = "The tower keeps a beacon lit for the harbour pilots through winter. " * 40
 

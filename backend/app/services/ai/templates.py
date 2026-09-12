@@ -24,11 +24,14 @@ so typos in variable names raise rather than render empty.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from jinja2 import StrictUndefined, nodes
 from jinja2.ext import Extension
 from jinja2.sandbox import SandboxedEnvironment
+
+if TYPE_CHECKING:
+    from app.models import LoreFit
 
 ROLE_START = "\x00ROLE_START:"
 ROLE_END = "\x00ROLE_END\x00"
@@ -89,7 +92,7 @@ class RenderedTemplate:
     # own selection. `send_lore_fit` is the report (a `LoreFit`; None when not
     # lore-enabled); `send_lore_left_out_entries` is each left-out entry's
     # rendered element keyed by id, for the door's per-entry drill.
-    send_lore_fit: Any = None
+    send_lore_fit: LoreFit | None = None
     send_lore_left_out_entries: dict[str, str] = field(default_factory=dict)
     # ADR-0067 S2: the field descriptors registered via `{% do
     # field_contract.store(f) %}` during this render, in insertion order. Set by

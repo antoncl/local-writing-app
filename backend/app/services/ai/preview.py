@@ -30,7 +30,7 @@ from app.services.ai.helpers import (
     _coerce_entry_ref,
     create_environment_for_project,
 )
-from app.services.ai.lore_budget import LoreLimits, fit_lore_budget
+from app.services.ai.lore_budget import LoreLimits
 from app.services.ai.profiles.cache_strategy import CachePlan
 from app.services.ai.profiles.registry import profile_for
 from app.services.ai.selector_eval import (
@@ -718,17 +718,13 @@ def _preview_lore_tiers(
     preview mirrors that call with an EMPTY composer — the one surface that
     cannot exist yet — so its tiers match the first send exactly up to whatever
     the next user message additionally mentions. (`journal=None` is never
-    passed: that selects `_implicit_lore_ids`'s legacy static-scan branch,
+    passed: that selects `_inferred_candidates`' legacy static-scan branch,
     which no send runs — the original #1477 artifact.) A locked chat's
     composer-accrued journal entries are rendered by the Context door's own
     journal section, frontend-side."""
     from app.services.ai.context_expander import expand_context
-    from app.services.ai.lore_block import _render_lore_entries, _wrap_lore_block
-    from app.services.ai.lore_selection import (
-        _lore_title,
-        _select_lore,
-        _tier_lore_ids,
-    )
+    from app.services.ai.lore_block import _wrap_lore_block
+    from app.services.ai.lore_selection import _budgeted_lore_tiers
     from app.services.ai.sessions import AISession
 
     rendered_system_text = "\n\n".join(
@@ -746,46 +742,25 @@ def _preview_lore_tiers(
         scene=scene,
         rendered_text=rendered_system_text,
     )
-    selection = _select_lore(
+    # ADR-0086 §4: the same select → render → fit → tier the send runs, against
+    # a throwaway session — so the estimate is bounded by the same rule, and an
+    # empty selection still reports a (zero) fit, as the send does.
+    tiers = _budgeted_lore_tiers(
         project_service,
         scene,
         preview_journal,
         list(rendered.used_node_ids or []),
-        expansion=lore_limits.expansion,
+        session=AISession(id="preview"),
+        hints=dict(rendered.used_node_hints or {}),
+        limits=lore_limits,
     )
-    candidate_ids = selection.ids
-    if not candidate_ids:
-        return _PreviewLoreTiers("", "", [], [])
-    # ADR-0086 §4: render every candidate once, fit, then tier the kept ids —
-    # the same order the send runs, so the estimate is bounded by the same rule.
-    index = project_service.build_mutations_index() if scene is not None else None
-    rendered_entries = dict(
-        _render_lore_entries(project_service, candidate_ids, scene, index=index)
-    )
-    fitted = fit_lore_budget(
-        selection,
-        rendered_entries,
-        lore_limits.budget_tokens,
-        title_of=lambda entry_id: _lore_title(project_service, entry_id),
-    )
-    stable_ids, volatile_ids = _tier_lore_ids(
-        project_service,
-        fitted.kept_ids,
-        AISession(id="preview"),
-        dict(rendered.used_node_hints or {}),
-    )
-    stable_entries = [(i, rendered_entries[i]) for i in stable_ids if i in rendered_entries]
-    volatile_entries = [(i, rendered_entries[i]) for i in volatile_ids if i in rendered_entries]
-    left_out_entries = {
-        e.id: rendered_entries[e.id] for e in fitted.report.left_out if e.id in rendered_entries
-    }
     return _PreviewLoreTiers(
-        _wrap_lore_block(stable_entries),
-        _wrap_lore_block(volatile_entries),
-        stable_entries,
-        volatile_entries,
-        fitted.report,
-        left_out_entries,
+        _wrap_lore_block(tiers.stable_entries),
+        _wrap_lore_block(tiers.volatile_entries),
+        tiers.stable_entries,
+        tiers.volatile_entries,
+        tiers.report,
+        tiers.left_out_entries,
     )
 
 

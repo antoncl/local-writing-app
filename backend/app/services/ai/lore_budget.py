@@ -9,16 +9,18 @@ order and keeps each whole entry that still fits. Declared entries are never
 walked, never counted against the budget, never dropped (ADR-0086 §1–§3).
 
 No project access here: the caller renders every candidate once and hands the
-`{id: xml}` map in, so this is tested as a function.
+`{id: xml}` map in, so this is tested as a function. The project-aware
+composition (select → render → fit → tier) that the send and the preview share
+is `lore_selection._budgeted_lore_tiers`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Literal, get_args
 
-from app.models import LoreFit, LoreFitEntry
+from app.models import LoreFit, LoreFitEntry, LoreSource
 from app.services.ai.profiles.base import default_token_count
 
 # ADR-0086 §2: the resolver's default when the assistant leaves
@@ -33,29 +35,17 @@ DEFAULT_LORE_BUDGET_TOKENS = 16_000
 # `named` sends only what was actually named — the two hops are not taken.
 LoreExpansion = Literal["one_hop", "named"]
 
-# The fit's own closed source set: the journal's `JournalSource` values plus
-# the structural hop, which the journal never records (ADR-0086 §5). The
-# journal's own type is deliberately not widened.
-LoreSource = Literal[
-    "user_message", "rendered_prompt", "scene_prose", "depth1_expansion", "structural_hop"
-]
-
-# ADR-0086 §1 fit order: distance from the author's own words — what they typed
+# ADR-0086 §1 fit order — distance from the author's own words: what they typed
 # this session, what their prompt named, what the anchored scene's prose names,
 # what the app found one textual hop from those, what it followed through graph
-# edges. Lower ranks fit first; the budget drops the structural hop first.
-_SOURCE_RANK: dict[str, int] = {
-    "user_message": 0,
-    "rendered_prompt": 1,
-    "scene_prose": 2,
-    "depth1_expansion": 3,
-    "structural_hop": 4,
-}
+# edges. The order is `LoreSource`'s declaration order (`app.models`), spelled
+# once; lower ranks fit first, so the budget drops the structural hop first.
+_SOURCE_RANK: dict[str, int] = {source: rank for rank, source in enumerate(get_args(LoreSource))}
 
-# The sources `named` expansion keeps: an entry the author, the prompt, or the
-# scene actually named. The two hops (`depth1_expansion`, `structural_hop`)
-# are what `named` turns off.
-NAMED_SOURCES: frozenset[str] = frozenset({"user_message", "rendered_prompt", "scene_prose"})
+# The two hops `named` expansion turns off; everything else is an entry the
+# author, the prompt, or the scene actually named.
+HOP_SOURCES: frozenset[str] = frozenset({"depth1_expansion", "structural_hop"})
+NAMED_SOURCES: frozenset[str] = frozenset(_SOURCE_RANK) - HOP_SOURCES
 
 
 @dataclass(frozen=True)
@@ -69,16 +59,28 @@ class LoreLimits:
     expansion: LoreExpansion = "one_hop"
 
 
+# The resolver's defaults as one shared (frozen) value, for signatures that
+# default to them.
+DEFAULT_LORE_LIMITS = LoreLimits()
+
+
 @dataclass(frozen=True)
 class InferredCandidate:
     """One id the app inferred, with why (`source`) and when it was first
     noticed (`added_at_turn` — the journal records no re-mentions; a
-    structural-hop id carries no turn and orders by id)."""
+    structural-hop id carries no turn and orders by id). A source outside the
+    fit's closed set is a programming error and fails here, loudly — never a
+    silent re-rank."""
 
     id: str
     source: LoreSource
     added_at_turn: int = 0
-    title: str = ""
+
+    def __post_init__(self) -> None:
+        if self.source not in _SOURCE_RANK:
+            raise ValueError(
+                f"unknown lore source {self.source!r}; the fit knows {sorted(_SOURCE_RANK)}"
+            )
 
     @property
     def fit_key(self) -> tuple[int, int, str]:
@@ -112,30 +114,46 @@ class BudgetedLore:
     report: LoreFit
 
 
+@dataclass(frozen=True)
+class BudgetedLoreTiers:
+    """What `lore_selection._budgeted_lore_tiers` hands the send and the
+    preview alike: the kept entries as `(id, element_xml)` pairs per tier (the
+    send wraps them; the preview surfaces them), the left-out entries' own
+    elements keyed by id (the door's drill), and the fit report."""
+
+    stable_entries: list[tuple[str, str]]
+    volatile_entries: list[tuple[str, str]]
+    left_out_entries: dict[str, str] = field(default_factory=dict)
+    report: LoreFit = field(default_factory=lambda: LoreFit(
+        budget_tokens=0, used_tokens=0, declared_tokens=0, kept=0
+    ))
+
+
 def fit_lore_budget(
     selection: LoreSelection,
     rendered: Mapping[str, str],
     budget_tokens: int,
     *,
+    titles: Mapping[str, str] | None = None,
     count: Callable[[str], int] = default_token_count,
-    title_of: Callable[[str], str] | None = None,
 ) -> BudgetedLore:
     """Walk the inferred candidates in fit order and keep each whole entry
     whose rendered size fits in what remains of the budget (`<=`); leave the
     rest out and continue, so an oversized entry doesn't block the smaller
-    ones ordered below it (ADR-0086 §3). The declared set is neither walked nor
-    counted: declared plus up to a budget's worth of inferred is what a turn
-    sends, and a declared set alone larger than the budget is reported, never
-    rationed.
+    ones ordered below it (ADR-0086 §3). The declared set is not walked
+    against the budget and never dropped; it is counted only to report
+    `declared_tokens` (§5) — a declared set alone larger than the budget is
+    reported, never rationed.
 
     `rendered` is `{id: element_xml}` for every candidate the caller could
     render; an id absent from it was unreadable and is not sendable, so it is
-    skipped on both sides. `count` is the one estimator every profile uses
-    (`default_token_count`), injectable for tests. `title_of` fills the title
-    of a left-out entry the selection couldn't name (a structural-hop id
-    carries no journal snapshot); it is called only for what was left out.
+    skipped on both sides. `titles` is `{id: title}` from the same render, so
+    a left-out entry is named by the node the model would have seen — one
+    provenance, no second read. `count` is the one estimator every profile
+    already uses (`default_token_count`), injectable for tests.
     """
     remaining = max(0, budget_tokens)
+    names = titles or {}
     declared_tokens = sum(count(rendered[eid]) for eid in selection.declared if eid in rendered)
     kept: set[str] = {eid for eid in selection.declared if eid in rendered}
     used = 0
@@ -150,9 +168,13 @@ def fit_lore_budget(
             used += tokens
             kept.add(candidate.id)
             continue
-        title = candidate.title or (title_of(candidate.id) if title_of is not None else "")
         left_out.append(
-            LoreFitEntry(id=candidate.id, title=title, source=candidate.source, tokens=tokens)
+            LoreFitEntry(
+                id=candidate.id,
+                title=names.get(candidate.id, ""),
+                source=candidate.source,
+                tokens=tokens,
+            )
         )
     report = LoreFit(
         budget_tokens=max(0, budget_tokens),

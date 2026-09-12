@@ -55,7 +55,6 @@ from app.services.ai.chat import (
     system_prompt_cache_blocks,
 )
 from app.services.ai.extraction import run_entry_patch_extraction
-from app.services.ai.lore_budget import LoreLimits
 from app.services.ai.preview import (
     PreviewError,
     PreviewRequest,
@@ -286,22 +285,19 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                 effective_inputs = []
                 input_conflicts = []
                 input_provenance = {}
-        # ADR-0086 §4: resolve the bound assistant ONCE, before the render —
-        # the render's lore fit needs its budget and reach, and the estimate
-        # below needs its provider/model. No assistant → the resolver's
-        # defaults for the fit, and an unpriced estimate as before.
+        # ADR-0086 §4: resolve the assistant ONCE, before the render, exactly
+        # as the send does — including the send's fallback to the topmost
+        # listed assistant when none is bound — so the render's lore fit uses
+        # the budget and reach the send will use. The estimate's pricing keeps
+        # its own contract (unpriced without a bound assistant).
         settings = machine_settings_service.load_settings()
-        resolved = (
-            resolve_call_params(
-                project,
-                settings,
-                assistant_id=request.assistant_id,
-                provider_override=None,
-                model_override=None,
-                max_tokens_override=None,
-            )
-            if request.assistant_id is not None
-            else None
+        resolved = resolve_call_params(
+            project,
+            settings,
+            assistant_id=request.assistant_id,
+            provider_override=None,
+            model_override=None,
+            max_tokens_override=None,
         )
         try:
             rendered, session_id = build_preview(
@@ -317,7 +313,7 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                     commit=request.commit,
                     resolution_scene_id=request.resolution_scene_id,
                     subject=request.subject,
-                    lore_limits=resolved.lore_limits if resolved is not None else LoreLimits(),
+                    lore_limits=resolved.lore_limits,
                 ),
             )
         except PreviewError as exc:
@@ -353,7 +349,10 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
     char_count = sum(len(b.text) for m in messages for b in m.blocks)
 
     estimate = await estimate_preview_tokens_and_cost(
-        project, rendered, resolved=resolved, settings=settings
+        project,
+        rendered,
+        resolved=resolved if request.assistant_id is not None else None,
+        settings=settings,
     )
 
     return AIPreviewResponse(

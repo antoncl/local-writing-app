@@ -64,13 +64,14 @@ class FitLoreBudgetTests(unittest.TestCase):
     def test_keeps_whole_entries_in_fit_order_until_the_budget_is_spent(self) -> None:
         selection = _selection(
             inferred=[
-                InferredCandidate("lore_1", "user_message", added_at_turn=2, title="One"),
-                InferredCandidate("lore_2", "user_message", added_at_turn=1, title="Two"),
-                InferredCandidate("lore_3", "structural_hop", title="Three"),
+                InferredCandidate("lore_1", "user_message", added_at_turn=2),
+                InferredCandidate("lore_2", "user_message", added_at_turn=1),
+                InferredCandidate("lore_3", "structural_hop"),
             ]
         )
         rendered = {"lore_1": "a" * 40, "lore_2": "b" * 40, "lore_3": "c" * 40}
-        fitted = fit_lore_budget(selection, rendered, 80, count=len)
+        titles = {"lore_1": "One", "lore_2": "Two", "lore_3": "Three"}
+        fitted = fit_lore_budget(selection, rendered, 80, count=len, titles=titles)
         self.assertEqual(fitted.kept_ids, ["lore_1", "lore_2"])
         self.assertEqual([e.id for e in fitted.report.left_out], ["lore_3"])
         self.assertEqual(fitted.report.left_out[0].title, "Three")
@@ -134,9 +135,7 @@ class FitLoreBudgetTests(unittest.TestCase):
         self.assertEqual([e.id for e in fitted.report.left_out], ["lore_b"])
 
     def test_zero_budget_sends_only_declared_entries(self) -> None:
-        selection = _selection(
-            {"lore_pick"}, [InferredCandidate("lore_seen", "user_message", title="Seen")]
-        )
+        selection = _selection({"lore_pick"}, [InferredCandidate("lore_seen", "user_message")])
         rendered = {"lore_pick": "p" * 10, "lore_seen": "s" * 10}
         fitted = fit_lore_budget(selection, rendered, 0, count=len)
         self.assertEqual(fitted.kept_ids, ["lore_pick"])
@@ -156,30 +155,32 @@ class FitLoreBudgetTests(unittest.TestCase):
         self.assertEqual(fitted.report.declared_tokens, 0)
         self.assertEqual(fitted.report.kept, 0)
 
-    def test_title_of_fills_only_an_unnamed_left_out_entry(self) -> None:
-        # A journal candidate carries its title snapshot; a structural-hop id
-        # does not, and only THAT one asks the caller — never a kept entry.
-        asked: list[str] = []
-
-        def title_of(entry_id: str) -> str:
-            asked.append(entry_id)
-            return f"Title of {entry_id}"
-
+    def test_left_out_titles_come_from_the_render_and_default_to_empty(self) -> None:
+        # One provenance: a left-out entry is named by the node the render
+        # read (the `titles` map the render filled), never by a second read or
+        # a journal snapshot; an id the map lacks reports an empty title.
         selection = _selection(
             inferred=[
                 InferredCandidate("lore_kept", "user_message", added_at_turn=1),
-                InferredCandidate("lore_named", "depth1_expansion", title="Named"),
+                InferredCandidate("lore_named", "depth1_expansion"),
                 InferredCandidate("lore_hop", "structural_hop"),
             ]
         )
         rendered = {"lore_kept": "k" * 10, "lore_named": "n" * 50, "lore_hop": "h" * 50}
-        fitted = fit_lore_budget(selection, rendered, 20, count=len, title_of=title_of)
+        fitted = fit_lore_budget(
+            selection, rendered, 20, count=len, titles={"lore_named": "Named", "lore_kept": "K"}
+        )
         self.assertEqual(fitted.kept_ids, ["lore_kept"])
         self.assertEqual(
             [(e.id, e.title) for e in fitted.report.left_out],
-            [("lore_named", "Named"), ("lore_hop", "Title of lore_hop")],
+            [("lore_named", "Named"), ("lore_hop", "")],
         )
-        self.assertEqual(asked, ["lore_hop"])
+
+    def test_an_unknown_source_fails_loudly(self) -> None:
+        # The fit's source set is closed; a candidate outside it is a
+        # programming error, never a silent re-rank to the source that fits first.
+        with self.assertRaises(ValueError):
+            InferredCandidate("lore_x", "context_pick")  # type: ignore[arg-type]
 
     def test_kept_ids_are_id_sorted_for_the_wire(self) -> None:
         # The fit order is for the fit only; the wire stays id-sorted (anti-goal:

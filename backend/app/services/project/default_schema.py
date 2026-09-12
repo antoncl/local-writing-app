@@ -1274,7 +1274,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "conversation, the prompt, or the scene actually named."
             ),
             "type": "select",
-            "options": ["one_hop", "named"],
+            "options": [
+                {"value": "one_hop", "label": "One hop"},
+                {"value": "named", "label": "Named only"},
+            ],
         },
         # Author-set prices for a model the price oracle can't reach — an unlisted
         # or local model (ADR-0083 Amendment 1). USD per 1M tokens, matching how

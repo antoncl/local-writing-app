@@ -460,6 +460,16 @@ class ChatUsage(BaseModel):
     output_tokens: int = 0
 
 
+# ADR-0086 §1/§5: by which route the app inferred a lore entry — the journal's
+# sources (`ChatSessionJournalEntry.source`, the journal's own narrower type,
+# which is deliberately not widened) plus the structural hop, which the
+# journal never records. Spelled ONCE, in fit order: the budget fits earlier
+# sources first, so `lore_budget` derives its rank table from this order.
+LoreSource = Literal[
+    "user_message", "rendered_prompt", "scene_prose", "depth1_expansion", "structural_hop"
+]
+
+
 class LoreFitEntry(BaseModel):
     """One inferred lore entry the per-turn budget left out (ADR-0086 §5):
     which, why it was a candidate, and how big it was — enough for the meta
@@ -467,11 +477,7 @@ class LoreFitEntry(BaseModel):
 
     id: str
     title: str = ""
-    # The fit's own closed set: the journal's `JournalSource` values plus
-    # `structural_hop` (which the journal never records).
-    source: Literal[
-        "user_message", "rendered_prompt", "scene_prose", "depth1_expansion", "structural_hop"
-    ]
+    source: LoreSource
     tokens: int
 
 

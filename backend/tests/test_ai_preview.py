@@ -889,6 +889,79 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertIn(nimitz.id, all_ids)
         self.assertIn(pavel.id, all_ids)
 
+    def _make_frugal_assistant(self):
+        """An assistant with a lore budget of 0 — declared entries only. Created
+        through the app, so it is listed from birth and becomes the topmost
+        (fallback) assistant for a request that binds none."""
+        from app.models import CreateAssistantEntryRequest, SaveAssistantEntryRequest
+
+        created = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Frugal", entry_type="assistant:assistant")
+        )
+        self.service.save_assistant_entry(
+            created.id,
+            SaveAssistantEntryRequest(
+                title="Frugal",
+                base_revision=created.revision,
+                entry_type="assistant:assistant",
+                metadata={
+                    "ai_provider": "anthropic",
+                    "ai_model": "claude-haiku-4-5-20251001",
+                    "ai_lore_budget_tokens": 0,
+                },
+            ),
+        )
+        return created
+
+    def test_preview_reports_a_zero_fit_for_an_empty_lore_enabled_selection(self) -> None:
+        # ADR-0086 §4: the preview applies the same fit as the send, and the send
+        # reports a (zero) fit when nothing was selected — so must the preview.
+        # None is reserved for "not lore-enabled".
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "system" %}Write.{% endrole %}{{ use_lore() }}',
+                "target_scene_id": "",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["lore_enabled"])
+        self.assertEqual(
+            body["lore_fit"],
+            {"budget_tokens": 16_000, "used_tokens": 0, "declared_tokens": 0, "kept": 0, "left_out": []},
+        )
+        self.assertEqual(body["lore_left_out_xml"], {})
+        off = self.client.post(
+            "/api/ai/preview",
+            json={"template_source": '{% role "system" %}Write.{% endrole %}', "target_scene_id": ""},
+        ).json()
+        self.assertFalse(off["lore_enabled"])
+        self.assertIsNone(off["lore_fit"])
+
+    def test_preview_without_a_bound_assistant_fits_by_the_sends_fallback_limits(self) -> None:
+        # The send resolves `assistant_id=None` to the topmost listed assistant
+        # (ADR-0024); the preview must fit by the same assistant's limits or the
+        # two disagree exactly for the unbound chat. Pricing keeps its own
+        # contract: no bound assistant → unpriced. The fallback skips an
+        # assistant whose provider the project policy forbids (ADR-0073 S2), so
+        # allow cloud here as the send tests do.
+        from app.models import UpdateProjectSettingsRequest
+
+        self.service.update_project_settings(UpdateProjectSettingsRequest(ai_policy="cloud-allowed"))
+        self._make_frugal_assistant()
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["lore_fit"]["budget_tokens"], 0)
+        self.assertIsNone(body["estimated_cost_usd"])
+
     def test_preview_applies_the_assistants_lore_budget_to_its_turn0_selection(self) -> None:
         # ADR-0086 §4/§5: the turn-0 preview fits its own selection by the same
         # rule as the send. Honor is a scene ref (declared) and is sent whatever
@@ -896,8 +969,6 @@ class PreviewEndpointTests(unittest.TestCase):
         # `scene_prose`). With the bound assistant's budget at 0, Nimitz is left
         # out of the tier blocks and reported — with his rendered element beside
         # the report for the door's drill — and the estimate no longer counts him.
-        from app.models import CreateAssistantEntryRequest, SaveAssistantEntryRequest
-
         nimitz = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character")
         )
@@ -923,23 +994,8 @@ class PreviewEndpointTests(unittest.TestCase):
                 metadata=scene.metadata,
             ),
         )
-        created = self.service.create_assistant_entry(
-            CreateAssistantEntryRequest(title="Frugal", entry_type="assistant:assistant")
-        )
-        self.service.save_assistant_entry(
-            created.id,
-            SaveAssistantEntryRequest(
-                title="Frugal",
-                base_revision=created.revision,
-                entry_type="assistant:assistant",
-                metadata={
-                    "ai_provider": "anthropic",
-                    "ai_model": "claude-haiku-4-5-20251001",
-                    "ai_lore_budget_tokens": 0,
-                },
-            ),
-        )
         template = '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}'
+        # Before any assistant exists: the resolver's defaults, everything fits.
         unbudgeted = self.client.post(
             "/api/ai/preview",
             json={"template_source": template, "target_scene_id": self.scene_id},
@@ -951,6 +1007,7 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(unbudgeted["lore_fit"]["left_out"], [])
         self.assertEqual(unbudgeted["lore_fit"]["kept"], 2)
 
+        created = self._make_frugal_assistant()
         response = self.client.post(
             "/api/ai/preview",
             json={

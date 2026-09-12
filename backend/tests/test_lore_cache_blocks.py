@@ -199,6 +199,59 @@ class LoreCacheBlockTests(unittest.TestCase):
         self.assertIn('name="Sidebar"', text)
         self.assertIn("A picked aside", text)
 
+    def test_used_mode_sends_only_the_chats_own_picks_and_leaves_the_chat_as_found(self) -> None:
+        # #1874 / ADR-0067 Amendment 2: the commit's transcription turn narrows
+        # the selector to the chat's `use()` picks — the always-policy Premise
+        # stays out. And it is READ-ONLY on the chat's lore state: no journal
+        # detection, no seen-revisions save (which, carrying an empty journal,
+        # would trip the append-only guard with a 409), and no baseline promotion
+        # (which would demote every settled world entry to volatile on the next
+        # ordinary turn). Start from a chat that already HAS that state, so each
+        # of those regressions would show.
+        picked = self._make_note("Sidebar", body="A picked aside.")
+        self._make_note("Gaslamp", body="Lit by whale oil.")  # journaled by mention on turn 1
+        self.service.save_chat_session(
+            self.chat_id,
+            SaveChatSessionRequest(
+                title="Brainstorm",
+                prompt_entry_id="prompt_x",
+                lore_enabled=True,
+                used_node_ids=[picked],
+            ),
+        )
+        self._blocks(self.chat_id, [{"role": "user", "content": "Tell me about Gaslamp"}])
+        before = self.service.read_chat_session(self.chat_id)
+        self.assertTrue(before.journal, "turn 1 should have journal-detected the mention")
+        self.assertTrue(before.seen_revisions)
+        baseline_before = dict(default_registry.get_or_create(f"chatlore:{self.chat_id}").baseline)
+
+        blocks, _sid, added = expand_and_prepare_chat_blocks(
+            self.service,
+            self.chat_id,
+            "SYSTEM PROMPT",
+            [
+                {"role": "user", "content": "Tell me about Gaslamp"},
+                {"role": "assistant", "content": "Premise, Gaslamp, all of it."},
+                {"role": "user", "content": "commit"},
+            ],
+            lore_mode="used",
+        )
+        text = "".join(b["text"] for b in blocks or [])
+        self.assertIn("A picked aside", text)
+        self.assertNotIn("A hidden world", text)  # always-policy: out
+        self.assertNotIn("Lit by whale oil", text)  # journaled mention: out
+        self.assertEqual(added, [])
+        after = self.service.read_chat_session(self.chat_id)
+        self.assertEqual(after.journal, before.journal)
+        self.assertEqual(after.seen_revisions, before.seen_revisions)
+        self.assertEqual(
+            default_registry.get_or_create(f"chatlore:{self.chat_id}").baseline, baseline_before
+        )
+        # The next ordinary turn still finds the world settled in the stable tier.
+        turn3 = self._blocks(self.chat_id, [{"role": "user", "content": "more"}])
+        stable_text = "".join(b["text"] for b in turn3 if b["tier"] == "stable")
+        self.assertIn('name="Premise"', stable_text)
+
     def test_use_selected_never_policy_node_stays_excluded(self) -> None:
         # `use()` joins the SAME direct channel, so it still obeys the one `never`
         # chokepoint — a selection cannot override a `never`-policy entry.

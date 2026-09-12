@@ -279,7 +279,6 @@ class ChatSessionsMixin:
         existing = self.read_chat_session(chat_id)
         self._guard_chat_preset_lock(existing, request)
         next_journal = self._resolved_chat_journal(existing, request)
-        self._record_chat_cost_delta(existing, request)
         # The save response must carry the same projection read_chat_session
         # computes — the UI keeps the returned session as its live copy, and a
         # hardcoded 0.0 here zeroed its session-cost display on every save
@@ -355,6 +354,9 @@ class ChatSessionsMixin:
                 else request.seen_revisions
             ),
         )
+        # The row is tagged from `updated` — the prompt/subject this save
+        # persists — so it never disagrees with the file it accompanies.
+        self._record_chat_cost_delta(updated, request)
         self._write_chat_session(path, updated)
         return updated
 
@@ -411,7 +413,7 @@ class ChatSessionsMixin:
         return list(request.journal)
 
     def _record_chat_cost_delta(
-        self, existing: ChatSession, request: SaveChatSessionRequest
+        self, chat: ChatSession, request: SaveChatSessionRequest
     ) -> None:
         """Phase C2 Slice B: per-turn cost no longer lives on the chat YAML
         — it lands as an ai_invocations row tagged with chat_session_id.
@@ -454,16 +456,35 @@ class ChatSessionsMixin:
                 if isinstance(message.model, str) and message.model:
                     model = message.model
                 break
+        self.record_chat_turn_invocation(
+            chat, provider=provider, model=model, usage=last_usage, cost_usd=delta
+        )
+
+    def record_chat_turn_invocation(
+        self,
+        chat: ChatSession,
+        *,
+        provider: str,
+        model: str,
+        usage: ChatUsage | None,
+        cost_usd: float | None,
+    ) -> None:
+        """The one place a chat-attributed `ai_invocations` row is shaped: tagged
+        with the chat's id, prompt and anchored scene. A streamed turn reaches it
+        through the save path's cost delta (`_record_chat_cost_delta`, which
+        pins usage/provenance to the transcript's last assistant message); a
+        server-run turn — the commit extraction (#1872) — calls it directly with
+        the reply's own usage, so the row is never a copy of a different call."""
         self.append_ai_invocation(
             CreateAIInvocationRequest(
-                prompt_entry_id=request.prompt_entry_id,
+                prompt_entry_id=chat.prompt_entry_id,
                 prompt_entry_type="chat:chat_session",
-                scene_id=self._subject_scene_id(existing.subject),
-                chat_session_id=existing.id,
+                scene_id=self._subject_scene_id(chat.subject),
+                chat_session_id=chat.id,
                 provider=provider,
                 model=model,
-                usage=last_usage,
-                cost_usd=delta,
+                usage=usage,
+                cost_usd=cost_usd,
             )
         )
 

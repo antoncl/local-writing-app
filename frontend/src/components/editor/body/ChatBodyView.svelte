@@ -244,13 +244,18 @@
   const commit = new ChatCommitController({
     getAssistantId: () => chatAssistantId,
     getHistory: () => chatHistory.map(({ role, content }) => ({ role, content })),
-    // ADR-0067 S2: the chat's own node id — the commit runs as a cached
-    // continuation of this chat, so the server reads back the field set its
-    // lock render registered instead of rebuilding a separate contract.
+    // ADR-0067 S2: the chat's own node id — the commit runs as a continuation
+    // of this chat, so the server reads back the field set its lock render
+    // registered instead of rebuilding a separate contract.
     getChatId: () => scene?.id ?? "",
-    addTurnCost: async (usd) => {
-      pendingTurnCost = (pendingTurnCost ?? 0) + usd;
-      await persistActiveChat();
+    // #1872: the server attributed the extraction's cost to this chat itself;
+    // re-read the node so `chatSession.cost_usd_total` (projected from the
+    // invocation log on read) catches up — a GET, not a transcript re-save.
+    refreshCostTotal: async () => {
+      const chatId = scene?.id;
+      if (!chatId) return;
+      const fresh = await api.readNode<ChatSession>(chatId);
+      if (scene?.id === chatId) chatSession = fresh;
     },
     setError: (message) => (chatError = message),
     setNotice: (message) => (chatNotice = message),

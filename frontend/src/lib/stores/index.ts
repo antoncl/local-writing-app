@@ -51,8 +51,15 @@ export async function loadProjectData(): Promise<void> {
   ]);
 }
 
-// Reset every domain slice to empty. For a future close-to-no-project flow;
-// opening another project overwrites in place, so this is not on the open path.
+// Reset every domain slice to empty — the project-switch half of the fan-out
+// (#1881). `openProjectAt` / `createProjectAt` call it right after
+// `onOpenWorkspace` (App's pane/layout reset) and right before
+// `loadProjectData`, in the same tick, so project A's lists, rosters and totals
+// are never offered under project B's title while B's answers are in flight.
+// The layered rosters (tags, assistants) clear here too; `loadProjectData`
+// re-reads them under B's scope next, so nothing re-refreshes from here.
+// Before #1881 this had no caller and App hand-cleared tags, chats and spend —
+// but not assistants.
 export function clearProjectData(): void {
   clearStructure();
   clearLore();
@@ -64,15 +71,7 @@ export function clearProjectData(): void {
   clearMutationSets();
   clearSchema();
   clearReferenceIndex();
-  // Not a plain clear (review fix): the tag roster is machine-global
-  // (ADR-0082 slice 1) — machine-layer tags remain valid with no project
-  // open, same as the assistant roster (`clearAssistants` below stays a plain
-  // clear; `loadProjectData` re-reads both rosters on the next open).
-  // Fire-and-forget: a full clear then a fresh GET, not awaited — this
-  // function is synchronous like its siblings, and the roster is empty for
-  // one tick either way.
   clearTagNodes();
-  void refreshTagNodes();
   clearTodos();
   clearValidation();
   clearChats();

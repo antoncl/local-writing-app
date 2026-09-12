@@ -12,7 +12,7 @@
   import { AlignedTableCell, AlignedTableHeader } from "@/lib/editor-core/alignedTable";
   import { placeSelectionToolbar, type FloatingMenuState, type ToolbarAction } from "@/lib/editor-core/selectionToolbar";
   import { visibleSelectionRect, selectionEndpointRect } from "@/lib/editor-core/selectionRects";
-  import { buildLongTextToolbarActions } from "@/lib/editor-core/longTextToolbarActions";
+  import { formattingToolbarActions } from "@/lib/editor-core/formattingToolbarActions";
   import { countWords } from "@/lib/utils/wordCount";
   import ProseSelectionToolbar from "@/components/editor/body/ProseSelectionToolbar.svelte";
 
@@ -87,8 +87,8 @@
     view.dispatch(tr);
   }
 
-  // Mirrors the body's updateSelectionMenu (ProseBodyView), minus the
-  // manuscript gate — the rail field always allows the Table menu.
+  // Mirrors the body's updateSelectionMenu (ProseBodyView): a text selection or a
+  // caret in a table shows the menu, in every prose editor alike (#1893).
   function updateMenu() {
     if (!editor || !root) return;
     const { selection } = editor.state;
@@ -105,7 +105,7 @@
       height: window.innerHeight,
     });
     menu = { visible: true, ...placed, wordCount: hasText ? countWords(selectedText) : 0 };
-    actions = buildLongTextToolbarActions(editor, hasText, inTable);
+    actions = formattingToolbarActions(editor, hasText, inTable);
     openMenuId = null;
   }
 

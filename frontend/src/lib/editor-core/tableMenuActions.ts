@@ -2,15 +2,13 @@
 // twelve-button ProseTableToolbar: the same TipTap commands, regrouped into
 // Row / Column / Align / Header submenus plus a destructive "Delete table".
 //
-// Alignment is column-wide and lives in the host (setCellAlign walks the table
-// geometry), so it is injected as `onAlign` rather than a plain chain call.
+// Alignment is column-wide (setColumnAlign walks the table geometry), so its
+// leaves call alignedTable rather than a plain chain command.
 import type { Editor } from "@tiptap/core";
 import type { ToolbarMenuAction } from "./selectionToolbar";
+import { setColumnAlign } from "./alignedTable";
 
-export function buildTableMenuAction(
-  editor: Editor,
-  onAlign: (align: "left" | "center" | "right") => void,
-): ToolbarMenuAction {
+export function buildTableMenuAction(editor: Editor): ToolbarMenuAction {
   const run = (fn: (chain: ReturnType<Editor["chain"]>) => ReturnType<Editor["chain"]>) => () =>
     void fn(editor.chain().focus()).run();
   return {
@@ -42,9 +40,9 @@ export function buildTableMenuAction(
         id: "table-align",
         label: "Align",
         items: [
-          { id: "align-left", label: "Left", run: () => onAlign("left") },
-          { id: "align-center", label: "Center", run: () => onAlign("center") },
-          { id: "align-right", label: "Right", run: () => onAlign("right") },
+          { id: "align-left", label: "Left", run: () => setColumnAlign(editor, "left") },
+          { id: "align-center", label: "Center", run: () => setColumnAlign(editor, "center") },
+          { id: "align-right", label: "Right", run: () => setColumnAlign(editor, "right") },
         ],
       },
       {

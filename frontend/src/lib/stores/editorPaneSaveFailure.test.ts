@@ -6,7 +6,7 @@
 //
 // Part A tests the classifier against a fake host (the policy, in isolation).
 // Part B drives it through the real controller (the wiring + saveError lifecycle).
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   handleSaveFailure,
   offerAutosaveConflictRecovery,
@@ -20,12 +20,12 @@ import { HttpError, api } from "@/lib/api";
 import type { LoreEntry } from "@/lib/types";
 
 function fakeHost(): SaveFailureHost & {
-  markPaneSaveError: ReturnType<typeof vi.fn>;
-  scheduleAutosaveRetry: ReturnType<typeof vi.fn>;
-  saveEditorPane: ReturnType<typeof vi.fn>;
-  run: ReturnType<typeof vi.fn>;
-  tearDown: ReturnType<typeof vi.fn>;
-  patchPane: ReturnType<typeof vi.fn>;
+  markPaneSaveError: Mock<SaveFailureHost["markPaneSaveError"]>;
+  scheduleAutosaveRetry: Mock<SaveFailureHost["scheduleAutosaveRetry"]>;
+  saveEditorPane: Mock<SaveFailureHost["saveEditorPane"]>;
+  run: Mock<SaveFailureHost["run"]>;
+  tearDown: Mock<SaveFailureHost["tearDown"]>;
+  patchPane: Mock<SaveFailureHost["patchPane"]>;
 } {
   return {
     // A pane with no `scene`, so the reconcile ladder declines without touching the
@@ -38,14 +38,14 @@ function fakeHost(): SaveFailureHost & {
       return true;
     }),
     saveEditorPane: vi.fn(async () => {}),
-    patchPane: vi.fn(),
+    patchPane: vi.fn<SaveFailureHost["patchPane"]>(),
     editorPaneComponents: {},
     titleReloadsByPane: {},
     metadataReloadsByPane: {},
     nextMetadataReloadToken: 1,
-    markPaneSaveError: vi.fn(),
-    scheduleAutosaveRetry: vi.fn(),
-    tearDown: vi.fn(),
+    markPaneSaveError: vi.fn<SaveFailureHost["markPaneSaveError"]>(),
+    scheduleAutosaveRetry: vi.fn<SaveFailureHost["scheduleAutosaveRetry"]>(),
+    tearDown: vi.fn<SaveFailureHost["tearDown"]>(),
   };
 }
 

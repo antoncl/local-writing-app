@@ -38,11 +38,12 @@
     "@tabler/icons-webfont": "^3.45.0",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/svelte": "^5.4.2",
+    "@types/node": "^24.13.4",
     "happy-dom": "^20.11.1",
     "subset-font": "^2.5.0",
     "svelte-check": "^4.7.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
-    "vitest": "^3.2.6"
+    "vitest": "^4.1.11"
   }
 }

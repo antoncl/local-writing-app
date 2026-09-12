@@ -3,7 +3,7 @@
 // needs it is wired. A read-only list (Backlinks, ReferencePicker, Chats, …)
 // must NOT add a per-instance document mousedown listener — a metadata panel
 // renders one ReferencePicker per ref field, so that dead weight adds up.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { tick } from "svelte";
 import { fireEvent, render, screen } from "@/lib/test/component";
 import Fixture from "./ViewNodeListGateFixture.svelte";
@@ -13,7 +13,7 @@ import Fixture from "./ViewNodeListGateFixture.svelte";
 // delegated `handle_event_propagation` mousedown listener at the mount root for
 // its event system — that's framework chrome, present regardless of #268, so we
 // exclude it and count only the component's own listener.
-function ownMousedownListeners(spy: ReturnType<typeof vi.spyOn>): number {
+function ownMousedownListeners(spy: MockInstance<typeof document.addEventListener>): number {
   return spy.mock.calls.filter(
     ([type, fn]) => type === "mousedown" && !String(fn).includes("handle_event_propagation"),
   ).length;

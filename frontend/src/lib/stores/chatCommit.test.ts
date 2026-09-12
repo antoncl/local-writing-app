@@ -300,6 +300,32 @@ describe("ChatCommitController — commitToEntry", () => {
     );
   });
 
+  it("appends the extraction's output-token count to the commit success notice", async () => {
+    // #1899: observability, not control — the notice names the extraction's
+    // output volume where the commit lands.
+    const { c, deps } = reviseController({ entryTitle: () => "Vale" });
+    extractPatch.mockResolvedValue({
+      ...okResult({ fields: { bio: "x" } }),
+      cost_usd_total: 0.5,
+      usage: { input_tokens: 1, cached_input_tokens: 0, cache_write_tokens: 0, output_tokens: 1234 },
+    });
+
+    await c.commitToEntry();
+
+    expect(deps.setNotice).toHaveBeenLastCalledWith("Committed — review it on Vale. · 1.2k tok out");
+  });
+
+  it("carries no tok-out suffix when the extraction reports no usage", async () => {
+    // #1899: absent usage (a provider that reported none) must not print a
+    // bogus "0 tok out" — the suffix is simply omitted.
+    const { c, deps } = reviseController({ entryTitle: () => "Vale" });
+    extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }));
+
+    await c.commitToEntry();
+
+    expect(deps.setNotice).toHaveBeenLastCalledWith("Committed — review it on Vale.");
+  });
+
   it("falls back to \"the scene\" when the target isn't in the roster", async () => {
     const { c, deps } = reviseController(); // entryTitle → null (a scene subject)
     extractPatch.mockResolvedValue(okResult({ fields: { summary: "s" } }));
@@ -607,6 +633,22 @@ describe("ChatCommitController — stageToPendingSet", () => {
     expect(deps.setNotice).toHaveBeenLastCalledWith(
       "Staged a mutation set for Mira (1 change) — review it under Mutation sets on the card, then place it in a scene to make it active." +
         " Ignored 1 field(s) the model couldn't set legally: id.",
+    );
+  });
+
+  it("appends the extraction's output-token count to the stage notice too", async () => {
+    // #1899: the stage destination shares the extraction — and its readout.
+    const { c, deps } = stageController({ entryTitle: () => "Mira" });
+    extractPatch.mockResolvedValue({
+      ...okResult({ fields: { condition: "werewolf" } }),
+      usage: { input_tokens: 1, cached_input_tokens: 0, cache_write_tokens: 0, output_tokens: 2500 },
+    });
+    createSet.mockResolvedValue(madeSet("set-9"));
+
+    await c.stageToPendingSet();
+
+    expect(deps.setNotice).toHaveBeenLastCalledWith(
+      "Staged a mutation set for Mira (1 change) — review it under Mutation sets on the card, then place it in a scene to make it active. · 2.5k tok out",
     );
   });
 

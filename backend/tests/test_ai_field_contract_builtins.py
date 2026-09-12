@@ -119,6 +119,16 @@ class FieldContractBuiltinsTests(unittest.TestCase):
         self.assertEqual(ids, self._proposable_ids("plot:plotline"))
         self.assertIn("body", ids)
 
+    def test_every_revise_builtin_states_the_length_anchor(self) -> None:
+        # #1899: every revise built-in commits a proposable body (and long_text
+        # fields like a plotline's `genre`), so every one of them tells the chat
+        # turn to hold length constant — the same sentence the commit envelope's
+        # revise branch states. Leaving one out pulls that prompt's extraction
+        # between an inflated draft in the transcript and the envelope's anchor.
+        for title in ("Revise entry", "Revise plot card", "Revise plotline", "Revise character arc"):
+            prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, title))
+            self.assertIn("change the content, not the volume", prompt.body, title)
+
     def test_revise_character_arc_registers_full_proposable_set(self) -> None:
         # ADR-0080 Amendment 2: the arc fixer registers the same generic
         # proposable set for its subject — body (the description) + the change-beat

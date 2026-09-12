@@ -36,6 +36,7 @@ import { entryIdFromPickValue } from "@/lib/editor-core/promptResolution";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
 import { extractHandler, type ExtractHost } from "@/lib/editor-core/outputHandlers";
+import { formatTokens } from "@/lib/utils/money";
 
 /** The live chat state + status/cost sinks the controller reaches into. Stable
  *  for the controller's life (wired once at construction) — the reactive inputs
@@ -152,8 +153,19 @@ export class ChatCommitController {
   // a time (the `committing` / `creatingDraft` guards).
   private commitOriginChatId = "";
 
+  // #1899: the last extraction's output-token count, informational — read by
+  // `outputTokensSuffix` to append " · N tok out" to the success notices below,
+  // so the commit's output volume is visible where it happens. Reset at the
+  // start of every `runExtractCommit` and set (or cleared) in `runExtraction`.
+  private lastExtractionOutputTokens: number | null = null;
+
   private chatUnchanged(): boolean {
     return this.deps.getChatId() === this.commitOriginChatId;
+  }
+
+  private outputTokensSuffix(): string {
+    if (this.lastExtractionOutputTokens == null) return "";
+    return ` · ${formatTokens(this.lastExtractionOutputTokens)} tok out`;
   }
 
   constructor(private readonly deps: ChatCommitDeps) {}
@@ -205,6 +217,7 @@ export class ChatCommitController {
     // chat's total after them — assign the host's snapshot from it. #986: the
     // chat switched during the extraction — don't touch the now-active chat.
     if (result.ok && this.chatUnchanged()) this.deps.setCostTotal(result.cost_usd_total ?? null);
+    if (result.ok) this.lastExtractionOutputTokens = result.usage?.output_tokens ?? null;
     if (!result.ok || !result.patch) {
       this.deps.setError(result.error || "The model returned nothing to commit.");
       return null;
@@ -240,6 +253,7 @@ export class ChatCommitController {
   private async runExtractCommit(host: ExtractHost): Promise<void> {
     this.deps.setError(null);
     this.deps.setNotice(null);
+    this.lastExtractionOutputTokens = null;
     this.committing = true;
     try {
       const patch = await extractHandler.produce(host);
@@ -311,7 +325,9 @@ export class ChatCommitController {
       patch.dropped.length > 0
         ? ` Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`
         : "";
-    this.deps.setNotice(`Committed — review it on ${reviewOn}.${dropped}`);
+    this.deps.setNotice(
+      `Committed — review it on ${reviewOn}.${dropped}${this.outputTokensSuffix()}`,
+    );
   }
 
   // Stage the brainstorm as a subject-pinned mutation set (ADR-0055 §4a/§6 — the
@@ -406,7 +422,8 @@ export class ChatCommitController {
     const count = `${rows.length} change${rows.length > 1 ? "s" : ""}`;
     this.deps.setNotice(
       `${updated ? "Updated the mutation set" : "Staged a mutation set"} for ${subject} (${count}) — ` +
-        `review it under Mutation sets on the card, then place it in a scene to make it active.${dropped}`,
+        `review it under Mutation sets on the card, then place it in a scene to make it active.${dropped}` +
+        `${this.outputTokensSuffix()}`,
     );
   }
 

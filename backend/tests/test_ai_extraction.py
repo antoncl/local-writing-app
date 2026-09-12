@@ -165,6 +165,56 @@ class ExtractionEnvelopeTests(unittest.TestCase):
         self.assertIn('OMIT the "body" key', envelope)
         self.assertIn("ONLY if the conversation actually revised the body", envelope)
 
+    def test_revise_envelope_anchors_length_to_the_current_entry(self) -> None:
+        # #1899: a token cap is a ceiling, not a target — a revise should hold
+        # the body and each field to about their CURRENT length (grounded by
+        # the entry riding along on `lore_mode="used"`, ADR-0067 Amendment 2),
+        # not the create branch's "length its description calls for" wording.
+        envelope = render_extraction_envelope(
+            self.service,
+            entry_type="lore:character",
+            creating=False,
+            stored=self._stored("lore:character"),
+        )
+        self.assertIn("at about the length the body has now", envelope)
+        self.assertIn("Hold each field to about its current length", envelope)
+        self.assertNotIn("at the length its description calls for", envelope)
+
+    def test_create_envelope_anchors_length_to_the_description(self) -> None:
+        # #1899: on create there is no "current" entry to anchor to, so length
+        # is anchored to the field's own description instead — the mirror of
+        # the revise case above.
+        envelope = render_extraction_envelope(
+            self.service,
+            entry_type="lore:character",
+            creating=True,
+            stored=self._stored("lore:character"),
+        )
+        self.assertIn("at the length its description calls for", envelope)
+        self.assertIn("Keep each field to the length its description calls for", envelope)
+        self.assertNotIn("Hold each field to about its current length", envelope)
+
+    def test_bodiless_envelope_still_anchors_field_length(self) -> None:
+        # #1899: the fields-clause anchor sentence is independent of the body
+        # clause — a bodiless type (no body clause at all) still gets it.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("entry_types", {})["lore:token"] = {
+            "name": "Token",
+            "kind": "lore",
+            "parent": "lore:base",
+            "has_body": False,
+        }
+        self.service._write_yaml(schema_path, data)
+        envelope = render_extraction_envelope(
+            self.service,
+            entry_type="lore:token",
+            creating=False,
+            stored=self._stored("lore:token"),
+        )
+        self.assertNotIn('"body"', envelope)
+        self.assertIn("Hold each field to about its current length", envelope)
+
     def test_body_clause_renders_the_body_field_description(self) -> None:
         # ADR-0059 §D — the dump fix. The body clause is steered by the `body`
         # intrinsic field's description ("what the fields don't capture; don't
@@ -440,7 +490,11 @@ class ExtractEndpointTests(unittest.TestCase):
 
     def test_revise_extract_returns_validated_patch_and_cost(self) -> None:
         chat_id = self._make_chat(stored=self._stored_full_proposable_set())
-        reply = _chat_reply('{"body": "A knight of renown.", "fields": {"bio": "New bio."}}', cost_usd=0.03)
+        reply = _chat_reply(
+            '{"body": "A knight of renown.", "fields": {"bio": "New bio."}}',
+            cost_usd=0.03,
+            usage=ChatUsage(output_tokens=42, input_tokens=5),
+        )
         with self._mock_chat(reply) as mock_chat:
             resp = self.client.post(
                 f"/api/ai/entry-patch/{self.hero.id}/extract",
@@ -459,6 +513,7 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertEqual(body["patch"]["body"], "A knight of renown.")
         self.assertEqual(body["patch"]["fields"], {"bio": "New bio."})
         self.assertEqual(body["cost_usd"], 0.03)
+        self.assertEqual(body["usage"]["output_tokens"], 42)
         # ADR-0067 S2: the turn CONTINUES the chat — its own (unchanged) system
         # prompt and real chat_id — appending the transcript + a "commit now"
         # turn that re-states the registered field list, rather than shipping a
@@ -638,6 +693,35 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertEqual(retry_sent.chat_id, chat_id)
         self.assertIn("Sure! I'd make Seren braver", retry_sent.messages[-2].content)
         self.assertIn("could not be read", retry_sent.messages[-1].content)
+
+    def test_extraction_reports_output_tokens_summed_over_the_retry(self) -> None:
+        # #1899: usage is observability, not a control — reported summed over
+        # the retry exactly like cost_usd, so the commit's output volume is
+        # visible even when the first pass was garbled and re-run.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        first = _chat_reply(
+            "Sure! I'd make Seren braver and more decisive.",
+            cost_usd=0.01,
+            usage=ChatUsage(input_tokens=10, output_tokens=700),
+        )
+        second = _chat_reply(
+            '{"body": "A braver knight.", "fields": {"bio": "Braver."}}',
+            cost_usd=0.02,
+            usage=ChatUsage(input_tokens=12, output_tokens=300),
+        )
+        with self._mock_chat_sequence(first, second):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={
+                    "messages": [{"role": "user", "content": "make Seren braver"}],
+                    "assistant_id": None,
+                    "chat_id": chat_id,
+                },
+            )
+        body = resp.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["usage"]["output_tokens"], 1000)
+        self.assertEqual(body["usage"]["input_tokens"], 22)
 
     def test_retry_also_garbled_stays_garbled_and_sums_cost(self) -> None:
         chat_id = self._make_chat(stored=self._stored_full_proposable_set())

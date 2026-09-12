@@ -29,6 +29,7 @@ from app.models import (
     AIChatRequest,
     AIEntryPatch,
     ChatMessage,
+    ChatUsage,
     EntryPatchExtraction,
     ExtractEntryPatchRequest,
 )
@@ -94,6 +95,10 @@ def render_extraction_envelope(
     remaining fields reuse `FieldContract` (`store`/`render`) for the descriptor
     formatting, so their lines are byte-identical in shape to what the chat-start
     system message already showed the model (ADR-0067 §3).
+
+    #1899: length is anchored to the entry as it stands (revise) or the field's
+    description (create), never to a token cap — a cap is a ceiling, not a
+    target, and would drift from what the field actually needs.
     """
     stored_ids = {f.get("id") for f in stored if isinstance(f, dict)}
     body_allowed = "body" in stored_ids
@@ -136,12 +141,15 @@ def render_extraction_envelope(
     if body_allowed:
         clause = f'- "body": {body_description + " " if body_description else ""}'
         clause += (
-            "Write the body for the new entry on that basis."
+            "Write the body for the new entry on that basis, at the length its "
+            "description calls for."
             if creating
             else (
                 'Include the "body" key ONLY if the conversation actually revised '
-                "the body; then give its complete revised text. OMIT the \"body\" "
-                "key entirely if the body was not discussed or changed — never "
+                "the body; then give its complete revised text at about the length "
+                "the body has now — a revision changes the content, not the volume, "
+                "unless the author asked for more or less. OMIT the \"body\" key "
+                "entirely if the body was not discussed or changed — never "
                 "reconstruct it from nothing."
             )
         )
@@ -160,9 +168,16 @@ def render_extraction_envelope(
         "shape (the whole list, in order); otherwise give the field's complete "
         "new value."
     )
-    if not creating:
+    if creating:
+        fields_clause += " Keep each field to the length its description calls for."
+    else:
         if title_allowed:
             fields_clause += f' You may also propose a new "title"{title_hint}.'
+        fields_clause += (
+            " Hold each field to about its current length — a revision changes "
+            "the content, not the volume, unless the author asked for more or "
+            "less; an empty field takes its length from its description."
+        )
         fields_clause += " Use {} if nothing changed."
     lines.append(fields_clause)
     lines.append("")
@@ -321,12 +336,14 @@ async def run_entry_patch_extraction(
         return EntryPatchExtraction(
             patch=None,
             cost_usd=chat_reply.cost_usd,
+            usage=chat_reply.usage,
             ok=False,
             error=chat_reply.error or "The model returned nothing to commit.",
         )
     patch = project.validate_ai_entry_patch_for_type(entry_type, chat_reply.content)
     patch = _constrain_to_registered_fields(patch, allowed_ids)
     cost = chat_reply.cost_usd
+    usage = chat_reply.usage
     # #1877: `run_chat_turn` recorded this call's row and reports the chat's
     # total after it; a retry below supersedes it with its own.
     cost_usd_total = chat_reply.cost_usd_total
@@ -353,13 +370,14 @@ async def run_entry_patch_extraction(
             lore_mode="used",
         )
         cost = _sum_costs(cost, retry.cost_usd)
+        usage = _sum_usage(usage, retry.usage)
         if retry.ok:
             cost_usd_total = retry.cost_usd_total
         if retry.ok and (retry.content or "").strip():
             patch = project.validate_ai_entry_patch_for_type(entry_type, retry.content)
             patch = _constrain_to_registered_fields(patch, allowed_ids)
     return EntryPatchExtraction(
-        patch=patch, cost_usd=cost, cost_usd_total=cost_usd_total, ok=True
+        patch=patch, cost_usd=cost, usage=usage, cost_usd_total=cost_usd_total, ok=True
     )
 
 
@@ -370,3 +388,18 @@ def _sum_costs(a: float | None, b: float | None) -> float | None:
     if b is None:
         return a
     return a + b
+
+
+def _sum_usage(a: ChatUsage | None, b: ChatUsage | None) -> ChatUsage | None:
+    """Add two optional per-turn usages field-wise — None means the provider
+    reported none."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return ChatUsage(
+        input_tokens=a.input_tokens + b.input_tokens,
+        cached_input_tokens=a.cached_input_tokens + b.cached_input_tokens,
+        cache_write_tokens=a.cache_write_tokens + b.cache_write_tokens,
+        output_tokens=a.output_tokens + b.output_tokens,
+    )

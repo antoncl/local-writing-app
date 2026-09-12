@@ -388,6 +388,16 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         self.assertTrue(by_id["body"]["proposable"])
         self.assertTrue((by_id["body"].get("description") or "").strip())
 
+    def test_body_description_states_a_length_budget(self) -> None:
+        # #1899: the body description reaches the chat system prompt AND the
+        # extraction envelope's body clause on BOTH branches (create/revise), so
+        # it states the body's budget mode-neutrally; the revise anchor ("about
+        # the length it has now") lives in the envelope's revise branch only.
+        schema = self.service.read_metadata_schema()
+        by_id = {f["id"]: f for f in _fields(self.service, schema, self.hero.id)}
+        self.assertIn("a few paragraphs", by_id["body"]["description"].lower())
+        self.assertNotIn("revising", by_id["body"]["description"])
+
     def test_is_proposable_field_honors_ai_proposable(self) -> None:
         # ADR-0059 §E: the single predicate gates on `ai_proposable` (default
         # True). This is the one place the contract loop and the validate-time

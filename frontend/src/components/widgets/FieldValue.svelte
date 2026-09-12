@@ -43,6 +43,10 @@
      *  caret; `expanded` is its state), not a second strip. */
     controlled?: boolean;
     expanded?: boolean;
+    /** Fold-to-first-row (#1884 slice 2): forwarded to ReferencePicker's `+N`
+     *  chip — the field row owns the persisted expanded state, this just
+     *  requests the flip. */
+    onToggleExpanded?: () => void;
     // Context the read-only widgets need to resolve a value's display:
     // ReferencePicker needs the rosters to turn a ref id into a title/link;
     // ListValueEditor takes the matcher for highlights.
@@ -63,6 +67,7 @@
     embedded = false,
     controlled = false,
     expanded = false,
+    onToggleExpanded = () => {},
     loreEntries = [],
     promptEntries = [],
     structure = null,
@@ -121,6 +126,7 @@
     {embedded}
     {controlled}
     {expanded}
+    {onToggleExpanded}
     value={metadataReferenceValue(field, value)}
     excludeId={excludeId}
     ariaLabel={label}

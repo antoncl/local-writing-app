@@ -16,6 +16,7 @@
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import { foldToFirstRow } from "@/lib/actions/foldToFirstRow";
   import { nodeSet } from "@/lib/views/viewResult";
   import { resolveColor } from "@/lib/utils/colors";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
@@ -62,6 +63,10 @@
     // and the uncontrolled-embedded (#1216) paths keep their own caret + state.
     controlled = false,
     expanded = false,
+    // Fires when the `+N` fold chip is clicked (#1884 slice 2) — the field row
+    // (not the picker) owns the persisted expanded state; this is just the
+    // request to flip it. Every other host leaves it at its no-op default.
+    onToggleExpanded = () => {},
     // In-memory data sources used by the embedded NodePicker.
     structure = null,
     // Research tree (sibling to manuscript) — threaded to the picker.
@@ -95,6 +100,7 @@
     embedded?: boolean;
     controlled?: boolean;
     expanded?: boolean;
+    onToggleExpanded?: () => void;
     structure?: StructureDocument | null;
     researchStructure?: StructureDocument | null;
     loreEntries?: LoreEntrySummary[];
@@ -152,6 +158,15 @@
   const assistantIndex = $derived(new Map($assistantEntriesStore.map((e) => [e.id, e] as const)));
   const selectedRefs = $derived(selectedIds.map((id) => resolveRefById(id)));
   const refNodes = $derived(selectedRefs.map((ref): RefNode => ({ ...ref, entry_type: ref.entry_type ?? "" })));
+
+  // Fold-to-first-row (#1884 slice 2): a `multi` field in controlled rail mode
+  // folds to whatever pills fit its first line + a `+N` chip at rest; `expanded`
+  // (the field row's persisted state) unfolds it. `visibleCount` is the fold
+  // action's measurement, kept as its own state so a non-`multi`/non-`controlled`
+  // field (which never folds) never has to reason about it.
+  let visibleCount = $state(Infinity);
+  const folded = $derived(embedded && controlled && multi && !expanded);
+  const hiddenCount = $derived(folded ? Math.max(0, refNodes.length - visibleCount) : 0);
 
   function toIdList(input: string | string[] | null | undefined): string[] {
     if (input === null || input === undefined) return [];
@@ -321,11 +336,29 @@
          (#1810: MetadataPanel only does that for a list once it actually HOLDS
          pills — an empty list stays compact, the add trigger right-aligned like
          a single ref's, not stretched into its own left-aligned row), pills at
-         natural width either way. -->
-    {#each refNodes as ref (ref.id)}
-      {@render refPill(ref)}
-    {/each}
-    {@render addTrigger()}
+         natural width either way. A LIST folds to its first line + a `+N` chip
+         at rest (#1884 slice 2) — expansion is owned by the field row, not this
+         component: `expanded` / `onToggleExpanded`, persisted by MetadataPanel. -->
+    <span
+      class="ref-pill-row"
+      class:folded
+      use:foldToFirstRow={{ enabled: folded, total: refNodes.length, onFit: (n) => (visibleCount = n) }}
+    >
+      {#each refNodes as ref, i (ref.id)}
+        <span class="ref-pill-slot" class:overflow={folded && i >= visibleCount}>{@render refPill(ref)}</span>
+      {/each}
+      {#if hiddenCount > 0}
+        <button
+          type="button"
+          class="ref-pill ref-pill-more"
+          aria-label={`Show all ${refNodes.length} ${ariaLabel}`}
+          title={`Show all ${refNodes.length}`}
+          onclick={() => onToggleExpanded()}
+        >+{hiddenCount}</button>
+      {:else}
+        {@render addTrigger()}
+      {/if}
+    </span>
   {:else if embedded}
     <!-- Rail-embedded (#1216), uncontrolled: the field row already shows the
          label, so skip the picker's titled header and render just the
@@ -466,14 +499,46 @@
      sizes this element — right-aligned at natural width for a single ref, and
      stretched to a full-width line for a list (its row is `.fr-val.wide`, whose
      `> *` gets flex:1). Pills sit at their natural width and wrap; the trigger
-     trails them. */
+     trails them.
+     The flex rules live on `.ref-pill-row` (not this element) so the row itself
+     is what `foldToFirstRow` measures via `getBoundingClientRect()` — a
+     `display: contents` parent has no box to measure. This element just stays
+     the `> *` MetadataPanel stretches; the row inside is `width: 100%`. */
   .reference-picker.controlled {
+    display: block;
+  }
+  .ref-pill-row {
     display: flex;
     flex-direction: row;
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
     justify-content: flex-start;
+    width: 100%;
+  }
+  .ref-pill-slot {
+    display: contents;
+  }
+  /* Folded (#1884 slice 2): pills past the first line are hidden; while the
+     action measures, `[data-measuring]` lays every pill out (see
+     foldToFirstRow.ts) so the fit is computed on real widths. */
+  .reference-picker.controlled .ref-pill-slot.overflow {
+    display: none;
+  }
+  .reference-picker.controlled .ref-pill-row:global([data-measuring]) .ref-pill-slot.overflow {
+    display: contents;
+  }
+  .ref-pill-more {
+    padding: 2px 8px 2px 6px;
+    border-color: transparent;
+    background: none;
+    color: var(--accent-emphasis);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+    cursor: pointer;
+  }
+  .ref-pill-more:hover {
+    text-decoration: underline;
   }
 
   /* A reference pill (#1732): entity colour-dot + title, always visible, in the

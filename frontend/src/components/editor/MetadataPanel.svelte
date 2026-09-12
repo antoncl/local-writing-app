@@ -5,6 +5,8 @@
   import { aiSettings } from "@/lib/stores/aiSettings.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
   import { fieldIconClass, entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { resolveColor } from "@/lib/utils/colors";
   import { effectiveFieldLabel, effectiveFieldHidden, isMetadataValuePresent, metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
@@ -268,6 +270,17 @@
       field.type === "list" ||
       (field.type === "multi_select" && field.options.length > 0)
     );
+  }
+
+  // A folding list field (#1884 slice 2): a non-empty `entity_ref_list` gets the
+  // gutter's disclosure caret, same condition as `isWide` — an empty list has no
+  // pills to fold, so it stays a bare gutter like every other field.
+  function isFoldableList(field: MetadataFieldDefinition, fieldId: string): boolean {
+    return field.type === "entity_ref_list" && isMetadataValuePresent(displayValue(fieldId));
+  }
+  const FOLD_DEFAULT = false;
+  function fieldExpanded(fieldId: string): boolean {
+    return railSectionCollapse.isExpanded(`field:${fieldId}`, FOLD_DEFAULT);
   }
 
   // The shared record-aware rule (#698): the flip's "Current:" hint and the
@@ -537,9 +550,21 @@
           <!-- Disclosure gutter — reserved so the field glyph lines up with the
                collapsible sections' glyph column (RailSectionHeader): caret ·
                glyph on every rail line (#1438). Reference fields no longer
-               collapse (#1732 — they render inline pills), so every field leaves
-               the gutter empty. -->
-          <span class="fr-disc" aria-hidden="true"></span>
+               collapse to their own list (#1732 — they render inline pills); the
+               gutter carries the caret for a folding LIST field instead (#1884
+               slice 2), empty for every other row. -->
+          {#if isFoldableList(field, fieldId)}
+            <button
+              type="button"
+              class="fr-disc fr-disc-toggle"
+              aria-expanded={fieldExpanded(fieldId)}
+              aria-label={fieldExpanded(fieldId) ? `Show fewer ${fieldLabel}` : `Show all ${fieldLabel}`}
+              title={fieldExpanded(fieldId) ? "Show fewer" : "Show all"}
+              onclick={() => railSectionCollapse.toggle(`field:${fieldId}`, FOLD_DEFAULT)}
+            ><GroupCaret size="xs" collapsed={!fieldExpanded(fieldId)} /></button>
+          {:else}
+            <span class="fr-disc" aria-hidden="true"></span>
+          {/if}
           {#if canClearOwn && isOwnClearable(fieldId) && !isCascadeOverridden(fieldId)}
             <!-- Clear-to-default (#522): the intra-project twin of #517's reset.
                  #517 hangs its "Reset to <source>" gesture off the `ti-versions`
@@ -712,6 +737,8 @@
                 allowUnset={true}
                 embedded={true}
                 controlled={isRefField(field)}
+                expanded={fieldExpanded(fieldId)}
+                onToggleExpanded={() => railSectionCollapse.toggle(`field:${fieldId}`, FOLD_DEFAULT)}
                 value={displayValue(fieldId)}
                 ariaLabel={fieldLabel}
                 loreEntries={loreEntries}
@@ -900,6 +927,20 @@
   .fr-disc {
     flex: none;
     width: 22px;
+  }
+  /* Folding-list caret (#1884 slice 2) — same 22px slot as the empty `.fr-disc`. */
+  .fr-disc-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--text-3);
+    cursor: pointer;
+  }
+  .fr-disc-toggle:hover {
+    color: var(--text);
   }
   .fr-icon {
     flex: none;

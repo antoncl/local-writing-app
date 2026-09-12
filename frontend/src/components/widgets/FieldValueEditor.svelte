@@ -49,6 +49,10 @@
      *  row (not the picker) owns the disclosure caret; `expanded` is that state. */
     controlled?: boolean;
     expanded?: boolean;
+    /** Fold-to-first-row (#1884 slice 2): forwarded to ReferencePicker's `+N`
+     *  chip — the field row owns the persisted expanded state, this just
+     *  requests the flip. */
+    onToggleExpanded?: () => void;
     ariaLabel?: string;
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
@@ -74,6 +78,7 @@
     embedded = false,
     controlled = false,
     expanded = false,
+    onToggleExpanded = () => {},
     ariaLabel,
     loreEntries = [],
     promptEntries = [],
@@ -175,6 +180,7 @@
     {embedded}
     {controlled}
     {expanded}
+    {onToggleExpanded}
     {loreEntries}
     {promptEntries}
     {structure}
@@ -196,6 +202,7 @@
     {embedded}
     {controlled}
     {expanded}
+    {onToggleExpanded}
     value={metadataReferenceValue(field, value)}
     excludeId={excludeId}
     ariaLabel={label}

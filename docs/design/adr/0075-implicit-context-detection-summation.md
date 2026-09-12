@@ -201,7 +201,7 @@ invalidates only forward.
 
 The journal is one **input** to the single gated lore selector (ADR-0057), not a
 rival selector: the final set is `{ explicit picks ∪ detected (journal) ∪ always }
-− { never, manual_only }`, deduped by id, gated on `lore_enabled`. An auto-added
+− { never, manual_only }`, deduped by id, gated on `lore_enabled`. (Since ADR-0086 Amendment 1 the journal itself may hold an id under more than one source — a mention from a better-ranked source appends a second entry — so an entry's identity is `(id, source)`; the selector still dedups by id, keeping the best-ranked.) An auto-added
 entity is surfaced to the author (an audit chip with a "remove + suppress for
 session" action) — **visible** auto-injection is fine; hidden is what scares.
 

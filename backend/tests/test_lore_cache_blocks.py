@@ -446,6 +446,25 @@ class LoreBudgetSendTests(_LoreCacheFixture):
         default_registry.clear()
         hopped = self._prepared(self.chat_id, turn, expansion="one_hop")
         self.assertIn(f'id="{honey}"', self._wire_text(hopped))
+        # ADR-0086 Amendment 1 (#1887): the author then NAMES the Honey Jar.
+        # The journal, which knew it only through the hop, records it again
+        # under the author's message, and `named` now sends it.
+        default_registry.clear()
+        named_later = self._prepared(
+            self.chat_id,
+            [
+                *turn,
+                {"role": "assistant", "content": "Gaslamp it is."},
+                {"role": "user", "content": "And what happens at the Honey Jar?"},
+            ],
+            expansion="named",
+        )
+        self.assertIn(f'id="{honey}"', self._wire_text(named_later))
+        sources = [(e.title, e.source) for e in self.service.read_chat_session(self.chat_id).journal]
+        self.assertEqual(
+            [s for s in sources if s[0] == "Honey Jar"],
+            [("Honey Jar", "depth1_expansion"), ("Honey Jar", "user_message")],
+        )
 
     def test_the_commit_turn_is_not_budgeted(self) -> None:
         # Anti-goal: the `used` turn has nothing inferred to budget and reports nothing.

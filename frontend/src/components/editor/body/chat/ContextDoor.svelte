@@ -24,6 +24,7 @@
     loreFitSummary,
     loreSourceLabel,
   } from "@/lib/chat/loreFit";
+  import { isPromotedEntry, journalEntityCount, journalEntryKey } from "@/lib/chat/journal";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import type {
     ChangedPick,
@@ -208,7 +209,7 @@
     {#if journal.length > 0 || changedPicks.length > 0}
       <button type="button" class="ctx-row" onclick={() => drill({ kind: "section", key: "journal" })}>
         <span class="ctx-row-label">Auto-added this conversation</span>
-        <span class="ctx-row-sub">{journal.length + changedPicks.length}</span>
+        <span class="ctx-row-sub">{journalEntityCount(journal) + changedPicks.length}</span>
         <GroupCaret size="xs" collapsed />
       </button>
     {/if}
@@ -293,9 +294,13 @@
       <div class="cbv-ctx-kv-line"><strong>{pair.label}</strong> · <span class="cbv-ctx-value">{pair.value}</span></div>
     {/each}
   {:else if current.kind === "section" && current.key === "journal"}
-    {#each journal as entry (entry.entry_id)}
+    <!-- Keyed by (id, source): an entry re-noticed from a better-ranked
+         source is a second line, marked as the promotion it is (ADR-0086
+         Amendment 1). The line says by which route, except the plain case
+         of the author's own first mention. -->
+    {#each journal as entry, i (journalEntryKey(entry))}
       <div class="cbv-ctx-kv-line">
-        {entry.title || entry.entry_id}{#if entry.added_at_turn != null} · turn {entry.added_at_turn}{/if}{#if entry.source === "depth1_expansion"} · {loreSourceLabel(entry.source)}{/if}
+        {entry.title || entry.entry_id}{#if entry.added_at_turn != null} · turn {entry.added_at_turn}{/if}{#if entry.source && entry.source !== "user_message"} · {loreSourceLabel(entry.source)}{:else if isPromotedEntry(journal, i)} · named{/if}
       </div>
     {/each}
     {#each changedPicks as pick (pick.id)}

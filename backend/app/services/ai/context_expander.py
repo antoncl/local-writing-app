@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from app.models import ChatSessionJournalEntry
 from app.services.ai.helpers import _attr_or_item, _safe_read_node
+from app.services.ai.lore_budget import source_rank
 from app.services.ai.lore_selection import (
     _build_scene_matcher,
     _scan_matcher_ids,
@@ -92,6 +93,13 @@ def expand_context(
     `turn` is the message index at which the detection fires (the new
     user message's index). Recorded on each entry for the audit UI.
 
+    Scope is by rank (ADR-0086 Amendment 1, #1887): a mention from a source
+    ranked strictly better than any the journal holds for that id appends
+    one more entry under that source and this turn; from the same or a worse
+    rank it adds nothing. The journal therefore may hold one id under more
+    than one source and stays append-only; readers key entries by
+    (id, source), never by id alone.
+
     Returns an empty list when nothing new was detected. Caller is
     responsible for appending the returned entries to the session
     journal and saving — the expander is pure.
@@ -128,21 +136,37 @@ def expand_context(
     combined_direct = direct_ids | rendered_ids | prose_ids
     depth1_ids = _textual_one_hop(project, combined_direct, scene=scene, matcher=matcher)
 
-    # What's already in context via a picker or an earlier journal turn?
-    in_scope: set[str] = set()
+    # What's already in context? A pick always is. For the journal, scope is
+    # by RANK (ADR-0086 Amendment 1, #1887): the best-ranked source it already
+    # holds for an id keeps out a mention from that source or a worse one; a
+    # mention from a strictly better-ranked source appends one more entry for
+    # the id under that source. So a hop can never re-add, a same-source
+    # re-mention adds nothing, and an entry the journal knew only by the hop
+    # (or the scene) is journaled again when the author names it — at most one
+    # entry per (id, source), append-only. The rank is the fit's own
+    # (`source_rank`), so promotion and fit order can't disagree.
+    picked: set[str] = {picked_id for picked_id in picked_ids if picked_id}
+    best_rank: dict[str, int] = {}
     for entry in existing_journal:
-        in_scope.add(entry.entry_id)
-    for picked_id in picked_ids:
-        if picked_id:
-            in_scope.add(picked_id)
+        rank = source_rank(entry.source)
+        if rank < best_rank.get(entry.entry_id, rank + 1):
+            best_rank[entry.entry_id] = rank
 
-    # Sorted so the persisted journal's entry order is deterministic run-to-run
-    # (these are sets; the final lore set is order-independent, but a stable
-    # journal keeps the chat node's front-matter free of spurious byte diffs).
-    new_direct = sorted(direct_ids - in_scope)
-    new_rendered = sorted(rendered_ids - in_scope)
-    new_prose = sorted(prose_ids - in_scope)
-    new_depth1 = sorted(depth1_ids - combined_direct - in_scope)
+    def novel(ids: set[str], source_name: str) -> list[str]:
+        # Sorted so the persisted journal's entry order is deterministic
+        # run-to-run (a stable journal keeps the chat node's front-matter
+        # free of spurious byte diffs).
+        rank = source_rank(source_name)
+        return sorted(
+            entry_id
+            for entry_id in ids
+            if entry_id not in picked and best_rank.get(entry_id, rank + 1) > rank
+        )
+
+    new_direct = novel(direct_ids, source)
+    new_rendered = novel(rendered_ids, "rendered_prompt")
+    new_prose = novel(prose_ids, "scene_prose")
+    new_depth1 = novel(depth1_ids - combined_direct, "depth1_expansion")
 
     entries: list[ChatSessionJournalEntry] = []
     entries.extend(_make_entries(project, new_direct, source=source, turn=turn))

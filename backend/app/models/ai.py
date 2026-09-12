@@ -588,6 +588,12 @@ class ChatSessionJournalEntry(BaseModel):
 
     `source` records WHY the entry entered scope. Useful for the audit UI
     and for debugging surprising auto-includes.
+
+    Identity is (entry_id, source), not entry_id: a mention from a source
+    ranked better than any the journal holds for an id appends a second
+    entry for that id (ADR-0086 Amendment 1). Readers must not build an
+    id-keyed map that keeps one entry arbitrarily; the selector keeps the
+    best-ranked candidate per id.
     """
     entry_id: str
     title: str = ""

@@ -147,10 +147,12 @@ def _detect_and_persist_journal(
 
     `system_prompt` is the fully-rendered, locked system prompt the caller
     already has — passed through to `expand_context`'s `rendered_text` as a
-    third scan surface in the SAME pass. The journal's existing dedup
-    (`in_scope`) makes this a first-turn-only detection: once an entity from
-    the (frozen) system prompt is journaled, later turns re-scan the same
-    text but find nothing new.
+    third scan surface in the SAME pass. The journal's rank rule (ADR-0086
+    Amendment 1: a mention adds an entry only from a source ranked better
+    than any the journal holds for that id) makes this a first-turn-only
+    detection in practice: whatever the frozen prompt names is journaled as
+    `rendered_prompt` on turn 1, and later re-scans of the same text find
+    nothing better-ranked to add.
     """
     from app.services.ai.context_expander import expand_context
 

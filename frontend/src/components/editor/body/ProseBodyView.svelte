@@ -82,9 +82,9 @@
     type FloatingMenuState,
     type ToolbarAction,
   } from "@/lib/editor-core/selectionToolbar";
-  import { buildTableMenuAction } from "@/lib/editor-core/tableMenuActions";
+  import { formattingToolbarParts, type BlockWrapType } from "@/lib/editor-core/formattingToolbarActions";
   import { visibleSelectionRect, selectionEndpointRect } from "@/lib/editor-core/selectionRects";
-  import { AlignedTableCell, AlignedTableHeader, setColumnAlign } from "@/lib/editor-core/alignedTable";
+  import { AlignedTableCell, AlignedTableHeader } from "@/lib/editor-core/alignedTable";
   import ProseSlashMenu from "./ProseSlashMenu.svelte";
   import ProseSelectionToolbar from "./ProseSelectionToolbar.svelte";
   import ProseAIToolbar from "./ProseAIToolbar.svelte";
@@ -108,10 +108,6 @@
     PromptEntrySummary,
   } from "@/lib/types";
 
-  // ---------- Local types ----------
-  type BlockWrapType = "blockquote" | "bulletList" | "orderedList";
-
-  
 
   // bound out so MetadataPanel's computedFieldString and the editor-hint
   
@@ -704,20 +700,16 @@
     ];
   }
 
-  // ---------- Table toolbar ----------
-  function setCellAlign(align: "left" | "center" | "right") {
-    if (editor) setColumnAlign(editor, align);
-  }
-
   // ---------- Selection toolbar ----------
   // One floating menu (#1223): shown on a non-empty text selection OR when the
   // caret is in a table. The general formatting group needs a selection; the
   // Table group needs a table — so the action list is built to match, and the
-  // menu hides only when neither applies.
+  // menu hides only when neither applies. The table follows the editor, not the
+  // document kind (#1893): a lore entry's body gets it like a scene does.
   function updateSelectionMenu() {
     if (!editor || !editorFrame) return;
     const { selection } = editor.state;
-    const inTable = documentKind === "manuscript" && editor.isActive("table");
+    const inTable = editor.isActive("table");
     const selectedText = selection.empty
       ? ""
       : editor.state.doc.textBetween(selection.from, selection.to, " ").trim();
@@ -866,11 +858,17 @@
 
   // Builds the unified menu (#1223). The general formatting group (B/I/S,
   // Revise, Style, To-do) applies to a text selection; the Table menu applies
-  // in a table. Both can be present (a selection inside a table).
+  // in a table. Both can be present (a selection inside a table). The
+  // formatting parts are the shared core the rail's long_text fields use too
+  // (#1893); the body adds Revise and To-do, and its own block transforms.
   function getSelectionToolbarActions(hasText: boolean, inTable: boolean): ToolbarAction[] {
     if (!editor) return [];
+    const { marks, style, table } = formattingToolbarParts(editor, hasText, inTable, {
+      setHeading: applySelectionHeading,
+      wrapBlock: applySelectionBlockWrap,
+    });
     const actions: ToolbarAction[] = [];
-    if (hasText) {
+    if (style) {
       const reviseEntries = promptEntriesForSurface(promptCtx, "selection");
       const reviseAction: ToolbarAction | null =
         reviseEntries.length === 0
@@ -893,29 +891,13 @@
                 })),
               };
       actions.push(
-        { kind: "button", id: "bold", label: "B", run: () => void editor?.chain().focus().toggleBold().run() },
-        { kind: "button", id: "italic", label: "I", run: () => void editor?.chain().focus().toggleItalic().run() },
-        { kind: "button", id: "strike", label: "S", run: () => void editor?.chain().focus().toggleStrike().run() },
+        ...marks,
         ...(reviseAction ? [reviseAction] : []),
-        {
-          kind: "menu",
-          id: "style",
-          label: "Style",
-          items: [
-            { id: "paragraph", label: "Paragraph", run: () => editor?.chain().focus().setParagraph().run() },
-            { id: "heading-1", label: "Heading 1", run: () => applySelectionHeading(1) },
-            { id: "heading-2", label: "Heading 2", run: () => applySelectionHeading(2) },
-            { id: "heading-3", label: "Heading 3", run: () => applySelectionHeading(3) },
-            { separator: true, id: "style-sep" },
-            { id: "bullet-list", label: "Bullet list", run: () => applySelectionBlockWrap("bulletList") },
-            { id: "numbered-list", label: "Numbered list", run: () => applySelectionBlockWrap("orderedList") },
-            { id: "quote", label: "Quote", run: () => applySelectionBlockWrap("blockquote") },
-          ],
-        },
+        style,
         { kind: "button", id: "todo", label: "TODO", run: markSelectionAsTodo },
       );
     }
-    if (inTable) actions.push(buildTableMenuAction(editor, setCellAlign));
+    if (table) actions.push(table);
     return actions;
   }
 

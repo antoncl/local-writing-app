@@ -12,7 +12,7 @@
   import { AlignedTableCell, AlignedTableHeader } from "@/lib/editor-core/alignedTable";
   import { placeSelectionToolbar, type FloatingMenuState, type ToolbarAction } from "@/lib/editor-core/selectionToolbar";
   import { visibleSelectionRect, selectionEndpointRect } from "@/lib/editor-core/selectionRects";
-  import { buildLongTextToolbarActions } from "@/lib/editor-core/longTextToolbarActions";
+  import { buildLongTextToolbarActions } from "@/lib/editor-core/formattingToolbarActions";
   import { countWords } from "@/lib/utils/wordCount";
   import ProseSelectionToolbar from "@/components/editor/body/ProseSelectionToolbar.svelte";
 

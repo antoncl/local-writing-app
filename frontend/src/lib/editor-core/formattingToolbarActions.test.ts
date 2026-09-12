@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Editor } from "@tiptap/core";
-import { buildLongTextToolbarActions } from "./longTextToolbarActions";
-import { isToolbarSeparator, isToolbarSubmenu, type ToolbarMenuEntry } from "./selectionToolbar";
+import { buildLongTextToolbarActions, formattingToolbarParts } from "./formattingToolbarActions";
+import { isToolbarSeparator, isToolbarSubmenu, type ToolbarAction, type ToolbarMenuEntry } from "./selectionToolbar";
 
 // A chainable editor stub: `chain()` returns a Proxy whose every property
 // access yields a function returning the proxy itself (so calls compose
@@ -33,11 +33,11 @@ function makeEditor() {
   return { editor, calls, callArgs };
 }
 
-function actionIds(actions: ReturnType<typeof buildLongTextToolbarActions>) {
+function actionIds(actions: ToolbarAction[]) {
   return actions.map((a) => a.id);
 }
 
-function styleItems(actions: ReturnType<typeof buildLongTextToolbarActions>): ToolbarMenuEntry[] {
+function styleItems(actions: ToolbarAction[]): ToolbarMenuEntry[] {
   const style = actions.find((a) => a.id === "style");
   if (!style || style.kind !== "menu") throw new Error("no style menu");
   return style.items;
@@ -45,6 +45,12 @@ function styleItems(actions: ReturnType<typeof buildLongTextToolbarActions>): To
 
 function leafIds(items: ToolbarMenuEntry[]): string[] {
   return items.map((e) => e.id);
+}
+
+function runLeaf(items: ToolbarMenuEntry[], id: string) {
+  const leaf = items.find((e) => e.id === id);
+  if (!leaf || isToolbarSeparator(leaf) || isToolbarSubmenu(leaf)) throw new Error(`no ${id} leaf`);
+  void leaf.run();
 }
 
 describe("buildLongTextToolbarActions (#1884 slice 1)", () => {
@@ -100,13 +106,64 @@ describe("buildLongTextToolbarActions (#1884 slice 1)", () => {
   it("running insert-table calls insertTable with the 3x3 header default", () => {
     const { editor, calls, callArgs } = makeEditor();
     const actions = buildLongTextToolbarActions(editor, true, false);
-    const insertTable = styleItems(actions).find((e) => e.id === "insert-table");
-    if (!insertTable || isToolbarSeparator(insertTable) || isToolbarSubmenu(insertTable)) {
-      throw new Error("no insert-table leaf");
-    }
-    void insertTable.run();
+    runLeaf(styleItems(actions), "insert-table");
     expect(calls).toContain("insertTable");
     expect(calls).toContain("run");
     expect(callArgs.insertTable).toEqual([{ rows: 3, cols: 3, withHeaderRow: true }]);
+  });
+});
+
+describe("formattingToolbarParts (#1893: the body and the rail share one formatting core)", () => {
+  it("returns the parts separately so a host can interleave its own actions", () => {
+    const { editor } = makeEditor();
+    const parts = formattingToolbarParts(editor, true, true);
+    expect(actionIds(parts.marks)).toEqual(["bold", "italic", "strike"]);
+    expect(parts.style?.id).toBe("style");
+    expect(parts.table?.id).toBe("table");
+    const idle = formattingToolbarParts(editor, false, false);
+    expect(idle).toEqual({ marks: [], style: null, table: null });
+  });
+
+  it("the default block transforms toggle on the whole textblock", () => {
+    const { editor, calls, callArgs } = makeEditor();
+    const parts = formattingToolbarParts(editor, true, false);
+    if (!parts.style || parts.style.kind !== "menu") throw new Error("no style menu");
+    runLeaf(parts.style.items, "heading-2");
+    expect(calls).toEqual(["focus", "toggleHeading", "run"]);
+    expect(callArgs.toggleHeading).toEqual([{ level: 2 }]);
+    calls.length = 0;
+    runLeaf(parts.style.items, "bullet-list");
+    expect(calls).toEqual(["focus", "toggleBulletList", "run"]);
+    calls.length = 0;
+    runLeaf(parts.style.items, "numbered-list");
+    expect(calls).toEqual(["focus", "toggleOrderedList", "run"]);
+    calls.length = 0;
+    runLeaf(parts.style.items, "quote");
+    expect(calls).toEqual(["focus", "toggleBlockquote", "run"]);
+  });
+
+  it("a host's block transforms replace the defaults (the body's partial-selection extraction)", () => {
+    const { editor, calls } = makeEditor();
+    const setHeading = vi.fn();
+    const wrapBlock = vi.fn();
+    const parts = formattingToolbarParts(editor, true, false, { setHeading, wrapBlock });
+    if (!parts.style || parts.style.kind !== "menu") throw new Error("no style menu");
+    runLeaf(parts.style.items, "heading-3");
+    runLeaf(parts.style.items, "quote");
+    runLeaf(parts.style.items, "bullet-list");
+    expect(setHeading).toHaveBeenCalledWith(3);
+    expect(wrapBlock.mock.calls).toEqual([["blockquote"], ["bulletList"]]);
+    expect(calls).toEqual([]);
+  });
+
+  it("Insert table is offered in the Style menu only outside a table, whatever the host", () => {
+    const { editor } = makeEditor();
+    const outside = formattingToolbarParts(editor, true, false, { setHeading: vi.fn() });
+    const inside = formattingToolbarParts(editor, true, true, { setHeading: vi.fn() });
+    if (!outside.style || outside.style.kind !== "menu" || !inside.style || inside.style.kind !== "menu") {
+      throw new Error("no style menu");
+    }
+    expect(leafIds(outside.style.items)).toContain("insert-table");
+    expect(leafIds(inside.style.items)).not.toContain("insert-table");
   });
 });

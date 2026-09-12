@@ -2,7 +2,7 @@
 // twelve-button ProseTableToolbar: the same TipTap commands, regrouped into
 // Row / Column / Align / Header submenus plus a destructive "Delete table".
 //
-// Alignment is column-wide and lives in the host (setCellAlign walks the table
+// Alignment is column-wide and lives in alignedTable (setColumnAlign walks the table
 // geometry), so it is injected as `onAlign` rather than a plain chain call.
 import type { Editor } from "@tiptap/core";
 import type { ToolbarMenuAction } from "./selectionToolbar";

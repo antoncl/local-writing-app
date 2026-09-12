@@ -50,6 +50,7 @@ from app.services.ai import tokens as ai_tokens
 from app.services.ai.call_resolver import resolve_call_params
 from app.services.ai.chat import (
     expand_and_prepare_chat_blocks,
+    record_stream_turn,
     run_chat_turn,
     system_prompt_cache_blocks,
 )
@@ -583,6 +584,11 @@ async def ai_chat_stream(
                 ),
                 descriptor=descriptor,
                 on_error=lambda ev: _record_stream_error(project, ev),
+                # #1877: the server ran the turn, so the server records its
+                # ai_invocations row — before `done` reaches the client.
+                on_done=lambda ev, usage, cost_usd: record_stream_turn(
+                    project, request.chat_id, ev, usage, cost_usd
+                ),
             ),
             http_request,
         ),

@@ -17,6 +17,19 @@ if TYPE_CHECKING:
     from app.services.machine_settings import MachineSettings
 
 
+def chat_usage_from_metrics(usage: UsageMetrics) -> ChatUsage:
+    """The one dispatch-layer → wire mapping. `UsageMetrics` carries the
+    1h/5m cache-write split; `ChatUsage` (the API, the transcript, the
+    invocation ledger) carries the total only, so the split is folded here
+    and nowhere else."""
+    return ChatUsage(
+        input_tokens=usage.input_tokens,
+        cached_input_tokens=usage.cached_input_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        output_tokens=usage.output_tokens,
+    )
+
+
 async def translate_usage_to_cost(
     usage: UsageMetrics | None,
     *,
@@ -35,12 +48,7 @@ async def translate_usage_to_cost(
     does, so the oracle auto-heals once it lists the model."""
     if usage is None:
         return None, None
-    wire_usage = ChatUsage(
-        input_tokens=usage.input_tokens,
-        cached_input_tokens=usage.cached_input_tokens,
-        cache_write_tokens=usage.cache_write_tokens,
-        output_tokens=usage.output_tokens,
-    )
+    wire_usage = chat_usage_from_metrics(usage)
     if not provider or not model:
         return wire_usage, None
     descriptor = await ai_tokens.priced_descriptor_for(

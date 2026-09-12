@@ -271,9 +271,10 @@ class CrossKindCostDispatchTests(unittest.TestCase):
 
 
 class ChatSessionCostViaLogTests(unittest.TestCase):
-    """Phase C2 Slice B. Chat-session cost is no longer accumulated on
-    the chat YAML — each non-zero save delta lands as an ai_invocations
-    row tagged with chat_session_id; cost_usd_total re-derives from the log.
+    """Phase C2 Slice B. Chat-session cost is not accumulated on the chat
+    YAML — each turn lands as an ai_invocations row tagged with
+    chat_session_id (recorded by the server that ran it, #1877);
+    cost_usd_total re-derives from the log.
     """
 
     def setUp(self) -> None:
@@ -293,18 +294,11 @@ class ChatSessionCostViaLogTests(unittest.TestCase):
         return chat.id
 
     def _save_with_cost(self, chat_id: str, cost: float) -> None:
-        from app.models import SaveChatSessionRequest
-        existing = self.service.read_chat_session(chat_id)
-        self.service.save_chat_session(
-            chat_id,
-            SaveChatSessionRequest(
-                title=existing.title,
-                prompt_entry_id=existing.prompt_entry_id,
-                assistant_id=existing.assistant_id,
-                system_prompt=existing.system_prompt,
-                pinned=existing.pinned,
-                cost_delta_usd=cost,
-            ),
+        # #1877: a turn's row is recorded by the server that ran it, through
+        # the one shaped seam every turn kind uses — never a client delta.
+        self.service.record_chat_turn_invocation(
+            self.service.read_chat_session(chat_id),
+            provider="anthropic", model="claude-test", usage=None, cost_usd=cost,
         )
 
     def test_chat_save_appends_invocation_row_with_chat_id(self) -> None:
@@ -364,107 +358,10 @@ class ChatSessionCostViaLogTests(unittest.TestCase):
         chat = self.service.read_chat_session(chat_id)
         self.assertAlmostEqual(chat.cost_usd_total, 0.02, places=6)
 
-    # --- #1794: the recorded row's model is the turn's actual model, not
-    # the assistant's static `ai_model` config (blank for tier assistants).
-
-    def _save_turn(
-        self,
-        chat_id: str,
-        *,
-        cost: float,
-        model: str | None = None,
-        provider: str | None = None,
-        assistant_id: str | None = None,
-    ) -> None:
-        from app.models import (
-            ChatSessionMessage,
-            ChatUsage,
-            SaveChatSessionRequest,
-        )
-
-        existing = self.service.read_chat_session(chat_id)
-        messages = [
-            ChatSessionMessage(role="user", content="hi"),
-            ChatSessionMessage(
-                role="assistant",
-                content="reply",
-                usage=ChatUsage(input_tokens=10, output_tokens=5),
-                provider=provider,
-                model=model,
-            ),
-        ]
-        self.service.save_chat_session(
-            chat_id,
-            SaveChatSessionRequest(
-                title=existing.title,
-                prompt_entry_id=existing.prompt_entry_id,
-                assistant_id=assistant_id if assistant_id is not None else existing.assistant_id,
-                system_prompt=existing.system_prompt,
-                pinned=existing.pinned,
-                messages=messages,
-                cost_delta_usd=cost,
-            ),
-        )
-
-    def _make_assistant(self, *, ai_model: str = "", ai_provider: str = "") -> str:
-        from app.models import (
-            CreateAssistantEntryRequest,
-            SaveAssistantEntryRequest,
-        )
-
-        entry = self.service.create_assistant_entry(
-            CreateAssistantEntryRequest(title="Assistant", layer_id=None)
-        )
-        self.service.save_assistant_entry(
-            entry.id,
-            SaveAssistantEntryRequest(
-                title="Assistant",
-                metadata={"ai_model": ai_model, "ai_provider": ai_provider},
-            ),
-        )
-        return entry.id
-
-    def _last_row(self, chat_id: str) -> dict:
-        body = self.client.get(f"/api/ai/invocations?chat_session_id={chat_id}").json()
-        return body["invocations"][-1]
-
-    def test_chat_save_records_the_turns_actual_model_not_blank_config(self) -> None:
-        # #1794: a tier-configured assistant leaves `ai_model` blank, so
-        # reading the assistant config alone recorded model="" and every
-        # row bucketed as "unknown model". The model actually used is
-        # stamped on the assistant message (ADR-0076) — record THAT.
-        chat_id = self._create_chat()
-        self._save_turn(chat_id, cost=0.05, provider="anthropic", model="claude-sonnet-5")
-        row = self._last_row(chat_id)
-        self.assertEqual(row["model"], "claude-sonnet-5")
-        self.assertEqual(row["provider"], "anthropic")
-
-    def test_message_provenance_wins_over_assistant_static_config(self) -> None:
-        # An exact-model assistant (ai_model set) whose turn ran on a
-        # different model: the row records what the turn used, not the
-        # stale config value.
-        assistant_id = self._make_assistant(ai_model="config-model", ai_provider="config-prov")
-        chat_id = self._create_chat()
-        self._save_turn(
-            chat_id,
-            cost=0.05,
-            provider="turn-prov",
-            model="turn-model",
-            assistant_id=assistant_id,
-        )
-        row = self._last_row(chat_id)
-        self.assertEqual(row["model"], "turn-model")
-        self.assertEqual(row["provider"], "turn-prov")
-
-    def test_falls_back_to_assistant_config_when_message_lacks_provenance(self) -> None:
-        # Older messages predate per-turn provenance (no model on the
-        # message). The assistant's static config still covers them.
-        assistant_id = self._make_assistant(ai_model="config-model", ai_provider="config-prov")
-        chat_id = self._create_chat()
-        self._save_turn(chat_id, cost=0.05, model=None, provider=None, assistant_id=assistant_id)
-        row = self._last_row(chat_id)
-        self.assertEqual(row["model"], "config-model")
-        self.assertEqual(row["provider"], "config-prov")
+    # #1794's "the row's model is the turn's actual model, not the assistant's
+    # static config" is now structural: the row is written by the server from
+    # the stream's own provenance (#1877) — see StreamingChatCostTests in
+    # test_ai_chat_cost_surface — so there is no config fallback to test.
 
 
 class InvocationCsvSerializationTests(unittest.TestCase):

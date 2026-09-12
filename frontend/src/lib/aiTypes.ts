@@ -552,9 +552,6 @@ export type SaveChatSessionRequest = {
   messages: ChatSessionMessage[];
   inputs?: Record<string, unknown>;
   journal?: ChatSessionJournalEntry[];
-  // V2: incremental cost to ADD to persisted cost_usd_total. Backend
-  // clamps negatives to 0 (cost is monotonic).
-  cost_delta_usd?: number;
   // V2: slot labels whose cache_write_times entry should be stamped
   // with the current server time. Send when the response's usage had
   // cache_write_tokens > 0 for that slot.

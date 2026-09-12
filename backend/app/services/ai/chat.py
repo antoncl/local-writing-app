@@ -10,12 +10,14 @@ the two share only the system-prompt cache-block via `system_prompt_cache_blocks
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Literal
 
 from app.models import (
     AIChatRequest,
     AIChatResponse,
     ChatSession,
+    ChatUsage,
     SaveChatSessionRequest,
 )
 from app.services import machine_settings as machine_settings_service
@@ -30,6 +32,8 @@ from app.services.project.errors import ProjectServiceError
 # touches no chat state. A closed type, not a free string, so a typo can't
 # silently pick a branch.
 LoreMode = Literal["implicit", "used"]
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
@@ -356,6 +360,30 @@ def expand_and_prepare_chat_blocks(
             blocks.append({"text": picks_xml, "tier": "volatile"})
 
     return (blocks or None), chat_id, list(new_entries)
+
+
+def record_stream_turn(
+    project: ProjectService,
+    chat_id: str | None,
+    ev: ai_providers.StreamDone,
+    usage: ChatUsage | None,
+    cost_usd: float | None,
+) -> None:
+    """The streamed turn's own `ai_invocations` row (#1877), recorded by the
+    server that ran the call — the stream transform's `on_done` hook. Mirrors
+    the commit extraction's `_record_extraction_call`: the row carries THIS
+    call's usage and provenance, never a copy of the transcript's last message,
+    and a ledger that can't be written is logged, never allowed to disrupt the
+    stream. A chat-less call (no `chat_id`) has no session to attribute to."""
+    if not chat_id:
+        return
+    try:
+        chat = project.read_chat_session(chat_id)
+        project.record_chat_turn_invocation(
+            chat, provider=ev.provider, model=ev.model, usage=usage, cost_usd=cost_usd
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Couldn't record the streamed chat turn's invocation row")
 
 
 async def run_chat_turn(

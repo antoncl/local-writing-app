@@ -133,25 +133,30 @@ class ChatSessionEndpointTests(unittest.TestCase):
         # fabricated 0.0 (#697).
         created = self.client.post("/api/chats", json={"title": "T"}).json()
         base = {"title": "T", "context_items": [], "messages": []}
-        no_delta = self.client.put(f"/api/chats/{created['id']}", json=base).json()
-        self.assertIsNone(no_delta["cost_usd_total"])
+        fresh = self.client.put(f"/api/chats/{created['id']}", json=base).json()
+        self.assertIsNone(fresh["cost_usd_total"])
 
-        # A priced delta lands in the log AND the response's total.
-        priced = self.client.put(
-            f"/api/chats/{created['id']}", json={**base, "cost_delta_usd": 0.007}
-        ).json()
+        # #1877: the server records each turn's row itself; the next save's
+        # response projects it — the same projection a GET computes.
+        def record(cost: float) -> None:
+            self.service.record_chat_turn_invocation(
+                self.service.read_chat_session(created["id"]),
+                provider="anthropic", model="m", usage=None, cost_usd=cost,
+            )
+
+        record(0.007)
+        priced = self.client.put(f"/api/chats/{created['id']}", json=base).json()
         self.assertAlmostEqual(priced["cost_usd_total"], 0.007)
 
-        # A later delta accumulates, and the save response matches the GET
+        # A later row accumulates, and the save response matches the GET
         # projection exactly (one truth, two doors).
-        again = self.client.put(
-            f"/api/chats/{created['id']}", json={**base, "cost_delta_usd": 0.003}
-        ).json()
+        record(0.003)
+        again = self.client.put(f"/api/chats/{created['id']}", json=base).json()
         self.assertAlmostEqual(again["cost_usd_total"], 0.010)
         reread = self.client.get(f"/api/chats/{created['id']}").json()
         self.assertAlmostEqual(reread["cost_usd_total"], 0.010)
 
-        # A zero/absent delta preserves the accrued total instead of zeroing it
+        # A plain save preserves the accrued total instead of zeroing it
         # (the original defect: the response reset it to 0.0 on every save).
         renamed = self.client.put(
             f"/api/chats/{created['id']}", json={**base, "title": "Renamed"}

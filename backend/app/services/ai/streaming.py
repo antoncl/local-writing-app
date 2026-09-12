@@ -21,7 +21,9 @@ import json
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
+from app.models import ChatUsage
 from app.services.ai import providers as ai_providers
+from app.services.ai.usage import chat_usage_from_metrics
 
 if TYPE_CHECKING:
     from app.services.ai.profiles import ModelDescriptor
@@ -31,16 +33,32 @@ def _ndjson(line: dict[str, Any]) -> str:
     return json.dumps(line, ensure_ascii=False) + "\n"
 
 
+def _price_done(
+    ev: ai_providers.StreamDone, descriptor: ModelDescriptor | None
+) -> tuple[ChatUsage | None, float | None]:
+    """The terminal event's usage in wire shape, and its USD cost when a
+    pricing descriptor is available. Computed ONCE per stream and shared by
+    the `done` line and the `on_done` ledger hook, so the two can't disagree."""
+    if ev.usage is None:
+        return None, None
+    usage = chat_usage_from_metrics(ev.usage)
+    if descriptor is None:
+        return usage, None
+    from app.services.ai.profiles import compute_cost
+
+    return usage, compute_cost(ev.usage, descriptor)
+
+
 def _done_line(
     ev: ai_providers.StreamDone,
     *,
     policy: str,
     extra_done: dict[str, Any],
-    descriptor: ModelDescriptor | None,
+    usage: ChatUsage | None,
+    cost_usd: float | None,
 ) -> dict[str, Any]:
     """Assemble the terminal `done` object: base fields + `extra_done`, plus
-    `usage` when the stream reported it and `cost_usd` when a pricing
-    descriptor is available to price that usage.
+    `usage` when the stream reported it and `cost_usd` when it was priced.
     """
     line: dict[str, Any] = {
         "type": "done",
@@ -52,17 +70,31 @@ def _done_line(
         "policy": policy,
         **extra_done,
     }
-    if ev.usage is not None:
-        line["usage"] = {
-            "input_tokens": ev.usage.input_tokens,
-            "cached_input_tokens": ev.usage.cached_input_tokens,
-            "cache_write_tokens": ev.usage.cache_write_tokens,
-            "output_tokens": ev.usage.output_tokens,
-        }
-        if descriptor is not None:
-            from app.services.ai.profiles import compute_cost
-            line["cost_usd"] = compute_cost(ev.usage, descriptor)
+    if usage is not None:
+        line["usage"] = usage.model_dump()
+        if cost_usd is not None:
+            line["cost_usd"] = cost_usd
     return line
+
+
+def _finish(
+    ev: ai_providers.StreamDone,
+    *,
+    policy: str,
+    extra_done: dict[str, Any],
+    descriptor: ModelDescriptor | None,
+    on_done: Callable[[ai_providers.StreamDone, ChatUsage | None, float | None], None] | None,
+) -> str:
+    """Price the terminal event once, hand it to the ledger hook, then render
+    the `done` line — in that order, so the row exists before the client sees
+    `done`. A failing hook never disrupts the stream (mirrors `on_error`)."""
+    usage, cost_usd = _price_done(ev, descriptor)
+    if on_done is not None:
+        with contextlib.suppress(Exception):
+            on_done(ev, usage, cost_usd)
+    return _ndjson(
+        _done_line(ev, policy=policy, extra_done=extra_done, usage=usage, cost_usd=cost_usd)
+    )
 
 
 def _error_line(ev: ai_providers.StreamError, *, policy: str) -> dict[str, Any]:
@@ -86,6 +118,8 @@ def transform_provider_events_to_ndjson(
     extra_done: dict[str, Any] | None = None,
     descriptor: ModelDescriptor | None = None,
     on_error: Callable[[ai_providers.StreamError], None] | None = None,
+    on_done: Callable[[ai_providers.StreamDone, ChatUsage | None, float | None], None]
+    | None = None,
 ) -> Iterator[str]:
     """Adapt provider events to NDJSON lines. Suppresses empty deltas.
 
@@ -98,6 +132,12 @@ def transform_provider_events_to_ndjson(
     emitted — the endpoint uses it to record the failure (message + the private
     `detail`) to the project's errors.log (#1601). The wire line carries only the
     user-facing `error`, never `detail`.
+
+    `on_done`, when given, is called with the terminal `StreamDone` plus the
+    priced usage BEFORE the `done` line is emitted — the endpoint uses it to
+    record the turn's own `ai_invocations` row (#1877), so the row exists by
+    the time the client sees `done` and its next read of the chat already
+    projects it. Like `on_error`, a failing hook never disrupts the stream.
     """
     extra_done = extra_done or {}
     try:
@@ -109,9 +149,9 @@ def transform_provider_events_to_ndjson(
                 if ev.text:
                     yield _ndjson({"type": "thinking", "text": ev.text})
             elif isinstance(ev, ai_providers.StreamDone):
-                yield _ndjson(_done_line(
-                    ev, policy=policy, extra_done=extra_done, descriptor=descriptor
-                ))
+                yield _finish(
+                    ev, policy=policy, extra_done=extra_done, descriptor=descriptor, on_done=on_done
+                )
             elif isinstance(ev, ai_providers.StreamError):
                 if on_error is not None:
                     # Recording a failure must never disrupt the stream.

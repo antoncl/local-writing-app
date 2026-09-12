@@ -282,15 +282,13 @@ class ChatSessionsMixin:
         # The save response must carry the same projection read_chat_session
         # computes — the UI keeps the returned session as its live copy, and a
         # hardcoded 0.0 here zeroed its session-cost display on every save
-        # (ADR-0076 decision 6). `existing` was projected from the log above,
-        # BEFORE the delta row landed, so adding the accepted delta mirrors the
-        # log exactly; None (unknown total, #697) stays None when no priced
-        # delta arrives. The log remains the source of truth on read; the
-        # persisted snapshot additionally keeps list_chat_sessions' roster
-        # cost current, which the hardcoded 0.0 never did.
+        # (ADR-0076 decision 6). `existing` was projected from the log just
+        # above, and every turn's row is written by the server that ran it
+        # (#1877) before the client can save, so the projection IS the total;
+        # None (unknown total, #697) stays None while no priced row exists.
+        # The log remains the source of truth on read; the persisted snapshot
+        # additionally keeps list_chat_sessions' roster cost current.
         next_cost = existing.cost_usd_total
-        if request.cost_delta_usd is not None and request.cost_delta_usd > 0:
-            next_cost = (next_cost or 0.0) + float(request.cost_delta_usd)
         next_cache_times = self._touched_cache_write_times(existing, request)
 
         updated = ChatSession(
@@ -354,9 +352,6 @@ class ChatSessionsMixin:
                 else request.seen_revisions
             ),
         )
-        # The row is tagged from `updated` — the prompt/subject this save
-        # persists — so it never disagrees with the file it accompanies.
-        self._record_chat_cost_delta(updated, request)
         self._write_chat_session(path, updated)
         return updated
 
@@ -412,54 +407,6 @@ class ChatSessionsMixin:
             )
         return list(request.journal)
 
-    def _record_chat_cost_delta(
-        self, chat: ChatSession, request: SaveChatSessionRequest
-    ) -> None:
-        """Phase C2 Slice B: per-turn cost no longer lives on the chat YAML
-        — it lands as an ai_invocations row tagged with chat_session_id.
-        cost_usd_total re-derives from the unified log on read; the value the
-        save path writes/returns is a snapshot of that same projection
-        (see save_chat_session), never a second source of truth."""
-        if request.cost_delta_usd is None or request.cost_delta_usd <= 0:
-            return
-        delta = float(request.cost_delta_usd)
-        # Provider/model for the telemetry row. The assistant's static
-        # config is only a FALLBACK: a tier-configured assistant leaves
-        # `ai_model` blank (the concrete model is resolved from the tier at
-        # send time), so reading the config alone recorded an empty model
-        # and every row bucketed as "unknown model" (#1794). The turn's own
-        # provenance — stamped on the assistant message from the stream
-        # response (ADR-0076) — is ground truth and wins below; the config
-        # still covers older messages that predate per-turn provenance.
-        provider = ""
-        model = ""
-        try:
-            assistant = self.resolve_assistant(request.assistant_id) if request.assistant_id else None
-            if assistant is not None:
-                raw_provider = assistant.metadata.get("ai_provider")
-                raw_model = assistant.metadata.get("ai_model")
-                if isinstance(raw_provider, str):
-                    provider = raw_provider
-                if isinstance(raw_model, str):
-                    model = raw_model
-        except Exception:
-            pass
-        # Pick up the last assistant turn's usage + per-turn provenance if
-        # the incoming messages carry it. The message's model/provider
-        # override the assistant's static config; usage falls back to None.
-        last_usage: ChatUsage | None = None
-        for message in reversed(request.messages):
-            if message.role == "assistant" and message.usage is not None:
-                last_usage = message.usage
-                if isinstance(message.provider, str) and message.provider:
-                    provider = message.provider
-                if isinstance(message.model, str) and message.model:
-                    model = message.model
-                break
-        self.record_chat_turn_invocation(
-            chat, provider=provider, model=model, usage=last_usage, cost_usd=delta
-        )
-
     def record_chat_turn_invocation(
         self,
         chat: ChatSession,
@@ -470,11 +417,11 @@ class ChatSessionsMixin:
         cost_usd: float | None,
     ) -> None:
         """The one place a chat-attributed `ai_invocations` row is shaped: tagged
-        with the chat's id, prompt and anchored scene. A streamed turn reaches it
-        through the save path's cost delta (`_record_chat_cost_delta`, which
-        pins usage/provenance to the transcript's last assistant message); a
-        server-run turn — the commit extraction (#1872) — calls it directly with
-        the reply's own usage, so the row is never a copy of a different call."""
+        with the chat's id, prompt and anchored scene. Every turn kind reaches it
+        from the server that ran the call, with that call's own usage and
+        provenance — the streamed turn via the stream's `on_done` hook (#1877),
+        the commit extraction directly (#1872). The client never round-trips a
+        cost; `cost_usd_total` is the log's projection on read."""
         self.append_ai_invocation(
             CreateAIInvocationRequest(
                 prompt_entry_id=chat.prompt_entry_id,

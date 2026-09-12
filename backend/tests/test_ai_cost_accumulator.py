@@ -1,9 +1,9 @@
-"""Step 6 of V2: per-chat cost accumulator + per-slot cache write
-timestamps.
+"""Step 6 of V2: per-chat cost total + per-slot cache write timestamps.
 
-Saves are additive — `cost_delta_usd` accumulates into
-`ChatSession.cost_usd_total`; `cache_write_slots` stamps the named
-slots with the current server time.
+`cost_usd_total` is a projection of the invocation log: each turn's row is
+recorded by the server that ran it (#1877), and a save only ever carries the
+projection back — never a delta. `cache_write_slots` stamps the named slots
+with the current server time.
 """
 
 from __future__ import annotations
@@ -65,29 +65,31 @@ class ChatCostAccumulatorTests(unittest.TestCase):
         self.assertIsNone(chat.cost_usd_total)
         self.assertEqual(chat.cache_write_times, {})
 
-    def test_cost_delta_accumulates_across_saves(self) -> None:
+    def _record(self, chat_id: str, cost: float) -> None:
+        # #1877: rows are recorded by the server that ran the turn, never by a
+        # client delta on the save — the same seam the stream + commit use.
+        self.service.record_chat_turn_invocation(
+            self.service.read_chat_session(chat_id),
+            provider="anthropic", model="m", usage=None, cost_usd=cost,
+        )
+
+    def test_recorded_turns_accumulate_into_the_total(self) -> None:
         cid = self._create_chat()
-        self._save(cid, cost_delta_usd=0.0012)
+        self._record(cid, 0.0012)
         self.assertAlmostEqual(self.service.read_chat_session(cid).cost_usd_total, 0.0012)
-        self._save(cid, cost_delta_usd=0.0008)
+        self._record(cid, 0.0008)
         self.assertAlmostEqual(self.service.read_chat_session(cid).cost_usd_total, 0.0020)
-        self._save(cid, cost_delta_usd=0.50)
+        self._record(cid, 0.50)
         self.assertAlmostEqual(self.service.read_chat_session(cid).cost_usd_total, 0.5020)
 
-    def test_save_without_cost_delta_preserves_total(self) -> None:
+    def test_save_preserves_the_total_and_never_adds_to_it(self) -> None:
         cid = self._create_chat()
-        self._save(cid, cost_delta_usd=0.0050)
-        # Plain save (rename, etc.) shouldn't reset the cost.
+        self._record(cid, 0.0050)
+        # A plain save (rename, transcript append, …) neither resets nor
+        # inflates the cost — it is a projection of the log, not a counter.
+        self._save(cid)
         self._save(cid)
         self.assertAlmostEqual(self.service.read_chat_session(cid).cost_usd_total, 0.0050)
-
-    def test_negative_cost_delta_is_clamped_to_zero(self) -> None:
-        # Cost is monotonic. A buggy frontend sending -0.5 must not
-        # decrement the persisted total.
-        cid = self._create_chat()
-        self._save(cid, cost_delta_usd=1.0)
-        self._save(cid, cost_delta_usd=-0.5)
-        self.assertAlmostEqual(self.service.read_chat_session(cid).cost_usd_total, 1.0)
 
     def test_cache_write_slots_stamp_each_slot(self) -> None:
         cid = self._create_chat()

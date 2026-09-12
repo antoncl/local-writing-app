@@ -18,7 +18,7 @@
 //
 // The controller owns only the commit machinery + its own review state
 // (`committing`, the pending `draftProposal`). ChatBodyView keeps the chat
-// session, cost accounting (`pendingTurnCost`), and the status lines — the
+// session, the cost-total snapshot, and the status lines — the
 // controller reaches those through the wired `deps`, so `persistActiveChat` and
 // `chatError`/`chatNotice` stay component-owned.
 import type {

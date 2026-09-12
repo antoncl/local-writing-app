@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import type { AssistantEntrySummary } from "@/lib/types";
-import { assistantEntriesStore, defaultAssistantIdStore } from "@/lib/stores/assistants";
+
+vi.mock("@/lib/api", () => ({ api: { listAssistantEntries: vi.fn() } }));
+import { api } from "@/lib/api";
+import { assistantEntriesStore, defaultAssistantIdStore, refreshAssistantEntries } from "@/lib/stores/assistants";
 
 const A = (id: string, listed: string): AssistantEntrySummary =>
   ({
@@ -32,5 +35,42 @@ describe("defaultAssistantIdStore", () => {
   it("is the topmost listed entry, preserving roster order", () => {
     assistantEntriesStore.set([A("first", "listed"), A("second", "listed")]);
     expect(get(defaultAssistantIdStore)).toBe("first");
+  });
+});
+
+// #1878: the no-project hydration (machine layer only) and the project-open
+// refresh can be in flight together. The EARLIER answer must never land over
+// the later one, or the pane shows machine-level assistants for a project
+// that has its own — the very symptom that needed "Add assistant" to repair.
+describe("refreshAssistantEntries stale guard", () => {
+  it("drops an earlier response that resolves after a later refresh's", async () => {
+    type Roster = { entries: AssistantEntrySummary[] };
+    let resolveFirst!: (value: Roster) => void;
+    let resolveSecond!: (value: Roster) => void;
+    const first = new Promise<Roster>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const second = new Promise<Roster>((resolve) => {
+      resolveSecond = resolve;
+    });
+    vi.mocked(api.listAssistantEntries).mockReturnValueOnce(first).mockReturnValueOnce(second);
+
+    const machineOnly = refreshAssistantEntries();
+    const withProject = refreshAssistantEntries();
+    resolveSecond({ entries: [A("machine", "listed"), A("project", "listed")] });
+    await withProject;
+    resolveFirst({ entries: [A("machine", "listed")] });
+    await machineOnly;
+
+    expect(get(assistantEntriesStore).map((entry) => entry.id)).toEqual(["machine", "project"]);
+  });
+
+  it("keeps the previous roster when the request fails", async () => {
+    assistantEntriesStore.set([A("kept", "listed")]);
+    vi.mocked(api.listAssistantEntries).mockRejectedValueOnce(new Error("offline"));
+
+    await refreshAssistantEntries();
+
+    expect(get(assistantEntriesStore).map((entry) => entry.id)).toEqual(["kept"]);
   });
 });

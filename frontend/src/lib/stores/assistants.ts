@@ -34,10 +34,18 @@ export const defaultAssistantIdStore = derived(
 );
 
 // Refresh swallows errors (backend may be unavailable) and leaves the previous
-// list in place — matching the prior App.svelte behavior.
+// list in place — matching the prior App.svelte behavior. Monotonic `latest`
+// (same guard as `refreshTagNodes`): the no-project hydration and the
+// project-open refresh (#1878) can be in flight together, and the earlier,
+// machine-only answer must never land over the later, project-scoped one.
+let latest = 0;
+
 export async function refreshAssistantEntries(): Promise<void> {
+  const seq = ++latest;
   try {
-    assistantEntriesStore.set((await api.listAssistantEntries()).entries);
+    const entries = (await api.listAssistantEntries()).entries;
+    if (seq !== latest) return; // superseded by a later refresh
+    assistantEntriesStore.set(entries);
   } catch {
     // Leave previous list in place.
   }

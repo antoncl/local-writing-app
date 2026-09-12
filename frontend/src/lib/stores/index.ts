@@ -17,15 +17,21 @@ import { refreshTagNodes, clearTagNodes } from "@/lib/stores/tagNodes";
 import { refreshTodos, refreshEmbeddedTodos, clearTodos } from "@/lib/stores/todos";
 import { clearValidation } from "@/lib/stores/validation";
 import { clearChats } from "@/lib/stores/chats";
-import { clearAssistants } from "@/lib/stores/assistants";
+import { refreshAssistantEntries, clearAssistants } from "@/lib/stores/assistants";
 import { aiSpend } from "@/lib/stores/aiSpend.svelte";
 
 // Load the project-scoped server state in parallel. Mirrors exactly the slices
 // the open paths fetched serially (structure/research/lore/prompts/schema/
-// tags/todos); chats, cost, assistants and project color are hydrated by
-// openProjectWorkspace on its own cadence. Callers run this inside App's run()
-// wrapper so HTTP errors still surface; schema's App-local authoring fallback
-// runs after this resolves (the store refresh itself carries no UI state).
+// tags/todos); chats, cost and project color are hydrated by
+// openProjectWorkspace on its own cadence. The two machine-global rosters —
+// tags and assistants — are layered (machine + project), so both are re-read
+// here under the project's scope: `loadMachineSettings` hydrates them before
+// any project is open, and that answer holds the machine layer alone (#1878:
+// the Assistants pane showed only machine-level assistants after a cold start
+// until some mutation happened to refresh the roster). Callers run this inside
+// App's run() wrapper so HTTP errors still surface; schema's App-local
+// authoring fallback runs after this resolves (the store refresh itself
+// carries no UI state).
 export async function loadProjectData(): Promise<void> {
   await Promise.all([
     refreshStructure(),
@@ -39,6 +45,7 @@ export async function loadProjectData(): Promise<void> {
     refreshSchema(),
     refreshReferenceIndex(),
     refreshTagNodes(),
+    refreshAssistantEntries(),
     refreshTodos(),
     refreshEmbeddedTodos(),
   ]);
@@ -59,11 +66,11 @@ export function clearProjectData(): void {
   clearReferenceIndex();
   // Not a plain clear (review fix): the tag roster is machine-global
   // (ADR-0082 slice 1) — machine-layer tags remain valid with no project
-  // open, same as the assistant roster (`clearAssistants` below has no such
-  // re-refresh yet, but tags need one because `loadMachineSettings` hydrates
-  // this store even before this flow runs). Fire-and-forget: a full clear
-  // then a fresh GET, not awaited — this function is synchronous like its
-  // siblings, and the roster is empty for one tick either way.
+  // open, same as the assistant roster (`clearAssistants` below stays a plain
+  // clear; `loadProjectData` re-reads both rosters on the next open).
+  // Fire-and-forget: a full clear then a fresh GET, not awaited — this
+  // function is synchronous like its siblings, and the roster is empty for
+  // one tick either way.
   clearTagNodes();
   void refreshTagNodes();
   clearTodos();

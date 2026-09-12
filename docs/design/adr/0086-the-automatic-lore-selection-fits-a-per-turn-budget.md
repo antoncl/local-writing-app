@@ -1,6 +1,6 @@
 # ADR-0086: The inferred lore selection fits a per-turn token budget; declared intent is never dropped, and the send reports what it left out
 
-- Status: **Proposed** — 2026-09-12 (authored by Claude, for Anton's direction call). A cold-implementer simulation was run against the first draft; its findings are folded in below.
+- Status: **Accepted** — 2026-09-12, Anton Lauridsen, PR #1883 (authored by Claude). At review Anton added the expansion setting (§2b, on the assistant) and deferred retrieval-based selection (see Alternatives). A cold-implementer simulation was run against the first draft; its findings are folded in below.
 - **Issue:** #1876 (bound the implicit lore selection per turn — the failure #1874 caught only at commit).
 - **Relates to:** ADR-0057 (a conversation selects its lore once behind one gate), ADR-0060 (the two volatility tiers), ADR-0075 (implicit context detection, the journal), ADR-0067 Amendment 2 (the commit turn carries only the chat's own picks), ADR-0076 (the Context door; the per-turn meta line), ADR-0084 (the plan flows up to the preview).
 
@@ -64,6 +64,16 @@ The budget bounds the **inferred set only**. It is measured as the sum of each i
 
 The assistant is the right home because the assistant is where the model is chosen, and the tolerable lore load is a property of the model: a cheap model gets a smaller budget, set once, on the thing that names the model. Sixteen thousand is a starting point, not a derivation: roughly four to five times the transcript that lost in #1874 and under half the block that beat it; it keeps a mid-sized world in play on a capable model and is easy to lower for a small one.
 
+### 2b — How far the app reaches: `ai_lore_expansion` on the assistant
+
+A second assistant field, **`ai_lore_expansion`**, a `select` with two options: **`one_hop`** (the default — today's behaviour) and **`named`**. It answers a different question from the budget: not *how much* inferred lore may be sent but *by which routes* the app may reach it. With `named`, the inferred set holds only what was actually named — journal entries with source `user_message`, `rendered_prompt` and `scene_prose` — and the two hops are not taken: `depth1_expansion` entries are not sent and the structural hop is not walked. "Expansion" means both hops; ADR-0075 already intended the structural one to be opt-in (`0075:63-66`), and a setting that turned off one hop while the other ran would be a lie about its own name.
+
+It is applied **at selection**, in `_select_lore`, for the send and the preview alike — never in detection. The journal keeps recording depth-1 detections under `named` exactly as today, and the door keeps showing them as noticed; the setting decides only whether noticed-by-expansion entries are sent. That keeps ADR-0075's journal honest and the change small: no new journal source, no detection branch.
+
+In the measured case, `named` alone would have sent nine entries instead of forty. It is the cheap, predictable move; the budget (§2) is the bound that holds regardless of route — a long session that *names* forty entities, or forty `always` policies, still needs it. The two compose: `named` shrinks the candidate list, the budget caps what remains.
+
+Placement on the assistant is Anton's call at review: one place to look for what a model gets. The conversation-shaped alternative — the prompt declaring it — is recorded under Alternatives.
+
 ### 3 — The fit: whole entries, first-fit in fit order
 
 Walk the inferred set in fit order; keep an entry if its rendered size fits in what remains of the budget (`≤`); otherwise leave it out and continue. An entry is whole or absent. An oversized entry does not block the smaller ones ordered below it — the report (§5) lists it with its size, so first-fit's one surprise (a lower-ordered entry in, a higher-ordered one out) is legible.
@@ -97,7 +107,7 @@ The turn-0 preview's own fit (§4) surfaces the same way as its tiers do today �
 
 ### 6 — No migration is owed
 
-Two additive optional fields with defaults: `ai_lore_budget_tokens` on the assistant schema (the `ai_max_tokens` shape) and `lore_fit` on `ChatSessionMessage` (the ADR-0076 decision 3 shape). Nothing changes in a chat's identity, the journal, the ledger, or any file an older reader would reject.
+Three additive optional fields with defaults: `ai_lore_budget_tokens` and `ai_lore_expansion` on the assistant schema (the `ai_max_tokens` shape) and `lore_fit` on `ChatSessionMessage` (the ADR-0076 decision 3 shape). Nothing changes in a chat's identity, the journal, the ledger, or any file an older reader would reject.
 
 ## User journey (the definition of done)
 
@@ -114,6 +124,8 @@ The author opens the Sanne chat on a DeepSeek Flash assistant and sends the seco
 - **Make the preview chat-aware** so the meta line warns before a mid-session send. Deferred, not rejected: it is a change to the door's contract (ADR-0076) and to what the estimate request carries; the send-side report gives the author the same information one turn later, and the turn-0 preview keeps its own fit. Named as a follow-up; its shape is deliberately not sketched here.
 - **Hysteresis** (keep last turn's kept set unless forced). Rejected: cheaper cache behaviour, unpredictable membership.
 - **Truncate or summarise entries to fit.** Rejected: see anti-goals.
+- **Declare expansion on the prompt** (`use_lore(expansion=…)`) rather than the assistant. Considered because how far to reach into the world is conversation-shaped — a brainstorm wants the hop, a revise-one-field chat doesn't — and a declaration is the ADR-0057/0060 idiom. Rejected at review for one place to look: the assistant already names the model and now the budget, and a writer tuning "what does this assistant get" should find both knobs together. A prompt-side override can be an amendment if a real prompt needs the other setting.
+- **Retrieval (RAG) as the inferred selector** — embed entries, retrieve the top-k by similarity to the turn. Deferred, not rejected. It fits the architecture (embeddings per entry per revision in `.cache/`, maintained by the ADR-0085 write seam) and would add recall for lore that is relevant but unnamed, which the name matcher cannot see. It is a *better inferred selector*, not a bound: whatever picks the candidates, the budget is what makes the pick safe, and this ADR is that bound. Its costs are real and its own decision: a local embedding model or a cloud call (privacy, fail-closed permission), a retrieval set that changes every turn against a cache design built for a settling one (ADR-0060), and a door answer of "similarity 0.71" where today's is "you named it". It becomes an ADR when there is evidence the matcher's recall is biting.
 - **Refresh `added_at_turn` on re-mention** so "latest first" means last mentioned. Not taken here: it changes the journal's semantics (ADR-0075) for a tie-break; the order is stated honestly as first-noticed and can be revisited with evidence.
 
 ## Consequences
@@ -127,13 +139,14 @@ The author opens the Sanne chat on a DeepSeek Flash assistant and sends the seco
 
 ## Rollout (slices)
 
-- **S1 — the budget and the report.** `_select_lore` with provenance; `lore_budget.py`; `ai_lore_budget_tokens` on the assistant and in `resolve_call_params` (default 16 000); the fit in `_lore_cache_blocks` and in `_preview_lore_tiers`; `lore_fit` on `AIChatResponse`, the stream `done` line, and `ChatSessionMessage`; the meta-line segment. Tests: fit order; declared never dropped; declared-over-budget leaves the inferred fit unchanged and is reported; first-fit skips an oversized entry and keeps a smaller lower-ordered one; the wire order stays id-sorted and a settled stable block is unchanged when the kept set is unchanged; the send's `lore_fit` matches what the wire carried; the preview applies the same fit to its turn-0 selection; `0` sends only declared entries; blank/invalid resolve to the default. *Not:* no door work; no change to detection or the journal; no truncation; no `warnings` entry.
+- **S1 — the budget, the expansion setting, and the report.** `_select_lore` with provenance and the `expansion` argument; `lore_budget.py`; `ai_lore_budget_tokens` and `ai_lore_expansion` on the assistant and in `resolve_call_params` (defaults 16 000 and `one_hop`); the fit in `_lore_cache_blocks` and in `_preview_lore_tiers`; `lore_fit` on `AIChatResponse`, the stream `done` line, and `ChatSessionMessage`; the meta-line segment. Tests: fit order; declared never dropped; declared-over-budget leaves the inferred fit unchanged and is reported; first-fit skips an oversized entry and keeps a smaller lower-ordered one; the wire order stays id-sorted and a settled stable block is unchanged when the kept set is unchanged; the send's `lore_fit` matches what the wire carried; the preview applies the same fit to its turn-0 selection; `0` sends only declared entries; blank/invalid resolve to the default; `named` sends no `depth1_expansion` entry and walks no structural hop while the journal still records the depth-1 detections. *Not:* no door work; no change to detection or the journal; no truncation; no `warnings` entry.
 - **S2 — the Left-out section.** The door reads the last sent turn's `lore_fit` (and the preview's left-out block for a fresh chat), lists each entry with source and size, drills to XML. *Not:* no new picker; no "add to context" action beyond the two controls that exist; no chat-aware preview.
 
 ## Acceptance
 
 - A chat whose inferred selection exceeds the budget sends at most the budget's worth of inferred lore, in fit order, whole entries only; its declared set is sent in full regardless.
 - Every send that left something out says so on that turn's meta line; the door lists what, with source and size.
+- An assistant set to `named` sends no entry the app reached by either hop; the journal still records the depth-1 detections, and the door still shows them as noticed.
 - The commit turn is unchanged. The journal is unchanged. A chat whose inferred selection fits sends exactly what it sends today, byte for byte, in the same order.
 
 ## To verify / build at implementation

@@ -1054,13 +1054,11 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "select",
             "options": [
                 {"value": "unwritten", "label": "Unwritten", "color": "stone"},
-                {"value": "off_page", "label": "Off page", "color": "graphite"},
-                {"value": "on_page", "label": "On page", "color": "moss"},
+                {"value": "off_page", "label": "Off the page", "color": "graphite"},
+                {"value": "on_page", "label": "On the page", "color": "moss"},
             ],
-            # A required select, like `context_policy` (#1421): blank reads as
-            # unwritten everywhere else (the healer above, the board), so the rail
-            # says so too instead of offering "(none)" (#1903). Never written —
-            # re-picking the default pops the key, front matter stays sparse.
+            # A required select, like `context_policy` (#1421): the rail shows the
+            # sparse default named above instead of offering "(none)" (#1903).
             "default": "unwritten",
         },
         "beat_links": {

@@ -272,10 +272,15 @@ export type ChatUsage = {
 
 // ADR-0086 §5: one inferred lore entry the per-turn budget left out — which,
 // by what route it was a candidate, and its size under the one estimator.
+// By which route the app inferred a lore entry: the journal's sources plus the
+// structural hop the journal never records (ADR-0086 §1). One spelling here;
+// `ChatSessionJournalEntry.source` stays the journal's own narrower union.
+export type LoreSource = "user_message" | "rendered_prompt" | "scene_prose" | "depth1_expansion" | "structural_hop";
+
 export type LoreFitEntry = {
   id: string;
   title: string;
-  source: "user_message" | "rendered_prompt" | "scene_prose" | "depth1_expansion" | "structural_hop";
+  source: LoreSource;
   tokens: number;
 };
 

@@ -9,7 +9,14 @@
 -->
 <script lang="ts">
   import { renderChatContent, containsMath, ensureKatexLoaded } from "@/lib/utils/chatMessageRender";
-  import { formatCostEur, formatTokensPrecise } from "@/lib/utils/money";
+  import { formatCostEur } from "@/lib/utils/money";
+  import {
+    DECLARED_OVER_HINT,
+    LEFT_OUT_HINT,
+    declaredOverBudget,
+    declaredOverLine,
+    leftOutSegment,
+  } from "@/lib/chat/loreFit";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import type { ChatMessage } from "@/lib/types";
 
@@ -83,18 +90,8 @@
          can change. A budget of 0 means "declared only" and is never "over". -->
     {@const fit = message.role === "assistant" ? message.lore_fit ?? null : null}
     {@const fitSegments = fit == null ? [] : [
-      ...(fit.left_out.length > 0
-        ? [{
-            text: `lore ${formatTokensPrecise(fit.used_tokens)}/${formatTokensPrecise(fit.budget_tokens)} · ${fit.left_out.length} left out`,
-            title: "Lore the app added on its own that did not fit this turn's budget. Pick an entry in the prompt, mark it always-include, or raise the assistant's lore budget.",
-          }]
-        : []),
-      ...(fit.budget_tokens > 0 && fit.declared_tokens > fit.budget_tokens
-        ? [{
-            text: `declared lore ${formatTokensPrecise(fit.declared_tokens)}, over the ${formatTokensPrecise(fit.budget_tokens)} budget`,
-            title: "Entries the prompt picked, the scene references, or an always-include policy names are always sent whole; only the assistant's budget for lore the app adds on its own applies.",
-          }]
-        : []),
+      ...(fit.left_out.length > 0 ? [{ text: leftOutSegment(fit), title: LEFT_OUT_HINT }] : []),
+      ...(declaredOverBudget(fit) ? [{ text: declaredOverLine(fit), title: DECLARED_OVER_HINT }] : []),
     ]}
     <div class="cbv-message cbv-message-{message.role}">
       <header class="cbv-message-role">

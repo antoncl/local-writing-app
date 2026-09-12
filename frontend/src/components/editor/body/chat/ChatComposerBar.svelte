@@ -77,7 +77,7 @@
     // left-out XML map, and the on-request renderer for a sent turn's entries.
     loreFit?: LoreFit | null;
     loreLeftOutXml?: Record<string, string>;
-    fetchLeftOutXml?: ((entryId: string) => Promise<string | null>) | null;
+    fetchLeftOutXml?: (entryId: string) => Promise<string | null>;
     // ADR-0057 §2: whether the bound prompt's `use_lore()`/`use()` gate ran —
     // the Context door's System section annotates it (not a call-site marker;
     // see ADR-0076 decision 9's rejected alternative).
@@ -121,7 +121,7 @@
     previewCacheBlocks,
     loreFit = null,
     loreLeftOutXml = {},
-    fetchLeftOutXml = null,
+    fetchLeftOutXml = async () => null,
     loreEnabled,
     journal,
     changedPicks,

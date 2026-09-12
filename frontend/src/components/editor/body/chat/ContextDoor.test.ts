@@ -236,6 +236,41 @@ describe("ContextDoor", () => {
     expect(asked).toEqual(["lore_d"]);
   });
 
+  it("says a render that failed could not be done, and asks again on the next drill", async () => {
+    let calls = 0;
+    const fetchLeftOutXml = async (id: string) => {
+      calls += 1;
+      if (calls === 1) throw new Error("backend restarting");
+      return `<place id="${id}" name="second try">…</place>`;
+    };
+    render(ContextDoor, { ...baseProps, loreFit: LEFT_OUT_FIT, fetchLeftOutXml });
+    await fireEvent.click(screen.getByText("Left out"));
+    await fireEvent.click(screen.getByText("The Honey Jar"));
+    expect(await screen.findByText(/Couldn't render this entry right now/)).toBeInTheDocument();
+    // Never the empty-render wording for a failure.
+    expect(screen.queryByText("This entry rendered no XML.")).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await fireEvent.click(screen.getByText("The Honey Jar"));
+    expect(await screen.findByText('<place id="lore_d" name="second try">…</place>')).toBeInTheDocument();
+    expect(calls).toBe(2);
+  });
+
+  it("falls through an empty title to the id, and labels the journal's hop with the same words", async () => {
+    const untitled: LoreFit = {
+      ...LEFT_OUT_FIT,
+      left_out: [{ id: "lore_zz", title: "", source: "structural_hop", tokens: 10 }],
+    };
+    const journal = [
+      { entry_id: "lore_j", title: "Journaled", added_at_turn: 1, source: "depth1_expansion" },
+    ] as ChatSessionJournalEntry[];
+    render(ContextDoor, { ...baseProps, loreFit: untitled, journal });
+    await fireEvent.click(screen.getByText("Left out"));
+    expect(screen.getByText("lore_zz")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await fireEvent.click(screen.getByText("Auto-added this conversation"));
+    expect(screen.getByText(/one hop · mention/)).toBeInTheDocument();
+  });
+
   it("states a declared set over a non-zero budget, and never for a budget of 0", async () => {
     const over: LoreFit = { ...LEFT_OUT_FIT, left_out: [], declared_tokens: 30200 };
     render(ContextDoor, { ...baseProps, loreFit: over });

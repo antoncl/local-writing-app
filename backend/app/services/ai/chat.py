@@ -189,19 +189,20 @@ def _detect_and_persist_journal(
 
 
 def render_chat_lore_entry_xml(project: ProjectService, chat_id: str, entry_id: str) -> str | None:
-    """ADR-0086 S2: one lore entry's rendered element as-of `chat_id`'s
-    resolution scene — the same per-node render the send places
-    (`_render_lore_entries`), produced on request for the Context door's drill
-    into an entry a sent turn's budget left out. The persisted `lore_fit`
-    carries ids, titles and sizes; the XML is rendered here, live, so the
-    door shows what the model would see now. None when the entry can't be
-    read; a missing chat raises `ProjectServiceError` for the route's 404."""
+    """ADR-0086 S2: one node's rendered element as-of `chat_id`'s resolution
+    scene — the same per-node render the send places (`_render_lore_entries`,
+    which accepts any readable node id, as `use()` does), produced on request
+    for the Context door's drill into an entry a sent turn's budget left out.
+    The persisted `lore_fit` carries ids, titles and sizes; the XML is rendered
+    here, live — so an entry edited since the send shows its current state,
+    and its size may differ from the one the fit measured. None when the node
+    can't be read; a missing chat raises `ProjectServiceError` for the route's
+    404. The mutations index is built by the render itself, guarded."""
     from app.services.ai.lore_block import _render_lore_entries
 
     chat = project.read_chat_session(chat_id)
-    scene = _chat_resolution_scene(project, chat) if chat.lore_enabled else None
-    index = project.build_mutations_index() if scene is not None else None
-    pairs = _render_lore_entries(project, [entry_id], scene=scene, index=index)
+    scene = _chat_resolution_scene(project, chat)
+    pairs = _render_lore_entries(project, [entry_id], scene=scene)
     return pairs[0][1] if pairs else None
 
 

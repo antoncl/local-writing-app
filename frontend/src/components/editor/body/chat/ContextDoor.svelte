@@ -15,7 +15,15 @@
   language — but this is NOT a picker: no tri-state, no selection, no writes.
 -->
 <script lang="ts">
-  import { formatTokens, formatTokensPrecise } from "@/lib/utils/money";
+  import { formatTokens } from "@/lib/utils/money";
+  import {
+    DECLARED_OVER_HINT,
+    LEFT_OUT_HINT,
+    declaredOverBudget,
+    declaredOverLine,
+    loreFitSummary,
+    loreSourceLabel,
+  } from "@/lib/chat/loreFit";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import type {
     ChangedPick,
@@ -24,16 +32,6 @@
     PreviewCacheBlock,
     PreviewMessage,
   } from "@/lib/types";
-
-  // ADR-0086 §1 sources, in the reader's words. The two hops are what the
-  // assistant's "Lore reach: Named only" setting turns off.
-  const SOURCE_LABEL: Record<string, string> = {
-    user_message: "your message",
-    rendered_prompt: "the prompt",
-    scene_prose: "scene prose",
-    depth1_expansion: "one hop · mention",
-    structural_hop: "one hop · link",
-  };
 
   interface Props {
     previewCacheBlocks: PreviewCacheBlock[];
@@ -45,8 +43,10 @@
     // turn-0 fit has these on the wire; a sent turn's are fetched on request.
     loreLeftOutXml?: Record<string, string>;
     // Renders one left-out entry as-of the chat's scene, on request (the
-    // chat-scoped lore-xml route). Null when there is no chat to ask.
-    fetchLeftOutXml?: ((entryId: string) => Promise<string | null>) | null;
+    // chat-scoped lore-xml route). Resolves null for an entry that rendered
+    // nothing; rejects when the render couldn't be done (the door says so and
+    // re-asks on the next drill).
+    fetchLeftOutXml?: (entryId: string) => Promise<string | null>;
     // The bound prompt id (or ""). Drives the System panel's pre-send guidance:
     // a prompt is bound but nothing has rendered yet → "fill the inputs".
     chatPromptEntryId: string;
@@ -69,7 +69,7 @@
     previewCacheBlocks,
     loreFit = null,
     loreLeftOutXml = {},
-    fetchLeftOutXml = null,
+    fetchLeftOutXml = async () => null,
     chatPromptEntryId,
     chatSystemPrompt,
     chatPreviewMessages,
@@ -98,7 +98,7 @@
     | { kind: "root" }
     | { kind: "section"; key: string } // "system" | "tier:<label>" | "turn:<i>" | "inputs" | "journal" | "leftout"
     | { kind: "entry"; tierLabel: string; entryId: string }
-    | { kind: "leftout-entry"; entryId: string; title: string };
+    | { kind: "leftout-entry"; entryId: string };
   let stack = $state<Panel[]>([{ kind: "root" }]);
   const current = $derived(stack[stack.length - 1]);
   function drill(panel: Panel) {
@@ -110,39 +110,40 @@
 
   // ADR-0086 §5: the "Left out" section exists when the last fit left
   // something out, or when the declared set alone exceeded a non-zero budget
-  // (a budget of 0 is "declared only" — never "over").
+  // (a budget of 0 is "declared only" — never "over"; `declaredOverBudget`).
   const leftOut = $derived(loreFit?.left_out ?? []);
-  const declaredOver = $derived(
-    loreFit != null && loreFit.budget_tokens > 0 && loreFit.declared_tokens > loreFit.budget_tokens,
-  );
+  const declaredOver = $derived(loreFit != null && declaredOverBudget(loreFit));
   const showLeftOut = $derived(leftOut.length > 0 || declaredOver);
   const leftOutTokens = $derived(leftOut.reduce((sum, e) => sum + e.tokens, 0));
+  // One title rule for the row and the panel head: the roster's live title,
+  // else the report's snapshot, else the id (`||`, so an empty title falls through).
+  function leftOutTitle(entryId: string): string {
+    return titleFor(entryId) || leftOut.find((e) => e.id === entryId)?.title || entryId;
+  }
 
   // A sent turn's left-out entries carry no XML on the wire; each is rendered
-  // on request the first time it is drilled and remembered for the session.
-  let fetchedXml = $state<Record<string, string | null>>({});
-  let fetching = $state<Record<string, boolean>>({});
-  function drillLeftOut(entryId: string, title: string) {
-    drill({ kind: "leftout-entry", entryId, title });
-    if (loreLeftOutXml[entryId] !== undefined || entryId in fetchedXml || fetching[entryId]) return;
-    if (!fetchLeftOutXml) return;
-    fetching = { ...fetching, [entryId]: true };
-    void fetchLeftOutXml(entryId)
-      .then((xml) => {
-        fetchedXml = { ...fetchedXml, [entryId]: xml };
-      })
-      .catch(() => {
-        fetchedXml = { ...fetchedXml, [entryId]: null };
-      })
-      .finally(() => {
-        fetching = { ...fetching, [entryId]: false };
+  // on request the first time it is drilled, as one cached promise the leaf
+  // awaits. A rejected render stays in the cache so the leaf can say
+  // "couldn't render" (never "rendered no XML"), and is marked so the next
+  // drill of that entry asks again.
+  let xmlRequests = $state<Record<string, Promise<string | null>>>({});
+  let xmlFailed = $state<Record<string, boolean>>({});
+  function drillLeftOut(entryId: string) {
+    if (loreLeftOutXml[entryId] === undefined && (!xmlRequests[entryId] || xmlFailed[entryId])) {
+      const request = fetchLeftOutXml(entryId);
+      xmlFailed = { ...xmlFailed, [entryId]: false };
+      request.catch(() => {
+        xmlFailed = { ...xmlFailed, [entryId]: true };
       });
+      xmlRequests = { ...xmlRequests, [entryId]: request };
+    }
+    drill({ kind: "leftout-entry", entryId });
   }
 
   function panelTitle(panel: Panel): string {
     if (panel.kind === "root") return "Context";
     if (panel.kind === "entry") return titleFor(panel.entryId) ?? panel.entryId;
-    if (panel.kind === "leftout-entry") return panel.title;
+    if (panel.kind === "leftout-entry") return leftOutTitle(panel.entryId);
     if (panel.key === "leftout") return "Left out";
     if (panel.key === "system") return "System";
     if (panel.key.startsWith("tier:")) return panel.key.slice("tier:".length);
@@ -294,7 +295,7 @@
   {:else if current.kind === "section" && current.key === "journal"}
     {#each journal as entry (entry.entry_id)}
       <div class="cbv-ctx-kv-line">
-        {entry.title || entry.entry_id}{#if entry.added_at_turn != null} · turn {entry.added_at_turn}{/if}{#if entry.source === "depth1_expansion"} · ↳ depth 1{/if}
+        {entry.title || entry.entry_id}{#if entry.added_at_turn != null} · turn {entry.added_at_turn}{/if}{#if entry.source === "depth1_expansion"} · {loreSourceLabel(entry.source)}{/if}
       </div>
     {/each}
     {#each changedPicks as pick (pick.id)}
@@ -306,29 +307,19 @@
     <!-- The fit's own figures first, then each left-out entry by fit order
          (the report's order), drillable to its element like a tier's entry. -->
     <div class="cbv-ctx-kv-line">
-      <strong>lore {formatTokensPrecise(loreFit.used_tokens)}/{formatTokensPrecise(loreFit.budget_tokens)}</strong>
-      · {loreFit.kept} sent
+      <strong>{loreFitSummary(loreFit)}</strong> · {loreFit.kept} sent
     </div>
     {#if declaredOver}
-      <div class="cbv-ctx-kv-line" title="Entries the prompt picked, the scene references, or an always-include policy names are always sent whole; the budget applies only to lore the app adds on its own.">
-        declared lore {formatTokensPrecise(loreFit.declared_tokens)}, over the {formatTokensPrecise(loreFit.budget_tokens)} budget
-      </div>
+      <div class="cbv-ctx-kv-line" title={DECLARED_OVER_HINT}>{declaredOverLine(loreFit)}</div>
     {/if}
     {#each leftOut as entry (entry.id)}
-      <button
-        type="button"
-        class="ctx-row"
-        onclick={() => drillLeftOut(entry.id, titleFor(entry.id) ?? entry.title ?? entry.id)}
-      >
-        <span class="ctx-row-label">{titleFor(entry.id) ?? entry.title ?? entry.id}</span>
-        <span class="ctx-row-sub">{SOURCE_LABEL[entry.source] ?? entry.source} · {formatTokens(entry.tokens)} tok</span>
+      <button type="button" class="ctx-row" onclick={() => drillLeftOut(entry.id)}>
+        <span class="ctx-row-label">{leftOutTitle(entry.id)}</span>
+        <span class="ctx-row-sub">{loreSourceLabel(entry.source)} · {formatTokens(entry.tokens)} tok</span>
         <GroupCaret size="xs" collapsed />
       </button>
     {/each}
-    <p class="cbv-meta ctx-hint">
-      To send one of these: pick it in the prompt's Lore input, set its context policy to
-      Always include, or raise the assistant's lore budget.
-    </p>
+    <p class="cbv-meta ctx-hint">{LEFT_OUT_HINT}</p>
   {:else if current.kind === "entry"}
     {@const block = tierBlocks.find((b) => b.label === current.tierLabel)}
     {@const xml = block?.entry_xml?.[current.entryId]}
@@ -338,13 +329,17 @@
       <p class="cbv-meta">This entry rendered no XML.</p>
     {/if}
   {:else if current.kind === "leftout-entry"}
-    {@const xml = loreLeftOutXml[current.entryId] ?? fetchedXml[current.entryId] ?? null}
-    {#if xml}
-      <pre class="ctx-pre">{xml}</pre>
-    {:else if fetching[current.entryId]}
-      <p class="cbv-meta">Rendering…</p>
+    {@const known = loreLeftOutXml[current.entryId]}
+    {#if known !== undefined}
+      {#if known}<pre class="ctx-pre">{known}</pre>{:else}<p class="cbv-meta">This entry rendered no XML.</p>{/if}
     {:else}
-      <p class="cbv-meta">This entry rendered no XML.</p>
+      {#await xmlRequests[current.entryId]}
+        <p class="cbv-meta">Rendering…</p>
+      {:then xml}
+        {#if xml}<pre class="ctx-pre">{xml}</pre>{:else}<p class="cbv-meta">This entry rendered no XML.</p>{/if}
+      {:catch}
+        <p class="cbv-meta">Couldn't render this entry right now. Go back and open it again to retry.</p>
+      {/await}
     {/if}
   {/if}
 </div>

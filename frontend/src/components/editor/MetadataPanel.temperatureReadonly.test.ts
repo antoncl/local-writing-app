@@ -7,7 +7,7 @@
 // `temperature` capability. This guards the wiring end-to-end: catalogue →
 // callback → derived → the note the author actually sees.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render } from "@/lib/test/component";
+import { render, fireEvent } from "@/lib/test/component";
 
 // The embedded ProviderTierPicker calls getMachineSettings() + listAIProvider
 // models() on mount. Stub both; give anthropic two models — one that accepts
@@ -115,8 +115,12 @@ describe("MetadataPanel — Temperature read-only for no-sampling models (#1554)
 
   it("leaves Temperature editable (no note) when the model accepts it", async () => {
     const container = mount({ ai_provider: "anthropic", ai_model: "m-temp" });
-    // Give the picker's async load + the onCapabilities effect time to settle,
-    // then assert the note never appears for a temp-ok model.
+    // #1884 slice 4: an unset scalar reads at rest (a "+" affordance) until
+    // opened — open the row first, THEN the live control carries the label.
+    await vi.waitFor(() =>
+      expect(container.querySelector("[aria-label='Edit Temperature']")).not.toBeNull(),
+    );
+    await fireEvent.click(container.querySelector("[aria-label='Edit Temperature']") as HTMLElement);
     await vi.waitFor(() =>
       expect(container.querySelector("[aria-label='Temperature']")).not.toBeNull(),
     );

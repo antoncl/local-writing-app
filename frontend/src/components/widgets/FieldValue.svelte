@@ -79,6 +79,16 @@
 
   const label = $derived(ariaLabel ?? field.name);
   const currentValue = $derived(metadataValueString(value));
+  // A select with a declared default is "required" (#1421): an absent value
+  // MEANS the default (writeField pops the key when the default is re-picked),
+  // so the read-only display shows the default, as the editor does — not a
+  // "(none)" placeholder over a value that is in force (#1884 slice 4 surfaced
+  // this once selects read at rest).
+  const selectDisplayValue = $derived(
+    field.type === "select" && !currentValue && field.default != null && field.default !== ""
+      ? String(field.default)
+      : currentValue,
+  );
 
   function metadataValueString(v: MetadataValue | undefined): string {
     if (Array.isArray(v)) return v.join(", ");
@@ -149,7 +159,7 @@
     {/each}
   </div>
 {:else if field.type === "select"}
-  <ColoredSelect value={currentValue} options={field.options} ariaLabel={label} readOnly onChange={noop} />
+  <ColoredSelect value={selectDisplayValue} options={field.options} ariaLabel={label} readOnly onChange={noop} />
 {:else if field.type === "boolean"}
   <!-- Tri-state display (#522), rail-only via `allowUnset`: an absent boolean reads
        dimmed/indeterminate (knob centred) rather than "off". -->

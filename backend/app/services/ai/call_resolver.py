@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from app.services.ai.assistant_validation import coerce_optional_temperature
+from app.services.ai.lore_budget import DEFAULT_LORE_BUDGET_TOKENS, LoreLimits
 from app.services.ai.profiles.base import ChatCall
 
 if TYPE_CHECKING:
@@ -69,19 +70,48 @@ def _clamp_to_model_max(desired: int, provider: str, model: str) -> int:
     return min(desired, cap) if cap else desired
 
 
+def _non_negative_number(value: object) -> float | None:
+    """The one parser for a non-negative number an author typed into assistant
+    metadata: None for unset/blank/invalid (a bool, nan, inf, a negative, or
+    something that isn't a number at all). The price and the lore budget both
+    read through here so they can't disagree on the same input."""
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or number < 0:
+        return None
+    return number
+
+
 def _optional_price(value: object) -> float | None:
     """Parse an author-set per-Mtok price from assistant metadata: a non-negative
     float, or None when unset/blank/invalid. A blank field (the common case)
     resolves to None so pricing falls through to the oracle/baked seed."""
-    if value is None or value == "":
-        return None
-    try:
-        price = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(price) or price < 0:
-        return None  # reject nan / inf / negative
-    return price
+    return _non_negative_number(value)
+
+
+def _lore_budget_tokens(value: object) -> int:
+    """Parse the assistant's `ai_lore_budget_tokens` (ADR-0086 §2): a
+    non-negative whole number of tokens, or the default for a blank, missing,
+    non-numeric or negative value. `0` is legal and means "declared entries
+    only"; there is no unbounded sentinel — a large number is the way to say
+    it."""
+    budget = _non_negative_number(value)
+    return DEFAULT_LORE_BUDGET_TOKENS if budget is None else int(budget)
+
+
+def _lore_limits(meta: dict) -> LoreLimits:
+    """The assistant's two lore knobs (ADR-0086 §2/§2b), resolved the way
+    `max_tokens` is: from its metadata, with the resolver's defaults for
+    anything blank or unrecognised."""
+    expansion = meta.get("ai_lore_expansion")
+    return LoreLimits(
+        budget_tokens=_lore_budget_tokens(meta.get("ai_lore_budget_tokens")),
+        expansion="named" if expansion == "named" else "one_hop",
+    )
 
 
 @dataclass
@@ -101,6 +131,10 @@ class ResolvedCall:
     # model the oracle can't reach. `None` = not set → resolve as usual.
     manual_price_in_usd_per_mtok: float | None = None
     manual_price_out_usd_per_mtok: float | None = None
+    # ADR-0086 §2/§2b: what an ordinary turn's inferred lore may cost and by
+    # which routes the app may reach it. Not part of the provider `ChatCall` —
+    # the send path reads it when it assembles the lore blocks.
+    lore_limits: LoreLimits = LoreLimits()
 
     def to_call(
         self,
@@ -173,6 +207,7 @@ def resolve_call_params(
             thinking_enabled=bool(meta.get("ai_thinking", False)),
             manual_price_in_usd_per_mtok=_optional_price(meta.get("ai_price_in_usd_per_mtok")),
             manual_price_out_usd_per_mtok=_optional_price(meta.get("ai_price_out_usd_per_mtok")),
+            lore_limits=_lore_limits(meta),
         )
     provider = provider_override or settings.default_provider
     model = model_override or settings.default_models.get(provider or "", "")

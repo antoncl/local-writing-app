@@ -311,7 +311,7 @@ class StreamingChatCostTests(unittest.TestCase):
                 "app.services.ai.profiles.anthropic.AnthropicProfile.chat_stream",
                 side_effect=fake_stream,
              ):
-            self.client.post(
+            response = self.client.post(
                 "/api/ai/chat/stream",
                 json={
                     "provider": "anthropic",
@@ -320,6 +320,55 @@ class StreamingChatCostTests(unittest.TestCase):
                 },
             )
         self.assertEqual(self.service.list_ai_invocations().invocations, [])
+        # ADR-0086 §5: no implicit selection ran, so no lore-fit report either.
+        done = next(e for e in self._parse_ndjson(response.text) if e["type"] == "done")
+        self.assertNotIn("lore_fit", done)
+
+    def test_stream_done_carries_the_lore_fit_report(self) -> None:
+        # ADR-0086 §5: the send that fitted the lore reports on the `done`
+        # line — beside usage/cost — what it kept and left out, under the
+        # assistant's budget. Here everything fits: an honest empty left-out list.
+        from app.models import CreateChatSessionRequest, SaveChatSessionRequest
+
+        loaded = _set_machine_keys(anthropic="sk-ant-test")
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Fitted", system_prompt="s")
+        )
+        self.service.save_chat_session(
+            chat.id, SaveChatSessionRequest(title="Fitted", lore_enabled=True)
+        )
+
+        def fake_stream(call):
+            yield ai_providers.StreamFinal(
+                stop_reason="end_turn", usage=UsageMetrics(input_tokens=10, output_tokens=5)
+            )
+
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                "app.services.ai.profiles.anthropic.AnthropicProfile.chat_stream",
+                side_effect=fake_stream,
+             ):
+            response = self.client.post(
+                "/api/ai/chat/stream",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "chat_id": chat.id,
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        done = next(e for e in self._parse_ndjson(response.text) if e["type"] == "done")
+        self.assertEqual(
+            done["lore_fit"],
+            {
+                "budget_tokens": 16_000,
+                "used_tokens": 0,
+                "declared_tokens": 0,
+                "kept": 0,
+                "left_out": [],
+            },
+        )
 
     def test_stream_done_without_usage_omits_cost(self) -> None:
         # Some stream variants don't return usage (e.g. when include_usage

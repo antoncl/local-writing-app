@@ -15,21 +15,22 @@ import json
 import logging
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date as _date_cls
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from jinja2 import TemplateError, TemplateNotFound, TemplateSyntaxError, UndefinedError
 
-from app.models import PreviewCacheBlock
+from app.models import LoreFit, PreviewCacheBlock
 from app.services.ai import tokens as ai_tokens
-from app.services.ai.call_resolver import resolve_call_params
+from app.services.ai.call_resolver import ResolvedCall
 from app.services.ai.entry_ref import ProjectInfoRef
 from app.services.ai.helpers import (
     EntryRef,
     _coerce_entry_ref,
     create_environment_for_project,
 )
+from app.services.ai.lore_budget import LoreLimits
 from app.services.ai.profiles.cache_strategy import CachePlan
 from app.services.ai.profiles.registry import profile_for
 from app.services.ai.selector_eval import (
@@ -501,6 +502,10 @@ class PreviewRequest:
     selection: str = ""
     resolution_scene_id: str = ""
     subject: str = ""
+    # ADR-0086 §4: the assistant's lore budget and reach, so the turn-0
+    # preview's lore is fitted by the same rule as the send. The resolver's
+    # defaults when no assistant is bound.
+    lore_limits: LoreLimits = LoreLimits()
 
 
 def build_preview(
@@ -619,12 +624,14 @@ def build_preview(
     if session is not None and commit:
         session.commit()
 
-    _annotate_rendered_from_env(rendered, env, project_service, scene)
+    _annotate_rendered_from_env(rendered, env, project_service, scene, request.lore_limits)
 
     return rendered, session_id
 
 
-def _annotate_rendered_from_env(rendered: RenderedTemplate, env, project_service, scene) -> None:
+def _annotate_rendered_from_env(
+    rendered: RenderedTemplate, env, project_service, scene, lore_limits: LoreLimits
+) -> None:
     """Copy the env-side execution state the render's helpers (`use()`,
     `use_lore()`, `field_contract.store()`) recorded during the template render
     onto `rendered`, and compute the send-path lore tiers when lore was
@@ -651,48 +658,58 @@ def _annotate_rendered_from_env(rendered: RenderedTemplate, env, project_service
     # cache-aware preview can surface it (templates no longer emit lore). Only for a
     # lore-enabled prompt; `scene` is the same as-of anchor the send path resolves.
     if rendered.lore_invoked:
-        _apply_preview_lore_tiers(rendered, _preview_lore_tiers(project_service, scene, rendered))
+        _apply_preview_lore_tiers(
+            rendered, _preview_lore_tiers(project_service, scene, rendered, lore_limits)
+        )
 
 
 def _apply_preview_lore_tiers(rendered: RenderedTemplate, tiers: _PreviewLoreTiers) -> None:
     """Carry a computed `_PreviewLoreTiers` onto its `RenderedTemplate` — the
-    tier XML, the member id order, and the per-entry XML map the Context door
-    drills into (ADR-0076 S7). Split out of `build_preview` to keep its
-    statement count under the complexity gate."""
+    tier XML, the member id order, the per-entry XML map the Context door
+    drills into (ADR-0076 S7), and the budget fit with its left-out entries
+    (ADR-0086 §5). Split out of `build_preview` to keep its statement count
+    under the complexity gate."""
     rendered.send_lore_stable = tiers.stable_xml
     rendered.send_lore_volatile = tiers.volatile_xml
     rendered.send_lore_stable_ids = [i for i, _ in tiers.stable_entries]
     rendered.send_lore_volatile_ids = [i for i, _ in tiers.volatile_entries]
     rendered.send_lore_stable_entries = dict(tiers.stable_entries)
     rendered.send_lore_volatile_entries = dict(tiers.volatile_entries)
+    rendered.send_lore_fit = tiers.fit
+    rendered.send_lore_left_out_entries = dict(tiers.left_out_entries)
 
 
 @dataclass
 class _PreviewLoreTiers:
     """The send-path lore split into (stable, volatile) tiers, both as the
     wrapped `<lore>` XML and as the per-entry (id, element_xml) pairs the
-    Context door drills into (ADR-0076 S7). Ids derive from the entry pairs,
-    so a separate readability filter is unnecessary — `_render_lore_entries`
-    already skips unreadable nodes."""
+    Context door drills into (ADR-0076 S7), plus the budget fit that decided
+    the kept set and the left-out entries' own elements (ADR-0086 §5). Ids
+    derive from the entry pairs, so a separate readability filter is
+    unnecessary — `_render_lore_entries` already skips unreadable nodes."""
 
     stable_xml: str
     volatile_xml: str
     stable_entries: list[tuple[str, str]]
     volatile_entries: list[tuple[str, str]]
+    fit: LoreFit | None = None
+    left_out_entries: dict[str, str] = field(default_factory=dict)
 
 
 def _preview_lore_tiers(
     project_service,
     scene: Any,
     rendered: RenderedTemplate,
+    lore_limits: LoreLimits,
 ) -> _PreviewLoreTiers:
     """The send-path lore the model will receive, split into (stable, volatile) XML
     plus their per-entry pairs, for the cache-aware preview (ADR-0060 §6) and the
-    Context door's per-entry drill (ADR-0076 S7). Mirrors the send path's selection +
-    tiering (`_relevant_lore_ids` + `_tier_lore_ids`) but against a FRESH throwaway
-    `AISession` — the cold turn-1 view (unhinted lore volatile; `use(node,
-    "stable")` stable) — and never commits, so it cannot touch a live chat's cache
-    baseline. Both tiers resolve as-of `scene`, like the send path.
+    Context door's per-entry drill (ADR-0076 S7). Mirrors the send path's selection,
+    budget fit and tiering (`_select_lore` → `fit_lore_budget` → `_tier_lore_ids`,
+    ADR-0086 §4) but against a FRESH throwaway `AISession` — the cold turn-1 view
+    (unhinted lore volatile; `use(node, "stable")` stable) — and never commits, so
+    it cannot touch a live chat's cache baseline. Both tiers resolve as-of `scene`,
+    like the send path.
 
     The journal fed to selection is the send path's own turn-1 detection
     (#1477, corrected in S2 review): a real send runs `expand_context` over the
@@ -701,16 +718,13 @@ def _preview_lore_tiers(
     preview mirrors that call with an EMPTY composer — the one surface that
     cannot exist yet — so its tiers match the first send exactly up to whatever
     the next user message additionally mentions. (`journal=None` is never
-    passed: that selects `_implicit_lore_ids`'s legacy static-scan branch,
+    passed: that selects `_inferred_candidates`' legacy static-scan branch,
     which no send runs — the original #1477 artifact.) A locked chat's
     composer-accrued journal entries are rendered by the Context door's own
     journal section, frontend-side."""
     from app.services.ai.context_expander import expand_context
-    from app.services.ai.lore_block import _render_lore_entries, _wrap_lore_block
-    from app.services.ai.lore_selection import (
-        _relevant_lore_ids,
-        _tier_lore_ids,
-    )
+    from app.services.ai.lore_block import _wrap_lore_block
+    from app.services.ai.lore_selection import _budgeted_lore_tiers
     from app.services.ai.sessions import AISession
 
     rendered_system_text = "\n\n".join(
@@ -728,20 +742,26 @@ def _preview_lore_tiers(
         scene=scene,
         rendered_text=rendered_system_text,
     )
-    ids = _relevant_lore_ids(
-        project_service, scene, "implicit", preview_journal, list(rendered.used_node_ids or [])
+    # ADR-0086 §4: the same select → render → fit → tier the send runs, against
+    # a throwaway session — so the estimate is bounded by the same rule, and an
+    # empty selection still reports a (zero) fit, as the send does.
+    tiers = _budgeted_lore_tiers(
+        project_service,
+        scene,
+        preview_journal,
+        list(rendered.used_node_ids or []),
+        session=AISession(id="preview"),
+        hints=dict(rendered.used_node_hints or {}),
+        limits=lore_limits,
     )
-    if not ids:
-        return _PreviewLoreTiers("", "", [], [])
-    stable_ids, volatile_ids = _tier_lore_ids(
-        project_service, ids, AISession(id="preview"), dict(rendered.used_node_hints or {})
+    return _PreviewLoreTiers(
+        _wrap_lore_block(tiers.stable_entries),
+        _wrap_lore_block(tiers.volatile_entries),
+        tiers.stable_entries,
+        tiers.volatile_entries,
+        tiers.report,
+        tiers.left_out_entries,
     )
-    index = project_service.build_mutations_index() if scene is not None else None
-    stable_entries = _render_lore_entries(project_service, stable_ids, scene, index=index)
-    volatile_entries = _render_lore_entries(project_service, volatile_ids, scene, index=index)
-    stable_xml = _wrap_lore_block(stable_entries)
-    volatile_xml = _wrap_lore_block(volatile_entries)
-    return _PreviewLoreTiers(stable_xml, volatile_xml, stable_entries, volatile_entries)
 
 
 def _include_line(source: str, name: str | None) -> int | None:
@@ -921,13 +941,15 @@ async def estimate_preview_tokens_and_cost(
     project_service,
     rendered: RenderedTemplate,
     *,
-    assistant_id: str | None,
+    resolved: ResolvedCall | None,
     settings: MachineSettings,
 ) -> PreviewEstimate:
     """Estimate tokens + input cost for a rendered preview (V2).
 
-    When an assistant is named, resolve its provider/model to pick the cache
-    strategy and price the input; without one, tokens are still counted (the
+    `resolved` is the bound assistant's call resolution (the route resolves it
+    once, before the render, because the render's lore fit needs the same
+    assistant's budget — ADR-0086 §4): its provider/model pick the cache
+    strategy and price the input. None (no assistant) still counts tokens (the
     tokenizer choice is provider-agnostic in v1) but cost/caching stay unknown.
 
     `cache_blocks` is the send-path composition the model will receive (ADR-0060
@@ -940,15 +962,7 @@ async def estimate_preview_tokens_and_cost(
     model: str | None = None
     profile = None
     descriptor: ModelDescriptor | None = None
-    if assistant_id is not None:
-        resolved = resolve_call_params(
-            project_service,
-            settings,
-            assistant_id=assistant_id,
-            provider_override=None,
-            model_override=None,
-            max_tokens_override=None,
-        )
+    if resolved is not None:
         provider = resolved.provider or None
         model = resolved.model or None
         if provider:

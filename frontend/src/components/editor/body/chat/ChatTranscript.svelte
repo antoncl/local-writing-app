@@ -9,7 +9,7 @@
 -->
 <script lang="ts">
   import { renderChatContent, containsMath, ensureKatexLoaded } from "@/lib/utils/chatMessageRender";
-  import { formatCostEur } from "@/lib/utils/money";
+  import { formatCostEur, formatTokensPrecise } from "@/lib/utils/money";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import type { ChatMessage } from "@/lib/types";
 
@@ -74,6 +74,28 @@
       message.model,
       message.latency_ms != null ? `${(message.latency_ms / 1000).toFixed(1)} s` : null,
     ].filter(Boolean).join(" · ")}
+    <!-- ADR-0086 §5: the lore-budget segments. An over-budget world is a
+         routine fact about the send, so they sit in the line's ordinary
+         register, never the danger one — that is for a pick that failed
+         (#1544). Silent when everything fitted. The one case worded as a
+         warning: the declared set alone is larger than a non-zero budget,
+         which only the author's picks/policies (or the assistant's budget)
+         can change. A budget of 0 means "declared only" and is never "over". -->
+    {@const fit = message.role === "assistant" ? message.lore_fit ?? null : null}
+    {@const fitSegments = fit == null ? [] : [
+      ...(fit.left_out.length > 0
+        ? [{
+            text: `lore ${formatTokensPrecise(fit.used_tokens)}/${formatTokensPrecise(fit.budget_tokens)} · ${fit.left_out.length} left out`,
+            title: "Lore the app added on its own that did not fit this turn's budget. Pick an entry in the prompt, mark it always-include, or raise the assistant's lore budget.",
+          }]
+        : []),
+      ...(fit.budget_tokens > 0 && fit.declared_tokens > fit.budget_tokens
+        ? [{
+            text: `declared lore ${formatTokensPrecise(fit.declared_tokens)}, over the ${formatTokensPrecise(fit.budget_tokens)} budget`,
+            title: "Entries the prompt picked, the scene references, or an always-include policy names are always sent whole; only the assistant's budget for lore the app adds on its own applies.",
+          }]
+        : []),
+    ]}
     <div class="cbv-message cbv-message-{message.role}">
       <header class="cbv-message-role">
         {#if message.role === "assistant"}{assistantName}<span class="cbv-role-dot" aria-hidden="true"></span>{:else}You{/if}
@@ -108,7 +130,7 @@
           {/each}
         </div>
       {/if}
-      {#if message.role === "assistant" && (message.usage || provenance)}
+      {#if message.role === "assistant" && (message.usage || provenance || fitSegments.length > 0)}
         <div class="cbv-turn-meta">
           {#if message.usage}
             {@const totalIn = message.usage.input_tokens + message.usage.cached_input_tokens + message.usage.cache_write_tokens}
@@ -118,6 +140,9 @@
             {#if message.cost_usd != null}<span> · {formatCostEur(message.cost_usd)}</span>{:else}<span title="No price is known for this model — set one on the assistant, or Update prices in Settings."> · price unknown</span>{/if}
           {/if}
           {#if provenance}<span>{#if message.usage} · {/if}{provenance}</span>{/if}
+          {#each fitSegments as segment, s}
+            <span class="cbv-lore-fit" title={segment.title}>{#if message.usage || provenance || s > 0} · {/if}{segment.text}</span>
+          {/each}
         </div>
       {/if}
     </div>

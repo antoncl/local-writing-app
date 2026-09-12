@@ -39,6 +39,23 @@ export function formatCostEur(usd: number | null | undefined): string {
   return `€${eur.toFixed(2)}`;
 }
 
+// One decimal through the thousands, for two sizes read against each other —
+// ADR-0086's "lore 15.8k/16k": `formatTokens` rounds ≥10k to whole thousands,
+// which would print a 15.8k fit and its 16k budget identically. 0 → "0",
+// 950 → "950", 2100 → "2.1k", 16000 → "16k", 30200 → "30.2k", 1.2M → "1.2M".
+export function formatTokensPrecise(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) {
+    return "0";
+  }
+  if (n < 1000) {
+    return String(Math.round(n));
+  }
+  if (n < 1_000_000) {
+    return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  }
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
 // Compact token count: 1234 → "1.2k", 12345 → "12k", 1234567 → "1.2M".
 export function formatTokens(n: number): string {
   if (!Number.isFinite(n) || n <= 0) {

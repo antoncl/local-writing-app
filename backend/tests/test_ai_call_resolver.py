@@ -16,6 +16,7 @@ from app.services.ai.call_resolver import (
     ResolvedCall,
     resolve_call_params,
 )
+from app.services.ai.lore_budget import DEFAULT_LORE_BUDGET_TOKENS, LoreLimits
 
 
 def _project(assistant: object | None) -> mock.Mock:
@@ -86,6 +87,58 @@ class ResolveCallParamsTests(unittest.TestCase):
         )
         # claude-sonnet-5 isn't in the baked catalogue → no clamp → the floor.
         self.assertEqual(resolved.max_tokens, DEFAULT_MAX_TOKENS)
+
+    def _lore_limits(self, **meta: object):
+        assistant = SimpleNamespace(
+            metadata={"ai_provider": "anthropic", "ai_model": "claude-sonnet-5", **meta}
+        )
+        return resolve_call_params(
+            _project(assistant),
+            _settings(),
+            assistant_id="a1",
+            provider_override=None,
+            model_override=None,
+            max_tokens_override=None,
+        ).lore_limits
+
+    def test_lore_limits_resolve_from_assistant_metadata(self) -> None:
+        # ADR-0086 §2/§2b: the budget and the reach, resolved the way max_tokens is.
+        limits = self._lore_limits(ai_lore_budget_tokens=12_000, ai_lore_expansion="named")
+        self.assertEqual(limits.budget_tokens, 12_000)
+        self.assertEqual(limits.expansion, "named")
+
+    def test_lore_budget_zero_is_legal_and_means_declared_only(self) -> None:
+        self.assertEqual(self._lore_limits(ai_lore_budget_tokens=0).budget_tokens, 0)
+
+    def test_blank_or_invalid_lore_budget_resolves_to_the_default(self) -> None:
+        for bad in ("", None, "lots", -5, float("nan"), True):
+            with self.subTest(value=bad):
+                self.assertEqual(
+                    self._lore_limits(ai_lore_budget_tokens=bad).budget_tokens,
+                    DEFAULT_LORE_BUDGET_TOKENS,
+                )
+        self.assertEqual(self._lore_limits().budget_tokens, DEFAULT_LORE_BUDGET_TOKENS)
+
+    def test_numeric_string_lore_budget_is_accepted(self) -> None:
+        # A `number` field can round-trip as a string; a whole number is taken.
+        self.assertEqual(self._lore_limits(ai_lore_budget_tokens="8000").budget_tokens, 8000)
+        self.assertEqual(self._lore_limits(ai_lore_budget_tokens=8000.0).budget_tokens, 8000)
+
+    def test_unrecognised_lore_expansion_resolves_to_one_hop(self) -> None:
+        for value in ("", None, "two_hop", "NAMED"):
+            with self.subTest(value=value):
+                self.assertEqual(self._lore_limits(ai_lore_expansion=value).expansion, "one_hop")
+
+    def test_no_assistant_gets_the_default_lore_limits(self) -> None:
+        resolved = resolve_call_params(
+            _project(None),
+            _settings(),
+            assistant_id=None,
+            provider_override=None,
+            model_override=None,
+            max_tokens_override=None,
+        )
+        self.assertEqual(resolved.lore_limits, LoreLimits())
 
     def test_empty_assistant_temperature_coerces_to_none(self) -> None:
         assistant = SimpleNamespace(

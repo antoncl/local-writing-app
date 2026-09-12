@@ -183,6 +183,11 @@ export type AIPreviewResponse = {
   // assistant or pricing unknown.
   estimated_tokens?: number;
   cache_blocks?: PreviewCacheBlock[];
+  // ADR-0086 §4/§5: the turn-0 preview's own budget fit and the left-out
+  // entries' rendered elements (keyed by id), so a fresh chat's Context door
+  // is honest before the first send. Absent when the prompt is not lore-enabled.
+  lore_fit?: LoreFit | null;
+  lore_left_out_xml?: Record<string, string>;
   // Settled input cost (warm cache — cache reads). #1052.
   estimated_cost_usd?: number | null;
   // First-send input cost (cache writes); equals estimated_cost_usd when the
@@ -242,6 +247,10 @@ export type ChatMessage = {
   // partial content is kept, rendered via the "Stopped early" banner. A
   // deliberate stop, never routed through the error/rewind path (#1037).
   stopped?: boolean;
+  // ADR-0086 §5: the send's lore-budget report, stamped from `done` beside
+  // usage/provenance and rendered on the same meta line. Absent when no
+  // implicit selection ran (lore off, a chat-less call, the commit turn).
+  lore_fit?: LoreFit | null;
 };
 
 export type AIChatRequest = {
@@ -261,6 +270,26 @@ export type ChatUsage = {
   output_tokens: number;
 };
 
+// ADR-0086 §5: one inferred lore entry the per-turn budget left out — which,
+// by what route it was a candidate, and its size under the one estimator.
+export type LoreFitEntry = {
+  id: string;
+  title: string;
+  source: "user_message" | "rendered_prompt" | "scene_prose" | "depth1_expansion" | "structural_hop";
+  tokens: number;
+};
+
+// ADR-0086 §5: what a send's (or the turn-0 preview's) lore budget did.
+// `declared_tokens` is reported, never bounded — a declared set alone larger
+// than the budget is the author's to shrink, so the meta line says so.
+export type LoreFit = {
+  budget_tokens: number;
+  used_tokens: number;
+  declared_tokens: number;
+  kept: number;
+  left_out: LoreFitEntry[];
+};
+
 export type AIChatResponse = {
   role: "assistant";
   content: string;
@@ -276,6 +305,8 @@ export type AIChatResponse = {
   // V2 telemetry. Null on failure or when provider didn't return usage.
   usage?: ChatUsage | null;
   cost_usd?: number | null;
+  // ADR-0086 §5: this turn's lore-budget report; absent on a chat-less call.
+  lore_fit?: LoreFit | null;
 };
 
 export type AIGenerateRequest = {
@@ -392,6 +423,9 @@ export type ChatSessionMessage = {
   provider?: string | null;
   model?: string | null;
   latency_ms?: number | null;
+  // ADR-0086 §5: the send's lore-budget report, persisted beside usage and
+  // provenance so it survives reload. Additive-optional; older messages lack it.
+  lore_fit?: LoreFit | null;
   // ADR-0076 S3: mirrors `truncated` — additive-optional, absent on messages
   // persisted before this slice.
   stopped?: boolean;

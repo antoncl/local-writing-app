@@ -24,11 +24,14 @@ so typos in variable names raise rather than render empty.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from jinja2 import StrictUndefined, nodes
 from jinja2.ext import Extension
 from jinja2.sandbox import SandboxedEnvironment
+
+if TYPE_CHECKING:
+    from app.models import LoreFit
 
 ROLE_START = "\x00ROLE_START:"
 ROLE_END = "\x00ROLE_END\x00"
@@ -85,6 +88,12 @@ class RenderedTemplate:
     # Context door can drill an entry down to its own <entry_type ...> element.
     send_lore_stable_entries: dict[str, str] = field(default_factory=dict)
     send_lore_volatile_entries: dict[str, str] = field(default_factory=dict)
+    # ADR-0086 §4/§5: the turn-0 preview applies the send's budget fit to its
+    # own selection. `send_lore_fit` is the report (a `LoreFit`; None when not
+    # lore-enabled); `send_lore_left_out_entries` is each left-out entry's
+    # rendered element keyed by id, for the door's per-entry drill.
+    send_lore_fit: LoreFit | None = None
+    send_lore_left_out_entries: dict[str, str] = field(default_factory=dict)
     # ADR-0067 S2: the field descriptors registered via `{% do
     # field_contract.store(f) %}` during this render, in insertion order. Set by
     # `build_preview` from `env.field_contract.stored`; persisted on the chat

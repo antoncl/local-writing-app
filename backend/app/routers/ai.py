@@ -285,6 +285,20 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                 effective_inputs = []
                 input_conflicts = []
                 input_provenance = {}
+        # ADR-0086 §4: resolve the assistant ONCE, before the render, exactly
+        # as the send does — including the send's fallback to the topmost
+        # listed assistant when none is bound — so the render's lore fit uses
+        # the budget and reach the send will use. The estimate's pricing keeps
+        # its own contract (unpriced without a bound assistant).
+        settings = machine_settings_service.load_settings()
+        resolved = resolve_call_params(
+            project,
+            settings,
+            assistant_id=request.assistant_id,
+            provider_override=None,
+            model_override=None,
+            max_tokens_override=None,
+        )
         try:
             rendered, session_id = build_preview(
                 project,
@@ -299,6 +313,7 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                     commit=request.commit,
                     resolution_scene_id=request.resolution_scene_id,
                     subject=request.subject,
+                    lore_limits=resolved.lore_limits,
                 ),
             )
         except PreviewError as exc:
@@ -333,9 +348,11 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
     ]
     char_count = sum(len(b.text) for m in messages for b in m.blocks)
 
-    settings = machine_settings_service.load_settings()
     estimate = await estimate_preview_tokens_and_cost(
-        project, rendered, assistant_id=request.assistant_id, settings=settings
+        project,
+        rendered,
+        resolved=resolved if request.assistant_id is not None else None,
+        settings=settings,
     )
 
     return AIPreviewResponse(
@@ -346,6 +363,10 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         rendered=True,
         estimated_tokens=estimate.estimated_tokens,
         cache_blocks=estimate.cache_blocks,
+        # ADR-0086 §5: the turn-0 fit's report and the left-out entries' own
+        # elements, so a fresh chat's door is honest before the first send.
+        lore_fit=rendered.send_lore_fit,
+        lore_left_out_xml=rendered.send_lore_left_out_entries,
         estimated_cost_usd=estimate.estimated_cost_usd,
         estimated_first_cost_usd=estimate.estimated_first_cost_usd,
         provider=estimate.provider,
@@ -549,8 +570,17 @@ async def ai_chat_stream(
     messages_list = [m.model_dump() for m in request.messages]
     prepared = expand_and_prepare_chat_blocks(
         project,
-        request.chat_id, request.system_prompt, messages_list
+        request.chat_id, request.system_prompt, messages_list,
+        lore_limits=resolved.lore_limits,
     )
+    # What rides the `done` line besides usage/cost: this turn's new journal
+    # entries and, when an implicit selection ran, its lore-budget report
+    # (ADR-0086 §5) — the send that left something out is the one that says so.
+    extra_done: dict[str, Any] = {}
+    if prepared.journal_added:
+        extra_done["journal_added"] = [e.model_dump() for e in prepared.journal_added]
+    if prepared.lore_fit is not None:
+        extra_done["lore_fit"] = prepared.lore_fit.model_dump()
 
     # Pre-fetch the pricing descriptor so the sync stream generator can
     # compute cost when the terminal StreamDone arrives, without needing
@@ -578,10 +608,7 @@ async def ai_chat_stream(
         stream_ndjson_until_disconnect(
             transform_provider_events_to_ndjson(
                 events, policy=policy,
-                extra_done=(
-                    {"journal_added": [e.model_dump() for e in prepared.journal_added]}
-                    if prepared.journal_added else None
-                ),
+                extra_done=extra_done or None,
                 descriptor=descriptor,
                 on_error=lambda ev: _record_stream_error(project, ev),
                 # #1877: the server ran the turn, so the server records its

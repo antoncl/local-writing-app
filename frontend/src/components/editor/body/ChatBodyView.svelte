@@ -425,6 +425,8 @@
       provider: m.provider ?? null,
       model: m.model ?? null,
       latency_ms: m.latency_ms ?? null,
+      // ADR-0086 §5: the send's lore-budget report, beside the fields above.
+      lore_fit: m.lore_fit ?? null,
     }));
     chatError = null;
     chatInput = "";
@@ -562,6 +564,8 @@
         provider: m.provider ?? null,
         model: m.model ?? null,
         latency_ms: m.latency_ms ?? null,
+        // ADR-0086 §5: the lore-budget report, echoed through the same way.
+        lore_fit: m.lore_fit ?? null,
         // S2: the per-turn journal chips must survive a reload — they are the
         // transcript's ambient auto-context signal now that the journal strip
         // is gone (the door carries the roster; the chips carry the moments).
@@ -716,6 +720,10 @@
           chatHistory[idx].provider = ev.provider;
           chatHistory[idx].model = ev.model;
           chatHistory[idx].latency_ms = ev.latency_ms;
+          // ADR-0086 §5: the send's lore-budget report rides the same `done`
+          // line and is stamped the same way — it renders as a quiet segment
+          // of the turn's meta line and persists with the message.
+          if (ev.lore_fit) chatHistory[idx].lore_fit = ev.lore_fit;
           chatHistory = chatHistory;
         } else if (ev.type === "error") {
           errored = true;

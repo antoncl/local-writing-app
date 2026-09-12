@@ -97,6 +97,8 @@ export type {
   ChatMessage,
   AIChatRequest,
   ChatUsage,
+  LoreFit,
+  LoreFitEntry,
   AIChatResponse,
   AIGenerateRequest,
   AIContextPresetResponse,

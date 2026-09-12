@@ -1053,10 +1053,15 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Page status",
             "type": "select",
             "options": [
-                {"value": "unwritten", "color": "stone"},
-                {"value": "off_page", "color": "graphite"},
-                {"value": "on_page", "color": "moss"},
+                {"value": "unwritten", "label": "Unwritten", "color": "stone"},
+                {"value": "off_page", "label": "Off page", "color": "graphite"},
+                {"value": "on_page", "label": "On page", "color": "moss"},
             ],
+            # A required select, like `context_policy` (#1421): blank reads as
+            # unwritten everywhere else (the healer above, the board), so the rail
+            # says so too instead of offering "(none)" (#1903). Never written —
+            # re-picking the default pops the key, front matter stays sparse.
+            "default": "unwritten",
         },
         "beat_links": {
             # A card's beat links (ADR-0048 S7 Slice 3b; ADR-0053): the beats this card

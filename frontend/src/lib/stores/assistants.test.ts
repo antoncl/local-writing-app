@@ -4,7 +4,12 @@ import type { AssistantEntrySummary } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({ api: { listAssistantEntries: vi.fn() } }));
 import { api } from "@/lib/api";
-import { assistantEntriesStore, defaultAssistantIdStore, refreshAssistantEntries } from "@/lib/stores/assistants";
+import {
+  assistantEntriesStore,
+  defaultAssistantIdStore,
+  refreshAssistantEntries,
+  setAssistantEntries,
+} from "@/lib/stores/assistants";
 
 const A = (id: string, listed: string): AssistantEntrySummary =>
   ({
@@ -72,5 +77,21 @@ describe("refreshAssistantEntries stale guard", () => {
     await refreshAssistantEntries();
 
     expect(get(assistantEntriesStore).map((entry) => entry.id)).toEqual(["kept"]);
+  });
+
+  it("a write-through invalidates a refresh already in flight (open pane, reorder at once)", async () => {
+    let resolveRefresh!: (value: { entries: AssistantEntrySummary[] }) => void;
+    vi.mocked(api.listAssistantEntries).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRefresh = resolve;
+      }),
+    );
+
+    const inFlight = refreshAssistantEntries();
+    setAssistantEntries([A("second", "listed"), A("first", "listed")]); // the reorder's response
+    resolveRefresh({ entries: [A("first", "listed"), A("second", "listed")] }); // the older order
+    await inFlight;
+
+    expect(get(assistantEntriesStore).map((entry) => entry.id)).toEqual(["second", "first"]);
   });
 });

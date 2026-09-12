@@ -53,10 +53,17 @@ export async function refreshAssistantEntries(): Promise<void> {
 
 // Write-through from a mutation that already returns the canonical roster
 // (reorder, delete assistant entry, …).
+// A write-through (a mutation's response IS the canonical roster) or a clear
+// also bumps `latest`, so a refresh already in flight cannot land its older
+// answer over it — e.g. open the Assistants pane (fires a refresh) and reorder
+// at once: without the bump the earlier GET resolved last and reverted the
+// order on screen (review of #1879).
 export function setAssistantEntries(entries: AssistantEntrySummary[]): void {
+  latest += 1;
   assistantEntriesStore.set(entries);
 }
 
 export function clearAssistants(): void {
+  latest += 1;
   assistantEntriesStore.set([]);
 }

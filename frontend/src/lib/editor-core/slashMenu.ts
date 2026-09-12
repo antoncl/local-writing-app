@@ -21,5 +21,15 @@ export type SlashCommand = {
   description: string;
   group: string;
   autocompleteTo?: string;
+  /** A scene verb (scene break, mutate, the cursor prompts — roleplay only
+   *  makes sense in a scene): offered in a manuscript body only. Unscoped
+   *  commands are formatting and belong to every prose body (#1893). */
+  scope?: "manuscript";
   run: (args?: string[]) => void | Promise<void>;
 };
+
+/** The commands a body of `kind` offers: every unscoped command, plus the
+ *  scene verbs when the body is a scene. */
+export function slashCommandsForKind<T extends { scope?: "manuscript" }>(commands: T[], kind: string): T[] {
+  return commands.filter((command) => command.scope === undefined || command.scope === kind);
+}

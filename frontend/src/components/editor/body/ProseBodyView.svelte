@@ -22,7 +22,6 @@
 
   import { onMount } from "svelte";
   import { Editor } from "@tiptap/core";
-  import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
   import { TextSelection, type Transaction } from "@tiptap/pm/state";
   import type { EditorView } from "@tiptap/pm/view";
   import StarterKit from "@tiptap/starter-kit";
@@ -76,13 +75,14 @@
     TABLE_GRID_MAX_COLS,
     type SlashCommand,
     type SlashMenuState,
+    slashCommandsForKind,
   } from "@/lib/editor-core/slashMenu";
   import {
     placeSelectionToolbar,
     type FloatingMenuState,
     type ToolbarAction,
   } from "@/lib/editor-core/selectionToolbar";
-  import { formattingToolbarParts, type BlockWrapType } from "@/lib/editor-core/formattingToolbarActions";
+  import { formattingToolbarParts } from "@/lib/editor-core/formattingToolbarActions";
   import { visibleSelectionRect, selectionEndpointRect } from "@/lib/editor-core/selectionRects";
   import { AlignedTableCell, AlignedTableHeader } from "@/lib/editor-core/alignedTable";
   import ProseSlashMenu from "./ProseSlashMenu.svelte";
@@ -449,8 +449,9 @@
   }
 
   // ---------- Slash menu ----------
+  // The menu opens in every prose body (#1893); the command LIST is what a
+  // kind scopes — see getSlashCommands / slashCommandsForKind.
   function isSlashTriggerContext() {
-    if (documentKind !== "manuscript") return false;
     if (!editor) return false;
     const { selection } = editor.state;
     if (!selection.empty) return false;
@@ -468,7 +469,7 @@
   }
 
   function refreshSlashFilterText() {
-    const next = editor && documentKind === "manuscript" ? readSlashFilterText() : "";
+    const next = editor ? readSlashFilterText() : "";
     if (next !== slashFilterText) slashFilterText = next;
   }
 
@@ -480,10 +481,6 @@
   }
 
   function updateSlashMenuFromContent() {
-    if (documentKind !== "manuscript") {
-      if (slashMenu.visible) closeSlashMenu();
-      return;
-    }
     if (slashMenu.visible && slashMenu.mode === "table-grid") {
       return;
     }
@@ -495,7 +492,6 @@
   }
 
   function openSlashMenu() {
-    if (documentKind !== "manuscript") return;
     if (!editor || !editorFrame || !editor.isFocused) return;
     if (!isSlashTriggerContext()) return;
     const coords = editor.view.coordsAtPos(editor.state.selection.from);
@@ -565,6 +561,10 @@
     }
   }
 
+  // Every prose body gets the formatting commands; a `scope: "manuscript"`
+  // command is a scene verb (scene break, mutate, the cursor prompts — roleplay
+  // only makes sense in a scene) and is dropped for other kinds by
+  // slashCommandsForKind (#1893).
   function getSlashCommands(): SlashCommand[] {
     if (!editor) return [];
     return [
@@ -613,6 +613,7 @@
       {
         group: "Insert",
         label: "Scene break",
+        scope: "manuscript",
         description: "Insert a centered section break (* * *).",
         // Clear the "/scene break" trigger text FIRST, like insertTableFromGrid:
         // setHorizontalRule moves the caret past the rule, so the run-then-clear
@@ -638,6 +639,7 @@
       {
         group: "Insert",
         label: "Mutate lore",
+        scope: "manuscript",
         description: "Record a mid-scene change to a lore field (rank, title, …).",
         autocompleteTo: "mutate",
         run: (args) => {
@@ -657,6 +659,7 @@
       ...promptEntriesForSurface(promptCtx, "cursor")
         .map((entry) => ({
           group: "AI",
+          scope: "manuscript" as const,
           label: entry.title,
           description: promptEntryDescription(promptCtx, entry),
           // Colon-free token from the title, NOT the entry_type: since the FQN
@@ -757,119 +760,19 @@
     openToolbarMenuId = openToolbarMenuId === actionId ? null : actionId;
   }
 
-  function applySelectionHeading(level: 1 | 2 | 3) {
-    if (!editor) return;
-    if (!extractSelectionToHeading(level)) {
-      editor.chain().focus().setHeading({ level }).run();
-    }
-  }
-
-  function extractSelectionToHeading(level: 1 | 2 | 3) {
-    if (!editor) return false;
-    return extractPartialTextSelection((selectedContent) => editor!.state.schema.nodes.heading.create({ level }, selectedContent));
-  }
-
-  function applySelectionBlockWrap(type: BlockWrapType) {
-    if (!editor) return;
-    if (extractSelectionToBlockWrap(type)) return;
-
-    if (type === "blockquote") {
-      editor.chain().focus().toggleBlockquote().run();
-    } else if (type === "bulletList") {
-      editor.chain().focus().toggleBulletList().run();
-    } else {
-      editor.chain().focus().toggleOrderedList().run();
-    }
-  }
-
-  function extractSelectionToBlockWrap(type: BlockWrapType) {
-    if (!editor) return false;
-    const { schema } = editor.state;
-    const paragraphType = schema.nodes.paragraph;
-    const blockquoteType = schema.nodes.blockquote;
-    const bulletListType = schema.nodes.bulletList;
-    const orderedListType = schema.nodes.orderedList;
-    const listItemType = schema.nodes.listItem;
-
-    if (!paragraphType) return false;
-
-    return extractPartialTextSelection((selectedContent) => {
-      const paragraph = paragraphType.create(null, selectedContent);
-      if (type === "blockquote") {
-        return blockquoteType ? blockquoteType.create(null, paragraph) : null;
-      }
-
-      if (!listItemType) return null;
-      const listItem = listItemType.create(null, paragraph);
-      if (type === "bulletList") {
-        return bulletListType ? bulletListType.create(null, listItem) : null;
-      }
-      return orderedListType ? orderedListType.create(null, listItem) : null;
-    });
-  }
-
-  function extractPartialTextSelection(createSelectedBlock: (selectedContent: Fragment) => ProseMirrorNode | null) {
-    if (!editor) return false;
-    const { state, view } = editor;
-    const { selection } = state;
-    const { $from: fromR, $to: toR, from, to } = selection;
-    const parent = fromR.parent;
-    const paragraphType = state.schema.nodes.paragraph;
-
-    if (
-      selection.empty ||
-      !paragraphType ||
-      !fromR.sameParent(toR) ||
-      fromR.depth !== 1 ||
-      !parent.isTextblock
-    ) {
-      return false;
-    }
-
-    const parentStart = fromR.start();
-    const parentEnd = fromR.end();
-    if (from === parentStart && to === parentEnd) {
-      return false;
-    }
-
-    const beforeContent = parent.content.cut(0, from - parentStart);
-    const selectedContent = parent.content.cut(from - parentStart, to - parentStart);
-    const afterContent = parent.content.cut(to - parentStart, parent.content.size);
-    if (selectedContent.size === 0) return false;
-    const selectedBlock = createSelectedBlock(selectedContent);
-    if (!selectedBlock) return false;
-
-    const replacementNodes = [
-      createParagraphNode(beforeContent),
-      selectedBlock,
-      createParagraphNode(afterContent),
-    ].filter((n): n is NonNullable<typeof n> => n !== null);
-
-    const transaction = state.tr.replaceWith(fromR.before(), fromR.after(), replacementNodes);
-    view.dispatch(transaction.scrollIntoView());
-    view.focus();
-    return true;
-  }
-
-  function createParagraphNode(content: Fragment) {
-    if (!editor || content.size === 0) return null;
-    return editor.state.schema.nodes.paragraph.create(null, content);
-  }
-
-  // Builds the unified menu (#1223). The general formatting group (B/I/S,
-  // Revise, Style, To-do) applies to a text selection; the Table menu applies
-  // in a table. Both can be present (a selection inside a table). The
-  // formatting parts are the shared core the rail's long_text fields use too
-  // (#1893); the body adds Revise and To-do, and its own block transforms.
+  // Builds the unified menu (#1223). The formatting group (B/I/S, Style)
+  // applies to a text selection; the Table menu applies in a table. Both can
+  // be present (a selection inside a table). The formatting parts are the
+  // shared core the rail's long_text fields use too (#1893); the body adds
+  // Revise and To-do for a SCENE only — a prompt run is refused outside a
+  // scene, and the embedded-todo index scans scenes.
   function getSelectionToolbarActions(hasText: boolean, inTable: boolean): ToolbarAction[] {
     if (!editor) return [];
-    const { marks, style, table } = formattingToolbarParts(editor, hasText, inTable, {
-      setHeading: applySelectionHeading,
-      wrapBlock: applySelectionBlockWrap,
-    });
+    const { marks, style, table } = formattingToolbarParts(editor, hasText, inTable);
+    const isScene = documentKind === "manuscript";
     const actions: ToolbarAction[] = [];
-    if (style) {
-      const reviseEntries = promptEntriesForSurface(promptCtx, "selection");
+    if (hasText && style) {
+      const reviseEntries = isScene ? promptEntriesForSurface(promptCtx, "selection") : [];
       const reviseAction: ToolbarAction | null =
         reviseEntries.length === 0
           ? null
@@ -890,12 +793,8 @@
                   run: () => focusAndRun(() => aiSuggestion.runPromptEntry(entry)),
                 })),
               };
-      actions.push(
-        ...marks,
-        ...(reviseAction ? [reviseAction] : []),
-        style,
-        { kind: "button", id: "todo", label: "TODO", run: markSelectionAsTodo },
-      );
+      actions.push(...marks, ...(reviseAction ? [reviseAction] : []), style);
+      if (isScene) actions.push({ kind: "button", id: "todo", label: "TODO", run: markSelectionAsTodo });
     }
     if (table) actions.push(table);
     return actions;
@@ -1001,12 +900,15 @@
   }
 
   function handleEditorKeydown(view: EditorView, event: KeyboardEvent) {
-    if (documentKind !== "manuscript") {
-      if (slashMenu.visible) closeSlashMenu();
-      return false;
-    }
-
-    if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
+    // Ctrl+J runs the default cursor prompt — a scene verb; the rest of the
+    // keys (slash menu, Tab, Escape) belong to every prose body (#1893).
+    if (
+      documentKind === "manuscript" &&
+      event.key.toLowerCase() === "j" &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
       event.preventDefault();
       const entry = defaultPromptForSurface(promptCtx, "cursor");
       if (entry) void aiSuggestion.runPromptEntry(entry);
@@ -1097,6 +999,9 @@
       }
     }
 
+    // In a table, Tab belongs to the Table keymap (next / previous cell) —
+    // this handler runs before plugin keymaps, so step aside (#1895).
+    if (event.key === "Tab" && editor?.isActive("table")) return false;
     if (event.key === "Tab" && !event.shiftKey && editor) {
       if (editor.can().sinkListItem("listItem")) {
         event.preventDefault();
@@ -1246,7 +1151,7 @@
     hiddenPromptIds: $hiddenLibraryStore,
   });
   // ---------- Reactives ----------
-  let slashCommands = $derived(editor && documentKind === "manuscript" ? getSlashCommands() : []);
+  let slashCommands = $derived(editor ? slashCommandsForKind(getSlashCommands(), documentKind) : []);
   let parsedSlash = $derived(parseSlashBody(slashFilterText) ?? { command: slashFilterText, args: "" });
   let slashArgTokens = $derived(tokenizeSlashArgs(parsedSlash.args));
   let filteredSlashCommands = $derived(filterSlashCommands(slashCommands, parsedSlash.command, parsedSlash.args.length > 0));

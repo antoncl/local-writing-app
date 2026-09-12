@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Editor } from "@tiptap/core";
 import { buildTableMenuAction } from "./tableMenuActions";
+import { setColumnAlign } from "./alignedTable";
 import {
   isToolbarSeparator,
   isToolbarSubmenu,
   type ToolbarMenuEntry,
 } from "./selectionToolbar";
+
+vi.mock("./alignedTable", () => ({ setColumnAlign: vi.fn() }));
 
 // A chainable editor stub: every table command returns the chain and records
 // its name, so we can assert which TipTap command a menu leaf fires.
@@ -47,7 +50,7 @@ function findLeaf(entries: ToolbarMenuEntry[], id: string): { run: () => void; d
 describe("buildTableMenuAction (#1223)", () => {
   it("groups the table commands into Row / Column / Align / Header submenus + a delete leaf", () => {
     const { editor } = makeEditor();
-    const action = buildTableMenuAction(editor, vi.fn());
+    const action = buildTableMenuAction(editor);
     expect(action.kind).toBe("menu");
     expect(action.label).toBe("Table");
     const submenus = action.items.filter(isToolbarSubmenu).map((s) => s.label);
@@ -71,19 +74,22 @@ describe("buildTableMenuAction (#1223)", () => {
     ];
     for (const [id, command] of cases) {
       const { editor, calls } = makeEditor();
-      findLeaf(buildTableMenuAction(editor, vi.fn()).items, id).run();
+      findLeaf(buildTableMenuAction(editor).items, id).run();
       expect(calls).toContain(command);
       expect(calls).toContain("run");
     }
   });
 
-  it("alignment leaves delegate to the injected onAlign (column-wide, host-owned)", () => {
+  it("alignment leaves call setColumnAlign (column-wide) on the editor", () => {
     const { editor } = makeEditor();
-    const onAlign = vi.fn();
-    const items = buildTableMenuAction(editor, onAlign).items;
+    const items = buildTableMenuAction(editor).items;
     findLeaf(items, "align-left").run();
     findLeaf(items, "align-center").run();
     findLeaf(items, "align-right").run();
-    expect(onAlign.mock.calls).toEqual([["left"], ["center"], ["right"]]);
+    expect(vi.mocked(setColumnAlign).mock.calls).toEqual([
+      [editor, "left"],
+      [editor, "center"],
+      [editor, "right"],
+    ]);
   });
 });

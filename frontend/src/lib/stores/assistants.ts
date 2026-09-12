@@ -34,10 +34,18 @@ export const defaultAssistantIdStore = derived(
 );
 
 // Refresh swallows errors (backend may be unavailable) and leaves the previous
-// list in place — matching the prior App.svelte behavior.
+// list in place — matching the prior App.svelte behavior. Monotonic `latest`
+// (same guard as `refreshTagNodes`): the no-project hydration and the
+// project-open refresh (#1878) can be in flight together, and the earlier,
+// machine-only answer must never land over the later, project-scoped one.
+let latest = 0;
+
 export async function refreshAssistantEntries(): Promise<void> {
+  const seq = ++latest;
   try {
-    assistantEntriesStore.set((await api.listAssistantEntries()).entries);
+    const entries = (await api.listAssistantEntries()).entries;
+    if (seq !== latest) return; // superseded by a later refresh
+    assistantEntriesStore.set(entries);
   } catch {
     // Leave previous list in place.
   }
@@ -45,10 +53,17 @@ export async function refreshAssistantEntries(): Promise<void> {
 
 // Write-through from a mutation that already returns the canonical roster
 // (reorder, delete assistant entry, …).
+// A write-through (a mutation's response IS the canonical roster) or a clear
+// also bumps `latest`, so a refresh already in flight cannot land its older
+// answer over it — e.g. open the Assistants pane (fires a refresh) and reorder
+// at once: without the bump the earlier GET resolved last and reverted the
+// order on screen (review of #1879).
 export function setAssistantEntries(entries: AssistantEntrySummary[]): void {
+  latest += 1;
   assistantEntriesStore.set(entries);
 }
 
 export function clearAssistants(): void {
+  latest += 1;
   assistantEntriesStore.set([]);
 }

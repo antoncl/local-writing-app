@@ -439,7 +439,11 @@
   // gesture "shows what the default is" (#522). Empty when the field defines no
   // default — reverting then simply unsets it.
   function defaultHint(fieldId: string): string {
-    return metadataValueString(metadataSchema.fields[fieldId]?.default ?? undefined);
+    const field = metadataSchema.fields[fieldId];
+    const raw = metadataValueString(field?.default ?? undefined);
+    // A select's default is named by its option label, as the row shows it —
+    // "One hop", not "one_hop" (#1900).
+    return field?.options?.find((option) => option.value === raw)?.label ?? raw;
   }
 
   // Persist a single field edit. A required select (one that declares a default,
@@ -698,6 +702,9 @@
             <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           {/if}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <!-- The description is the tooltip of the name AND of the at-rest
+               value control (RailScalarCell's hit target) — #1900 — not of the
+               whole row, which would hover it over a long_text's prose. -->
           <span
             class="fr-name"
             title={field.description || undefined}

@@ -17,6 +17,7 @@ from app.services.ai.call_resolver import (
     resolve_call_params,
 )
 from app.services.ai.lore_budget import DEFAULT_LORE_BUDGET_TOKENS, LoreLimits
+from app.services.project.default_schema import DEFAULT_METADATA_SCHEMA
 
 
 def _project(assistant: object | None) -> mock.Mock:
@@ -128,6 +129,19 @@ class ResolveCallParamsTests(unittest.TestCase):
         for value in ("", None, "two_hop", "NAMED"):
             with self.subTest(value=value):
                 self.assertEqual(self._lore_limits(ai_lore_expansion=value).expansion, "one_hop")
+
+    def test_the_schema_says_what_the_resolver_does_with_a_blank(self) -> None:
+        # The rail shows the schema default for a blank Lore reach and the
+        # resolver applies its own — one value, spelled once (#1900). The
+        # budget has no schema default (a number default is seeded to disk),
+        # so its description names the constant instead.
+        fields = DEFAULT_METADATA_SCHEMA["fields"]
+        self.assertEqual(fields["ai_lore_expansion"]["default"], self._lore_limits().expansion)
+        self.assertEqual(
+            [option["value"] for option in fields["ai_lore_expansion"]["options"]], ["one_hop", "named"]
+        )
+        self.assertNotIn("default", fields["ai_lore_budget_tokens"])
+        self.assertIn(str(DEFAULT_LORE_BUDGET_TOKENS), fields["ai_lore_budget_tokens"]["description"])
 
     def test_no_assistant_gets_the_default_lore_limits(self) -> None:
         resolved = resolve_call_params(

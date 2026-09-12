@@ -14,7 +14,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from app.services.ai.assistant_validation import coerce_optional_temperature
-from app.services.ai.lore_budget import DEFAULT_LORE_BUDGET_TOKENS, LoreLimits
+from app.services.ai.lore_budget import (
+    DEFAULT_LORE_BUDGET_TOKENS,
+    DEFAULT_LORE_LIMITS,
+    LoreLimits,
+)
 from app.services.ai.profiles.base import ChatCall
 
 if TYPE_CHECKING:
@@ -110,7 +114,7 @@ def _lore_limits(meta: dict) -> LoreLimits:
     expansion = meta.get("ai_lore_expansion")
     return LoreLimits(
         budget_tokens=_lore_budget_tokens(meta.get("ai_lore_budget_tokens")),
-        expansion="named" if expansion == "named" else "one_hop",
+        expansion="named" if expansion == "named" else DEFAULT_LORE_LIMITS.expansion,
     )
 
 

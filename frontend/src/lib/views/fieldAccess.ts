@@ -5,6 +5,7 @@
 // routing (ADR-0029 §D) and collection-vs-scalar shaping (ADR-0031 §E, #202).
 
 import type { EvalNode } from "@/lib/views/evaluateView";
+import { effectiveSelectValue } from "@/lib/metadataTypes";
 import type { MetadataFieldDefinition, MetadataSchema, ViewFieldOf } from "@/lib/types";
 
 // The three canonical intrinsic keys — top-level properties on EVERY node/
@@ -38,14 +39,18 @@ export function fieldValue(node: EvalNode, key: string, schema: MetadataSchema |
   const field = schema?.fields?.[key];
   if (field?.category === "computed") return node.computed_metadata?.[key];
   const raw = node.metadata?.[key];
-  // A required select — one with a schema default (#1421) — reads as its
-  // default when blank: the rail shows the default, so Views group and filter
-  // what the rail shows (#1908). The backend evaluator fills the same blank
-  // (`selector_eval.with_select_defaults`); the parity corpus holds both to it.
-  if (field?.type === "select" && field.default != null && field.default !== "" && (raw == null || raw === "")) {
-    return field.default;
-  }
-  return raw;
+  // A required select reads as its default when blank (#1908) — but only on
+  // a node whose type carries the field: the rail shows the default there and
+  // nothing at all elsewhere (a plotline has no page status). The backend
+  // roster fills the same way (`with_select_defaults`, per entry type); the
+  // parity corpus holds both to it.
+  return declaresField(schema, node.entry_type, key) ? effectiveSelectValue(field, raw) : raw;
+}
+
+/** Whether `entryType`'s resolved field list carries `key`. The resolved
+ *  schema's `fields` already folds in the parent chain. */
+export function declaresField(schema: MetadataSchema | null | undefined, entryType: string, key: string): boolean {
+  return schema?.entry_types?.[entryType]?.fields?.includes(key) ?? false;
 }
 
 // A node's link-field values as a list of trimmed strings — entity_ref (a bare

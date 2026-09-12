@@ -1,5 +1,5 @@
 {
-  "_comment": "Cross-runtime parity corpus for the context-pick selector evaluator (ADR-0074 slice 5 / ADR-0082 slice 2b). The SAME cases are run by backend/tests/test_selector_eval_parity.py (Python: evaluate_selector_membership) and frontend/src/lib/views/selectorEvalParity.test.ts (TypeScript: evaluateView). Both must return `expected` verbatim. `expected` is in node-array (roster) order, deduped. A change to either evaluator that breaks parity turns its runtime's gate red. `tagged` names a tag NODE by id and matches when that id appears anywhere in a node's metadata (any field, any depth) — schema-free, not keyed to a conventional `tags` field; the `schema.entry_types[*].parent` chain drives type/descendants_of. `schema.fields` (optional, `{key: {type}}`) declares field TYPES for the `field` predicate — `entity_ref`/`entity_ref_list` keys are reference fields (canonicalised, below); an undeclared key falls back to scalar/list auto-detection at runtime, unaffected. The optional top-level `redirects` map (`{\"<merged id>\": \"<survivor id>\"}`, ADR-0082 §5 / #1805) models a merged tag's `merged_into` chain; both runners build a canonical function from it (chain-walked to its terminal survivor, identity when absent, a case's ids don't appear in it, or the chain revisits an id already on its OWN walk — a cycle or cycle-adjacent id resolves to ITSELF, mirroring `NodeIndex._walk_merge_chain`, never to an arbitrary cycle member) and pass it to their evaluator — mirroring the backend `canonical_id` kwarg and the frontend `EvalContext.canonicalId`. It follows EVERY `tagged:` operand id, a reference-field `field` predicate's operand AND the node's own value (per `schema.fields`), and — per each runner's own node-reference construction — every node's metadata references too, so a merged id matches through the redirect from either side.",
+  "_comment": "Cross-runtime parity corpus for the context-pick selector evaluator (ADR-0074 slice 5 / ADR-0082 slice 2b). The SAME cases are run by backend/tests/test_selector_eval_parity.py (Python: evaluate_selector_membership) and frontend/src/lib/views/selectorEvalParity.test.ts (TypeScript: evaluateView). Both must return `expected` verbatim. `expected` is in node-array (roster) order, deduped. A change to either evaluator that breaks parity turns its runtime's gate red. `tagged` names a tag NODE by id and matches when that id appears anywhere in a node's metadata (any field, any depth) — schema-free, not keyed to a conventional `tags` field; the `schema.entry_types[*].parent` chain drives type/descendants_of. `schema.fields` (optional, `{key: {type, default?}}`) declares field TYPES for the `field` predicate — `entity_ref`/`entity_ref_list` keys are reference fields (canonicalised, below); a `select` with a `default` is a required select (#1421/#1908): a node whose entry type lists the key in its `fields` reads a blank as that default (both runners fill it before evaluating); an undeclared key falls back to scalar/list auto-detection at runtime, unaffected. The optional top-level `redirects` map (`{\"<merged id>\": \"<survivor id>\"}`, ADR-0082 §5 / #1805) models a merged tag's `merged_into` chain; both runners build a canonical function from it (chain-walked to its terminal survivor, identity when absent, a case's ids don't appear in it, or the chain revisits an id already on its OWN walk — a cycle or cycle-adjacent id resolves to ITSELF, mirroring `NodeIndex._walk_merge_chain`, never to an arbitrary cycle member) and pass it to their evaluator — mirroring the backend `canonical_id` kwarg and the frontend `EvalContext.canonicalId`. It follows EVERY `tagged:` operand id, a reference-field `field` predicate's operand AND the node's own value (per `schema.fields`), and — per each runner's own node-reference construction — every node's metadata references too, so a merged id matches through the redirect from either side.",
   "schema": {
     "entry_types": {
       "lore:base": {},
@@ -8,7 +8,7 @@
       "lore:character": { "parent": "lore:base" },
       "lore:hero": { "parent": "lore:character" },
       "plot:base": {},
-      "plot:card": { "parent": "plot:base" }
+      "plot:card": { "parent": "plot:base", "fields": ["page_status"] }
     },
     "fields": {
       "plotline": { "type": "entity_ref_list" },
@@ -249,23 +249,25 @@
       "expected": ["x"]
     },
     {
-      "name": "a blank required select reads as its schema default (#1908)",
+      "name": "a blank required select reads as its schema default, on a type that carries the field (#1908)",
       "expr": { "field": { "key": "page_status", "op": "overlap", "value": "unwritten" } },
       "nodes": [
-        { "id": "a", "entry_type": "lore:note", "metadata": {} },
-        { "id": "b", "entry_type": "lore:note", "metadata": { "page_status": "off_page" } },
-        { "id": "c", "entry_type": "lore:note", "metadata": { "page_status": "" } }
+        { "id": "a", "entry_type": "plot:card", "metadata": {} },
+        { "id": "b", "entry_type": "plot:card", "metadata": { "page_status": "off_page" } },
+        { "id": "c", "entry_type": "plot:card", "metadata": { "page_status": "" } },
+        { "id": "d", "entry_type": "lore:note", "metadata": {} }
       ],
       "expected": ["a", "c"]
     },
     {
-      "name": "a required select is never unset — the default is always in force (#1908)",
+      "name": "a required select is never unset on a type that carries it; a type without it stays unset (#1908)",
       "expr": { "field": { "key": "page_status", "op": "unset" } },
       "nodes": [
-        { "id": "a", "entry_type": "lore:note", "metadata": {} },
-        { "id": "b", "entry_type": "lore:note", "metadata": { "page_status": "off_page" } }
+        { "id": "a", "entry_type": "plot:card", "metadata": {} },
+        { "id": "b", "entry_type": "plot:card", "metadata": { "page_status": "off_page" } },
+        { "id": "d", "entry_type": "lore:note", "metadata": {} }
       ],
-      "expected": []
+      "expected": ["d"]
     }
   ]
 }

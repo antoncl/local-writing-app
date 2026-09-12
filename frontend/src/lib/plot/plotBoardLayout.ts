@@ -81,17 +81,16 @@ export type PlotCardData = {
   causalLinks: string[];
 };
 
-/** A card's page status as the board shows it (#1907): the stored value, or
- *  the schema default for a sparse blank (the rail's rule, #1421), with the
- *  label and swatch the schema's `page_status` options declare. Without the
- *  field in the schema (not loaded yet, or a layer without it) the value
+/** A card's page status as the board shows it (#1907): the projected value
+ *  (the backend already resolves a sparse blank to the schema default), with
+ *  the label and swatch the schema's `page_status` options declare. Without
+ *  the field in the schema (not loaded yet, or a layer without it) the value
  *  stands in for its label and there is no swatch. */
 export function pageStatusOf(
   stored: string | null,
   field: MetadataFieldDefinition | undefined,
 ): Pick<PlotCardData, "pageStatus" | "pageStatusLabel" | "pageStatusSwatch"> {
-  const fallback = typeof field?.default === "string" && field.default !== "" ? field.default : "unwritten";
-  const pageStatus = stored || fallback;
+  const pageStatus = stored || (typeof field?.default === "string" ? field.default : "");
   const option = field?.options.find((o) => o.value === pageStatus);
   return { pageStatus, pageStatusLabel: option?.label ?? pageStatus, pageStatusSwatch: option?.color ?? null };
 }

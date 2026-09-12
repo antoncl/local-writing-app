@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import { isRequiredSelect } from "@/lib/metadataTypes";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import RailScalarCell, { leavesRow } from "@/components/editor/RailScalarCell.svelte";
   import RailFlipCandidate from "@/components/editor/RailFlipCandidate.svelte";
@@ -461,9 +462,7 @@
   // evaluation. Every other edit writes through unchanged.
   function writeField(fieldId: string, v: MetadataValue) {
     const field = metadataSchema.fields[fieldId];
-    const isRequiredSelect =
-      field?.type === "select" && field.default != null && field.default !== "";
-    if (isRequiredSelect && String(v) === String(field.default)) {
+    if (isRequiredSelect(field) && String(v) === field.default) {
       clearField(fieldId);
       return;
     }

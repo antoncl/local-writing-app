@@ -23,6 +23,10 @@
     // Read-only display (#64): the trigger pill renders identically (dot +
     // label + tint) but is inert — no popover, no hover affordance, no caret.
     readOnly = false,
+    // Leave `derived` options (#1906) out of the list — the trigger still
+    // names one that is held. An authoring host sets this; a host that
+    // references a value (a view filter) keeps every option pickable.
+    hideDerived = false,
   }: {
     value?: string;
     options?: SelectOption[];
@@ -31,6 +35,7 @@
     ariaLabel?: string;
     onChange?: (value: string) => void;
     readOnly?: boolean;
+    hideDerived?: boolean;
   } = $props();
 
   let open = $state(false);
@@ -148,9 +153,7 @@
           <span class="colored-select-row-label muted">{placeholder}</span>
         </button>
       {/if}
-      <!-- A derived option (#1906) is the app's to set, never the author's:
-           it shows at rest (`current` still resolves it) but is not offered. -->
-      {#each options.filter((o) => !o.derived) as opt}
+      {#each hideDerived ? options.filter((o) => !o.derived) : options as opt}
         <button
           type="button"
           class="colored-select-row"

@@ -97,6 +97,14 @@ def _make_select_defaults(fields: dict[str, Any]) -> dict[str, Any]:
 _SELECT_DEFAULTS = _make_select_defaults(_CORPUS["schema"].get("fields") or {})
 
 
+def _select_defaults_for(entry_type: str) -> dict[str, Any]:
+    """The defaults a node of `entry_type` reads: only for the keys its type's
+    (resolved) `fields` list carries — the double for `preview.py`'s per-type
+    scoping. A type without the field never holds its default."""
+    fields = (_CORPUS["schema"]["entry_types"].get(entry_type) or {}).get("fields") or []
+    return {key: value for key, value in _SELECT_DEFAULTS.items() if key in fields}
+
+
 @pytest.mark.parametrize("case", _CORPUS["cases"], ids=lambda c: c["name"])
 def test_selector_eval_parity(case: dict[str, Any]) -> None:
     # Node-side references are canonicalised by the CALLER (`preview.py`'s
@@ -109,7 +117,7 @@ def test_selector_eval_parity(case: dict[str, Any]) -> None:
             n["id"],
             n["entry_type"],
             frozenset(_CANONICAL_ID(ref) for ref in selector_references(n.get("metadata"))),
-            with_select_defaults(n.get("metadata") or {}, _SELECT_DEFAULTS),
+            with_select_defaults(n.get("metadata") or {}, _select_defaults_for(n["entry_type"])),
         )
         for n in case["nodes"]
     ]

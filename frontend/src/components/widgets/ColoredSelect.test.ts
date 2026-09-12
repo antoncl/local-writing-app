@@ -31,11 +31,12 @@ describe("ColoredSelect popover (#1587)", () => {
     expect(document.querySelector(".colored-select-popover")).toBeNull();
   });
 
-  it("a derived option shows at rest but is never offered (#1906)", async () => {
+  it("with hideDerived, a derived option shows at rest but is not offered (#1906)", async () => {
     const { container } = render(ColoredSelect, {
       props: {
         value: "on_page",
         allowBlank: false,
+        hideDerived: true,
         options: [
           { value: "unwritten", label: "Unwritten" },
           { value: "off_page", label: "Off the page" },

@@ -58,6 +58,23 @@ export type SelectOption = {
   derived?: boolean;
 };
 
+/** A required select (#1421): a select with a non-blank default. A blank value
+ *  MEANS the default everywhere — the rail shows it, an edit back to it pops
+ *  the key, Views and the selector roster read it (#1908). The one spelling. */
+export function isRequiredSelect(
+  field: MetadataFieldDefinition | null | undefined,
+): field is MetadataFieldDefinition & { default: string } {
+  return field?.type === "select" && typeof field.default === "string" && field.default !== "";
+}
+
+/** The value a select is in force with: the stored value, or — for a required
+ *  select holding nothing (absent, "", or an empty list) — its default. */
+export function effectiveSelectValue(field: MetadataFieldDefinition | null | undefined, raw: unknown): unknown {
+  if (!isRequiredSelect(field)) return raw;
+  const blank = raw == null || raw === "" || (Array.isArray(raw) && raw.length === 0);
+  return blank ? field.default : raw;
+}
+
 export type MetadataFieldDefinition = {
   name: string;
   type: MetadataFieldType;

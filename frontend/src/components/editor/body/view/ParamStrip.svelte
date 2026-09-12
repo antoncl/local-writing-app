@@ -45,6 +45,7 @@
           <FieldValueEditor
             field={control.field}
             value={displayValue(control.name)}
+            pickDerived={true}
             onChange={(v) => setParam(control.name, v)}
             ariaLabel={control.label}
             loreEntries={$loreEntriesStore}

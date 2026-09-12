@@ -25,7 +25,8 @@ class SelectOption(BaseModel):
     value: str
     label: str | None = None
     color: str | None = None
-    derived: bool = False
+    # None, not False, so `exclude_none` dumps keep every ordinary option sparse.
+    derived: bool | None = None
 
 
 def _normalize_select_options(value: Any) -> list[Any]:

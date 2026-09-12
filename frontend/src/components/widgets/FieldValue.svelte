@@ -11,6 +11,7 @@
   // this for its own read-only mode; every other surface renders it directly.
   import ListValueEditor from "@/components/widgets/ListValueEditor.svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
+  import { isRequiredSelect } from "@/lib/metadataTypes";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ToggleSwitch from "@/components/widgets/ToggleSwitch.svelte";
@@ -84,11 +85,7 @@
   // so the read-only display shows the default, as the editor does — not a
   // "(none)" placeholder over a value that is in force (#1884 slice 4 surfaced
   // this once selects read at rest).
-  const selectDisplayValue = $derived(
-    field.type === "select" && !currentValue && field.default != null && field.default !== ""
-      ? String(field.default)
-      : currentValue,
-  );
+  const selectDisplayValue = $derived(isRequiredSelect(field) && !currentValue ? field.default : currentValue);
 
   function metadataValueString(v: MetadataValue | undefined): string {
     if (Array.isArray(v)) return v.join(", ");

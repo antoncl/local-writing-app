@@ -332,22 +332,24 @@ class CardBeatBadgeProjectionTests(_CardLinkTestCase):
         self._save_card(card, {"page_status": "off_page"})
         self.assertEqual(self._projected_card(card)["page_status"], "off_page")
 
-    def test_projection_page_status_is_null_when_unwritten(self) -> None:
+    def test_projection_page_status_reads_the_schema_default_when_blank(self) -> None:
+        # #1908: the sparse blank is resolved once, in the projection, so the
+        # board, its prompt context and the rail agree on what a fresh card is.
         card = self._new_card()
         self._save_card(card, {})
-        self.assertIsNone(self._projected_card(card)["page_status"])
+        self.assertEqual(self._projected_card(card)["page_status"], "unwritten")
 
     def test_projection_clears_a_stale_on_page_after_the_scene_is_deleted(self) -> None:
         # delete_scene purges the scene ref but never re-derives page_status; the
         # projection derives from the CURRENT scene, so a since-detached card reads
-        # unwritten (null), never a stale on_page.
+        # unwritten (the schema default), never a stale on_page.
         scene_id = self._scene()
         card = self._new_card()
         self._save_card(card, {"scene": scene_id})
         self.service.delete_scene(scene_id)
         projected = self._projected_card(card)
         self.assertIsNone(projected["scene"])
-        self.assertIsNone(projected["page_status"])
+        self.assertEqual(projected["page_status"], "unwritten")
 
 
 class CardFollowUpsTests(_CardLinkTestCase):

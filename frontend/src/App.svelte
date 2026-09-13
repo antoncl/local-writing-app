@@ -92,6 +92,7 @@
     computeDraftTitleOverrides,
   } from "@/lib/editor-core/editorPaneModel";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import { implicitContextOpener } from "@/lib/editor-core/implicitContextOpen";
   import { roleplayPresence } from "@/lib/stores/roleplayPresence.svelte";
   import { flushDirtyPanesOnHide } from "@/lib/stores/editorPaneSave";
   import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
@@ -209,6 +210,8 @@
     editorPanes.run = run;
     editorPanes.setStatus = (message) => { status = message; };
     editorPanes.setError = (message) => { error = message; };
+    // The hover card over a lore-name match follows it here (#1923).
+    implicitContextOpener.open = (entryId) => void run(() => editorPanes.openLore(entryId));
     editorPanes.onProjectNodeSaved = (title) => {
       projectTitle = title;
       if (appState.name === "projectOpen") {

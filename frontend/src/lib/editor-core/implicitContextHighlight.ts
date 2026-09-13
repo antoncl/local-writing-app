@@ -5,9 +5,15 @@
 // Implementation: ProseMirror plugin maintains a DecorationSet by
 // walking the doc on every transaction, calling the matcher, and
 // emitting inline decorations with a CSS class and entry-id data
-// attribute. A single hover popup element is shared per editor view —
-// shown when the cursor enters a decoration's DOM node, hidden when it
-// leaves.
+// attribute. A single hover card is shared per editor view (#1923): it is
+// shown for exactly one attached decoration under the pointer, and hides
+// the moment that stops being true — the pointer moves to text that is not
+// a match or leaves the name, the span leaves this view's DOM (a rescan
+// re-renders it, and a detached node never fires mouseout), Escape, a
+// pointer-down anywhere else — and it goes with the view. The underlined
+// name is the app's inline link to the entry: the card's title opens it,
+// and so does a modifier-click on the name (Cmd on a Mac, Ctrl elsewhere;
+// a plain click keeps placing the caret).
 //
 // Performance: per the benchmark at frontend/benchmarks/results.md,
 // regex scans at Honorverse-scale finish in microseconds even at 500KB
@@ -21,10 +27,23 @@ import { Decoration, DecorationSet } from "prosemirror-view";
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView } from "prosemirror-view";
 
-import { compileMatcher, type CompiledMatcher, type MatchHit, type MatcherEntry } from "@/lib/editor-core/implicitContextMatcher";
+import { anchoredPopover } from "@/lib/actions/anchoredPopover";
+import { type CompiledMatcher, type MatcherEntry } from "@/lib/editor-core/implicitContextMatcher";
+import { implicitContextOpener } from "@/lib/editor-core/implicitContextOpen";
 
 const HIGHLIGHT_CLASS = "implicit-context-match";
 const POPUP_CLASS = "implicit-context-popup";
+/** How long the card waits after the pointer leaves the name before hiding —
+ *  the bridge that lets the pointer cross the gap onto the card. */
+export const HIDE_DELAY_MS = 80;
+
+/** Following a name is a modifier-click: Cmd on a Mac, where Ctrl+click is
+ *  the secondary click, and Ctrl everywhere else. */
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+const FOLLOW_HINT = IS_MAC ? "Cmd+click" : "Ctrl+click";
+function followsLink(event: MouseEvent): boolean {
+  return IS_MAC ? event.metaKey : event.ctrlKey;
+}
 
 export type ImplicitContextOptions = {
   /** Compiled matcher. Pass `null` to disable highlighting (e.g. while
@@ -103,23 +122,36 @@ function buildScan(doc: PMNode, matcher: CompiledMatcher): ScanState {
   return { decorations: DecorationSet.create(doc, decorations), entityIds };
 }
 
-/** Shared popup DOM — one element per editor view, kept hidden until a
- *  decoration is hovered. Reused across hover events to avoid
- *  thrashing the DOM. */
-type PopupController = {
+/** The hover card — one element per editor view, on the page only while it
+ *  is shown. `target` is the decoration it is shown for; the card is up
+ *  exactly while `target` is set (a pending `hideSoon` is the bridge delay,
+ *  nothing more). Placement is `anchoredPopover`'s — the one home for
+ *  body-portaled popovers: it portals the element, flips and clamps it, and
+ *  re-pins it on scroll and resize. */
+type HoverCard = {
+  readonly target: HTMLElement | null;
   show(target: HTMLElement, entry: MatcherEntry): void;
+  /** Re-pin to the anchor after the text around it reflowed. */
+  refresh(): void;
+  /** Cancel a pending `hideSoon` — the pointer came back (to the name or onto
+   *  the card) within the bridge delay. */
+  keep(): void;
+  /** Hide after the bridge delay unless kept. A no-op when nothing is shown
+   *  or the delay is already running — the pointer sweeping across text that
+   *  is not a match must not keep postponing it. */
+  hideSoon(): void;
   hide(): void;
   destroy(): void;
 };
 
-function createPopup(): PopupController {
+function createHoverCard(): HoverCard {
   const el = document.createElement("div");
   el.className = POPUP_CLASS;
-  el.setAttribute("role", "tooltip");
-  el.style.display = "none";
-  document.body.appendChild(el);
-
+  el.setAttribute("role", "dialog");
+  let target: HTMLElement | null = null;
+  let placement: ReturnType<typeof anchoredPopover> | null = null;
   let hideTimer: number | null = null;
+
   const clearHideTimer = () => {
     if (hideTimer !== null) {
       window.clearTimeout(hideTimer);
@@ -127,63 +159,93 @@ function createPopup(): PopupController {
     }
   };
 
-  function position(target: HTMLElement) {
-    const rect = target.getBoundingClientRect();
-    // Default placement: below the target. If that would clip off the
-    // bottom edge, flip above. Horizontal: left-align, clamp to viewport.
-    el.style.display = "block";
-    el.style.visibility = "hidden"; // measure first
-    const popupRect = el.getBoundingClientRect();
-    const vh = window.innerHeight;
-    const vw = window.innerWidth;
-    let top = rect.bottom + 6;
-    if (top + popupRect.height > vh - 8) {
-      top = rect.top - popupRect.height - 6;
+  function hide() {
+    clearHideTimer();
+    if (!target) return;
+    target = null;
+    placement?.destroy();
+    placement = null;
+    document.removeEventListener("keydown", onKeydown, true);
+    document.removeEventListener("pointerdown", onPointerDown, true);
+  }
+
+  function hideSoon() {
+    if (!target || hideTimer !== null) return;
+    hideTimer = window.setTimeout(hide, HIDE_DELAY_MS);
+  }
+
+  // Escape and a pointer-down anywhere but the card dismiss it — on the
+  // document, since hovering never focuses the editor. Escape is consumed:
+  // the keypress that closes the card must not also close the dialog or menu
+  // the editor sits in.
+  function onKeydown(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    hide();
+  }
+  function onPointerDown(event: Event) {
+    if (!(event.target instanceof Node) || !el.contains(event.target)) hide();
+  }
+
+  // The bridge: crossing onto the card keeps it, leaving it hides it.
+  el.addEventListener("mouseenter", clearHideTimer);
+  el.addEventListener("mouseleave", hideSoon);
+
+  function render(entry: MatcherEntry) {
+    el.innerHTML = "";
+    el.setAttribute("aria-label", entry.title);
+    const open = implicitContextOpener.open;
+    const titleEl = document.createElement(open ? "button" : "div");
+    titleEl.className = `${POPUP_CLASS}-title`;
+    titleEl.textContent = entry.title;
+    if (open && titleEl instanceof HTMLButtonElement) {
+      titleEl.type = "button";
+      titleEl.classList.add(`${POPUP_CLASS}-open`);
+      titleEl.title = `Open this entry (${FOLLOW_HINT} on the name does too)`;
+      titleEl.addEventListener("click", () => {
+        hide();
+        open(entry.id);
+      });
     }
-    let left = rect.left;
-    if (left + popupRect.width > vw - 8) {
-      left = vw - popupRect.width - 8;
+    el.appendChild(titleEl);
+    if (entry.entryType) {
+      const typeEl = document.createElement("div");
+      typeEl.className = `${POPUP_CLASS}-type`;
+      typeEl.textContent = entry.entryType;
+      el.appendChild(typeEl);
     }
-    if (left < 8) left = 8;
-    el.style.top = `${Math.round(top)}px`;
-    el.style.left = `${Math.round(left)}px`;
-    el.style.visibility = "visible";
+    if (entry.preview) {
+      const previewEl = document.createElement("div");
+      previewEl.className = `${POPUP_CLASS}-preview`;
+      previewEl.textContent = entry.preview;
+      el.appendChild(previewEl);
+    }
   }
 
   return {
-    show(target, entry) {
+    get target() {
+      return target;
+    },
+    show(next, entry) {
       clearHideTimer();
-      el.innerHTML = "";
-      const titleEl = document.createElement("div");
-      titleEl.className = `${POPUP_CLASS}-title`;
-      titleEl.textContent = entry.title;
-      el.appendChild(titleEl);
-      if (entry.entryType) {
-        const typeEl = document.createElement("div");
-        typeEl.className = `${POPUP_CLASS}-type`;
-        typeEl.textContent = entry.entryType;
-        el.appendChild(typeEl);
+      target = next;
+      render(entry);
+      if (placement) {
+        placement.update({ anchor: next });
+        return;
       }
-      if (entry.preview) {
-        const previewEl = document.createElement("div");
-        previewEl.className = `${POPUP_CLASS}-preview`;
-        previewEl.textContent = entry.preview;
-        el.appendChild(previewEl);
-      }
-      position(target);
+      placement = anchoredPopover(el, { anchor: next });
+      document.addEventListener("keydown", onKeydown, true);
+      document.addEventListener("pointerdown", onPointerDown, true);
     },
-    hide() {
-      // Short delay so quickly leaving and re-entering doesn't flicker.
-      clearHideTimer();
-      hideTimer = window.setTimeout(() => {
-        el.style.display = "none";
-        hideTimer = null;
-      }, 80);
+    refresh() {
+      placement?.update({ anchor: target });
     },
-    destroy() {
-      clearHideTimer();
-      el.remove();
-    },
+    keep: clearHideTimer,
+    hideSoon,
+    hide,
+    destroy: hide,
   };
 }
 
@@ -211,6 +273,18 @@ export const ImplicitContextHighlight = Extension.create<ImplicitContextOptions>
     // for now we read fresh from this.options on each transaction so a
     // mutated `options.matcher` is picked up without full re-init.
     const getMatcher = (): CompiledMatcher | null => this.options.matcher;
+    // One card per plugin instance, i.e. per editor view.
+    const card = createHoverCard();
+
+    const entryOf = (target: HTMLElement | null): MatcherEntry | undefined => {
+      const id = target?.getAttribute("data-entry-id");
+      return id ? getMatcher()?.lookup.get(id) : undefined;
+    };
+    /** The entry a modifier-click on `eventTarget` follows, if any. */
+    const followed = (view: EditorView, event: Event): MatcherEntry | undefined => {
+      if (!followsLink(event as MouseEvent) || !implicitContextOpener.open) return undefined;
+      return entryOf(findDecorationTarget(event.target, view.dom));
+    };
 
     return [
       new Plugin<ScanState>({
@@ -232,61 +306,63 @@ export const ImplicitContextHighlight = Extension.create<ImplicitContextOptions>
             return buildScan(tr.doc, matcher);
           },
         },
+        view: () => ({
+          update: (view, previous) => {
+            if (!card.target) return;
+            // The anchor left this view's DOM (a rescan re-rendered the span,
+            // and a detached node never fires mouseout): the card's claim is
+            // stale. Still attached through an edit elsewhere, it only moved.
+            if (!view.dom.contains(card.target)) card.hide();
+            else if (view.state.doc !== previous.doc) card.refresh();
+          },
+          destroy: () => card.destroy(),
+        }),
         props: {
           decorations(state) {
             return pluginKey.getState(state)?.decorations ?? DecorationSet.empty;
           },
-          handleDOMEvents: (() => {
-            let popup: PopupController | null = null;
-            let currentTarget: HTMLElement | null = null;
-
-            const ensurePopup = (): PopupController => {
-              if (!popup) popup = createPopup();
-              return popup;
-            };
-
-            return {
-              mouseover(view: EditorView, event: Event): boolean {
-                const matcher = getMatcher();
-                if (!matcher) return false;
-                const target = findDecorationTarget(event.target, view.dom);
-                if (!target || target === currentTarget) return false;
-                const id = target.getAttribute("data-entry-id");
-                if (!id) return false;
-                const entry = matcher.lookup.get(id);
-                if (!entry) return false;
-                currentTarget = target;
-                ensurePopup().show(target, entry);
+          handleDOMEvents: {
+            mouseover(view: EditorView, event: Event): boolean {
+              if (!getMatcher()) return false;
+              const target = findDecorationTarget(event.target, view.dom);
+              if (target && target === card.target) {
+                card.keep();
                 return false;
-              },
-              mouseout(view: EditorView, event: Event): boolean {
-                const target = findDecorationTarget(event.target, view.dom);
-                if (target !== currentTarget) return false;
-                // Only hide if leaving to an element that isn't a child
-                // of the decoration.
-                const related = (event as MouseEvent).relatedTarget;
-                if (related instanceof Node && target?.contains(related)) {
-                  return false;
-                }
-                currentTarget = null;
-                popup?.hide();
-                return false;
-              },
-            };
-          })(),
+              }
+              const entry = entryOf(target);
+              // Over text that is not a match — including the text that
+              // replaced a re-rendered span the pointer never left.
+              if (!target || !entry) card.hideSoon();
+              else card.show(target, entry);
+              return false;
+            },
+            mouseout(view: EditorView, event: Event): boolean {
+              const target = findDecorationTarget(event.target, view.dom);
+              if (!target || target !== card.target) return false;
+              // Leaving to a child of the name is not leaving the name.
+              const related = (event as MouseEvent).relatedTarget;
+              if (related instanceof Node && target.contains(related)) return false;
+              card.hideSoon();
+              return false;
+            },
+            // Following a name is not placing the caret: claim the mousedown
+            // so ProseMirror's own handler (the selection, `handleClickOn`)
+            // never sees the gesture, then open on the click that completes it.
+            mousedown(view: EditorView, event: Event): boolean {
+              if (!followed(view, event)) return false;
+              event.preventDefault();
+              return true;
+            },
+            click(view: EditorView, event: Event): boolean {
+              const entry = followed(view, event);
+              if (!entry) return false;
+              card.hide();
+              implicitContextOpener.open?.(entry.id);
+              return true;
+            },
+          },
         },
       }),
     ];
   },
 });
-
-/** Helper: build options for a project's current lore set. Wraps the
- *  matcher compile so callers don't need to import it directly.
- *  Pass the metadataSchema so the matcher can resolve per-entry colors
- *  for the highlight decorations. */
-export function buildImplicitContextOptions(
-  loreEntries: Parameters<typeof compileMatcher>[0],
-  schema: Parameters<typeof compileMatcher>[1] = null,
-): ImplicitContextOptions {
-  return { matcher: compileMatcher(loreEntries, schema) };
-}

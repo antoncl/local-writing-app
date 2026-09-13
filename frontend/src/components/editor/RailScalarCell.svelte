@@ -1,12 +1,14 @@
 <script module lang="ts">
-  // A focus move INSIDE the row, or into ColoredSelect's body-portaled listbox
-  // (`.colored-select-popover`), is still "editing"; anything else ends it.
+  // A focus move INSIDE the row, or into a body-portaled surface the row's
+  // control raised — ColoredSelect's listbox (`.colored-select-popover`), the
+  // implicit-context hover card over a long-text field's lore-name match
+  // (`.implicit-context-popup`, #1923) — is still "editing"; anything else ends it.
   // Exported so MetadataPanel's document-level outside-click listener shares
   // the same rule (it owns which row is open; this owns what counts as "in it").
   export function leavesRow(rowEl: HTMLElement, target: EventTarget | null): boolean {
     if (!(target instanceof Node)) return false; // null / non-node: don't guess
     if (rowEl.contains(target)) return false;
-    return !(target instanceof Element && target.closest(".colored-select-popover"));
+    return !(target instanceof Element && target.closest(".colored-select-popover, .implicit-context-popup"));
   }
 </script>
 

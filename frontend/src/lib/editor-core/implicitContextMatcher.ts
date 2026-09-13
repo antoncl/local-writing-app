@@ -40,7 +40,7 @@ export type CompiledMatcher = {
 };
 
 const RE_ESCAPE = /[.*+?^${}()|[\]\\]/g;
-function escapeRegex(s: string): string {
+export function escapeRegex(s: string): string {
   return s.replace(RE_ESCAPE, "\\$&");
 }
 

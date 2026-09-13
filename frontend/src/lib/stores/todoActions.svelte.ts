@@ -146,7 +146,7 @@ class TodoActions {
         // The pane may have just been created: let it mount before the reveal
         // reaches its body view (#1925; the body itself waits for its load).
         await tick();
-        editorPanes.revealSearchMatchInOpenPane(hit, reveal);
+        editorPanes.revealSearchMatchInOpenPane(hit.file_id, reveal);
       }
     });
   }

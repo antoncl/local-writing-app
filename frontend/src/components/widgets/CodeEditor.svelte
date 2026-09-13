@@ -80,6 +80,7 @@
     );
     editor = new EditorView({ doc: value, parent: host, extensions });
     pushDiagnostics();
+    if (pendingReveal) revealSearchMatch(pendingReveal);
   });
 
   onDestroy(() => {
@@ -146,9 +147,18 @@
     editor.dispatch(setDiagnostics(editor.state, items));
   }
 
-  /** Mark the query's matches and select the `ordinal`-th (#1925). */
+  // A reveal that arrives before the view exists (the pane just opened)
+  // waits for the mount — the code twin of ProseBodyView's pending reveal.
+  let pendingReveal: SearchReveal | null = null;
+
+  /** Mark the query's matches and put the caret at the hit's (#1925). */
   export function revealSearchMatch(reveal: SearchReveal): void {
-    if (editor) revealInView(editor, reveal);
+    pendingReveal = null;
+    if (!editor) {
+      pendingReveal = reveal;
+      return;
+    }
+    revealInView(editor, reveal);
   }
 </script>
 

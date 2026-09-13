@@ -4,7 +4,7 @@
   import type { SearchHit } from "@/lib/types";
   import { kindLabel } from "@/lib/kindLabels";
   import { SearchPaneController } from "@/lib/stores/searchPane.svelte";
-  import { compileSearchPattern, type SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
+  import { compileSearchPattern, findMatches, type SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
@@ -34,19 +34,22 @@
   const ctrl = new SearchPaneController(untrack(() => run), {
     isDirtyOpen: (id, kind, entryType) => editorPanes.isNodeOpenDirty(id, kind, entryType),
     reconcile: (id, kind, entryType) => editorPanes.reconcileNodeFromServer(id, kind, entryType),
-    // An empty replacement deletes the matches (#1926): the modal says so and
-    // is the destructive kind — and it is raised for a single hit too.
+    // An empty replacement deletes the matches (#1926): the modal says so, is
+    // the destructive kind, and is raised for a single hit too.
     confirm: (n, nodes, query, replacement) =>
       new Promise<boolean>((resolve) => {
-        const deletes = replacement === "";
         const what = `${n} occurrence${n === 1 ? "" : "s"} of "${query}" in ${nodes} node${nodes === 1 ? "" : "s"}`;
+        const copy =
+          replacement === ""
+            ? {
+                title: n === 1 ? "Delete the match?" : "Delete the matches?",
+                message: `Delete ${what}. The Replace-with field is empty, so the matched text is removed.`,
+                confirmLabel: "Delete",
+                destructive: true,
+              }
+            : { title: "Replace all?", message: `Replace ${what}.`, confirmLabel: "Replace all", destructive: false };
         confirmService.request({
-          title: deletes ? (n === 1 ? "Delete the match?" : "Delete the matches?") : "Replace all?",
-          message: deletes
-            ? `Delete ${what}. The Replace-with field is empty, so the matched text is removed.`
-            : `Replace ${what}.`,
-          confirmLabel: deletes ? "Delete" : "Replace all",
-          destructive: deletes,
+          ...copy,
           onConfirm: async () => resolve(true),
           onCancel: () => resolve(false),
         });
@@ -123,20 +126,12 @@
     wholeWord: boolean,
   ): { text: string; hit: boolean }[] {
     if (!q) return [{ text, hit: false }];
-    const re = compileSearchPattern(q, matchCase, wholeWord);
     const out: { text: string; hit: boolean }[] = [];
     let from = 0;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(text))) {
-      const at = match.index;
-      const matched = match[0];
-      if (matched.length === 0) {
-        re.lastIndex += 1;
-        continue;
-      }
-      if (at > from) out.push({ text: text.slice(from, at), hit: false });
-      out.push({ text: matched, hit: true });
-      from = at + matched.length;
+    for (const match of findMatches(text, compileSearchPattern(q, matchCase, wholeWord))) {
+      if (match.start > from) out.push({ text: text.slice(from, match.start), hit: false });
+      out.push({ text: text.slice(match.start, match.end), hit: true });
+      from = match.end;
     }
     if (from < text.length) out.push({ text: text.slice(from), hit: false });
     return out;
@@ -154,8 +149,8 @@
   // TODO, or unsaved edits in an open pane — is computed client-side for the
   // note text; the actual write is always the backend's ownership/revision/
   // dispatch check (§4), never guessed here. With the replace field empty the
-  // same write deletes the matches, so the buttons read Delete and the
-  // controller confirms before posting (#1926).
+  // same write deletes the matches, so the controller confirms that — as a
+  // deletion, one hit included — before posting (#1926).
   //
   // Reveal window (#1868, per-group — review finding A): rendering every hit
   // as a NodeRow froze the tab on a short/common query (thousands of hits),
@@ -198,7 +193,7 @@
     disabled={ctrl.eligibleHits.length === 0 || ctrl.replacing}
     onclick={() => ctrl.replaceAll()}
   >
-    {ctrl.deletes ? "Delete all" : "Replace all"} ({ctrl.eligibleHits.length})
+    Replace all ({ctrl.eligibleHits.length})
   </button>
 </div>
 <div class="search-options">
@@ -272,7 +267,7 @@
                   ctrl.replaceOne(hit);
                 }}
               >
-                {ctrl.deletes ? "Delete" : "Replace"}
+                Replace
               </button>
             {/if}
           {/snippet}

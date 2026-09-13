@@ -889,7 +889,7 @@ button.row-action-add.active {
    one the hit named. */
 .search-match {
   background: color-mix(in oklab, var(--warn) 18%, transparent);
-  border-radius: 2px;
+  border-radius: var(--r-sm);
 }
 .search-match-current {
   background: color-mix(in oklab, var(--warn) 38%, transparent);

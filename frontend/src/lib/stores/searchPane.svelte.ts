@@ -130,16 +130,23 @@ export class SearchPaneController {
   deletes = $derived(this.replacement === "");
 
   // What a hit's open carries into the editor (#1925): the query it was
-  // found with and which match in its node it is — its index among the
-  // node's body hits, so the editor can find it by counting rather than by
-  // a markdown offset. Null for a hit with no body range (a TODO or a
-  // metadata hit), which only opens the node.
+  // found with, the excerpt that identifies the match by its neighbourhood,
+  // and its index among the node's body hits as the tie-breaker — so the
+  // editor finds the match itself, never by a markdown offset. Null for a
+  // hit with no body range (a TODO or a metadata hit), which only opens the
+  // node.
   revealFor(hit: SearchHit): SearchReveal | null {
     if (hit.todo_id || hit.field !== "body") return null;
     const ordinal = this.hits.filter(
       (other) => other.file_id === hit.file_id && other.field === "body" && !other.todo_id && other.start < hit.start,
     ).length;
-    return { query: this.lastQuery, matchCase: this.lastMatchCase, wholeWord: this.lastWholeWord, ordinal };
+    return {
+      query: this.lastQuery,
+      matchCase: this.lastMatchCase,
+      wholeWord: this.lastWholeWord,
+      excerpt: hit.excerpt,
+      ordinal,
+    };
   }
 
   setMatchCase(on: boolean): void {
@@ -281,6 +288,7 @@ export class SearchPaneController {
 
   async replaceAll(): Promise<void> {
     const hits = this.eligibleHits;
+    if (hits.length === 0) return;
     if (hits.length > 1 || this.deletes) {
       const nodes = new Set(hits.map((hit) => hit.file_id)).size;
       if (!(await this.deps.confirm(hits.length, nodes, this.lastQuery, this.replacement))) return;

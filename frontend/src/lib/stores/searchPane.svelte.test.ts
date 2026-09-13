@@ -373,6 +373,16 @@ describe("SearchPaneController — an empty replacement is a deletion (#1926)", 
     expect(api.replace).toHaveBeenCalled();
   });
 
+  it("confirms nothing for an empty batch", async () => {
+    const deps = fakeDeps();
+    const c = new SearchPaneController(run, deps);
+
+    await c.replaceAll();
+
+    expect(deps.confirm).not.toHaveBeenCalled();
+    expect(api.replace).not.toHaveBeenCalled();
+  });
+
   it("confirms a single hit's Replace when the replacement is empty, and posts nothing when declined", async () => {
     const deps = fakeDeps({ confirm: vi.fn(async () => false) });
     const c = new SearchPaneController(run, deps);
@@ -416,9 +426,10 @@ describe("SearchPaneController.revealFor (#1925)", () => {
       hit("a", { field: "metadata", start: 0, end: 0 }),
     ];
 
-    expect(c.revealFor(c.hits[0])).toEqual({ query: "Aetheria", matchCase: true, wholeWord: false, ordinal: 1 });
-    expect(c.revealFor(c.hits[2])).toEqual({ query: "Aetheria", matchCase: true, wholeWord: false, ordinal: 0 });
-    expect(c.revealFor(c.hits[1])).toEqual({ query: "Aetheria", matchCase: true, wholeWord: false, ordinal: 0 });
+    const found = { query: "Aetheria", matchCase: true, wholeWord: false, excerpt: "x" };
+    expect(c.revealFor(c.hits[0])).toEqual({ ...found, ordinal: 1 });
+    expect(c.revealFor(c.hits[2])).toEqual({ ...found, ordinal: 0 });
+    expect(c.revealFor(c.hits[1])).toEqual({ ...found, ordinal: 0 });
   });
 
   it("is null for a hit with no body range — a TODO or a metadata hit", () => {

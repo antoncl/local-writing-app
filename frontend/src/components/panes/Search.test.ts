@@ -190,7 +190,13 @@ describe("Search pane — results render", () => {
     await tick();
 
     await fireEvent.click(screen.getByText("lore/places/citadel.md:3"));
-    expect(onOpenHit).toHaveBeenCalledWith(h, { query: "citadel", matchCase: false, wholeWord: false, ordinal: 0 });
+    expect(onOpenHit).toHaveBeenCalledWith(h, {
+      query: "citadel",
+      matchCase: false,
+      wholeWord: false,
+      excerpt: h.excerpt,
+      ordinal: 0,
+    });
   });
 
   it("groups hits by kind, data-driven, with project last and an unknown kind still shown", async () => {
@@ -281,9 +287,9 @@ describe("Search pane — results render", () => {
 });
 
 describe("Search pane — replace (ADR-0085 §4/§5)", () => {
-  it("shows the eligible count on Replace all, disabled at zero — Delete all while the field is empty (#1926)", async () => {
+  it("shows the eligible count on Replace all and disables it at zero", async () => {
     render(Search, { props: { run, onOpenHit: () => {} } });
-    expect(screen.getByRole("button", { name: "Delete all (0)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Replace all (0)" })).toBeDisabled();
 
     vi.mocked(api.search).mockResolvedValue({
       query: "aetheria",
@@ -294,13 +300,7 @@ describe("Search pane — replace (ADR-0085 §4/§5)", () => {
     await fireEvent.keyDown(input, { key: "Enter" });
     await tick();
 
-    expect(screen.getByRole("button", { name: "Delete all (1)" })).not.toBeDisabled();
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
-
-    await fireEvent.input(screen.getByPlaceholderText("Replace with"), { target: { value: "Aetherion" } });
-    await tick();
     expect(screen.getByRole("button", { name: "Replace all (1)" })).not.toBeDisabled();
-    expect(screen.getByRole("button", { name: "Replace" })).toBeInTheDocument();
   });
 
   it("previews <del>+<ins> for an eligible hit and leaves <mark> for an inherited one", async () => {
@@ -343,7 +343,7 @@ describe("Search pane — replace (ADR-0085 §4/§5)", () => {
     await tick();
 
     expect(screen.getByText("inherited — not replaceable here")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^(Replace|Delete)$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Replace" })).not.toBeInTheDocument();
   });
 
   it("clicking a hit's Replace posts to api.replace and does not open the hit", async () => {
@@ -374,7 +374,7 @@ describe("Search pane — replace (ADR-0085 §4/§5)", () => {
     expect(onOpenHit).not.toHaveBeenCalled();
   });
 
-  it("names an empty replace Delete and confirms it, destructively, before posting (#1926)", async () => {
+  it("confirms a Replace with an empty field as a deletion, destructively, before posting (#1926)", async () => {
     const h = hit("scenes/act-1/arrival.md", 12, "Aetheria at dawn.");
     vi.mocked(api.search).mockResolvedValue({ query: "aetheria", hits: [h] });
     vi.mocked(api.replace).mockResolvedValue({ outcomes: [], replaced_nodes: 0 });
@@ -385,7 +385,7 @@ describe("Search pane — replace (ADR-0085 §4/§5)", () => {
     await fireEvent.keyDown(input, { key: "Enter" });
     await tick();
 
-    await fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Replace" }));
     await tick();
     expect(api.replace).not.toHaveBeenCalled();
     const request = vi.mocked(confirmService.request).mock.calls[0][0];

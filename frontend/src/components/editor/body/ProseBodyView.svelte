@@ -389,20 +389,23 @@
 
   // A search hit's reveal (#1925), applied once the document it targets is
   // loaded: the hit's pane may have just opened, and `loadScene` finishes
-  // after the opener's tick. The editor marks the matches itself
-  // (searchMatchHighlight.ts) — no markdown offset crosses this seam.
-  let pendingReveal: SearchReveal | null = null;
+  // after the opener's tick. Keyed to that document — a load of any other
+  // (the pane moved on) drops it rather than marking a document nobody
+  // searched. The editor marks the matches itself (searchMatchHighlight.ts):
+  // no markdown offset crosses this seam.
+  let pendingReveal: { sceneId: string; reveal: SearchReveal } | null = null;
 
   export function revealSearchMatch(reveal: SearchReveal): void {
-    pendingReveal = reveal;
-    if (loadedSceneId === scene?.id) applyPendingReveal();
+    if (!scene) return;
+    pendingReveal = { sceneId: scene.id, reveal };
+    if (loadedSceneId === scene.id) applyPendingReveal();
   }
 
   function applyPendingReveal(): void {
-    if (!pendingReveal || !editor) return;
-    const reveal = pendingReveal;
+    const pending = pendingReveal;
     pendingReveal = null;
-    editor.commands.revealSearchMatch(reveal);
+    if (!pending || !editor || pending.sceneId !== loadedSceneId) return;
+    editor.commands.revealSearchMatch(pending.reveal);
   }
 
   export function highlightEmbeddedTodo(todoId: string): void {

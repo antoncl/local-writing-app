@@ -243,6 +243,9 @@
   let codeEditor: CodeEditor | null = $state(null);
 
   export function revealSearchMatch(reveal: SearchReveal): void {
+    // A prompt parked on Preview or Setup keeps its template mounted but
+    // hidden — the reveal has to be on the tab the writer sees.
+    if (isPrompt()) selectPromptTab("template");
     codeEditor?.revealSearchMatch(reveal);
   }
   let popoverPos = $state({ top: 0, right: 8 });

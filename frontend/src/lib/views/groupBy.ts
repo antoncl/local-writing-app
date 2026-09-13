@@ -18,12 +18,17 @@ import { walkViewExpr } from "@/lib/views/walkViewExpr";
 // roster (so an unrelated tag save doesn't re-evaluate it), and a view that
 // DOES re-evaluates correctly on a tag rename.
 export function groupByHasRefLevel(
-  spec: Pick<ViewSpec, "group_by"> | null | undefined,
+  spec: Pick<ViewSpec, "group_by" | "groups"> | null | undefined,
   schema: MetadataSchema | null | undefined,
 ): boolean {
-  const levels = spec?.group_by;
-  if (!levels || levels.length === 0) return false;
-  return levels.some((level) => isNodeSetField(schema?.fields?.[level.field]));
+  const levelsHaveRef = (levels: ViewGroupByLevel[] | null | undefined): boolean =>
+    !!levels && levels.some((level) => isNodeSetField(schema?.fields?.[level.field]));
+  // Both the top-level `group_by` (the unnamed single-group path) AND each named
+  // group's OWN levels (ADR-0037 Amendment 1: a grouped spec organizes per group,
+  // and carries no top-level `group_by`) — otherwise a grouped view that groups a
+  // handle by a tag field never subscribes to the tag roster, so its ref buckets
+  // show raw ids.
+  return levelsHaveRef(spec?.group_by) || (spec?.groups ?? []).some((g) => levelsHaveRef(g.group_by));
 }
 
 // Whether ANY signal in `spec` touches a tag id: a `group_by` ref-level
@@ -43,12 +48,12 @@ export function groupByHasRefLevel(
 // filter, a ref-field `field` predicate, or a ref/title-joined nest over a tag
 // field — with no grouping at all — all do.
 export function viewUsesTagIds(
-  spec: Pick<ViewSpec, "group_by" | "expr"> | null | undefined,
+  spec: Pick<ViewSpec, "group_by" | "expr" | "groups"> | null | undefined,
   schema: MetadataSchema | null | undefined,
 ): boolean {
   if (groupByHasRefLevel(spec, schema)) return true;
   let found = false;
-  walkViewExpr(spec?.expr, (e) => {
+  const visit = (e: Parameters<Parameters<typeof walkViewExpr>[1]>[0]): void => {
     // Same null-check style as `evalLeaf` — the backend serializes every
     // slot with unset ones as explicit `null` (Pydantic default dump), so
     // `!= null` (not a truthiness/`in` check) is the correct "is this leaf
@@ -62,7 +67,14 @@ export function viewUsesTagIds(
       isNodeSetField(schema?.fields?.[nest.match.field])
     )
       found = true;
-  });
+  };
+  // The top-level `expr` AND every named group's `expr`. A GROUPED spec (two+
+  // output handles — e.g. a nest's results and orphans routed to separate groups)
+  // carries no top-level `expr`; its nodes live in `groups[].expr`. Walking only
+  // `spec.expr` missed a tag-nest there, so `resolveTitle` was withheld and the
+  // join matched raw ids — collapsing the (correct) tree the moment orphans were
+  // wired to a second group.
+  for (const expr of [spec?.expr, ...(spec?.groups ?? []).map((g) => g.expr)]) walkViewExpr(expr, visit);
   return found;
 }
 

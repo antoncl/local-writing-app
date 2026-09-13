@@ -277,3 +277,77 @@ describe("a plain tagged: filter with no ref grouping canonicalises through the 
     expect(result.nodes.map((n) => n.id)).toEqual([]);
   });
 });
+
+// A nest's results + orphans routed to two output handles compile to a GROUPED
+// spec (groups[], no top-level expr). The gate must see the tag-nest inside
+// groups[].expr, or resolveTitle is withheld and the tree collapses the moment
+// orphans are wired to a second group.
+describe("viewUsesTagIds / groupByHasRefLevel see spec.groups[], not just the top level", () => {
+  const LORE_SCHEMA = {
+    version: 1,
+    entry_types: {
+      "lore:base": { name: "Lore", kind: "lore", abstract: true, fields: [] },
+      "lore:note": { name: "Note", kind: "lore", parent: "lore:base", fields: [] },
+    },
+    fields: {
+      title: { name: "Title", type: "text", category: "intrinsic" },
+      entry_type: { name: "Type", type: "text", category: "intrinsic" },
+      tags: { name: "Tags", type: "entity_ref_list" },
+    },
+  } as unknown as MetadataSchema;
+
+  const AETH = {
+    filter: { of: { descendants_of: "lore:base" }, pred: { field: { key: "title", op: "overlap", value: "Aetheria" } }, mode: "keep" },
+  };
+  const NEST = {
+    id: "N",
+    parents: AETH,
+    children: { complement: AETH },
+    match: { field: "tags", direction: "child_to_parent", by: "title" },
+    recursive: true,
+  };
+  const groupedSpec = {
+    kind: "lore",
+    groups: [
+      { name: "Matched", expr: { nest: NEST } },
+      { name: "Unmatched", expr: { orphans_of: "N" } },
+    ],
+  } as unknown as ViewSpec;
+
+  it("viewUsesTagIds sees a tag-nest inside groups[].expr (the wired-orphans regression)", () => {
+    expect(viewUsesTagIds(groupedSpec, LORE_SCHEMA)).toBe(true);
+  });
+
+  it("viewUsesTagIds + groupByHasRefLevel see a per-group group_by ref level", () => {
+    const spec = {
+      kind: "lore",
+      groups: [{ name: "G", expr: { type: "lore:note" }, group_by: [{ field: "tags" }] }],
+    } as unknown as ViewSpec;
+    expect(groupByHasRefLevel(spec, LORE_SCHEMA)).toBe(true);
+    expect(viewUsesTagIds(spec, LORE_SCHEMA)).toBe(true);
+  });
+
+  // The end-to-end regression, wired exactly as ViewNodeList/ViewBodyView do:
+  // resolveTitle is passed to evaluateView IFF viewUsesTagIds. Before the fix the
+  // gate returned false for the grouped spec → resolveTitle undefined → the
+  // by:title-over-tags nest matched raw ids → the Matched group collapsed flat.
+  it("the Matched group nests THROUGH the gate (resolveTitle threaded iff viewUsesTagIds)", () => {
+    const nodes: EvalNode[] = [
+      { id: "parent", entry_type: "lore:note", title: "Aetheria", metadata: {} },
+      { id: "child_a", entry_type: "lore:note", title: "Techne", metadata: { tags: ["tag_aeth"] } },
+      { id: "child_b", entry_type: "lore:note", title: "The Gods", metadata: { tags: ["tag_aeth"] } },
+      { id: "orphan", entry_type: "lore:note", title: "Unrelated", metadata: {} },
+    ];
+    const uses = viewUsesTagIds(groupedSpec, LORE_SCHEMA);
+    const res = evaluateView(groupedSpec, nodes, {
+      schema: LORE_SCHEMA,
+      resolveTitle: uses ? (id) => (id === "tag_aeth" ? "Aetheria" : undefined) : undefined,
+    });
+    const matched = res.groups?.find((g) => g.label === "Matched");
+    const aeth = matched?.children.find((c) => c.nodeId === "parent");
+    // The parent header carries its two tagged children — not a flattened list.
+    expect(aeth?.children.map((c) => c.node?.id).sort()).toEqual(["child_a", "child_b"]);
+    const unmatched = res.groups?.find((g) => g.label === "Unmatched");
+    expect(unmatched?.children.map((c) => c.nodeId)).toEqual(["orphan"]);
+  });
+});

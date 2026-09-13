@@ -208,6 +208,20 @@ export type EvalBindings = Record<string, BindingValue | null | undefined>;
 // than a node's metadata. `field_of(of, "references")` projects to the referrers.
 export const REFERENCES_FIELD = "references";
 
+// #1928: the `layer` computed field's value is the node's own resolved layer
+// (`source_layer_id`). Materialize it onto computed_metadata at the eval
+// boundary — the scalar analogue of how `references` is resolved at eval time —
+// so `fieldValue` routes it like any computed select, with no key special-case.
+// Nodes without a source layer (scenes) pass through untouched; an existing
+// value is never clobbered. Shallow-copies only the nodes it changes.
+export function materializeLayerField<T extends { source_layer_id?: string; computed_metadata?: Record<string, unknown> | null }>(nodes: T[]): T[] {
+  return nodes.map((n) =>
+    n && n.source_layer_id && !(n.computed_metadata && "layer" in n.computed_metadata)
+      ? { ...n, computed_metadata: { ...(n.computed_metadata ?? {}), layer: n.source_layer_id } }
+      : n,
+  );
+}
+
 export type EvalContext = {
   // Needed only by the `descendants_of` leaf: resolves an entry_type FQN to
   // itself + every type inheriting from it via `parent:` chains.

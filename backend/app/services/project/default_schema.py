@@ -1178,6 +1178,34 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "computed",
             "computed": {"function": "references", "value_type": "node_set"},
         },
+        "layer": {
+            # The inheritance LAYER a node is resolved from (#1928) — the
+            # deferred `source_layer` item of #232, finally the resolver-stamped
+            # field that comment envisioned rather than a magic string
+            # special-cased in every consumer. The value is the node index's
+            # `source_layer_id` verdict: which layer (built-in Library, machine,
+            # an ancestor project, or the open project itself) won resolution.
+            # Computed, not stored — it derives from where a file sits in the
+            # chain, so it has no place in front matter and must stay read-only.
+            #
+            # Modelled exactly like `listed`: a computed `select`, hence
+            # filterable AND groupable (buckets in declared-option order, ADR-0037
+            # Amendment 3) while the field itself is read-only. Its `options` are
+            # NOT static — a static default can't know a project's chain — so they
+            # are FILLED PER PROJECT at resolve time with this chain's layers in
+            # rank order (`schema.py::_build_metadata_schema`, whose value covers
+            # every possible `source_layer_id`: Library + machine + each project
+            # layer). Lives in the flat `fields` catalog only, never seeded into a
+            # type's membership, so it stays out of the editor rail while the view
+            # designer still offers it (`ViewBodyView.computedFieldOptions`). Its
+            # value is materialized per runtime — `computed_metadata.layer` on the
+            # frontend view roster, the selector roster's metadata on the AI path
+            # (`preview.py`) — since the two evaluators read different slots.
+            "name": "Layer",
+            "type": "computed",
+            "options": [],
+            "computed": {"function": "layer", "value_type": "select"},
+        },
         "listed": {
             # An assistant's CURATION state (#332/#333) — is it in the author's
             # roster, or merely available? Computed, not stored: the value is

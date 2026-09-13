@@ -36,6 +36,36 @@ describe("nodeSummary — compact node one-liners (#220)", () => {
     expect(summary("filter", { filter_kind: "field", field: { key: "rank", op: "unset" } })).toBe("keep · Rank is empty");
   });
 
+  it("resolves a select field's option value to its label (#1932)", () => {
+    // The stored value is an opaque option id (e.g. a `layer` id); the compact
+    // line must show the option's LABEL, the way the entry_type predicate already
+    // resolves an FQN to a friendly name.
+    const withOptions: SummaryResolvers = {
+      ...R,
+      optionLabel: (key, value) =>
+        key === "layer" ? ({ a343657175dfade6: "unbecoming-someone" }[value] ?? value) : value,
+    };
+    expect(
+      nodeSummary(
+        "filter",
+        { filter_kind: "field", field: { key: "layer", op: "overlap", value: "a343657175dfade6" } },
+        withOptions,
+      ),
+    ).toBe("keep · layer any of unbecoming-someone");
+    // Array (multi_select) values map element-wise.
+    expect(
+      nodeSummary(
+        "filter",
+        { filter_kind: "field", field: { key: "layer", op: "overlap", value: ["a343657175dfade6"] } },
+        withOptions,
+      ),
+    ).toBe("keep · layer any of unbecoming-someone");
+    // A non-option field (no match) keeps the raw value; a missing resolver too.
+    expect(
+      nodeSummary("filter", { filter_kind: "field", field: { key: "rank", op: "overlap", value: 3 } }, withOptions),
+    ).toBe("keep · Rank any of 3");
+  });
+
   it("shows the parameter label for a promoted value slot", () => {
     const cfg: ViewNodeData = {
       filter_kind: "field",

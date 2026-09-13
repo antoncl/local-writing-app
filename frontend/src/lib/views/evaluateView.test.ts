@@ -980,6 +980,42 @@ describe("nest — child→parent by ref", () => {
   });
 });
 
+describe("nest — child→parent by title resolves a tag id to its title (#1933)", () => {
+  // A city card tagged with its country (the documented city→country hierarchy).
+  // Post-ADR-0082 the `tags` value is the country TAG's id, not its title; the
+  // parent is the card whose TITLE equals the tag. #1813 migrated the `ref` join
+  // for the string→id promotion but left `title` reading the raw id.
+  const GEO: EvalNode[] = [
+    { id: "france", entry_type: "lore:place", title: "France", metadata: {} }, // untagged → a root
+    { id: "paris", entry_type: "lore:place", title: "Paris", metadata: { tags: ["tag_france"] } },
+  ];
+  const spec: ViewSpec = {
+    kind: "lore",
+    expr: {
+      nest: {
+        parents: { field: { key: "tags", op: "unset" } },
+        match: { field: "tags", direction: "child_to_parent", by: "title" },
+      },
+    },
+  };
+
+  it("nests Paris under France by resolving the country tag id to its title", () => {
+    const res = evaluateView(spec, GEO, {
+      resolveTitle: (id) => (id === "tag_france" ? "France" : undefined),
+    });
+    expect(nrows(res.groups)).toEqual([["France", ["paris"]]]);
+  });
+
+  it("without the id→title resolution the child is orphaned — the pre-fix regression", () => {
+    // No resolveTitle: the raw tag id "tag_france" matches no card title, so the
+    // parent edge is never built and Paris drops. This is exactly what the fix
+    // restores; it is load-bearing.
+    const res = evaluateView(spec, GEO);
+    expect(res.diagnostics?.orphansDropped).toBe(1);
+    expect(res.nodes.some((n) => n.id === "paris")).toBe(false);
+  });
+});
+
 describe("nest — many-to-many & data cycles", () => {
   it("a child under two parents appears under both (dedupe is per (node, path))", () => {
     const FAM: EvalNode[] = [

@@ -512,9 +512,6 @@
         // cosmetic; value is the macro contract).
         if (label && label !== draft.value) out.label = label;
         if (draft.color) out.color = draft.color;
-        // A derived option (#1906) round-trips untouched — the editor never
-        // sets it; only an app-side deriver gives it meaning.
-        if (draft.derived) out.derived = true;
         return out;
       });
     // Migration: a row whose value changed from its loaded `originalValue`
@@ -566,6 +563,9 @@
       // Author help text (#1004) — persisted only when non-empty, same as icon.
       ...(payload.description.trim() ? { description: payload.description.trim() } : {}),
       ...(defaultValue !== undefined ? { default: defaultValue } : {}),
+      // A derived state (#1911) is a select's alone; the editor emits it only
+      // when both halves are chosen, so a half-declared rule persists as none.
+      ...(payload.type === "select" && payload.derived ? { derived: payload.derived } : {}),
       // AI-authorship gate (ADR-0059 §E). Default is true, so persist only the
       // opt-out — an omitted key reads back as true (backend default), keeping
       // the field yaml clean while a deliberate `false` survives.

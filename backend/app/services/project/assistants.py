@@ -427,7 +427,9 @@ class AssistantEntriesMixin:
         machine_layer = self.machine_layer()
         on_machine_layer = machine_layer is not None and index_entry.source_layer_id == machine_layer.id
         if self.root_path is not None and not on_machine_layer:
-            metadata = self._strip_dangling_references(metadata, self.read_metadata_schema(), index)
+            schema = self.read_metadata_schema()
+            metadata = self._strip_dangling_references(metadata, schema, index)
+            metadata = self._canonicalise_metadata_selects(metadata, entry_type, schema)
         return AssistantEntry(
             id=node_id,
             title=str(front_matter.get("title") or node_id),

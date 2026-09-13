@@ -16,6 +16,7 @@ import yaml
 
 from app.models import (
     CharacterArcSummary,
+    MetadataFieldDefinition,
     PlotBoard,
     PlotBoardBeat,
     PlotBoardCard,
@@ -218,6 +219,7 @@ class PlotBoardMixin:
         # (Slice 6b) — the display side of `_heal_causal_links`, symmetric with the
         # beat catalog above.
         card_ids = {card.id for card in card_entries}
+        page_status_field = self.read_metadata_schema().fields.get(_PAGE_STATUS_FIELD)
         cards: list[PlotBoardCard] = []
         used_containers: set[str] = set()
         for card in card_entries:
@@ -237,7 +239,7 @@ class PlotBoardMixin:
                     plotline=card.metadata.get("plotline") or None,
                     scene=scene,
                     container=container,
-                    page_status=self._board_page_status(card.metadata, scene),
+                    page_status=self._board_page_status(card.metadata, page_status_field),
                     beats=self._resolve_card_beats(card.metadata, beat_catalog),
                     sequence=scene_to_order.get(scene) if scene else None,
                     causal_links=self._resolve_card_causal(card.metadata, card_ids, card.id),
@@ -292,27 +294,21 @@ class PlotBoardMixin:
         )
         return layout.containers, layout.scene_to_container, layout.scene_to_order
 
-    def _page_status_default(self) -> str | None:
-        """The schema default a blank `page_status` reads as (#1421/#1908) — the
-        one place the projection asks; `read_metadata_schema()` is cached."""
-        field = self.read_metadata_schema().fields.get(_PAGE_STATUS_FIELD)
-        return field.default if field is not None and field.required_select else None
-
-    def _board_page_status(self, metadata: dict[str, Any], scene: str | None) -> str | None:
+    def _board_page_status(self, metadata: dict[str, Any], field: MetadataFieldDefinition | None) -> str | None:
         """The card's page status as the board shows it (ADR-0048 S7 Slice 5b):
-        `on_page` when a scene is attached (the shared `_page_status_from_scene` rule,
-        overriding any stored value), else the authored `off_page` / `unwritten`, else
-        the schema `default` — the sparse blank resolved once here (#1908), so the
-        board, its prompt context and the rail agree on what a fresh card is.
-        Derived from the CURRENT scene, so a stale stored `on_page` on a
-        since-detached card (the card list skips read-side healing) never reaches
-        the board. The valid-value filter is a read-time defense (write-time schema
+        the stored value — `on_page` already derived by the read-side canon the
+        card list applies (#1911), else the authored `off_page` / `unwritten` —
+        else the schema `default`, the sparse blank resolved once here (#1908) so
+        the board, its prompt context and the rail agree on what a fresh card is.
+        `field` is the schema's `page_status`, looked up once per projection by
+        the caller. The options filter is a read-time defense (write-time schema
         validation is what strips a bad value)."""
-        derived = self._page_status_from_scene(scene)
-        if derived is not None:
-            return derived
+        if field is None:
+            return None
         stored = metadata.get(_PAGE_STATUS_FIELD)
-        return stored if stored in ("off_page", "unwritten") else self._page_status_default()
+        if any(option.value == stored for option in field.options):
+            return stored
+        return field.default if field.required_select else None
 
     @staticmethod
     def _iter_roster_beats(metadata: dict[str, Any]) -> Iterator[dict[str, Any]]:

@@ -314,6 +314,7 @@ class PromptEntriesMixin:
         # entity_ref (a `preferred_assistant_id` set at a consuming layer) is
         # stripped too when its target is gone.
         metadata = self._strip_dangling_references(metadata, schema, index)
+        metadata = self._canonicalise_metadata_selects(metadata, raw_entry_type, schema)
         # A field the fold touched but the strip then removed is no longer a value
         # to mark — keep `overridden_fields` in step with what shipped.
         overridden_fields = [field for field in overridden_fields if field in metadata]

@@ -21,6 +21,7 @@ from app.models import (
     MetadataSchema,
     NodePickerConfig,
 )
+from app.services.project.metadata_refs import REF_FIELD_TYPES
 from app.services.project.schema_validation import ENTRY_TYPE_FQN_RE
 
 
@@ -157,12 +158,54 @@ def _field_shape_errors(field_id: str, field: MetadataFieldDefinition, schema: M
     # seeds nothing to disk, resolves an absent field at evaluation, #1421). It
     # must therefore name a real option — otherwise every entry resolves to a
     # value the field can never legally hold. Soft, like the rest here.
-    if field.type == "select" and field.default is not None and field.options:
-        allowed = {opt.value for opt in field.options}
-        if field.default not in allowed:
+    option_values = {opt.value for opt in field.options}
+    if field.type == "select" and field.default is not None and option_values and field.default not in option_values:
+        errors.append(
+            f"Select metadata field {field_id} has default {field.default!r}, "
+            f"which is not one of its options ({', '.join(sorted(option_values))})."
+        )
+    errors.extend(_derived_select_errors(field_id, field, schema, option_values))
+    return errors
+
+
+def _derived_select_errors(
+    field_id: str, field: MetadataFieldDefinition, schema: MetadataSchema, option_values: set[str]
+) -> list[str]:
+    """A derived select state (#1911) must sit on a select, name one of its
+    options (and not the default — a fresh node would hold a state only the
+    app should set), watch a reference field the schema declares, and be
+    carried beside that reference by every type that carries the field —
+    otherwise the healer would write a value the field can never hold, or
+    never fire. Soft, like the rest here: a hand-edited layer stays readable
+    (and the select canon derives nothing it cannot store)."""
+    derived = field.derived
+    if derived is None:
+        return []
+    errors: list[str] = []
+    if field.type != "select":
+        errors.append(f"Metadata field {field_id} declares a derived state but is not type select.")
+    elif option_values and derived.value not in option_values:
+        errors.append(
+            f"Select metadata field {field_id} derives {derived.value!r}, "
+            f"which is not one of its options ({', '.join(sorted(option_values))})."
+        )
+    if field.default is not None and field.default == derived.value:
+        errors.append(
+            f"Select metadata field {field_id} derives {derived.value!r}, which is also its "
+            "default — a fresh node would hold a state only the app should set."
+        )
+    watched = schema.fields.get(derived.when_set)
+    if watched is None or watched.type not in REF_FIELD_TYPES:
+        errors.append(
+            f"Metadata field {field_id} derives its state from {derived.when_set!r}, "
+            "which is not a reference field in the schema."
+        )
+        return errors
+    for entry_type_id, entry_type in schema.entry_types.items():
+        if field_id in entry_type.fields and derived.when_set not in entry_type.fields:
             errors.append(
-                f"Select metadata field {field_id} has default {field.default!r}, "
-                f"which is not one of its options ({', '.join(sorted(allowed))})."
+                f"Entry type {entry_type_id} carries metadata field {field_id} but not "
+                f"{derived.when_set!r}, the reference its derived state watches."
             )
     return errors
 

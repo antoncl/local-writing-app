@@ -29,6 +29,7 @@ from app.models import (
     CreatePlotTemplateRequest,
     CreateSceneRequest,
     CreateStructureNodeRequest,
+    DerivedSelectState,
     EntryTypeDefinition,
     PlotTemplateSpec,
     RealizeCardRequest,
@@ -979,8 +980,9 @@ class PlotKindRegistrationTests(PlotTestCase):
             [(option.value, option.label) for option in field.options],
             [("unwritten", "Unwritten"), ("off_page", "Off the page"), ("on_page", "On the page")],
         )
-        # #1906: on_page is the scene link's to set — derived, never the author's pick.
-        self.assertEqual([option.value for option in field.options if option.derived], ["on_page"])
+        # #1906/#1911: on_page is the scene link's to set — the FIELD declares it,
+        # so the healer, the rail and the type editor read one rule.
+        self.assertEqual(field.derived, DerivedSelectState(value="on_page", when_set="scene"))
 
     def test_card_type_is_shown_and_editable_in_detail_types(self) -> None:
         # ADR-0048 §1 / #738: the card must appear in Detail Types (a `plot`-kind

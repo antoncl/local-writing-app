@@ -28,6 +28,10 @@ from app.services.migrations import CURRENT_VERSION, read_project_version
 from app.services.project.overrides import OVERRIDE_ENTRY_TYPE, OVERRIDES_FOLDER
 from app.services.project_service import ProjectService
 
+# The version the tags chain step (v10) migrates FROM. Pinned rather than
+# `CURRENT_VERSION - 1`: later steps (v11, #1911) sit above it in the ladder.
+_BEFORE_TAGS_STEP = 9
+
 
 def _tag_titles(folder: Path) -> dict[str, str]:
     """`{title: id}` over every `*.md` directly in `folder` (a `tags/` dir) —
@@ -79,10 +83,10 @@ class TagsChainMigrationTests(unittest.TestCase):
 
         # `created_at` stamps a fresh project straight to CURRENT_VERSION (it
         # never runs migrations on first open, migrations.py's own docstring) —
-        # roll both layers back one version so the v10 chain step is PENDING,
+        # roll both layers back below v10 so the tags chain step is PENDING,
         # simulating a project the tags.yaml fixtures above predate.
-        self._rollback_schema_version(self.series, CURRENT_VERSION - 1)
-        self._rollback_schema_version(self.book, CURRENT_VERSION - 1)
+        self._rollback_schema_version(self.series, _BEFORE_TAGS_STEP)
+        self._rollback_schema_version(self.book, _BEFORE_TAGS_STEP)
 
         ProjectService.opened_at(self.book)
         self.series_tags = _tag_titles(self.series / "tags")
@@ -440,7 +444,7 @@ class AncestorSkipAndFailureTests(unittest.TestCase):
 
         # Roll series back so its own ladder actually runs and walks its
         # (bogus) declared chain.
-        manifest["schema_version"] = CURRENT_VERSION - 1
+        manifest["schema_version"] = _BEFORE_TAGS_STEP
         series_manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
 
         ProjectService.opened_at(self.book)  # must not raise

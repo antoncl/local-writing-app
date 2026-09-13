@@ -93,8 +93,30 @@ class RequiredSelectTests(MetadataValidationBase):
         entry = self.service.read_lore_entry(hero.id)  # must not raise
         self.assertNotIn("context_policy", entry.metadata)
 
+    def test_literal_default_is_dropped_on_read(self) -> None:
+        # #1912: a node storing the default LITERALLY (an import, an AI patch, a
+        # pre-#1421 picker) is the same value as the sparse blank under a
+        # different provenance — the rail would show a reset chip that does
+        # nothing. Healed to absent on read, like the blank.
+        hero = self._hero()
+        self.service.save_lore_entry(
+            hero.id,
+            SaveLoreEntryRequest(
+                title=hero.title,
+                body=hero.body,
+                base_revision=hero.revision,
+                entry_type="lore:character",
+                metadata={"context_policy": "always"},
+            ),
+        )
+        path = self.service._path_for_node_id(hero.id, "lore")
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace("context_policy: always", "context_policy: auto"), encoding="utf-8")
+        self.assertNotIn("context_policy", self.service.read_lore_entry(hero.id).metadata)
+
     def test_read_heal_preserves_a_real_value(self) -> None:
-        # Only a blank is healed — a legitimate stored value passes through.
+        # Only a blank or the literal default is healed — any other stored value
+        # passes through.
         schema = self.service.read_metadata_schema()
         kept = self.service._strip_unknown_metadata_fields(
             {"context_policy": "always"}, "lore:character", schema

@@ -8,13 +8,13 @@ from pydantic import BaseModel
 class SelectOption(BaseModel):
     """One choice in a select / multi_select field, or a select prompt input.
 
-    Stored as `{value, label?, color?, derived?}`. `value` is what's persisted
+    Stored as `{value, label?, color?}`. `value` is what's persisted
     on the entry; `label` (optional) is the display text — defaults to value
     if omitted. `color` is an optional machine-palette swatch id, used by
-    the ColoredSelect frontend widget to render a tinted pill. `derived`
-    marks a state the app holds, never the author (#1906): shown at rest,
-    absent from the pick list, and a field holding it is read-only — a plot
-    card's `on_page`, set and unset by its scene link.
+    the ColoredSelect frontend widget to render a tinted pill. A state the
+    app holds rather than the author (a plot card's `on_page`) is not an
+    option attribute: the FIELD declares it (`MetadataFieldDefinition.derived`,
+    #1911), so one declaration drives the healer, the rail and the type editor.
 
     Bare strings are accepted as a shortcut (`["draft", "complete"]` →
     `[{"value": "draft"}, {"value": "complete"}]`) so existing YAMLs and
@@ -25,8 +25,6 @@ class SelectOption(BaseModel):
     value: str
     label: str | None = None
     color: str | None = None
-    # None, not False, so `exclude_none` dumps keep every ordinary option sparse.
-    derived: bool | None = None
 
 
 def _normalize_select_options(value: Any) -> list[Any]:

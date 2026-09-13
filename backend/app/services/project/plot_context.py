@@ -38,6 +38,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.models import (
+    MetadataFieldDefinition,
     PlotContext,
     PlotContextArc,
     PlotContextBeat,
@@ -52,6 +53,7 @@ from app.models import (
 # and character arcs — both `plot:thread` holders — so a card's event-beat AND
 # change-beat links resolve to the one merged catalog.
 from app.services.project.plot import (
+    _PAGE_STATUS_FIELD,
     PLOT_CHARACTER_ARC_ENTRY_TYPE,
     PLOT_PLOTLINE_ENTRY_TYPE,
 )
@@ -109,8 +111,9 @@ class PlotContextMixin:
         # One catalog over BOTH thread subtypes so a card's event-beats AND
         # change-beats resolve (plotline + arc ids are disjoint node ids).
         beat_catalog = {**plotline_catalog, **arc_catalog}
+        page_status_field = self.read_metadata_schema().fields.get(_PAGE_STATUS_FIELD)
         context_cards = [
-            self._context_card(card, scene_to_order, plotline_titles, beat_catalog, admitted_ids)
+            self._context_card(card, scene_to_order, plotline_titles, beat_catalog, admitted_ids, page_status_field)
             for card in admitted
         ]
 
@@ -267,6 +270,7 @@ class PlotContextMixin:
         plotline_titles: dict[str, str],
         beat_catalog: dict[str, _ThreadCatalogEntry],
         admitted_ids: set[str],
+        page_status_field: MetadataFieldDefinition | None,
     ) -> PlotContextCard:
         """Project one admitted card for the AI: synopsis + plotline + reveal rank
         + page status + the beats it fulfils + the cards it leads to. Beat links
@@ -284,7 +288,7 @@ class PlotContextMixin:
             plotline_title=plotline_titles.get(plotline_id) if plotline_id else None,
             scene_id=scene,
             sequence=scene_to_order.get(scene) if scene else None,
-            page_status=self._board_page_status(card.metadata, scene),
+            page_status=self._board_page_status(card.metadata, page_status_field),
             beats=self._resolve_card_beats(card.metadata, beat_catalog),
             causal_out=self._resolve_card_causal(card.metadata, admitted_ids, card.id),
         )

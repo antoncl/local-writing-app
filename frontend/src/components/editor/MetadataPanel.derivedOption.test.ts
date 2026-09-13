@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
-// #1906: a select holding a `derived` option — a state the app set (a plot
-// card's On the page from its scene link) — is read-only in the rail: no edit
-// hit target, the control disabled. A card at an authored state edits as usual.
+// #1906/#1911: a select holding its field's derived state — a state the app
+// set (a plot card's On the page from its scene link) — is read-only in the
+// rail: no edit hit target, the control disabled. A card at an authored state
+// edits as usual.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@/lib/test/component";
 import MetadataPanel from "./MetadataPanel.svelte";
@@ -19,8 +20,9 @@ const SCHEMA = {
       options: [
         { value: "unwritten", label: "Unwritten" },
         { value: "off_page", label: "Off the page" },
-        { value: "on_page", label: "On the page", derived: true },
+        { value: "on_page", label: "On the page" },
       ],
+      derived: { value: "on_page", when_set: "scene" },
     },
   },
 } as unknown as MetadataSchema;
@@ -42,7 +44,7 @@ function mount(metadata: EntryMetadata) {
   });
 }
 
-describe("MetadataPanel — a derived option makes the field read-only (#1906)", () => {
+describe("MetadataPanel — the derived state makes the field read-only (#1906/#1911)", () => {
   it("holding the derived state: no edit hit target, the select is disabled and shows the label", () => {
     mount({ page_status: "on_page" });
     expect(screen.queryByRole("button", { name: /^Edit Page status/ })).toBeNull();

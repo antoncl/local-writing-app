@@ -297,7 +297,11 @@ def _eval_field(
     return out
 
 
-def _is_empty(value: Any) -> bool:
+def is_empty(value: Any) -> bool:
+    """The one emptiness rule for a metadata value: None, a blank string, or an
+    empty collection. The `set` / `unset` predicates read it, and so does the
+    derived-select healer (#1911), so "is this reference set" cannot drift
+    between a view filter and the state it drives."""
     if value is None:
         return True
     if isinstance(value, str):
@@ -305,6 +309,9 @@ def _is_empty(value: Any) -> bool:
     if isinstance(value, (list, tuple, set, dict)):
         return len(value) == 0
     return False
+
+
+_is_empty = is_empty
 
 
 def _to_str_set(raw: Any) -> set[str]:

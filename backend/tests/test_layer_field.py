@@ -65,6 +65,15 @@ class LayerFieldTests(unittest.TestCase):
             [(option.value, option.label) for option in options],
             [(layer.id, layer.label) for layer in chain],
         )
+        # Independently of the walk above: the concrete project-chain labels are
+        # present (so a wrong-but-consistent chain can't pass), and there are MORE
+        # options than the four project folders — proving the machine AND Library
+        # layers (the prompt-inheritance case) are folded in, not just projects.
+        labels = [option.label for option in options]
+        self.assertIn("honorverse", labels)  # the universe layer
+        self.assertIn("honor-harrington", labels)  # the series layer
+        self.assertIn("Book 1", labels)  # the open project itself
+        self.assertGreater(len(options), 4)
         # The open project's own layer is the last bucket ("local").
         self.assertEqual(options[-1].value, chain[-1].id)
         self.assertTrue(chain[-1].is_root)

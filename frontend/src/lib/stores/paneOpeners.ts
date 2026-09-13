@@ -5,14 +5,18 @@
 // The plot board opener used to stay in App too, for the same reason — but
 // `refreshPlotBoard` records its own failure into `plotBoardError` (the pane
 // renders it inline) and never rejects, so the `run()` wrapper was redundant
-// (#1920).
+// (#1920). It now lives with its store (`plotBoard.ts`, review of #1922) —
+// `plotlines.ts` needed it too, and importing it from here made that a new
+// import cycle back through `chatSessions.svelte.ts` / `editorPanes.svelte.ts`;
+// this is just a re-export so App's existing import keeps working.
 
 import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
 import { chatSessions } from "@/lib/stores/chatSessions.svelte";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { aiSpend } from "@/lib/stores/aiSpend.svelte";
-import { refreshPlotBoard } from "@/lib/stores/plotBoard";
+
+export { openPlotBoardPane } from "@/lib/stores/plotBoard";
 
 export function openPromptsPane(): void {
   workspaceLayout.ensureVisible("prompts");
@@ -55,12 +59,4 @@ export function openTagsPane(): void {
   // gives its list.
   void refreshTagNodes();
   workspaceLayout.ensureVisible("tags");
-}
-
-export function openPlotBoardPane(): void {
-  // Fetch-then-show: the pane opens at once and shows "Loading…" until the
-  // projection resolves; `refreshPlotBoard` records a failure in `plotBoardError`
-  // (the pane renders it inline) and never rejects, so no run()/banner is needed.
-  void refreshPlotBoard();
-  workspaceLayout.ensureVisible("plotEditor");
 }

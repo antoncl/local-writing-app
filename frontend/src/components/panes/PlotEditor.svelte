@@ -435,14 +435,21 @@
 
   // A plot node asked to be revealed (plotBoardReveal, #1920). Read the signal first so a
   // drag frame (flowNodes churn) can't retrigger this once it is null; wait for the
-  // projection so a reveal that arrives while the board is still opening is not dropped.
-  // Once the projection is in: expand a plotline / arc node, or light a card, if it is on
-  // this board (a stale id — a node on another project — is simply not here), centre the
-  // viewport on it, and clear the one-shot either way.
+  // projection so a reveal that arrives while the board is still opening is not dropped —
+  // unless the load FAILED (review of #1922), in which case the reveal is dropped too, not
+  // held for a later Retry. Once the projection is in: expand a plotline / arc node, or
+  // light a card, if it is on this board (a stale id — a node on another project — is
+  // simply not here), centre the viewport on it, and clear the one-shot either way.
   $effect(() => {
     const reveal = $plotBoardReveal;
     if (!reveal) return;
-    if (!projection) return;
+    if (!projection) {
+      // A failed load (the pane shows its inline error) drops the pending reveal —
+      // otherwise a Retry minutes later would light a node from a click the writer has
+      // forgotten (review of #1922).
+      if (error) plotBoardReveal.set(null);
+      return;
+    }
     const nodeType =
       reveal.entryType === "plot:plotline" ? "plotPlotline"
       : reveal.entryType === "plot:character_arc" ? "plotArc"

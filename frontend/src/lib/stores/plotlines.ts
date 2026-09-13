@@ -7,9 +7,8 @@
 
 import { writable } from "svelte/store";
 import { api } from "@/lib/api";
-import { refreshPlotBoard, refreshAfterMutation } from "@/lib/stores/plotBoard";
+import { refreshPlotBoard, refreshAfterMutation, openPlotBoardPane } from "@/lib/stores/plotBoard";
 import { refreshCharacterArcs } from "@/lib/stores/characterArcs";
-import { openPlotBoardPane } from "@/lib/stores/paneOpeners";
 import type { CharacterArcEntry, PlotlineEntry, PlotlineSummary } from "@/lib/types";
 
 export const plotlineEntriesStore = writable<PlotlineSummary[]>([]);

@@ -17,14 +17,34 @@ import { get } from "svelte/store";
 import { FOREIGN_PROJECT_NODE, editorPanes } from "./editorPanes.svelte";
 import { plotBoardReveal } from "./plotlines";
 import { mutationSetEditorStore } from "./mutationSets";
+import { metadataSchemaStore } from "@/lib/stores/schema";
 import { api } from "@/lib/api";
-import { openPlotBoardPane } from "@/lib/stores/paneOpeners";
-import type { MutationSetEntry, ProjectNode } from "@/lib/types";
+import { openPlotBoardPane } from "@/lib/stores/plotBoard";
+import type { MetadataSchema, MutationSetEntry, ProjectNode } from "@/lib/types";
 
 // `revealOnPlotBoard` (called by the plot-reveal branch below) now opens the
 // pane itself (#1920) rather than relying on a shell $effect — mock it so
 // these dispatch tests stay about routing, not the pane opener's own effects.
-vi.mock("@/lib/stores/paneOpeners", () => ({ openPlotBoardPane: vi.fn() }));
+// Only `openPlotBoardPane` is mocked — `refreshPlotBoard`/`plotBoardStore` etc.
+// stay real for other imports of this module.
+vi.mock("@/lib/stores/plotBoard", async (orig) => ({
+  ...(await orig<typeof import("@/lib/stores/plotBoard")>()),
+  openPlotBoardPane: vi.fn(),
+}));
+
+// A user-authored plot subtype (schema designer, ADR-0048 / class–instance model):
+// `plot:noir_card` descends from `plot:card`, `plot:house_template` from
+// `plot:template` — the dispatch-by-family-root fixture (#1920, review of #1922).
+const PLOT_SUBTYPE_SCHEMA = {
+  version: 1,
+  entry_types: {
+    "plot:card": { name: "Card", kind: "plot", fields: [] },
+    "plot:noir_card": { name: "Noir Card", kind: "plot", fields: [], parent: "plot:card" },
+    "plot:template": { name: "Template", kind: "plot", fields: [] },
+    "plot:house_template": { name: "House Template", kind: "plot", fields: [], parent: "plot:template" },
+  },
+  fields: {},
+} as unknown as MetadataSchema;
 
 // kind → the opener it must reach. The table IS the assertion: a kind wired to
 // the wrong opener reads as an obvious mismatch here, which the old code's
@@ -140,7 +160,7 @@ describe("editorPanes.openNodeOfKind (#344)", () => {
       vi.spyOn(editorPanes, name).mockResolvedValue(undefined),
     );
 
-    await expect(editorPanes.openNodeOfKind("x", "plot")).rejects.toThrow(/known entry type/i);
+    await expect(editorPanes.openNodeOfKind("x", "plot")).rejects.toThrow(/not a known plot type/i);
 
     expect(get(plotBoardReveal)).toBeNull();
     expect(openPlotBoardPane).not.toHaveBeenCalled();
@@ -152,11 +172,40 @@ describe("editorPanes.openNodeOfKind (#344)", () => {
       vi.spyOn(editorPanes, name).mockResolvedValue(undefined),
     );
 
-    await expect(editorPanes.openNodeOfKind("x", "plot", "plot:beat")).rejects.toThrow(/known entry type/i);
+    await expect(editorPanes.openNodeOfKind("x", "plot", "plot:beat")).rejects.toThrow(/not a known plot type/i);
 
     expect(get(plotBoardReveal)).toBeNull();
     expect(openPlotBoardPane).not.toHaveBeenCalled();
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  describe("dispatch by plot family root, not exact entry type (#1920, review of #1922)", () => {
+    beforeEach(() => metadataSchemaStore.set(PLOT_SUBTYPE_SCHEMA));
+    afterEach(() => metadataSchemaStore.set(null));
+
+    it("reveals a user-authored card subtype lit on the board, like its plot:card root", async () => {
+      const spies = [...ROUTES.map(([, name]) => name), "openPlotTemplate" as const].map((name) =>
+        vi.spyOn(editorPanes, name).mockResolvedValue(undefined),
+      );
+
+      await editorPanes.openNodeOfKind("card_9", "plot", "plot:noir_card");
+
+      expect(get(plotBoardReveal)).toEqual({ id: "card_9", entryType: "plot:card" });
+      expect(openPlotBoardPane).toHaveBeenCalledOnce();
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("opens a user-authored template subtype as a document, like its plot:template root", async () => {
+      const openPlotTemplate = vi.spyOn(editorPanes, "openPlotTemplate").mockResolvedValue(undefined);
+      const spies = ROUTES.map(([, name]) => vi.spyOn(editorPanes, name).mockResolvedValue(undefined));
+
+      await editorPanes.openNodeOfKind("tpl_9", "plot", "plot:house_template");
+
+      expect(openPlotTemplate).toHaveBeenCalledWith("tpl_9");
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+      expect(get(plotBoardReveal)).toBeNull();
+      expect(openPlotBoardPane).not.toHaveBeenCalled();
+    });
   });
 
   it("refuses an unknown kind instead of falling back to openScene", async () => {

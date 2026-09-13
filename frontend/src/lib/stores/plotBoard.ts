@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { setStructure } from "@/lib/stores/structure";
 import { refreshCards } from "@/lib/stores/plotCards";
 import { metadataSchemaStore } from "@/lib/stores/schema";
+import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
 import type { CardEntry, PlotBoardLayout, PlotBoardProjection, Scene } from "@/lib/types";
 
 export const plotBoardStore = writable<PlotBoardProjection | null>(null);
@@ -45,6 +46,16 @@ export function refreshPlotBoard(): Promise<void> {
       inFlight = null;
     });
   return inFlight;
+}
+
+// Open the plot board pane (#1920): fetch-then-show, so the pane opens at once and
+// shows "Loading…" until the projection resolves. `refreshPlotBoard` records a
+// failure in `plotBoardError` (the pane renders it inline) and never rejects, so no
+// run()/banner is needed here. Lives with the store it opens (review of #1922) —
+// `paneOpeners.ts` re-exports it for its App-level callers.
+export function openPlotBoardPane(): void {
+  void refreshPlotBoard();
+  workspaceLayout.ensureVisible("plotEditor");
 }
 
 // A mutation's refresh must reflect state AFTER the mutation. The coalescing guard

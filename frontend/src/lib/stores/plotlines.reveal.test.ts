@@ -3,9 +3,15 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { get } from "svelte/store";
 import { plotBoardReveal, revealOnPlotBoard } from "./plotlines";
-import { openPlotBoardPane } from "@/lib/stores/paneOpeners";
+import { openPlotBoardPane } from "@/lib/stores/plotBoard";
 
-vi.mock("@/lib/stores/paneOpeners", () => ({ openPlotBoardPane: vi.fn() }));
+// Mock only `openPlotBoardPane` — `refreshPlotBoard`/`plotBoardStore` etc. stay
+// real, since other imports of this module (e.g. plotlines.ts's own
+// `refreshAfterMutation`) rely on them.
+vi.mock("@/lib/stores/plotBoard", async (orig) => ({
+  ...(await orig<typeof import("@/lib/stores/plotBoard")>()),
+  openPlotBoardPane: vi.fn(),
+}));
 
 describe("revealOnPlotBoard (#1920)", () => {
   beforeEach(() => {

@@ -20,6 +20,7 @@ metadata-value subsystem, not schema-definition CRUD.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,27 @@ _CLEARABLE_FIELD_KEYS = tuple(
     for name, info in MetadataFieldDefinition.model_fields.items()
     if info.default is None and name not in RESOLVER_STAMPED_FIELD_KEYS
 )
+# The same for an entry type's optional attributes (#1919): the layer key and
+# the resolved attribute that says whether the chain above declares it — the
+# `own_*` twin, which is the layer-merged declaration on this type, not the
+# value inherited down the parent-type chain.
+_CLEARABLE_ENTRY_TYPE_KEYS = (("color", "own_color"), ("icon", "own_icon"))
+
+
+def _spell_inherited_clears(payload: dict[str, Any], inherited: Any, keys: Iterable[tuple[str, str]]) -> dict[str, Any]:
+    """`payload` with an explicit `null` for each `(key, inherited_attribute)`
+    it leaves unset that `inherited` carries (#1916 / #1919).
+
+    A layer's schema sections merge per attribute (`_merge_metadata_schema_section`),
+    where an absent key means "inherit": a definition the editor round-trips
+    whole must spell a cleared attribute as `null`, or the clear never takes.
+    `inherited` is the definition as the chain ABOVE the layer resolves it, or
+    None when nothing above declares it — then no key is written, as before."""
+    if inherited is not None:
+        for key, attribute in keys:
+            if key not in payload and getattr(inherited, attribute) is not None:
+                payload[key] = None
+    return payload
 
 
 def _entry_type_ancestry(
@@ -282,7 +304,8 @@ class MetadataSchemaMixin:
         built_in = bool(source and source.built_in)
 
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
-        self._assemble_entry_type_layer_data(request, entry_type_id, layer_data, built_in)
+        inherited = self._read_metadata_schema_to_path(root, layer_path, inclusive=False).entry_types.get(entry_type_id)
+        self._assemble_entry_type_layer_data(request, entry_type_id, layer_data, built_in, inherited)
         self._validate_candidate_schema(root, layer_path, layer_data)
         self._write_yaml(layer_path, layer_data)
         return self.read_metadata_schema()
@@ -326,15 +349,20 @@ class MetadataSchemaMixin:
         entry_type_id: str,
         layer_data: dict[str, Any],
         built_in: bool,
+        inherited: EntryTypeDefinition | None,
     ) -> None:
         """Build the per-layer entry-type payload for an upsert and store it into
         `layer_data`. A built-in overlay that would carry nothing but an empty
         membership is dropped rather than written as `<type>: {}` (which would
-        flip the built-in's reported source to this layer)."""
+        flip the built-in's reported source to this layer). `inherited` is the
+        type as the chain above this layer resolves it: a colour or icon the
+        request clears that it declares is written as an explicit `null`
+        (#1919), the way a field attribute is."""
         entry_types = layer_data.get("entry_types")
         if not isinstance(entry_types, dict):
             entry_types = {}
         entry_type_data = self._base_entry_type_payload(request, entry_type_id, entry_types.get(entry_type_id))
+        _spell_inherited_clears(entry_type_data, inherited, _CLEARABLE_ENTRY_TYPE_KEYS)
         if built_in:
             self._apply_builtin_overlay(entry_type_data, entry_type_id)
         if built_in and not entry_type_data.get("fields") and not (set(entry_type_data) - {"fields"}):
@@ -494,11 +522,7 @@ class MetadataSchemaMixin:
         "inherit", and the clear would not take without one. A layer that
         never inherited the attribute writes no key, as before."""
         payload = field.model_dump(exclude_none=True, exclude=RESOLVER_STAMPED_FIELD_KEYS)
-        if inherited is not None:
-            for key in _CLEARABLE_FIELD_KEYS:
-                if key not in payload and getattr(inherited, key) is not None:
-                    payload[key] = None
-        return payload
+        return _spell_inherited_clears(payload, inherited, ((key, key) for key in _CLEARABLE_FIELD_KEYS))
 
     def _validate_candidate_schema(self, root: Path, layer_path: Path, layer_data: dict[str, Any]) -> None:
         """Single-layer variant: validate the schema produced by rewriting just
@@ -609,11 +633,21 @@ class MetadataSchemaMixin:
                 f"Field {field_key} is not defined for entry_type {entry_type_id}.", 422
             )
         label = request.label.strip() if isinstance(request.label, str) else None
+        # An aspect the request clears that the chain ABOVE this layer declares
+        # on this type is written as an explicit `null` (#1919): the overlay
+        # merges per field key, where an absent entry means "inherit", so a
+        # dropped entry would bring the ancestor's relabel straight back.
+        inherited = self._read_metadata_schema_to_path(root, layer_path, inclusive=False).entry_types.get(entry_type_id)
+        above = inherited.own_field_overrides.get(field_key) if inherited is not None else None
         overlay: dict[str, Any] = {}
         if label:
             overlay["label"] = label
+        elif above is not None and above.label is not None:
+            overlay["label"] = None
         if request.hidden is not None:
             overlay["hidden"] = bool(request.hidden)
+        elif above is not None and above.hidden is not None:
+            overlay["hidden"] = None
 
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
         self._write_field_override_to_layer(layer_data, entry_type_id, field_key, overlay)

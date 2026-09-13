@@ -1,4 +1,4 @@
-"""A nearer layer clears a field attribute an ancestor declared (#1916).
+"""A nearer layer clears an attribute an ancestor declared (#1916, #1919).
 
 Field definitions merge per attribute up the chain (`_merge_metadata_schema_section`
 is `{**base, **layer}` per field), where an absent key means "inherit". So a
@@ -25,11 +25,14 @@ from layer_fixtures import declare_full_chain
 from app.models import (
     CreateLoreEntryRequest,
     DerivedSelectState,
+    EntryTypeDefinition,
     LoreEntry,
     MetadataFieldDefinition,
     MoveMetadataFieldRequest,
     SaveLoreEntryRequest,
     SelectOption,
+    SetFieldOverrideRequest,
+    UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
 )
 from app.services.project_service import ProjectService
@@ -63,7 +66,16 @@ class LayerClearsInheritedAttributeTests(unittest.TestCase):
                         "derived": {"value": "filmed", "when_set": "footage"},
                     },
                 },
-                "entry_types": {"lore:character": {"fields": ["footage", "filmed"]}},
+                # The type carries a colour, an icon and a relabel of `filmed`
+                # (#1919): the other per-attribute merges a nearer layer clears.
+                "entry_types": {
+                    "lore:character": {
+                        "fields": ["footage", "filmed"],
+                        "color": "red",
+                        "icon": "user",
+                        "field_overrides": {"filmed": {"label": "Shot", "hidden": False}},
+                    }
+                },
             },
         )
 
@@ -84,6 +96,27 @@ class LayerClearsInheritedAttributeTests(unittest.TestCase):
 
     def _stored(self, layer: Path, field_id: str) -> dict:
         return self.service._read_yaml(layer / "metadata.schema.yaml")["fields"][field_id]
+
+    def _stored_type(self, layer: Path, entry_type_id: str) -> dict:
+        return self.service._read_yaml(layer / "metadata.schema.yaml")["entry_types"][entry_type_id]
+
+    def _upsert_type(self, layer: Path, entry_type_id: str, definition: EntryTypeDefinition) -> None:
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=self._layer_id(layer), entry_type_id=entry_type_id, entry_type=definition
+            )
+        )
+
+    def _set_override(self, layer: Path, field_key: str, *, label: str | None, hidden: bool | None) -> None:
+        self.service.set_metadata_field_override(
+            SetFieldOverrideRequest(
+                layer_id=self._layer_id(layer),
+                entry_type_id="lore:character",
+                field_key=field_key,
+                label=label,
+                hidden=hidden,
+            )
+        )
 
     def _character(self, title: str) -> LoreEntry:
         return self.service.create_lore_entry(CreateLoreEntryRequest(title=title, entry_type="lore:character"))
@@ -184,6 +217,64 @@ class LayerClearsInheritedAttributeTests(unittest.TestCase):
         field = self.service.read_metadata_schema().fields["page_status"]
         self.assertIsNone(field.derived)
         self.assertEqual(field.default, "unwritten")
+
+    # --- entry-type attributes (#1919) ---------------------------------
+
+    def test_the_book_clears_the_ancestor_s_type_colour_and_icon(self) -> None:
+        # The type editor sends `color: null` / `icon: null` for a cleared
+        # swatch; the built-in overlay strip leaves the nulls in place.
+        self._upsert_type(self.root, "lore:character", EntryTypeDefinition(name="Character", kind="lore", color=None, icon=None))
+        stored = self._stored_type(self.root, "lore:character")
+        self.assertIn("color", stored)
+        self.assertIsNone(stored["color"])
+        self.assertIn("icon", stored)
+        self.assertIsNone(stored["icon"])
+        resolved = self.service.read_metadata_schema().entry_types["lore:character"]
+        self.assertIsNone(resolved.own_color)
+        self.assertIsNone(resolved.own_icon)
+        self.assertIsNone(resolved.color)
+        self.assertIsNone(resolved.icon)
+
+    def test_a_type_attribute_no_ancestor_declared_writes_no_key(self) -> None:
+        self._upsert_type(self.root, "lore:vessel", EntryTypeDefinition(name="Vessel", kind="lore"))
+        stored = self._stored_type(self.root, "lore:vessel")
+        self.assertNotIn("color", stored)
+        self.assertNotIn("icon", stored)
+
+    def test_a_hand_authored_null_clears_the_inherited_type_colour(self) -> None:
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {"version": 1, "entry_types": {"lore:character": {"color": None}}},
+        )
+        resolved = self.service.read_metadata_schema().entry_types["lore:character"]
+        self.assertIsNone(resolved.color)
+        self.assertEqual(resolved.icon, "user")
+
+    # --- per-type field overrides (#1919) ------------------------------
+
+    def test_the_book_clears_the_ancestor_s_field_override(self) -> None:
+        self.assertEqual(self.service.read_metadata_schema().entry_types["lore:character"].field_overrides["filmed"].label, "Shot")
+        self._set_override(self.root, "filmed", label=None, hidden=None)
+        stored = self._stored_type(self.root, "lore:character")["field_overrides"]["filmed"]
+        self.assertEqual(stored, {"label": None, "hidden": None})
+        override = self.service.read_metadata_schema().entry_types["lore:character"].field_overrides["filmed"]
+        self.assertIsNone(override.label)
+        self.assertIsNone(override.hidden)
+
+    def test_a_partial_override_clears_only_the_aspect_it_omits(self) -> None:
+        self._set_override(self.root, "filmed", label="Take", hidden=None)
+        stored = self._stored_type(self.root, "lore:character")["field_overrides"]["filmed"]
+        self.assertEqual(stored, {"label": "Take", "hidden": None})
+        override = self.service.read_metadata_schema().entry_types["lore:character"].field_overrides["filmed"]
+        self.assertEqual(override.label, "Take")
+        self.assertIsNone(override.hidden)
+
+    def test_a_field_override_no_ancestor_declared_drops_the_entry(self) -> None:
+        # `footage` carries no ancestor override: clearing writes nothing, as before.
+        self._set_override(self.root, "footage", label="Reel", hidden=None)
+        self._set_override(self.root, "footage", label=None, hidden=None)
+        stored = self.service._read_yaml(self.root / "metadata.schema.yaml").get("entry_types", {})
+        self.assertNotIn("footage", stored.get("lore:character", {}).get("field_overrides", {}))
 
 
 if __name__ == "__main__":

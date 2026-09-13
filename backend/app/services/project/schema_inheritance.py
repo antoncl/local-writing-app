@@ -27,6 +27,11 @@ from app.services.project.default_schema import INTRINSIC_FIELD_KEYS
 # `_expand_group_applications`) — derived, never authored, never persisted into
 # a layer. The layer writers exclude them; a new stamped key joins here.
 RESOLVER_STAMPED_FIELD_KEYS = frozenset({"category", "group_origin", "item_members", "item_scalar"})
+# The entry-type keys the resolver stamps on read (`_resolve_one_entry_type`,
+# `_merge_entry_type_field_overrides`): the pre-inheritance `own_*` twins.
+# Never persisted into a layer — a request that echoes a resolved type carries
+# them, and the type writer drops them.
+RESOLVER_STAMPED_ENTRY_TYPE_KEYS = frozenset({"own_fields", "own_color", "own_icon", "own_field_overrides"})
 
 
 @dataclass
@@ -210,7 +215,11 @@ class MetadataSchemaInheritanceMixin:
             "color",
             "icon",
         ):
-            if inheritable not in next_entry_type and inheritable in parent_def:
+            # An explicit `null` is a layer's clear of an ancestor LAYER's value
+            # (#1919), not a declaration: the parent type still flows, the way
+            # `_merge_entry_type_field_overrides` reads a null aspect and the
+            # frontend's `firstInEntryTypeChain` walks past a null colour.
+            if next_entry_type.get(inheritable) is None and inheritable in parent_def:
                 next_entry_type[inheritable] = parent_def[inheritable]
 
     def _merge_entry_type_field_overrides(

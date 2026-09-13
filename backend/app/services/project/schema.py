@@ -20,7 +20,6 @@ metadata-value subsystem, not schema-definition CRUD.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -50,39 +49,17 @@ from app.services.project.default_schema import (
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import SCHEMA_FILENAME
 from app.services.project.node_index import IndexLayer
-from app.services.project.schema_inheritance import RESOLVER_STAMPED_FIELD_KEYS
-from app.services.project.schema_validation import ENTRY_TYPE_FQN_RE
-
-# The authored field attributes whose unset form is `None`: the ones a layer
-# below an ancestor's declaration can only clear with an explicit `null`
-# (#1916). Derived from the model so a new optional attribute joins the rule;
-# a tuple, so the nulls land in the file in declaration order.
-_CLEARABLE_FIELD_KEYS = tuple(
-    name
-    for name, info in MetadataFieldDefinition.model_fields.items()
-    if info.default is None and name not in RESOLVER_STAMPED_FIELD_KEYS
+from app.services.project.schema_inheritance import (
+    RESOLVER_STAMPED_ENTRY_TYPE_KEYS,
+    RESOLVER_STAMPED_FIELD_KEYS,
 )
-# The same for an entry type's optional attributes (#1919): the layer key and
-# the resolved attribute that says whether the chain above declares it — the
-# `own_*` twin, which is the layer-merged declaration on this type, not the
-# value inherited down the parent-type chain.
-_CLEARABLE_ENTRY_TYPE_KEYS = (("color", "own_color"), ("icon", "own_icon"))
-
-
-def _spell_inherited_clears(payload: dict[str, Any], inherited: Any, keys: Iterable[tuple[str, str]]) -> dict[str, Any]:
-    """`payload` with an explicit `null` for each `(key, inherited_attribute)`
-    it leaves unset that `inherited` carries (#1916 / #1919).
-
-    A layer's schema sections merge per attribute (`_merge_metadata_schema_section`),
-    where an absent key means "inherit": a definition the editor round-trips
-    whole must spell a cleared attribute as `null`, or the clear never takes.
-    `inherited` is the definition as the chain ABOVE the layer resolves it, or
-    None when nothing above declares it — then no key is written, as before."""
-    if inherited is not None:
-        for key, attribute in keys:
-            if key not in payload and getattr(inherited, attribute) is not None:
-                payload[key] = None
-    return payload
+from app.services.project.schema_layer_write import (
+    CLEARABLE_ENTRY_TYPE_KEYS,
+    CLEARABLE_FIELD_KEYS,
+    explicit_nulls,
+    spell_clears,
+)
+from app.services.project.schema_validation import ENTRY_TYPE_FQN_RE
 
 
 def _entry_type_ancestry(
@@ -304,7 +281,7 @@ class MetadataSchemaMixin:
         built_in = bool(source and source.built_in)
 
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
-        inherited = self._read_metadata_schema_to_path(root, layer_path, inclusive=False).entry_types.get(entry_type_id)
+        inherited = self._schema_above_layer(root, layer_path).entry_types.get(entry_type_id)
         self._assemble_entry_type_layer_data(request, entry_type_id, layer_data, built_in, inherited)
         self._validate_candidate_schema(root, layer_path, layer_data)
         self._write_yaml(layer_path, layer_data)
@@ -353,16 +330,13 @@ class MetadataSchemaMixin:
     ) -> None:
         """Build the per-layer entry-type payload for an upsert and store it into
         `layer_data`. A built-in overlay that would carry nothing but an empty
-        membership is dropped rather than written as `<type>: {}` (which would
-        flip the built-in's reported source to this layer). `inherited` is the
-        type as the chain above this layer resolves it: a colour or icon the
-        request clears that it declares is written as an explicit `null`
-        (#1919), the way a field attribute is."""
+        membership is dropped rather than written as `<type>: {}`. `inherited`
+        is the type as the chain above this layer resolves it — what a cleared
+        colour or icon is cleared against (`spell_clears`)."""
         entry_types = layer_data.get("entry_types")
         if not isinstance(entry_types, dict):
             entry_types = {}
-        entry_type_data = self._base_entry_type_payload(request, entry_type_id, entry_types.get(entry_type_id))
-        _spell_inherited_clears(entry_type_data, inherited, _CLEARABLE_ENTRY_TYPE_KEYS)
+        entry_type_data = self._base_entry_type_payload(request, entry_type_id, entry_types.get(entry_type_id), inherited)
         if built_in:
             self._apply_builtin_overlay(entry_type_data, entry_type_id)
         if built_in and not entry_type_data.get("fields") and not (set(entry_type_data) - {"fields"}):
@@ -372,20 +346,29 @@ class MetadataSchemaMixin:
         layer_data["entry_types"] = entry_types
 
     def _base_entry_type_payload(
-        self, request: UpsertMetadataEntryTypeRequest, entry_type_id: str, existing_entry_type: Any
+        self,
+        request: UpsertMetadataEntryTypeRequest,
+        entry_type_id: str,
+        existing_entry_type: Any,
+        inherited: EntryTypeDefinition | None,
     ) -> dict[str, Any]:
         """The layer payload for one entry-type upsert, before any built-in
         overlay stripping. Persist ONLY the fields the caller actually set
         (`exclude_unset`) — Pydantic defaults like body_editor="wysiwyg" would
-        otherwise leak onto disk and mask a parent type's inherited values — but
-        preserve the membership and group-applications an existing local
-        definition already carries when the caller omits them (each managed via
-        its own dedicated path)."""
+        otherwise leak onto disk and mask a parent type's inherited values —
+        never the resolver-stamped `own_*` keys a request echoing a resolved
+        type carries, and preserve what the layer's existing entry holds for
+        the parts managed by their own writers: the membership and the
+        group applications when the caller omits them, and always the
+        per-type field overrides and display order (a type save never speaks
+        for `set_metadata_field_override` / `set_metadata_field_order`).
+        A colour or icon the request clears is spelled per `spell_clears`."""
         existing = existing_entry_type if isinstance(existing_entry_type, dict) else {}
         existing_fields = existing.get("fields")
         fields = existing_fields if isinstance(existing_fields, list) else request.entry_type.fields
-        entry_type_data = request.entry_type.model_dump(exclude_unset=True, exclude_none=True)
-        entry_type_data.pop("own_fields", None)
+        entry_type_data = request.entry_type.model_dump(
+            exclude_unset=True, exclude_none=True, exclude=RESOLVER_STAMPED_ENTRY_TYPE_KEYS
+        )
         entry_type_data["name"] = request.entry_type.name.strip() or entry_type_id
         entry_type_data["kind"] = request.entry_type.kind
         entry_type_data["abstract"] = bool(request.entry_type.abstract)
@@ -393,8 +376,20 @@ class MetadataSchemaMixin:
         existing_applications = existing.get("group_applications")
         if isinstance(existing_applications, list) and "group_applications" not in entry_type_data:
             entry_type_data["group_applications"] = deepcopy(existing_applications)
+        for managed in ("field_overrides", "display_order"):
+            entry_type_data.pop(managed, None)
+            if managed in existing:
+                entry_type_data[managed] = deepcopy(existing[managed])
         if not request.entry_type.parent:
             entry_type_data.pop("parent", None)
+        spell_clears(
+            entry_type_data,
+            explicit_nulls(request.entry_type),
+            existing,
+            inherited,
+            CLEARABLE_ENTRY_TYPE_KEYS,
+            inherited_attribute_prefix="own_",
+        )
         return entry_type_data
 
     def _apply_builtin_overlay(self, entry_type_data: dict[str, Any], entry_type_id: str) -> None:
@@ -494,6 +489,14 @@ class MetadataSchemaMixin:
             return self._fold_schema_layers(paths[:cut], substitutions)
         return schema_cache.resolved_schema(paths[:cut], self._build_metadata_schema)
 
+    def _schema_above_layer(
+        self, root: Path, layer_path: Path, substitutions: dict[Path, dict[str, Any]] | None = None
+    ) -> MetadataSchema:
+        """What a definition written at `layer_path` inherits: the schema
+        resolved up to the layer just above it — the definition a cleared
+        attribute is cleared against (`spell_clears`)."""
+        return self._read_metadata_schema_to_path(root, layer_path, inclusive=False, substitutions=substitutions)
+
     def _validate_candidate_schema_layers(
         self, root: Path, substitutions: dict[Path, dict[str, Any]]
     ) -> None:
@@ -508,21 +511,15 @@ class MetadataSchemaMixin:
 
     @staticmethod
     def _layer_field_payload(
-        field: MetadataFieldDefinition, inherited: MetadataFieldDefinition | None
+        field: MetadataFieldDefinition, inherited: MetadataFieldDefinition | None, existing: dict[str, Any] | None
     ) -> dict[str, Any]:
-        """`field` as a layer stores it, given `inherited` — the same field as
-        the chain ABOVE that layer resolves it, or None when nothing above
-        declares it.
-
-        Never the resolver-stamped keys. `field` is the layer's complete
-        definition (the type editor round-trips every attribute it shows), so
-        an attribute it leaves unset that `inherited` carries is written as an
-        explicit `null` (#1916): field definitions merge per attribute
-        (`_merge_metadata_schema_section`), where an absent key means
-        "inherit", and the clear would not take without one. A layer that
-        never inherited the attribute writes no key, as before."""
+        """`field` as a layer stores it: never the resolver-stamped keys, and
+        each optional attribute read per `spell_clears` against `inherited`
+        (the field as the chain above the layer resolves it) and `existing`
+        (the layer's current entry)."""
         payload = field.model_dump(exclude_none=True, exclude=RESOLVER_STAMPED_FIELD_KEYS)
-        return _spell_inherited_clears(payload, inherited, ((key, key) for key in _CLEARABLE_FIELD_KEYS))
+        spell_clears(payload, explicit_nulls(field), existing, inherited, CLEARABLE_FIELD_KEYS)
+        return payload
 
     def _validate_candidate_schema(self, root: Path, layer_path: Path, layer_data: dict[str, Any]) -> None:
         """Single-layer variant: validate the schema produced by rewriting just
@@ -633,21 +630,18 @@ class MetadataSchemaMixin:
                 f"Field {field_key} is not defined for entry_type {entry_type_id}.", 422
             )
         label = request.label.strip() if isinstance(request.label, str) else None
-        # An aspect the request clears that the chain ABOVE this layer declares
-        # on this type is written as an explicit `null` (#1919): the overlay
-        # merges per field key, where an absent entry means "inherit", so a
-        # dropped entry would bring the ancestor's relabel straight back.
-        inherited = self._read_metadata_schema_to_path(root, layer_path, inclusive=False).entry_types.get(entry_type_id)
-        above = inherited.own_field_overrides.get(field_key) if inherited is not None else None
         overlay: dict[str, Any] = {}
         if label:
             overlay["label"] = label
-        elif above is not None and above.label is not None:
-            overlay["label"] = None
         if request.hidden is not None:
             overlay["hidden"] = bool(request.hidden)
-        elif above is not None and above.hidden is not None:
-            overlay["hidden"] = None
+        # The request is the complete overlay, so an aspect it leaves empty is
+        # cleared — spelled per `spell_clears` against the override the chain
+        # above declares on this type (`own_field_overrides`, the layer-chain
+        # declaration; a parent type's override is not this layer's to clear).
+        above = self._schema_above_layer(root, layer_path).entry_types.get(entry_type_id)
+        above_override = above.own_field_overrides.get(field_key) if above is not None else None
+        spell_clears(overlay, {"label", "hidden"} - set(overlay), None, above_override, ("label", "hidden"))
 
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
         self._write_field_override_to_layer(layer_data, entry_type_id, field_key, overlay)
@@ -701,8 +695,8 @@ class MetadataSchemaMixin:
         fields = layer_data.get("fields")
         if not isinstance(fields, dict):
             fields = {}
-        inherited = self._read_metadata_schema_to_path(root, layer_path, inclusive=False).fields.get(field_id)
-        fields[field_id] = self._layer_field_payload(request.field, inherited)
+        inherited = self._schema_above_layer(root, layer_path).fields.get(field_id)
+        fields[field_id] = self._layer_field_payload(request.field, inherited, fields.get(field_id))
         layer_data["fields"] = fields
         self._attach_field_to_entry_type(root, layer_path, layer_data, request, field_id)
 
@@ -810,11 +804,10 @@ class MetadataSchemaMixin:
         # What the target inherits is resolved with the source layer's entry
         # already gone — a clear the source held (`derived: null`, #1916) must
         # travel with the field, not read as "nothing above declares it".
-        inherited = self._read_metadata_schema_to_path(
-            root, target_path, inclusive=False, substitutions={source_path: source_data}
-        ).fields.get(field_id)
+        inherited = self._schema_above_layer(root, target_path, {source_path: source_data}).fields.get(field_id)
+        existing = target_data.get("fields", {}).get(field_id) if isinstance(target_data.get("fields"), dict) else None
         self._add_metadata_field_to_layer(
-            root, target_path, target_data, field_id, self._layer_field_payload(field, inherited), request.entry_type
+            root, target_path, target_data, field_id, self._layer_field_payload(field, inherited, existing), request.entry_type
         )
 
         self._validate_candidate_schema_layers(root, {source_path: source_data, target_path: target_data})

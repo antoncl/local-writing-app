@@ -10,6 +10,8 @@
   // Theme-aware syntax colors that override CodeMirror's light-oriented default
   // (built once at module load; see codeHighlightStyle.ts for the why).
   import { codeSyntaxHighlighting } from "./codeHighlightStyle";
+  import { revealSearchMatch as revealInView, searchReveal } from "./codeSearchReveal";
+  import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
 
   let {
     value = $bindable(),
@@ -53,7 +55,7 @@
     ro ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [];
 
   onMount(() => {
-    const extensions = [basicSetup, codeSyntaxHighlighting, lintGutter()];
+    const extensions = [basicSetup, codeSyntaxHighlighting, lintGutter(), searchReveal];
     if (language === "jinja2") {
       const jinjaLanguage = StreamLanguage.define(jinja2);
       extensions.push(jinjaLanguage);
@@ -78,6 +80,7 @@
     );
     editor = new EditorView({ doc: value, parent: host, extensions });
     pushDiagnostics();
+    if (pendingReveal) revealSearchMatch(pendingReveal);
   });
 
   onDestroy(() => {
@@ -142,6 +145,20 @@
       });
     }
     editor.dispatch(setDiagnostics(editor.state, items));
+  }
+
+  // A reveal that arrives before the view exists (the pane just opened)
+  // waits for the mount — the code twin of ProseBodyView's pending reveal.
+  let pendingReveal: SearchReveal | null = null;
+
+  /** Mark the query's matches and put the caret at the hit's (#1925). */
+  export function revealSearchMatch(reveal: SearchReveal): void {
+    pendingReveal = null;
+    if (!editor) {
+      pendingReveal = reveal;
+      return;
+    }
+    revealInView(editor, reveal);
   }
 </script>
 

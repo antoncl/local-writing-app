@@ -11,9 +11,11 @@
 // todos store (todosStore / embeddedTodosStore); this controller owns the
 // actions + the `newTodo` compose field.
 
+import { tick } from "svelte";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
 import {
   embeddedTodosStore,
   refreshEmbeddedTodos,
@@ -131,7 +133,7 @@ class TodoActions {
   }
 
   // ---- Navigation openers ----
-  async openSearchHit(hit: SearchHit): Promise<void> {
+  async openSearchHit(hit: SearchHit, reveal: SearchReveal | null = null): Promise<void> {
     if (hit.file_id === "project") return;
     await this.run(async () => {
       // ADR-0085 §2: hits carry the index's kind now; open through the one
@@ -140,6 +142,11 @@ class TodoActions {
       await editorPanes.openNodeOfKind(hit.file_id, hit.kind, hit.entry_type);
       if (hit.kind === "manuscript" && hit.todo_id) {
         window.setTimeout(() => editorPanes.highlightEmbeddedTodoInOpenPane(hit.file_id, hit.todo_id!), 0);
+      } else if (reveal) {
+        // The pane may have just been created: let it mount before the reveal
+        // reaches its body view (#1925; the body itself waits for its load).
+        await tick();
+        editorPanes.revealSearchMatchInOpenPane(hit.file_id, reveal);
       }
     });
   }

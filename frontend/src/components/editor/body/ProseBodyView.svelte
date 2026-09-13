@@ -38,6 +38,7 @@
     REBUILD_META,
     implicitContextIds,
   } from "@/lib/editor-core/implicitContextHighlight";
+  import { SearchMatchHighlight, type SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import {
     InteriorityReveal,
     interiorityHasBeats,
@@ -347,11 +348,13 @@
     syncEditorEmpty();
     updateSelectionMenu();
     publishImplicitContext();
+    applyPendingReveal();
   }
 
   export function clearEditor(): void {
     editor?.commands.clearContent(false);
     loadedSceneId = null;
+    pendingReveal = null;
     liveWordCount = 0;
     syncEditorEmpty();
   }
@@ -382,6 +385,27 @@
     if (!merged) return null;
     if (merged.tr) editor.view.dispatch(merged.tr);
     return editorHtmlToSceneMarkdown(editor.getHTML());
+  }
+
+  // A search hit's reveal (#1925), applied once the document it targets is
+  // loaded: the hit's pane may have just opened, and `loadScene` finishes
+  // after the opener's tick. Keyed to that document — a load of any other
+  // (the pane moved on) drops it rather than marking a document nobody
+  // searched. The editor marks the matches itself (searchMatchHighlight.ts):
+  // no markdown offset crosses this seam.
+  let pendingReveal: { sceneId: string; reveal: SearchReveal } | null = null;
+
+  export function revealSearchMatch(reveal: SearchReveal): void {
+    if (!scene) return;
+    pendingReveal = { sceneId: scene.id, reveal };
+    if (loadedSceneId === scene.id) applyPendingReveal();
+  }
+
+  function applyPendingReveal(): void {
+    const pending = pendingReveal;
+    pendingReveal = null;
+    if (!pending || !editor || pending.sceneId !== loadedSceneId) return;
+    editor.commands.revealSearchMatch(pending.reveal);
   }
 
   export function highlightEmbeddedTodo(todoId: string): void {
@@ -1072,6 +1096,7 @@
         TodoAnchor,
         ...tableExtensions,
         ImplicitContextHighlight.configure({ matcher: implicitContextMatcher }),
+        SearchMatchHighlight,
         InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],
       content: "",

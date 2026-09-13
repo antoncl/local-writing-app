@@ -26,6 +26,7 @@
   import { onDestroy } from "svelte";
   import type { Snippet } from "svelte";
   import CodeEditor from "@/components/widgets/CodeEditor.svelte";
+  import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import { makePromptCompletionSource } from "@/lib/promptCompletion";
   import EntryInputsEditor from "@/components/editor/body/EntryInputsEditor.svelte";
   import OfferOnPicker from "@/components/editor/body/OfferOnPicker.svelte";
@@ -237,6 +238,16 @@
   // --- Cheatsheet popover ---
   let cheatsheetPopoverOpen = $state(false);
   let helpButtonEl: HTMLButtonElement | undefined = $state();
+  // The one mounted CodeEditor (the prompt template tab, or the bare code
+  // body — never both), for the search reveal (#1925).
+  let codeEditor: CodeEditor | null = $state(null);
+
+  export function revealSearchMatch(reveal: SearchReveal): void {
+    // A prompt parked on Preview or Setup keeps its template mounted but
+    // hidden — the reveal has to be on the tab the writer sees.
+    if (isPrompt()) selectPromptTab("template");
+    codeEditor?.revealSearchMatch(reveal);
+  }
   let popoverPos = $state({ top: 0, right: 8 });
 
   function toggleCheatsheetPopover(): void {
@@ -491,7 +502,7 @@
   <div class="editor-wrap raw-body-wrap">
     <div class="raw-body-editor">
       {#key scene?.id}
-        <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={[]} />
+        <CodeEditor bind:this={codeEditor} bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={[]} />
       {/key}
     </div>
   </div>
@@ -513,7 +524,7 @@
            exists for code bodies today) — that would need a state reset, not a
            remount, exactly like ProseBodyView's loadScene boundary. -->
       {#key scene?.id}
-        <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={promptPreviewDiagnostics} completionSource={promptCompletionSource} />
+        <CodeEditor bind:this={codeEditor} bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={promptPreviewDiagnostics} completionSource={promptCompletionSource} />
       {/key}
     </div>
     <div class="raw-body-toolbar">

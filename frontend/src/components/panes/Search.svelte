@@ -4,6 +4,7 @@
   import type { SearchHit } from "@/lib/types";
   import { kindLabel } from "@/lib/kindLabels";
   import { SearchPaneController } from "@/lib/stores/searchPane.svelte";
+  import { compileSearchPattern, findMatches, type SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
@@ -14,12 +15,13 @@
     // App's error-catching async wrapper (same one Tree uses). Returns whether
     // the action completed without throwing.
     run,
-    // Open a hit in an editor pane — App owns the pane set + the embedded-TODO
-    // highlight that follows a scene hit.
+    // Open a hit in an editor pane — App owns the pane set, the embedded-TODO
+    // highlight that follows a scene hit, and the reveal that follows a body
+    // hit (#1925: the editor marks the matches and selects this one).
     onOpenHit,
   }: {
     run: (action: () => Promise<void>) => Promise<boolean>;
-    onOpenHit: (hit: SearchHit) => void;
+    onOpenHit: (hit: SearchHit, reveal: SearchReveal | null) => void;
   } = $props();
 
   // Domain state (query, options, hits, replace, in-flight token) lives in the
@@ -32,13 +34,22 @@
   const ctrl = new SearchPaneController(untrack(() => run), {
     isDirtyOpen: (id, kind, entryType) => editorPanes.isNodeOpenDirty(id, kind, entryType),
     reconcile: (id, kind, entryType) => editorPanes.reconcileNodeFromServer(id, kind, entryType),
-    confirm: (n, nodes, query) =>
+    // An empty replacement deletes the matches (#1926): the modal says so, is
+    // the destructive kind, and is raised for a single hit too.
+    confirm: (n, nodes, query, replacement) =>
       new Promise<boolean>((resolve) => {
+        const what = `${n} occurrence${n === 1 ? "" : "s"} of "${query}" in ${nodes} node${nodes === 1 ? "" : "s"}`;
+        const copy =
+          replacement === ""
+            ? {
+                title: n === 1 ? "Delete the match?" : "Delete the matches?",
+                message: `Delete ${what}. The Replace-with field is empty, so the matched text is removed.`,
+                confirmLabel: "Delete",
+                destructive: true,
+              }
+            : { title: "Replace all?", message: `Replace ${what}.`, confirmLabel: "Replace all", destructive: false };
         confirmService.request({
-          title: "Replace all?",
-          message: `Replace ${n} occurrence${n === 1 ? "" : "s"} of "${query}" in ${nodes} node${nodes === 1 ? "" : "s"}.`,
-          confirmLabel: "Replace all",
-          destructive: false,
+          ...copy,
           onConfirm: async () => resolve(true),
           onCancel: () => resolve(false),
         });
@@ -103,11 +114,11 @@
   };
 
   // Split an excerpt around matches of `q` so the match can be wrapped in
-  // <mark>. Only the excerpt is highlighted — never the path/line. The regex
-  // is built the same way the backend builds its search pattern (`_compile_query`
-  // in `search.py`): the mark must show exactly what the backend matched
-  // (ADR-0085 §3 options) — a case-insensitive substring mark under Match case
-  // highlights the very occurrences the toggle excluded.
+  // <mark>. Only the excerpt is highlighted — never the path/line. The
+  // pattern is the one the backend and the editor's reveal build
+  // (`compileSearchPattern`): the mark must show exactly what the backend
+  // matched (ADR-0085 §3 options) — a case-insensitive substring mark under
+  // Match case highlights the very occurrences the toggle excluded.
   function segments(
     text: string,
     q: string,
@@ -115,22 +126,12 @@
     wholeWord: boolean,
   ): { text: string; hit: boolean }[] {
     if (!q) return [{ text, hit: false }];
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const source = wholeWord ? `(?<!\\w)${escaped}(?!\\w)` : escaped;
-    const re = new RegExp(source, matchCase ? "g" : "gi");
     const out: { text: string; hit: boolean }[] = [];
     let from = 0;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(text))) {
-      const at = match.index;
-      const matched = match[0];
-      if (matched.length === 0) {
-        re.lastIndex += 1;
-        continue;
-      }
-      if (at > from) out.push({ text: text.slice(from, at), hit: false });
-      out.push({ text: matched, hit: true });
-      from = at + matched.length;
+    for (const match of findMatches(text, compileSearchPattern(q, matchCase, wholeWord))) {
+      if (match.start > from) out.push({ text: text.slice(from, match.start), hit: false });
+      out.push({ text: text.slice(match.start, match.end), hit: true });
+      from = match.end;
     }
     if (from < text.length) out.push({ text: text.slice(from), hit: false });
     return out;
@@ -147,7 +148,9 @@
   // (every currently eligible hit). Ineligibility — inherited, metadata,
   // TODO, or unsaved edits in an open pane — is computed client-side for the
   // note text; the actual write is always the backend's ownership/revision/
-  // dispatch check (§4), never guessed here.
+  // dispatch check (§4), never guessed here. With the replace field empty the
+  // same write deletes the matches, so the controller confirms that — as a
+  // deletion, one hit included — before posting (#1926).
   //
   // Reveal window (#1868, per-group — review finding A): rendering every hit
   // as a NodeRow froze the tab on a short/common query (thousands of hits),
@@ -236,7 +239,7 @@
       {#each group.hits as hit}
         {@const elig = ctrl.eligibility(hit)}
         {@const previewReplace = ctrl.replacement !== "" && elig === "ok"}
-        <NodeRow title={`${hit.path}:${hit.line}`} onClick={() => onOpenHit(hit)}>
+        <NodeRow title={`${hit.path}:${hit.line}`} onClick={() => onOpenHit(hit, ctrl.revealFor(hit))}>
           {#snippet detailSlot()}
             <small class="search-excerpt"
               >{#if hit.clipped_before}<span class="search-clip">…</span>{/if}{#each segments(hit.excerpt, ctrl.lastQuery, ctrl.lastMatchCase, ctrl.lastWholeWord) as seg}{#if seg.hit}{#if previewReplace}<del

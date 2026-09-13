@@ -69,6 +69,7 @@ import {
   isNodeOpenDirty as runIsNodeOpenDirty,
   reconcileNodeFromServer as runReconcileNodeFromServer,
 } from "./editorPaneReconcile";
+import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
 import { clearImplicitContext, implicitContextFor } from "@/lib/stores/implicitContext.svelte";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -114,6 +115,8 @@ export type MetadataReloadSignal = { token: number; metadata: EntryMetadata; sta
 interface EditorPaneComponentHandle {
   reloadScene: (scene: EditableDocument, mode?: "boundary" | "reconcile") => void | Promise<void>;
   highlightEmbeddedTodo: (todoId: string) => void;
+  // A search hit's reveal (#1925): mark the query's matches, land on the clicked one.
+  revealSearchMatch: (reveal: SearchReveal) => void;
   // Rung 2 (ADR-0077). Required so svelte-check fails if NodeEditor drops the forwarder.
   tryMergeProse: (baseBody: string, remoteBody: string) => Promise<string | null>;
 }
@@ -1070,6 +1073,16 @@ class EditorPanesController {
     const pane = this.panes.find((candidate) => candidate.scene?.id === sceneId);
     if (!pane) return;
     this.editorPaneComponents[pane.id]?.highlightEmbeddedTodo(todoId);
+  }
+
+  // A search hit's reveal (#1925) reaches the pane showing the node. Node ids
+  // are unique across kinds (machine-minted `<kind>_<uuid>`), so the id alone
+  // finds the pane — for every kind a hit can open, not only the kinds a
+  // replace can write to (the reconcile's `paneDocType` table).
+  revealSearchMatchInOpenPane(nodeId: string, reveal: SearchReveal): void {
+    const pane = this.panes.find((candidate) => candidate.document?.id === nodeId);
+    if (!pane) return;
+    this.editorPaneComponents[pane.id]?.revealSearchMatch(reveal);
   }
 
   // The generic post-write reconcile entry point (ADR-0085 §5) — extracted to

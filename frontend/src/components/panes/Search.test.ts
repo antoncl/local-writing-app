@@ -10,6 +10,7 @@ import { tick } from "svelte";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import Search from "./Search.svelte";
 import { api } from "@/lib/api";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
 import type { SearchHit } from "@/lib/types";
 
 // Search imports `api` and calls `api.search`/`api.replace` directly; mock the
@@ -57,6 +58,7 @@ function hit(
 beforeEach(() => {
   vi.mocked(api.search).mockReset();
   vi.mocked(api.replace).mockReset();
+  vi.mocked(confirmService.request).mockReset();
   vi.useFakeTimers();
 });
 
@@ -176,7 +178,7 @@ describe("Search pane — results render", () => {
     expect(screen.getAllByText("Lore / Implant metadata:1")).toHaveLength(2);
   });
 
-  it("opens a clicked hit through onOpenHit", async () => {
+  it("opens a clicked hit through onOpenHit, with the reveal the editor lands on (#1925)", async () => {
     const h = hit("lore/places/citadel.md", 3, "The citadel loomed over the plain.");
     vi.mocked(api.search).mockResolvedValue({ query: "citadel", hits: [h] });
     const onOpenHit = vi.fn();
@@ -188,7 +190,13 @@ describe("Search pane — results render", () => {
     await tick();
 
     await fireEvent.click(screen.getByText("lore/places/citadel.md:3"));
-    expect(onOpenHit).toHaveBeenCalledWith(h);
+    expect(onOpenHit).toHaveBeenCalledWith(h, {
+      query: "citadel",
+      matchCase: false,
+      wholeWord: false,
+      excerpt: h.excerpt,
+      ordinal: 0,
+    });
   });
 
   it("groups hits by kind, data-driven, with project last and an unknown kind still shown", async () => {
@@ -353,15 +361,44 @@ describe("Search pane — replace (ADR-0085 §4/§5)", () => {
     await fireEvent.keyDown(input, { key: "Enter" });
     await tick();
 
+    await fireEvent.input(screen.getByPlaceholderText("Replace with"), { target: { value: "Aetherion" } });
+    await tick();
     vi.mocked(api.search).mockResolvedValue({ query: "aetheria", hits: [] });
     await fireEvent.click(screen.getByRole("button", { name: "Replace" }));
     await tick();
 
     expect(api.replace).toHaveBeenCalledWith({
-      replacement: "",
+      replacement: "Aetherion",
       hits: [{ file_id: h.file_id, field: "body", start: h.start, end: h.end, text: h.text, revision: h.revision }],
     });
     expect(onOpenHit).not.toHaveBeenCalled();
+  });
+
+  it("confirms a Replace with an empty field as a deletion, destructively, before posting (#1926)", async () => {
+    const h = hit("scenes/act-1/arrival.md", 12, "Aetheria at dawn.");
+    vi.mocked(api.search).mockResolvedValue({ query: "aetheria", hits: [h] });
+    vi.mocked(api.replace).mockResolvedValue({ outcomes: [], replaced_nodes: 0 });
+    render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "aetheria" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    await tick();
+    expect(api.replace).not.toHaveBeenCalled();
+    const request = vi.mocked(confirmService.request).mock.calls[0][0];
+    expect(request).toMatchObject({ title: "Delete the match?", confirmLabel: "Delete", destructive: true });
+    expect(request.message).toContain('Delete 1 occurrence of "aetheria" in 1 node');
+
+    await request.onConfirm();
+    await tick();
+    await tick();
+    expect(api.replace).toHaveBeenCalledWith({
+      replacement: "",
+      hits: [expect.objectContaining({ file_id: h.file_id })],
+    });
   });
 
   it("shows a rejected outcome's detail in the summary line", async () => {
@@ -384,6 +421,8 @@ describe("Search pane — replace (ADR-0085 §4/§5)", () => {
     await fireEvent.keyDown(input, { key: "Enter" });
     await tick();
 
+    await fireEvent.input(screen.getByPlaceholderText("Replace with"), { target: { value: "Aetherion" } });
+    await tick();
     vi.mocked(api.search).mockResolvedValue({ query: "aetheria", hits: [] });
     await fireEvent.click(screen.getByRole("button", { name: "Replace" }));
     await tick();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { MetadataSchema, ViewSpec } from "@/lib/types";
-import { buildBindings, effectiveParamValue, resolveParamControls } from "@/lib/views/viewParams";
+import type { MetadataFieldDefinition, MetadataSchema, ViewSpec } from "@/lib/types";
+import { buildBindings, effectiveParamValue, resolveParamControls, toMultiValued } from "@/lib/views/viewParams";
 
 const SCHEMA = {
   version: 1,
@@ -10,6 +10,31 @@ const SCHEMA = {
     status: { name: "Status", type: "select", options: [{ value: "draft" }, { value: "revised" }] },
   },
 } as unknown as MetadataSchema;
+
+describe("toMultiValued — computed select filter widget (#1928)", () => {
+  const layerField = (options: { value: string; label?: string }[]) =>
+    ({
+      name: "Layer",
+      type: "computed",
+      category: "computed",
+      computed: { value_type: "select" },
+      options,
+    }) as unknown as MetadataFieldDefinition;
+
+  it("widens a computed select WITH options to multi_select, so the Filter renders a picker", () => {
+    const widened = toMultiValued(layerField([{ value: "lib", label: "Library" }, { value: "book", label: "Book" }]));
+    expect(widened.type).toBe("multi_select");
+    expect(widened.options).toHaveLength(2);
+  });
+
+  it("leaves a computed select with EMPTY options as type computed → free-text box (the #1928 gap when the backend shipped no options)", () => {
+    // FieldValueEditor renders a select/chips only for select/multi_select; a
+    // field still typed `computed` falls through to its text input. This is why
+    // the Layer filter degraded when read_metadata_schema_overview shipped
+    // `layer` with empty options — fixed backend-side, pinned here.
+    expect(toMultiValued(layerField([])).type).toBe("computed");
+  });
+});
 
 describe("resolveParamControls (type derived from the referencing Filter slot)", () => {
   it("derives each control's field def from the field its {var} operand sits on", () => {

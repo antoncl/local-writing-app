@@ -78,6 +78,20 @@ class LayerFieldTests(unittest.TestCase):
         self.assertEqual(options[-1].value, chain[-1].id)
         self.assertTrue(chain[-1].is_root)
 
+    def test_overview_schema_carries_layer_options(self) -> None:
+        # The frontend view designer loads its schema from
+        # read_metadata_schema_overview (NOT read_metadata_schema), and the Layer
+        # filter renders as an options picker only when those options are non-empty
+        # (#1928): an empty list degraded it to a free-text box. Pin that the
+        # overview path fills `layer` options identically to the build path.
+        overview = self.service.read_metadata_schema_overview().effective_schema
+        built = self.service.read_metadata_schema(self.root)
+        overview_opts = [(o.value, o.label) for o in overview.fields["layer"].options]
+        self.assertEqual(
+            overview_opts, [(o.value, o.label) for o in built.fields["layer"].options]
+        )
+        self.assertGreater(len(overview_opts), 0)
+
     def test_layer_never_enters_a_type_membership(self) -> None:
         # Flat catalog only: no entry_type lists it, so it stays out of the
         # editor rail (the view designer surfaces it separately).
@@ -92,11 +106,12 @@ class LayerFieldTests(unittest.TestCase):
             LoreEntry(id=entry_id, title=title, body=f"# {title}", revision="", entry_type="lore:note", metadata={}),
         )
 
-    def test_selector_roster_stamps_layer_for_the_ai_path(self) -> None:
-        # Backend parity (#1928): the AI selector reads a field's value from
-        # `metadata`, so `_selector_roster` must fold each node's origin layer in
-        # there — the twin of the frontend view roster's `computed_metadata.layer`
-        # stamp — or a `field: {key: layer}` selector picks nothing.
+    def test_selector_roster_carries_source_layer_for_the_ai_path(self) -> None:
+        # Backend parity (#1928): the roster carries each node's origin layer as
+        # plain data (`source_layer_id`), and the selector EVALUATOR folds it into
+        # the computed `layer` field — the twin of the frontend, where evaluateView
+        # materializes `layer`. So a `field: {key: layer}` selector filters by
+        # origin without the roster builder pre-stamping metadata.
         from app.services.ai.preview import _selector_roster
         from app.services.ai.selector_eval import evaluate_selector_membership
 
@@ -107,11 +122,14 @@ class LayerFieldTests(unittest.TestCase):
 
         roster = _selector_roster(self.service, "lore")
         by_id = {node.id: node for node in roster}
-        inherited_layer = by_id["manticore"].metadata["layer"]
+        inherited_layer = by_id["manticore"].source_layer_id
         local = next(node for node in roster if node.id != "manticore")
 
-        # Distinct origins produce distinct layer values...
-        self.assertNotEqual(local.metadata["layer"], inherited_layer)
+        # Origin rides as data, NOT in metadata (the evaluator, not the builder,
+        # materializes the field), and the two entries have distinct origins...
+        self.assertTrue(inherited_layer)
+        self.assertNotEqual(local.source_layer_id, inherited_layer)
+        self.assertNotIn("layer", by_id["manticore"].metadata)
         # ...and a field filter on the ancestor layer keeps only the inherited one.
         selected = evaluate_selector_membership(
             {"field": {"key": "layer", "op": "overlap", "value": inherited_layer}},

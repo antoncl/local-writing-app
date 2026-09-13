@@ -309,28 +309,14 @@ def _selector_roster(project_service, kind: Any) -> list[SelectorNode] | None:
                 entry.id,
                 entry.entry_type,
                 _canonical_references(index, entry.metadata),
-                _with_layer(entry.metadata, entry.source_layer_id),
+                entry.metadata,
+                source_layer_id=entry.source_layer_id,
             )
             for entry in project_service.list_lore_entries().entries
         ]
     if kind in _GENERIC_ROSTER_KINDS:
         return _generic_roster(project_service, kind)
     return None
-
-
-def _with_layer(metadata: dict[str, Any], source_layer_id: str | None) -> dict[str, Any]:
-    """`metadata` with the computed `layer` value folded in for the selector
-    evaluator (#1928). The backend selector reads a field's value from `metadata`
-    (never `computed_metadata`, which it has no slot for), so a `field: {key:
-    layer}` predicate resolves only if the layer id sits here — the AI-path twin
-    of the frontend view roster's `computed_metadata.layer` stamp. Kept OFF the
-    dict handed to `_canonical_references`, whose reference scan would otherwise
-    read a layer id as a node ref. A copy, never a mutation: the entry's metadata
-    is shared/cached. Empty source layer → nothing to fold, so an unfiltered
-    selector is unchanged."""
-    if not source_layer_id:
-        return metadata
-    return {**metadata, "layer": source_layer_id}
 
 
 def _canonical_references(index, metadata: dict[str, Any]) -> frozenset[str]:
@@ -358,7 +344,8 @@ def _generic_roster(project_service, kind: str) -> list[SelectorNode]:
                 entry.id,
                 entry_type,
                 _canonical_references(index, metadata),
-                _with_layer(metadata, entry.source_layer_id),
+                metadata,
+                source_layer_id=entry.source_layer_id,
             )
         )
     return roster

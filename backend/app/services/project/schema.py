@@ -280,6 +280,15 @@ class MetadataSchemaMixin:
                 field_sources[field_id] = source
 
         data = self._resolve_metadata_schema_inheritance(data)
+        # Fill the dynamic `layer` options here too (#1928): this overview builds
+        # its own merged `data` (it tracks per-field sources), so it does NOT go
+        # through `_build_metadata_schema` and would otherwise ship `layer` with an
+        # empty option list. That matters because the FRONTEND designer loads its
+        # schema from THIS endpoint, and `toMultiValued` only renders a computed
+        # select as an options picker when its options are non-empty — an empty
+        # list degrades the Layer filter to a free-text box. Pinned by
+        # `test_overview_schema_carries_layer_options`.
+        self._fill_layer_field_options(data, self._metadata_schema_layer_paths(root))
         return MetadataSchemaOverview(
             effective_schema=MetadataSchema.model_validate(data),
             layers=layers,

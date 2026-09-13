@@ -53,12 +53,37 @@ from typing import Any, NamedTuple
 
 
 class SelectorNode(NamedTuple):
-    """One candidate node in a roster: the fields the grammar can test."""
+    """One candidate node in a roster: the fields the grammar can test.
+
+    `source_layer_id` is the node's own resolved inheritance layer — plain node
+    data (like `id`/`entry_type`), NOT a metadata field. The evaluator folds it
+    into the built-in computed `layer` field itself (`_materialize_layer`), so a
+    caller building a roster just supplies this datum and any `field: {key:
+    layer}` selector works — the AI-path twin of the frontend view roster, where
+    `evaluateView` materializes `layer` from the same datum (#1928). Defaults to
+    "" so every existing positional construction is unchanged."""
 
     id: str
     entry_type: str
     references: frozenset[str]
     metadata: Mapping[str, Any]
+    source_layer_id: str = ""
+
+
+def _materialize_layer(nodes: Sequence[SelectorNode]) -> list[SelectorNode]:
+    """Fold each node's `source_layer_id` into the computed `layer` metadata key
+    (#1928), so a `field: {key: layer}` predicate resolves — the evaluator owning
+    this, not the roster builder, is what lets any roster with `source_layer_id`
+    populated be filtered by layer (the backend mirror of the frontend's
+    `materializeLayerField` living inside `evaluateView`). A no-op for a node with
+    no source layer or one whose metadata already carries `layer`; `references`
+    (precomputed, layer-free) is untouched, so a layer id never reads as a ref."""
+    return [
+        node._replace(metadata={**node.metadata, "layer": node.source_layer_id})
+        if node.source_layer_id and "layer" not in node.metadata
+        else node
+        for node in nodes
+    ]
 
 
 def with_select_defaults(metadata: Mapping[str, Any], defaults: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -134,6 +159,7 @@ def evaluate_selector_membership(
     (`preview.py`'s `_canonical_references`), so an operand written before a merge
     still matches. Identity (no-op) when omitted, so every existing caller is
     unchanged."""
+    nodes = _materialize_layer(nodes)
     universe = {n.id for n in nodes}
     member = _eval(expr, nodes, universe, is_descendant, collection_fields, numeric_fields, ref_fields, canonical_id)
     return [n.id for n in nodes if n.id in member]

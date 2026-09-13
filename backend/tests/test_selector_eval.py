@@ -165,6 +165,21 @@ def test_field_set_and_unset():
     assert _run({"field": {"key": "pov", "op": "unset"}}, nodes) == ["b", "c"]
 
 
+def test_field_on_layer_folds_source_layer_id():
+    # #1928: `layer` is not a stored metadata field — the evaluator folds each
+    # node's source_layer_id into it (the backend twin of the frontend's
+    # materializeLayerField inside evaluateView), so a roster that supplies
+    # source_layer_id (not metadata) can be filtered/tested by origin layer.
+    nodes = [
+        SelectorNode("a", "lore:note", frozenset(), {}, source_layer_id="L_anc"),
+        SelectorNode("b", "lore:note", frozenset(), {}, source_layer_id="L_local"),
+        SelectorNode("c", "lore:note", frozenset(), {}),  # no source layer
+    ]
+    assert _run({"field": {"key": "layer", "op": "overlap", "value": "L_anc"}}, nodes) == ["a"]
+    assert _run({"field": {"key": "layer", "op": "set"}}, nodes) == ["a", "b"]
+    assert _run({"field": {"key": "layer", "op": "unset"}}, nodes) == ["c"]
+
+
 # --- ADR-0036: absent/empty expr selects nothing --------------------------
 
 

@@ -231,8 +231,12 @@
       nextKinds.add(kind);
     }
     // Re-encode the degenerate membership as `sources` (the stored shape, #78).
-    // Pass the current sources so saved-view refs survive the wholesale
-    // re-encode instead of being dropped on every checkbox toggle (#82).
+    // Pass the current sources so anything the checkbox tree can't re-author
+    // survives the wholesale re-encode instead of being dropped on every toggle:
+    // non-degenerate inline exprs (descendants_of / intersect / difference, #94)
+    // are the load-bearing case now — plus any legacy saved-view refs (#82), inert
+    // since ADR-0074 Amendment 3 but still preserved. Dropping this arg would
+    // silently clobber #94 sources.
     emit({ sources: membershipToSources(Array.from(nextKinds), nextEntryTypes, config.sources) });
   }
 

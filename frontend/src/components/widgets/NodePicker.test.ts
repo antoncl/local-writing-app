@@ -648,6 +648,73 @@ describe("NodePicker saved-view selectors — app-wide axis (#1487, #1939)", () 
       expr: { intersect: [{ tagged: "villain" }, { type: "lore:character" }] },
     });
   });
+
+  it("does not offer the read-only system default view", async () => {
+    // The materialized `view_default_lore` (title "Default", system:true) is the
+    // pane's implicit default, not a user selection — ViewSwitcher excludes it and
+    // so must the picker, or it would show a "Default" row absorbing all lore.
+    const systemView: ViewNodeSummary = {
+      id: "sys1",
+      title: "Default",
+      entry_type: "view:view",
+      view_kind: "lore",
+      system: true,
+      spec: { kind: "lore", expr: { descendants_of: "lore:character" } },
+    };
+    paneViews.views = { lore: [villainsView, systemView] };
+    renderLoreInput();
+    const menu = await openMenu();
+    const views = await openViewsAxis(menu);
+    expect(within(views).getByText("Villains")).toBeInTheDocument();
+    expect(within(menu).queryByText("Default")).toBeNull();
+  });
+
+  it("carries a grouped view WHOLE (its handles), not rewritten to the type roster", async () => {
+    // A view with 2+ named handles stores `{groups:[…]}` and NO top-level `expr`.
+    // The clip must NOT rewrite it to `{expr:typeExpr}` (which would inject the
+    // whole type roster); the stored selector is the view's whole spec.
+    const groupedView: ViewNodeSummary = {
+      id: "g1",
+      title: "Cast by allegiance",
+      entry_type: "view:view",
+      view_kind: "lore",
+      spec: {
+        kind: "lore",
+        groups: [
+          { name: "Heroes", expr: { tagged: "hero" } },
+          { name: "Villains", expr: { tagged: "villain" } },
+        ],
+      },
+    };
+    paneViews.views = { lore: [groupedView] };
+    const onChange = vi.fn();
+    render(NodePicker, {
+      props: {
+        // Type-restricted: the buggy path rewrote a grouped view to
+        // `{expr:{type:lore:character}}` and pulled in every character.
+        config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }], multiple: true },
+        loreEntries: [
+          loreEntry("lore_a", "Vex", ["villain"]),
+          loreEntry("lore_b", "Mara", ["hero"]),
+          loreEntry("lore_z", "Bystander", []), // a character in NEITHER handle
+        ],
+        affordance: "add",
+        onChange,
+      },
+    });
+    const menu = await openMenu();
+    const views = await openViewsAxis(menu);
+    await expandGroup(views, "Cast by allegiance");
+    expect(within(views).getByText("Vex")).toBeInTheDocument();
+    expect(within(views).getByText("Mara")).toBeInTheDocument();
+    // A rewritten `{type}` selector would wrongly include this untagged character;
+    // the whole grouped spec resolves only to its handles' members.
+    expect(within(views).queryByText("Bystander")).toBeNull();
+    await fireEvent.click(within(views).getByText("Cast by allegiance").closest("button")!);
+    await tick();
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value[0].selector).toEqual(groupedView.spec);
+  });
 });
 
 // ADR-0074 slice 5 pt.2 (#1491) / ADR-0082 slice 2b: the general tag-node

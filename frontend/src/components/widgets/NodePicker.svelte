@@ -42,6 +42,7 @@
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import { createTargetFor, hasTitleMatch } from "@/lib/utils/pickerCreate";
   import { buildSelectorRoster, isSelectorRef, membersForSelector } from "@/lib/views/pickerSelectors";
+  import { walkViewExpr } from "@/lib/views/walkViewExpr";
   import {
     flattenSelectors,
     memberCountForRef,
@@ -328,19 +329,32 @@
   );
 
   // Saved views (ADR-0074 Amendment 3): offered app-wide, like the "By tag" axis
-  // below — for every allowed kind, each saved view of that kind, its members
-  // clipped to the input's entry types. NOT curated per input (that config
-  // source is retired), so a built-in snippet's picker offers views without
-  // naming project-specific view ids. Read from the `paneViews` roster (loaded
-  // app-wide at project open, refreshed on view CRUD) — no fetch, exactly as the
-  // By-tag axis reads the tag store; a view is grouped under its own `view_kind`.
+  // below — for every allowed kind, each saved view of that kind (its members
+  // clipped to the input's entry types where that can be done faithfully). NOT
+  // curated per input (that config source is retired), so a built-in snippet's
+  // picker offers views without naming project-specific view ids. Read from the
+  // `paneViews` roster (loaded app-wide at project open, refreshed on view CRUD)
+  // — no fetch, exactly as the By-tag axis reads the tag store; a view is grouped
+  // under its own `view_kind`, and system default views are excluded like the
+  // ViewSwitcher does.
   //
-  // A view offered for `kind` is its spec INTERSECTED with the config's
-  // entry_type constraint for that kind — the same clip `tagSpecFor` applies, so
-  // a lore:character input can't pull in a lore:location the view happens to
-  // match. The stored spec drives invocation expansion too, so the constraint
-  // lives in the spec, not just the display filter.
-  function viewSpecFor(kind: string, viewExpr: ViewSpec["expr"]): ViewSpec {
+  // The clip is `{intersect: [view expr, type constraint]}` — the shape
+  // `tagSpecFor` uses — but ONLY for a flat single-`expr` view, where that is
+  // exactly "the view's members ∩ those types". A view with named `groups` (no
+  // top-level `expr` to intersect), a null `expr`, or a relational/row op
+  // (`nest`/`field_of`/`orphans_of`/`var`) is carried WHOLE and scoped by kind
+  // only: there is no single spec for "(grouped or row result) ∩ type", and
+  // rewriting one would drop handles or diverge from set intersection. The stored
+  // spec drives invocation-time expansion, so whatever clip applies lives in it.
+  const NON_FLAT_EXPR_KEYS = ["nest", "orphans_nest", "field_of", "orphans_of", "var"] as const;
+  function exprIsFlat(expr: ViewSpec["expr"]): boolean {
+    let flat = true;
+    walkViewExpr(expr, (e) => {
+      if (NON_FLAT_EXPR_KEYS.some((k) => (e as Record<string, unknown>)[k] != null)) flat = false;
+    });
+    return flat;
+  }
+  function viewSelectorSpec(kind: string, spec: ViewSpec): ViewSpec {
     const fqns = membership.entryTypes[kind] ?? [];
     const typeExpr =
       fqns.length === 1
@@ -348,24 +362,28 @@
         : fqns.length > 1
           ? { union: fqns.map((f) => ({ type: f })) }
           : null;
-    const clauses = [viewExpr, typeExpr].filter((e): e is NonNullable<typeof e> => e != null);
-    const expr = clauses.length === 0 ? null : clauses.length === 1 ? clauses[0] : { intersect: clauses };
-    return { kind, expr } as ViewSpec;
+    if (typeExpr && spec.expr && !spec.groups?.length && exprIsFlat(spec.expr)) {
+      return { ...spec, kind, expr: { intersect: [spec.expr, typeExpr] } } as ViewSpec;
+    }
+    return { ...spec, kind } as ViewSpec;
   }
   const viewGroups = $derived.by<SelectorGroup[]>(() => {
     const groups: SelectorGroup[] = [];
     for (const kind of allowedKinds) {
       for (const summary of paneViews.viewsFor(kind)) {
-        if (!summary.spec) continue;
+        // Skip the read-only system default view (ADR-0036 §5) — it's the pane's
+        // implicit "everything" default, not a user selection, and ViewSwitcher
+        // excludes it the same way (`!v.system`). No spec ⇒ nothing to resolve.
+        if (!summary.spec || summary.system) continue;
         const ref: NodePickerRef = {
           id: `view:${summary.id}`,
           kind: "view",
           title: summary.title,
-          selector: viewSpecFor(kind, summary.spec.expr),
+          selector: viewSelectorSpec(kind, summary.spec),
         };
         const members = membersForSelector(ref, selectorRoster);
-        // Skip a view that resolves to nothing (its clip drops every member of
-        // the allowed kind) — an empty, pickable row is noise. Mirrors tagGroups.
+        // Skip a view that resolves to nothing — an empty, pickable row is noise.
+        // Mirrors tagGroups (and drops a null-`expr` view: the empty set).
         if (members.length > 0) groups.push({ ref, members });
       }
     }

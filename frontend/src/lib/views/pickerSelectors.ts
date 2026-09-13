@@ -19,7 +19,7 @@ import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
 import { structureToEvalNodes } from "@/lib/views/structureNodes";
 import { buildBindings } from "@/lib/views/viewParams";
 import { reportClientError } from "@/lib/errorLog";
-import { canonicalIdIn, tagById, tagTitleById } from "@/lib/stores/tagNodes";
+import { canonicalIdIn, tagById } from "@/lib/stores/tagNodes";
 import { referenceIndexStore } from "@/lib/stores/references";
 import type {
   AssistantEntrySummary,
@@ -100,18 +100,20 @@ export function membersForSelector(ref: NodePickerRef, roster: SelectorRoster): 
   //    itself seeds the strip with.
   //  - `referenceIndex`: a backlinks (`field_of references`) view projects the
   //    reverse index.
-  // Snapshot the tag stores once (a plain, non-reactive function — there is no
-  // `$derived` to keep tracking, unlike ViewNodeList's `$tagById`): a nest calls
-  // `resolveTitle`/`canonicalId` per edge. `evaluateView` canonicalises both sides
-  // of a `tagged:` leaf, so a persisted `{tagged: <merged id>}` selector still
-  // expands through a merge (ADR-0082 §5 / #1805).
+  // Take ONE `tagById` snapshot and derive both tag readers from it — `resolveTitle`
+  // is `tagTitleById`'s own body (survivor's title via `canonicalIdIn`) inlined, so
+  // we don't cold-rebuild that second derived per call (this runs once per view/tag
+  // in NodePicker's group loops). A plain, non-reactive function is correct here —
+  // there is no `$derived` to keep tracking, unlike ViewNodeList's `$tagById`; the
+  // picker expands once (live count / send), it does not re-render on tag change.
+  // `evaluateView` canonicalises both sides of a `tagged:` leaf, so a persisted
+  // `{tagged: <merged id>}` selector still expands through a merge (ADR-0082 §5).
   const byId = get(tagById);
-  const titleById = get(tagTitleById);
   const result = evaluateView(resolved.spec, nodes, {
     schema: roster.schema ?? null,
     bindings: buildBindings(resolved.spec.params, {}),
     referenceIndex: get(referenceIndexStore),
-    resolveTitle: (id) => titleById.get(id),
+    resolveTitle: (id) => byId.get(canonicalIdIn(byId, id))?.title,
     canonicalId: (id) => canonicalIdIn(byId, id),
   });
   return result.nodes.map((n) => memberRef(n, resolved.kind));

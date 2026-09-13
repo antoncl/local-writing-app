@@ -51,6 +51,17 @@ from app.services.project.layers import SCHEMA_FILENAME
 from app.services.project.node_index import IndexLayer
 from app.services.project.schema_validation import ENTRY_TYPE_FQN_RE
 
+# Keys the schema resolver stamps on a field on read — never persisted.
+_RESOLVER_STAMPED_FIELD_KEYS = frozenset({"category", "group_origin", "item_members", "item_scalar"})
+# The authored field attributes whose unset form is `None`: the ones a layer
+# below an ancestor's declaration can only clear with an explicit `null`
+# (#1916). Derived from the model so a new optional attribute joins the rule.
+_CLEARABLE_FIELD_KEYS = frozenset(
+    name
+    for name, info in MetadataFieldDefinition.model_fields.items()
+    if info.default is None and name not in _RESOLVER_STAMPED_FIELD_KEYS
+)
+
 
 def _entry_type_ancestry(
     entry_types: dict[str, EntryTypeDefinition], entry_type_id: str
@@ -437,6 +448,39 @@ class MetadataSchemaMixin:
         if schema_errors:
             raise ProjectServiceError(" ".join(schema_errors), 422)
 
+    def _layer_field_payload(
+        self, root: Path, layer_path: Path, field_id: str, field: MetadataFieldDefinition
+    ) -> dict[str, Any]:
+        """`field` as the layer at `layer_path` stores it.
+
+        Never the resolver-stamped keys. An attribute the definition leaves
+        unset that the chain ABOVE this layer declares is written as an explicit
+        `null` (#1916): field definitions merge per attribute
+        (`_merge_metadata_schema_section`), where an absent key means "inherit",
+        so the clear the author asked for would not take without one. A layer
+        that never inherited the attribute writes no key, as before."""
+        payload = field.model_dump(exclude_none=True, exclude=_RESOLVER_STAMPED_FIELD_KEYS)
+        inherited = self._read_metadata_schema_above_path(root, layer_path).fields.get(field_id)
+        if inherited is not None:
+            for key in _CLEARABLE_FIELD_KEYS:
+                if key not in payload and getattr(inherited, key) is not None:
+                    payload[key] = None
+        return payload
+
+    def _read_metadata_schema_above_path(self, root: Path, layer_path: Path) -> MetadataSchema:
+        """The schema resolved base → the layer just above `layer_path`: what a
+        definition written at `layer_path` inherits. The built-in schema alone
+        for the outermost layer. Served from the resolved-definitions cache."""
+        layers = self.collect_layers(root)
+        above: IndexLayer | None = None
+        for layer in layers:
+            if layer.folder / SCHEMA_FILENAME == layer_path:
+                break
+            above = layer
+        if above is None:
+            return self.builtin_metadata_schema()
+        return self.read_metadata_schema(root, up_to_layer_id=above.id)
+
     def _validate_candidate_schema(self, root: Path, layer_path: Path, layer_data: dict[str, Any]) -> None:
         """Single-layer variant: validate the schema produced by rewriting just
         `layer_path`, and raise on any error. Shared by the schema write paths."""
@@ -604,9 +648,7 @@ class MetadataSchemaMixin:
         fields = layer_data.get("fields")
         if not isinstance(fields, dict):
             fields = {}
-        fields[field_id] = request.field.model_dump(
-            exclude_none=True, exclude={"category", "group_origin", "item_members", "item_scalar"}
-        )
+        fields[field_id] = self._layer_field_payload(root, layer_path, field_id, request.field)
         layer_data["fields"] = fields
         self._attach_field_to_entry_type(root, layer_path, layer_data, request, field_id)
 
@@ -778,9 +820,7 @@ class MetadataSchemaMixin:
             fields = {}
         # `field` may come from the RESOLVED schema (move path), which carries
         # resolver-stamped derived keys — never persist those into a layer.
-        fields[field_id] = field.model_dump(
-            exclude_none=True, exclude={"category", "group_origin", "item_members", "item_scalar"}
-        )
+        fields[field_id] = self._layer_field_payload(root, layer_path, field_id, field)
         layer_data["fields"] = fields
 
         entry_types = layer_data.get("entry_types")

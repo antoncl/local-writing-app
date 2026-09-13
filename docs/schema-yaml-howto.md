@@ -154,7 +154,19 @@ What follows from the declaration, with no further code:
   readable and simply derives nothing.
 
 Field definitions merge per attribute up the layer chain, so a layer that
-only relabels or recolours the options keeps an ancestor's `derived`.
+only relabels or recolours the options keeps an ancestor's `derived`. To
+switch an inherited rule off at a nearer layer, write the key with an
+explicit null:
+
+```yaml
+fields:
+  filmed:
+    derived: null        # this layer and everything below it: no app-set state
+```
+
+An absent key inherits; `null` clears. The same spelling drops an inherited
+`default`, `description` or `icon`, and the type editor writes it for you
+when you clear a value the layer inherited.
 
 ## File naming
 

@@ -20,7 +20,12 @@ from tempfile import TemporaryDirectory
 
 from layer_fixtures import declare_full_chain
 
-from app.models import CreateLoreEntryRequest, LoreEntry, SaveLoreEntryRequest
+from app.models import (
+    CreateLoreEntryRequest,
+    LoreEntry,
+    MutationSetRow,
+    SaveLoreEntryRequest,
+)
 from app.scope import WorkScope
 from app.services.project.errors import ProjectServiceError
 from app.services.project.overrides import OVERRIDES_FOLDER
@@ -210,6 +215,58 @@ class LayerOverrideTests(unittest.TestCase):
         saved = self._save_override("lore_honor", {**read.metadata, "rank": "Captain"})
         self.assertEqual(saved.metadata["rank"], "Captain")
         self.assertEqual(saved.overridden_fields, ["rank"])
+
+    def test_an_override_sets_a_required_select_back_to_its_default(self) -> None:
+        # #1917: the ancestor picked `always`; the book picks the default. The
+        # rail's spelling of the default is the absent key (#1421), and that is
+        # a delta like any other — the row carries the default literally, the
+        # effective value reads sparse, and the override mark survives the
+        # read canon so the reset gesture is still offered.
+        self._write_lore_at(
+            self.series, "lore_honor", "Honor Harrington", {"rank": "Commander", "context_policy": "always"}
+        )
+        self.assertEqual(self.service.read_lore_entry("lore_honor").metadata["context_policy"], "always")
+
+        saved = self._save_override("lore_honor", {"rank": "Commander"})
+        self.assertNotIn("context_policy", saved.metadata)
+        self.assertEqual(saved.overridden_fields, ["context_policy"])
+        text = next((self.root / OVERRIDES_FOLDER).glob("*.md")).read_text(encoding="utf-8")
+        self.assertIn("value: auto", text)
+        # Echoing the sparse form back leaves the delta as it is.
+        self.assertEqual(self._save_override("lore_honor", {"rank": "Commander"}).overridden_fields, ["context_policy"])
+
+        # Reset-to-inherited (#517) drops the row: the ancestor's pick returns.
+        cleared = self.service.save_lore_entry(
+            "lore_honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Body.", entry_type="lore:character",
+                metadata={"rank": "Commander"},
+                authoring_layer_id=self._layer_id(self.root),
+                clear_override_fields=["context_policy"],
+            ),
+        )
+        self.assertEqual(cleared.metadata["context_policy"], "always")
+        self.assertEqual(cleared.overridden_fields, [])
+        self.assertFalse(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+
+    def test_a_delta_holding_the_literal_default_keeps_its_mark(self) -> None:
+        # #1917: an import, an AI patch or a pre-#1421 client wrote the default
+        # literally — or the legacy blank. The file still shadows the ancestor's
+        # `always`, so the read marks the field even though its value reads
+        # sparse; without the mark there is no reset control for a delta that
+        # is still on disk.
+        self._write_lore_at(
+            self.series, "lore_honor", "Honor Harrington", {"rank": "Commander", "context_policy": "always"}
+        )
+        for stored in ("auto", ""):
+            with self.subTest(stored=stored):
+                self.service._write_override_file(
+                    self.root, "lore_honor", "Honor Harrington",
+                    [MutationSetRow(field="context_policy", op="replace", value=stored)],
+                )
+                read = self.service.read_lore_entry("lore_honor")
+                self.assertNotIn("context_policy", read.metadata)
+                self.assertEqual(read.overridden_fields, ["context_policy"])
 
     def test_reverting_an_override_to_canon_drops_the_delta_file(self) -> None:
         self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})

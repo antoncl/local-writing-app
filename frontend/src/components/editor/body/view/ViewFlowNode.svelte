@@ -87,6 +87,10 @@
     nodeSummary(kind, cfg, {
       fieldName: (key) => ctx.fieldByKey(key)?.name ?? key,
       entryTypeName: (fqn) => ctx.entryTypesWithAbstract.find((t) => t.fqn === fqn)?.name ?? fqn,
+      // Resolve a select field's stored option id to its label (#1932) — e.g. a
+      // `layer` filter shows the layer name, not its id — from the field def
+      // already in hand; a non-option field has no match and keeps the raw value.
+      optionLabel: (key, value) => ctx.fieldByKey(key)?.options?.find((o) => o.value === value)?.label ?? value,
     }),
   );
 

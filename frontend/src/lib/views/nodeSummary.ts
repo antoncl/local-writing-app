@@ -12,6 +12,11 @@ export type SummaryResolvers = {
   fieldName: (key: string) => string;
   // Display name for an entry_type FQN (falls back to the FQN).
   entryTypeName: (fqn: string) => string;
+  // A select field's stored option VALUE → its display label (falls back to the
+  // value). Resolves e.g. a `layer` filter's option id to the layer's name so the
+  // compact line reads `Layer any of unbecoming-someone`, not a raw id. Optional:
+  // absent (or a non-option field) leaves values stringified as before.
+  optionLabel?: (fieldKey: string, value: string) => string;
 };
 
 // Empty-slot placeholders — a compact node shows what it still needs, never a
@@ -38,16 +43,17 @@ const OP_LABEL: Record<ViewFieldPredicate["op"], string> = {
 // parameter's label; arrays join; everything else stringifies. Reference ids
 // stay raw here (resolving them needs the full rosters) — the expanded editor
 // renders the real widget; the compact line is a glance aid.
-function valueText(value: unknown, paramLabel?: string): string {
+function valueText(value: unknown, paramLabel?: string, labelFor?: (v: string) => string): string {
   if (value == null || value === "") return "";
+  const label = (v: string): string => (labelFor ? labelFor(v) : v);
   if (typeof value === "object") {
     const obj = value as Record<string, unknown>;
     if ("var" in obj) return `⟨${paramLabel || String(obj.var)}⟩`;
     if ("field_of" in obj) return "⟨projection⟩";
-    if (Array.isArray(value)) return value.map(String).join(", ");
+    if (Array.isArray(value)) return value.map((v) => label(String(v))).join(", ");
   }
   if (typeof value === "boolean") return value ? "yes" : "no";
-  return String(value);
+  return label(String(value));
 }
 
 function fieldSummary(cfg: ViewNodeData, r: SummaryResolvers): string {
@@ -55,7 +61,8 @@ function fieldSummary(cfg: ViewNodeData, r: SummaryResolvers): string {
   if (!pred?.key) return PLACEHOLDER.field!;
   const name = r.fieldName(pred.key);
   if (pred.op === "set" || pred.op === "unset") return `${name} ${OP_LABEL[pred.op]}`;
-  const val = valueText(pred.value, cfg.param?.label);
+  const labelFor = r.optionLabel ? (v: string) => r.optionLabel!(pred.key, v) : undefined;
+  const val = valueText(pred.value, cfg.param?.label, labelFor);
   return val ? `${name} ${OP_LABEL[pred.op]} ${val}` : `${name} ${OP_LABEL[pred.op]}`;
 }
 

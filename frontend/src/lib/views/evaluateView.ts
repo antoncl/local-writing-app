@@ -1000,12 +1000,23 @@ function buildNestAdjacency<T extends EvalNode>(
     }
     return titleIndex.get(title.trim().toLowerCase()) ?? [];
   };
+  // In `title` mode the field value is matched against node TITLES. Post-ADR-0082
+  // a tag-ref field stores the tag's id, not its title (the "a City is tagged with
+  // its Country" hierarchy nests a child under the card TITLED like its tag), so a
+  // tag id is first resolved to the tag's title via `resolveTitle` — the tag-title
+  // map that already follows a merged tag's redirect. #1813 migrated the `ref`
+  // branch for the string→id promotion but left this `title` branch reading the
+  // raw id, orphaning every such child. Deliberately NOT via `canonicalId`: the
+  // title path must resolve by TITLE only (a literal title string is matched as
+  // itself, never redirected as if it were an id — the #1187 invariant), and a
+  // value that is not a known tag id falls through unchanged.
+  const titleForMatch = (value: string): string => state.resolveTitle?.(value) ?? value;
   // Resolve a stored field value to the node id(s) it identifies. A `ref` value
   // is redirected through `canonicalId` when supplied — a merged tag's id still
   // resolves to its survivor; a node's own id (`child.id`/`parent.id`) is never
   // canonicalised, only the stored reference value.
   const resolve = (value: string): string[] =>
-    byTitle ? idsForTitle(value) : [state.canonicalId ? state.canonicalId(value) : value];
+    byTitle ? idsForTitle(titleForMatch(value)) : [state.canonicalId ? state.canonicalId(value) : value];
 
   if (match.direction === "child_to_parent") {
     // The child card holds the link to its parent(s).

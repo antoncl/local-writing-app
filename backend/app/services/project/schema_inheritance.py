@@ -23,6 +23,11 @@ from typing import Any
 
 from app.services.project.default_schema import INTRINSIC_FIELD_KEYS
 
+# The field keys the resolver stamps on read (`_stamp_field_categories` and
+# `_expand_group_applications`) — derived, never authored, never persisted into
+# a layer. The layer writers exclude them; a new stamped key joins here.
+RESOLVER_STAMPED_FIELD_KEYS = frozenset({"category", "group_origin", "item_members", "item_scalar"})
+
 
 @dataclass
 class _ResolutionState:

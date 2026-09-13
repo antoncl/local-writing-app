@@ -444,7 +444,7 @@ class PromotionMixin:
             rows = self._diff_metadata_to_override_rows(
                 base=travels_metadata,
                 submitted={**travels_metadata, **stays_metadata},
-                field_types=self._schema_field_types(self.read_metadata_schema()),
+                schema=self.read_metadata_schema(),
             )
             self._write_override_file(root, entry_id, title, rows)
         node_index_gate.invalidate()

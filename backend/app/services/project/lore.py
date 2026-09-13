@@ -133,9 +133,8 @@ class LoreEntriesMixin:
         # references before validation — see _strip_unknown_metadata_fields
         # / _strip_dangling_references for the rationale.
         metadata = self._repair_metadata_on_read(metadata, entry_type, schema, index)
-        # A field the fold touched but the strips then removed is no longer a
-        # value to mark — keep `overridden_fields` in step with what shipped.
-        overridden_fields = [field for field in overridden_fields if field in metadata]
+        # Marks in step with what shipped — `_marked_override_fields` (#1917).
+        overridden_fields = self._marked_override_fields(overridden_fields, metadata, entry_type, schema)
         metadata_errors = self._validate_lore_entry_metadata(node_id, entry_type, metadata, schema, index)
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
@@ -332,12 +331,17 @@ class LoreEntriesMixin:
         # canonicalisation on an override write is deferred with the tag *write
         # target* (#393 / ADR-0045 §4), the same reason it is not scoped to L yet.
         submitted = self._normalise_metadata(request.metadata, winner.path)
+        # The echo spells a required select's default as the absent key (#1421)
+        # against the schema the client read with — the resolution scope, whose
+        # default may differ from L's (a book that redeclares the field). Spell
+        # it literally with that schema before the as-of-L diff reads it (#1917).
+        submitted = self._explicit_select_defaults(submitted, request.entry_type, self.read_metadata_schema())
 
         current_revision = self._composite_revision([winner.path, *self._override_paths_for_target(index, entry_id)])
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Lore Entry changed on disk after it was opened.", 409)
 
-        rows = self._diff_metadata_to_override_rows(base_above_layer, submitted, field_types)
+        rows = self._diff_metadata_to_override_rows(base_above_layer, submitted, schema)
         # Clear-to-inherit (#517): drop the row(s) for any field the client asked
         # to reset. The submitted metadata still carries the overridden value (the
         # reset gesture does not know the above-L value to echo back), so the diff

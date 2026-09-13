@@ -315,9 +315,8 @@ class PromptEntriesMixin:
         # stripped too when its target is gone.
         metadata = self._strip_dangling_references(metadata, schema, index)
         metadata = self._canonicalise_metadata_selects(metadata, raw_entry_type, schema)
-        # A field the fold touched but the strip then removed is no longer a value
-        # to mark — keep `overridden_fields` in step with what shipped.
-        overridden_fields = [field for field in overridden_fields if field in metadata]
+        # Marks in step with what shipped — `_marked_override_fields` (#1917).
+        overridden_fields = self._marked_override_fields(overridden_fields, metadata, raw_entry_type, schema)
         offer_on = self._parse_offer_on(front_matter.get("offer_on"))
         context_strategy = self._parse_context_strategy(front_matter.get("context_strategy"))
         return PromptEntry(
@@ -485,6 +484,13 @@ class PromptEntriesMixin:
             if record.layer_rank < authoring_layer.rank
         ]
         base_above_layer, _ = self.materialize_override_metadata(base_metadata, records_above, field_types)
+        # Symmetry with the read: `submitted` is the client's echo of
+        # `read_prompt_entry`, whose dangling references were stripped and whose
+        # selects were canonicalised — a base that still carries them would mint
+        # a row (a blank `preferred_assistant_id`, a `remove` of a deleted tag)
+        # for a field the author never touched.
+        base_above_layer = self._strip_dangling_references(base_above_layer, schema, index)
+        base_above_layer = self._canonicalise_metadata_selects(base_above_layer, request.entry_type, schema)
 
         submitted = self._normalise_metadata(request.metadata, winner.path)
         # Never override the resolver-stamped computed fields (#1684): they are not
@@ -495,7 +501,7 @@ class PromptEntriesMixin:
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Prompt changed on disk after it was opened.", 409)
 
-        rows = self._diff_metadata_to_override_rows(base_above_layer, submitted, field_types)
+        rows = self._diff_metadata_to_override_rows(base_above_layer, submitted, schema)
         # Reset-to-inherited (#1738): drop the row(s) for any field the client asked
         # to reset — the submitted metadata still echoes the overridden value, so the
         # diff produced a row; dropping it reverts the field to canon. An empty result

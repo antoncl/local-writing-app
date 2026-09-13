@@ -657,6 +657,13 @@
           {#each refFieldChoices as choice (choice.id)}
             <option value={choice.id}>{choice.name}</option>
           {/each}
+          {#if derivedWhenSet && !refFieldChoices.some((choice) => choice.id === derivedWhenSet)}
+            <!-- The rule watches a reference this type does not carry (it is
+                 inert here, #1911) — still show it selected, or the control
+                 reads as unset and a touch would clear the declaration for
+                 every type that does carry it (#1916). -->
+            <option value={derivedWhenSet}>{derivedWhenSet} (not on this type)</option>
+          {/if}
         </select>
       </label>
     </div>

@@ -126,7 +126,9 @@ A few more options round out a field, and none of them are technical:
   filled in, and lets go of when it is cleared. A plot card is *On the page*
   exactly while its scene is attached; you can declare the same for a field of
   your own ("Filmed" while "Footage" is set). That option is never offered in
-  the Entry's panel and is never the default.
+  the Entry's panel and is never the default. Setting it to none on a field
+  that inherits the rule from a project above switches the rule off from this
+  project down — the same goes for clearing an inherited default or description.
 - **Default for new entries** — an optional starting value every new Entry of this
   type begins with, so you're not filling the same thing in each time. Applies to
   value fields (Text, Number, Select, and the like); a reference field — an Entry

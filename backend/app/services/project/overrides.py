@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app.models import MutationSetRow
+from app.models import MetadataFieldDefinition, MetadataSchema, MutationSetRow
 from app.services.project.errors import ProjectServiceError
 from app.services.project.lore_mutations import (
     COLLECTION_FIELD_TYPES,
@@ -51,6 +51,15 @@ from app.services.project.node_index import IndexLayer, NodeIndex
 
 OVERRIDES_FOLDER = "overrides"
 OVERRIDE_ENTRY_TYPE = "override:override"
+
+
+def _required_select_reading(definition: MetadataFieldDefinition, value: Any) -> Any:
+    """`value` as a required select reads it: blank or absent IS the default
+    (#1421, the blank rule `_strip_unknown_metadata_fields` writes by). Any
+    other field, or any other value, passes through."""
+    if definition.required_select and value in (None, ""):
+        return definition.default
+    return value
 
 
 @dataclass(frozen=True)
@@ -372,7 +381,7 @@ class LayerOverridesMixin:
         self,
         base: dict[str, Any],
         submitted: dict[str, Any],
-        field_types: dict[str, str],
+        schema: MetadataSchema,
     ) -> list[MutationSetRow]:
         """The sparse delta from `base` (the effective value above the authoring
         layer) to `submitted` (the whole metadata the client sent).
@@ -380,15 +389,23 @@ class LayerOverridesMixin:
         Scalars diff to a `replace`; collections to `add`/`remove` per item, so a
         later ancestor addition to a multi-valued field keeps flowing down after
         an override adds one item (ADR-0039). Fields equal to base contribute
-        nothing, keeping the override sparse."""
+        nothing, keeping the override sparse.
+
+        A required select's sparse spelling IS its default (#1421): both sides
+        are read as the default before they are compared, and a row that sets
+        one carries the default literally (#1917) — "back to the default" over
+        an ancestor's pick is a delta like any other, where the bare absent key
+        would diff to a blank the save then refuses."""
+        fields = schema.fields
         rows: list[MutationSetRow] = []
         # Only fields in L's own roster can be stored at L. A field the client
         # round-trips that is defined only *below* L (the entry is edited from the
         # deeper open project) is not part of L's view of the entry and must not
         # become a delta row — otherwise it fails the as-of-L validation that
         # follows (ADR-0045 §4). Fields outside the roster are dropped here.
-        for field in sorted(f for f in (set(base) | set(submitted)) if f in field_types):
-            field_type = field_types[field]
+        for field in sorted(f for f in (set(base) | set(submitted)) if f in fields):
+            definition = fields[field]
+            field_type = definition.type
             if field_type in COLLECTION_FIELD_TYPES:
                 base_items = _as_str_list(base.get(field))
                 new_items = _as_str_list(submitted.get(field))
@@ -398,30 +415,57 @@ class LayerOverridesMixin:
                 for item in base_items:
                     if item not in new_items:
                         rows.append(MutationSetRow(field=field, op="remove", value=item))
-            else:
-                base_value = base.get(field)
-                new_value = submitted.get(field)
-                if new_value != base_value:
-                    if field_type == "list":
-                        # #698 v1: the override row format is string-typed (the
-                        # #58 marker grammar), so a NON-EMPTY structured list has
-                        # no honest representation here — str() would persist a
-                        # Python repr the fold then serves as the value. Clearing
-                        # IS representable (value="" folds to []), so the revert
-                        # gesture keeps working; anything else refuses loudly.
-                        # Structured override rows are a filed follow-up.
-                        if new_value in (None, "", []):
-                            rows.append(MutationSetRow(field=field, op="replace", value=""))
-                            continue
-                        raise ProjectServiceError(
-                            f"Ordered-list field {field} cannot be overridden from a "
-                            "descendant layer yet; edit the entry in the project that owns it.",
-                            422,
-                        )
-                    # A field omitted from the payload clears to empty, matching an
-                    # owned save (which drops the key by rewriting the whole file).
-                    rows.append(MutationSetRow(field=field, op="replace", value="" if new_value is None else str(new_value)))
+                continue
+            base_value = _required_select_reading(definition, base.get(field))
+            new_value = _required_select_reading(definition, submitted.get(field))
+            if new_value != base_value:
+                rows.append(self._scalar_override_row(field, field_type, new_value))
         return rows
+
+    @staticmethod
+    def _scalar_override_row(field: str, field_type: str, new_value: Any) -> MutationSetRow:
+        """The `replace` row that sets a scalar field to `new_value`."""
+        if field_type == "list":
+            # #698 v1: the override row format is string-typed (the #58 marker
+            # grammar), so a NON-EMPTY structured list has no honest
+            # representation here — str() would persist a Python repr the fold
+            # then serves as the value. Clearing IS representable (value=""
+            # folds to []), so the revert gesture keeps working; anything else
+            # refuses loudly. Structured override rows are a filed follow-up.
+            if new_value in (None, "", []):
+                return MutationSetRow(field=field, op="replace", value="")
+            raise ProjectServiceError(
+                f"Ordered-list field {field} cannot be overridden from a "
+                "descendant layer yet; edit the entry in the project that owns it.",
+                422,
+            )
+        # A field omitted from the payload clears to empty, matching an owned
+        # save (which drops the key by rewriting the whole file).
+        return MutationSetRow(field=field, op="replace", value="" if new_value is None else str(new_value))
+
+    @staticmethod
+    def _marked_override_fields(
+        touched: list[str], metadata: dict[str, Any], entry_type: str, schema: MetadataSchema
+    ) -> list[str]:
+        """`touched` (the fields the fold wrote) narrowed to the ones the read
+        still marks after the repair ran. The mark reports the delta — a row
+        this layer holds on the field — not whether the shown value differs
+        from canon, so it survives the select canon: a select the entry type
+        carries reads its blank, its default (#1912) and a stale derived state
+        (#1911) as the absent key, and that absent key is a spelling of the
+        override's value, not a strip (#1917). A field the strips removed
+        (retired from the schema, a dangling reference) drops its mark with
+        its value."""
+        if not touched:
+            return touched
+        entry_type_definition = schema.entry_types.get(entry_type)
+        carried = entry_type_definition.fields if entry_type_definition is not None else ()
+        sparse = {
+            field
+            for field in carried
+            if (definition := schema.fields.get(field)) is not None and definition.type == "select"
+        }
+        return [field for field in touched if field in metadata or field in sparse]
 
     # --- composite revision -------------------------------------------------
 

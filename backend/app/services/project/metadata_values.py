@@ -724,6 +724,24 @@ class MetadataValuesMixin:
                 metadata.pop(field_id, None)
         return metadata
 
+    def _explicit_select_defaults(
+        self, metadata: dict[str, Any], entry_type: str, schema: MetadataSchema
+    ) -> dict[str, Any]:
+        """The inverse of the canon's pop, in place on `metadata` (returned for
+        chaining): every required select the entry type carries that is absent
+        or blank is spelled as its default literally (#1421). For a sparse
+        echo that must be compared against a reading made with ANOTHER schema
+        — a layer override diffs the client's resolution-scope echo against the
+        as-of-L base, whose default may differ (#1917)."""
+        entry_type_definition = schema.entry_types.get(entry_type)
+        if entry_type_definition is None:
+            return metadata
+        for field_id in entry_type_definition.fields:
+            field = schema.fields.get(field_id)
+            if field is not None and field.required_select and metadata.get(field_id) in (None, ""):
+                metadata[field_id] = field.default
+        return metadata
+
     def _strip_dangling_references(
         self,
         metadata: dict[str, Any],

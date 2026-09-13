@@ -141,6 +141,21 @@ class PromptOverrideTests(unittest.TestCase):
         self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
         self.assertFalse((self.series / OVERRIDES_FOLDER).exists())
 
+    def test_a_dangling_reference_in_the_ancestor_does_not_mint_an_override_row(self) -> None:
+        # The read heals a `preferred_assistant_id` whose assistant is gone to
+        # blank, so the client's echo carries the blank; the base the diff reads
+        # must be healed the same way, or a colour change also pins the
+        # reference blank in a row of its own.
+        self._write_prompt_at(
+            self.series, "revise", "Revise plotline", {"color": "slate", "preferred_assistant_id": "asst_gone"}
+        )
+        read = self.service.read_prompt_entry("revise")
+        self.assertEqual(read.metadata.get("preferred_assistant_id"), "")
+        saved = self._save_override("revise", {**read.metadata, "color": "amber"})
+        self.assertEqual(saved.overridden_fields, ["color"])
+        text = next((self.root / OVERRIDES_FOLDER).glob("*.md")).read_text(encoding="utf-8")
+        self.assertNotIn("preferred_assistant_id", text)
+
     def test_assistant_tags_override_adds_and_keeps_later_ancestor_additions(self) -> None:
         beta, romance, gamma = self._tag("Beta"), self._tag("Romance"), self._tag("Gamma")
         self._write_prompt_at(self.series, "revise", "Revise plotline", {"assistant_tags": [beta]})

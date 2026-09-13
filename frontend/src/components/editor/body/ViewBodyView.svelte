@@ -35,13 +35,7 @@
   import { canonicalIdIn, tagById, tagTitleById } from "@/lib/stores/tagNodes";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
-  import {
-    evaluateView,
-    materializeLayerField,
-    nestWarnings,
-    type EvalNode,
-    type EvalBindings,
-  } from "@/lib/views/evaluateView";
+  import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
   import { viewUsesTagIds } from "@/lib/views/groupBy";
   import { chatSummariesToEvalNodes } from "@/lib/views/chatNodes";
   import { liftFieldByKey, liftFieldsForKind } from "@/lib/views/computedFields";
@@ -356,7 +350,7 @@
   // `$tagTitleById`/`$tagById` itself.
   const usesTagIds = $derived(viewUsesTagIds(spec, schema));
   let preview = $derived(
-    evaluateView(spec, materializeLayerField(universe), {
+    evaluateView(spec, universe, {
       schema,
       referenceIndex,
       bindings: previewBindings,

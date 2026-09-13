@@ -73,7 +73,10 @@ describe("#1928 materializeLayerField", () => {
 });
 
 describe("#1928 layer field routes through evaluateView like any computed select", () => {
-  const NODES = materializeLayerField(RAW);
+  // Raw nodes (no computed_metadata.layer): evaluateView materializes `layer`
+  // itself, so a view executes from its spec + a raw roster with no caller-side
+  // pre-processing — the whole point of centralizing the fold in the evaluator.
+  const NODES = RAW;
 
   it("filters via a field overlap predicate", () => {
     const r = evaluateView(

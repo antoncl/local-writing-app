@@ -363,6 +363,14 @@ export function evaluateView<T extends EvalNode>(
   nodes: T[],
   ctx: EvalContext = {},
 ): ViewResult<T> {
+  // #1928: materialize the built-in `layer` computed field's value (each node's
+  // own `source_layer_id`) up front, so a view that filters or groups on `layer`
+  // executes from its spec + a raw roster ALONE — no caller-side pre-processing
+  // to remember, and nothing a second runtime (the backend selector evaluator)
+  // has to replicate out of band for the same view to be runnable there. The
+  // scalar analogue of how `references` is resolved inside the evaluator; a no-op
+  // for nodes with no source layer (scenes) and for specs that never read it.
+  nodes = materializeLayerField(nodes);
   const order = new Map<string, number>();
   const nodeById = new Map<string, T>();
   const idByCanonical = new Map<string, string>();

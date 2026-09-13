@@ -23,6 +23,7 @@
     MetadataFieldDefinition,
     MetadataSchema,
     MetadataValue,
+    NavigateTarget,
     PromptEntrySummary,
     ResolvedCascadeField,
     SelectOption,
@@ -100,7 +101,7 @@
     onStatusChange?: (status: string) => void;
     onMetadataChange?: (metadata: EntryMetadata) => void;
     onCustomData?: () => void;
-    onNavigate?: (payload: { id: string; kind: string }) => void;
+    onNavigate?: (target: NavigateTarget) => void;
     // Clear-to-inherit (#517): drop a field's layer override so it reverts to the
     // inherited value. Only the lore host wires it; absent → the override mark
     // stays a static marker (nothing to reset), e.g. scrubbed/parked panes.

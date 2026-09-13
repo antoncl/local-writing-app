@@ -7,29 +7,31 @@
 
 import { writable } from "svelte/store";
 import { api } from "@/lib/api";
-import { refreshPlotBoard, refreshAfterMutation } from "@/lib/stores/plotBoard";
+import { refreshPlotBoard, refreshAfterMutation, openPlotBoardPane } from "@/lib/stores/plotBoard";
 import { refreshCharacterArcs } from "@/lib/stores/characterArcs";
 import type { CharacterArcEntry, PlotlineEntry, PlotlineSummary } from "@/lib/types";
 
 export const plotlineEntriesStore = writable<PlotlineSummary[]>([]);
 
-// A one-shot cross-pane signal (ADR-0053 §3): a card's `plotline` backlink no longer
-// opens an editor pane — a plotline is edited on its board node now — so it asks to be
-// REVEALED on the board instead. The App shell opens the board pane when this goes
-// non-null; PlotEditor expands the matching node and clears it. Null = nothing pending.
-export const plotlineReveal = writable<string | null>(null);
+// The plot entry types the board can reveal per node. A template is not a board
+// node (it opens as a document), so it is deliberately absent.
+export type PlotBoardRevealKind = "plot:plotline" | "plot:character_arc" | "plot:card";
+export type PlotBoardReveal = { id: string; entryType: PlotBoardRevealKind };
 
-export function revealPlotline(id: string): void {
-  plotlineReveal.set(id);
-}
+// A one-shot cross-pane signal (ADR-0053 §3; #1920): a plot node asks to be REVEALED
+// on the board — expanded (plotline / arc) or lit (card) — and centred. PlotEditor
+// acts on it once its projection is in and clears it. Null = nothing pending.
+export const plotBoardReveal = writable<PlotBoardReveal | null>(null);
 
-// A one-shot cross-pane signal to bring the board pane into view WITHOUT
-// expanding a node — for a plot node that has no per-node reveal yet (cards,
-// arcs, templates; ADR-0085 slice 1).
-export const plotBoardRequested = writable(false);
-
-export function revealPlotBoard(): void {
-  plotBoardRequested.set(true);
+// A plot node asks to be REVEALED on the board (#1920). Two steps, in this order and
+// both here: the store carries WHICH node to PlotEditor (it acts once its projection
+// is in, then clears the one-shot), and the pane is brought into view directly —
+// NOT from a shell $effect on the store: PlotEditor's consuming effect ran first in
+// the flush and cleared the signal before the shell ever saw it, so a hidden board
+// tab lit its node behind another tab and never came forward.
+export function revealOnPlotBoard(id: string, entryType: PlotBoardRevealKind): void {
+  plotBoardReveal.set({ id, entryType });
+  openPlotBoardPane();
 }
 
 export async function refreshPlotlines(): Promise<void> {

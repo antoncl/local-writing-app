@@ -26,6 +26,7 @@
     NodePickerRef,
     LoreEntrySummary,
     MetadataFieldDefinition,
+    NavigateTarget,
     PromptEntrySummary,
     StructureDocument,
     StructureNode,
@@ -106,7 +107,7 @@
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
     onChange?: (value: string | string[]) => void;
-    onNavigate?: (detail: { id: string; kind: string }) => void;
+    onNavigate?: (target: NavigateTarget) => void;
     createLayerId?: string | null | undefined;
   } = $props();
 
@@ -441,7 +442,7 @@
       class="ref-pill-body"
       disabled={ref.missing}
       title={ref.missing ? "This reference no longer resolves" : `Open ${ref.title}`}
-      onclick={ref.missing ? undefined : () => onNavigate({ id: ref.id, kind: ref.kind })}
+      onclick={ref.missing ? undefined : () => onNavigate({ id: ref.id, kind: ref.kind, entryType: ref.entry_type })}
     >
       <span class="ref-pill-dot" class:no-color={!hex} style={hex ? `--dot: ${hex}` : ""}></span>
       <span class="ref-pill-name">{ref.missing ? "Missing" : ref.title}</span>
@@ -465,7 +466,7 @@
     depth={ctx.depth}
     stripeColor={ref.missing ? "#c98a8a" : null}
     typeIcon={entryTypeIconClass(ref.entry_type, metadataSchema)}
-    onClick={ref.missing ? undefined : () => onNavigate({ id: ref.id, kind: ref.kind })}
+    onClick={ref.missing ? undefined : () => onNavigate({ id: ref.id, kind: ref.kind, entryType: ref.entry_type })}
   >
     {#snippet trailing()}
       <span

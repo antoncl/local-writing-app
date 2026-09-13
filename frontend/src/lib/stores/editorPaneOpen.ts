@@ -23,11 +23,12 @@ import { api } from "@/lib/api";
 import { chatSessionsStore } from "@/lib/stores/chats";
 import { structureStore } from "@/lib/stores/structure";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
-import { revealPlotline, revealPlotBoard } from "@/lib/stores/plotlines";
+import { revealOnPlotBoard } from "@/lib/stores/plotlines";
 import { openEditMutationSet } from "@/lib/stores/mutationSets";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { authoringDefaultLayerId } from "@/lib/utils/layerAuthoring";
-import { projectSchemaLayerId } from "@/lib/stores/schema";
+import { entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
+import { metadataSchemaStore, projectSchemaLayerId } from "@/lib/stores/schema";
 import { cloneMetadata, type DocumentRef, type EditorPaneState } from "@/lib/editor-core/editorPaneModel";
 import type { EditableDocument, EntryMetadata, LoreEntry, PromptEntry, Scene, ViewSpec } from "@/lib/types";
 
@@ -52,6 +53,7 @@ export interface PaneOpenHost {
   openLore(id: string): Promise<void>;
   openResearchNote(id: string): Promise<void>;
   openPrompt(id: string): Promise<void>;
+  openPlotTemplate(id: string): Promise<void>;
   openAssistant(id: string): Promise<void>;
   openView(id: string): Promise<void>;
   openChat(id: string): Promise<void>;
@@ -390,7 +392,7 @@ export async function openPlotCard(host: PaneOpenHost, entryId: string): Promise
 // this is the roomier alternative, not a replacement, and NOT a create surface
 // (plotlines are minted board-native — the palette / New plotline). A book-local
 // `plot` node, so no Library provenance / read-only lock applies. The card's
-// `plotline` backlink still REVEALS on the board (revealPlotline), not here.
+// `plotline` backlink still REVEALS on the board (revealOnPlotBoard), not here.
 export async function openPlotline(host: PaneOpenHost, entryId: string): Promise<void> {
   return openEntryDocument(host, "plotline", entryId, "open plotline", (id) => api.getPlotline(id), {
     body: true,
@@ -465,6 +467,23 @@ export async function openLore(host: PaneOpenHost, entryId: string): Promise<voi
   });
 }
 
+// The plot family root a node's entry type descends from (ADR-0048 / class–instance
+// model): a user-authored `plot:noir_card` with `parent: plot:card` opens like a card,
+// as the backend's `_read_plot_node` dispatches it. Null when the type is missing, not
+// a plot type, or the schema has not loaded — the caller throws rather than guesses.
+const PLOT_ROOTS = ["plot:template", "plot:plotline", "plot:character_arc", "plot:card"] as const;
+type PlotRoot = (typeof PLOT_ROOTS)[number];
+
+function plotRootOf(entryType: string | undefined): PlotRoot | null {
+  if (!entryType) return null;
+  const schema = get(metadataSchemaStore);
+  for (const root of PLOT_ROOTS) {
+    if (entryType === root) return root;
+    if (schema && entryTypeIsA(schema, entryType, root)) return root;
+  }
+  return null;
+}
+
 // Open any node given its kind — the one place cross-kind navigation
 // dispatches, so a caller holding an `(id, kind)` pair never has to know which
 // opener a kind maps to.
@@ -510,16 +529,29 @@ export async function openNodeOfKind(
     case "tag": return openEntryDocument(host, "tag", nodeId, "open tag", (id) => api.getTagEntry(id), { metadata: true });
     case "chat":
       return host.openChat(nodeId);
-    case "plot":
-      // A plotline is edited on its board node (ADR-0053 §3), so it is REVEALED —
-      // the backlink expands the matching node once the board projection is in.
-      // Other plot entry types (card, character arc, template) have no per-node
-      // reveal yet, so this just brings the board into view (ADR-0085 slice 1); a
-      // focused card reveal is future board work. Existing callers pass no
-      // entryType and keep today's plotline-reveal behaviour.
-      if (!entryType || entryType === "plot:plotline") revealPlotline(nodeId);
-      else revealPlotBoard();
-      return;
+    case "plot": {
+      // The plot family's default editor is decided by ENTRY TYPE, not kind (#1920):
+      // a template is a document (the templates pane's own route); a plotline and a
+      // character arc are edited on their expanded board node (ADR-0053 §3 / ADR-0080 §5),
+      // so they are revealed there; a card is revealed lit on the board. Dispatch is by
+      // FAMILY ROOT, not exact match (review of #1922): the plot family is class–instance,
+      // so a user-authored subtype (`plot:noir_card` with `parent: plot:card`) opens like
+      // its root, mirroring the backend's `_read_plot_node` ancestry dispatch. A missing or
+      // unknown entry type throws like an unknown kind does — the old "else → show the
+      // board" branch was a guess that opened nothing.
+      const root = plotRootOf(entryType);
+      switch (root) {
+        case "plot:template":
+          return host.openPlotTemplate(nodeId);
+        case "plot:plotline":
+        case "plot:character_arc":
+        case "plot:card":
+          revealOnPlotBoard(nodeId, root);
+          return;
+        default:
+          throw new Error(`Cannot open a plot node from here: "${entryType ?? ""}" is not a known plot type.`);
+      }
+    }
     case "project":
       // Singleton per layer, so the id is checked rather than assumed —
       // an ancestor's project.md is a legitimate source with no surface.

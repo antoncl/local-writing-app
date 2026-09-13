@@ -30,6 +30,7 @@
     readBoardSizes,
     reconcilePlotlineUiState,
     reconcileArcUiState,
+    reconcileCardUiState,
     type PlotBoardNode,
     type PlotContainerData,
   } from "@/lib/plot/plotBoardLayout";
@@ -66,7 +67,7 @@
     instantiateTemplateOnBoard,
     savePlotlineEntry,
     getPlotlineEntry,
-    plotlineReveal,
+    plotBoardReveal,
   } from "@/lib/stores/plotlines";
   import { deleteArc, getArcEntry, saveArcEntry } from "@/lib/stores/characterArcs";
   import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
@@ -203,6 +204,15 @@
   // decide whether it recedes (a getter so it tracks this reactive state fresh).
   let focusedPlotlineId = $state<string | null>(null);
 
+  // A card revealed by a search hit / backlink (#1920): lit while every other card
+  // recedes — the diagnostic-highlight treatment, keyed on one card. A third highlight
+  // mode, mutually exclusive with plotline focus and a selected finding. Cleared on the
+  // next board interaction (pane click, node click, Escape) and by the #928 self-heal.
+  let revealedCardId = $state<string | null>(null);
+  // The viewport target of the last reveal — a NEW object per reveal so ViewportFit
+  // re-fires on the same node; null until something is revealed.
+  let revealFit = $state<{ id: string } | null>(null);
+
   // Cross-dimension diagnostics (ADR-0048 S7): whether the findings rail is open, and
   // which finding is selected. A selected finding lights its cards across the board;
   // selecting a finding and focusing a plotline are mutually-exclusive highlight modes,
@@ -233,11 +243,18 @@
     }
     return null;
   });
+  // The lit set: a revealed card (#1920) wins, else a selected finding's cards.
+  let litCardIds = $derived<ReadonlySet<string> | null>(
+    revealedCardId ? new Set([revealedCardId]) : highlightedCardIds,
+  );
   // Select a finding (toggle off if it is already selected). Clears any plotline focus
   // so only one highlight mode is ever lit.
   function selectDiagnostic(id: string): void {
     selectedDiagnosticId = selectedDiagnosticId === id ? null : id;
-    if (selectedDiagnosticId !== null) focusedPlotlineId = null;
+    if (selectedDiagnosticId !== null) {
+      focusedPlotlineId = null;
+      revealedCardId = null;
+    }
   }
 
   // A card/plotline kebab menu is lifted above its sibling nodes while open by a pure-CSS
@@ -298,10 +315,10 @@
     get focusedPlotlineId() {
       return focusedPlotlineId;
     },
-    // The cards a selected diagnostic finding lights (S7). A getter so the card tracks
-    // the selection reactively, same as the focus above.
+    // The cards a selected finding lights, or the one card a reveal lights (#1920). A
+    // getter so the card tracks the selection reactively, same as the focus above.
     get highlightedCardIds() {
-      return highlightedCardIds;
+      return litCardIds;
     },
   });
 
@@ -323,8 +340,12 @@
     },
     toggleFocus: (id) => {
       focusedPlotlineId = focusedPlotlineId === id ? null : id;
-      // One highlight mode at a time — focusing a thread drops any selected finding.
-      if (focusedPlotlineId !== null) selectedDiagnosticId = null;
+      // One highlight mode at a time — focusing a thread drops any selected finding
+      // and any revealed card (#1920).
+      if (focusedPlotlineId !== null) {
+        selectedDiagnosticId = null;
+        revealedCardId = null;
+      }
     },
     loadPlotline: (id) => getPlotlineEntry(id),
     // Persist an edit and refresh the board + rail. Surface a failure in the app banner
@@ -412,22 +433,38 @@
     },
   });
 
-  // A card's `plotline` backlink no longer opens an editor pane — it reveals the
-  // plotline on the board (plotlineReveal signal). When one arrives, expand that node
-  // if it's on this board, then clear the one-shot. Reading the signal first means a
-  // drag frame (flowNodes churn) can't retrigger this once the signal is null.
+  // A plot node asked to be revealed (plotBoardReveal, #1920). Read the signal first so a
+  // drag frame (flowNodes churn) can't retrigger this once it is null; wait for the
+  // projection so a reveal that arrives while the board is still opening is not dropped —
+  // unless the load FAILED (review of #1922), in which case the reveal is dropped too, not
+  // held for a later Retry. Once the projection is in: expand a plotline / arc node, or
+  // light a card, if it is on this board (a stale id — a node on another project — is
+  // simply not here), centre the viewport on it, and clear the one-shot either way.
   $effect(() => {
-    const revealId = $plotlineReveal;
-    if (!revealId) return;
-    // Wait for the board to load before deciding — a reveal that arrives while the
-    // board is still opening (its pane was closed) must not be dropped. Once the
-    // projection is in, expand the node if it's here; either way the one-shot clears
-    // (a stale id — a plotline on another project — is simply not on this board).
-    if (!projection) return;
-    if (flowNodes.some((n) => n.type === "plotPlotline" && n.id === revealId)) {
-      expandedPlotlineId = revealId;
+    const reveal = $plotBoardReveal;
+    if (!reveal) return;
+    if (!projection) {
+      // A failed load (the pane shows its inline error) drops the pending reveal —
+      // otherwise a Retry minutes later would light a node from a click the writer has
+      // forgotten (review of #1922).
+      if (error) plotBoardReveal.set(null);
+      return;
     }
-    plotlineReveal.set(null);
+    const nodeType =
+      reveal.entryType === "plot:plotline" ? "plotPlotline"
+      : reveal.entryType === "plot:character_arc" ? "plotArc"
+      : "plotCard";
+    if (flowNodes.some((n) => n.type === nodeType && n.id === reveal.id)) {
+      if (reveal.entryType === "plot:plotline") expandedPlotlineId = reveal.id;
+      else if (reveal.entryType === "plot:character_arc") expandedArcId = reveal.id;
+      else {
+        revealedCardId = reveal.id;
+        focusedPlotlineId = null;
+        selectedDiagnosticId = null;
+      }
+      revealFit = { id: reveal.id };
+    }
+    plotBoardReveal.set(null);
   });
 
   // Self-heal the ephemeral focus/expand state against the live board (#928). A plotline
@@ -447,6 +484,13 @@
   $effect(() => {
     const healed = reconcileArcUiState(projection, { expandedArcId });
     if (healed.expandedArcId !== expandedArcId) expandedArcId = healed.expandedArcId;
+  });
+
+  // Same self-heal for a revealed card (#1920): a card deleted elsewhere must not leave
+  // the board dimmed around a card that is gone.
+  $effect(() => {
+    const healed = reconcileCardUiState(projection, { revealedCardId });
+    if (healed.revealedCardId !== revealedCardId) revealedCardId = healed.revealedCardId;
   });
 
   // Delete a card from the board (#860). Confirmed (destructive, app dialog) — the
@@ -817,7 +861,10 @@
   aria-label="Plot board"
   tabindex="-1"
   bind:this={boardEl}
-  onkeydown={undoCtl.handleKeydown}
+  onkeydown={(e) => {
+    if (e.key === "Escape") revealedCardId = null;
+    undoCtl.handleKeydown(e);
+  }}
   onpointerdown={focusBoardForUndo}
 >
   {#if !projection}
@@ -980,6 +1027,10 @@
           expandedArcId = null;
           focusedPlotlineId = null;
           selectedDiagnosticId = null;
+          revealedCardId = null;
+        }}
+        onnodeclick={() => {
+          revealedCardId = null;
         }}
         onnodedragstart={({ nodes }) => {
           dragging = true;
@@ -1080,6 +1131,13 @@
              writer; the viewport stays where they left it. `minZoom` clamps the initial
              fit so a spread-out board can't shrink to the canvas floor and read as empty. -->
         <ViewportFit trigger={projection?.board_id} options={{ padding: 0.2, maxZoom: 1, minZoom: 0.5 }} />
+        <!-- Centre the viewport on a revealed node (#1920). `revealFit` is a fresh object per
+             reveal so the same node re-centres; the options follow the target. maxZoom 1 keeps a
+             single card from filling the canvas; the padding leaves its neighbours visible. -->
+        <ViewportFit
+          trigger={revealFit}
+          options={revealFit ? { nodes: [{ id: revealFit.id }], padding: 0.6, maxZoom: 1, duration: 200 } : {}}
+        />
       </SvelteFlow>
       </div>
     {/if}

@@ -32,7 +32,7 @@
   import EditorCostHint from "@/components/editor/EditorCostHint.svelte";
   import { characterCostRows, rollupCostFor } from "@/lib/editor-core/characterCost";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, PromptContextStrategy, PromptEntrySummary, PromptInputDefinition, ViewSpec } from "@/lib/types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, NavigateTarget, PromptContextStrategy, PromptEntrySummary, PromptInputDefinition, ViewSpec } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { readOnlyInPlace } from "@/lib/utils/provenance";
@@ -91,7 +91,7 @@
     onChange?: ((payload: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[]; offer_on?: string[]; context_strategy?: PromptContextStrategy | null }) => void) | undefined;
     onFocus?: (() => void) | undefined;
     onCustomData?: ((payload: { entryType: string; kind: DocumentKind }) => void) | undefined;
-    onNavigate?: ((payload: { id: string; kind: string }) => void) | undefined;
+    onNavigate?: ((target: NavigateTarget) => void) | undefined;
     onOpenChat?: ((payload: { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string }) => void) | undefined;
     // The view designer self-persists; it reports its save lifecycle up so the
     // pane's tab badge can reflect it (#263).

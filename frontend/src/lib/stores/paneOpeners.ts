@@ -1,14 +1,22 @@
 // Openers for the registry regions that need no App-local state — they only
 // touch importable singletons (workspaceLayout + a roster refresh), so they
 // live here rather than in App.svelte (extracted at the file-size cap; the
-// openers that route through App's run()/error banner, like the plot board
-// and import flows, stay in App).
+// import flow, which routes through App's run()/error banner, stays in App).
+// The plot board opener used to stay in App too, for the same reason — but
+// `refreshPlotBoard` records its own failure into `plotBoardError` (the pane
+// renders it inline) and never rejects, so the `run()` wrapper was redundant
+// (#1920). It now lives with its store (`plotBoard.ts`, review of #1922) —
+// `plotlines.ts` needed it too, and importing it from here made that a new
+// import cycle back through `chatSessions.svelte.ts` / `editorPanes.svelte.ts`;
+// this is just a re-export so App's existing import keeps working.
 
 import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
 import { chatSessions } from "@/lib/stores/chatSessions.svelte";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { aiSpend } from "@/lib/stores/aiSpend.svelte";
+
+export { openPlotBoardPane } from "@/lib/stores/plotBoard";
 
 export function openPromptsPane(): void {
   workspaceLayout.ensureVisible("prompts");

@@ -178,6 +178,19 @@ export function reconcileArcUiState(projection: PlotBoardProjection | null, stat
   return { expandedArcId };
 }
 
+// The board's ephemeral revealed-card state (#1920): which card a search hit / backlink
+// lit. Reconciled like the plotline/arc state — a card deleted elsewhere must not leave
+// the board dimmed around a card that is gone.
+export type CardUiState = { revealedCardId: string | null };
+
+export function reconcileCardUiState(projection: PlotBoardProjection | null, state: CardUiState): CardUiState {
+  if (!projection) return state;
+  const live = new Set(projection.cards.map((card) => card.id));
+  const revealedCardId = state.revealedCardId && live.has(state.revealedCardId) ? state.revealedCardId : null;
+  if (revealedCardId === state.revealedCardId) return state;
+  return { revealedCardId };
+}
+
 // Geometry (px). Exported so the unit test asserts against the same constants the
 // layout uses rather than hard-coding magic numbers that could silently drift.
 export const CARD_WIDTH = 210;

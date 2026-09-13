@@ -15,10 +15,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { FOREIGN_PROJECT_NODE, editorPanes } from "./editorPanes.svelte";
-import { plotlineReveal, plotBoardRequested } from "./plotlines";
+import { plotBoardReveal } from "./plotlines";
 import { mutationSetEditorStore } from "./mutationSets";
+import { metadataSchemaStore } from "@/lib/stores/schema";
 import { api } from "@/lib/api";
-import type { MutationSetEntry, ProjectNode } from "@/lib/types";
+import { openPlotBoardPane } from "@/lib/stores/plotBoard";
+import type { MetadataSchema, MutationSetEntry, ProjectNode } from "@/lib/types";
+
+// `revealOnPlotBoard` (called by the plot-reveal branch below) now opens the
+// pane itself (#1920) rather than relying on a shell $effect — mock it so
+// these dispatch tests stay about routing, not the pane opener's own effects.
+// Only `openPlotBoardPane` is mocked — `refreshPlotBoard`/`plotBoardStore` etc.
+// stay real for other imports of this module.
+vi.mock("@/lib/stores/plotBoard", async (orig) => ({
+  ...(await orig<typeof import("@/lib/stores/plotBoard")>()),
+  openPlotBoardPane: vi.fn(),
+}));
+
+// A user-authored plot subtype (schema designer, ADR-0048 / class–instance model):
+// `plot:noir_card` descends from `plot:card`, `plot:house_template` from
+// `plot:template` — the dispatch-by-family-root fixture (#1920, review of #1922).
+const PLOT_SUBTYPE_SCHEMA = {
+  version: 1,
+  entry_types: {
+    "plot:card": { name: "Card", kind: "plot", fields: [] },
+    "plot:noir_card": { name: "Noir Card", kind: "plot", fields: [], parent: "plot:card" },
+    "plot:template": { name: "Template", kind: "plot", fields: [] },
+    "plot:house_template": { name: "House Template", kind: "plot", fields: [], parent: "plot:template" },
+  },
+  fields: {},
+} as unknown as MetadataSchema;
 
 // kind → the opener it must reach. The table IS the assertion: a kind wired to
 // the wrong opener reads as an obvious mismatch here, which the old code's
@@ -32,8 +58,10 @@ const ROUTES = [
   ["view", "openView"],
   ["chat", "openChat"],
   ["project", "openProjectNode"],
-  // The `plot` kind (always a plotline — the only plot ref target) is NOT in this
-  // opener table: it no longer opens a pane. See the reveal test below.
+  // The `plot` kind is NOT in this opener table: its default editor is decided by
+  // ENTRY TYPE, not kind (#1920) — a plotline/arc/card reveals on the board rather
+  // than opening a pane; only a template opens one (openPlotTemplate). See the
+  // dedicated tests below.
 ] as const;
 
 const LOCAL_PROJECT_NODE: ProjectNode = {
@@ -47,7 +75,11 @@ const LOCAL_PROJECT_NODE: ProjectNode = {
 };
 
 describe("editorPanes.openNodeOfKind (#344)", () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.mocked(openPlotBoardPane).mockClear();
+  });
+  afterEach(() => plotBoardReveal.set(null));
 
   for (const [kind, opener] of ROUTES) {
     it(`routes a ${kind} backlink to ${opener}`, async () => {
@@ -67,33 +99,113 @@ describe("editorPanes.openNodeOfKind (#344)", () => {
   }
 
   it("reveals a plotline on the board instead of opening a pane", async () => {
-    // A plotline is edited on its board node now (ADR-0053 §3), so a `plot` backlink
-    // signals a board reveal (plotlineReveal) rather than opening an editor pane. Pin
-    // both halves: the signal is set to the id, and no pane opener fired.
-    plotlineReveal.set(null);
-    const spies = ROUTES.map(([, name]) => vi.spyOn(editorPanes, name).mockResolvedValue(undefined));
+    // A plotline is edited on its board node (ADR-0053 §3), so the plot family's
+    // dispatch-by-entry-type (#1920) signals a board reveal rather than opening an
+    // editor pane. Pin both halves: the signal carries the id + entry type, and no
+    // pane opener (incl. openPlotTemplate) fired.
+    const spies = [...ROUTES.map(([, name]) => name), "openPlotTemplate" as const].map((name) =>
+      vi.spyOn(editorPanes, name).mockResolvedValue(undefined),
+    );
 
-    await editorPanes.openNodeOfKind("line_1", "plot");
+    await editorPanes.openNodeOfKind("line_1", "plot", "plot:plotline");
 
-    expect(get(plotlineReveal)).toBe("line_1");
+    expect(get(plotBoardReveal)).toEqual({ id: "line_1", entryType: "plot:plotline" });
+    expect(openPlotBoardPane).toHaveBeenCalledOnce();
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
-    plotlineReveal.set(null);
   });
 
-  it("brings the board into view for a plot entry_type with no per-node reveal yet", async () => {
-    // A card (or arc/template) has no per-node reveal yet (ADR-0085 slice 1), so
-    // the backlink just asks the board pane into view — it must NOT be mistaken
-    // for a plotline (plotlineReveal stays null) and no pane opener fires.
-    plotlineReveal.set(null);
-    plotBoardRequested.set(false);
-    const spies = ROUTES.map(([, name]) => vi.spyOn(editorPanes, name).mockResolvedValue(undefined));
+  it("reveals a character arc on the board instead of opening a pane", async () => {
+    const spies = [...ROUTES.map(([, name]) => name), "openPlotTemplate" as const].map((name) =>
+      vi.spyOn(editorPanes, name).mockResolvedValue(undefined),
+    );
+
+    await editorPanes.openNodeOfKind("arc_1", "plot", "plot:character_arc");
+
+    expect(get(plotBoardReveal)).toEqual({ id: "arc_1", entryType: "plot:character_arc" });
+    expect(openPlotBoardPane).toHaveBeenCalledOnce();
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("reveals a card lit on the board instead of opening a pane", async () => {
+    const spies = [...ROUTES.map(([, name]) => name), "openPlotTemplate" as const].map((name) =>
+      vi.spyOn(editorPanes, name).mockResolvedValue(undefined),
+    );
 
     await editorPanes.openNodeOfKind("card_1", "plot", "plot:card");
 
-    expect(get(plotlineReveal)).toBeNull();
-    expect(get(plotBoardRequested)).toBe(true);
+    expect(get(plotBoardReveal)).toEqual({ id: "card_1", entryType: "plot:card" });
+    expect(openPlotBoardPane).toHaveBeenCalledOnce();
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
-    plotBoardRequested.set(false);
+  });
+
+  it("opens a plot template as a document instead of revealing it on the board", async () => {
+    // A template is not a board node — it opens via its own NodeEditor route
+    // (#1920) — so it must reach openPlotTemplate, and nothing else, and never
+    // touch the board-reveal signal.
+    const openPlotTemplate = vi.spyOn(editorPanes, "openPlotTemplate").mockResolvedValue(undefined);
+    const spies = ROUTES.map(([, name]) => vi.spyOn(editorPanes, name).mockResolvedValue(undefined));
+
+    await editorPanes.openNodeOfKind("tpl_1", "plot", "plot:template");
+
+    expect(openPlotTemplate).toHaveBeenCalledWith("tpl_1");
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    expect(get(plotBoardReveal)).toBeNull();
+    expect(openPlotBoardPane).not.toHaveBeenCalled();
+  });
+
+  it("refuses a plot node with no entry type instead of guessing", async () => {
+    // The old "else → show the board" branch was a guess that opened nothing
+    // (#1920); a missing entry type now throws like an unknown kind does.
+    const spies = [...ROUTES.map(([, name]) => name), "openPlotTemplate" as const].map((name) =>
+      vi.spyOn(editorPanes, name).mockResolvedValue(undefined),
+    );
+
+    await expect(editorPanes.openNodeOfKind("x", "plot")).rejects.toThrow(/not a known plot type/i);
+
+    expect(get(plotBoardReveal)).toBeNull();
+    expect(openPlotBoardPane).not.toHaveBeenCalled();
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unknown plot entry type instead of guessing", async () => {
+    const spies = [...ROUTES.map(([, name]) => name), "openPlotTemplate" as const].map((name) =>
+      vi.spyOn(editorPanes, name).mockResolvedValue(undefined),
+    );
+
+    await expect(editorPanes.openNodeOfKind("x", "plot", "plot:beat")).rejects.toThrow(/not a known plot type/i);
+
+    expect(get(plotBoardReveal)).toBeNull();
+    expect(openPlotBoardPane).not.toHaveBeenCalled();
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  describe("dispatch by plot family root, not exact entry type (#1920, review of #1922)", () => {
+    beforeEach(() => metadataSchemaStore.set(PLOT_SUBTYPE_SCHEMA));
+    afterEach(() => metadataSchemaStore.set(null));
+
+    it("reveals a user-authored card subtype lit on the board, like its plot:card root", async () => {
+      const spies = [...ROUTES.map(([, name]) => name), "openPlotTemplate" as const].map((name) =>
+        vi.spyOn(editorPanes, name).mockResolvedValue(undefined),
+      );
+
+      await editorPanes.openNodeOfKind("card_9", "plot", "plot:noir_card");
+
+      expect(get(plotBoardReveal)).toEqual({ id: "card_9", entryType: "plot:card" });
+      expect(openPlotBoardPane).toHaveBeenCalledOnce();
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("opens a user-authored template subtype as a document, like its plot:template root", async () => {
+      const openPlotTemplate = vi.spyOn(editorPanes, "openPlotTemplate").mockResolvedValue(undefined);
+      const spies = ROUTES.map(([, name]) => vi.spyOn(editorPanes, name).mockResolvedValue(undefined));
+
+      await editorPanes.openNodeOfKind("tpl_9", "plot", "plot:house_template");
+
+      expect(openPlotTemplate).toHaveBeenCalledWith("tpl_9");
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+      expect(get(plotBoardReveal)).toBeNull();
+      expect(openPlotBoardPane).not.toHaveBeenCalled();
+    });
   });
 
   it("refuses an unknown kind instead of falling back to openScene", async () => {

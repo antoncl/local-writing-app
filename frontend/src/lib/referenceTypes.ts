@@ -30,6 +30,10 @@ export type Backlink = {
   field_name: string;
 };
 
+// What a navigate affordance (backlink row, reference pill) hands the shell to open a
+// node: id + kind, plus the entry type because the plot family dispatches on it (#1920).
+export type NavigateTarget = { id: string; kind: string; entryType?: string };
+
 // Forward reference adjacency for the whole project (#184 Phase 2): each node id
 // → the ids it references through any entity_ref / entity_ref_list field. The
 // frontend inverts this into a reverse index the view evaluator's `references`

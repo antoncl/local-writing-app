@@ -17,6 +17,7 @@ import {
   readBoardSizes,
   reconcilePlotlineUiState,
   reconcileArcUiState,
+  reconcileCardUiState,
   CARD_GAP_X,
   CARD_HEIGHT,
   CARD_WIDTH,
@@ -930,6 +931,24 @@ describe("reconcileArcUiState (mirrors reconcilePlotlineUiState, #928)", () => {
   it("leaves a null (loading / failed) projection untouched", () => {
     const state = { expandedArcId: "a1" };
     expect(reconcileArcUiState(null, state)).toBe(state);
+  });
+});
+
+describe("reconcileCardUiState (mirrors reconcilePlotlineUiState, #1920)", () => {
+  const proj = projection({ cards: [card("c1"), card("c2")] });
+
+  it("keeps a revealed id that still exists on the board", () => {
+    const state = { revealedCardId: "c1" };
+    expect(reconcileCardUiState(proj, state)).toBe(state);
+  });
+
+  it("drops a revealed id whose card was deleted", () => {
+    expect(reconcileCardUiState(proj, { revealedCardId: "gone" })).toEqual({ revealedCardId: null });
+  });
+
+  it("leaves a null (loading / failed) projection untouched", () => {
+    const state = { revealedCardId: "c1" };
+    expect(reconcileCardUiState(null, state)).toBe(state);
   });
 });
 

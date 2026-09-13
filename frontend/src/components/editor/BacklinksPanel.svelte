@@ -7,6 +7,7 @@
   import type {
     Backlink,
     LoreEntrySummary,
+    NavigateTarget,
     StructureDocument,
     StructureNode,
   } from "@/lib/types";
@@ -24,7 +25,7 @@
     backlinks?: Backlink[];
     loreEntries?: LoreEntrySummary[];
     structure?: StructureDocument | null;
-    onNavigate?: (detail: { id: string; kind: string }) => void;
+    onNavigate?: (target: NavigateTarget) => void;
   } = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
@@ -87,7 +88,7 @@
       <ViewNodeList
         result={nodeSet(backlinkNodes)}
         mode="tree"
-        onClick={(node) => onNavigate({ id: node.targetId, kind: node.kind })}
+        onClick={(node) => onNavigate({ id: node.targetId, kind: node.kind, entryType: node.entry_type })}
         row={backlinkRow}
       >
         {#snippet whenEmpty()}

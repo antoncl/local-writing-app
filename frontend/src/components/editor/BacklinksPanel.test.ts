@@ -43,9 +43,10 @@ describe("BacklinksPanel", () => {
     const onNavigate = vi.fn();
     render(BacklinksPanel, { props: { backlinks: [backlink()], onNavigate } });
     // Collapsed by default — expand the group to reveal the rows, then click one.
-    // onNavigate carries targetId (the real node id), not the composite row key.
+    // onNavigate carries targetId (the real node id), not the composite row key,
+    // plus the backlink's entry_type (#1920 — the plot family dispatches on it).
     await fireEvent.click(screen.getByText("References"));
     await fireEvent.click(screen.getByText("Mira"));
-    expect(onNavigate).toHaveBeenCalledWith({ id: "lore_1", kind: "lore" });
+    expect(onNavigate).toHaveBeenCalledWith({ id: "lore_1", kind: "lore", entryType: "lore:character" });
   });
 });

@@ -17,6 +17,7 @@
     mutationUnitGroupLabel,
     type MutationUnitGroup,
   } from "@/lib/editor-core/mutationUnits";
+  import type { NavigateTarget } from "@/lib/types";
 
   let {
     units,
@@ -28,7 +29,7 @@
     /** The scrubber's current stop: 0 = base, i ≥ 1 = units[i-1]. */
     activeIndex?: number;
     onSelect?: (index: number) => void;
-    onNavigate?: (payload: { id: string; kind: string }) => void;
+    onNavigate?: (target: NavigateTarget) => void;
   } = $props();
 
   let expanded = $state(false);

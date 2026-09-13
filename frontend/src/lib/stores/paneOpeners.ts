@@ -1,14 +1,18 @@
 // Openers for the registry regions that need no App-local state — they only
 // touch importable singletons (workspaceLayout + a roster refresh), so they
 // live here rather than in App.svelte (extracted at the file-size cap; the
-// openers that route through App's run()/error banner, like the plot board
-// and import flows, stay in App).
+// import flow, which routes through App's run()/error banner, stays in App).
+// The plot board opener used to stay in App too, for the same reason — but
+// `refreshPlotBoard` records its own failure into `plotBoardError` (the pane
+// renders it inline) and never rejects, so the `run()` wrapper was redundant
+// (#1920).
 
 import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
 import { chatSessions } from "@/lib/stores/chatSessions.svelte";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { aiSpend } from "@/lib/stores/aiSpend.svelte";
+import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 
 export function openPromptsPane(): void {
   workspaceLayout.ensureVisible("prompts");
@@ -51,4 +55,12 @@ export function openTagsPane(): void {
   // gives its list.
   void refreshTagNodes();
   workspaceLayout.ensureVisible("tags");
+}
+
+export function openPlotBoardPane(): void {
+  // Fetch-then-show: the pane opens at once and shows "Loading…" until the
+  // projection resolves; `refreshPlotBoard` records a failure in `plotBoardError`
+  // (the pane renders it inline) and never rejects, so no run()/banner is needed.
+  void refreshPlotBoard();
+  workspaceLayout.ensureVisible("plotEditor");
 }

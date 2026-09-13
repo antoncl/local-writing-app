@@ -47,9 +47,10 @@ describe("ReferencePicker — callback props (runes port of change/navigate)", (
       props: { field, value: ["lore_1"], ariaLabel: "Characters", loreEntries, onNavigate },
     });
     // Collapsed by default — expand the group, then click the resolved row.
+    // entryType rides along (#1920 — the plot family dispatches on it).
     await fireEvent.click(screen.getByText("Characters"));
     await fireEvent.click(screen.getByText("Mira"));
-    expect(onNavigate).toHaveBeenCalledWith({ id: "lore_1", kind: "lore" });
+    expect(onNavigate).toHaveBeenCalledWith({ id: "lore_1", kind: "lore", entryType: "lore:character" });
   });
 
   it("removing a ref reports the reduced id list through onChange", async () => {
@@ -130,7 +131,7 @@ describe("ReferencePicker — controlled rail mode (#1732)", () => {
       props: { field, value: ["lore_1"], ariaLabel: "Characters", loreEntries, embedded: true, controlled: true, onNavigate },
     });
     await fireEvent.click(screen.getByText("Mira"));
-    expect(onNavigate).toHaveBeenCalledWith({ id: "lore_1", kind: "lore" });
+    expect(onNavigate).toHaveBeenCalledWith({ id: "lore_1", kind: "lore", entryType: "lore:character" });
   });
 
   it("controlled: a pill's × reports the reduced id list through onChange", async () => {

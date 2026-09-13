@@ -24,6 +24,7 @@
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataValue,
+    NavigateTarget,
     PromptEntrySummary,
     StructureDocument,
   } from "@/lib/types";
@@ -57,7 +58,7 @@
     researchStructure?: StructureDocument | null;
     excludeId?: string | null;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
-    onNavigate?: (payload: { id: string; kind: string }) => void;
+    onNavigate?: (target: NavigateTarget) => void;
   }
 
   let {

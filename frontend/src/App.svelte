@@ -67,8 +67,6 @@
     setPromptEntries,
   } from "@/lib/stores/prompts";
   import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
-  import { refreshPlotBoard } from "@/lib/stores/plotBoard";
-  import { plotlineReveal, plotBoardRequested } from "@/lib/stores/plotlines";
   import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
   import {
     assistantEntriesStore,
@@ -116,6 +114,7 @@
     openAssistantsPane,
     openChatsPane,
     openTagsPane,
+    openPlotBoardPane,
   } from "@/lib/stores/paneOpeners";
   import TagsPane from "@/components/panes/TagsPane.svelte";
   import type {
@@ -123,6 +122,7 @@
     CodeFencedBody,
     Scene,
     LooseScene,
+    NavigateTarget,
     NodePickerConfig,
     ProjectInfo,
     ProjectValidation,
@@ -409,23 +409,6 @@
     if (focusedId && workspaceLayout.isPlaced(focusedId)) workspaceLayout.activate(focusedId);
   });
 
-  // A plotline backlink no longer opens an editor pane — it asks to be revealed on the
-  // board (ADR-0053 §3, plotlineReveal). Bring the board pane into view; PlotEditor
-  // expands the target node and clears the one-shot once its projection is in.
-  $effect(() => {
-    if ($plotlineReveal) openPlotBoardPane();
-  });
-
-  // A plot node with no per-node reveal yet (card, arc, template; ADR-0085 slice
-  // 1) just needs the board pane in view — no node to expand. Clear the one-shot
-  // immediately since there is nothing further for a projection to clear.
-  $effect(() => {
-    if ($plotBoardRequested) {
-      openPlotBoardPane();
-      plotBoardRequested.set(false);
-    }
-  });
-
   // Noun for the pane's delete button, keyed by document kind (was a
   // scene/lore-only ternary that mislabelled view/prompt/chat panes).
   const PANE_DELETE_NOUN: Record<string, string> = {
@@ -602,14 +585,6 @@
     return isInherited({ source_layer_id: pane.scene?.source_layer_id }, $projectLayerIdStore);
   }
 
-  function openPlotBoardPane() {
-    // Fetch-then-show, like openChatsPane / openAssistantsPane — but through run()
-    // so an HTTP error surfaces in the banner rather than being swallowed. The
-    // pane opens immediately and shows "Loading…" until the projection resolves.
-    void run(() => refreshPlotBoard());
-    workspaceLayout.ensureVisible("plotEditor");
-  }
-
   function sceneEntryHasBody(scene: Scene): boolean {
     const entryDefinition = metadataSchema?.entry_types[scene.entry_type];
     return entryDefinition?.has_body ?? true;
@@ -618,8 +593,8 @@
   // Every kind the reference index can produce, not lore-else-scene (#344).
   // The dispatch lives on the controller with the openers it chooses between;
   // `run` puts an unopenable kind's message in the error banner.
-  function navigateToBacklink(id: string, kind: string) {
-    void run(() => editorPanes.openNodeOfKind(id, kind));
+  function navigateToBacklink(target: NavigateTarget) {
+    void run(() => editorPanes.openNodeOfKind(target.id, target.kind, target.entryType));
   }
 
   function metadataListText(value: unknown) {
@@ -1190,7 +1165,7 @@
             detail.context_strategy,
           )}
         onCustomData={(detail) => schemaPanes?.openForCustomData(detail.entryType, detail.kind, editorPane.id)}
-        onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
+        onNavigate={navigateToBacklink}
         onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, { assistantId: detail.assistantId })}
         onViewSaveState={(state) => editorPanes.setViewSaveState(editorPane.id, state)}
         onAuthoringLayerChange={(layerId) => editorPanes.setEditorPaneAuthoringLayer(editorPane.id, layerId)}

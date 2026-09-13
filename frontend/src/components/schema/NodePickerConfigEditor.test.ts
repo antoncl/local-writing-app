@@ -8,8 +8,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@/lib/test/component";
 
-// The editor lists saved views on mount (picker sources) — mock the client so
-// the network guard stays quiet (#973 pattern, see TagManagerDialog.test.ts).
+// The editor no longer fetches saved views (ADR-0074 Amendment 3 retired the
+// per-input view source), but stub the api client anyway so no transitive path
+// trips the network guard (#973 pattern, see TagManagerDialog.test.ts).
 vi.mock("@/lib/api", () => ({
   api: {
     listViews: vi.fn(async () => ({ entries: [] })),

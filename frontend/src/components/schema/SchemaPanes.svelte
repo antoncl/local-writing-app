@@ -546,26 +546,31 @@
       payload.type === "entity_ref_list"
         ? undefined
         : schemaFieldDefaultForStorage(payload.type, payload.defaultValue);
+    // Every optional attribute is sent, an unset one as an explicit `null`
+    // (#1919): the backend reads a null as a clear — stored as `null` when a
+    // layer above declares the attribute, so the merge does not inherit it
+    // back, and as no key otherwise — and an OMITTED key as "leave the layer's
+    // spelling alone". The editor shows all of these, so it speaks for all.
     const nextField: MetadataFieldDefinition = {
       name: payload.name.trim() || nextFieldId,
       type: payload.type,
       options: hasOptions ? options : [],
-      ...(hasPicker ? { picker_config: payload.pickerConfig } : {}),
-      ...(computedSpec ? { computed: computedSpec } : {}),
+      picker_config: hasPicker ? payload.pickerConfig : null,
+      computed: computedSpec,
       // List item shape (#698): exactly one of the two, enforced by the
       // editor's single "Items are" control (and again by the backend model).
-      ...(payload.type === "list" && payload.itemGroup ? { item_group: payload.itemGroup } : {}),
-      ...(payload.type === "list" && payload.itemType ? { item_type: payload.itemType } : {}),
-      ...(payload.group.trim() ? { group: payload.group.trim() } : {}),
-      // Per-field icon override (chosen in the IconPicker). null/empty = fall
-      // back to the field-type default glyph.
-      ...(payload.icon ? { icon: payload.icon } : {}),
-      // Author help text (#1004) — persisted only when non-empty, same as icon.
-      ...(payload.description.trim() ? { description: payload.description.trim() } : {}),
-      ...(defaultValue !== undefined ? { default: defaultValue } : {}),
+      item_group: payload.type === "list" && payload.itemGroup ? payload.itemGroup : null,
+      item_type: payload.type === "list" && payload.itemType ? payload.itemType : null,
+      group: payload.group.trim() || null,
+      // Per-field icon override (chosen in the IconPicker). null = fall back
+      // to the field-type default glyph.
+      icon: payload.icon || null,
+      // Author help text (#1004).
+      description: payload.description.trim() || null,
+      default: defaultValue ?? null,
       // A derived state (#1911) is a select's alone; the editor emits it only
       // when both halves are chosen, so a half-declared rule persists as none.
-      ...(payload.type === "select" && payload.derived ? { derived: payload.derived } : {}),
+      derived: payload.type === "select" && payload.derived ? payload.derived : null,
       // AI-authorship gate (ADR-0059 §E). Default is true, so persist only the
       // opt-out — an omitted key reads back as true (backend default), keeping
       // the field yaml clean while a deliberate `false` survives.

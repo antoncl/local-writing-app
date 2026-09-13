@@ -20,6 +20,11 @@ from app.models import (
     UpsertMetadataGroupRequest,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.schema_layer_write import (
+    CLEARABLE_GROUP_KEYS,
+    explicit_nulls,
+    spell_clears,
+)
 
 
 class MetadataSchemaGroupsMixin:
@@ -38,7 +43,13 @@ class MetadataSchemaGroupsMixin:
         groups = layer_data.get("groups")
         if not isinstance(groups, dict):
             groups = {}
-        groups[group_id] = request.group.model_dump(exclude_none=True)
+        payload = request.group.model_dump(exclude_none=True)
+        # The group's icon per `spell_clears` (#1919): the groups dialog has no
+        # icon control and omits the key, so an ancestor's icon — or a
+        # hand-authored `icon: null` at this layer — survives a member edit.
+        inherited = self._schema_above_layer(root, layer_path).groups.get(group_id)
+        spell_clears(payload, explicit_nulls(request.group), groups.get(group_id), inherited, CLEARABLE_GROUP_KEYS)
+        groups[group_id] = payload
         layer_data["groups"] = groups
         self._validate_candidate_schema(root, layer_path, layer_data)
         self._write_yaml(layer_path, layer_data)

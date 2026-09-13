@@ -200,6 +200,7 @@
 {:else if input.type === "context_pick"}
   <NodePicker
     config={(input.target ?? {}) as NodePickerConfig}
+    allowSelectors
     value={decodePickerValue(value)}
     label={input.label || input.name || "Context"}
     structure={structure}

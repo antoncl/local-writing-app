@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { tagNodesStore } from "@/lib/stores/tagNodes";
 import { cardEntriesStore } from "@/lib/stores/plotCards";
+import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { setPalette } from "@/lib/utils/colors";
 import { hideLibraryEntry, openProjectHidden } from "@/lib/stores/hiddenLibrary";
 import type { MetadataSchema, PlotlineSummary, PromptEntrySummary, ViewNodeSummary } from "@/lib/types";
@@ -81,16 +82,20 @@ beforeEach(() => {
   localStorage.clear();
   openProjectHidden("nodepicker-test");
   metadataSchemaStore.set(SCHEMA);
-  // The picker lazily fetches saved views when the menu opens (ADR-0074 slice
-  // 5); default it empty so tests that don't exercise views never touch the
-  // network (#973). Tags come from tagNodesStore (no fetch) — empty by default.
+  // The picker reads saved views from the `paneViews` roster (ADR-0074
+  // Amendment 3 — no fetch); reset it per test and seed it where a test
+  // exercises views. Tags come from tagNodesStore (no fetch) — empty by default.
+  // The api.listViews stub stays as a belt so no transitive path touches the
+  // network (#973).
   vi.spyOn(api, "listViews").mockResolvedValue({ entries: [] });
+  paneViews.reset();
   tagNodesStore.set([]);
   cardEntriesStore.set([]);
 });
 afterEach(() => {
   openProjectHidden(null);
   localStorage.clear();
+  paneViews.reset();
   tagNodesStore.set([]);
   cardEntriesStore.set([]);
   vi.restoreAllMocks();
@@ -475,11 +480,13 @@ describe("NodePicker manuscript tree (#1476)", () => {
   });
 });
 
-// ADR-0074 slice 5 (#1487): an author-configured saved view ({view:id}) renders
-// as a tri-state selector — absorb the whole view (one live ref) or drill in and
-// pick members. pickerMembership drops view-refs, so this pins that the runtime
-// picker surfaces them (the invisible-view bug) and expands their members.
-describe("NodePicker saved-view selectors (#1487)", () => {
+// ADR-0074 Amendment 3 (#1939): saved views are offered APP-WIDE, like the
+// By-tag axis — every saved view whose KIND the input accepts appears, with no
+// per-input {view:id} source. So a lore input surfaces a lore view purely from
+// the app-wide listViews() roster; the config below names only {kind:"lore"}.
+// Under the pre-amendment code that same config named no view, so nothing
+// showed — the config shape here is the regression guard for the app-wide gate.
+describe("NodePicker saved-view selectors — app-wide axis (#1487, #1939)", () => {
   const villainsView: ViewNodeSummary = {
     id: "v1",
     title: "Villains",
@@ -487,11 +494,21 @@ describe("NodePicker saved-view selectors (#1487)", () => {
     view_kind: "lore",
     spec: { kind: "lore", expr: { tagged: "villain" } },
   };
+  // A view of another KIND must not appear on a lore input (kind scoping).
+  const scenesView: ViewNodeSummary = {
+    id: "m1",
+    title: "All scenes",
+    entry_type: "view:view",
+    view_kind: "manuscript",
+    spec: { kind: "manuscript", expr: null },
+  };
 
-  function renderWithView(extra: Record<string, unknown> = {}) {
+  function renderLoreInput(extra: Record<string, unknown> = {}) {
     return render(NodePicker, {
       props: {
-        config: { sources: [{ view: "v1" }], multiple: true },
+        // A LORE input — a kind source only, NO {view:id}. The view rides the
+        // app-wide listViews() roster (Amendment 3), not config curation.
+        config: { sources: [{ kind: "lore" }], multiple: true },
         loreEntries: [
           loreEntry("lore_a", "Vex", ["villain"]),
           loreEntry("lore_b", "Mara", ["hero"]),
@@ -509,64 +526,194 @@ describe("NodePicker saved-view selectors (#1487)", () => {
     return document.querySelector(".ctx-menu") as HTMLElement;
   }
 
+  // A lore input has two axes (Lore + Saved views) → the root shows axis rows;
+  // drill into "Saved views" (ADR-0074 7b) and return that panel. If a sole
+  // authored entity_type short-circuited straight into its own panel (#1742),
+  // step Back to the root first.
+  async function openViewsAxis(menu: HTMLElement): Promise<HTMLElement> {
+    const back = within(menu).queryByRole("button", { name: "Back to sources" });
+    if (back) {
+      await fireEvent.click(back);
+      await tick();
+    }
+    await fireEvent.click(within(menu).getByText("Saved views").closest("button")!);
+    await tick();
+    return (await within(menu).findAllByRole("group", { name: "Saved views" }))[0];
+  }
+
   beforeEach(() => {
-    vi.spyOn(api, "listViews").mockResolvedValue({ entries: [villainsView] });
+    // Seed the app-wide roster the picker reads (grouped by view_kind), the way
+    // App.svelte's loadForProject does — not a per-input {view:id} source.
+    paneViews.views = { lore: [villainsView] };
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("renders the configured view as a selector over its live members", async () => {
-    renderWithView();
+  it("surfaces a lore view app-wide (no {view:id} source) over its live members", async () => {
+    renderLoreInput();
     const menu = await openMenu();
-    // The view (dropped by pickerMembership) is surfaced, with its tagged members.
-    expect(await within(menu).findByText("Villains")).toBeInTheDocument();
+    const views = await openViewsAxis(menu);
+    expect(within(views).getByText("Villains")).toBeInTheDocument();
     // Collapsed by default (#1520) — expand the view to reveal its members.
-    await expandGroup(menu, "Villains");
-    expect(within(menu).getByText("Vex")).toBeInTheDocument();
-    expect(within(menu).getByText("Nok")).toBeInTheDocument();
+    await expandGroup(views, "Villains");
+    expect(within(views).getByText("Vex")).toBeInTheDocument();
+    expect(within(views).getByText("Nok")).toBeInTheDocument();
     // "Mara" is not tagged villain — not a member.
-    expect(within(menu).queryByText("Mara")).toBeNull();
+    expect(within(views).queryByText("Mara")).toBeNull();
+  });
+
+  it("does not offer a view whose kind the input rejects (manuscript view on a lore input)", async () => {
+    // A manuscript view is grouped under `manuscript`; a lore input reads only
+    // viewsFor("lore"), so it is never even considered — kind scoping.
+    paneViews.views = { lore: [villainsView], manuscript: [scenesView] };
+    renderLoreInput();
+    const menu = await openMenu();
+    const views = await openViewsAxis(menu);
+    expect(within(views).getByText("Villains")).toBeInTheDocument();
+    expect(within(menu).queryByText("All scenes")).toBeNull();
   });
 
   it("checking the view stores ONE live selector ref (absorb)", async () => {
     const onChange = vi.fn();
-    renderWithView({ onChange });
+    renderLoreInput({ onChange });
     const menu = await openMenu();
-    await fireEvent.click((await within(menu).findByText("Villains")).closest("button")!);
+    const views = await openViewsAxis(menu);
+    await fireEvent.click(within(views).getByText("Villains").closest("button")!);
     await tick();
     const [detail] = onChange.mock.calls[0];
     expect(detail.value).toHaveLength(1);
     expect(detail.value[0]).toMatchObject({ id: "view:v1", kind: "view" });
+    // A kind-only lore input applies no entry-type clip, so the stored selector
+    // is the view's own spec.
     expect(detail.value[0].selector).toEqual(villainsView.spec);
   });
 
   it("drilling in and checking a member stores that explicit member ref", async () => {
     const onChange = vi.fn();
-    renderWithView({ onChange });
+    renderLoreInput({ onChange });
     const menu = await openMenu();
-    await within(menu).findByText("Villains");
-    await expandGroup(menu, "Villains");
-    await fireEvent.click(within(menu).getByText("Vex").closest("button")!);
+    const views = await openViewsAxis(menu);
+    await expandGroup(views, "Villains");
+    await fireEvent.click(within(views).getByText("Vex").closest("button")!);
     await tick();
     const [detail] = onChange.mock.calls[0];
     expect(detail.value).toEqual([expect.objectContaining({ id: "lore_a", kind: "lore" })]);
   });
 
-  it("a search matching no member hides the view entirely (#1488 review)", async () => {
-    renderWithView();
+  it("a search matching no member hides the view (#1488)", async () => {
+    renderLoreInput();
     const menu = await openMenu();
-    await within(menu).findByText("Villains");
     const box = document.querySelector(".ctx-search") as HTMLInputElement;
-    // A term matching neither the view title nor any member.
+    // A term matching neither the view title nor any member → the view is gone.
     await fireEvent.input(box, { target: { value: "zzzznope" } });
     await tick();
     expect(within(menu).queryByText("Villains")).toBeNull();
-    expect(within(menu).queryByText("Vex")).toBeNull();
-    // A member-name search shows the view with just that member.
-    await fireEvent.input(box, { target: { value: "Vex" } });
+    // A member-name search brings the view back ("Villains" is unique to the view).
+    await fireEvent.input(box, { target: { value: "Nok" } });
     await tick();
     expect(within(menu).getByText("Villains")).toBeInTheDocument();
-    expect(within(menu).getByText("Vex")).toBeInTheDocument();
-    expect(within(menu).queryByText("Nok")).toBeNull();
+  });
+
+  it("clips a view's members and stored selector to the input's entry types", async () => {
+    const onChange = vi.fn();
+    render(NodePicker, {
+      props: {
+        // Restrict the lore input to lore:character — a lore:location the view
+        // matches by tag must be clipped out (the tagSpecFor-style intersect).
+        config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }], multiple: true },
+        loreEntries: [
+          loreEntry("lore_a", "Vex", ["villain"]), // lore:character
+          {
+            id: "lore_x",
+            title: "Dread Keep",
+            body: "",
+            entry_type: "lore:location",
+            metadata: { tags: ["villain"], aliases: [] },
+          } as unknown as import("@/lib/types").LoreEntrySummary,
+        ],
+        affordance: "add",
+        onChange,
+      },
+    });
+    const menu = await openMenu();
+    const views = await openViewsAxis(menu);
+    await expandGroup(views, "Villains");
+    expect(within(views).getByText("Vex")).toBeInTheDocument();
+    // The location is tagged villain but the input accepts only characters.
+    expect(within(views).queryByText("Dread Keep")).toBeNull();
+    await fireEvent.click(within(views).getByText("Villains").closest("button")!);
+    await tick();
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value[0].selector).toEqual({
+      kind: "lore",
+      expr: { intersect: [{ tagged: "villain" }, { type: "lore:character" }] },
+    });
+  });
+
+  it("does not offer the read-only system default view", async () => {
+    // The materialized `view_default_lore` (title "Default", system:true) is the
+    // pane's implicit default, not a user selection — ViewSwitcher excludes it and
+    // so must the picker, or it would show a "Default" row absorbing all lore.
+    const systemView: ViewNodeSummary = {
+      id: "sys1",
+      title: "Default",
+      entry_type: "view:view",
+      view_kind: "lore",
+      system: true,
+      spec: { kind: "lore", expr: { descendants_of: "lore:character" } },
+    };
+    paneViews.views = { lore: [villainsView, systemView] };
+    renderLoreInput();
+    const menu = await openMenu();
+    const views = await openViewsAxis(menu);
+    expect(within(views).getByText("Villains")).toBeInTheDocument();
+    expect(within(menu).queryByText("Default")).toBeNull();
+  });
+
+  it("carries a grouped view WHOLE (its handles), not rewritten to the type roster", async () => {
+    // A view with 2+ named handles stores `{groups:[…]}` and NO top-level `expr`.
+    // The clip must NOT rewrite it to `{expr:typeExpr}` (which would inject the
+    // whole type roster); the stored selector is the view's whole spec.
+    const groupedView: ViewNodeSummary = {
+      id: "g1",
+      title: "Cast by allegiance",
+      entry_type: "view:view",
+      view_kind: "lore",
+      spec: {
+        kind: "lore",
+        groups: [
+          { name: "Heroes", expr: { tagged: "hero" } },
+          { name: "Villains", expr: { tagged: "villain" } },
+        ],
+      },
+    };
+    paneViews.views = { lore: [groupedView] };
+    const onChange = vi.fn();
+    render(NodePicker, {
+      props: {
+        // Type-restricted: the buggy path rewrote a grouped view to
+        // `{expr:{type:lore:character}}` and pulled in every character.
+        config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }], multiple: true },
+        loreEntries: [
+          loreEntry("lore_a", "Vex", ["villain"]),
+          loreEntry("lore_b", "Mara", ["hero"]),
+          loreEntry("lore_z", "Bystander", []), // a character in NEITHER handle
+        ],
+        affordance: "add",
+        onChange,
+      },
+    });
+    const menu = await openMenu();
+    const views = await openViewsAxis(menu);
+    await expandGroup(views, "Cast by allegiance");
+    expect(within(views).getByText("Vex")).toBeInTheDocument();
+    expect(within(views).getByText("Mara")).toBeInTheDocument();
+    // A rewritten `{type}` selector would wrongly include this untagged character;
+    // the whole grouped spec resolves only to its handles' members.
+    expect(within(views).queryByText("Bystander")).toBeNull();
+    await fireEvent.click(within(views).getByText("Cast by allegiance").closest("button")!);
+    await tick();
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value[0].selector).toEqual(groupedView.spec);
   });
 });
 

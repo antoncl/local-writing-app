@@ -26,11 +26,10 @@
   // so leaf checkboxes update but parent indeterminate state goes
   // stale. Flat rendering sidesteps that entirely.
 
-  import { onMount, untrack } from "svelte";
-  import type { NodePickerConfig, PromptInputType, ViewNodeSummary } from "@/lib/types";
+  import { untrack } from "svelte";
+  import type { NodePickerConfig, PromptInputType } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { api } from "@/lib/api";
-  import { isViewRef, membershipToSources, pickerMembership } from "@/lib/utils/pickerSources";
+  import { membershipToSources, pickerMembership } from "@/lib/utils/pickerSources";
   import { singleConcreteTarget } from "@/lib/utils/pickerCreate";
   import {
     buildTree,
@@ -93,40 +92,12 @@
   // `membershipToSources`. The full Venn graph ships later, for the designer.
   const membership = $derived(pickerMembership(config));
 
-  // --- Saved views (ADR-0023 "…or use a saved view") -----------------
-  // Besides the degenerate checkbox tree, a picker source can be a saved
-  // view referenced by id ({ view: <id> }). We list the project's views,
-  // keep only those anchored to a kind this editor offers (scene / lore),
-  // and let the author add/remove them as chips. The tree's writeSelection
-  // preserves these refs (they can't be expressed as checkboxes).
-  let availableViews = $state<ViewNodeSummary[]>([]);
-  onMount(async () => {
-    try {
-      const res = await api.listViews();
-      const kindIds = new Set(KINDS.map((k) => k.id as string));
-      availableViews = res.entries.filter((v) => kindIds.has(v.view_kind));
-    } catch {
-      availableViews = [];
-    }
-  });
-
-  // The view-ref sources currently on the config, in stored order.
-  const viewRefs = $derived((config.sources ?? []).filter(isViewRef));
-  const viewRefIds = $derived(new Set(viewRefs.map((r) => r.view)));
-  function viewTitle(id: string): string {
-    return availableViews.find((v) => v.id === id)?.title ?? id;
-  }
-  // Views not yet added — offered in the "add a saved view" dropdown.
-  const addableViews = $derived(availableViews.filter((v) => !viewRefIds.has(v.id)));
-
-  function addViewRef(viewId: string) {
-    if (!viewId || viewRefIds.has(viewId)) return;
-    emit({ sources: [...(config.sources ?? []), { view: viewId }] });
-  }
-  function removeViewRef(viewId: string) {
-    const next = (config.sources ?? []).filter((s) => !(isViewRef(s) && s.view === viewId));
-    emit({ sources: next });
-  }
+  // Saved-view picker sources are retired (ADR-0074 Amendment 3): saved views
+  // are now offered app-wide in the runtime picker (like tags), not curated per
+  // input, so there is no author-time view-ref editor here. Existing `{view:id}`
+  // sources in stored configs stay valid data — `membershipToSources` still
+  // preserves them across a checkbox re-encode — but are no longer authored or
+  // consulted.
 
   // Widget-level collapse state. Local to the component instance — resets
   // when the prompt entry (and therefore this widget) re-mounts. Default
@@ -187,7 +158,6 @@
 
   type Chip =
     | { kind: "entry"; key: string; entryKind: Kind; entryTypeId: string; label: string }
-    | { kind: "viewref"; key: string; viewId: string; label: string }
     | { kind: "preset"; key: string; presetId: "full_outline" | "full_text"; label: string }
     | { kind: "marker"; key: string; label: string };
 
@@ -261,8 +231,12 @@
       nextKinds.add(kind);
     }
     // Re-encode the degenerate membership as `sources` (the stored shape, #78).
-    // Pass the current sources so saved-view refs survive the wholesale
-    // re-encode instead of being dropped on every checkbox toggle (#82).
+    // Pass the current sources so anything the checkbox tree can't re-author
+    // survives the wholesale re-encode instead of being dropped on every toggle:
+    // non-degenerate inline exprs (descendants_of / intersect / difference, #94)
+    // are the load-bearing case now — plus any legacy saved-view refs (#82), inert
+    // since ADR-0074 Amendment 3 but still preserved. Dropping this arg would
+    // silently clobber #94 sources.
     emit({ sources: membershipToSources(Array.from(nextKinds), nextEntryTypes, config.sources) });
   }
 
@@ -355,14 +329,6 @@
         });
       }
     }
-    for (const ref of viewRefs) {
-      out.push({
-        kind: "viewref",
-        key: `view:${ref.view}`,
-        viewId: ref.view,
-        label: viewTitle(ref.view),
-      });
-    }
     for (const preset of PRESETS) {
       if ((config.presets ?? []).includes(preset.id)) {
         out.push({
@@ -381,7 +347,6 @@
 
   const hasAnySource = $derived(
     KINDS.some((k) => renderedByKind[k.id].some((n) => n.state !== "unchecked")) ||
-      viewRefs.length > 0 ||
       (config.presets ?? []).length > 0,
   );
 
@@ -401,9 +366,6 @@
     for (const { id: k, label: kLabel } of KINDS) {
       const n = pickedCountByKind[k];
       if (n > 0) out.push({ key: `count:${k}`, kind: "count", label: `${kLabel} · ${n}` });
-    }
-    for (const ref of viewRefs) {
-      out.push({ key: `view:${ref.view}`, kind: "count", label: viewTitle(ref.view) });
     }
     for (const preset of PRESETS) {
       if ((config.presets ?? []).includes(preset.id)) {
@@ -551,17 +513,6 @@
                 onclick={() => removeEntryChip(chip.entryKind, chip.entryTypeId)}
               >✕</button>
             </span>
-          {:else if chip.kind === "viewref"}
-            <span class="ctx-chip ctx-chip-view">
-              <span class="ctx-chip-view-glyph" aria-hidden="true">◉</span>
-              <span class="ctx-chip-label">{chip.label}</span>
-              <button
-                type="button"
-                class="ctx-chip-remove"
-                aria-label={`Remove saved view ${chip.label}`}
-                onclick={() => removeViewRef(chip.viewId)}
-              >✕</button>
-            </span>
           {:else if chip.kind === "preset"}
             <span class="ctx-chip ctx-chip-preset">
               <span class="ctx-chip-label">{chip.label}</span>
@@ -637,49 +588,6 @@
         {/if}
       {/each}
     </div>
-  </section>
-
-  <section class="ctx-section">
-    <header class="ctx-section-label">…or use a saved view</header>
-    {#if viewRefs.length > 0}
-      <div class="ctx-chips">
-        {#each viewRefs as ref (ref.view)}
-          <span class="ctx-chip ctx-chip-view">
-            <span class="ctx-chip-view-glyph" aria-hidden="true">◉</span>
-            <span class="ctx-chip-label">{viewTitle(ref.view)}</span>
-            {#if !readonly}
-              <button
-                type="button"
-                class="ctx-chip-remove"
-                aria-label={`Remove saved view ${viewTitle(ref.view)}`}
-                onclick={() => removeViewRef(ref.view)}
-              >✕</button>
-            {/if}
-          </span>
-        {/each}
-      </div>
-    {/if}
-    {#if !readonly}
-      {#if addableViews.length > 0}
-        <select
-          class="ctx-view-select"
-          aria-label="Add a saved view"
-          value=""
-          onchange={(e) => {
-            const el = e.currentTarget as HTMLSelectElement;
-            addViewRef(el.value);
-            el.value = "";
-          }}
-        >
-          <option value="" disabled>Add a saved view…</option>
-          {#each addableViews as view (view.id)}
-            <option value={view.id}>{view.title} · {view.view_kind}</option>
-          {/each}
-        </select>
-      {:else if availableViews.length === 0}
-        <p class="ctx-muted">No saved views for scenes or lore yet.</p>
-      {/if}
-    {/if}
   </section>
 
   <!-- ADR-0082 §2 / F1, P8 (round 2): offer to mint a new entry when a typed
@@ -1169,45 +1077,6 @@
 
   .ctx-chip-preset .ctx-chip-remove:hover {
     background: color-mix(in srgb, var(--accent) 12%, transparent);
-  }
-
-  .ctx-chip-view {
-    background: var(--board);
-    border-color: var(--border-strong);
-  }
-
-  .ctx-chip-view-glyph {
-    color: var(--accent);
-    font-size: var(--fs-xs);
-    line-height: 1;
-  }
-
-  .ctx-view-select {
-    appearance: none;
-    -webkit-appearance: none;
-    align-self: flex-start;
-    max-width: 260px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text);
-    font-size: var(--fs-sm);
-    font-family: inherit;
-    padding: 5px 26px 5px 10px;
-    border-radius: 7px;
-    cursor: pointer;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1 L5 5 L9 1' fill='none' stroke='%233f7d68' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-    background-repeat: no-repeat;
-    background-position: right 9px center;
-    background-size: 8px 5px;
-  }
-
-  .ctx-view-select:hover {
-    border-color: var(--border-strong);
-  }
-
-  .ctx-view-select:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
   }
 
   /* --- Tree frame -------------------------------------------------- */

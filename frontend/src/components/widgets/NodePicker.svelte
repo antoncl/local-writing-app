@@ -19,7 +19,7 @@
   import { cardEntriesStore } from "@/lib/stores/plotCards";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
-  import { api } from "@/lib/api";
+  import { paneViews } from "@/lib/stores/paneViews.svelte";
   import type {
     AssistantEntrySummary,
     NodePickerConfig,
@@ -31,7 +31,6 @@
     StructureDocument,
     StructureNode,
     TagEntry,
-    ViewNodeSummary,
     ViewSpec,
   } from "@/lib/types";
   import {
@@ -40,9 +39,10 @@
     stripeForType,
     stripeForNode,
   } from "@/lib/utils/pickerStripes";
-  import { isViewRef, pickerMembership } from "@/lib/utils/pickerSources";
+  import { pickerMembership } from "@/lib/utils/pickerSources";
   import { createTargetFor, hasTitleMatch } from "@/lib/utils/pickerCreate";
   import { buildSelectorRoster, isSelectorRef, membersForSelector } from "@/lib/views/pickerSelectors";
+  import { walkViewExpr } from "@/lib/views/walkViewExpr";
   import {
     flattenSelectors,
     memberCountForRef,
@@ -328,42 +328,64 @@
     buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries, cardEntries }),
   );
 
-  // Saved views: pickerMembership drops view-refs (no `kind`), so read them off
-  // config.sources directly. Lazy-loaded when the menu opens; reloaded on config
-  // change; a cancel token drops a stale response.
-  const configuredViewIds = $derived((config.sources ?? []).filter(isViewRef).map((s) => s.view));
-  let viewSummaries = $state<Map<string, ViewNodeSummary>>(new Map());
-  $effect(() => {
-    const ids = configuredViewIds;
-    if (ids.length === 0) {
-      viewSummaries = new Map();
-      return;
+  // Saved views (ADR-0074 Amendment 3): offered app-wide, like the "By tag" axis
+  // below — for every allowed kind, each saved view of that kind (its members
+  // clipped to the input's entry types where that can be done faithfully). NOT
+  // curated per input (that config source is retired), so a built-in snippet's
+  // picker offers views without naming project-specific view ids. Read from the
+  // `paneViews` roster (loaded app-wide at project open, refreshed on view CRUD)
+  // — no fetch, exactly as the By-tag axis reads the tag store; a view is grouped
+  // under its own `view_kind`, and system default views are excluded like the
+  // ViewSwitcher does.
+  //
+  // The clip is `{intersect: [view expr, type constraint]}` — the shape
+  // `tagSpecFor` uses — but ONLY for a flat single-`expr` view, where that is
+  // exactly "the view's members ∩ those types". A view with named `groups` (no
+  // top-level `expr` to intersect), a null `expr`, or a relational/row op
+  // (`nest`/`field_of`/`orphans_of`/`var`) is carried WHOLE and scoped by kind
+  // only: there is no single spec for "(grouped or row result) ∩ type", and
+  // rewriting one would drop handles or diverge from set intersection. The stored
+  // spec drives invocation-time expansion, so whatever clip applies lives in it.
+  const NON_FLAT_EXPR_KEYS = ["nest", "orphans_nest", "field_of", "orphans_of", "var"] as const;
+  function exprIsFlat(expr: ViewSpec["expr"]): boolean {
+    let flat = true;
+    walkViewExpr(expr, (e) => {
+      if (NON_FLAT_EXPR_KEYS.some((k) => (e as Record<string, unknown>)[k] != null)) flat = false;
+    });
+    return flat;
+  }
+  function viewSelectorSpec(kind: string, spec: ViewSpec): ViewSpec {
+    const fqns = membership.entryTypes[kind] ?? [];
+    const typeExpr =
+      fqns.length === 1
+        ? { type: fqns[0] }
+        : fqns.length > 1
+          ? { union: fqns.map((f) => ({ type: f })) }
+          : null;
+    if (typeExpr && spec.expr && !spec.groups?.length && exprIsFlat(spec.expr)) {
+      return { ...spec, kind, expr: { intersect: [spec.expr, typeExpr] } } as ViewSpec;
     }
-    // Lazy: only fetch once the menu is open (a closed picker never touches the
-    // network), and reload when the configured sources change.
-    if (!open) return;
-    let cancelled = false;
-    const wanted = new Set(ids);
-    api
-      .listViews()
-      .then((list) => {
-        if (cancelled) return;
-        const map = new Map<string, ViewNodeSummary>();
-        for (const v of list.entries) if (wanted.has(v.id)) map.set(v.id, v);
-        viewSummaries = map;
-      })
-      .catch(() => {}); // a fetch failure just leaves the section empty
-    return () => {
-      cancelled = true;
-    };
-  });
+    return { ...spec, kind } as ViewSpec;
+  }
   const viewGroups = $derived.by<SelectorGroup[]>(() => {
     const groups: SelectorGroup[] = [];
-    for (const id of configuredViewIds) {
-      const summary = viewSummaries.get(id);
-      if (!summary?.spec) continue;
-      const ref: NodePickerRef = { id: `view:${id}`, kind: "view", title: summary.title, selector: summary.spec };
-      groups.push({ ref, members: membersForSelector(ref, selectorRoster) });
+    for (const kind of allowedKinds) {
+      for (const summary of paneViews.viewsFor(kind)) {
+        // Skip the read-only system default view (ADR-0036 §5) — it's the pane's
+        // implicit "everything" default, not a user selection, and ViewSwitcher
+        // excludes it the same way (`!v.system`). No spec ⇒ nothing to resolve.
+        if (!summary.spec || summary.system) continue;
+        const ref: NodePickerRef = {
+          id: `view:${summary.id}`,
+          kind: "view",
+          title: summary.title,
+          selector: viewSelectorSpec(kind, summary.spec),
+        };
+        const members = membersForSelector(ref, selectorRoster);
+        // Skip a view that resolves to nothing — an empty, pickable row is noise.
+        // Mirrors tagGroups (and drops a null-`expr` view: the empty set).
+        if (members.length > 0) groups.push({ ref, members });
+      }
     }
     return groups;
   });
@@ -926,7 +948,10 @@
     return groups;
   });
 
-  const hasAnyConfigured = $derived(allowedKinds.length > 0 || configuredViewIds.length > 0);
+  // Views now ride `allowedKinds` (a view is offered only for a kind the input
+  // accepts), so there is no separate view-configured term — a config with no
+  // kinds offers nothing, views included.
+  const hasAnyConfigured = $derived(allowedKinds.length > 0);
   const hasAnyResults = $derived(
     visibleGroups.length > 0 ||
       manuscriptRows.length > 0 ||

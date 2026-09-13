@@ -16,8 +16,9 @@ howto.
 - A `context_pick` input type alongside `text`, `long_text`, `select`,
   `entity_ref`, etc. in the prompt's Inputs editor.
 - **Constraint at the source** — the author checks which kinds (Scenes, Lore,
-  Plot) and which sub-types, plus any saved views, and the runtime picker offers
-  exactly that.
+  Plot) and which sub-types, and the runtime picker offers exactly that — plus
+  **every tag and every saved view of an allowed kind**, app-wide (you don't
+  list those per input).
 - **Live refs, not snapshots.** Checking a *container* — the whole manuscript, an
   act, a chapter, a plotline, a tag, or a saved view — stores **one** ref that
   expands to its **current** members at invocation. Add a scene to that chapter
@@ -47,7 +48,9 @@ relevant" → `context_pick`.
    - Check the **kinds** — **Scenes**, **Lore**, **Plot** — and, under each,
      optionally restrict to specific sub-types (Lore → only Character + Location).
      Leave a kind's sub-types all-checked to allow any.
-   - Add **saved views** as sources if the picker should offer them.
+   - You don't list **tags** or **saved views** here — the picker offers every
+     tag and every saved view of an allowed kind app-wide, scoped to the kinds
+     and sub-types you checked (ADR-0074 Amendment 3).
    - **Multiple** — on for "pick several" (default); off for single-pick.
    - **Allow target marking** — only when scenes are pickable; see
      [Scene binding](#scene-binding-target-marking).
@@ -62,9 +65,11 @@ relevant" → `context_pick`.
 The picker is a **drill-in popover**:
 
 - **Root** — a search box and a list of **axes** with counts: Manuscript, Lore,
-  Plot, By tag, Saved views (only the ones the config enables). Tap an axis to
-  drill into it. When a config exposes exactly **one** axis, the picker skips the
-  list and opens straight into that panel.
+  Plot, By tag, Saved views. Manuscript/Lore/Plot show when the config allows that
+  kind; **By tag** and **Saved views** are app-wide — every tag and every saved
+  view of an allowed kind, clipped to your checked sub-types. An axis with nothing
+  behind it is dropped. Tap an axis to drill into it. When a config exposes exactly
+  **one** axis, the picker skips the list and opens straight into that panel.
 - **A panel** — a ← back header, the axis name, and that axis's **tri-state tree**.
   Containers open **collapsed**, so a panel leads with its top level (acts, tags,
   plotlines…) instead of a wall of leaves; the manuscript root stays open so its
@@ -165,10 +170,11 @@ The wire shape of a `context_pick` input in the prompt's YAML:
   label: "Reference scenes"
   required: true
   target:
-    sources:                          # what's pickable — at least one
+    sources:                          # what's pickable — at least one kind
       - { kind: manuscript }          # scenes + their containers
       - { kind: lore, expr: { type: "lore:character" } }
-      - { view: "arc-tracker" }       # a saved view, by id
+    # Tags and saved views are NOT listed here — the picker offers every tag and
+    # every saved view of an allowed kind app-wide (ADR-0074 Amendment 3).
     multiple: true                    # default true
     allow_target_marking: true        # default false; only when scenes pickable
 ```

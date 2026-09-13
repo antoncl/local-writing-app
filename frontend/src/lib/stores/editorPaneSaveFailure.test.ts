@@ -275,7 +275,7 @@ describe("autosaveOnce — through the real controller (#457)", () => {
   function injectMergeHandle(result: string | null): ReturnType<typeof vi.fn> {
     const tryMergeProse = vi.fn(async () => result);
     editorPanes.editorPaneComponents = {
-      pane_1: { tryMergeProse, reloadScene: vi.fn(), highlightEmbeddedTodo: vi.fn() },
+      pane_1: { tryMergeProse, reloadScene: vi.fn(), highlightEmbeddedTodo: vi.fn(), revealSearchMatch: vi.fn() },
     };
     return tryMergeProse;
   }

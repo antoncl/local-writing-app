@@ -33,6 +33,7 @@
 import { api } from "@/lib/api";
 import type { ReplaceHitRef, SearchHit } from "@/lib/types";
 import { orderKinds } from "@/lib/kindLabels";
+import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
 
 // The number of hits the pane renders up front and reveals per batch — an
 // unbounded render of thousands of NodeRows is what froze the tab (#1868).
@@ -42,7 +43,9 @@ export const REVEAL_BATCH = 100;
 export type SearchPaneDeps = {
   isDirtyOpen: (nodeId: string, kind: string, entryType?: string) => boolean;
   reconcile: (nodeId: string, kind: string, entryType?: string) => Promise<void>;
-  confirm: (n: number, nodes: number, query: string) => Promise<boolean>;
+  // `replacement` is what the hits become — empty means they are deleted,
+  // and the modal says so (#1926).
+  confirm: (n: number, nodes: number, query: string, replacement: string) => Promise<boolean>;
 };
 
 // A hit's replace eligibility (§4/§5). `todo` and `metadata`/`inherited`/`dirty`
@@ -121,6 +124,23 @@ export class SearchPaneController {
   }
 
   eligibleHits = $derived(this.hits.filter((hit) => this.eligibility(hit) === "ok"));
+
+  // An empty replacement deletes the matches — the backend's contract
+  // (ADR-0085 §4); the pane names it, and confirms it, as a deletion (#1926).
+  deletes = $derived(this.replacement === "");
+
+  // What a hit's open carries into the editor (#1925): the query it was
+  // found with and which match in its node it is — its index among the
+  // node's body hits, so the editor can find it by counting rather than by
+  // a markdown offset. Null for a hit with no body range (a TODO or a
+  // metadata hit), which only opens the node.
+  revealFor(hit: SearchHit): SearchReveal | null {
+    if (hit.todo_id || hit.field !== "body") return null;
+    const ordinal = this.hits.filter(
+      (other) => other.file_id === hit.file_id && other.field === "body" && !other.todo_id && other.start < hit.start,
+    ).length;
+    return { query: this.lastQuery, matchCase: this.lastMatchCase, wholeWord: this.lastWholeWord, ordinal };
+  }
 
   setMatchCase(on: boolean): void {
     this.matchCase = on;
@@ -251,15 +271,19 @@ export class SearchPaneController {
     }
   }
 
-  replaceOne(hit: SearchHit): Promise<void> {
-    return this.replace([hit]);
+  // A deletion is always confirmed, even for one hit: the button sits on the
+  // row the writer clicks to open the hit, and there is no undo for a node
+  // that is not open (#1926).
+  async replaceOne(hit: SearchHit): Promise<void> {
+    if (this.deletes && !(await this.deps.confirm(1, 1, this.lastQuery, this.replacement))) return;
+    await this.replace([hit]);
   }
 
   async replaceAll(): Promise<void> {
     const hits = this.eligibleHits;
-    if (hits.length > 1) {
+    if (hits.length > 1 || this.deletes) {
       const nodes = new Set(hits.map((hit) => hit.file_id)).size;
-      if (!(await this.deps.confirm(hits.length, nodes, this.lastQuery))) return;
+      if (!(await this.deps.confirm(hits.length, nodes, this.lastQuery, this.replacement))) return;
     }
     await this.replace(hits);
   }

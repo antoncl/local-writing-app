@@ -38,6 +38,7 @@
     REBUILD_META,
     implicitContextIds,
   } from "@/lib/editor-core/implicitContextHighlight";
+  import { SearchMatchHighlight, type SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import {
     InteriorityReveal,
     interiorityHasBeats,
@@ -347,11 +348,13 @@
     syncEditorEmpty();
     updateSelectionMenu();
     publishImplicitContext();
+    applyPendingReveal();
   }
 
   export function clearEditor(): void {
     editor?.commands.clearContent(false);
     loadedSceneId = null;
+    pendingReveal = null;
     liveWordCount = 0;
     syncEditorEmpty();
   }
@@ -382,6 +385,24 @@
     if (!merged) return null;
     if (merged.tr) editor.view.dispatch(merged.tr);
     return editorHtmlToSceneMarkdown(editor.getHTML());
+  }
+
+  // A search hit's reveal (#1925), applied once the document it targets is
+  // loaded: the hit's pane may have just opened, and `loadScene` finishes
+  // after the opener's tick. The editor marks the matches itself
+  // (searchMatchHighlight.ts) — no markdown offset crosses this seam.
+  let pendingReveal: SearchReveal | null = null;
+
+  export function revealSearchMatch(reveal: SearchReveal): void {
+    pendingReveal = reveal;
+    if (loadedSceneId === scene?.id) applyPendingReveal();
+  }
+
+  function applyPendingReveal(): void {
+    if (!pendingReveal || !editor) return;
+    const reveal = pendingReveal;
+    pendingReveal = null;
+    editor.commands.revealSearchMatch(reveal);
   }
 
   export function highlightEmbeddedTodo(todoId: string): void {
@@ -1072,6 +1093,7 @@
         TodoAnchor,
         ...tableExtensions,
         ImplicitContextHighlight.configure({ matcher: implicitContextMatcher }),
+        SearchMatchHighlight,
         InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],
       content: "",

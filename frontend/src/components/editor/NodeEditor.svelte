@@ -25,6 +25,7 @@
   import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
   import CodeBodyView from "@/components/editor/body/CodeBodyView.svelte";
   import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
+  import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import { INTERIORITY_EYE_SVG } from "@/lib/editor-core/interiorityReveal";
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
   import ViewBodyView from "@/components/editor/body/ViewBodyView.svelte";
@@ -156,6 +157,7 @@
 
 
   let proseBodyView: ProseBodyView | null = $state(null);
+  let codeBodyView: CodeBodyView | null = $state(null);
   let chatBodyView: ChatBodyView | null = $state(null);
   let viewBodyView: ViewBodyView | null = $state(null);
   let loadedSceneId: string | null = $state(null);
@@ -580,6 +582,12 @@
 
   export function highlightEmbeddedTodo(todoId: string) {
     proseBodyView?.highlightEmbeddedTodo(todoId);
+  }
+
+  // A search hit's reveal (#1925) goes to whichever body the shape mounts.
+  export function revealSearchMatch(reveal: SearchReveal) {
+    if (rawBodyMode) codeBodyView?.revealSearchMatch(reveal);
+    else proseBodyView?.revealSearchMatch(reveal);
   }
 
   // Rung 2 of the reconcile ladder (ADR-0077): forward the prose three-way merge
@@ -1057,6 +1065,7 @@
     {/if}
     <div class="code-body-host" class:hidden={reviewing}>
       <CodeBodyView
+        bind:this={codeBodyView}
         bind:rawBody
         bind:entryInputDrafts={promptDrafts.drafts}
         {hostPaneId}

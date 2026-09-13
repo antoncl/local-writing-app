@@ -1224,7 +1224,7 @@
 
   {#snippet searchBody()}
     <div class="pane-content">
-      <Search {run} onOpenHit={(hit) => todoActions.openSearchHit(hit)} />
+      <Search {run} onOpenHit={(hit, reveal) => todoActions.openSearchHit(hit, reveal)} />
     </div>
   {/snippet}
 

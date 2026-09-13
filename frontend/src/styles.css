@@ -882,6 +882,19 @@ button.row-action-add.active {
   background: color-mix(in oklab, var(--star) 28%, transparent);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--star) 16%, transparent);
 }
+/* Search-match reveal (#1925): opening a search hit marks the query's
+   matches in the editor — a TipTap decoration in prose
+   (searchMatchHighlight.ts), a CodeMirror decoration in a code body
+   (codeSearchReveal.ts), one pair of classes. The current match is the
+   one the hit named. */
+.search-match {
+  background: color-mix(in oklab, var(--warn) 18%, transparent);
+  border-radius: 2px;
+}
+.search-match-current {
+  background: color-mix(in oklab, var(--warn) 38%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--warn) 22%, transparent);
+}
 /* ProseBodyView editor-overlay UI (.selection-toolbar/.slash-menu/.table-toolbar/
    .ai-inline-toolbar) co-located into ProseBodyView.svelte (#14). */
 

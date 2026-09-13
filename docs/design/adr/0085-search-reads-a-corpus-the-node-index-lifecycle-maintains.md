@@ -161,3 +161,7 @@ The writer renames a city. She opens Search and types "Aetheria"; by the third l
 - The plot family's read primitives, to pair with the four save primitives in §4's dispatch.
 - `_search_open_todos`: whether the embedded-TODO scan needs anything from front matter that the corpus does not hold, or only the body it does.
 - How the lore pane reconciles after a server write today (`editorPaneAncestry.ts`), so the generic entry point in §5 wraps it rather than duplicating it.
+
+## Amendment 1 — Opening a hit lands on the match (2026-09-13)
+
+The anti-goal "not a jump-to-offset in the editor" held that clicking a hit opens the node and nothing more, because positioning the editor at a markdown offset needs a markdown-offset ↔ ProseMirror-position seam that does not exist. #1925 lands on the match without that seam: the pane sends the query (with the options it was found with) and the hit's ordinal among its node's body hits, and the editor finds the matches itself — `SearchMatchHighlight` (`frontend/src/lib/editor-core/searchMatchHighlight.ts`) scans the live document with the one pattern the backend and the pane build (`compileSearchPattern`), marks every match and selects the ordinal-th; a code body's CodeMirror editor does the same (`codeSearchReveal.ts`). No offset crosses the pane boundary: `start`/`end` stay what §2 made them, the replace anchor. The seam remains unbuilt and undecided.

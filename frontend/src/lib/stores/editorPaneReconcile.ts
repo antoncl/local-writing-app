@@ -86,9 +86,19 @@ function findOpenPane(host: PaneReconcileHost, docType: string, nodeId: string):
  *  "unsaved edits in the editor — save first" and exclude it from a replace.
  *  False for a node with no open pane, or a kind/entry_type with no pane at all. */
 export function isNodeOpenDirty(host: PaneReconcileHost, nodeId: string, kind: string, entryType?: string): boolean {
+  return findOpenPaneForNode(host, nodeId, kind, entryType)?.dirty ?? false;
+}
+
+/** The open pane showing `nodeId`, by the DocumentRef type its kind claims —
+ *  undefined for no pane, or a kind/entry_type with no pane at all. */
+export function findOpenPaneForNode(
+  host: PaneReconcileHost,
+  nodeId: string,
+  kind: string,
+  entryType?: string,
+): EditorPaneState | undefined {
   const docType = paneDocType(kind, entryType);
-  if (!docType) return false;
-  return findOpenPane(host, docType, nodeId)?.dirty ?? false;
+  return docType ? findOpenPane(host, docType, nodeId) : undefined;
 }
 
 // Re-baseline a research/plot-family pane from a fresh fetch — the same

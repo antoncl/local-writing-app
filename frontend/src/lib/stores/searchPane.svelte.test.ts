@@ -299,13 +299,14 @@ describe("SearchPaneController.replaceAll (ADR-0085 §4)", () => {
     const deps = fakeDeps({ confirm: vi.fn(async () => true) });
     const c = new SearchPaneController(run, deps);
     c.lastQuery = "Aetheria";
+    c.replacement = "Aetherion";
     c.hits = [hit("a"), hit("b")];
     vi.mocked(api.search).mockResolvedValue({ query: "Aetheria", hits: [] });
     vi.mocked(api.replace).mockResolvedValue({ outcomes: [], replaced_nodes: 0 });
 
     await c.replaceAll();
 
-    expect(deps.confirm).toHaveBeenCalledWith(2, 2, "Aetheria");
+    expect(deps.confirm).toHaveBeenCalledWith(2, 2, "Aetheria", "Aetherion");
     expect(api.replace).toHaveBeenCalled();
   });
 
@@ -319,9 +320,10 @@ describe("SearchPaneController.replaceAll (ADR-0085 §4)", () => {
     expect(api.replace).not.toHaveBeenCalled();
   });
 
-  it("does not confirm for a single eligible hit", async () => {
+  it("does not confirm a single-hit replace", async () => {
     const deps = fakeDeps();
     const c = new SearchPaneController(run, deps);
+    c.replacement = "Aetherion";
     c.hits = [hit("a")];
     vi.mocked(api.search).mockResolvedValue({ query: "", hits: [] });
     vi.mocked(api.replace).mockResolvedValue({ outcomes: [], replaced_nodes: 0 });
@@ -350,6 +352,79 @@ describe("SearchPaneController.replaceAll (ADR-0085 §4)", () => {
     expect(api.replace).toHaveBeenCalledWith(
       expect.objectContaining({ hits: [expect.objectContaining({ file_id: "ok1" })] }),
     );
+  });
+});
+
+// An empty replacement deletes the matches (ADR-0085 §4): the controller
+// confirms that — as a deletion — for one hit too, and never posts a
+// declined one.
+describe("SearchPaneController — an empty replacement is a deletion (#1926)", () => {
+  it("confirms Replace all for a single hit when the replacement is empty", async () => {
+    const deps = fakeDeps();
+    const c = new SearchPaneController(run, deps);
+    c.lastQuery = "Aetheria";
+    c.hits = [hit("a")];
+    vi.mocked(api.search).mockResolvedValue({ query: "Aetheria", hits: [] });
+    vi.mocked(api.replace).mockResolvedValue({ outcomes: [], replaced_nodes: 0 });
+
+    await c.replaceAll();
+
+    expect(deps.confirm).toHaveBeenCalledWith(1, 1, "Aetheria", "");
+    expect(api.replace).toHaveBeenCalled();
+  });
+
+  it("confirms a single hit's Replace when the replacement is empty, and posts nothing when declined", async () => {
+    const deps = fakeDeps({ confirm: vi.fn(async () => false) });
+    const c = new SearchPaneController(run, deps);
+    c.lastQuery = "Aetheria";
+    c.hits = [hit("a")];
+
+    await c.replaceOne(hit("a"));
+
+    expect(deps.confirm).toHaveBeenCalledWith(1, 1, "Aetheria", "");
+    expect(api.replace).not.toHaveBeenCalled();
+  });
+
+  it("does not confirm a single hit's Replace with a replacement", async () => {
+    const deps = fakeDeps();
+    const c = new SearchPaneController(run, deps);
+    c.replacement = "Aetherion";
+    c.hits = [hit("a")];
+    vi.mocked(api.search).mockResolvedValue({ query: "", hits: [] });
+    vi.mocked(api.replace).mockResolvedValue({ outcomes: [], replaced_nodes: 0 });
+
+    await c.replaceOne(hit("a"));
+
+    expect(deps.confirm).not.toHaveBeenCalled();
+    expect(api.replace).toHaveBeenCalled();
+  });
+});
+
+// What a hit's open carries into the editor (#1925): the query it was found
+// with, and which match in its node it is.
+describe("SearchPaneController.revealFor (#1925)", () => {
+  it("counts the hit among its node's body hits, in body order", () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    c.lastQuery = "Aetheria";
+    c.lastMatchCase = true;
+    c.lastWholeWord = false;
+    c.hits = [
+      hit("a", { start: 40, end: 48 }),
+      hit("b", { start: 5, end: 13 }),
+      hit("a", { start: 10, end: 18 }),
+      hit("a", { start: 0, end: 0, todo_id: "t1" }),
+      hit("a", { field: "metadata", start: 0, end: 0 }),
+    ];
+
+    expect(c.revealFor(c.hits[0])).toEqual({ query: "Aetheria", matchCase: true, wholeWord: false, ordinal: 1 });
+    expect(c.revealFor(c.hits[2])).toEqual({ query: "Aetheria", matchCase: true, wholeWord: false, ordinal: 0 });
+    expect(c.revealFor(c.hits[1])).toEqual({ query: "Aetheria", matchCase: true, wholeWord: false, ordinal: 0 });
+  });
+
+  it("is null for a hit with no body range — a TODO or a metadata hit", () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    expect(c.revealFor(hit("a", { todo_id: "t1" }))).toBeNull();
+    expect(c.revealFor(hit("a", { field: "metadata" }))).toBeNull();
   });
 });
 

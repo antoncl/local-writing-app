@@ -10,6 +10,8 @@
   // Theme-aware syntax colors that override CodeMirror's light-oriented default
   // (built once at module load; see codeHighlightStyle.ts for the why).
   import { codeSyntaxHighlighting } from "./codeHighlightStyle";
+  import { revealSearchMatch as revealInView, searchReveal } from "./codeSearchReveal";
+  import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
 
   let {
     value = $bindable(),
@@ -53,7 +55,7 @@
     ro ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [];
 
   onMount(() => {
-    const extensions = [basicSetup, codeSyntaxHighlighting, lintGutter()];
+    const extensions = [basicSetup, codeSyntaxHighlighting, lintGutter(), searchReveal];
     if (language === "jinja2") {
       const jinjaLanguage = StreamLanguage.define(jinja2);
       extensions.push(jinjaLanguage);
@@ -142,6 +144,11 @@
       });
     }
     editor.dispatch(setDiagnostics(editor.state, items));
+  }
+
+  /** Mark the query's matches and select the `ordinal`-th (#1925). */
+  export function revealSearchMatch(reveal: SearchReveal): void {
+    if (editor) revealInView(editor, reveal);
   }
 </script>
 

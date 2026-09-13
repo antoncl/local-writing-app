@@ -122,7 +122,14 @@
   import { TreeAddMenu } from "@/components/widgets/treeAddMenu.svelte";
   import { anchoredPopover } from "@/lib/actions/anchoredPopover";
   import { CollapseGuard } from "@/components/widgets/treeCollapseGuard";
-  import { evaluateView, filterGroups, type EvalBindings, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
+  import {
+    evaluateView,
+    filterGroups,
+    materializeLayerField,
+    type EvalBindings,
+    type ViewGroup,
+    type ViewResult,
+  } from "@/lib/views/evaluateView";
   import { leafGroup, nodeSet } from "@/lib/views/viewResult";
   import { buildBindings } from "@/lib/views/viewParams";
   import { repairSpecCycles } from "@/lib/views/cycleCheck";
@@ -273,7 +280,7 @@
   // or the pre-resolved `result`, or an empty set when neither is wired.
   const computedResult = $derived.by((): ViewResult<T> =>
     view && safeSpec
-      ? evaluateView(safeSpec, view.universe as T[], {
+      ? evaluateView(safeSpec, materializeLayerField(view.universe as T[]), {
           schema: view.schema,
           bindings,
           referenceIndex: view.referenceIndex,

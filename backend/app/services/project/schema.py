@@ -166,7 +166,32 @@ class MetadataSchemaMixin:
             layer_data = schema_cache.layer_parse(path, fp, self._read_metadata_schema_layer)
             self._merge_metadata_schema_layer(data, deepcopy(layer_data))
         data = self._resolve_metadata_schema_inheritance(data)
+        self._fill_layer_field_options(data, paths)
         return MetadataSchema.model_validate(data)
+
+    def _fill_layer_field_options(self, data: dict, paths: list[Path]) -> None:
+        """Fill the built-in `layer` field's `select` options with THIS chain's
+        layers, in rank order (#1928).
+
+        `layer`'s options can't be static — they are the open project's own
+        inheritance chain — so the flat catalog def ships an empty list and this
+        fills it on every rebuild, keyed (like the whole schema) by the chain.
+        The layer set matches what the node index stamps `source_layer_id` from
+        (`references.py`: `include_machine`/`include_library` both True), so every
+        value a node can carry has a bucket. `collect_layers` is path-based and
+        reads no schema, so calling it here creates no cycle (it is the same walk
+        `read_metadata_schema_layers` already runs). `paths` is empty for the
+        machine/built-in schema (no project) — nothing to fill, so leave the
+        catalog def's empty options as-is.
+        """
+        field = data.get("fields", {}).get("layer")
+        if field is None or not paths:
+            return
+        root = paths[-1].parent
+        field["options"] = [
+            {"value": layer.id, "label": layer.label}
+            for layer in self.collect_layers(root, include_machine=True, include_library=True)
+        ]
 
     def _schema_as_authored(
         self, root: Path | None = None, *, authoring_layer: Path | None = None

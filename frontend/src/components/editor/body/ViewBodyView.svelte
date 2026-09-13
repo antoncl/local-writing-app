@@ -35,7 +35,13 @@
   import { canonicalIdIn, tagById, tagTitleById } from "@/lib/stores/tagNodes";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
-  import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
+  import {
+    evaluateView,
+    materializeLayerField,
+    nestWarnings,
+    type EvalNode,
+    type EvalBindings,
+  } from "@/lib/views/evaluateView";
   import { viewUsesTagIds } from "@/lib/views/groupBy";
   import { chatSummariesToEvalNodes } from "@/lib/views/chatNodes";
   import { liftFieldByKey, liftFieldsForKind } from "@/lib/views/computedFields";
@@ -350,7 +356,7 @@
   // `$tagTitleById`/`$tagById` itself.
   const usesTagIds = $derived(viewUsesTagIds(spec, schema));
   let preview = $derived(
-    evaluateView(spec, universe, {
+    evaluateView(spec, materializeLayerField(universe), {
       schema,
       referenceIndex,
       bindings: previewBindings,
@@ -429,6 +435,15 @@
   function computedFieldOptions(kinds: Iterable<string>): FieldOption[] {
     const out: FieldOption[] = [];
     const seen = new Set<string>();
+    // #1928: `layer` is UNIVERSAL — not tied to any kind or entry_type (it's the
+    // node's own resolved inheritance layer) — so it's added once here rather
+    // than per-kind, straight from the resolved schema (single-sourcing its
+    // label/options from the backend, like any other computed select). Not
+    // tracked in `seen`: nothing below can re-add it (a lift field keyed `layer`
+    // is already skipped by the `schema?.fields?.[cf.key]` guard in the loop).
+    if (schema?.fields?.layer) {
+      out.push({ key: "layer", name: schema.fields.layer.name, def: schema.fields.layer });
+    }
     for (const k of kinds) {
       if (!seen.has("parent") && !schema?.fields?.parent && STRUCTURAL_KINDS.has(k)) {
         out.push({ key: "parent", name: "Parent", def: parentFieldDef(k) });
@@ -445,6 +460,7 @@
   // The descriptor for a computed field key on a kind (the `fieldByKey` counterpart
   // of `computedFieldOptions`): structural `parent` or a registered lift field.
   function computedFieldByKey(k: string, key: string): MetadataFieldDefinition | null {
+    if (key === "layer" && schema?.fields?.layer) return schema.fields.layer;
     if (key === "parent" && STRUCTURAL_KINDS.has(k)) return parentFieldDef(k);
     return liftFieldByKey(k, key);
   }

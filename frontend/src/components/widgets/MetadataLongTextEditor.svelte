@@ -5,7 +5,6 @@
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
-  import { openImplicitContextEntry } from "@/lib/editor-core/implicitContextOpen";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import { tableExtensions } from "@/lib/editor-core/alignedTable";
@@ -145,7 +144,7 @@
       extensions: [
         StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
         ...tableExtensions,
-        ImplicitContextHighlight.configure({ matcher, openEntry: openImplicitContextEntry }),
+        ImplicitContextHighlight.configure({ matcher }),
       ],
       content: "",
       editorProps: {

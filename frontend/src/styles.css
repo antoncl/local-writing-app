@@ -1198,7 +1198,8 @@ button.row-action-add.active {
 
 .implicit-context-popup {
   position: fixed;
-  z-index: var(--z-dropdown);
+  /* Body-portaled by anchoredPopover: must clear the modal layer like every other portaled popover. */
+  z-index: 10000;
   max-width: 320px;
   padding: 8px 10px;
   background: var(--surface);
@@ -1212,7 +1213,7 @@ button.row-action-add.active {
 
 .implicit-context-popup-title {
   display: block;
-  font-weight: 600;
+  font-weight: var(--w-semibold);
   color: var(--text);
 }
 
@@ -1225,7 +1226,7 @@ button.row-action-add.active {
   border: none;
   padding: 0;
   font: inherit;
-  font-weight: 600;
+  font-weight: var(--w-semibold);
   color: var(--accent);
   cursor: pointer;
   text-align: left;

@@ -32,14 +32,16 @@ export function groupByHasRefLevel(
 // assistant view's TAG param filter, `field: {key: assistant_tags, op:
 // overlap, value: {var: TAG}}`, is exactly this shape; ADR-0082 §5 / #1805 X1
 // canonicalises its operand/values the same way the ref-group bucket does),
-// OR a `nest`/`orphans_nest` joined `by: "ref"` on a node-set field (#1813 —
-// `buildNestAdjacency` follows `canonicalId` for such a join, so a view using
-// one needs the same subscription). Callers gate BOTH the reactive tag-roster
-// `resolveTitle` AND `canonicalId` readers on this (widened from the
-// group_by-only F7 gate): a view that touches no tag ids at all never
-// subscribes to the tag store, but a ref group_by, a `tagged:` filter, a
-// ref-field `field` predicate, or a ref-joined nest — with no grouping at
-// all — all do.
+// OR a `nest`/`orphans_nest` joined on a node-set field — `by: "ref"` (#1813 —
+// `buildNestAdjacency` follows `canonicalId` for such a join) OR `by: "title"`
+// (#1933 — a title-join over a tag field resolves each tag id to its title via
+// `resolveTitle` before matching it against node titles). Both readers are gated
+// on this flag, so a view using either join needs the same subscription. Callers
+// gate BOTH the reactive tag-roster `resolveTitle` AND `canonicalId` readers on
+// this (widened from the group_by-only F7 gate): a view that touches no tag ids
+// at all never subscribes to the tag store, but a ref group_by, a `tagged:`
+// filter, a ref-field `field` predicate, or a ref/title-joined nest over a tag
+// field — with no grouping at all — all do.
 export function viewUsesTagIds(
   spec: Pick<ViewSpec, "group_by" | "expr"> | null | undefined,
   schema: MetadataSchema | null | undefined,
@@ -54,7 +56,12 @@ export function viewUsesTagIds(
     if (e.tagged != null) found = true;
     if (e.field != null && isNodeSetField(schema?.fields?.[e.field.key])) found = true;
     const nest = e.nest ?? e.orphans_nest;
-    if (nest && nest.match.by === "ref" && isNodeSetField(schema?.fields?.[nest.match.field])) found = true;
+    if (
+      nest &&
+      (nest.match.by === "ref" || nest.match.by === "title") &&
+      isNodeSetField(schema?.fields?.[nest.match.field])
+    )
+      found = true;
   });
   return found;
 }

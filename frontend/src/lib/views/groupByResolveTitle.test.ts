@@ -177,7 +177,13 @@ describe("viewUsesTagIds — widens the gate to a plain tagged: filter too (#180
     expect(viewUsesTagIds(spec, SCHEMA)).toBe(false);
   });
 
-  it("is false for a nest joined by: title on a node-set field (a title join never carries an id)", () => {
+  // #1933: since ADR-0082 a tag-ref field stores tag IDS, so a title-join over
+  // one DOES carry ids — each is resolved to the tag's title (via resolveTitle)
+  // before matching against node titles. It therefore needs the same tag-store
+  // subscription as the ref join. (Pre-ADR-0082 tags were literal strings, so a
+  // title join carried no id — the assumption this test used to encode, and the
+  // reason the Aetheria nest silently orphaned every child until #1934 + this.)
+  it("is true for a nest joined by: title on a node-set field (tag ids resolve to titles)", () => {
     const spec = {
       kind: "lore",
       expr: {
@@ -188,7 +194,60 @@ describe("viewUsesTagIds — widens the gate to a plain tagged: filter too (#180
         },
       },
     } as ViewSpec;
+    expect(viewUsesTagIds(spec, SCHEMA)).toBe(true);
+  });
+
+  it("is false for a nest joined by: title on a NON-node-set field (a literal-title join, no ids)", () => {
+    // A title-join over a plain text field matches literal titles and needs no
+    // tag resolution — the case the node-set gate correctly excludes.
+    const spec = {
+      kind: "lore",
+      expr: {
+        nest: {
+          parents: { type: "lore:note" },
+          children: { type: "lore:note" },
+          match: { field: "title", direction: "child_to_parent", by: "title" },
+        },
+      },
+    } as ViewSpec;
     expect(viewUsesTagIds(spec, SCHEMA)).toBe(false);
+  });
+
+  // The Aetheria-view shape: a recursive nest whose parents are a title filter
+  // and children its complement, joined `by: title` over the `tags` field. This
+  // is what must trip the gate so ViewNodeList threads resolveTitle.
+  it("is true for the recursive title-join-over-tags shape (the reported view)", () => {
+    const spec = {
+      kind: "lore",
+      expr: {
+        nest: {
+          parents: {
+            filter: {
+              of: { descendants_of: "lore:base" },
+              pred: { field: { key: "title", op: "overlap", value: "Aetheria" } },
+              mode: "keep",
+            },
+          },
+          children: {
+            complement: {
+              filter: {
+                of: { descendants_of: "lore:base" },
+                pred: { field: { key: "title", op: "overlap", value: "Aetheria" } },
+                mode: "keep",
+              },
+            },
+          },
+          match: { field: "tags", direction: "child_to_parent", by: "title" },
+          recursive: true,
+        },
+      },
+    } as unknown as ViewSpec;
+    // `tags` is entity_ref_list in the real schema; add it here so isNodeSetField sees it.
+    const schemaWithTags = {
+      ...SCHEMA,
+      fields: { ...SCHEMA.fields, tags: { name: "Tags", type: "entity_ref_list" } },
+    } as unknown as MetadataSchema;
+    expect(viewUsesTagIds(spec, schemaWithTags)).toBe(true);
   });
 });
 

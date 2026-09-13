@@ -1184,11 +1184,10 @@ button.row-action-add.active {
 /* .prompt-cheatsheet-body (+ its narrow-screen @media override) co-located
    into CodeBodyView.svelte (#14). */
 
-/* Implicit-context highlight + hover popup. Applied by the ProseMirror
+/* Implicit-context highlight + hover card. Applied by the ProseMirror
    plugin in implicitContextHighlight.ts. Underlines lore-name matches
    inline as the user types so they see what the send-time expander
-   would pick up. Subtle by default — colour comes from the entity in a
-   future iteration. */
+   would pick up; the card follows the match to its entry (#1923). */
 .implicit-context-match {
   /* Per-entity color set via --entity-color inline by the TipTap
      decoration (see implicitContextHighlight.ts). Falls back to a
@@ -1199,7 +1198,7 @@ button.row-action-add.active {
 
 .implicit-context-popup {
   position: fixed;
-  z-index: 9999;
+  z-index: var(--z-dropdown);
   max-width: 320px;
   padding: 8px 10px;
   background: var(--surface);
@@ -1209,12 +1208,33 @@ button.row-action-add.active {
   font-size: var(--fs-md);
   line-height: 1.4;
   color: var(--text);
-  pointer-events: none;
 }
 
 .implicit-context-popup-title {
+  display: block;
   font-weight: 600;
   color: var(--text);
+}
+
+/* The title is the link to the entry — a button styled as one, so the
+   card reads like a web page's hover card; Ctrl/Cmd+click on the
+   underlined name follows it without the card. */
+.implicit-context-popup-open {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+}
+
+.implicit-context-popup-open:hover,
+.implicit-context-popup-open:focus-visible {
+  background: transparent;
+  text-decoration: underline;
 }
 
 .implicit-context-popup-type {

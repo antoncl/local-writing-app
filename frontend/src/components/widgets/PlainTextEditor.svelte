@@ -14,6 +14,7 @@
   import StarterKit from "@tiptap/starter-kit";
   import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
+  import { openImplicitContextEntry } from "@/lib/editor-core/implicitContextOpen";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
 
   let {
@@ -137,7 +138,7 @@
           strike: false,
           code: false,
         }),
-        ImplicitContextHighlight.configure({ matcher }),
+        ImplicitContextHighlight.configure({ matcher, openEntry: openImplicitContextEntry }),
       ],
       editable: !disabled,
       content: "",

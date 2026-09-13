@@ -38,6 +38,7 @@
     REBUILD_META,
     implicitContextIds,
   } from "@/lib/editor-core/implicitContextHighlight";
+  import { openImplicitContextEntry } from "@/lib/editor-core/implicitContextOpen";
   import {
     InteriorityReveal,
     interiorityHasBeats,
@@ -1071,7 +1072,7 @@
         MutationCloseMark,
         TodoAnchor,
         ...tableExtensions,
-        ImplicitContextHighlight.configure({ matcher: implicitContextMatcher }),
+        ImplicitContextHighlight.configure({ matcher: implicitContextMatcher, openEntry: openImplicitContextEntry }),
         InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],
       content: "",

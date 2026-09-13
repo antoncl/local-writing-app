@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CardSummary, LoreEntrySummary, NodePickerRef, ViewSpec } from "@/lib/types";
 import {
   buildSelectorRoster,
@@ -11,6 +11,7 @@ import {
 import { coerceInputValue, encodePickerValue } from "@/lib/utils/promptInputs";
 import { reportClientError } from "@/lib/errorLog";
 import { clearTagNodes, tagNodesStore } from "@/lib/stores/tagNodes";
+import { clearReferenceIndex, referenceIndexStore } from "@/lib/stores/references";
 import type { TagEntry } from "@/lib/types";
 
 vi.mock("@/lib/errorLog", () => ({ reportClientError: vi.fn(), installGlobalErrorLogging: vi.fn() }));
@@ -27,6 +28,15 @@ const tagSelector: NodePickerRef = {
 
 const lore = (id: string, title: string, tags: string[]): LoreEntrySummary =>
   ({ id, title, entry_type: "lore:character", metadata: { tags } }) as unknown as LoreEntrySummary;
+
+// A tag node (ADR-0082) — shared by every describe that seeds the tag store.
+const makeTag = (id: string, title: string, mergedInto: string | null = null): TagEntry => ({
+  id,
+  title,
+  entry_type: "tag:tag",
+  metadata: {},
+  merged_into: mergedInto,
+});
 
 const ROSTER = buildSelectorRoster({
   loreEntries: [
@@ -113,18 +123,10 @@ describe("membersForSelector", () => {
   });
 
   describe("through a merged-tag redirect (ADR-0082 §5, R6)", () => {
-    const T = (id: string, title: string, mergedInto: string | null = null): TagEntry => ({
-      id,
-      title,
-      entry_type: "tag:tag",
-      metadata: {},
-      merged_into: mergedInto,
-    });
-
     afterEach(() => clearTagNodes());
 
     it("a persisted selector still naming the merged id expands to a node now carrying the survivor id", () => {
-      tagNodesStore.set([T("tag_mirror", "mirror", "tag_mirrors"), T("tag_mirrors", "mirrors")]);
+      tagNodesStore.set([makeTag("tag_mirror", "mirror", "tag_mirrors"), makeTag("tag_mirrors", "mirrors")]);
       // The stored selector predates the merge — it still says "tag_mirror".
       const staleSelector: NodePickerRef = {
         id: "tagged:lore:tag_mirror",
@@ -142,7 +144,7 @@ describe("membersForSelector", () => {
     });
 
     it("also matches a carrier that still holds the merged id itself (both sides fold to the survivor)", () => {
-      tagNodesStore.set([T("tag_mirror", "mirror", "tag_mirrors"), T("tag_mirrors", "mirrors")]);
+      tagNodesStore.set([makeTag("tag_mirror", "mirror", "tag_mirrors"), makeTag("tag_mirrors", "mirrors")]);
       const currentSelector: NodePickerRef = {
         id: "tagged:lore:tag_mirrors",
         kind: "lore",
@@ -155,6 +157,130 @@ describe("membersForSelector", () => {
 
       expect(membersForSelector(currentSelector, roster).map((m) => m.id)).toEqual(["lore_hero"]);
     });
+  });
+});
+
+// #1943 — the picker shares `evaluateView` with the panes/designer, so a selector
+// must resolve with the SAME full EvalContext. A relational or parameterized view
+// is the regression surface: with only `{schema, canonicalId}` a tag-title nest
+// collapsed to its seed root (the reported 20→1) and a param view's default was
+// never applied. These fail unless `resolveTitle` (nest) and `bindings` (param)
+// are threaded.
+describe("membersForSelector resolves with the full EvalContext (#1943)", () => {
+  // Self-contained isolation: each test seeds its own tag / reference-index state,
+  // so neither ordering with the other describes nor with each other can make one
+  // pass for the wrong reason (the param test, in particular, relies on an empty
+  // tag store).
+  beforeEach(() => {
+    clearTagNodes();
+    clearReferenceIndex();
+  });
+  afterEach(() => {
+    clearTagNodes();
+    clearReferenceIndex();
+  });
+
+  // A nest matched `by: title`: a child whose `tags` names a tag TITLED like the
+  // root nests under it. The child stores a tag ID, so the engine must resolve
+  // id→title (`resolveTitle`) to match — the exact shape of "Aetherian lore".
+  const nestByTitleSpec: ViewSpec = {
+    kind: "lore",
+    expr: {
+      nest: {
+        parents: { hand_picked: ["lore_root"] },
+        children: { complement: { hand_picked: ["lore_root"] } },
+        match: { field: "tags", direction: "child_to_parent", by: "title" },
+        recursive: true,
+      },
+    },
+  } as ViewSpec;
+  const nestSelector: NodePickerRef = {
+    id: "view:aetherian",
+    kind: "view",
+    title: "Aetherian lore",
+    selector: nestByTitleSpec,
+  };
+  const nestRoster = buildSelectorRoster({
+    loreEntries: [
+      lore("lore_root", "Aetheria", []),
+      lore("lore_child", "Fire", ["tag_ae"]), // tagged with a tag TITLED "Aetheria"
+      lore("lore_other", "Unrelated", ["tag_zz"]),
+    ],
+  });
+
+  it("resolves a nest matched `by: title` through the tag-title store", () => {
+    tagNodesStore.set([makeTag("tag_ae", "Aetheria"), makeTag("tag_zz", "Elsewhere")]);
+    // Root + the child whose tag-title matches it. Without `resolveTitle` the id
+    // never becomes "Aetheria", the edge fails, and the tree collapses to just the
+    // seed root — the 20→1 regression (this assertion reddens to ["lore_root"]).
+    expect(membersForSelector(nestSelector, nestRoster).map((m) => m.id).sort()).toEqual([
+      "lore_child",
+      "lore_root",
+    ]);
+  });
+
+  // A parameterized view: members sit behind `{var: p}`. The picker has no
+  // parameter strip, so a selector resolves at the param DEFAULT.
+  const paramSpec: ViewSpec = {
+    kind: "lore",
+    expr: {
+      filter: {
+        of: { type: "lore:character" },
+        pred: { field: { key: "tags", op: "overlap", value: { var: "p" } } },
+        mode: "keep",
+      },
+    },
+    params: [{ name: "p", label: "Tags", default: ["tag_keep"] }],
+  } as ViewSpec;
+  const paramSelector: NodePickerRef = {
+    id: "view:paramd",
+    kind: "view",
+    title: "Tagged keep",
+    selector: paramSpec,
+  };
+
+  it("applies a parameterized view's param DEFAULT (no strip on the picker)", () => {
+    const roster = buildSelectorRoster({
+      loreEntries: [
+        lore("lore_keep", "Keep", ["tag_keep"]),
+        lore("lore_drop", "Drop", ["tag_other"]),
+      ],
+    });
+    // Only the entry carrying the default tag. Without `bindings` the `{var: p}`
+    // operand is unbound → the predicate is inactive → the filter passes BOTH
+    // (this assertion reddens to include "lore_drop").
+    expect(membersForSelector(paramSelector, roster).map((m) => m.id).sort()).toEqual(["lore_keep"]);
+  });
+
+  // A backlinks view projects the reverse reference index (`field_of references`).
+  // The third EvalContext piece; without `referenceIndex` the projection has no
+  // index and the selector silently resolves to zero — the same under-count class
+  // as #1943, on the AI-context path.
+  const backlinksSpec: ViewSpec = {
+    kind: "lore",
+    expr: { field_of: { of: { hand_picked: ["lore_target"] }, field: "references" } },
+  } as ViewSpec;
+  const backlinksSelector: NodePickerRef = {
+    id: "view:backlinks",
+    kind: "view",
+    title: "What references Target",
+    selector: backlinksSpec,
+  };
+
+  it("projects a backlinks view through the reverse reference index", () => {
+    // lore_ref references lore_target → a `field_of references` of {lore_target}
+    // resolves to its referrers.
+    referenceIndexStore.set(new Map([["lore_target", new Set(["lore_ref"])]]));
+    const roster = buildSelectorRoster({
+      loreEntries: [
+        lore("lore_target", "Target", []),
+        lore("lore_ref", "Referrer", []),
+        lore("lore_none", "Unrelated", []),
+      ],
+    });
+    // Only the referrer. Without `referenceIndex` the projection has no index →
+    // the selector resolves to [] (this assertion reddens to empty).
+    expect(membersForSelector(backlinksSelector, roster).map((m) => m.id)).toEqual(["lore_ref"]);
   });
 });
 

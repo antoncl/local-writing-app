@@ -17,8 +17,10 @@ import { get } from "svelte/store";
 import { decodePickerValue, encodePickerValue } from "@/lib/utils/promptInputs";
 import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
 import { structureToEvalNodes } from "@/lib/views/structureNodes";
+import { buildBindings } from "@/lib/views/viewParams";
 import { reportClientError } from "@/lib/errorLog";
 import { canonicalIdIn, tagById } from "@/lib/stores/tagNodes";
+import { referenceIndexStore } from "@/lib/stores/references";
 import type {
   AssistantEntrySummary,
   CardSummary,
@@ -83,16 +85,37 @@ export function membersForSelector(ref: NodePickerRef, roster: SelectorRoster): 
   const resolved = specForSelector(ref);
   if (resolved === null) return [];
   const nodes = roster.rostersByKind[resolved.kind] ?? [];
-  // ADR-0082 §5 / #1805: a plain (non-reactive) function, so a `get()` snapshot
-  // is correct here — unlike ViewNodeList's `$tagById`, there is no `$derived`
-  // to keep tracking. `evaluateView` itself now canonicalises both sides of a
-  // `tagged:` leaf (the OPERAND in `evalLeaf`, the node's own references via
-  // `nodeReferences`), so a persisted `{tagged: <merged id>}` selector still
-  // expands to a node now carrying the survivor's id without a bespoke clone
-  // here — whichever side still names the merged id, the other side's
-  // already-canonical form is what it is compared against.
-  const canonicalId = (id: string) => canonicalIdIn(get(tagById), id);
-  const result = evaluateView(resolved.spec, nodes, { schema: roster.schema ?? null, canonicalId });
+  // Evaluate with the SAME full EvalContext the view panes/designer thread
+  // (ViewNodeList) — the picker shares `evaluateView`, so an under-provisioned
+  // context is the only reason a selector could resolve to fewer members than the
+  // designer preview (#1943). Slice-5's original selector was a flat `{tagged}`
+  // tag leaf, which needs only `canonicalId`; #1941 made arbitrary saved views
+  // reachable here, and a relational or parameterized view exercises the rest:
+  //  - `resolveTitle`: a nest matched `by: title` resolves a child's tag id to the
+  //    tag's TITLE before matching a parent's title — without it every edge fails
+  //    and the tree collapses to its seed roots (#1943's 20→1).
+  //  - `bindings`: a parameterized view's members sit behind a `{var}` operand;
+  //    with no parameter strip on the picker, a selector resolves at the param
+  //    DEFAULTS — `buildBindings(params, {})`, the empty-override env ViewNodeList
+  //    itself seeds the strip with.
+  //  - `referenceIndex`: a backlinks (`field_of references`) view projects the
+  //    reverse index.
+  // Take ONE `tagById` snapshot and derive both tag readers from it — `resolveTitle`
+  // is `tagTitleById`'s own body (survivor's title via `canonicalIdIn`) inlined, so
+  // we don't cold-rebuild that second derived per call (this runs once per view/tag
+  // in NodePicker's group loops). A plain, non-reactive function is correct here —
+  // there is no `$derived` to keep tracking, unlike ViewNodeList's `$tagById`; the
+  // picker expands once (live count / send), it does not re-render on tag change.
+  // `evaluateView` canonicalises both sides of a `tagged:` leaf, so a persisted
+  // `{tagged: <merged id>}` selector still expands through a merge (ADR-0082 §5).
+  const byId = get(tagById);
+  const result = evaluateView(resolved.spec, nodes, {
+    schema: roster.schema ?? null,
+    bindings: buildBindings(resolved.spec.params, {}),
+    referenceIndex: get(referenceIndexStore),
+    resolveTitle: (id) => byId.get(canonicalIdIn(byId, id))?.title,
+    canonicalId: (id) => canonicalIdIn(byId, id),
+  });
   return result.nodes.map((n) => memberRef(n, resolved.kind));
 }
 

@@ -158,6 +158,95 @@ describe("membersForSelector", () => {
   });
 });
 
+// #1943 — the picker shares `evaluateView` with the panes/designer, so a selector
+// must resolve with the SAME full EvalContext. A relational or parameterized view
+// is the regression surface: with only `{schema, canonicalId}` a tag-title nest
+// collapsed to its seed root (the reported 20→1) and a param view's default was
+// never applied. These fail unless `resolveTitle` (nest) and `bindings` (param)
+// are threaded.
+describe("membersForSelector resolves with the full EvalContext (#1943)", () => {
+  const T = (id: string, title: string): TagEntry => ({
+    id,
+    title,
+    entry_type: "tag:tag",
+    metadata: {},
+    merged_into: null,
+  });
+  afterEach(() => clearTagNodes());
+
+  // A nest matched `by: title`: a child whose `tags` names a tag TITLED like the
+  // root nests under it. The child stores a tag ID, so the engine must resolve
+  // id→title (`resolveTitle`) to match — the exact shape of "Aetherian lore".
+  const nestByTitleSpec: ViewSpec = {
+    kind: "lore",
+    expr: {
+      nest: {
+        parents: { hand_picked: ["lore_root"] },
+        children: { complement: { hand_picked: ["lore_root"] } },
+        match: { field: "tags", direction: "child_to_parent", by: "title" },
+        recursive: true,
+      },
+    },
+  } as ViewSpec;
+  const nestSelector: NodePickerRef = {
+    id: "view:aetherian",
+    kind: "view",
+    title: "Aetherian lore",
+    selector: nestByTitleSpec,
+  };
+  const nestRoster = buildSelectorRoster({
+    loreEntries: [
+      lore("lore_root", "Aetheria", []),
+      lore("lore_child", "Fire", ["tag_ae"]), // tagged with a tag TITLED "Aetheria"
+      lore("lore_other", "Unrelated", ["tag_zz"]),
+    ],
+  });
+
+  it("resolves a nest matched `by: title` through the tag-title store", () => {
+    tagNodesStore.set([T("tag_ae", "Aetheria"), T("tag_zz", "Elsewhere")]);
+    // Root + the child whose tag-title matches it. Without `resolveTitle` the id
+    // never becomes "Aetheria", the edge fails, and the tree collapses to just the
+    // seed root — the 20→1 regression (this assertion reddens to ["lore_root"]).
+    expect(membersForSelector(nestSelector, nestRoster).map((m) => m.id).sort()).toEqual([
+      "lore_child",
+      "lore_root",
+    ]);
+  });
+
+  // A parameterized view: members sit behind `{var: p}`. The picker has no
+  // parameter strip, so a selector resolves at the param DEFAULT.
+  const paramSpec: ViewSpec = {
+    kind: "lore",
+    expr: {
+      filter: {
+        of: { type: "lore:character" },
+        pred: { field: { key: "tags", op: "overlap", value: { var: "p" } } },
+        mode: "keep",
+      },
+    },
+    params: [{ name: "p", label: "Tags", default: ["tag_keep"] }],
+  } as ViewSpec;
+  const paramSelector: NodePickerRef = {
+    id: "view:paramd",
+    kind: "view",
+    title: "Tagged keep",
+    selector: paramSpec,
+  };
+
+  it("applies a parameterized view's param DEFAULT (no strip on the picker)", () => {
+    const roster = buildSelectorRoster({
+      loreEntries: [
+        lore("lore_keep", "Keep", ["tag_keep"]),
+        lore("lore_drop", "Drop", ["tag_other"]),
+      ],
+    });
+    // Only the entry carrying the default tag. Without `bindings` the `{var: p}`
+    // operand is unbound → the predicate is inactive → the filter passes BOTH
+    // (this assertion reddens to include "lore_drop").
+    expect(membersForSelector(paramSelector, roster).map((m) => m.id).sort()).toEqual(["lore_keep"]);
+  });
+});
+
 describe("expandSelectorRefs", () => {
   it("replaces a selector with its members and passes concrete refs through", () => {
     const value: NodePickerRef[] = [

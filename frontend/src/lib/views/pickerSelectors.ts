@@ -15,7 +15,7 @@
 
 import { get } from "svelte/store";
 import { decodePickerValue, encodePickerValue } from "@/lib/utils/promptInputs";
-import { evaluateView, materializeLayerField, type EvalNode } from "@/lib/views/evaluateView";
+import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
 import { structureToEvalNodes } from "@/lib/views/structureNodes";
 import { reportClientError } from "@/lib/errorLog";
 import { canonicalIdIn, tagById } from "@/lib/stores/tagNodes";
@@ -92,7 +92,7 @@ export function membersForSelector(ref: NodePickerRef, roster: SelectorRoster): 
   // here — whichever side still names the merged id, the other side's
   // already-canonical form is what it is compared against.
   const canonicalId = (id: string) => canonicalIdIn(get(tagById), id);
-  const result = evaluateView(resolved.spec, materializeLayerField(nodes), { schema: roster.schema ?? null, canonicalId });
+  const result = evaluateView(resolved.spec, nodes, { schema: roster.schema ?? null, canonicalId });
   return result.nodes.map((n) => memberRef(n, resolved.kind));
 }
 

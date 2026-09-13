@@ -249,6 +249,24 @@ class LayerOverrideTests(unittest.TestCase):
         self.assertEqual(cleared.overridden_fields, [])
         self.assertFalse(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
 
+    def test_the_echo_s_sparse_default_is_the_default_the_client_read_with(self) -> None:
+        # The book redeclares `context_policy` with default `never`; the rail
+        # pops the key when `never` is picked. Authoring that pick at the
+        # SERIES (whose default is still `auto`) must write `never`, not the
+        # series' default — the echo is read with the schema the client saw.
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {"version": 1, "fields": {"context_policy": {"default": "never"}}},
+        )
+        self._write_lore_at(
+            self.universe, "lore_honor", "Honor Harrington", {"rank": "Commander", "context_policy": "always"}
+        )
+        saved = self._save_override("lore_honor", {"rank": "Commander"}, layer=self.series)
+        self.assertNotIn("context_policy", saved.metadata)
+        self.assertEqual(saved.overridden_fields, ["context_policy"])
+        text = next((self.series / OVERRIDES_FOLDER).glob("*.md")).read_text(encoding="utf-8")
+        self.assertIn("value: never", text)
+
     def test_a_delta_holding_the_literal_default_keeps_its_mark(self) -> None:
         # #1917: an import, an AI patch or a pre-#1421 client wrote the default
         # literally — or the legacy blank. The file still shadows the ancestor's

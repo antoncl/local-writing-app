@@ -27,6 +27,7 @@ from app.models import (
     DerivedSelectState,
     LoreEntry,
     MetadataFieldDefinition,
+    MoveMetadataFieldRequest,
     SaveLoreEntryRequest,
     SelectOption,
     UpsertMetadataFieldRequest,
@@ -133,6 +134,25 @@ class LayerClearsInheritedAttributeTests(unittest.TestCase):
         self.assertIsNone(self.service.read_metadata_schema().fields["filmed"].derived)
         as_of_base = self.service.read_metadata_schema(up_to_layer_id=self._layer_id(self.base)).fields["filmed"]
         self.assertEqual(as_of_base.derived, DerivedSelectState(value="filmed", when_set="footage"))
+
+    def test_a_move_carries_the_clear_with_the_field(self) -> None:
+        # The series clears the base's rule, then the field moves to the book.
+        # What the book inherits is resolved with the series' entry already
+        # gone, so the null travels instead of reading as "nothing above".
+        self._upsert(
+            self.series,
+            "filmed",
+            MetadataFieldDefinition(name="Filmed", type="select", options=_FILMED_OPTIONS, default="planned"),
+        )
+        self.assertIsNone(self._stored(self.series, "filmed")["derived"])
+        self.service.move_metadata_field(
+            MoveMetadataFieldRequest(
+                field_id="filmed", target_layer_id=self._layer_id(self.root), entry_type="lore:character"
+            )
+        )
+        self.assertNotIn("filmed", self.service._read_yaml(self.series / "metadata.schema.yaml").get("fields", {}))
+        self.assertIsNone(self._stored(self.root, "filmed")["derived"])
+        self.assertIsNone(self.service.read_metadata_schema().fields["filmed"].derived)
 
     def test_a_hand_authored_null_clears_the_inherited_attribute(self) -> None:
         # The on-disk spelling the writer produces is one an author can type.

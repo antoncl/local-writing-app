@@ -491,6 +491,35 @@ describe("SchemaFieldInlineEditor 'Default for new entries' visibility (round 2,
   });
 });
 
+describe("SchemaFieldInlineEditor derived select state on a type without the reference (#1916)", () => {
+  it("keeps the declared reference selected and round-trips it on Done", async () => {
+    const onSave = vi.fn();
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: {
+          name: "Filmed",
+          type: "select",
+          options: [{ value: "planned" }, { value: "filmed" }],
+          default: "planned",
+          derived: { value: "filmed", when_set: "footage" },
+        },
+        selectedFieldId: "filmed",
+        layerId: "proj",
+        // lore:location carries no reference field — the rule is inert here.
+        refFieldChoices: [],
+        onSave,
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+    const whenSet = screen.getByLabelText("While this reference is set") as HTMLSelectElement;
+    expect(whenSet.value).toBe("footage");
+    await fireEvent.click(screen.getByText("Done"));
+    const saved = onSave.mock.calls[0][0] as { derived: unknown };
+    expect(saved.derived).toEqual({ value: "filmed", when_set: "footage" });
+  });
+});
+
 describe("SchemaFieldInlineEditor derived select state (#1911)", () => {
   function mountSelect(field: MetadataFieldDefinition, onSave = vi.fn()) {
     render(SchemaFieldInlineEditor, {

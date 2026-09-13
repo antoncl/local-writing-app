@@ -164,9 +164,11 @@ fields:
     derived: null        # this layer and everything below it: no app-set state
 ```
 
-An absent key inherits; `null` clears. The same spelling drops an inherited
-`default`, `description` or `icon`, and the type editor writes it for you
-when you clear a value the layer inherited.
+An absent key inherits; `null` clears. The same spelling drops any inherited
+optional attribute — `default`, `description`, `icon`, `group`,
+`picker_config`, … — and the type editor writes it for you when you clear a
+value the layer inherited. (Entry types and groups merge the same way but do
+not take a `null` yet.)
 
 ## File naming
 

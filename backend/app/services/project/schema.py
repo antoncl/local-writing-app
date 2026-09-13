@@ -49,17 +49,17 @@ from app.services.project.default_schema import (
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import SCHEMA_FILENAME
 from app.services.project.node_index import IndexLayer
+from app.services.project.schema_inheritance import RESOLVER_STAMPED_FIELD_KEYS
 from app.services.project.schema_validation import ENTRY_TYPE_FQN_RE
 
-# Keys the schema resolver stamps on a field on read — never persisted.
-_RESOLVER_STAMPED_FIELD_KEYS = frozenset({"category", "group_origin", "item_members", "item_scalar"})
 # The authored field attributes whose unset form is `None`: the ones a layer
 # below an ancestor's declaration can only clear with an explicit `null`
-# (#1916). Derived from the model so a new optional attribute joins the rule.
-_CLEARABLE_FIELD_KEYS = frozenset(
+# (#1916). Derived from the model so a new optional attribute joins the rule;
+# a tuple, so the nulls land in the file in declaration order.
+_CLEARABLE_FIELD_KEYS = tuple(
     name
     for name, info in MetadataFieldDefinition.model_fields.items()
-    if info.default is None and name not in _RESOLVER_STAMPED_FIELD_KEYS
+    if info.default is None and name not in RESOLVER_STAMPED_FIELD_KEYS
 )
 
 
@@ -428,13 +428,43 @@ class MetadataSchemaMixin:
         under `root`, substituting the caller's in-memory `layer_data` for the
         paths it is rewriting, then resolve inheritance. The shared 'what would
         this look like' view behind every definition write's pre-flight check."""
+        return self._fold_schema_layers(self._metadata_schema_layer_paths(root), substitutions)
+
+    def _fold_schema_layers(
+        self, paths: list[Path], substitutions: dict[Path, dict[str, Any]]
+    ) -> MetadataSchema:
+        """Fold `paths` (base → nearest) onto the built-in schema, taking each
+        path's data from `substitutions` when present, else from disk."""
         candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
-        for path in self._metadata_schema_layer_paths(root):
+        for path in paths:
             if path in substitutions:
                 self._merge_metadata_schema_layer(candidate, substitutions[path])
             elif path.exists():
                 self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
         return MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
+
+    def _read_metadata_schema_to_path(
+        self,
+        root: Path,
+        target_path: Path,
+        *,
+        inclusive: bool,
+        substitutions: dict[Path, dict[str, Any]] | None = None,
+    ) -> MetadataSchema:
+        """The schema resolved base → `target_path` — through it (`inclusive`)
+        or up to the layer just above it: what a definition written at
+        `target_path` inherits. `target_path` must be on `root`'s chain; the
+        outermost layer's "above" is the built-in schema alone. Served from
+        the resolved-definitions cache unless `substitutions` swap a layer's
+        data in memory (a move, whose source layer is being rewritten)."""
+        paths = self._metadata_schema_layer_paths(root)
+        try:
+            cut = paths.index(target_path) + (1 if inclusive else 0)
+        except ValueError:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404) from None
+        if substitutions:
+            return self._fold_schema_layers(paths[:cut], substitutions)
+        return schema_cache.resolved_schema(paths[:cut], self._build_metadata_schema)
 
     def _validate_candidate_schema_layers(
         self, root: Path, substitutions: dict[Path, dict[str, Any]]
@@ -448,38 +478,27 @@ class MetadataSchemaMixin:
         if schema_errors:
             raise ProjectServiceError(" ".join(schema_errors), 422)
 
+    @staticmethod
     def _layer_field_payload(
-        self, root: Path, layer_path: Path, field_id: str, field: MetadataFieldDefinition
+        field: MetadataFieldDefinition, inherited: MetadataFieldDefinition | None
     ) -> dict[str, Any]:
-        """`field` as the layer at `layer_path` stores it.
+        """`field` as a layer stores it, given `inherited` — the same field as
+        the chain ABOVE that layer resolves it, or None when nothing above
+        declares it.
 
-        Never the resolver-stamped keys. An attribute the definition leaves
-        unset that the chain ABOVE this layer declares is written as an explicit
-        `null` (#1916): field definitions merge per attribute
-        (`_merge_metadata_schema_section`), where an absent key means "inherit",
-        so the clear the author asked for would not take without one. A layer
-        that never inherited the attribute writes no key, as before."""
-        payload = field.model_dump(exclude_none=True, exclude=_RESOLVER_STAMPED_FIELD_KEYS)
-        inherited = self._read_metadata_schema_above_path(root, layer_path).fields.get(field_id)
+        Never the resolver-stamped keys. `field` is the layer's complete
+        definition (the type editor round-trips every attribute it shows), so
+        an attribute it leaves unset that `inherited` carries is written as an
+        explicit `null` (#1916): field definitions merge per attribute
+        (`_merge_metadata_schema_section`), where an absent key means
+        "inherit", and the clear would not take without one. A layer that
+        never inherited the attribute writes no key, as before."""
+        payload = field.model_dump(exclude_none=True, exclude=RESOLVER_STAMPED_FIELD_KEYS)
         if inherited is not None:
             for key in _CLEARABLE_FIELD_KEYS:
                 if key not in payload and getattr(inherited, key) is not None:
                     payload[key] = None
         return payload
-
-    def _read_metadata_schema_above_path(self, root: Path, layer_path: Path) -> MetadataSchema:
-        """The schema resolved base → the layer just above `layer_path`: what a
-        definition written at `layer_path` inherits. The built-in schema alone
-        for the outermost layer. Served from the resolved-definitions cache."""
-        layers = self.collect_layers(root)
-        above: IndexLayer | None = None
-        for layer in layers:
-            if layer.folder / SCHEMA_FILENAME == layer_path:
-                break
-            above = layer
-        if above is None:
-            return self.builtin_metadata_schema()
-        return self.read_metadata_schema(root, up_to_layer_id=above.id)
 
     def _validate_candidate_schema(self, root: Path, layer_path: Path, layer_data: dict[str, Any]) -> None:
         """Single-layer variant: validate the schema produced by rewriting just
@@ -648,7 +667,8 @@ class MetadataSchemaMixin:
         fields = layer_data.get("fields")
         if not isinstance(fields, dict):
             fields = {}
-        fields[field_id] = self._layer_field_payload(root, layer_path, field_id, request.field)
+        inherited = self._read_metadata_schema_to_path(root, layer_path, inclusive=False).fields.get(field_id)
+        fields[field_id] = self._layer_field_payload(request.field, inherited)
         layer_data["fields"] = fields
         self._attach_field_to_entry_type(root, layer_path, layer_data, request, field_id)
 
@@ -753,7 +773,15 @@ class MetadataSchemaMixin:
         source_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
         target_data = self._read_yaml(target_path) if target_path.exists() else self._empty_metadata_schema()
         self._remove_metadata_field_from_layer(source_data, field_id, request.entry_type)
-        self._add_metadata_field_to_layer(root, target_path, target_data, field_id, field, request.entry_type)
+        # What the target inherits is resolved with the source layer's entry
+        # already gone — a clear the source held (`derived: null`, #1916) must
+        # travel with the field, not read as "nothing above declares it".
+        inherited = self._read_metadata_schema_to_path(
+            root, target_path, inclusive=False, substitutions={source_path: source_data}
+        ).fields.get(field_id)
+        self._add_metadata_field_to_layer(
+            root, target_path, target_data, field_id, self._layer_field_payload(field, inherited), request.entry_type
+        )
 
         self._validate_candidate_schema_layers(root, {source_path: source_data, target_path: target_data})
         self._write_yaml(source_path, source_data)
@@ -812,15 +840,13 @@ class MetadataSchemaMixin:
         layer_path: Path,
         layer_data: dict[str, Any],
         field_id: str,
-        field: MetadataFieldDefinition,
+        field_payload: dict[str, Any],
         entry_type: str,
     ) -> None:
         fields = layer_data.get("fields")
         if not isinstance(fields, dict):
             fields = {}
-        # `field` may come from the RESOLVED schema (move path), which carries
-        # resolver-stamped derived keys — never persist those into a layer.
-        fields[field_id] = self._layer_field_payload(root, layer_path, field_id, field)
+        fields[field_id] = field_payload
         layer_data["fields"] = fields
 
         entry_types = layer_data.get("entry_types")
@@ -1029,14 +1055,7 @@ class MetadataSchemaMixin:
         return MetadataSchema.model_validate(data)
 
     def _read_metadata_schema_through_path(self, root: Path, target_path: Path) -> MetadataSchema:
-        data = deepcopy(DEFAULT_METADATA_SCHEMA)
-        for path in self._metadata_schema_layer_paths(root):
-            if path.exists():
-                self._merge_metadata_schema_layer(data, self._read_metadata_schema_layer(path))
-            if path == target_path:
-                break
-        data = self._resolve_metadata_schema_inheritance(data)
-        return MetadataSchema.model_validate(data)
+        return self._read_metadata_schema_to_path(root, target_path, inclusive=True)
 
     def _metadata_schema_layer_warnings(self, root: Path) -> list[str]:
         """Why this project's chain is only itself, when it is (#429).

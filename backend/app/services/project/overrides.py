@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app.models import MutationSetRow
+from app.models import MetadataFieldDefinition, MetadataSchema, MutationSetRow
 from app.services.project.errors import ProjectServiceError
 from app.services.project.lore_mutations import (
     COLLECTION_FIELD_TYPES,
@@ -53,10 +53,11 @@ OVERRIDES_FOLDER = "overrides"
 OVERRIDE_ENTRY_TYPE = "override:override"
 
 
-def _required_select_reading(definition: Any, value: Any) -> Any:
+def _required_select_reading(definition: MetadataFieldDefinition, value: Any) -> Any:
     """`value` as a required select reads it: blank or absent IS the default
-    (#1421). Any other field, or any other value, passes through."""
-    if definition is not None and getattr(definition, "required_select", False) and value in (None, ""):
+    (#1421, the blank rule `_strip_unknown_metadata_fields` writes by). Any
+    other field, or any other value, passes through."""
+    if definition.required_select and value in (None, ""):
         return definition.default
     return value
 
@@ -380,7 +381,7 @@ class LayerOverridesMixin:
         self,
         base: dict[str, Any],
         submitted: dict[str, Any],
-        schema: Any,
+        schema: MetadataSchema,
     ) -> list[MutationSetRow]:
         """The sparse delta from `base` (the effective value above the authoring
         layer) to `submitted` (the whole metadata the client sent).
@@ -395,16 +396,16 @@ class LayerOverridesMixin:
         one carries the default literally (#1917) — "back to the default" over
         an ancestor's pick is a delta like any other, where the bare absent key
         would diff to a blank the save then refuses."""
-        field_types = self._schema_field_types(schema)
-        fields = getattr(schema, "fields", None) or {}
+        fields = schema.fields
         rows: list[MutationSetRow] = []
         # Only fields in L's own roster can be stored at L. A field the client
         # round-trips that is defined only *below* L (the entry is edited from the
         # deeper open project) is not part of L's view of the entry and must not
         # become a delta row — otherwise it fails the as-of-L validation that
         # follows (ADR-0045 §4). Fields outside the roster are dropped here.
-        for field in sorted(f for f in (set(base) | set(submitted)) if f in field_types):
-            field_type = field_types[field]
+        for field in sorted(f for f in (set(base) | set(submitted)) if f in fields):
+            definition = fields[field]
+            field_type = definition.type
             if field_type in COLLECTION_FIELD_TYPES:
                 base_items = _as_str_list(base.get(field))
                 new_items = _as_str_list(submitted.get(field))
@@ -415,7 +416,6 @@ class LayerOverridesMixin:
                     if item not in new_items:
                         rows.append(MutationSetRow(field=field, op="remove", value=item))
                 continue
-            definition = fields.get(field)
             base_value = _required_select_reading(definition, base.get(field))
             new_value = _required_select_reading(definition, submitted.get(field))
             if new_value != base_value:
@@ -443,24 +443,29 @@ class LayerOverridesMixin:
         # save (which drops the key by rewriting the whole file).
         return MutationSetRow(field=field, op="replace", value="" if new_value is None else str(new_value))
 
+    @staticmethod
     def _marked_override_fields(
-        self, touched: list[str], metadata: dict[str, Any], entry_type: str, schema: Any
+        touched: list[str], metadata: dict[str, Any], entry_type: str, schema: MetadataSchema
     ) -> list[str]:
-        """`touched` (the fields the fold wrote) narrowed to the ones still a
-        value to mark after the read canon ran: a field the canon kept, or a
-        required select the entry type carries — its default reads sparse
-        (#1912), so an absent key there is the override's spelling of the
-        default, not a strip (#1917). A field the strips removed (retired from
-        the schema, a dangling reference) drops its mark with its value."""
-        entry_type_definition = getattr(schema, "entry_types", {}).get(entry_type)
-        carried = set(entry_type_definition.fields) if entry_type_definition is not None else set()
-        fields = getattr(schema, "fields", None) or {}
-
-        def sparse_default(field: str) -> bool:
-            definition = fields.get(field)
-            return field in carried and definition is not None and definition.required_select
-
-        return [field for field in touched if field in metadata or sparse_default(field)]
+        """`touched` (the fields the fold wrote) narrowed to the ones the read
+        still marks after the repair ran. The mark reports the delta — a row
+        this layer holds on the field — not whether the shown value differs
+        from canon, so it survives the select canon: a select the entry type
+        carries reads its blank, its default (#1912) and a stale derived state
+        (#1911) as the absent key, and that absent key is a spelling of the
+        override's value, not a strip (#1917). A field the strips removed
+        (retired from the schema, a dangling reference) drops its mark with
+        its value."""
+        if not touched:
+            return touched
+        entry_type_definition = schema.entry_types.get(entry_type)
+        carried = entry_type_definition.fields if entry_type_definition is not None else ()
+        sparse = {
+            field
+            for field in carried
+            if (definition := schema.fields.get(field)) is not None and definition.type == "select"
+        }
+        return [field for field in touched if field in metadata or field in sparse]
 
     # --- composite revision -------------------------------------------------
 

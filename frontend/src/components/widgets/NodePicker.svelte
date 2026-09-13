@@ -108,6 +108,13 @@
     // Compact mode trims chrome so the picker fits inside the Inputs
     // dialog's narrow column. Composer-level renders use the default.
     compact = false,
+    // The ADR-0074 selector axes — By tag, Saved views, Plotlines — offer a live
+    // SET of members (synthetic `tagged:`/`view:`/`plotline:` refs). They are a
+    // context_pick feature; OFF by default so the concrete-node pickers
+    // (entity_ref fields, tag-merge, view hand_picked) never offer them, where
+    // absorbing one would store a synthetic id that resolves to nothing (#1940).
+    // Only the context_pick composer (PromptInputField) opts in.
+    allowSelectors = false,
     // Suppress the built-in chip display. Caller renders selected refs
     // themselves (e.g. ReferencePicker hosts NodeRow cards above the
     // picker). The `value` prop still flows in so the dropdown can mark
@@ -143,6 +150,7 @@
     assistantEntries?: AssistantEntrySummary[];
     tagEntries?: TagEntry[];
     compact?: boolean;
+    allowSelectors?: boolean;
     hideChips?: boolean;
     excludeIds?: string[];
     onChange?: (detail: { value: NodePickerRef[] }) => void;
@@ -368,6 +376,7 @@
     return { ...spec, kind } as ViewSpec;
   }
   const viewGroups = $derived.by<SelectorGroup[]>(() => {
+    if (!allowSelectors) return []; // selector axis — context_pick only (#1940)
     const groups: SelectorGroup[] = [];
     for (const kind of allowedKinds) {
       for (const summary of paneViews.viewsFor(kind)) {
@@ -421,6 +430,7 @@
     return { kind, expr } as ViewSpec;
   }
   const tagGroups = $derived.by<SelectorGroup[]>(() => {
+    if (!allowSelectors) return []; // selector axis — context_pick only (#1940)
     const groups: SelectorGroup[] = [];
     for (const kind of allowedKinds) {
       for (const tag of tagNodes) {
@@ -457,7 +467,7 @@
   // tags, an empty plotline is NOT dropped — a plotline is a real authored container
   // (like an act with no scenes yet), not incidental vocabulary.
   const plotlineGroups = $derived.by<SelectorGroup[]>(() => {
-    if (!allowedKinds.includes("plot")) return [];
+    if (!allowSelectors || !allowedKinds.includes("plot")) return []; // selector axis — context_pick only (#1940)
     // Only actual plotlines become containers — a stray non-plotline node in the
     // roster must not be promoted (the roster is a plotline list, but guard it).
     return plotEntries

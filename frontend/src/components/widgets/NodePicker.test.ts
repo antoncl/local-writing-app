@@ -178,6 +178,7 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     ]);
     render(NodePicker, {
       props: {
+        allowSelectors: true,
         config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
         plotEntries: [plotline("p1", "The Heist"), plotline("p2", "Romance")],
         affordance: "add",
@@ -202,6 +203,7 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     cardEntriesStore.set([plotCard("c1", "Break-in", "p1"), plotCard("c2", "Getaway", "p1")]);
     render(NodePicker, {
       props: {
+        allowSelectors: true,
         config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
         plotEntries: [plotline("p1", "The Heist")],
         affordance: "add",
@@ -231,6 +233,7 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     };
     render(NodePicker, {
       props: {
+        allowSelectors: true,
         config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }], multiple: true },
         plotEntries: [plotline("p1", "The Heist")],
         // Already picked as a live selector — a kind-based isSel misread this and
@@ -256,6 +259,7 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     cardEntriesStore.set([plotCard("c1", "Break-in", "p1"), plotCard("c2", "Getaway", "p1")]);
     render(NodePicker, {
       props: {
+        allowSelectors: true,
         config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }], multiple: true },
         plotEntries: [plotline("p1", "The Heist")],
         affordance: "add",
@@ -279,6 +283,7 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
   it("does not promote a stray non-plotline node to a container", async () => {
     render(NodePicker, {
       props: {
+        allowSelectors: true,
         config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
         // A stray plot:card in the plotline roster must not become a container.
         plotEntries: [plotline("p1", "The Heist"), { ...plotline("c1", "A card"), entry_type: "plot:card" }],
@@ -506,6 +511,7 @@ describe("NodePicker saved-view selectors — app-wide axis (#1487, #1939)", () 
   function renderLoreInput(extra: Record<string, unknown> = {}) {
     return render(NodePicker, {
       props: {
+        allowSelectors: true, // a context_pick input — selectors on (PromptInputField)
         // A LORE input — a kind source only, NO {view:id}. The view rides the
         // app-wide listViews() roster (Amendment 3), not config curation.
         config: { sources: [{ kind: "lore" }], multiple: true },
@@ -617,6 +623,7 @@ describe("NodePicker saved-view selectors — app-wide axis (#1487, #1939)", () 
     const onChange = vi.fn();
     render(NodePicker, {
       props: {
+        allowSelectors: true,
         // Restrict the lore input to lore:character — a lore:location the view
         // matches by tag must be clipped out (the tagSpecFor-style intersect).
         config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }], multiple: true },
@@ -690,6 +697,7 @@ describe("NodePicker saved-view selectors — app-wide axis (#1487, #1939)", () 
     const onChange = vi.fn();
     render(NodePicker, {
       props: {
+        allowSelectors: true,
         // Type-restricted: the buggy path rewrote a grouped view to
         // `{expr:{type:lore:character}}` and pulled in every character.
         config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }], multiple: true },
@@ -727,6 +735,7 @@ describe("NodePicker tag selectors (#1491)", () => {
   function renderWithTags(extra: Record<string, unknown> = {}) {
     return render(NodePicker, {
       props: {
+        allowSelectors: true, // a context_pick input — selectors on (PromptInputField)
         config: { sources: [{ kind: "lore" }], multiple: true },
         loreEntries: [
           loreEntry("lore_a", "Vex", ["tag_villain"]),
@@ -785,6 +794,7 @@ describe("NodePicker tag selectors (#1491)", () => {
   it("respects the config's entry_type constraint — a tag can't over-match past scope (#1493 review)", async () => {
     render(NodePicker, {
       props: {
+        allowSelectors: true,
         config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }], multiple: true },
         loreEntries: [
           loreEntry("lore_a", "Vex", ["tag_villain"]), // a character
@@ -814,6 +824,7 @@ describe("NodePicker tag selectors (#1491)", () => {
     tagNodesStore.set([villainTag, motifTag, assistantTag] as never);
     render(NodePicker, {
       props: {
+        allowSelectors: true,
         config: { sources: [{ kind: "lore" }], multiple: true },
         loreEntries: [loreEntry("lore_a", "Vex", ["tag_mirrors"])],
         affordance: "add",
@@ -1060,6 +1071,7 @@ describe("NodePicker sole allowed type (#1735 / #1742)", () => {
     tagNodesStore.set([{ id: "tag_villain", title: "villain", entry_type: "tag:tag" }] as never);
     render(NodePicker, {
       props: {
+        allowSelectors: true,
         config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }] },
         loreEntries: [loreEntry("l1", "Mara Voss", ["tag_villain"]), loreEntry("l2", "Quill", [])],
         affordance: "add",
@@ -1382,6 +1394,7 @@ describe("NodePicker instance colour (#1520)", () => {
     tagNodesStore.set([{ id: "tag_epic", title: "epic", entry_type: "tag:tag" }] as never);
     render(NodePicker, {
       props: {
+        allowSelectors: true,
         config: { sources: [{ kind: "lore" }], multiple: true },
         loreEntries: [
           {
@@ -1405,5 +1418,65 @@ describe("NodePicker instance colour (#1520)", () => {
     await expandGroup(tags, "epic");
     const member = within(tags).getByText("Aetheria").closest(".node-row") as HTMLElement;
     expect(member.style.getPropertyValue("--row-stripe")).toBe("#dc143c");
+  });
+});
+
+// #1940: the selector axes (By tag / Saved views / plotlines) offer a live SET
+// via synthetic `tagged:`/`view:`/`plotline:` refs — a context_pick feature.
+// They are gated on `allowSelectors`, OFF by default, so a concrete-node picker
+// (entity_ref field, tag-merge, view hand_picked) never offers them (absorbing
+// one would store a dangling synthetic id). Only the context_pick composer
+// (PromptInputField) passes `allowSelectors`.
+describe("NodePicker selector axes gated to context_pick (#1940)", () => {
+  const loreView: ViewNodeSummary = {
+    id: "v1",
+    title: "Villains",
+    entry_type: "view:view",
+    view_kind: "lore",
+    spec: { kind: "lore", expr: { tagged: "tag_villain" } },
+  };
+  function seed() {
+    tagNodesStore.set([{ id: "tag_villain", title: "villain", entry_type: "tag:tag" }] as never);
+    paneViews.views = { lore: [loreView] };
+  }
+  async function openMenu(): Promise<HTMLElement> {
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    return document.querySelector(".ctx-menu") as HTMLElement;
+  }
+
+  it("omits By-tag and Saved-views by default (a concrete field picker)", async () => {
+    seed();
+    render(NodePicker, {
+      props: {
+        // No allowSelectors → the entity_ref-field / merge / hand_picked default.
+        config: { sources: [{ kind: "lore" }], multiple: true },
+        loreEntries: [loreEntry("lore_a", "Vex", ["tag_villain"])],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    // The concrete Lore axis is still there (its entry-type group)…
+    expect(within(menu).getByText("Character")).toBeInTheDocument();
+    // …but no selector axis rows, nor their selector rows.
+    expect(within(menu).queryByText("By tag")).toBeNull();
+    expect(within(menu).queryByText("Saved views")).toBeNull();
+    expect(within(menu).queryByText("villain")).toBeNull(); // the tag selector
+    expect(within(menu).queryByText("Villains")).toBeNull(); // the view selector
+  });
+
+  it("offers them once allowSelectors is set (the context_pick composer)", async () => {
+    seed();
+    render(NodePicker, {
+      props: {
+        allowSelectors: true,
+        config: { sources: [{ kind: "lore" }], multiple: true },
+        loreEntries: [loreEntry("lore_a", "Vex", ["tag_villain"])],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    expect(within(menu).getByText("By tag")).toBeInTheDocument();
+    expect(within(menu).getByText("Saved views")).toBeInTheDocument();
   });
 });

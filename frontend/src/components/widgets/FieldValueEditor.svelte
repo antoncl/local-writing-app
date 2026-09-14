@@ -6,6 +6,7 @@
   // field definition + current value + onChange, it renders the right control
   // and emits a normalized value. Collection/computed handling stays generic so
   // callers can filter by type as they see fit.
+  import { untrack } from "svelte";
   import ListValueEditor from "@/components/widgets/ListValueEditor.svelte";
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
@@ -98,6 +99,41 @@
 
   const label = $derived(ariaLabel ?? field.name);
   const currentValue = $derived(metadataValueString(value));
+
+  // Caret-preserving draft for the freeform text `<input>` (#1951). That input
+  // edits a `text` field, a legacy `date`, or an OPTION-LESS `multi_select` (a
+  // bare comma list). For multi_select, `emit` reformats on every keystroke —
+  // splits on commas, de-dupes, re-joins with ", " — so binding the input
+  // straight to the re-derived `currentValue` rewrote its own text mid-typing
+  // ("a,b" -> "a, b", a dropped trailing comma, a de-dupe), and a browser
+  // bounces the caret to the end whenever a controlled input's value is
+  // rewritten. We show the user's own text verbatim while they type and adopt
+  // the derived value only when it changes for a reason OTHER than our last
+  // keystroke (an external reset, or a parent switching which value is edited)
+  // — detected by re-deriving `currentValue` from the draft and seeing it
+  // diverge. `text`/`date` never reformat, so the draft is a no-op for them.
+  // Seed from the derived value once (untracked — the $effect below maintains it).
+  let textDraft = $state(untrack(() => currentValue));
+  function reformatDraft(raw: string): string {
+    return metadataValueString(normaliseFieldValue(field, raw));
+  }
+  $effect(() => {
+    const derived = currentValue;
+    // React ONLY to the derived value changing (an external reset, or our own
+    // change once the parent echoes it back) — `untrack` keeps the draft off
+    // this effect's dependencies, so a keystroke (which moves the draft but not
+    // yet `currentValue`) doesn't re-run it and race the echo, snapping the
+    // caret back. On a real external change the derived value diverges from the
+    // draft's own normalization and we adopt it.
+    untrack(() => {
+      if (derived !== reformatDraft(textDraft)) textDraft = derived;
+    });
+  });
+  function editText(raw: string) {
+    textDraft = raw;
+    emit(raw);
+  }
+
   // The derived state an authoring host keeps out of the pick list (#1911).
   const derivedState = $derived(derivedSelectValue(field));
 
@@ -279,7 +315,7 @@
 {:else if field.type === "color"}
   <SwatchPicker value={currentValue || null} onChange={(id) => emit(id ?? "")} />
 {:else}
-  <input aria-label={label} value={currentValue} oninput={(event) => emit(event.currentTarget.value)} />
+  <input aria-label={label} value={textDraft} oninput={(event) => editText(event.currentTarget.value)} />
 {/if}
 
 <style>

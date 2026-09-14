@@ -474,6 +474,43 @@ class NodePickerConfigSourcesTests(unittest.TestCase):
         self.assertEqual(cfg.kinds, ["lore"])
         self.assertEqual(cfg.entry_types, {"lore": ["lore:character"]})
 
+    def test_family_scope_roundtrip(self) -> None:
+        """A `descendants_of` leaf (ADR-0074 Amendment 4) round-trips through
+        `entry_type_families` and re-encodes as `{descendants_of: fqn}`."""
+        cfg = NodePickerConfig.from_membership(
+            kinds=["lore"],
+            entry_types={"lore": ["lore:character"]},
+            families={"lore": ["lore:character"]},
+        )
+        self.assertEqual(cfg.entry_types, {"lore": ["lore:character"]})
+        self.assertEqual(cfg.entry_type_families, {"lore": ["lore:character"]})
+        source = cfg.sources[0]
+        self.assertEqual(source.expr.descendants_of, "lore:character")
+        self.assertIsNone(source.expr.type)
+
+    def test_mixed_exact_and_family_union_is_stable_sorted(self) -> None:
+        """A kind with both an EXACT and a FAMILY fqn encodes as a MIXED
+        union, fqns sorted, so equal membership yields a byte-equal source
+        list regardless of input dict order (tag-scope change detection
+        relies on this determinism)."""
+        cfg_a = NodePickerConfig.from_membership(
+            kinds=["lore"],
+            entry_types={"lore": ["lore:location", "lore:character"]},
+            families={"lore": ["lore:character"]},
+        )
+        cfg_b = NodePickerConfig.from_membership(
+            kinds=["lore"],
+            entry_types={"lore": ["lore:character", "lore:location"]},
+            families={"lore": ["lore:character"]},
+        )
+        self.assertEqual(cfg_a.model_dump()["sources"], cfg_b.model_dump()["sources"])
+        self.assertEqual(cfg_a.entry_types, {"lore": ["lore:character", "lore:location"]})
+        self.assertEqual(cfg_a.entry_type_families, {"lore": ["lore:character"]})
+        union = cfg_a.sources[0].expr.union
+        self.assertEqual(len(union), 2)
+        self.assertEqual(union[0].descendants_of, "lore:character")
+        self.assertEqual(union[1].type, "lore:location")
+
 
 class ViewUiStateTests(unittest.TestCase):
     """Fold/ui state on the view node (ADR-0036): the lock-free /ui endpoint,

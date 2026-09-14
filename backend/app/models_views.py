@@ -154,34 +154,64 @@ class ViewRef(BaseModel):
 ViewSource = ViewSpec | ViewRef
 
 
-def _view_expr_entry_type_leaves(expr: ViewExpr | None) -> list[str] | None:
-    """Reduce an `expr` to the exact entry_type FQNs it whitelists, or None when
-    it isn't a kind-only / type-leaf / union-of-type-leaves shape (the only
-    forms the pre-evaluator degenerate reducer understands). None = "no
-    entry_type constraint" (any type of the kind allowed)."""
+def _leaf_expr(fqn: str, *, family: bool) -> ViewExpr:
+    """Inverse of `_view_expr_leaf` for a single fqn: `{descendants_of: fqn}`
+    for a family scope, `{type: fqn}` for an exact one."""
+
+    return ViewExpr(descendants_of=fqn) if family else ViewExpr(type=fqn)
+
+
+def _view_expr_leaf(expr: ViewExpr) -> tuple[str, bool] | None:
+    """The type/descendants_of leaf of a single expr node, or None when it is
+    neither (a combinator, a promoted `{var}` leaf — #222 — a field predicate,
+    …). Only a STRING operand is a static entry_type; a `{var}` is a
+    parameterized source. Returns `(fqn, family)`: `family` is True for
+    `descendants_of` (self + subtypes, ADR-0074 Amendment 4), False for the
+    EXACT `type` leaf. Mirrors `leafOf` in frontend/src/lib/utils/pickerSources.ts."""
+
+    if isinstance(expr.type, str):
+        return (expr.type, False)
+    if isinstance(expr.descendants_of, str):
+        return (expr.descendants_of, True)
+    return None
+
+
+def _view_expr_entry_type_leaves(expr: ViewExpr | None) -> list[tuple[str, bool]] | None:
+    """Reduce an `expr` to the per-fqn entry-type leaves it whitelists (each
+    tagged exact vs family), or None when it isn't a kind-only / type-leaf /
+    descendants_of-leaf / union-of-those shape (the only forms the
+    pre-evaluator degenerate reducer understands) — a MIXED union of exact and
+    family leaves is a legal degenerate shape. None = "no entry_type
+    constraint" (any type of the kind allowed). Mirrors `exprEntryTypeLeaves`
+    in frontend/src/lib/utils/pickerSources.ts."""
 
     if expr is None:
         return None
-    # Only a STRING type leaf is a static entry_type whitelist. A promoted
-    # `{"var": ...}` type leaf (ADR-0038 §C Amendment 1) is a parameterized source,
-    # not a fixed set — it has no degenerate (kinds, entry_types) reduction.
-    if isinstance(expr.type, str):
-        return [expr.type]
-    if expr.union is not None and all(isinstance(child.type, str) for child in expr.union):
-        return [child.type for child in expr.union if isinstance(child.type, str)]
+    direct = _view_expr_leaf(expr)
+    if direct:
+        return [direct]
+    if expr.union is not None:
+        leaves = [_view_expr_leaf(child) for child in expr.union]
+        if leaves and all(leaf is not None for leaf in leaves):
+            return leaves
     return None
 
 
 def _sources_membership(
     sources: list[ViewSource],
-) -> tuple[list[str], dict[str, list[str]]]:
+) -> tuple[list[str], dict[str, list[str]], dict[str, list[str]]]:
     """Degenerate reducer: read a `sources` list back as the legacy
-    `(kinds, entry_types)` membership subset, so pre-evaluator picker/tag-scope
-    filtering keeps working unchanged (0.5.0 step 1). Non-degenerate exprs and
-    view-refs contribute their kind (when known) with no entry_type constraint."""
+    `(kinds, entry_types)` membership subset plus the new `families` subset
+    (ADR-0074 Amendment 4), so pre-evaluator picker/tag-scope filtering keeps
+    working unchanged. `entry_types[kind]` lists EVERY scoped fqn (exact +
+    family); `families[kind]` lists only the fqns whose leaf is
+    `descendants_of`. Non-degenerate exprs and view-refs contribute their kind
+    (when known) with no entry_type constraint. Mirrors `pickerMembership` in
+    frontend/src/lib/utils/pickerSources.ts."""
 
     kinds: list[str] = []
     entry_types: dict[str, list[str]] = {}
+    families: dict[str, list[str]] = {}
     for source in sources:
         if not isinstance(source, ViewSpec):
             continue  # view-refs can't be resolved without loading the view
@@ -190,33 +220,42 @@ def _sources_membership(
         leaves = _view_expr_entry_type_leaves(source.expr)
         if leaves:
             bucket = entry_types.setdefault(source.kind, [])
-            for fqn in leaves:
+            for fqn, family in leaves:
                 if fqn not in bucket:
                     bucket.append(fqn)
-    return kinds, entry_types
+                if family:
+                    fam_bucket = families.setdefault(source.kind, [])
+                    if fqn not in fam_bucket:
+                        fam_bucket.append(fqn)
+    return kinds, entry_types, families
 
 
 def _membership_to_sources(
-    kinds: list[str], entry_types: dict[str, list[str]]
+    kinds: list[str],
+    entry_types: dict[str, list[str]],
+    families: dict[str, list[str]] | None = None,
 ) -> list[ViewSpec]:
     """Inverse of `_sources_membership`: build one degenerate ViewSpec source per
-    kind. A kind with an entry_type whitelist becomes a `type` leaf (single) or a
-    `union` of type leaves; a kind without one becomes a kind-only spec (no
-    expr). Deterministic so equal membership yields equal sources (tag-scope
-    change detection compares serialized scopes)."""
+    kind, each fqn emitted as `{type: fqn}` (exact) or `{descendants_of: fqn}`
+    (family, per `families`) — a single leaf when a kind has one fqn, a `union`
+    (which may MIX both leaf kinds) when several. Deterministic — fqns are
+    sorted so equal membership yields a byte-equal source list (tag-scope
+    change detection compares serialized scopes). Mirrors `membershipToSources`
+    in frontend/src/lib/utils/pickerSources.ts."""
 
+    families = families or {}
     ordered_kinds = list(dict.fromkeys([*kinds, *entry_types.keys()]))
     sources: list[ViewSpec] = []
     for kind in ordered_kinds:
-        fqns = entry_types.get(kind) or []
-        if not fqns:
+        fqns = sorted(entry_types.get(kind) or [])
+        fam = set(families.get(kind) or [])
+        leaves = [_leaf_expr(fqn, family=fqn in fam) for fqn in fqns]
+        if not leaves:
             sources.append(ViewSpec(kind=kind))
-        elif len(fqns) == 1:
-            sources.append(ViewSpec(kind=kind, expr=ViewExpr(type=fqns[0])))
+        elif len(leaves) == 1:
+            sources.append(ViewSpec(kind=kind, expr=leaves[0]))
         else:
-            sources.append(
-                ViewSpec(kind=kind, expr=ViewExpr(union=[ViewExpr(type=f) for f in fqns]))
-            )
+            sources.append(ViewSpec(kind=kind, expr=ViewExpr(union=leaves)))
     return sources
 
 
@@ -255,8 +294,15 @@ class NodePickerConfig(BaseModel):
     @property
     def entry_types(self) -> dict[str, list[str]]:
         """Legacy read accessor — the per-kind entry_type FQN whitelist the
-        `sources` encode. Read-only (not serialized)."""
+        `sources` encode; EVERY scoped fqn, exact + family. Read-only (not
+        serialized)."""
         return _sources_membership(self.sources)[1]
+
+    @property
+    def entry_type_families(self) -> dict[str, list[str]]:
+        """The per-kind subset of `entry_types` whose leaf is `descendants_of`
+        (self + subtypes, ADR-0074 Amendment 4). Read-only (not serialized)."""
+        return _sources_membership(self.sources)[2]
 
     @classmethod
     def from_membership(
@@ -264,17 +310,19 @@ class NodePickerConfig(BaseModel):
         *,
         kinds: list[str] | None = None,
         entry_types: dict[str, list[str]] | None = None,
+        families: dict[str, list[str]] | None = None,
         presets: list[str] | None = None,
         multiple: bool | None = None,
         allow_target_marking: bool | None = None,
         create_missing: bool | None = None,
     ) -> NodePickerConfig:
-        """Build a config from the legacy `(kinds, entry_types)` membership pair,
+        """Build a config from the legacy `(kinds, entry_types)` membership pair
+        plus the new `families` tri-state subset (ADR-0074 Amendment 4),
         encoding it as degenerate `sources`. Mechanics pass through — including
         `create_missing` (round 2 review fix, ADR-0082 §2): omitting it here
         would silently drop it on any round-trip through this constructor."""
         return cls(
-            sources=_membership_to_sources(kinds or [], entry_types or {}),
+            sources=_membership_to_sources(kinds or [], entry_types or {}, families or {}),
             presets=presets or [],
             multiple=multiple,
             allow_target_marking=allow_target_marking,

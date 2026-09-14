@@ -655,12 +655,11 @@ describe("NodePicker sole allowed type (#1735 / #1742)", () => {
     expect(within(menu).getByRole("button", { name: "Back to sources" })).toBeInTheDocument();
   });
 
-  it("keeps the concrete Lore browse EXACT — a deity is not shown under a plain character scope (#1945)", async () => {
-    // Deliberate split: the selector axes (By tag / Saved views) resolve is-a so a
-    // specialization surfaces there (see NodePicker.selectors.test.ts), but the
-    // concrete Lore browse stays exact — matching the backend entity_ref validator,
-    // so ReferencePicker never offers a value the backend would reject. Author-
-    // controlled per-type family scoping (showing deities here too) is a follow-up.
+  it("concrete Lore browse honors an EXACT scope — a deity is NOT shown under a plain lore:character (#1947)", async () => {
+    // Per-type tri-state (#1947): an EXACT `{type}` scope matches the concrete type
+    // only, so a specialization is out of the concrete browse (and out of the
+    // entity_ref picker, matching the backend ref-validator). The FAMILY sibling
+    // below shows the opposite direction.
     render(NodePicker, {
       props: {
         config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }] },
@@ -673,8 +672,24 @@ describe("NodePicker sole allowed type (#1735 / #1742)", () => {
     });
     const menu = await openMenu();
     expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
-    // Exact scope: the deity subtype is not in the concrete Lore browse.
     expect(within(menu).queryByText("Hespera")).toBeNull();
+  });
+
+  it("concrete Lore browse honors a FAMILY scope — a deity IS shown under {descendants_of: lore:character} (#1947)", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore", expr: { descendants_of: "lore:character" } }] },
+        loreEntries: [
+          loreEntry("l1", "Mara Voss", []), // a character
+          { ...loreEntry("deity_1", "Hespera", []), entry_type: "lore:character:deity" },
+        ],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
+    // Family scope: the deity subtype browses under its parent's scope.
+    expect(within(menu).getByText("Hespera")).toBeInTheDocument();
   });
 });
 

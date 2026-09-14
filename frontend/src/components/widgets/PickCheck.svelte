@@ -5,12 +5,15 @@
   // state word). Rendered in NodeRow's `leading` slot so every pickable row —
   // container or leaf, any source — shows the same 16px box.
   //
-  // Four states (identical to the retired PickTree.ctx-mcheck):
+  // States:
   //   on            — explicitly picked (filled accent + ✓)
+  //   family        — picked WITH its subtypes (filled accent + ✓ over a stacked
+  //                   card), the author-time tri-state's third step (#1947); the
+  //                   runtime picker never sets it
   //   implied       — included via a checked container (soft fill + ✓)
   //   indeterminate — a container with only some descendants picked (centre square)
   //   off           — not picked (bare border)
-  export type PickCheckState = "on" | "implied" | "indeterminate" | "off";
+  export type PickCheckState = "on" | "family" | "implied" | "indeterminate" | "off";
 </script>
 
 <script lang="ts">
@@ -18,7 +21,7 @@
 </script>
 
 <span class={`pick-check pick-check-${state}`} aria-hidden="true"
-  >{state === "on" || state === "implied" ? "✓" : ""}</span
+  >{state === "on" || state === "family" || state === "implied" ? "✓" : ""}</span
 >
 
 <style>
@@ -41,6 +44,16 @@
     background: var(--accent);
     border-color: var(--accent);
     color: var(--surface);
+  }
+  /* Family (this type + subtypes): the filled `on` box over a quiet stacked
+     card, so "and everything under it" reads at a glance without a second glyph
+     fighting for room in 16px. The offset box-shadow is the card peeking out
+     bottom-right. */
+  .pick-check-family {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--surface);
+    box-shadow: 2.5px 2.5px 0 -0.5px var(--accent-soft2);
   }
   .pick-check-implied {
     background: var(--accent-soft2);

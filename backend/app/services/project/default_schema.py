@@ -891,7 +891,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "character entries, not free text."
             ),
             "type": "entity_ref_list",
-            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"descendants_of": "lore:character"}}]},
         },
         "pov": {
             "name": "POV",
@@ -901,7 +901,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "(book / act / chapter / scene) unless a level below overrides it."
             ),
             "type": "entity_ref",
-            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"descendants_of": "lore:character"}}]},
         },
         "character": {
             # The character a `plot:character_arc` is about (ADR-0080 §2): the arc's
@@ -913,7 +913,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # that later UX work, not as a save-time check here.
             "name": "Character",
             "type": "entity_ref",
-            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"descendants_of": "lore:character"}}]},
         },
         "location": {
             "name": "Location",
@@ -922,7 +922,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "location entry."
             ),
             "type": "entity_ref",
-            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:location"}}]},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"descendants_of": "lore:location"}}]},
         },
         "role": {
             "name": "Role",
@@ -950,7 +950,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "existing location entry."
             ),
             "type": "entity_ref",
-            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:location"}}]},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"descendants_of": "lore:location"}}]},
         },
         "location_type": {
             "name": "Location type",
@@ -968,7 +968,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "location entry (e.g. the city a building sits in)."
             ),
             "type": "entity_ref",
-            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:location"}}]},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"descendants_of": "lore:location"}}]},
         },
         "related_entries": {
             "name": "Related Entries",

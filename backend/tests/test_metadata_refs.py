@@ -20,6 +20,7 @@ from app.models.schema import (
     MetadataFieldDefinition,
     MetadataSchema,
 )
+from app.models_views import NodePickerConfig
 from app.services.project.metadata_refs import (
     UNCHANGED,
     iter_ref_occurrences,
@@ -198,3 +199,132 @@ def test_reference_edges_include_a_nested_ref() -> None:
     assert ("char_a", "pov") in targets      # top-level still works
     assert ("char_b", "rels") in targets     # nested edge, keyed on the list field
     assert ("char_c", "rels") in targets
+
+
+# --- ADR-0074 Amendment 4: FAMILY (`descendants_of`) picker scope ------------
+#
+# A picker/tag scope may whitelist an entry_type EXACTLY (`{type: fqn}`) or as
+# a FAMILY (`{descendants_of: fqn}`, self + subtypes). `_ref_matches_picker`
+# (read-side heal) and `_validate_reference_target` (save/AI-patch) must both
+# accept a target whose entry_type is EXACTLY scoped OR is-a one of the scoped
+# FAMILY roots — never the reverse (a parent accepted under a child's scope).
+
+
+def _family_schema() -> MetadataSchema:
+    """`lore:character` and its `lore:character:deity` sub-type (parent chain),
+    each field carrying a picker_config exercising a different scope shape:
+    `family_field` is FAMILY-scoped to `lore:character` (self + subtypes),
+    `exact_field` is EXACT-scoped to `lore:character` only, and
+    `deity_family_field` is FAMILY-scoped to the deity sub-type itself — so a
+    plain `lore:character` (deity's own parent) must NOT match it; a reversed
+    is-a arg order would wrongly accept it (the parent is an ancestor of the
+    scoped root, not a descendant)."""
+    return MetadataSchema(
+        fields={
+            "family_field": MetadataFieldDefinition(
+                name="Family Patron",
+                type="entity_ref",
+                picker_config=NodePickerConfig.from_membership(
+                    kinds=["lore"],
+                    entry_types={"lore": ["lore:character"]},
+                    families={"lore": ["lore:character"]},
+                ),
+            ),
+            "exact_field": MetadataFieldDefinition(
+                name="Exact Patron",
+                type="entity_ref",
+                picker_config=NodePickerConfig.from_membership(
+                    kinds=["lore"], entry_types={"lore": ["lore:character"]}
+                ),
+            ),
+            "deity_family_field": MetadataFieldDefinition(
+                name="Deity-only Family",
+                type="entity_ref",
+                picker_config=NodePickerConfig.from_membership(
+                    kinds=["lore"],
+                    entry_types={"lore": ["lore:character:deity"]},
+                    families={"lore": ["lore:character:deity"]},
+                ),
+            ),
+        },
+        entry_types={
+            "lore:character": EntryTypeDefinition(
+                name="Character", kind="lore", fields=["family_field", "exact_field", "deity_family_field"]
+            ),
+            "lore:character:deity": EntryTypeDefinition(
+                name="Deity",
+                kind="lore",
+                parent="lore:character",
+                fields=["family_field", "exact_field", "deity_family_field"],
+            ),
+        },
+    )
+
+
+def _family_node_index() -> SimpleNamespace:
+    return SimpleNamespace(
+        by_id={
+            "deity_1": NodeIndexEntry(
+                id="deity_1", kind="lore", entry_type="lore:character:deity", path=Path("deity_1.md")
+            ),
+            "char_1": NodeIndexEntry(
+                id="char_1", kind="lore", entry_type="lore:character", path=Path("char_1.md")
+            ),
+        },
+        canonical_id=lambda node_id: node_id,
+    )
+
+
+def test_validate_reference_target_accepts_a_subtype_under_a_family_scope_but_not_exact() -> None:
+    schema = _family_schema()
+    node_index = _family_node_index()
+    service = ProjectService(None)
+    family_field = schema.fields["family_field"]
+    exact_field = schema.fields["exact_field"]
+
+    assert (
+        service._validate_reference_target(
+            "Entry", "family_field", "deity_1", family_field, node_index, schema
+        )
+        == []
+    )
+    exact_errors = service._validate_reference_target(
+        "Entry", "exact_field", "deity_1", exact_field, node_index, schema
+    )
+    assert exact_errors != []
+
+
+def test_ref_matches_picker_accepts_a_subtype_under_a_family_scope_but_not_exact() -> None:
+    schema = _family_schema()
+    node_index = _family_node_index()
+    service = ProjectService(None)
+    family_field = schema.fields["family_field"]
+    exact_field = schema.fields["exact_field"]
+
+    assert service._ref_matches_picker("deity_1", family_field, node_index, schema) is True
+    assert service._ref_matches_picker("deity_1", exact_field, node_index, schema) is False
+
+
+def test_family_scope_is_a_arg_order_does_not_accept_a_parent_under_a_child_scope() -> None:
+    # ★ arg-order trap: a scope FAMILY-rooted at the deity sub-type must not
+    # accept a plain `lore:character` node — `lore:character` is deity's
+    # ANCESTOR, not a descendant. A reversed `_entry_type_matches(family_root,
+    # target.entry_type, schema)` call would wrongly say yes (a parent IS in
+    # its own ancestry-of-itself lookup direction reversed).
+    schema = _family_schema()
+    node_index = _family_node_index()
+    service = ProjectService(None)
+    deity_family_field = schema.fields["deity_family_field"]
+
+    errors = service._validate_reference_target(
+        "Entry", "deity_family_field", "char_1", deity_family_field, node_index, schema
+    )
+    assert errors != []
+    assert service._ref_matches_picker("char_1", deity_family_field, node_index, schema) is False
+    # The deity itself, self + subtypes of the scoped root, still matches.
+    assert (
+        service._validate_reference_target(
+            "Entry", "deity_family_field", "deity_1", deity_family_field, node_index, schema
+        )
+        == []
+    )

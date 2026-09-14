@@ -11,7 +11,7 @@ inputs:
     sources:
     - kind: lore
       expr:
-        type: lore:character
+        descendants_of: lore:character
     multiple: false
     presets: []
 context_strategy:

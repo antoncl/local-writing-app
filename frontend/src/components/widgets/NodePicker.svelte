@@ -363,12 +363,14 @@
     return flat;
   }
   function viewSelectorSpec(kind: string, spec: ViewSpec): ViewSpec {
+    // IS-A clip (`descendants_of`), matching tagSpecFor — a saved view picked on
+    // a lore:character scope includes a lore:character:deity member (#1945).
     const fqns = membership.entryTypes[kind] ?? [];
     const typeExpr =
       fqns.length === 1
-        ? { type: fqns[0] }
+        ? { descendants_of: fqns[0] }
         : fqns.length > 1
-          ? { union: fqns.map((f) => ({ type: f })) }
+          ? { union: fqns.map((f) => ({ descendants_of: f })) }
           : null;
     if (typeExpr && spec.expr && !spec.groups?.length && exprIsFlat(spec.expr)) {
       return { ...spec, kind, expr: { intersect: [spec.expr, typeExpr] } } as ViewSpec;
@@ -413,18 +415,22 @@
   // merged — including this "By tag" axis, which would otherwise offer a
   // dead selector no longer distinguishable from its survivor.
   const tagNodes = $derived($liveTags.filter((t) => t.entry_type !== "tag:assistant_tag"));
-  // A `tagged` leaf INTERSECTED with the config's entry_type constraint for the
-  // kind, so a tag can't over-match past the picker's scope (a lore:character
-  // input must not pull in a lore:location sharing the tag). The stored spec
-  // drives invocation expansion too, so the constraint lives in the spec, not
-  // just the display filter.
+  // A `tagged` leaf INTERSECTED with the kind's type scope, so a tag can't
+  // over-match past the picker's scope (a lore:character input must not pull in a
+  // lore:location sharing the tag). The constraint is IS-A (`descendants_of`, not
+  // exact `type`): a specialization of an allowed type — e.g. a
+  // lore:character:deity when the scope names lore:character — is included when
+  // grouped under its tag (#1945). This is the selector-axis (By tag / Saved
+  // views) reading only; the concrete Lore/entity_ref browse stays exact, matching
+  // the backend ref-validator (a per-type author-controlled choice is a follow-up).
+  // The stored spec drives invocation expansion too, so the constraint lives in it.
   function tagSpecFor(kind: string, tagId: string): ViewSpec {
     const fqns = membership.entryTypes[kind] ?? [];
     const typeExpr =
       fqns.length === 1
-        ? { type: fqns[0] }
+        ? { descendants_of: fqns[0] }
         : fqns.length > 1
-          ? { union: fqns.map((f) => ({ type: f })) }
+          ? { union: fqns.map((f) => ({ descendants_of: f })) }
           : null;
     const expr = typeExpr ? { intersect: [{ tagged: tagId }, typeExpr] } : { tagged: tagId };
     return { kind, expr } as ViewSpec;

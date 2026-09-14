@@ -247,4 +247,35 @@ describe("NodePickerConfigEditor — tri-state per-type scope (#1947)", () => {
     }) as HTMLButtonElement;
     expect(character.disabled).toBe(true);
   });
+
+  it("renders an indeterminate parent (a subtype-only scope) with a mixed toggle and an N-of-M count", () => {
+    metadataSchemaStore.set(LORE_SCHEMA);
+    render(NodePickerConfigEditor, {
+      props: {
+        config: { sources: [{ kind: "lore", expr: { type: "lore:character:deity" } }] },
+        mode: "field" as const,
+      },
+    });
+    // Scoping only Deity leaves its Character parent partial: a "mixed" toggle
+    // announcing the roll-up, with the subtype itself exact.
+    const character = screen.getByRole("button", { name: "Character: some subtypes" });
+    expect(character.getAttribute("aria-pressed")).toBe("mixed");
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Deity: this type" })).toBeInTheDocument();
+  });
+
+  it("seeds a legacy kind-only source as family on a concrete-branch root (no false empty warning)", () => {
+    metadataSchemaStore.set(LORE_SCHEMA);
+    render(NodePickerConfigEditor, {
+      props: { config: { sources: [{ kind: "lore" }] }, mode: "field" as const },
+    });
+    // A bare {kind:"lore"} historically meant "all sub-types allowed" — the
+    // concrete-branch root reflects that as family (this type + subtypes), not
+    // exact-only, so the subtypes aren't silently dropped on the first save.
+    expect(
+      screen.getByRole("button", { name: "Character: this type and its subtypes" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("+ subtypes").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Nothing is pickable/)).toBeNull();
+  });
 });

@@ -54,10 +54,11 @@ export type RenderedNode = {
   interactive: boolean;
   hasChildren: boolean;
   collapsed: boolean;
-  // Roll-up for the `indeterminate` "N of M" hint: concrete leaves under this
-  // node that a scope (here or below) covers, out of the node's concrete leaves.
+  // Roll-up for the `indeterminate` "N of M" hint: CONCRETE types in this node's
+  // subtree that a scope covers, out of the concrete types there (intermediate
+  // concrete branches included — a scope on one is a covered type too).
   pickedCount: number;
-  totalLeaves: number;
+  totalScopable: number;
 };
 
 // Build the per-kind tree from the project schema. Roots are entry types whose
@@ -102,17 +103,6 @@ export function buildTree(schema: MetadataSchema | null, kind: string, exclude?:
   return roots;
 }
 
-// Concrete (instantiable) leaves under a node — abstract types contribute none.
-// A concrete node WITH children is a branch, not a leaf (its own id is not a
-// concrete leaf here); its instances are covered by an `exact`/`family` scope on
-// the node itself, which the scope map records directly.
-export function concreteLeaves(node: SchemaNode): string[] {
-  if (node.children.length === 0) return node.abstract ? [] : [node.id];
-  const out: string[] = [];
-  for (const child of node.children) out.push(...concreteLeaves(child));
-  return out;
-}
-
 // The cycle a click on this node walks — see NodeCapability.
 export function nodeCapability(node: SchemaNode): NodeCapability {
   const hasChildren = node.children.length > 0;
@@ -150,19 +140,31 @@ export function pickState(node: SchemaNode, scope: ScopeMap, ancestorFamily: boo
   return anyDescendantScoped(node, scope) ? "indeterminate" : "off";
 }
 
-// Concrete leaves under `node` that a scope covers — a `family` here or above
-// covers all of them; otherwise a leaf counts when it (or a branch above it
-// within the subtree) is `family`, or the leaf is itself scoped.
-function coveredLeafCount(node: SchemaNode, scope: ScopeMap, underFamily: boolean): number {
-  const family = underFamily || scope.get(node.id) === "family";
-  if (node.children.length === 0) {
-    if (node.abstract) return 0;
-    return family || scope.has(node.id) ? 1 : 0;
+// Roll-up for the `indeterminate` hint: how many CONCRETE types in the subtree a
+// scope covers, out of the concrete types there. Counts intermediate concrete
+// branches, not just leaves — a concrete branch has instances too, so an
+// `exact`/`family` scope sitting on one is a covered type. Counting only leaves
+// let a scoped mid-tree type vanish from the roll-up, contradicting its own
+// visibly-scoped row. `underFamily` = an ancestor (or this node) is `family`, so
+// everything below is covered.
+function countScoped(
+  node: SchemaNode,
+  scope: ScopeMap,
+  underFamily: boolean,
+): { covered: number; total: number } {
+  let covered = 0;
+  let total = 0;
+  for (const child of node.children) {
+    const childFamily = underFamily || scope.get(child.id) === "family";
+    if (!child.abstract) {
+      total += 1;
+      if (underFamily || scope.has(child.id)) covered += 1;
+    }
+    const sub = countScoped(child, scope, childFamily);
+    covered += sub.covered;
+    total += sub.total;
   }
-  if (family) return concreteLeaves(node).length;
-  let sum = 0;
-  for (const child of node.children) sum += coveredLeafCount(child, scope, false);
-  return sum;
+  return { covered, total };
 }
 
 // Cycle a node's scope on click, returning a NEW map (pure). Setting a node to
@@ -206,7 +208,8 @@ export function flattenForRender(
     const capability = nodeCapability(node);
     const hasChildren = node.children.length > 0;
     const isCollapsed = hasChildren && collapsed.has(node.id);
-    const leaves = concreteLeaves(node);
+    const effectiveFamily = ancestorFamily || scope.get(node.id) === "family";
+    const rollup = countScoped(node, scope, effectiveFamily);
     out.push({
       id: node.id,
       name: node.name,
@@ -217,12 +220,11 @@ export function flattenForRender(
       interactive: !ancestorFamily && capability !== "none",
       hasChildren,
       collapsed: isCollapsed,
-      pickedCount: coveredLeafCount(node, scope, ancestorFamily),
-      totalLeaves: leaves.length,
+      pickedCount: rollup.covered,
+      totalScopable: rollup.total,
     });
     if (!isCollapsed) {
-      const childAncestorFamily = ancestorFamily || scope.get(node.id) === "family";
-      for (const child of node.children) walk(child, depth + 1, childAncestorFamily);
+      for (const child of node.children) walk(child, depth + 1, effectiveFamily);
     }
   }
   for (const root of roots) walk(root, 0, false);

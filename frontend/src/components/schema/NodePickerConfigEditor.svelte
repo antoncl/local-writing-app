@@ -627,7 +627,7 @@
                   {/if}
                 </button>
                 {#if item.state === "indeterminate" && item.hasChildren}
-                  <span class="ctx-tree-partial-count">{item.pickedCount} of {item.totalLeaves}</span>
+                  <span class="ctx-tree-partial-count">{item.pickedCount} of {item.totalScopable}</span>
                 {/if}
               </div>
             {/each}

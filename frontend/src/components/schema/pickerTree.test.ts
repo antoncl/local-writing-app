@@ -148,7 +148,7 @@ describe("pickerTree — flattenForRender", () => {
     const byId = (id: string) => rows.find((r) => r.id === id)!;
     expect(byId("lore:character").state).toBe("indeterminate");
     expect(byId("lore:character").pickedCount).toBe(1);
-    expect(byId("lore:character").totalLeaves).toBe(2);
+    expect(byId("lore:character").totalScopable).toBe(2);
     expect(byId("lore:character:deity").state).toBe("exact");
     expect(byId("lore:character:hero").state).toBe("off");
   });
@@ -158,5 +158,46 @@ describe("pickerTree — flattenForRender", () => {
     const voidRow = rows.find((r) => r.id === "lore:void")!;
     expect(voidRow.capability).toBe("none");
     expect(voidRow.interactive).toBe(false);
+  });
+});
+
+// A three-level tree — Character > Noble(branch) > {King, Duke} + Hero — exercises
+// the roll-up over an INTERMEDIATE concrete branch, which the leaf-only count got
+// wrong (self-review finding: a scoped mid-tree type must count, or the "N of M"
+// contradicts its own checked row), and the family-covers-all count path.
+describe("pickerTree — roll-up over an intermediate concrete branch (#1947 self-review)", () => {
+  const DEEP_SCHEMA = {
+    entry_types: {
+      "lore:character": { name: "Character", kind: "lore" },
+      "lore:noble": { name: "Noble", kind: "lore", parent: "lore:character" },
+      "lore:king": { name: "King", kind: "lore", parent: "lore:noble" },
+      "lore:duke": { name: "Duke", kind: "lore", parent: "lore:noble" },
+      "lore:hero": { name: "Hero", kind: "lore", parent: "lore:character" },
+    },
+    fields: {},
+  } as unknown as MetadataSchema;
+  const deepRoots = buildTree(DEEP_SCHEMA, "lore");
+  const byId = (rows: ReturnType<typeof flattenForRender>, id: string) =>
+    rows.find((r) => r.id === id)!;
+
+  it("counts a scoped mid-tree concrete branch as covered — no contradictory 0-of-N", () => {
+    const rows = flattenForRender(deepRoots, new Map([["lore:noble", "exact"]]), new Set());
+    const character = byId(rows, "lore:character");
+    expect(character.state).toBe("indeterminate");
+    expect(character.pickedCount).toBe(1); // Noble is covered...
+    expect(character.totalScopable).toBe(4); // ...of Noble, Hero, King, Duke
+    expect(byId(rows, "lore:noble").state).toBe("exact");
+    expect(byId(rows, "lore:king").state).toBe("off"); // exact on Noble does NOT cover its subtypes
+  });
+
+  it("a family on the mid branch covers its subtree in the count", () => {
+    const rows = flattenForRender(deepRoots, new Map([["lore:noble", "family"]]), new Set());
+    const character = byId(rows, "lore:character");
+    expect(character.state).toBe("indeterminate");
+    expect(character.pickedCount).toBe(3); // Noble + King + Duke
+    expect(character.totalScopable).toBe(4);
+    expect(byId(rows, "lore:noble").state).toBe("family");
+    expect(byId(rows, "lore:king").state).toBe("implied");
+    expect(byId(rows, "lore:king").interactive).toBe(false);
   });
 });

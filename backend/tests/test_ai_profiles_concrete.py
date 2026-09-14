@@ -79,10 +79,14 @@ class _FakeAsyncClient:
 
     async def post(self, url: str, **kwargs) -> _FakeResponse:
         # Ollama /api/show — return the canned payload for the requested model.
+        # An Exception value simulates that model's /api/show failing.
         if self._raise is not None:
             raise self._raise
         model = (kwargs.get("json") or {}).get("model")
-        return _FakeResponse((self._show_payloads or {}).get(model))
+        payload = (self._show_payloads or {}).get(model)
+        if isinstance(payload, Exception):
+            raise payload
+        return _FakeResponse(payload)
 
 
 def _patch_async_client(
@@ -325,6 +329,21 @@ def test_ollama_context_length_falls_back_to_any_arch_key():
     # No context_length anywhere → 0.
     assert _context_length_from_show({"model_info": {}}) == 0
     assert _context_length_from_show({}) == 0
+
+
+def test_ollama_show_failure_degrades_to_unknown_context(monkeypatch):
+    # A per-model /api/show failure must degrade that model to context 0, not
+    # abort the whole catalogue.
+    _patch_async_client(
+        monkeypatch,
+        "app.services.ai.profiles.ollama",
+        payload={"models": [{"name": "flaky:latest", "details": {"family": "llama"}}]},
+        show_payloads={"flaky:latest": httpx.ConnectError("show boom")},
+    )
+    profile = OllamaProfile(host="http://localhost:11434")
+    (model,) = asyncio.run(profile.list_models())
+    assert model.id == "flaky:latest"
+    assert model.context_window == 0
 
 
 def test_ollama_model_for_tier_always_none():

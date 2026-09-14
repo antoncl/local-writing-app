@@ -190,13 +190,14 @@ def _row_to_descriptor(row: dict, show: dict | None = None) -> ModelDescriptor:
     name = _row_name(row)
     context_window = _context_length_from_show(show) if show else 0
     capabilities = _capabilities_from_show(show) if show else set()
-    if not capabilities:
-        # Fallback when /api/show didn't answer (server race, or an older
-        # Ollama without a capabilities list): guess vision from the family
-        # string, as before. Not comprehensive, but better than nothing.
-        family = str((row.get("details") or {}).get("family") or "").lower()
-        if any(token in family for token in ("vision", "llava", "vlm")):
-            capabilities = {Capability.VISION}
+    # The family-name vision guess is additive: it's the sole signal when
+    # /api/show is absent (server race, or an older Ollama without a
+    # capabilities list), and it never drops a VISION hint we'd have shown
+    # before /api/show existed — even when /api/show answered with other
+    # capabilities. Not comprehensive, but better than nothing.
+    family = str((row.get("details") or {}).get("family") or "").lower()
+    if any(token in family for token in ("vision", "llava", "vlm")):
+        capabilities = capabilities | {Capability.VISION}
     return ModelDescriptor(
         id=name,
         display_name=name,

@@ -12,7 +12,12 @@ import { setSelectionHeading, wrapSelectionBlock } from "./blockTransforms";
 const editors: Editor[] = [];
 
 function editorWith(html: string): Editor {
-  const editor = new Editor({ element: document.createElement("div"), extensions: [StarterKit], content: html });
+  // Match the production prose editors: StarterKit v3 bundles TrailingNode on by
+  // default, but every real prose surface turns it off (it would drift the saved
+  // Markdown), so a faithful getHTML() here must too — otherwise a block ending
+  // in a heading/quote/list gains a spurious trailing <p></p>.
+  const extensions = [StarterKit.configure({ trailingNode: false })];
+  const editor = new Editor({ element: document.createElement("div"), extensions, content: html });
   editors.push(editor);
   return editor;
 }

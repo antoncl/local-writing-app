@@ -5,7 +5,11 @@
 import { describe, expect, it } from "vitest";
 import { history, redo, undo, undoDepth } from "@tiptap/pm/history";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
-import { schema } from "@tiptap/pm/schema-basic";
+// TipTap 3's @tiptap/pm no longer re-exports the ./schema-basic subpath (#1866),
+// so this isolated headless test — it never mounts a TipTap Editor — takes the
+// same basic schema straight from prosemirror-schema-basic. It shares the one
+// prosemirror-model copy @tiptap/pm resolves, so nodes stay interop-compatible.
+import { schema } from "prosemirror-schema-basic";
 
 import {
   minimalReplaceTransaction,

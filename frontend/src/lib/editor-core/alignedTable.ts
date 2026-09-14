@@ -7,10 +7,7 @@
 // table geometry directly rather than TipTap's single-cell setCellAttribute.
 import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import Table from "@tiptap/extension-table";
-import TableCell from "@tiptap/extension-table-cell";
-import TableHeader from "@tiptap/extension-table-header";
-import TableRow from "@tiptap/extension-table-row";
+import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 
 export const AlignedTableCell = TableCell.extend({
   addAttributes() {

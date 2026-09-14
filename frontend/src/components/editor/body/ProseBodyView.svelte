@@ -24,7 +24,7 @@
   import { Editor } from "@tiptap/core";
   import { TextSelection, type Transaction } from "@tiptap/pm/state";
   import type { EditorView } from "@tiptap/pm/view";
-  import StarterKit from "@tiptap/starter-kit";
+  import { proseStarterKit } from "@/lib/editor-core/proseStarterKit";
   import {
     minimalReplaceTransaction,
     parseHtmlToDoc,
@@ -336,7 +336,7 @@
       const tr = minimalReplaceTransaction(editor.state, newDoc);
       if (tr) editor.view.dispatch(tr);
     } else {
-      editor.commands.setContent(html || "<p></p>", false);
+      editor.commands.setContent(html || "<p></p>", { emitUpdate: false });
     }
     loadedSceneId = sceneId;
     enforceUniqueTodoAnchors();
@@ -368,7 +368,7 @@
   export async function adoptBody(markdown: string): Promise<void> {
     if (!editor) return;
     const html = await sceneMarkdownToHtml(markdown);
-    editor.commands.setContent(html || "<p></p>", true);
+    editor.commands.setContent(html || "<p></p>", { emitUpdate: true });
   }
 
   /** Rung 2 of the reconcile ladder (ADR-0077 / #1626): three-way merge the
@@ -1088,7 +1088,7 @@
     editor = new Editor({
       element: editorElement,
       extensions: [
-        StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+        proseStarterKit(),
         AISuggestion,
         CharacterMark,
         MutationMark,

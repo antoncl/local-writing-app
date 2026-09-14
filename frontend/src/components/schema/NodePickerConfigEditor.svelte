@@ -4,10 +4,13 @@
   // Per [docs/context-picker.md](../../docs/context-picker.md) and the
   // UX-review-driven v2 rewrite:
   //
-  // - Pickable content is a hierarchical tree (parent checkbox = check
-  //   all descendants; indeterminate when partial). Tree is derived
-  //   from the project's metadata schema, so user-added sub-types of
-  //   character / place / etc. surface automatically.
+  // - Pickable content is a hierarchical tree. Each type's checkbox is
+  //   TRI-STATE (#1947, ADR-0074 Amendment 5): off → this type (`{type}`) →
+  //   this type + subtypes (`{descendants_of}`) → off. A family type covers its
+  //   whole subtree, whose rows then read as implied (locked); indeterminate
+  //   when only part of a subtree is scoped. Tree is derived from the project's
+  //   metadata schema, so user-added sub-types of character / place / etc.
+  //   surface automatically.
   // - Only scene + lore kinds. Snippets are template fragments (you
   //   `{% include %}` them), assistants are personas (you assign them)
   //   — neither is data the model should "know about." Dropped from
@@ -33,9 +36,12 @@
   import { singleConcreteTarget } from "@/lib/utils/pickerCreate";
   import {
     buildTree,
-    concreteLeaves,
-    nodeState,
+    cycleScope,
     flattenForRender,
+    nodeCapability,
+    type NodeCapability,
+    type PickState,
+    type ScopeMap,
     type SchemaNode,
   } from "./pickerTree";
   import PickCheck from "@/components/widgets/PickCheck.svelte";
@@ -87,9 +93,10 @@
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   const metadataSchema = $derived($metadataSchemaStore);
   // The editor authors the degenerate type-leaf subset (ADR-0023). It thinks in
-  // legacy {kinds, entryTypes}, bridging to the stored `sources` shape here:
-  // reads reduce via `pickerMembership`, `writeSelection` re-encodes via
-  // `membershipToSources`. The full Venn graph ships later, for the designer.
+  // legacy {kinds, entryTypes, families}, bridging to the stored `sources` shape
+  // here: reads reduce via `pickerMembership` (→ per-kind `scopeMapFor`),
+  // `writeScope` re-encodes via `membershipToSources`. The full Venn graph ships
+  // later, for the designer.
   const membership = $derived(pickerMembership(config));
 
   // Saved-view picker sources are retired (ADR-0074 Amendment 3): saved views
@@ -156,8 +163,25 @@
     },
   ];
 
+  // The sr-only state word for each tree row (announced after the type name),
+  // and the click-hint tooltip per cycle shape — the tri-state control's whole
+  // vocabulary in one place.
+  const SCOPE_WORD: Record<PickState, string> = {
+    off: "not a source",
+    exact: "this type",
+    family: "this type and its subtypes",
+    implied: "included via its parent",
+    indeterminate: "some subtypes",
+  };
+  const SCOPE_HINT: Record<NodeCapability, string> = {
+    "concrete-branch": "Click to cycle: off → this type → this type + subtypes",
+    "concrete-leaf": "Click to include this type",
+    "abstract-branch": "Click to include this type and its subtypes",
+    none: "",
+  };
+
   type Chip =
-    | { kind: "entry"; key: string; entryKind: Kind; entryTypeId: string; label: string }
+    | { kind: "entry"; key: string; entryKind: Kind; entryTypeId: string; label: string; family: boolean }
     | { kind: "preset"; key: string; presetId: "full_outline" | "full_text"; label: string }
     | { kind: "marker"; key: string; label: string };
 
@@ -174,18 +198,28 @@
     collapsedIds = next;
   }
 
-  function selectionFor(kind: Kind): Set<string> {
-    const explicit = membership.entryTypes[kind];
-    if (explicit && explicit.length > 0) return new Set(explicit);
+  // The per-fqn tri-state scope for a kind, read straight from the config's
+  // membership: `entryTypes` names every scoped type, `families` marks which are
+  // `{descendants_of}` (this type + subtypes) vs. `{type}` (exact).
+  function scopeMapFor(kind: Kind): ScopeMap {
+    const scope: ScopeMap = new Map();
+    const fam = new Set(membership.families[kind] ?? []);
+    for (const fqn of membership.entryTypes[kind] ?? []) {
+      scope.set(fqn, fam.has(fqn) ? "family" : "exact");
+    }
     // Legacy fallback: a source with `kind` set but no entry_type leaf
     // historically meant "all sub-types of that kind allowed" at runtime.
-    // Reflect that as "all concrete leaves checked" in the editor so the
-    // displayed selection matches the runtime behaviour. The first toggle
-    // promotes the config to explicit positive selection.
-    if (membership.kinds.includes(kind)) {
-      return new Set(trees[kind].flatMap((root) => concreteLeaves(root)));
+    // Reflect that as `family` on each offerable root so the displayed scope
+    // matches the runtime behaviour; the first cycle materialises it to
+    // explicit positive selection.
+    if (scope.size === 0 && membership.kinds.includes(kind)) {
+      for (const root of trees[kind]) {
+        const cap = nodeCapability(root);
+        if (cap === "none") continue;
+        scope.set(root.id, cap === "concrete-leaf" ? "exact" : "family");
+      }
     }
-    return new Set();
+    return scope;
   }
 
   function nodeById(kind: Kind, id: string): SchemaNode | undefined {
@@ -204,23 +238,16 @@
     return undefined;
   }
 
-  function toggleNode(kind: Kind, id: string) {
+  // Cycle one node's scope on click: off → this type → this type + subtypes → off
+  // (a concrete branch); a leaf skips the subtypes step, an abstract container
+  // skips the exact step (it has no instances). `cycleScope` is pure.
+  function cycleNode(kind: Kind, id: string) {
     const node = nodeById(kind, id);
     if (!node) return;
-    const current = selectionFor(kind);
-    const next = new Set(current);
-    const leaves = concreteLeaves(node);
-    if (leaves.length === 0) return;
-    const state = nodeState(node, current);
-    if (state === "checked") {
-      for (const leaf of leaves) next.delete(leaf);
-    } else {
-      for (const leaf of leaves) next.add(leaf);
-    }
-    writeSelection(kind, next);
+    writeScope(kind, cycleScope(scopeMapFor(kind), node));
   }
 
-  function writeSelection(kind: Kind, next: Set<string>) {
+  function writeScope(kind: Kind, next: ScopeMap) {
     const nextEntryTypes: Record<string, string[]> = { ...membership.entryTypes };
     const nextFamilies: Record<string, string[]> = { ...membership.families };
     const nextKinds = new Set(membership.kinds);
@@ -229,16 +256,15 @@
       delete nextFamilies[kind];
       nextKinds.delete(kind);
     } else {
-      nextEntryTypes[kind] = Array.from(next).sort();
-      // Per-type FAMILY scopes (`{descendants_of}`, #1947) are not yet authorable
-      // in this leaf-checkbox tree — the tri-state control is the follow-up. Until
-      // then, PRESERVE a family scope on any type still selected so editing a
-      // family-scoped field's config (e.g. a default-schema `characters` field)
-      // doesn't silently downgrade it to exact. A non-leaf family type (e.g.
-      // `lore:character` set to subtypes) rides in `next` untouched — the leaf
-      // toggles never reach it — so filtering by `next.has` keeps it while dropping
-      // one the user removed via its chip.
-      nextFamilies[kind] = (membership.families[kind] ?? []).filter((f) => next.has(f));
+      nextEntryTypes[kind] = Array.from(next.keys()).sort();
+      // The scope map is the single source of truth for exact-vs-family now, so
+      // families derives straight from it (no preservation dance).
+      const fam = Array.from(next.entries())
+        .filter(([, scope]) => scope === "family")
+        .map(([fqn]) => fqn)
+        .sort();
+      if (fam.length > 0) nextFamilies[kind] = fam;
+      else delete nextFamilies[kind];
       nextKinds.add(kind);
     }
     // Re-encode the degenerate membership as `sources` (the stored shape, #78).
@@ -266,10 +292,9 @@
   // the tree / preset / scene-binding controls already use. The chip band
   // is a projection of config state, not a parallel store.
   function removeEntryChip(entryKind: Kind, entryTypeId: string) {
-    const current = selectionFor(entryKind);
-    const next = new Set(current);
+    const next = new Map(scopeMapFor(entryKind));
     next.delete(entryTypeId);
-    writeSelection(entryKind, next);
+    writeScope(entryKind, next);
   }
 
   // Whether the config (as of an in-progress edit) still names exactly one
@@ -303,24 +328,24 @@
     plot: buildTree(metadataSchema, "plot", PLOT_EXCLUDE),
     tag: buildTree(metadataSchema, "tag"),
   });
-  // Pre-computed render lists per kind, including each node's checkbox
-  // state. Runes `$derived` tracks reactive reads inside called functions
-  // (config / trees via selectionFor), so the legacy explicit-dependency
-  // IIFE workaround for `$:` is no longer needed (see
-  // [[feedback-svelte5-reactivity-traps]]).
+  // Pre-computed render lists per kind, including each node's tri-state. Runes
+  // `$derived` tracks reactive reads inside called functions (config / trees via
+  // scopeMapFor), so the legacy explicit-dependency IIFE workaround for `$:` is
+  // no longer needed (see [[feedback-svelte5-reactivity-traps]]).
   const renderedByKind = $derived({
-    manuscript: flattenForRender(trees.manuscript, selectionFor("manuscript"), collapsedIds),
-    lore: flattenForRender(trees.lore, selectionFor("lore"), collapsedIds),
-    plot: flattenForRender(trees.plot, selectionFor("plot"), collapsedIds),
-    tag: flattenForRender(trees.tag, selectionFor("tag"), collapsedIds),
+    manuscript: flattenForRender(trees.manuscript, scopeMapFor("manuscript"), collapsedIds),
+    lore: flattenForRender(trees.lore, scopeMapFor("lore"), collapsedIds),
+    plot: flattenForRender(trees.plot, scopeMapFor("plot"), collapsedIds),
+    tag: flattenForRender(trees.tag, scopeMapFor("tag"), collapsedIds),
   });
 
-  // Per-kind picked-leaf totals (for the kind-bar count).
+  // Per-kind scoped-type totals (for the kind-bar count). A `family` type counts
+  // once — it's one scope, not its subtypes enumerated.
   const pickedCountByKind = $derived({
-    manuscript: selectionFor("manuscript").size,
-    lore: selectionFor("lore").size,
-    plot: selectionFor("plot").size,
-    tag: selectionFor("tag").size,
+    manuscript: scopeMapFor("manuscript").size,
+    lore: scopeMapFor("lore").size,
+    plot: scopeMapFor("plot").size,
+    tag: scopeMapFor("tag").size,
   });
 
   // Chip projection.
@@ -328,6 +353,7 @@
     const out: Chip[] = [];
     for (const { id: kind } of KINDS) {
       const ids = membership.entryTypes[kind] ?? [];
+      const fam = new Set(membership.families[kind] ?? []);
       for (const id of ids) {
         const node = nodeById(kind, id);
         if (!node) continue;
@@ -337,6 +363,7 @@
           entryKind: kind,
           entryTypeId: id,
           label: node.name,
+          family: fam.has(id),
         });
       }
     }
@@ -357,13 +384,12 @@
   });
 
   const hasAnySource = $derived(
-    KINDS.some((k) => renderedByKind[k.id].some((n) => n.state !== "unchecked")) ||
-      (config.presets ?? []).length > 0,
+    KINDS.some((k) => scopeMapFor(k.id).size > 0) || (config.presets ?? []).length > 0,
   );
 
   // Only surface the ★-marking control when scenes are actually pickable —
   // marking is scene-only; showing it for lore-only inputs would be noise.
-  const scenesPickable = $derived(renderedByKind.manuscript.some((n) => n.state !== "unchecked"));
+  const scenesPickable = $derived(scopeMapFor("manuscript").size > 0);
 
   // Collapsed-state pill strip. Aggregates by kind rather than listing
   // each entry type — gives "Scenes · 2" instead of "Chapter · Scene".
@@ -517,6 +543,9 @@
             <span class="ctx-chip">
               <span class="ctx-chip-dot" aria-hidden="true"></span>
               <span class="ctx-chip-label">{chip.label}</span>
+              {#if chip.family}
+                <span class="ctx-chip-scope">+ subtypes</span>
+              {/if}
               <button
                 type="button"
                 class="ctx-chip-remove"
@@ -581,14 +610,21 @@
                 <button
                   type="button"
                   class="ctx-tree-toggle"
-                  class:disabled={!item.hasLeaves || readonly}
-                  aria-pressed={item.state === "indeterminate" ? "mixed" : item.state === "checked"}
-                  aria-label={item.name}
-                  disabled={!item.hasLeaves || readonly}
-                  onclick={() => toggleNode(kind.id, item.id)}
+                  class:disabled={readonly || item.capability === "none"}
+                  class:locked={item.state === "implied"}
+                  aria-pressed={item.state === "indeterminate"
+                    ? "mixed"
+                    : item.state === "exact" || item.state === "family" || item.state === "implied"}
+                  aria-label={`${item.name}: ${SCOPE_WORD[item.state]}`}
+                  title={item.interactive && !readonly ? SCOPE_HINT[item.capability] : undefined}
+                  disabled={!(item.interactive && !readonly)}
+                  onclick={() => cycleNode(kind.id, item.id)}
                 >
-                  <PickCheck state={item.state === "checked" ? "on" : item.state === "indeterminate" ? "indeterminate" : "off"} />
+                  <PickCheck state={item.state === "exact" ? "on" : item.state} />
                   <span class="ctx-tree-name" class:root={item.depth === 0}>{item.name}</span>
+                  {#if item.state === "family"}
+                    <span class="ctx-tree-scope-tag">+ subtypes</span>
+                  {/if}
                 </button>
                 {#if item.state === "indeterminate" && item.hasChildren}
                   <span class="ctx-tree-partial-count">{item.pickedCount} of {item.totalLeaves}</span>
@@ -1058,6 +1094,17 @@
     line-height: 1.2;
   }
 
+  /* "+ subtypes" marker inside a family-scoped chip — the same quiet accent pill
+     as the tree row's `.ctx-tree-scope-tag`. */
+  .ctx-chip-scope {
+    font-size: var(--fs-xs);
+    color: var(--accent-emphasis);
+    background: var(--accent-soft);
+    border-radius: var(--r-pill);
+    padding: 0 6px;
+    line-height: 1.4;
+  }
+
   .ctx-chip-remove {
     appearance: none;
     background: transparent;
@@ -1194,13 +1241,31 @@
     font: inherit;
   }
 
-  .ctx-tree-toggle:hover:not(.disabled) {
+  .ctx-tree-toggle:hover:not(.disabled):not(.locked) {
     background: var(--inset);
   }
 
   .ctx-tree-toggle.disabled {
     cursor: not-allowed;
     opacity: 0.6;
+  }
+
+  /* A row an ancestor's `+ subtypes` already covers: shows its implied check,
+     but the parent owns the toggle, so no hover invite and a default cursor. */
+  .ctx-tree-toggle.locked {
+    cursor: default;
+  }
+
+  /* The active third-state pill — quiet accent, reads as "and everything under
+     it" beside the type name. Matches the chip-band's `.ctx-chip-scope`. */
+  .ctx-tree-scope-tag {
+    flex: none;
+    font-size: var(--fs-xs);
+    color: var(--accent-emphasis);
+    background: var(--accent-soft);
+    border-radius: var(--r-pill);
+    padding: 1px 7px;
+    line-height: 1.35;
   }
 
   .ctx-tree-name {

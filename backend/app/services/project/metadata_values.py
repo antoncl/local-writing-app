@@ -853,8 +853,14 @@ class MetadataValuesMixin:
         the is-a walk is actually needed. Shared by `_ref_matches_picker`
         (read-side heal) and `_validate_reference_target` (save/AI-patch
         validation) so the tri-state check can't drift between them."""
-        allowed = cfg.entry_types.get(target_kind, []) if cfg.entry_types else []
-        family_roots = cfg.entry_type_families.get(target_kind, []) if cfg.entry_type_families else []
+        # `entry_types` / `entry_type_families` are properties that each reduce
+        # the whole `sources` list (`_sources_membership`), so snapshot once
+        # rather than re-derive per access — this runs on the read-side heal hot
+        # loop (`_ref_matches_picker`).
+        entry_types = cfg.entry_types
+        entry_type_families = cfg.entry_type_families
+        allowed = entry_types.get(target_kind, []) if entry_types else []
+        family_roots = entry_type_families.get(target_kind, []) if entry_type_families else []
         if not allowed and not family_roots:
             return True
         if target_entry_type in allowed:

@@ -416,7 +416,7 @@ class LoreMutationsMixin(MarkerMixin):
                 value = self._coerce_mutation_value(marker.value, field_type)
             errors.extend(
                 self._validate_metadata_field_value(
-                    label, marker.field, value, field, node_index=node_index
+                    label, marker.field, value, field, node_index=node_index, schema=schema
                 )
             )
         return errors

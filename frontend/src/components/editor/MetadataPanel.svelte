@@ -1350,14 +1350,21 @@
   }
   /* Free-text scalars (a `text` field, the option-less `multi_select`
      fallback, the legacy `date` input) edit through a bare `<input>` inside
-     RailScalarCell's `.fr-edit`. Let it fill the available width instead of
+     RailScalarCell's `.fr-edit`. Let it GROW into the free width instead of
      the old fixed 160px cap, so a long value (e.g. an alias list) is fully
      visible on a wide rail (#1949) rather than clipped in a narrow
-     right-anchored box. Scoped to `.fr-edit` so nested picker/list inputs
-     (not wrapped in it) are untouched. */
+     right-anchored box. `flex: 1 1 0` — grow from a ZERO basis, not `width:
+     100%` and not `flex: … auto`: `.fr-val` is `flex-wrap: wrap`, and the
+     fixed-size leading override / trailing mutation markers are flex siblings
+     of the input (`.fr-edit` is display:contents). A 100%/auto (intrinsic)
+     basis makes line-collection wrap each marker onto its own line while
+     editing; a zero basis lets the input sit BETWEEN the markers and grow into
+     the leftover width, keeping the one-line `[versions] value ⤳` layout.
+     Scoped to `.fr-edit` so nested picker/list inputs (not wrapped in it) are
+     untouched. */
   .field-row .fr-val :global(.fr-edit input[type="text"]),
   .field-row .fr-val :global(.fr-edit input:not([type])) {
-    width: 100%;
+    flex: 1 1 0;
     min-width: 0;
     text-align: left;
   }

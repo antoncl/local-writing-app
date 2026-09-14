@@ -14,10 +14,10 @@ inputs:
     - kind: lore
       expr:
         union:
-        - type: lore:character
-        - type: lore:item
-        - type: lore:location
-        - type: lore:note
+        - descendants_of: lore:character
+        - descendants_of: lore:item
+        - descendants_of: lore:location
+        - descendants_of: lore:note
     presets: []
 ---
 {#

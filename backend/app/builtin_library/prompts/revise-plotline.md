@@ -13,7 +13,7 @@ inputs:
     sources:
     - kind: plot
       expr:
-        type: plot:plotline
+        descendants_of: plot:plotline
     multiple: false
     presets: []
 context_strategy:

@@ -178,12 +178,12 @@ describe("NodePicker saved-view selectors — app-wide axis (#1487, #1939)", () 
     await fireEvent.click(within(views).getByText("Villains").closest("button")!);
     await tick();
     const [detail] = onChange.mock.calls[0];
-    // The type scope is is-a (#1945): the stored constraint is `descendants_of`
-    // (family), not exact `type` — so the clip includes a character specialization
-    // at invocation, and the constraint still keeps a lore:location out.
+    // Per-type scope (#1947): the config scopes lore:character EXACT (`{type}`), so
+    // the stored clip is exact `type` — a lore:location is kept out, and a
+    // lore:character:deity would be too (see the family vs exact tests below).
     expect(detail.value[0].selector).toEqual({
       kind: "lore",
-      expr: { intersect: [{ tagged: "villain" }, { descendants_of: "lore:character" }] },
+      expr: { intersect: [{ tagged: "villain" }, { type: "lore:character" }] },
     });
   });
 
@@ -349,16 +349,16 @@ describe("NodePicker tag selectors (#1491)", () => {
     expect(within(tags).queryByText("Dark Keep")).toBeNull();
   });
 
-  it("includes a SPECIALIZATION of the scoped type (is-a) — a deity under a character scope (#1945)", async () => {
+  // Per-type scope is tri-state (#1947): a FAMILY (`descendants_of`) scope includes
+  // a specialization under its tag; an EXACT (`type`) scope does not. These two
+  // tests pin both directions on the tag-selector path.
+  async function openByTag(deityConfig: { descendants_of: string } | { type: string }): Promise<HTMLElement> {
     render(NodePicker, {
       props: {
         allowSelectors: true,
-        config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }], multiple: true },
+        config: { sources: [{ kind: "lore", expr: deityConfig }], multiple: true },
         loreEntries: [
-          loreEntry("lore_a", "Vex", ["tag_villain"]), // a character
-          // A deity — a specialization of lore:character (parent in SCHEMA). A
-          // character scope must include it (is-a); exact `{type}` matching clipped
-          // it, which is #1945 (the reported deity-under-tag disappearance).
+          loreEntry("lore_a", "Vex", ["tag_villain"]), // a lore:character
           { ...loreEntry("deity_1", "Hespera", ["tag_villain"]), entry_type: "lore:character:deity" },
         ],
         affordance: "add",
@@ -370,13 +370,25 @@ describe("NodePicker tag selectors (#1491)", () => {
     await tick();
     await fireEvent.click(within(menu).getByText("By tag").closest("button")!);
     await tick();
-    const tags = (await within(menu).findAllByRole("group", { name: "By tag" }))[0];
-    // Both members surface — the character AND the deity. Without is-a scoping the
-    // deity is clipped, the count reads "1 match", and Hespera never appears.
+    return (await within(menu).findAllByRole("group", { name: "By tag" }))[0];
+  }
+
+  it("a FAMILY scope includes a specialization under its tag — deity under lore:character (#1947)", async () => {
+    const tags = await openByTag({ descendants_of: "lore:character" });
+    // Both surface. Under an EXACT scope the count would read "1 match" and Hespera
+    // never appears — see the sibling exact test.
     expect(within(tags).getByText("2 matches")).toBeInTheDocument();
     await expandGroup(tags, "villain");
     expect(within(tags).getByText("Vex")).toBeInTheDocument();
     expect(within(tags).getByText("Hespera")).toBeInTheDocument();
+  });
+
+  it("an EXACT scope excludes a specialization — deity NOT under a plain lore:character scope (#1947)", async () => {
+    const tags = await openByTag({ type: "lore:character" });
+    expect(within(tags).getByText("1 match")).toBeInTheDocument();
+    await expandGroup(tags, "villain");
+    expect(within(tags).getByText("Vex")).toBeInTheDocument();
+    expect(within(tags).queryByText("Hespera")).toBeNull();
   });
 
   it("offers a user-authored vocabulary (tag:motifs) as a By-tag row, but never tag:assistant_tag (review)", async () => {

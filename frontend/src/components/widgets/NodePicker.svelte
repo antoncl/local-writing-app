@@ -31,6 +31,7 @@
     StructureDocument,
     StructureNode,
     TagEntry,
+    ViewExpr,
     ViewSpec,
   } from "@/lib/types";
   import {
@@ -40,6 +41,7 @@
     stripeForNode,
   } from "@/lib/utils/pickerStripes";
   import { pickerMembership } from "@/lib/utils/pickerSources";
+  import { descendantTypeFqns } from "@/lib/utils/schemaTypeHelpers";
   import { createTargetFor, hasTitleMatch } from "@/lib/utils/pickerCreate";
   import { buildSelectorRoster, isSelectorRef, membersForSelector } from "@/lib/views/pickerSelectors";
   import { walkViewExpr } from "@/lib/views/walkViewExpr";
@@ -298,7 +300,7 @@
     // The config's scene-subtype allowlist (#1461) — container FQNs stripped, as
     // they gate scenes, not themselves — combined with the active search match.
     const allowedSceneTypes = new Set(
-      (membership.entryTypes.manuscript ?? []).filter(
+      [...allowedTypeSet("manuscript")].filter(
         (fqn) => fqn !== "manuscript:act" && fqn !== "manuscript:chapter",
       ),
     );
@@ -362,16 +364,28 @@
     });
     return flat;
   }
-  function viewSelectorSpec(kind: string, spec: ViewSpec): ViewSpec {
-    // IS-A clip (`descendants_of`), matching tagSpecFor — a saved view picked on
-    // a lore:character scope includes a lore:character:deity member (#1945).
+  // Per-type scope is TRI-STATE (ADR-0074 Amendment 4, #1947): each allowed
+  // entry_type is EXACT (`{type: fqn}`) or FAMILY (`{descendants_of: fqn}`, self +
+  // subtypes), per `membership.families`. `typeScopeExpr` builds the leaf/union the
+  // selector specs (By tag / Saved views) intersect; `allowedTypeSet` widens a
+  // family fqn to its concrete descendants for the concrete-browse
+  // `.has(entry_type)` filters. Both honor the stored leaf — a `{type:
+  // lore:character}` scope excludes a deity, a `{descendants_of: lore:character}`
+  // scope includes it (the #1945 case, now author-controlled per type).
+  function typeScopeExpr(kind: string): ViewExpr | null {
     const fqns = membership.entryTypes[kind] ?? [];
-    const typeExpr =
-      fqns.length === 1
-        ? { descendants_of: fqns[0] }
-        : fqns.length > 1
-          ? { union: fqns.map((f) => ({ descendants_of: f })) }
-          : null;
+    if (fqns.length === 0) return null;
+    const fam = new Set(membership.families[kind] ?? []);
+    const leaf = (fqn: string): ViewExpr => (fam.has(fqn) ? { descendants_of: fqn } : { type: fqn });
+    return fqns.length === 1 ? leaf(fqns[0]) : { union: fqns.map(leaf) };
+  }
+  function allowedTypeSet(kind: string): Set<string> {
+    const fqns = membership.entryTypes[kind] ?? [];
+    const fam = new Set(membership.families[kind] ?? []);
+    return new Set(fqns.flatMap((f) => (fam.has(f) ? [f, ...descendantTypeFqns(metadataSchema ?? null, f)] : [f])));
+  }
+  function viewSelectorSpec(kind: string, spec: ViewSpec): ViewSpec {
+    const typeExpr = typeScopeExpr(kind);
     if (typeExpr && spec.expr && !spec.groups?.length && exprIsFlat(spec.expr)) {
       return { ...spec, kind, expr: { intersect: [spec.expr, typeExpr] } } as ViewSpec;
     }
@@ -415,23 +429,15 @@
   // merged — including this "By tag" axis, which would otherwise offer a
   // dead selector no longer distinguishable from its survivor.
   const tagNodes = $derived($liveTags.filter((t) => t.entry_type !== "tag:assistant_tag"));
-  // A `tagged` leaf INTERSECTED with the kind's type scope, so a tag can't
-  // over-match past the picker's scope (a lore:character input must not pull in a
-  // lore:location sharing the tag). The constraint is IS-A (`descendants_of`, not
-  // exact `type`): a specialization of an allowed type — e.g. a
-  // lore:character:deity when the scope names lore:character — is included when
-  // grouped under its tag (#1945). This is the selector-axis (By tag / Saved
-  // views) reading only; the concrete Lore/entity_ref browse stays exact, matching
-  // the backend ref-validator (a per-type author-controlled choice is a follow-up).
-  // The stored spec drives invocation expansion too, so the constraint lives in it.
+  // A `tagged` leaf INTERSECTED with the kind's per-type scope (`typeScopeExpr`),
+  // so a tag can't over-match past the picker's scope (a lore:character input must
+  // not pull in a lore:location sharing the tag). The scope honors each type's
+  // stored leaf (exact `{type}` vs family `{descendants_of}`), so a family-scoped
+  // lore:character includes a lore:character:deity tagged the same, while an
+  // exact-scoped one does not. The stored spec drives invocation expansion too, so
+  // the constraint lives in it.
   function tagSpecFor(kind: string, tagId: string): ViewSpec {
-    const fqns = membership.entryTypes[kind] ?? [];
-    const typeExpr =
-      fqns.length === 1
-        ? { descendants_of: fqns[0] }
-        : fqns.length > 1
-          ? { union: fqns.map((f) => ({ descendants_of: f })) }
-          : null;
+    const typeExpr = typeScopeExpr(kind);
     const expr = typeExpr ? { intersect: [{ tagged: tagId }, typeExpr] } : { tagged: tagId };
     return { kind, expr } as ViewSpec;
   }
@@ -616,7 +622,7 @@
     node: StructureNode | undefined,
   ): Array<{ id: string; title: string; entry_type: string; tags: string[] }> {
     if (!node) return [];
-    const allowed = new Set(membership.entryTypes.research ?? []);
+    const allowed = allowedTypeSet("research");
     const out: Array<{ id: string; title: string; entry_type: string; tags: string[] }> = [];
     const walk = (n: StructureNode) => {
       if (n.type === "research:note" && n.scene_id) {
@@ -649,7 +655,7 @@
   // Lore grouped by sub-type, respecting `config.entry_types.lore` filter
   // when set. Empty filter = all sub-types allowed.
   const loreGroups = $derived.by(() => {
-    const allowed = new Set(membership.entryTypes.lore ?? []);
+    const allowed = allowedTypeSet("lore");
     const visible = loreEntries.filter((entry) => {
       // context_policy = "never" hides the entry from every explicit
       // picker. The entry still exists (browsable in the Lore pane);
@@ -682,7 +688,7 @@
   // it is a prompt-discovery surface, so it routes through the shared seam.
   // Whitelist Sets are hoisted OUT of the filter callbacks: the chain re-runs
   // per search keystroke, and a per-item Set allocation was the waste.
-  const snippetAllowed = $derived(new Set(membership.entryTypes.snippet ?? []));
+  const snippetAllowed = $derived(allowedTypeSet("snippet"));
   const snippetEntries = $derived(
     hidePromptEntries(promptEntries, $hiddenLibraryStore)
       .filter((p) => snippetAllowed.size === 0 || snippetAllowed.has(p.entry_type))
@@ -690,7 +696,7 @@
   );
 
   // Assistants matching the config's per-kind entry_type whitelist + search.
-  const assistantAllowed = $derived(new Set(membership.entryTypes.assistant ?? []));
+  const assistantAllowed = $derived(allowedTypeSet("assistant"));
   const assistantCandidates = $derived(
     assistantEntries
       .filter((a) => assistantAllowed.size === 0 || assistantAllowed.has(a.entry_type))
@@ -699,7 +705,7 @@
 
   // Tag nodes matching the config's per-vocabulary entry_type whitelist +
   // search (ADR-0082 slice 1) — MEMBER picks, a flat kind list like assistants.
-  const tagAllowed = $derived(new Set(membership.entryTypes.tag ?? []));
+  const tagAllowed = $derived(allowedTypeSet("tag"));
   const tagCandidates = $derived(
     tagEntries
       .filter((t) => tagAllowed.size === 0 || tagAllowed.has(t.entry_type))

@@ -28,6 +28,7 @@ from app.models import (
     GroupMember,
     MetadataFieldDefinition,
     MetadataSchema,
+    NodePickerConfig,
     Swatch,
 )
 from app.services.ai.entry_patch import (
@@ -87,6 +88,12 @@ class _FieldValueCheck:
     value: Any
     field: MetadataFieldDefinition
     node_index: NodeIndex | None
+    # Threaded so `_validate_entity_ref_value`/`_validate_entity_ref_list_value`
+    # can resolve a FAMILY (`descendants_of`) picker scope's is-a check
+    # (ADR-0074 Amendment 4) without re-reading the schema when a caller
+    # already holds it. `None` falls back to a lazy read in
+    # `_validate_reference_target`, mirroring its `node_index` fallback.
+    schema: MetadataSchema | None = None
 
 
 class MetadataValuesMixin:
@@ -147,7 +154,12 @@ class MetadataValuesMixin:
         )
         status_field = schema.fields.get("status")
         if status_field:
-            errors.extend(self._validate_metadata_field_value(f"Scene {scene_id}", "status", status, status_field, allow_computed=True, node_index=node_index))
+            errors.extend(
+                self._validate_metadata_field_value(
+                    f"Scene {scene_id}", "status", status, status_field,
+                    allow_computed=True, node_index=node_index, schema=schema,
+                )
+            )
         return errors
 
     def _validate_lore_entry_metadata(
@@ -222,7 +234,11 @@ class MetadataValuesMixin:
             if field_id not in allowed_field_ids:
                 errors.append(f"{label} metadata field {field_id} is not defined for entry_type {entry_type}.")
                 continue
-            errors.extend(self._validate_metadata_field_value(label, field_id, value, field, node_index=node_index))
+            errors.extend(
+                self._validate_metadata_field_value(
+                    label, field_id, value, field, node_index=node_index, schema=schema
+                )
+            )
         return errors
 
     def _validate_metadata_field_value(
@@ -234,6 +250,7 @@ class MetadataValuesMixin:
         *,
         allow_computed: bool = False,
         node_index: NodeIndex | None = None,
+        schema: MetadataSchema | None = None,
     ) -> list[str]:
         if value is None or value == "":
             # A select that declares a default is "required": an empty *stored*
@@ -251,12 +268,14 @@ class MetadataValuesMixin:
         if field.type == "computed" and not allow_computed:
             return [f"{label} stores computed metadata field {field_id}; computed fields are derived."]
         if field.type == "list":
-            return self._validate_list_field_value(label, field_id, value, field, node_index=node_index)
+            return self._validate_list_field_value(
+                label, field_id, value, field, node_index=node_index, schema=schema
+            )
         handler_name = self._FIELD_VALUE_VALIDATORS.get(field.type)
         if handler_name is None:
             return []
         check = _FieldValueCheck(
-            label=label, field_id=field_id, value=value, field=field, node_index=node_index
+            label=label, field_id=field_id, value=value, field=field, node_index=node_index, schema=schema
         )
         return getattr(self, handler_name)(check)
 
@@ -269,7 +288,7 @@ class MetadataValuesMixin:
         if not isinstance(check.value, str):
             return [f"{check.label} metadata field {check.field_id} must be text."]
         return self._validate_reference_target(
-            check.label, check.field_id, check.value, check.field, check.node_index
+            check.label, check.field_id, check.value, check.field, check.node_index, check.schema
         )
 
     def _validate_select_value(self, check: _FieldValueCheck) -> list[str]:
@@ -304,7 +323,9 @@ class MetadataValuesMixin:
         errors: list[str] = []
         for item in check.value:
             errors.extend(
-                self._validate_reference_target(check.label, check.field_id, item, check.field, check.node_index)
+                self._validate_reference_target(
+                    check.label, check.field_id, item, check.field, check.node_index, check.schema
+                )
             )
         return errors
 
@@ -316,6 +337,7 @@ class MetadataValuesMixin:
         field: MetadataFieldDefinition,
         *,
         node_index: NodeIndex | None = None,
+        schema: MetadataSchema | None = None,
     ) -> list[str]:
         """Per-item validation for list fields (#698, ADR-0048 §6).
 
@@ -344,7 +366,8 @@ class MetadataValuesMixin:
             for index, item in enumerate(value):
                 errors.extend(
                     self._validate_metadata_field_value(
-                        label, f"{field_id}[{index}]", item, member_field, node_index=node_index
+                        label, f"{field_id}[{index}]", item, member_field,
+                        node_index=node_index, schema=schema,
                     )
                 )
             return errors
@@ -369,6 +392,7 @@ class MetadataValuesMixin:
                         member_value,
                         member_field,
                         node_index=node_index,
+                        schema=schema,
                     )
                 )
         return errors
@@ -514,7 +538,9 @@ class MetadataValuesMixin:
             resolved = self._resolve_ai_tag_titles(value, tag_target)
             return _AI_FIELD_DROPPED if resolved is None else resolved
         # References are excluded above, so no node index is needed.
-        errors = self._validate_metadata_field_value("AI patch", field_id, value, field, node_index=None)
+        errors = self._validate_metadata_field_value(
+            "AI patch", field_id, value, field, node_index=None, schema=schema
+        )
         if errors:
             # A field with any illegal value drops WHOLE — for `list` fields
             # too (#698). The prompt asks the model for the complete
@@ -762,12 +788,14 @@ class MetadataValuesMixin:
         def _heal(occ: RefOccurrence) -> Any:
             if occ.field.type == "entity_ref":
                 if occ.value not in (None, "") and not self._ref_matches_picker(
-                    occ.value, occ.field, node_index
+                    occ.value, occ.field, node_index, schema
                 ):
                     return ""
                 return UNCHANGED
             if occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
-                filtered = [i for i in occ.value if self._ref_matches_picker(i, occ.field, node_index)]
+                filtered = [
+                    i for i in occ.value if self._ref_matches_picker(i, occ.field, node_index, schema)
+                ]
                 return filtered if len(filtered) != len(occ.value) else UNCHANGED
             return UNCHANGED
 
@@ -808,13 +836,49 @@ class MetadataValuesMixin:
             metadata.update(cleaned)
         return changed
 
+    def _entry_type_in_picker_scope(
+        self,
+        cfg: NodePickerConfig,
+        target_kind: str,
+        target_entry_type: str,
+        schema: MetadataSchema | None,
+    ) -> bool:
+        """Whether `target_entry_type` (of `target_kind`) is in-scope for `cfg`'s
+        per-kind entry_type whitelist: EXACT membership (`entry_types`, every
+        scoped fqn) OR is-a one of the FAMILY roots (`entry_type_families`,
+        ADR-0074 Amendment 4) — `entry_types` already contains a family root's
+        own fqn (self + subtypes), so only a strict subtype needs the ancestry
+        walk. Empty exact + empty family = no constraint (whole-kind accept).
+        `schema` is only read (lazily, via `self.read_metadata_schema()`) when
+        the is-a walk is actually needed. Shared by `_ref_matches_picker`
+        (read-side heal) and `_validate_reference_target` (save/AI-patch
+        validation) so the tri-state check can't drift between them."""
+        allowed = cfg.entry_types.get(target_kind, []) if cfg.entry_types else []
+        family_roots = cfg.entry_type_families.get(target_kind, []) if cfg.entry_type_families else []
+        if not allowed and not family_roots:
+            return True
+        if target_entry_type in allowed:
+            return True
+        if family_roots:
+            if schema is None:
+                schema = self.read_metadata_schema()
+            return any(self._entry_type_matches(target_entry_type, root, schema) for root in family_roots)
+        return False
+
     def _ref_matches_picker(
-        self, item: Any, field: MetadataFieldDefinition, node_index: NodeIndex
+        self,
+        item: Any,
+        field: MetadataFieldDefinition,
+        node_index: NodeIndex,
+        schema: MetadataSchema | None = None,
     ) -> bool:
         """Whether `item` is a live node id acceptable to `field`'s picker config
         — it exists in the index and, if the field constrains a picker, matches
-        its `kinds` and per-kind `entry_types`. Was the `is_valid_ref` closure
-        inside `_strip_dangling_references` (#76)."""
+        its `kinds` and per-kind `entry_types`/`entry_type_families`
+        (`_entry_type_in_picker_scope`). `schema` is only needed for a family
+        scope's is-a walk; unset, it lazily reads the effective schema (mirrors
+        `_validate_reference_target`). Was the `is_valid_ref` closure inside
+        `_strip_dangling_references` (#76)."""
         if not isinstance(item, str) or not item:
             return False
         # A merged tag's id is NOT dangling (ADR-0082 §5): it resolves to the
@@ -829,8 +893,7 @@ class MetadataValuesMixin:
             return True
         if cfg.kinds and target.kind not in cfg.kinds:
             return False
-        allowed = cfg.entry_types.get(target.kind, []) if cfg.entry_types else []
-        return not allowed or target.entry_type in allowed
+        return self._entry_type_in_picker_scope(cfg, target.kind, target.entry_type, schema)
 
     def _purge_metadata_refs(
         self,
@@ -1099,6 +1162,7 @@ class MetadataValuesMixin:
         node_id: str,
         field: MetadataFieldDefinition,
         node_index: NodeIndex | None,
+        schema: MetadataSchema | None = None,
     ) -> list[str]:
         if not node_id:
             return []
@@ -1112,7 +1176,9 @@ class MetadataValuesMixin:
             return []
         if cfg.kinds and target.kind not in cfg.kinds:
             return [f"{label} metadata field {field_id} references {node_id} but expected one of kinds {sorted(cfg.kinds)}."]
+        if self._entry_type_in_picker_scope(cfg, target.kind, target.entry_type, schema):
+            return []
         allowed = cfg.entry_types.get(target.kind, []) if cfg.entry_types else []
-        if allowed and target.entry_type not in allowed:
-            return [f"{label} metadata field {field_id} references {node_id} but expected entry_type in {sorted(allowed)}."]
-        return []
+        return [
+            f"{label} metadata field {field_id} references {node_id} but expected entry_type in {sorted(allowed)}."
+        ]

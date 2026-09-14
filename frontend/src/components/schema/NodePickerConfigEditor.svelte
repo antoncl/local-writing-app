@@ -222,22 +222,33 @@
 
   function writeSelection(kind: Kind, next: Set<string>) {
     const nextEntryTypes: Record<string, string[]> = { ...membership.entryTypes };
+    const nextFamilies: Record<string, string[]> = { ...membership.families };
     const nextKinds = new Set(membership.kinds);
     if (next.size === 0) {
       delete nextEntryTypes[kind];
+      delete nextFamilies[kind];
       nextKinds.delete(kind);
     } else {
       nextEntryTypes[kind] = Array.from(next).sort();
+      // Per-type FAMILY scopes (`{descendants_of}`, #1947) are not yet authorable
+      // in this leaf-checkbox tree — the tri-state control is the follow-up. Until
+      // then, PRESERVE a family scope on any type still selected so editing a
+      // family-scoped field's config (e.g. a default-schema `characters` field)
+      // doesn't silently downgrade it to exact. A non-leaf family type (e.g.
+      // `lore:character` set to subtypes) rides in `next` untouched — the leaf
+      // toggles never reach it — so filtering by `next.has` keeps it while dropping
+      // one the user removed via its chip.
+      nextFamilies[kind] = (membership.families[kind] ?? []).filter((f) => next.has(f));
       nextKinds.add(kind);
     }
     // Re-encode the degenerate membership as `sources` (the stored shape, #78).
     // Pass the current sources so anything the checkbox tree can't re-author
     // survives the wholesale re-encode instead of being dropped on every toggle:
-    // non-degenerate inline exprs (descendants_of / intersect / difference, #94)
+    // non-degenerate inline exprs (intersect / difference / a `{var}` leaf, #94)
     // are the load-bearing case now — plus any legacy saved-view refs (#82), inert
     // since ADR-0074 Amendment 3 but still preserved. Dropping this arg would
     // silently clobber #94 sources.
-    emit({ sources: membershipToSources(Array.from(nextKinds), nextEntryTypes, config.sources) });
+    emit({ sources: membershipToSources(Array.from(nextKinds), nextEntryTypes, nextFamilies, config.sources) });
   }
 
   function togglePreset(id: "full_outline" | "full_text", checked: boolean) {

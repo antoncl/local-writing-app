@@ -13,7 +13,7 @@ inputs:
     sources:
     - kind: plot
       expr:
-        type: plot:card
+        descendants_of: plot:card
     multiple: false
     presets: []
 context_strategy:

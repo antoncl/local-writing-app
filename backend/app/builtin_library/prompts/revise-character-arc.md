@@ -13,7 +13,7 @@ inputs:
     sources:
     - kind: plot
       expr:
-        type: plot:character_arc
+        descendants_of: plot:character_arc
     multiple: false
     presets: []
 context_strategy:

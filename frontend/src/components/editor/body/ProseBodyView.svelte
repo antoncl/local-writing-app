@@ -24,7 +24,7 @@
   import { Editor } from "@tiptap/core";
   import { TextSelection, type Transaction } from "@tiptap/pm/state";
   import type { EditorView } from "@tiptap/pm/view";
-  import StarterKit from "@tiptap/starter-kit";
+  import { proseStarterKit } from "@/lib/editor-core/proseStarterKit";
   import {
     minimalReplaceTransaction,
     parseHtmlToDoc,
@@ -1088,18 +1088,7 @@
     editor = new Editor({
       element: editorElement,
       extensions: [
-        // StarterKit v3 newly bundles Link, Underline and TrailingNode by
-        // default. The scene Markdown grammar has no representation for a link
-        // or an underline mark (turndown would leak them as raw HTML and break
-        // md↔html↔md idempotency), and a permanent trailing empty paragraph
-        // would drift the saved body — so all three stay off, preserving the v2
-        // prose surface. undoRedo (the renamed History) stays on for Ctrl+Z.
-        StarterKit.configure({
-          heading: { levels: [1, 2, 3] },
-          link: false,
-          underline: false,
-          trailingNode: false,
-        }),
+        proseStarterKit(),
         AISuggestion,
         CharacterMark,
         MutationMark,

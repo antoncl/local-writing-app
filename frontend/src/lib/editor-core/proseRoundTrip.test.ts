@@ -11,7 +11,6 @@
 // so getHTML()'s shape is pinned against the TipTap version in the lockfile.
 import { afterEach, describe, expect, it } from "vitest";
 import { Editor, type Extensions } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
 import {
   AISuggestion,
   TodoAnchor,
@@ -20,6 +19,7 @@ import {
   createMutationMark,
 } from "./proseMarks";
 import { tableExtensions } from "./alignedTable";
+import { proseStarterKit } from "./proseStarterKit";
 import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "../utils/markdown";
 
 // A live editor schedules a DOM observer flush that fires after the environment
@@ -29,18 +29,14 @@ afterEach(() => {
   for (const editor of editors.splice(0)) editor.destroy();
 });
 
-/** The production prose extension set (mirrors ProseBodyView.svelte). The
- *  marker factories take resolver callbacks that only affect the pill's visible
- *  label — turndown reconstructs each marker from its data-* attributes, not its
- *  text — so stub resolvers keep the round-trip faithful. */
+/** The production prose extension set: the shared proseStarterKit() (the exact
+ *  StarterKit config the body and long_text editors mount) plus the custom
+ *  marks. The marker factories take resolver callbacks that only affect the
+ *  pill's visible label — turndown reconstructs each marker from its data-*
+ *  attributes, not its text — so stub resolvers keep the round-trip faithful. */
 function proseExtensions(): Extensions {
   return [
-    StarterKit.configure({
-      heading: { levels: [1, 2, 3] },
-      link: false,
-      underline: false,
-      trailingNode: false,
-    }),
+    proseStarterKit(),
     AISuggestion,
     createCharacterMark({ colorForId: () => "", titleForId: () => "Character" }),
     createMutationMark({ labelForMarker: () => "label" }),
@@ -70,6 +66,10 @@ describe("scene round-trip through a real editor (#1866)", () => {
     ["a character mark in prose", "The lighthouse kept <!-- character:id=lore_1 -->Mira<!-- /character --> awake."],
     ["an embedded todo", "<!-- embedded-todo:id=todo1;status=open;note= -->fix this line<!-- /embedded-todo -->"],
     ["a single-row mutation pill", "<!-- mutate:entity=lore_1;field=status;value=dead;id=mut1 -->"],
+    [
+      "a multi-row mutation carrier (the data-mutation-rows JSON)",
+      "<!-- mutate:entity=lore_1;id=unit1\nfield=status;value=dead;id=row1\nfield=mood;value=grim;id=row2\n-->",
+    ],
     ["a mutation close pill", "<!-- mutate:close;ref=mut1;id=close1 -->"],
     ["a heading and a paragraph", "# Title\n\nA paragraph of prose."],
   ])("preserves %s byte-for-byte", async (_label, markdown) => {
@@ -104,10 +104,29 @@ describe("scene round-trip through a real editor (#1866)", () => {
     expect(separator).toMatch(/:-+\s*\|\s*-+:/); // left-aligned A, right-aligned B
   });
 
-  it("does not leak a trailing empty paragraph (trailingNode is off)", () => {
-    // StarterKit v3 bundles TrailingNode on by default; if the opt-out ever
-    // regresses, getHTML() gains a permanent trailing <p></p> that drifts the
-    // saved body once anything defeats the .trim() cushion.
-    expect(editorHtml("<p>hello</p>")).toBe("<p>hello</p>");
+  it("drops a markdown link — link is off, so it does not round-trip", async () => {
+    // A link parses to <a>; with link:false that mark is unknown, so the text
+    // survives and the link is stripped. If the opt-out regressed, turndown
+    // would re-emit [the docs](…) and this would fail.
+    expect(await roundTrip("See [the docs](https://example.com/page) here.")).toBe("See the docs here.");
+  });
+
+  it("drops an underline mark — the scene grammar has no underline", () => {
+    // Underline has no Markdown syntax, so feed the mark as HTML: with
+    // underline:false the <u> is unknown and dropped; a regressed opt-out keeps
+    // it and turndown would leak raw <u> into the saved body.
+    expect(editorHtml("<p><u>underlined</u></p>")).toBe("<p>underlined</p>");
+  });
+
+  it("does not append a trailing empty paragraph after a non-paragraph block (trailingNode is off)", () => {
+    // StarterKit v3 bundles TrailingNode on by default. It appends a trailing
+    // <p></p> ONLY after a block that is not a paragraph, and ONLY on a
+    // dispatched transaction — so build the editor, then setContent a heading
+    // (which dispatches) to actually exercise the opt-out. With trailingNode on
+    // this returns "<h1>hello</h1><p></p>"; off, it stays "<h1>hello</h1>".
+    const editor = new Editor({ element: document.createElement("div"), extensions: proseExtensions() });
+    editors.push(editor);
+    editor.commands.setContent("<h1>hello</h1>");
+    expect(editor.getHTML()).toBe("<h1>hello</h1>");
   });
 });

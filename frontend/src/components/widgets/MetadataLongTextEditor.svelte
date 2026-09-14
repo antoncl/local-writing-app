@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { Editor } from "@tiptap/core";
-  import StarterKit from "@tiptap/starter-kit";
+  import { proseStarterKit } from "@/lib/editor-core/proseStarterKit";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
@@ -142,7 +142,7 @@
     editor = new Editor({
       element: editorElement,
       extensions: [
-        StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+        proseStarterKit(),
         ...tableExtensions,
         ImplicitContextHighlight.configure({ matcher }),
       ],

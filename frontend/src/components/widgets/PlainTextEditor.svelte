@@ -124,7 +124,9 @@
         // Strip everything except paragraph + hard break — we want plain
         // text semantics, no rich formatting. Disabling these prevents
         // the user from accidentally getting bold/italic/list/heading
-        // structure they can't see styled.
+        // structure they can't see styled. link/underline/trailingNode are
+        // newly bundled ON by StarterKit v3 and belong to the same intent —
+        // no autolinking a typed URL, no Ctrl+U underline.
         StarterKit.configure({
           heading: false,
           bulletList: false,
@@ -136,6 +138,9 @@
           italic: false,
           strike: false,
           code: false,
+          link: false,
+          underline: false,
+          trailingNode: false,
         }),
         ImplicitContextHighlight.configure({ matcher }),
       ],

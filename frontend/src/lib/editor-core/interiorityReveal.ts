@@ -14,9 +14,9 @@
 // positions, mapped through each transaction so it follows edits.
 
 import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey, type EditorState, type Transaction } from "prosemirror-state";
-import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
-import type { Node as PMNode, MarkType } from "prosemirror-model";
+import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/pm/state";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
+import type { Node as PMNode, MarkType } from "@tiptap/pm/model";
 
 const HANDLE_CLASS = "interiority-handle";
 const BLOCK_CLASS = "interiority-block";

@@ -13,9 +13,9 @@
  *  The code body has a CodeMirror twin (`widgets/codeSearchReveal.ts`) that
  *  shares the pattern, the match scan, the choice and the classes. */
 import { Extension } from "@tiptap/core";
-import type { Node as PMNode } from "prosemirror-model";
-import { Plugin, PluginKey, TextSelection } from "prosemirror-state";
-import { Decoration, DecorationSet } from "prosemirror-view";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { escapeRegex } from "./implicitContextMatcher";
 
 /** What a search hit's open carries into the editor. */

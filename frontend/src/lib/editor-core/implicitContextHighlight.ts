@@ -22,10 +22,10 @@
 // if a large project shows pressure.
 
 import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey, type EditorState } from "prosemirror-state";
-import { Decoration, DecorationSet } from "prosemirror-view";
-import type { Node as PMNode } from "prosemirror-model";
-import type { EditorView } from "prosemirror-view";
+import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import type { EditorView } from "@tiptap/pm/view";
 
 import { anchoredPopover } from "@/lib/actions/anchoredPopover";
 import { type CompiledMatcher, type MatcherEntry } from "@/lib/editor-core/implicitContextMatcher";

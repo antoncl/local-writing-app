@@ -181,7 +181,7 @@
     // synchronously) — `editor` itself isn't nulled by the onMount cleanup, so
     // re-check `isDestroyed` rather than crash into a torn-down ProseMirror view.
     if (editor.isDestroyed) return;
-    editor.commands.setContent(html || "<p></p>", false);
+    editor.commands.setContent(html || "<p></p>", { emitUpdate: false });
     // An external value push is a boundary, not an edit: rebuild the state so
     // undo history starts empty. Without this, a same-id external replacement —
     // notably "reset to inherited" re-seeding this still-mounted editor — lands

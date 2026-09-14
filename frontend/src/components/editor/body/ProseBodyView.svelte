@@ -336,7 +336,7 @@
       const tr = minimalReplaceTransaction(editor.state, newDoc);
       if (tr) editor.view.dispatch(tr);
     } else {
-      editor.commands.setContent(html || "<p></p>", false);
+      editor.commands.setContent(html || "<p></p>", { emitUpdate: false });
     }
     loadedSceneId = sceneId;
     enforceUniqueTodoAnchors();
@@ -368,7 +368,7 @@
   export async function adoptBody(markdown: string): Promise<void> {
     if (!editor) return;
     const html = await sceneMarkdownToHtml(markdown);
-    editor.commands.setContent(html || "<p></p>", true);
+    editor.commands.setContent(html || "<p></p>", { emitUpdate: true });
   }
 
   /** Rung 2 of the reconcile ladder (ADR-0077 / #1626): three-way merge the
@@ -1088,7 +1088,18 @@
     editor = new Editor({
       element: editorElement,
       extensions: [
-        StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+        // StarterKit v3 newly bundles Link, Underline and TrailingNode by
+        // default. The scene Markdown grammar has no representation for a link
+        // or an underline mark (turndown would leak them as raw HTML and break
+        // md↔html↔md idempotency), and a permanent trailing empty paragraph
+        // would drift the saved body — so all three stay off, preserving the v2
+        // prose surface. undoRedo (the renamed History) stays on for Ctrl+Z.
+        StarterKit.configure({
+          heading: { levels: [1, 2, 3] },
+          link: false,
+          underline: false,
+          trailingNode: false,
+        }),
         AISuggestion,
         CharacterMark,
         MutationMark,

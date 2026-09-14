@@ -195,7 +195,7 @@
             : [],
         })),
       };
-      editor.commands.setContent(doc, false);
+      editor.commands.setContent(doc, { emitUpdate: false });
       // An external value push is a boundary, not an edit: rebuild the state so
       // undo history starts empty. Otherwise a same-id external replacement
       // (e.g. the chat composer's clear-on-send) lands on the undo stack and

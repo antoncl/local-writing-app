@@ -44,7 +44,9 @@ class _FakeResponse:
 
 class _FakeAsyncClient:
     """Stand-in for httpx.AsyncClient supporting `async with`. Returns a
-    pre-canned JSON payload for any GET. Pass `raise_exc` to simulate a
+    pre-canned JSON payload for any GET. `show_payloads` maps a model name to
+    the JSON its `/api/show` POST returns (Ollama); an absent model yields a
+    None body, exercising the fallback path. Pass `raise_exc` to simulate a
     transport error."""
 
     def __init__(
@@ -53,11 +55,13 @@ class _FakeAsyncClient:
         *,
         raise_exc: Exception | None = None,
         capture: dict | None = None,
+        show_payloads: dict[str, Any] | None = None,
         **_kwargs,
     ) -> None:
         self._payload = json_payload
         self._raise = raise_exc
         self._capture = capture
+        self._show_payloads = show_payloads
 
     async def __aenter__(self) -> _FakeAsyncClient:
         return self
@@ -73,11 +77,24 @@ class _FakeAsyncClient:
             raise self._raise
         return _FakeResponse(self._payload)
 
+    async def post(self, url: str, **kwargs) -> _FakeResponse:
+        # Ollama /api/show — return the canned payload for the requested model.
+        if self._raise is not None:
+            raise self._raise
+        model = (kwargs.get("json") or {}).get("model")
+        return _FakeResponse((self._show_payloads or {}).get(model))
 
-def _patch_async_client(monkeypatch, module, *, payload=None, raise_exc=None, capture=None):
+
+def _patch_async_client(
+    monkeypatch, module, *, payload=None, raise_exc=None, capture=None, show_payloads=None
+):
     def factory(**kwargs):
         return _FakeAsyncClient(
-            json_payload=payload, raise_exc=raise_exc, capture=capture, **kwargs
+            json_payload=payload,
+            raise_exc=raise_exc,
+            capture=capture,
+            show_payloads=show_payloads,
+            **kwargs,
         )
 
     monkeypatch.setattr(f"{module}.httpx.AsyncClient", factory)
@@ -251,14 +268,63 @@ def test_ollama_parses_local_tags(monkeypatch):
                 {"name": "llava:7b", "details": {"family": "llava"}},
             ]
         },
+        show_payloads={
+            "llama3.2:latest": {
+                "model_info": {
+                    "general.architecture": "llama",
+                    "llama.context_length": 131072,
+                },
+                "capabilities": ["completion", "tools"],
+            },
+            # No /api/show entry for llava — exercises the family fallback.
+        },
     )
     profile = OllamaProfile(host="http://localhost:11434")
     models = asyncio.run(profile.list_models())
     by_id = {m.id: m for m in models}
     assert "llama3.2:latest" in by_id
     assert by_id["llama3.2:latest"].tier == CapabilityTier.LOCAL
-    # Vision capability inferred from family name.
+    # Context window discovered from /api/show model_info (arch-prefixed key).
+    assert by_id["llama3.2:latest"].context_window == 131072
+    # Capability surfaced from /api/show.
+    assert any(c.value == "tools" for c in by_id["llama3.2:latest"].capabilities)
+    # /api/show absent for llava → context unknown, vision from the family name.
+    assert by_id["llava:7b"].context_window == 0
     assert any(c.value == "vision" for c in by_id["llava:7b"].capabilities)
+
+
+def test_ollama_discovers_context_and_caps_per_architecture(monkeypatch):
+    _patch_async_client(
+        monkeypatch,
+        "app.services.ai.profiles.ollama",
+        payload={"models": [{"name": "qwen3:8b", "details": {"family": "qwen3"}}]},
+        show_payloads={
+            "qwen3:8b": {
+                "model_info": {
+                    "general.architecture": "qwen35",
+                    "qwen35.context_length": 262144,
+                },
+                "capabilities": ["completion", "thinking", "vision"],
+            }
+        },
+    )
+    profile = OllamaProfile(host="http://localhost:11434")
+    (model,) = asyncio.run(profile.list_models())
+    # Arch-prefixed key resolved dynamically (qwen35., not llama.).
+    assert model.context_window == 262144
+    caps = {c.value for c in model.capabilities}
+    assert "thinking" in caps
+    assert "vision" in caps
+
+
+def test_ollama_context_length_falls_back_to_any_arch_key():
+    from app.services.ai.profiles.ollama import _context_length_from_show
+
+    # general.architecture missing → scan for any *.context_length key.
+    assert _context_length_from_show({"model_info": {"gemma3.context_length": 8192}}) == 8192
+    # No context_length anywhere → 0.
+    assert _context_length_from_show({"model_info": {}}) == 0
+    assert _context_length_from_show({}) == 0
 
 
 def test_ollama_model_for_tier_always_none():

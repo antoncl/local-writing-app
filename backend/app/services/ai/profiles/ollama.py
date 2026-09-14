@@ -7,6 +7,7 @@ Picker just lists what's installed.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -68,6 +69,14 @@ class OllamaProfile(OpenAICompatibleProfile):
                 response = await client.get(f"{self._base}/api/tags")
                 response.raise_for_status()
                 payload = response.json()
+                rows = payload.get("models") or []
+                # /api/tags carries no context window or capability data — that
+                # lives in /api/show, one POST per model. Fan them out
+                # concurrently; the result is cached in self._cache, so this
+                # cost is paid once per catalogue refresh, not on every list.
+                shows = await asyncio.gather(
+                    *(self._fetch_show(client, _row_name(row)) for row in rows)
+                )
         except (httpx.HTTPError, ValueError) as exc:
             # Local Ollama may be down; cache empty list so the picker
             # renders "(no local models)" instead of spinning.
@@ -76,10 +85,33 @@ class OllamaProfile(OpenAICompatibleProfile):
             return []
 
         descriptors = [
-            _row_to_descriptor(row) for row in payload.get("models") or []
+            _row_to_descriptor(row, show)
+            for row, show in zip(rows, shows, strict=True)
         ]
         self._cache = descriptors
         return descriptors
+
+    async def _fetch_show(
+        self, client: httpx.AsyncClient, name: str
+    ) -> dict | None:
+        """Fetch `/api/show` metadata for one model, or None if unavailable.
+
+        `/api/show` reads GGUF metadata only — it does not load the model into
+        VRAM — so it's cheap. A per-model failure degrades gracefully to a
+        descriptor with `context_window=0` rather than failing the whole list.
+        """
+        if not name:
+            return None
+        try:
+            response = await client.post(
+                f"{self._base}/api/show", json={"model": name}
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            log.debug("Ollama /api/show failed for %s: %s", name, exc)
+            return None
+        return payload if isinstance(payload, dict) else None
 
     def ping_host(
         self, *, timeout: float = 4.0, transport: httpx.BaseTransport | None = None
@@ -150,23 +182,71 @@ class OllamaProfile(OpenAICompatibleProfile):
         return None
 
 
-def _row_to_descriptor(row: dict) -> ModelDescriptor:
-    name = str(row.get("name") or row.get("model") or "")
-    details = row.get("details") or {}
-    family = str(details.get("family") or "").lower()
-    capabilities: set[Capability] = set()
-    # Vision models tend to have "vision" or "llava" in the family. Not
-    # comprehensive but better than nothing for the picker hint.
-    if any(token in family for token in ("vision", "llava", "vlm")):
-        capabilities.add(Capability.VISION)
+def _row_name(row: dict) -> str:
+    return str(row.get("name") or row.get("model") or "")
+
+
+def _row_to_descriptor(row: dict, show: dict | None = None) -> ModelDescriptor:
+    name = _row_name(row)
+    context_window = _context_length_from_show(show) if show else 0
+    capabilities = _capabilities_from_show(show) if show else set()
+    if not capabilities:
+        # Fallback when /api/show didn't answer (server race, or an older
+        # Ollama without a capabilities list): guess vision from the family
+        # string, as before. Not comprehensive, but better than nothing.
+        family = str((row.get("details") or {}).get("family") or "").lower()
+        if any(token in family for token in ("vision", "llava", "vlm")):
+            capabilities = {Capability.VISION}
     return ModelDescriptor(
         id=name,
         display_name=name,
         provider="ollama",
-        # Ollama doesn't publish a per-model context window via /api/tags;
-        # the user would need to /api/show each model. Leave 0 — the
-        # picker can show "unknown" when 0.
-        context_window=0,
+        context_window=context_window,
         tier=CapabilityTier.LOCAL,
         capabilities=capabilities,
     )
+
+
+def _context_length_from_show(show: dict) -> int:
+    """Read the model's trained context length from `/api/show` `model_info`.
+
+    The key is architecture-prefixed (`llama.context_length`,
+    `qwen2.context_length`, ...), so resolve it via `general.architecture`
+    rather than hardcoding a family. Falls back to scanning for any
+    `*.context_length` key, then 0 when absent.
+    """
+    info = show.get("model_info")
+    if not isinstance(info, dict):
+        return 0
+    arch = str(info.get("general.architecture") or "")
+    keys = [f"{arch}.context_length"] if arch else []
+    keys += [
+        key
+        for key in info
+        if isinstance(key, str) and key.endswith(".context_length")
+    ]
+    for key in keys:
+        value = info.get(key)
+        if isinstance(value, (int, float)) and value > 0:
+            return int(value)
+    return 0
+
+
+# Ollama's /api/show `capabilities` we surface as picker flags. `completion`
+# and `embedding` carry no Capability; Ollama caches nothing, so CACHING is
+# never added.
+_SHOW_CAPABILITY_MAP: dict[str, Capability] = {
+    "vision": Capability.VISION,
+    "tools": Capability.TOOLS,
+    "thinking": Capability.THINKING,
+}
+
+
+def _capabilities_from_show(show: dict) -> set[Capability]:
+    """Map Ollama's /api/show `capabilities` list onto our Capability flags."""
+    caps: set[Capability] = set()
+    for raw in show.get("capabilities") or []:
+        mapped = _SHOW_CAPABILITY_MAP.get(str(raw).lower())
+        if mapped is not None:
+            caps.add(mapped)
+    return caps

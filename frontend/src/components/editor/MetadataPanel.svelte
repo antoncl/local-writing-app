@@ -295,17 +295,23 @@
   // compact, single-row shape `entity_ref` renders when empty — so it only
   // goes wide once it actually holds pills to wrap; otherwise the wide
   // `.fr-val` layout (flex-basis: 100%, justify-content: stretch) stretches
-  // that lone icon into its own left-aligned row. `multi_select` doesn't
-  // share this: it always renders every option as a chip, never a bare add
-  // control, so it's never visually empty. `list`'s "+ Add item" is its own
-  // permanent, labelled row by design (a growing collection), not a bare
-  // icon standing in for the whole row — not the same asymmetry.
+  // that lone icon into its own left-aligned row.
+  //
+  // `multi_select` splits the same way (#1949). WITH options it always
+  // renders its chips (never a bare add control), so it is always wide.
+  // WITHOUT options it is a freeform value list shown/edited as one bare
+  // `<input>` — the same family as `list` — so it goes wide once it holds a
+  // value (a long alias list belongs on its own full-width line, not clipped
+  // in the compact value column) and stays a compact single row while empty,
+  // exactly like an empty ref list. `list` itself is always wide: its
+  // "+ Add item" is a permanent, labelled row by design.
   function isWide(field: MetadataFieldDefinition, fieldId: string): boolean {
+    const populated = isMetadataValuePresent(displayValue(fieldId));
     return (
       field.type === "long_text" ||
-      (field.type === "entity_ref_list" && isMetadataValuePresent(displayValue(fieldId))) ||
       field.type === "list" ||
-      (field.type === "multi_select" && field.options.length > 0)
+      (field.type === "entity_ref_list" && populated) ||
+      (field.type === "multi_select" && (field.options.length > 0 || populated))
     );
   }
 
@@ -1342,9 +1348,35 @@
     background: var(--surface);
     color: var(--text);
   }
-  .field-row:not(.wide) .fr-val :global(input[type="text"]),
-  .field-row:not(.wide) .fr-val :global(input[type="number"]),
-  .field-row:not(.wide) .fr-val :global(input:not([type])) {
+  /* Free-text scalars (a `text` field, the option-less `multi_select`
+     fallback, the legacy `date` input) edit through a bare `<input>` inside
+     RailScalarCell's `.fr-edit`. Let it GROW into the free width instead of
+     the old fixed 160px cap, so a long value (e.g. an alias list) is fully
+     visible on a wide rail (#1949) rather than clipped in a narrow
+     right-anchored box. `flex: 1 1 0` — grow from a ZERO basis, not `width:
+     100%` and not `flex: … auto`: `.fr-val` is `flex-wrap: wrap`, and the
+     fixed-size leading override / trailing mutation markers are flex siblings
+     of the input (`.fr-edit` is display:contents). A 100%/auto (intrinsic)
+     basis makes line-collection wrap each marker onto its own line while
+     editing; a zero basis lets the input sit BETWEEN the markers and grow into
+     the leftover width, keeping the one-line `[versions] value ⤳` layout.
+     Scoped to `.fr-edit` so nested picker/list inputs (not wrapped in it) are
+     untouched. */
+  .field-row .fr-val :global(.fr-edit input[type="text"]),
+  .field-row .fr-val :global(.fr-edit input:not([type])) {
+    flex: 1 1 0;
+    min-width: 0;
+    text-align: left;
+  }
+  /* The compact row's cell only claims the row's free width while such an
+     input is open, so its right-anchored value column at rest — and the
+     changed-field flip highlight, which rides `.fr-val` — stay put. */
+  .field-row:not(.wide) .fr-val:has(:global(.fr-edit input[type="text"])),
+  .field-row:not(.wide) .fr-val:has(:global(.fr-edit input:not([type]))) {
+    flex: 1 1 auto;
+  }
+  /* Numbers are short scalars — keep them compact, at the value column. */
+  .field-row:not(.wide) .fr-val :global(.fr-edit input[type="number"]) {
     max-width: 160px;
     text-align: left;
   }

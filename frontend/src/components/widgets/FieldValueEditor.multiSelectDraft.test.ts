@@ -43,12 +43,16 @@ describe("FieldValueEditor — option-less multi_select keeps a caret-preserving
     expect(input.value).toBe("Alpha,Beta");
   });
 
-  it("does not reformat a value the user is midway through typing (trailing comma survives)", async () => {
-    const { input, apply } = mount(["Alpha"]);
-    await fireEvent.input(input, { target: { value: "Alpha, " } });
-    await apply(["Alpha"]); // normalize drops the trailing comma -> unchanged store value
-    // The old bug snapped the box back to "Alpha", eating the "," you just typed.
-    expect(input.value).toBe("Alpha, ");
+  it("keeps the raw text when normalize REFORMATS the value (a case-duplicate is de-duped)", async () => {
+    // Typing a case-duplicate de-dupes on the way to the store ("Alpha,alpha" ->
+    // ["Alpha"]), so the derived string genuinely CHANGES ("" -> "Alpha"). That
+    // is the reformat class that, on the old binding, rewrote the box (dropping
+    // the "alpha" mid-type) and reset the caret; the draft keeps it verbatim.
+    const { input, onChange, apply } = mount([]);
+    await fireEvent.input(input, { target: { value: "Alpha,alpha" } });
+    expect(onChange).toHaveBeenLastCalledWith(["Alpha"]);
+    await apply(["Alpha"]);
+    expect(input.value).toBe("Alpha,alpha");
   });
 
   it("adopts the derived value on an EXTERNAL change (a reset, or a parent switching the value)", async () => {

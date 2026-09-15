@@ -49,9 +49,9 @@ export const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDo
 // Document types whose server baseline is a Scene reached via /api/scenes: real
 // manuscript scenes, and the Act/Chapter `structure_node`s that round-trip through
 // the scene endpoints (editorPaneOpen.openStructureNode). RELOAD_GETTERS above
-// covers every kind with its own endpoint; a type in NEITHER set is a synthetic /
-// surface-only pane (chat, and latently assistant/project/view) with no document
-// file — no baseline to re-fetch, so it must be SKIPPED, never fetched as a scene.
+// covers every kind with its own endpoint. A type in NEITHER set has no reload
+// getter wired here — chat (a scene-shaped stub with no document file), plus
+// assistant/project/view — so it is SKIPPED rather than mis-fetched as a scene.
 const SCENE_BACKED_DOCUMENT_TYPES = new Set(["manuscript", "structure_node"]);
 
 // The server getter for an open pane's `document.type`, or null when the type has

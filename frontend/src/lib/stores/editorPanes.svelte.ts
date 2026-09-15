@@ -314,11 +314,10 @@ class EditorPanesController {
     //    `node_…` structural id, pane.scene.id is the backing `manuscript_…` scene
     //    id — and GET /api/scenes/<node_…> 404s. Every other kind has
     //    document.id === scene.id, so keying/fetching off scene.id is a no-op there.
-    //  - The getter is chosen by the pane's declared kind. A kind with no getter
-    //    (chat, and the other synthetic/surface-only panes) has no server document
-    //    to refresh, so it is skipped — never mis-fetched as a scene, whose 404
-    //    would also reject this whole Promise.all and starve the panes that CAN
-    //    refresh (#1977).
+    //  - The getter is chosen by the pane's declared kind. A kind with no reload
+    //    getter (chat, plus assistant/project/view) is skipped — never mis-fetched
+    //    as a scene, whose 404 would also reject this whole Promise.all and starve
+    //    the panes that CAN refresh (#1977).
     const seen = new Set<string>();
     const targets: { key: string; sceneId: string; getter: (id: string) => Promise<ReloadableDocument> }[] = [];
     for (const pane of this.panes) {

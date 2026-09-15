@@ -50,7 +50,9 @@ is safe to share.
 
 **Local models (Ollama)** — set the **Ollama host** field (default
 `http://127.0.0.1:11434`). With Ollama running and a project policy of **Local
-only**, the whole app works offline.
+only**, the whole app works offline. How the app keeps a local model fast — sizing
+its context window so a chat doesn't spill onto the CPU, and the one Ollama setting
+worth tuning — is its own guide: **[Ollama context](#guide:ollama-context)**.
 
 **Check it works** — the **Connection** section has a **Test connection** button.
 If it's disabled, it tells you why (e.g. *"This project's AI access is off, so there

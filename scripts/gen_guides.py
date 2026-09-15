@@ -40,6 +40,7 @@ GUIDES = [
     {"id": "views", "title": "Views", "source": "docs/views.md"},
     {"id": "plotting", "title": "Plotting", "source": "docs/plotting.md"},
     {"id": "ai-setup", "title": "Turning on AI", "source": "docs/ai-setup.md"},
+    {"id": "ollama-context", "title": "Ollama context", "source": "docs/ollama-context.md"},
     {"id": "writing-prompts", "title": "Writing prompts", "source": "docs/prompts/guide.md"},
     {"id": "context-picker", "title": "Context picker", "source": "docs/context-picker.md"},
     {"id": "roleplay", "title": "Roleplay", "source": "docs/roleplay.md"},

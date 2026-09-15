@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 300" role="img" aria-label="Default: 131072 tokens, about 18 GB, 76 percent on the CPU. Fitted: sized to the turn, about 4 GB, fully on the GPU."><style>.l{font-family:var(--sans,"Segoe UI",system-ui,sans-serif)}.m{font-family:var(--mono,Consolas,ui-monospace,monospace)}.n{font-family:var(--mono,Consolas,ui-monospace,monospace);font-variant-numeric:tabular-nums}</style>
+<rect x="-30" y="-30" width="920" height="360" fill="var(--diagram-bg,#ffffff)"/>
+<text x="0" y="14" class="l" font-size="15" fill="var(--text,#242424)" font-weight="600">Default — load at the trained max</text>
+<text x="0" y="34" class="m" font-size="12" fill="var(--text-3,#74817b)">num_ctx 131072</text>
+<rect x="0" y="50" width="812" height="30" rx="6" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<rect x="0" y="50" width="18" height="30" rx="6" fill="var(--accent,#2f6f5e)"/>
+<rect x="22" y="56" width="786" height="18" rx="4" fill="none" stroke="var(--border-strong,#b4c2bc)" stroke-dasharray="4 4"/>
+<text x="36" y="69" class="m" font-size="11" fill="var(--text-3,#74817b)">reserved, empty cache — the rest of 131072 tokens</text>
+<rect x="0" y="92" width="812" height="10" rx="5" fill="var(--inset,#f1f5f3)"/>
+<rect x="0" y="92" width="617" height="10" rx="5" fill="var(--danger,#a64a4a)"/>
+<rect x="619" y="92" width="193" height="10" rx="5" fill="var(--warn,#8a520d)" opacity="0.5"/>
+<text x="0" y="126" class="n" font-size="13" fill="var(--danger,#a64a4a)" font-weight="600">~18 GB</text>
+<text x="92" y="126" class="l" font-size="12.5" fill="var(--text-2,#4d5753)">76% spills to the CPU → the model crawls</text>
+<line x1="0" y1="156" x2="812" y2="156" stroke="var(--border,#cbd6d2)"/>
+<text x="0" y="186" class="l" font-size="15" fill="var(--text,#242424)" font-weight="600">Fitted — size to the turn</text>
+<text x="0" y="206" class="m" font-size="12" fill="var(--text-3,#74817b)">num_ctx 16384</text>
+<rect x="0" y="222" width="812" height="30" rx="6" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<rect x="0" y="222" width="101" height="30" rx="6" fill="var(--accent,#2f6f5e)"/>
+<text x="113" y="241" class="m" font-size="11" fill="var(--text-3,#74817b)">prompt + reply, rounded to a stable step</text>
+<rect x="0" y="264" width="812" height="8" rx="4" fill="var(--inset,#f1f5f3)"/>
+<rect x="0" y="264" width="176" height="8" rx="4" fill="var(--accent,#2f6f5e)"/>
+<text x="188" y="272" class="n" font-size="12" fill="var(--accent-strong,#234e43)" font-weight="600">~4 GB · 100% GPU</text>
+</svg>

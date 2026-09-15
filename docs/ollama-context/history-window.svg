@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 330" role="img" aria-label="Without a window, an overflowing history makes Ollama drop the system prompt and lore from the front. With the history window, the oldest exchanges are dropped instead and the system prompt and lore survive."><style>.l{font-family:var(--sans,"Segoe UI",system-ui,sans-serif)}.m{font-family:var(--mono,Consolas,ui-monospace,monospace)}</style>
+<rect x="-30" y="-30" width="920" height="390" fill="var(--diagram-bg,#ffffff)"/>
+<text x="0" y="14" class="l" font-size="13.5" fill="var(--danger,#a64a4a)" font-weight="600">Without a window</text>
+<text x="0" y="32" class="m" font-size="10.5" fill="var(--text-3,#74817b)">Ollama truncates from the front</text>
+<rect x="0" y="44" width="380" height="250" rx="8" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<rect x="16" y="54" width="348" height="30" rx="5" fill="var(--surface,#ffffff)" stroke="var(--danger,#a64a4a)" stroke-dasharray="4 3"/>
+<text x="28" y="73" class="l" font-size="11.5" fill="var(--danger,#a64a4a)">System prompt — lost</text>
+<rect x="16" y="90" width="348" height="28" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="28" y="108" class="l" font-size="11.5" fill="var(--text-2,#4d5753)">Lore — partly lost</text>
+<rect x="16" y="126" width="348" height="94" rx="5" fill="var(--accent-soft,#edf6f2)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="28" y="150" class="l" font-size="11.5" fill="var(--text,#242424)">Conversation history</text>
+<text x="28" y="170" class="m" font-size="10.5" fill="var(--text-3,#74817b)">grown past the window</text>
+<rect x="16" y="228" width="348" height="30" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="28" y="247" class="l" font-size="11.5" fill="var(--text-2,#4d5753)">Reply headroom</text>
+<text x="460" y="14" class="l" font-size="13.5" fill="var(--accent-strong,#234e43)" font-weight="600">With the history window</text>
+<text x="460" y="32" class="m" font-size="10.5" fill="var(--text-3,#74817b)">the app drops the oldest exchanges</text>
+<rect x="460" y="44" width="380" height="250" rx="8" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<rect x="476" y="54" width="348" height="30" rx="5" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="488" y="73" class="l" font-size="11.5" fill="var(--accent-strong,#234e43)" font-weight="600">System prompt — kept</text>
+<rect x="476" y="90" width="348" height="28" rx="5" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="488" y="108" class="l" font-size="11.5" fill="var(--accent-strong,#234e43)">Lore — kept</text>
+<rect x="476" y="126" width="348" height="26" rx="5" fill="var(--surface,#ffffff)" stroke="var(--danger,#a64a4a)" stroke-dasharray="4 3"/>
+<text x="488" y="143" class="l" font-size="10.5" fill="var(--danger,#a64a4a)">✂ oldest exchanges dropped</text>
+<rect x="476" y="158" width="348" height="60" rx="5" fill="var(--accent-soft,#edf6f2)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="488" y="182" class="l" font-size="11.5" fill="var(--text,#242424)">Recent turns — kept whole</text>
+<text x="488" y="202" class="m" font-size="10.5" fill="var(--text-3,#74817b)">+ your current message</text>
+<rect x="476" y="228" width="348" height="30" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="488" y="247" class="l" font-size="11.5" fill="var(--text-2,#4d5753)">Reply headroom</text>
+</svg>

@@ -52,6 +52,51 @@ _HEADER = (
     "// Run `python scripts/gen_guides.py` after changing a source guide.\n"
 )
 
+# A markdown image whose target is a local `.svg`, alone on its line. Diagrams
+# live as committed `.svg` files that GitHub renders as images; the in-app viewer
+# can't load images (the bundle copies no assets), so these refs are spliced
+# inline at bundle time. One source of truth per diagram, both surfaces (#1967).
+_SVG_IMG = re.compile(r"(?m)^!\[[^\]]*\]\((?P<path>[^)]+\.svg)\)[ \t]*$")
+
+
+def _svg_paths(markdown: str, source: Path) -> list[Path]:
+    """Absolute paths of every `![alt](*.svg)` the markdown references."""
+    return [(source.parent / m.group("path")).resolve() for m in _SVG_IMG.finditer(markdown)]
+
+
+def _inline_svgs(markdown: str, source: Path) -> str:
+    """Splice each `![alt](*.svg)` reference's file contents inline.
+
+    GuideView renders with a plain ``new Marked()`` and no sanitiser, so a raw
+    ``<svg>`` survives only wrapped in a ``<div>`` with the opening tag alone on
+    its line and no blank lines inside — the shape Marked passes through as HTML
+    instead of escaping (GuideView.svg.test.ts pins this). The committed ``.svg``
+    files are authored in exactly that no-blank-line shape.
+    """
+
+    def repl(match: re.Match[str]) -> str:
+        svg = (source.parent / match.group("path")).resolve().read_text(encoding="utf-8").strip()
+        return f"<div>\n{svg}\n</div>"
+
+    return _SVG_IMG.sub(repl, markdown)
+
+
+def _referenced_svgs() -> list[str]:
+    """Repo-relative POSIX paths of every SVG the guides inline, de-duplicated.
+
+    Skips a source that doesn't exist: discovery has nothing to read there, and a
+    genuinely missing bundled file fails loudly at ``render()`` while the
+    string-based filter check still flags it.
+    """
+    seen: dict[str, None] = {}
+    for guide in GUIDES:
+        src = REPO / guide["source"]
+        if not src.exists():
+            continue
+        for svg in _svg_paths(src.read_text(encoding="utf-8"), src):
+            seen[svg.relative_to(REPO).as_posix()] = None
+    return list(seen)
+
 
 def render() -> str:
     """The bundle's exact on-disk text (a typed TS module, LF, unicode kept)."""
@@ -60,7 +105,10 @@ def render() -> str:
             "id": guide["id"],
             "title": guide["title"],
             "kind": guide.get("kind", "guide"),
-            "markdown": (REPO / guide["source"]).read_text(encoding="utf-8"),
+            "markdown": _inline_svgs(
+                (REPO / guide["source"]).read_text(encoding="utf-8"),
+                REPO / guide["source"],
+            ),
         }
         for guide in GUIDES
     ]
@@ -104,12 +152,21 @@ def coverage_errors() -> list[str]:
         matches = re.compile(pattern)
     except re.error as exc:
         return [f"guides-bundle `files:` is not valid regex: {exc}"]
-    return [
+    errors = [
         f"guides-bundle `files:` filter misses bundled source {guide['source']} — "
         f"add it to the filter in {PRECOMMIT.name}"
         for guide in GUIDES
         if not matches.search(guide["source"])
     ]
+    # SVGs are inputs too: editing one must retrigger the hook, or the regen only
+    # trips CI (#1537). An inlined SVG missing from the filter fails here.
+    errors += [
+        f"guides-bundle `files:` filter misses inlined SVG {svg} — "
+        f"add it to the filter in {PRECOMMIT.name}"
+        for svg in _referenced_svgs()
+        if not matches.search(svg)
+    ]
+    return errors
 
 
 def main(argv: list[str] | None = None) -> int:

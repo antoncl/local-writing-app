@@ -35,30 +35,7 @@ never arrive. On a measured run, one Llama model at `num_ctx 131072` claimed abo
 **18 GB** and ran **76% on the CPU** — where a model runs slowly. Sized to the turn
 (`num_ctx 8192`), the same model took **3.1 GB** and stayed entirely on the GPU.
 
-<div>
-<svg viewBox="0 0 860 300" role="img" aria-label="Default: 131072 tokens, about 18 GB, 76 percent on the CPU. Fitted: sized to the turn, about 4 GB, fully on the GPU."><style>.l{font-family:var(--sans)}.m{font-family:var(--mono)}.n{font-family:var(--mono);font-variant-numeric:tabular-nums}</style>
-<text x="0" y="14" class="l" font-size="15" fill="var(--text)" font-weight="600">Default — load at the trained max</text>
-<text x="0" y="34" class="m" font-size="12" fill="var(--text-3)">num_ctx 131072</text>
-<rect x="0" y="50" width="812" height="30" rx="6" fill="var(--inset)" stroke="var(--border)"/>
-<rect x="0" y="50" width="18" height="30" rx="6" fill="var(--accent)"/>
-<rect x="22" y="56" width="786" height="18" rx="4" fill="none" stroke="var(--border-strong)" stroke-dasharray="4 4"/>
-<text x="36" y="69" class="m" font-size="11" fill="var(--text-3)">reserved, empty cache — the rest of 131072 tokens</text>
-<rect x="0" y="92" width="812" height="10" rx="5" fill="var(--inset)"/>
-<rect x="0" y="92" width="617" height="10" rx="5" fill="var(--danger)"/>
-<rect x="619" y="92" width="193" height="10" rx="5" fill="var(--warn)" opacity="0.5"/>
-<text x="0" y="126" class="n" font-size="13" fill="var(--danger)" font-weight="600">~18 GB</text>
-<text x="92" y="126" class="l" font-size="12.5" fill="var(--text-2)">76% spills to the CPU → the model crawls</text>
-<line x1="0" y1="156" x2="812" y2="156" stroke="var(--border)"/>
-<text x="0" y="186" class="l" font-size="15" fill="var(--text)" font-weight="600">Fitted — size to the turn</text>
-<text x="0" y="206" class="m" font-size="12" fill="var(--text-3)">num_ctx 16384</text>
-<rect x="0" y="222" width="812" height="30" rx="6" fill="var(--inset)" stroke="var(--border)"/>
-<rect x="0" y="222" width="101" height="30" rx="6" fill="var(--accent)"/>
-<text x="113" y="241" class="m" font-size="11" fill="var(--text-3)">prompt + reply, rounded to a stable step</text>
-<rect x="0" y="264" width="812" height="8" rx="4" fill="var(--inset)"/>
-<rect x="0" y="264" width="176" height="8" rx="4" fill="var(--accent)"/>
-<text x="188" y="272" class="n" font-size="12" fill="var(--accent-strong)" font-weight="600">~4 GB · 100% GPU</text>
-</svg>
-</div>
+![Default versus fitted memory use. The default loads at the trained max (num_ctx 131072), reserving about 18 GB — 76% of it empty cache that spills to the CPU. Fitted to the turn (num_ctx 16384), the same model takes about 4 GB and stays fully on the GPU.](ollama-context/default-vs-fitted.svg)
 
 It's worth being clear: this isn't the model getting *cut off*. Nothing is lost.
 It's an empty reservation the size of the whole trained window, sitting in memory
@@ -96,36 +73,7 @@ loses the instructions and world you gave it, with no warning.
 The history window flips which end gives. It drops the **oldest whole exchanges**
 instead, keeping the system prompt, the lore, and your current message intact.
 
-<div>
-<svg viewBox="0 0 860 330" role="img" aria-label="Without a window, an overflowing history makes Ollama drop the system prompt and lore from the front. With the history window, the oldest exchanges are dropped instead and the system prompt and lore survive."><style>.l{font-family:var(--sans)}.m{font-family:var(--mono)}</style>
-<text x="0" y="14" class="l" font-size="13.5" fill="var(--danger)" font-weight="600">Without a window</text>
-<text x="0" y="32" class="m" font-size="10.5" fill="var(--text-3)">Ollama truncates from the front</text>
-<rect x="0" y="44" width="380" height="250" rx="8" fill="var(--inset)" stroke="var(--border)"/>
-<rect x="16" y="54" width="348" height="30" rx="5" fill="var(--surface)" stroke="var(--danger)" stroke-dasharray="4 3"/>
-<text x="28" y="73" class="l" font-size="11.5" fill="var(--danger)">System prompt — lost</text>
-<rect x="16" y="90" width="348" height="28" rx="5" fill="var(--surface)" stroke="var(--border-strong)"/>
-<text x="28" y="108" class="l" font-size="11.5" fill="var(--text-2)">Lore — partly lost</text>
-<rect x="16" y="126" width="348" height="94" rx="5" fill="var(--accent-soft)" stroke="var(--border-strong)"/>
-<text x="28" y="150" class="l" font-size="11.5" fill="var(--text)">Conversation history</text>
-<text x="28" y="170" class="m" font-size="10.5" fill="var(--text-3)">grown past the window</text>
-<rect x="16" y="228" width="348" height="30" rx="5" fill="var(--surface)" stroke="var(--border-strong)"/>
-<text x="28" y="247" class="l" font-size="11.5" fill="var(--text-2)">Reply headroom</text>
-<text x="460" y="14" class="l" font-size="13.5" fill="var(--accent-strong)" font-weight="600">With the history window</text>
-<text x="460" y="32" class="m" font-size="10.5" fill="var(--text-3)">the app drops the oldest exchanges</text>
-<rect x="460" y="44" width="380" height="250" rx="8" fill="var(--inset)" stroke="var(--border)"/>
-<rect x="476" y="54" width="348" height="30" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
-<text x="488" y="73" class="l" font-size="11.5" fill="var(--accent-strong)" font-weight="600">System prompt — kept</text>
-<rect x="476" y="90" width="348" height="28" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
-<text x="488" y="108" class="l" font-size="11.5" fill="var(--accent-strong)">Lore — kept</text>
-<rect x="476" y="126" width="348" height="26" rx="5" fill="var(--surface)" stroke="var(--danger)" stroke-dasharray="4 3"/>
-<text x="488" y="143" class="l" font-size="10.5" fill="var(--danger)">✂ oldest exchanges dropped</text>
-<rect x="476" y="158" width="348" height="60" rx="5" fill="var(--accent-soft)" stroke="var(--border-strong)"/>
-<text x="488" y="182" class="l" font-size="11.5" fill="var(--text)">Recent turns — kept whole</text>
-<text x="488" y="202" class="m" font-size="10.5" fill="var(--text-3)">+ your current message</text>
-<rect x="476" y="228" width="348" height="30" rx="5" fill="var(--surface)" stroke="var(--border-strong)"/>
-<text x="488" y="247" class="l" font-size="11.5" fill="var(--text-2)">Reply headroom</text>
-</svg>
-</div>
+![Two stacks compared. Without a window, an overflowing history makes Ollama truncate from the front, so the system prompt is lost and lore is partly lost. With the history window, the app drops the oldest exchanges instead, and the system prompt, lore, recent turns, and your current message are all kept.](ollama-context/history-window.svg)
 
 You turn it on per assistant, with the **History budget (tokens)** field. Leave it
 **blank** and nothing changes — the whole conversation is sent, exactly as before.
@@ -164,42 +112,7 @@ Sizing is the big lever; precision is the fine one. Moving a chat from 128K down
 Quantizing the cache then roughly halves what's left, and it matters most at large
 contexts, where the cache is actually full.
 
-<div>
-<svg viewBox="0 0 860 320" role="img" aria-label="VRAM used versus context size. At 8K and 32K the model stays around 3 to 5 GB, on the GPU. At 128K the 16-bit cache reaches about 18 GB and spills to the CPU, while the 8-bit cache stays near 10 GB, under a 12 GB example ceiling."><style>.l{font-family:var(--sans)}.n{font-family:var(--mono);font-variant-numeric:tabular-nums}</style>
-<line x1="70" y1="20" x2="70" y2="250" stroke="var(--border-strong)"/>
-<line x1="70" y1="250" x2="820" y2="250" stroke="var(--border-strong)"/>
-<text x="60" y="254" class="n" font-size="11" fill="var(--text-3)" text-anchor="end">0</text>
-<text x="60" y="200" class="n" font-size="11" fill="var(--text-3)" text-anchor="end">5</text>
-<text x="60" y="145" class="n" font-size="11" fill="var(--text-3)" text-anchor="end">10</text>
-<text x="60" y="90" class="n" font-size="11" fill="var(--text-3)" text-anchor="end">15</text>
-<text x="60" y="45" class="n" font-size="11" fill="var(--text-3)" text-anchor="end">18</text>
-<line x1="70" y1="113" x2="820" y2="113" stroke="var(--warn)" stroke-dasharray="2 5"/>
-<text x="78" y="108" class="l" font-size="10.5" fill="var(--warn)">GPU memory (12 GB example)</text>
-<text x="24" y="140" class="l" font-size="11" fill="var(--text-2)" transform="rotate(-90 24 140)" text-anchor="middle">VRAM used (GB)</text>
-<rect x="150" y="215.6" width="34" height="34.4" rx="3" fill="var(--accent)"/>
-<rect x="188" y="219" width="34" height="31" rx="3" fill="var(--accent)" opacity="0.5"/>
-<text x="186" y="268" class="n" font-size="12" fill="var(--text)" text-anchor="middle" font-weight="600">8K</text>
-<text x="167" y="208" class="n" font-size="10" fill="var(--text-2)" text-anchor="middle">3.1</text>
-<text x="205" y="211" class="n" font-size="10" fill="var(--text-3)" text-anchor="middle">2.7</text>
-<rect x="360" y="188" width="34" height="62" rx="3" fill="var(--accent)"/>
-<rect x="398" y="203.3" width="34" height="46.7" rx="3" fill="var(--accent)" opacity="0.5"/>
-<text x="396" y="268" class="n" font-size="12" fill="var(--text)" text-anchor="middle" font-weight="600">32K</text>
-<text x="377" y="180" class="n" font-size="10" fill="var(--text-2)" text-anchor="middle">~5.5</text>
-<text x="415" y="195" class="n" font-size="10" fill="var(--text-3)" text-anchor="middle">4.1</text>
-<rect x="600" y="45" width="34" height="205" rx="3" fill="var(--danger)"/>
-<rect x="638" y="136.2" width="34" height="113.8" rx="3" fill="var(--accent)" opacity="0.5"/>
-<text x="636" y="268" class="n" font-size="12" fill="var(--text)" text-anchor="middle" font-weight="600">128K</text>
-<text x="617" y="38" class="n" font-size="10" fill="var(--danger)" text-anchor="middle" font-weight="600">~18</text>
-<text x="655" y="128" class="n" font-size="10" fill="var(--text-3)" text-anchor="middle">~10</text>
-<text x="617" y="235" class="l" font-size="9.5" fill="#fff" text-anchor="middle" transform="rotate(-90 617 235)">spills to CPU</text>
-<rect x="150" y="288" width="14" height="14" rx="3" fill="var(--accent)"/>
-<text x="172" y="299" class="l" font-size="11" fill="var(--text-2)">16-bit cache (default)</text>
-<rect x="360" y="288" width="14" height="14" rx="3" fill="var(--accent)" opacity="0.5"/>
-<text x="382" y="299" class="l" font-size="11" fill="var(--text-2)">8-bit cache (q8_0)</text>
-<rect x="600" y="288" width="14" height="14" rx="3" fill="var(--danger)"/>
-<text x="622" y="299" class="l" font-size="11" fill="var(--text-2)">over the ceiling → CPU</text>
-</svg>
-</div>
+![Bar chart of VRAM used versus context size. At 8K and 32K the model stays around 3 to 5 GB, on the GPU. At 128K the 16-bit cache reaches about 18 GB and spills over a 12 GB example ceiling to the CPU, while the 8-bit cache stays near 10 GB and fits.](ollama-context/vram-by-context.svg)
 
 The figures above are measured on a Llama-family model; your exact numbers vary by
 hardware and architecture. The shape is what holds: right-sizing keeps you on the

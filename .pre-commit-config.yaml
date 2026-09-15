@@ -80,11 +80,12 @@ repos:
         entry: python scripts/gen_guides.py --check
         language: system
         pass_filenames: false
-        # Must name EVERY doc gen_guides.py bundles — a bundled source missing
-        # here skips this local check and only trips CI's regen-clean (#1537).
-        # gen_guides.py --check asserts this filter covers all its sources, so
-        # the two lists can't drift silently: add a source, this must widen too.
-        files: ^(docs/(getting-started|lore|custom-fields|mutations|views|plotting|ai-setup|ollama-context|context-picker|roleplay)\.md|docs/prompts/(guide|reference)\.md|scripts/gen_guides\.py|frontend/src/lib/generated/guides\.ts)$
+        # Must name EVERY input gen_guides.py bundles — a bundled source (or an
+        # inlined diagram .svg) missing here skips this local check and only
+        # trips CI's regen-clean (#1537). gen_guides.py --check asserts this
+        # filter covers all its sources AND every SVG they inline, so the lists
+        # can't drift silently: add a source or a diagram, this must widen too.
+        files: ^(docs/(getting-started|lore|custom-fields|mutations|views|plotting|ai-setup|ollama-context|context-picker|roleplay)\.md|docs/ollama-context/[^/]+\.svg|docs/prompts/(guide|reference)\.md|scripts/gen_guides\.py|frontend/src/lib/generated/guides\.ts)$
 
       - id: version-sync
         name: version sync (backend pyproject == frontend package.json, #1299)

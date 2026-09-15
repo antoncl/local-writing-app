@@ -1,6 +1,6 @@
 [project]
 name = "local-writing-service"
-version = "0.9.5"
+version = "0.9.6"
 description = "Local application service for a private fiction writing app"
 requires-python = ">=3.11"
 # These ranges are declared INTENT; the versions every install actually gets

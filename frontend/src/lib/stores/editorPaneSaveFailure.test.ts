@@ -379,3 +379,73 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(true);
   });
 });
+
+// flushReviewCommit's changed-on-disk recovery (#1965 follow-up). Before this,
+// committing an AI-revision review against a stale base_revision — a sibling surface
+// (the plot board, a second window) moved the node on disk — failed quietly: the 409
+// returned false, the review stayed open, nothing landed ("Accept all did nothing").
+// Now the commit rides the SAME reconcile ladder autosave/close use. flushReviewCommit
+// is kind-agnostic, so this lore harness exercises the identical path #1965 hit on a
+// plotline.
+describe("flushReviewCommit — changed-on-disk recovery (#1965)", () => {
+  beforeEach(() => {
+    editorPanes.reset();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    editorPanes.dispose();
+    editorPanes.reset();
+    editorPanes.editorPaneComponents = {};
+  });
+
+  function injectMerge(result: string | null): void {
+    editorPanes.editorPaneComponents = {
+      pane_1: { tryMergeProse: vi.fn(async () => result), reloadScene: vi.fn(), highlightEmbeddedTodo: vi.fn(), revealSearchMatch: vi.fn() },
+    };
+  }
+
+  it("lands the commit on a clean write — returns true, one save", async () => {
+    seedDirtyLorePane();
+    stubSuccessRefreshes();
+    const save = vi
+      .spyOn(api, "saveLoreEntry")
+      .mockResolvedValue({ ...LORE, title: "Edited Name", body: "edited body", revision: "r2" });
+
+    expect(await editorPanes.flushReviewCommit("lore_1")).toBe(true);
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges a disjoint sibling edit and lands — returns true, no dialog (the Accept-all fix)", async () => {
+    seedDirtyLorePane();
+    stubSuccessRefreshes();
+    // On disk only the BODY changed — disjoint from the review's local edits.
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue({ ...LORE, body: "server body", revision: "r2" });
+    injectMerge("merged body");
+    const save = vi
+      .spyOn(api, "saveLoreEntry")
+      .mockRejectedValueOnce(new HttpError("conflict", 409, null)) // the commit's write
+      .mockResolvedValueOnce({ ...LORE, title: "Edited Name", body: "merged body", revision: "r3" }); // rung-2 re-save
+    const request = vi.spyOn(conflictDiffService, "request").mockImplementation(() => {});
+
+    expect(await editorPanes.flushReviewCommit("lore_1")).toBe(true); // commit lands → the review closes
+    expect(save).toHaveBeenCalledTimes(2); // the 409 + the reconciled re-save
+    expect(request).not.toHaveBeenCalled(); // silent, no dialog
+    expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(false);
+  });
+
+  it("raises the diff dialog and keeps the review open on a genuine overlap — returns false", async () => {
+    seedDirtyLorePane();
+    vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue({ ...LORE, body: "their body", revision: "r2" });
+    injectMerge(null); // overlapping prose → no silent merge
+    let request!: Parameters<typeof conflictDiffService.request>[0];
+    vi.spyOn(conflictDiffService, "request").mockImplementation((r) => {
+      request = r;
+    });
+
+    expect(await editorPanes.flushReviewCommit("lore_1")).toBe(false); // review stays open
+    expect(request).toBeDefined(); // the diff-preview dialog was offered
+    expect(request.onDiskBody).toBe("their body");
+    expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(true);
+  });
+});

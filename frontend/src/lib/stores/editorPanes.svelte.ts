@@ -81,7 +81,7 @@ import {
   offerCloseConflictRecovery,
   offerAutosaveConflictRecovery,
   reconcileOn409,
-  RELOAD_GETTERS,
+  reloadGetterFor,
 } from "@/lib/stores/editorPaneSave";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
 import { forwardRefsOf, sameRefSet } from "@/lib/views/referenceIndex";
@@ -316,10 +316,19 @@ class EditorPanesController {
       ).values(),
     );
     if (documentRefs.length === 0) return;
-    const refreshedDocuments = await Promise.all(
-      documentRefs.map((document) => (RELOAD_GETTERS[document.type] ?? api.getScene)(document.id)),
+    // Re-baseline only panes whose kind has a reloadable server document. A
+    // synthetic pane (chat, and latently assistant/project/view) has no getter, so
+    // it is skipped rather than mis-fetched as a scene — otherwise its 404 would
+    // reject this whole Promise.all and starve the panes that CAN refresh (#1977).
+    const reloadable = documentRefs.flatMap((document) => {
+      const getter = reloadGetterFor(document.type);
+      return getter ? [{ document, getter }] : [];
+    });
+    if (reloadable.length === 0) return;
+    const refreshedDocuments = await Promise.all(reloadable.map(({ document, getter }) => getter(document.id)));
+    const refreshedByKey = new Map(
+      refreshedDocuments.map((document, index) => [`${reloadable[index].document.type}:${document.id}`, document]),
     );
-    const refreshedByKey = new Map(refreshedDocuments.map((document, index) => [`${documentRefs[index].type}:${document.id}`, document]));
     const nextReloads: Record<string, MetadataReloadSignal> = {};
     this.panes = this.panes.map((pane) => {
       if (!pane.scene || !pane.document) return pane;

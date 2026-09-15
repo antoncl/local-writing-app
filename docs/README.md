@@ -37,6 +37,12 @@ Listed in the viewer's display order (Getting started is the default landing gui
 The mapping above is owned by `GUIDES` in `scripts/gen_guides.py`. If you add,
 remove, or reorder a guide there, update this table to match.
 
+A guide's inline diagrams are committed as `.svg` files beside it (e.g.
+[`ollama-context/`](ollama-context/)) and referenced with `![](…)` so **GitHub**
+renders them as images. The in-app viewer can't load images, so `gen_guides.py`
+splices each SVG's source inline into the bundle — one source of truth per
+diagram, rendering on both surfaces. Edit the `.svg`, then re-run the generator.
+
 ## Dev / design docs — for contributors, not shipped
 
 ### Top-level design notes & how-tos

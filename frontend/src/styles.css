@@ -86,6 +86,13 @@
      spin buttons render on a bright default background in dark mode. */
   color-scheme: light;
   --surface: #ffffff;
+  /* Backing for the inline diagram SVGs in the user guides (docs/*.svg).
+     Transparent in-app so a diagram sits flush on its pane exactly as designed;
+     the SVGs carry a #ffffff fallback, so the same file rendered as a standalone
+     image on GitHub — where this token doesn't exist — gets a self-contained
+     white card instead of dark text lost on GitHub's dark theme. One diagram
+     source, both surfaces (#1967). Theme-agnostic, so it is not redefined below. */
+  --diagram-bg: transparent;
   --board: #f4f6f5;
   --panel: #edf3f1;
   --inset: #f1f5f3;

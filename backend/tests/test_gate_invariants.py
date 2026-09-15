@@ -646,6 +646,50 @@ def test_coverage_guard_catches_a_source_missing_from_the_filter(monkeypatch):
     assert any("docs/not-bundled.md" in e for e in errors)
 
 
+# --- diagram .svg files are GitHub-rendered and in-app inlined (#1967) ---------
+#
+# Guide diagrams live as committed `.svg` files so GitHub renders them as images;
+# the in-app viewer can't load images, so gen_guides.py splices each `![](*.svg)`
+# ref inline as raw <svg>. Two things must hold: the splice keeps the Marked-safe
+# shape GuideView.svg.test.ts depends on, and the coverage guard extends to the
+# SVGs so editing one still retriggers the bundle hook (the #1537 asymmetry).
+
+
+def test_inline_svgs_splices_a_ref_into_a_marked_safe_block(tmp_path):
+    """`![](x.svg)` becomes a <div>-wrapped raw <svg> with no blank line inside."""
+    (tmp_path / "d.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect/>\n<text>hi</text>\n</svg>',
+        encoding="utf-8",
+    )
+    out = gen_guides._inline_svgs("before\n\n![alt](d.svg)\n\nafter\n", tmp_path / "guide.md")
+    assert "![alt](d.svg)" not in out
+    assert "<div>\n<svg " in out
+    body = out.split("<div>\n", 1)[1].split("\n</div>", 1)[0]
+    assert "\n\n" not in body, "a blank line inside the SVG would make Marked escape it"
+    assert body.startswith("<svg ") and body.rstrip().endswith("</svg>")
+
+
+def test_the_ollama_guide_bundles_its_diagrams_inline():
+    """The shipped bundle carries raw <svg>, not image refs the viewer can't load."""
+    bundle = gen_guides.render()
+    assert bundle.count("<svg ") == 3
+    assert ".svg)" not in bundle, "an `![](*.svg)` ref survived inlining"
+
+
+def test_referenced_svgs_actually_finds_the_diagrams():
+    """Guards against a vacuous coverage pass: the discovery must not be empty."""
+    svgs = gen_guides._referenced_svgs()
+    assert "docs/ollama-context/default-vs-fitted.svg" in svgs
+    assert len(svgs) == 3
+
+
+def test_coverage_guard_catches_a_diagram_missing_from_the_filter(monkeypatch):
+    """An inlined SVG the real filter can't match is reported (mutation guard)."""
+    monkeypatch.setattr(gen_guides, "_referenced_svgs", lambda: ["docs/unfiltered/x.svg"])
+    errors = gen_guides.coverage_errors()
+    assert any("docs/unfiltered/x.svg" in e for e in errors)
+
+
 def test_the_hook_feeds_every_style_checked_file_to_the_style_guard():
     hook = _load_hook("check_edited_file")
     for f in _tracked_files():

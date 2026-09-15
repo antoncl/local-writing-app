@@ -11,8 +11,8 @@ nothing used to mark which was which. This index is the map: for everything unde
 
 ## User guides — bundled into the in-app guide viewer
 
-These eleven files are the **sources** for the in-app Guides pane. The bundle
-`frontend/src/lib/guides.ts` is **generated** from them by `scripts/gen_guides.py`
+These twelve files are the **sources** for the in-app Guides pane. The bundle
+`frontend/src/lib/generated/guides.ts` is **generated** from them by `scripts/gen_guides.py`
 and held regen-clean by `--check` in pre-commit and CI (the same drift-safe pattern
 as the prompt-vocab manifest). **Edit the source `.md` here; never hand-edit the
 generated `guides.ts`** — run `python scripts/gen_guides.py` after a change.
@@ -28,6 +28,7 @@ Listed in the viewer's display order (Getting started is the default landing gui
 | Views | `views` | [views.md](views.md) |
 | Plotting | `plotting` | [plotting.md](plotting.md) |
 | Turning on AI | `ai-setup` | [ai-setup.md](ai-setup.md) |
+| Ollama context | `ollama-context` | [ollama-context.md](ollama-context.md) |
 | Writing prompts | `writing-prompts` | [prompts/guide.md](prompts/guide.md) |
 | Context picker | `context-picker` | [context-picker.md](context-picker.md) |
 | Roleplay | `roleplay` | [roleplay.md](roleplay.md) |

@@ -61,10 +61,12 @@ class _Router:
         show: dict | None,
         chat_json: dict | None = None,
         chat_frames: list[dict] | None = None,
+        chat_status: int = 200,
     ) -> None:
         self.show = show
         self.chat_json = chat_json
         self.chat_frames = chat_frames
+        self.chat_status = chat_status
         self.requests: list[httpx.Request] = []
         self.bodies: list[dict] = []
 
@@ -76,9 +78,12 @@ class _Router:
                 return httpx.Response(500)
             return httpx.Response(200, json=self.show)
         if path == "/api/chat":
-            body = json.loads(request.content)
-            self.bodies.append(body)
-            if body.get("stream"):
+            self.bodies.append(json.loads(request.content))
+            if self.chat_status != 200:
+                # Ollama reports a bad model / request as an HTTP error whose
+                # body carries the reason (applies to both stream and non-stream).
+                return httpx.Response(self.chat_status, json=self.chat_json or {})
+            if self.bodies[-1].get("stream"):
                 return httpx.Response(200, content=_ndjson(self.chat_frames or []))
             return httpx.Response(200, json=self.chat_json or {})
         return httpx.Response(404)
@@ -211,6 +216,20 @@ def test_chat_raises_on_error_object(route) -> None:
         OllamaProfile("http://box:11434").chat(_call())
 
 
+def test_chat_surfaces_ollama_message_on_http_error(route) -> None:
+    # A 404 carrying Ollama's own reason must surface that reason, not a bare
+    # "Client error 404".
+    route(
+        _Router(
+            show=_SHOW_128K,
+            chat_status=404,
+            chat_json={"error": "model 'llama3.2' not found"},
+        )
+    )
+    with pytest.raises(ProviderError, match="model 'llama3.2' not found"):
+        OllamaProfile("http://box:11434").chat(_call())
+
+
 # -- streaming -----------------------------------------------------------------
 
 
@@ -258,17 +277,35 @@ def test_stream_surfaces_thinking_field(route) -> None:
     assert text == "answer"
 
 
-def test_stream_empty_output_raises(route) -> None:
+def test_stream_empty_output_raises_with_diagnostic_detail(route) -> None:
     frames = [{"message": {"content": ""}, "done": True, "done_reason": "stop"}]
     route(_Router(show=_SHOW_128K, chat_frames=frames))
-    with pytest.raises(ProviderError, match="no output"):
+    with pytest.raises(ProviderError, match="no output") as exc:
         list(OllamaProfile("http://box:11434").chat_stream(_call()))
+    # The user-facing message stays plain; the diagnostic rides as `detail`
+    # (errors.log, never the UI), restoring the /v1 path's #1601 behavior.
+    assert exc.value.detail is not None
+    assert "done_reason='stop'" in exc.value.detail
 
 
 def test_stream_error_frame_raises(route) -> None:
     frames = [{"error": "context canceled"}]
     route(_Router(show=_SHOW_128K, chat_frames=frames))
     with pytest.raises(ProviderError, match="context canceled"):
+        list(OllamaProfile("http://box:11434").chat_stream(_call()))
+
+
+def test_stream_surfaces_ollama_message_on_http_error(route) -> None:
+    # A non-200 opening the stream must surface Ollama's reason from the body,
+    # read even though the response was opened for streaming.
+    route(
+        _Router(
+            show=_SHOW_128K,
+            chat_status=400,
+            chat_json={"error": "invalid options.num_ctx"},
+        )
+    )
+    with pytest.raises(ProviderError, match="invalid options.num_ctx"):
         list(OllamaProfile("http://box:11434").chat_stream(_call()))
 
 

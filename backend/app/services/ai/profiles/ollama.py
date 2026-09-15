@@ -71,6 +71,7 @@ class _NativeStreamState:
         self.emitted = False
         self.stop_reason: str | None = None
         self.final: dict | None = None
+        self.frames = 0
 
 
 class OllamaProfile(OpenAICompatibleProfile):
@@ -117,7 +118,7 @@ class OllamaProfile(OpenAICompatibleProfile):
         try:
             with httpx.Client(timeout=_CHAT_TIMEOUT) as client:
                 response = client.post(f"{self._base}/api/chat", json=body)
-                response.raise_for_status()
+                _raise_for_ollama_status(response)
                 data = response.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise ProviderError(f"Ollama chat request failed: {exc}") from exc
@@ -142,7 +143,7 @@ class OllamaProfile(OpenAICompatibleProfile):
             with httpx.Client(timeout=_STREAM_TIMEOUT) as client, client.stream(
                 "POST", f"{self._base}/api/chat", json=body
             ) as response:
-                response.raise_for_status()
+                _raise_for_ollama_status(response)
                 for line in response.iter_lines():
                     yield from self._consume_stream_line(line, splitter, state)
         except (httpx.HTTPError, ValueError) as exc:
@@ -153,8 +154,15 @@ class OllamaProfile(OpenAICompatibleProfile):
             yield event
         if not state.emitted:
             # No visible content is a failure from the user's side, not a silent
-            # empty success (#1601).
-            raise ProviderError(_EMPTY_STREAM_MESSAGE)
+            # empty success. Carry a diagnostic to errors.log (never the UI), as
+            # the /v1 path did (#1601).
+            raise ProviderError(
+                _EMPTY_STREAM_MESSAGE,
+                detail=(
+                    f"empty native ollama stream: model={call.model} "
+                    f"frames={state.frames} done_reason={state.stop_reason!r}"
+                ),
+            )
         usage = (
             self.extract_usage(state.final, call.model)
             if state.final is not None
@@ -178,6 +186,7 @@ class OllamaProfile(OpenAICompatibleProfile):
             return
         if data.get("error"):
             raise ProviderError(str(data["error"]))
+        state.frames += 1
         message = data.get("message") or {}
         # A thinking-capable model may split reasoning onto a `thinking` field;
         # inline `<think>` tags in `content` are handled by the splitter (same
@@ -372,6 +381,28 @@ class OllamaProfile(OpenAICompatibleProfile):
         # no objective "fast vs premium" within a single user's install.
         # The picker shows the explicit list under tier=LOCAL.
         return None
+
+
+def _raise_for_ollama_status(response: httpx.Response) -> None:
+    """Raise `ProviderError` for a non-2xx `/api/chat` response, preferring
+    Ollama's own `{"error": ...}` message over the bare HTTP status.
+
+    Ollama reports a bad model, a malformed request, etc. as an HTTP error with
+    the reason in the body; surfacing that beats "Client error 404". `read()`
+    makes the body available on a streaming response (unread at this point) and
+    is a no-op on one already read.
+    """
+    if response.is_success:
+        return
+    response.read()
+    message = f"Ollama returned HTTP {response.status_code}."
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and payload.get("error"):
+        message = str(payload["error"])
+    raise ProviderError(message)
 
 
 def _ceil_bucket(n: int) -> int:

@@ -17,6 +17,7 @@ import json
 import httpx
 import pytest
 
+from app.services.ai.call_resolver import OLLAMA_DEFAULT_MAX_TOKENS
 from app.services.ai.profiles import ollama as ollama_mod
 from app.services.ai.profiles.base import (
     ChatCall,
@@ -143,14 +144,26 @@ def test_chat_sizes_num_ctx_to_the_turn_not_the_model_max(route) -> None:
 
 def test_chat_reserves_reply_headroom_in_num_ctx(route) -> None:
     # num_ctx is the WHOLE window (prompt + generated), so the reply length
-    # (num_predict) must fit inside it or the model truncates. At the default
-    # 32k max_tokens a tiny prompt still buckets to 64k — a real but partial cut
-    # on a 128k model; #1959's reply clamp is what unlocks the rest. Pin this so
-    # the headroom can't be "optimized" below num_predict (which would truncate).
+    # (num_predict) must fit inside it or the model truncates. An EXPLICIT
+    # max_tokens=32768 still buckets to 64k — the profile honors what it's given.
+    # (#1959 stops the *default* from being 32768 for Ollama at the resolver, so a
+    # default chat never reaches this; see test_chat_default_reply_budget_*.) Pin
+    # this so the headroom can't be "optimized" below num_predict (→ truncation).
     router = route(_Router(show=_SHOW_128K, chat_json={"message": {"content": "ok"}}))
     OllamaProfile("http://box:11434").chat(_call(max_tokens=32768))
 
     assert router.bodies[0]["options"]["num_ctx"] == 65536
+
+
+def test_chat_default_reply_budget_yields_a_small_num_ctx(route) -> None:
+    # The #1959 payoff: with Ollama's resolver default (8192) rather than 32768,
+    # a plain chat lands num_ctx at 16k — on the GPU — instead of 64k. This pins
+    # the downstream half; the resolver half is in test_ai_call_resolver.py.
+    router = route(_Router(show=_SHOW_128K, chat_json={"message": {"content": "ok"}}))
+    OllamaProfile("http://box:11434").chat(_call(max_tokens=OLLAMA_DEFAULT_MAX_TOKENS))
+
+    assert router.bodies[0]["options"]["num_predict"] == 8192
+    assert router.bodies[0]["options"]["num_ctx"] == 16384
 
 
 def test_chat_clamps_num_ctx_to_model_trained_max(route) -> None:

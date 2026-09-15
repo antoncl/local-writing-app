@@ -33,6 +33,23 @@ if TYPE_CHECKING:
 # so raising the floor can't 400 a model with a smaller ceiling.
 DEFAULT_MAX_TOKENS = 32768
 
+# Ollama is the exception to that generous default. A local model must allocate a
+# KV cache big enough for the whole context window (prompt + reply), and #1957
+# sizes that window (`num_ctx`) from `max_tokens` — so a 32768 reply reservation
+# forces a huge cache (a tiny chat still lands at a 64k window) even though a
+# local reply is never that long. 8192 tokens (~6000 words) is a generous single
+# fiction reply that keeps `num_ctx` small (~16k, which stays on the GPU) and
+# leaves a reasoning model room to think before it answers (#1591); an author who
+# wants more sets `ai_max_tokens` explicitly and it is honored verbatim (#1959).
+# Cloud providers don't allocate a per-call window, so they keep 32768.
+OLLAMA_DEFAULT_MAX_TOKENS = 8192
+
+
+def _default_max_tokens(provider: str) -> int:
+    """The unset-`ai_max_tokens` default, per provider: smaller for Ollama, where
+    the same value also sizes the allocated context window (#1959)."""
+    return OLLAMA_DEFAULT_MAX_TOKENS if provider == "ollama" else DEFAULT_MAX_TOKENS
+
 
 # A trailing dated-snapshot suffix — OpenAI's `-YYYY-MM-DD`
 # (`gpt-4o-2024-08-06`) or Anthropic's `-YYYYMMDD` (`claude-haiku-4-5-20251001`).
@@ -199,10 +216,13 @@ def resolve_call_params(
         if max_tokens_override is not None:
             max_tokens = max_tokens_override
         else:
+            provider_default = _default_max_tokens(provider)
             try:
-                max_tokens = int(meta.get("ai_max_tokens", DEFAULT_MAX_TOKENS))
+                max_tokens = int(meta.get("ai_max_tokens", provider_default))
             except (TypeError, ValueError):
-                max_tokens = DEFAULT_MAX_TOKENS
+                # Blank / non-numeric ai_max_tokens → the provider default (a
+                # present-but-empty field reaches here, not the .get default).
+                max_tokens = provider_default
         return ResolvedCall(
             provider=provider,
             model=model,
@@ -215,7 +235,11 @@ def resolve_call_params(
         )
     provider = provider_override or settings.default_provider
     model = model_override or settings.default_models.get(provider or "", "")
-    desired = max_tokens_override if max_tokens_override is not None else DEFAULT_MAX_TOKENS
+    desired = (
+        max_tokens_override
+        if max_tokens_override is not None
+        else _default_max_tokens(provider)
+    )
     return ResolvedCall(
         provider=provider,
         model=model,

@@ -13,6 +13,7 @@ from unittest import mock
 
 from app.services.ai.call_resolver import (
     DEFAULT_MAX_TOKENS,
+    OLLAMA_DEFAULT_MAX_TOKENS,
     ResolvedCall,
     resolve_call_params,
 )
@@ -180,8 +181,9 @@ class ResolveCallParamsTests(unittest.TestCase):
         self.assertEqual(resolved.provider, "ollama")
         self.assertEqual(resolved.model, "llama3")
         self.assertIsNone(resolved.temperature)
-        # Ollama isn't in the baked catalogue → no clamp → the floor.
-        self.assertEqual(resolved.max_tokens, DEFAULT_MAX_TOKENS)
+        # Ollama's unset-max_tokens default is the smaller local reply budget
+        # (#1959), not the 32768 cloud floor — it sizes num_ctx downstream.
+        self.assertEqual(resolved.max_tokens, OLLAMA_DEFAULT_MAX_TOKENS)
 
     def test_override_without_an_assistant_still_wins(self) -> None:
         resolved = resolve_call_params(
@@ -195,6 +197,53 @@ class ResolveCallParamsTests(unittest.TestCase):
         self.assertEqual(resolved.provider, "openai")
         self.assertEqual(resolved.model, "gpt-5")
         self.assertEqual(resolved.max_tokens, 1024)
+
+    # ---- Ollama's smaller unset-max_tokens default (#1959) ----
+
+    def _resolve_ollama(self, meta_extra: dict) -> ResolvedCall:
+        assistant = SimpleNamespace(
+            metadata={"ai_provider": "ollama", "ai_model": "llama3.2", **meta_extra}
+        )
+        return resolve_call_params(
+            _project(assistant),
+            _settings(),
+            assistant_id="a1",
+            provider_override=None,
+            model_override=None,
+            max_tokens_override=None,
+        )
+
+    def test_ollama_unset_max_tokens_uses_the_local_default(self) -> None:
+        # No ai_max_tokens key → the smaller Ollama default, so #1957's num_ctx
+        # sizing doesn't reserve a 32k reply.
+        self.assertEqual(self._resolve_ollama({}).max_tokens, OLLAMA_DEFAULT_MAX_TOKENS)
+
+    def test_ollama_blank_max_tokens_uses_the_local_default(self) -> None:
+        # A present-but-empty field reaches the except branch, not the .get default.
+        self.assertEqual(
+            self._resolve_ollama({"ai_max_tokens": ""}).max_tokens,
+            OLLAMA_DEFAULT_MAX_TOKENS,
+        )
+
+    def test_ollama_explicit_max_tokens_is_honored_below_and_above_the_default(self) -> None:
+        # An author-set value always wins — the default only fills a blank.
+        self.assertEqual(self._resolve_ollama({"ai_max_tokens": 2000}).max_tokens, 2000)
+        self.assertEqual(self._resolve_ollama({"ai_max_tokens": 16000}).max_tokens, 16000)
+
+    def test_cloud_unset_max_tokens_keeps_the_cloud_default(self) -> None:
+        # The smaller default is Ollama-only; cloud providers keep 32768.
+        assistant = SimpleNamespace(
+            metadata={"ai_provider": "anthropic", "ai_model": "claude-sonnet-5"}
+        )
+        resolved = resolve_call_params(
+            _project(assistant),
+            _settings(),
+            assistant_id="a1",
+            provider_override=None,
+            model_override=None,
+            max_tokens_override=None,
+        )
+        self.assertEqual(resolved.max_tokens, DEFAULT_MAX_TOKENS)
 
 
 class MaxTokensClampTests(unittest.TestCase):

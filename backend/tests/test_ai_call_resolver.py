@@ -230,6 +230,37 @@ class ResolveCallParamsTests(unittest.TestCase):
         self.assertEqual(self._resolve_ollama({"ai_max_tokens": 2000}).max_tokens, 2000)
         self.assertEqual(self._resolve_ollama({"ai_max_tokens": 16000}).max_tokens, 16000)
 
+    # ---- history budget (#1958): blank means unlimited, not a default ----
+
+    def _resolve_history(self, value: object | None) -> ResolvedCall:
+        meta = {"ai_provider": "ollama", "ai_model": "llama3.2"}
+        if value is not None:
+            meta["ai_history_budget_tokens"] = value
+        return resolve_call_params(
+            _project(SimpleNamespace(metadata=meta)),
+            _settings(),
+            assistant_id="a1",
+            provider_override=None,
+            model_override=None,
+            max_tokens_override=None,
+        )
+
+    def test_history_budget_blank_or_missing_is_unlimited(self) -> None:
+        # Unlike ai_lore_budget_tokens (blank → a default constant), a blank
+        # history budget is None = unlimited, so nothing is trimmed by default.
+        assert self._resolve_history(None).history_budget_tokens is None
+        assert self._resolve_history("").history_budget_tokens is None
+        assert self._resolve_history("lots").history_budget_tokens is None
+        assert self._resolve_history(-5).history_budget_tokens is None
+
+    def test_history_budget_explicit_value_is_kept(self) -> None:
+        assert self._resolve_history(8000).history_budget_tokens == 8000
+        assert self._resolve_history("12000").history_budget_tokens == 12000
+
+    def test_history_budget_zero_is_legal_and_preserved(self) -> None:
+        # 0 is distinct from blank: "send only the current turn".
+        assert self._resolve_history(0).history_budget_tokens == 0
+
     def test_cloud_unset_max_tokens_keeps_the_cloud_default(self) -> None:
         # The smaller default is Ollama-only; cloud providers keep 32768.
         assistant = SimpleNamespace(

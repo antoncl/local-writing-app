@@ -55,6 +55,7 @@ from app.services.ai.chat import (
     system_prompt_cache_blocks,
 )
 from app.services.ai.extraction import run_entry_patch_extraction
+from app.services.ai.history_budget import apply_history_window
 from app.services.ai.preview import (
     PreviewError,
     PreviewRequest,
@@ -576,11 +577,17 @@ async def ai_chat_stream(
     # What rides the `done` line besides usage/cost: this turn's new journal
     # entries and, when an implicit selection ran, its lore-budget report
     # (ADR-0086 §5) — the send that left something out is the one that says so.
+    # #1958: window the history sent to the provider (streaming is always the
+    # ordinary implicit chat — extraction never streams — so no exemption here).
+    sent_messages, history_fit = apply_history_window(messages_list, resolved, settings)
+
     extra_done: dict[str, Any] = {}
     if prepared.journal_added:
         extra_done["journal_added"] = [e.model_dump() for e in prepared.journal_added]
     if prepared.lore_fit is not None:
         extra_done["lore_fit"] = prepared.lore_fit.model_dump()
+    if history_fit is not None:
+        extra_done["history_fit"] = history_fit.model_dump()
 
     # Pre-fetch the pricing descriptor so the sync stream generator can
     # compute cost when the terminal StreamDone arrives, without needing
@@ -596,7 +603,7 @@ async def ai_chat_stream(
     events = ai_providers.chat_stream(
         resolved.to_call(
             system_prompt=request.system_prompt,
-            messages=messages_list,
+            messages=sent_messages,
             system_blocks=prepared.system_blocks,
             session_id=prepared.session_id,
         ),

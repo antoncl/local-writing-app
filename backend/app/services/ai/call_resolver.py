@@ -124,6 +124,18 @@ def _lore_budget_tokens(value: object) -> int:
     return DEFAULT_LORE_BUDGET_TOKENS if budget is None else int(budget)
 
 
+def _history_budget_tokens(value: object) -> int | None:
+    """Parse the assistant's `ai_history_budget_tokens` (#1958): a non-negative
+    whole number of tokens, or None for blank/missing/non-numeric/negative.
+
+    Unlike `_lore_budget_tokens`, a blank resolves to None = UNLIMITED (send the
+    whole transcript = today's behavior), NOT to a default constant — so an
+    assistant that sets nothing changes nothing, and cloud prefix-caching stays
+    byte-identical. `0` is legal and means "the current turn only"."""
+    budget = _non_negative_number(value)
+    return int(budget) if budget is not None else None
+
+
 def _lore_limits(meta: dict) -> LoreLimits:
     """The assistant's two lore knobs (ADR-0086 §2/§2b), resolved the way
     `max_tokens` is: from its metadata, with the resolver's defaults for
@@ -156,6 +168,10 @@ class ResolvedCall:
     # which routes the app may reach it. Not part of the provider `ChatCall` —
     # the send path reads it when it assembles the lore blocks.
     lore_limits: LoreLimits = LoreLimits()
+    # #1958: cap on the conversation history sent each turn, in tokens. None =
+    # unlimited (today's behavior). Read by the send seam's history window, not
+    # part of the provider `ChatCall`.
+    history_budget_tokens: int | None = None
 
     def to_call(
         self,
@@ -232,6 +248,7 @@ def resolve_call_params(
             manual_price_in_usd_per_mtok=_optional_price(meta.get("ai_price_in_usd_per_mtok")),
             manual_price_out_usd_per_mtok=_optional_price(meta.get("ai_price_out_usd_per_mtok")),
             lore_limits=_lore_limits(meta),
+            history_budget_tokens=_history_budget_tokens(meta.get("ai_history_budget_tokens")),
         )
     provider = provider_override or settings.default_provider
     model = model_override or settings.default_models.get(provider or "", "")

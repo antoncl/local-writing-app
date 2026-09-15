@@ -419,6 +419,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "ai_thinking",
                 "ai_lore_budget_tokens",
                 "ai_lore_expansion",
+                "ai_history_budget_tokens",
                 "ai_price_in_usd_per_mtok",
                 "ai_price_out_usd_per_mtok",
                 "summary",
@@ -1329,6 +1330,23 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # A required select, like `context_policy` above (#1421): the default
             # is what the resolver applies to a blank, spelled once (#1900).
             "default": DEFAULT_LORE_LIMITS.expansion,
+        },
+        # #1958. No schema default on purpose (like ai_lore_budget_tokens): a
+        # number default is seeded into every new assistant's front matter, which
+        # would pin a cap into every file. Blank resolves at call time — but to
+        # UNLIMITED (the whole transcript), not a constant, so the description
+        # says "send the whole conversation" rather than naming a number.
+        "ai_history_budget_tokens": {
+            "name": "History budget (tokens)",
+            "description": (
+                "Upper bound on the conversation history sent each turn, in "
+                "tokens. Leave blank to send the whole conversation (the "
+                "default). Older complete exchanges are dropped first; the "
+                "current message is always sent. Mainly for local (Ollama) "
+                "models, so a long chat can't push the system prompt and lore "
+                "out of the context window. 0 sends only the current turn."
+            ),
+            "type": "number",
         },
         # Author-set prices for a model the price oracle can't reach — an unlisted
         # or local model (ADR-0083 Amendment 1). USD per 1M tokens, matching how

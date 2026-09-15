@@ -43,6 +43,7 @@
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
   import { deriveBodyShape, documentLabelFor } from "@/lib/editor-core/documentPresentation";
+  import { wireReviewFreeze } from "@/lib/editor-core/reviewFreeze.svelte";
 
   // Data sources for context_pick inputs in the prompt preview / inputs
   
@@ -542,12 +543,15 @@
     discard: () => entryReview.abandon(),
   };
   // Freeze while reviewing, thaw (null) the instant the review ends or the pane
-  // unmounts. Idempotent on the host side; the flush-on-enter runs once.
-  $effect(() => {
-    const entryId = scene?.id;
-    if (!entryId) return;
-    onReviewFreeze?.(entryId, reviewing ? reviewCommitter : null);
-    return () => onReviewFreeze?.(entryId, null);
+  // unmounts. Fires only on a genuine transition (entry id / `reviewing`) — never on
+  // App recreating the inline `onReviewFreeze` arrow each render, which used to
+  // thrash begin/endReviewLock into an unbounded flush loop (#1965). The wiring lives
+  // in editor-core so the reactivity contract is unit-testable off the mega-component.
+  wireReviewFreeze({
+    entryId: () => scene?.id ?? null,
+    reviewing: () => reviewing,
+    committer: () => reviewCommitter,
+    signal: () => onReviewFreeze,
   });
   // Reset accumulated review resolution whenever the proposal identity changes,
   // so a superseding commit starts clean instead of inheriting prior adoptions.

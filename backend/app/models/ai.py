@@ -496,6 +496,20 @@ class LoreFit(BaseModel):
     left_out: list[LoreFitEntry] = Field(default_factory=list)
 
 
+class HistoryFit(BaseModel):
+    """What the per-turn conversation-history window dropped on one send (#1958):
+    the budget applied, the tokens actually sent, and how many prior rounds were
+    kept vs dropped. Flatter than `LoreFit` — history turns aren't drilled like
+    lore entries. Reported only when a trim actually dropped a round; `None`
+    otherwise (unlimited/blank budget, nothing over budget, or the `used` commit
+    turn)."""
+
+    budget_tokens: int
+    used_tokens: int
+    kept_rounds: int
+    dropped_rounds: int
+
+
 class AIChatResponse(BaseModel):
     role: Literal["assistant"] = "assistant"
     content: str
@@ -526,6 +540,10 @@ class AIChatResponse(BaseModel):
     # by the send that did the leaving out, the one caller that knows. None on
     # a chat-less call, a lore-disabled chat, or the commit's `used` turn.
     lore_fit: LoreFit | None = None
+    # #1958: what the conversation-history window dropped this turn. None when
+    # the assistant set no ai_history_budget_tokens (the default), nothing was
+    # over budget, or the commit's `used` turn.
+    history_fit: HistoryFit | None = None
 
 
 class AIGenerateRequest(BaseModel):

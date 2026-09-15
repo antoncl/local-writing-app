@@ -25,6 +25,7 @@ from app.models import (
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai.call_resolver import resolve_call_params
+from app.services.ai.history_budget import apply_history_window
 from app.services.ai.lore_budget import DEFAULT_LORE_LIMITS, LoreLimits
 from app.services.ai.usage import translate_usage_to_cost
 from app.services.project.errors import ProjectServiceError
@@ -474,10 +475,18 @@ async def run_chat_turn(
         lore_limits=resolved.lore_limits,
     )
 
+    # #1958: window the history that goes to the provider (not the copy above,
+    # which journal turn-numbering counts). The commit turn (`used`) is exempt —
+    # it needs the full transcript to transcribe (extraction.py).
+    if lore_mode == "implicit":
+        sent_messages, history_fit = apply_history_window(messages_list, resolved, settings)
+    else:
+        sent_messages, history_fit = messages_list, None
+
     result = ai_providers.chat(
         resolved.to_call(
             system_prompt=request.system_prompt,
-            messages=messages_list,
+            messages=sent_messages,
             system_blocks=prepared.system_blocks,
             session_id=prepared.session_id,
         ),
@@ -524,4 +533,5 @@ async def run_chat_turn(
         cost_usd=cost_usd,
         cost_usd_total=cost_usd_total,
         lore_fit=prepared.lore_fit,
+        history_fit=history_fit,
     )

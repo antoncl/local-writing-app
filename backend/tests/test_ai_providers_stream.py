@@ -625,20 +625,51 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         self.assertTrue(fake_stream.closed)
 
     def test_ollama_stream_closes_upstream_on_early_stop(self):
-        # Ollama has no chat_stream override — this proves the teardown is
-        # inherited from OpenAICompatibleProfile, not reimplemented per provider.
-        chunks = [
-            _chunk(content="a"),
-            _chunk(content="b"),
-            _chunk(content="c", finish="stop"),
-        ]
-        fake_stream = _FakeSdkStream(chunks)
+        # #1957: Ollama now streams over its OWN native /api/chat transport (not
+        # the inherited /v1 path). The early-stop teardown invariant still holds
+        # — closing the generator must close the upstream httpx response so the
+        # daemon stops generating. Pin it for the native transport: a byte stream
+        # that records its own close(), reached through a MockTransport.
+        import httpx
 
-        class _FakeOpenAI:
-            def __init__(self, **_kwargs):
-                self.chat = SimpleNamespace(
-                    completions=SimpleNamespace(create=lambda **_kw: fake_stream)
+        from app.services.ai.profiles import ollama as ollama_mod
+
+        ndjson = (
+            b'{"message": {"content": "a"}, "done": false}\n'
+            b'{"message": {"content": "b"}, "done": false}\n'
+            b'{"message": {"content": "c"}, "done": true, "done_reason": "stop"}\n'
+        )
+
+        class _RecordingStream(httpx.SyncByteStream):
+            def __init__(self) -> None:
+                self.closed = False
+
+            def __iter__(self):
+                yield ndjson
+
+            def close(self) -> None:
+                self.closed = True
+
+        rec = _RecordingStream()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/api/show":
+                return httpx.Response(
+                    200,
+                    json={
+                        "model_info": {
+                            "general.architecture": "llama",
+                            "llama.context_length": 131072,
+                        }
+                    },
                 )
+            return httpx.Response(200, stream=rec)
+
+        real_client = httpx.Client
+
+        def factory(*args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            return real_client(*args, **kwargs)
 
         call = ChatCall(
             model="m",
@@ -646,11 +677,11 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=64,
         )
-        with patch("openai.OpenAI", _FakeOpenAI):
+        with patch.object(ollama_mod.httpx, "Client", factory):
             gen = OllamaProfile(host="http://127.0.0.1:11434").chat_stream(call)
             next(gen)  # consume one event — don't drain the stream
             gen.close()
-        self.assertTrue(fake_stream.closed)
+        self.assertTrue(rec.closed)
 
 
 def _a_delta_event(dtype, *, text=None, thinking=None):

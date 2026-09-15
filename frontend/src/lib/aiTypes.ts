@@ -251,6 +251,9 @@ export type ChatMessage = {
   // usage/provenance and rendered on the same meta line. Absent when no
   // implicit selection ran (lore off, a chat-less call, the commit turn).
   lore_fit?: LoreFit | null;
+  // #1958: the send's history-window report, stamped and rendered the same way,
+  // beside lore_fit. Absent unless a round was dropped.
+  history_fit?: HistoryFit | null;
 };
 
 export type AIChatRequest = {
@@ -295,6 +298,16 @@ export type LoreFit = {
   left_out: LoreFitEntry[];
 };
 
+// #1958: what a send's conversation-history window dropped — the tokens sent and
+// how many prior rounds were kept vs dropped. Flat (no per-entry drill, unlike
+// LoreFit); absent unless a whole round was trimmed.
+export type HistoryFit = {
+  budget_tokens: number;
+  used_tokens: number;
+  kept_rounds: number;
+  dropped_rounds: number;
+};
+
 export type AIChatResponse = {
   role: "assistant";
   content: string;
@@ -312,6 +325,8 @@ export type AIChatResponse = {
   cost_usd?: number | null;
   // ADR-0086 §5: this turn's lore-budget report; absent on a chat-less call.
   lore_fit?: LoreFit | null;
+  // #1958: this turn's history-window report; absent unless a round was dropped.
+  history_fit?: HistoryFit | null;
 };
 
 export type AIGenerateRequest = {

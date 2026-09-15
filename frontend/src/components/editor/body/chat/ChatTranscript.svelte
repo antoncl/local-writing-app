@@ -17,6 +17,7 @@
     declaredOverLine,
     leftOutSegment,
   } from "@/lib/chat/loreFit";
+  import { HISTORY_FIT_HINT, droppedRoundsSegment } from "@/lib/chat/historyFit";
   import { journalEntryKey } from "@/lib/chat/journal";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import type { ChatMessage } from "@/lib/types";
@@ -90,9 +91,11 @@
          which only the author's picks/policies (or the assistant's budget)
          can change. A budget of 0 means "declared only" and is never "over". -->
     {@const fit = message.role === "assistant" ? message.lore_fit ?? null : null}
-    {@const fitSegments = fit == null ? [] : [
-      ...(fit.left_out.length > 0 ? [{ text: leftOutSegment(fit), title: LEFT_OUT_HINT }] : []),
-      ...(declaredOverBudget(fit) ? [{ text: declaredOverLine(fit), title: DECLARED_OVER_HINT }] : []),
+    {@const hfit = message.role === "assistant" ? message.history_fit ?? null : null}
+    {@const fitSegments = [
+      ...(fit && fit.left_out.length > 0 ? [{ text: leftOutSegment(fit), title: LEFT_OUT_HINT }] : []),
+      ...(fit && declaredOverBudget(fit) ? [{ text: declaredOverLine(fit), title: DECLARED_OVER_HINT }] : []),
+      ...(hfit && hfit.dropped_rounds > 0 ? [{ text: droppedRoundsSegment(hfit), title: HISTORY_FIT_HINT }] : []),
     ]}
     <div class="cbv-message cbv-message-{message.role}">
       <header class="cbv-message-role">

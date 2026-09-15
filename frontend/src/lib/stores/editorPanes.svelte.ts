@@ -26,7 +26,6 @@ import { get } from "svelte/store";
 import { api, HttpError } from "@/lib/api";
 import { AutosaveScheduler } from "@/lib/editor-core/autosave";
 import {
-  type DocumentRef,
   type EditorPaneState,
   type ViewSaveState,
   cloneMetadata,
@@ -82,6 +81,7 @@ import {
   offerAutosaveConflictRecovery,
   reconcileOn409,
   reloadGetterFor,
+  type ReloadableDocument,
 } from "@/lib/stores/editorPaneSave";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
 import { forwardRefsOf, sameRefSet } from "@/lib/views/referenceIndex";
@@ -307,28 +307,32 @@ class EditorPanesController {
   }
 
   async refreshOpenEditorPaneBaselines(transformDraftMetadata?: (metadata: EntryMetadata) => EntryMetadata): Promise<void> {
-    const documentRefs = Array.from(
-      new Map(
-        this.panes
-          .map((pane) => pane.document)
-          .filter((document): document is DocumentRef => Boolean(document))
-          .map((document) => [`${document.type}:${document.id}`, document]),
-      ).values(),
-    );
-    if (documentRefs.length === 0) return;
-    // Re-baseline only panes whose kind has a reloadable server document. A
-    // synthetic pane (chat, and latently assistant/project/view) has no getter, so
-    // it is skipped rather than mis-fetched as a scene — otherwise its 404 would
-    // reject this whole Promise.all and starve the panes that CAN refresh (#1977).
-    const reloadable = documentRefs.flatMap((document) => {
-      const getter = reloadGetterFor(document.type);
-      return getter ? [{ document, getter }] : [];
-    });
-    if (reloadable.length === 0) return;
-    const refreshedDocuments = await Promise.all(reloadable.map(({ document, getter }) => getter(document.id)));
-    const refreshedByKey = new Map(
-      refreshedDocuments.map((document, index) => [`${reloadable[index].document.type}:${document.id}`, document]),
-    );
+    // Re-baseline each loaded pane from a fresh server fetch. Two rules keep this
+    // correct across kinds:
+    //  - The reload id is the LOADED document's id (pane.scene.id), NOT document.id.
+    //    For a structure_node (Act/Chapter) those differ — document.id is the
+    //    `node_…` structural id, pane.scene.id is the backing `manuscript_…` scene
+    //    id — and GET /api/scenes/<node_…> 404s. Every other kind has
+    //    document.id === scene.id, so keying/fetching off scene.id is a no-op there.
+    //  - The getter is chosen by the pane's declared kind. A kind with no getter
+    //    (chat, and the other synthetic/surface-only panes) has no server document
+    //    to refresh, so it is skipped — never mis-fetched as a scene, whose 404
+    //    would also reject this whole Promise.all and starve the panes that CAN
+    //    refresh (#1977).
+    const seen = new Set<string>();
+    const targets: { key: string; sceneId: string; getter: (id: string) => Promise<ReloadableDocument> }[] = [];
+    for (const pane of this.panes) {
+      if (!pane.document || !pane.scene) continue;
+      const getter = reloadGetterFor(pane.document.type);
+      if (!getter) continue;
+      const key = `${pane.document.type}:${pane.scene.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push({ key, sceneId: pane.scene.id, getter });
+    }
+    if (targets.length === 0) return;
+    const refreshedDocuments = await Promise.all(targets.map((target) => target.getter(target.sceneId)));
+    const refreshedByKey = new Map(targets.map((target, index) => [target.key, refreshedDocuments[index]]));
     const nextReloads: Record<string, MetadataReloadSignal> = {};
     this.panes = this.panes.map((pane) => {
       if (!pane.scene || !pane.document) return pane;

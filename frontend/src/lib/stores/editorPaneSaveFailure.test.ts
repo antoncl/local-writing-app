@@ -100,6 +100,32 @@ describe("offerAutosaveConflictRecovery — the two choices (#457)", () => {
     expect(host.saveEditorPane).toHaveBeenCalledWith("p", { force: true });
   });
 
+  it("fires onOverwritten after a force-save that lands — the review path closes its overlay (#1970)", async () => {
+    let request!: Parameters<typeof conflictDiffService.request>[0];
+    vi.spyOn(conflictDiffService, "request").mockImplementation((r) => {
+      request = r;
+    });
+    const host = fakeHost(); // run() resolves true (the force-save landed)
+    const onOverwritten = vi.fn();
+    offerAutosaveConflictRecovery(host, "p", null, onOverwritten);
+    await request.actions.at(-1)?.onSelect(); // Overwrite
+    expect(host.saveEditorPane).toHaveBeenCalledWith("p", { force: true });
+    expect(onOverwritten).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT fire onOverwritten when the force-save fails — never drops an overlay over unsaved content (#1970)", async () => {
+    let request!: Parameters<typeof conflictDiffService.request>[0];
+    vi.spyOn(conflictDiffService, "request").mockImplementation((r) => {
+      request = r;
+    });
+    const host = fakeHost();
+    host.run = vi.fn(async () => false); // the force-save did not land
+    const onOverwritten = vi.fn();
+    offerAutosaveConflictRecovery(host, "p", null, onOverwritten);
+    await request.actions.at(-1)?.onSelect(); // Overwrite
+    expect(onOverwritten).not.toHaveBeenCalled();
+  });
+
   it("Keep editing lights the sticky badge so the retry does not re-pop the prompt", () => {
     let request!: Parameters<typeof conflictDiffService.request>[0];
     vi.spyOn(conflictDiffService, "request").mockImplementation((r) => {
@@ -447,5 +473,33 @@ describe("flushReviewCommit — changed-on-disk recovery (#1965)", () => {
     expect(request).toBeDefined(); // the diff-preview dialog was offered
     expect(request.onDiskBody).toBe("their body");
     expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(true);
+  });
+
+  it("closes the review on Overwrite from the overlap dialog — force-saves, then drops the proposal (#1970)", async () => {
+    seedDirtyLorePane();
+    stubSuccessRefreshes();
+    // Register a review lock the way an open review does, without its dirty-pane
+    // entry-flush firing an extra save: freeze while clean, then dirty for the commit.
+    editorPanes.panes = editorPanes.panes.map((p) => ({ ...p, dirty: false }));
+    const discard = vi.fn();
+    await editorPanes.beginReviewLock("lore_1", { hasChanges: () => true, commit: async () => true, discard });
+    editorPanes.panes = editorPanes.panes.map((p) => ({ ...p, dirty: true }));
+
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue({ ...LORE, body: "their body", revision: "r2" });
+    injectMerge(null); // overlapping prose → the dialog, not a silent merge
+    vi.spyOn(api, "saveLoreEntry")
+      .mockRejectedValueOnce(new HttpError("conflict", 409, null)) // the commit's write 409s
+      .mockResolvedValue({ ...LORE, body: "edited body", revision: "r3" }); // Overwrite's force-save lands
+    let request!: Parameters<typeof conflictDiffService.request>[0];
+    vi.spyOn(conflictDiffService, "request").mockImplementation((r) => {
+      request = r;
+    });
+
+    expect(await editorPanes.flushReviewCommit("lore_1")).toBe(false); // review stays open behind the dialog
+    expect(discard).not.toHaveBeenCalled(); // not until the author picks Overwrite
+
+    await request.actions.at(-1)?.onSelect(); // Overwrite
+    expect(api.saveLoreEntry).toHaveBeenCalledTimes(2); // the 409 commit + the forced re-save
+    expect(discard).toHaveBeenCalledTimes(1); // proposal dropped → the overlay closes like a clean commit
   });
 });

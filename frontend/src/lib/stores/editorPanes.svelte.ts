@@ -23,7 +23,7 @@
 // store — a controller with traceable methods (see docs/frontend-architecture.md).
 
 import { get } from "svelte/store";
-import { api } from "@/lib/api";
+import { api, HttpError } from "@/lib/api";
 import { AutosaveScheduler } from "@/lib/editor-core/autosave";
 import {
   type DocumentRef,
@@ -79,6 +79,7 @@ import {
   refreshAfterSave,
   autosaveOnce,
   offerCloseConflictRecovery,
+  offerAutosaveConflictRecovery,
   reconcileOn409,
   RELOAD_GETTERS,
 } from "@/lib/stores/editorPaneSave";
@@ -441,9 +442,35 @@ class EditorPanesController {
     const pane = this.#reviewPaneFor(entryId);
     if (!pane) return true;
     this.#autosave.cancel(pane.id);
-    // `run` returns false when the save threw (a changed-on-disk 409 surfaces to
-    // App's error sink) — propagate it so the commit keeps the review open.
-    return this.run(() => this.saveEditorPane(pane.id));
+    // A changed-on-disk 409 must NOT silently drop the commit: a sibling surface
+    // (the plot board, a second pane/window) can move the node under an open review,
+    // leaving this pane's base_revision stale (#1965). Route it through the same
+    // reconcile ladder (ADR-0077) autosave and close use — rungs 1–2 merge a disjoint
+    // sibling edit and the commit lands (returns true → the review closes); a genuine
+    // overlap raises the diff-preview dialog and keeps the review open. Without this,
+    // Accept all against a stale revision failed quietly. A non-conflict save error
+    // (or the clean path) propagates run()'s verdict unchanged.
+    let conflict = false;
+    const ok = await this.run(async () => {
+      try {
+        await this.saveEditorPane(pane.id);
+      } catch (error) {
+        // Key on the status, not the message (the canonical 409 signal the autosave
+        // classifier uses) — robust to wording and what the api layer surfaces.
+        if (error instanceof HttpError && error.status === 409) {
+          conflict = true;
+          return;
+        }
+        throw error;
+      }
+    });
+    if (conflict) {
+      const { outcome, remote } = await reconcileOn409(this, pane.id);
+      if (outcome !== "conflict") return true; // adopted/merged → the commit landed
+      offerAutosaveConflictRecovery(this, pane.id, remote);
+      return false; // genuine overlap → keep the review open behind the dialog
+    }
+    return ok;
   }
 
   // Closing a pane mid-review. With nothing adopted there is nothing to save, so

@@ -4,10 +4,12 @@
   // invocation ledger. The by-model / by-day breakdowns are aggregate labels,
   // not nodes, so they stay a bespoke stats surface (the widget-taxonomy
   // carve-out for non-node data). The by-chat / by-scene / by-prompt rows ARE
-  // nodes, so they render as NodeRows that open on click (#1709) — a bucket
-  // whose node was deleted comes back `openable: false` and renders inert as
-  // "(deleted …)". Cost fields arrive nullable: null means "no priced row in
-  // this scope" and renders as — via formatCostEur, never €0.00 (#697).
+  // nodes, so they render as NodeRows that open on click (#1709). The backend
+  // folds every deleted-node bucket in a breakdown into one inert "N deleted
+  // chats" line (`openable: false`, #1972), so we trust its label and total for
+  // both live and deleted rows. Cost fields arrive nullable: null means "no
+  // priced row in this scope" and renders as — via formatCostEur, never €0.00
+  // (#697).
   import { untrack } from "svelte";
   import { aiSpend, SPEND_RANGES } from "@/lib/stores/aiSpend.svelte";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -92,9 +94,9 @@
       </div>
 
       {@render statSection("By model", summary.by_model, "ai-spend-by-model")}
-      {@render nodeSection("By chat", summary.by_chat, "ai-spend-by-chat", "chat", "chat")}
-      {@render nodeSection("By scene", summary.by_scene, "ai-spend-by-scene", "manuscript", "scene")}
-      {@render nodeSection("By prompt", summary.by_prompt, "ai-spend-by-prompt", "prompt", "prompt")}
+      {@render nodeSection("By chat", summary.by_chat, "ai-spend-by-chat", "chat")}
+      {@render nodeSection("By scene", summary.by_scene, "ai-spend-by-scene", "manuscript")}
+      {@render nodeSection("By prompt", summary.by_prompt, "ai-spend-by-prompt", "prompt")}
       {@render statSection("By day", summary.by_day, "ai-spend-by-day")}
     </div>
   {:else if !aiSpend.error}
@@ -128,14 +130,14 @@
   {/if}
 {/snippet}
 
-<!-- Node breakdowns (chat, scene, prompt): rows ARE nodes → NodeRow that
-     opens on click; a bucket whose node was deleted renders inert (#1709). -->
+<!-- Node breakdowns (chat, scene, prompt): rows ARE nodes → NodeRow that opens
+     on click; the backend-folded "N deleted …" aggregate arrives openable:false
+     and renders inert with its own label (#1709, #1972). -->
 {#snippet nodeSection(
   label: string,
   buckets: AICostBucket[],
   testid: string,
   kind: string,
-  noun: string,
 )}
   {#if buckets.length > 0}
     <section class="spend-section">
@@ -154,10 +156,10 @@
               </NodeRow>
             {:else}
               <NodeRow
-                title={`(deleted ${noun})`}
+                title={bucket.label}
                 clickable={false}
                 dimmed
-                ariaLabel={`Deleted ${noun} — ${bucketTitle(bucket)}`}
+                ariaLabel={`${bucket.label} — ${bucketTitle(bucket)}`}
               >
                 {#snippet trailing()}{@render costTrailing(bucket)}{/snippet}
               </NodeRow>

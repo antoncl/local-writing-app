@@ -467,8 +467,14 @@ class EditorPanesController {
     if (conflict) {
       const { outcome, remote } = await reconcileOn409(this, pane.id);
       if (outcome !== "conflict") return true; // adopted/merged → the commit landed
-      offerAutosaveConflictRecovery(this, pane.id, remote);
-      return false; // genuine overlap → keep the review open behind the dialog
+      // Genuine overlap → the diff dialog. Keep the review open behind it, but on
+      // Overwrite (once the force-save lands) drop the proposal so the overlay
+      // closes like a clean commit — otherwise it lingers until dismissed by hand
+      // (#1970). `discard` only tears down the resolved overlay; it writes nothing,
+      // and the adopted content is already force-saved. Re-read the lock at click
+      // time (lazy): if the review already ended, it's a safe no-op.
+      offerAutosaveConflictRecovery(this, pane.id, remote, () => this.#reviewLocks.get(pane.id)?.discard());
+      return false;
     }
     return ok;
   }

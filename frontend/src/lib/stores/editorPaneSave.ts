@@ -348,7 +348,19 @@ function draftsDifferFrom(remote: ReloadableDocument, pane: EditorPaneState): bo
 // either choice: Overwrite force-saves in place; Keep editing (and backdrop/Esc)
 // leaves the draft intact and lights the saveError badge — which also stops the
 // autosave from silently re-firing the prompt on its next retry.
-export function offerAutosaveConflictRecovery(host: SaveFailureHost, id: string, remote: ReloadableDocument | null): void {
+//
+// `onOverwritten` (optional) fires ONLY after a force-save that actually landed
+// (run() returned true). The review-commit flush (flushReviewCommit) passes one
+// to tear down its now-resolved review overlay — the content is on disk, so the
+// proposal shell must go, exactly as a clean commit closes it (#1970). It is
+// gated on success so a failed force-save never drops the overlay over unsaved
+// content. The autosave/close callers pass nothing → behaviour unchanged.
+export function offerAutosaveConflictRecovery(
+  host: SaveFailureHost,
+  id: string,
+  remote: ReloadableDocument | null,
+  onOverwritten?: () => void,
+): void {
   const pane = host.panes.find((candidate) => candidate.id === id);
   conflictDiffService.request({
     title: paneTitle(host, id),
@@ -360,7 +372,8 @@ export function offerAutosaveConflictRecovery(host: SaveFailureHost, id: string,
         label: "Overwrite",
         destructive: true,
         onSelect: async () => {
-          await host.run(() => host.saveEditorPane(id, { force: true }));
+          const ok = await host.run(() => host.saveEditorPane(id, { force: true }));
+          if (ok) onOverwritten?.();
         },
       },
     ],

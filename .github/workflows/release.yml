@@ -128,7 +128,7 @@ jobs:
       - name: Install frontend (from the lockfile)
         run: npm ci --prefix frontend
 
-      # Non-Linux freezes on the host. Linux freezes inside a glibc-2.31 container
+      # Non-Linux freezes on the host. Linux freezes inside a glibc-2.36 container
       # (below), which installs its own copy — so the host install is win/mac only.
       # Deps from the lock (#1393): the freeze bundles whatever is installed, so
       # an unpinned resolve here would make the shipped binary for a given tag
@@ -154,16 +154,20 @@ jobs:
         if: runner.os != 'Linux'
         run: python packaging/build.py
 
-      # Linux: freeze inside a glibc-2.31 container (#1376). PyInstaller binaries
+      # Linux: freeze inside a glibc-2.36 container (#1376). PyInstaller binaries
       # link glibc, which is forward-compatible only, so a binary frozen on the
-      # runner's glibc 2.39 fails on any older distro — including a Raspberry Pi on
-      # Debian Bullseye (glibc 2.31) and even current Pi OS Bookworm (2.36).
-      # `python:3.12-bullseye` is Debian 11 + Python 3.12 (glibc 2.31), so the
-      # frozen binary runs on Bullseye and everything newer. Node from the host
-      # `npm ci` (mounted, same Linux arch) is reused; the container just adds a
-      # node binary + the build extra, then runs the same `build.py`. Runs natively
-      # on each runner's arch (arm64 runner → arm64 image), no emulation.
-      - name: Build the frozen artifact (Linux, in a glibc-2.31 container)
+      # runner's glibc 2.39 fails on any older distro. The floor is Debian 12
+      # "bookworm" (glibc 2.36): a bookworm-frozen binary runs on current
+      # Raspberry Pi OS and mainstream Linux (Ubuntu 24.04, Debian 12+) and
+      # everything newer. It was Debian 11 "bullseye" (glibc 2.31) until bullseye
+      # left LTS and its apt pool was pruned — installs 404'd and every Linux build
+      # broke (#1975); the Pi target has since moved to trixie, so the floor no
+      # longer needs 2.31. `python:3.12-bookworm` is Debian 12 + Python 3.12. Node
+      # from the host `npm ci` (mounted, same Linux arch) is reused; the container
+      # just adds a node binary + the build extra, then runs the same `build.py`.
+      # Runs natively on each runner's arch (arm64 runner → arm64 image), no
+      # emulation.
+      - name: Build the frozen artifact (Linux, in a glibc-2.36 container)
         if: runner.os == 'Linux'
         shell: bash
         run: |
@@ -171,7 +175,7 @@ jobs:
           # -e GITHUB_SHA: docker run does NOT inherit host env, and the spec bakes
           # $GITHUB_SHA as the build stamp (S6a) the nightly channel compares — pass
           # it through or Linux builds ship a blank stamp.
-          docker run --rm -e GITHUB_SHA -v "$PWD":/src -w /src python:3.12-bullseye bash -c '
+          docker run --rm -e GITHUB_SHA -v "$PWD":/src -w /src python:3.12-bookworm bash -c '
             set -euo pipefail
             curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
             apt-get install -y --no-install-recommends nodejs
@@ -199,17 +203,17 @@ jobs:
             ./dist/local-writing-app/local-writing-app --self-check
           fi
 
-      # Linux: self-check INSIDE a glibc-2.31 container, not on the host. Running it
+      # Linux: self-check INSIDE a glibc-2.36 container, not on the host. Running it
       # on the runner's glibc 2.39 always passes (forward-compat) and proves nothing
       # about the floor — that blind spot is exactly what shipped the Pi break
-      # (#1376). debian:11 is the oldest glibc we target; if a future change raises
+      # (#1376). debian:12 is the oldest glibc we target; if a future change raises
       # the floor above it, this fails in CI instead of on a user's Pi.
-      - name: Smoke — frozen binary self-check on the glibc-2.31 floor (Linux)
+      - name: Smoke — frozen binary self-check on the glibc-2.36 floor (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD":/src -w /src debian:11 \
+          docker run --rm -v "$PWD":/src -w /src debian:12 \
             ./dist/local-writing-app/local-writing-app --self-check
 
       # Browser-level wiring smoke (#1352): drive a real browser through ~5 core

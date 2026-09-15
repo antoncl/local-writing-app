@@ -910,8 +910,11 @@ class AICostBucket(BaseModel):
 
     `openable` is True only for a node-keyed bucket (by_chat / by_scene /
     by_prompt) whose `key` still resolves to a live node — the frontend opens
-    those on click and renders the rest ("(deleted chat)", etc.) as inert
-    (#1709). by_model / by_day are not nodes, so it stays False for them.
+    those on click (#1709). Every deleted-node bucket in a breakdown is folded
+    server-side into one inert aggregate line keyed `DELETED_BUCKET_KEY`, whose
+    `label` is "N deleted chats" (#1972); the frontend renders that label and
+    total verbatim. by_model / by_day are not nodes, so `openable` stays False
+    for them without any fold.
     """
     key: str
     label: str

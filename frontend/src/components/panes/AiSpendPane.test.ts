@@ -151,13 +151,16 @@ describe("AI Spend pane — rollup renders", () => {
     expect(editorPanes.openNodeOfKind).toHaveBeenCalledWith("scene_42", "manuscript");
   });
 
-  it("renders a deleted node-keyed row as inert, not the raw id (#1709)", async () => {
+  it("renders the folded deleted aggregate inert, from the backend label (#1972)", async () => {
+    // The backend collapses every deleted chat into one "N deleted chats" line
+    // with the summed cost; the pane trusts that label + total and renders the
+    // row inert (no raw id, no per-chat rows).
     vi.mocked(api.aiCostSummary).mockResolvedValue(
       summary({
         total_cost_usd: 1.0,
-        count: 1,
+        count: 5,
         by_chat: [
-          bucket({ key: "chat_0a5af03b0e", label: "chat_0a5af03b0e", cost_usd: 1.0, count: 1, openable: false }),
+          bucket({ key: "__deleted__", label: "3 deleted chats", cost_usd: 1.0, count: 5, openable: false }),
         ],
       }),
     );
@@ -165,11 +168,12 @@ describe("AI Spend pane — rollup renders", () => {
     await tick();
     await tick();
 
-    // The useless raw id is replaced by a friendly "(deleted chat)" label…
-    expect(screen.getByText("(deleted chat)")).toBeInTheDocument();
-    expect(screen.queryByText("chat_0a5af03b0e")).not.toBeInTheDocument();
-    // …and the row is inert: clicking it opens nothing.
-    await fireEvent.click(screen.getByText("(deleted chat)"));
+    const chatRows = screen.getByTestId("ai-spend-by-chat");
+    // One line, carrying the backend wording and the summed cost (€ at 0.92)…
+    expect(chatRows.textContent).toContain("3 deleted chats");
+    expect(chatRows.textContent).toContain("€0.92");
+    // …and it is inert: clicking it opens nothing.
+    await fireEvent.click(screen.getByText("3 deleted chats"));
     expect(editorPanes.openNodeOfKind).not.toHaveBeenCalled();
   });
 

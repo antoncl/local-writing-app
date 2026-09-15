@@ -24,7 +24,7 @@ elsewhere on the composed class and resolve through the MRO at call time.
 from __future__ import annotations
 
 import csv
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -117,6 +117,44 @@ def _bucket_targets(
     if day:
         targets.append(("by_day", day, day, False))
     return targets
+
+
+# The sentinel key of the folded "deleted" line (#1972). Not a real node id
+# (those are `<kind>_<uuid>`), so it can never collide with a live bucket, and
+# the frontend keys/renders it like any other bucket.
+DELETED_BUCKET_KEY = "__deleted__"
+
+
+def _deleted_label(count: int, noun: str) -> str:
+    return f"1 deleted {noun}" if count == 1 else f"{count} deleted {noun}s"
+
+
+def _fold_deleted(buckets: Iterable[AICostBucket], noun: str) -> list[AICostBucket]:
+    """Collapse every deleted-node bucket (`openable=False`) in a node
+    breakdown into one inert aggregate line (#1972): cleaning up N chats leaves
+    a single "N deleted chats" row totalling their cost, not N look-alike
+    "(deleted chat)" rows. Live buckets pass through untouched. The aggregate
+    reduces cost with the same `_add_cost` the other summers use, so it inherits
+    the #697 "None until a priced row" policy rather than re-expressing it, and
+    it cost-ranks alongside the live rows like any other bucket."""
+    live: list[AICostBucket] = []
+    deleted: list[AICostBucket] = []
+    for bucket in buckets:
+        (live if bucket.openable else deleted).append(bucket)
+    if deleted:
+        agg = AICostBucket(
+            key=DELETED_BUCKET_KEY,
+            label=_deleted_label(len(deleted), noun),
+            openable=False,
+        )
+        for bucket in deleted:
+            agg.count += bucket.count
+            agg.unpriced_count += bucket.unpriced_count
+            agg.input_tokens += bucket.input_tokens
+            agg.output_tokens += bucket.output_tokens
+            agg.cost_usd = _add_cost(agg.cost_usd, bucket.cost_usd)
+        live.append(agg)
+    return sorted(live, key=_cost_rank)
 
 
 # --- CSV ledger serialization (#1801). The on-disk row is flat: the nine
@@ -383,9 +421,12 @@ class AiInvocationsMixin:
                 bucket.cost_usd = _add_cost(bucket.cost_usd, cost)
 
         totals.by_model = sorted(breakdowns["by_model"].values(), key=_cost_rank)
-        totals.by_chat = sorted(breakdowns["by_chat"].values(), key=_cost_rank)
-        totals.by_scene = sorted(breakdowns["by_scene"].values(), key=_cost_rank)
-        totals.by_prompt = sorted(breakdowns["by_prompt"].values(), key=_cost_rank)
+        # The node breakdowns fold their deleted buckets into one aggregate line
+        # (#1972) and cost-rank the result; by_model / by_day have no nodes to
+        # delete, so they sort straight.
+        totals.by_chat = _fold_deleted(breakdowns["by_chat"].values(), "chat")
+        totals.by_scene = _fold_deleted(breakdowns["by_scene"].values(), "scene")
+        totals.by_prompt = _fold_deleted(breakdowns["by_prompt"].values(), "prompt")
         totals.by_day = sorted(
             breakdowns["by_day"].values(), key=lambda bucket: bucket.key, reverse=True
         )

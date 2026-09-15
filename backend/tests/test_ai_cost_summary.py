@@ -1,10 +1,14 @@
 """GET /api/ai/invocations/summary (#10): project-wide AI spend rollup over
 the ai_invocations ledger — totals plus by-model / by-chat / by-scene /
-by-day buckets. Costs are summed from stored `cost_usd` verbatim; unpriced
-rows stay excluded from every sum but still counted, and a scope with rows
-but no priced row reports cost None rather than 0.0 (#697). Rows are read
+by-prompt / by-day buckets. Costs are summed from stored `cost_usd` verbatim;
+unpriced rows stay excluded from every sum but still counted, and a scope with
+rows but no priced row reports cost None rather than 0.0 (#697). Rows are read
 raw with the same tolerant semantics as the scene/character/project computed
 costs, so the surfaces can never disagree about which rows count.
+
+The node breakdowns fold every deleted-node bucket into one inert aggregate
+line keyed `DELETED_BUCKET_KEY` (#1972); the deleted-node cases below assert
+that fold rather than a per-id bucket.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from project_fixtures import open_test_project
 
 from app.main import app
 from app.services.project.ai_invocations import (
+    DELETED_BUCKET_KEY,
     INVOCATION_CSV_COLUMNS,
     invocation_record_to_csv_row,
 )
@@ -249,7 +254,10 @@ class AICostSummaryEndpointTests(unittest.TestCase):
         self.assertEqual(body["count"], 2)
         self.assertAlmostEqual(body["total_cost_usd"], 0.30, places=6)
 
-    def test_chat_bucket_falls_back_to_id_when_no_title(self) -> None:
+    def test_single_deleted_node_folds_to_one_inert_line(self) -> None:
+        # A dangling id (deleted / never-a-node) never surfaces as a per-id row:
+        # it folds into the inert "N deleted …" aggregate, hiding the useless raw
+        # id from the pane (#1972). One deleted node still gets its own line.
         self._write_rows(
             [
                 {
@@ -264,16 +272,88 @@ class AICostSummaryEndpointTests(unittest.TestCase):
         response = self.client.get("/api/ai/invocations/summary")
         body = response.json()
         self.assertEqual(len(body["by_chat"]), 1)
-        self.assertEqual(body["by_chat"][0]["key"], "chat_nonexistent")
-        self.assertEqual(body["by_chat"][0]["label"], "chat_nonexistent")
-        # A deleted / never-a-node id is inert: the frontend renders it as
-        # "(deleted …)" rather than a clickable row (#1709).
+        self.assertEqual(body["by_chat"][0]["key"], DELETED_BUCKET_KEY)
+        self.assertEqual(body["by_chat"][0]["label"], "1 deleted chat")
         self.assertFalse(body["by_chat"][0]["openable"])
-        # by_prompt falls back to the id the same way when no title resolves.
+        self.assertAlmostEqual(body["by_chat"][0]["cost_usd"], 0.10, places=6)
+        # The raw id must not leak through anywhere in the breakdown.
+        self.assertNotIn("chat_nonexistent", [b["key"] for b in body["by_chat"]])
+        # by_prompt folds the same way, with the prompt noun.
         self.assertEqual(len(body["by_prompt"]), 1)
-        self.assertEqual(body["by_prompt"][0]["key"], "prompt_nonexistent")
-        self.assertEqual(body["by_prompt"][0]["label"], "prompt_nonexistent")
+        self.assertEqual(body["by_prompt"][0]["key"], DELETED_BUCKET_KEY)
+        self.assertEqual(body["by_prompt"][0]["label"], "1 deleted prompt")
         self.assertFalse(body["by_prompt"][0]["openable"])
+
+    def test_multiple_deleted_chats_fold_into_one_totalled_line(self) -> None:
+        # The reported bug: cleaning up several chats left a wall of look-alike
+        # "(deleted chat)" rows. They must collapse into one line totalling the
+        # cost and counting the invocations of every folded chat (#1972).
+        self._write_rows(
+            [
+                {"id": "r1", "ts": "2026-08-01T10:00:00+00:00",
+                 "chat_session_id": "chat_gone_a", "cost_usd": 0.10},
+                {"id": "r2", "ts": "2026-08-01T11:00:00+00:00",
+                 "chat_session_id": "chat_gone_a", "cost_usd": 0.05},
+                {"id": "r3", "ts": "2026-08-01T12:00:00+00:00",
+                 "chat_session_id": "chat_gone_b", "cost_usd": 0.20},
+                {"id": "r4", "ts": "2026-08-01T13:00:00+00:00",
+                 "chat_session_id": "chat_gone_c", "cost_usd": 0.30},
+            ]
+        )
+        body = self.client.get("/api/ai/invocations/summary").json()
+        self.assertEqual(len(body["by_chat"]), 1)
+        agg = body["by_chat"][0]
+        self.assertEqual(agg["key"], DELETED_BUCKET_KEY)
+        self.assertEqual(agg["label"], "3 deleted chats")
+        self.assertFalse(agg["openable"])
+        # Cost totals every folded chat; count totals every folded invocation.
+        self.assertAlmostEqual(agg["cost_usd"], 0.65, places=6)
+        self.assertEqual(agg["count"], 4)
+
+    def test_live_chats_stay_separate_from_the_deleted_fold(self) -> None:
+        from app.models import CreateChatSessionRequest
+
+        live = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Plot brainstorm", system_prompt="")
+        )
+        self._write_rows(
+            [
+                {"id": "r1", "ts": "2026-08-01T10:00:00+00:00",
+                 "chat_session_id": live.id, "cost_usd": 0.40},
+                {"id": "r2", "ts": "2026-08-01T11:00:00+00:00",
+                 "chat_session_id": "chat_gone_a", "cost_usd": 0.10},
+                {"id": "r3", "ts": "2026-08-01T12:00:00+00:00",
+                 "chat_session_id": "chat_gone_b", "cost_usd": 0.05},
+            ]
+        )
+        body = self.client.get("/api/ai/invocations/summary").json()
+        by_key = {b["key"]: b for b in body["by_chat"]}
+        # The live chat keeps its own clickable row…
+        self.assertIn(live.id, by_key)
+        self.assertTrue(by_key[live.id]["openable"])
+        self.assertEqual(by_key[live.id]["label"], "Plot brainstorm")
+        # …and the two deleted chats share one inert folded line.
+        self.assertIn(DELETED_BUCKET_KEY, by_key)
+        self.assertEqual(by_key[DELETED_BUCKET_KEY]["label"], "2 deleted chats")
+        self.assertAlmostEqual(by_key[DELETED_BUCKET_KEY]["cost_usd"], 0.15, places=6)
+
+    def test_all_unpriced_deleted_fold_reports_none_cost_not_zero(self) -> None:
+        # The fold reduces cost through the shared #697 reducer, so an all-
+        # unpriced set of deleted chats reports None (renders "—"), not 0.0.
+        self._write_rows(
+            [
+                {"id": "r1", "ts": "2026-08-01T10:00:00+00:00",
+                 "chat_session_id": "chat_gone_a"},
+                {"id": "r2", "ts": "2026-08-01T11:00:00+00:00",
+                 "chat_session_id": "chat_gone_b"},
+            ]
+        )
+        body = self.client.get("/api/ai/invocations/summary").json()
+        self.assertEqual(len(body["by_chat"]), 1)
+        agg = body["by_chat"][0]
+        self.assertEqual(agg["label"], "2 deleted chats")
+        self.assertIsNone(agg["cost_usd"])
+        self.assertEqual(agg["unpriced_count"], 2)
 
     def test_chat_bucket_uses_real_session_title_when_present(self) -> None:
         from app.models import CreateChatSessionRequest
@@ -320,7 +400,9 @@ class AICostSummaryEndpointTests(unittest.TestCase):
         self.assertEqual(body["by_scene"], [])
         self.assertEqual(body["by_prompt"], [])
 
-    def test_scene_bucket_present_for_non_empty_scene_id(self) -> None:
+    def test_scene_bucket_folds_a_deleted_scene_summing_its_rows(self) -> None:
+        # A scene_id with no live node folds like a deleted chat; both of the
+        # scene's rows sum into the one "1 deleted scene" aggregate (#1972).
         self._write_rows(
             [
                 {
@@ -340,8 +422,8 @@ class AICostSummaryEndpointTests(unittest.TestCase):
         response = self.client.get("/api/ai/invocations/summary")
         body = response.json()
         self.assertEqual(len(body["by_scene"]), 1)
-        self.assertEqual(body["by_scene"][0]["key"], "scene_abc")
-        self.assertEqual(body["by_scene"][0]["label"], "scene_abc")
+        self.assertEqual(body["by_scene"][0]["key"], DELETED_BUCKET_KEY)
+        self.assertEqual(body["by_scene"][0]["label"], "1 deleted scene")
         self.assertAlmostEqual(body["by_scene"][0]["cost_usd"], 0.15, places=6)
         self.assertEqual(body["by_scene"][0]["count"], 2)
 
@@ -401,7 +483,12 @@ class AICostSummaryEndpointTests(unittest.TestCase):
         )
         computed = self.service._compute_invocation_cost("scene", "scene_x")
         self.assertAlmostEqual(computed, 0.04, places=6)
-        self.assertAlmostEqual(self._bucket("by_scene", "scene_x")["cost_usd"], computed, places=6)
+        # scene_x resolves to no live node, so its rows land in the folded
+        # aggregate; a lone folded scene carries exactly its own cost, so the
+        # summary/computed agreement (#1708) still holds through the fold.
+        self.assertAlmostEqual(
+            self._bucket("by_scene", DELETED_BUCKET_KEY)["cost_usd"], computed, places=6
+        )
 
 
 if __name__ == "__main__":

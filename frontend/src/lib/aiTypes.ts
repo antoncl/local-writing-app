@@ -411,9 +411,10 @@ export type AICostBucket = {
   input_tokens: number;
   output_tokens: number;
   // True only for a node-keyed bucket (by_chat / by_scene / by_prompt) whose
-  // `key` still resolves to a live node — those rows open on click; the rest
-  // render as inert "(deleted …)" rows (#1709). Always false for by_model /
-  // by_day, which aren't nodes.
+  // `key` still resolves to a live node — those rows open on click (#1709). The
+  // backend folds every deleted-node bucket into one inert "N deleted …"
+  // aggregate line (openable false, `label` carries the wording, #1972).
+  // Always false for by_model / by_day, which aren't nodes.
   openable: boolean;
 };
 

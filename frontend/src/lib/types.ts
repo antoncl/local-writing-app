@@ -100,6 +100,7 @@ export type {
   LoreFit,
   LoreFitEntry,
   LoreSource,
+  HistoryFit,
   AIChatResponse,
   AIGenerateRequest,
   AIContextPresetResponse,

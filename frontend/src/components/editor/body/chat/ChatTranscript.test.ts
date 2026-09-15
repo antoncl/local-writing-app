@@ -77,6 +77,38 @@ describe("ChatTranscript", () => {
     expect(container.querySelector(".cbv-meta-danger")).not.toBeInTheDocument();
   });
 
+  // #1958: the history-window segment sits on the same meta line, only when a
+  // round was actually dropped.
+  it("renders the history-fit segment when the send dropped older exchanges", () => {
+    const history = [
+      {
+        role: "assistant",
+        content: "The Regent does.",
+        provider: "ollama",
+        model: "llama3.2",
+        usage: { input_tokens: 100, cached_input_tokens: 0, cache_write_tokens: 0, output_tokens: 20 },
+        history_fit: { budget_tokens: 16000, used_tokens: 12400, kept_rounds: 4, dropped_rounds: 3 },
+      },
+    ] as ChatMessage[];
+    const { container } = render(ChatTranscript, { chatHistory: history, chatRunning: false });
+    expect(container.querySelector(".cbv-turn-meta")?.textContent).toContain(
+      "history 12.4k/16k · 3 earlier exchanges dropped",
+    );
+  });
+
+  it("stays silent when the history window dropped nothing", () => {
+    const history = [
+      {
+        role: "assistant",
+        content: "A.",
+        usage: { input_tokens: 10, cached_input_tokens: 0, cache_write_tokens: 0, output_tokens: 5 },
+        history_fit: { budget_tokens: 16000, used_tokens: 800, kept_rounds: 2, dropped_rounds: 0 },
+      },
+    ] as ChatMessage[];
+    const { container } = render(ChatTranscript, { chatHistory: history, chatRunning: false });
+    expect(container.querySelector(".cbv-turn-meta")?.textContent).not.toContain("dropped");
+  });
+
   it("words a declared set over the budget as such, and stays silent when all fitted", () => {
     const over = [
       {

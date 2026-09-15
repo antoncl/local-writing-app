@@ -753,6 +753,8 @@
           // line and is stamped the same way — it renders as a quiet segment
           // of the turn's meta line and persists with the message.
           if (ev.lore_fit) chatHistory[idx].lore_fit = ev.lore_fit;
+          // #1958: the history-window report rides the same `done` line.
+          if (ev.history_fit) chatHistory[idx].history_fit = ev.history_fit;
           chatHistory = chatHistory;
         } else if (ev.type === "error") {
           errored = true;

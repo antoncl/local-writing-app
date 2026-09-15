@@ -18,6 +18,10 @@ from app.services.ai.profiles.base import ChatOutcome
 
 _ANTHROPIC_CHAT = "app.services.ai.profiles.anthropic.AnthropicProfile.chat"
 _OPENAI_COMPAT_CHAT = "app.services.ai.profiles.openai_compatible.OpenAICompatibleProfile.chat"
+# Ollama has its own native /api/chat override (#1957); patching the base
+# OpenAICompatibleProfile.chat no longer intercepts it, so Ollama-routed tests
+# must patch this seam or they hit a real daemon.
+_OLLAMA_CHAT = "app.services.ai.profiles.ollama.OllamaProfile.chat"
 _ANTHROPIC_STREAM = "app.services.ai.profiles.anthropic.AnthropicProfile.chat_stream"
 _OPENAI_COMPAT_STREAM = (
     "app.services.ai.profiles.openai_compatible.OpenAICompatibleProfile.chat_stream"
@@ -230,7 +234,7 @@ class ChatEndpointTests(unittest.TestCase):
         loaded = _set_machine_keys(default_provider="ollama")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                _OPENAI_COMPAT_CHAT,
+                _OLLAMA_CHAT,
                 return_value=ChatOutcome("OK.", "stop", SimpleNamespace()),
             ):
             response = self.client.post(
@@ -359,7 +363,7 @@ class ChatEndpointTests(unittest.TestCase):
         loaded = _set_machine_keys(default_provider="ollama")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                _OPENAI_COMPAT_CHAT,
+                _OLLAMA_CHAT,
                 return_value=ChatOutcome("default-provider reply", "stop", SimpleNamespace()),
             ):
             response = self.client.post(

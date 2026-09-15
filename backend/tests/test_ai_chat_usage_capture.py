@@ -13,12 +13,13 @@ from app.services.ai import providers as ai_providers
 from app.services.ai.profiles.base import ChatCall, ChatOutcome, ProviderError
 from app.services.ai.providers import _extract_usage_for_provider
 
-# Seams: the provider call now lives on the profile class. Anthropic has its
-# own; OpenAI/Ollama/OpenRouter inherit OpenAICompatibleProfile.chat.
+# Seams: the provider call now lives on the profile class. Anthropic and Ollama
+# each have their own; OpenAI/OpenRouter inherit OpenAICompatibleProfile.chat.
 _ANTHROPIC_CHAT = "app.services.ai.profiles.anthropic.AnthropicProfile.chat"
 _OPENAI_COMPAT_CHAT = (
     "app.services.ai.profiles.openai_compatible.OpenAICompatibleProfile.chat"
 )
+_OLLAMA_CHAT = "app.services.ai.profiles.ollama.OllamaProfile.chat"
 
 
 def _settings(**keys: str) -> ms.MachineSettings:
@@ -133,11 +134,11 @@ def test_chat_openrouter_captures_usage_anthropic_style_split():
     assert result.usage.output_tokens == 500
 
 
-def test_chat_ollama_captures_usage_from_openai_compat_response():
-    raw = SimpleNamespace(
-        usage=SimpleNamespace(prompt_tokens=120, completion_tokens=300)
-    )
-    with patch(_OPENAI_COMPAT_CHAT, return_value=ChatOutcome("Hello.", "stop", raw)):
+def test_chat_ollama_captures_usage_from_native_response():
+    # Ollama's native /api/chat returns usage on a plain dict
+    # (prompt_eval_count / eval_count), not the OpenAI usage object (#1957).
+    raw = {"prompt_eval_count": 120, "eval_count": 300}
+    with patch(_OLLAMA_CHAT, return_value=ChatOutcome("Hello.", "stop", raw)):
         result = ai_providers.chat(
             _call("llama3.2"),
             provider_name="ollama",

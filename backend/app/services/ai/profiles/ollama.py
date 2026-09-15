@@ -8,7 +8,9 @@ Picker just lists what's installed.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -16,7 +18,14 @@ import httpx
 from app.services.ai.profiles.base import (
     Capability,
     CapabilityTier,
+    ChatCall,
+    ChatOutcome,
     ModelDescriptor,
+    ProviderError,
+    StreamDelta,
+    StreamFinal,
+    StreamThinking,
+    ThinkTagSplitter,
     UsageMetrics,
     default_token_count,
 )
@@ -31,6 +40,37 @@ log = logging.getLogger(__name__)
 # Fallback when the machine hasn't set a custom Ollama host — the daemon's
 # default bind address.
 _DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
+
+# Chat is long-running (large context, slow local models); match the OpenAI-
+# compat path's timeouts so the native transport isn't stricter than the /v1
+# one it replaces.
+_CHAT_TIMEOUT = 180.0
+_STREAM_TIMEOUT = 180.0
+
+# User-facing line for a stream that produced no visible output (mirrors the
+# OpenAI-compat path, #1601). The daemon-side cause, if any, is in the HTTP
+# error we'd have raised earlier.
+_EMPTY_STREAM_MESSAGE = (
+    "The model returned no output. See errors.log in your project folder for details."
+)
+
+# num_ctx is rounded UP to one of these buckets so a conversation growing a few
+# tokens at a time doesn't reload the model every turn (changing num_ctx forces
+# a reload). Only crossing a bucket boundary reloads — O(log n) reloads over a
+# whole chat, versus today's constant full-context allocation. Clamped to the
+# model's trained max, so a bucket above it collapses to the max.
+_CTX_BUCKETS = (2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144)
+
+
+class _NativeStreamState:
+    """Mutable accumulator for one `/api/chat` NDJSON stream: whether any
+    visible event was emitted, plus the stop reason and final frame (its usage
+    counts) carried on the terminal `done` frame."""
+
+    def __init__(self) -> None:
+        self.emitted = False
+        self.stop_reason: str | None = None
+        self.final: dict | None = None
 
 
 class OllamaProfile(OpenAICompatibleProfile):
@@ -60,6 +100,158 @@ class OllamaProfile(OpenAICompatibleProfile):
     def _chat_api_key(self) -> str:
         # Ollama needs no key; the SDK still wants a non-empty placeholder.
         return "ollama"
+
+    # -- Native /api/chat transport --------------------------------------
+    #
+    # Ollama's OpenAI-compat `/v1` shim can't set `num_ctx` and reloads the
+    # model at its full trained context on every call — a giant KV cache
+    # regardless of how little context the turn needs (#1957, verified on
+    # 0.34.0). The native `/api/chat` endpoint honors `options.num_ctx`, so
+    # these two methods bypass the inherited `/v1` path and size the context to
+    # the payload. The transport is sync `httpx` to match the sync base
+    # contract (`ChatOutcome` / an `Iterator`, not awaitables).
+
+    def chat(self, call: ChatCall) -> ChatOutcome:
+        messages = self._build_messages(call)
+        body = self._native_chat_body(call, messages, stream=False)
+        try:
+            with httpx.Client(timeout=_CHAT_TIMEOUT) as client:
+                response = client.post(f"{self._base}/api/chat", json=body)
+                response.raise_for_status()
+                data = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ProviderError(f"Ollama chat request failed: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ProviderError("Ollama returned an unexpected chat response.")
+        if data.get("error"):
+            raise ProviderError(str(data["error"]))
+        message = data.get("message") or {}
+        content = str(message.get("content") or "")
+        # `raw` is the native dict; `extract_usage` already reads its
+        # prompt_eval_count / eval_count.
+        return ChatOutcome(content, data.get("done_reason"), data)
+
+    def chat_stream(
+        self, call: ChatCall
+    ) -> Iterator[StreamDelta | StreamThinking | StreamFinal]:
+        messages = self._build_messages(call)
+        body = self._native_chat_body(call, messages, stream=True)
+        splitter = ThinkTagSplitter()
+        state = _NativeStreamState()
+        try:
+            with httpx.Client(timeout=_STREAM_TIMEOUT) as client, client.stream(
+                "POST", f"{self._base}/api/chat", json=body
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    yield from self._consume_stream_line(line, splitter, state)
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ProviderError(f"Ollama chat stream failed: {exc}") from exc
+        for event in splitter.flush():
+            if event.text:
+                state.emitted = True
+            yield event
+        if not state.emitted:
+            # No visible content is a failure from the user's side, not a silent
+            # empty success (#1601).
+            raise ProviderError(_EMPTY_STREAM_MESSAGE)
+        usage = (
+            self.extract_usage(state.final, call.model)
+            if state.final is not None
+            else None
+        )
+        yield StreamFinal(stop_reason=state.stop_reason, usage=usage)
+
+    def _consume_stream_line(
+        self, line: str, splitter: ThinkTagSplitter, state: _NativeStreamState
+    ) -> Iterator[StreamDelta | StreamThinking]:
+        """Parse one NDJSON `/api/chat` frame into stream events, updating
+        `state` in place. Blank / non-JSON / non-object frames are skipped; an
+        `error` frame raises."""
+        if not line:
+            return
+        try:
+            data = json.loads(line)
+        except ValueError:
+            return
+        if not isinstance(data, dict):
+            return
+        if data.get("error"):
+            raise ProviderError(str(data["error"]))
+        message = data.get("message") or {}
+        # A thinking-capable model may split reasoning onto a `thinking` field;
+        # inline `<think>` tags in `content` are handled by the splitter (same
+        # as the /v1 path).
+        thinking = message.get("thinking")
+        if thinking:
+            state.emitted = True
+            yield StreamThinking(text=str(thinking))
+        content = message.get("content")
+        if content:
+            for event in splitter.feed(str(content)):
+                if event.text:
+                    state.emitted = True
+                yield event
+        if data.get("done"):
+            state.stop_reason = data.get("done_reason")
+            state.final = data
+
+    def _native_chat_body(
+        self, call: ChatCall, messages: list[dict], *, stream: bool
+    ) -> dict:
+        """Assemble the `/api/chat` body, sizing `options.num_ctx` to the turn."""
+        options: dict[str, Any] = {"num_predict": call.max_tokens}
+        num_ctx = self._resolve_num_ctx(call, messages)
+        if num_ctx is not None:
+            options["num_ctx"] = num_ctx
+        if call.temperature is not None and self.supports_temperature(call.model):
+            options["temperature"] = call.temperature
+        return {
+            "model": call.model,
+            "messages": messages,
+            "stream": stream,
+            "options": options,
+        }
+
+    def _resolve_num_ctx(self, call: ChatCall, messages: list[dict]) -> int | None:
+        """The context window to allocate for this turn, or None to leave it to
+        the daemon (its default is the model's trained max — today's behavior).
+
+        Reserve room for both the prompt and the reply (`num_ctx` is the whole
+        window, prompt + generated), round up to a stable bucket so history
+        growth doesn't thrash the loader, then clamp to the model's trained max.
+        Returns None when that max is unknown, so a discovery miss degrades to
+        the daemon default rather than a guessed cap.
+        """
+        model_max = self._model_context_window(call.model)
+        if model_max <= 0:
+            return None
+        prompt_tokens = sum(
+            self.count_tokens(str(m.get("content") or ""), call.model)
+            for m in messages
+        )
+        needed = prompt_tokens + max(int(call.max_tokens or 0), 0)
+        return min(model_max, _ceil_bucket(needed))
+
+    def _model_context_window(self, model: str) -> int:
+        """Best-effort trained context length for `model`, via a sync `/api/show`.
+
+        `/api/show` reads GGUF metadata only (no VRAM load), so it's cheap next
+        to the multi-second generation that follows. Returns 0 when the daemon
+        is unreachable, the model is unknown, or the metadata is absent — the
+        caller reads 0 as "don't constrain num_ctx".
+        """
+        try:
+            with httpx.Client(timeout=4.0) as client:
+                response = client.post(
+                    f"{self._base}/api/show", json={"model": model}
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            log.debug("Ollama /api/show (num_ctx sizing) failed for %s: %s", model, exc)
+            return 0
+        return _context_length_from_show(payload) if isinstance(payload, dict) else 0
 
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelDescriptor]:
         if not force_refresh and self._cache is not None:
@@ -180,6 +372,15 @@ class OllamaProfile(OpenAICompatibleProfile):
         # no objective "fast vs premium" within a single user's install.
         # The picker shows the explicit list under tier=LOCAL.
         return None
+
+
+def _ceil_bucket(n: int) -> int:
+    """Round `n` up to the next `_CTX_BUCKETS` step; pass values above the top
+    bucket through unchanged (the caller clamps to the model's trained max)."""
+    for bucket in _CTX_BUCKETS:
+        if n <= bucket:
+            return bucket
+    return n
 
 
 def _row_name(row: dict) -> str:

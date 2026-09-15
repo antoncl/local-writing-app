@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
 from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import UpdateProjectSettingsRequest
+from app.services.ai.profiles import ollama as ollama_mod
 from app.services.ai.profiles.base import ChatOutcome
 
 _ANTHROPIC_CHAT = "app.services.ai.profiles.anthropic.AnthropicProfile.chat"
@@ -92,34 +95,53 @@ class ChatEndpointTests(unittest.TestCase):
         self.assertEqual(body["policy"], "cloud-allowed")
         self.assertIsNone(body["error"])
 
-    def test_ollama_chat_uses_openai_compatible_path(self) -> None:
+    def test_ollama_chat_uses_native_api_chat_path(self) -> None:
         self._allow_local_only()
         loaded = _set_machine_keys(default_provider="ollama")
 
-        # Patch the OpenAI SDK client itself so the real OllamaProfile.chat
-        # runs and we can see the endpoint + key it constructs — the base_url
-        # and placeholder-key behaviour that used to be free-function kwargs.
-        captured: dict = {}
+        # #1957: Ollama posts to the native /api/chat (not the /v1 shim) so it
+        # can size options.num_ctx. Run the real OllamaProfile.chat with every
+        # httpx client (sync for /api/show + /api/chat, async for any /api/tags
+        # pricing lookup) forced onto a MockTransport, and assert the native
+        # endpoint + a sized context reached the wire.
+        seen: list[str] = []
+        chat_bodies: list[dict] = []
 
-        class _FakeOpenAI:
-            def __init__(self, **kwargs):
-                captured.update(kwargs)
-                self.chat = SimpleNamespace(
-                    completions=SimpleNamespace(create=self._create)
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.url.path)
+            if request.url.path == "/api/tags":
+                return httpx.Response(200, json={"models": [{"name": "llama3.2"}]})
+            if request.url.path == "/api/show":
+                return httpx.Response(
+                    200,
+                    json={
+                        "model_info": {
+                            "general.architecture": "llama",
+                            "llama.context_length": 131072,
+                        }
+                    },
                 )
+            if request.url.path == "/api/chat":
+                chat_bodies.append(json.loads(request.content))
+                return httpx.Response(
+                    200,
+                    json={"message": {"content": "Local reply."}, "done_reason": "stop"},
+                )
+            return httpx.Response(404)
 
-            def _create(self, **_kw):
-                return SimpleNamespace(
-                    choices=[
-                        SimpleNamespace(
-                            message=SimpleNamespace(content="Local reply."),
-                            finish_reason="stop",
-                        )
-                    ]
-                )
+        real_client, real_async = httpx.Client, httpx.AsyncClient
+
+        def sync_factory(*args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            return real_client(*args, **kwargs)
+
+        def async_factory(*args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            return real_async(*args, **kwargs)
 
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("openai.OpenAI", _FakeOpenAI):
+             patch.object(ollama_mod.httpx, "Client", sync_factory), \
+             patch.object(ollama_mod.httpx, "AsyncClient", async_factory):
             response = self.client.post(
                 "/api/ai/chat",
                 json={
@@ -132,10 +154,10 @@ class ChatEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(response.json()["ok"])
         self.assertEqual(response.json()["content"], "Local reply.")
-        # Ollama routes through the OpenAI-compatible client at host/v1 with a
-        # placeholder key — no real credential required.
-        self.assertEqual(captured["base_url"], "http://127.0.0.1:11434/v1")
-        self.assertEqual(captured["api_key"], "ollama")
+        # Native endpoint, never the /v1 shim, with a context sized to the turn.
+        self.assertIn("/api/chat", seen)
+        self.assertFalse(any("/v1" in p for p in seen))
+        self.assertIn("num_ctx", chat_bodies[0]["options"])
 
     def test_multi_turn_messages_passed_through(self) -> None:
         self._allow_cloud()

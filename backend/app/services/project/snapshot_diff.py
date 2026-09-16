@@ -139,7 +139,7 @@ ALIGN_LOOKAHEAD = 4
 class SnapshotDiffMixin:
     """Composed onto `ProjectService`; resolves `_require_project`,
     `_path_for_node_id`, `_node_id_for_path`, `_read_markdown_with_front_matter`,
-    `_snapshots_dir`, `_require_snapshot` and `_snapshot_source_id` via MRO."""
+    `_snapshots_dir`, `_require_snapshot` and `_resolve_snapshot_target` via MRO."""
 
     def snapshot_drift(
         self,
@@ -160,8 +160,10 @@ class SnapshotDiffMixin:
         "now" the client-side field flip does rather than lagging on disk.
         `_require_snapshot` gives the 404 the diff route used to.
         """
-        root = self._require_project()
-        node_id = self._snapshot_source_id(scene_id)
+        # Drift is scene-only (the witness): this route is only reached for a
+        # scene, so it resolves at the manuscript layer through the shared
+        # resolver like every other snapshot op.
+        root, node_id, _ = self._resolve_snapshot_target(scene_id, "manuscript")
         self._require_snapshot(root, node_id, snapshot_id)
         return self._snapshot_drift(
             root,

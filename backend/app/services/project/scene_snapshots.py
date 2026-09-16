@@ -23,6 +23,14 @@ Every method here takes `root` from the caller rather than reading
 `self._require_project()` itself: a capture is a write, so it is a unit of work
 with a resolution scope it carries explicitly (ADR-0045, same reasoning as
 `_manuscript_tree`).
+
+The store is **node-scoped, not scene-scoped** (ADR-0087, #1981). The same
+two-file store keys on any node's canonical id; the public methods take a
+`kind` — defaulting to `"manuscript"`, so every scene call is unchanged — and
+resolve the store root from the node's *owning layer* (a scene's owning layer
+is always the open project, so its store path stays byte-identical). A witness
+(the resolved lore-context, ADR-0087 §5) is built only for a scene; other kinds
+capture the bytes and the record without one.
 """
 
 from __future__ import annotations
@@ -43,7 +51,7 @@ from app.services.atomic_io import atomic_write_bytes
 from app.services.project.errors import ProjectServiceError
 
 if TYPE_CHECKING:
-    from app.models import Scene
+    from app.models import ResearchNote, Scene
 
 SNAPSHOTS_DIRNAME = "snapshots"
 
@@ -76,6 +84,13 @@ AUTOMATIC_KEEP = 5
 # author's intent — long enough that no real note is truncated, short enough
 # that the sidecar cannot be made unbounded through this field.
 SNAPSHOT_DESCRIPTION_MAX = 280
+
+# The kinds the node-scoped routes accept today. Scenes reach the store through
+# the /api/scenes routes; research is slice 1 (#1981). lore (S2), tags (S4),
+# prompt/plot (S5) each arrive with the cross-layer write semantics their restore
+# needs — until then the node routes fail closed rather than let a restore write
+# an owning-layer file with no fork/override (ADR-0087 rollout).
+NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research"})
 
 
 def _read_body_and_content_time(path: Path) -> tuple[bytes, str]:
@@ -134,8 +149,9 @@ class SceneSnapshotsMixin:
     """Composed onto `ProjectService`; the project IO helpers it uses
     (`_atomic_write`, `_read_yaml`, `_write_yaml`, `_new_id`,
     `_read_markdown_with_front_matter`, `_path_for_node_id`,
-    `_node_id_for_path`, `_update_scene_title_in_structure`,
-    `_remove_missing_scene_todo_anchors`, `read_scene`) resolve via MRO."""
+    `_node_id_for_path`, `layer_by_id`, `_update_scene_title_in_structure`,
+    `_remove_missing_scene_todo_anchors`, `_update_research_title_in_structure`,
+    `read_scene`, `read_research_note`, `read_node`) resolve via MRO."""
 
     # ----- store layout -----------------------------------------------------
 
@@ -224,12 +240,13 @@ class SceneSnapshotsMixin:
         records.sort(key=lambda record: (record.captured_at, record.id))
         return records
 
-    def list_snapshots(self, scene_id: str) -> SnapshotList:
-        root = self._require_project()
-        node_id = self._snapshot_source_id(scene_id)
+    def list_snapshots(self, scene_id: str, *, kind: str = "manuscript") -> SnapshotList:
+        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind)
         return SnapshotList(snapshots=self._snapshot_records(root, node_id))
 
-    def read_snapshot(self, scene_id: str, snapshot_id: str) -> SnapshotDetail:
+    def read_snapshot(
+        self, scene_id: str, snapshot_id: str, *, kind: str = "manuscript"
+    ) -> SnapshotDetail:
         """The stored body and normalised front-matter state, parsed for display.
         Reading is not restoring — the byte-copy is parsed here so a pane can
         render it, while restore stays a file copy.
@@ -238,8 +255,7 @@ class SceneSnapshotsMixin:
         normalisation the live side gets from `read_scene` — so the client field
         flip (#583) diffs like against like. Reusing it rather than re-deriving
         the title here keeps the was-side to one pipeline."""
-        root = self._require_project()
-        node_id = self._snapshot_source_id(scene_id)
+        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind)
         record = self._require_snapshot(root, node_id, snapshot_id)
         snapshots_dir = self._snapshots_dir(root, node_id)
         front_matter, body = self._read_markdown_with_front_matter(
@@ -261,21 +277,84 @@ class SceneSnapshotsMixin:
             raise ProjectServiceError(f"Snapshot {snapshot_id} does not exist.", 404)
         return self._read_snapshot_record(sidecar)
 
-    def _snapshot_source_id(self, scene_id: str) -> str:
-        """The id the store is keyed by: the scene file's front-matter id, which
-        is canonical identity. A route may be reached with the structure node's
-        id instead, and the two are not always the same."""
-        path = self._path_for_node_id(scene_id, "manuscript")
-        return self._node_id_for_path(path)
+    def _snapshot_store_root(self, node_id: str) -> Path:
+        """The owning layer's folder — the root the snapshot store lives under.
+
+        A snapshot freezes the *owning layer's* file, so an inherited node's
+        snapshots co-locate with the layer that owns that file rather than with
+        the open project (ADR-0087 §3). For a manuscript scene — always
+        collected at the open project — and for any node authored in the open
+        project, the owning layer *is* the open project, so this returns the
+        open-project root and the store path is byte-identical to before.
+        """
+        root = self._require_project()
+        index = self._build_node_index(root)
+        entry = index.by_id.get(index.canonical_id(node_id))
+        if entry is None or not entry.source_layer_id:
+            return root
+        layer = self.layer_by_id(root, entry.source_layer_id)
+        return layer.folder if layer is not None else root
+
+    def _resolve_snapshot_target(self, ref: str, kind: str) -> tuple[Path, str, Path]:
+        """`(store root, canonical node id, node file path)` for a snapshot op.
+
+        `ref` may be a structure node's id; `_path_for_node_id` normalises it to
+        the file and `_node_id_for_path` to that file's front-matter id — the id
+        the store is keyed by, which are not always the same. `kind` selects the
+        family the id is resolved in (a node route knows the kind from the index;
+        the scene routes default to `"manuscript"`). The one resolver every
+        public method shares, replacing the manuscript-only source-id lookup and
+        the `_require_project()` root each method used to take on its own (one
+        traversal, not six).
+        """
+        path = self._path_for_node_id(ref, kind)
+        node_id = self._node_id_for_path(path)
+        return self._snapshot_store_root(node_id), node_id, path
+
+    def node_snapshot_kind(self, node_id: str) -> str:
+        """Resolve a node id to its kind for the node-scoped routes, or refuse.
+
+        The node routes **fail closed** on two axes the scene-only predecessor
+        never had to guard, because a scene is always root-scoped and writable:
+
+        - **Kind.** Only the kinds the store is proven for are accepted; each
+          remaining kind opens in a later slice, together with the cross-layer
+          write semantics its restore needs (ADR-0087 rollout).
+        - **Owning layer.** Only a node owned by the *open* project may be
+          snapshotted. Restore writes the owning-layer file in place, so an
+          inherited node would have its ancestor's authored file overwritten with
+          no fork/override — the 409 `save_lore_entry` raises (S2, ADR-0087
+          §2/§3b) — and a built-in Library node (read-only, ADR-0049 #689) or a
+          machine node would be mutated straight past the read-only guard.
+          Research is never inherited-as-authored (`save_research_note`), so this
+          is also its permanent rule, not only an S1 restriction.
+        """
+        root = self._require_project()
+        index = self._build_node_index(root)
+        entry = index.by_id.get(index.canonical_id(node_id))
+        if entry is None:
+            raise ProjectServiceError(f"Node {node_id} does not exist.", 404)
+        if entry.kind not in NODE_SNAPSHOT_KINDS:
+            raise ProjectServiceError(
+                f"Snapshots are not available for {entry.kind} nodes yet.", 422
+            )
+        layer = self.layer_by_id(root, entry.source_layer_id)
+        if layer is None or not layer.is_root:
+            raise ProjectServiceError(
+                "Snapshots of an inherited or built-in node are not supported yet.", 422
+            )
+        return entry.kind
 
     # ----- capture ----------------------------------------------------------
 
-    def capture_snapshot(self, scene_id: str, dynamic_context: list[str] | None = None) -> Snapshot:
+    def capture_snapshot(
+        self, scene_id: str, dynamic_context: list[str] | None = None, *, kind: str = "manuscript"
+    ) -> Snapshot:
         """The camera: an explicit, never-thinned capture of the current state."""
-        root = self._require_project()
-        path = self._path_for_node_id(scene_id, "manuscript")
-        node_id = self._node_id_for_path(path)
-        return self._capture(root, node_id, path, retention="kept", dynamic_context=dynamic_context)
+        root, node_id, path = self._resolve_snapshot_target(scene_id, kind)
+        return self._capture(
+            root, node_id, path, retention="kept", dynamic_context=dynamic_context, kind=kind
+        )
 
     def _capture(
         self,
@@ -285,6 +364,7 @@ class SceneSnapshotsMixin:
         *,
         retention: str,
         dynamic_context: list[str] | None = None,
+        kind: str = "manuscript",
     ) -> Snapshot:
         """Copy `path`'s bytes into the store and write the sidecar beside them.
 
@@ -318,7 +398,12 @@ class SceneSnapshotsMixin:
         # file is rewritten a moment later — the same invariant the witness gets
         # from following this line, stated in the docstring below.
         body, content_written_at = _read_body_and_content_time(path)
-        witness = self.build_witness(node_id, dynamic_context)
+        # The witness is scene-only (ADR-0087 §5): it resolves lore-context from
+        # scene-shaped inputs (entity_ref fields, in-prose mutation markers, the
+        # editor's detected set). Another kind has nothing to witness, so no
+        # `witness` key is written and a later comparison reports none rather
+        # than an all-clear from a build that saw nothing.
+        witness = self.build_witness(node_id, dynamic_context) if kind == "manuscript" else None
         record: dict[str, Any] = {
             "id": snapshot_id,
             "snapshot_of": node_id,
@@ -397,7 +482,9 @@ class SceneSnapshotsMixin:
 
     # ----- restore ----------------------------------------------------------
 
-    def restore_snapshot(self, scene_id: str, snapshot_id: str) -> Scene:
+    def restore_snapshot(
+        self, scene_id: str, snapshot_id: str, *, kind: str = "manuscript"
+    ) -> Scene | ResearchNote:
         """Capture the current state, then put the snapshot back — one
         operation, never a client-side capture-then-restore.
 
@@ -411,16 +498,14 @@ class SceneSnapshotsMixin:
         failure between them leaves an extra snapshot and an untouched scene —
         never the reverse.
         """
-        root = self._require_project()
-        path = self._path_for_node_id(scene_id, "manuscript")
-        node_id = self._node_id_for_path(path)
+        root, node_id, path = self._resolve_snapshot_target(scene_id, kind)
         record = self._require_snapshot(root, node_id, snapshot_id)
 
         # No dynamic context: this route has no prose editor behind it, so the
         # implicit set is *not observed* rather than empty. The witness records
         # two sources, and a later comparison narrows membership to what both
         # sides saw instead of reporting every detected entity as removed.
-        self._capture(root, node_id, path, retention="thinned")
+        self._capture(root, node_id, path, retention="thinned", kind=kind)
 
         stored = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
         if record.schema_version == migrations.CURRENT_VERSION:
@@ -454,9 +539,41 @@ class SceneSnapshotsMixin:
         # The filename stays as it is — it is cosmetic, and reads resolve by id.
         # The structure title is not: it is what the manuscript tree renders, so
         # a restore that changed the title has to reach it.
-        self._update_scene_title_in_structure(node_id, str(front_matter.get("title") or node_id))
-        self._remove_missing_scene_todo_anchors(node_id, body)
-        return self.read_scene(node_id)
+        self._heal_after_restore(kind, node_id, str(front_matter.get("title") or node_id), body)
+        return self._read_restored_node(kind, node_id)
+
+    def _heal_after_restore(self, kind: str, node_id: str, title: str, body: str) -> None:
+        """Re-sync the out-of-index structure a restore may have changed.
+
+        A restore replaces the file's bytes, which can change the node's title
+        (and, for a scene, drop an embedded todo anchor). Only two kinds keep a
+        copy of the node title in a *separate* structure document the index
+        write does not touch — a scene (`manuscript.structure.yaml`) and a
+        research note (`research.structure.yaml`); lore/prompt/tag/plot keep no
+        such duplicate and heal nothing beyond the structural index write
+        (ADR-0087 §4). Dispatched by kind rather than always calling the scene
+        healers, which would look up a manuscript tree a research restore has no
+        node in.
+        """
+        if kind == "manuscript":
+            self._update_scene_title_in_structure(node_id, title)
+            self._remove_missing_scene_todo_anchors(node_id, body)
+        elif kind == "research":
+            self._update_research_title_in_structure(node_id, title)
+
+    def _read_restored_node(self, kind: str, node_id: str) -> Scene | ResearchNote:
+        """Read the just-restored node back in its own shape.
+
+        `read_node` (node_ops) dispatches every kind *except* research, so a
+        research restore reads through `read_research_note` directly; a scene
+        keeps its own `read_scene` so the scene route's `Scene` response model
+        is unchanged. Any other kind (S2+) falls through to the unified reader.
+        """
+        if kind == "manuscript":
+            return self.read_scene(node_id)
+        if kind == "research":
+            return self.read_research_note(node_id)
+        return self.read_node(node_id)
 
     def finalize_scene(
         self, scene_id: str, body: str, dynamic_context: list[str] | None = None
@@ -536,7 +653,7 @@ class SceneSnapshotsMixin:
         self._write_yaml(sidecar, data)
         return self._read_snapshot_record(sidecar)
 
-    def pin_snapshot(self, scene_id: str, snapshot_id: str) -> Snapshot:
+    def pin_snapshot(self, scene_id: str, snapshot_id: str, *, kind: str = "manuscript") -> Snapshot:
         """Flip `retention` from `thinned` to `kept` — the third case the enum
         was chosen for (ADR-0043 Amendment 1).
 
@@ -556,15 +673,14 @@ class SceneSnapshotsMixin:
         more automatic on the next capture. The budget is a window over a set
         the author can now take things out of.
         """
-        root = self._require_project()
-        node_id = self._snapshot_source_id(scene_id)
+        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind)
         record = self._require_snapshot(root, node_id, snapshot_id)
         if record.retention == "kept":
             return record
         return self._mutate_sidecar(root, node_id, snapshot_id, retention="kept")
 
     def set_snapshot_description(
-        self, scene_id: str, snapshot_id: str, description: str
+        self, scene_id: str, snapshot_id: str, description: str, *, kind: str = "manuscript"
     ) -> Snapshot:
         """Set (or clear, with `""`) the one-line description (#468).
 
@@ -573,14 +689,13 @@ class SceneSnapshotsMixin:
         actions-row label that render it. Capped so a paste cannot make the
         sidecar unbounded.
         """
-        root = self._require_project()
-        node_id = self._snapshot_source_id(scene_id)
+        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind)
         cleaned = " ".join(description.split())[:SNAPSHOT_DESCRIPTION_MAX]
         return self._mutate_sidecar(root, node_id, snapshot_id, description=cleaned)
 
     # ----- deletion ---------------------------------------------------------
 
-    def delete_snapshot(self, scene_id: str, snapshot_id: str) -> SnapshotList:
+    def delete_snapshot(self, scene_id: str, snapshot_id: str, *, kind: str = "manuscript") -> SnapshotList:
         """Remove one snapshot — the only irreversible gesture in the feature.
 
         Both files go, or the leftover is exactly the unreachable residue
@@ -594,8 +709,7 @@ class SceneSnapshotsMixin:
         lore deletes are already hard deletes, and a feature that quietly
         retained data after a delete would be the only such thing in the project.
         """
-        root = self._require_project()
-        node_id = self._snapshot_source_id(scene_id)
+        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind)
         self._require_snapshot(root, node_id, snapshot_id)
         folder = self._snapshots_dir(root, node_id)
         (folder / f"{snapshot_id}.md").unlink(missing_ok=True)

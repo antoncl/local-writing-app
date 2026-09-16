@@ -46,6 +46,24 @@ export const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDo
   research: (id) => api.getResearchNote(id),
 };
 
+// Document types whose server baseline is a Scene reached via /api/scenes: real
+// manuscript scenes, and the Act/Chapter `structure_node`s that round-trip through
+// the scene endpoints (editorPaneOpen.openStructureNode). RELOAD_GETTERS above
+// covers every kind with its own endpoint. A type in NEITHER set has no reload
+// getter wired here — chat (a scene-shaped stub with no document file), plus
+// assistant/project/view — so it is SKIPPED rather than mis-fetched as a scene.
+const SCENE_BACKED_DOCUMENT_TYPES = new Set(["manuscript", "structure_node"]);
+
+// The server getter for an open pane's `document.type`, or null when the type has
+// no reloadable baseline (skip it). Routing by the pane's declared type — not a
+// blanket `?? api.getScene` — is the #344 lesson: a chat pane open during a
+// schema/tag write once fell through the fallback to GET /api/scenes/chat_… → 404
+// (#1977). Kept beside RELOAD_GETTERS so the reload sites share one source of
+// truth for "what can be re-baselined, and how".
+export function reloadGetterFor(type: string): ((id: string) => Promise<ReloadableDocument>) | null {
+  return RELOAD_GETTERS[type] ?? (SCENE_BACKED_DOCUMENT_TYPES.has(type) ? (id) => api.getScene(id) : null);
+}
+
 // The one thing the dispatch needs back from the controller: the project node's
 // title write-back (the top bar + pane reflect a rename). Passed as a narrow host
 // so this stays a free function rather than a method that keeps the file large.
@@ -244,9 +262,11 @@ export async function reconcileOn409(host: SaveFailureHost, id: string): Promise
   if (!opening?.scene) return { outcome: "conflict", remote: null };
   const kind = opening.document?.type ?? "manuscript";
   const sceneId = opening.scene.id;
+  const getter = reloadGetterFor(kind);
+  if (!getter) return { outcome: "conflict", remote: null }; // no reloadable baseline → dialog
   let remote: ReloadableDocument;
   try {
-    remote = await (RELOAD_GETTERS[kind] ?? api.getScene)(sceneId);
+    remote = await getter(sceneId);
   } catch {
     return { outcome: "conflict", remote: null }; // can't re-fetch → dialog (no diff)
   }

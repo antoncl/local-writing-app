@@ -1,6 +1,6 @@
 # ADR-0088: The lore card's two time-axes share one foot dock; a mode control picks the track, and the keys stay one gesture across both
 
-- Status: **Proposed** — 2026-09-16 (authored by Claude; awaiting Anton's review). Companion **surface** ADR to ADR-0087 (the model), as ADR-0044 was to ADR-0043. **Amends ADR-0044.**
+- Status: **Accepted** — 2026-09-16, Anton Lauridsen, PR #1980 (authored by Claude). Companion **surface** ADR to ADR-0087 (the model), as ADR-0044 was to ADR-0043. **Amends ADR-0044.**
 - **Feature:** the on-card surface for node-scoped snapshots (#401 / ADR-0087) — how a lore card shows both its mutation and snapshot timelines at once.
 - **Relates to:** ADR-0087 (the model this surfaces), ADR-0044 (**amends** — realizes its "if both axes ever share a card" case), ADR-0013 (the mutation scrubber / in-fiction time), ADR-0042 (the layer axis, "L, not a grid"), ADR-0038 §A (position-is-mode, compact-expand), ADR-0030 (design language).
 - **Mockup (normative for this ADR):** [`../mockups/0087-rotary-scrubber.html`](../mockups/0087-rotary-scrubber.html) — iterated live with Anton; the mode gadget, the two-track visual languages, the diff and the per-layer caption were *tried* here, not sketched. A single self-contained file with fixture data; open it in a browser.

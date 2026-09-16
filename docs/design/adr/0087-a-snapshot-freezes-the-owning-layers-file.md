@@ -29,6 +29,7 @@ So the question is not "how do we build snapshots for lore" — it is "what does
 - **Not a snapshot of the resolved fold.** A snapshot freezes the *single authored file at one layer* (a base file, or an override delta), never the composed cross-layer value. Freezing the fold would bake one book's overrides into a series photograph and make "restore" ambiguous. The unit is the file you edited.
 - **Not undo.** Snapshots are sparse, named restore points a writer curates; they are not the fine-grained command-pattern undo (ADR-0050, a separate settled concern). Restore captures-first and is itself an edit, not a rewind of the edit log.
 - **Not a storage root that orphans on move.** Snapshots co-locate with their file's own project folder and are keyed by the entity's *stable* canonical id — never keyed by a layer-id or an override's salted id (both non-persistable path hashes), never pinned to whichever project happened to be open at capture.
+- **Not a feature that works on some of a kind's layers but not others.** Snapshots must be available on *every* layer a node can be authored at — a series base **and** a book override of the same character — or the writer hits an invisible exception (the arbitrary-exception wart ADR-0081 fought). This is an invariant: it may ship as its own slice, but it is never dropped. Excluding a whole *kind* (§Scope) is a different, comprehensible boundary — not a partial feature within a kind.
 - **Not a config/surface feature in v1.** `assistant`, `project`, and `view` nodes are deferred (see Scope) — the engine can photograph them, but the writer-facing surface isn't built here.
 
 ## Decision
@@ -55,9 +56,11 @@ For a scene the owning layer **is** the open project and the entity id **is** th
 
 Because ancestor layers now hold `snapshots/` directories for the first time, the ADR-0043 invariant "`snapshots/` is excluded from the node index, once" must now apply **at every layer's `snapshots/`** — the index collector, ADR-0040's staleness manifest, and the ADR-0085 `SearchCorpus` (built off `NodeIndex.by_id`) all skip it — or an ancestor's byte-copies (which carry the live entity's id) collide as duplicate ids, every capture invalidates the index, and snapshot bodies leak into search. The existing duplicate-id / staleness-manifest guard test is repeated at an ancestor layer.
 
-### 3b — The one authored file that is not an index node: an override, addressed by (entity id + layer)
+### 3b — A book override is snapshotted like any other layer of the entity — addressed by (entity + layer)
 
-An override delta is deliberately **not** an index node — it never enters `by_id` (`overrides.py:20`; ADR-0071 §3). So it cannot be reached by `/api/nodes/{override-id}` and has no `NodeIndexEntry` of its own. It participates by the same coordinates the authoring-layer save already uses: **the entity's canonical id (`target`) + the authoring layer**. Its snapshot's **kind** is the entity's kind, read from the base node's `NodeIndexEntry` (the entity is always an index node even when an override refines it at a nearer layer). Capture triggers on the `_save_lore_override` / `_save_prompt_override` path, not only the owned-save path. Restore writes the override delta back and returns the **re-folded composite** the open project resolves (a `LoreEntry`, not a bare delta), via the §4 reconciliation. This is the single in-scope file that is addressed by entity+layer rather than by its own node route.
+Snapshots must behave the *same* whether you author a character at the series layer or override it at a book (the anti-goal above). So a book override is in scope, not a case a user can feel the edge of. The one thing that makes it *mechanically* different: a book override is a sparse **delta file** that is deliberately **not** a node in the index — it never enters `by_id` (`overrides.py:20`; ADR-0071 §3), so it has no id to look up and no `NodeIndexEntry`.
+
+It is therefore addressed by the same coordinates the "Editing at" save already uses — **the entity's canonical id + the authoring layer** ("Seraphine, at the book layer") — never by the delta file's own salted id (a non-persistable hash, like a layer-id). Its snapshot's **kind** is the entity's kind, read from the base node's `NodeIndexEntry` (the entity is always an index node, even when a nearer layer overrides it). Capture rides the override save path (`_save_lore_override` / `_save_prompt_override`), not only the owned-save path. Restore writes the delta back and returns the **re-folded composite** the book actually shows (a `LoreEntry`, never the bare "set field = X" delta), via §4. Sequenced as its own slice, but part of what makes lore *done* — not deferred.
 
 ### 4 — Restore is: migrate-if-behind → byte-write → the shared structural index-write seam → a small per-kind healer
 
@@ -92,6 +95,8 @@ Anton opens the series character **Seraphine Vale** while the book *The Marrowga
 
 **Deferred (engine-capable, surface not built in v1):** `assistant`, `project`, `view`. The store can photograph them (they are one `.md` file each), so this is a **surface deferral, not a principled "never":** they are not the motivating canon, `assistant`/`project` are configuration-shaped, and a `view` (ADR-0021, an authored node) has an autosaved single-owner surface where restore-point value is lower — but if a writer wants view/project history later, the engine already supports it and only the card surface is owed.
 
+This is a per-*kind* availability boundary — a whole kind is in or out, which a writer can hold in their head — and is deliberately *not* the within-kind partial-ness the anti-goal forbids (a lore entry revertible at one layer but silently not another, which §3b closes).
+
 ## Alternatives considered
 
 - **Snapshot the resolved fold rather than the owning file.** Rejected: lossy (bakes one book's overrides into a series photograph), makes "restore" ambiguous, and couples the snapshot engine to inheritance — the opposite of §2's insight.
@@ -111,9 +116,10 @@ Anton opens the series character **Seraphine Vale** while the book *The Marrowga
 ## Rollout (slices)
 
 - **S1 — node-scoped store, proven on research (witness-free).** Thread `kind` off the `NodeIndexEntry`; move the store root to the owning-layer folder keyed by the entity id; entity-scoped addressing; the per-layer `snapshots/` exclusion (+ its guard test at an ancestor layer); restore = migrate-if-behind → structural index write → the research title heal. *Not:* lore, overrides, the combined surface. *Done when:* a research note captures/lists/diffs/byte-restores with its tree title healed, its snapshots in the note's own project folder.
-- **S2 — lore, including the override case (§3b).** Owning-layer keying for base files; override addressing by entity+layer with capture on the override save and re-folded restore; the layer-scoped snapshot histories. Surface work lands with **ADR-0088**. *Done when:* the engine user journey holds — base and override keep separate histories, and a base restore re-folds downstream.
-- **S3 — tags / motifs.** Snapshots-only; restore rebuilds `canonical_id`/redirects and does not replay the reference sweep; the merge/delete cascade reaps snapshot dirs; field-diff compare. *Done when:* a motif tag reverts cleanly with redirects intact.
-- **S4 — prompt + plot.** Prompt (override-aware; body read-only on overrides); plot cards (persist the beat/link heal on restore). *Done when:* both capture/restore with their healers.
+- **S2 — lore base files** (own-layer and ancestor base — real index nodes). Owning-layer folder keying by entity id; migrate-if-behind restore; layer-scoped histories where the file is a node. Surface work lands with **ADR-0088**. *Done when:* a series character captures/restores with its history under the series project, and a base restore re-folds downstream.
+- **S3 — lore overrides (§3b).** The (entity + layer) addressing for override deltas, capture on the override save, re-folded restore — so a **book override** is snapshottable and revertible exactly like a base. Its own slice per the uniformity anti-goal, not a deferral. *Done when:* a book override of a character keeps its own history, separate from the series base, and reverts to the composite.
+- **S4 — tags / motifs.** Snapshots-only; restore rebuilds `canonical_id`/redirects and does not replay the reference sweep; the merge/delete cascade reaps snapshot dirs; field-diff compare. *Done when:* a motif tag reverts cleanly with redirects intact.
+- **S5 — prompt + plot.** Prompt (override-aware, so S3's addressing applies; body read-only on overrides); plot cards (persist the beat/link heal on restore). *Done when:* both capture/restore with their healers.
 
 ## Acceptance
 

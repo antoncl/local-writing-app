@@ -1,0 +1,508 @@
+<title>The Rotary Scrubber</title>
+<meta name="description" content="Interactive study: one foot-dock scrubber whose Amiga-style rotary switches which timeline it travels — mutations or snapshots — on a lore card." />
+<style>
+  /* ---- tokens: LIGHT (bare :root) ---- */
+  :root{
+    --app-bg:#f5f7f6; --board:#f4f6f5; --surface:#ffffff; --panel:#edf3f1; --inset:#f1f5f3;
+    --tier1:#e6efe9; --tier2:#d6e4dd; --tier3:#c4d7cd; --tier-rail:#aec1b8;
+    --border:#cbd6d2; --border-strong:#b4c2bc; --divider:#e2e8e5;
+    --text:#242424; --text-2:#4d5753; --text-3:#74817b;
+    --accent:#2f6f5e; --accent-strong:#234e43; --accent-deep:#1c3f36; --accent-emphasis:#234e43;
+    --accent-soft:#edf6f2; --accent-soft2:#dff0ea; --accent-drop:#d9ecdf;
+    --star:#6b5a0c; --star-soft:#f3eed2; --star-border:#c8b896;
+    --danger:#a64a4a; --danger-soft:#fbeeee; --danger-border:#e2c4c2; --danger-emphasis:#8f3a3a;
+    --warn:#8a520d; --warn-soft:#fff4e6; --warn-border:#f0d29a;
+    --k-lore:#5b5ca8; --k-lore-soft:#ececf6; --k-lore-border:#c9cbe8; --k-lore-text:#43448a;
+    --mutation-color:#7c5cbf;
+    --diff-now:#7d6353; --diff-now-soft:#f2ebe3; --diff-now-edge:#cfbdaa;
+    --diff-was:#566b7a; --diff-was-soft:#e7edf1; --diff-was-edge:#b1c2ce;
+    --shadow:rgba(36,36,36,0.06); --shadow2:rgba(36,36,36,0.10); --shadow-pane:rgba(36,36,36,0.13);
+    --scrim:rgba(25,40,35,0.28);
+
+    --sans:"Segoe UI",system-ui,sans-serif; --serif:Georgia,"Times New Roman",serif; --mono:Consolas,ui-monospace,monospace;
+    --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:15px; --fs-xl:16px; --fs-2xl:20px; --fs-prose:16px;
+    --w-regular:400; --w-medium:500; --w-semibold:600; --w-bold:700;
+    --sp-0:2px; --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+    --r-sm:4px; --r-md:6px; --r-lg:10px; --r-pill:999px;
+    --elev-1:0 2px 8px var(--shadow); --elev-2:0 6px 18px var(--shadow2); --elev-3:0 16px 36px var(--shadow-pane);
+    color-scheme:light;
+  }
+  /* ---- tokens: DARK ---- */
+  :root:not([data-theme="light"]){}
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+    --app-bg:#14181a; --board:#181c1a; --surface:#1f2522; --panel:#20272a; --inset:#242a28;
+    --tier1:#29322e; --tier2:#333e39; --tier3:#404d47; --tier-rail:#46534c;
+    --border:#3a4541; --border-strong:#4a5651; --divider:#2a322f;
+    --text:#e8edeb; --text-2:#a9b6b0; --text-3:#7e8a84;
+    --accent:#6cc4a6; --accent-strong:#4ea88c; --accent-deep:#2f7a64; --accent-emphasis:#7cc0a1;
+    --accent-soft:#1f3a32; --accent-soft2:#2a4a3f; --accent-drop:#1d3026;
+    --star:#d4b94e; --star-soft:#3a3216; --star-border:#5e5430;
+    --danger:#d97070; --danger-soft:#3a2424; --danger-border:#5a3838; --danger-emphasis:#e58a8a;
+    --warn:#e6c084; --warn-soft:#2c2414; --warn-border:#5a4a24;
+    --k-lore:#9a9bd6; --k-lore-soft:#2a2c46; --k-lore-border:#3a3d62; --k-lore-text:#b6b8e4;
+    --mutation-color:#9a7fe0;
+    --diff-now:#d9a184; --diff-now-soft:#3b2a21; --diff-now-edge:#6d4a36;
+    --diff-was:#8fb6d2; --diff-was-soft:#1f2d38; --diff-was-edge:#3d5a70;
+    --shadow:rgba(0,0,0,0.40); --shadow2:rgba(0,0,0,0.50); --shadow-pane:rgba(0,0,0,0.55);
+    --scrim:rgba(0,0,0,0.50); color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --app-bg:#14181a; --board:#181c1a; --surface:#1f2522; --panel:#20272a; --inset:#242a28;
+    --tier1:#29322e; --tier2:#333e39; --tier3:#404d47; --tier-rail:#46534c;
+    --border:#3a4541; --border-strong:#4a5651; --divider:#2a322f;
+    --text:#e8edeb; --text-2:#a9b6b0; --text-3:#7e8a84;
+    --accent:#6cc4a6; --accent-strong:#4ea88c; --accent-deep:#2f7a64; --accent-emphasis:#7cc0a1;
+    --accent-soft:#1f3a32; --accent-soft2:#2a4a3f; --accent-drop:#1d3026;
+    --star:#d4b94e; --star-soft:#3a3216; --star-border:#5e5430;
+    --danger:#d97070; --danger-soft:#3a2424; --danger-border:#5a3838; --danger-emphasis:#e58a8a;
+    --warn:#e6c084; --warn-soft:#2c2414; --warn-border:#5a4a24;
+    --k-lore:#9a9bd6; --k-lore-soft:#2a2c46; --k-lore-border:#3a3d62; --k-lore-text:#b6b8e4;
+    --mutation-color:#9a7fe0;
+    --diff-now:#d9a184; --diff-now-soft:#3b2a21; --diff-now-edge:#6d4a36;
+    --diff-was:#8fb6d2; --diff-was-soft:#1f2d38; --diff-was-edge:#3d5a70;
+    --shadow:rgba(0,0,0,0.40); --shadow2:rgba(0,0,0,0.50); --shadow-pane:rgba(0,0,0,0.55);
+    --scrim:rgba(0,0,0,0.50); color-scheme:dark;
+  }
+
+  *{box-sizing:border-box}
+  body{background:var(--board); color:var(--text); font-family:var(--sans); font-size:var(--fs-md);}
+  .wrap{max-width:860px; margin:0 auto; padding-block:var(--sp-5); padding-inline:var(--sp-4);}
+
+  /* page header */
+  .page-head{display:flex; align-items:flex-start; justify-content:space-between; gap:var(--sp-3); margin-bottom:var(--sp-5);}
+  .page-head h1{font-family:var(--serif); font-weight:var(--w-bold); font-size:var(--fs-2xl); margin:0 0 var(--sp-1); letter-spacing:.2px;}
+  .page-head p{margin:0; color:var(--text-2); font-size:var(--fs-md); max-width:60ch; line-height:1.5;}
+  .theme-cyc{flex:none; width:34px; height:30px; display:inline-flex; align-items:center; justify-content:center;
+    border:1px solid var(--border); border-radius:var(--r-md); background:var(--surface); color:var(--text-2); font-size:var(--fs-xl); cursor:pointer;}
+  .theme-cyc:hover{background:var(--panel); color:var(--text);}
+
+  .eyebrow{font-size:var(--fs-xs); font-weight:var(--w-semibold); letter-spacing:.07em; text-transform:uppercase; color:var(--text-3);}
+
+  /* ---- lore card ---- */
+  .lore-card{background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--elev-1); overflow:hidden;}
+  .lc-head{padding:var(--sp-3) var(--sp-5) var(--sp-2); border-bottom:1px solid var(--divider);}
+  .lc-titlerow{display:flex; align-items:flex-start; justify-content:space-between; gap:var(--sp-4);}
+  .lc-title-wrap{min-width:0;}
+  .lc-title{font-family:var(--serif); font-size:var(--fs-2xl); font-weight:var(--w-bold); color:var(--text); border-bottom:1px solid transparent; padding-bottom:2px; display:flex; align-items:center; gap:8px;}
+  .lc-kindchip{font-family:var(--sans); font-size:var(--fs-xs); font-weight:var(--w-semibold); letter-spacing:.04em; text-transform:uppercase;
+    color:var(--k-lore-text); background:var(--k-lore-soft); border:1px solid var(--k-lore-border); border-radius:var(--r-pill); padding:2px 8px;}
+
+  /* layer control (right of title) */
+  .layer-ctrl{flex:none; display:flex; flex-direction:column; align-items:flex-end; gap:4px;}
+  .rotary{display:inline-flex; align-items:center; gap:7px; padding:4px 9px 4px 8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text-2); border-radius:var(--r-md); cursor:pointer; font-family:var(--sans); font-size:var(--fs-md);
+    transition:background-color 80ms linear, color 80ms linear, border-color 80ms linear;}
+  .rotary:hover{background:var(--panel); color:var(--text); border-color:var(--border-strong);}
+  .rotary .dial{width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; font-size:14px; color:var(--text-3); transition:transform 220ms ease-out;}
+  .rotary:active .dial{transform:rotate(120deg);}
+  .rotary .rlabel{font-weight:var(--w-semibold);}
+  .rotary.live{border-color:var(--accent-emphasis); color:var(--accent-emphasis);}
+  .rotary.live .dial{color:var(--accent-emphasis);}
+
+  /* provenance strip */
+  .lc-prov{margin-top:8px; display:flex; align-items:center; gap:7px; font-size:var(--fs-sm); padding:5px 10px; border-radius:var(--r-sm);
+    border:1px solid var(--warn-border); background:var(--warn-soft); color:var(--warn);}
+  .lc-prov .gl{font-size:13px;}
+  .lc-prov.book{border-color:var(--k-lore-border); background:var(--k-lore-soft); color:var(--k-lore-text);}
+
+  /* body */
+  .lc-body{position:relative; min-height:210px;}
+  .prose{font-family:var(--serif); font-size:var(--fs-prose); line-height:1.65; color:var(--text); padding:var(--sp-5) var(--sp-5) var(--sp-4); max-width:62ch;}
+  .prose.editable{outline:none;}
+  .prose p{margin:0 0 .8em;}
+  /* read-only overlay while parked */
+  .overlay{position:absolute; inset:0; background:var(--surface); display:flex; flex-direction:column;}
+  .ribbon{display:flex; align-items:center; gap:8px; font-family:var(--sans); font-size:var(--fs-xs); font-weight:var(--w-semibold);
+    letter-spacing:.04em; text-transform:uppercase; padding:6px var(--sp-5); border-bottom:1px solid var(--divider);}
+  .ribbon.snap{color:var(--diff-was); background:var(--diff-was-soft);}
+  .ribbon.mut{color:var(--mutation-color); background:color-mix(in srgb,var(--mutation-color) 12%, transparent);}
+  .overlay .prose{overflow:auto;}
+  del{color:var(--diff-was); background:var(--diff-was-soft); text-decoration:line-through; text-decoration-color:color-mix(in srgb,var(--diff-was) 60%,transparent); border-radius:3px; padding:0 1px;}
+  ins{color:var(--diff-now); background:var(--diff-now-soft); text-decoration:none; border-radius:3px; padding:0 1px;}
+  .mono-mut{color:var(--mutation-color); font-weight:var(--w-semibold);}
+
+  /* ---- foot dock: rotary + track ---- */
+  .footdock{border-top:1px solid var(--divider); background:var(--inset);}
+  .fd-main{display:flex; align-items:stretch; gap:var(--sp-4); padding:8px 14px; min-height:60px;}
+  .fd-rotary-col{flex:none; display:flex; align-items:center;}
+  .fd-track{position:relative; flex:1 1 auto; min-width:0;}
+  .fd-right{flex:none; display:flex; align-items:center;}
+
+  /* the shared ruled baseline */
+  .rail-line{position:absolute; left:0; right:0; bottom:22px; height:1px; background:var(--border);}
+
+  /* SNAPSHOT visual language: notches into the edge, Live at right, warm/cool */
+  .notch{position:absolute; bottom:22px; transform:translateX(-50%); width:16px; height:26px; border:0; background:none; cursor:pointer; display:flex; align-items:flex-end; justify-content:center;}
+  .notch i{display:block; width:4px; height:9px; border:1.5px solid var(--diff-was); border-radius:1px; background:transparent; transition:box-shadow 80ms linear;}
+  .notch.kept i{width:3px; height:17px; border:0; background:var(--diff-was);}
+  .notch.live i{width:3px; height:21px; border:0; border-radius:2px; background:var(--diff-now);}
+  .notch:hover i, .notch.current i{box-shadow:0 0 0 2px var(--diff-was-soft);}
+  .notch.live.current i{box-shadow:0 0 0 3px var(--diff-now-soft);}
+  .tick{position:absolute; bottom:8px; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:2px; pointer-events:none;}
+  .tick b{width:1px; height:5px; background:var(--border);}
+  .tick em{font-style:normal; font-size:var(--fs-xs); color:var(--text-3); opacity:.75;}
+  .playhead{position:absolute; bottom:22px; transform:translateX(-50%); pointer-events:none; transition:left 160ms ease-out; display:flex; flex-direction:column; align-items:center;}
+  .playhead .stem{width:1.5px; height:28px; background:var(--diff-was);}
+  .playhead .cap{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid var(--diff-was); position:absolute; top:-8px;}
+
+  /* MUTATION visual language: beads on a rail, home at left, violet */
+  .mut-strip{display:flex; align-items:center; gap:10px; height:100%;}
+  .mut-home{width:20px;height:20px;border-radius:6px;flex:none;border:2px solid color-mix(in srgb,var(--mutation-color) 42%,transparent); background:var(--surface); color:var(--mutation-color); display:inline-flex;align-items:center;justify-content:center; cursor:pointer; font-size:12px;}
+  .mut-home.current{background:var(--mutation-color); border-color:var(--mutation-color); color:#fff;}
+  .mut-rail{position:relative; flex:1 1 auto; display:flex; align-items:center; gap:34px; padding:0 6px; min-height:22px;}
+  .mut-rail::before{content:"";position:absolute; left:0; right:0; top:50%; height:2px; background:color-mix(in srgb,var(--mutation-color) 24%,transparent);}
+  .bead{position:relative; width:14px;height:14px;border-radius:50%; border:2px solid color-mix(in srgb,var(--mutation-color) 42%,transparent); background:var(--surface); cursor:pointer;}
+  .bead.passed{background:color-mix(in srgb,var(--mutation-color) 42%,transparent);}
+  .bead.current{background:var(--mutation-color); border-color:var(--mutation-color);}
+  .mut-asof{flex:none; font-size:var(--fs-sm); color:var(--mutation-color); font-weight:var(--w-semibold);}
+
+  /* camera capture (snapshots only) */
+  .capture{display:inline-flex;align-items:center;justify-content:center;width:30px;height:26px;padding:0;color:var(--text-2);background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);cursor:pointer;}
+  .capture:hover{border-color:var(--diff-now); color:var(--diff-now);}
+  .capture svg{width:16px;height:16px;}
+
+  /* actions row (parked) */
+  .fd-actions{display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:8px 14px; border-top:1px solid var(--divider); background:var(--panel);}
+  .asof{font-size:var(--fs-sm); font-weight:var(--w-semibold); color:var(--diff-was); font-variant-numeric:tabular-nums;}
+  .desc{font-size:var(--fs-sm); color:var(--text-2); font-style:italic;}
+  .segmented{display:inline-flex; border:1px solid var(--border); border-radius:var(--r-sm); overflow:hidden;}
+  .seg{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:var(--fs-sm);padding:3px 9px;border:0;border-left:1px solid var(--border);background:var(--surface);color:var(--text-2);cursor:pointer;}
+  .seg:first-child{border-left:0;}
+  .seg:hover{background:var(--inset);}
+  .seg.on{background:var(--accent-soft); color:var(--accent-emphasis); font-weight:600;}
+  .seg[data-tone="warm"].on{background:var(--diff-now-edge); color:var(--text);}
+  .seg[data-tone="cool"].on{background:var(--diff-was-edge); color:var(--text);}
+  .act{font-size:var(--fs-sm); padding:4px 11px; border:1px solid var(--border); border-radius:var(--r-md); background:var(--surface); cursor:pointer; color:var(--text);}
+  .act:hover{background:var(--inset);}
+  .act.restore{border-color:var(--accent); color:var(--accent-emphasis); font-weight:600;}
+  .act.restore:hover{background:var(--accent-soft);}
+  .act.del:hover{border-color:var(--danger); color:var(--danger); background:var(--danger-soft);}
+  .writes-note{flex-basis:100%; font-size:var(--fs-xs); color:var(--text-3); display:flex; align-items:center; gap:6px;}
+  .writes-note b{color:var(--k-lore-text); font-weight:var(--w-semibold);}
+  .mut-note{flex-basis:100%; font-size:var(--fs-xs); color:var(--text-3);}
+
+  .stage-caption{margin:var(--sp-3) 2px 0; color:var(--text-3); font-size:var(--fs-sm); line-height:1.5;}
+
+  /* study + notes cards */
+  section.block{margin-top:var(--sp-6);}
+  section.block > h2{font-family:var(--serif); font-size:var(--fs-xl); font-weight:var(--w-bold); margin:0 0 var(--sp-1);}
+  section.block > .sub{color:var(--text-2); font-size:var(--fs-md); margin:0 0 var(--sp-4); max-width:64ch; line-height:1.5;}
+  .study-grid{display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-4);}
+  .study-card{background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); padding:var(--sp-4);}
+  .study-card h3{margin:0 0 4px; font-size:var(--fs-md); font-weight:var(--w-semibold);}
+  .study-card .why{margin:10px 0 0; font-size:var(--fs-sm); color:var(--text-2); line-height:1.5;}
+  .study-card .why b{color:var(--text);}
+  .demoline{display:flex; align-items:center; gap:10px; min-height:34px;}
+
+  .axes{display:grid; grid-template-columns:1fr; gap:var(--sp-2);}
+  .axis{display:grid; grid-template-columns:120px 1fr; gap:var(--sp-3); align-items:baseline; padding:10px 12px; border:1px solid var(--border); border-radius:var(--r-md); background:var(--surface);}
+  .axis .name{font-weight:var(--w-semibold); display:flex; align-items:center; gap:7px;}
+  .axis .name .swatch{width:10px;height:10px;border-radius:3px; flex:none;}
+  .axis .what{font-size:var(--fs-sm); color:var(--text-2); line-height:1.5;}
+  .axis .what code{font-family:var(--mono); font-size:11px; background:var(--inset); padding:1px 4px; border-radius:3px; color:var(--text-2);}
+
+  /* toast */
+  .toast{position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(16px); opacity:0; pointer-events:none;
+    background:var(--accent); color:#fff; padding:9px 15px; border-radius:var(--r-md); box-shadow:var(--elev-2); font-size:var(--fs-md); transition:opacity 160ms ease-out, transform 160ms ease-out; z-index:400;}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+  @media (max-width:560px){
+    .study-grid{grid-template-columns:1fr;}
+    .axis{grid-template-columns:1fr;}
+    .lc-titlerow{flex-direction:column; gap:var(--sp-2);}
+    .layer-ctrl{align-items:flex-start;}
+  }
+</style>
+
+<div class="wrap">
+  <header class="page-head">
+    <div>
+      <h1>The Rotary Scrubber</h1>
+      <p>One foot-dock scrubber. An Amiga-style rotary decides which timeline it travels — the character's <em>mutations</em> (story time) or your <em>snapshots</em> (edit time). Click the rotary, drag the track, park on a point. The layer control on the right is the <em>scope</em> snapshots read from.</p>
+    </div>
+    <button class="theme-cyc" id="themeCyc" title="Cycle theme (follow system → light → dark)" aria-label="Cycle theme">◐</button>
+  </header>
+
+  <section class="stage">
+    <article class="lore-card">
+      <div class="lc-head">
+        <div class="lc-titlerow">
+          <div class="lc-title-wrap">
+            <div class="eyebrow">Name</div>
+            <div class="lc-title">Seraphine Vale <span class="lc-kindchip">Character</span></div>
+          </div>
+          <div class="layer-ctrl">
+            <span class="eyebrow">Editing at</span>
+            <button class="rotary layer-rotary live" id="layerRotary" title="Click: edit at Book">
+              <span class="dial" aria-hidden="true">⟳</span><span class="rlabel" id="layerLabel">Series</span>
+            </button>
+          </div>
+        </div>
+        <div class="lc-prov" id="prov"><span class="gl">✎</span><span id="provText"></span></div>
+      </div>
+
+      <div class="lc-body" id="body"><!-- filled by JS --></div>
+
+      <div class="footdock">
+        <div class="fd-main">
+          <div class="fd-rotary-col">
+            <button class="rotary live" id="trackRotary" title="Click: switch the track to Snapshots">
+              <span class="dial" aria-hidden="true">⟳</span><span class="rlabel" id="trackLabel">Mutations</span>
+            </button>
+          </div>
+          <div class="fd-track" id="track"><!-- notches or beads --></div>
+          <div class="fd-right" id="footRight"><!-- camera when snapshots --></div>
+        </div>
+        <div id="actions"><!-- actions row when parked --></div>
+      </div>
+    </article>
+    <p class="stage-caption" id="cap"></p>
+  </section>
+
+  <section class="block">
+    <h2>Rotary vs. a plain toggle</h2>
+    <p class="sub">Same job — flip the track between Mutations and Snapshots — two ways. The rotary is one compact click-to-advance gadget (it's already how this app's theme switch works). The segmented control shows both options at once but eats more width. Both are wired to the card above.</p>
+    <div class="study-grid">
+      <div class="study-card">
+        <h3>A · Amiga rotary</h3>
+        <div class="demoline">
+          <button class="rotary live" id="studyRotary" title="Click to advance"><span class="dial">⟳</span><span class="rlabel" id="studyRotaryLabel">Mutations</span></button>
+          <span style="color:var(--text-3); font-size:var(--fs-sm);">← click to advance</span>
+        </div>
+        <p class="why"><b>For:</b> no popover (dodges the zoom-anchored-dropdown problem), tiny, quiet, native to the app. <b>Against:</b> the other option hides behind a click — leans on the label + tooltip to stay discoverable.</p>
+      </div>
+      <div class="study-card">
+        <h3>B · Segmented</h3>
+        <div class="demoline">
+          <div class="segmented" id="studySeg" role="group" aria-label="Track">
+            <button class="seg" data-track="mutations">Mutations</button>
+            <button class="seg" data-track="snapshots">Snapshots</button>
+          </div>
+        </div>
+        <p class="why"><b>For:</b> both options always visible, zero learning. <b>Against:</b> wider, and it competes with the compare toggle that already lives in the parked actions row — two segmented controls on one strip.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>Three axes, one card</h2>
+    <p class="sub">Why the rotary only unifies two of them: only two are timelines. Layer is a <em>scope</em>, not a time — so it stays its own control, and the snapshot track reads from it.</p>
+    <div class="axes">
+      <div class="axis">
+        <div class="name"><span class="swatch" style="background:var(--k-lore)"></span>Layer</div>
+        <div class="what"><b>Which file you author</b> — Series canon vs. a Book override. Not a timeline; kept as the <code>Editing at</code> selector. Restoring a snapshot writes <em>this</em> layer's file; inheritance re-folds downward exactly as a normal edit would.</div>
+      </div>
+      <div class="axis">
+        <div class="name"><span class="swatch" style="background:var(--mutation-color)"></span>Mutations</div>
+        <div class="what"><b>Story time</b> — how the character's canon is rewritten <em>through the manuscript</em> by in-scene ⤳ markers. Read-only past states; position is the mode. Today it's a cramped rail widget — the rotary promotes it to the full-width foot.</div>
+      </div>
+      <div class="axis">
+        <div class="name"><span class="swatch" style="background:var(--diff-now)"></span>Snapshots</div>
+        <div class="what"><b>Edit time</b> — your own version history of this file, per layer. Notches cut <em>into</em> the edge so they read apart from mutation beads; <code>Live</code> sits at the right, restore captures first.</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  // ---------- content ----------
+  var canon = {
+    series: "Seraphine Vale keeps the ledger of the Coil's debts in a language no living clerk can read. She is patient the way stone is patient. When she smiles, it is a decision, not a feeling.",
+    book:   "Seraphine Vale keeps the ledger of the Coil's debts in a language no living clerk can read — save one apprentice, whom she is quietly teaching. She is patient the way stone is patient."
+  };
+  // snapshots per layer (newest last; Live is implicit at the right)
+  var snaps = {
+    series: [
+      {id:"s1", age:"2 days ago", ago:2, retention:"kept", desc:"before the rewrite",
+       was:"Seraphine Vale keeps the ledger of the Coil's debts in a cipher of her own making. She is patient the way water is patient. When she smiles, it is a courtesy."},
+      {id:"s2", age:"yesterday", ago:1, retention:"thinned", desc:"",
+       was:"Seraphine Vale keeps the ledger of the Coil's debts in a language no living clerk can read. She is patient the way water is patient. When she smiles, it is a decision, not a feeling."},
+      {id:"s3", age:"20 min ago", ago:0.4, retention:"thinned", desc:"",
+       was:"Seraphine Vale keeps the ledger of the Coil's debts in a language no living clerk can read. She is patient the way stone is patient. When she smiles, it is a decision."}
+    ],
+    book: [
+      {id:"b1", age:"5 hours ago", ago:0.9, retention:"kept", desc:"before the apprentice",
+       was:"Seraphine Vale keeps the ledger of the Coil's debts in a language no living clerk can read. She is patient the way stone is patient."}
+    ]
+  };
+  // mutations (story-time) — effective read-only states as of a scene
+  var muts = [
+    {id:"m1", scene:"Scene 5 · #1", label:"Scene 5",
+     eff:"Seraphine Vale keeps the ledger of the Coil's debts in a language no living clerk can read. She is patient the way stone is patient. When she smiles now, it is a blade — the Marrowgate has made her hard."},
+    {id:"m2", scene:"Scene 12 · #2", label:"Scene 12",
+     eff:"Seraphine Vale keeps the ledger still, but the numbers have begun to lean in her favor. She is patient the way a snare is patient. Her loyalty to the Coil is a fiction she maintains for exactly as long as it pays."}
+  ];
+
+  var state = { layer:"series", track:"mutations", mutStop:0, snapPark:null, compare:"both" };
+
+  // ---------- tiny word diff (LCS) ----------
+  function tok(s){ return s.match(/\s+|[^\s]+/g) || []; }
+  function diffHTML(oldS, newS){
+    var a=tok(oldS), b=tok(newS), n=a.length, m=b.length;
+    var dp=[]; for(var i=0;i<=n;i++){dp.push(new Array(m+1).fill(0));}
+    for(i=n-1;i>=0;i--)for(var j=m-1;j>=0;j--)dp[i][j]=a[i]===b[j]?dp[i+1][j+1]+1:Math.max(dp[i+1][j],dp[i][j+1]);
+    var out=[]; i=0; j=0;
+    function esc(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    while(i<n&&j<m){
+      if(a[i]===b[j]){out.push(esc(a[i]));i++;j++;}
+      else if(dp[i+1][j]>=dp[i][j+1]){out.push('<del>'+esc(a[i])+'</del>');i++;}
+      else{out.push('<ins>'+esc(b[j])+'</ins>');j++;}
+    }
+    while(i<n){out.push('<del>'+esc(a[i])+'</del>');i++;}
+    while(j<m){out.push('<ins>'+esc(b[j])+'</ins>');j++;}
+    return out.join('');
+  }
+  function esc(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+  // ---------- helpers ----------
+  var $=function(id){return document.getElementById(id);};
+  function toast(msg){var t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(function(){t.classList.remove('show');},2200);}
+  function layerName(l){return l==="series"?"Series":"Book";}
+
+  // ---------- render ----------
+  function render(){
+    // layer control
+    $('layerLabel').textContent = layerName(state.layer);
+    $('layerRotary').title = "Click: edit at " + (state.layer==="series"?"Book":"Series");
+    // provenance
+    var prov=$('prov');
+    if(state.layer==="series"){ prov.className="lc-prov"; $('provText').innerHTML="Editing <b>Series</b> canon — every book below inherits it"; }
+    else { prov.className="lc-prov book"; $('provText').innerHTML="Overriding at <b>Book</b> — applies here and below"; }
+
+    // track rotary + segmented + study mirrors
+    $('trackLabel').textContent = state.track==="mutations"?"Mutations":"Snapshots";
+    $('trackRotary').title = "Click: switch the track to " + (state.track==="mutations"?"Snapshots":"Mutations");
+    $('studyRotaryLabel').textContent = state.track==="mutations"?"Mutations":"Snapshots";
+    Array.prototype.forEach.call($('studySeg').children,function(b){ b.classList.toggle('on', b.dataset.track===state.track); });
+
+    renderTrack();
+    renderBody();
+    renderActions();
+    renderCaption();
+  }
+
+  function renderTrack(){
+    var track=$('track'), right=$('footRight');
+    if(state.track==="mutations"){
+      right.innerHTML="";
+      var stops = muts;
+      var html='<div class="mut-strip">';
+      html+='<button class="mut-home '+(state.mutStop===0?'current':'')+'" data-stop="0" title="Base — book start (editable)">⌂</button>';
+      html+='<div class="mut-rail">';
+      stops.forEach(function(m,i){
+        var idx=i+1;
+        html+='<button class="bead '+(state.mutStop===idx?'current':(state.mutStop>idx?'passed':''))+'" data-stop="'+idx+'" title="As of '+m.scene+' · read-only"></button>';
+      });
+      html+='</div>';
+      var asof = state.mutStop===0 ? "Base — book start" : ("As of "+muts[state.mutStop-1].label+" · read-only");
+      html+='<span class="mut-asof">'+asof+'</span>';
+      html+='</div>';
+      track.innerHTML=html;
+      track.querySelectorAll('[data-stop]').forEach(function(el){ el.onclick=function(){ state.mutStop=+el.dataset.stop; render(); }; });
+    } else {
+      // snapshots: notches + Live at right + ticks + playhead + camera
+      var list = snaps[state.layer];
+      var N = list.length; // snapshots
+      var total = N+1; // + Live
+      // positions across the track (%). oldest left, Live right.
+      function pos(i){ return total===1 ? 96 : (6 + (88*(i/(total-1)))); }
+      var html='<div class="rail-line"></div>';
+      var ticks=["","","",""];
+      list.forEach(function(s,i){
+        var cls = s.retention==="kept" ? "notch kept" : "notch";
+        var cur = (state.snapPark===s.id)?" current":"";
+        html+='<button class="'+cls+cur+'" style="left:'+pos(i)+'%" data-snap="'+s.id+'" title="'+s.age+(s.desc?" · "+s.desc:"")+'"><i></i></button>';
+        html+='<div class="tick" style="left:'+pos(i)+'%"><b></b><em>'+shortAge(s.age)+'</em></div>';
+      });
+      // Live
+      var liveCur=(state.snapPark===null)?" current":"";
+      html+='<button class="notch live'+liveCur+'" style="left:'+pos(N)+'%" data-snap="live" title="Live — your current draft (editable)"><i></i></button>';
+      html+='<div class="tick" style="left:'+pos(N)+'%"><b></b><em>Live</em></div>';
+      // playhead on the parked (or live) notch
+      var parkIdx = state.snapPark===null ? N : list.findIndex(function(s){return s.id===state.snapPark;});
+      html+='<div class="playhead" style="left:'+pos(parkIdx)+'%"><span class="stem"></span><span class="cap"></span></div>';
+      track.innerHTML=html;
+      track.querySelectorAll('[data-snap]').forEach(function(el){ el.onclick=function(){ state.snapPark = el.dataset.snap==="live"?null:el.dataset.snap; render(); }; });
+      right.innerHTML='<button class="capture" title="Capture a snapshot now" aria-label="Capture snapshot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3l1.6-2h6.8L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.4"/></svg></button>';
+      right.querySelector('.capture').onclick=function(){ toast("Captured — a kept snapshot at the "+layerName(state.layer)+" layer"); };
+    }
+  }
+  function shortAge(a){ if(a.indexOf("day")>=0)return a.replace(" ago",""); if(a.indexOf("hour")>=0)return a.replace("hours","h").replace("hour","h").replace(" ago",""); if(a.indexOf("min")>=0)return a.replace(" ago","").replace(" min","m").replace("yesterday","1d"); if(a==="yesterday")return "1d"; return a; }
+
+  function renderBody(){
+    var body=$('body');
+    var parked = (state.track==="mutations" && state.mutStop>0) || (state.track==="snapshots" && state.snapPark!==null);
+    if(!parked){
+      body.innerHTML='<div class="prose editable"><p>'+esc(canon[state.layer])+'</p></div>';
+      return;
+    }
+    if(state.track==="mutations"){
+      var m=muts[state.mutStop-1];
+      body.innerHTML='<div class="overlay"><div class="ribbon mut"><span>⤳ As of '+esc(m.scene)+' · read-only</span></div><div class="prose"><p>'+esc(m.eff)+'</p></div></div>';
+    } else {
+      var s=byId(snaps[state.layer], state.snapPark);
+      var cur=canon[state.layer];
+      var inner;
+      if(state.compare==="snapshot") inner=esc(s.was);
+      else if(state.compare==="active") inner=esc(cur);
+      else inner=diffHTML(s.was, cur); // both
+      body.innerHTML='<div class="overlay"><div class="ribbon snap"><span>◷ Snapshot · '+esc(s.age)+' · read-only</span>'+(s.desc?'<span class="desc">“'+esc(s.desc)+'”</span>':'')+'</div><div class="prose"><p>'+inner+'</p></div></div>';
+    }
+  }
+  function byId(list,id){ for(var i=0;i<list.length;i++)if(list[i].id===id)return list[i]; return null; }
+
+  function renderActions(){
+    var a=$('actions');
+    if(state.track==="snapshots" && state.snapPark!==null){
+      var s=byId(snaps[state.layer], state.snapPark);
+      a.innerHTML=
+        '<div class="fd-actions">'+
+          '<span class="asof">'+esc(s.age)+'</span>'+
+          '<div class="segmented" id="cmp" role="group" aria-label="Compare">'+
+            '<button class="seg" data-cmp="active">Active</button>'+
+            '<button class="seg" data-tone="cool" data-cmp="snapshot">Snapshot</button>'+
+            '<button class="seg" data-cmp="both">Both</button>'+
+          '</div>'+
+          '<button class="act restore">Restore</button>'+
+          '<button class="act">'+(s.retention==="kept"?"Pinned":"Pin")+'</button>'+
+          '<button class="act del">Delete</button>'+
+          '<div class="writes-note">↩ Restoring writes the <b>'+layerName(state.layer)+'</b> layer'+(state.layer==="series"?' — every book re-folds from it':'')+'.</div>'+
+        '</div>';
+      Array.prototype.forEach.call(a.querySelectorAll('#cmp .seg'),function(b){
+        b.classList.toggle('on', b.dataset.cmp===state.compare);
+        b.onclick=function(){ state.compare=b.dataset.cmp; renderBody(); Array.prototype.forEach.call(a.querySelectorAll('#cmp .seg'),function(x){x.classList.toggle('on',x.dataset.cmp===state.compare);}); };
+      });
+      a.querySelector('.restore').onclick=function(){ toast("Restored · wrote the "+layerName(state.layer)+" layer (a safety snapshot was captured first)"); state.snapPark=null; render(); };
+      a.querySelector('.del').onclick=function(){ toast("(mock) delete is the only irreversible gesture — it would confirm first"); };
+    } else if(state.track==="mutations" && state.mutStop>0){
+      a.innerHTML='<div class="fd-actions"><span class="asof" style="color:var(--mutation-color)">'+esc(muts[state.mutStop-1].scene)+'</span><div class="mut-note">Mutations are canon set inside scenes — this axis is read-only here; there is no restore. Jump to the scene to change the marker.</div></div>';
+    } else {
+      a.innerHTML="";
+    }
+  }
+
+  function renderCaption(){
+    var c=$('cap');
+    if(state.track==="mutations"){
+      c.innerHTML='<b>Track: Mutations (story time)</b> — beads on a rail, home ⌂ at the left is the editable base; each violet bead is a canon change made in a scene. Park one to read the character <em>as of</em> that point. Now flip the rotary to Snapshots.';
+    } else {
+      c.innerHTML='<b>Track: Snapshots (edit time)</b> — notches cut into the edge, <em>Live</em> at the right is your editable draft; filled = kept, hollow = automatic. Park one to see the diff, then Restore. The set changes with the <em>'+layerName(state.layer)+'</em> layer above — try switching layers.';
+    }
+  }
+
+  // ---------- wire ----------
+  $('trackRotary').onclick=function(){ state.track = state.track==="mutations"?"snapshots":"mutations"; render(); };
+  $('studyRotary').onclick=function(){ state.track = state.track==="mutations"?"snapshots":"mutations"; render(); };
+  Array.prototype.forEach.call($('studySeg').children,function(b){ b.onclick=function(){ state.track=b.dataset.track; render(); }; });
+  $('layerRotary').onclick=function(){ state.layer = state.layer==="series"?"book":"series"; state.snapPark=null; state.mutStop=0; render(); };
+
+  // theme cycle (the app's own Amiga gadget, for real here)
+  var themeOrder=["system","light","dark"], glyph={system:"◐",light:"☀",dark:"☾"}, ti=0;
+  $('themeCyc').onclick=function(){ ti=(ti+1)%3; var t=themeOrder[ti]; if(t==="system"){document.documentElement.removeAttribute("data-theme");}else{document.documentElement.setAttribute("data-theme",t);} $('themeCyc').textContent=glyph[t]; $('themeCyc').title="Theme: "+t+" (click to cycle)"; };
+
+  render();
+})();
+</script>

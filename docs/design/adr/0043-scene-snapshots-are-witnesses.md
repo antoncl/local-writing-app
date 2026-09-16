@@ -486,7 +486,9 @@ so that a later design is not bound by a sketch made here.
 - **Restoring world state.** Not constructible (see Context), and it would contradict the derived-never-stored
   rule the mutation model is built on.
 - **Snapshots of lore entries or other node kinds.** Out of v1 scope; the layer-composition question
-  above must be answered first.
+  above must be answered first. *(Lifted by ADR-0087: a snapshot freezes the single owning-layer file,
+  so the layer-composition question dissolves — restore is an edit that inheritance re-folds. The witness
+  stays scene-only.)*
 - **Whole-project checkpoints.** A coherent but different feature answering a different question. The
   catastrophic case is already partly covered by `.migration-backups/`.
 - **Git, or any version-control dependency.**

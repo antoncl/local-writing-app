@@ -130,3 +130,93 @@ def delete_snapshot(project: CurrentProject, scene_id: str, snapshot_id: str) ->
     """
     with translate_errors():
         return project.delete_snapshot(scene_id, snapshot_id)
+
+
+# ----- node-scoped routes: any node kind (ADR-0087 / #1981) -----------------
+#
+# The same store, addressed by node id for any kind. Each route resolves and
+# authorises the node's kind via `node_snapshot_kind` (fail-closed: 404 unknown,
+# 422 unsupported kind or inherited/built-in node) and hands it to the shared
+# service method, whose `kind` default leaves the scene routes above unchanged.
+# The record format and on-disk layout are identical; only the store root (the
+# node's owning layer) and the witness (scene-only) vary by kind. A scene
+# reaches the exact same store through either route.
+
+
+def _node_kind(project: CurrentProject, node_id: str) -> str:
+    """The node's snapshot-eligible kind, or a refusal. The store fails closed on
+    kinds and layers S1 does not support — an unindexed id is a 404, an
+    unsupported kind or an inherited/built-in node a 422 (see the service's
+    `node_snapshot_kind`). Called inside `translate_errors`, so its
+    `ProjectServiceError` becomes the HTTP status."""
+    return project.node_snapshot_kind(node_id)
+
+
+@router.get("/api/nodes/{node_id}/snapshots", response_model=SnapshotList)
+def list_node_snapshots(project: CurrentProject, node_id: str) -> SnapshotList:
+    """Every snapshot of this node, oldest first (ADR-0087)."""
+    with translate_errors():
+        return project.list_snapshots(node_id, kind=_node_kind(project, node_id))
+
+
+@router.post("/api/nodes/{node_id}/snapshots", response_model=Snapshot)
+def capture_node_snapshot(
+    project: CurrentProject, node_id: str, request: CaptureSnapshotRequest | None = None
+) -> Snapshot:
+    """The camera for any node. `dynamic_context` is a scene concern; a
+    non-scene caller sends no body and captures the bytes and record without a
+    witness (ADR-0087 §5)."""
+    with translate_errors():
+        return project.capture_snapshot(
+            node_id,
+            request.dynamic_context if request is not None else None,
+            kind=_node_kind(project, node_id),
+        )
+
+
+@router.get("/api/nodes/{node_id}/snapshots/{snapshot_id}", response_model=SnapshotDetail)
+def read_node_snapshot(project: CurrentProject, node_id: str, snapshot_id: str) -> SnapshotDetail:
+    """The stored body, parsed for the read-only overlay. Reading a snapshot
+    never touches the live node."""
+    with translate_errors():
+        return project.read_snapshot(node_id, snapshot_id, kind=_node_kind(project, node_id))
+
+
+@router.post("/api/nodes/{node_id}/snapshots/{snapshot_id}/restore")
+def restore_node_snapshot(project: CurrentProject, node_id: str, snapshot_id: str):
+    """Capture-then-restore in one call, for any node. No `response_model`: the
+    restored node returns in its own shape (Scene, ResearchNote, …), which
+    FastAPI cannot pick a single model for — mirrors `GET /api/nodes/{id}`."""
+    with translate_errors():
+        return project.restore_snapshot(node_id, snapshot_id, kind=_node_kind(project, node_id))
+
+
+@router.post("/api/nodes/{node_id}/snapshots/{snapshot_id}/pin", response_model=Snapshot)
+def pin_node_snapshot(project: CurrentProject, node_id: str, snapshot_id: str) -> Snapshot:
+    """Flip `retention` from `thinned` to `kept` (ADR-0043 Amendment 1)."""
+    with translate_errors():
+        return project.pin_snapshot(node_id, snapshot_id, kind=_node_kind(project, node_id))
+
+
+@router.put(
+    "/api/nodes/{node_id}/snapshots/{snapshot_id}/description", response_model=Snapshot
+)
+def set_node_snapshot_description(
+    project: CurrentProject,
+    node_id: str,
+    snapshot_id: str,
+    request: SetSnapshotDescriptionRequest,
+) -> Snapshot:
+    """Set (or clear) the snapshot's one-line description (#468)."""
+    with translate_errors():
+        return project.set_snapshot_description(
+            node_id, snapshot_id, request.description, kind=_node_kind(project, node_id)
+        )
+
+
+@router.delete("/api/nodes/{node_id}/snapshots/{snapshot_id}", response_model=SnapshotList)
+def delete_node_snapshot(project: CurrentProject, node_id: str, snapshot_id: str) -> SnapshotList:
+    """Remove one snapshot; returns what remains so the strip re-lists in one
+    call. The feature's only irreversible gesture."""
+    with translate_errors():
+        return project.delete_snapshot(node_id, snapshot_id, kind=_node_kind(project, node_id))

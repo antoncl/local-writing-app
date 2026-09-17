@@ -116,6 +116,18 @@ ANCESTOR_RESTORE_SAFE_KINDS = frozenset({"lore"})
 # `node_override_snapshot_kind` / `_resolve_override_snapshot_target`.
 OVERRIDE_SNAPSHOT_KINDS = frozenset({"lore"})
 
+# The reserved scope at the authoring layer that override snapshot stores nest
+# under: `<authoring-layer>/.overrides/snapshots/<entity_id>/`, NOT the layer's
+# plain `snapshots/<entity_id>/`. A base store is `<owning-layer>/snapshots/
+# <entity_id>/`; were an override to use the plain `snapshots/`, the two would
+# become the SAME directory the instant a fork or promote moved the entity's
+# ownership into the authoring layer — and then a base restore would byte-write a
+# delta over the base file (or an override restore a full entry over a delta),
+# silent corruption. The `.overrides` scope keeps the base and override lanes
+# structurally distinct for all time; like every snapshot store it is excluded
+# from the index (it is not a family folder, so the node walk never globs it).
+OVERRIDE_STORE_SCOPE = ".overrides"
+
 
 def _owning_layer_is_writable(layer: IndexLayer | None) -> bool:
     """Whether a restore may byte-write this owning layer's file at all.
@@ -388,7 +400,12 @@ class SceneSnapshotsMixin:
         if layer is None:
             raise ProjectServiceError("Unknown authoring layer.", 422)
         node_id = self._build_node_index(root).canonical_id(entity_id)
-        return layer.folder, node_id, self._override_file_for_target(layer.folder, node_id)
+        # Store root = the authoring layer's reserved `.overrides` scope, so the
+        # override lane never aliases the base lane at the same layer (see
+        # OVERRIDE_STORE_SCOPE). The delta file itself lives at the real layer
+        # folder's `overrides/`, resolved here from `layer.folder`.
+        store_root = layer.folder / OVERRIDE_STORE_SCOPE
+        return store_root, node_id, self._override_file_for_target(layer.folder, node_id)
 
     def node_snapshot_kind(self, node_id: str) -> str:
         """Resolve a node id to its kind for the node-scoped routes, or refuse.
@@ -644,13 +661,16 @@ class SceneSnapshotsMixin:
         # implicit set is *not observed* rather than empty. The witness records
         # two sources, and a later comparison narrows membership to what both
         # sides saw instead of reporting every detected entity as removed.
-        self._capture(root, node_id, path, retention="thinned", kind=kind)
-
         stored = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
+        # Read the frozen snapshot BEFORE the capture-first below: that capture is
+        # `thinned` and runs `_thin`, which can evict this very snapshot when it is
+        # one of the oldest automatic ones — reading after would raise on a restore
+        # of an old thinned snapshot and lose it.
         if record.schema_version == migrations.CURRENT_VERSION:
             # ADR-0043: prose is restored byte-exact when the snapshot is already
             # at the current schema (the common case).
-            self._atomic_write_bytes(path, stored.read_bytes())
+            frozen_bytes = stored.read_bytes()
+            migrated = None
         else:
             # ADR-0071 §7: the snapshot predates the current schema — migrate its
             # body over one document on the way out, leaving the immutable stored
@@ -661,6 +681,12 @@ class SceneSnapshotsMixin:
             migrated = migrations.migrate_document(
                 migrations.MigratableDocument(front_matter, body), record.schema_version
             )
+
+        self._capture(root, node_id, path, retention="thinned", kind=kind)
+
+        if migrated is None:
+            self._atomic_write_bytes(path, frozen_bytes)
+        else:
             self._write_markdown_with_front_matter(path, migrated.front_matter, migrated.body)
         # (unchanged below) — the explicit structural index write still runs for
         # both branches; the byte branch bypassed the write hook, the migrate
@@ -729,26 +755,34 @@ class SceneSnapshotsMixin:
         witness: lore heals nothing, and a delta has nothing scene-shaped to
         witness.
         """
+        stored = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
+        # Read the frozen bytes BEFORE the capture-first: that capture is `thinned`
+        # and runs `_thin`, which can evict this very snapshot when it is one of the
+        # oldest automatic ones (the read-after-thin footgun the base path shares).
+        frozen = stored.read_bytes()
         if path is not None:
             self._capture(root, node_id, path, retention="thinned", kind=kind)
-        stored = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
-        if path is None:
-            # The override was reverted-to-canon since capture; recreate its delta
-            # file at the authoring layer before writing the frozen bytes back.
-            path = self._recreate_override_path(root, stored)
-        self._atomic_write_bytes(path, stored.read_bytes())
+            target = path
+        else:
+            # Reverted-to-canon since capture (no current delta ⇒ no capture-first
+            # ran, so `stored` still exists); recreate the delta at the authoring
+            # layer before writing the frozen bytes back.
+            target = self._recreate_override_path(root, stored)
+        self._atomic_write_bytes(target, frozen)
         node_index_gate.invalidate()
         return self.read_node(node_id)
 
-    def _recreate_override_path(self, layer_folder: Path, stored: Path) -> Path:
+    def _recreate_override_path(self, store_root: Path, stored: Path) -> Path:
         """Mint a delta-file path when restoring an override reverted-to-canon
         since capture. The filename is cosmetic — the `target` front-matter key is
         the join — so it derives from the frozen snapshot's own title, the shape
-        `_write_override_file` mints.
+        `_write_override_file` mints. The delta lives at the real layer folder's
+        `overrides/`, which is the parent of the override store scope (`store_root`
+        = `<layer>/.overrides`).
         """
         front_matter, _ = self._read_markdown_with_front_matter(stored, strict=True)
         title = str(front_matter.get("title") or "override")
-        return self._filepath_for_new_node(layer_folder / OVERRIDES_FOLDER, title)
+        return self._filepath_for_new_node(store_root.parent / OVERRIDES_FOLDER, title)
 
     def finalize_scene(
         self, scene_id: str, body: str, dynamic_context: list[str] | None = None

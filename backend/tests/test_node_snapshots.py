@@ -36,9 +36,13 @@ from app.models import LoreEntry, SaveLoreEntryRequest, SaveResearchNoteRequest
 from app.scope import WorkScope
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import IndexLayer
+from app.services.project.node_index_gate import node_index_gate
 from app.services.project.node_index_snapshot import SNAPSHOT_RELATIVE_PATH
 from app.services.project.overrides import OVERRIDES_FOLDER
-from app.services.project.scene_snapshots import _owning_layer_is_writable
+from app.services.project.scene_snapshots import (
+    OVERRIDE_STORE_SCOPE,
+    _owning_layer_is_writable,
+)
 from app.services.project_service import ProjectService
 
 
@@ -744,7 +748,9 @@ class LoreOverrideSnapshotTests(unittest.TestCase):
         )
 
     def _override_store(self) -> Path:
-        return self.book / "snapshots" / self.entity_id
+        # The override lane nests under the authoring layer's reserved `.overrides`
+        # scope, never the plain `snapshots/` a base store uses (ADR-0087 §3b fix).
+        return self.book / OVERRIDE_STORE_SCOPE / "snapshots" / self.entity_id
 
     def _capture(self) -> dict:
         response = self.client.post(
@@ -867,17 +873,65 @@ class LoreOverrideSnapshotTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200, deleted.text)
         self.assertNotIn(kept["id"], [s["id"] for s in deleted.json()["snapshots"]])
 
-    def test_the_override_store_is_not_indexed(self) -> None:
+    def test_capturing_an_override_does_not_leak_into_the_fold(self) -> None:
+        # The frozen delta copy carries a `target:` key, so a faulty exclusion
+        # could fold it in as a phantom override. Force a real cold rebuild (not
+        # the warm process-global memo) and confirm exactly the one real override
+        # is collected and no snapshot-store path entered the node candidates.
         self._capture()
-        (self.book / SNAPSHOT_RELATIVE_PATH).unlink(missing_ok=True)
+        node_index_gate.invalidate()
         index = self.service._build_node_index(self.book)
-        under_snapshots = [
+        records = index.overrides_by_target.get(self.entity_id, [])
+        self.assertEqual(len(records), 1, "the snapshot copy leaked in as a phantom override")
+        leaked = [
             str(entry.path)
             for entries in index.candidates.values()
             for entry in entries
-            if "snapshots" in entry.path.parts
+            if OVERRIDE_STORE_SCOPE in entry.path.parts or "snapshots" in entry.path.parts
         ]
-        self.assertEqual(under_snapshots, [])
+        self.assertEqual(leaked, [])
+
+    def test_a_fork_does_not_alias_the_override_store_to_the_base_lane(self) -> None:
+        # The corruption the `.overrides` scope prevents: an override snapshot then
+        # a fork (which moves ownership INTO the authoring layer) must not let the
+        # base route surface the override delta as a base snapshot and byte-write
+        # it over the forked base file. The two stores must be different dirs.
+        override = self._capture()
+        self.assertTrue(self._override_store().is_dir())
+        self.service.fork_lore_entry(self.entity_id)  # book now OWNS E
+        node_index_gate.invalidate()
+        base_store = self.book / "snapshots" / self.entity_id
+        self.assertNotEqual(base_store.resolve(), self._override_store().resolve())
+        base_list = (
+            self.client.get(f"/api/nodes/{self.entity_id}/snapshots").json().get("snapshots", [])
+        )
+        self.assertNotIn(
+            override["id"],
+            [s["id"] for s in base_list],
+            "the override snapshot aliased into the base lane after a fork",
+        )
+
+    def test_restoring_an_old_thinned_override_snapshot_does_not_500(self) -> None:
+        # Read-after-thin footgun: the capture-first (thinned) can evict the very
+        # snapshot being restored. Accumulate >AUTOMATIC_KEEP thinned pre-restore
+        # snapshots, then restore the oldest — it must not 500.
+        kept = self._capture()
+        for _ in range(6):
+            restored = self.client.post(
+                f"/api/nodes/{self.entity_id}/snapshots/{kept['id']}/restore"
+                f"?layer={self.book_layer}"
+            )
+            self.assertEqual(restored.status_code, 200, restored.text)
+        listed = self.client.get(
+            f"/api/nodes/{self.entity_id}/snapshots?layer={self.book_layer}"
+        ).json()["snapshots"]
+        thinned = [s for s in listed if s["retention"] == "thinned"]
+        self.assertTrue(thinned)
+        oldest = self.client.post(
+            f"/api/nodes/{self.entity_id}/snapshots/{thinned[0]['id']}/restore"
+            f"?layer={self.book_layer}"
+        )
+        self.assertEqual(oldest.status_code, 200, oldest.text)
 
     # ----- fail closed ------------------------------------------------------
 

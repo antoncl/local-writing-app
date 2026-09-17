@@ -131,14 +131,22 @@ class TagNodesMixin:
         index_entry = index.by_id.get(tag_id)
         if index_entry is None or index_entry.kind != "tag":
             raise ProjectServiceError(f"Tag {tag_id} does not exist.", 404)
-        # With a project open, refuse deleting an INHERITED tag: like the old
+        # Refuse deleting a tag owned by an ANCESTOR *project* layer: like the old
         # delete_lore_entry it would unlink the ancestor's own file and — now that
         # tags are snapshottable (S4, #1988) — reap that ancestor's shared snapshot
         # history for every book below (the ancestor-canon hazard the lore S2
-        # review caught). A no-op for an owned or not-yet-indexed tag. No project
-        # open ⇒ a machine-layer vocabulary delete, which the guard cannot scope.
+        # review caught). Scoped by the owning layer rather than
+        # `_reject_inherited_library_write`, which would ALSO refuse the user's own
+        # machine-layer vocabulary tags (a regression): a machine tag's layer
+        # resolves to None here (machine is excluded), and an open-project tag's is
+        # root — both stay deletable; only a resolvable non-root project ancestor
+        # is refused.
         if self.root_path is not None:
-            self._reject_inherited_library_write(tag_id, noun="tag", kind="tag")
+            owning = self.layer_by_id(self.root_path, index_entry.source_layer_id)
+            if owning is not None and not owning.is_root:
+                raise ProjectServiceError(
+                    f"This tag is inherited from {owning.label} and is read-only here.", 409
+                )
         # A redirect (a tag with `merged_into` set) has no survivor to leave
         # behind, so cascade-deleting it is meaningless — but deleting a
         # SURVIVOR takes every tag that redirects to it with it (ADR-0082 §5):

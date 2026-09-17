@@ -351,7 +351,11 @@ class SceneSnapshotsMixin:
         """
         root = self._require_project()
         index = self._build_node_index(root)
-        entry = index.by_id.get(index.canonical_id(node_id))
+        # By the node's OWN id, never the merge-survivor's `canonical_id`: a
+        # snapshot lives under the layer that owns *this* file. A merged (redirect)
+        # tag's snapshots stay at its own layer — canonicalizing here would relocate
+        # them onto the survivor's layer and strand/mis-reap the store (S4 review).
+        entry = index.by_id.get(node_id)
         if entry is None or not entry.source_layer_id:
             return root
         layer = self.layer_by_id(root, entry.source_layer_id)
@@ -433,7 +437,10 @@ class SceneSnapshotsMixin:
         """
         root = self._require_project()
         index = self._build_node_index(root)
-        entry = index.by_id.get(index.canonical_id(node_id))
+        # By the node's OWN id, never the merge-survivor's `canonical_id`: a
+        # snapshot op addresses this node's own file/history/layer (a merged tag is
+        # snapshotted at its own layer, not the survivor's — S4 review).
+        entry = index.by_id.get(node_id)
         if entry is None:
             raise ProjectServiceError(f"Node {node_id} does not exist.", 404)
         if entry.kind not in NODE_SNAPSHOT_KINDS:

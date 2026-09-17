@@ -1071,6 +1071,18 @@ class TagSnapshotRoundTripTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 204, deleted.text)
         self.assertFalse(self._store_dir().exists())
 
+    def test_a_machine_tag_stays_deletable_with_a_project_open(self) -> None:
+        # The inherited-tag guard must not regress deletes of the user's OWN
+        # machine-layer vocabulary: a machine tag's owning layer resolves to None
+        # here (machine is excluded), so the guard leaves it deletable.
+        machine = self.client.post(
+            "/api/tag-entries",
+            json={"title": "Editor", "entry_type": "tag:assistant_tag", "layer_id": ""},
+        )
+        self.assertEqual(machine.status_code, 200, machine.text)
+        deleted = self.client.delete(f"/api/tag-entries/{machine.json()['id']}")
+        self.assertEqual(deleted.status_code, 204, deleted.text)
+
 
 class TagMergeSnapshotTests(unittest.TestCase):
     """A merged tag reverts with its `merged_into` redirects intact, and deleting a
@@ -1101,22 +1113,25 @@ class TagMergeSnapshotTests(unittest.TestCase):
     def _canonical(self, tag_id: str) -> str:
         return self.service._build_node_index(self.root).canonical_id(tag_id)
 
-    def test_restoring_a_survivor_keeps_its_redirects_intact(self) -> None:
+    def test_restoring_a_pre_merge_snapshot_re_resolves_the_redirect_from_bytes(self) -> None:
+        # Capture A while it is a normal tag, then merge A into B (A gets
+        # merged_into=B; canonical_id(A)==B). Restoring A's pre-merge snapshot
+        # writes A's bytes back WITHOUT merged_into, so the next index build
+        # re-resolves canonical_id(A)==A — the merge is undone from the restored
+        # file. This proves redirects reconcile purely from the restored bytes
+        # (ADR-0087 §4) with no reference sweep replayed. (Not vacuous: a restore
+        # that dropped/ignored the map would leave canonical_id(A)==B.)
+        snapshot = self._capture(self.a)
         self.client.post(f"/api/tag-entries/{self.a}/merge", json={"into": self.b})
         self.assertEqual(self._canonical(self.a), self.b)
-        snapshot = self._capture(self.b)
-        self.service.save_tag_entry(
-            self.b, SaveTagEntryRequest(title="renamed", entry_type="tag:tag", metadata={})
-        )
         restored = self.client.post(
-            f"/api/nodes/{self.b}/snapshots/{snapshot['id']}/restore"
+            f"/api/nodes/{self.a}/snapshots/{snapshot['id']}/restore"
         )
         self.assertEqual(restored.status_code, 200, restored.text)
-        self.assertEqual(restored.json()["title"], "mirrors", "the survivor did not revert")
-        # The redirect (on A's untouched file) still resolves through canonical_id —
-        # the restore did not replay the eager reference sweep or drop the map.
         self.assertEqual(
-            self._canonical(self.a), self.b, "the redirect broke after restoring the survivor"
+            self._canonical(self.a),
+            self.a,
+            "restoring the pre-merge snapshot did not undo the redirect",
         )
 
     def test_deleting_a_merged_survivor_reaps_every_cascaded_store(self) -> None:
@@ -1178,6 +1193,32 @@ class TagAncestorSnapshotTests(unittest.TestCase):
             (self.universe / "snapshots" / self.tag_id).is_dir(),
             "the delete reaped the ancestor's shared snapshot store",
         )
+
+    def test_a_book_tag_merged_into_an_ancestor_keeps_its_store_at_the_book(self) -> None:
+        # A book-local tag merged into the inherited (ancestor) tag: its own
+        # pre-merge snapshots must stay listable and reapable at the BOOK (keyed by
+        # its own id), not follow canonical_id to the ancestor layer and strand.
+        book_tag = self.client.post(
+            "/api/tag-entries", json={"title": "echo", "entry_type": "tag:tag"}
+        )
+        self.assertEqual(book_tag.status_code, 200, book_tag.text)
+        book_id = book_tag.json()["id"]
+        captured = self.client.post(f"/api/nodes/{book_id}/snapshots")
+        self.assertEqual(captured.status_code, 200, captured.text)
+        self.assertTrue((self.book / "snapshots" / book_id).is_dir())
+        # Merge the book tag into the ancestor tag (merge checks only the source).
+        merged = self.client.post(
+            f"/api/tag-entries/{book_id}/merge", json={"into": self.tag_id}
+        )
+        self.assertEqual(merged.status_code, 200, merged.text)
+        # Still listable at the book — not stranded at the ancestor layer.
+        listed = self.client.get(f"/api/nodes/{book_id}/snapshots").json()["snapshots"]
+        self.assertIn(captured.json()["id"], [s["id"] for s in listed])
+        # Deleting the book redirect reaps its BOOK store, not the ancestor's.
+        deleted = self.client.delete(f"/api/tag-entries/{book_id}")
+        self.assertEqual(deleted.status_code, 204, deleted.text)
+        self.assertFalse((self.book / "snapshots" / book_id).exists())
+        self.assertTrue((self.universe / "tags" / f"{self.tag_id}.md").exists())
 
 
 if __name__ == "__main__":

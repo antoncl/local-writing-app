@@ -230,6 +230,12 @@ class ResearchNotesMixin:
         for note_id in note_ids:
             with contextlib.suppress(ProjectServiceError):
                 paths.append(self._path_for_node_id(note_id, "research"))
+            # A note and its snapshot store are one unit of deletion (ADR-0043):
+            # a research note is snapshottable since #1981, so drop its store too
+            # or it is the unreachable residue the manuscript delete paths
+            # (delete_scene / delete_structure_node) also clear. Outside the
+            # suppress so it runs even when the note file can't be resolved.
+            self.delete_scene_snapshots(root, note_id)
         self._delete_node_files(tuple(paths))  # unlink all + un-shadow the memo once
 
         TreeStructureService.remove_node_by_id(document.root, node_id)

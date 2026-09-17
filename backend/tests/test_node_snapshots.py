@@ -195,6 +195,24 @@ class ResearchNoteSnapshotRoundTripTests(unittest.TestCase):
         self.assertEqual(response.json()["snapshots"], [])
         self.assertFalse(self._store_dir().exists())
 
+    def test_deleting_the_note_removes_its_snapshot_store(self) -> None:
+        # A note and its store are one unit of deletion (ADR-0043). Now that a
+        # research note is snapshottable, deleting it through the research tree
+        # must take the store too, or it is the orphaned residue the scene delete
+        # paths go out of their way to clear.
+        self._capture()
+        self.assertTrue(self._store_dir().is_dir())
+
+        tree = self.client.get("/api/research-structure").json()
+        leaf = tree["root"]["children"][-1]
+        self.assertEqual(leaf["scene_id"], self.note_id)
+        deleted = self.client.delete(f"/api/research-structure/nodes/{leaf['id']}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+
+        self.assertFalse(
+            self._store_dir().exists(), "the note's snapshot store outlived the note"
+        )
+
     def test_the_research_store_is_not_indexed(self) -> None:
         for _ in range(2):
             self._capture()

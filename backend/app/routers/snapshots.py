@@ -134,8 +134,9 @@ def delete_snapshot(project: CurrentProject, scene_id: str, snapshot_id: str) ->
 
 # ----- node-scoped routes: any node kind (ADR-0087 / #1981) -----------------
 #
-# The same store, addressed by node id for any kind. Each route resolves the
-# node's kind from the index (`lookup_node_kind`) and hands it to the shared
+# The same store, addressed by node id for any kind. Each route resolves and
+# authorises the node's kind via `node_snapshot_kind` (fail-closed: 404 unknown,
+# 422 unsupported kind or inherited/built-in node) and hands it to the shared
 # service method, whose `kind` default leaves the scene routes above unchanged.
 # The record format and on-disk layout are identical; only the store root (the
 # node's owning layer) and the witness (scene-only) vary by kind. A scene

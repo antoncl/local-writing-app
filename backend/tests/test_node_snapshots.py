@@ -32,7 +32,12 @@ from layer_fixtures import declare_full_chain, make_project_folder
 from project_fixtures import open_test_project
 
 from app.main import app
-from app.models import LoreEntry, SaveLoreEntryRequest, SaveResearchNoteRequest
+from app.models import (
+    LoreEntry,
+    SaveLoreEntryRequest,
+    SaveResearchNoteRequest,
+    SaveTagEntryRequest,
+)
 from app.scope import WorkScope
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import IndexLayer
@@ -958,6 +963,221 @@ class LoreOverrideSnapshotTests(unittest.TestCase):
             f"/api/nodes/{self.entity_id}/snapshots?layer=layer_does_not_exist"
         )
         self.assertEqual(refused.status_code, 422, refused.text)
+
+
+class TagSnapshotRoundTripTests(unittest.TestCase):
+    """One tag (motif) through the shipped node routes (ADR-0087 S4). A tag is a
+    body-less, layered node that heals nothing on restore — the base-lore restore
+    path handles it, and the reference sweep is never replayed."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.root = Path(self.temp_dir.name).resolve() / "book"
+        self.service = open_test_project(self.root, "Tag Snapshot Tests")
+        self.client = TestClient(app)
+        created = self.client.post(
+            "/api/tag-entries",
+            json={"title": "Salt and Iron", "entry_type": "tag:tag", "color": "#c33"},
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        self.tag_id = created.json()["id"]
+
+    def _store_dir(self) -> Path:
+        return self.root / "snapshots" / self.tag_id
+
+    def _tag_path(self) -> Path:
+        return self.service._tag_index_entry(self.tag_id).path
+
+    def _capture(self) -> dict:
+        response = self.client.post(f"/api/nodes/{self.tag_id}/snapshots")
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def _color(self) -> str | None:
+        return self.client.get(f"/api/tag-entries/{self.tag_id}").json()["metadata"].get("color")
+
+    def _save_color(self, color: str) -> None:
+        self.service.save_tag_entry(
+            self.tag_id,
+            SaveTagEntryRequest(title="Salt and Iron", entry_type="tag:tag", metadata={"color": color}),
+        )
+
+    def test_capture_writes_the_store_under_the_open_project(self) -> None:
+        snapshot = self._capture()
+        store = self._store_dir()
+        self.assertTrue(store.is_dir(), "the tag store folder was not created")
+        self.assertTrue((store / f"{snapshot['id']}.md").exists())
+        self.assertTrue((store / f"{snapshot['id']}.yaml").exists())
+        self.assertEqual(snapshot["snapshot_of"], self.tag_id)
+
+    def test_read_returns_the_frozen_metadata(self) -> None:
+        # A body-less tag has empty body but field-comparable metadata (the
+        # field-diff input the ADR-0088 surface renders).
+        snapshot = self._capture()
+        response = self.client.get(f"/api/nodes/{self.tag_id}/snapshots/{snapshot['id']}")
+        self.assertEqual(response.status_code, 200, response.text)
+        detail = response.json()
+        self.assertEqual(detail["title"], "Salt and Iron")
+        self.assertEqual(detail["metadata"].get("color"), "#c33")
+
+    def test_byte_restore_reverts_the_tag(self) -> None:
+        snapshot = self._capture()
+        original = self._tag_path().read_bytes()
+        self._save_color("#39c")
+        self.assertEqual(self._color(), "#39c")
+        response = self.client.post(
+            f"/api/nodes/{self.tag_id}/snapshots/{snapshot['id']}/restore"
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["metadata"].get("color"), "#c33")
+        self.assertEqual(self._tag_path().read_bytes(), original)
+
+    def test_a_tag_capture_writes_no_witness(self) -> None:
+        snapshot = self._capture()
+        witness = self.service.read_snapshot_witness(self.root, self.tag_id, snapshot["id"])
+        self.assertIsNone(witness)
+
+    def test_pin_describe_and_delete_over_the_node_route(self) -> None:
+        kept = self._capture()
+        self._save_color("#39c")
+        self.client.post(f"/api/nodes/{self.tag_id}/snapshots/{kept['id']}/restore")
+        listed = self.client.get(f"/api/nodes/{self.tag_id}/snapshots").json()["snapshots"]
+        thinned = [snap for snap in listed if snap["retention"] == "thinned"]
+        self.assertTrue(thinned, "restore did not leave a thinned pre-restore snapshot")
+        pinned = self.client.post(
+            f"/api/nodes/{self.tag_id}/snapshots/{thinned[0]['id']}/pin"
+        )
+        self.assertEqual(pinned.status_code, 200, pinned.text)
+        self.assertEqual(pinned.json()["retention"], "kept")
+
+        described = self.client.put(
+            f"/api/nodes/{self.tag_id}/snapshots/{kept['id']}/description",
+            json={"description": "the colour before the change"},
+        )
+        self.assertEqual(described.status_code, 200, described.text)
+        self.assertEqual(described.json()["description"], "the colour before the change")
+
+        deleted = self.client.delete(f"/api/nodes/{self.tag_id}/snapshots/{kept['id']}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertNotIn(kept["id"], [s["id"] for s in deleted.json()["snapshots"]])
+
+    def test_deleting_the_tag_removes_its_snapshot_store(self) -> None:
+        # A tag and its store are one unit of deletion (ADR-0043); deleting the
+        # tag through its own route must reap the store (the S4 leak).
+        self._capture()
+        self.assertTrue(self._store_dir().is_dir())
+        deleted = self.client.delete(f"/api/tag-entries/{self.tag_id}")
+        self.assertEqual(deleted.status_code, 204, deleted.text)
+        self.assertFalse(self._store_dir().exists())
+
+
+class TagMergeSnapshotTests(unittest.TestCase):
+    """A merged tag reverts with its `merged_into` redirects intact, and deleting a
+    merged survivor reaps every cascaded tag's snapshot store (ADR-0087
+    §4/§Consequences, S4)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.root = Path(self.temp_dir.name).resolve() / "book"
+        self.service = open_test_project(self.root, "Tag Merge Snapshot Tests")
+        self.client = TestClient(app)
+        self.a = self._create("mirror")
+        self.b = self._create("mirrors")
+
+    def _create(self, title: str) -> str:
+        response = self.client.post(
+            "/api/tag-entries", json={"title": title, "entry_type": "tag:tag"}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["id"]
+
+    def _capture(self, tag_id: str) -> dict:
+        response = self.client.post(f"/api/nodes/{tag_id}/snapshots")
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def _canonical(self, tag_id: str) -> str:
+        return self.service._build_node_index(self.root).canonical_id(tag_id)
+
+    def test_restoring_a_survivor_keeps_its_redirects_intact(self) -> None:
+        self.client.post(f"/api/tag-entries/{self.a}/merge", json={"into": self.b})
+        self.assertEqual(self._canonical(self.a), self.b)
+        snapshot = self._capture(self.b)
+        self.service.save_tag_entry(
+            self.b, SaveTagEntryRequest(title="renamed", entry_type="tag:tag", metadata={})
+        )
+        restored = self.client.post(
+            f"/api/nodes/{self.b}/snapshots/{snapshot['id']}/restore"
+        )
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["title"], "mirrors", "the survivor did not revert")
+        # The redirect (on A's untouched file) still resolves through canonical_id —
+        # the restore did not replay the eager reference sweep or drop the map.
+        self.assertEqual(
+            self._canonical(self.a), self.b, "the redirect broke after restoring the survivor"
+        )
+
+    def test_deleting_a_merged_survivor_reaps_every_cascaded_store(self) -> None:
+        # Capture A's own store BEFORE the merge (afterwards A resolves to B).
+        self._capture(self.a)
+        self.client.post(f"/api/tag-entries/{self.a}/merge", json={"into": self.b})
+        self._capture(self.b)
+        store_a = self.root / "snapshots" / self.a
+        store_b = self.root / "snapshots" / self.b
+        self.assertTrue(store_a.is_dir())
+        self.assertTrue(store_b.is_dir())
+        deleted = self.client.delete(f"/api/tag-entries/{self.b}")  # survivor → cascades to A
+        self.assertEqual(deleted.status_code, 204, deleted.text)
+        self.assertFalse(store_b.exists(), "the survivor's store outlived it")
+        self.assertFalse(store_a.exists(), "the cascaded redirect's store was not reaped")
+
+
+class TagAncestorSnapshotTests(unittest.TestCase):
+    """An ancestor-owned tag snapshots under the owning layer (tags are layered +
+    heal nothing, so admitted like an ancestor lore base), and deleting an
+    inherited tag is refused so ancestor canon + its snapshot history survive."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.universe = self.base / "honorverse"
+        self.book = self.universe / "book"
+        self.service = open_test_project(self.book, "Book")
+        make_project_folder(self.service, self.universe, "Universe")
+        declare_full_chain(self.service, self.book, self.base)
+        self.client = TestClient(app)
+        self.tag_id = "tag_ancestor"
+        (self.universe / "tags").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            self.universe / "tags" / f"{self.tag_id}.md",
+            self.tag_id, "Recurrence", "tag:tag", {}, "",
+        )
+        node_index_gate.invalidate()
+        self.service._build_node_index(self.book)
+
+    def test_an_ancestor_tag_snapshots_under_the_owning_layer(self) -> None:
+        response = self.client.post(f"/api/nodes/{self.tag_id}/snapshots")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue((self.universe / "snapshots" / self.tag_id).is_dir())
+        self.assertFalse((self.book / "snapshots" / self.tag_id).exists())
+
+    def test_deleting_an_inherited_tag_is_refused(self) -> None:
+        captured = self.client.post(f"/api/nodes/{self.tag_id}/snapshots")
+        self.assertEqual(captured.status_code, 200, captured.text)
+        self.assertTrue((self.universe / "snapshots" / self.tag_id).is_dir())
+        refused = self.client.delete(f"/api/tag-entries/{self.tag_id}")
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertTrue(
+            (self.universe / "tags" / f"{self.tag_id}.md").exists(),
+            "the delete unlinked the ancestor's tag file",
+        )
+        self.assertTrue(
+            (self.universe / "snapshots" / self.tag_id).is_dir(),
+            "the delete reaped the ancestor's shared snapshot store",
+        )
 
 
 if __name__ == "__main__":

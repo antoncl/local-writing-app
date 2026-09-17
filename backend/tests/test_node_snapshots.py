@@ -32,11 +32,14 @@ from layer_fixtures import declare_full_chain, make_project_folder
 from project_fixtures import open_test_project
 
 from app.main import app
-from app.models import SaveLoreEntryRequest, SaveResearchNoteRequest
+from app.models import LoreEntry, SaveLoreEntryRequest, SaveResearchNoteRequest
+from app.scope import WorkScope
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import IndexLayer
 from app.services.project.node_index_snapshot import SNAPSHOT_RELATIVE_PATH
+from app.services.project.overrides import OVERRIDES_FOLDER
 from app.services.project.scene_snapshots import _owning_layer_is_writable
+from app.services.project_service import ProjectService
 
 
 class ResearchNoteSnapshotRoundTripTests(unittest.TestCase):
@@ -679,6 +682,228 @@ class OwningLayerWritabilityTests(unittest.TestCase):
         # layer_by_id returns None for a Library/machine/unknown id under its
         # default flags; the guard must fail closed on that.
         self.assertFalse(_owning_layer_is_writable(None))
+
+
+class LoreOverrideSnapshotTests(unittest.TestCase):
+    """Snapshots of a book override (ADR-0087 §3b). A character owned at the
+    series is overridden at the book; the override is addressed by
+    (entity id + authoring layer) through the `?layer=` node routes, its history
+    lives under the **book** — apart from the series base's — and a restore writes
+    the delta back and returns the re-folded composite (never the bare delta)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.universe = self.base / "honorverse"
+        self.book = self.universe / "book"
+        self.service = open_test_project(self.book, "Book")
+        make_project_folder(self.service, self.universe, "Universe")
+        declare_full_chain(self.service, self.book, self.base)
+        # A character schema shared down the chain: one scalar field to override.
+        self.service._write_yaml(
+            self.base / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "fields": {"rank": {"name": "rank", "type": "text", "label": "Rank"}},
+                "entry_types": {"lore:character": {"fields": ["rank"]}},
+            },
+        )
+        self.client = TestClient(app)
+        # Base character owned at the ancestor (series/universe)…
+        self.entity_id = "lore_seraphine"
+        self._write_lore_at(self.universe, self.entity_id, "Seraphine", {"rank": "Ensign"})
+        # …and a book override of one field (the open project is the book).
+        self.book_layer = self.service._metadata_schema_layer_id(self.book)
+        self._save_override({"rank": "Captain"})
+
+    # ----- helpers ----------------------------------------------------------
+
+    def _write_lore_at(self, folder: Path, node_id: str, title: str, metadata: dict) -> None:
+        writer = ProjectService(WorkScope(root=folder))
+        writer._write_lore_entry_file(
+            folder / "lore" / f"{node_id}.md",
+            LoreEntry(
+                id=node_id, title=title, body="", revision="",
+                entry_type="lore:character", metadata=metadata,
+            ),
+        )
+
+    def _layer_id(self, folder: Path) -> str:
+        return next(
+            layer.id for layer in self.service.collect_layers(self.book) if layer.folder == folder
+        )
+
+    def _save_override(self, metadata: dict) -> LoreEntry:
+        return self.service.save_lore_entry(
+            self.entity_id,
+            SaveLoreEntryRequest(
+                title="Seraphine", body="", entry_type="lore:character",
+                metadata=metadata, authoring_layer_id=self.book_layer,
+            ),
+        )
+
+    def _override_store(self) -> Path:
+        return self.book / "snapshots" / self.entity_id
+
+    def _capture(self) -> dict:
+        response = self.client.post(
+            f"/api/nodes/{self.entity_id}/snapshots?layer={self.book_layer}"
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def _rank(self) -> str:
+        return self.client.get(f"/api/lore/{self.entity_id}").json()["metadata"]["rank"]
+
+    # ----- the round trip ---------------------------------------------------
+
+    def test_capture_stores_the_override_under_the_book_not_the_series(self) -> None:
+        snapshot = self._capture()
+        store = self._override_store()
+        self.assertTrue(store.is_dir(), "the override store was not created under the book")
+        self.assertTrue((store / f"{snapshot['id']}.md").exists())
+        self.assertEqual(snapshot["snapshot_of"], self.entity_id)
+        # The series base's own store (if any) is a different folder — no collision.
+        self.assertFalse((self.universe / "snapshots" / self.entity_id).exists())
+        # The frozen bytes are the delta itself: the target join + the override row.
+        frozen = (store / f"{snapshot['id']}.md").read_text(encoding="utf-8")
+        self.assertIn(f"target: {self.entity_id}", frozen)
+        self.assertIn("Captain", frozen)
+
+    def test_restore_writes_the_delta_back_and_refolds_the_composite(self) -> None:
+        snapshot = self._capture()
+        self.assertEqual(self._rank(), "Captain")
+
+        self._save_override({"rank": "Admiral"})
+        self.assertEqual(self._rank(), "Admiral")
+
+        restored = self.client.post(
+            f"/api/nodes/{self.entity_id}/snapshots/{snapshot['id']}/restore"
+            f"?layer={self.book_layer}"
+        )
+        self.assertEqual(restored.status_code, 200, restored.text)
+        # Restore returns the re-folded composite LoreEntry, not the bare delta.
+        body = restored.json()
+        self.assertEqual(body["metadata"]["rank"], "Captain")
+        self.assertIn("rank", body["overridden_fields"])
+        # The book's composed view re-folds to the restored override…
+        self.assertEqual(self._rank(), "Captain")
+        # …and the series base file is untouched (its rank never moved).
+        base_file = (self.universe / "lore" / f"{self.entity_id}.md").read_text(encoding="utf-8")
+        self.assertIn("Ensign", base_file)
+
+    def test_an_override_capture_writes_no_witness(self) -> None:
+        snapshot = self._capture()
+        witness = self.service.read_snapshot_witness(self.book, self.entity_id, snapshot["id"])
+        self.assertIsNone(witness)
+
+    def test_the_base_and_the_override_keep_separate_histories(self) -> None:
+        # The inherited base snapshots under the series (owning layer, S2)…
+        base = self.client.post(f"/api/nodes/{self.entity_id}/snapshots")
+        self.assertEqual(base.status_code, 200, base.text)
+        self.assertTrue((self.universe / "snapshots" / self.entity_id).is_dir())
+        # …the override snapshots under the book (authoring layer, §3b).
+        override = self._capture()
+        self.assertTrue(self._override_store().is_dir())
+        # Each listing sees only its own lane.
+        base_ids = [
+            s["id"]
+            for s in self.client.get(f"/api/nodes/{self.entity_id}/snapshots").json()["snapshots"]
+        ]
+        override_ids = [
+            s["id"]
+            for s in self.client.get(
+                f"/api/nodes/{self.entity_id}/snapshots?layer={self.book_layer}"
+            ).json()["snapshots"]
+        ]
+        self.assertIn(base.json()["id"], base_ids)
+        self.assertNotIn(base.json()["id"], override_ids)
+        self.assertIn(override["id"], override_ids)
+        self.assertNotIn(override["id"], base_ids)
+
+    def test_restore_after_revert_to_canon_recreates_the_delta(self) -> None:
+        snapshot = self._capture()
+        # Revert to canon: submitting the inherited value drops the delta file.
+        self._save_override({"rank": "Ensign"})
+        self.assertFalse(any((self.book / OVERRIDES_FOLDER).glob("*.md")))
+        self.assertEqual(self._rank(), "Ensign")
+        # Restoring the old override snapshot re-creates the delta and re-folds.
+        restored = self.client.post(
+            f"/api/nodes/{self.entity_id}/snapshots/{snapshot['id']}/restore"
+            f"?layer={self.book_layer}"
+        )
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertTrue(any((self.book / OVERRIDES_FOLDER).glob("*.md")))
+        self.assertEqual(self._rank(), "Captain")
+
+    def test_pin_describe_and_delete_over_the_override_route(self) -> None:
+        kept = self._capture()
+        # A restore leaves a thinned pre-restore capture the pin exists to rescue.
+        self.client.post(
+            f"/api/nodes/{self.entity_id}/snapshots/{kept['id']}/restore?layer={self.book_layer}"
+        )
+        listed = self.client.get(
+            f"/api/nodes/{self.entity_id}/snapshots?layer={self.book_layer}"
+        ).json()["snapshots"]
+        thinned = [s for s in listed if s["retention"] == "thinned"]
+        self.assertTrue(thinned, "restore did not leave a thinned pre-restore snapshot")
+        pinned = self.client.post(
+            f"/api/nodes/{self.entity_id}/snapshots/{thinned[0]['id']}/pin?layer={self.book_layer}"
+        )
+        self.assertEqual(pinned.status_code, 200, pinned.text)
+        self.assertEqual(pinned.json()["retention"], "kept")
+
+        described = self.client.put(
+            f"/api/nodes/{self.entity_id}/snapshots/{kept['id']}/description?layer={self.book_layer}",
+            json={"description": "the ledger before the rewrite"},
+        )
+        self.assertEqual(described.status_code, 200, described.text)
+        self.assertEqual(described.json()["description"], "the ledger before the rewrite")
+
+        deleted = self.client.delete(
+            f"/api/nodes/{self.entity_id}/snapshots/{kept['id']}?layer={self.book_layer}"
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertNotIn(kept["id"], [s["id"] for s in deleted.json()["snapshots"]])
+
+    def test_the_override_store_is_not_indexed(self) -> None:
+        self._capture()
+        (self.book / SNAPSHOT_RELATIVE_PATH).unlink(missing_ok=True)
+        index = self.service._build_node_index(self.book)
+        under_snapshots = [
+            str(entry.path)
+            for entries in index.candidates.values()
+            for entry in entries
+            if "snapshots" in entry.path.parts
+        ]
+        self.assertEqual(under_snapshots, [])
+
+    # ----- fail closed ------------------------------------------------------
+
+    def test_capturing_is_refused_when_there_is_no_override_at_that_layer(self) -> None:
+        # Revert to canon so no delta exists, then a capture has nothing to freeze.
+        self._save_override({"rank": "Ensign"})
+        self.assertFalse(any((self.book / OVERRIDES_FOLDER).glob("*.md")))
+        refused = self.client.post(
+            f"/api/nodes/{self.entity_id}/snapshots?layer={self.book_layer}"
+        )
+        self.assertEqual(refused.status_code, 404, refused.text)
+
+    def test_a_layer_that_does_not_override_the_entry_is_refused(self) -> None:
+        # The owning layer (the series/universe) authors the base, it does not
+        # override it — an override must be strictly below the owning layer.
+        owning_layer = self._layer_id(self.universe)
+        refused = self.client.post(
+            f"/api/nodes/{self.entity_id}/snapshots?layer={owning_layer}"
+        )
+        self.assertEqual(refused.status_code, 422, refused.text)
+
+    def test_an_unknown_authoring_layer_is_refused(self) -> None:
+        refused = self.client.post(
+            f"/api/nodes/{self.entity_id}/snapshots?layer=layer_does_not_exist"
+        )
+        self.assertEqual(refused.status_code, 422, refused.text)
 
 
 if __name__ == "__main__":

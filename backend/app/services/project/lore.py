@@ -443,7 +443,23 @@ class LoreEntriesMixin:
         # delete belongs to even if another request opens a different one
         # mid-operation (#381).
         root = self._require_project()
-        path = self._path_for_node_id(entry_id, "lore")
+        # An *inherited* entry resolves to its ancestor's own base file, so a
+        # delete from a downstream book would unlink that file — and, since S2,
+        # reap its shared snapshot store — wiping series canon and its whole
+        # history for every book below. Refused at the boundary, exactly as the
+        # prompt/plot delete siblings and save_lore_entry already refuse the
+        # equivalent write (ADR-0049 §3); a no-op for a book-local shadow (owned
+        # here). The escape hatch for an inherited entry is fork/override, not
+        # deleting the ancestor's file.
+        self._reject_inherited_library_write(entry_id, noun="lore entry", kind="lore")
+        # A lore entry and its snapshot store are one unit of deletion (ADR-0043):
+        # lore is snapshottable since S2 (#1983), and its store lives under the
+        # *owning* layer's folder keyed by the front-matter id (§3) — resolve and
+        # reap it before the unlink, while the index can still find the owning
+        # layer, or it is left as the unreachable residue the scene/research
+        # delete paths also clear.
+        store_root, node_id, path = self._resolve_snapshot_target(entry_id, "lore")
+        self.delete_scene_snapshots(store_root, node_id)
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         self._purge_references_to({entry_id}, root)
         return self.list_lore_entries()

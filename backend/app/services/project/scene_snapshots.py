@@ -52,6 +52,7 @@ from app.services.project.errors import ProjectServiceError
 
 if TYPE_CHECKING:
     from app.models import ResearchNote, Scene
+    from app.services.project.node_index import IndexLayer
 
 SNAPSHOTS_DIRNAME = "snapshots"
 
@@ -86,11 +87,41 @@ AUTOMATIC_KEEP = 5
 SNAPSHOT_DESCRIPTION_MAX = 280
 
 # The kinds the node-scoped routes accept today. Scenes reach the store through
-# the /api/scenes routes; research is slice 1 (#1981). lore (S2), tags (S4),
-# prompt/plot (S5) each arrive with the cross-layer write semantics their restore
-# needs — until then the node routes fail closed rather than let a restore write
-# an owning-layer file with no fork/override (ADR-0087 rollout).
-NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research"})
+# the /api/scenes routes; research (S1, #1981) and lore (S2, #1983) are proven.
+# tags (S4) and prompt/plot (S5) each arrive with the cross-layer write semantics
+# their restore needs — until then the node routes fail closed on the kind rather
+# than let a restore write a file the slice has not proven (ADR-0087 rollout).
+NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore"})
+
+
+# Kinds whose restore reconciles correctly at ANY writable layer, so an inherited
+# (ancestor-owned) base is snapshottable — not only one owned by the open project.
+# lore heals nothing out of the index (§4): the byte-write plus the index re-fold
+# is the whole restore. scene and research instead keep the node title in a
+# separate structure document their healer rewrites in the OPEN project only
+# (`_update_scene_title_in_structure` / `_update_research_title_in_structure`, both
+# rooted at `_require_project()`), so restoring an ancestor-owned one would leave
+# the ANCESTOR's own tree desynced from the file the restore just rewrote. Both
+# stay open-project-only until that healer is owning-layer-aware — and research IS
+# authored at ancestors (it is walked cross-layer), so this is a live refusal, not
+# a dead branch. (Scenes are root-scoped regardless.)
+ANCESTOR_RESTORE_SAFE_KINDS = frozenset({"lore"})
+
+
+def _owning_layer_is_writable(layer: IndexLayer | None) -> bool:
+    """Whether a restore may byte-write this owning layer's file at all.
+
+    Restore byte-writes the owning-layer file (ADR-0087 §2/§4) — structurally what
+    a normal "Editing at: <layer>" save already does — so any real project layer
+    qualifies: the open project or a writable ancestor. What it must never write is
+    a file with no author-facing write path: the built-in Library (read-only,
+    ADR-0049 #689) or the machine config layer. `layer_by_id` already drops both to
+    `None` under its default flags; the explicit clauses keep the guard closed even
+    if a caller widens `include_library`/`include_machine`. This is the writability
+    *floor* — kind-independent; whether an inherited node of a given *kind* may be
+    restored at an ancestor is the separate `ANCESTOR_RESTORE_SAFE_KINDS` gate.
+    """
+    return layer is not None and not layer.is_library and not layer.is_machine
 
 
 def _read_body_and_content_time(path: Path) -> tuple[bytes, str]:
@@ -320,14 +351,17 @@ class SceneSnapshotsMixin:
         - **Kind.** Only the kinds the store is proven for are accepted; each
           remaining kind opens in a later slice, together with the cross-layer
           write semantics its restore needs (ADR-0087 rollout).
-        - **Owning layer.** Only a node owned by the *open* project may be
-          snapshotted. Restore writes the owning-layer file in place, so an
-          inherited node would have its ancestor's authored file overwritten with
-          no fork/override — the 409 `save_lore_entry` raises (S2, ADR-0087
-          §2/§3b) — and a built-in Library node (read-only, ADR-0049 #689) or a
-          machine node would be mutated straight past the read-only guard.
-          Research is never inherited-as-authored (`save_research_note`), so this
-          is also its permanent rule, not only an S1 restriction.
+        - **Owning layer.** Two gates, because restore byte-writes the
+          owning-layer file in place. First it must be author-*writable* — the
+          open project or a writable ancestor (`_owning_layer_is_writable`); a
+          built-in Library (read-only, ADR-0049 #689) or machine node is refused.
+          Then an *inherited* node (owned by an ancestor) is admitted only for a
+          kind whose restore reconciles at that ancestor
+          (`ANCESTOR_RESTORE_SAFE_KINDS`): lore heals nothing (§4), but a
+          scene/research restore rewrites only the open project's structure tree,
+          which would desync the ancestor's — so those stay open-project-only
+          until their healer is owning-layer-aware. (A book *override* — a delta
+          file, not an index node — is S3; this guard sees only base index nodes.)
         """
         root = self._require_project()
         index = self._build_node_index(root)
@@ -339,9 +373,14 @@ class SceneSnapshotsMixin:
                 f"Snapshots are not available for {entry.kind} nodes yet.", 422
             )
         layer = self.layer_by_id(root, entry.source_layer_id)
-        if layer is None or not layer.is_root:
+        if not _owning_layer_is_writable(layer):
             raise ProjectServiceError(
-                "Snapshots of an inherited or built-in node are not supported yet.", 422
+                "Snapshots of a built-in or machine node are not supported.", 422
+            )
+        if not layer.is_root and entry.kind not in ANCESTOR_RESTORE_SAFE_KINDS:
+            raise ProjectServiceError(
+                f"Snapshots of an inherited {entry.kind} node are not supported yet.",
+                422,
             )
         return entry.kind
 

@@ -89,11 +89,11 @@ AUTOMATIC_KEEP = 5
 SNAPSHOT_DESCRIPTION_MAX = 280
 
 # The kinds the node-scoped routes accept today. Scenes reach the store through
-# the /api/scenes routes; research (S1, #1981), lore (S2, #1983) and tag (S4,
-# #1988) are proven. prompt/plot (S5) arrive with the cross-layer write semantics
-# their restore needs — until then the node routes fail closed on the kind rather
+# the /api/scenes routes; research (S1, #1981), lore (S2, #1983), tag (S4, #1988)
+# and prompt (S5a, #1990) are proven. plot (S5b) arrives with the card-link heal
+# its restore needs — until then the node routes fail closed on the kind rather
 # than let a restore write a file the slice has not proven (ADR-0087 rollout).
-NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore", "tag"})
+NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore", "tag", "prompt"})
 
 
 # Kinds whose restore reconciles correctly at ANY writable layer, so an inherited
@@ -110,14 +110,19 @@ NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore", "tag"})
 # layered and heals nothing on restore — its `merged_into`/`canonical_id` re-resolve
 # from the restored bytes at index-build time (§4), the reference sweep is never
 # replayed — so an ancestor-owned tag restores as safely as an ancestor lore base.
-ANCESTOR_RESTORE_SAFE_KINDS = frozenset({"lore", "tag"})
+# prompt joins them: it is layered and heals nothing on restore (its overrides
+# re-fold at index-build time exactly like lore's), so an ancestor-owned prompt
+# base is admitted.
+ANCESTOR_RESTORE_SAFE_KINDS = frozenset({"lore", "tag", "prompt"})
 
 # The kinds whose *overrides* (nearer-layer delta files, ADR-0087 §3b) the node
-# routes can snapshot when addressed by (entity id + authoring layer). Only lore
-# in S3 (#1986); prompt overrides arrive with S5. An override is a sparse delta,
-# not an index node, so it needs its own resolver/guard — see
+# routes can snapshot when addressed by (entity id + authoring layer). lore (S3,
+# #1986) and prompt (S5a, #1990) — both override-aware; a prompt override is a
+# metadata-only delta byte-identical in shape to lore's (a prompt locks its body,
+# so an override never carries body bytes). An override is a sparse delta, not an
+# index node, so it needs its own resolver/guard — see
 # `node_override_snapshot_kind` / `_resolve_override_snapshot_target`.
-OVERRIDE_SNAPSHOT_KINDS = frozenset({"lore"})
+OVERRIDE_SNAPSHOT_KINDS = frozenset({"lore", "prompt"})
 
 # The reserved scope at the authoring layer that override snapshot stores nest
 # under: `<authoring-layer>/.overrides/snapshots/<entity_id>/`, NOT the layer's
@@ -465,7 +470,7 @@ class SceneSnapshotsMixin:
 
         The override's kind is the **base entity's** kind, read from its index
         node (the entity is always an index node even when a nearer layer
-        overrides it, §3b) — only `lore` in S3. Writability is checked on the
+        overrides it, §3b) — `lore` (S3) and `prompt` (S5a). Writability is checked on the
         **authoring** layer, because that is the layer whose delta file a restore
         byte-writes (not the base's owning layer, which an ancestor holds). The
         authoring layer must be strictly *below* the owning layer — a layer at or

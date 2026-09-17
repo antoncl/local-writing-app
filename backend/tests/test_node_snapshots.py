@@ -13,7 +13,7 @@ ride the same `/api/nodes/{id}/snapshots/...` routes. The properties pinned here
   *every* layer stays out of the node index (the ancestor guard);
 - the node routes fail closed on the owning *layer's writability*, not on
   root-ness: a writable ancestor is admitted, the read-only built-in Library and
-  the machine layer are refused (`_owning_layer_is_snapshottable`).
+  the machine layer are refused (`_owning_layer_is_writable`).
 
 The scene half of the feature is unchanged; `test_scene_snapshots` and friends
 are the regression check that the `kind`-parameterisation is byte-identical for
@@ -629,20 +629,24 @@ class LoreAncestorBaseTests(unittest.TestCase):
         self.assertEqual(after.status_code, 200, after.text)
         self.assertIn("as the series first wrote it", after.json()["body"])
 
-    def test_deleting_the_entry_reaps_the_store_under_the_series(self) -> None:
-        # The reap must target the OWNING layer's store, not the open project's:
-        # an ancestor-owned entry's history lives under the series, so deleting the
-        # entry must reap it there. A (root, node_id) reap keyed on the open
-        # project would rmtree a nonexistent book/snapshots/<id> and orphan the
-        # real series store — this is what pins _resolve_snapshot_target's root.
+    def test_deleting_an_inherited_entry_is_refused(self) -> None:
+        # Deleting an entry inherited from an ancestor must be refused (409), like
+        # its prompt/plot delete siblings and like save_lore_entry: the delete
+        # would unlink the ancestor's own base file AND reap its shared snapshot
+        # store, wiping series canon and its history for every downstream book.
+        # Both the ancestor file and its store survive. (The escape hatch for an
+        # inherited entry is fork/override, not deleting the ancestor's file.)
         captured = self.client.post(f"/api/nodes/{self.entry_id}/snapshots")
         self.assertEqual(captured.status_code, 200, captured.text)
         self.assertTrue((self.universe / "snapshots" / self.entry_id).is_dir())
-        deleted = self.client.delete(f"/api/lore/{self.entry_id}")
-        self.assertEqual(deleted.status_code, 200, deleted.text)
-        self.assertFalse(
-            (self.universe / "snapshots" / self.entry_id).exists(),
-            "the series character's store outlived the entry (reaped at the wrong root)",
+        refused = self.client.delete(f"/api/lore/{self.entry_id}")
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertTrue(
+            self._ancestor_path.exists(), "the delete unlinked the ancestor's base file"
+        )
+        self.assertTrue(
+            (self.universe / "snapshots" / self.entry_id).is_dir(),
+            "the delete reaped the ancestor's shared snapshot store",
         )
 
 

@@ -143,59 +143,84 @@ def delete_snapshot(project: CurrentProject, scene_id: str, snapshot_id: str) ->
 # reaches the exact same store through either route.
 
 
-def _node_kind(project: CurrentProject, node_id: str) -> str:
-    """The node's snapshot-eligible kind, or a refusal. The store fails closed on
-    kinds and layers S1 does not support — an unindexed id is a 404, an
-    unsupported kind or an inherited/built-in node a 422 (see the service's
-    `node_snapshot_kind`). Called inside `translate_errors`, so its
+def _node_kind(project: CurrentProject, node_id: str, layer: str | None = None) -> str:
+    """The node's snapshot-eligible kind, or a refusal. Without `layer`, the base
+    node itself (`node_snapshot_kind`: 404 unknown, 422 unsupported kind or
+    inherited/built-in node). With `layer`, the request addresses a **book
+    override** of `node_id` at that authoring layer (ADR-0087 §3b): the kind comes
+    from the base entity and the authoring layer is validated
+    (`node_override_snapshot_kind`). Called inside `translate_errors`, so its
     `ProjectServiceError` becomes the HTTP status."""
+    if layer is not None:
+        return project.node_override_snapshot_kind(node_id, layer)
     return project.node_snapshot_kind(node_id)
 
 
 @router.get("/api/nodes/{node_id}/snapshots", response_model=SnapshotList)
-def list_node_snapshots(project: CurrentProject, node_id: str) -> SnapshotList:
-    """Every snapshot of this node, oldest first (ADR-0087)."""
+def list_node_snapshots(
+    project: CurrentProject, node_id: str, layer: str | None = None
+) -> SnapshotList:
+    """Every snapshot of this node, oldest first (ADR-0087). `layer` lists a book
+    override's history at that authoring layer instead of the base's (§3b)."""
     with translate_errors():
-        return project.list_snapshots(node_id, kind=_node_kind(project, node_id))
+        return project.list_snapshots(node_id, kind=_node_kind(project, node_id, layer), layer_id=layer)
 
 
 @router.post("/api/nodes/{node_id}/snapshots", response_model=Snapshot)
 def capture_node_snapshot(
-    project: CurrentProject, node_id: str, request: CaptureSnapshotRequest | None = None
+    project: CurrentProject,
+    node_id: str,
+    request: CaptureSnapshotRequest | None = None,
+    layer: str | None = None,
 ) -> Snapshot:
     """The camera for any node. `dynamic_context` is a scene concern; a
     non-scene caller sends no body and captures the bytes and record without a
-    witness (ADR-0087 §5)."""
+    witness (ADR-0087 §5). `layer` snapshots a book override instead of the base
+    (§3b) — there must already be an override at that layer to photograph."""
     with translate_errors():
         return project.capture_snapshot(
             node_id,
             request.dynamic_context if request is not None else None,
-            kind=_node_kind(project, node_id),
+            kind=_node_kind(project, node_id, layer),
+            layer_id=layer,
         )
 
 
 @router.get("/api/nodes/{node_id}/snapshots/{snapshot_id}", response_model=SnapshotDetail)
-def read_node_snapshot(project: CurrentProject, node_id: str, snapshot_id: str) -> SnapshotDetail:
+def read_node_snapshot(
+    project: CurrentProject, node_id: str, snapshot_id: str, layer: str | None = None
+) -> SnapshotDetail:
     """The stored body, parsed for the read-only overlay. Reading a snapshot
-    never touches the live node."""
+    never touches the live node. `layer` reads a book override's snapshot (§3b)."""
     with translate_errors():
-        return project.read_snapshot(node_id, snapshot_id, kind=_node_kind(project, node_id))
+        return project.read_snapshot(
+            node_id, snapshot_id, kind=_node_kind(project, node_id, layer), layer_id=layer
+        )
 
 
 @router.post("/api/nodes/{node_id}/snapshots/{snapshot_id}/restore")
-def restore_node_snapshot(project: CurrentProject, node_id: str, snapshot_id: str):
+def restore_node_snapshot(
+    project: CurrentProject, node_id: str, snapshot_id: str, layer: str | None = None
+):
     """Capture-then-restore in one call, for any node. No `response_model`: the
-    restored node returns in its own shape (Scene, ResearchNote, …), which
-    FastAPI cannot pick a single model for — mirrors `GET /api/nodes/{id}`."""
+    restored node returns in its own shape (Scene, ResearchNote, LoreEntry …),
+    which FastAPI cannot pick a single model for — mirrors `GET /api/nodes/{id}`.
+    `layer` restores a book override, returning the re-folded composite (§3b)."""
     with translate_errors():
-        return project.restore_snapshot(node_id, snapshot_id, kind=_node_kind(project, node_id))
+        return project.restore_snapshot(
+            node_id, snapshot_id, kind=_node_kind(project, node_id, layer), layer_id=layer
+        )
 
 
 @router.post("/api/nodes/{node_id}/snapshots/{snapshot_id}/pin", response_model=Snapshot)
-def pin_node_snapshot(project: CurrentProject, node_id: str, snapshot_id: str) -> Snapshot:
+def pin_node_snapshot(
+    project: CurrentProject, node_id: str, snapshot_id: str, layer: str | None = None
+) -> Snapshot:
     """Flip `retention` from `thinned` to `kept` (ADR-0043 Amendment 1)."""
     with translate_errors():
-        return project.pin_snapshot(node_id, snapshot_id, kind=_node_kind(project, node_id))
+        return project.pin_snapshot(
+            node_id, snapshot_id, kind=_node_kind(project, node_id, layer), layer_id=layer
+        )
 
 
 @router.put(
@@ -206,17 +231,26 @@ def set_node_snapshot_description(
     node_id: str,
     snapshot_id: str,
     request: SetSnapshotDescriptionRequest,
+    layer: str | None = None,
 ) -> Snapshot:
     """Set (or clear) the snapshot's one-line description (#468)."""
     with translate_errors():
         return project.set_snapshot_description(
-            node_id, snapshot_id, request.description, kind=_node_kind(project, node_id)
+            node_id,
+            snapshot_id,
+            request.description,
+            kind=_node_kind(project, node_id, layer),
+            layer_id=layer,
         )
 
 
 @router.delete("/api/nodes/{node_id}/snapshots/{snapshot_id}", response_model=SnapshotList)
-def delete_node_snapshot(project: CurrentProject, node_id: str, snapshot_id: str) -> SnapshotList:
+def delete_node_snapshot(
+    project: CurrentProject, node_id: str, snapshot_id: str, layer: str | None = None
+) -> SnapshotList:
     """Remove one snapshot; returns what remains so the strip re-lists in one
     call. The feature's only irreversible gesture."""
     with translate_errors():
-        return project.delete_snapshot(node_id, snapshot_id, kind=_node_kind(project, node_id))
+        return project.delete_snapshot(
+            node_id, snapshot_id, kind=_node_kind(project, node_id, layer), layer_id=layer
+        )

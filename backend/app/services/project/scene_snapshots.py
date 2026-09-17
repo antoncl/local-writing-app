@@ -49,9 +49,11 @@ from app.models.snapshots import UNREADABLE_WITNESS_VERSION
 from app.services import migrations
 from app.services.atomic_io import atomic_write_bytes
 from app.services.project.errors import ProjectServiceError
+from app.services.project.node_index_gate import node_index_gate
+from app.services.project.overrides import OVERRIDES_FOLDER
 
 if TYPE_CHECKING:
-    from app.models import ResearchNote, Scene
+    from app.models import LoreEntry, ResearchNote, Scene
     from app.services.project.node_index import IndexLayer
 
 SNAPSHOTS_DIRNAME = "snapshots"
@@ -106,6 +108,25 @@ NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore"})
 # authored at ancestors (it is walked cross-layer), so this is a live refusal, not
 # a dead branch. (Scenes are root-scoped regardless.)
 ANCESTOR_RESTORE_SAFE_KINDS = frozenset({"lore"})
+
+# The kinds whose *overrides* (nearer-layer delta files, ADR-0087 §3b) the node
+# routes can snapshot when addressed by (entity id + authoring layer). Only lore
+# in S3 (#1986); prompt overrides arrive with S5. An override is a sparse delta,
+# not an index node, so it needs its own resolver/guard — see
+# `node_override_snapshot_kind` / `_resolve_override_snapshot_target`.
+OVERRIDE_SNAPSHOT_KINDS = frozenset({"lore"})
+
+# The reserved scope at the authoring layer that override snapshot stores nest
+# under: `<authoring-layer>/.overrides/snapshots/<entity_id>/`, NOT the layer's
+# plain `snapshots/<entity_id>/`. A base store is `<owning-layer>/snapshots/
+# <entity_id>/`; were an override to use the plain `snapshots/`, the two would
+# become the SAME directory the instant a fork or promote moved the entity's
+# ownership into the authoring layer — and then a base restore would byte-write a
+# delta over the base file (or an override restore a full entry over a delta),
+# silent corruption. The `.overrides` scope keeps the base and override lanes
+# structurally distinct for all time; like every snapshot store it is excluded
+# from the index (it is not a family folder, so the node walk never globs it).
+OVERRIDE_STORE_SCOPE = ".overrides"
 
 
 def _owning_layer_is_writable(layer: IndexLayer | None) -> bool:
@@ -271,12 +292,19 @@ class SceneSnapshotsMixin:
         records.sort(key=lambda record: (record.captured_at, record.id))
         return records
 
-    def list_snapshots(self, scene_id: str, *, kind: str = "manuscript") -> SnapshotList:
-        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind)
+    def list_snapshots(
+        self, scene_id: str, *, kind: str = "manuscript", layer_id: str | None = None
+    ) -> SnapshotList:
+        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind, layer_id=layer_id)
         return SnapshotList(snapshots=self._snapshot_records(root, node_id))
 
     def read_snapshot(
-        self, scene_id: str, snapshot_id: str, *, kind: str = "manuscript"
+        self,
+        scene_id: str,
+        snapshot_id: str,
+        *,
+        kind: str = "manuscript",
+        layer_id: str | None = None,
     ) -> SnapshotDetail:
         """The stored body and normalised front-matter state, parsed for display.
         Reading is not restoring — the byte-copy is parsed here so a pane can
@@ -286,7 +314,7 @@ class SceneSnapshotsMixin:
         normalisation the live side gets from `read_scene` — so the client field
         flip (#583) diffs like against like. Reusing it rather than re-deriving
         the title here keeps the was-side to one pipeline."""
-        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind)
+        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind, layer_id=layer_id)
         record = self._require_snapshot(root, node_id, snapshot_id)
         snapshots_dir = self._snapshots_dir(root, node_id)
         front_matter, body = self._read_markdown_with_front_matter(
@@ -326,7 +354,9 @@ class SceneSnapshotsMixin:
         layer = self.layer_by_id(root, entry.source_layer_id)
         return layer.folder if layer is not None else root
 
-    def _resolve_snapshot_target(self, ref: str, kind: str) -> tuple[Path, str, Path]:
+    def _resolve_snapshot_target(
+        self, ref: str, kind: str, *, layer_id: str | None = None
+    ) -> tuple[Path, str, Path | None]:
         """`(store root, canonical node id, node file path)` for a snapshot op.
 
         `ref` may be a structure node's id; `_path_for_node_id` normalises it to
@@ -337,10 +367,45 @@ class SceneSnapshotsMixin:
         public method shares, replacing the manuscript-only source-id lookup and
         the `_require_project()` root each method used to take on its own (one
         traversal, not six).
+
+        When `layer_id` is given the target is a *book override* delta (§3b),
+        addressed by (entity id + authoring layer) rather than by an index node —
+        `_resolve_override_snapshot_target`; `path` is then `None` when no
+        override exists at that layer yet.
         """
+        if layer_id is not None:
+            return self._resolve_override_snapshot_target(ref, layer_id)
         path = self._path_for_node_id(ref, kind)
         node_id = self._node_id_for_path(path)
         return self._snapshot_store_root(node_id), node_id, path
+
+    def _resolve_override_snapshot_target(
+        self, entity_id: str, layer_id: str
+    ) -> tuple[Path, str, Path | None]:
+        """`(store root, entity id, override delta path | None)` for an override
+        snapshot op (ADR-0087 §3b).
+
+        A book override is a sparse delta file, deliberately **not** a node in the
+        index, so it cannot be reached by id. It is addressed by the same
+        coordinates the "Editing at" save uses — the entity's canonical id + the
+        authoring layer. The store roots at the **authoring** layer's folder (not
+        the base entity's owning layer), keyed by the entity id, so the book's
+        override history sits under the book, apart from the series base's own
+        (§3). `path` is `_override_file_for_target` — `None` when no override
+        exists at this layer (a capture then has nothing to photograph; a restore
+        recreates it).
+        """
+        root = self._require_project()
+        layer = self.layer_by_id(root, layer_id)
+        if layer is None:
+            raise ProjectServiceError("Unknown authoring layer.", 422)
+        node_id = self._build_node_index(root).canonical_id(entity_id)
+        # Store root = the authoring layer's reserved `.overrides` scope, so the
+        # override lane never aliases the base lane at the same layer (see
+        # OVERRIDE_STORE_SCOPE). The delta file itself lives at the real layer
+        # folder's `overrides/`, resolved here from `layer.folder`.
+        store_root = layer.folder / OVERRIDE_STORE_SCOPE
+        return store_root, node_id, self._override_file_for_target(layer.folder, node_id)
 
     def node_snapshot_kind(self, node_id: str) -> str:
         """Resolve a node id to its kind for the node-scoped routes, or refuse.
@@ -384,13 +449,55 @@ class SceneSnapshotsMixin:
             )
         return entry.kind
 
+    def node_override_snapshot_kind(self, entity_id: str, layer_id: str) -> str:
+        """Resolve `(entity, authoring layer)` to the entity's kind for the
+        override snapshot routes (ADR-0087 §3b), or refuse.
+
+        The override's kind is the **base entity's** kind, read from its index
+        node (the entity is always an index node even when a nearer layer
+        overrides it, §3b) — only `lore` in S3. Writability is checked on the
+        **authoring** layer, because that is the layer whose delta file a restore
+        byte-writes (not the base's owning layer, which an ancestor holds). The
+        authoring layer must be strictly *below* the owning layer — a layer at or
+        above it does not override the entry, it authors or inherits it — so a
+        built-in Library / machine layer (never a valid override layer) and the
+        owning layer itself are refused.
+        """
+        root = self._require_project()
+        index = self._build_node_index(root)
+        entry = index.by_id.get(index.canonical_id(entity_id))
+        if entry is None:
+            raise ProjectServiceError(f"Node {entity_id} does not exist.", 404)
+        if entry.kind not in OVERRIDE_SNAPSHOT_KINDS:
+            raise ProjectServiceError(
+                f"Override snapshots are not available for {entry.kind} nodes yet.", 422
+            )
+        layer = self.layer_by_id(root, layer_id)
+        if not _owning_layer_is_writable(layer):
+            raise ProjectServiceError(
+                "Snapshots at a built-in or machine layer are not supported.", 422
+            )
+        owning = self.layer_by_id(root, entry.source_layer_id)
+        if owning is None or layer.rank <= owning.rank:
+            raise ProjectServiceError("That layer does not override this entry.", 422)
+        return entry.kind
+
     # ----- capture ----------------------------------------------------------
 
     def capture_snapshot(
-        self, scene_id: str, dynamic_context: list[str] | None = None, *, kind: str = "manuscript"
+        self,
+        scene_id: str,
+        dynamic_context: list[str] | None = None,
+        *,
+        kind: str = "manuscript",
+        layer_id: str | None = None,
     ) -> Snapshot:
         """The camera: an explicit, never-thinned capture of the current state."""
-        root, node_id, path = self._resolve_snapshot_target(scene_id, kind)
+        root, node_id, path = self._resolve_snapshot_target(scene_id, kind, layer_id=layer_id)
+        if path is None:
+            # An override target (§3b) with no delta at this layer: there is no
+            # authored file to photograph. Override a field first, then snapshot it.
+            raise ProjectServiceError("There is no override at this layer to snapshot.", 404)
         return self._capture(
             root, node_id, path, retention="kept", dynamic_context=dynamic_context, kind=kind
         )
@@ -522,8 +629,13 @@ class SceneSnapshotsMixin:
     # ----- restore ----------------------------------------------------------
 
     def restore_snapshot(
-        self, scene_id: str, snapshot_id: str, *, kind: str = "manuscript"
-    ) -> Scene | ResearchNote:
+        self,
+        scene_id: str,
+        snapshot_id: str,
+        *,
+        kind: str = "manuscript",
+        layer_id: str | None = None,
+    ) -> Scene | ResearchNote | LoreEntry:
         """Capture the current state, then put the snapshot back — one
         operation, never a client-side capture-then-restore.
 
@@ -537,20 +649,28 @@ class SceneSnapshotsMixin:
         failure between them leaves an extra snapshot and an untouched scene —
         never the reverse.
         """
-        root, node_id, path = self._resolve_snapshot_target(scene_id, kind)
+        root, node_id, path = self._resolve_snapshot_target(scene_id, kind, layer_id=layer_id)
         record = self._require_snapshot(root, node_id, snapshot_id)
+
+        if layer_id is not None:
+            # A book override (§3b): write the delta back and re-fold, not the
+            # base-file byte-write-plus-structural-patch below.
+            return self._restore_override(root, node_id, snapshot_id, path, kind)
 
         # No dynamic context: this route has no prose editor behind it, so the
         # implicit set is *not observed* rather than empty. The witness records
         # two sources, and a later comparison narrows membership to what both
         # sides saw instead of reporting every detected entity as removed.
-        self._capture(root, node_id, path, retention="thinned", kind=kind)
-
         stored = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
+        # Read the frozen snapshot BEFORE the capture-first below: that capture is
+        # `thinned` and runs `_thin`, which can evict this very snapshot when it is
+        # one of the oldest automatic ones — reading after would raise on a restore
+        # of an old thinned snapshot and lose it.
         if record.schema_version == migrations.CURRENT_VERSION:
             # ADR-0043: prose is restored byte-exact when the snapshot is already
             # at the current schema (the common case).
-            self._atomic_write_bytes(path, stored.read_bytes())
+            frozen_bytes = stored.read_bytes()
+            migrated = None
         else:
             # ADR-0071 §7: the snapshot predates the current schema — migrate its
             # body over one document on the way out, leaving the immutable stored
@@ -561,6 +681,12 @@ class SceneSnapshotsMixin:
             migrated = migrations.migrate_document(
                 migrations.MigratableDocument(front_matter, body), record.schema_version
             )
+
+        self._capture(root, node_id, path, retention="thinned", kind=kind)
+
+        if migrated is None:
+            self._atomic_write_bytes(path, frozen_bytes)
+        else:
             self._write_markdown_with_front_matter(path, migrated.front_matter, migrated.body)
         # (unchanged below) — the explicit structural index write still runs for
         # both branches; the byte branch bypassed the write hook, the migrate
@@ -613,6 +739,50 @@ class SceneSnapshotsMixin:
         if kind == "research":
             return self.read_research_note(node_id)
         return self.read_node(node_id)
+
+    def _restore_override(
+        self, root: Path, node_id: str, snapshot_id: str, path: Path | None, kind: str
+    ) -> LoreEntry:
+        """Restore a book-override delta (ADR-0087 §3b): write the frozen delta
+        back and return the re-folded composite the book shows.
+
+        Captures-first when a current delta exists — a reverted-to-canon override
+        has none, and there is nothing to lose. An override delta carries no
+        schema_version and no migration ladder, so it is always restored
+        byte-exact. The write opts out of incremental indexing (an override-bearing
+        chain rebuilds cold), so the memo is invalidated rather than structurally
+        patched, and the next read re-folds the composite (§4). No heal, no
+        witness: lore heals nothing, and a delta has nothing scene-shaped to
+        witness.
+        """
+        stored = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
+        # Read the frozen bytes BEFORE the capture-first: that capture is `thinned`
+        # and runs `_thin`, which can evict this very snapshot when it is one of the
+        # oldest automatic ones (the read-after-thin footgun the base path shares).
+        frozen = stored.read_bytes()
+        if path is not None:
+            self._capture(root, node_id, path, retention="thinned", kind=kind)
+            target = path
+        else:
+            # Reverted-to-canon since capture (no current delta ⇒ no capture-first
+            # ran, so `stored` still exists); recreate the delta at the authoring
+            # layer before writing the frozen bytes back.
+            target = self._recreate_override_path(root, stored)
+        self._atomic_write_bytes(target, frozen)
+        node_index_gate.invalidate()
+        return self.read_node(node_id)
+
+    def _recreate_override_path(self, store_root: Path, stored: Path) -> Path:
+        """Mint a delta-file path when restoring an override reverted-to-canon
+        since capture. The filename is cosmetic — the `target` front-matter key is
+        the join — so it derives from the frozen snapshot's own title, the shape
+        `_write_override_file` mints. The delta lives at the real layer folder's
+        `overrides/`, which is the parent of the override store scope (`store_root`
+        = `<layer>/.overrides`).
+        """
+        front_matter, _ = self._read_markdown_with_front_matter(stored, strict=True)
+        title = str(front_matter.get("title") or "override")
+        return self._filepath_for_new_node(store_root.parent / OVERRIDES_FOLDER, title)
 
     def finalize_scene(
         self, scene_id: str, body: str, dynamic_context: list[str] | None = None
@@ -692,7 +862,9 @@ class SceneSnapshotsMixin:
         self._write_yaml(sidecar, data)
         return self._read_snapshot_record(sidecar)
 
-    def pin_snapshot(self, scene_id: str, snapshot_id: str, *, kind: str = "manuscript") -> Snapshot:
+    def pin_snapshot(
+        self, scene_id: str, snapshot_id: str, *, kind: str = "manuscript", layer_id: str | None = None
+    ) -> Snapshot:
         """Flip `retention` from `thinned` to `kept` — the third case the enum
         was chosen for (ADR-0043 Amendment 1).
 
@@ -712,14 +884,20 @@ class SceneSnapshotsMixin:
         more automatic on the next capture. The budget is a window over a set
         the author can now take things out of.
         """
-        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind)
+        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind, layer_id=layer_id)
         record = self._require_snapshot(root, node_id, snapshot_id)
         if record.retention == "kept":
             return record
         return self._mutate_sidecar(root, node_id, snapshot_id, retention="kept")
 
     def set_snapshot_description(
-        self, scene_id: str, snapshot_id: str, description: str, *, kind: str = "manuscript"
+        self,
+        scene_id: str,
+        snapshot_id: str,
+        description: str,
+        *,
+        kind: str = "manuscript",
+        layer_id: str | None = None,
     ) -> Snapshot:
         """Set (or clear, with `""`) the one-line description (#468).
 
@@ -728,13 +906,15 @@ class SceneSnapshotsMixin:
         actions-row label that render it. Capped so a paste cannot make the
         sidecar unbounded.
         """
-        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind)
+        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind, layer_id=layer_id)
         cleaned = " ".join(description.split())[:SNAPSHOT_DESCRIPTION_MAX]
         return self._mutate_sidecar(root, node_id, snapshot_id, description=cleaned)
 
     # ----- deletion ---------------------------------------------------------
 
-    def delete_snapshot(self, scene_id: str, snapshot_id: str, *, kind: str = "manuscript") -> SnapshotList:
+    def delete_snapshot(
+        self, scene_id: str, snapshot_id: str, *, kind: str = "manuscript", layer_id: str | None = None
+    ) -> SnapshotList:
         """Remove one snapshot — the only irreversible gesture in the feature.
 
         Both files go, or the leftover is exactly the unreachable residue
@@ -748,7 +928,7 @@ class SceneSnapshotsMixin:
         lore deletes are already hard deletes, and a feature that quietly
         retained data after a delete would be the only such thing in the project.
         """
-        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind)
+        root, node_id, _ = self._resolve_snapshot_target(scene_id, kind, layer_id=layer_id)
         self._require_snapshot(root, node_id, snapshot_id)
         folder = self._snapshots_dir(root, node_id)
         (folder / f"{snapshot_id}.md").unlink(missing_ok=True)

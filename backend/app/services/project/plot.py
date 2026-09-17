@@ -579,6 +579,18 @@ class PlotMixin:
             entry_id, winner, expected_entry_type, noun=noun, schema=self.read_metadata_schema()
         )
         path = self._plot_node_path(entry_id, winner, noun=noun)
+        # A plot node and its snapshot store are one unit of deletion (ADR-0043):
+        # plot is snapshottable since S5b (#1992). Reap the store — keyed by the
+        # resolved file's front-matter id, under the owning layer — before the
+        # unlink, or it is the unreachable residue the lore/tag/prompt delete paths
+        # also clear. The key comes from the path resolved above, NOT the shared
+        # `_resolve_snapshot_target` (which would re-run `_path_for_node_id` and
+        # 404 a truly-absent node with the fixed "Plotline" label — `_plot_node_path`
+        # already 404s it with the right noun, the S5a-review contract). The
+        # inherited-node guard ran earlier, so an ancestor's shared store is never
+        # touched; a node with no store reaps to a harmless no-op.
+        snapshot_node_id = self._node_id_for_path(path)
+        self.delete_scene_snapshots(self._snapshot_store_root(snapshot_node_id), snapshot_node_id)
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         self._purge_references_to({entry_id}, root)
 
@@ -1028,7 +1040,12 @@ class PlotMixin:
         winner = self._build_node_index().by_id.get(entry_id)
         if winner is None or winner.entry_type != PLOT_TEMPLATE_ENTRY_TYPE:
             raise ProjectServiceError(f"Plot template {entry_id} not found.", 404)
-        path = self._path_for_node_id(entry_id, "plot")
+        # Reap the snapshot store before the unlink (ADR-0043), keyed by the
+        # front-matter id under the owning layer — the inherited-library guard
+        # above ran first, so a read-only Library/ancestor template's store is
+        # never reaped; an owned clone with no store is a harmless no-op.
+        store_root, node_id, path = self._resolve_snapshot_target(entry_id, "plot")
+        self.delete_scene_snapshots(store_root, node_id)
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         self._purge_references_to({entry_id}, root)
         return self.list_plot_templates()

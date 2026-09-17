@@ -636,6 +636,12 @@ class PromptEntriesMixin:
 
     def delete_prompt_entry(self, entry_id: str) -> PromptEntryList:
         self._reject_inherited_library_write(entry_id, kind="prompt", noun="prompt")
-        path = self._path_for_node_id(entry_id, "prompt")
+        # A prompt and its snapshot store are one unit of deletion (ADR-0043):
+        # prompts are snapshottable since S5a (#1990), and the store lives under
+        # the owning layer keyed by the front-matter id — resolve and reap it
+        # before the unlink (while the index can still resolve the owner), or it
+        # is the unreachable residue the lore/tag delete paths also clear.
+        store_root, node_id, path = self._resolve_snapshot_target(entry_id, "prompt")
+        self.delete_scene_snapshots(store_root, node_id)
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         return self.list_prompt_entries()

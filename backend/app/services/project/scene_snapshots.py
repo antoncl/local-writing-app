@@ -52,6 +52,7 @@ from app.services.project.errors import ProjectServiceError
 
 if TYPE_CHECKING:
     from app.models import ResearchNote, Scene
+    from app.services.project.node_index import IndexLayer
 
 SNAPSHOTS_DIRNAME = "snapshots"
 
@@ -86,11 +87,29 @@ AUTOMATIC_KEEP = 5
 SNAPSHOT_DESCRIPTION_MAX = 280
 
 # The kinds the node-scoped routes accept today. Scenes reach the store through
-# the /api/scenes routes; research is slice 1 (#1981). lore (S2), tags (S4),
-# prompt/plot (S5) each arrive with the cross-layer write semantics their restore
-# needs — until then the node routes fail closed rather than let a restore write
-# an owning-layer file with no fork/override (ADR-0087 rollout).
-NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research"})
+# the /api/scenes routes; research (S1, #1981) and lore (S2, #1983) are proven.
+# tags (S4) and prompt/plot (S5) each arrive with the cross-layer write semantics
+# their restore needs — until then the node routes fail closed on the kind rather
+# than let a restore write a file the slice has not proven (ADR-0087 rollout).
+NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore"})
+
+
+def _owning_layer_is_snapshottable(layer: IndexLayer | None) -> bool:
+    """Whether a snapshot restore may write this owning layer's file in place.
+
+    Restore byte-writes the owning-layer file (ADR-0087 §2/§4) — structurally
+    what a normal "Editing at: <layer>" save already does — so any real project
+    layer qualifies: the open project (a scene, or a locally authored node) **or**
+    a writable ancestor (a series character edited at the series layer, §S2). What
+    it must never write is a file with no author-facing write path: the built-in
+    Library (read-only, ADR-0049 #689) or the machine config layer. `layer_by_id`
+    already drops both to `None` under its default flags; the explicit clauses
+    keep the guard closed even if a caller widens `include_library`/
+    `include_machine`. Deliberately kind-independent: research staying
+    open-project-only is an emergent property (it is never authored at an
+    ancestor), not a rule encoded here.
+    """
+    return layer is not None and not layer.is_library and not layer.is_machine
 
 
 def _read_body_and_content_time(path: Path) -> tuple[bytes, str]:
@@ -320,14 +339,15 @@ class SceneSnapshotsMixin:
         - **Kind.** Only the kinds the store is proven for are accepted; each
           remaining kind opens in a later slice, together with the cross-layer
           write semantics its restore needs (ADR-0087 rollout).
-        - **Owning layer.** Only a node owned by the *open* project may be
-          snapshotted. Restore writes the owning-layer file in place, so an
-          inherited node would have its ancestor's authored file overwritten with
-          no fork/override — the 409 `save_lore_entry` raises (S2, ADR-0087
-          §2/§3b) — and a built-in Library node (read-only, ADR-0049 #689) or a
-          machine node would be mutated straight past the read-only guard.
-          Research is never inherited-as-authored (`save_research_note`), so this
-          is also its permanent rule, not only an S1 restriction.
+        - **Owning layer.** The node's owning layer must be one the author can
+          author at, because restore byte-writes that layer's file in place: the
+          open project, or a writable ancestor (a series base edited at the
+          series layer — ADR-0087 §2/§S2, `_owning_layer_is_snapshottable`). A
+          built-in Library node (read-only, ADR-0049 #689) or a machine node is
+          refused: it has no author-facing write path, and a byte-write would
+          mutate it straight past the read-only guard. (A book *override* of an
+          inherited entry — a delta file, not an index node — is S3, addressed on
+          the override save path; this guard sees only base index nodes.)
         """
         root = self._require_project()
         index = self._build_node_index(root)
@@ -339,9 +359,9 @@ class SceneSnapshotsMixin:
                 f"Snapshots are not available for {entry.kind} nodes yet.", 422
             )
         layer = self.layer_by_id(root, entry.source_layer_id)
-        if layer is None or not layer.is_root:
+        if not _owning_layer_is_snapshottable(layer):
             raise ProjectServiceError(
-                "Snapshots of an inherited or built-in node are not supported yet.", 422
+                "Snapshots of a built-in or machine node are not supported.", 422
             )
         return entry.kind
 

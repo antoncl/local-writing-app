@@ -25,6 +25,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from fastapi.testclient import TestClient
 from layer_fixtures import declare_full_chain, make_project_folder
@@ -32,9 +33,10 @@ from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import SaveLoreEntryRequest, SaveResearchNoteRequest
+from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import IndexLayer
 from app.services.project.node_index_snapshot import SNAPSHOT_RELATIVE_PATH
-from app.services.project.scene_snapshots import _owning_layer_is_snapshottable
+from app.services.project.scene_snapshots import _owning_layer_is_writable
 
 
 class ResearchNoteSnapshotRoundTripTests(unittest.TestCase):
@@ -352,19 +354,18 @@ class OwningLayerRootTests(unittest.TestCase):
             self.book.resolve(),
         )
 
-    def test_capturing_an_inherited_note_stores_under_the_ancestor(self) -> None:
-        # S2 admits a node owned by a *writable* ancestor: restoring its file is
-        # the same in-place write "Editing at: <ancestor>" already does. The store
-        # co-locates with the ancestor that owns the file (ADR-0087 §3), NOT the
-        # open project — that is the whole reason the root moved off the open
-        # project in S1. (The Library/machine floor is the writability unit test.)
+    def test_capturing_an_inherited_research_note_is_refused(self) -> None:
+        # The owning-layer store MECHANISM resolves the ancestor (the two tests
+        # above), but research is not ancestor-restore-safe: its restore heals the
+        # OPEN project's research tree only (`_update_research_title_in_structure`
+        # → `_require_project()`), so restoring an ancestor-owned note would leave
+        # the ancestor's own tree desynced. Refused (422), nothing written to
+        # either layer. (lore, which heals nothing, IS admitted at an ancestor —
+        # see LoreAncestorBaseTests.)
         response = self.client.post(f"/api/nodes/{self.inherited_id}/snapshots")
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertTrue((self.universe / "snapshots" / self.inherited_id).is_dir())
-        self.assertFalse(
-            (self.book / "snapshots" / self.inherited_id).exists(),
-            "the ancestor's history was scattered under the open project",
-        )
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertFalse((self.universe / "snapshots").exists())
+        self.assertFalse((self.book / "snapshots").exists())
 
     def test_a_local_note_snapshots_normally_in_the_child(self) -> None:
         # The guard allows an open-project note even in a layered chain.
@@ -374,13 +375,13 @@ class OwningLayerRootTests(unittest.TestCase):
 
     def test_a_store_at_any_layer_is_excluded_from_the_index(self) -> None:
         # The per-layer exclusion is a property of the walk (family folders only),
-        # so a store under the ANCESTOR is excluded from the child index just like
-        # one at the open project. Captured through the route (S2 admits the
-        # inherited note), so a real ancestor store — not a hand-placed one — is
-        # what the index must skip.
-        captured = self.client.post(f"/api/nodes/{self.inherited_id}/snapshots")
-        self.assertEqual(captured.status_code, 200, captured.text)
-        self.assertTrue((self.universe / "snapshots" / self.inherited_id).is_dir())
+        # so a store placed under the ANCESTOR is excluded from the child index
+        # just like one at the open project. Placed by hand because the route
+        # refuses to capture this inherited *research* note (not ancestor-restore-
+        # safe); the exclusion it checks is independent of how the store got there.
+        ancestor_store = self.universe / "snapshots" / self.inherited_id
+        ancestor_store.mkdir(parents=True, exist_ok=True)
+        (ancestor_store / "snap_x.md").write_text("frozen bytes", encoding="utf-8")
         index = self._cold_index()
         under_snapshots = [
             str(entry.path)
@@ -545,6 +546,21 @@ class LoreEntrySnapshotRoundTripTests(unittest.TestCase):
         ]
         self.assertEqual(under_snapshots, [])
 
+    def test_node_snapshot_kind_refuses_a_read_only_owning_layer(self) -> None:
+        # The writability floor, end-to-end through the guard (not just the pure
+        # helper): if the owning layer resolves to the read-only built-in Library,
+        # node_snapshot_kind must refuse before any byte-write can reach it. Forced
+        # via layer_by_id because the built-in Library ships no lore node to author.
+        library = IndexLayer(
+            folder=self.root, id="lib", label="Library", rank=0, is_library=True
+        )
+        with (
+            mock.patch.object(self.service, "layer_by_id", return_value=library),
+            self.assertRaises(ProjectServiceError) as caught,
+        ):
+            self.service.node_snapshot_kind(self.entry_id)
+        self.assertEqual(caught.exception.status_code, 422)
+
 
 class LoreAncestorBaseTests(unittest.TestCase):
     """A lore base file owned by a WRITABLE ANCESTOR — the case research never has
@@ -613,34 +629,52 @@ class LoreAncestorBaseTests(unittest.TestCase):
         self.assertEqual(after.status_code, 200, after.text)
         self.assertIn("as the series first wrote it", after.json()["body"])
 
+    def test_deleting_the_entry_reaps_the_store_under_the_series(self) -> None:
+        # The reap must target the OWNING layer's store, not the open project's:
+        # an ancestor-owned entry's history lives under the series, so deleting the
+        # entry must reap it there. A (root, node_id) reap keyed on the open
+        # project would rmtree a nonexistent book/snapshots/<id> and orphan the
+        # real series store — this is what pins _resolve_snapshot_target's root.
+        captured = self.client.post(f"/api/nodes/{self.entry_id}/snapshots")
+        self.assertEqual(captured.status_code, 200, captured.text)
+        self.assertTrue((self.universe / "snapshots" / self.entry_id).is_dir())
+        deleted = self.client.delete(f"/api/lore/{self.entry_id}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertFalse(
+            (self.universe / "snapshots" / self.entry_id).exists(),
+            "the series character's store outlived the entry (reaped at the wrong root)",
+        )
+
 
 class OwningLayerWritabilityTests(unittest.TestCase):
-    """The layer floor `node_snapshot_kind` enforces (ADR-0087 §2/§S2): a real
-    project layer — root or a writable ancestor — is snapshottable; the read-only
+    """The writability floor `node_snapshot_kind` enforces (ADR-0087 §2): a real
+    project layer — root or a writable ancestor — is writable; the read-only
     built-in Library and the machine layer are not. Unit-tested directly because
-    the built-in Library ships no lore/research node to route a request through."""
+    the built-in Library ships no lore/research node to route a request through
+    (the guard's *use* of this floor is pinned by the service-level refusal test
+    in LoreEntrySnapshotRoundTripTests)."""
 
     @staticmethod
     def _layer(**flags: bool) -> IndexLayer:
         return IndexLayer(folder=Path("x"), id="layer", label="L", rank=0, **flags)
 
-    def test_open_project_root_is_snapshottable(self) -> None:
-        self.assertTrue(_owning_layer_is_snapshottable(self._layer(is_root=True)))
+    def test_open_project_root_is_writable(self) -> None:
+        self.assertTrue(_owning_layer_is_writable(self._layer(is_root=True)))
 
-    def test_a_writable_ancestor_is_snapshottable(self) -> None:
+    def test_a_writable_ancestor_is_writable(self) -> None:
         # A base owned by a plain project layer (no flags) — the S2 admission.
-        self.assertTrue(_owning_layer_is_snapshottable(self._layer()))
+        self.assertTrue(_owning_layer_is_writable(self._layer()))
 
     def test_the_builtin_library_is_refused(self) -> None:
-        self.assertFalse(_owning_layer_is_snapshottable(self._layer(is_library=True)))
+        self.assertFalse(_owning_layer_is_writable(self._layer(is_library=True)))
 
     def test_the_machine_layer_is_refused(self) -> None:
-        self.assertFalse(_owning_layer_is_snapshottable(self._layer(is_machine=True)))
+        self.assertFalse(_owning_layer_is_writable(self._layer(is_machine=True)))
 
     def test_an_unresolved_layer_is_refused(self) -> None:
         # layer_by_id returns None for a Library/machine/unknown id under its
         # default flags; the guard must fail closed on that.
-        self.assertFalse(_owning_layer_is_snapshottable(None))
+        self.assertFalse(_owning_layer_is_writable(None))
 
 
 if __name__ == "__main__":

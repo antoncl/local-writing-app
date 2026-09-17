@@ -89,11 +89,11 @@ AUTOMATIC_KEEP = 5
 SNAPSHOT_DESCRIPTION_MAX = 280
 
 # The kinds the node-scoped routes accept today. Scenes reach the store through
-# the /api/scenes routes; research (S1, #1981) and lore (S2, #1983) are proven.
-# tags (S4) and prompt/plot (S5) each arrive with the cross-layer write semantics
+# the /api/scenes routes; research (S1, #1981), lore (S2, #1983) and tag (S4,
+# #1988) are proven. prompt/plot (S5) arrive with the cross-layer write semantics
 # their restore needs — until then the node routes fail closed on the kind rather
 # than let a restore write a file the slice has not proven (ADR-0087 rollout).
-NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore"})
+NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore", "tag"})
 
 
 # Kinds whose restore reconciles correctly at ANY writable layer, so an inherited
@@ -106,8 +106,11 @@ NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore"})
 # the ANCESTOR's own tree desynced from the file the restore just rewrote. Both
 # stay open-project-only until that healer is owning-layer-aware — and research IS
 # authored at ancestors (it is walked cross-layer), so this is a live refusal, not
-# a dead branch. (Scenes are root-scoped regardless.)
-ANCESTOR_RESTORE_SAFE_KINDS = frozenset({"lore"})
+# a dead branch. (Scenes are root-scoped regardless.) tag joins lore here: a tag is
+# layered and heals nothing on restore — its `merged_into`/`canonical_id` re-resolve
+# from the restored bytes at index-build time (§4), the reference sweep is never
+# replayed — so an ancestor-owned tag restores as safely as an ancestor lore base.
+ANCESTOR_RESTORE_SAFE_KINDS = frozenset({"lore", "tag"})
 
 # The kinds whose *overrides* (nearer-layer delta files, ADR-0087 §3b) the node
 # routes can snapshot when addressed by (entity id + authoring layer). Only lore
@@ -348,7 +351,11 @@ class SceneSnapshotsMixin:
         """
         root = self._require_project()
         index = self._build_node_index(root)
-        entry = index.by_id.get(index.canonical_id(node_id))
+        # By the node's OWN id, never the merge-survivor's `canonical_id`: a
+        # snapshot lives under the layer that owns *this* file. A merged (redirect)
+        # tag's snapshots stay at its own layer — canonicalizing here would relocate
+        # them onto the survivor's layer and strand/mis-reap the store (S4 review).
+        entry = index.by_id.get(node_id)
         if entry is None or not entry.source_layer_id:
             return root
         layer = self.layer_by_id(root, entry.source_layer_id)
@@ -430,7 +437,10 @@ class SceneSnapshotsMixin:
         """
         root = self._require_project()
         index = self._build_node_index(root)
-        entry = index.by_id.get(index.canonical_id(node_id))
+        # By the node's OWN id, never the merge-survivor's `canonical_id`: a
+        # snapshot op addresses this node's own file/history/layer (a merged tag is
+        # snapshotted at its own layer, not the survivor's — S4 review).
+        entry = index.by_id.get(node_id)
         if entry is None:
             raise ProjectServiceError(f"Node {node_id} does not exist.", 404)
         if entry.kind not in NODE_SNAPSHOT_KINDS:

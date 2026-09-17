@@ -131,6 +131,22 @@ class TagNodesMixin:
         index_entry = index.by_id.get(tag_id)
         if index_entry is None or index_entry.kind != "tag":
             raise ProjectServiceError(f"Tag {tag_id} does not exist.", 404)
+        # Refuse deleting a tag owned by an ANCESTOR *project* layer: like the old
+        # delete_lore_entry it would unlink the ancestor's own file and — now that
+        # tags are snapshottable (S4, #1988) — reap that ancestor's shared snapshot
+        # history for every book below (the ancestor-canon hazard the lore S2
+        # review caught). Scoped by the owning layer rather than
+        # `_reject_inherited_library_write`, which would ALSO refuse the user's own
+        # machine-layer vocabulary tags (a regression): a machine tag's layer
+        # resolves to None here (machine is excluded), and an open-project tag's is
+        # root — both stay deletable; only a resolvable non-root project ancestor
+        # is refused.
+        if self.root_path is not None:
+            owning = self.layer_by_id(self.root_path, index_entry.source_layer_id)
+            if owning is not None and not owning.is_root:
+                raise ProjectServiceError(
+                    f"This tag is inherited from {owning.label} and is read-only here.", 409
+                )
         # A redirect (a tag with `merged_into` set) has no survivor to leave
         # behind, so cascade-deleting it is meaningless — but deleting a
         # SURVIVOR takes every tag that redirects to it with it (ADR-0082 §5):
@@ -140,6 +156,15 @@ class TagNodesMixin:
         # (`_chats_with_subject_in`) is the precedent for "a deleted survivor
         # takes its dependents with it".
         redirect_ids = self._transitive_redirects(tag_id, index)
+        # A tag and its snapshot store are one unit of deletion (ADR-0043): tags
+        # are snapshottable since S4, so reap EACH cascaded tag's store — the
+        # survivor and every redirect it takes with it — at its owning-layer root,
+        # BEFORE the unlinks below (while the index can still resolve the owner).
+        # Project-scoped like the purge: a no-project machine-layer delete has no
+        # snapshot store to reap.
+        if self.root_path is not None:
+            for reap_id in (tag_id, *redirect_ids):
+                self.delete_scene_snapshots(self._snapshot_store_root(reap_id), reap_id)
         for redirect_id in redirect_ids:
             self._delete_node_file(index.by_id[redirect_id].path)
         self._delete_node_file(index_entry.path)  # unlink + un-shadow the memo (#392)

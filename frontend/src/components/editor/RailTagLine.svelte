@@ -131,10 +131,25 @@
   // means "this project" and is a valid layer; only `undefined` means the host
   // offers no create at all (the same contract ReferencePicker uses).
   const createEnabled = $derived(createLayerId !== undefined);
+  // Never offer Create for a title already on the node: the candidates exclude
+  // selected tags, so without this a retyped `night` would show `+ Create` and
+  // silently no-op on Enter.
+  const typedIsSelected = $derived(items.some((i) => i.title.trim().toLowerCase() === typedTrimmed.toLowerCase()));
   const canCreate = $derived(
-    createEnabled && createTarget != null && typedTrimmed.length > 0 && !hasTitleMatch(candidates, typedTrimmed),
+    createEnabled &&
+      createTarget != null &&
+      typedTrimmed.length > 0 &&
+      !typedIsSelected &&
+      !hasTitleMatch(candidates, typedTrimmed),
   );
   const optionCount = $derived(candidates.length + (canCreate ? 1 : 0));
+  // Combobox wiring: the listbox and its options carry ids so the input can
+  // name the highlighted option for assistive tech.
+  const listId = $derived(`tag-line-${fieldId}-list`);
+  const listOpen = $derived(typedTrimmed.length > 0);
+  const activeOptionId = $derived(
+    !listOpen || optionCount === 0 ? undefined : highlightIndex < candidates.length ? `${listId}-${highlightIndex}` : `${listId}-create`,
+  );
 
   $effect(() => {
     void typed;
@@ -245,7 +260,12 @@
       <input
         type="text"
         class="tag-line-input"
+        role="combobox"
         aria-label={`Add ${fieldLabel}`}
+        aria-autocomplete="list"
+        aria-expanded={listOpen}
+        aria-controls={listId}
+        aria-activedescendant={activeOptionId}
         autocomplete="off"
         bind:value={typed}
         bind:this={inputEl}
@@ -253,10 +273,11 @@
       />
     </div>
     {#if typedTrimmed.length > 0}
-      <ul role="listbox" class="tag-line-complete">
+      <ul role="listbox" id={listId} class="tag-line-complete">
         {#each candidates as candidate, i (candidate.id)}
           <li
             role="option"
+            id={`${listId}-${i}`}
             aria-selected={i === highlightIndex}
             class="tag-line-option"
             class:highlighted={i === highlightIndex}
@@ -269,6 +290,7 @@
         {#if canCreate}
           <li
             role="option"
+            id={`${listId}-create`}
             data-testid="tag-line-create"
             aria-selected={candidates.length === highlightIndex}
             class="tag-line-option"

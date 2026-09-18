@@ -204,6 +204,63 @@ describe("RailTagLine — editing", () => {
     expect(input).toHaveValue("");
   });
 
+  it("a second Enter while a create is in flight does not mint twice", async () => {
+    let resolveCreate: (tag: TagEntry) => void = () => {};
+    const createSpy = vi.spyOn(api, "createTagEntry").mockImplementation(
+      () => new Promise<TagEntry>((resolve) => { resolveCreate = resolve; }),
+    );
+    const onChange = vi.fn();
+    render(RailTagLine, {
+      props: { field: themeField, fieldId: "tags", fieldLabel: "Tags", value: [], editing: true, createLayerId: null, onOpen: noop, onClose: noop, onChange },
+    });
+    const input = screen.getByLabelText("Add Tags");
+    await fireEvent.input(input, { target: { value: "Mystery" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    resolveCreate({ id: "tag_new", title: "Mystery", entry_type: "tag:theme", metadata: {} } as TagEntry);
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledWith(["tag_new"]));
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed create shows the error line and keeps the typed title", async () => {
+    vi.spyOn(api, "createTagEntry").mockRejectedValue(new Error("layer is read-only"));
+    render(RailTagLine, {
+      props: { field: themeField, fieldId: "tags", fieldLabel: "Tags", value: [], editing: true, createLayerId: null, onOpen: noop, onClose: noop, onChange: noop },
+    });
+    const input = screen.getByLabelText("Add Tags");
+    await fireEvent.input(input, { target: { value: "Mystery" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("layer is read-only"));
+    expect(input).toHaveValue("Mystery");
+  });
+
+  it("retyping a title already on the node offers no Create option", async () => {
+    render(RailTagLine, {
+      props: { field: themeField, fieldId: "tags", fieldLabel: "Tags", value: ["tag_guilt"], editing: true, createLayerId: null, onOpen: noop, onClose: noop, onChange: noop },
+    });
+    const input = screen.getByLabelText("Add Tags");
+    await fireEvent.input(input, { target: { value: "guilt" } });
+    expect(screen.queryByTestId("tag-line-create")).toBeNull();
+  });
+
+  it("the input is a combobox naming the highlighted option", async () => {
+    render(RailTagLine, {
+      props: { field: openField, fieldId: "tags", fieldLabel: "Tags", value: [], editing: true, onOpen: noop, onClose: noop, onChange: noop },
+    });
+    const input = screen.getByLabelText("Add Tags");
+    expect(input).toHaveAttribute("role", "combobox");
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    await fireEvent.input(input, { target: { value: "gu" } });
+    expect(input).toHaveAttribute("aria-expanded", "true");
+    const listbox = screen.getByRole("listbox");
+    expect(input).toHaveAttribute("aria-controls", listbox.id);
+    const first = within(listbox).getAllByRole("option")[0];
+    expect(input).toHaveAttribute("aria-activedescendant", first.id);
+    await fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute("aria-activedescendant", within(listbox).getAllByRole("option")[1].id);
+  });
+
   it("createLayerId null means 'this project' — the create option IS offered (the rail's scene case)", async () => {
     render(RailTagLine, {
       props: {

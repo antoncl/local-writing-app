@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { LoreScrubController } from "./loreScrub.svelte";
 import type { MutationMarkerRecord } from "@/lib/types";
 
@@ -52,5 +52,37 @@ describe("LoreScrubController.anchorSceneId (ADR-0055 §1)", () => {
     ];
     c.index = 1;
     expect(c.anchorSceneId).toBe("sceneLast");
+  });
+});
+
+// ADR-0088 §4: the foot dock steps the mutation axis with the same ← / → gesture
+// it steps the snapshot axis. `step` is the clamped walk; scrubTo is spied so the
+// clamp is tested without the effective-state fetch scrubTo would otherwise make.
+describe("LoreScrubController.step (ADR-0088 §4)", () => {
+  it("steps one stop toward the target", () => {
+    const c = new LoreScrubController();
+    c.markers = [rec({ unit_id: "u1" }), rec({ unit_id: "u2" })]; // units.length = 2
+    const scrubTo = vi.spyOn(c, "scrubTo").mockResolvedValue();
+    c.step(1);
+    expect(scrubTo).toHaveBeenCalledWith(1);
+  });
+
+  it("does not step below base (0)", () => {
+    const c = new LoreScrubController();
+    c.markers = [rec({ unit_id: "u1" })];
+    const scrubTo = vi.spyOn(c, "scrubTo").mockResolvedValue();
+    c.step(-1); // already at base
+    expect(scrubTo).not.toHaveBeenCalled();
+    expect(c.index).toBe(0);
+  });
+
+  it("does not step past the last stop (units.length)", () => {
+    const c = new LoreScrubController();
+    c.markers = [rec({ unit_id: "u1" }), rec({ unit_id: "u2" })]; // length 2
+    c.index = 2;
+    const scrubTo = vi.spyOn(c, "scrubTo").mockResolvedValue();
+    c.step(1); // already at the last stop
+    expect(scrubTo).not.toHaveBeenCalled();
+    expect(c.index).toBe(2);
   });
 });

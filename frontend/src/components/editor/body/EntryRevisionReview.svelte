@@ -16,6 +16,7 @@
 
   import RevisionFlip from "@/components/editor/body/RevisionFlip.svelte";
   import SegmentedControl from "@/components/widgets/SegmentedControl.svelte";
+  import { paneOwnsKey } from "@/lib/utils/paneScope";
   import type { FieldFlip } from "@/lib/utils/entryRevision";
   import type { DiffView } from "@/lib/types";
 
@@ -84,21 +85,13 @@
   // strobe the view.
   let rootEl: HTMLDivElement | null = $state(null);
 
-  function addressedToThisPane(target: HTMLElement | null): boolean {
-    if (!rootEl) return false;
-    if (rootEl.closest(".hidden-doc")) return false;
-    const pane = rootEl.closest(".editor-panel");
-    const focused = target?.closest?.(".editor-panel") ?? null;
-    return !focused || !pane || focused === pane;
-  }
-
   function onKeydown(event: KeyboardEvent): void {
     if (!hasProse) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const target = event.target as HTMLElement | null;
     if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "")) return;
     if (!/^[asb]$/i.test(event.key)) return;
-    if (!addressedToThisPane(target)) return;
+    if (!paneOwnsKey(rootEl, target)) return;
     if (event.repeat) {
       event.preventDefault();
       return;

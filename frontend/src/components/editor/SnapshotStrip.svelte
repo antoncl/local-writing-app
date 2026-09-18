@@ -69,8 +69,9 @@
   //
   // A/S/B are the compare axis (#409): Active · Snapshot · Both. Left hand on
   // the letters, right hand on the arrows, so *when* and *which* are driven at
-  // once. Not ↑↓, which fight page scroll on a long scene.
-  let stripEl: HTMLDivElement | null = $state(null);
+  // once. Not ↑↓, which fight page scroll on a long scene. (The key handling
+  // itself now lives in the FootDock — this list is still the source of truth
+  // for the compare buttons and the dock's A/S/B map.)
 
   // The three compare states, as a list so the buttons and the key map cannot
   // drift apart.
@@ -80,73 +81,10 @@
     { id: "both", key: "B", label: "Both", hint: "both versions, adjacent" },
   ] as const;
 
-  /**
-   * Whether this strip is the one the keypress is for.
-   *
-   * Every strip installs its own `svelte:window` handler, and the workspace
-   * keeps every tab MOUNTED — "only the active one is shown" — so gating on
-   * `parked` alone let one press drive every parked strip in the workspace, and
-   * a hidden pane swallow plain letters anywhere focus was not an input. Slice 1
-   * bound only the arrows and Esc; #409 made the bindings bare `a`/`s`/`b`,
-   * which is what turned a latent bug into a daily one.
-   *
-   * Two rules, in order: a strip inside a hidden tab is never addressed, and
-   * when focus sits inside some other editor pane that pane owns the key.
-   */
-  function addressedToThisPane(target: HTMLElement | null): boolean {
-    if (!stripEl) return false;
-    if (stripEl.closest(".hidden-doc")) return false;
-    const pane = stripEl.closest(".editor-panel");
-    const focused = target?.closest?.(".editor-panel") ?? null;
-    return !focused || !pane || focused === pane;
-  }
-
-  function onKeydown(event: KeyboardEvent): void {
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
-    const target = event.target as HTMLElement | null;
-    if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "")) return;
-    if (!parked && !(target && stripEl?.contains(target))) return;
-    if (!addressedToThisPane(target)) return;
-
-    // A/S/B are TOGGLES, not held modifiers. Without this an OS auto-repeat
-    // fires keydown ~30×/s and the view strobes between two states instead of
-    // settling on one (§I). The arrows are exempt: repeating those is a
-    // legitimate way to walk the timeline.
-    const compare = /^[asb]$/i.test(event.key);
-    if (compare && event.repeat) {
-      event.preventDefault();
-      return;
-    }
-
-    switch (event.key) {
-      case "ArrowLeft":
-        strip.step(-1);
-        break;
-      case "ArrowRight":
-        strip.step(1);
-        break;
-      case "Escape":
-        // Straight back to Live in one press, not via Both: Esc keeps one
-        // meaning, and B is already the way back to Both.
-        void strip.park(null);
-        break;
-      case "a":
-      case "A":
-        strip.toggleView("now");
-        break;
-      case "s":
-      case "S":
-        strip.toggleView("was");
-        break;
-      case "b":
-      case "B":
-        strip.setView("both");
-        break;
-      default:
-        return;
-    }
-    event.preventDefault();
-  }
+  // The keyboard (←/→/Esc/A·S·B) and the pane-scoping used to live here; they
+  // moved to the FootDock, which owns the single window handler for both the
+  // snapshot and mutation tracks (ADR-0088 §4). This strip is now purely
+  // presentational — the dock drives it through the controller.
 
   // The description edits in place (variant B, ADR-0044 §L / Open item 4): at
   // rest the row shows only what exists — the one-liner with a pencil, or a
@@ -190,9 +128,7 @@
   }
 </script>
 
-<svelte:window onkeydown={onKeydown} />
-
-<div class="snapshot-strip" class:compact={!parked} class:waiting={strip.slow} role="group" aria-label="Snapshots" bind:this={stripEl}>
+<div class="snapshot-strip" class:compact={!parked} class:waiting={strip.slow} role="group" aria-label="Snapshots">
   <div class="strip-track">
     <!-- Ticks first, so notches paint above them. -->
     {#each visibleTicks as tick (tick.label)}

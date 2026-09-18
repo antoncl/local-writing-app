@@ -5,8 +5,7 @@
   import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
-  import MutationScrubber from "@/components/editor/MutationScrubber.svelte";
-  import SnapshotStrip from "@/components/editor/SnapshotStrip.svelte";
+  import FootDock from "@/components/editor/FootDock.svelte";
   import EditorRail from "@/components/editor/EditorRail.svelte";
   import { editorRailLayout } from "@/lib/stores/editorRailLayout.svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
@@ -947,16 +946,21 @@
       {/key}
     {/if}
     {#if documentKind === "lore" && scene?.id}
-      <!-- The mutation scrubber lives with Details (#1249): the metadata fields
-           are what mutate, so the time-travel strip docks wherever the rail
-           docks, beside the timeline it shares an ordered dataset with. -->
-      {#if scrub.units.length > 0}
-        <MutationScrubber units={scrub.units} index={scrub.index} onScrub={(index) => void scrub.scrubTo(index)} />
-      {/if}
+      <!-- The mutation SCRUBBER relocated to the foot dock (ADR-0088 S2 §5),
+           where it shares one dock and a mode control with the snapshot track.
+           The mutation TIMELINE stays here in the rail — a separate view of the
+           same ordered dataset; the ADR moves only the beads scrubber. -->
       <MutationTimeline
         units={scrub.units}
         activeIndex={scrub.index}
-        onSelect={(index) => void scrub.scrubTo(index)}
+        onSelect={(index) => {
+          // Engaging the mutation axis from the rail returns the snapshot axis to
+          // Live, so the two are never both engaged (ADR-0088 S2): the foot dock
+          // follows the engaged axis, and this keeps them mutually exclusive even
+          // though the rail drives scrub outside the dock.
+          void snapshots.park(null);
+          void scrub.scrubTo(index);
+        }}
         onNavigate={(payload) => onNavigate?.(payload)}
       />
       <!-- Mutation sets (ADR-0055 §3): the mutation sets pinned to this entity,
@@ -1238,12 +1242,12 @@
     />
   {/if}
 
-  <!-- Foot-docked: snapshots are about the body, so the strip stays with it. Now
-       also on a lore card (ADR-0088 S1) — its mutation scrubber still travels
-       with Details in the rail (#1249); S2 folds both into one dock. Gated on a
-       prose body: the read-only compare overlay is prose. -->
+  <!-- Foot-docked: the lore card's two time-axes share ONE dock (ADR-0088 S2).
+       For a scene, or a lore entry with no mutations, FootDock degrades to
+       exactly ADR-0044's snapshot strip with no mode control. Gated on a prose
+       body: the read-only compare overlay is prose. -->
   {#if (documentKind === "manuscript" || documentKind === "lore") && scene && bodyShape === "prose"}
-    <SnapshotStrip strip={snapshots} writesLabel={snapshotWritesLabel} />
+    <FootDock {snapshots} {scrub} {documentKind} writesLabel={snapshotWritesLabel} />
   {/if}
 
   <footer class="status">

@@ -19,11 +19,28 @@ path as a rootdir, not as a package.
 
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 from urllib.parse import quote
 
 from app.scope import WorkScope
+from app.services.project.scene_snapshots import SESSION_GAP_MINUTES
 from app.services.project_service import ProjectService
+
+
+def backdate_past_gap(path: Path) -> None:
+    """Backdate a node file's mtime past the session gap, so the next save trips
+    the automatic session-boundary capture (ADR-0043 Amendment 2, #1985).
+
+    The trigger reads mtime and nothing else, so `os.utime` is the only way to
+    exercise it without a 30-minute test. Shared by the scene, research, lore,
+    and prompt snapshot suites so the simulation stays one definition (a divergent
+    copy would let two lanes' auto-capture tests drift without a signal).
+    """
+    stale = time.time() - (SESSION_GAP_MINUTES + 1) * 60
+    os.utime(path, (stale, stale))
+
 
 # The project the HTTP surface should resolve for the current test, or None for
 # the unbound (no project open) surfaces. Reset per-test by the conftest fixture.

@@ -9,35 +9,18 @@ base and the override save paths, the same simulation the scene tests use.
 
 from __future__ import annotations
 
-import os
-import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
 from layer_fixtures import declare_full_chain, make_project_folder
-from project_fixtures import open_test_project
+from project_fixtures import backdate_past_gap, open_test_project
 
 from app.main import app
 from app.models import CreatePromptEntryRequest, SavePromptEntryRequest
 from app.services.project.overrides import OVERRIDES_FOLDER
-from app.services.project.scene_snapshots import (
-    OVERRIDE_STORE_SCOPE,
-    SESSION_GAP_MINUTES,
-)
-
-
-def _backdate_past_gap(path: Path) -> None:
-    """Make `path`'s mtime look like the last save was before the session gap,
-    so the next save trips the automatic capture (ADR-0043 Amendment 2, #1985).
-
-    The trigger reads mtime and nothing else, so `os.utime` is the only way to
-    exercise it without a 30-minute test — the same simulation
-    `test_scene_snapshots` uses for scenes, now for the non-scene save paths.
-    """
-    stale = time.time() - (SESSION_GAP_MINUTES + 1) * 60
-    os.utime(path, (stale, stale))
+from app.services.project.scene_snapshots import OVERRIDE_STORE_SCOPE
 
 
 class PromptSnapshotRoundTripTests(unittest.TestCase):
@@ -82,7 +65,7 @@ class PromptSnapshotRoundTripTests(unittest.TestCase):
     # ----- automatic session-boundary capture (#1985) -----------------------
 
     def test_a_save_past_the_session_gap_auto_captures_the_prior_state(self) -> None:
-        _backdate_past_gap(self._prompt_path())
+        backdate_past_gap(self._prompt_path())
         self._save_body("Rewritten entirely — nothing of the first draft left.")
         records = self._auto_snapshots()
         self.assertEqual(len(records), 1)
@@ -216,11 +199,19 @@ class PromptOverrideSnapshotTests(unittest.TestCase):
     def test_a_later_override_past_the_gap_photographs_the_prior_delta(self) -> None:
         delta = self.service._override_file_for_target(self.book, self.prompt_id)
         self.assertIsNotNone(delta, "setUp should have written the first override delta")
-        _backdate_past_gap(delta)
+        backdate_past_gap(delta)
         self._save_override({"color": "#39c"})
         records = self._auto_snapshots()
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].retention, "thinned")
+        # kind="prompt" is forwarded on the override path — no scene witness. The
+        # override resolution ignores kind (short-circuits on layer_id), so a
+        # dropped kind would ship one silently; read the .overrides store root.
+        self.assertIsNone(
+            self.service.read_snapshot_witness(
+                self.book / OVERRIDE_STORE_SCOPE, self.prompt_id, records[0].id
+            )
+        )
         store = self._override_store()
         self.assertTrue((store / f"{records[0].id}.md").exists())
         # The frozen bytes are the PRIOR delta (#c33), not the freshly-written one.
@@ -258,7 +249,11 @@ class PromptOverrideSnapshotTests(unittest.TestCase):
 
     def test_an_override_capture_writes_no_witness(self) -> None:
         snapshot = self._capture()
-        witness = self.service.read_snapshot_witness(self.book, self.prompt_id, snapshot["id"])
+        # The override store roots at <book>/.overrides — read there, not the base
+        # lane under <book>/snapshots, or the assertion passes vacuously (#1985 review).
+        witness = self.service.read_snapshot_witness(
+            self.book / OVERRIDE_STORE_SCOPE, self.prompt_id, snapshot["id"]
+        )
         self.assertIsNone(witness)
 
     def test_ancestor_base_admitted_and_inherited_delete_refused(self) -> None:

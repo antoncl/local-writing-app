@@ -22,8 +22,6 @@ manuscript. Here we add the second kind, the layer axis, and the writability gua
 
 from __future__ import annotations
 
-import os
-import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -31,7 +29,7 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 from layer_fixtures import declare_full_chain, make_project_folder
-from project_fixtures import open_test_project
+from project_fixtures import backdate_past_gap, open_test_project
 
 from app.main import app
 from app.models import (
@@ -49,22 +47,9 @@ from app.services.project.node_index_snapshot import SNAPSHOT_RELATIVE_PATH
 from app.services.project.overrides import OVERRIDES_FOLDER
 from app.services.project.scene_snapshots import (
     OVERRIDE_STORE_SCOPE,
-    SESSION_GAP_MINUTES,
     _owning_layer_is_writable,
 )
 from app.services.project_service import ProjectService
-
-
-def _backdate_past_gap(path: Path) -> None:
-    """Make `path`'s mtime look like the last save was before the session gap,
-    so the next save trips the automatic capture (ADR-0043 Amendment 2, #1985).
-
-    The trigger reads mtime and nothing else, so `os.utime` is the only way to
-    exercise it without a 30-minute test — the same simulation
-    `test_scene_snapshots` uses for scenes, now for the non-scene save paths.
-    """
-    stale = time.time() - (SESSION_GAP_MINUTES + 1) * 60
-    os.utime(path, (stale, stale))
 
 
 class ResearchNoteSnapshotRoundTripTests(unittest.TestCase):
@@ -121,7 +106,7 @@ class ResearchNoteSnapshotRoundTripTests(unittest.TestCase):
     # ----- automatic session-boundary capture (#1985) -----------------------
 
     def test_a_save_past_the_session_gap_auto_captures_the_prior_state(self) -> None:
-        _backdate_past_gap(self._note_path())
+        backdate_past_gap(self._note_path())
         self._save_body("The timeline, wholly rewritten.")
         records = self._auto_snapshots()
         self.assertEqual(len(records), 1)
@@ -486,13 +471,17 @@ class LoreEntrySnapshotRoundTripTests(unittest.TestCase):
     # ----- automatic session-boundary capture (#1985) -----------------------
 
     def test_a_save_past_the_session_gap_auto_captures_the_prior_state(self) -> None:
-        _backdate_past_gap(self._entry_path())
+        backdate_past_gap(self._entry_path())
         self._save_body("Rewritten — nothing of the first ledger remains.")
         records = self._auto_snapshots()
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].retention, "thinned")
-        # `kind="lore"` is forwarded, so no scene witness is built on a lore node
-        # (the mutation this guards: dropping the kind → a manuscript witness).
+        # No scene witness on a lore node. On the BASE path two things keep it
+        # None: dropping the `kind="lore"` at the call site makes
+        # _resolve_snapshot_target look the id up as a scene and raise 404 (the
+        # save fails loudly, before any capture); and with kind forwarded, this
+        # pins _capture's own `if kind == "manuscript"` guard (make that build
+        # unconditional and a correctly-forwarded lore save writes a witness here).
         self.assertIsNone(
             self.service.read_snapshot_witness(self.root, self.entry_id, records[0].id)
         )
@@ -841,11 +830,21 @@ class LoreOverrideSnapshotTests(unittest.TestCase):
     def test_a_later_override_past_the_gap_photographs_the_prior_delta(self) -> None:
         delta = self.service._override_file_for_target(self.book, self.entity_id)
         self.assertIsNotNone(delta, "setUp should have written the first override delta")
-        _backdate_past_gap(delta)
+        backdate_past_gap(delta)
         self._save_override({"rank": "Commodore"})
         records = self._auto_snapshots()
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].retention, "thinned")
+        # kind="lore" is forwarded on the override path too — no scene witness.
+        # This is the ONLY guard for it here: _resolve_snapshot_target ignores kind
+        # for an override (it short-circuits on layer_id), so a dropped kind would
+        # NOT raise — it would silently ship a witness. Read the OVERRIDE store
+        # root (.overrides), not the base lane, or the check passes vacuously.
+        self.assertIsNone(
+            self.service.read_snapshot_witness(
+                self.book / OVERRIDE_STORE_SCOPE, self.entity_id, records[0].id
+            )
+        )
         # The photograph lands in the override (.overrides) lane, not the base lane…
         store = self._override_store()
         self.assertTrue((store / f"{records[0].id}.md").exists())
@@ -893,7 +892,11 @@ class LoreOverrideSnapshotTests(unittest.TestCase):
 
     def test_an_override_capture_writes_no_witness(self) -> None:
         snapshot = self._capture()
-        witness = self.service.read_snapshot_witness(self.book, self.entity_id, snapshot["id"])
+        # The override store roots at <book>/.overrides — read there, not the base
+        # lane under <book>/snapshots, or the assertion passes vacuously (#1985 review).
+        witness = self.service.read_snapshot_witness(
+            self.book / OVERRIDE_STORE_SCOPE, self.entity_id, snapshot["id"]
+        )
         self.assertIsNone(witness)
 
     def test_the_base_and_the_override_keep_separate_histories(self) -> None:

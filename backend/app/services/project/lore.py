@@ -444,6 +444,15 @@ class LoreEntriesMixin:
         # ignores it while the local copy wins). An ancestor's override stays: it
         # belongs to that layer and its other descendants.
         self._drop_layer_overrides_for_target(root, entry_id)
+        # The fork moved ownership into this project, so this layer's override
+        # snapshot store for the id (ADR-0087 §3b) is now permanently unreachable —
+        # the override route refuses once authoring == owning. Reap it as the
+        # delta's sibling (#2015), or it lingers as the orphaned residue the base
+        # lane already avoids. This is the ONE ownership-transfer site: a
+        # revert-to-canon keeps its store (the restore path) and promotion keeps
+        # its lane reachable, so neither reaps — the reap cannot live in the shared
+        # _drop_layer_overrides_for_target above.
+        self.delete_override_snapshots(root, entry_id)
         return self.read_lore_entry(entry_id)
 
     def delete_lore_entry(self, entry_id: str) -> LoreEntryList:

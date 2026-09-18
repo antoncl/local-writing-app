@@ -1007,3 +1007,25 @@ class SceneSnapshotsMixin:
         affordance on.
         """
         shutil.rmtree(self._snapshots_dir(root, node_id), ignore_errors=True)
+
+    def delete_override_snapshots(self, layer_folder: Path, entity_id: str) -> None:
+        """Reap a layer's override snapshot store for an entity (ADR-0087 §3b) —
+        the override-lane twin of `delete_scene_snapshots`.
+
+        Called only where an override lane becomes *permanently* unreachable: a
+        fork-to-here moves ownership onto this layer, so `node_override_snapshot_kind`
+        refuses (authoring == owning) and `<layer>/.overrides/snapshots/<E>` can no
+        longer be listed or restored. Reaping it keeps ADR-0043's "a node and its
+        snapshots are one unit" honest on the override lane. It is **not** called on
+        a revert-to-canon (that store is the restore-after-revert recovery path) or
+        on promotion (the lane stays reachable and is re-written), which is why the
+        reap lives at the ownership-transfer site and not in the shared
+        `_drop_layer_overrides_for_target` those transitions also route through.
+
+        The override lane is keyed by the entity's *canonical* id — the same key its
+        writer uses (`_resolve_override_snapshot_target`), and unlike the base lane,
+        which keys by the node's own id — so canonicalise to match, or a reap by a
+        raw id would `rmtree` nothing and leave the real store behind.
+        """
+        canonical = self._build_node_index().canonical_id(entity_id)
+        self.delete_scene_snapshots(layer_folder / OVERRIDE_STORE_SCOPE, canonical)

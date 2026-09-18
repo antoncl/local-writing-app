@@ -4,7 +4,9 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import RailScalarCell, { leavesRow } from "@/components/editor/RailScalarCell.svelte";
   import RailFlipCandidate from "@/components/editor/RailFlipCandidate.svelte";
+  import RailTagLine from "@/components/editor/RailTagLine.svelte";
   import { isTagFlipField, tagFlipItemsFor } from "@/components/widgets/TagFlipChips.svelte";
+  import { isTagListField } from "@/lib/utils/pickerCreate";
   import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
   import { aiSettings } from "@/lib/stores/aiSettings.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
@@ -391,8 +393,11 @@
 
   // A folding list field (#1884 slice 2): a non-empty `entity_ref_list` gets the
   // gutter's disclosure caret, same condition as `isWide` — an empty list has no
-  // pills to fold, so it stays a bare gutter like every other field.
+  // pills to fold, so it stays a bare gutter like every other field. A tags
+  // field (#2007) never folds — it is one mono line, not a pill list, so it has
+  // nothing to disclose.
   function isFoldableList(field: MetadataFieldDefinition, fieldId: string): boolean {
+    if (isTagListField(field, metadataSchema)) return false;
     return field.type === "entity_ref_list" && isMetadataValuePresent(displayValue(fieldId));
   }
   const FOLD_DEFAULT = false;
@@ -816,6 +821,21 @@
           {#if !metadataValueString(displayValue(fieldId))}
             <small class="muted">inherited</small>
           {/if}
+        {:else if isTagListField(field, metadataSchema)}
+          <!-- A tags field (#2007): ADR-0082's single-kind-`tag` carve-out renders as one mono line, never pills. -->
+          <RailTagLine
+            {field}
+            {fieldId}
+            {fieldLabel}
+            value={displayValue(fieldId)}
+            readOnly={fieldReadOnly(fieldId)}
+            editing={isEditing(fieldId)}
+            onOpen={openField}
+            onClose={closeField}
+            {createLayerId}
+            onChange={(ids) => writeField(fieldId, ids)}
+            onNavigate={(payload) => onNavigate?.(payload)}
+          />
         {:else if !isScalarRow(field, fieldId)}
           <FieldValueEditor
             {field}

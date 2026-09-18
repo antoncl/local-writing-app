@@ -3,7 +3,7 @@
 // mechanic on NodePickerConfig. Split out of NodePicker.svelte to keep that
 // component under the file-size cap rather than growing it further.
 
-import type { MetadataSchema, NodePickerConfig } from "@/lib/types";
+import type { MetadataFieldDefinition, MetadataSchema, NodePickerConfig } from "@/lib/types";
 import { pickerMembership } from "@/lib/utils/pickerSources";
 
 export type CreateTarget = { kind: string; entryType: string };
@@ -52,6 +52,17 @@ export function createTargetFor(
 ): CreateTarget | null {
   if (!config?.create_missing) return null;
   return singleConcreteTarget(config, schema);
+}
+
+/** Whether `field` is the ADR-0082 §2 tag-vocabulary carve-out that renders as
+ * the RAIL's own mono tag line (#2007), never pills: a `singleConcreteTarget`
+ * of kind `tag`. Unlike `createTargetFor`, NOT gated on `create_missing` — a
+ * tags field reads as one line whether or not minting is offered. */
+export function isTagListField(
+  field: MetadataFieldDefinition,
+  schema: MetadataSchema | null | undefined,
+): boolean {
+  return field.type === "entity_ref_list" && singleConcreteTarget(field.picker_config, schema)?.kind === "tag";
 }
 
 /** Whether `candidates` already carries a title matching `text`, trimmed and

@@ -33,7 +33,7 @@ from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
-    CreateCardRequest,
+    CreateChatSessionRequest,
     CreatePromptEntryRequest,
     LoreEntry,
     SaveLoreEntryRequest,
@@ -257,14 +257,15 @@ class ResearchNoteSnapshotRoundTripTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404, response.text)
 
     def test_snapshots_are_refused_for_a_kind_not_yet_supported(self) -> None:
-        # The kind allow-list still fails closed on the slices not yet built — plot
-        # is S5b, and its restore needs the card-link heal. A root-owned plot card
-        # clears the writability guard, so this is the *kind* gate alone, refusing
-        # before anything is written.
-        card = self.service.create_card(CreateCardRequest(title="A Card"))
-        refused = self.client.post(f"/api/nodes/{card.id}/snapshots")
+        # The kind allow-list still fails closed on the kinds outside the rollout
+        # (assistant, mutation_set, view, chat). A chat session is a root-scoped
+        # index node, so it clears the writability guard — this is the *kind* gate
+        # alone, refusing before anything is written. (Plot became supported in
+        # S5b, so the previous plot-card target now captures.)
+        chat = self.service.create_chat_session(CreateChatSessionRequest())
+        refused = self.client.post(f"/api/nodes/{chat.id}/snapshots")
         self.assertEqual(refused.status_code, 422, refused.text)
-        self.assertFalse((self.root / "snapshots" / card.id).exists())
+        self.assertFalse((self.root / "snapshots" / chat.id).exists())
 
 
 class SceneRoutesAndNodeRoutesShareOneStoreTests(unittest.TestCase):

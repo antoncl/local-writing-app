@@ -89,11 +89,15 @@ AUTOMATIC_KEEP = 5
 SNAPSHOT_DESCRIPTION_MAX = 280
 
 # The kinds the node-scoped routes accept today. Scenes reach the store through
-# the /api/scenes routes; research (S1, #1981), lore (S2, #1983), tag (S4, #1988)
-# and prompt (S5a, #1990) are proven. plot (S5b) arrives with the card-link heal
-# its restore needs — until then the node routes fail closed on the kind rather
-# than let a restore write a file the slice has not proven (ADR-0087 rollout).
-NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore", "tag", "prompt"})
+# the /api/scenes routes; research (S1, #1981), lore (S2, #1983), tag (S4, #1988),
+# prompt (S5a, #1990) and plot (S5b, #1992) are proven. A plot node byte-restores
+# like lore/tag and heals nothing out of its own file: its beat_links/causal_links
+# are denormalised onto the card and healed on READ (`_normalise_card_metadata`),
+# the plot board is an opaque per-project layout recomputed from live nodes, and
+# nothing else holds card membership — so the byte-write plus the index re-fold is
+# the whole restore, with no owned-file rewrite (§4). Stale-on-disk links after a
+# restore are the same transient state ordinary editing leaves until the next save.
+NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore", "tag", "prompt", "plot"})
 
 
 # Kinds whose restore reconciles correctly at ANY writable layer, so an inherited
@@ -113,6 +117,14 @@ NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore", "tag", "promp
 # prompt joins them: it is layered and heals nothing on restore (its overrides
 # re-fold at index-build time exactly like lore's), so an ancestor-owned prompt
 # base is admitted.
+# plot is deliberately NOT here. It is layered (a plotline/card/arc/template is
+# walked cross-layer and IS readable from an ancestor), but its writes are
+# book-local (`_reject_inherited_book_local` / `_reject_inherited_library_write`
+# refuse editing or deleting an inherited plot node). A base restore byte-writes
+# the OWNING layer's file, so admitting an inherited plot node here would let a
+# downstream book rewrite the ancestor's plot canon — the write the book-local
+# guard forbids. `node_snapshot_kind` refuses an inherited plot node for exactly
+# this reason, keeping plot snapshots open-project-only.
 ANCESTOR_RESTORE_SAFE_KINDS = frozenset({"lore", "tag", "prompt"})
 
 # The kinds whose *overrides* (nearer-layer delta files, ADR-0087 §3b) the node

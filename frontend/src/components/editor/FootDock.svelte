@@ -180,20 +180,27 @@
 </div>
 
 <style>
-  /* One dock frame: the mode control in a fixed left column, the current track
-     filling the rest. Each track keeps its own visual language (notches vs
+  /* One dock frame: a single quiet ruled line (ADR-0044's compact-at-rest), the
+     mode control and the current track sharing it. The dock owns the top rule
+     and the width; the rotary column and both strips render transparent and
+     borderless inside it, so it reads as ONE strip, not a filled control bolted
+     onto a separate track. Each track keeps its own visual language (notches vs
      beads) so the mode reads at a glance (§3). */
   .foot-dock {
     display: flex;
-    align-items: stretch;
+    /* Top-align at the track line, so when the snapshot strip expands on park
+       the mode control stays on the line rather than floating to its centre. */
+    align-items: flex-start;
+    border-top: 1px solid var(--divider);
   }
   .fd-rotary-col {
     flex: none;
     display: flex;
     align-items: center;
-    padding: 6px 12px;
-    border-top: 1px solid var(--divider);
-    background: var(--panel);
+    min-height: 27px; /* the compact line height — matches the strips */
+    /* Horizontal only: no vertical padding, so the control sits ON the compact
+       line instead of growing the dock past it. */
+    padding: 0 10px 0 12px;
   }
   .fd-track {
     flex: 1 1 auto;

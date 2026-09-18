@@ -302,7 +302,8 @@
        states are the only places the number lives and nothing can drift off the
        rule the way #406 did. */
     --rule-bottom: 23px;
-    border-top: 1px solid var(--divider);
+    /* The dock (FootDock) owns the top rule now, so the strip carries none —
+       else a second rule abuts the dock's. Only the parked fill/height remain. */
     background: var(--inset);
     transition: min-height 160ms ease-out, padding 160ms ease-out, background-color 160ms ease-out;
   }

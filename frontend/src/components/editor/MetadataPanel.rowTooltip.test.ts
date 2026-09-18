@@ -3,7 +3,7 @@
 // value control (the thing the author is about to change). A field without a
 // description keeps the control's plain "Set / Edit <name>" title.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@/lib/test/component";
+import { render, screen, fireEvent } from "@/lib/test/component";
 import MetadataPanel from "./MetadataPanel.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import type { EntryMetadata, MetadataSchema } from "@/lib/types";
@@ -60,8 +60,10 @@ describe("MetadataPanel — the description is the name's and the control's tool
     expect(row.hasAttribute("title")).toBe(false);
   });
 
-  it("a field without a description: no title on the name; the control keeps its plain verb", () => {
+  it("a field without a description: no title on the name; the control keeps its plain verb", async () => {
     mount({});
+    // #2006: an empty alias row now folds by default — open it first.
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
     const row = rowFor("Alias");
     expect(screen.getByText("Alias").hasAttribute("title")).toBe(false);
     expect(row.querySelector(".fr-rest-hit")?.getAttribute("title")).toBe("Set Alias");

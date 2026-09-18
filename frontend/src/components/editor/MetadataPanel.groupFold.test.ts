@@ -59,7 +59,9 @@ function headFor(label: string): HTMLElement {
 describe("MetadataPanel — L1 groups fold (#1884 slice 3)", () => {
   it("renders General and Arc heads, both expanded, all three rows present", () => {
     metadataSchemaStore.set(SCHEMA);
-    mount(SCHEMA, ["alias", "want", "need"]);
+    // #2006: filled values keep these rows "known" — this test is about L1
+    // group folding, not the (separate) empty-field fold.
+    mount(SCHEMA, ["alias", "want", "need"], { alias: "x", want: "x", need: "x" });
     const generalButton = headFor("General").querySelector("button.rgh-toggle") as HTMLElement;
     const arcButton = headFor("Arc").querySelector("button.rgh-toggle") as HTMLElement;
     expect(generalButton).toHaveAttribute("aria-expanded", "true");
@@ -71,7 +73,9 @@ describe("MetadataPanel — L1 groups fold (#1884 slice 3)", () => {
 
   it("clicking Arc folds its two rows, leaves General's row, and persists; clicking again unfolds", async () => {
     metadataSchemaStore.set(SCHEMA);
-    mount(SCHEMA, ["alias", "want", "need"]);
+    // #2006: filled values keep these rows "known" — this test is about L1
+    // group folding, not the (separate) empty-field fold.
+    mount(SCHEMA, ["alias", "want", "need"], { alias: "x", want: "x", need: "x" });
     const arcButton = headFor("Arc").querySelector("button.rgh-toggle") as HTMLElement;
     await fireEvent.click(arcButton);
     expect(screen.queryByText("Want")).toBeNull();
@@ -87,7 +91,9 @@ describe("MetadataPanel — L1 groups fold (#1884 slice 3)", () => {
 
   it("clicking General folds the alias row and persists group:~ungrouped", async () => {
     metadataSchemaStore.set(SCHEMA);
-    mount(SCHEMA, ["alias", "want", "need"]);
+    // #2006: filled values keep these rows "known" — this test is about L1
+    // group folding, not the (separate) empty-field fold.
+    mount(SCHEMA, ["alias", "want", "need"], { alias: "x", want: "x", need: "x" });
     const generalButton = headFor("General").querySelector("button.rgh-toggle") as HTMLElement;
     await fireEvent.click(generalButton);
     expect(screen.queryByText("Alias")).toBeNull();
@@ -103,7 +109,9 @@ describe("MetadataPanel — L1 groups fold (#1884 slice 3)", () => {
       entry_types: { "lore:character": { name: "Character", kind: "lore", fields: ["alias", "want", "need", "tone"] } },
     } as unknown as MetadataSchema;
     metadataSchemaStore.set(schema);
-    mount(schema, ["alias", "want", "need", "tone"]);
+    // #2006: filled values keep these rows "known" — this test is about L1
+    // group folding, not the (separate) empty-field fold.
+    mount(schema, ["alias", "want", "need", "tone"], { alias: "x", want: "x", need: "x", tone: "x" });
     expect(headFor("Voice").querySelector("button.rgh-toggle")).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Tone")).toBeTruthy();
     expect(railSectionCollapse.isExpanded("group:Voice", false)).toBe(false); // nothing stored — the component's default did it
@@ -119,7 +127,9 @@ describe("MetadataPanel — L1 groups fold (#1884 slice 3)", () => {
       entry_types: { "lore:character": { name: "Character", kind: "lore", fields: ["title", "want", "need"] } },
     } as unknown as MetadataSchema;
     metadataSchemaStore.set(schema);
-    mount(schema, ["title", "want", "need"]);
+    // #2006: filled values keep want/need "known" — this test is about L1
+    // group folding, not the (separate) empty-field fold.
+    mount(schema, ["title", "want", "need"], { want: "x", need: "x" });
     expect(screen.queryByText("General")).toBeNull();
     expect(headFor("Arc")).toBeTruthy();
   });
@@ -134,7 +144,9 @@ describe("MetadataPanel — L1 groups fold (#1884 slice 3)", () => {
       entry_types: { "lore:character": { name: "Character", kind: "lore", fields: ["alias", "want"] } },
     } as unknown as MetadataSchema;
     metadataSchemaStore.set(schema);
-    mount(schema, ["alias", "want"]);
+    // #2006: a filled alias keeps it "known" — this test is about L1 group
+    // folding, not the (separate) empty-field fold.
+    mount(schema, ["alias", "want"], { alias: "x" });
     expect(document.querySelector(".rail-group-head")).toBeNull();
     expect(screen.getByText("Alias")).toBeTruthy();
     expect(screen.queryByText("Want")).toBeNull();
@@ -142,7 +154,9 @@ describe("MetadataPanel — L1 groups fold (#1884 slice 3)", () => {
 
   it("a schema whose fields have no group renders no rail-group-head at all", () => {
     metadataSchemaStore.set(UNGROUPED_SCHEMA);
-    mount(UNGROUPED_SCHEMA, ["alias"]);
+    // #2006: a filled alias keeps it "known" — this test is about L1 group
+    // folding, not the (separate) empty-field fold.
+    mount(UNGROUPED_SCHEMA, ["alias"], { alias: "x" });
     expect(document.querySelector(".rail-group-head")).toBeNull();
     expect(screen.getByText("Alias")).toBeTruthy();
   });

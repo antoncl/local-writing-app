@@ -8,7 +8,7 @@
 // empty, it renders exactly like an empty `entity_ref` — one row, `.field-row`
 // without `.wide`.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@/lib/test/component";
+import { render, screen, fireEvent } from "@/lib/test/component";
 import MetadataPanel from "./MetadataPanel.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import type { EntryMetadata, MetadataSchema } from "@/lib/types";
@@ -52,8 +52,10 @@ function rowFor(label: string): HTMLElement {
 }
 
 describe("MetadataPanel — empty entity_ref_list renders compact, not wide (#1810)", () => {
-  it("an empty entity_ref_list is NOT .wide — one row, like an empty entity_ref", () => {
+  it("an empty entity_ref_list is NOT .wide — one row, like an empty entity_ref", async () => {
     mount({ allies: [] });
+    // #2006: an empty allies row now folds by default — open it first.
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
     expect(rowFor("Allies").classList.contains("wide")).toBe(false);
   });
 
@@ -62,8 +64,10 @@ describe("MetadataPanel — empty entity_ref_list renders compact, not wide (#18
     expect(rowFor("Allies").classList.contains("wide")).toBe(true);
   });
 
-  it("an unset (absent-key) entity_ref_list is NOT .wide either", () => {
+  it("an unset (absent-key) entity_ref_list is NOT .wide either", async () => {
     mount({});
+    // #2006: an unset allies row now folds by default — open it first.
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
     expect(rowFor("Allies").classList.contains("wide")).toBe(false);
   });
 });

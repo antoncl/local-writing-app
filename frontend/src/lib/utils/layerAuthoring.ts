@@ -53,3 +53,25 @@ export function pickableAuthoringLayers(
   if (owningIdx < 0) return [];
   return [...layers.slice(owningIdx)].reverse();
 }
+
+/**
+ * The `?layer=` argument for a lore entry's node-snapshot routes: the authoring
+ * layer when the entry is edited as an override *below* its owning layer, else
+ * `null` — the base file's own history (ADR-0088 §6 / ADR-0087 §3b).
+ *
+ * The snapshot store co-locates with the file the write lands in (ADR-0087 §3),
+ * so this must mirror the base-vs-override choice `saveLoreEntry` makes from the
+ * same `authoringLayerId`: a base edit writes the owning-layer file (`null`), a
+ * sparse override writes a delta at L (`L`). The one case the two diverge is
+ * `L === owning layer` — a *direct canon edit* still writes the base file, and
+ * `node_override_snapshot_kind` refuses an authoring layer that is not strictly
+ * below the owning one, so it maps to `null`, never that layer id. A
+ * locally-owned entry passes `authoringLayerId === null` and lands here as
+ * `null` regardless.
+ */
+export function snapshotLayerId(
+  authoringLayerId: string | null,
+  owningLayerId: string | undefined | null,
+): string | null {
+  return authoringLayerId !== null && authoringLayerId !== owningLayerId ? authoringLayerId : null;
+}

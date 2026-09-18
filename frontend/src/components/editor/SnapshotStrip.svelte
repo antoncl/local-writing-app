@@ -22,7 +22,16 @@
   import { notchAges, notchTooltip, notchWhen } from "@/lib/utils/snapshotTime";
   import { LIVE_LEFT, TICKS, agePosition, notchPositions, trackSpanMinutes } from "@/lib/utils/snapshotTrack";
 
-  let { strip }: { strip: SnapshotStripController } = $props();
+  let {
+    strip,
+    writesLabel = null,
+  }: {
+    strip: SnapshotStripController;
+    // The layer a restore writes (ADR-0088 §6), shown on a parked snapshot so the
+    // inheritance effect reads instead of feeling like a no-op. `null` for a
+    // scene — its strip has no layer axis, so no caption (ADR-0044 verbatim).
+    writesLabel?: string | null;
+  } = $props();
 
   // Ages are read once per render against a single `now`, so every notch and
   // tick on one paint shares a clock. Recomputed whenever the list changes.
@@ -310,6 +319,13 @@
       Delete
     </button>
   </div>
+
+  <!-- ADR-0088 §6: name the layer a restore writes, so ADR-0087 §2's inheritance
+       effect (the write re-folds downward) reads rather than feeling like a
+       no-op. Only for a layer-scoped node (lore); a scene passes null. -->
+  {#if writesLabel}
+    <p class="writes-note">Restoring writes the <strong>{writesLabel}</strong> layer.</p>
+  {/if}
 
   <!-- Below the actions, not in front of them: the report is advisory, and
        Restore stays reachable without passing it (ADR-0043). It appears here
@@ -599,6 +615,20 @@
     padding: 8px 14px;
     border-top: 1px solid var(--divider);
     background: var(--panel);
+  }
+  /* A quiet full-width caption under the actions — it names the write layer, so
+     it reads as a sentence, not a control (ADR-0088 §6). */
+  .writes-note {
+    margin: 0;
+    padding: 6px 14px;
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+    border-top: 1px solid var(--divider);
+    background: var(--panel);
+  }
+  .writes-note strong {
+    font-weight: var(--w-semibold);
+    color: var(--text-2);
   }
   .asof {
     font-size: var(--fs-sm);

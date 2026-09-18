@@ -76,19 +76,23 @@ function rowFor(label: string): HTMLElement {
 }
 
 describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)", () => {
-  it("rest: shows the text value, no input, plus an Edit hit; long_text/entity_ref_list rows have no hit", () => {
+  it("rest: shows the text value, no input, plus an Edit hit; long_text/entity_ref_list rows have no hit", async () => {
     mount({ alias: "The Painted" });
     const row = rowFor("Alias");
     expect(row.querySelector("input")).toBeNull();
     expect(row.querySelector(".fr-rest-value")?.textContent).toContain("The Painted");
     expect(screen.getByRole("button", { name: /^Edit Alias/ })).toBeTruthy();
 
+    // #2006: Notes/Kin are empty, so they fold by default — open it first.
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
     expect(rowFor("Notes").querySelector(".fr-rest-hit")).toBeNull();
     expect(rowFor("Kin").querySelector(".fr-rest-hit")).toBeNull();
   });
 
-  it("empty rest: shows the + affordance and a 'Set …' title", () => {
+  it("empty rest: shows the + affordance and a 'Set …' title", async () => {
     mount({});
+    // #2006: an empty alias row now folds by default — open it first.
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
     const row = rowFor("Alias");
     expect(row.querySelector(".fr-rest-add")?.textContent).toBe("+");
     const hit = row.querySelector(".fr-rest-hit") as HTMLElement;
@@ -151,6 +155,8 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
     await fireEvent.click(screen.getByRole("button", { name: /^Edit Alias/ }));
     expect(rowFor("Alias").classList.contains("editing")).toBe(true);
 
+    // #2006: Tone is unset (empty), so it folds by default — open it first.
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
     // Tone is unset here, so its hit is named "Set Tone".
     await fireEvent.click(screen.getByRole("button", { name: "Set Tone" }));
 

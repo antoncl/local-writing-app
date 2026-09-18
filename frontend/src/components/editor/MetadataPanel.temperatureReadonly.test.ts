@@ -106,6 +106,12 @@ function mount(metadata: EntryMetadata, onMetadataChange?: (m: EntryMetadata) =>
 describe("MetadataPanel — Temperature read-only for no-sampling models (#1554)", () => {
   it("shows the 'Not supported' note when the selected model lacks temperature", async () => {
     const container = mount({ ai_provider: "anthropic", ai_model: "m-notemp" });
+    // #2006: ai_temperature is unset (empty), so it folds by default — open
+    // it first, once the toggle exists (the capability fetch is async).
+    await vi.waitFor(() =>
+      expect(container.querySelector("[data-testid='rail-fold-toggle']")).not.toBeNull(),
+    );
+    await fireEvent.click(container.querySelector("[data-testid='rail-fold-toggle']") as HTMLElement);
     await vi.waitFor(() => {
       const note = container.querySelector(".fr-temp-note");
       expect(note).not.toBeNull();
@@ -115,6 +121,12 @@ describe("MetadataPanel — Temperature read-only for no-sampling models (#1554)
 
   it("leaves Temperature editable (no note) when the model accepts it", async () => {
     const container = mount({ ai_provider: "anthropic", ai_model: "m-temp" });
+    // #2006: ai_temperature is unset (empty), so it folds by default — open
+    // it first, once the toggle exists (the capability fetch is async).
+    await vi.waitFor(() =>
+      expect(container.querySelector("[data-testid='rail-fold-toggle']")).not.toBeNull(),
+    );
+    await fireEvent.click(container.querySelector("[data-testid='rail-fold-toggle']") as HTMLElement);
     // #1884 slice 4: an unset scalar reads at rest (a "+" affordance) until
     // opened — open the row first, THEN the live control carries the label.
     await vi.waitFor(() =>

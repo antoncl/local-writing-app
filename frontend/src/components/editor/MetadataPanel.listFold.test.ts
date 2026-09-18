@@ -107,8 +107,10 @@ describe("MetadataPanel — folding list gutter caret (#1884 slice 2)", () => {
     }
   });
 
-  it("an empty entity_ref_list row has no gutter button — a plain span", () => {
+  it("an empty entity_ref_list row has no gutter button — a plain span", async () => {
     mount({ allies: [] });
+    // #2006: an empty allies row now folds by default — open it first.
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
     const gutter = rowFor("Allies").querySelector(".fr-disc") as HTMLElement;
     expect(gutter.tagName).toBe("SPAN");
     expect(gutter.classList.contains("fr-disc-toggle")).toBe(false);

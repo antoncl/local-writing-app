@@ -7,7 +7,7 @@
 // while an empty one stays a compact single row. A multi_select WITH options
 // renders chips and is wide unconditionally.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@/lib/test/component";
+import { render, screen, fireEvent } from "@/lib/test/component";
 import MetadataPanel from "./MetadataPanel.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import type { EntryMetadata, MetadataSchema } from "@/lib/types";
@@ -61,18 +61,24 @@ describe("MetadataPanel — option-less multi_select goes wide when populated (#
     expect(rowFor("Aliases").classList.contains("wide")).toBe(true);
   });
 
-  it("an empty option-less multi_select is NOT .wide — one compact row, like an empty ref list", () => {
+  it("an empty option-less multi_select is NOT .wide — one compact row, like an empty ref list", async () => {
     mount({ aliases: [] });
+    // #2006: an empty aliases row now folds by default — open it first.
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
     expect(rowFor("Aliases").classList.contains("wide")).toBe(false);
   });
 
-  it("an unset (absent-key) option-less multi_select is NOT .wide either", () => {
+  it("an unset (absent-key) option-less multi_select is NOT .wide either", async () => {
     mount({});
+    // #2006: an unset aliases row now folds by default — open it first.
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
     expect(rowFor("Aliases").classList.contains("wide")).toBe(false);
   });
 
-  it("a multi_select WITH options is .wide unconditionally — it renders chips, never a bare add control", () => {
+  it("a multi_select WITH options is .wide unconditionally — it renders chips, never a bare add control", async () => {
     mount({});
+    // #2006: an unset traits row now folds by default — open it first.
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
     expect(rowFor("Traits").classList.contains("wide")).toBe(true);
   });
 });

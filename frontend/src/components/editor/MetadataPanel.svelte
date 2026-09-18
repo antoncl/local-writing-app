@@ -269,13 +269,56 @@
     for (const [group, groupIds] of groups) out.push({ group, ids: groupIds });
     return out;
   }
-  const sections = $derived(buildSections(visibleFieldIds.filter(rendersRow), metadataSchema));
+  const renderedFieldIds = $derived(visibleFieldIds.filter(rendersRow));
+
+  // #2006: rail = what is known; empty fields fold away behind one summary
+  // line so the rail reads like a filled-in form, not a checklist of blanks.
+  // While the fold is OPEN, membership is STICKY — `foldHeld` snapshots the
+  // empty ids at open time, and a field filled or emptied afterward stays put
+  // (in `foldIds`) until the fold closes — so a row never jumps out from under
+  // a writer mid-edit. Closed, fold membership is just the live empty set.
+  let foldOpen = $state(false);
+  let foldHeld = $state<Set<string>>(new Set());
+  // A flipped row (a lore proposal or a snapshot compare, `compare`) and a
+  // mutated row (`⤳`) carry information even when the shown value is empty —
+  // a proposal to CLEAR a field, a diff against an empty side — so they never
+  // fold; only a plain empty row does.
+  const emptyIds = $derived(
+    renderedFieldIds.filter((id) => {
+      const field = metadataSchema.fields[id];
+      if (!field || isFlipped(id) || isMutated(id)) return false;
+      return isRowEmpty(field, id);
+    }),
+  );
+  const foldIds = $derived(foldOpen ? new Set([...emptyIds, ...foldHeld]) : new Set(emptyIds));
+  const knownFieldIds = $derived(renderedFieldIds.filter((id) => !foldIds.has(id)));
+  const foldFieldIds = $derived(foldOpen ? renderedFieldIds.filter((id) => foldIds.has(id)) : []);
+  const foldCount = $derived(emptyIds.length);
+  const showFold = $derived(foldOpen || foldCount > 0);
+  function toggleFold() {
+    if (foldOpen) {
+      foldOpen = false;
+      foldHeld = new Set();
+    } else {
+      foldHeld = new Set(emptyIds);
+      foldOpen = true;
+    }
+  }
+
+  const sections = $derived(buildSections(knownFieldIds, metadataSchema));
+  const foldSections = $derived(buildSections(foldFieldIds, metadataSchema));
 
   // Every block folds the same way once there is anything to fold: when a type
   // has at least one L1 group, the ungrouped fields get a header too (#1884
-  // slice 3). A type with no groups is one block — no header at all.
+  // slice 3). A type with no groups is one block — no header at all. The
+  // known loop asks this of the KNOWN rows only (#2006): when every grouped
+  // field is empty and folded, the rows on screen are one block, and a lone
+  // "General" head over them would be the noise this rule exists to avoid.
+  // The open fold shows heads when either side has a group, so its chooser
+  // reads like the schema.
   const UNGROUPED_LABEL = "General";
   const showGroupHeads = $derived(sections.some((s) => s.group !== null));
+  const showFoldHeads = $derived(showGroupHeads || foldSections.some((s) => s.group !== null));
   const GROUP_DEFAULT = true;
   function groupKey(section: RailSection): string { return `group:${section.group ?? "~ungrouped"}`; }
   function groupExpanded(section: RailSection): boolean { return railSectionCollapse.isExpanded(groupKey(section), GROUP_DEFAULT); }
@@ -591,6 +634,252 @@
   <button type="button" class="rail-type-action" onclick={() => { close(); onCustomData?.(); }}>Edit type…</button>
 {/snippet}
 
+{#snippet fieldRow(fieldId: string)}
+  <!-- Intrinsic identity fields (id/title/entry_type, #116) are surfaced
+       via dedicated rail controls (the type select above, the shell title
+       header) and stored off `metadata`, so skip them in the generic
+       value-editor loop — otherwise they'd render as empty rows. -->
+  <!-- Intrinsic identity fields (id/title/entry_type) get dedicated controls
+       and are normally skipped here — EXCEPT when one is an active proposal
+       flip (a `title` rename, ADR-0046 3b): then it renders as a rail flip so
+       the author can adopt it, and adoption routes back to the shell state. -->
+  <!-- A computed field with no value renders no row at all (#1684): the row
+       would be a padlock beside nothing (a scene's cost before any
+       invocation, a non-runnable prompt's `runnable`), which is rail noise,
+       not information. The field stays in the schema/type editor. -->
+  {#if rendersRow(fieldId)}
+    {@const field = metadataSchema.fields[fieldId]}
+    {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
+    <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")} class:empty={isRowEmpty(field, fieldId)} class:scalar={isScalarRow(field, fieldId)} class:editing={isEditing(fieldId)}>
+      <!-- Disclosure gutter — reserved so the field glyph lines up with the
+           collapsible sections' glyph column (RailSectionHeader): caret ·
+           glyph on every rail line (#1438). Reference fields no longer
+           collapse to their own list (#1732 — they render inline pills); the
+           gutter carries the caret for a folding LIST field instead (#1884
+           slice 2), empty for every other row. -->
+      {#if isFoldableList(field, fieldId)}
+        <button
+          type="button"
+          class="fr-disc fr-disc-toggle"
+          aria-expanded={fieldExpanded(fieldId)}
+          aria-label={fieldExpanded(fieldId) ? `Show fewer ${fieldLabel}` : `Show all ${fieldLabel}`}
+          title={fieldExpanded(fieldId) ? "Show fewer" : "Show all"}
+          onclick={() => railSectionCollapse.toggle(`field:${fieldId}`, FOLD_DEFAULT)}
+        ><GroupCaret size="xs" collapsed={!fieldExpanded(fieldId)} /></button>
+      {:else}
+        <span class="fr-disc" aria-hidden="true"></span>
+      {/if}
+      {#if canClearOwn && isOwnClearable(fieldId) && !isCascadeOverridden(fieldId)}
+        <!-- Clear-to-default (#522): the intra-project twin of #517's reset.
+             #517 hangs its "Reset to <source>" gesture off the `ti-versions`
+             override-delta glyph — which only exists on an overridden field.
+             An intra-project node has no such glyph, but every field carries
+             its own default glyph (the type/field icon, rendered on every
+             row), so THAT glyph becomes the affordance here: hover it to
+             reveal a "Reset to default" chip, click it to delete the sparse
+             metadata key and revert the field to its default / unset. A cascade
+             OVERRIDE never reaches this branch (it carries the ti-versions mark
+             in the value cell, #1734), so a cascade field here is one set with
+             nothing above it — "default", not "inherited". -->
+        <button
+          type="button"
+          class="fr-icon fr-icon-reset"
+          title={defaultHint(fieldId)
+            ? `Set here — reset ${fieldLabel} to its default (${defaultHint(fieldId)})`
+            : `Set here — clear ${fieldLabel} (revert to default)`}
+          aria-label={`Reset ${fieldLabel} to default`}
+          onclick={() => clearField(fieldId)}
+        >
+          <i class={fieldIconClass(field)} aria-hidden="true"></i>
+          <span class="fr-reset-chip">Reset to default</span>
+        </button>
+      {:else}
+        <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
+      {/if}
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+      <!-- The description is the tooltip of the name AND of the at-rest
+           value control (RailScalarCell's hit target) — #1900 — not of the
+           whole row, which would hover it over a long_text's prose. -->
+      <span
+        class="fr-name"
+        title={field.description || undefined}
+        onclick={(e) => { if (isScalarRow(field, fieldId) && !isEditing(fieldId)) openField(fieldId, e.currentTarget.closest(".field-row") as HTMLElement); }}
+      >{fieldLabel}</span>
+      <div class="fr-val" title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : isCascadeInherited(fieldId) ? `Inherited from ${cascadeSourceLabel(fieldId)}` : undefined}>
+        {#if isOverridden(fieldId)}
+          {#if canResetOverride}
+            <!-- The `ti-versions` mark PR 2 ships, made interactive (#517):
+                 the primary provenance signal AND the reset control. Its
+                 hover/focus reveals a "Reset to <source>" chip above it. -->
+            <button
+              type="button"
+              class="fr-override-marker fr-reset"
+              title={`Overridden here — reset this value to ${sourceLayerLabel ?? "inherited canon"}`}
+              aria-label={`Reset ${fieldLabel} to ${sourceLayerLabel ?? "the inherited value"}`}
+              onclick={() => onResetField?.(fieldId)}
+            >
+              <i class="ti ti-versions" aria-hidden="true"></i>
+              <span class="fr-reset-chip"><i class="ti ti-arrow-back-up" aria-hidden="true"></i>Reset to {sourceLayerLabel ?? "inherited"}</span>
+            </button>
+          {:else}
+            <i class="ti ti-versions fr-override-marker" title={`Overridden here — this value comes from a layer override in this project, not from ${sourceLayerLabel ?? "inherited canon"}`}></i>
+          {/if}
+        {:else if isCascadeOverridden(fieldId)}
+          <!-- ADR-0079 override (#1734): this scene sets a cascade value that
+               SHADOWS the one it would inherit. Same ti-versions mark + reset
+               as the layer override (#517), but the reset drops the own value
+               so the field inherits again (clearField), and it names the
+               ancestor it would fall back to. -->
+          {#if canClearOwn}
+            <button
+              type="button"
+              class="fr-override-marker fr-reset"
+              title={`Overridden here — reset ${fieldLabel} to the value inherited from ${cascadeOverrideSourceLabel(fieldId)}`}
+              aria-label={`Reset ${fieldLabel} to the value inherited from ${cascadeOverrideSourceLabel(fieldId)}`}
+              onclick={() => clearField(fieldId)}
+            >
+              <i class="ti ti-versions" aria-hidden="true"></i>
+              <span class="fr-reset-chip"><i class="ti ti-arrow-back-up" aria-hidden="true"></i>Reset to inherited</span>
+            </button>
+          {:else}
+            <i class="ti ti-versions fr-override-marker" title={`Overridden here — differs from the value inherited from ${cascadeOverrideSourceLabel(fieldId)}`}></i>
+          {/if}
+        {/if}
+        {#if isFlipResolve(fieldId)}
+          <RailFlipCandidate
+            {field} {fieldLabel}
+            value={displayValue(fieldId)}
+            adopted={isFlipAdopted(fieldId)}
+            onToggle={() => compare?.resolve?.onToggle(fieldId)}
+            currentHint={flipCurrentHint(fieldId)}
+            tagItems={isTagFlipField(field, metadataSchema) ? tagFlipItemsFor(displayValue(fieldId), $tagTitleById) : null}
+            loreEntries={loreEntries}
+            promptEntries={promptEntries}
+            structure={structure}
+            researchStructure={researchStructure}
+            implicitContextMatcher={implicitContextMatcher}
+            excludeId={excludeId}
+          />
+        {:else if fieldId === "status"}
+          <!-- status is stored off `metadata` and edited via onStatusChange. -->
+          {@const statusValue = isMutated("status")
+            ? metadataValueString(effectiveOverrides?.["status"])
+            : isFlipped("status")
+              ? metadataValueString(compare?.fields["status"]?.[compare.side] as MetadataValue)
+              : status}
+          {#if !isScalarRow(field, fieldId)}
+            <ColoredSelect
+              value={statusValue}
+              options={field.options}
+              ariaLabel={fieldLabel}
+              placeholder="(no status)"
+              {readOnly}
+              onChange={(value) => onStatusChange?.(value)}
+            />
+          {:else}
+            <RailScalarCell
+              {field}
+              {fieldId}
+              {fieldLabel}
+              value={statusValue}
+              empty={isRowEmpty(field, fieldId)}
+              editing={isEditing(fieldId)}
+              closesOnPick={closesOnPick(field, fieldId)}
+              onOpen={openField}
+              onClose={closeField}
+              onChange={(v) => onStatusChange?.(String(v))}
+            />
+          {/if}
+        {:else if field.type === "computed"}
+          {@const computedRaw = computedFieldString(fieldId)}
+          {@const computedValue = (field.options ?? []).find((option) => option.value === computedRaw)?.label ?? computedRaw}
+          <!-- Read-only derived value, shown by its declared option label
+               when the field has one (a select-valued computed field like
+               `runnable` stores "runnable", displays "Runnable" — #1684).
+               The text breaks on any character so a long, space-less
+               computed value (a filesystem `path`, #417 s3) wraps within
+               the rail instead of overflowing, and the full value sits on
+               the title tooltip. -->
+          <span class="fr-computed" title={computedValue}><span class="fr-computed-text">{computedValue}</span><i class="ti ti-lock" aria-hidden="true"></i></span>
+        {:else if field.type === "color"}
+          <!-- Color renders at its display_order slot like any field
+               (ADR-0029 §G) — the hoist is gone. When unset, the swatch shows
+               the RESOLVED inherited color (type → parent → kind default) as a
+               dashed placeholder, so the actual colour is visible; the label
+               only has to say it's inherited (#1440). -->
+          <SwatchPicker
+            value={metadataValueString(displayValue(fieldId)) || null}
+            placeholderHex={resolveColor(null, entryType, documentKind, metadataSchema)?.hex ?? null}
+            {readOnly}
+            onChange={(id) => (id ? onMetadataChange?.({ ...metadata, [fieldId]: id }) : clearField(fieldId))}
+          />
+          {#if !metadataValueString(displayValue(fieldId))}
+            <small class="muted">inherited</small>
+          {/if}
+        {:else if !isScalarRow(field, fieldId)}
+          <FieldValueEditor
+            {field}
+            readOnly={fieldReadOnly(fieldId)}
+            allowUnset={true}
+            embedded={true}
+            controlled={isRefField(field)}
+            expanded={fieldExpanded(fieldId)}
+            onToggleExpanded={() => railSectionCollapse.toggle(`field:${fieldId}`, FOLD_DEFAULT)}
+            value={displayValue(fieldId)}
+            ariaLabel={fieldLabel}
+            loreEntries={loreEntries}
+            promptEntries={promptEntries}
+            structure={structure}
+            researchStructure={researchStructure}
+            implicitContextMatcher={implicitContextMatcher}
+            excludeId={excludeId}
+            createLayerId={createLayerId}
+            onChange={(v) => writeField(fieldId, v)}
+            onNavigate={(payload) => onNavigate?.(payload)}
+          />
+        {:else}
+          <RailScalarCell
+            {field}
+            {fieldId}
+            {fieldLabel}
+            value={displayValue(fieldId)}
+            empty={isRowEmpty(field, fieldId)}
+            editing={isEditing(fieldId)}
+            closesOnPick={closesOnPick(field, fieldId)}
+            onOpen={openField}
+            onClose={closeField}
+            onChange={(v) => writeField(fieldId, v)}
+          />
+        {/if}
+        {#if isMutated(fieldId)}
+          <!-- Mutation mark (#64) trails the value, co-located with the
+               `ti-versions` override mark that leads it, so a field that is
+               both overridden and mutated reads `[versions] Captain ⤳` on
+               one line — design-language.md §marks, not split across cells (#492). -->
+          <span class="fr-mutated-marker" title="Changed by here">⤳</span>
+        {/if}
+        {#if fieldId === "ai_temperature" && temperatureUnsupported}
+          {#if temperatureClearedForModel}
+            <!-- #1579: a stored temperature was just discarded because the
+                 selected model dropped sampling — announce it, so the value
+                 isn't stripped silently. -->
+            <small class="fr-temp-note fr-temp-cleared" role="status">
+              <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+              Temperature cleared — {temperatureClearedForModel} doesn't support it.
+            </small>
+          {:else}
+            <!-- The selected model dropped sampling (Anthropic Opus 4.7+/5,
+                 incl. via OpenRouter): the field renders read-only above and
+                 this quiet note says why, so the empty control doesn't read as
+                 a bug (#1554). -->
+            <small class="muted fr-temp-note">Not supported by the model</small>
+          {/if}
+        {/if}
+      </div>
+    </div>
+  {/if}
+{/snippet}
+
 <section class="scene-metadata" aria-label={`${documentLabel} details`}>
   <!-- The head is one fact — the entry's type — and reads as one (#1904, #1884):
        glyph + name + caret, the rail's own ColoredSelect in its quiet face. The
@@ -658,252 +947,32 @@
     {/if}
     {#if !showGroupHeads || groupExpanded(section)}
     {#each section.ids as fieldId (fieldId)}
-      <!-- Intrinsic identity fields (id/title/entry_type, #116) are surfaced
-           via dedicated rail controls (the type select above, the shell title
-           header) and stored off `metadata`, so skip them in the generic
-           value-editor loop — otherwise they'd render as empty rows. -->
-      <!-- Intrinsic identity fields (id/title/entry_type) get dedicated controls
-           and are normally skipped here — EXCEPT when one is an active proposal
-           flip (a `title` rename, ADR-0046 3b): then it renders as a rail flip so
-           the author can adopt it, and adoption routes back to the shell state. -->
-      <!-- A computed field with no value renders no row at all (#1684): the row
-           would be a padlock beside nothing (a scene's cost before any
-           invocation, a non-runnable prompt's `runnable`), which is rail noise,
-           not information. The field stays in the schema/type editor. -->
-      {#if rendersRow(fieldId)}
-        {@const field = metadataSchema.fields[fieldId]}
-        {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field, fieldId)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId) || isCascadeInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")} class:empty={isRowEmpty(field, fieldId)} class:scalar={isScalarRow(field, fieldId)} class:editing={isEditing(fieldId)}>
-          <!-- Disclosure gutter — reserved so the field glyph lines up with the
-               collapsible sections' glyph column (RailSectionHeader): caret ·
-               glyph on every rail line (#1438). Reference fields no longer
-               collapse to their own list (#1732 — they render inline pills); the
-               gutter carries the caret for a folding LIST field instead (#1884
-               slice 2), empty for every other row. -->
-          {#if isFoldableList(field, fieldId)}
-            <button
-              type="button"
-              class="fr-disc fr-disc-toggle"
-              aria-expanded={fieldExpanded(fieldId)}
-              aria-label={fieldExpanded(fieldId) ? `Show fewer ${fieldLabel}` : `Show all ${fieldLabel}`}
-              title={fieldExpanded(fieldId) ? "Show fewer" : "Show all"}
-              onclick={() => railSectionCollapse.toggle(`field:${fieldId}`, FOLD_DEFAULT)}
-            ><GroupCaret size="xs" collapsed={!fieldExpanded(fieldId)} /></button>
-          {:else}
-            <span class="fr-disc" aria-hidden="true"></span>
-          {/if}
-          {#if canClearOwn && isOwnClearable(fieldId) && !isCascadeOverridden(fieldId)}
-            <!-- Clear-to-default (#522): the intra-project twin of #517's reset.
-                 #517 hangs its "Reset to <source>" gesture off the `ti-versions`
-                 override-delta glyph — which only exists on an overridden field.
-                 An intra-project node has no such glyph, but every field carries
-                 its own default glyph (the type/field icon, rendered on every
-                 row), so THAT glyph becomes the affordance here: hover it to
-                 reveal a "Reset to default" chip, click it to delete the sparse
-                 metadata key and revert the field to its default / unset. A cascade
-                 OVERRIDE never reaches this branch (it carries the ti-versions mark
-                 in the value cell, #1734), so a cascade field here is one set with
-                 nothing above it — "default", not "inherited". -->
-            <button
-              type="button"
-              class="fr-icon fr-icon-reset"
-              title={defaultHint(fieldId)
-                ? `Set here — reset ${fieldLabel} to its default (${defaultHint(fieldId)})`
-                : `Set here — clear ${fieldLabel} (revert to default)`}
-              aria-label={`Reset ${fieldLabel} to default`}
-              onclick={() => clearField(fieldId)}
-            >
-              <i class={fieldIconClass(field)} aria-hidden="true"></i>
-              <span class="fr-reset-chip">Reset to default</span>
-            </button>
-          {:else}
-            <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
-          {/if}
-          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-          <!-- The description is the tooltip of the name AND of the at-rest
-               value control (RailScalarCell's hit target) — #1900 — not of the
-               whole row, which would hover it over a long_text's prose. -->
-          <span
-            class="fr-name"
-            title={field.description || undefined}
-            onclick={(e) => { if (isScalarRow(field, fieldId) && !isEditing(fieldId)) openField(fieldId, e.currentTarget.closest(".field-row") as HTMLElement); }}
-          >{fieldLabel}</span>
-          <div class="fr-val" title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : isCascadeInherited(fieldId) ? `Inherited from ${cascadeSourceLabel(fieldId)}` : undefined}>
-            {#if isOverridden(fieldId)}
-              {#if canResetOverride}
-                <!-- The `ti-versions` mark PR 2 ships, made interactive (#517):
-                     the primary provenance signal AND the reset control. Its
-                     hover/focus reveals a "Reset to <source>" chip above it. -->
-                <button
-                  type="button"
-                  class="fr-override-marker fr-reset"
-                  title={`Overridden here — reset this value to ${sourceLayerLabel ?? "inherited canon"}`}
-                  aria-label={`Reset ${fieldLabel} to ${sourceLayerLabel ?? "the inherited value"}`}
-                  onclick={() => onResetField?.(fieldId)}
-                >
-                  <i class="ti ti-versions" aria-hidden="true"></i>
-                  <span class="fr-reset-chip"><i class="ti ti-arrow-back-up" aria-hidden="true"></i>Reset to {sourceLayerLabel ?? "inherited"}</span>
-                </button>
-              {:else}
-                <i class="ti ti-versions fr-override-marker" title={`Overridden here — this value comes from a layer override in this project, not from ${sourceLayerLabel ?? "inherited canon"}`}></i>
-              {/if}
-            {:else if isCascadeOverridden(fieldId)}
-              <!-- ADR-0079 override (#1734): this scene sets a cascade value that
-                   SHADOWS the one it would inherit. Same ti-versions mark + reset
-                   as the layer override (#517), but the reset drops the own value
-                   so the field inherits again (clearField), and it names the
-                   ancestor it would fall back to. -->
-              {#if canClearOwn}
-                <button
-                  type="button"
-                  class="fr-override-marker fr-reset"
-                  title={`Overridden here — reset ${fieldLabel} to the value inherited from ${cascadeOverrideSourceLabel(fieldId)}`}
-                  aria-label={`Reset ${fieldLabel} to the value inherited from ${cascadeOverrideSourceLabel(fieldId)}`}
-                  onclick={() => clearField(fieldId)}
-                >
-                  <i class="ti ti-versions" aria-hidden="true"></i>
-                  <span class="fr-reset-chip"><i class="ti ti-arrow-back-up" aria-hidden="true"></i>Reset to inherited</span>
-                </button>
-              {:else}
-                <i class="ti ti-versions fr-override-marker" title={`Overridden here — differs from the value inherited from ${cascadeOverrideSourceLabel(fieldId)}`}></i>
-              {/if}
-            {/if}
-            {#if isFlipResolve(fieldId)}
-              <RailFlipCandidate
-                {field} {fieldLabel}
-                value={displayValue(fieldId)}
-                adopted={isFlipAdopted(fieldId)}
-                onToggle={() => compare?.resolve?.onToggle(fieldId)}
-                currentHint={flipCurrentHint(fieldId)}
-                tagItems={isTagFlipField(field, metadataSchema) ? tagFlipItemsFor(displayValue(fieldId), $tagTitleById) : null}
-                loreEntries={loreEntries}
-                promptEntries={promptEntries}
-                structure={structure}
-                researchStructure={researchStructure}
-                implicitContextMatcher={implicitContextMatcher}
-                excludeId={excludeId}
-              />
-            {:else if fieldId === "status"}
-              <!-- status is stored off `metadata` and edited via onStatusChange. -->
-              {@const statusValue = isMutated("status")
-                ? metadataValueString(effectiveOverrides?.["status"])
-                : isFlipped("status")
-                  ? metadataValueString(compare?.fields["status"]?.[compare.side] as MetadataValue)
-                  : status}
-              {#if !isScalarRow(field, fieldId)}
-                <ColoredSelect
-                  value={statusValue}
-                  options={field.options}
-                  ariaLabel={fieldLabel}
-                  placeholder="(no status)"
-                  {readOnly}
-                  onChange={(value) => onStatusChange?.(value)}
-                />
-              {:else}
-                <RailScalarCell
-                  {field}
-                  {fieldId}
-                  {fieldLabel}
-                  value={statusValue}
-                  empty={isRowEmpty(field, fieldId)}
-                  editing={isEditing(fieldId)}
-                  closesOnPick={closesOnPick(field, fieldId)}
-                  onOpen={openField}
-                  onClose={closeField}
-                  onChange={(v) => onStatusChange?.(String(v))}
-                />
-              {/if}
-            {:else if field.type === "computed"}
-              {@const computedRaw = computedFieldString(fieldId)}
-              {@const computedValue = (field.options ?? []).find((option) => option.value === computedRaw)?.label ?? computedRaw}
-              <!-- Read-only derived value, shown by its declared option label
-                   when the field has one (a select-valued computed field like
-                   `runnable` stores "runnable", displays "Runnable" — #1684).
-                   The text breaks on any character so a long, space-less
-                   computed value (a filesystem `path`, #417 s3) wraps within
-                   the rail instead of overflowing, and the full value sits on
-                   the title tooltip. -->
-              <span class="fr-computed" title={computedValue}><span class="fr-computed-text">{computedValue}</span><i class="ti ti-lock" aria-hidden="true"></i></span>
-            {:else if field.type === "color"}
-              <!-- Color renders at its display_order slot like any field
-                   (ADR-0029 §G) — the hoist is gone. When unset, the swatch shows
-                   the RESOLVED inherited color (type → parent → kind default) as a
-                   dashed placeholder, so the actual colour is visible; the label
-                   only has to say it's inherited (#1440). -->
-              <SwatchPicker
-                value={metadataValueString(displayValue(fieldId)) || null}
-                placeholderHex={resolveColor(null, entryType, documentKind, metadataSchema)?.hex ?? null}
-                {readOnly}
-                onChange={(id) => (id ? onMetadataChange?.({ ...metadata, [fieldId]: id }) : clearField(fieldId))}
-              />
-              {#if !metadataValueString(displayValue(fieldId))}
-                <small class="muted">inherited</small>
-              {/if}
-            {:else if !isScalarRow(field, fieldId)}
-              <FieldValueEditor
-                {field}
-                readOnly={fieldReadOnly(fieldId)}
-                allowUnset={true}
-                embedded={true}
-                controlled={isRefField(field)}
-                expanded={fieldExpanded(fieldId)}
-                onToggleExpanded={() => railSectionCollapse.toggle(`field:${fieldId}`, FOLD_DEFAULT)}
-                value={displayValue(fieldId)}
-                ariaLabel={fieldLabel}
-                loreEntries={loreEntries}
-                promptEntries={promptEntries}
-                structure={structure}
-                researchStructure={researchStructure}
-                implicitContextMatcher={implicitContextMatcher}
-                excludeId={excludeId}
-                createLayerId={createLayerId}
-                onChange={(v) => writeField(fieldId, v)}
-                onNavigate={(payload) => onNavigate?.(payload)}
-              />
-            {:else}
-              <RailScalarCell
-                {field}
-                {fieldId}
-                {fieldLabel}
-                value={displayValue(fieldId)}
-                empty={isRowEmpty(field, fieldId)}
-                editing={isEditing(fieldId)}
-                closesOnPick={closesOnPick(field, fieldId)}
-                onOpen={openField}
-                onClose={closeField}
-                onChange={(v) => writeField(fieldId, v)}
-              />
-            {/if}
-            {#if isMutated(fieldId)}
-              <!-- Mutation mark (#64) trails the value, co-located with the
-                   `ti-versions` override mark that leads it, so a field that is
-                   both overridden and mutated reads `[versions] Captain ⤳` on
-                   one line — design-language.md §marks, not split across cells (#492). -->
-              <span class="fr-mutated-marker" title="Changed by here">⤳</span>
-            {/if}
-            {#if fieldId === "ai_temperature" && temperatureUnsupported}
-              {#if temperatureClearedForModel}
-                <!-- #1579: a stored temperature was just discarded because the
-                     selected model dropped sampling — announce it, so the value
-                     isn't stripped silently. -->
-                <small class="fr-temp-note fr-temp-cleared" role="status">
-                  <i class="ti ti-alert-triangle" aria-hidden="true"></i>
-                  Temperature cleared — {temperatureClearedForModel} doesn't support it.
-                </small>
-              {:else}
-                <!-- The selected model dropped sampling (Anthropic Opus 4.7+/5,
-                     incl. via OpenRouter): the field renders read-only above and
-                     this quiet note says why, so the empty control doesn't read as
-                     a bug (#1554). -->
-                <small class="muted fr-temp-note">Not supported by the model</small>
-              {/if}
-            {/if}
-          </div>
-        </div>
-      {/if}
+      {@render fieldRow(fieldId)}
     {/each}
     {/if}
   {/each}
+
+  {#if showFold}
+    <!-- #2006: one summary line stands in for every empty field. Closed, it
+         names the live empty count; open, it flips to "fewer fields" and stays
+         that way (even as sticky-held fields fill in) until clicked again. -->
+    <button type="button" class="rail-fold" data-testid="rail-fold-toggle" aria-expanded={foldOpen} onclick={toggleFold}>
+      <GroupCaret size="xs" collapsed={!foldOpen} />
+      <span>{foldOpen ? "fewer fields" : `${foldCount} more field${foldCount === 1 ? "" : "s"}`}</span>
+    </button>
+    {#if foldOpen}
+      <div class="rail-fold-body" data-testid="rail-fold-body">
+        {#each foldSections as section}
+          {#if showFoldHeads}
+            <RailGroupHead label={section.group ?? UNGROUPED_LABEL} />
+          {/if}
+          {#each section.ids as fieldId (fieldId)}
+            {@render fieldRow(fieldId)}
+          {/each}
+        {/each}
+      </div>
+    {/if}
+  {/if}
 </section>
 
 <style>
@@ -983,6 +1052,13 @@
     padding: 10px 12px;
     border-bottom: 1px solid var(--divider);
   }
+
+  /* #2006 fold summary line — gap 17px + the xs caret's 15px slot lines the
+     label up with RailGroupHead's label, same as .rgh-toggle (see that
+     component's comment). */
+  .rail-fold { display: inline-flex; align-items: center; gap: 17px; margin: 2px 0 0; padding: 6px 12px 6px 12px; border: none; background: none; color: var(--text-3); font: inherit; font-size: var(--fs-sm); cursor: pointer; text-align: left; }
+  .rail-fold:hover { color: var(--text-2); }
+  .rail-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
 
   /* L1 section headers live in styles.css (shared with the type
      editor); only the Field row chrome is scoped per-component. */

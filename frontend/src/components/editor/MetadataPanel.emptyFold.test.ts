@@ -99,6 +99,44 @@ describe("MetadataPanel — empty fields fold (#2006)", () => {
     expect(screen.queryByTestId("rail-fold-toggle")).toBeNull();
   });
 
+  it("a row inside the open fold opens for editing in place (the rest/edit flip)", async () => {
+    mount({ alias: "The Painted" });
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
+    await fireEvent.click(screen.getByRole("button", { name: /^Set Nick/ }));
+    const row = screen.getByText("Nick").closest(".field-row")!;
+    expect(row.closest("[data-testid='rail-fold-body']")).not.toBeNull();
+    expect(row.classList.contains("editing")).toBe(true);
+    expect(row.querySelector("input")).not.toBeNull();
+  });
+
+  it("a flipped row never folds, even when the proposed value is empty (a proposal to clear a field)", () => {
+    // The proposal clears `alias`: the shown value is the empty `was`, but the
+    // row carries the proposal itself, so it stays among the known rows.
+    render(MetadataPanel, {
+      props: {
+        ...baseProps({ alias: "The Painted" }),
+        compare: {
+          fields: { alias: { was: "", now: "The Painted" } },
+          side: "was",
+          resolve: { adopted: () => false, onToggle: vi.fn() },
+        },
+      } as never,
+    });
+    const row = screen.getByText("Alias").closest(".field-row")!;
+    expect(row.closest("[data-testid='rail-fold-body']")).toBeNull();
+    expect(screen.getByTestId("rail-fold-toggle")).toHaveTextContent("5 more fields");
+  });
+
+  it("no lone General head over the known rows when every grouped field is empty and folded", async () => {
+    mount({ alias: "The Painted" });
+    expect(screen.queryByText("General")).toBeNull();
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
+    // Open, the chooser reads like the schema: Arc heads its two rows, and the
+    // ungrouped empties sit under General.
+    expect(screen.getByText("Arc")).toBeInTheDocument();
+    expect(screen.getByText("General")).toBeInTheDocument();
+  });
+
   it("sticky while open: a field filled mid-edit stays inside the fold until closed", async () => {
     const props = baseProps({ tone: "x", kin: ["lore_1"], role: "x", loyalty: "x" });
     const { rerender } = render(MetadataPanel, { props: props as never });

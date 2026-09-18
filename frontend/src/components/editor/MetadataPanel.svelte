@@ -279,10 +279,15 @@
   // a writer mid-edit. Closed, fold membership is just the live empty set.
   let foldOpen = $state(false);
   let foldHeld = $state<Set<string>>(new Set());
+  // A flipped row (a lore proposal or a snapshot compare, `compare`) and a
+  // mutated row (`⤳`) carry information even when the shown value is empty —
+  // a proposal to CLEAR a field, a diff against an empty side — so they never
+  // fold; only a plain empty row does.
   const emptyIds = $derived(
     renderedFieldIds.filter((id) => {
       const field = metadataSchema.fields[id];
-      return field ? isRowEmpty(field, id) : false;
+      if (!field || isFlipped(id) || isMutated(id)) return false;
+      return isRowEmpty(field, id);
     }),
   );
   const foldIds = $derived(foldOpen ? new Set([...emptyIds, ...foldHeld]) : new Set(emptyIds));
@@ -305,11 +310,15 @@
 
   // Every block folds the same way once there is anything to fold: when a type
   // has at least one L1 group, the ungrouped fields get a header too (#1884
-  // slice 3). A type with no groups is one block — no header at all. Derived
-  // from EVERY rendered row (known ∪ fold, #2006) so a type whose grouped
-  // fields are all empty still shows heads consistently across both loops.
+  // slice 3). A type with no groups is one block — no header at all. The
+  // known loop asks this of the KNOWN rows only (#2006): when every grouped
+  // field is empty and folded, the rows on screen are one block, and a lone
+  // "General" head over them would be the noise this rule exists to avoid.
+  // The open fold shows heads when either side has a group, so its chooser
+  // reads like the schema.
   const UNGROUPED_LABEL = "General";
-  const showGroupHeads = $derived(buildSections(renderedFieldIds, metadataSchema).some((s) => s.group !== null));
+  const showGroupHeads = $derived(sections.some((s) => s.group !== null));
+  const showFoldHeads = $derived(showGroupHeads || foldSections.some((s) => s.group !== null));
   const GROUP_DEFAULT = true;
   function groupKey(section: RailSection): string { return `group:${section.group ?? "~ungrouped"}`; }
   function groupExpanded(section: RailSection): boolean { return railSectionCollapse.isExpanded(groupKey(section), GROUP_DEFAULT); }
@@ -954,7 +963,7 @@
     {#if foldOpen}
       <div class="rail-fold-body" data-testid="rail-fold-body">
         {#each foldSections as section}
-          {#if showGroupHeads}
+          {#if showFoldHeads}
             <RailGroupHead label={section.group ?? UNGROUPED_LABEL} />
           {/if}
           {#each section.ids as fieldId (fieldId)}

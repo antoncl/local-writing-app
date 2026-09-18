@@ -41,15 +41,29 @@
   // the mutation axis exists only for a lore entry with authored mutations. So
   // "both timelines" ⇔ "has mutations", and that gates the mode control.
   let hasBothTimelines = $derived(documentKind === "lore" && scrub.units.length > 0);
-  // Forced to snapshots when there is no mutation axis, so a stale `mode` from a
-  // previous entry can never leave the dock showing an empty track.
-  let shownTrack = $derived<Track>(hasBothTimelines ? mode : "snapshots");
+  // The track follows the ENGAGED axis, wherever the engagement came from — the
+  // dock's own mode control, OR the rail's mutation timeline, which drives the
+  // same scrub controller (NodeEditor). So the dock can never show a parked
+  // snapshot while the body shows a mutation scrub: engaging one axis takes the
+  // track. With nothing engaged it shows the last explicit `mode`; with no
+  // mutation axis at all it is always snapshots (a stale `mode` can't leave an
+  // empty track).
+  let shownTrack = $derived<Track>(
+    !hasBothTimelines
+      ? "snapshots"
+      : scrub.index > 0
+        ? "mutations"
+        : snapshots.parked !== null
+          ? "snapshots"
+          : mode,
+  );
 
   function cycle(): void {
-    // Reset the OUTGOING axis to its editable end on every switch, so `scrubbed`
-    // and `snapshotParked` are never both true. The card's overlay precedence
-    // (NodeEditor) then needs no mode-awareness — "only one timeline on the track
-    // at a time" (§Anti-goals) holds structurally.
+    // Reset the outgoing axis to its editable end and flip the mode. The card's
+    // mutual exclusion (at most one of scrubbed / snapshotParked) is kept by
+    // `shownTrack` following the engaged axis, plus the rail timeline clearing the
+    // snapshot park (NodeEditor) — NOT by this reset alone, so the body-overlay
+    // precedence stays correct even when the rail engages the mutation axis.
     if (shownTrack === "snapshots") {
       void snapshots.park(null); // leaving snapshots → Live
       mode = "mutations";
@@ -57,6 +71,11 @@
       void scrub.scrubTo(0); // leaving mutations → base
       mode = "snapshots";
     }
+    // The track component swaps on the mode change, unmounting whatever the user
+    // clicked to engage (a notch or bead) and dropping focus to <body> — which
+    // would strand the keyboard behind the editable-end focus gate below. Move
+    // focus to the persistent mode control so ← / → / Esc / m keep working (§4).
+    footEl?.querySelector<HTMLElement>(".mode-control")?.focus();
   }
 
   function onKeydown(event: KeyboardEvent): void {

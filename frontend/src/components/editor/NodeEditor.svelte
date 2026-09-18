@@ -953,7 +953,14 @@
       <MutationTimeline
         units={scrub.units}
         activeIndex={scrub.index}
-        onSelect={(index) => void scrub.scrubTo(index)}
+        onSelect={(index) => {
+          // Engaging the mutation axis from the rail returns the snapshot axis to
+          // Live, so the two are never both engaged (ADR-0088 S2): the foot dock
+          // follows the engaged axis, and this keeps them mutually exclusive even
+          // though the rail drives scrub outside the dock.
+          void snapshots.park(null);
+          void scrub.scrubTo(index);
+        }}
         onNavigate={(payload) => onNavigate?.(payload)}
       />
       <!-- Mutation sets (ADR-0055 §3): the mutation sets pinned to this entity,

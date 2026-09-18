@@ -130,4 +130,37 @@ describe("FootDock — unified keyboard + mode switch (ADR-0088 S2)", () => {
     expect(spies.snapStep).toHaveBeenCalledWith(-1);
     expect(spies.scrubStep).not.toHaveBeenCalled();
   });
+
+  it("ignores a key typed outside the dock at the editable end", () => {
+    // The load-bearing gate: at rest (nothing parked/scrubbed) a plain key typed
+    // elsewhere in the pane must NOT move the track (the #409 daily-bug guard).
+    const { spies } = mount(scrubWithMutations());
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    expect(spies.snapStep).not.toHaveBeenCalled();
+    expect(spies.toggleView).not.toHaveBeenCalled();
+    expect(spies.scrubStep).not.toHaveBeenCalled();
+  });
+
+  it("follows the engaged axis: shows mutations when scrubbed, even without cycling", () => {
+    // The rail timeline can engage the mutation axis (scrub.index>0) outside the
+    // dock; the dock must then show the mutation track, never a parked-snapshot
+    // strip, so scrubbed and snapshotParked can't present at once.
+    const scrub = scrubWithMutations();
+    scrub.index = 1;
+    const { container } = mount(scrub);
+    expect(container.querySelector(".mutation-scrubber-strip")).not.toBeNull();
+    expect(container.querySelector(".snapshot-strip")).toBeNull();
+  });
+
+  it("refocuses the mode control after a cycle so the keyboard stays alive", () => {
+    // Cycling unmounts the focused track (a clicked notch/bead) and would drop
+    // focus to <body>, stranding the keys behind the editable-end gate. The
+    // cycle moves focus to the persistent mode control instead (ADR §4).
+    const { container } = mount(scrubWithMutations());
+    press(container, "m");
+    const modeControl = container.querySelector(".mode-control");
+    expect(modeControl).not.toBeNull();
+    expect(document.activeElement).toBe(modeControl);
+  });
 });

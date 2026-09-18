@@ -82,4 +82,13 @@ export class LoreScrubController {
       }
     }
   }
+
+  /** ← / → along the mutation axis: one stop, clamped to [0, units.length], no
+   *  wrap — the mirror of `SnapshotStripController.step`, so the ADR-0088 foot
+   *  dock drives both axes with the same gesture (§4). Stop 0 is base (editable);
+   *  the last stop is the newest mutation unit. */
+  step(direction: -1 | 1): void {
+    const next = Math.min(this.units.length, Math.max(0, this.index + direction));
+    if (next !== this.index) void this.scrubTo(next);
+  }
 }

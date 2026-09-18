@@ -280,6 +280,10 @@ class LoreEntriesMixin:
         metadata_errors = self._validate_lore_entry_metadata(node_id, entry.entry_type, entry.metadata, schema, index)
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
+        # Before the write: photograph the pre-save bytes at the node's OWNING
+        # layer (an ancestor for a direct-edit-of-canon save), which
+        # `_snapshot_store_root` resolves from `node_id` (ADR-0043 Am. 2).
+        self.maybe_capture_session_boundary(node_id, kind="lore")
         self._write_lore_entry_file(path, entry)
         self._maybe_rename_node_file(path, request.title)
         return self.read_lore_entry(node_id)
@@ -360,6 +364,10 @@ class LoreEntriesMixin:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
 
         if rows:
+            # Photograph the prior delta before overwriting it (the None path of a
+            # first-ever override is a silent no-op). A revert-to-canon drop below
+            # is an erase, not a session save, so it is deliberately not captured.
+            self.maybe_capture_session_boundary(entry_id, kind="lore", layer_id=authoring_layer.id)
             self._write_override_file(authoring_layer.folder, entry_id, request.title, rows)
         else:
             # An empty delta means the author reverted to canon: drop this layer's

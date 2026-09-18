@@ -321,6 +321,9 @@ class ResearchNotesMixin:
             entry_type=entry_type,
             metadata=clean_metadata,
         )
+        # Before the write: the session-boundary photo is the pre-save bytes —
+        # what this note looked like when the author sat down (ADR-0043 Am. 2).
+        self.maybe_capture_session_boundary(node_id, kind="research")
         self._write_research_note_file(path, note)
         renamed_path = self._maybe_rename_node_file(path, request.title) or path
         # Keep the research tree title in sync the same way save_scene

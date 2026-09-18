@@ -511,6 +511,11 @@ class PromptEntriesMixin:
             rows = [row for row in rows if row.field not in cleared]
 
         if rows:
+            # Photograph the prior delta before overwriting it (a first-ever
+            # override resolves to a None path — a silent no-op). The
+            # revert-to-canon drop below is an erase, not a session save, so it is
+            # deliberately not captured.
+            self.maybe_capture_session_boundary(entry_id, kind="prompt", layer_id=authoring_layer.id)
             self._write_override_file(authoring_layer.folder, entry_id, request.title, rows)
         else:
             # An empty delta means the author reverted to canon: drop this layer's
@@ -548,6 +553,9 @@ class PromptEntriesMixin:
         # Never persist `disposition`/`runnable` (#1684) — resolver-stamped at
         # read; see strip_computed_fields for why the strip stays narrow.
         metadata = strip_computed_fields(metadata, self.read_metadata_schema())
+        # Before the write: photograph the pre-save bytes at the node's owning
+        # layer (ADR-0043 Am. 2), the same session-boundary rule scenes use.
+        self.maybe_capture_session_boundary(node_id, kind="prompt")
         self._write_node_entry_file(
             path,
             node_id,

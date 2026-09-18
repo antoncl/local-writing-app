@@ -619,39 +619,65 @@ class SceneSnapshotsMixin:
             (folder / f"{record.id}.yaml").unlink(missing_ok=True)
 
     def maybe_capture_session_boundary(
-        self, root: Path, node_id: str, path: Path, dynamic_context: list[str] | None = None
+        self,
+        ref: str,
+        *,
+        kind: str = "manuscript",
+        layer_id: str | None = None,
+        dynamic_context: list[str] | None = None,
     ) -> None:
-        """Called from the save path **before** the new body is written.
+        """Called from a save path **before** the new body is written.
 
         The rule (ADR-0043 Amendment 2): on a save, if the last save to this
-        scene was longer ago than `SESSION_GAP_MINUTES`, capture the pre-save
+        node was longer ago than `SESSION_GAP_MINUTES`, capture the pre-save
         state first. The backend needs nothing new for this — it already has the
         file, its modification time and the save.
 
-        *Last save is the file's mtime.* It needs no new state, and the two
-        things that could have made it lie do not: a rename preserves mtime, and
-        structure writes touch `manuscript.structure.yaml`, not the scene. What
-        does refresh it — a marker rewrite, an embedded-todo edit, a schema-driven
-        metadata rewrite — are all writes to this scene's own file, so counting
-        them as a save is right rather than merely tolerable.
+        The target is resolved through the same `(ref, kind, layer_id)` surface
+        the explicit camera uses (`_resolve_snapshot_target`), so a base node, an
+        inherited node owned by an ancestor, and a book override delta all reach
+        the right store with one traversal — the auto-camera and the camera share
+        their aim. `kind` is forwarded to `_capture`, so a witness is built only
+        for a scene (`kind == "manuscript"`); every other kind has nothing
+        scene-shaped to witness. An override target with no delta at this layer
+        yet resolves to a `path` of `None` (the first override of a field):
+        there is nothing to photograph, so this returns — the silent no-op a
+        missing file gets, not the 404 the explicit camera raises.
+
+        *Last save is the file's mtime.* It needs no new state. The writes that
+        could make it lie were audited and do not: a rename preserves mtime, and
+        structure writes touch the structure YAML, not the node file. What does
+        refresh it — a marker rewrite, an embedded-todo edit, a schema-driven
+        metadata rewrite — are writes to this node's own file, so counting them
+        as a save is right rather than merely tolerated. The **one** refresher
+        that is not an author save is the reference sweep a tag delete/merge runs
+        (`_purge_references_to` / `_rewrite_references_from_to`), which rewrites a
+        carrier node's own front matter in place. That bumps mtime without an
+        author edit, so the *next* genuine session-boundary save may find a fresh
+        mtime and skip its capture. It fails safe — the file is intact, only the
+        "what it looked like when I sat down" photo is missed, never a spurious
+        or empty one — and a scene has always carried the same exposure.
 
         A missing file is not an error here: a capture is never the reason a
         save fails.
 
         **One imprecision, accepted deliberately.** The bytes are the pre-edit
-        state, but `dynamic_context` is the set the editor holds *now* — it
-        describes the body about to be written, since the author has been typing
-        for up to one save interval before this fires. Exact agreement would need
-        the backend to retain the previous session's last set across the gap and
-        across restarts. The error is bounded by one save rather than by the
-        session, and it is self-correcting.
+        state, but `dynamic_context` (a scene's witness input) is the set the
+        editor holds *now* — it describes the body about to be written, since the
+        author has been typing for up to one save interval before this fires.
+        Exact agreement would need the backend to retain the previous session's
+        last set across the gap and across restarts. The error is bounded by one
+        save rather than by the session, and it is self-correcting.
         """
-        if not path.exists():
+        store_root, node_id, path = self._resolve_snapshot_target(ref, kind, layer_id=layer_id)
+        if path is None or not path.exists():
             return
         last_save = datetime.fromtimestamp(path.stat().st_mtime, UTC)
         if (datetime.now(UTC) - last_save).total_seconds() <= SESSION_GAP_MINUTES * 60:
             return
-        self._capture(root, node_id, path, retention="thinned", dynamic_context=dynamic_context)
+        self._capture(
+            store_root, node_id, path, retention="thinned", dynamic_context=dynamic_context, kind=kind
+        )
 
     # ----- restore ----------------------------------------------------------
 

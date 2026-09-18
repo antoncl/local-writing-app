@@ -2,7 +2,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import SchemaTypeEditor from "./SchemaTypeEditor.svelte";
-import type { MetadataFieldDefinition, MetadataSchemaLayer } from "@/lib/types";
+import { metadataSchemaStore } from "@/lib/stores/schema";
+import type { MetadataFieldDefinition, MetadataSchema, MetadataSchemaLayer } from "@/lib/types";
 
 describe("SchemaTypeEditor reusable groups on built-in types (#1033)", () => {
   it("shows Add group and the Reusable-groups section on a readonly (built-in) type", () => {
@@ -254,5 +255,33 @@ describe("SchemaTypeEditor summary-fields save payload (#2008)", () => {
     await fireEvent.change(select, { target: { value: "age" } });
     await fireEvent.click(screen.getByRole("button", { name: "Save Type" }));
     expect(onSaveType).toHaveBeenCalledWith(expect.objectContaining({ summaryFields: ["name", "age"] }));
+  });
+
+  it("Reset to inherited sends summaryFields: null on Save Type (the wire shape that clears the layer)", async () => {
+    metadataSchemaStore.set({
+      version: 1,
+      fields: { name: { name: "Name", type: "text", options: [] } },
+      entry_types: {
+        "lore:base": { name: "Lore Entries", kind: "lore", fields: ["name"], summary_fields: ["name"] },
+        "lore:character": { name: "Character", kind: "lore", parent: "lore:base", fields: ["name"], summary_fields: ["name"] },
+      },
+    } as unknown as MetadataSchema);
+    const onSaveType = vi.fn();
+    render(SchemaTypeEditor, {
+      props: {
+        schemaTypeKind: "lore" as const,
+        schemaTypeParent: "lore:base",
+        initialName: "Character",
+        initialTypeId: "lore:character",
+        initialSummaryFields: ["name"],
+        selectedSchemaTypeId: "lore:character",
+        schemaTypeLayerId: "proj",
+        onSaveType,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Reset to inherited" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Save Type" }));
+    expect(onSaveType).toHaveBeenCalledWith(expect.objectContaining({ summaryFields: null }));
+    metadataSchemaStore.set(null);
   });
 });

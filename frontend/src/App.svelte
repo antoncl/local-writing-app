@@ -1180,6 +1180,7 @@
           if (editorPane.scene) await editorPanes.flushSceneIfDirty(editorPane.scene.id);
         }}
         onSceneRestored={(restored) => editorPanes.reconcileSceneFromServer(restored)}
+        onNodeRestored={(nodeId) => editorPanes.reconcileNodeFromServer(nodeId, "lore")}
         onInteriorityChange={(has) => roleplayPresence.set(editorPane.id, has)}
         onReviewFreeze={(entryId, committer) =>
           committer

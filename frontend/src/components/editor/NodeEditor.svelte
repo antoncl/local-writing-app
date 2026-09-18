@@ -35,7 +35,8 @@
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, NavigateTarget, PromptContextStrategy, PromptEntrySummary, PromptInputDefinition, ViewSpec } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
-  import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { metadataSchemaLayersStore, metadataSchemaStore } from "@/lib/stores/schema";
+  import { snapshotLayerId } from "@/lib/utils/layerAuthoring";
   import { readOnlyInPlace } from "@/lib/utils/provenance";
   import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -110,6 +111,10 @@
     // reload. The pane store owns the document lifecycle; the card does not.
     onFlushScene?: (() => Promise<void>) | undefined;
     onSceneRestored?: ((restored: import("@/lib/types").Scene) => void | Promise<void>) | undefined;
+    // A lore snapshot restore (ADR-0088 S1). The node route returns the re-folded
+    // entry; the host reloads it by id (reconcileNodeFromServer). Kept distinct
+    // from onSceneRestored so the scene path's Scene-typed reload is unchanged.
+    onNodeRestored?: ((nodeId: string) => void | Promise<void>) | undefined;
     // Roleplay presence (ADR-0070 S3): fires when this scene's editor gains or
     // loses roleplay beats, so the shell (App → ≡ menu) can enable/disable the
     // "Finalize roleplay…" action. `hasInteriorityBeats` otherwise dead-ends here.
@@ -151,6 +156,7 @@
     onResetField = undefined,
     onFlushScene = undefined,
     onSceneRestored = undefined,
+    onNodeRestored = undefined,
     onInteriorityChange = undefined,
     onReviewFreeze = undefined,
     onFlushReviewCommit = undefined
@@ -209,14 +215,41 @@
     return scrub.load(id);
   });
 
-  // ---- Snapshot strip (#401, ADR-0044) --------------------------------------
+  // ---- Snapshot strip (#401, ADR-0044; lore surface ADR-0088 S1) ------------
   // The same shape as the scrub above, on the real-time axis: `parked` flips
   // the body to a read-only overlay while the TipTap buffer stays mounted and
-  // hidden underneath. Scenes only — ADR-0043's v1 is scenes, and putting a
-  // third axis on a lore card is exactly the L-not-a-grid problem ADR-0042 had
-  // to settle.
+  // hidden underneath. Scenes use their own routes; a lore card reaches the node
+  // routes at the layer its edits write to (ADR-0087 §3b / ADR-0088). The
+  // mutation scrubber still lives in the rail here — S2 unifies the two axes into
+  // one foot dock with a mode control; S1 only surfaces the snapshot axis.
   const snapshots = new SnapshotStripController();
-  let snapshotParked = $derived(documentKind === "manuscript" && snapshots.parked !== null);
+  let snapshotParked = $derived(
+    (documentKind === "manuscript" || documentKind === "lore") && snapshots.parked !== null,
+  );
+
+  // The snapshot track's layer scope (ADR-0088 §6): lore reads the node routes at
+  // the layer its edits write to (base vs override), mirrored from the same
+  // authoringLayerId the save uses; a scene has no layer axis. Kept a STRING so
+  // the load effect re-runs on a real layer switch but not on every keystroke —
+  // reading `scene` recomputes it, yet the stable value keeps the dep from
+  // re-firing (cf. the sceneId memo above).
+  let snapshotLayer = $derived(
+    documentKind === "lore" && scene
+      ? snapshotLayerId(authoringLayerId, scene.source_layer_id)
+      : null,
+  );
+  // The human label for that write layer, for the parked caption (§6): the
+  // override layer when overriding, else the entry's owning layer.
+  let snapshotWritesLabel = $derived.by(() => {
+    if (documentKind !== "lore" || !scene) return null;
+    const layerId = snapshotLayer ?? scene.source_layer_id ?? null;
+    if (!layerId) return null;
+    return (
+      $metadataSchemaLayersStore.find((layer) => layer.id === layerId)?.label ??
+      scene.source_layer_label ??
+      null
+    );
+  });
 
   // Forward roleplay-beat presence to the shell (ADR-0070 S3) so App can gate the
   // ≡-menu Finalize action. hasInteriorityBeats is bound out of ProseBodyView.
@@ -226,7 +259,14 @@
 
   $effect(() => {
     snapshots.flushScene = onFlushScene ?? null;
-    snapshots.onRestored = onSceneRestored ?? null;
+    // A scene restore hands the returned Scene to reconcileSceneFromServer; a lore
+    // restore re-fetches by id (the node route returns the re-folded entry, which
+    // reconcileNodeFromServer reloads). Dispatching here leaves the scene path's
+    // Scene-typed reload untouched (ADR-0088 anti-goal).
+    snapshots.onRestored = (restored) =>
+      documentKind === "lore"
+        ? onNodeRestored?.(sceneId ?? "")
+        : onSceneRestored?.(restored as import("@/lib/types").Scene);
     // Adopting a region writes only the prose, through the hidden buffer restore
     // already owns — so it goes straight to the view, not back through the
     // server (ADR-0044 Amendment 4). Evaluated at call time, like `readLive`.
@@ -244,7 +284,21 @@
       // the author sees underlined, not a rescan.
       dynamic_context: scene?.id ? implicitContextFor(scene.id) : undefined,
     });
-    return snapshots.load(documentKind === "manuscript" ? sceneId : null);
+    // Depends only on the primitive id / kind / layer — never the churning
+    // `scene` object — so a keystroke does not reload the strip and reset the
+    // parked notch (cf. the sceneId memo). A layer switch (authoringLayerId →
+    // snapshotLayer) IS a real change and swaps the set (§6). The ternary is the
+    // load() argument so each branch is contextually typed to SnapshotTarget.
+    const layer = snapshotLayer;
+    return snapshots.load(
+      !sceneId
+        ? null
+        : documentKind === "manuscript"
+          ? sceneId
+          : documentKind === "lore"
+            ? { kind: "node", nodeId: sceneId, layer }
+            : null,
+    );
   });
 
   // The rail flips with the body (§F). Kept apart from `effectiveOverrides`:
@@ -1184,11 +1238,12 @@
     />
   {/if}
 
-  <!-- Foot-docked, and only on scenes: snapshots are about the prose, so the
-       strip stays with the body (the mutation scrubber travels with Details —
-       it renders inside the rail, #1249). -->
-  {#if documentKind === "manuscript" && scene && bodyShape === "prose"}
-    <SnapshotStrip strip={snapshots} />
+  <!-- Foot-docked: snapshots are about the body, so the strip stays with it. Now
+       also on a lore card (ADR-0088 S1) — its mutation scrubber still travels
+       with Details in the rail (#1249); S2 folds both into one dock. Gated on a
+       prose body: the read-only compare overlay is prose. -->
+  {#if (documentKind === "manuscript" || documentKind === "lore") && scene && bodyShape === "prose"}
+    <SnapshotStrip strip={snapshots} writesLabel={snapshotWritesLabel} />
   {/if}
 
   <footer class="status">

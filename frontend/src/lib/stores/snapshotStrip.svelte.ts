@@ -16,7 +16,17 @@
 // host's job because the pane store owns the document lifecycle.
 import { api } from "@/lib/api";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
-import type { DiffRun, DiffView, FieldDiff, Scene, Snapshot, SnapshotDrift } from "@/lib/types";
+import type {
+  DiffRun,
+  DiffView,
+  FieldDiff,
+  LoreEntry,
+  Scene,
+  Snapshot,
+  SnapshotDetail,
+  SnapshotDrift,
+  SnapshotList,
+} from "@/lib/types";
 import { adoptRegion, renderDiffRuns } from "@/lib/utils/diffRuns";
 import { diffRuns, fieldDiffs } from "@/lib/utils/snapshotDiff";
 import { inNotchOrder, notchWhen } from "@/lib/utils/snapshotTime";
@@ -74,6 +84,81 @@ const SLOW_PARK_MS = 2000;
  *  accepting text the server will silently drop, and it lives here rather than
  *  inline in the markup so the pairing has one place to be found and changed. */
 export const SNAPSHOT_DESCRIPTION_MAX = 280;
+
+/** What a strip is bound to. A manuscript scene keeps its own `/scenes` routes —
+ *  they carry the entity-drift witness the node routes deliberately do not
+ *  (ADR-0087 §5). Any other snapshot-eligible kind uses the `/nodes` routes with
+ *  an optional authoring `layer` for a book override's history (§3b). */
+export type SnapshotTarget =
+  | { kind: "scene"; sceneId: string }
+  | { kind: "node"; nodeId: string; layer: string | null };
+
+/** The document a restore hands back — a `Scene` from the scene routes, or the
+ *  re-folded node from the node routes (lore is the only kind the surface
+ *  restores today, ADR-0088 S1). The controller only forwards it to the host. */
+export type RestoredDocument = Scene | LoreEntry;
+
+/** The snapshot calls the controller makes, bound to one target. Built once per
+ *  `load()` so the scene-vs-node dispatch lives in a single place and every
+ *  method below just calls `#backend.*` (one traversal, not six). `drift` is
+ *  `null` for a node target: the entity-drift witness is a scene concern with no
+ *  node route, so a node park skips it and the client-side content diff still
+ *  runs. `key` identifies the binding for the in-flight freshness guards. */
+interface SnapshotBackend {
+  key: string;
+  list: () => Promise<SnapshotList>;
+  read: (id: string) => Promise<SnapshotDetail>;
+  drift:
+    | ((
+        id: string,
+        dynamicContext: string[] | null,
+        metadata: Record<string, unknown>,
+        body: string,
+      ) => Promise<SnapshotDrift>)
+    | null;
+  restore: (id: string) => Promise<RestoredDocument>;
+  capture: (dynamicContext: string[] | undefined) => Promise<Snapshot>;
+  pin: (id: string) => Promise<Snapshot>;
+  describe: (id: string, description: string) => Promise<Snapshot>;
+  del: (id: string) => Promise<SnapshotList>;
+}
+
+function sceneBackend(sceneId: string): SnapshotBackend {
+  return {
+    key: `scene:${sceneId}`,
+    list: () => api.listSnapshots(sceneId),
+    read: (id) => api.readSnapshot(sceneId, id),
+    drift: (id, dyn, meta, body) => api.snapshotDrift(sceneId, id, dyn, meta, body),
+    restore: (id) => api.restoreSnapshot(sceneId, id),
+    capture: (dyn) => api.captureSnapshot(sceneId, dyn),
+    pin: (id) => api.pinSnapshot(sceneId, id),
+    describe: (id, description) => api.setSnapshotDescription(sceneId, id, description),
+    del: (id) => api.deleteSnapshot(sceneId, id),
+  };
+}
+
+function nodeBackend(nodeId: string, layer: string | null): SnapshotBackend {
+  return {
+    key: `node:${nodeId}:${layer ?? ""}`,
+    list: () => api.listNodeSnapshots(nodeId, layer),
+    read: (id) => api.readNodeSnapshot(nodeId, id, layer),
+    // No node-scoped witness route (ADR-0087 §5): a node park skips the drift
+    // call and keeps only the client-side content diff.
+    drift: null,
+    restore: (id) => api.restoreNodeSnapshot(nodeId, id, layer),
+    // A non-scene node has no dynamic-context witness to send.
+    capture: () => api.captureNodeSnapshot(nodeId, layer),
+    pin: (id) => api.pinNodeSnapshot(nodeId, id, layer),
+    describe: (id, description) => api.setNodeSnapshotDescription(nodeId, id, description, layer),
+    del: (id) => api.deleteNodeSnapshot(nodeId, id, layer),
+  };
+}
+
+function backendFor(target: SnapshotTarget): SnapshotBackend {
+  return target.kind === "scene"
+    ? sceneBackend(target.sceneId)
+    : nodeBackend(target.nodeId, target.layer);
+}
 
 export class SnapshotStripController {
   /** Oldest first **by content time** (`inNotchOrder`) — the order the strip
@@ -144,8 +229,10 @@ export class SnapshotStripController {
 
   /** Write any pending edits before a capture or a restore reads the file. */
   flushScene: (() => Promise<void>) | null = null;
-  /** Hand the restored document back to the host, which owns the buffer. */
-  onRestored: ((scene: Scene) => void | Promise<void>) | null = null;
+  /** Hand the restored document back to the host, which owns the buffer. A
+   *  scene restore hands back the `Scene`; a node restore the re-folded node —
+   *  the host dispatches by kind (ADR-0088 S1). */
+  onRestored: ((restored: RestoredDocument) => void | Promise<void>) | null = null;
   /** Hand a re-projected body to the host after adopting a region (Amendment
    *  4). Distinct from `onRestored`: no backend round trip and no `Scene` — only
    *  the prose changes, and the host writes it into the buffer marked dirty. */
@@ -155,7 +242,10 @@ export class SnapshotStripController {
    *  mtime, which is what the session-gap capture trigger reads. */
   readLive: (() => LiveState) | null = null;
 
-  #sceneId: string | null = null;
+  /** The active binding — the target's api dispatch, built in `load()`. `null`
+   *  before the first load and after a null load. Its `key` is the freshness
+   *  token every in-flight guard compares against, in place of the old scene id. */
+  #backend: SnapshotBackend | null = null;
   // Two monotonic tokens, because they guard two different things and sharing
   // one is a bug the author meets immediately.
   //
@@ -203,35 +293,44 @@ export class SnapshotStripController {
     this.slow = false;
   }
 
-  /** (Re)load this scene's snapshots, returning to Live. Returns a cancel fn
-   *  for the caller's `$effect` teardown. */
-  load(sceneId: string | null): () => void {
-    this.#sceneId = sceneId;
+  /** (Re)load this target's snapshots, returning to Live. A bare scene id is
+   *  accepted as shorthand for the scene target, so the manuscript call sites and
+   *  their tests are unchanged. Returns a cancel fn for the caller's `$effect`
+   *  teardown. */
+  load(target: string | SnapshotTarget | null): () => void {
+    const resolved: SnapshotTarget | null =
+      target === null
+        ? null
+        : typeof target === "string"
+          ? { kind: "scene", sceneId: target }
+          : target;
+    const backend = resolved ? backendFor(resolved) : null;
+    this.#backend = backend;
     this.parked = null;
     this.#endPending();
-    // `#clearDiff` cancels the in-flight fetch and render, which a scene change
+    // `#clearDiff` cancels the in-flight fetch and render, which a target change
     // needs just as much as a return to Live does.
     this.#clearDiff();
-    if (!sceneId) {
+    if (!backend) {
       this.snapshots = [];
       return () => {};
     }
     void this.refresh();
     return () => {
-      if (this.#sceneId === sceneId) this.#sceneId = null;
+      if (this.#backend?.key === backend.key) this.#backend = null;
     };
   }
 
   async refresh(): Promise<void> {
-    const sceneId = this.#sceneId;
-    if (!sceneId) return;
+    const backend = this.#backend;
+    if (!backend) return;
     try {
-      const list = await api.listSnapshots(sceneId);
-      if (this.#sceneId === sceneId) this.snapshots = inNotchOrder(list.snapshots);
+      const list = await backend.list();
+      if (this.#backend?.key === backend.key) this.snapshots = inNotchOrder(list.snapshots);
     } catch {
       // A strip that cannot list is an empty strip, not an error dialog: the
       // author is writing, and this is a safety net rather than the task.
-      if (this.#sceneId === sceneId) this.snapshots = [];
+      if (this.#backend?.key === backend.key) this.snapshots = [];
     }
   }
 
@@ -246,8 +345,8 @@ export class SnapshotStripController {
    *  call in parallel. §G still puts the diff at the discrete moment the author
    *  parks; the runs carry all the text, so every later flip is a re-render. */
   async park(snapshotId: string | null): Promise<void> {
-    const sceneId = this.#sceneId;
-    if (!snapshotId || !sceneId) {
+    const backend = this.#backend;
+    if (!snapshotId || !backend) {
       // Live needs no round trip, so it happens at once.
       this.parked = null;
       this.#endPending();
@@ -255,7 +354,7 @@ export class SnapshotStripController {
       return;
     }
     const seq = ++this.#fetch;
-    const fresh = () => seq === this.#fetch && this.#sceneId === sceneId;
+    const fresh = () => seq === this.#fetch && this.#backend?.key === backend.key;
     this.pendingId = snapshotId;
     this.#watchForSlow();
     try {
@@ -264,15 +363,17 @@ export class SnapshotStripController {
       // (ADR-0043), so a drift failure must not drop the author out of a snapshot
       // they can otherwise read — but it degrades to "couldn't compare", not to a
       // silent all-clear (a failed fetch is not evidence of an unchanged world).
-      // A missing snapshot body cannot be rendered, so that one still throws.
-      const [snapshot, drift] = await Promise.all([
-        api.readSnapshot(sceneId, snapshotId),
-        api
-          // The buffer (metadata + body) rides along so the now-witness reads
-          // the same "now" the client-side flip below does, not stale disk (#581).
-          .snapshotDrift(sceneId, snapshotId, live.dynamic_context ?? null, live.metadata, live.body)
-          .catch(() => DRIFT_UNCOMPARABLE),
-      ]);
+      // A node target has no witness route (ADR-0087 §5): drift resolves straight
+      // to NO_DRIFT and the client-side content diff below still runs. A missing
+      // snapshot body cannot be rendered, so that one still throws.
+      const driftPromise = backend.drift
+        ? backend
+            // The buffer (metadata + body) rides along so the now-witness reads
+            // the same "now" the client-side flip below does, not stale disk (#581).
+            .drift(snapshotId, live.dynamic_context ?? null, live.metadata, live.body)
+            .catch(() => DRIFT_UNCOMPARABLE)
+        : Promise.resolve(NO_DRIFT);
+      const [snapshot, drift] = await Promise.all([backend.read(snapshotId), driftPromise]);
       if (!fresh()) return;
       const runs = diffRuns(snapshot.body, live.body);
       // Render before anything is shown, so the swap below is one step.
@@ -408,14 +509,15 @@ export class SnapshotStripController {
   /** The camera. Returns to Live afterwards: the author marked *this* state, so
    *  the useful place to be is the one they were already in. */
   async capture(): Promise<void> {
-    const sceneId = this.#sceneId;
-    if (!sceneId || this.busy) return;
+    const backend = this.#backend;
+    if (!backend || this.busy) return;
     this.busy = true;
     try {
       await this.flushScene?.();
       // The camera witnesses the same world an automatic capture does, so an
-      // explicit snapshot is not the weaker record of the two.
-      await api.captureSnapshot(sceneId, this.readLive?.()?.dynamic_context);
+      // explicit snapshot is not the weaker record of the two. (A node backend
+      // ignores the dynamic context — a non-scene node carries no witness, §5.)
+      await backend.capture(this.readLive?.()?.dynamic_context);
       await this.refresh();
       await this.park(null);
     } catch {
@@ -435,14 +537,14 @@ export class SnapshotStripController {
    * that teaches people to click through gates (ADR-0043 Amendment 1).
    */
   async restore(): Promise<boolean> {
-    const sceneId = this.#sceneId;
+    const backend = this.#backend;
     const snapshotId = this.parked;
-    if (!sceneId || !snapshotId || this.busy) return false;
+    if (!backend || !snapshotId || this.busy) return false;
     this.busy = true;
     try {
       await this.flushScene?.();
-      const scene = await api.restoreSnapshot(sceneId, snapshotId);
-      await this.onRestored?.(scene);
+      const restored = await backend.restore(snapshotId);
+      await this.onRestored?.(restored);
       await this.refresh();
       await this.park(null);
       return true;
@@ -467,12 +569,12 @@ export class SnapshotStripController {
    *  to fall back to. The button that offers it is shown only on a `thinned`
    *  notch, so a pinned one simply stops offering it. */
   async pin(): Promise<void> {
-    const sceneId = this.#sceneId;
+    const backend = this.#backend;
     const id = this.parked;
-    if (!sceneId || !id || this.busy) return;
+    if (!backend || !id || this.busy) return;
     this.busy = true;
     try {
-      await api.pinSnapshot(sceneId, id);
+      await backend.pin(id);
       await this.refresh();
     } catch {
       // Leave the strip as it was; a failed pin must not move the author.
@@ -489,14 +591,14 @@ export class SnapshotStripController {
    *  editor without editing is the common gesture, and it must cost neither a
    *  sidecar write nor a re-list. */
   async describe(description: string): Promise<void> {
-    const sceneId = this.#sceneId;
+    const backend = this.#backend;
     const id = this.parked;
-    if (!sceneId || !id || this.busy) return;
+    if (!backend || !id || this.busy) return;
     const next = description.trim();
     if (next === (this.current?.description ?? "")) return;
     this.busy = true;
     try {
-      await api.setSnapshotDescription(sceneId, id, next);
+      await backend.describe(id, next);
       await this.refresh();
     } catch {
       // Leave the strip as it was.
@@ -511,10 +613,10 @@ export class SnapshotStripController {
    *  "don't show again": a gate in front of the only irreversible action is the
    *  one place the click-through habit has not already been spent. */
   del(): void {
-    const sceneId = this.#sceneId;
+    const backend = this.#backend;
     const id = this.parked;
     const target = this.current;
-    if (!sceneId || !id || !target || this.busy) return;
+    if (!backend || !id || !target || this.busy) return;
     const when = notchWhen(target);
     const named = target.description ? `“${target.description}” (${when})` : `the snapshot from ${when}`;
     confirmService.request({
@@ -523,14 +625,17 @@ export class SnapshotStripController {
       confirmLabel: "Delete snapshot",
       destructive: true,
       cannotBeUndone: true,
-      onConfirm: () => this.#removeParked(sceneId, id),
+      // Capture the binding now: the confirm resolves later, and by then the
+      // author may have moved to another node — delete must still target the one
+      // they confirmed, not wherever they landed.
+      onConfirm: () => this.#removeParked(backend, id),
     });
   }
 
-  async #removeParked(sceneId: string, id: string): Promise<void> {
+  async #removeParked(backend: SnapshotBackend, id: string): Promise<void> {
     this.busy = true;
     try {
-      await api.deleteSnapshot(sceneId, id);
+      await backend.del(id);
       // Back to Live first — the parked id no longer exists — then re-list so
       // the gap is gone from the strip.
       await this.park(null);

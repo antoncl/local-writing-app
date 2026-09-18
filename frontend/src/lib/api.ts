@@ -16,6 +16,7 @@ import { promptsApi } from "./api/prompts";
 import { researchApi } from "./api/research";
 import { schemaApi } from "./api/schema";
 import { searchApi } from "./api/search";
+import { snapshotsApi } from "./api/snapshots";
 import { tagNodesApi } from "./api/tagNodes";
 import { todosApi } from "./api/todos";
 import { viewsApi } from "./api/views";
@@ -41,4 +42,5 @@ export const api = {
   ...mutationsApi,
   ...searchApi,
   ...tagNodesApi,
+  ...snapshotsApi,
 };

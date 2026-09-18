@@ -23,6 +23,14 @@ const pinSnapshot = vi.fn();
 const setSnapshotDescription = vi.fn();
 const deleteSnapshot = vi.fn();
 const restoreSnapshot = vi.fn();
+// The node-scoped family (ADR-0088 S1) — the lore card's routes.
+const listNodeSnapshots = vi.fn();
+const readNodeSnapshot = vi.fn();
+const restoreNodeSnapshot = vi.fn();
+const captureNodeSnapshot = vi.fn();
+const pinNodeSnapshot = vi.fn();
+const setNodeSnapshotDescription = vi.fn();
+const deleteNodeSnapshot = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -33,6 +41,13 @@ vi.mock("@/lib/api", () => ({
     setSnapshotDescription: (...args: unknown[]) => setSnapshotDescription(...args),
     deleteSnapshot: (...args: unknown[]) => deleteSnapshot(...args),
     restoreSnapshot: (...args: unknown[]) => restoreSnapshot(...args),
+    listNodeSnapshots: (...args: unknown[]) => listNodeSnapshots(...args),
+    readNodeSnapshot: (...args: unknown[]) => readNodeSnapshot(...args),
+    restoreNodeSnapshot: (...args: unknown[]) => restoreNodeSnapshot(...args),
+    captureNodeSnapshot: (...args: unknown[]) => captureNodeSnapshot(...args),
+    pinNodeSnapshot: (...args: unknown[]) => pinNodeSnapshot(...args),
+    setNodeSnapshotDescription: (...args: unknown[]) => setNodeSnapshotDescription(...args),
+    deleteNodeSnapshot: (...args: unknown[]) => deleteNodeSnapshot(...args),
   },
 }));
 
@@ -134,6 +149,13 @@ beforeEach(() => {
   setSnapshotDescription.mockReset();
   deleteSnapshot.mockReset();
   restoreSnapshot.mockReset();
+  listNodeSnapshots.mockReset();
+  readNodeSnapshot.mockReset();
+  restoreNodeSnapshot.mockReset();
+  captureNodeSnapshot.mockReset();
+  pinNodeSnapshot.mockReset();
+  setNodeSnapshotDescription.mockReset();
+  deleteNodeSnapshot.mockReset();
   confirmService.dismiss();
 });
 
@@ -554,6 +576,102 @@ describe("author gestures", () => {
 
     expect(confirmService.active).toBe(null);
     expect(restoreSnapshot).toHaveBeenCalledWith("scene_1", "snap_1");
+  });
+});
+
+describe("a node target (ADR-0088 lore surface)", () => {
+  // A lore card reaches the /nodes routes with an optional authoring layer, and
+  // those routes carry no entity-drift witness (ADR-0087 §5) — so a node park
+  // must skip the drift call while the client-side content diff still runs, and
+  // every gesture must thread the layer.
+  async function parkedNode(layer: string | null = null) {
+    listNodeSnapshots.mockResolvedValue({ snapshots: [SNAPSHOT] });
+    readNodeSnapshot.mockImplementation(async () => detail());
+    const strip = new SnapshotStripController();
+    strip.readLive = () => LIVE;
+    strip.load({ kind: "node", nodeId: "lore_1", layer });
+    await vi.waitFor(() => expect(strip.snapshots.length).toBe(1));
+    return strip;
+  }
+
+  it("lists through the node routes carrying the authoring layer", async () => {
+    listNodeSnapshots.mockResolvedValue({ snapshots: [SNAPSHOT] });
+    const strip = new SnapshotStripController();
+    strip.load({ kind: "node", nodeId: "lore_1", layer: "book" });
+    await vi.waitFor(() => expect(strip.snapshots.length).toBe(1));
+    expect(listNodeSnapshots).toHaveBeenCalledWith("lore_1", "book");
+    // The scene routes are untouched — a node target never hits them.
+    expect(listSnapshots).not.toHaveBeenCalled();
+  });
+
+  it("parks with no witness call, and the content diff still builds", async () => {
+    const strip = await parkedNode();
+    await strip.park("snap_1");
+    expect(readNodeSnapshot).toHaveBeenCalledWith("lore_1", "snap_1", null);
+    expect(strip.runs.length).toBe(4);
+    expect(strip.bodyHtml).toContain("r-was");
+    expect(strip.bodyHtml).toContain("r-now");
+    // No node witness route (§5): drift never fires and the report stays hidden.
+    expect(snapshotDrift).not.toHaveBeenCalled();
+    expect(strip.drift.available).toBe(false);
+    expect(strip.hasDriftToReport).toBe(false);
+  });
+
+  it("reads the frozen side at the parked snapshot's layer", async () => {
+    const strip = await parkedNode("book");
+    await strip.park("snap_1");
+    expect(readNodeSnapshot).toHaveBeenCalledWith("lore_1", "snap_1", "book");
+  });
+
+  it("captures through the node camera with no dynamic context", async () => {
+    const strip = await parkedNode();
+    captureNodeSnapshot.mockResolvedValue(SNAPSHOT);
+    await strip.capture();
+    // A non-scene node carries no witness (§5): the camera sends node id + layer
+    // only, never a dynamic-context set.
+    expect(captureNodeSnapshot).toHaveBeenCalledWith("lore_1", null);
+  });
+
+  it("restores through the node route and forwards the re-folded entry", async () => {
+    const strip = await parkedNode("book");
+    await strip.park("snap_1");
+    const restored = { id: "lore_1", title: "Seraphine" };
+    restoreNodeSnapshot.mockResolvedValue(restored);
+    const onRestored = vi.fn();
+    strip.onRestored = onRestored;
+
+    await strip.restore();
+
+    expect(restoreNodeSnapshot).toHaveBeenCalledWith("lore_1", "snap_1", "book");
+    expect(onRestored).toHaveBeenCalledWith(restored);
+    expect(restoreSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("deletes at the node's layer, after confirming", async () => {
+    const strip = await parkedNode("book");
+    await strip.park("snap_1");
+    deleteNodeSnapshot.mockResolvedValue({ snapshots: [] });
+
+    strip.del();
+    expect(confirmService.active).not.toBe(null);
+    expect(deleteNodeSnapshot).not.toHaveBeenCalled();
+
+    await confirmService.resolve();
+    expect(deleteNodeSnapshot).toHaveBeenCalledWith("lore_1", "snap_1", "book");
+    expect(deleteSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("pins and describes at the node's layer", async () => {
+    const strip = await parkedNode("book");
+    await strip.park("snap_1");
+    pinNodeSnapshot.mockResolvedValue(SNAPSHOT);
+    setNodeSnapshotDescription.mockResolvedValue({ ...SNAPSHOT, description: "A note" });
+
+    await strip.pin();
+    expect(pinNodeSnapshot).toHaveBeenCalledWith("lore_1", "snap_1", "book");
+
+    await strip.describe("A note");
+    expect(setNodeSnapshotDescription).toHaveBeenCalledWith("lore_1", "snap_1", "A note", "book");
   });
 });
 

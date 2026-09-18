@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { MetadataSchemaLayer } from "@/lib/types";
-import { authoringDefaultLayerId, pickableAuthoringLayers } from "@/lib/utils/layerAuthoring";
+import {
+  authoringDefaultLayerId,
+  pickableAuthoringLayers,
+  snapshotLayerId,
+} from "@/lib/utils/layerAuthoring";
 
 // A universe > series > book stack, outermost first / open project (book) last —
 // the order the merged schema-layer store carries.
@@ -61,5 +65,25 @@ describe("pickableAuthoringLayers", () => {
     const before = STACK.map((l) => l.id);
     pickableAuthoringLayers(STACK, "universe");
     expect(STACK.map((l) => l.id)).toEqual(before);
+  });
+});
+
+describe("snapshotLayerId", () => {
+  it("is null for a locally-owned entry (the base file's own history)", () => {
+    expect(snapshotLayerId(null, "book")).toBeNull();
+    expect(snapshotLayerId(null, null)).toBeNull();
+  });
+
+  it("is null for a direct canon edit (L == owning layer writes the base)", () => {
+    // Editing at the owning layer rewrites the base file, not an override; the
+    // base route (layer=null) is the one that admits it, and the override route
+    // refuses a layer that is not strictly below the owning one.
+    expect(snapshotLayerId("series", "series")).toBeNull();
+  });
+
+  it("is the authoring layer for an override strictly below the owning layer", () => {
+    // Inherited-at-rest: series canon overridden at the open project (book).
+    expect(snapshotLayerId("book", "series")).toBe("book");
+    expect(snapshotLayerId("series", "universe")).toBe("series");
   });
 });

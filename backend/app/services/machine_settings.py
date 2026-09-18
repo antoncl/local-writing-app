@@ -140,8 +140,9 @@ class MachineSettings(BaseModel):
 
 
 def _guard_against_unisolated_test_config() -> None:
-    """Refuse to resolve the developer's REAL machine config dir from a test
-    process that has not isolated itself (#1862, the recurrence of #1358).
+    """Refuse to resolve the developer's REAL machine config dir from a process
+    that should have isolated itself but did not — a test runner (#1862, the
+    recurrence of #1358) or the Claude worktree dev backend (#1998).
 
     Machine-config isolation used to live only in the pytest autouse fixture
     (`conftest._isolate_machine_settings`), which patches `config_path`. But the
@@ -150,12 +151,17 @@ def _guard_against_unisolated_test_config() -> None:
     never fires and `save_settings()` silently clobbered the real config.yaml.
 
     So the guard lives at the resolution seam instead of in one runner's fixture:
-    when a test runner is loaded (`pytest`/`unittest` imported) and no
-    `CONFIG_DIR_ENV` override is set, fail LOUD rather than hand back the real
-    dir. The production entrypoint (`app.server`) imports neither module — a
-    verified invariant, covered by `test_guard_does_not_trip_production` — and
-    the frozen build is exempted regardless, so a stray transitive
-    `unittest.mock` import can never refuse startup for a shipped app.
+    reached only when no `CONFIG_DIR_ENV` override is set, it fails LOUD rather
+    than hand back the real dir when either
+    - a test runner is loaded (`pytest`/`unittest` imported), or
+    - `DEV_BACKEND_CHECKOUT` is set: the worktree dev server (#1998), which runs
+      the real app against the real config unless `dev_backend.py` set the
+      override — its intended isolation, so its absence here is a regression.
+
+    The production entrypoint (`app.server`) sets neither signal — a verified
+    invariant, covered by `test_guard_does_not_trip_production` — and the frozen
+    build is exempted regardless, so a stray transitive `unittest.mock` import can
+    never refuse startup for a shipped app.
     """
     if getattr(sys, "frozen", False):
         return
@@ -165,6 +171,12 @@ def _guard_against_unisolated_test_config() -> None:
             f"without isolation. Set ${CONFIG_DIR_ENV} to a throwaway folder "
             "(conftest.pytest_configure does this for pytest; a unittest.TestCase "
             "run outside pytest must set it in setUp/setUpModule). See #1862."
+        )
+    if os.environ.get("DEV_BACKEND_CHECKOUT"):
+        raise RuntimeError(
+            "Refusing to resolve the real machine config dir from the Claude "
+            f"worktree dev backend. Set ${CONFIG_DIR_ENV} to a throwaway folder — "
+            "scripts/dev_backend.py::env_for_server does this. See #1998."
         )
 
 

@@ -256,6 +256,19 @@ def env_for_server(nonce: str) -> dict[str, str]:
     # path than we probe, our own healthy server would 404 and `verify_server`
     # would report it as someone else's — a confident, false accusation.
     env["DEV_BACKEND_PROBE_PATH"] = PROBE_PATH
+    # Isolate the machine config to a per-worktree throwaway dir (#1998). Without
+    # this the dev instance reads and WRITES the developer's real
+    # %APPDATA%/config.yaml — recents, default_projects_folder, palette, and the
+    # provider API keys — so a create/settings action here silently clobbers real
+    # machine settings (default_projects_folder reset to a temp path, the #1358/
+    # #1862 leak one layer out from the test runner). The pytest conftest
+    # (LWA_CONFIG_DIR) and the Playwright webServer (APPDATA/HOME/XDG) already
+    # redirect it; the dev server was the one real-app path that did not. `tmp/`
+    # is gitignored and per-worktree like the port file above, so each tree keeps
+    # its own config. setdefault: an explicit LWA_CONFIG_DIR still wins. The
+    # config_dir() guard below refuses to resolve the real dir if this ever
+    # regresses (DEV_BACKEND_CHECKOUT set without an override).
+    env.setdefault("LWA_CONFIG_DIR", str(REPO / "tmp" / "claude-config"))
     return env
 
 

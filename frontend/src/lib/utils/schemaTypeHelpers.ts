@@ -553,6 +553,31 @@ export function buildNodeTypeTree(
   return rootIds.map((typeId) => buildNode(typeId, 0)).filter((node): node is NodeTypeTreeNode => Boolean(node));
 }
 
+// The field choices a type's "Summary" control offers to nominate (#2008):
+// effective fields, in display order, excluding hidden ones (the rail's
+// visibility rule).
+export function summaryFieldChoices(
+  schema: MetadataSchema | null,
+  entryTypeId: string | null,
+  sections: SchemaFieldSection[],
+): { id: string; label: string }[] {
+  // The identity triple (title/id/entry_type, plus body) lives on the node,
+  // not in metadata, so nominating it would never render — keep it out.
+  return sections
+    .flatMap((section) => section.entries)
+    .filter(([fieldId]) => !effectiveFieldHidden(schema, entryTypeId, fieldId) && !schema?.fields?.[fieldId]?.intrinsic)
+    .map(([fieldId]) => ({ id: fieldId, label: effectiveFieldLabel(schema, entryTypeId, fieldId) }));
+}
+
+// Array-aware equality for a summary-fields nomination (#2008) — `!==` would
+// always be true for a fresh array; null vs [] differ deliberately (null
+// inherits the parent's nomination, [] is this type's own empty nomination,
+// which shadows the parent's and lets the first-three-scalars fallback run).
+export function sameSummaryFields(a: string[] | null, b: string[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.length === b.length && a.every((key, i) => key === b[i]);
+}
+
 // The Types cascade as ONE pure step: the selected entry type resolves to
 // its schema kind, and that single kind drives BOTH the tree roster AND the
 // context heading. Extracted from SchemaPanes so this wiring is unit-testable —

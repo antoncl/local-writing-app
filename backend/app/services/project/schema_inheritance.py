@@ -31,7 +31,9 @@ RESOLVER_STAMPED_FIELD_KEYS = frozenset({"category", "group_origin", "item_membe
 # `_merge_entry_type_field_overrides`): the pre-inheritance `own_*` twins.
 # Never persisted into a layer — a request that echoes a resolved type carries
 # them, and the type writer drops them.
-RESOLVER_STAMPED_ENTRY_TYPE_KEYS = frozenset({"own_fields", "own_color", "own_icon", "own_field_overrides"})
+RESOLVER_STAMPED_ENTRY_TYPE_KEYS = frozenset(
+    {"own_fields", "own_color", "own_icon", "own_summary_fields", "own_field_overrides"}
+)
 
 
 @dataclass
@@ -135,6 +137,10 @@ class MetadataSchemaInheritanceMixin:
         # `own_icon` mirrors `own_color` — the type-level icon as declared here,
         # before parent inheritance overwrites the effective `icon` (#316).
         next_entry_type["own_icon"] = raw_entry_type.get("icon")
+        # `own_summary_fields` mirrors `own_color`/`own_icon` — the type-level
+        # summary nomination as declared here, before parent inheritance
+        # overwrites the effective `summary_fields` (#2008).
+        next_entry_type["own_summary_fields"] = deepcopy(raw_entry_type.get("summary_fields"))
         inherited_fields = parent_def.get("fields", []) if isinstance(parent_def, dict) else []
         next_entry_type["fields"] = self._merge_metadata_field_lists(inherited_fields, local_fields)
         # L2: append generated fields from this type's group applications (after
@@ -214,6 +220,7 @@ class MetadataSchemaInheritanceMixin:
             "default_inputs",
             "color",
             "icon",
+            "summary_fields",
         ):
             # An explicit `null` is a layer's clear of an ancestor LAYER's value
             # (#1919), not a declaration: the parent type still flows, the way

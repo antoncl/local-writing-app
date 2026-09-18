@@ -66,6 +66,32 @@ def _entry_type_field_reference_errors(entry_type_id: str, entry_type, schema: M
     ]
 
 
+def _entry_type_summary_field_errors(entry_type_id: str, entry_type, schema: MetadataSchema) -> list[str]:
+    """Every key an entry type nominates as `summary_fields` must be a member
+    of its EFFECTIVE (inheritance-resolved) `fields`, and the nomination must
+    carry no duplicate key (#2008)."""
+    summary_fields = entry_type.summary_fields
+    if not summary_fields:
+        return []
+    errors: list[str] = []
+    members = set(entry_type.fields)
+    seen: set[str] = set()
+    duplicated: set[str] = set()
+    for field_id in summary_fields:
+        if field_id in seen:
+            duplicated.add(field_id)
+        seen.add(field_id)
+        if field_id not in members:
+            errors.append(
+                f"Metadata entry_type {entry_type_id} nominates unknown summary field {field_id}."
+            )
+    for field_id in duplicated:
+        errors.append(
+            f"Metadata entry_type {entry_type_id} nominates summary field {field_id} more than once."
+        )
+    return errors
+
+
 def _entry_type_group_application_errors(entry_type_id: str, entry_type, schema: MetadataSchema) -> list[str]:
     """Every group a type applies must exist in the schema's group registry."""
     return [
@@ -261,6 +287,8 @@ class MetadataSchemaValidationMixin:
             errors.extend(_entry_type_identity_errors(entry_type_id, entry_type, schema))
         for entry_type_id, entry_type in schema.entry_types.items():
             errors.extend(_entry_type_field_reference_errors(entry_type_id, entry_type, schema))
+        for entry_type_id, entry_type in schema.entry_types.items():
+            errors.extend(_entry_type_summary_field_errors(entry_type_id, entry_type, schema))
         for entry_type_id, entry_type in schema.entry_types.items():
             errors.extend(_entry_type_group_application_errors(entry_type_id, entry_type, schema))
         for field_id, field in schema.fields.items():

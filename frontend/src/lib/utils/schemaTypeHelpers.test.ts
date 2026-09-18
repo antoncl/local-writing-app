@@ -12,6 +12,7 @@ import {
   kindEntryTypeOptions,
   kindRootEntryTypeId,
   nestingLocalPrefix,
+  summaryFieldChoices,
   normalizeListFieldValue,
   resolveSchemaScope,
   schemaKindForDocumentKind,
@@ -437,5 +438,28 @@ describe("kindRootEntryTypeId (#734)", () => {
   it("returns null for a kind with no types, or an absent schema", () => {
     expect(kindRootEntryTypeId(SCHEMA, "prompt")).toBeNull();
     expect(kindRootEntryTypeId(null, "lore")).toBeNull();
+  });
+});
+
+describe("summaryFieldChoices (#2008)", () => {
+  it("offers the type's fields minus hidden and intrinsic ones, with effective labels", () => {
+    const fields = {
+      title: { name: "Title", type: "text", intrinsic: true, options: [] },
+      secret: { name: "Secret", type: "text", hidden: true, options: [] },
+      role: { name: "Role", type: "select", options: [] },
+      age: { name: "Age", type: "number", options: [] },
+    };
+    const schema = {
+      version: 1,
+      fields,
+      entry_types: {
+        "lore:character": { name: "Character", kind: "lore", fields: Object.keys(fields), field_overrides: { age: { label: "Years" } } },
+      },
+    } as unknown as MetadataSchema;
+    const sections = [{ group: null, entries: Object.entries(fields) }] as unknown as Parameters<typeof summaryFieldChoices>[2];
+    expect(summaryFieldChoices(schema, "lore:character", sections)).toEqual([
+      { id: "role", label: "Role" },
+      { id: "age", label: "Years" },
+    ]);
   });
 });

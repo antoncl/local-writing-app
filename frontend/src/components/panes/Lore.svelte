@@ -18,6 +18,7 @@
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { parseSearchQuery, readTags } from "@/lib/utils/entrySearch";
+  import { summaryLine } from "@/lib/utils/summaryFields";
   import { liveTags, tagTitleById } from "@/lib/stores/tagNodes";
   import { tagChipHexByTitle } from "@/lib/utils/pickerStripes";
   import { defaultView } from "@/lib/views/evaluateView";
@@ -161,13 +162,18 @@
     return currentSchema?.entry_types[entry.entry_type]?.name ?? "Entry";
   }
 
+  // The row's one-line detail (#2008): the entry type's nominated (or
+  // synthesized) fields' present values, joined " · ". `resolveTitle` covers
+  // both id spaces a summary field can reference: a lore entry (resolved off
+  // this pane's own entries list — no extra fetch) and a tag node (the tag
+  // roster store, same resolver entryTagTitles above uses).
+  const entryTitleById = $derived(new Map(entries.map((e) => [e.id, e.title] as const)));
+  function resolveEntitySummaryTitle(id: string): string | undefined {
+    return entryTitleById.get(id) ?? $tagTitleById.get(id);
+  }
   function entryDetailText(entry: LoreEntrySummary): string | null {
-    // Editorial Card direction: kind is implied by the group header, tags
-    // render as pills (see entryTags), aliases stay in the editor pane only.
-    // Keeping the function for future per-entry detail (e.g. "last edited 2
-    // days ago") — null today.
-    void entry;
-    return null;
+    if (!schema) return null;
+    return summaryLine(schema.entry_types[entry.entry_type], schema, entry.metadata, resolveEntitySummaryTitle);
   }
 
   function entryTags(entry: LoreEntrySummary): string[] {

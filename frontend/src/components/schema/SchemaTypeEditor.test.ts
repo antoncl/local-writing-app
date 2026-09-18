@@ -208,3 +208,51 @@ describe("SchemaTypeEditor 'Move to layer…' (#1667, ADR-0078 §8)", () => {
     expect(screen.queryByRole("combobox", { name: "Move to layer" })).toBeNull();
   });
 });
+
+describe("SchemaTypeEditor summary-fields save payload (#2008)", () => {
+  it("passes the seeded own nomination through on Save Type", async () => {
+    const onSaveType = vi.fn();
+    render(SchemaTypeEditor, {
+      props: {
+        schemaTypeKind: "lore" as const,
+        initialName: "Character",
+        initialTypeId: "lore:character",
+        initialSummaryFields: ["age", "name"],
+        selectedSchemaTypeId: "lore:character",
+        schemaTypeLayerId: "proj",
+        onSaveType,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Save Type" }));
+    expect(onSaveType).toHaveBeenCalledWith(expect.objectContaining({ summaryFields: ["age", "name"] }));
+  });
+
+  it("passes an edit made through the Summary control through on Save Type", async () => {
+    const onSaveType = vi.fn();
+    render(SchemaTypeEditor, {
+      props: {
+        schemaTypeKind: "lore" as const,
+        initialName: "Character",
+        initialTypeId: "lore:character",
+        initialSummaryFields: ["name"],
+        selectedSchemaTypeId: "lore:character",
+        schemaTypeLayerId: "proj",
+        typeFieldSections: [
+          {
+            group: null,
+            entries: [
+              ["name", { name: "Name", type: "text", options: [] }],
+              ["age", { name: "Age", type: "number", options: [] }],
+            ] as [string, MetadataFieldDefinition][],
+          },
+        ],
+        onSaveType,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Add a summary field" }));
+    const select = screen.getByRole("combobox", { name: "Add a summary field" }) as HTMLSelectElement;
+    await fireEvent.change(select, { target: { value: "age" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Save Type" }));
+    expect(onSaveType).toHaveBeenCalledWith(expect.objectContaining({ summaryFields: ["name", "age"] }));
+  });
+});

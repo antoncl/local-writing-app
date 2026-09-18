@@ -27,6 +27,7 @@ from app.services.ai.helpers import (
     _xml_safe_tag,
 )
 from app.services.project.metadata_refs import ref_members
+from app.services.project.schema_summary import summary_values
 
 if TYPE_CHECKING:
     from app.models import MutationSetRow
@@ -260,7 +261,7 @@ def _render_node_field_lines(
         if _is_empty_value(value):
             continue
         field_type = getattr(field, "type", "") if field is not None else ""
-        lines.append(_render_field_element(project, field_id, str(field_type), value, field))
+        lines.append(_render_field_element(project, schema, field_id, str(field_type), value, field))
     return lines
 
 
@@ -298,7 +299,7 @@ def _is_empty_value(value: Any) -> bool:
 
 
 def _render_field_element(
-    project: ProjectService, field_id: str, field_type: str, value: Any, field: Any = None
+    project: ProjectService, schema: Any, field_id: str, field_type: str, value: Any, field: Any = None
 ) -> str:
     """One indented child element for a field, dispatched on type. References
     resolve the target's name for legibility while carrying its id as the join
@@ -306,10 +307,10 @@ def _render_field_element(
     multi-paragraph or structured values are never crammed inline."""
     tag = _xml_safe_tag(field_id)
     if field_type == "entity_ref":
-        return "  " + _ref_element(project, tag, value)
+        return "  " + _ref_element(project, schema, tag, value)
     if field_type == "entity_ref_list":
         items = value if isinstance(value, list) else [value]
-        refs = [_ref_element(project, "entry", item) for item in items if item]
+        refs = [_ref_element(project, schema, "entry", item) for item in items if item]
         if not refs:
             return f"  <{tag} />"
         inner = "\n".join(f"    {ref}" for ref in refs)
@@ -322,12 +323,12 @@ def _render_field_element(
         # A nested entity_ref member is resolved to `{"id","name"}` so the model
         # reads the target's name inline AND keeps the id as the join key — parity
         # with a top-level ref's `<field id>Name</field>` (ADR-0081 §4).
-        rendered = _resolve_list_refs(project, field, value)
+        rendered = _resolve_list_refs(project, schema, field, value)
         return f"  <{tag}>\n{xml_escape(json.dumps(rendered, ensure_ascii=False))}\n  </{tag}>"
     return f"  <{tag}>{xml_escape(_scalar_text(value))}</{tag}>"
 
 
-def _resolve_list_refs(project: ProjectService, field: Any, value: Any) -> Any:
+def _resolve_list_refs(project: ProjectService, schema: Any, field: Any, value: Any) -> Any:
     """A copy of a group-list value with each nested entity_ref id resolved to a
     `{"id","name"}` map; non-ref members pass through. Returns `value`
     unchanged when the field carries no ref members (ADR-0081 §4)."""
@@ -344,33 +345,77 @@ def _resolve_list_refs(project: ProjectService, field: Any, value: Any) -> Any:
             if key not in new_item:
                 continue
             if member_field.type == "entity_ref":
-                new_item[key] = _ref_id_name(project, new_item[key])
+                new_item[key] = _ref_id_name(project, schema, new_item[key])
             elif member_field.type == "entity_ref_list" and isinstance(new_item[key], list):
-                new_item[key] = [_ref_id_name(project, ref) for ref in new_item[key] if ref]
+                new_item[key] = [_ref_id_name(project, schema, ref) for ref in new_item[key] if ref]
         resolved.append(new_item)
     return resolved
 
 
-def _ref_element(project: ProjectService, tag: str, ref_id: Any) -> str:
-    """`<tag id="...">Target Name</tag>` for one entity_ref value. Best-effort
-    reads the target's title; falls back to the id as the text when the target
-    can't be read, so a dangling ref still shows something."""
+def _ref_element(project: ProjectService, schema: Any, tag: str, ref_id: Any) -> str:
+    """`<tag id="..." summary="...">Target Name</tag>` for one entity_ref value.
+    Best-effort reads the target's title; falls back to the id as the text
+    when the target can't be read, so a dangling ref still shows something.
+    `summary` is the target's rendered summary values joined by " · ",
+    OMITTED when there is none (#2008)."""
     rid = str(ref_id)
-    return f"<{tag} id={quoteattr(rid)}>{xml_escape(_ref_name(project, rid))}</{tag}>"
+    name, summary = _ref_target(project, schema, rid)
+    summary_attr = f" summary={quoteattr(summary)}" if summary else ""
+    return f"<{tag} id={quoteattr(rid)}{summary_attr}>{xml_escape(name)}</{tag}>"
 
 
-def _ref_id_name(project: ProjectService, ref_id: Any) -> dict[str, str]:
-    """`{"id","name"}` for one nested entity_ref value — the JSON-safe twin of
-    `_ref_element`, carrying both the join key and the legible name."""
+def _ref_id_name(project: ProjectService, schema: Any, ref_id: Any) -> dict[str, str]:
+    """`{"id","name"}` (+ `"summary"` when non-empty) for one nested entity_ref
+    value — the JSON-safe twin of `_ref_element`, carrying both the join key
+    and the legible name (#2008)."""
     rid = str(ref_id)
-    return {"id": rid, "name": _ref_name(project, rid)}
+    name, summary = _ref_target(project, schema, rid)
+    result = {"id": rid, "name": name}
+    if summary:
+        result["summary"] = summary
+    return result
 
 
-def _ref_name(project: ProjectService, ref_id: str) -> str:
-    """The target's display title for a ref id, or the id when it can't be read
-    (so a dangling ref still shows something)."""
+def _resolve_nested_ref_title(project: ProjectService, nested_id: str) -> str | None:
+    """`resolve_title` hook for `summary_values` (#2008): the title of a node a
+    NOMINATED `entity_ref`/`entity_ref_list` field points at, one best-effort
+    read per nested id — no caching, mirroring `_ref_target`'s own single read
+    of the referring target."""
+    nested = _safe_read_node(project, nested_id)
+    if nested is None:
+        return None
+    title = _attr_or_item(nested, "title")
+    return str(title) if title else None
+
+
+def _ref_target(project: ProjectService, schema: Any, ref_id: str) -> tuple[str, str]:
+    """The target's display title and rendered summary for a ref id, read the
+    target node ONCE. Falls back to `(ref_id, "")` when the target can't be
+    read, so a dangling ref still shows something. The summary is the
+    target's `summary_values` texts joined by " · " (#2008) — empty when the
+    target's entry_type isn't in the resolved schema, or it nominates/has no
+    present summary values. A nominated `entity_ref`/`entity_ref_list` field
+    renders the nested target's title via `_resolve_nested_ref_title` (one
+    extra read per nested id)."""
     target = _safe_read_node(project, ref_id)
-    return str(_attr_or_item(target, "title") or ref_id) if target is not None else ref_id
+    if target is None:
+        return ref_id, ""
+    name = str(_attr_or_item(target, "title") or ref_id)
+    summary = ""
+    if schema is not None:
+        entry_type_id = str(_attr_or_item(target, "entry_type") or "")
+        definition = schema.entry_types.get(entry_type_id)
+        if definition is not None:
+            metadata = _attr_or_item(target, "metadata")
+            metadata = metadata if isinstance(metadata, dict) else {}
+
+            def resolve_title(nested_id: str) -> str | None:
+                return _resolve_nested_ref_title(project, nested_id)
+
+            summary = " · ".join(
+                text for _, _, text in summary_values(definition, schema, metadata, resolve_title)
+            )
+    return name, summary
 
 
 def _scalar_text(value: Any) -> str:

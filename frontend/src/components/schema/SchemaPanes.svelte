@@ -110,6 +110,9 @@
   let schemaTypeInitId = $state("");
   let schemaTypeInitColor: string | null = $state(null);
   let schemaTypeInitIcon: string | null = $state(null);
+  // Seed for the "Summary" control's own nomination (#2008) — mirrors
+  // initColor/initIcon's pre-inheritance convention.
+  let schemaTypeInitSummaryFields: string[] | null = $state(null);
   let schemaTypeDraftToken = $state(0);
 
   // The per-type editor's tab is titled after the type it edits — like any
@@ -317,7 +320,7 @@
     schemaTypeAbstract = false;
     schemaTypeReadonly = false;
     selectedSchemaTypeId = null;
-    const ok = await saveSchemaType({ typeId: payload.localKey, name: payload.name, color: null, icon: null });
+    const ok = await saveSchemaType({ typeId: payload.localKey, name: payload.name, color: null, icon: null, summaryFields: null });
     if (ok !== false) {
       createSeedParentId = undefined;
       openSchemaTypeDetail(`${kind}:${payload.localKey}`);
@@ -355,6 +358,8 @@
     schemaTypeInitColor = entryType.own_color ?? null;
     // Seed own-icon (pre-inheritance), same convention as own-color (#316).
     schemaTypeInitIcon = entryType.own_icon ?? null;
+    // Seed own-summary-nomination (pre-inheritance), same convention (#2008).
+    schemaTypeInitSummaryFields = entryType.own_summary_fields ?? null;
     schemaTypeDraftToken += 1;
     openSubordinatePane("schema_type", ownerPaneId, () => closeSchemaPane("schema_type"));
   }
@@ -742,6 +747,9 @@
         fields: previousTypeId ? (existing?.own_fields ?? existing?.fields ?? []) : [],
         color: payload.color || null,
         icon: payload.icon || null,
+        // Sent explicitly (list OR null) — null clears this layer's own
+        // nomination so the resolver falls back to the parent's (#2008).
+        summary_fields: payload.summaryFields,
       };
       if (previousTypeId && previousTypeId !== nextTypeId) {
         setStatus("Renaming types is not available yet");
@@ -955,6 +963,7 @@
     initialTypeId={schemaTypeInitId}
     initialColor={schemaTypeInitColor}
     initialIcon={schemaTypeInitIcon}
+    initialSummaryFields={schemaTypeInitSummaryFields}
     bind:schemaTypeLayerId
     bind:expandedSchemaFieldId
     bind:fieldDropTarget

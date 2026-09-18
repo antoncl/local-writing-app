@@ -433,6 +433,17 @@ class EntryTypeDefinition(BaseModel):
     # to distinguish "icon set on this type" from "icon inherited from parent".
     # Computed by the schema inheritance resolver; not authored directly.
     own_icon: str | None = None
+    # Ordered field keys this type nominates as its SUMMARY — what a list row's
+    # detail line, a reference peek card, and the AI's reference qualifier show
+    # (#2008). Same inheritance treatment as `color`/`icon`: a child type
+    # inherits its parent's nomination unless it declares its own; a layer can
+    # clear its own nomination with an explicit `null` to fall back to the
+    # parent's again. None = no nomination on this type — consumers fall back
+    # to `schema_summary.summary_field_keys`'s scalar-field heuristic.
+    summary_fields: list[str] | None = None
+    # The pre-inheritance summary_fields value (mirrors `own_color`/`own_icon`).
+    # Computed by the schema inheritance resolver; not authored directly.
+    own_summary_fields: list[str] | None = None
     # Soft-deprecation flag. Set on entry_types that are kept readable for
     # legacy projects but should not be offered when creating new entries.
     # Schemas keep their definition (so existing files still validate); UI

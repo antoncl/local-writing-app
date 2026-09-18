@@ -62,9 +62,11 @@ class XmlOutputStructureTests(_HelperFixtureBase):
             body="Captain of the Fearless.",
         )
         text = self._render_lore("scene_one_node")
-        self.assertIn(
-            f'<home_place id="{self.manticore["id"]}">Manticore</home_place>', text
-        )
+        # Partial match (not the literal full tag): Manticore nominates/falls
+        # back to a summary field (#2008), which rides along as a `summary=`
+        # attribute this test doesn't otherwise care about.
+        self.assertIn(f'<home_place id="{self.manticore["id"]}"', text)
+        self.assertIn(">Manticore</home_place>", text)
 
     def test_entity_ref_list_renders_each_target_with_id(self) -> None:
         # related_entries (entity_ref_list) → a block of <entry id=...>Name</entry>.

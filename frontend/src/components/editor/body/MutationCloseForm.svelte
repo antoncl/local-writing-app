@@ -57,12 +57,12 @@
     expandedUnits = next;
   }
 
-  const entityRefField = {
+  const entityRefField: MetadataFieldDefinition = {
     name: "Entity",
     type: "entity_ref",
     options: [],
-    picker_config: { kinds: ["lore"] },
-  } as MetadataFieldDefinition;
+    picker_config: { sources: [{ kind: "lore" }] },
+  };
 
   $effect(() => {
     const id = entityId;

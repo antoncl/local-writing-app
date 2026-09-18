@@ -246,12 +246,12 @@
     entity ? buildFieldOptions(schema, entity.entry_type) : [],
   );
 
-  const entityRefField = {
+  const entityRefField: MetadataFieldDefinition = {
     name: "Entity",
     type: "entity_ref",
     options: [],
-    picker_config: { kinds: ["lore"] },
-  } as MetadataFieldDefinition;
+    picker_config: { sources: [{ kind: "lore" }] },
+  };
 
   function isFilled(value: MetadataValue): boolean {
     if (value === null || value === undefined || value === "") return false;

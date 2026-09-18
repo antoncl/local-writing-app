@@ -1176,8 +1176,10 @@
         onFlushScene={async () => {
           // A capture photographs the file and a restore overwrites it, so both
           // must run against a file that already holds the author's latest
-          // words — autosave is a 6-second idle debounce behind (#401).
-          if (editorPane.scene) await editorPanes.flushSceneIfDirty(editorPane.scene.id);
+          // words — autosave is a 6-second idle debounce behind (#401). Kind-
+          // agnostic: the snapshot strip is on lore too now (ADR-0088 S1), and a
+          // manuscript-only flush would photograph a dirty lore card stale.
+          if (editorPane.scene) await editorPanes.flushOpenPaneIfDirty(editorPane.scene.id);
         }}
         onSceneRestored={(restored) => editorPanes.reconcileSceneFromServer(restored)}
         onNodeRestored={(nodeId) => editorPanes.reconcileNodeFromServer(nodeId, "lore")}

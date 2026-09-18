@@ -623,13 +623,22 @@ describe("a node target (ADR-0088 lore surface)", () => {
     expect(readNodeSnapshot).toHaveBeenCalledWith("lore_1", "snap_1", "book");
   });
 
-  it("captures through the node camera with no dynamic context", async () => {
+  it("captures through the node camera, re-lists, and returns to Live", async () => {
     const strip = await parkedNode();
+    await strip.park("snap_1");
+    expect(strip.parked).toBe("snap_1");
     captureNodeSnapshot.mockResolvedValue(SNAPSHOT);
+    listNodeSnapshots.mockClear(); // isolate the post-capture refresh call
+
     await strip.capture();
+
     // A non-scene node carries no witness (§5): the camera sends node id + layer
     // only, never a dynamic-context set.
     expect(captureNodeSnapshot).toHaveBeenCalledWith("lore_1", null);
+    // The freshly-taken snapshot must appear — capture re-lists...
+    expect(listNodeSnapshots).toHaveBeenCalled();
+    // ...and returns to Live: the camera marks *this* state and stays there.
+    expect(strip.parked).toBe(null);
   });
 
   it("restores through the node route and forwards the re-folded entry", async () => {
@@ -659,6 +668,23 @@ describe("a node target (ADR-0088 lore surface)", () => {
     await confirmService.resolve();
     expect(deleteNodeSnapshot).toHaveBeenCalledWith("lore_1", "snap_1", "book");
     expect(deleteSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("deletes the snapshot the author confirmed even after navigating away", async () => {
+    // del() captures the binding at click time on purpose: the confirm resolves
+    // later, and by then the pane may have moved to another node/layer. The
+    // delete must still target the one the author confirmed, not where they land.
+    const strip = await parkedNode("book");
+    await strip.park("snap_1");
+    deleteNodeSnapshot.mockResolvedValue({ snapshots: [] });
+
+    strip.del(); // the modal is up, holding lore_1 / book
+    // The author switches to a different entry and layer before confirming.
+    listNodeSnapshots.mockResolvedValue({ snapshots: [SNAPSHOT] });
+    strip.load({ kind: "node", nodeId: "lore_2", layer: "series" });
+
+    await confirmService.resolve();
+    expect(deleteNodeSnapshot).toHaveBeenCalledWith("lore_1", "snap_1", "book");
   });
 
   it("pins and describes at the node's layer", async () => {

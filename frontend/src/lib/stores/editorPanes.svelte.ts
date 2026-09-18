@@ -1057,6 +1057,21 @@ class EditorPanesController {
     if (pane?.dirty) await this.saveEditorPane(pane.id);
   }
 
+  /** Flush a dirty pane of ANY kind by node id, for the snapshot capture/restore
+   *  hook (ADR-0088 S1). `flushSceneIfDirty`'s `paneForScene` is manuscript-only,
+   *  so a dirty LORE pane would otherwise slip through: the camera would
+   *  photograph the stale on-disk file, and a restore — reconciling a still-dirty
+   *  pane — would be silently reverted by the pending autosave. Node ids are
+   *  unique across kinds, so the id match is unambiguous. Cancels the pending
+   *  autosave first, as `flushDirtyPanes` does, so a debounced write cannot fire a
+   *  second time against the baseline this save moves. */
+  async flushOpenPaneIfDirty(nodeId: string): Promise<void> {
+    const pane = this.panes.find((candidate) => candidate.scene?.id === nodeId);
+    if (!pane?.dirty) return;
+    this.#autosave.cancel(pane.id);
+    await this.saveEditorPane(pane.id);
+  }
+
   /** Persist every dirty pane. Returns false if any of them could not be saved.
    *
    * `reset()` drops `panes` outright, so a project switch used to discard

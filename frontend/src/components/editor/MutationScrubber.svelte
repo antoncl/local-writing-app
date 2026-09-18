@@ -86,13 +86,15 @@
 </div>
 
 <style>
+  /* Foot-dock chrome (ADR-0088 S2): the scrubber lives in the FootDock now, which
+     owns the top rule and background, so the beads render transparent and
+     borderless — a sibling of the notch strip, on the same compact line. */
   .mutation-scrubber-strip {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 6px 14px;
-    border-top: 1px solid var(--divider);
-    background: var(--inset);
+    min-height: 27px;
+    padding: 0 14px;
     min-width: 0;
   }
 

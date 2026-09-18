@@ -204,7 +204,26 @@ describe("RailTagLine — editing", () => {
     expect(input).toHaveValue("");
   });
 
-  it("without createLayerId, no create option renders for an unknown title", async () => {
+  it("createLayerId null means 'this project' — the create option IS offered (the rail's scene case)", async () => {
+    render(RailTagLine, {
+      props: {
+        field: themeField,
+        fieldId: "tags",
+        fieldLabel: "Tags",
+        value: [],
+        editing: true,
+        createLayerId: null,
+        onOpen: noop,
+        onClose: noop,
+        onChange: noop,
+      },
+    });
+    const input = screen.getByLabelText("Add Tags");
+    await fireEvent.input(input, { target: { value: "Mystery" } });
+    expect(screen.getByTestId("tag-line-create")).toBeInTheDocument();
+  });
+
+  it("without createLayerId (undefined), no create option renders for an unknown title", async () => {
     render(RailTagLine, {
       props: {
         field: themeField,

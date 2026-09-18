@@ -1006,8 +1006,25 @@ class LoreOverrideSnapshotTests(unittest.TestCase):
             "the override snapshot aliased into the base lane after a fork",
         )
 
-    def test_forking_reaps_the_now_unreachable_override_store(self) -> None:
-        # A base snapshot lives under the series (the owning layer)…
+    def test_forking_reaps_only_the_forked_entitys_override_store(self) -> None:
+        # A SIBLING inherited entity, also overridden at the book with its own
+        # override snapshot — so the reap has to be entity-scoped, not layer-wide
+        # (an over-broad reap of <book>/.overrides/snapshots would take this too).
+        self._write_lore_at(self.universe, "lore_hale", "Hale", {"rank": "Ensign"})
+        node_index_gate.invalidate()  # a direct file write bypasses the memo
+        self.service.save_lore_entry(
+            "lore_hale",
+            SaveLoreEntryRequest(
+                title="Hale", body="", entry_type="lore:character",
+                metadata={"rank": "Bosun"}, authoring_layer_id=self.book_layer,
+            ),
+        )
+        sibling = self.client.post(f"/api/nodes/lore_hale/snapshots?layer={self.book_layer}")
+        self.assertEqual(sibling.status_code, 200, sibling.text)
+        sibling_store = self.book / OVERRIDE_STORE_SCOPE / "snapshots" / "lore_hale"
+        self.assertTrue(sibling_store.is_dir())
+
+        # E's own base snapshot lives under the series (the owning layer)…
         base = self.client.post(f"/api/nodes/{self.entity_id}/snapshots")
         self.assertEqual(base.status_code, 200, base.text)
         base_store = self.universe / "snapshots" / self.entity_id
@@ -1016,17 +1033,22 @@ class LoreOverrideSnapshotTests(unittest.TestCase):
         self._capture()
         self.assertTrue(self._override_store().is_dir())
 
-        # Fork the entry down: the book now OWNS E, so the override lane can never
-        # be listed or restored again (node_override_snapshot_kind refuses).
+        # Fork ONLY E: the book now OWNS E, so its override lane can never be listed
+        # or restored again — node_override_snapshot_kind refuses at the ownership
+        # gate (not the kind or writability gate — pin the message so a future 422
+        # from a different gate cannot pass this off as unreachability).
         self.service.fork_lore_entry(self.entity_id)
         node_index_gate.invalidate()
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.node_override_snapshot_kind(self.entity_id, self.book_layer)
         self.assertEqual(ctx.exception.status_code, 422)
-        # The orphaned override store is reaped (#2015)…
+        self.assertEqual(ctx.exception.message, "That layer does not override this entry.")
+        # E's orphaned override store is reaped (#2015)…
         self.assertFalse(self._override_store().exists())
-        # …while the series' own base snapshot store — a different lane — survives.
+        # …while E's series base lane (a different lane) and the sibling's book
+        # override store (a different entity, same lane) both survive.
         self.assertTrue(base_store.is_dir())
+        self.assertTrue(sibling_store.is_dir())
 
     def test_restoring_an_old_thinned_override_snapshot_does_not_500(self) -> None:
         # Read-after-thin footgun: the capture-first (thinned) can evict the very

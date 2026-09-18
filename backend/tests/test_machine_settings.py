@@ -632,6 +632,30 @@ class TestConfigDirIsolationGuard:
         )
         assert result.returncode == 0, result.stderr
 
+    def test_dev_backend_without_isolation_is_refused(self, tmp_path: Path) -> None:
+        # The Claude worktree dev backend (#1998) runs the real app; if it forgot
+        # to set LWA_CONFIG_DIR it must be REFUSED, not silently resolve the real
+        # config. Same clean-subprocess shape as the production test (no test
+        # runner loaded, else the pytest/unittest branch fires first), but with
+        # DEV_BACKEND_CHECKOUT set and no override — the platform config-home vars
+        # point at tmp_path so a regression lands there, but the guard must raise.
+        import subprocess
+        import sys as _sys
+
+        env = {k: v for k, v in os.environ.items() if k != ms.CONFIG_DIR_ENV}
+        env.update(
+            APPDATA=str(tmp_path),
+            XDG_CONFIG_HOME=str(tmp_path),
+            HOME=str(tmp_path),
+            DEV_BACKEND_CHECKOUT=str(tmp_path / "checkout"),
+        )
+        code = "import app.services.machine_settings as ms\nms.config_dir()\n"
+        result = subprocess.run(
+            [_sys.executable, "-c", code], env=env, capture_output=True, text=True
+        )
+        assert result.returncode != 0, "dev backend resolved the real config dir unguarded"
+        assert "1998" in result.stderr
+
 
 if __name__ == "__main__":
     unittest.main()

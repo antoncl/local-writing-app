@@ -1006,6 +1006,28 @@ class LoreOverrideSnapshotTests(unittest.TestCase):
             "the override snapshot aliased into the base lane after a fork",
         )
 
+    def test_forking_reaps_the_now_unreachable_override_store(self) -> None:
+        # A base snapshot lives under the series (the owning layer)…
+        base = self.client.post(f"/api/nodes/{self.entity_id}/snapshots")
+        self.assertEqual(base.status_code, 200, base.text)
+        base_store = self.universe / "snapshots" / self.entity_id
+        self.assertTrue(base_store.is_dir())
+        # …and an override snapshot under the book (reachable while E is inherited).
+        self._capture()
+        self.assertTrue(self._override_store().is_dir())
+
+        # Fork the entry down: the book now OWNS E, so the override lane can never
+        # be listed or restored again (node_override_snapshot_kind refuses).
+        self.service.fork_lore_entry(self.entity_id)
+        node_index_gate.invalidate()
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.node_override_snapshot_kind(self.entity_id, self.book_layer)
+        self.assertEqual(ctx.exception.status_code, 422)
+        # The orphaned override store is reaped (#2015)…
+        self.assertFalse(self._override_store().exists())
+        # …while the series' own base snapshot store — a different lane — survives.
+        self.assertTrue(base_store.is_dir())
+
     def test_restoring_an_old_thinned_override_snapshot_does_not_500(self) -> None:
         # Read-after-thin footgun: the capture-first (thinned) can evict the very
         # snapshot being restored. Accumulate >AUTOMATIC_KEEP thinned pre-restore

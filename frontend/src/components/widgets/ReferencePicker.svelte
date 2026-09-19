@@ -16,12 +16,15 @@
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import PeekCard, { type PeekCardDeps } from "@/components/widgets/PeekCard.svelte";
   import { foldToFirstRow } from "@/lib/actions/foldToFirstRow";
+  import { peekAnchor } from "@/lib/actions/peekAnchor";
   import { nodeSet } from "@/lib/views/viewResult";
   import { resolveColor } from "@/lib/utils/colors";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import { buildRefResolver } from "@/lib/utils/refResolve";
+  import { buildPeekTarget } from "@/lib/utils/peekTarget";
   import type {
     NodePickerConfig,
     NodePickerRef,
@@ -43,6 +46,8 @@
   // Tag nodes read from the store too (ADR-0082 slice 1), same reasoning: a ref
   // pointing at a tag resolves anywhere without the caller threading the roster.
   import { canonicalIdIn, liveTags, tagById, refreshTagNodes, resolveOrCreateTag } from "@/lib/stores/tagNodes";
+  // The reverse reference index — a tag's peek card carrier count/breakdown (#2011).
+  import { referenceIndexStore } from "@/lib/stores/references";
 
   let {
     field,
@@ -301,6 +306,42 @@
   function pillHexFor(ref: ResolvedRef): string | null {
     return resolveColor(instanceColorFor(ref), ref.entry_type, ref.kind, metadataSchema)?.hex ?? null;
   }
+
+  // --- Peek card (#2011): hover/focus a rail pill for a preview ----------
+  let peek = $state<{ ref: RefNode; anchor: HTMLElement } | null>(null);
+  function openPeek(ref: RefNode, anchor: HTMLElement) {
+    if (ref.missing) return; // nothing to preview for an unresolved ref
+    peek = { ref, anchor };
+  }
+  function closePeek() {
+    peek = null;
+  }
+  const peekModel = $derived(
+    peek ? buildPeekTarget(peek.ref, metadataSchema, {
+      resolveRef: refResolver,
+      referenceIndex: $referenceIndexStore,
+      canonicalTagId: (id) => canonicalIdIn($tagById, id),
+    }) : null,
+  );
+  const peekDeps: PeekCardDeps = $derived({
+    structure,
+    researchStructure,
+    loreEntries,
+    promptEntries,
+    plotEntries: $plotlineEntriesStore,
+    assistantEntries: $assistantEntriesStore,
+    tagEntries: $liveTags,
+  });
+  function peekSwap(id: string) {
+    if (!peek) return;
+    emit(multi ? selectedIds.map((x) => (x === peek!.ref.id ? id : x)) : [id]);
+    closePeek();
+  }
+  function peekRemove() {
+    if (!peek) return;
+    removeId(peek.ref.id);
+    closePeek();
+  }
 </script>
 
 <section
@@ -384,6 +425,21 @@
   {/if}
 </section>
 
+{#if peek && peekModel}
+  <PeekCard
+    model={peekModel}
+    anchor={peek.anchor}
+    field={field}
+    deps={peekDeps}
+    on={{
+      open: () => onNavigate({ id: peek!.ref.id, kind: peek!.ref.kind, entryType: peek!.ref.entry_type }),
+      swap: readOnly ? undefined : peekSwap,
+      remove: readOnly ? undefined : peekRemove,
+      close: closePeek,
+    }}
+  />
+{/if}
+
 {#snippet addTrigger()}
   {#if !readOnly}
     <span class="reference-picker-trigger">
@@ -420,7 +476,11 @@
 
 {#snippet refPill(ref: RefNode)}
   {@const hex = ref.missing ? null : pillHexFor(ref)}
-  <span class="ref-pill" class:missing={ref.missing}>
+  <span
+    class="ref-pill"
+    class:missing={ref.missing}
+    use:peekAnchor={{ onOpen: (anchor) => openPeek(ref, anchor), onClose: closePeek }}
+  >
     <button
       type="button"
       class="ref-pill-body"

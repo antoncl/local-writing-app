@@ -12,11 +12,15 @@
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import PeekCard, { type PeekCardDeps } from "@/components/widgets/PeekCard.svelte";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { resolveColor } from "@/lib/utils/colors";
   import { buildRefResolver } from "@/lib/utils/refResolve";
+  import { buildPeekTarget } from "@/lib/utils/peekTarget";
+  import { peekAnchor } from "@/lib/actions/peekAnchor";
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   import { liveTags } from "@/lib/stores/tagNodes";
+  import { referenceIndexStore } from "@/lib/stores/references";
   import type {
     AssistantEntrySummary,
     LoreEntrySummary,
@@ -131,6 +135,43 @@
   function pillHexFor(node: RefTabNode): string | null {
     return resolveColor(instanceColorFor(node), node.entry_type, node.kind, model.schema)?.hex ?? null;
   }
+
+  // --- Peek card (#2011): hover/focus a row for a preview -----------------
+  let peek = $state<{ node: RefTabNode; anchor: HTMLElement } | null>(null);
+  function openPeek(node: RefTabNode, anchor: HTMLElement) {
+    if (node.missing) return;
+    peek = { node, anchor };
+  }
+  function closePeek() {
+    peek = null;
+  }
+  const peekModel = $derived(
+    peek
+      ? buildPeekTarget(peek.node, model.schema, {
+          resolveRef: (id) => resolver(id),
+          referenceIndex: $referenceIndexStore,
+        })
+      : null,
+  );
+  const peekDeps: PeekCardDeps = $derived({
+    structure: deps.structure,
+    researchStructure: deps.researchStructure,
+    loreEntries: deps.loreEntries,
+    promptEntries: deps.promptEntries,
+    plotEntries: $plotlineEntriesStore,
+    assistantEntries: deps.assistantEntries,
+    tagEntries: $liveTags,
+  });
+  function peekSwap(id: string) {
+    if (!peek) return;
+    on.change(model.ids.map((x) => (x === peek!.node.id ? id : x)));
+    closePeek();
+  }
+  function peekRemove() {
+    if (!peek) return;
+    removeId(peek.node.id);
+    closePeek();
+  }
 </script>
 
 <div class="ref-list-tab" role="tabpanel" id={`body-tabpanel-${model.fieldId}`} aria-label={model.fieldLabel}>
@@ -184,33 +225,50 @@
   </div>
 </div>
 
+{#if peek && peekModel}
+  <PeekCard
+    model={peekModel}
+    anchor={peek.anchor}
+    field={model.field}
+    deps={peekDeps}
+    on={{
+      open: () => on.navigate({ id: peek!.node.id, kind: peek!.node.kind, entryType: peek!.node.entry_type }),
+      swap: model.readOnly ? undefined : peekSwap,
+      remove: model.readOnly ? undefined : peekRemove,
+      close: closePeek,
+    }}
+  />
+{/if}
+
 {#snippet refRow(node: RefTabNode, ctx: RowCtx<RefTabNode>)}
   {@const hex = node.missing ? null : pillHexFor(node)}
-  <NodeRow
-    title={node.missing ? "Missing" : node.title}
-    depth={ctx.depth}
-    stripeColor={null}
-    typeIcon={entryTypeIconClass(node.entry_type, model.schema)}
-    onDblClick={ctx.onDblClick}
-  >
-    {#snippet trailing()}
-      <span
-        class="ref-type-pill"
-        class:has-color={!!hex}
-        class:missing={node.missing}
-        style={hex ? `--chip-base: ${hex}` : ""}
-      >{node.missing ? "Missing" : entryTypeName(node.entry_type, node.kind)}</span>
-      {#if !model.readOnly}
-        <button
-          type="button"
-          class="row-action-delete"
-          aria-label={`Remove ${node.missing ? "Missing" : node.title} from ${model.fieldLabel}`}
-          title="Remove"
-          onclick={() => removeId(node.id)}
-        >×</button>
-      {/if}
-    {/snippet}
-  </NodeRow>
+  <div class="ref-row-anchor" use:peekAnchor={{ onOpen: (anchor) => openPeek(node, anchor), onClose: closePeek }}>
+    <NodeRow
+      title={node.missing ? "Missing" : node.title}
+      depth={ctx.depth}
+      stripeColor={null}
+      typeIcon={entryTypeIconClass(node.entry_type, model.schema)}
+      onDblClick={ctx.onDblClick}
+    >
+      {#snippet trailing()}
+        <span
+          class="ref-type-pill"
+          class:has-color={!!hex}
+          class:missing={node.missing}
+          style={hex ? `--chip-base: ${hex}` : ""}
+        >{node.missing ? "Missing" : entryTypeName(node.entry_type, node.kind)}</span>
+        {#if !model.readOnly}
+          <button
+            type="button"
+            class="row-action-delete"
+            aria-label={`Remove ${node.missing ? "Missing" : node.title} from ${model.fieldLabel}`}
+            title="Remove"
+            onclick={() => removeId(node.id)}
+          >×</button>
+        {/if}
+      {/snippet}
+    </NodeRow>
+  </div>
 {/snippet}
 
 <style>
@@ -219,6 +277,12 @@
     flex-direction: column;
     min-height: 0;
     height: 100%;
+  }
+
+  /* The peek-anchor wrapper (#2011) adds no box of its own — the NodeRow
+     inside it keeps ViewNodeList's row layout unchanged. */
+  .ref-row-anchor {
+    display: contents;
   }
 
   /* Shares the prose measure, matching the body's own reading column. */

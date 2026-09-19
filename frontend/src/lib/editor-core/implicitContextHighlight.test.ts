@@ -179,3 +179,36 @@ describe("implicit-context hover card", () => {
     expect(card()).toBeNull();
   });
 });
+
+describe("implicit-context hover card — peek summary rows (#2011)", () => {
+  it("appends summary rows when describe() returns some", () => {
+    const editor = new Editor({
+      element: document.createElement("div"),
+      extensions: [
+        StarterKit,
+        ImplicitContextHighlight.configure({
+          matcher,
+          describe: (id) => (id === "lore_alice" ? [{ key: "role", label: "Role", text: "Courier" }] : []),
+        }),
+      ],
+      content: "<p>Alice walked.</p>",
+    });
+    editors.push(editor);
+    mouse(match(editor), "mouseover");
+    const summary = card()?.querySelector(".implicit-context-popup-summary");
+    expect(summary).not.toBeNull();
+    expect(summary?.querySelector(".implicit-context-popup-summary-label")?.textContent).toBe("Role");
+    expect(summary?.querySelector(".implicit-context-popup-summary-value")?.textContent).toBe("Courier");
+  });
+
+  it("renders no summary block when describe() returns nothing", () => {
+    const editor = new Editor({
+      element: document.createElement("div"),
+      extensions: [StarterKit, ImplicitContextHighlight.configure({ matcher, describe: () => [] })],
+      content: "<p>Alice walked.</p>",
+    });
+    editors.push(editor);
+    mouse(match(editor), "mouseover");
+    expect(card()?.querySelector(".implicit-context-popup-summary")).toBeNull();
+  });
+});

@@ -1,0 +1,27 @@
+/* Peek-card summary rows for the implicit-context hover card (#2011) — the
+   same field-grid content a reference's peek card (PeekCard.svelte) shows,
+   appended after the `.implicit-context-popup-preview` text. Split out of
+   styles.css (which was already at the file-size guard's cap) rather than
+   pushing it over; imported directly by implicitContextHighlight.ts, the one
+   module that builds this popup's DOM by hand (it isn't a Svelte component,
+   so it can't carry a scoped `<style>` block of its own). */
+
+.implicit-context-popup-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  row-gap: 4px;
+  margin-top: 6px;
+  font-size: var(--fs-sm);
+}
+
+.implicit-context-popup-summary-label {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.implicit-context-popup-summary-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

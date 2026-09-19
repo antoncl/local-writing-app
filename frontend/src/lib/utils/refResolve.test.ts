@@ -21,11 +21,33 @@ describe("buildRefResolver", () => {
     expect(resolve("scene_1")).toEqual({ id: "scene_1", kind: "manuscript", title: "Chapter One", entry_type: "manuscript:scene" });
   });
 
+  it("carries a scene's own metadata through (#2011 — the peek card's summary rows)", () => {
+    const withMeta: StructureDocument = {
+      root: {
+        id: "node_root",
+        type: "manuscript:root",
+        title: "Root",
+        children: [
+          {
+            id: "node_1",
+            type: "manuscript:scene",
+            title: "Chapter One",
+            scene_id: "scene_1",
+            metadata: { pov: "Elien" },
+            children: [],
+          },
+        ],
+      },
+    } as unknown as StructureDocument;
+    const resolve = buildRefResolver({ structure: withMeta });
+    expect(resolve("scene_1")?.metadata).toEqual({ pov: "Elien" });
+  });
+
   it("resolves a lore id", () => {
     const resolve = buildRefResolver({
       loreEntries: [{ id: "lore_1", title: "Elien", body: "", entry_type: "lore:character", metadata: {} }],
     });
-    expect(resolve("lore_1")).toEqual({ id: "lore_1", kind: "lore", title: "Elien", entry_type: "lore:character" });
+    expect(resolve("lore_1")).toEqual({ id: "lore_1", kind: "lore", title: "Elien", entry_type: "lore:character", metadata: {} });
   });
 
   it("resolves a prompt (snippet) id", () => {
@@ -38,7 +60,7 @@ describe("buildRefResolver", () => {
   it("resolves a tag id via the full tag roster (entry_type included)", () => {
     const tag: TagEntry = { id: "tag_1", title: "Grief", entry_type: "tag:theme", metadata: {} };
     const resolve = buildRefResolver({ tagById: new Map([[tag.id, tag]]) });
-    expect(resolve("tag_1")).toEqual({ id: "tag_1", kind: "tag", title: "Grief", entry_type: "tag:theme" });
+    expect(resolve("tag_1")).toEqual({ id: "tag_1", kind: "tag", title: "Grief", entry_type: "tag:theme", metadata: {} });
   });
 
   it("falls back to a title-only tag resolve when only tagTitleById is given", () => {

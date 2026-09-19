@@ -64,6 +64,7 @@ function baseCtx(overrides: Partial<RailRowContext> = {}): RailRowContext {
     tagTitleById: new Map(),
     openFieldId: null,
     fieldExpanded: () => false,
+    sectionsInBody: false,
     ...overrides,
   };
 }
@@ -83,6 +84,7 @@ function baseCallbacks(): RailRowCallbacks {
     resetField: vi.fn(),
     navigate: vi.fn(),
     toggleFlip: vi.fn(),
+    goToSection: vi.fn(),
   };
 }
 
@@ -127,13 +129,33 @@ describe("RailFieldRow", () => {
     expect(b.container.querySelector(".fr-disc-toggle")).toBeNull();
   });
 
-  it("a long_text model renders wide and always live (no rest hit)", () => {
-    const model = buildRailRowModel(baseCtx({ metadata: { bio: "Born on the river." } }), "bio");
+  it("a long_text model (sectionsInBody: false) renders wide and always live (no rest hit)", () => {
+    const model = buildRailRowModel(baseCtx({ sectionsInBody: false, metadata: { bio: "Born on the river." } }), "bio");
     const { container } = render(RailFieldRow, { props: { model, deps: baseDeps(), on: baseCallbacks() } });
     const row = container.querySelector(".field-row") as HTMLElement;
     expect(row.classList.contains("wide")).toBe(true);
     expect(row.classList.contains("scalar")).toBe(false);
     expect(container.querySelector(".fr-rest-hit")).toBeNull();
+  });
+
+  it("a long_text model (sectionsInBody: true) renders as a non-wide 'Go to …' index row", async () => {
+    const model = buildRailRowModel(baseCtx({ sectionsInBody: true, metadata: { bio: "one two three four" } }), "bio");
+    const on = baseCallbacks();
+    const { container } = render(RailFieldRow, { props: { model, deps: baseDeps(), on } });
+    const row = container.querySelector(".field-row") as HTMLElement;
+    expect(row.classList.contains("wide")).toBe(false);
+    const hit = screen.getByRole("button", { name: "Go to Bio" });
+    expect(hit.textContent).toBe("4 words");
+    await fireEvent.click(hit);
+    expect(on.goToSection).toHaveBeenCalledWith("bio");
+  });
+
+  it("an empty long_text index row (sectionsInBody: true) reads 'empty' and folds like any empty row", () => {
+    const model = buildRailRowModel(baseCtx({ sectionsInBody: true, metadata: {} }), "bio");
+    const { container } = render(RailFieldRow, { props: { model, deps: baseDeps(), on: baseCallbacks() } });
+    const row = container.querySelector(".field-row") as HTMLElement;
+    expect(row.classList.contains("empty")).toBe(true);
+    expect(screen.getByRole("button", { name: "Go to Bio" }).textContent).toBe("empty");
   });
 
   it("an unset color model renders the color row with the inherited note and never reads empty", () => {

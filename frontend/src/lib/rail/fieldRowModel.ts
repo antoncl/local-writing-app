@@ -13,6 +13,7 @@ import { resolveColor } from "@/lib/utils/colors";
 import { effectiveFieldLabel, isMetadataValuePresent, metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
 import { fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
+import { countWords } from "@/lib/utils/wordCount";
 import type {
   DocumentKind,
   EntryMetadata,
@@ -44,6 +45,10 @@ export type RailRowContext = {
   structure: StructureDocument | null;
   sourceLayerLabel: string | null;
   inheritedFromLabel: string | null;
+  // #2009: the open entry's body renders a headed section per long_text field
+  // (BodySections). When true, a long_text row becomes a rail INDEX row (a
+  // word-count "Go to …" jump) instead of hosting the editor — see `sectionIndex`.
+  sectionsInBody: boolean;
   canClearOwn: boolean;
   canResetOverride: boolean;
   readOnly: boolean;
@@ -78,6 +83,10 @@ export type RailRowModel = {
   scalar: boolean;
   editing: boolean;
   wide: boolean;
+  // #2009: this row is a long_text index row (its editor lives in a body
+  // section instead) — `wordCount` is over the field's current value.
+  sectionIndex: boolean;
+  wordCount: number;
   colorRow: boolean;
   foldableList: boolean;
   fieldExpanded: boolean;
@@ -282,11 +291,17 @@ function isRefFieldType(field: MetadataFieldDefinition): boolean {
 function isWide(ctx: RailRowContext, field: MetadataFieldDefinition, fieldId: string): boolean {
   const populated = isMetadataValuePresent(displayValue(ctx, fieldId));
   return (
-    field.type === "long_text" ||
+    (field.type === "long_text" && !ctx.sectionsInBody) ||
     field.type === "list" ||
     (field.type === "entity_ref_list" && populated) ||
     (field.type === "multi_select" && (field.options.length > 0 || populated))
   );
+}
+
+// #2009: a long_text row becomes an index row when its editor lives in a body
+// section instead of the rail.
+function isSectionIndex(ctx: RailRowContext, field: MetadataFieldDefinition): boolean {
+  return ctx.sectionsInBody && field.type === "long_text";
 }
 
 // An empty row recedes (#1884 slice 3): label + glyph in --text-3. `color`
@@ -345,6 +360,7 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
   const scalar = isScalarRow(ctx, field, fieldId);
   const editing = ctx.openFieldId === fieldId;
   const wide = isWide(ctx, field, fieldId);
+  const sectionIndex = isSectionIndex(ctx, field);
   const colorRow = field.type === "color";
   const isComputed = field.type === "computed";
   const isStatus = fieldId === "status";
@@ -391,6 +407,8 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
     scalar,
     editing,
     wide,
+    sectionIndex,
+    wordCount: sectionIndex ? countWords(metadataValueString(value)) : 0,
     colorRow,
     foldableList: isFoldableList(ctx, field, fieldId),
     fieldExpanded: ctx.fieldExpanded(fieldId),

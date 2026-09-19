@@ -77,7 +77,7 @@ function rowFor(label: string): HTMLElement {
 
 describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)", () => {
   it("rest: shows the text value, no input, plus an Edit hit; long_text/entity_ref_list rows have no hit", async () => {
-    mount({ alias: "The Painted" });
+    mount({ alias: "The Painted" }, "", { sectionsInBody: false });
     const row = rowFor("Alias");
     expect(row.querySelector("input")).toBeNull();
     expect(row.querySelector(".fr-rest-value")?.textContent).toContain("The Painted");
@@ -87,6 +87,14 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
     await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
     expect(rowFor("Notes").querySelector(".fr-rest-hit")).toBeNull();
     expect(rowFor("Kin").querySelector(".fr-rest-hit")).toBeNull();
+  });
+
+  it("with sectionsInBody, Notes becomes an index row into its body section (a 'Go to …' word-count hit)", async () => {
+    mount({ notes: "one two three" }, "", { sectionsInBody: true });
+    const row = rowFor("Notes");
+    expect(row.classList.contains("wide")).toBe(false);
+    const hit = screen.getByRole("button", { name: "Go to Notes" });
+    expect(hit.textContent).toBe("3 words");
   });
 
   it("empty rest: shows the + affordance and a 'Set …' title", async () => {

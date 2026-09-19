@@ -29,6 +29,8 @@
     resetField: (fieldId: string) => void;
     navigate: (payload: NavigateTarget) => void;
     toggleFlip: (fieldId: string) => void;
+    // #2009: a long_text index row's hit — scroll to (and focus) its body section.
+    goToSection: (fieldId: string) => void;
   };
 </script>
 
@@ -237,6 +239,18 @@
         onChange={(ids) => on.write(model.fieldId, ids)}
         onNavigate={(payload) => on.navigate(payload)}
       />
+    {:else if model.sectionIndex}
+      <!-- #2009: the field's editor lives in a body section instead of the
+           rail — this row is an index into it. Word count over the current
+           value; an empty field reads "empty" (the row itself still carries
+           `.empty`, so #2006's fold still folds it). Never `.wide` — an index
+           line is one row like any scalar. -->
+      <button
+        type="button"
+        class="fr-rest-hit fr-section-index"
+        aria-label={`Go to ${model.fieldLabel}`}
+        onclick={() => on.goToSection(model.fieldId)}
+      >{model.empty ? "empty" : model.wordCount === 1 ? "1 word" : `${model.wordCount} words`}</button>
     {:else if !model.scalar}
       <FieldValueEditor
         field={model.field}
@@ -623,6 +637,29 @@
      rules key off `.field-row` state, which is this component's own class. */
   .field-row.scalar:not(.editing) .fr-name { cursor: pointer; }
   .field-row.editing { background: var(--inset); box-shadow: inset 2px 0 0 var(--accent); }
+
+  /* #2009: the long_text index row's "Go to …" hit. A plain inline text
+     button (not the absolute-overlay `.fr-rest-hit` recipe RailScalarCell
+     uses over a separate display) — the button's own text IS the display. */
+  .fr-section-index {
+    display: inline-flex;
+    align-items: center;
+    border: 0;
+    background: none;
+    padding: 2px 6px;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+  .fr-section-index:hover {
+    color: var(--text-2);
+    background: var(--inset);
+  }
+  .fr-section-index:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
 
   .fr-computed {
     display: inline-flex;

@@ -39,6 +39,7 @@
     implicitContextIds,
   } from "@/lib/editor-core/implicitContextHighlight";
   import { SearchMatchHighlight, type SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
+  import { handleSectionArrow } from "@/lib/editor-core/sectionKeyboardBridge";
   import {
     InteriorityReveal,
     interiorityHasBeats,
@@ -147,6 +148,13 @@
       prefilledDrafts?: Record<string, string>;
       unresolved?: Array<{ name: string; label: string; token: string }>;
     }) => void;
+    // Body Sections keyboard bridge (#2009): resolved lazily (see
+    // MetadataLongTextEditor) — the body only ever bridges FORWARD, into the
+    // first section (it has no previous neighbour by construction).
+    neighbours?: (() => import("@/lib/editor-core/sectionKeyboardBridge").SectionNeighbours) | null;
+    // Body Sections registry (#2009): reports this view's editor instance (and
+    // `null` on teardown) so NodeEditor can register it at index 0.
+    onEditorReady?: (editor: Editor, phase: "ready" | "destroy") => void;
   }
 
   let {
@@ -168,6 +176,8 @@
     onFocus,
     onOpenChat,
     onRequestInputsDialog,
+    neighbours = null,
+    onEditorReady = () => {},
   }: Props = $props();
 
   // ---------- Custom TipTap extensions ----------
@@ -922,6 +932,12 @@
   }
 
   function handleEditorKeydown(view: EditorView, event: KeyboardEvent) {
+    // Body Sections keyboard bridge (#2009): checked first, so an arrow at the
+    // body's own edge hands off to the first section instead of any other
+    // handler intercepting it. Only `next` is ever wired for the body — it
+    // has no previous neighbour by construction (index 0).
+    if (neighbours && handleSectionArrow(view, event, neighbours())) return true;
+
     // Ctrl+J runs the default cursor prompt — a scene verb; the rest of the
     // keys (slash menu, Tab, Escape) belong to every prose body (#1893).
     if (
@@ -1147,8 +1163,13 @@
     if (scene) {
       void loadScene(scene);
     }
+    const mounted = editor;
+    onEditorReady(mounted, "ready");
 
-    return () => editor?.destroy();
+    return () => {
+      onEditorReady(mounted, "destroy");
+      mounted.destroy();
+    };
   });
 
   // Surface the cost rollup to the editor-hint chip via documentLabel

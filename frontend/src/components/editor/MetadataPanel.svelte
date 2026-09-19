@@ -90,6 +90,14 @@
       resolve?: { adopted: (fieldId: string) => boolean; onToggle: (fieldId: string) => void };
     } | null;
     readOnly?: boolean;
+    // #2009: the open entry's body renders a headed section per long_text
+    // field (BodySections) — NodeEditor passes `bodyShape === "prose"`. When
+    // true, a long_text row becomes an index row instead of hosting the
+    // editor; `onGoToSection` is then required to jump to it.
+    sectionsInBody?: boolean;
+    // #2009: scroll + focus the body section for a field id — wired to the
+    // registry NodeEditor owns (the section's own TipTap editor instance).
+    onGoToSection?: (fieldId: string) => void;
     // Outbound events as callback props (#14: MetadataPanel is runes — replaces
     // its createEventDispatcher). NodeEditor (legacy parent) passes these.
     onEntryTypeChange?: (entryType: string) => void;
@@ -130,6 +138,8 @@
     effectiveOverrides = null,
     compare = null,
     readOnly = false,
+    sectionsInBody = false,
+    onGoToSection,
     onEntryTypeChange,
     onStatusChange,
     onMetadataChange,
@@ -365,6 +375,14 @@
     onMetadataChange?.({ ...metadata, ai_provider: provider, ai_capability_tier: tier, ai_model: model });
   }
 
+  // #2009: a long_text index row's hit — bring its body section into view,
+  // then hand off to the host to focus that section's own TipTap editor (the
+  // rail doesn't own the section registry; NodeEditor does).
+  function goToSection(fieldId: string) {
+    document.getElementById(`section-${fieldId}`)?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+    onGoToSection?.(fieldId);
+  }
+
   // Read at rest, edit on demand (#1884 slice 4): `RailScalarCell` owns the two
   // widgets (rest display + live control) for one scalar row; this component
   // owns only WHICH row is "open" at a time and the document-level
@@ -435,6 +453,7 @@
     tagTitleById: $tagTitleById,
     openFieldId,
     fieldExpanded,
+    sectionsInBody,
   });
   function rowModel(fieldId: string) {
     return buildRailRowModel(ctx, fieldId);
@@ -466,6 +485,7 @@
     resetField: (fieldId) => onResetField?.(fieldId),
     navigate: (payload) => onNavigate?.(payload),
     toggleFlip: (fieldId) => compare?.resolve?.onToggle(fieldId),
+    goToSection: (fieldId) => goToSection(fieldId),
   };
 </script>
 

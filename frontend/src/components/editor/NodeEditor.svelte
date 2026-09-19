@@ -24,6 +24,8 @@
   import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
   import CodeBodyView from "@/components/editor/body/CodeBodyView.svelte";
   import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
+  import BodySections from "@/components/editor/body/BodySections.svelte";
+  import { createSectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import { INTERIORITY_EYE_SVG } from "@/lib/editor-core/interiorityReveal";
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
@@ -45,19 +47,6 @@
   import { deriveBodyShape, documentLabelFor } from "@/lib/editor-core/documentPresentation";
   import { wireReviewFreeze } from "@/lib/editor-core/reviewFreeze.svelte";
 
-  // Data sources for context_pick inputs in the prompt preview / inputs
-  
-  // Research tree, sibling to manuscript `structure`. Threaded through to
-  // the context picker so context_pick / entity_ref fields can target
-  
-  // Optional matcher pass-through for the implicit-context highlight
-  
-  // Scenes available for the inline prompt-preview scene picker. The pane is
-  
-
-  // Outbound events as callback props (#14: App is now runes — components can't
-  // use on:event). NodeEditor stays legacy; these replace its dispatcher. Its
-  
   interface Props {
     scene?: EditableDocument | null;
     documentKind?: DocumentKind;
@@ -161,7 +150,7 @@
     onFlushReviewCommit = undefined
   }: Props = $props();
 
-
+  const sectionRegistry = createSectionRegistry(); // #2009: body-section keyboard bridge + "go to" registry
   let proseBodyView: ProseBodyView | null = $state(null);
   let codeBodyView: CodeBodyView | null = $state(null);
   let chatBodyView: ChatBodyView | null = $state(null);
@@ -381,7 +370,6 @@
   // output config, see api.ts savePromptEntry).
   let contextStrategyDraft = $state<PromptContextStrategy | null>(null);
 
-
   let backlinksReq = 0;
   // Backlinks = the open node's referrers (#194): membership from the in-memory
   // reverse index, rows from `resolve_references`. A request token drops out-of-
@@ -399,8 +387,6 @@
       if (req === backlinksReq) backlinks = [];
     }
   }
-
-
 
   // Compose the save event from the parent's title/status/metadata plus
   // whichever body view owns the current body content. ProseBodyView
@@ -857,6 +843,8 @@
     scene?.id && structure ? (findNodeBySceneId(structure.root, scene.id)?.resolved_cascade ?? null) : null,
   );
   let hasBody = $derived(bodyShape !== "none");
+  // Shared by the rail and Body Sections (#2009) — one node, one read-only verdict.
+  let editorReadOnly = $derived(scrubbed || snapshotParked || reviewing || (inheritedReadOnly && documentKind !== "prompt"));
   $effect.pre(() => {
     if (titleReload && titleReload.token !== lastTitleReloadToken) {
       lastTitleReloadToken = titleReload.token;
@@ -904,13 +892,12 @@
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}
       compare={snapshotCompare ?? entryCompare}
-      readOnly={scrubbed || snapshotParked || reviewing || (inheritedReadOnly && documentKind !== "prompt")}
+      readOnly={editorReadOnly}
+      sectionsInBody={bodyShape === "prose"}
+      onGoToSection={(fieldId) => sectionRegistry.focus(fieldId)}
       onEntryTypeChange={(next) => updateEntryType(next)}
       onStatusChange={(next) => updateStatus(next)}
-      onMetadataChange={(next) => {
-        metadata = next;
-        emitChange();
-      }}
+      onMetadataChange={(next) => { metadata = next; emitChange(); }}
       onCustomData={() => onCustomData?.({ entryType, kind: documentKind })}
       onNavigate={(payload) => onNavigate?.(payload)}
       onResetField={documentKind === "lore" || documentKind === "prompt" ? onResetField : undefined}
@@ -1197,8 +1184,19 @@
       onFocus={() => onFocus?.()}
       onOpenChat={(payload) => onOpenChat?.(payload)}
       onRequestInputsDialog={(payload) => promptDialog?.open(payload)}
+      neighbours={() => sectionRegistry.neighboursFor(0)}
+      onEditorReady={(editor, phase) => phase === "ready" ? sectionRegistry.register(0, null, editor) : sectionRegistry.unregister(editor)}
       />
     </div>
+    <BodySections
+      schema={metadataSchema}
+      {entryType}
+      {metadata}
+      readOnly={editorReadOnly}
+      onMetadataChange={(next) => { metadata = next; emitChange(); }}
+      {implicitContextMatcher}
+      register={sectionRegistry}
+    />
   {/if}
   {#if bodyShape === "chat"}
     <ChatBodyView

@@ -122,6 +122,47 @@ describe("ReferenceListTab (#2010)", () => {
   });
 });
 
+describe("ReferenceListTab — filter breadth (#2038)", () => {
+  // The same predicate the Assistants pane uses: aliases and tag-node titles
+  // (with the `#` restrictor) match, plus the entry-type name the pill shows.
+  const ENTRIES: LoreEntrySummary[] = [
+    { id: "char_tomas", title: "Tomas", body: "", entry_type: "lore:character", metadata: { tags: ["tag_night"] } },
+    { id: "char_elena", title: "Elena", body: "", entry_type: "lore:character", metadata: { aliases: ["Ellie"] } },
+    { id: "loc_rivendell", title: "Rivendell", body: "", entry_type: "lore:location", metadata: {} },
+  ];
+  const deps = () => baseDeps({ loreEntries: ENTRIES, tagTitleById: new Map([["tag_night", "night"]]) });
+
+  async function filterTo(container: HTMLElement, value: string) {
+    const box = container.querySelector('input[type="search"]') as HTMLInputElement;
+    await fireEvent.input(box, { target: { value } });
+    await tick();
+  }
+
+  it("an alias matches", async () => {
+    const { container } = render(ReferenceListTab, { props: { model: baseModel(), deps: deps(), on: baseOn() } });
+    await filterTo(container, "ellie");
+    expect(screen.getByText("Elena")).toBeInTheDocument();
+    expect(screen.queryByText("Tomas")).toBeNull();
+    expect(screen.queryByText("Rivendell")).toBeNull();
+  });
+
+  it("a tag-node title matches, through the # restrictor too", async () => {
+    const { container } = render(ReferenceListTab, { props: { model: baseModel(), deps: deps(), on: baseOn() } });
+    await filterTo(container, "#night");
+    expect(screen.getByText("Tomas")).toBeInTheDocument();
+    expect(screen.queryByText("Elena")).toBeNull();
+    expect(screen.queryByText("Rivendell")).toBeNull();
+  });
+
+  it("the entry-type name matches", async () => {
+    const { container } = render(ReferenceListTab, { props: { model: baseModel(), deps: deps(), on: baseOn() } });
+    await filterTo(container, "location");
+    expect(screen.getByText("Rivendell")).toBeInTheDocument();
+    expect(screen.queryByText("Tomas")).toBeNull();
+    expect(screen.queryByText("Elena")).toBeNull();
+  });
+});
+
 describe("ReferenceListTab — peek card (#2011)", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());

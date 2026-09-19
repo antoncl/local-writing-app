@@ -18,9 +18,11 @@ const SCHEMA = {
   version: 1,
   entry_types: {
     "lore:base": { name: "Lore", kind: "lore", icon: "book", fields: [] },
-    "lore:note": { name: "Note", kind: "lore", parent: "lore:base", fields: [] },
+    "lore:note": { name: "Note", kind: "lore", parent: "lore:base", fields: ["remark"] },
   },
-  fields: {},
+  fields: {
+    remark: { name: "Remark", type: "text", options: [] },
+  },
 } as unknown as MetadataSchema;
 
 const DOCUMENT_ENTRY_TYPES = [
@@ -34,6 +36,25 @@ beforeEach(() => {
 
 describe("EditorRailContent", () => {
   it("renders the type head and the backlinks panel with no scene open", () => {
+    renderRail();
+    expect(document.querySelector(".rail-type")).not.toBeNull();
+    expect(screen.getByText("Note")).toBeInTheDocument();
+  });
+
+  it("the empty-field fold is the LAST entry in the rail, below the backlinks panel (#2037)", () => {
+    // `remark` is empty, so the fold renders; the trailing sections render
+    // inside MetadataPanel between its rows and the fold.
+    renderRail();
+    const fold = document.querySelector('[data-testid="rail-fold-toggle"]') as HTMLElement;
+    const backlinks = document.querySelector(".scene-backlinks") as HTMLElement;
+    expect(fold).not.toBeNull();
+    expect(backlinks).not.toBeNull();
+    expect(backlinks.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fold.closest(".scene-metadata")).not.toBeNull();
+    expect(backlinks.closest(".scene-metadata")).not.toBeNull();
+  });
+
+  function renderRail() {
     render(EditorRailContent, {
       model: {
         metadataSchema: SCHEMA,
@@ -43,7 +64,7 @@ describe("EditorRailContent", () => {
         documentKind: "lore",
         documentLabel: "Entry",
         documentEntryTypes: DOCUMENT_ENTRY_TYPES,
-        metadataFieldIds: [],
+        metadataFieldIds: ["remark"],
         scene: null,
         createLayerId: null,
         overriddenFieldsForPanel: [],
@@ -78,8 +99,5 @@ describe("EditorRailContent", () => {
         park: () => {},
       },
     });
-
-    expect(document.querySelector(".rail-type")).not.toBeNull();
-    expect(screen.getByText("Note")).toBeInTheDocument();
-  });
+  }
 });

@@ -40,6 +40,12 @@
     documentLabel: string;
     documentEntryTypes: [string, EntryTypeDefinition][];
     metadataFieldIds: string[];
+    // #2037: the rail's trailing sections (Backlinks, Conversations, the
+    // mutation timeline, pinned sets) render HERE, between the known rows and
+    // the empty-field fold, so the fold is the last entry in the rail. The
+    // fold stays in this component because its rows come off this panel's
+    // row context.
+    trailing?: import("svelte").Snippet;
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
     structure?: StructureDocument | null;
@@ -158,6 +164,7 @@
     onNavigate,
     onResetField,
     resolvedCascade = null,
+    trailing,
   }: Props = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14
@@ -596,6 +603,8 @@
     {/each}
     {/if}
   {/each}
+
+  {@render trailing?.()}
 
   {#if showFold}
     <!-- #2006: one summary line stands in for every empty field. Closed, it

@@ -23,9 +23,11 @@
   import { liveTags } from "@/lib/stores/tagNodes";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { rememberScrollOnScroll } from "@/lib/editor-core/scrollMemory";
+  import { makeNodeSearchFilter } from "@/lib/utils/nodeSearch";
   import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
   import type {
     AssistantEntrySummary,
+    EntryMetadata,
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataSchema,
@@ -39,7 +41,16 @@
   // The tab's universe node — a ResolvedRef widened with a `missing` sentinel
   // (a "Missing" row, ReferencePicker's own pill treatment) and a always-
   // string `entry_type` so it satisfies EvalNode.
-  type RefTabNode = { id: string; kind: string; title: string; entry_type: string; missing?: boolean };
+  type RefTabNode = {
+    id: string;
+    kind: string;
+    title: string;
+    entry_type: string;
+    // Carried by the ResolvedRef spread (rosters supply instance metadata) —
+    // declared so the search filter can read aliases and tag ids (#2038).
+    metadata?: EntryMetadata;
+    missing?: boolean;
+  };
 
   interface Model {
     field: MetadataFieldDefinition;
@@ -122,13 +133,19 @@
     on.change(model.ids.filter((other) => other !== id));
   }
 
-  function filterNode(node: RefTabNode, query: string): boolean {
-    return node.title.toLowerCase().includes(query);
-  }
-
   function entryTypeName(entryType: string, kind: string): string {
     if (entryType && model.schema?.entry_types[entryType]?.name) return model.schema.entry_types[entryType].name;
     return entryType || kind;
+  }
+
+  // #2038: the SAME predicate the Assistants pane uses (title + aliases + the
+  // titles of the tag nodes the entry carries + the `#` tag restrictor), plus
+  // the entry-type name the row's pill shows. Rebuilt with the tag roster so a
+  // tag rename reflects. Bodies are out of reach here by structure: the tab's
+  // nodes come off in-memory rosters that carry no body (see #2038).
+  const nodeSearch = $derived(makeNodeSearchFilter(deps.tagTitleById ?? new Map()));
+  function filterNode(node: RefTabNode, query: string): boolean {
+    return nodeSearch(node, query) || entryTypeName(node.entry_type, node.kind).toLowerCase().includes(query);
   }
 
   function instanceColorFor(node: RefTabNode): string | null {

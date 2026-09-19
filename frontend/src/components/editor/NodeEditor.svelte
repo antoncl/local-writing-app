@@ -8,8 +8,6 @@
   import FootDock from "@/components/editor/FootDock.svelte";
   import EditorRail from "@/components/editor/EditorRail.svelte";
   import { editorRailLayout } from "@/lib/stores/editorRailLayout.svelte";
-  import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
-  import EntryReviewOverlay from "@/components/editor/body/EntryReviewOverlay.svelte";
   import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
   import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
@@ -21,17 +19,11 @@
   import { notchWhen } from "@/lib/utils/snapshotTime";
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import PromptInvocationDialog from "@/components/editor/PromptInvocationDialog.svelte";
-  import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
-  import CodeBodyView from "@/components/editor/body/CodeBodyView.svelte";
-  import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
-  import BodySections from "@/components/editor/body/BodySections.svelte";
+  import EditorBodyHost from "@/components/editor/EditorBodyHost.svelte";
+  import EditorHeader from "@/components/editor/EditorHeader.svelte";
   import { createSectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
-  import { INTERIORITY_EYE_SVG } from "@/lib/editor-core/interiorityReveal";
-  import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
-  import ViewBodyView from "@/components/editor/body/ViewBodyView.svelte";
   import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
-  import EditorCostHint from "@/components/editor/EditorCostHint.svelte";
   import { characterCostRows, rollupCostFor } from "@/lib/editor-core/characterCost";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, NavigateTarget, PromptContextStrategy, PromptEntrySummary, PromptInputDefinition, ViewSpec } from "@/lib/types";
@@ -39,7 +31,6 @@
   import { metadataSchemaLayersStore, metadataSchemaStore } from "@/lib/stores/schema";
   import { snapshotLayerId } from "@/lib/utils/layerAuthoring";
   import { readOnlyInPlace } from "@/lib/utils/provenance";
-  import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { backlinksFor } from "@/lib/views/backlinks";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
@@ -151,10 +142,7 @@
   }: Props = $props();
 
   const sectionRegistry = createSectionRegistry(); // #2009: body-section keyboard bridge + "go to" registry
-  let proseBodyView: ProseBodyView | null = $state(null);
-  let codeBodyView: CodeBodyView | null = $state(null);
-  let chatBodyView: ChatBodyView | null = $state(null);
-  let viewBodyView: ViewBodyView | null = $state(null);
+  let bodyHost: EditorBodyHost | null = $state(null); // #2029: the five body-shape branches + their bind:this view refs live here now
   let loadedSceneId: string | null = $state(null);
   // A memoized PRIMITIVE id. Reading the object prop `scene` inside an effect
   // subscribes that effect to the `scene` prop signal, which Svelte re-fires on
@@ -258,13 +246,13 @@
     // Adopting a region writes only the prose, through the hidden buffer restore
     // already owns — so it goes straight to the view, not back through the
     // server (ADR-0044 Amendment 4). Evaluated at call time, like `readLive`.
-    snapshots.onAdopt = (body) => proseBodyView?.adoptBody(body);
+    snapshots.onAdopt = (body) => bodyHost?.adoptBody(body);
     // What the diff compares against: the BUFFER, not the file. Autosave lags
     // by up to six seconds, so the file is not reliably what the author is
     // looking at — and parking is a reading gesture, so flushing to make it
     // current would make reading write (ADR-0044 §G).
     snapshots.readLive = () => ({
-      body: proseBodyView?.getBody() ?? scene?.body ?? "",
+      body: bodyHost?.getBody() ?? scene?.body ?? "",
       title,
       status,
       metadata,
@@ -318,7 +306,7 @@
       return;
     }
     const overrideBody = bodyMutated ? String(scrub.overrides?.body ?? "") : null;
-    const markdown = overrideBody ?? proseBodyView?.getBody() ?? scene?.body ?? "";
+    const markdown = overrideBody ?? bodyHost?.getBody() ?? scene?.body ?? "";
     let cancelled = false;
     void sceneMarkdownToHtml(markdown).then((html) => {
       if (!cancelled) overlayBodyHtml = html;
@@ -397,15 +385,14 @@
   // no-op for chats). Other kinds persist via the pane draft → saveEditorPane.
   function handleTitleInput() {
     emitChange();
-    if (documentKind === "chat") chatBodyView?.setTitleFromPane(title);
-    if (documentKind === "view") viewBodyView?.setTitleFromPane(title);
+    bodyHost?.setTitleFromPane(title);
   }
 
   function emitChange() {
     if (!scene) return;
     onChange?.({
       title,
-      body: rawBodyMode ? rawBody : (proseBodyView?.getBody() ?? ""),
+      body: rawBodyMode ? rawBody : (bodyHost?.getBody() ?? ""),
       status,
       entryType,
       metadata: cloneMetadata(metadata),
@@ -512,11 +499,11 @@
   // the save the same way a keystroke does (the rawBodyMode effect → emitChange).
   entryReview.onAdoptBody = (body) => {
     if (rawBodyMode) rawBody = body;
-    else proseBodyView?.adoptBody(body);
+    else bodyHost?.adoptBody(body);
   };
   entryReview.onEmitChange = emitChange;
   entryReview.readCurrentBody = () =>
-    rawBodyMode ? rawBody : (proseBodyView?.getBody() ?? scene?.body ?? "");
+    rawBodyMode ? rawBody : (bodyHost?.getBody() ?? scene?.body ?? "");
   // The one explicit post that ends a commit — the pane controller cancels the
   // (frozen) timer and PUTs once (body + metadata together).
   entryReview.onFlush = () => {
@@ -608,8 +595,8 @@
     if (entryReview.proposesTagField) refreshTagNodes();
   });
 
-  // Editor-pane handle exports — forwarded to ProseBodyView and called by the
-  // editorPanes controller via `editorPaneComponents[pane.id].xxx(...)`.
+  // Editor-pane handle exports — forwarded to EditorBodyHost (#2029) and called
+  // by the editorPanes controller via `editorPaneComponents[pane.id].xxx(...)`.
   // reloadScene re-seeds whichever body the shape mounts — TipTap for prose,
   // `rawBody` for code — from a server scene, so a reconcile after an
   // out-of-band write (embedded-TODO, ADR-0085 replace) redraws both;
@@ -620,24 +607,23 @@
       lastEmittedRawBody = rawBody;
       return;
     }
-    return proseBodyView?.loadScene(nextScene, mode);
+    return bodyHost?.loadScene(nextScene, mode);
   }
 
   export function highlightEmbeddedTodo(todoId: string) {
-    proseBodyView?.highlightEmbeddedTodo(todoId);
+    bodyHost?.highlightEmbeddedTodo(todoId);
   }
 
   // A search hit's reveal (#1925) goes to whichever body the shape mounts.
   export function revealSearchMatch(reveal: SearchReveal) {
-    if (rawBodyMode) codeBodyView?.revealSearchMatch(reveal);
-    else proseBodyView?.revealSearchMatch(reveal);
+    bodyHost?.revealSearchMatch(reveal);
   }
 
   // Rung 2 of the reconcile ladder (ADR-0077): forward the prose three-way merge
   // to the body view. Absent body view (chat/view) → null, i.e. non-prose, so the
   // 409 handler falls to the dialog.
   export function tryMergeProse(baseBody: string, remoteBody: string): Promise<string | null> {
-    return proseBodyView?.tryMergeProse?.(baseBody, remoteBody) ?? Promise.resolve(null);
+    return bodyHost?.tryMergeProse(baseBody, remoteBody) ?? Promise.resolve(null);
   }
 
   $effect.pre(() => {
@@ -1030,204 +1016,34 @@
   class:rail-right={scene && !railIsPane && railSide === "right"}
   class:rail-bottom={scene && !railIsPane && railSide === "bottom"}
 >
-  {#if scene && bodyShape === "chat"}
-    <!-- ADR-0076 S6: the chat header (title + setup) is one row inside the body,
-         so the shell renders no header content (LayerAuthoringBar no-ops for chat,
-         EditorCostHint is empty for a chat node). But an EMPTY header slot must
-         still occupy grid row 1 at zero height — without it ChatBodyView
-         auto-places into the `auto` row 1 instead of the `1fr` body row, and the
-         transcript stops filling the pane (dead space below the composer). -->
-    <div class="editor-header-void" aria-hidden="true"></div>
-  {:else}
-    <section class="editor-header">
-      {#if scene}
-        <div class="scene-title-row">
-          <label class="title-label">
-            {documentNameLabel}{#if titleMutated}<span class="title-mutated-marker" title="Changed by here">⤳</span>{/if}
-            <!-- Same five title-input variants as the chat header, from the one
-                 `chatTitleField` snippet — here they sit inside the eyebrow
-                 label; chat renders the snippet bare (ADR-0076 S6). -->
-            {@render chatTitleField()}
-          </label>
-          <!-- Interiority reveal (ADR-0070 S2): a shell affordance, present only
-               while the scene holds roleplay. Adaptive-stateful — quiet eye when
-               idle, gaining the name "Interiority" + a tint while revealing. The
-               shortcut lives in the tooltip, never as a compound on the button. -->
-          {#if hasInteriorityBeats}
-            <button
-              type="button"
-              class="interiority-toggle"
-              class:active={interiorityRevealed}
-              aria-pressed={interiorityRevealed}
-              aria-label="Interiority — reveal every beat"
-              title="Interiority — reveal every beat  (Alt+I)"
-              onclick={() => proseBodyView?.toggleInteriority()}
-            >
-              <span class="tg-glyph" aria-hidden="true">{@html INTERIORITY_EYE_SVG}</span>
-              {#if interiorityRevealed}<span class="tg-name">Interiority</span>{/if}
-            </button>
-          {/if}
-        </div>
-        <!-- Layer override authoring (#314 / ADR-0042): choose which level this
-             inherited entry's edits write to. Renders only for an inherited lore
-             entry; no-ops otherwise. -->
-        <LayerAuthoringBar
-          {scene}
-          {documentKind}
-          {authoringLayerId}
-          {recentlySaved}
-          {onAuthoringLayerChange}
-        />
-        <EditorCostHint
-          {todoStatusHint}
-          {documentKind}
-          {liveWordCount}
-          characterCosts={characterCostRowsView}
-          {lastInvocationCostUsd}
-          {sceneSessionCostUsd}
-          rollupCost={rollupCostKind}
-        />
-      {:else}
-        <h2>Select a scene</h2>
-      {/if}
-    </section>
-  {/if}
-
-  {#if bodyShape === "none"}
-    <!-- `!detailsDetached`: if the shape flips to none while Details is detached,
-         the fold-back effect reattaches next tick — this gate keeps metaContent
-         single-mounted through that one tick (not inline + detached pane, #1258). -->
-    {#if scene && metadataSchema && !detailsDetached}
-      <div class="editor-pane-meta">
-        {@render metaContent()}
-      </div>
-    {:else if !scene || !metadataSchema}
-      <FieldsOnlyView />
-    {/if}
-  {/if}
-  {#if bodyShape === "code"}
-    {#if entryReview.hasReview && entryReview.proposal}
-      <!-- A commit brainstorm reviewed on a code-bodied node (a prompt template —
-           #711). Same overlay as prose; the raw body stays mounted and hidden
-           beneath (frozen diff base), thawing to the adopted text on commit. -->
-      <EntryReviewOverlay review={entryReview} />
-    {/if}
-    <div class="code-body-host" class:hidden={reviewing}>
-      <CodeBodyView
-        bind:this={codeBodyView}
-        bind:rawBody
-        bind:entryInputDrafts={promptDrafts.drafts}
-        {hostPaneId}
-        {scene}
-        {documentKind}
-        {structure}
-        {researchStructure}
-        {loreEntries}
-        {promptEntries}
-        {availableScenes}
-        {rawBodyLanguage}
-        {loadedSceneId}
-        nextInputDraftId={promptDrafts.nextDraftId}
-        entrySlugify={promptDrafts.slugify}
-        readOnly={inheritedReadOnly}
-        onInputsChange={emitChange}
-        bind:offerOn={offerOnDraft}
-        onOfferOnChange={emitChange}
-        bind:contextStrategy={contextStrategyDraft}
-        onContextStrategyChange={emitChange}
-      />
-    </div>
-  {/if}
-  {#if bodyShape === "prose"}
-    {#if scrubbed}
-      <!-- The effective body as of the scrub point (§4.4). -->
-      <ReadOnlyBodyOverlay
-        html={overlayBodyHtml}
-        label="Effective body (read-only)"
-        ribbon={bodyMutated ? `Body as of ${scrub.units[scrub.index - 1]?.records[0]?.scene_path || "scene"} — mutated` : ""}
-        ribbonMark="⤳"
-      />
-    {:else if snapshotParked}
-      <!-- The parked snapshot, on the same overlay: the live buffer stays
-           mounted and hidden underneath (ADR-0044 §G). -->
-      <ReadOnlyBodyOverlay
-        html={snapshots.bodyHtml}
-        label="Snapshot body (read-only)"
-        ribbon={snapshotRibbon}
-        tone="snapshot"
-        onRunClick={(regionId, kind) => snapshots.adopt(regionId, kind)}
-      />
-    {:else if entryReview.hasReview && entryReview.proposal}
-      <EntryReviewOverlay review={entryReview} />
-    {/if}
-    <div
-      class="prose-body-host"
-      class:hidden={scrubbed || snapshotParked || reviewing}
-    >
-      <ProseBodyView
-        bind:this={proseBodyView}
-      bind:liveWordCount
-      bind:editorEmpty
-      bind:hasInteriorityBeats
-      bind:interiorityRevealed
-      bind:lastInvocationCostUsd
-      bind:sceneSessionCostUsd
-      bind:characterCostUsd
-      {scene}
-      {documentKind}
-      {loreEntries}
-      {promptEntries}
-      {availableScenes}
-      {implicitContextMatcher}
-      {documentLabel}
-      onBodyChange={emitChange}
-      onFocus={() => onFocus?.()}
-      onOpenChat={(payload) => onOpenChat?.(payload)}
-      onRequestInputsDialog={(payload) => promptDialog?.open(payload)}
-      neighbours={() => sectionRegistry.neighboursFor(0)}
-      onEditorReady={(editor, phase) => phase === "ready" ? sectionRegistry.register(0, null, editor) : sectionRegistry.unregister(editor)}
-      />
-    </div>
-    <BodySections
-      schema={metadataSchema}
-      {entryType}
-      {metadata}
-      readOnly={editorReadOnly}
-      onMetadataChange={(next) => { metadata = next; emitChange(); }}
-      {implicitContextMatcher}
-      register={sectionRegistry}
-    />
-  {/if}
-  {#if bodyShape === "chat"}
-    <ChatBodyView
-      bind:this={chatBodyView}
-      {scene}
-      {promptEntries}
-      {assistantEntries}
-      {loreEntries}
-      {structure}
-      {researchStructure}
-      {defaultAssistantId}
-      {implicitContextMatcher}
-      titleField={chatTitleField}
-      onBodyChange={emitChange}
-      onFocus={() => onFocus?.()}
-    />
-  {/if}
-  {#if bodyShape === "view"}
-    <ViewBodyView
-      bind:this={viewBodyView}
-      {scene}
-      {loreEntries}
-      {promptEntries}
-      {assistantEntries}
-      {structure}
-      {researchStructure}
-      onBodyChange={emitChange}
-      onFocus={() => onFocus?.()}
-      onSaveState={(state) => onViewSaveState?.(state)}
-    />
-  {/if}
+  <!-- Header + body regions (#2029 split); `{ model, deps, on }` per RailFieldRow. -->
+  <EditorHeader
+    model={{
+      scene, documentKind, bodyShape, documentNameLabel, titleMutated, hasInteriorityBeats,
+      interiorityRevealed, liveWordCount, characterCostRowsView, lastInvocationCostUsd,
+      sceneSessionCostUsd, rollupCostKind, todoStatusHint, authoringLayerId, recentlySaved, chatTitleField,
+    }}
+    on={{ toggleInteriority: () => bodyHost?.toggleInteriority(), authoringLayerChange: onAuthoringLayerChange }}
+  />
+  <EditorBodyHost
+    bind:this={bodyHost}
+    model={{
+      scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, metadata,
+      metadataSchema, editorReadOnly, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
+      overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, detailsDetached, chatTitleField, metaContent,
+    }}
+    deps={{
+      loreEntries, promptEntries, assistantEntries, availableScenes, structure, researchStructure,
+      implicitContextMatcher, defaultAssistantId, documentLabel, hostPaneId, sectionRegistry, promptDrafts,
+    }}
+    on={{
+      change: emitChange, focus: () => onFocus?.(), openChat: (payload) => onOpenChat?.(payload),
+      requestInputsDialog: (payload) => promptDialog?.open(payload),
+      metadataChange: (next) => { metadata = next; emitChange(); }, viewSaveState: (state) => onViewSaveState?.(state),
+    }}
+    bind:rawBody bind:offerOnDraft bind:contextStrategyDraft bind:liveWordCount bind:editorEmpty
+    bind:hasInteriorityBeats bind:interiorityRevealed bind:lastInvocationCostUsd bind:sceneSessionCostUsd bind:characterCostUsd
+  />
 
   {#if scene && metadataSchema && !railIsPane}
     <EditorRail
@@ -1272,7 +1088,7 @@
   {promptEntries}
   {implicitContextMatcher}
   onRun={async (entry, values, assistantId) => {
-    await proseBodyView?.runPromptEntryWithInputsExternal(entry, values, assistantId);
+    await bodyHost?.runPromptEntryWithInputsExternal(entry, values, assistantId);
   }}
 />
 
@@ -1340,15 +1156,6 @@
     min-width: 0;
   }
 
-  /* none-shape: the rail IS the pane (assistant / project / structure_node). */
-  .editor-pane-meta {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: auto;
-    overscroll-behavior: contain;
-    padding: 18px 0;
-  }
-
   /* Detached Details pane (#1258): the scroll container the docked rail's
      `.rail-scroll` supplies, so tall metadata scrolls instead of clipping. */
   .details-pane-scroll {
@@ -1357,84 +1164,6 @@
     overscroll-behavior: contain;
   }
 
-  .editor-header {
-    display: grid;
-    gap: 6px;
-    padding: 12px 22px 6px;
-    border-bottom: 1px solid var(--divider);
-    background: var(--surface);
-  }
-  /* ADR-0076 S6: empty stand-in that holds the header's grid row for chat (which
-     renders its header inside the body), so ChatBodyView stays in the `.editor-panel`
-     1fr row and the transcript fills the pane. Zero height, no chrome. */
-  .editor-header-void {
-    min-height: 0;
-    padding: 0;
-    border: 0;
-  }
-
-  .scene-title-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 4px 8px;
-    align-items: center;
-  }
-
-  /* Interiority reveal toggle (ADR-0070 S2) — a shell affordance in the title
-     row's right column. Adaptive-stateful: quiet eye when idle; gains the name
-     "Interiority" + an accent tint while revealing (mirrors the ⤢/theme
-     shell-affordance pattern in design-language.md §5). */
-  .interiority-toggle {
-    justify-self: end;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 6px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text-3);
-    cursor: pointer;
-    font-size: var(--fs-sm);
-  }
-  .interiority-toggle .tg-glyph {
-    display: inline-flex;
-    width: 16px;
-    height: 16px;
-  }
-  .interiority-toggle .tg-glyph :global(svg) {
-    width: 16px;
-    height: 16px;
-  }
-  .interiority-toggle:hover {
-    color: var(--text-2);
-    background: var(--inset);
-  }
-  .interiority-toggle.active {
-    color: var(--accent);
-    background: var(--accent-soft);
-  }
-  .interiority-toggle .tg-name {
-    font-weight: 600;
-  }
-
-  /* ---- Time-travel overlay chrome (#64) ---------------------------------- */
-  /* Keeps ProseBodyView a direct grid child of .editor-panel when visible;
-     display:none while scrubbed preserves the mounted TipTap buffer. */
-  .prose-body-host,
-  .code-body-host {
-    display: contents;
-  }
-  .prose-body-host.hidden,
-  .code-body-host.hidden {
-    display: none;
-  }
-
-  .title-mutated-marker {
-    margin-left: 4px;
-    color: var(--mutation-color);
-    font-weight: 700;
-  }
   .title-input[readonly] {
     background: var(--inset);
     cursor: default;
@@ -1463,15 +1192,6 @@
   .title-input.mutated {
     color: var(--mutation-color);
     font-weight: 600;
-  }
-
-  .title-label {
-    display: grid;
-    gap: 3px;
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    text-transform: uppercase;
   }
 
   .title-input {

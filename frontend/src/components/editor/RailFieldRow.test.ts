@@ -179,7 +179,7 @@ describe("RailFieldRow", () => {
     const row = container.querySelector(".field-row") as HTMLElement;
     expect(row.classList.contains("wide")).toBe(false);
     const hit = screen.getByRole("button", { name: "Open Kin" });
-    expect(hit.textContent).toBe("1 · 1 Character");
+    expect(hit.textContent).toBe("1 Character");
     await fireEvent.click(hit);
     expect(on.goToList).toHaveBeenCalledWith("kin");
   });

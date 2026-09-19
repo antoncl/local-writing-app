@@ -346,6 +346,8 @@ function listSummary(ctx: RailRowContext, fieldId: string): string {
     counts.set(label, counts.get(label)! + 1);
   }
   const parts = order.map((label) => `${counts.get(label)} ${label}`);
+  // One type: `2 Character` — the leading total would only repeat it.
+  if (parts.length === 1) return parts[0];
   return `${ids.length} · ${parts.join(", ")}`;
 }
 

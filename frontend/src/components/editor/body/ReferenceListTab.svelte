@@ -133,7 +133,7 @@
   }
 </script>
 
-<div class="ref-list-tab">
+<div class="ref-list-tab" role="tabpanel" id={`body-tabpanel-${model.fieldId}`} aria-label={model.fieldLabel}>
   <div class="ref-list-head">
     <span class="ref-list-label"
       >{model.fieldLabel}{#if model.ids.length > 0}<span class="ref-list-count">{model.ids.length}</span>{/if}</span

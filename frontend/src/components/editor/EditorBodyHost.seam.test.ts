@@ -5,8 +5,8 @@
 // read), so the seam must report "no body" as `undefined`, never "": coalescing
 // here would silently capture an empty body for those kinds. The none shape
 // is the one branch that mounts without TipTap, so it is the one under test.
-import { describe, expect, it } from "vitest";
-import { render } from "@/lib/test/component";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render } from "@/lib/test/component";
 import EditorBodyHost from "./EditorBodyHost.svelte";
 import type { MetadataSchema } from "@/lib/types";
 
@@ -116,5 +116,32 @@ describe("EditorBodyHost — none shape + a list tab (#2010)", () => {
     // The list tab itself rendered.
     expect(container.querySelector(".ref-list-tab")).not.toBeNull();
     expect(container.querySelector(".ref-list-label")?.textContent).toContain("Kin");
+  });
+
+  it("a remove in the list tab reaches metadataChange with the field replaced and every sibling key intact", async () => {
+    const metadataChange = vi.fn();
+    const noop = () => {};
+    const { container } = render(EditorBodyHost, {
+      props: {
+        model: baseModel({
+          scene: { id: "proj_1", title: "Project" },
+          entryType: "structure_node:project",
+          metadata: { kin: ["lore_1", "lore_2"], color: "amber" },
+          metadataSchema: SCHEMA,
+          activeBodyTab: "list:kin",
+        }),
+        deps: baseDeps({
+          loreEntries: [
+            { id: "lore_1", title: "Mara", entry_type: "lore:character", metadata: {} },
+            { id: "lore_2", title: "Tomas", entry_type: "lore:character", metadata: {} },
+          ],
+        }),
+        on: { change: noop, focus: noop, openChat: noop, requestInputsDialog: noop, metadataChange, viewSaveState: noop, navigate: noop },
+      } as never,
+    });
+    const remove = container.querySelector<HTMLButtonElement>('.row-action-delete[aria-label="Remove Tomas from Kin"]');
+    expect(remove).not.toBeNull();
+    await fireEvent.click(remove!);
+    expect(metadataChange).toHaveBeenCalledWith({ kin: ["lore_1"], color: "amber" });
   });
 });

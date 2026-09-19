@@ -161,7 +161,7 @@ describe("buildRailRowModel", () => {
         baseCtx({ listsInBody: true, metadata: { allies: ["lore_1"] } }),
         "allies",
       );
-      expect(model.listSummary).toBe("1 · 1 missing");
+      expect(model.listSummary).toBe("1 missing");
     });
 
     it("an empty entity_ref_list with listsInBody still reads empty (folds under #2006)", () => {

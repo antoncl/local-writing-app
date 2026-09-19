@@ -8,6 +8,8 @@
     name: string;
     color: string | null;
     icon: string | null;
+    // Own row-detail nomination (#2008); null clears it (falls back to the parent's).
+    summaryFields: string[] | null;
   };
 </script>
 
@@ -31,6 +33,7 @@
   import { untrack } from "svelte";
   import SchemaFieldInlineEditor, { type FieldDraftPayload } from "@/components/schema/SchemaFieldInlineEditor.svelte";
   import SchemaFieldRow from "@/components/schema/SchemaFieldRow.svelte";
+  import SummaryFieldsEditor from "@/components/schema/SummaryFieldsEditor.svelte";
   import RailGroupHead from "@/components/editor/RailGroupHead.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import IconPicker from "@/components/widgets/IconPicker.svelte";
@@ -45,10 +48,12 @@
     inheritedFromLabel,
     nestingLocalPrefix,
     nodeTypeDisplayName,
+    sameSummaryFields,
     slugifyFieldId,
     sourceBadgeLabel,
     sourceLayerIndex,
     suggestPrefixFromLabel,
+    summaryFieldChoices,
     type SchemaFieldSection,
     type SchemaKind,
   } from "@/lib/utils/schemaTypeHelpers";
@@ -71,6 +76,8 @@
     initialTypeId?: string;
     initialColor?: string | null;
     initialIcon?: string | null;
+    // Seed for the "Summary" control (#2008), same pre-inheritance convention as initialColor/Icon.
+    initialSummaryFields?: string[] | null;
     // Two-way bound by the parent:
     schemaTypeLayerId?: string;
     expandedSchemaFieldId?: string | null;
@@ -127,6 +134,7 @@
     initialTypeId = "",
     initialColor = null,
     initialIcon = null,
+    initialSummaryFields = null,
     schemaTypeLayerId = $bindable(""),
     expandedSchemaFieldId = $bindable(null),
     fieldDropTarget = $bindable(null),
@@ -197,6 +205,7 @@
     typeId: initialTypeId,
     color: initialColor,
     icon: initialIcon,
+    summaryFields: initialSummaryFields,
   }));
 
   let draftName = $state(seed.name);
@@ -206,6 +215,19 @@
   let draftTypeId = $state(seed.typeId);
   let draftColor = $state(seed.color);
   let draftIcon = $state(seed.icon);
+  // Own summary-line nomination (#2008); null = "inherit the parent's".
+  let draftSummaryFields = $state<string[] | null>(seed.summaryFields);
+  // The parent's effective nomination (dimmed display + copy-on-edit base)
+  // and its display name; the field roster the "+" offers.
+  const inheritedSummaryFields = $derived(
+    schemaTypeParent ? (metadataSchema?.entry_types[schemaTypeParent]?.summary_fields ?? null) : null,
+  );
+  const inheritedSummaryFrom = $derived(
+    schemaTypeParent ? nodeTypeDisplayName(schemaTypeParent, metadataSchema?.entry_types[schemaTypeParent]) : null,
+  );
+  const summaryFieldOptions = $derived(
+    summaryFieldChoices(metadataSchema, selectedSchemaTypeId, typeFieldSections),
+  );
   // The effective icon this type would inherit from its parent chain (#316),
   // shown as the dashed fallback + "inherits X" hint when own-icon is unset.
   const inheritedIcon = $derived(
@@ -298,13 +320,15 @@
       typeId: draftTypeId,
       color: draftColor,
       icon: draftIcon,
+      summaryFields: draftSummaryFields,
     };
   }
   const isDirty = $derived(
     draftName !== baseline.name ||
       draftTypeId !== baseline.typeId ||
       draftColor !== baseline.color ||
-      draftIcon !== baseline.icon,
+      draftIcon !== baseline.icon ||
+      !sameSummaryFields(draftSummaryFields, baseline.summaryFields),
   );
   $effect(() => {
     dirty = isDirty;
@@ -316,6 +340,7 @@
       name: draftName,
       color: draftColor,
       icon: draftIcon,
+      summaryFields: draftSummaryFields,
     });
     // Re-baseline on success so `dirty` clears without a remount (a failed save
     // — e.g. a blocked rename — returns false and keeps the changes flagged).
@@ -441,6 +466,13 @@
       <span class="extends-pill">{nodeTypeDisplayName(schemaTypeParent, parentDef)}</span>
     {/if}
   </div>
+  <SummaryFieldsEditor
+    fields={summaryFieldOptions}
+    value={draftSummaryFields}
+    inherited={inheritedSummaryFields}
+    inheritedFrom={inheritedSummaryFrom}
+    onChange={(next) => (draftSummaryFields = next)}
+  />
   {#if selectedSchemaTypeId}
     {@const ownFieldIds = new Set(typeOwnFieldEntries.map(([id]) => id))}
     {@const totalFieldCount = typeFieldSections.reduce((n, s) => n + s.entries.length, 0)}

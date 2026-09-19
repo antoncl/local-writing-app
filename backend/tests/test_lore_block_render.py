@@ -7,6 +7,8 @@ suite already does elsewhere.
 """
 from __future__ import annotations
 
+import re
+
 from test_ai_helpers import _HelperFixtureBase
 
 from app.models import SaveLoreEntryRequest
@@ -62,8 +64,12 @@ class XmlOutputStructureTests(_HelperFixtureBase):
             body="Captain of the Fearless.",
         )
         text = self._render_lore("scene_one_node")
-        self.assertIn(
-            f'<home_place id="{self.manticore["id"]}">Manticore</home_place>', text
+        # The whole tag, with the optional `summary="…"` attribute a target's
+        # nominated / fallback summary rides along as (#2008) — nothing else
+        # may sit between the id and the name.
+        self.assertRegex(
+            text,
+            rf'<home_place id="{re.escape(self.manticore["id"])}"( summary="[^"]*")?>Manticore</home_place>',
         )
 
     def test_entity_ref_list_renders_each_target_with_id(self) -> None:

@@ -61,6 +61,14 @@ export type EntryTypeDefinition = {
   // aspect (label) doesn't freeze the inherited other aspect (hidden) into the
   // layer. Read-back only; writes still go through the field-override endpoint.
   own_field_overrides?: Record<string, FieldOverride>;
+  // The fields nominated for the row/list "detail" line's summary (#2008),
+  // inherited down the kind→type chain like `color`. Field keys of the type.
+  // Absent/empty falls back to the resolver's synthesis (first three present
+  // scalar fields, in schema order). See `lib/utils/summaryFields.ts`.
+  summary_fields?: string[] | null;
+  // Pre-inheritance nomination — mirrors `own_fields` / `own_color`. Editor
+  // uses this to distinguish "set on this type" from "inherited from parent".
+  own_summary_fields?: string[] | null;
 };
 
 // Per-type presentation overlay on a field (#116). `label` renames it for the

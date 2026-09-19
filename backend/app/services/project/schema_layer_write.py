@@ -48,8 +48,12 @@ CLEARABLE_FIELD_KEYS = _optional_keys(MetadataFieldDefinition, RESOLVER_STAMPED_
 CLEARABLE_GROUP_KEYS = _optional_keys(MetadataGroupDefinition, frozenset())
 # An entry type's `parent` is a declaration key with its own handling
 # (`_base_entry_type_payload` pops a falsy one; the built-in overlay strips it);
-# `body_shape` has no editor control. The two the type editor clears:
-CLEARABLE_ENTRY_TYPE_KEYS = tuple(key for key in _optional_keys(EntryTypeDefinition, RESOLVER_STAMPED_ENTRY_TYPE_KEYS) if key in ("color", "icon"))
+# `body_shape` has no editor control. The three the type editor clears:
+CLEARABLE_ENTRY_TYPE_KEYS = tuple(
+    key
+    for key in _optional_keys(EntryTypeDefinition, RESOLVER_STAMPED_ENTRY_TYPE_KEYS)
+    if key in ("color", "icon", "summary_fields")
+)
 
 
 def explicit_nulls(model: BaseModel) -> set[str]:

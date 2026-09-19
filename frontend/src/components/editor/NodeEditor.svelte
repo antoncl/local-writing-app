@@ -697,13 +697,19 @@
     // for one render before the fallback effect below catches it.
     activeBodyTab = restoredBodyTab(sceneId ? bodyMemory.tabFor(sceneId) : undefined, bodyTabs);
   });
+  // Every deliberate tab change goes through here so the memory and the
+  // strip can never disagree (the restore effect above is the only other
+  // writer, and it reads the memory rather than writing it).
+  function setBodyTab(id: string): void {
+    activeBodyTab = id;
+    if (sceneId) bodyMemory.rememberTab(sceneId, id);
+  }
   $effect(() => {
     // A schema change (or the field itself being removed) can make the active
     // tab's field disappear — fall back to "body" rather than stranding the
     // strip on a tab that no longer exists.
     if (activeBodyTab !== "body" && !bodyTabs.some((tab) => tab.id === activeBodyTab)) {
-      activeBodyTab = "body";
-      if (sceneId) bodyMemory.rememberTab(sceneId, "body");
+      setBodyTab("body");
     }
   });
   $effect.pre(() => {
@@ -898,10 +904,7 @@
       navigate: (payload) => onNavigate?.(payload),
       resetField: (fieldId) => onResetField?.(fieldId),
       goToSection: (fieldId) => sectionRegistry.focus(fieldId),
-      goToList: (fieldId) => {
-        activeBodyTab = `list:${fieldId}`;
-        if (sceneId) bodyMemory.rememberTab(sceneId, activeBodyTab);
-      },
+      goToList: (fieldId) => setBodyTab(`list:${fieldId}`),
       park: () => { void snapshots.park(null); },
     }}
   />
@@ -987,10 +990,7 @@
     }}
     on={{
       toggleInteriority: () => bodyHost?.toggleInteriority(), authoringLayerChange: onAuthoringLayerChange,
-      selectBodyTab: (id) => {
-        activeBodyTab = id;
-        if (sceneId) bodyMemory.rememberTab(sceneId, id);
-      },
+      selectBodyTab: setBodyTab,
     }}
   />
   <EditorBodyHost

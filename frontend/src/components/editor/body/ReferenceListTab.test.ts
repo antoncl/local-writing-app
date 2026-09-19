@@ -153,7 +153,10 @@ describe("ReferenceListTab — peek card (#2011)", () => {
 describe("ReferenceListTab — scroll memory (#2013)", () => {
   const NODE_ID = "char_tomas"; // any stable string; not resolved as a ref here
 
-  afterEach(() => bodyMemory.forget(NODE_ID));
+  afterEach(() => {
+    bodyMemory.forget(NODE_ID);
+    vi.unstubAllGlobals();
+  });
 
   it("restores a remembered scroll position for this node/field on mount", async () => {
     bodyMemory.rememberScroll(NODE_ID, "list:kin", 120);
@@ -184,6 +187,5 @@ describe("ReferenceListTab — scroll memory (#2013)", () => {
     await fireEvent.scroll(body);
     (frame as unknown as FrameRequestCallback)(0);
     expect(bodyMemory.scrollFor(NODE_ID, "list:kin")).toBe(40);
-    vi.unstubAllGlobals();
   });
 });

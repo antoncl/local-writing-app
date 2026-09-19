@@ -153,8 +153,12 @@
   // mounts. reloadScene re-seeds the TipTap buffer from a server scene (a
   // reconcile after an out-of-band write, e.g. embedded-TODO/ADR-0085
   // replace); highlightEmbeddedTodo scrolls to a marker.
-  export function getBody(): string {
-    return proseBodyView?.getBody() ?? "";
+  // `undefined` when this shape mounts no prose view (chat / view / none):
+  // the shell's callers fall back to the stored `scene.body` in that case
+  // (snapshot capture, the scrub overlay, the review's current-body read) —
+  // coalescing to "" here would silently capture an empty body for them.
+  export function getBody(): string | undefined {
+    return proseBodyView?.getBody();
   }
 
   export async function adoptBody(markdown: string): Promise<void> {

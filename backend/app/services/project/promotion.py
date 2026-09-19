@@ -394,6 +394,11 @@ class PromotionMixin:
         )
         self._write_lore_entry_file(self._filepath_for_new_node(dest.folder / "lore", full.title), promoted)
         self._delete_node_file(self._path_for_node_id(entry_id, "lore"))
+        # The base snapshot store co-locates with the owning layer, which just
+        # moved to `dest` — carry the history with it (#2019), or a later list
+        # resolves the new owner's empty folder and silently loses it. A MOVE, not
+        # a reap: promotion preserves the entry (contrast #2015's fork reap).
+        self.move_scene_snapshots(root, dest.folder, entry_id)
         # The write funnel patches the memo incrementally per call; a promotion
         # spans two layers in one gesture, which the incremental patch was
         # never built to model. Force a cold rebuild rather than trust it, so
@@ -613,6 +618,10 @@ class PromotionMixin:
             omit_empty_metadata=True,
         )
         self._delete_node_file(self._path_for_node_id(entry_id, "prompt"))
+        # Carry the base snapshot store to the new owning layer (#2019), same as
+        # promote_lore_entry. This site runs for every cascaded include member AND
+        # the top prompt, so one move here covers them all.
+        self.move_scene_snapshots(root, dest.folder, entry_id)
         # See `promote_lore_entry`: force a cold rebuild so the next read (the
         # next cascade member, or the final `read_prompt_entry`) already
         # resolves this id as inherited from `dest`.

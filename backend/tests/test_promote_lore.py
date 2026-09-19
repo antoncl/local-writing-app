@@ -152,6 +152,34 @@ class PromoteLoreTests(unittest.TestCase):
         self.assertTrue(any((self.series / "lore").glob("*.md")))
         self.assertEqual(list((self.root / "lore").glob("*.md")), [])
 
+    # --- 1a: the base snapshot store follows the entry (#2019) ------------
+
+    def test_promotion_moves_the_base_snapshot_store_to_the_destination(self) -> None:
+        # The base store co-locates with the OWNING layer, which promotion moves
+        # up — so the store must move too, or a later list resolves the new owner's
+        # empty folder and the history is silently lost, stranded at the origin.
+        self._write_ancestor_lore(self.root, "alice", "Alice", entry_type="lore:character")
+        node_index_gate.invalidate()  # a direct file write bypasses the memo
+        snap = self.service.capture_snapshot("alice", kind="lore")
+        self.assertTrue((self.root / "snapshots" / "alice").is_dir())
+
+        self.service.promote_lore_entry("alice", self.series_layer_id)
+
+        # The store followed the entry to the destination…
+        self.assertTrue((self.series / "snapshots" / "alice").is_dir())
+        self.assertFalse((self.root / "snapshots" / "alice").exists())
+        # …and the history is still listable at the new owner (no silent loss).
+        listed = [s.id for s in self.service.list_snapshots("alice", kind="lore").snapshots]
+        self.assertIn(snap.id, listed)
+
+    def test_promoting_a_never_snapshotted_entry_moves_no_store(self) -> None:
+        # A missing source store must be a clean no-op, not a raise.
+        self._write_ancestor_lore(self.root, "bob", "Bob", entry_type="lore:character")
+        node_index_gate.invalidate()
+        self.service.promote_lore_entry("bob", self.series_layer_id)
+        self.assertFalse((self.series / "snapshots" / "bob").exists())
+        self.assertEqual(self.service.list_snapshots("bob", kind="lore").snapshots, [])
+
     # --- 2: refusals -------------------------------------------------------
 
     def test_promote_refuses_inherited(self) -> None:

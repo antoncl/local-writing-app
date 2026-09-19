@@ -74,6 +74,7 @@ describe("EditorRailContent", () => {
         navigate: () => {},
         resetField: () => {},
         goToSection: () => {},
+        goToList: () => {},
         park: () => {},
       },
     });

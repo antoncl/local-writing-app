@@ -24,6 +24,7 @@
   import BodySections from "@/components/editor/body/BodySections.svelte";
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
   import ViewBodyView from "@/components/editor/body/ViewBodyView.svelte";
+  import ReferenceListTab from "@/components/editor/body/ReferenceListTab.svelte";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
@@ -31,6 +32,8 @@
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
   import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
+  import { tagTitleById } from "@/lib/stores/tagNodes";
+  import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import type {
     AssistantEntrySummary,
     BodyShape,
@@ -40,6 +43,7 @@
     EntryMetadata,
     LoreEntrySummary,
     MetadataSchema,
+    NavigateTarget,
     PromptContextStrategy,
     PromptEntrySummary,
   } from "@/lib/types";
@@ -74,6 +78,11 @@
     // The rail/backlinks/conversations content, defined in NodeEditor. Only
     // the none-shape branch (the rail-is-pane case) renders it here.
     metaContent: import("svelte").Snippet;
+    // #2010: the body tab strip's current selection, owned by NodeEditor. A
+    // `list:<fieldId>` value renders ReferenceListTab for that field, hiding
+    // (never unmounting — TipTap state/undo must survive a tab switch) the
+    // shape's own body view underneath.
+    activeBodyTab: string;
   }
 
   interface BodyHostDeps {
@@ -102,6 +111,8 @@
     }) => void;
     metadataChange: (next: EntryMetadata) => void;
     viewSaveState: (state: ViewSaveState) => void;
+    // #2010: a ReferenceListTab row's double-click / navigate intent.
+    navigate: (target: NavigateTarget) => void;
   }
 
   interface Props {
@@ -135,6 +146,20 @@
     sceneSessionCostUsd = $bindable(0),
     characterCostUsd = $bindable({}),
   }: Props = $props();
+
+  // #2010: the active body tab's field id, or null on the "body"/"details" tab.
+  // Guarded against a non-string/absent `activeBodyTab` (a test double, or a
+  // host mid-migration) rather than assuming the prop is always well-formed.
+  let listFieldId = $derived(
+    typeof model.activeBodyTab === "string" && model.activeBodyTab.startsWith("list:")
+      ? model.activeBodyTab.slice(5)
+      : null,
+  );
+  function toIdList(v: unknown): string[] {
+    if (Array.isArray(v)) return v.map((item) => String(item));
+    if (typeof v === "string" && v) return [v];
+    return [];
+  }
 
   let proseBodyView: ProseBodyView | null = $state(null);
   let codeBodyView: CodeBodyView | null = $state(null);
@@ -214,10 +239,15 @@
 {#if model.bodyShape === "none"}
   <!-- `!detailsDetached`: if the shape flips to none while Details is detached,
        the fold-back effect reattaches next tick — this gate keeps metaContent
-       single-mounted through that one tick (not inline + detached pane, #1258). -->
+       single-mounted through that one tick (not inline + detached pane, #1258).
+       #2010: wrapped in a `display: contents` host so a list tab can HIDE it
+       (never unmount — this content has its own live edit state) instead of
+       replacing it; `.none-body-host` is the same pattern as `.prose-body-host`. -->
   {#if model.scene && model.metadataSchema && !model.detailsDetached}
-    <div class="editor-pane-meta">
-      {@render model.metaContent()}
+    <div class="none-body-host" class:hidden={listFieldId !== null}>
+      <div class="editor-pane-meta">
+        {@render model.metaContent()}
+      </div>
     </div>
   {:else if !model.scene || !model.metadataSchema}
     <FieldsOnlyView />
@@ -230,7 +260,7 @@
          beneath (frozen diff base), thawing to the adopted text on commit. -->
     <EntryReviewOverlay review={model.entryReview} />
   {/if}
-  <div class="code-body-host" class:hidden={model.reviewing}>
+  <div class="code-body-host" class:hidden={model.reviewing || listFieldId !== null}>
     <CodeBodyView
       bind:this={codeBodyView}
       bind:rawBody
@@ -280,7 +310,7 @@
   {/if}
   <div
     class="prose-body-host"
-    class:hidden={model.scrubbed || model.snapshotParked || model.reviewing}
+    class:hidden={model.scrubbed || model.snapshotParked || model.reviewing || listFieldId !== null}
   >
     <ProseBodyView
       bind:this={proseBodyView}
@@ -339,17 +369,48 @@
   />
 {/if}
 {#if model.bodyShape === "view"}
-  <ViewBodyView
-    bind:this={viewBodyView}
-    scene={model.scene}
-    loreEntries={deps.loreEntries}
-    promptEntries={deps.promptEntries}
-    assistantEntries={deps.assistantEntries}
-    structure={deps.structure}
-    researchStructure={deps.researchStructure}
-    onBodyChange={on.change}
-    onFocus={() => on.focus()}
-    onSaveState={(state) => on.viewSaveState(state)}
+  <!-- #2010: same hidden-host pattern as prose/code/none — a view pane is a
+     lightweight component (no undo buffer to preserve), but hiding rather
+     than conditionally mounting keeps ALL five shapes on one rule. -->
+  <div class="view-body-host" class:hidden={listFieldId !== null}>
+    <ViewBodyView
+      bind:this={viewBodyView}
+      scene={model.scene}
+      loreEntries={deps.loreEntries}
+      promptEntries={deps.promptEntries}
+      assistantEntries={deps.assistantEntries}
+      structure={deps.structure}
+      researchStructure={deps.researchStructure}
+      onBodyChange={on.change}
+      onFocus={() => on.focus()}
+      onSaveState={(state) => on.viewSaveState(state)}
+    />
+  </div>
+{/if}
+{#if listFieldId && model.metadataSchema}
+  <!-- #2010: the active tab is a list tab — render its full editor as a
+       direct grid child, alongside the (hidden, still-mounted) shape body. -->
+  <ReferenceListTab
+    model={{
+      field: model.metadataSchema.fields[listFieldId],
+      fieldId: listFieldId,
+      fieldLabel: effectiveFieldLabel(model.metadataSchema, model.entryType, listFieldId),
+      ids: toIdList(model.metadata[listFieldId]),
+      readOnly: model.editorReadOnly,
+      schema: model.metadataSchema,
+    }}
+    deps={{
+      loreEntries: deps.loreEntries,
+      promptEntries: deps.promptEntries,
+      assistantEntries: deps.assistantEntries,
+      structure: deps.structure,
+      researchStructure: deps.researchStructure,
+      tagTitleById: $tagTitleById,
+    }}
+    on={{
+      change: (ids) => on.metadataChange({ ...model.metadata, [listFieldId]: ids }),
+      navigate: (payload) => on.navigate(payload),
+    }}
   />
 {/if}
 
@@ -365,13 +426,21 @@
 
   /* ---- Time-travel overlay chrome (#64) ---------------------------------- */
   /* Keeps ProseBodyView a direct grid child of .editor-panel when visible;
-     display:none while scrubbed preserves the mounted TipTap buffer. */
+     display:none while scrubbed preserves the mounted TipTap buffer. #2010
+     reuses the same pattern for `.none-body-host`/`.view-body-host` so a body
+     tab strip's list tab can HIDE a shape's own body instead of unmounting
+     it — the none-shape metaContent and the view designer carry live edit
+     state exactly like prose/code do. */
   .prose-body-host,
-  .code-body-host {
+  .code-body-host,
+  .none-body-host,
+  .view-body-host {
     display: contents;
   }
   .prose-body-host.hidden,
-  .code-body-host.hidden {
+  .code-body-host.hidden,
+  .none-body-host.hidden,
+  .view-body-host.hidden {
     display: none;
   }
 </style>

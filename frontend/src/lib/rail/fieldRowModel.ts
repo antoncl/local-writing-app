@@ -49,6 +49,15 @@ export type RailRowContext = {
   // (BodySections). When true, a long_text row becomes a rail INDEX row (a
   // word-count "Go to …" jump) instead of hosting the editor — see `sectionIndex`.
   sectionsInBody: boolean;
+  // #2010: the open entry's body renders a tab per `entity_ref_list` field
+  // (the body tab strip). When true, such a field becomes a rail INDEX row (a
+  // per-type-count "Open …" jump) instead of hosting its own picker/pills —
+  // see `listIndex`. False for chat (the strip never renders there).
+  listsInBody: boolean;
+  // #2010: resolves a list member id to its entry_type, for the list-index
+  // row's per-type summary — the same walk `lib/utils/refResolve.ts` shares
+  // with ReferencePicker/ReferenceListTab. Absent id (unresolvable) → null.
+  resolveListMemberType?: (id: string) => string | null;
   canClearOwn: boolean;
   canResetOverride: boolean;
   readOnly: boolean;
@@ -87,6 +96,10 @@ export type RailRowModel = {
   // section instead) — `wordCount` is over the field's current value.
   sectionIndex: boolean;
   wordCount: number;
+  // #2010: this row is an entity_ref_list index row (its editor lives in a
+  // body tab instead) — `listSummary` is the per-type count line.
+  listIndex: boolean;
+  listSummary: string;
   colorRow: boolean;
   foldableList: boolean;
   fieldExpanded: boolean;
@@ -289,6 +302,7 @@ function isRefFieldType(field: MetadataFieldDefinition): boolean {
 // compact types keep their control inline on the right. See MetadataPanel's
 // prior comment history (#1810, #1949) for the full reasoning per type.
 function isWide(ctx: RailRowContext, field: MetadataFieldDefinition, fieldId: string): boolean {
+  if (isListIndex(ctx, field)) return false;
   const populated = isMetadataValuePresent(displayValue(ctx, fieldId));
   return (
     (field.type === "long_text" && !ctx.sectionsInBody) ||
@@ -302,6 +316,39 @@ function isWide(ctx: RailRowContext, field: MetadataFieldDefinition, fieldId: st
 // section instead of the rail.
 function isSectionIndex(ctx: RailRowContext, field: MetadataFieldDefinition): boolean {
   return ctx.sectionsInBody && field.type === "long_text";
+}
+
+// #2010: an entity_ref_list row becomes an index row when its editor lives in
+// a body tab instead of the rail. A tags field never routes here — it keeps
+// its own mono-line treatment (#2007) regardless of `listsInBody`.
+function isListIndex(ctx: RailRowContext, field: MetadataFieldDefinition): boolean {
+  return ctx.listsInBody && field.type === "entity_ref_list" && !isTagListField(field, ctx.schema);
+}
+
+// The list-index row's summary line: the total count, then a per-entry-type
+// breakdown in first-appearance order ("12 · 5 Characters, 4 Locations"). An
+// id `resolveListMemberType` can't resolve counts as "missing" — the same
+// "unresolved but still countable" treatment ReferencePicker's own pill gives
+// a stale/broken ref, just folded into the summary instead of a row of its own.
+function listSummary(ctx: RailRowContext, fieldId: string): string {
+  const value = displayValue(ctx, fieldId);
+  const ids = Array.isArray(value) ? value.map((v) => String(v)) : [];
+  if (ids.length === 0) return "";
+  const order: string[] = [];
+  const counts = new Map<string, number>();
+  for (const id of ids) {
+    const entryType = ctx.resolveListMemberType?.(id) ?? null;
+    const label = entryType ? (ctx.schema.entry_types[entryType]?.name ?? entryType) : "missing";
+    if (!counts.has(label)) {
+      counts.set(label, 0);
+      order.push(label);
+    }
+    counts.set(label, counts.get(label)! + 1);
+  }
+  const parts = order.map((label) => `${counts.get(label)} ${label}`);
+  // One type: `2 Character` — the leading total would only repeat it.
+  if (parts.length === 1) return parts[0];
+  return `${ids.length} · ${parts.join(", ")}`;
 }
 
 // An empty row recedes (#1884 slice 3): label + glyph in --text-3. `color`
@@ -324,6 +371,7 @@ function isRowEmpty(ctx: RailRowContext, field: MetadataFieldDefinition, fieldId
 // line, not a pill list, so it has nothing to disclose.
 function isFoldableList(ctx: RailRowContext, field: MetadataFieldDefinition, fieldId: string): boolean {
   if (isTagListField(field, ctx.schema)) return false;
+  if (isListIndex(ctx, field)) return false;
   return field.type === "entity_ref_list" && isMetadataValuePresent(displayValue(ctx, fieldId));
 }
 
@@ -361,6 +409,7 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
   const editing = ctx.openFieldId === fieldId;
   const wide = isWide(ctx, field, fieldId);
   const sectionIndex = isSectionIndex(ctx, field);
+  const listIndex = isListIndex(ctx, field);
   const colorRow = field.type === "color";
   const isComputed = field.type === "computed";
   const isStatus = fieldId === "status";
@@ -409,6 +458,8 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
     wide,
     sectionIndex,
     wordCount: sectionIndex ? countWords(metadataValueString(value)) : 0,
+    listIndex,
+    listSummary: listIndex ? listSummary(ctx, fieldId) : "",
     colorRow,
     foldableList: isFoldableList(ctx, field, fieldId),
     fieldExpanded: ctx.fieldExpanded(fieldId),

@@ -33,6 +33,7 @@
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
   import { deriveBodyShape, documentLabelFor } from "@/lib/editor-core/documentPresentation";
   import { wireReviewFreeze } from "@/lib/editor-core/reviewFreeze.svelte";
+  import { buildBodyTabs } from "@/lib/editor-core/bodyTabs";
 
   interface Props {
     scene?: EditableDocument | null;
@@ -676,6 +677,28 @@
   let bodyShape = $derived(deriveBodyShape(entryTypeDef));
   let rawBodyMode = $derived(bodyShape === "code");
   let rawBodyLanguage = $derived((entryTypeDef?.body_language ?? "markdown") satisfies EntryBodyLanguage);
+
+  // ---- Body tab strip (#2010) -------------------------------------------
+  // One "Body"/"Details" tab plus one per `entity_ref_list` field; empty when
+  // the entry type declares no list fields (no strip). Component-local — the
+  // active tab isn't persisted across a reopen (#2013 is a later issue).
+  let bodyTabs = $derived(buildBodyTabs(metadataSchema, entryType, bodyShape, metadata));
+  let activeBodyTab = $state("body");
+  $effect(() => {
+    // Reset to "body" on a genuine node switch (keyed on the primitive id,
+    // like the rail reconcile) — never on a keystroke, which would fight a
+    // tab the author is actively looking at.
+    void sceneId;
+    activeBodyTab = "body";
+  });
+  $effect(() => {
+    // A schema change (or the field itself being removed) can make the active
+    // tab's field disappear — fall back to "body" rather than stranding the
+    // strip on a tab that no longer exists.
+    if (activeBodyTab !== "body" && !bodyTabs.some((tab) => tab.id === activeBodyTab)) {
+      activeBodyTab = "body";
+    }
+  });
   $effect.pre(() => {
     if (rawBodyMode && rawBody !== lastEmittedRawBody) {
       lastEmittedRawBody = rawBody;
@@ -868,6 +891,7 @@
       navigate: (payload) => onNavigate?.(payload),
       resetField: (fieldId) => onResetField?.(fieldId),
       goToSection: (fieldId) => sectionRegistry.focus(fieldId),
+      goToList: (fieldId) => { activeBodyTab = `list:${fieldId}`; },
       park: () => { void snapshots.park(null); },
     }}
   />
@@ -949,8 +973,12 @@
       scene, documentKind, bodyShape, documentNameLabel, titleMutated, hasInteriorityBeats,
       interiorityRevealed, liveWordCount, characterCostRowsView, lastInvocationCostUsd,
       sceneSessionCostUsd, rollupCostKind, todoStatusHint, authoringLayerId, recentlySaved, chatTitleField,
+      tabs: bodyTabs, activeBodyTab,
     }}
-    on={{ toggleInteriority: () => bodyHost?.toggleInteriority(), authoringLayerChange: onAuthoringLayerChange }}
+    on={{
+      toggleInteriority: () => bodyHost?.toggleInteriority(), authoringLayerChange: onAuthoringLayerChange,
+      selectBodyTab: (id) => { activeBodyTab = id; },
+    }}
   />
   <EditorBodyHost
     bind:this={bodyHost}
@@ -958,6 +986,7 @@
       scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, metadata,
       metadataSchema, editorReadOnly, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
       overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, detailsDetached, chatTitleField, metaContent,
+      activeBodyTab,
     }}
     deps={{
       loreEntries, promptEntries, assistantEntries, availableScenes, structure, researchStructure,
@@ -967,6 +996,7 @@
       change: emitChange, focus: () => onFocus?.(), openChat: (payload) => onOpenChat?.(payload),
       requestInputsDialog: (payload) => promptDialog?.open(payload),
       metadataChange: (next) => { metadata = next; emitChange(); }, viewSaveState: (state) => onViewSaveState?.(state),
+      navigate: (payload) => onNavigate?.(payload),
     }}
     bind:rawBody bind:offerOnDraft bind:contextStrategyDraft bind:liveWordCount bind:editorEmpty
     bind:hasInteriorityBeats bind:interiorityRevealed bind:lastInvocationCostUsd bind:sceneSessionCostUsd bind:characterCostUsd

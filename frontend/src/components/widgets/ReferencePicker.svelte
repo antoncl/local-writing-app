@@ -21,6 +21,7 @@
   import { resolveColor } from "@/lib/utils/colors";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { pickerMembership } from "@/lib/utils/pickerSources";
+  import { buildRefResolver } from "@/lib/utils/refResolve";
   import type {
     NodePickerConfig,
     NodePickerRef,
@@ -152,11 +153,22 @@
   type RefNode = ResolvedRef & { entry_type: string };
 
   const selectedIds = $derived(toIdList(value));
-  const sceneIndex = $derived(structure ? flattenScenesAll(structure.root) : new Map<string, { id: string; title: string; entry_type: string }>());
+  // Kept alongside the resolver below (not folded into it): `instanceColorFor`
+  // needs the raw LoreEntrySummary for its `metadata.color`, not a ResolvedRef.
   const loreIndex = $derived(new Map(loreEntries.map((e) => [e.id, e] as const)));
-  const promptIndex = $derived(new Map(promptEntries.map((e) => [e.id, e] as const)));
-  const plotIndex = $derived(new Map($plotlineEntriesStore.map((e) => [e.id, e] as const)));
-  const assistantIndex = $derived(new Map($assistantEntriesStore.map((e) => [e.id, e] as const)));
+  // The shared id → node walk (#2010 lift): rebuilt whenever the in-memory
+  // sources it closes over change, exactly like the per-index `$derived`s it
+  // replaces — same reactivity, one fewer copy of the walk.
+  const refResolver = $derived(
+    buildRefResolver({
+      structure,
+      loreEntries,
+      promptEntries,
+      assistantEntries: $assistantEntriesStore,
+      plotEntries: $plotlineEntriesStore,
+      tagById: $tagById,
+    }),
+  );
   const selectedRefs = $derived(selectedIds.map((id) => resolveRefById(id)));
   const refNodes = $derived(selectedRefs.map((ref): RefNode => ({ ...ref, entry_type: ref.entry_type ?? "" })));
 
@@ -176,40 +188,12 @@
     return trimmed ? [trimmed] : [];
   }
 
-  function flattenScenesAll(node: StructureNode | null | undefined): Map<string, { id: string; title: string; entry_type: string }> {
-    const out = new Map<string, { id: string; title: string; entry_type: string }>();
-    const walk = (n: StructureNode) => {
-      if (n.type === "manuscript:scene" && n.scene_id) {
-        const entryType = (n as unknown as { entry_type?: string }).entry_type ?? "manuscript:scene";
-        out.set(n.scene_id, { id: n.scene_id, title: n.title, entry_type: entryType });
-      }
-      for (const child of n.children ?? []) walk(child);
-    };
-    if (node) walk(node);
-    return out;
-  }
-
+  // A resolver miss falls back to the picker's configured kind so a freshly-
+  // saved ref whose index hasn't refreshed yet still shows the right
+  // type-pill color, flagged `missing` so the pill/row render distinctly.
   function resolveRefById(id: string): ResolvedRef {
-    const scene = sceneIndex.get(id);
-    if (scene) return { id, kind: "manuscript", title: scene.title, entry_type: scene.entry_type };
-    const lore = loreIndex.get(id);
-    if (lore) return { id, kind: "lore", title: lore.title, entry_type: lore.entry_type };
-    const snippet = promptIndex.get(id);
-    if (snippet) return { id, kind: "snippet", title: snippet.title, entry_type: snippet.entry_type };
-    const assistant = assistantIndex.get(id);
-    if (assistant) return { id, kind: "assistant", title: assistant.title, entry_type: assistant.entry_type };
-    const plotline = plotIndex.get(id);
-    if (plotline) return { id, kind: "plot", title: plotline.title, entry_type: plotline.entry_type };
-    // A tag node (ADR-0082 slice 1). `kind: "tag"` here names a MEMBER pick —
-    // note it carries no `selector`, which is how a selector ref (the same
-    // "tag" kind value, §4 of the ADR) is told apart; slice 2 disambiguates
-    // the literal itself. Canonicalised first (§5): a chip for a merged id
-    // shows the survivor's title/type, while `.id` stays the value actually
-    // stored, so removal-by-id still targets what the field holds.
-    const tag = $tagById.get(canonicalIdIn($tagById, id));
-    if (tag) return { id, kind: "tag", title: tag.title, entry_type: tag.entry_type };
-    // Fall back to the picker's configured kind so a freshly-saved ref whose
-    // index hasn't refreshed yet still shows the right type-pill color.
+    const resolved = refResolver(id);
+    if (resolved) return resolved;
     const fallbackKind = (targetKind || "lore") as NodePickerRef["kind"];
     return { id, kind: fallbackKind, title: id, entry_type: targetEntryType || undefined, missing: true };
   }

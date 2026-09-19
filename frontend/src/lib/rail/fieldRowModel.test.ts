@@ -60,6 +60,7 @@ function baseCtx(overrides: Partial<RailRowContext> = {}): RailRowContext {
     openFieldId: null,
     fieldExpanded: () => false,
     sectionsInBody: false,
+    listsInBody: false,
     ...overrides,
   };
 }
@@ -130,5 +131,50 @@ describe("buildRailRowModel", () => {
     expect(model.sectionIndex).toBe(true);
     expect(model.wordCount).toBe(0);
     expect(model.empty).toBe(true);
+  });
+
+  describe("listsInBody (#2010)", () => {
+    it("without listsInBody, a populated entity_ref_list is unchanged (wide + foldable, no index)", () => {
+      const model = buildRailRowModel(baseCtx({ metadata: { allies: ["lore_1"] } }), "allies");
+      expect(model.listIndex).toBe(false);
+      expect(model.wide).toBe(true);
+      expect(model.foldableList).toBe(true);
+    });
+
+    it("with listsInBody, a populated entity_ref_list becomes a non-wide, non-foldable index row with a per-type summary", () => {
+      const model = buildRailRowModel(
+        baseCtx({
+          listsInBody: true,
+          metadata: { allies: ["lore_1", "lore_2", "lore_3"] },
+          resolveListMemberType: (id) => (id === "lore_2" ? "tag:tag" : "lore:character"),
+        }),
+        "allies",
+      );
+      expect(model.listIndex).toBe(true);
+      expect(model.wide).toBe(false);
+      expect(model.foldableList).toBe(false);
+      expect(model.listSummary).toBe("3 · 2 Character, 1 Tag");
+    });
+
+    it("an unresolvable list member counts as 'missing' in the summary", () => {
+      const model = buildRailRowModel(
+        baseCtx({ listsInBody: true, metadata: { allies: ["lore_1"] } }),
+        "allies",
+      );
+      expect(model.listSummary).toBe("1 · 1 missing");
+    });
+
+    it("an empty entity_ref_list with listsInBody still reads empty (folds under #2006)", () => {
+      const model = buildRailRowModel(baseCtx({ listsInBody: true, metadata: {} }), "allies");
+      expect(model.listIndex).toBe(true);
+      expect(model.empty).toBe(true);
+      expect(model.listSummary).toBe("");
+    });
+
+    it("a tag-vocabulary field is never a list index, even with listsInBody", () => {
+      const model = buildRailRowModel(baseCtx({ listsInBody: true, metadata: { tags: ["tag_1"] } }), "tags");
+      expect(model.listIndex).toBe(false);
+      expect(model.isTagList).toBe(true);
+    });
   });
 });

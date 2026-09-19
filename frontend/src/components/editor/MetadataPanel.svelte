@@ -25,8 +25,11 @@
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
-  import { tagTitleById } from "@/lib/stores/tagNodes";
+  import { tagById, tagTitleById } from "@/lib/stores/tagNodes";
+  import { assistantEntriesStore } from "@/lib/stores/assistants";
+  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
+  import { buildRefResolver } from "@/lib/utils/refResolve";
   import { buildRailRowModel, isFlipped, isFlipResolve, isMutated, isRowEmpty, type RailRowContext } from "@/lib/rail/fieldRowModel";
 
   interface Props {
@@ -98,6 +101,12 @@
     // #2009: scroll + focus the body section for a field id — wired to the
     // registry NodeEditor owns (the section's own TipTap editor instance).
     onGoToSection?: (fieldId: string) => void;
+    // #2010: the open entry's body renders a tab per `entity_ref_list` field
+    // (the body tab strip) — NodeEditor passes `bodyShape !== "chat"`. When
+    // true, such a field becomes an index row instead of hosting its own
+    // picker/pills; `onGoToList` is then required to switch to its tab.
+    listsInBody?: boolean;
+    onGoToList?: (fieldId: string) => void;
     // Outbound events as callback props (#14: MetadataPanel is runes — replaces
     // its createEventDispatcher). NodeEditor (legacy parent) passes these.
     onEntryTypeChange?: (entryType: string) => void;
@@ -140,6 +149,8 @@
     readOnly = false,
     sectionsInBody = false,
     onGoToSection,
+    listsInBody = false,
+    onGoToList,
     onEntryTypeChange,
     onStatusChange,
     onMetadataChange,
@@ -375,6 +386,22 @@
     onMetadataChange?.({ ...metadata, ai_provider: provider, ai_capability_tier: tier, ai_model: model });
   }
 
+  // #2010: resolves an entity_ref_list member id to its entry_type, for a
+  // list-index row's per-type summary — the same walk ReferencePicker's pills
+  // use (lib/utils/refResolve), over the in-memory sources this panel already
+  // holds plus the global assistant/plot/tag rosters (read directly, like
+  // ReferencePicker does — no extra prop threading).
+  const listMemberResolver = $derived(
+    buildRefResolver({
+      structure,
+      loreEntries,
+      promptEntries,
+      assistantEntries: $assistantEntriesStore,
+      plotEntries: $plotlineEntriesStore,
+      tagById: $tagById,
+    }),
+  );
+
   // #2009: a long_text index row's hit — bring its body section into view,
   // then hand off to the host to focus that section's own TipTap editor (the
   // rail doesn't own the section registry; NodeEditor does).
@@ -454,6 +481,8 @@
     openFieldId,
     fieldExpanded,
     sectionsInBody,
+    listsInBody,
+    resolveListMemberType: (id) => listMemberResolver(id)?.entry_type ?? null,
   });
   function rowModel(fieldId: string) {
     return buildRailRowModel(ctx, fieldId);
@@ -486,6 +515,7 @@
     navigate: (payload) => onNavigate?.(payload),
     toggleFlip: (fieldId) => compare?.resolve?.onToggle(fieldId),
     goToSection: (fieldId) => goToSection(fieldId),
+    goToList: (fieldId) => onGoToList?.(fieldId),
   };
 </script>
 

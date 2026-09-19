@@ -12,6 +12,7 @@
   // style block).
   import type { BodyShape, DocumentKind } from "@/lib/types";
   import type { CharacterCostRow, RollupCost } from "@/lib/editor-core/characterCost";
+  import type { BodyTab } from "@/lib/editor-core/bodyTabs";
   import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
   import EditorCostHint from "@/components/editor/EditorCostHint.svelte";
   import { INTERIORITY_EYE_SVG } from "@/lib/editor-core/interiorityReveal";
@@ -35,11 +36,16 @@
     // The five title-input variants, defined once in NodeEditor (state and
     // persistence live entirely there — see its own doc comment).
     chatTitleField: import("svelte").Snippet;
+    // #2010: the body tab strip — one "Body"/"Details" tab plus one per
+    // `entity_ref_list` field. Empty ⇒ no strip (today's rendering).
+    tabs: BodyTab[];
+    activeBodyTab: string;
   }
 
   interface HeaderCallbacks {
     toggleInteriority: () => void;
     authoringLayerChange?: ((layerId: string | null) => void) | undefined;
+    selectBodyTab: (id: string) => void;
   }
 
   interface Props {
@@ -48,6 +54,28 @@
   }
 
   let { model, on }: Props = $props();
+
+  // #2010: ArrowLeft/Right/Home/End move the tablist selection, per the
+  // standard tabs pattern. `currentTarget` is the `.body-tabs` div (the
+  // listener is on it — a `<nav>` landmark is invalid with role="tablist",
+  // an a11y-lint FAIL — so the strip is a plain div), so the query below is
+  // scoped to this strip's own buttons.
+  function handleTabKeydown(event: KeyboardEvent) {
+    const tabs = model.tabs;
+    if (tabs.length === 0) return;
+    const current = tabs.findIndex((t) => t.id === model.activeBodyTab);
+    const base = current === -1 ? 0 : current;
+    let next = -1;
+    if (event.key === "ArrowRight") next = (base + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") next = (base - 1 + tabs.length) % tabs.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = tabs.length - 1;
+    if (next === -1) return;
+    event.preventDefault();
+    on.selectBodyTab(tabs[next].id);
+    const nav = event.currentTarget as HTMLElement;
+    (nav.querySelectorAll<HTMLButtonElement>(".body-tab")[next])?.focus();
+  }
 </script>
 
 {#if model.scene && model.bodyShape === "chat"}
@@ -107,6 +135,26 @@
         sceneSessionCostUsd={model.sceneSessionCostUsd}
         rollupCost={model.rollupCostKind}
       />
+      {#if model.tabs.length > 0}
+        <!-- #2010: one tab per `entity_ref_list` field, plus a leading
+             Body/Details tab — grid row 1, so `.editor-panel`'s grid and the
+             `display: contents` body-host contract (EditorBodyHost) are
+             untouched (a strip element here stays a child of THIS section,
+             never a new direct child of `.editor-panel`). -->
+        <div class="body-tabs" role="tablist" aria-label="Body" tabindex="-1" onkeydown={handleTabKeydown}>
+          {#each model.tabs as tab (tab.id)}
+            <button
+              type="button"
+              role="tab"
+              class="body-tab"
+              class:active={model.activeBodyTab === tab.id}
+              aria-selected={model.activeBodyTab === tab.id}
+              tabindex={model.activeBodyTab === tab.id ? 0 : -1}
+              onclick={() => on.selectBodyTab(tab.id)}
+            >{tab.label}{#if tab.count !== undefined}<span class="body-tab-count">{tab.count}</span>{/if}</button>
+          {/each}
+        </div>
+      {/if}
     {:else}
       <h2>Select a scene</h2>
     {/if}
@@ -189,5 +237,44 @@
     font-size: var(--fs-xs);
     font-weight: 700;
     text-transform: uppercase;
+  }
+
+  /* #2010 body tab strip — one tab per `entity_ref_list` field plus a
+     leading Body/Details tab. Sans, no caps (unlike the title eyebrow):
+     these are navigation, not a field label. */
+  .body-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+    overflow-x: auto;
+  }
+  .body-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 4px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--text-2);
+    font-size: var(--fs-md);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .body-tab:hover {
+    color: var(--text);
+  }
+  .body-tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .body-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  .body-tab-count {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
 </style>

@@ -31,6 +31,9 @@
     toggleFlip: (fieldId: string) => void;
     // #2009: a long_text index row's hit — scroll to (and focus) its body section.
     goToSection: (fieldId: string) => void;
+    // #2010: an entity_ref_list index row's hit — switch the body tab strip to
+    // this field's list tab.
+    goToList: (fieldId: string) => void;
   };
 </script>
 
@@ -251,6 +254,20 @@
         aria-label={`Go to ${model.fieldLabel}`}
         onclick={() => on.goToSection(model.fieldId)}
       >{model.empty ? "empty" : model.wordCount === 1 ? "1 word" : `${model.wordCount} words`}</button>
+    {:else if model.listIndex}
+      <!-- #2010: the field's editor lives in a body tab instead of the rail —
+           this row is an index into it. Per-type summary; an empty list reads
+           "empty" (the row itself still carries `.empty`, so #2006's fold
+           still folds it). Never `.wide` — an index line is one row like any
+           scalar. Same `fr-rest-hit fr-section-index` chrome as the #2009
+           long_text index row — both are "this field's editor lives
+           elsewhere" jumps and read as one vocabulary. -->
+      <button
+        type="button"
+        class="fr-rest-hit fr-section-index"
+        aria-label={`Open ${model.fieldLabel}`}
+        onclick={() => on.goToList(model.fieldId)}
+      >{model.empty ? "empty" : model.listSummary}</button>
     {:else if !model.scalar}
       <FieldValueEditor
         field={model.field}

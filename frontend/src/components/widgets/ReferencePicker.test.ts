@@ -8,10 +8,10 @@
 // The `embedded` block covers #1216: in the metadata rail the field row already
 // prints the label, so the embedded picker must drop its own titled header
 // (which doubled the label) while keeping the expand/collapse control.
-import { afterEach, describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { tick } from "svelte";
 import { get } from "svelte/store";
-import { render, screen, fireEvent } from "@/lib/test/component";
+import { render, screen, fireEvent, within } from "@/lib/test/component";
 import ReferencePicker from "./ReferencePicker.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { clearTagNodes, tagById, tagNodesStore } from "@/lib/stores/tagNodes";
@@ -502,5 +502,50 @@ describe("ReferencePicker — create_missing wiring (ADR-0082 §2 / F2/F3)", () 
 
     expect(createSpy).not.toHaveBeenCalled();
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("ReferencePicker — peek card (#2011)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("hovering a rail pill opens a peek card with the ref's title", async () => {
+    render(ReferencePicker, {
+      props: { field, value: ["lore_1"], ariaLabel: "Characters", loreEntries, embedded: true, controlled: true },
+    });
+    const pill = document.querySelector(".ref-pill") as HTMLElement;
+    await fireEvent.mouseOver(pill);
+    vi.advanceTimersByTime(350);
+    await tick();
+    const card = document.querySelector(".peek-card");
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("Mira");
+  });
+
+  it("Remove on the card removes the id", async () => {
+    const onChange = vi.fn();
+    render(ReferencePicker, {
+      props: { field, value: ["lore_1"], ariaLabel: "Characters", loreEntries, embedded: true, controlled: true, onChange },
+    });
+    const pill = document.querySelector(".ref-pill") as HTMLElement;
+    await fireEvent.mouseOver(pill);
+    vi.advanceTimersByTime(350);
+    await tick();
+    const card = document.querySelector(".peek-card") as HTMLElement;
+    await fireEvent.click(within(card).getByText("× Remove"));
+    expect(onChange).toHaveBeenCalledWith([]);
+  });
+
+  it("readOnly offers Open but no Swap/Remove", async () => {
+    render(ReferencePicker, {
+      props: { field, value: ["lore_1"], ariaLabel: "Characters", loreEntries, embedded: true, controlled: true, readOnly: true },
+    });
+    const pill = document.querySelector(".ref-pill") as HTMLElement;
+    await fireEvent.mouseOver(pill);
+    vi.advanceTimersByTime(350);
+    await tick();
+    const card = document.querySelector(".peek-card") as HTMLElement;
+    expect(within(card).getByRole("button", { name: "Open" })).toBeInTheDocument();
+    expect(within(card).queryByText(/remove/i)).toBeNull();
   });
 });

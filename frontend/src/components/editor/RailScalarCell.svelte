@@ -8,7 +8,12 @@
   export function leavesRow(rowEl: HTMLElement, target: EventTarget | null): boolean {
     if (!(target instanceof Node)) return false; // null / non-node: don't guess
     if (rowEl.contains(target)) return false;
-    return !(target instanceof Element && target.closest(".colored-select-popover, .implicit-context-popup"));
+    // `.peek-card` (#2011): a reference pill's hover/focus peek card is body-
+    // portaled like the other two — its own Swap picker can be mid-use
+    // without the row it floats off reading as "left".
+    return !(
+      target instanceof Element && target.closest(".colored-select-popover, .implicit-context-popup, .peek-card")
+    );
   }
 </script>
 

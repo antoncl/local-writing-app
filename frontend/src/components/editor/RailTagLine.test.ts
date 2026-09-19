@@ -4,12 +4,14 @@
 // vocabulary), the empty/missing states, and the editing input's completion +
 // create-missing + backspace/escape keyboard contract.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { tick } from "svelte";
 import { render, screen, fireEvent, within } from "@/lib/test/component";
 import RailTagLine from "./RailTagLine.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { clearTagNodes, tagNodesStore } from "@/lib/stores/tagNodes";
+import { referenceIndexStore, clearReferenceIndex } from "@/lib/stores/references";
 import { api } from "@/lib/api";
-import type { MetadataFieldDefinition, MetadataSchema, TagEntry } from "@/lib/types";
+import type { LoreEntrySummary, MetadataFieldDefinition, MetadataSchema, TagEntry } from "@/lib/types";
 
 const SCHEMA = {
   version: 1,
@@ -334,5 +336,88 @@ describe("RailTagLine — editing", () => {
     const input = screen.getByLabelText("Add Tags");
     await fireEvent.keyDown(input, { key: "Escape" });
     expect(onClose).toHaveBeenCalledWith("tags");
+  });
+});
+
+describe("RailTagLine — peek card at rest (#2011)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    clearReferenceIndex();
+  });
+
+  it("hovering a name on the rest line opens the tag's peek card", async () => {
+    render(RailTagLine, {
+      props: {
+        field: openField,
+        fieldId: "tags",
+        fieldLabel: "Tags",
+        value: ["tag_pov", "tag_river"],
+        editing: false,
+        onOpen: noop,
+        onClose: noop,
+        onChange: noop,
+      },
+    });
+    const name = screen.getByText("pov");
+    await fireEvent.mouseOver(name);
+    vi.advanceTimersByTime(350);
+    await tick();
+    const card = document.querySelector(".peek-card");
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("pov");
+  });
+
+  it("Remove on the card drops that id from the value", async () => {
+    const onChange = vi.fn();
+    render(RailTagLine, {
+      props: {
+        field: openField,
+        fieldId: "tags",
+        fieldLabel: "Tags",
+        value: ["tag_pov", "tag_river"],
+        editing: false,
+        onOpen: noop,
+        onClose: noop,
+        onChange,
+      },
+    });
+    const name = screen.getByText("pov");
+    await fireEvent.mouseOver(name);
+    vi.advanceTimersByTime(350);
+    await tick();
+    const card = document.querySelector(".peek-card") as HTMLElement;
+    await fireEvent.click(within(card).getByText("× Remove"));
+    expect(onChange).toHaveBeenCalledWith(["tag_river"]);
+  });
+
+  it("the breakdown reads a real kind (Lore), not Other, when the carrier resolves via threaded deps", async () => {
+    // Same reference-index fixture shape peekTarget.test.ts uses: the tag's
+    // carriers are its reverse-index entry — a lore entry here.
+    referenceIndexStore.set(new Map([["tag_pov", new Set(["lore_1"])]]));
+    const loreEntries: LoreEntrySummary[] = [
+      { id: "lore_1", title: "Mira", body: "", entry_type: "lore:character", metadata: {} },
+    ];
+    render(RailTagLine, {
+      props: {
+        field: openField,
+        fieldId: "tags",
+        fieldLabel: "Tags",
+        value: ["tag_pov"],
+        editing: false,
+        onOpen: noop,
+        onClose: noop,
+        onChange: noop,
+        deps: { loreEntries },
+      },
+    });
+    const name = screen.getByText("pov");
+    await fireEvent.mouseOver(name);
+    vi.advanceTimersByTime(350);
+    await tick();
+    const card = document.querySelector(".peek-card") as HTMLElement;
+    expect(card.textContent).toContain("carried by 1 node");
+    expect(within(card).getByText("Lore")).toBeInTheDocument();
+    expect(within(card).queryByText("Other")).not.toBeInTheDocument();
   });
 });

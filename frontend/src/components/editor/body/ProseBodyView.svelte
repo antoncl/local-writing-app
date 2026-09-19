@@ -101,6 +101,7 @@
   import { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
   import { countWords } from "@/lib/utils/wordCount";
   import { resolveColor } from "@/lib/utils/colors";
+  import { summaryValues, type SummaryValue } from "@/lib/utils/summaryFields";
   import type {
     DocumentKind,
     EditableDocument,
@@ -210,6 +211,21 @@
   function characterTitleFromId(id: string): string {
     const entry = loreEntries.find((e) => e.id === id);
     return entry?.title || "Unresolved character";
+  }
+
+  // Peek-card summary rows for the implicit-context hover card (#2011) —
+  // lore only, since compileMatcher only ever indexes loreEntries (scenes and
+  // prompts are never matcher entries). `metadataSchema` is declared further
+  // down as a `$derived`, but this function only reads it when the hover
+  // card actually renders (well after the whole script body has run), the
+  // same deferred-reference pattern `characterColorFromId` above already uses.
+  function describeEntry(entryId: string): SummaryValue[] {
+    if (!metadataSchema) return [];
+    const entry = loreEntries.find((e) => e.id === entryId);
+    if (!entry) return [];
+    const def = metadataSchema.entry_types[entry.entry_type];
+    const resolveTitle = (id: string) => loreEntries.find((e) => e.id === id)?.title;
+    return summaryValues(def, metadataSchema, entry.metadata, resolveTitle);
   }
 
   const CharacterMark = createCharacterMark({
@@ -1116,7 +1132,7 @@
         MutationCloseMark,
         TodoAnchor,
         ...tableExtensions,
-        ImplicitContextHighlight.configure({ matcher: implicitContextMatcher }),
+        ImplicitContextHighlight.configure({ matcher: implicitContextMatcher, describe: describeEntry }),
         SearchMatchHighlight,
         InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],

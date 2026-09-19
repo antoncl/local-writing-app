@@ -241,6 +241,7 @@
         createLayerId={deps.createLayerId}
         onChange={(ids) => on.write(model.fieldId, ids)}
         onNavigate={(payload) => on.navigate(payload)}
+        deps={{ loreEntries: deps.loreEntries, promptEntries: deps.promptEntries, structure: deps.structure }}
       />
     {:else if model.sectionIndex}
       <!-- #2009: the field's editor lives in a body section instead of the

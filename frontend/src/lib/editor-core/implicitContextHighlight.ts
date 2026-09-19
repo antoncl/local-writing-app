@@ -30,6 +30,10 @@ import type { EditorView } from "@tiptap/pm/view";
 import { anchoredPopover } from "@/lib/actions/anchoredPopover";
 import { type CompiledMatcher, type MatcherEntry } from "@/lib/editor-core/implicitContextMatcher";
 import { implicitContextOpener } from "@/lib/editor-core/implicitContextOpen";
+import type { SummaryValue } from "@/lib/utils/summaryFields";
+// The peek-card summary rows' own rules (#2011) — see the file for why this
+// lives here instead of growing styles.css past its size-guard cap.
+import "@/lib/editor-core/implicitContextPopup.css";
 
 const HIGHLIGHT_CLASS = "implicit-context-match";
 const POPUP_CLASS = "implicit-context-popup";
@@ -51,6 +55,12 @@ export type ImplicitContextOptions = {
    *  reference changes via setMatcher() rather than reactivity, so the
    *  initial value is fine if you provide an empty matcher. */
   matcher: CompiledMatcher | null;
+  /** Peek-card summary rows for the hover card (#2011) — optional, and lore
+   *  only (scenes/prompts are never matcher entries). Read fresh off
+   *  `this.options.describe` at render time, like `matcher`, so the host can
+   *  swap it in without recreating the extension. `null`/absent renders the
+   *  card exactly as before (title/type/preview, no summary grid). */
+  describe?: ((entryId: string) => SummaryValue[]) | null;
 };
 
 /** What one scan produced: the decorations to paint, and the distinct entry
@@ -144,7 +154,7 @@ type HoverCard = {
   destroy(): void;
 };
 
-function createHoverCard(): HoverCard {
+function createHoverCard(getDescribe: () => ((entryId: string) => SummaryValue[]) | null): HoverCard {
   const el = document.createElement("div");
   el.className = POPUP_CLASS;
   el.setAttribute("role", "dialog");
@@ -221,6 +231,27 @@ function createHoverCard(): HoverCard {
       previewEl.textContent = entry.preview;
       el.appendChild(previewEl);
     }
+    // Peek-card summary rows (#2011) — the same field-grid content a
+    // reference's peek card shows, appended after the preview. Lore only:
+    // `describe` is wired from loreEntries + schema; absent/empty is a no-op.
+    const rows = getDescribe()?.(entry.id) ?? [];
+    if (rows.length > 0) {
+      const summaryEl = document.createElement("div");
+      summaryEl.className = `${POPUP_CLASS}-summary`;
+      for (const row of rows) {
+        const rowEl = document.createElement("div");
+        rowEl.className = `${POPUP_CLASS}-summary-row`;
+        const labelEl = document.createElement("span");
+        labelEl.className = `${POPUP_CLASS}-summary-label`;
+        labelEl.textContent = row.label;
+        const valueEl = document.createElement("span");
+        valueEl.className = `${POPUP_CLASS}-summary-value`;
+        valueEl.textContent = row.text;
+        rowEl.append(labelEl, valueEl);
+        summaryEl.appendChild(rowEl);
+      }
+      el.appendChild(summaryEl);
+    }
   }
 
   return {
@@ -265,7 +296,7 @@ function findDecorationTarget(target: EventTarget | null, editorRoot: Element): 
 export const ImplicitContextHighlight = Extension.create<ImplicitContextOptions>({
   name: "implicitContextHighlight",
   addOptions() {
-    return { matcher: null };
+    return { matcher: null, describe: null };
   },
   addProseMirrorPlugins() {
     // Capture matcher reference. The extension is recreated when the
@@ -273,8 +304,9 @@ export const ImplicitContextHighlight = Extension.create<ImplicitContextOptions>
     // for now we read fresh from this.options on each transaction so a
     // mutated `options.matcher` is picked up without full re-init.
     const getMatcher = (): CompiledMatcher | null => this.options.matcher;
+    const getDescribe = (): ((entryId: string) => SummaryValue[]) | null => this.options.describe ?? null;
     // One card per plugin instance, i.e. per editor view.
-    const card = createHoverCard();
+    const card = createHoverCard(getDescribe);
 
     const entryOf = (target: HTMLElement | null): MatcherEntry | undefined => {
       const id = target?.getAttribute("data-entry-id");

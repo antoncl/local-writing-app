@@ -4,9 +4,9 @@
 // a `hand_picked` + `group_by: entry_type` spec (see ViewNodeList.gate.test.ts
 // and Lore.test.ts's #642 grouping pin) — this pins the tab's own wiring:
 // grouping, remove, navigate, the Missing row, readOnly, and the filter box.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
-import { render, screen, fireEvent } from "@/lib/test/component";
+import { render, screen, fireEvent, within } from "@/lib/test/component";
 import ReferenceListTab from "./ReferenceListTab.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import type { LoreEntrySummary, MetadataFieldDefinition, MetadataSchema } from "@/lib/types";
@@ -117,5 +117,33 @@ describe("ReferenceListTab (#2010)", () => {
     expect(screen.getByText("Rivendell")).toBeInTheDocument();
     expect(screen.queryByText("Tomas")).toBeNull();
     expect(screen.queryByText("Elena")).toBeNull();
+  });
+});
+
+describe("ReferenceListTab — peek card (#2011)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("hovering a row opens a peek card with its title", async () => {
+    const { container } = render(ReferenceListTab, { props: { model: baseModel(), deps: baseDeps(), on: baseOn() } });
+    const anchor = screen.getByText("Tomas").closest(".ref-row-anchor") as HTMLElement;
+    await fireEvent.mouseOver(anchor);
+    vi.advanceTimersByTime(350);
+    await tick();
+    const card = container.ownerDocument.querySelector(".peek-card");
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("Tomas");
+  });
+
+  it("clicking Remove on the card removes it from the list", async () => {
+    const on = baseOn();
+    render(ReferenceListTab, { props: { model: baseModel(), deps: baseDeps(), on } });
+    const anchor = screen.getByText("Tomas").closest(".ref-row-anchor") as HTMLElement;
+    await fireEvent.mouseOver(anchor);
+    vi.advanceTimersByTime(350);
+    await tick();
+    const card = document.querySelector(".peek-card") as HTMLElement;
+    await fireEvent.click(within(card).getByText("× Remove"));
+    expect(on.change).toHaveBeenCalledWith(["char_elena", "loc_rivendell"]);
   });
 });

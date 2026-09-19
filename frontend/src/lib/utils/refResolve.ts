@@ -12,6 +12,7 @@
 import { canonicalIdIn } from "@/lib/stores/tagNodes";
 import type {
   AssistantEntrySummary,
+  EntryMetadata,
   LoreEntrySummary,
   PromptEntrySummary,
   StructureDocument,
@@ -27,6 +28,11 @@ export type ResolvedRef = {
   kind: "manuscript" | "lore" | "snippet" | "assistant" | "plot" | "tag";
   title: string;
   entry_type?: string;
+  // Full instance metadata, when the source roster carries it (lore/prompt/
+  // assistant/tag) — #2011's peek card needs it for summaryValues(). Plot
+  // stays without (its roster carries no metadata); a scene's is the
+  // StructureNode's own front matter.
+  metadata?: EntryMetadata;
 };
 
 export type RefResolveDeps = {
@@ -46,12 +52,12 @@ export type RefResolveDeps = {
 
 function flattenScenesAll(
   node: StructureNode | null | undefined,
-): Map<string, { id: string; title: string; entry_type: string }> {
-  const out = new Map<string, { id: string; title: string; entry_type: string }>();
+): Map<string, { id: string; title: string; entry_type: string; metadata?: EntryMetadata }> {
+  const out = new Map<string, { id: string; title: string; entry_type: string; metadata?: EntryMetadata }>();
   const walk = (n: StructureNode) => {
     if (n.type === "manuscript:scene" && n.scene_id) {
       const entryType = (n as unknown as { entry_type?: string }).entry_type ?? "manuscript:scene";
-      out.set(n.scene_id, { id: n.scene_id, title: n.title, entry_type: entryType });
+      out.set(n.scene_id, { id: n.scene_id, title: n.title, entry_type: entryType, metadata: n.metadata ?? undefined });
     }
     for (const child of n.children ?? []) walk(child);
   };
@@ -71,18 +77,18 @@ export function buildRefResolver(deps: RefResolveDeps): (id: string) => Resolved
 
   return (id: string): ResolvedRef | null => {
     const scene = sceneIndex.get(id);
-    if (scene) return { id, kind: "manuscript", title: scene.title, entry_type: scene.entry_type };
+    if (scene) return { id, kind: "manuscript", title: scene.title, entry_type: scene.entry_type, metadata: scene.metadata };
     const lore = loreIndex.get(id);
-    if (lore) return { id, kind: "lore", title: lore.title, entry_type: lore.entry_type };
+    if (lore) return { id, kind: "lore", title: lore.title, entry_type: lore.entry_type, metadata: lore.metadata };
     const snippet = promptIndex.get(id);
-    if (snippet) return { id, kind: "snippet", title: snippet.title, entry_type: snippet.entry_type };
+    if (snippet) return { id, kind: "snippet", title: snippet.title, entry_type: snippet.entry_type, metadata: snippet.metadata };
     const assistant = assistantIndex.get(id);
-    if (assistant) return { id, kind: "assistant", title: assistant.title, entry_type: assistant.entry_type };
+    if (assistant) return { id, kind: "assistant", title: assistant.title, entry_type: assistant.entry_type, metadata: assistant.metadata };
     const plotline = plotIndex.get(id);
     if (plotline) return { id, kind: "plot", title: plotline.title, entry_type: plotline.entry_type };
     if (deps.tagById) {
       const tag = deps.tagById.get(canonicalIdIn(deps.tagById, id));
-      if (tag) return { id, kind: "tag", title: tag.title, entry_type: tag.entry_type };
+      if (tag) return { id, kind: "tag", title: tag.title, entry_type: tag.entry_type, metadata: tag.metadata };
     } else if (deps.tagTitleById?.has(id)) {
       return { id, kind: "tag", title: deps.tagTitleById.get(id)! };
     }

@@ -10,7 +10,32 @@
   import { tagById, liveTags, canonicalIdIn, resolveOrCreateTag } from "@/lib/stores/tagNodes";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { singleConcreteTarget, createTargetFor, hasTitleMatch } from "@/lib/utils/pickerCreate";
-  import type { MetadataFieldDefinition, MetadataValue, NavigateTarget, TagEntry } from "@/lib/types";
+  import { peekAnchor } from "@/lib/actions/peekAnchor";
+  import { buildPeekTarget } from "@/lib/utils/peekTarget";
+  import { buildRefResolver } from "@/lib/utils/refResolve";
+  import { referenceIndexStore } from "@/lib/stores/references";
+  import PeekCard from "@/components/widgets/PeekCard.svelte";
+  import type {
+    LoreEntrySummary,
+    MetadataFieldDefinition,
+    MetadataValue,
+    NavigateTarget,
+    PromptEntrySummary,
+    StructureDocument,
+    TagEntry,
+  } from "@/lib/types";
+
+  // The rosters the tag peek card's carrier breakdown needs to bucket a
+  // non-tag carrier by its own kind (#2011 follow-up) — the subset of
+  // RailFieldRow's `RailRowDeps` that `buildRefResolver` actually reads
+  // (it has no `researchStructure` param — a research note is never a tag
+  // carrier). Optional/defaulted: every existing call site keeps working
+  // unchanged, just with an "Other"-only breakdown until it threads these too.
+  interface Deps {
+    loreEntries?: LoreEntrySummary[];
+    promptEntries?: PromptEntrySummary[];
+    structure?: StructureDocument | null;
+  }
 
   interface Props {
     field: MetadataFieldDefinition;
@@ -24,6 +49,7 @@
     createLayerId?: string | null;
     onChange: (ids: string[]) => void;
     onNavigate?: (target: NavigateTarget) => void;
+    deps?: Deps;
   }
 
   let {
@@ -38,6 +64,7 @@
     createLayerId = undefined,
     onChange,
     onNavigate,
+    deps = {},
   }: Props = $props();
 
   const schema = $derived($metadataSchemaStore);
@@ -102,6 +129,55 @@
 
   function navigate(id: string, entryType: string | null) {
     onNavigate?.({ id, kind: "tag", entryType: entryType ?? undefined });
+  }
+
+  // --- Peek card (#2011): the rest line is ONE `.fr-rest-hit` button, so a
+  // per-name hover/focus preview needs peekAnchor's delegated mode — it
+  // matches `.tag-line-name[data-tag-id]` inside the button and hands back
+  // the hovered span itself as the anchor. Per-name keyboard focus isn't
+  // reachable on this one-button line either way (the whole line is a single
+  // tab stop); the edit mode's own completion list is the keyboard path for
+  // these tags, so that is not a regression peek cards need to fix. -----
+  let peek = $state<{ item: ResolvedTag; anchor: HTMLElement } | null>(null);
+  function openPeek(anchor: HTMLElement) {
+    const id = anchor.dataset.tagId;
+    const item = id ? items.find((i) => i.id === id) : undefined;
+    if (!item || item.missing) return;
+    peek = { item, anchor };
+  }
+  function closePeek() {
+    peek = null;
+  }
+  // The shared id → node walk (lib/utils/refResolve.ts) — same as
+  // ReferencePicker/ReferenceListTab, so a scene/lore carrier in the tag's
+  // breakdown resolves to its real kind instead of falling through to
+  // "other"; `tagById` keeps the existing tag-title fallback for a carrier
+  // that is itself another tag.
+  const peekResolver = $derived(
+    buildRefResolver({
+      structure: deps.structure,
+      loreEntries: deps.loreEntries,
+      promptEntries: deps.promptEntries,
+      tagById: $tagById,
+    }),
+  );
+  const peekModel = $derived(
+    peek
+      ? buildPeekTarget(
+          { id: peek.item.id, kind: "tag", title: peek.item.title, entry_type: peek.item.entryType ?? undefined },
+          schema,
+          {
+            resolveRef: peekResolver,
+            referenceIndex: $referenceIndexStore,
+            canonicalTagId: (id) => canonicalIdIn($tagById, id),
+          },
+        )
+      : null,
+  );
+  function peekRemove() {
+    if (!peek) return;
+    onChange(ids.filter((other) => other !== peek!.item.id));
+    closePeek();
   }
 
   // --- Editing ---------------------------------------------------------
@@ -240,7 +316,7 @@
   }
 </script>
 
-{#snippet nameSpan(item: ResolvedTag, navigable: boolean)}{#if item.missing}<span class="tag-line-name missing">{item.title}</span>{:else if navigable}<button type="button" class="tag-line-name tag-line-navigate" onclick={() => navigate(item.id, item.entryType)}>{item.title}</button>{:else}<span class="tag-line-name">{item.title}</span>{/if}{/snippet}
+{#snippet nameSpan(item: ResolvedTag, navigable: boolean)}{#if item.missing}<span class="tag-line-name missing">{item.title}</span>{:else if navigable}<button type="button" class="tag-line-name tag-line-navigate" data-tag-id={item.id} onclick={() => navigate(item.id, item.entryType)}>{item.title}</button>{:else}<span class="tag-line-name" data-tag-id={item.id}>{item.title}</span>{/if}{/snippet}
 
 {#snippet lineBody(navigable: boolean)}{#if singleVocab}{#each items as item, i (item.id + i)}{#if i > 0}{" · "}{/if}{@render nameSpan(item, navigable)}{/each}{:else}{#each restGroups as group, gi (group.key)}{#if gi > 0}<span class="tag-line-divider">|</span>{/if}{#if group.label}<span class="tag-line-vocab">{`${group.label}: `}</span>{/if}{#each group.items as item, ii (item.id + ii)}{#if ii > 0}{" · "}{/if}{@render nameSpan(item, navigable)}{/each}{/each}{/if}{/snippet}
 
@@ -310,6 +386,7 @@
     aria-label={ariaLabel}
     title={field.description || (isEmpty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}`)}
     onclick={(e) => onOpen(fieldId, (e.currentTarget as HTMLElement).closest(".field-row") as HTMLElement)}
+    use:peekAnchor={{ delegate: ".tag-line-name[data-tag-id]", onOpen: openPeek, onClose: closePeek }}
   >
     {#if isEmpty}
       <span class="tag-line-add" aria-hidden="true">+</span>
@@ -317,6 +394,19 @@
       {@render lineBody(false)}
     {/if}
   </button>
+{/if}
+
+{#if peek && peekModel}
+  <PeekCard
+    model={peekModel}
+    anchor={peek.anchor}
+    {field}
+    on={{
+      open: () => navigate(peek!.item.id, peek!.item.entryType),
+      remove: readOnly ? undefined : peekRemove,
+      close: closePeek,
+    }}
+  />
 {/if}
 
 <style>

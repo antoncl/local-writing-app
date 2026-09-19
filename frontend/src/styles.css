@@ -757,6 +757,22 @@ button.row-action-add.active {
   cursor: text;
 }
 
+/* Body sections (#2009, #2030): the long_text sections render INSIDE the
+   .editor-wrap scroll frame, after the prose, as one column. With sections
+   present the prose must not force-fill the frame (its `flex: 1 0 auto`
+   below would push every section under the fold even for a one-line body);
+   it keeps a few lines of minimum height so an empty body is still a place
+   to click. The bottom padding mirrors `.editor-body`'s so the last section
+   clears the frame. */
+.editor-wrap.has-sections > .editor-body {
+  flex: 0 0 auto;
+  min-height: 12em;
+}
+.prose-sections {
+  width: 100%;
+  padding-bottom: 46px;
+}
+
 .editor-body {
   /* flex: 1 0 auto inside the .editor-wrap flex column makes the
      editable area grow to fill vertical space without clamping content,

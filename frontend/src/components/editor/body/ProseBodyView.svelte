@@ -20,7 +20,7 @@
 -->
 <script lang="ts">
 
-  import { onMount } from "svelte";
+  import { onMount, type Snippet } from "svelte";
   import { Editor } from "@tiptap/core";
   import { TextSelection, type Transaction } from "@tiptap/pm/state";
   import type { EditorView } from "@tiptap/pm/view";
@@ -155,6 +155,10 @@
     // Body Sections registry (#2009): reports this view's editor instance (and
     // `null` on teardown) so NodeEditor can register it at index 0.
     onEditorReady?: (editor: Editor, phase: "ready" | "destroy") => void;
+    // Body sections (#2009): rendered INSIDE this view's scroll frame, after
+    // the prose, so they share its column and never become grid children of
+    // the editor panel (the regression that emptied the body and cut the rail).
+    sections?: Snippet;
   }
 
   let {
@@ -178,6 +182,7 @@
     onRequestInputsDialog,
     neighbours = null,
     onEditorReady = () => {},
+    sections = undefined,
   }: Props = $props();
 
   // ---------- Custom TipTap extensions ----------
@@ -1257,6 +1262,7 @@
   class:empty-editor={editorEmpty}
   class:lore-editor={documentKind === "lore"}
   class="editor-wrap"
+  class:has-sections={Boolean(sections)}
   data-testid="prose-editor"
   bind:this={editorFrame}
   onmousedown={(event) => {
@@ -1299,6 +1305,14 @@
   />
 
   <div bind:this={editorElement}></div>
+  {#if sections}
+    <!-- Body sections (#2009) live INSIDE the scroll frame, after the prose:
+         the editor panel is a CSS grid that assigns rows/columns by direct
+         child, so anything mounted beside this view becomes its own grid item
+         (the body's 1fr row collapses, a block centres on its own width, the
+         rail loses its span). In here, prose and sections are one column. -->
+    <div class="prose-sections">{@render sections()}</div>
+  {/if}
 </div>
 
 <MutationDialogs

@@ -1309,7 +1309,10 @@
     onHoverGrid={(rows, cols) => (slashMenu = { ...slashMenu, gridRows: rows, gridCols: cols })}
   />
 
-  <div bind:this={editorElement}></div>
+  <!-- `prose-body` is the free body's own mount; the frame (`prose-editor`)
+       also holds one editor per long_text section (#2009), so a locator that
+       wants THE body must anchor here, not on the frame. -->
+  <div bind:this={editorElement} data-testid="prose-body"></div>
   {#if sections}
     <!-- Body sections (#2009) live INSIDE the scroll frame, after the prose:
          the editor panel is a CSS grid that assigns rows/columns by direct

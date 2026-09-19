@@ -51,7 +51,10 @@ test.describe("assembled-product smoke (#1352)", () => {
     // (`.node-row-click`), not the drag handle or delete control beside it.
     await page.locator(".node-row").filter({ hasText: "Chapter One" }).locator(".node-row-click").click();
 
-    const prose = page.getByTestId("prose-editor").locator(".ProseMirror");
+    // `prose-body` is the free body's mount; the `prose-editor` frame also
+    // holds one editor per long_text section (#2009), so anchoring on the
+    // frame resolves to several editors (a strict-mode violation).
+    const prose = page.getByTestId("prose-body").locator(".ProseMirror");
     await expect(prose).toBeVisible();
 
     // Arm the save assertion before typing: the editor↔backend write is the

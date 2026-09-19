@@ -77,6 +77,9 @@
     navigate: (target: NavigateTarget) => void;
     resetField: (fieldId: string) => void;
     goToSection: (fieldId: string) => void;
+    // #2010: a list-index row's hit — switch the body tab strip to this
+    // field's list tab. Owned by NodeEditor (which owns `activeBodyTab`).
+    goToList: (fieldId: string) => void;
     // Engaging the mutation axis from the rail returns the snapshot axis to
     // Live (ADR-0088 S2) — see the MutationTimeline `onSelect` below.
     park: () => void;
@@ -116,6 +119,8 @@
     readOnly={model.editorReadOnly}
     sectionsInBody={model.bodyShape === "prose"}
     onGoToSection={(fieldId) => on.goToSection(fieldId)}
+    listsInBody={model.bodyShape !== "chat"}
+    onGoToList={(fieldId) => on.goToList(fieldId)}
     onEntryTypeChange={(next) => on.entryTypeChange(next)}
     onStatusChange={(next) => on.statusChange(next)}
     onMetadataChange={(next) => on.metadataChange(next)}

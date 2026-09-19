@@ -65,6 +65,7 @@ function baseCtx(overrides: Partial<RailRowContext> = {}): RailRowContext {
     openFieldId: null,
     fieldExpanded: () => false,
     sectionsInBody: false,
+    listsInBody: false,
     ...overrides,
   };
 }
@@ -85,6 +86,7 @@ function baseCallbacks(): RailRowCallbacks {
     navigate: vi.fn(),
     toggleFlip: vi.fn(),
     goToSection: vi.fn(),
+    goToList: vi.fn(),
   };
 }
 
@@ -165,6 +167,21 @@ describe("RailFieldRow", () => {
     expect(row.classList.contains("color-row")).toBe(true);
     expect(row.classList.contains("empty")).toBe(false);
     expect(screen.getByText("inherited")).toBeTruthy();
+  });
+
+  it("a listsInBody reference-list model renders as a non-wide 'Open …' index row", async () => {
+    const model = buildRailRowModel(
+      baseCtx({ listsInBody: true, metadata: { kin: ["lore_1"] }, resolveListMemberType: () => "lore:character" }),
+      "kin",
+    );
+    const on = baseCallbacks();
+    const { container } = render(RailFieldRow, { props: { model, deps: baseDeps(), on } });
+    const row = container.querySelector(".field-row") as HTMLElement;
+    expect(row.classList.contains("wide")).toBe(false);
+    const hit = screen.getByRole("button", { name: "Open Kin" });
+    expect(hit.textContent).toBe("1 Character");
+    await fireEvent.click(hit);
+    expect(on.goToList).toHaveBeenCalledWith("kin");
   });
 
   it("clicking the name fires on.open with the row element", async () => {

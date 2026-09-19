@@ -129,6 +129,31 @@ class PromotePromptTests(unittest.TestCase):
         self._find_prompt_path(self.series, "genprompt")  # raises if absent
         self.assertEqual(list((self.root / "prompts").glob("*.md")), [])
 
+    def test_promotion_moves_base_snapshot_stores_including_cascaded_members(self) -> None:
+        # #2019: the store move lives in the shared per-member path
+        # (_write_promoted_prompt), so a cascaded include member's history follows
+        # too — not only the top prompt's. Capture on BOTH and promote the top.
+        self._write_ancestor_prompt(
+            self.root, "snip", "Snip", body="Reusable voice guidance.", entry_type="prompt:snippet"
+        )
+        self._write_ancestor_prompt(self.root, "prompta", "Prompt A", body='{% include "snip" %}\n')
+        node_index_gate.invalidate()  # direct file writes bypass the memo
+        top = self.service.capture_snapshot("prompta", kind="prompt")
+        member = self.service.capture_snapshot("snip", kind="prompt")
+        self.assertTrue((self.root / "snapshots" / "prompta").is_dir())
+        self.assertTrue((self.root / "snapshots" / "snip").is_dir())
+
+        self.service.promote_prompt_entry("prompta", self.series_layer_id)
+
+        # Both stores moved to the series, neither remains under the book…
+        self.assertTrue((self.series / "snapshots" / "prompta").is_dir())
+        self.assertTrue((self.series / "snapshots" / "snip").is_dir())
+        self.assertFalse((self.root / "snapshots" / "prompta").exists())
+        self.assertFalse((self.root / "snapshots" / "snip").exists())
+        # …and both histories remain listable at the new owner.
+        self.assertIn(top.id, [s.id for s in self.service.list_snapshots("prompta", kind="prompt").snapshots])
+        self.assertIn(member.id, [s.id for s in self.service.list_snapshots("snip", kind="prompt").snapshots])
+
     def test_leftover_override_is_removed_by_the_promotion(self) -> None:
         # #1854: the book overrode a series prompt's colour, then the prompt moved
         # into the book (a prompt clone mints a new id, so for prompts this is a

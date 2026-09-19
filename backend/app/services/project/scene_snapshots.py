@@ -1029,3 +1029,34 @@ class SceneSnapshotsMixin:
         """
         canonical = self._build_node_index().canonical_id(entity_id)
         self.delete_scene_snapshots(layer_folder / OVERRIDE_STORE_SCOPE, canonical)
+
+    def move_scene_snapshots(self, from_root: Path, to_root: Path, node_id: str) -> None:
+        """Relocate a node's base snapshot store when its OWNING layer changes.
+
+        Promotion moves an entry's owning-layer file *up* the chain, and the base
+        store co-locates with the owning layer (`_snapshot_store_root`), so the
+        store must follow — otherwise a later `list_snapshots` resolves the new
+        owner's empty folder and the history is silently lost, stranded at the
+        origin (#2019). This is a MOVE, not a reap: promotion preserves the entry,
+        so its history goes with it — the opposite of #2015's fork, which severs
+        into a new local copy and reaps the meaningless old override lane.
+
+        Keyed by the node's own id (the base lane's key, never `canonical_id`).
+        A never-snapshotted entry has no store — a silent no-op. The destination
+        cannot already own this id (that ownership move is the whole operation), so
+        a store there would be an anomaly (the only mint path is the duplicate-id-
+        across-layers state a fork-then-promote-back produces); refuse rather than
+        let `shutil.move` silently nest the source *inside* the existing dir.
+        """
+        source = self._snapshots_dir(from_root, node_id)
+        if not source.is_dir():
+            return
+        destination = self._snapshots_dir(to_root, node_id)
+        if destination.exists():
+            raise ProjectServiceError(
+                "The destination already holds a snapshot store for this node id "
+                "(it may already own an entry with this id).",
+                409,
+            )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(destination))

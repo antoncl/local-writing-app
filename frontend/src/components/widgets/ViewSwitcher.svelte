@@ -13,12 +13,17 @@
   import type { MetadataSchema } from "@/lib/types";
 
   interface Props {
-    // The pane's anchor kind ("lore" / "scene" / "assistant").
+    // The anchor kind ("lore" / "scene" / "assistant"): names the roster on
+    // offer and where "New view…" anchors.
     kind: string;
+    // Where the choice is remembered (#2039): the pane's kind by default, or a
+    // surface key such as a list tab's `list:<entry_type>:<field_id>`, so two
+    // surfaces over the same kind keep separate choices.
+    selectionKey?: string;
     // Resolves the kind's root type when duplicating an un-materialized default.
     schema?: MetadataSchema | null;
   }
-  let { kind, schema }: Props = $props();
+  let { kind, selectionKey = kind, schema }: Props = $props();
 
   let open = $state(false);
 
@@ -30,7 +35,7 @@
   // builtins[0]). Only user views below are Edit/Delete-able.
   let builtins = $derived(builtinViews(kind, schema));
   let userViews = $derived(saved.filter((v) => !v.system));
-  let selectedId = $derived(paneViews.selectedId(kind));
+  let selectedId = $derived(paneViews.selectedId(selectionKey));
   let currentLabel = $derived(
     selectedId
       ? (builtins.find((b) => b.id === selectedId)?.title ??
@@ -45,7 +50,7 @@
   }
 
   function pick(id: string | null): void {
-    paneViews.select(kind, id);
+    paneViews.select(selectionKey, id);
     open = false;
   }
 

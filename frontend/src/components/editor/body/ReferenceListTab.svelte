@@ -23,6 +23,8 @@
   import { liveTags } from "@/lib/stores/tagNodes";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { rememberScrollOnScroll } from "@/lib/editor-core/scrollMemory";
+  import ViewSwitcher from "@/components/widgets/ViewSwitcher.svelte";
+  import { listTabSelectionKey, paneViews } from "@/lib/stores/paneViews.svelte";
   import { makeNodeSearchFilter } from "@/lib/utils/nodeSearch";
   import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
   import type {
@@ -34,6 +36,7 @@
     NavigateTarget,
     NodePickerConfig,
     NodePickerRef,
+    ViewSpec,
     PromptEntrySummary,
     StructureDocument,
   } from "@/lib/types";
@@ -55,6 +58,10 @@
   interface Model {
     field: MetadataFieldDefinition;
     fieldId: string;
+    // The open node's entry type: half of the view-choice key (#2039), so a
+    // Scene's Characters tab and a Character's Related Entries tab remember
+    // separate views.
+    entryType: string;
     fieldLabel: string;
     ids: string[];
     readOnly: boolean;
@@ -119,6 +126,34 @@
   const nodes = $derived(model.ids.map(toNode));
 
   const pickerConfig = $derived({ ...(model.field.picker_config ?? {}), multiple: true } as NodePickerConfig);
+
+  // --- View switcher (#2039) ------------------------------------------------
+  // The tab renders a view, so it gets the ▤ switcher every pane has — keyed
+  // per entry type + field (not per pane kind), offering the views of the
+  // field's kind. A field whose sources span kinds (or name none) keeps the
+  // default only: a saved view is anchored to ONE kind. A chosen view's spec
+  // evaluates over the tab's own ids — `universe` is exactly the field's
+  // members, so the view can only shape and filter them, never reach past
+  // them (ADR-0035 §3); the default is #2010's hand-picked synthesis.
+  const listKind = $derived.by(() => {
+    // A saved-view ref source (`{ view }`) names no kind of its own.
+    const kinds = new Set(
+      (model.field.picker_config?.sources ?? []).map((s) => ("kind" in s ? s.kind : null)).filter((k): k is string => !!k),
+    );
+    return kinds.size === 1 ? [...kinds][0]! : null;
+  });
+  const selectionKey = $derived(listTabSelectionKey(model.entryType, model.fieldId));
+  const chosenSpec = $derived(listKind ? paneViews.selectedSpec(selectionKey, listKind, model.schema) : null);
+  const viewSpec = $derived<ViewSpec>(
+    chosenSpec
+      ? { ...chosenSpec, kind: listKind! }
+      : {
+          kind: "lore",
+          expr: { hand_picked: model.ids },
+          sort: { by: "manual" },
+          group_by: [{ field: "entry_type", order: "label" }],
+        },
+  );
   const selectedRefs = $derived(
     nodes
       .filter((n) => !n.missing)
@@ -232,37 +267,38 @@
     <span class="ref-list-label"
       >{model.fieldLabel}{#if model.ids.length > 0}<span class="ref-list-count">{model.ids.length}</span>{/if}</span
     >
-    {#if !model.readOnly}
-      <span class="ref-list-add">
-        <NodePicker
-          hideChips
-          config={pickerConfig}
-          value={selectedRefs}
-          affordance="add"
-          label={model.fieldLabel}
-          structure={deps.structure}
-          researchStructure={deps.researchStructure}
-          loreEntries={deps.loreEntries}
-          promptEntries={deps.promptEntries}
-          plotEntries={$plotlineEntriesStore}
-          assistantEntries={deps.assistantEntries}
-          tagEntries={$liveTags}
-          onChange={handlePickerChange}
-        />
-      </span>
-    {/if}
+    <span class="ref-list-actions">
+      {#if listKind}
+        <ViewSwitcher kind={listKind} {selectionKey} schema={model.schema} />
+      {/if}
+      {#if !model.readOnly}
+        <span class="ref-list-add">
+          <NodePicker
+            hideChips
+            config={pickerConfig}
+            value={selectedRefs}
+            affordance="add"
+            label={model.fieldLabel}
+            structure={deps.structure}
+            researchStructure={deps.researchStructure}
+            loreEntries={deps.loreEntries}
+            promptEntries={deps.promptEntries}
+            plotEntries={$plotlineEntriesStore}
+            assistantEntries={deps.assistantEntries}
+            tagEntries={$liveTags}
+            onChange={handlePickerChange}
+          />
+        </span>
+      {/if}
+    </span>
   </div>
   <div class="ref-list-body" bind:this={refListBody}>
     <ViewNodeList
       view={{
-        spec: {
-          kind: "lore",
-          expr: { hand_picked: model.ids },
-          sort: { by: "manual" },
-          group_by: [{ field: "entry_type", order: "label" }],
-        },
+        spec: viewSpec,
         universe: nodes,
         schema: model.schema,
+        referenceIndex: $referenceIndexStore,
       }}
       searchPlaceholder="Filter"
       filter={filterNode}
@@ -367,6 +403,12 @@
     color: var(--text-3);
     font-weight: 400;
     text-transform: none;
+  }
+
+  .ref-list-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
   }
 
   /* Rail pill mode's bare-glyph "+" (#1732/#1884 slice 3, copied from

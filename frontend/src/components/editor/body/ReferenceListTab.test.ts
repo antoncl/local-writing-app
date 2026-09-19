@@ -10,6 +10,7 @@ import { render, screen, fireEvent, within } from "@/lib/test/component";
 import ReferenceListTab from "./ReferenceListTab.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
+import { listTabSelectionKey, paneViews } from "@/lib/stores/paneViews.svelte";
 import type { LoreEntrySummary, MetadataFieldDefinition, MetadataSchema } from "@/lib/types";
 
 const SCHEMA = {
@@ -35,6 +36,7 @@ function baseModel(over: Record<string, unknown> = {}) {
   return {
     field: KIN_FIELD,
     fieldId: "kin",
+    entryType: "lore:character",
     fieldLabel: "Kin",
     ids: ["char_tomas", "char_elena", "loc_rivendell"],
     readOnly: false,
@@ -119,6 +121,51 @@ describe("ReferenceListTab (#2010)", () => {
     expect(screen.getByText("Rivendell")).toBeInTheDocument();
     expect(screen.queryByText("Tomas")).toBeNull();
     expect(screen.queryByText("Elena")).toBeNull();
+  });
+});
+
+describe("ReferenceListTab — view switcher (#2039)", () => {
+  const KEY = listTabSelectionKey("lore:character", "kin");
+  const CHARACTERS_AZ = { kind: "lore", expr: { descendants_of: "lore:character" }, sort: { by: "title" } };
+
+  beforeEach(() => {
+    paneViews.reset();
+    paneViews.views = { lore: [{ id: "view_az", title: "Characters A–Z", view_kind: "lore", spec: CHARACTERS_AZ } as never] };
+    paneViews.specs = new Map([["view_az", CHARACTERS_AZ as never]]);
+  });
+  afterEach(() => {
+    paneViews.reset();
+    localStorage.clear();
+  });
+
+  it("renders the switcher in the tab head for a single-kind field", () => {
+    const { container } = render(ReferenceListTab, { props: { model: baseModel(), deps: baseDeps(), on: baseOn() } });
+    expect(container.querySelector(".ref-list-head .view-switcher")).not.toBeNull();
+  });
+
+  it("a field whose sources span kinds gets no switcher (a view is anchored to one kind)", () => {
+    const mixed = { ...KIN_FIELD, picker_config: { sources: [{ kind: "lore" }, { kind: "manuscript" }] } } as MetadataFieldDefinition;
+    const { container } = render(ReferenceListTab, {
+      props: { model: baseModel({ field: mixed }), deps: baseDeps(), on: baseOn() },
+    });
+    expect(container.querySelector(".view-switcher")).toBeNull();
+  });
+
+  it("the view chosen under the tab's own key shapes the tab's ids: filtered to characters, sorted by title, no type groups", () => {
+    paneViews.select(KEY, "view_az");
+    const { container } = render(ReferenceListTab, { props: { model: baseModel(), deps: baseDeps(), on: baseOn() } });
+    const titles = Array.from(container.querySelectorAll(".node-row:not(.group-header) .node-row-text")).map((el) =>
+      el.textContent?.trim(),
+    );
+    expect(titles).toEqual(["Elena", "Tomas"]);
+    expect(container.querySelector(".node-row.group-header")).toBeNull();
+    expect(screen.queryByText("Rivendell")).toBeNull();
+  });
+
+  it("the pane-kind selection does not leak into the tab", () => {
+    paneViews.select("lore", "view_az");
+    render(ReferenceListTab, { props: { model: baseModel(), deps: baseDeps(), on: baseOn() } });
+    expect(screen.getByText("Rivendell")).toBeInTheDocument();
   });
 });
 

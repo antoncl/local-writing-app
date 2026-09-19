@@ -17,7 +17,24 @@ import { defaultView } from "@/lib/views/evaluateView";
 import { builtinSpecFor, isBuiltinExtraViewId, isShippedBuiltinExtraId } from "@/lib/views/builtinViews";
 import type { MetadataSchema, ViewAppearance, ViewNodeSummary, ViewSpec } from "@/lib/types";
 
-const STORAGE_PREFIX = "paneView.selected."; // + kind
+const STORAGE_PREFIX = "paneView.selected."; // + selection key
+
+// A selection KEY is the pane's kind ("lore") or, since #2039, a surface key
+// for a reference-list body tab: `list:<entry_type>:<field_id>`, so a Scene's
+// Characters tab and a Character's Related Entries tab each remember their own
+// view. The kind still names the roster the key selects from; a surface key
+// validates against the whole roster because the key does not carry the kind
+// (the switcher only ever offers the field's own kind, so a stored id is a
+// view of that kind or gone).
+const SURFACE_KEY_PREFIX = "list:";
+
+export function listTabSelectionKey(entryType: string, fieldId: string): string {
+  return `${SURFACE_KEY_PREFIX}${entryType}:${fieldId}`;
+}
+
+function isSurfaceKey(key: string): boolean {
+  return key.startsWith(SURFACE_KEY_PREFIX);
+}
 
 function loadSelection(kind: string): string | null {
   try {
@@ -72,15 +89,18 @@ class PaneViewsController {
     this.#loadedPath = path;
     await this.reload();
     const restored: Record<string, string | null> = {};
-    for (const kind of new Set([...Object.keys(this.views), ...storedSelectionKinds()])) {
-      const saved = loadSelection(kind);
+    for (const key of new Set([...Object.keys(this.views), ...storedSelectionKinds()])) {
+      const saved = loadSelection(key);
       // A built-in extra (e.g. "Openable chats") is a valid selection even when
       // no node exists yet — frontend-synthesized (builtinViews) until the first
       // UI-state write materializes it backend-side (#1682). MEMBERSHIP, not a
       // prefix test: a retired extra id from an older build must drop back to
-      // the default, not stay selected forever with 422ing writes.
-      const valid = saved && ((this.views[kind] ?? []).some((v) => v.id === saved) || isShippedBuiltinExtraId(kind, saved));
-      restored[kind] = valid ? saved : null;
+      // the default, not stay selected forever with 422ing writes. A surface
+      // key (#2039) validates against every kind's roster — see the note on
+      // SURFACE_KEY_PREFIX.
+      const roster = isSurfaceKey(key) ? Object.values(this.views).flat() : (this.views[key] ?? []);
+      const valid = saved && (roster.some((v) => v.id === saved) || isShippedBuiltinExtraId(key, saved));
+      restored[key] = valid ? saved : null;
     }
     this.selected = restored;
   }
@@ -137,8 +157,9 @@ class PaneViewsController {
     return this.views[kind] ?? [];
   }
 
-  selectedId(kind: string): string | null {
-    return this.selected[kind] ?? null;
+  // `key` is a pane kind or a surface key (see SURFACE_KEY_PREFIX).
+  selectedId(key: string): string | null {
+    return this.selected[key] ?? null;
   }
 
   // The concrete view-node id whose fold state a pane persists to (ADR-0036):
@@ -148,9 +169,10 @@ class PaneViewsController {
     return this.selected[kind] ?? `view_default_${kind}`;
   }
 
-  select(kind: string, id: string | null): void {
-    this.selected = { ...this.selected, [kind]: id };
-    saveSelection(kind, id);
+  // `key` is a pane kind or a surface key (see SURFACE_KEY_PREFIX).
+  select(key: string, id: string | null): void {
+    this.selected = { ...this.selected, [key]: id };
+    saveSelection(key, id);
   }
 
   // The ViewSpec a pane should render through: the selected view's spec, or the
@@ -159,22 +181,27 @@ class PaneViewsController {
   // is threaded through to resolve the kind's root type; without it the resolver
   // falls back to `<kind>:base`.
   specFor(kind: string, schema?: MetadataSchema | null): ViewSpec {
-    const id = this.selected[kind];
-    if (id) {
-      // A built-in extra ALWAYS renders its live synthesis, never a stored
-      // copy: once materialized (#1682) the node also appears in `specs`, but
-      // it exists purely to carry ui state — preferring its frozen spec would
-      // fork behavior between users who touched the view and those who didn't
-      // whenever a release refines an extra (defaults dodge this because
-      // `selected === null` re-derives below; extras are selected by id).
-      if (isBuiltinExtraViewId(id)) {
-        const builtin = builtinSpecFor(kind, id, schema);
-        if (builtin) return builtin;
-      }
-      const spec = this.specs.get(id);
-      if (spec) return spec;
+    return this.selectedSpec(kind, kind, schema) ?? defaultView(kind, schema);
+  }
+
+  // The selected view's spec under `key`, or null when the surface's own
+  // default applies (a pane's `defaultView`, a list tab's hand-picked
+  // synthesis — the caller knows which). `kind` names the roster the key
+  // selects from (#2039: a surface key does not carry it).
+  selectedSpec(key: string, kind: string, schema?: MetadataSchema | null): ViewSpec | null {
+    const id = this.selected[key];
+    if (!id) return null;
+    // A built-in extra ALWAYS renders its live synthesis, never a stored
+    // copy: once materialized (#1682) the node also appears in `specs`, but
+    // it exists purely to carry ui state — preferring its frozen spec would
+    // fork behavior between users who touched the view and those who didn't
+    // whenever a release refines an extra (defaults dodge this because
+    // `selected === null` re-derives; extras are selected by id).
+    if (isBuiltinExtraViewId(id)) {
+      const builtin = builtinSpecFor(kind, id, schema);
+      if (builtin) return builtin;
     }
-    return defaultView(kind, schema);
+    return this.specs.get(id) ?? null;
   }
 
   // The render layout a pane should apply (ADR-0069): the resolved view's stored

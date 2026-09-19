@@ -5,6 +5,7 @@ import type { EditorView } from "@tiptap/pm/view";
 import {
   createSectionRegistry,
   handleSectionArrow,
+  inEdgeTextblock,
   sectionArrowDecision,
   type SectionNeighbours,
 } from "./sectionKeyboardBridge";
@@ -70,7 +71,9 @@ function fakeEvent(key: string, mods: Partial<Pick<KeyboardEvent, "shiftKey" | "
 function fakeView(opts: { pos: number; docSize: number; empty?: boolean }): EditorView {
   return {
     state: {
-      selection: { $from: { pos: opts.pos }, empty: opts.empty ?? true },
+      // `parent.isTextblock: false` makes `inEdgeTextblock` decline without
+      // walking a doc this fake doesn't have.
+      selection: { $from: { pos: opts.pos, parent: { isTextblock: false } }, empty: opts.empty ?? true },
       doc: { content: { size: opts.docSize } },
     },
     // Headless (no layout) — first/last-line is never what's under test here.
@@ -162,6 +165,58 @@ describe("handleSectionArrow — real editor, doc-edge cases", () => {
     const handled = handleSectionArrow(editor.view, fakeEvent("ArrowRight"), { prev: null, next });
     expect(handled).toBe(false);
     expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleSectionArrow — multi-paragraph documents bridge only from the edge paragraph", () => {
+  const editors: Editor[] = [];
+  afterEach(() => {
+    for (const editor of editors.splice(0)) editor.destroy();
+  });
+
+  function mountTwo(): Editor {
+    const editor = new Editor({
+      element: document.createElement("div"),
+      extensions: [proseStarterKit()],
+      content: "<p>one</p><p>two</p>",
+    });
+    editors.push(editor);
+    // happy-dom has no layout, so `endOfTextblock` cannot answer "last visual
+    // line"; simulate the layout saying yes so the doc-edge check alone decides.
+    editor.view.endOfTextblock = () => true;
+    return editor;
+  }
+
+  it("inEdgeTextblock: paragraph one is the start edge, paragraph two the end edge", () => {
+    const editor = mountTwo();
+    editor.commands.setTextSelection(2); // inside "one"
+    expect(inEdgeTextblock(editor.state, "start")).toBe(true);
+    expect(inEdgeTextblock(editor.state, "end")).toBe(false);
+    editor.commands.setTextSelection(7); // inside "two"
+    expect(inEdgeTextblock(editor.state, "start")).toBe(false);
+    expect(inEdgeTextblock(editor.state, "end")).toBe(true);
+  });
+
+  it("ArrowDown on the last line of paragraph one does NOT bridge; on paragraph two it does", () => {
+    const editor = mountTwo();
+    const next = vi.fn();
+    editor.commands.setTextSelection(2);
+    expect(handleSectionArrow(editor.view, fakeEvent("ArrowDown"), { prev: null, next })).toBe(false);
+    expect(next).not.toHaveBeenCalled();
+    editor.commands.setTextSelection(7);
+    expect(handleSectionArrow(editor.view, fakeEvent("ArrowDown"), { prev: null, next })).toBe(true);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("ArrowUp on the first line of paragraph two does NOT bridge; on paragraph one it does", () => {
+    const editor = mountTwo();
+    const prev = vi.fn();
+    editor.commands.setTextSelection(7);
+    expect(handleSectionArrow(editor.view, fakeEvent("ArrowUp"), { prev, next: null })).toBe(false);
+    expect(prev).not.toHaveBeenCalled();
+    editor.commands.setTextSelection(2);
+    expect(handleSectionArrow(editor.view, fakeEvent("ArrowUp"), { prev, next: null })).toBe(true);
+    expect(prev).toHaveBeenCalledOnce();
   });
 });
 

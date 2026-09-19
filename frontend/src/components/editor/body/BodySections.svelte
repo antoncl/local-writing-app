@@ -48,10 +48,28 @@
   // own IDENTITY (never by index/fieldId) — a fast remount can register the
   // NEW instance at the same slot before the OLD one's cleanup runs, and an
   // index-keyed delete there would evict the live registration (#2009 follow-up).
+  const mounted = new Map<string, Editor>();
   function handleEditorReady(fieldId: string, editor: Editor, phase: "ready" | "destroy") {
-    if (phase === "ready") register.register(sectionIndex(fieldId), fieldId, editor);
-    else register.unregister(editor);
+    if (phase === "ready") {
+      mounted.set(fieldId, editor);
+      register.register(sectionIndex(fieldId), fieldId, editor);
+    } else {
+      mounted.delete(fieldId);
+      register.unregister(editor);
+    }
   }
+  // A section's document index is not fixed for the life of its editor: a
+  // schema edit while the node is open (a long_text field added, reordered
+  // or hidden) reshuffles `orderedIds`, so every mounted editor re-registers
+  // under its current index — otherwise the bridge would still walk the
+  // order the sections had when they mounted.
+  $effect(() => {
+    void orderedIds;
+    for (const [fieldId, editor] of mounted) {
+      register.unregister(editor);
+      register.register(sectionIndex(fieldId), fieldId, editor);
+    }
+  });
 
   // MetadataLongTextEditor's `value` is a plain string; `metadata[id]` is the
   // wider `MetadataValue` (a long_text field only ever stores a string or is

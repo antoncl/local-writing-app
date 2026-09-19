@@ -6,7 +6,7 @@
 // deliberately NOT bridged (leave the default no-op): merging two independent
 // metadata fields by deleting across their boundary would be a data-loss trap
 // a plain caret move never risks.
-import { TextSelection } from "@tiptap/pm/state";
+import { TextSelection, type EditorState } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/core";
 import type { EditorView } from "@tiptap/pm/view";
 
@@ -39,6 +39,29 @@ export function sectionArrowDecision(input: {
 
 const ARROW_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
 
+/** Whether the caret's textblock is the FIRST (`"start"`) or LAST (`"end"`)
+ *  textblock of the document. `view.endOfTextblock` only knows the edge of
+ *  the caret's own paragraph; without this the bridge would fire from the
+ *  last line of paragraph one and skip every paragraph below it. Pure over
+ *  the editor state — no layout needed. */
+export function inEdgeTextblock(state: EditorState, edge: SectionEdge): boolean {
+  const { $from } = state.selection;
+  if (!$from.parent.isTextblock) return false;
+  const caretBlockStart = $from.start();
+  let edgeBlockStart: number | null = null;
+  state.doc.descendants((node, pos) => {
+    if (!node.isTextblock) return true;
+    const start = pos + 1;
+    if (edge === "start") {
+      if (edgeBlockStart === null) edgeBlockStart = start;
+      return false;
+    }
+    edgeBlockStart = start;
+    return false;
+  });
+  return edgeBlockStart === caretBlockStart;
+}
+
 /** The ProseMirror `handleKeyDown` check: computes `sectionArrowDecision`'s
  *  inputs off the live view and, when it fires AND the target neighbour is
  *  actually wired, hands off the caret and reports the key as handled (so the
@@ -54,8 +77,8 @@ export function handleSectionArrow(view: EditorView, event: KeyboardEvent, neigh
     key: event.key,
     atDocStart: $from.pos <= 1,
     atDocEnd: $from.pos >= state.doc.content.size - 1,
-    onFirstLine: view.endOfTextblock("up"),
-    onLastLine: view.endOfTextblock("down"),
+    onFirstLine: inEdgeTextblock(state, "start") && view.endOfTextblock("up"),
+    onLastLine: inEdgeTextblock(state, "end") && view.endOfTextblock("down"),
     hasSelection: !empty,
   });
   const target = decision === "prev" ? neighbours.prev : decision === "next" ? neighbours.next : null;

@@ -1054,7 +1054,9 @@ class SceneSnapshotsMixin:
         destination = self._snapshots_dir(to_root, node_id)
         if destination.exists():
             raise ProjectServiceError(
-                "A snapshot store already exists for this node at the destination.", 409
+                "The destination already holds a snapshot store for this node id "
+                "(it may already own an entry with this id).",
+                409,
             )
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(source), str(destination))

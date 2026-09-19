@@ -180,6 +180,33 @@ class PromoteLoreTests(unittest.TestCase):
         self.assertFalse((self.series / "snapshots" / "bob").exists())
         self.assertEqual(self.service.list_snapshots("bob", kind="lore").snapshots, [])
 
+    def test_forking_then_promoting_back_aborts_cleanly_on_the_store_collision(self) -> None:
+        # The fork-then-promote-back anomaly: E owned at the series and snapshotted
+        # from the book (inherited lore is snapshottable) → <series>/snapshots/E…
+        self._write_ancestor_lore(self.series, "alice", "Alice", entry_type="lore:character")
+        node_index_gate.invalidate()
+        self.service.capture_snapshot("alice", kind="lore")
+        self.assertTrue((self.series / "snapshots" / "alice").is_dir())
+        # …forked down to the book (keeps the id) and snapshotted there too.
+        self.service.fork_lore_entry("alice")
+        node_index_gate.invalidate()
+        self.service.capture_snapshot("alice", kind="lore")
+        self.assertTrue((self.root / "snapshots" / "alice").is_dir())
+
+        # Promoting the fork BACK onto the series (which still owns E) collides on
+        # the store. Because the move runs FIRST, it refuses BEFORE any file is
+        # written or deleted — the promotion aborts clean, no half-applied
+        # duplicate-id file, nothing stranded.
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.promote_lore_entry("alice", self.series_layer_id)
+        self.assertEqual(ctx.exception.status_code, 409)
+        # Nothing mutated: the series still holds exactly one `alice` file and its
+        # store, and the book keeps its fork and its store.
+        self.assertEqual(len(list((self.series / "lore").glob("*.md"))), 1)
+        self.assertTrue((self.series / "snapshots" / "alice").is_dir())
+        self.assertTrue(any((self.root / "lore").glob("*.md")))
+        self.assertTrue((self.root / "snapshots" / "alice").is_dir())
+
     # --- 2: refusals -------------------------------------------------------
 
     def test_promote_refuses_inherited(self) -> None:

@@ -133,9 +133,14 @@
      column, so headed metadata sections read as one continuous page with the
      prose above them — not a second, rail-styled surface. */
   .bs-block {
+    /* The same box as `.editor-body` (styles.css): full width, capped at the
+       measure, centred, padding inside the box — so a heading's left edge
+       sits exactly on the prose's left edge. */
+    width: 100%;
     max-width: var(--prose-measure);
     margin-inline: auto;
     padding: 0 56px;
+    box-sizing: border-box;
   }
   .bs-field {
     display: block;

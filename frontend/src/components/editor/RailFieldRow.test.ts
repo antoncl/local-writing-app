@@ -15,12 +15,15 @@ import type { MetadataSchema, TagEntry } from "@/lib/types";
 const SCHEMA = {
   version: 1,
   entry_types: {
-    "lore:character": { name: "Character", kind: "lore", fields: ["alias", "cost", "tags"] },
+    "lore:character": { name: "Character", kind: "lore", fields: ["alias", "cost", "tags", "kin", "bio", "hue"] },
     "tag:theme": { name: "Theme", kind: "tag" },
   },
   fields: {
     alias: { name: "Alias", type: "text", options: [] },
     cost: { name: "Cost", type: "computed", options: [], computed: { fn: "cost" } },
+    kin: { name: "Kin", type: "entity_ref_list", options: [], picker_config: { sources: [{ kind: "lore" }] } },
+    bio: { name: "Bio", type: "long_text", options: [] },
+    hue: { name: "Hue", type: "color", options: [] },
     tags: {
       name: "Tags",
       type: "entity_ref_list",
@@ -106,6 +109,40 @@ describe("RailFieldRow", () => {
     render(RailFieldRow, { props: { model, deps: baseDeps(), on: baseCallbacks() } });
     expect(screen.getByTestId("rail-tag-line")).toBeTruthy();
     clearTagNodes();
+  });
+
+  it("a populated reference-list model renders wide with pills and the fold caret; an empty one is compact with no caret", () => {
+    const full = buildRailRowModel(baseCtx({ metadata: { kin: ["lore_1"] } }), "kin");
+    const a = render(RailFieldRow, { props: { model: full, deps: baseDeps(), on: baseCallbacks() } });
+    const fullRow = a.container.querySelector(".field-row") as HTMLElement;
+    expect(fullRow.classList.contains("wide")).toBe(true);
+    expect(a.container.querySelector(".ref-pill")).not.toBeNull();
+    expect(a.container.querySelector(".fr-disc-toggle")).not.toBeNull();
+    a.unmount();
+    const empty = buildRailRowModel(baseCtx(), "kin");
+    const b = render(RailFieldRow, { props: { model: empty, deps: baseDeps(), on: baseCallbacks() } });
+    const emptyRow = b.container.querySelector(".field-row") as HTMLElement;
+    expect(emptyRow.classList.contains("wide")).toBe(false);
+    expect(emptyRow.classList.contains("empty")).toBe(true);
+    expect(b.container.querySelector(".fr-disc-toggle")).toBeNull();
+  });
+
+  it("a long_text model renders wide and always live (no rest hit)", () => {
+    const model = buildRailRowModel(baseCtx({ metadata: { bio: "Born on the river." } }), "bio");
+    const { container } = render(RailFieldRow, { props: { model, deps: baseDeps(), on: baseCallbacks() } });
+    const row = container.querySelector(".field-row") as HTMLElement;
+    expect(row.classList.contains("wide")).toBe(true);
+    expect(row.classList.contains("scalar")).toBe(false);
+    expect(container.querySelector(".fr-rest-hit")).toBeNull();
+  });
+
+  it("an unset color model renders the color row with the inherited note and never reads empty", () => {
+    const model = buildRailRowModel(baseCtx(), "hue");
+    const { container } = render(RailFieldRow, { props: { model, deps: baseDeps(), on: baseCallbacks() } });
+    const row = container.querySelector(".field-row") as HTMLElement;
+    expect(row.classList.contains("color-row")).toBe(true);
+    expect(row.classList.contains("empty")).toBe(false);
+    expect(screen.getByText("inherited")).toBeTruthy();
   });
 
   it("clicking the name fires on.open with the row element", async () => {

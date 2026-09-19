@@ -155,6 +155,16 @@ function releaseSingleton(handle: SingletonHandle) {
   if (activePeek === handle) activePeek = null;
 }
 
+/** Close whichever peek is open, from OUTSIDE its anchor action — the card's
+ *  own Escape / outside-pointerdown handlers call this so the action's timers
+ *  and the singleton agree with the site (otherwise the action still believes
+ *  it is open and the next hover, focus or tap on the same anchor is
+ *  swallowed). Closing runs the action's own `onClose`, so a site must expect
+ *  it after calling this. A no-op when nothing is open. */
+export function closeActivePeek(): void {
+  activePeek?.closeNow();
+}
+
 /** Wire the open card's own root element into the singleton's close timer:
  *  crossing onto the card cancels a pending close, leaving it restarts one —
  *  the same bridge `createHoverCard`'s `keep()`/`hideSoon()` gives the prose

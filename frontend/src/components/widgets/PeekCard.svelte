@@ -8,7 +8,7 @@
   // Escape, a pointerdown outside both the card and its anchor, or the site's
   // own peekAnchor timing closing it.
   import { anchoredPopover } from "@/lib/actions/anchoredPopover";
-  import { bridgePeek } from "@/lib/actions/peekAnchor";
+  import { bridgePeek, closeActivePeek } from "@/lib/actions/peekAnchor";
   import { kindLabel, type PeekTarget } from "@/lib/utils/peekTarget";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import type {
@@ -85,13 +85,20 @@
     if (rootEl?.contains(target)) return;
     if (anchor.contains(target)) return;
     if (target instanceof Element && target.closest(".ctx-menu, .ctx-picker-anchor")) return;
-    on.close();
+    close();
   }
   function onDocumentKeydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
       event.stopPropagation();
-      on.close();
+      close();
     }
+  }
+  // Close through the anchor action first so its timers and the one-at-a-time
+  // singleton agree with the site; the action's own onClose then reaches the
+  // site, and the explicit `on.close()` covers a card mounted without one.
+  function close() {
+    closeActivePeek();
+    on.close();
   }
 
   $effect(() => {

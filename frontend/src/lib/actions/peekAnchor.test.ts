@@ -3,7 +3,7 @@
 // fake timers, then the DOM-wiring action's hover/touch/Escape/singleton
 // contract on real elements.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bridgePeek, createPeekTimers, peekAnchor, type PeekAnchorParams } from "./peekAnchor";
+import { bridgePeek, closeActivePeek, createPeekTimers, peekAnchor, type PeekAnchorParams } from "./peekAnchor";
 
 // The `Action` type's return is `void | ActionReturn<...>` since a caller
 // invoking it directly (not via `use:`) isn't statically known to get a
@@ -187,6 +187,27 @@ describe("peekAnchor action", () => {
     vi.advanceTimersByTime(350);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("a card-initiated close (closeActivePeek) runs the action's onClose and lets the same anchor reopen", () => {
+    const anchor = document.createElement("button");
+    document.body.appendChild(anchor);
+    const { onOpen, onClose } = mount(anchor);
+    fire(anchor, "mouseover");
+    vi.advanceTimersByTime(350);
+    expect(onOpen).toHaveBeenCalledOnce();
+    // The card's outside-click / Escape path closes from outside the action.
+    closeActivePeek();
+    expect(onClose).toHaveBeenCalledOnce();
+    // The action's timers agree: leaving and re-entering opens again.
+    fire(anchor, "mouseout", { relatedTarget: document.body });
+    fire(anchor, "mouseover");
+    vi.advanceTimersByTime(350);
+    expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it("closeActivePeek is a no-op when nothing is open", () => {
+    expect(() => closeActivePeek()).not.toThrow();
   });
 
   it("a touch pointerdown toggles the card open, then closed, and swallows the follow-up click", () => {

@@ -59,7 +59,7 @@ export type PeekTargetDeps = {
 const KIND_LABEL: Record<string, string> = {
   manuscript: "Scene",
   lore: "Lore",
-  snippet: "Snippet",
+  snippet: "Prompt",
   assistant: "Assistant",
   plot: "Plotline",
   tag: "Tag",

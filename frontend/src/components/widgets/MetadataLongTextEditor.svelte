@@ -279,14 +279,20 @@
     line-height: 1.65;
   }
 
-  /* #2040: paragraphs follow the prose presentation settings the body editor
-     follows (`.editor-body > p` in styles.css reads the same three variables
-     that `applyProsePresentation` sets on :root) — a long_text section is part
-     of the body document, and the rail's/list's long_text editors follow suit. */
   :global(.metadata-long-text-body p) {
+    margin: 0 0 1em;
+  }
+
+  /* #2040: top-level paragraphs follow the prose presentation settings the
+     body editor follows (`.editor-body > p` in styles.css reads the same three
+     variables that `applyProsePresentation` sets on :root) — a long_text
+     section is part of the body document, and the rail's/list's long_text
+     editors follow suit. Child combinator, like the body's rule: a paragraph
+     inside a table cell keeps its cell alignment and no indent. */
+  :global(.metadata-long-text-body > p) {
     text-align: var(--prose-align, left);
     text-indent: var(--prose-indent, 0);
-    margin: 0 0 var(--prose-para-gap, 1em);
+    margin-bottom: var(--prose-para-gap, 1em);
   }
 
   :global(.metadata-long-text-body p:last-child) {

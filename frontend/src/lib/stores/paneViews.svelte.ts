@@ -14,7 +14,7 @@
 
 import { api } from "@/lib/api";
 import { defaultView } from "@/lib/views/evaluateView";
-import { builtinSpecFor, isBuiltinExtraViewId, isShippedBuiltinExtraId } from "@/lib/views/builtinViews";
+import { builtinSpecFor, isBuiltinExtraViewId, isShippedBuiltinExtraId, kindsWithBuiltinExtras } from "@/lib/views/builtinViews";
 import type { MetadataSchema, ViewAppearance, ViewNodeSummary, ViewSpec } from "@/lib/types";
 
 const STORAGE_PREFIX = "paneView.selected."; // + selection key
@@ -36,6 +36,14 @@ function isSurfaceKey(key: string): boolean {
   return key.startsWith(SURFACE_KEY_PREFIX);
 }
 
+// Whether a persisted id is a built-in extra this build ships for the key's
+// roster: the pane's own kind for a kind key; ANY kind for a surface key,
+// which carries no kind (the switcher only ever offers the field's kind).
+function isShippedExtraForKey(key: string, id: string): boolean {
+  if (!isSurfaceKey(key)) return isShippedBuiltinExtraId(key, id);
+  return kindsWithBuiltinExtras().some((kind) => isShippedBuiltinExtraId(kind, id));
+}
+
 function loadSelection(kind: string): string | null {
   try {
     return localStorage.getItem(STORAGE_PREFIX + kind);
@@ -53,17 +61,18 @@ function saveSelection(kind: string, id: string | null): void {
   }
 }
 
-// Kinds with a persisted selection, so restoration also covers a kind whose only
-// non-default selection is a frontend-synthesized built-in (e.g. "Openable
-// chats" when the project has no saved chat views to enumerate).
-function storedSelectionKinds(): string[] {
+// Selection keys (pane kinds and surface keys) with a persisted selection, so
+// restoration also covers a key whose only non-default selection is a
+// frontend-synthesized built-in (e.g. "Openable chats" when the project has
+// no saved chat views to enumerate).
+function storedSelectionKeys(): string[] {
   try {
-    const kinds: string[] = [];
+    const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key?.startsWith(STORAGE_PREFIX)) kinds.push(key.slice(STORAGE_PREFIX.length));
+      if (key?.startsWith(STORAGE_PREFIX)) keys.push(key.slice(STORAGE_PREFIX.length));
     }
-    return kinds;
+    return keys;
   } catch {
     return [];
   }
@@ -89,7 +98,7 @@ class PaneViewsController {
     this.#loadedPath = path;
     await this.reload();
     const restored: Record<string, string | null> = {};
-    for (const key of new Set([...Object.keys(this.views), ...storedSelectionKinds()])) {
+    for (const key of new Set([...Object.keys(this.views), ...storedSelectionKeys()])) {
       const saved = loadSelection(key);
       // A built-in extra (e.g. "Openable chats") is a valid selection even when
       // no node exists yet — frontend-synthesized (builtinViews) until the first
@@ -99,7 +108,7 @@ class PaneViewsController {
       // key (#2039) validates against every kind's roster — see the note on
       // SURFACE_KEY_PREFIX.
       const roster = isSurfaceKey(key) ? Object.values(this.views).flat() : (this.views[key] ?? []);
-      const valid = saved && (roster.some((v) => v.id === saved) || isShippedBuiltinExtraId(key, saved));
+      const valid = saved && (roster.some((v) => v.id === saved) || isShippedExtraForKey(key, saved));
       restored[key] = valid ? saved : null;
     }
     this.selected = restored;
@@ -140,8 +149,8 @@ class PaneViewsController {
     // extras, which enter the backend spec map only once materialized (#1682)
     // and are synthesized locally until then. Membership, not a prefix test,
     // so a retired extra id self-corrects to the default here.
-    for (const [kind, id] of Object.entries(this.selected)) {
-      if (id && !map.has(id) && !isShippedBuiltinExtraId(kind, id)) this.select(kind, null);
+    for (const [key, id] of Object.entries(this.selected)) {
+      if (id && !map.has(id) && !isShippedExtraForKey(key, id)) this.select(key, null);
     }
   }
 

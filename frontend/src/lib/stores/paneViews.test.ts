@@ -52,6 +52,16 @@ describe("paneViews surface keys (#2039)", () => {
     expect(paneViews.selectedId(KEY)).toBe("view_chars");
   });
 
+  it("a persisted surface-key selection of a shipped built-in extra survives load and reload (no node backs it yet)", async () => {
+    const promptKey = listTabSelectionKey("assistant:assistant", "prompts");
+    localStorage.setItem("paneView.selected." + promptKey, "view_builtin_prompt_runnable");
+    await paneViews.loadForProject("/p");
+    expect(paneViews.selectedId(promptKey)).toBe("view_builtin_prompt_runnable");
+    await paneViews.reload();
+    expect(paneViews.selectedId(promptKey)).toBe("view_builtin_prompt_runnable");
+    expect(paneViews.selectedSpec(promptKey, "prompt")).not.toBeNull();
+  });
+
   it("a persisted surface-key selection whose view is gone drops back to the default", async () => {
     localStorage.setItem("paneView.selected." + KEY, "view_deleted");
     await paneViews.loadForProject("/p");

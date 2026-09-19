@@ -20,10 +20,15 @@
     // surface key such as a list tab's `list:<entry_type>:<field_id>`, so two
     // surfaces over the same kind keep separate choices.
     selectionKey?: string;
+    // What the default row is called when the surface's default is not the
+    // kind's roster default (a list tab's default is the field's own members,
+    // so "All prompts" would misname it). The row still duplicates the kind's
+    // default spec — that is the editable starting point either way.
+    defaultLabel?: string;
     // Resolves the kind's root type when duplicating an un-materialized default.
     schema?: MetadataSchema | null;
   }
-  let { kind, selectionKey = kind, schema }: Props = $props();
+  let { kind, selectionKey = kind, defaultLabel, schema }: Props = $props();
 
   let open = $state(false);
 
@@ -33,7 +38,9 @@
   // extras (chat ships "Openable chats"). All are Duplicate-not-Edit; the
   // materialized system default node, if any, is not re-listed (it duplicates
   // builtins[0]). Only user views below are Edit/Delete-able.
-  let builtins = $derived(builtinViews(kind, schema));
+  let builtins = $derived(
+    builtinViews(kind, schema).map((view, i) => (i === 0 && defaultLabel ? { ...view, title: defaultLabel } : view)),
+  );
   let userViews = $derived(saved.filter((v) => !v.system));
   let selectedId = $derived(paneViews.selectedId(selectionKey));
   let currentLabel = $derived(

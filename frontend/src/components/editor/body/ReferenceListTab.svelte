@@ -269,7 +269,7 @@
     >
     <span class="ref-list-actions">
       {#if listKind}
-        <ViewSwitcher kind={listKind} {selectionKey} schema={model.schema} />
+        <ViewSwitcher kind={listKind} {selectionKey} defaultLabel="Default view" schema={model.schema} />
       {/if}
       {#if !model.readOnly}
         <span class="ref-list-add">

@@ -1270,6 +1270,11 @@
     // 780px column or below short content) — focus the editor at the
     // end of the doc so the cursor lands where the user expects.
     if (event.target === event.currentTarget) {
+      // With body sections below the prose (#2030), a gutter click beside or
+      // under a section is that section's business, not the body's — only a
+      // click level with the prose falls through to it.
+      const proseBottom = editorElement?.getBoundingClientRect().bottom;
+      if (sections && proseBottom !== undefined && event.clientY > proseBottom) return;
       event.preventDefault();
       editor?.chain().focus("end").run();
     }

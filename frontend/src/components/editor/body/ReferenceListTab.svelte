@@ -9,6 +9,7 @@
   //
   // NO view switcher in this slice (out of scope, #2010): ViewSwitcher is
   // pane-scoped by kind; a tab-scoped view key is a follow-up.
+  import { onMount, tick } from "svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
@@ -21,6 +22,8 @@
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   import { liveTags } from "@/lib/stores/tagNodes";
   import { referenceIndexStore } from "@/lib/stores/references";
+  import { rememberScrollOnScroll } from "@/lib/editor-core/scrollMemory";
+  import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
   import type {
     AssistantEntrySummary,
     LoreEntrySummary,
@@ -45,6 +48,10 @@
     ids: string[];
     readOnly: boolean;
     schema: MetadataSchema | null;
+    // The open node's id (#2013) — needed only to key the scroll-position
+    // memory below; "" when the host has no scene (a test double, or a
+    // mid-migration host) skips restore/remember rather than erroring.
+    nodeId: string;
   }
 
   interface Deps {
@@ -172,6 +179,35 @@
     removeId(peek.node.id);
     closePeek();
   }
+
+  // --- Scroll-position memory (#2013) --------------------------------------
+  // Surface key mirrors ProseBodyView's "body": "list:<fieldId>" per field, so
+  // two different list tabs on the same node remember independently.
+  let refListBody = $state<HTMLDivElement>();
+  const surfaceFor = (fieldId: string) => `list:${fieldId}`;
+
+  onMount(() => {
+    if (!refListBody) return;
+    return rememberScrollOnScroll(
+      refListBody,
+      () => (model.nodeId ? { nodeId: model.nodeId, surface: surfaceFor(model.fieldId) } : null),
+      bodyMemory,
+    );
+  });
+
+  // Restores on mount AND whenever the node or the field changes — this
+  // component is not remounted on either (EditorBodyHost keeps it mounted
+  // across a node switch that stays on a list tab, and across switching
+  // which list field is open), so a plain onMount alone would miss those.
+  $effect(() => {
+    const nodeId = model.nodeId;
+    const fieldId = model.fieldId;
+    if (!nodeId || !refListBody) return;
+    const remembered = bodyMemory.scrollFor(nodeId, surfaceFor(fieldId));
+    void tick().then(() => {
+      if (refListBody) refListBody.scrollTop = remembered ?? 0;
+    });
+  });
 </script>
 
 <div class="ref-list-tab" role="tabpanel" id={`body-tabpanel-${model.fieldId}`} aria-label={model.fieldLabel}>
@@ -199,7 +235,7 @@
       </span>
     {/if}
   </div>
-  <div class="ref-list-body">
+  <div class="ref-list-body" bind:this={refListBody}>
     <ViewNodeList
       view={{
         spec: {

@@ -9,6 +9,7 @@ import { tick } from "svelte";
 import { render, screen, fireEvent, within } from "@/lib/test/component";
 import ReferenceListTab from "./ReferenceListTab.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
+import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
 import type { LoreEntrySummary, MetadataFieldDefinition, MetadataSchema } from "@/lib/types";
 
 const SCHEMA = {
@@ -38,6 +39,7 @@ function baseModel(over: Record<string, unknown> = {}) {
     ids: ["char_tomas", "char_elena", "loc_rivendell"],
     readOnly: false,
     schema: SCHEMA,
+    nodeId: "",
     ...over,
   };
 }
@@ -145,5 +147,43 @@ describe("ReferenceListTab — peek card (#2011)", () => {
     const card = document.querySelector(".peek-card") as HTMLElement;
     await fireEvent.click(within(card).getByText("× Remove"));
     expect(on.change).toHaveBeenCalledWith(["char_elena", "loc_rivendell"]);
+  });
+});
+
+describe("ReferenceListTab — scroll memory (#2013)", () => {
+  const NODE_ID = "char_tomas"; // any stable string; not resolved as a ref here
+
+  afterEach(() => bodyMemory.forget(NODE_ID));
+
+  it("restores a remembered scroll position for this node/field on mount", async () => {
+    bodyMemory.rememberScroll(NODE_ID, "list:kin", 120);
+    const { container } = render(ReferenceListTab, {
+      props: { model: baseModel({ nodeId: NODE_ID }), deps: baseDeps(), on: baseOn() },
+    });
+    await tick();
+    await tick();
+    const body = container.querySelector(".ref-list-body") as HTMLElement;
+    expect(body.scrollTop).toBe(120);
+  });
+
+  it("scrolling the list records the position under list:<fieldId> for this node", async () => {
+    let frame: FrameRequestCallback | null = null;
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((cb: FrameRequestCallback) => {
+        frame = cb;
+        return 1;
+      }),
+    );
+    const { container } = render(ReferenceListTab, {
+      props: { model: baseModel({ nodeId: NODE_ID }), deps: baseDeps(), on: baseOn() },
+    });
+    await tick();
+    const body = container.querySelector(".ref-list-body") as HTMLElement;
+    Object.defineProperty(body, "scrollTop", { value: 40, writable: true });
+    await fireEvent.scroll(body);
+    (frame as unknown as FrameRequestCallback)(0);
+    expect(bodyMemory.scrollFor(NODE_ID, "list:kin")).toBe(40);
+    vi.unstubAllGlobals();
   });
 });

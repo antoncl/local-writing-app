@@ -20,7 +20,7 @@
 -->
 <script lang="ts">
 
-  import { onMount, type Snippet } from "svelte";
+  import { onMount, tick, type Snippet } from "svelte";
   import { Editor } from "@tiptap/core";
   import { TextSelection, type Transaction } from "@tiptap/pm/state";
   import type { EditorView } from "@tiptap/pm/view";
@@ -102,6 +102,8 @@
   import { countWords } from "@/lib/utils/wordCount";
   import { resolveColor } from "@/lib/utils/colors";
   import { summaryValues, type SummaryValue } from "@/lib/utils/summaryFields";
+  import { applyScrollWhenLaidOut, rememberScrollOnScroll, scrollRestorePlan } from "@/lib/editor-core/scrollMemory";
+  import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
   import type {
     DocumentKind,
     EditableDocument,
@@ -252,6 +254,10 @@
   // ---------- State ----------
   let editorFrame = $state<HTMLDivElement>();
   let editorElement = $state<HTMLDivElement>();
+  // A remembered scroll offset (#2013) that a boundary load could not apply
+  // because the frame had no height; plain (non-rune) — read by the
+  // ResizeObserver in onMount, never by the template.
+  let pendingScrollTop: number | null = null;
   let editor: Editor | null = $state(null);
   let loadedSceneId: string | null = $state(null);
   let selectionMenu: FloatingMenuState = $state({ visible: false, x: 0, y: 0, wordCount: 0, placement: "above" });
@@ -380,6 +386,23 @@
     updateSelectionMenu();
     publishImplicitContext();
     applyPendingReveal();
+    // Restore the remembered scroll (#2013) on a real open only, once the
+    // just-set content has laid out. A frame with no height (the node reopened
+    // on a list tab, so this host is hidden) holds the offset for the
+    // ResizeObserver in onMount to apply when the writer comes back to Body.
+    if (mode === "boundary") {
+      await tick();
+      if (editorFrame) {
+        const plan = scrollRestorePlan(mode, editorFrame.clientHeight);
+        const top = bodyMemory.scrollFor(sceneId, "body") ?? 0;
+        if (plan === "now") {
+          editorFrame.scrollTop = top;
+          pendingScrollTop = null;
+        } else if (plan === "defer") {
+          pendingScrollTop = top;
+        }
+      }
+    }
   }
 
   export function clearEditor(): void {
@@ -1184,10 +1207,21 @@
     if (scene) {
       void loadScene(scene);
     }
+    // Scroll memory (#2013): key read live off `scene` at fire time — this
+    // listener attaches once, but the open scene moves on across a node
+    // switch without remounting this view.
+    const detachBodyScroll = editorFrame
+      ? rememberScrollOnScroll(editorFrame, () => (scene ? { nodeId: scene.id, surface: "body" } : null), bodyMemory)
+      : null;
+    const detachDeferredRestore = editorFrame
+      ? applyScrollWhenLaidOut(editorFrame, () => pendingScrollTop, () => { pendingScrollTop = null; })
+      : null;
     const mounted = editor;
     onEditorReady(mounted, "ready");
 
     return () => {
+      detachDeferredRestore?.();
+      detachBodyScroll?.();
       onEditorReady(mounted, "destroy");
       mounted.destroy();
     };

@@ -300,17 +300,23 @@
     onRequestInputsDialog={(payload) => on.requestInputsDialog(payload)}
     neighbours={() => deps.sectionRegistry.neighboursFor(0)}
     onEditorReady={(editor, phase) => phase === "ready" ? deps.sectionRegistry.register(0, null, editor) : deps.sectionRegistry.unregister(editor)}
-    />
+    >
+      <!-- The long_text sections (#2009) render inside the prose view's own
+           scroll frame, never as siblings: the panel grid places direct
+           children by position (#2030). -->
+      {#snippet sections()}
+        <BodySections
+          schema={model.metadataSchema}
+          entryType={model.entryType}
+          metadata={model.metadata}
+          readOnly={model.editorReadOnly}
+          onMetadataChange={(next) => on.metadataChange(next)}
+          implicitContextMatcher={deps.implicitContextMatcher}
+          register={deps.sectionRegistry}
+        />
+      {/snippet}
+    </ProseBodyView>
   </div>
-  <BodySections
-    schema={model.metadataSchema}
-    entryType={model.entryType}
-    metadata={model.metadata}
-    readOnly={model.editorReadOnly}
-    onMetadataChange={(next) => on.metadataChange(next)}
-    implicitContextMatcher={deps.implicitContextMatcher}
-    register={deps.sectionRegistry}
-  />
 {/if}
 {#if model.bodyShape === "chat"}
   <ChatBodyView

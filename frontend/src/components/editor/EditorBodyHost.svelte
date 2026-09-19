@@ -398,6 +398,7 @@
       ids: toIdList(model.metadata[listFieldId]),
       readOnly: model.editorReadOnly,
       schema: model.metadataSchema,
+      nodeId: model.scene?.id ?? "",
     }}
     deps={{
       loreEntries: deps.loreEntries,

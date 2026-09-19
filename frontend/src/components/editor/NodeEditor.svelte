@@ -34,6 +34,8 @@
   import { deriveBodyShape, documentLabelFor } from "@/lib/editor-core/documentPresentation";
   import { wireReviewFreeze } from "@/lib/editor-core/reviewFreeze.svelte";
   import { buildBodyTabs } from "@/lib/editor-core/bodyTabs";
+  import { restoredBodyTab } from "@/lib/editor-core/bodyTabRestore";
+  import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
 
   interface Props {
     scene?: EditableDocument | null;
@@ -678,25 +680,36 @@
   let rawBodyMode = $derived(bodyShape === "code");
   let rawBodyLanguage = $derived((entryTypeDef?.body_language ?? "markdown") satisfies EntryBodyLanguage);
 
-  // ---- Body tab strip (#2010) -------------------------------------------
+  // ---- Body tab strip (#2010, reopen memory #2013) -----------------------
   // One "Body"/"Details" tab plus one per `entity_ref_list` field; empty when
-  // the entry type declares no list fields (no strip). Component-local — the
-  // active tab isn't persisted across a reopen (#2013 is a later issue).
+  // the entry type declares no list fields (no strip). The active tab is
+  // remembered per node for the session (bodyMemory) so returning to a node
+  // restores the tab the writer left it on, rather than always resetting to
+  // "Body".
   let bodyTabs = $derived(buildBodyTabs(metadataSchema, entryType, bodyShape, metadata));
   let activeBodyTab = $state("body");
   $effect(() => {
-    // Reset to "body" on a genuine node switch (keyed on the primitive id,
-    // like the rail reconcile) — never on a keystroke, which would fight a
-    // tab the author is actively looking at.
-    void sceneId;
-    activeBodyTab = "body";
+    // On a genuine node switch (keyed on the primitive id, like the rail
+    // reconcile — never a keystroke, which would fight a tab the author is
+    // actively looking at) restore this node's remembered tab, validated
+    // against the CURRENT bodyTabs in the SAME effect (restoredBodyTab) —
+    // so a stale list tab from a different entry type can never flicker in
+    // for one render before the fallback effect below catches it.
+    activeBodyTab = restoredBodyTab(sceneId ? bodyMemory.tabFor(sceneId) : undefined, bodyTabs);
   });
+  // Every deliberate tab change goes through here so the memory and the
+  // strip can never disagree (the restore effect above is the only other
+  // writer, and it reads the memory rather than writing it).
+  function setBodyTab(id: string): void {
+    activeBodyTab = id;
+    if (sceneId) bodyMemory.rememberTab(sceneId, id);
+  }
   $effect(() => {
     // A schema change (or the field itself being removed) can make the active
     // tab's field disappear — fall back to "body" rather than stranding the
     // strip on a tab that no longer exists.
     if (activeBodyTab !== "body" && !bodyTabs.some((tab) => tab.id === activeBodyTab)) {
-      activeBodyTab = "body";
+      setBodyTab("body");
     }
   });
   $effect.pre(() => {
@@ -891,7 +904,7 @@
       navigate: (payload) => onNavigate?.(payload),
       resetField: (fieldId) => onResetField?.(fieldId),
       goToSection: (fieldId) => sectionRegistry.focus(fieldId),
-      goToList: (fieldId) => { activeBodyTab = `list:${fieldId}`; },
+      goToList: (fieldId) => setBodyTab(`list:${fieldId}`),
       park: () => { void snapshots.park(null); },
     }}
   />
@@ -977,7 +990,7 @@
     }}
     on={{
       toggleInteriority: () => bodyHost?.toggleInteriority(), authoringLayerChange: onAuthoringLayerChange,
-      selectBodyTab: (id) => { activeBodyTab = id; },
+      selectBodyTab: setBodyTab,
     }}
   />
   <EditorBodyHost

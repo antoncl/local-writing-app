@@ -1,0 +1,57 @@
+// Session-only memory of a node's last-viewed body tab and scroll position
+// (#2013): NodeEditor's body-tab strip (#2010) resets to "body" and the top
+// of the frame on every node switch — this closes the gap so returning to a
+// node within the same session lands where the writer left it. No
+// localStorage and no storage-shape change: memory dies with the tab/reload,
+// same lifetime as `loadedSceneId` and friends.
+//
+// Keyed by node id. `surface` distinguishes the prose frame ("body") from a
+// list tab ("list:<fieldId>") so a node's body scroll and its list-tab
+// scrolls are tracked independently — a Map per node, never a joined string
+// key (a separator byte in the key made git read this file as binary).
+//
+// Plain `Map`s, not `$state` (cf. `railSectionCollapse.svelte.ts`, which DOES
+// need `$state` because its reads happen inside a Svelte template and must
+// re-render on a toggle): every consumer here reads imperatively at open
+// time (a node switch / a scroll event), never inside a template — so
+// reactivity would only add overhead.
+export class BodyMemory {
+  #tabs = new Map<string, string>();
+  #scroll = new Map<string, Map<string, number>>();
+
+  tabFor(nodeId: string): string | undefined {
+    return this.#tabs.get(nodeId);
+  }
+
+  rememberTab(nodeId: string, tabId: string): void {
+    this.#tabs.set(nodeId, tabId);
+  }
+
+  scrollFor(nodeId: string, surface: string): number | undefined {
+    return this.#scroll.get(nodeId)?.get(surface);
+  }
+
+  rememberScroll(nodeId: string, surface: string, top: number): void {
+    let surfaces = this.#scroll.get(nodeId);
+    if (!surfaces) {
+      surfaces = new Map();
+      this.#scroll.set(nodeId, surfaces);
+    }
+    surfaces.set(surface, top);
+  }
+
+  /** Drop everything remembered for a node — for a node the author just
+   *  deleted, so a stale entry doesn't linger for the rest of the session
+   *  (a future node minted with the same id is not a real risk — ids are
+   *  machine-minted UUIDs, never reused). */
+  forget(nodeId: string): void {
+    this.#tabs.delete(nodeId);
+    this.#scroll.delete(nodeId);
+  }
+}
+
+export function createBodyMemory(): BodyMemory {
+  return new BodyMemory();
+}
+
+export const bodyMemory = createBodyMemory();

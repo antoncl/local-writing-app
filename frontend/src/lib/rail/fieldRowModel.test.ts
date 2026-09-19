@@ -8,11 +8,12 @@ import type { MetadataSchema } from "@/lib/types";
 const SCHEMA = {
   version: 1,
   entry_types: {
-    "lore:character": { name: "Character", kind: "lore", fields: ["alias", "allies", "tags", "status"] },
+    "lore:character": { name: "Character", kind: "lore", fields: ["alias", "allies", "tags", "status", "bio"] },
     "tag:tag": { name: "Tag", kind: "tag" },
   },
   fields: {
     alias: { name: "Alias", type: "text", options: [] },
+    bio: { name: "Bio", type: "long_text", options: [] },
     allies: {
       name: "Allies",
       type: "entity_ref_list",
@@ -58,6 +59,7 @@ function baseCtx(overrides: Partial<RailRowContext> = {}): RailRowContext {
     tagTitleById: new Map(),
     openFieldId: null,
     fieldExpanded: () => false,
+    sectionsInBody: false,
     ...overrides,
   };
 }
@@ -107,5 +109,26 @@ describe("buildRailRowModel", () => {
   it("status reads the status prop, not the metadata bag", () => {
     const model = buildRailRowModel(baseCtx({ status: "draft", metadata: { status: "ignored" } }), "status");
     expect(model.statusValue).toBe("draft");
+  });
+
+  it("without sectionsInBody, long_text is a plain wide rail row (unchanged)", () => {
+    const model = buildRailRowModel(baseCtx({ metadata: { bio: "one two three" } }), "bio");
+    expect(model.sectionIndex).toBe(false);
+    expect(model.wide).toBe(true);
+    expect(model.wordCount).toBe(0);
+  });
+
+  it("with sectionsInBody, long_text becomes a non-wide index row with a word count", () => {
+    const model = buildRailRowModel(baseCtx({ sectionsInBody: true, metadata: { bio: "one two three" } }), "bio");
+    expect(model.sectionIndex).toBe(true);
+    expect(model.wide).toBe(false);
+    expect(model.wordCount).toBe(3);
+  });
+
+  it("an empty long_text index row has a zero word count and still reads empty", () => {
+    const model = buildRailRowModel(baseCtx({ sectionsInBody: true, metadata: {} }), "bio");
+    expect(model.sectionIndex).toBe(true);
+    expect(model.wordCount).toBe(0);
+    expect(model.empty).toBe(true);
   });
 });

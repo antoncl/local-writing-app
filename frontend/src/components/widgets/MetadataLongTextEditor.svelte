@@ -1,17 +1,20 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { Editor } from "@tiptap/core";
+  import type { EditorView } from "@tiptap/pm/view";
   import { proseStarterKit } from "@/lib/editor-core/proseStarterKit";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
+  import { SearchMatchHighlight } from "@/lib/editor-core/searchMatchHighlight";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import { tableExtensions } from "@/lib/editor-core/alignedTable";
   import { placeSelectionToolbar, type FloatingMenuState, type ToolbarAction } from "@/lib/editor-core/selectionToolbar";
   import { visibleSelectionRect, selectionEndpointRect } from "@/lib/editor-core/selectionRects";
   import { formattingToolbarActions } from "@/lib/editor-core/formattingToolbarActions";
   import { countWords } from "@/lib/utils/wordCount";
+  import { handleSectionArrow, type SectionNeighbours } from "@/lib/editor-core/sectionKeyboardBridge";
   import ProseSelectionToolbar from "@/components/editor/body/ProseSelectionToolbar.svelte";
 
   let {
@@ -23,11 +26,23 @@
     // Emitted with the new markdown value (was a `change` CustomEvent before the
     // runes pass); the parent persists it.
     onChange = () => {},
+    // Body Sections keyboard bridge (#2009): resolved lazily, at the moment an
+    // arrow press might bridge — never cached, so it's safe even before every
+    // neighbouring section has mounted. Absent (the rail's own long_text row,
+    // outside a body section) means arrows behave exactly as before.
+    neighbours = null,
+    // Body Sections registry (#2009): reports the mounted editor instance on
+    // "ready" and, by IDENTITY, on "destroy" — so the host can register/
+    // unregister it for the keyboard bridge + the rail's "Go to …" jump.
+    // Unused outside a section.
+    onEditorReady = () => {},
   }: {
     value?: string;
     ariaLabel?: string;
     matcher?: CompiledMatcher | null;
     onChange?: (value: string) => void;
+    neighbours?: (() => SectionNeighbours) | null;
+    onEditorReady?: (editor: Editor, phase: "ready" | "destroy") => void;
   } = $props();
 
   let root = $state<HTMLDivElement | null>(null);
@@ -138,6 +153,16 @@
     return doc.childCount === 1 && doc.firstChild!.type.name === "paragraph" && doc.firstChild!.content.size === 0;
   }
 
+  // Body Sections keyboard bridge (#2009): the first check on every keydown,
+  // exactly like ProseBodyView's own `handleEditorKeydown` — an arrow at this
+  // field's edge hands the caret to the neighbouring section (or the free
+  // body) instead of doing nothing. A no-op (`false`) when `neighbours` isn't
+  // supplied (the rail's own long_text row).
+  function handleEditorKeydown(view: EditorView, event: KeyboardEvent): boolean {
+    if (!neighbours) return false;
+    return handleSectionArrow(view, event, neighbours());
+  }
+
   onMount(() => {
     editor = new Editor({
       element: editorElement,
@@ -145,6 +170,7 @@
         proseStarterKit(),
         ...tableExtensions,
         ImplicitContextHighlight.configure({ matcher }),
+        SearchMatchHighlight,
       ],
       content: "",
       editorProps: {
@@ -154,6 +180,7 @@
           spellcheck: "true",
         },
         transformPastedHTML: (html) => sanitizePastedHtml(html),
+        handleKeyDown: handleEditorKeydown,
       },
       onUpdate: () => {
         if (!editor || applyingExternalValue) return;
@@ -167,9 +194,14 @@
       onFocus: updateMenu,
       onBlur: hideMenu,
     });
+    const mounted = editor;
+    onEditorReady(mounted, "ready");
 
     void loadValue(value);
-    return () => editor?.destroy();
+    return () => {
+      onEditorReady(mounted, "destroy");
+      mounted.destroy();
+    };
   });
 
   async function loadValue(nextValue: string) {

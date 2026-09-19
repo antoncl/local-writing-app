@@ -19,10 +19,14 @@ from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
 from layer_fixtures import declare_full_chain, make_project_folder
-from project_fixtures import open_test_project
+from project_fixtures import backdate_past_gap, open_test_project
 
 from app.main import app
-from app.models import CreateCardRequest, CreatePlotTemplateRequest
+from app.models import (
+    CreateCardRequest,
+    CreatePlotTemplateRequest,
+    SavePlotTemplateRequest,
+)
 
 _THREE_ACT_TEMPLATE = "builtin-plot-three-act-story-arc"
 
@@ -71,6 +75,24 @@ class PlotCardSnapshotRoundTripTests(unittest.TestCase):
         response = self.client.post(f"/api/nodes/{self.card_id}/snapshots")
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
+
+    def _auto_snapshots(self) -> list:
+        return self.service.list_snapshots(self.card_id, kind="plot").snapshots
+
+    # ----- automatic session-boundary capture (#2016) -----------------------
+
+    def test_a_save_past_the_session_gap_auto_captures_the_prior_state(self) -> None:
+        # A card save routes through the shared _save_plot_folder_node hook.
+        backdate_past_gap(self._card_path())
+        self._save_card(title="A Card", metadata={})
+        records = self._auto_snapshots()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].retention, "thinned")
+
+    def test_a_save_within_the_session_gap_captures_nothing(self) -> None:
+        # setUp created the card moments ago — same sitting.
+        self._save_card(title="A Card", metadata={})
+        self.assertEqual(self._auto_snapshots(), [])
 
     def test_capture_writes_the_store_under_the_open_project(self) -> None:
         snapshot = self._capture()
@@ -218,6 +240,18 @@ class PlotPlotlineAndTemplateSnapshotTests(unittest.TestCase):
         deleted = self.client.delete(f"/api/plot/templates/{template_id}")
         self.assertEqual(deleted.status_code, 200, deleted.text)
         self.assertFalse(self._store_dir(template_id).exists())
+
+    def test_a_template_save_past_the_session_gap_auto_captures(self) -> None:
+        # save_plot_template is the bespoke second hook site (#2016), separate from
+        # the shared folder-node core the card/plotline savers use.
+        template_id = self.service.create_plot_template(
+            CreatePlotTemplateRequest(title="My Template")
+        ).id
+        backdate_past_gap(self.service._path_for_node_id(template_id, "plot"))
+        self.service.save_plot_template(template_id, SavePlotTemplateRequest(title="My Template"))
+        records = self.service.list_snapshots(template_id, kind="plot").snapshots
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].retention, "thinned")
 
     def test_a_builtin_library_template_snapshot_is_refused(self) -> None:
         # A built-in template is a read-only Library node; the writability floor

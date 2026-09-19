@@ -370,6 +370,10 @@ class PlotMixin:
         )
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
+        # Before the write: photograph the pre-save bytes on a session boundary
+        # (ADR-0043 Am. 2, #2016) — the same hook the other kinds use. Shared by
+        # plotline/card/character_arc; base lane only (plot has no override lane).
+        self.maybe_capture_session_boundary(node_id, kind="plot")
         self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, request.body)
         self._maybe_rename_node_file(path, request.title)
         return node_id
@@ -1030,6 +1034,8 @@ class PlotMixin:
         )
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
+        # Before the write: session-boundary photo of the pre-save bytes (#2016).
+        self.maybe_capture_session_boundary(node_id, kind="plot")
         self._write_plot_template_file(path, node_id, request.title, request.template, request.body, metadata)
         self._maybe_rename_node_file(path, request.title)
         return self.read_plot_template(node_id)

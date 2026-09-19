@@ -193,10 +193,11 @@ class PromoteLoreTests(unittest.TestCase):
         self.service.capture_snapshot("alice", kind="lore")
         self.assertTrue((self.root / "snapshots" / "alice").is_dir())
 
-        # Promoting the fork BACK onto the series (which still owns E) collides on
-        # the store. Because the move runs FIRST, it refuses BEFORE any file is
-        # written or deleted — the promotion aborts clean, no half-applied
-        # duplicate-id file, nothing stranded.
+        # Promoting the fork BACK onto the series (which still owns E) is refused
+        # up front by the dest-owns-id guard (#2025) — before the partition, the
+        # store move, or any file write. (The #2019 store-collision 409 in
+        # move_scene_snapshots is now unreachable defense-in-depth behind it.)
+        # Either way the promotion aborts clean: no half-applied duplicate.
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.promote_lore_entry("alice", self.series_layer_id)
         self.assertEqual(ctx.exception.status_code, 409)
@@ -206,6 +207,46 @@ class PromoteLoreTests(unittest.TestCase):
         self.assertTrue((self.series / "snapshots" / "alice").is_dir())
         self.assertTrue(any((self.root / "lore").glob("*.md")))
         self.assertTrue((self.root / "snapshots" / "alice").is_dir())
+
+    def test_promoting_a_fork_back_onto_its_origin_is_refused_by_the_guard(self) -> None:
+        # #2025, the general case: fork-then-promote-back with NO snapshot, so the
+        # #2019 store-collision 409 can't catch it — only the dest-owns-id guard.
+        self._write_ancestor_lore(self.series, "alice", "Alice", entry_type="lore:character")
+        node_index_gate.invalidate()
+        self.service.fork_lore_entry("alice")  # keeps the id, now owned at book01
+        node_index_gate.invalidate()
+        before_series = self._snapshot_files(self.series)
+
+        # Preview refuses (the guard runs in the shared partition preview calls)…
+        with self.assertRaises(ProjectServiceError) as pctx:
+            self.service.preview_lore_promotion("alice", self.series_layer_id)
+        self.assertEqual(pctx.exception.status_code, 409)
+        # …and commit refuses identically, before any write.
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.promote_lore_entry("alice", self.series_layer_id)
+        self.assertEqual(ctx.exception.status_code, 409)
+        # Nothing mutated: the series still holds exactly one `alice` file (no
+        # duplicate-id write) and its files are untouched; the book keeps its fork.
+        self.assertEqual(len(list((self.series / "lore").glob("*.md"))), 1)
+        self.assertEqual(self._snapshot_files(self.series), before_series)
+        self.assertTrue(any((self.root / "lore").glob("*.md")))
+
+    def test_promoting_a_fork_past_its_shadow_to_a_farther_ancestor_is_refused(self) -> None:
+        # The shadow can sit BETWEEN the destination and here: fork from the series,
+        # then promote to the UNIVERSE (grandparent). The series shadow would mask
+        # the promoted universe copy — so the guard must refuse this too, by
+        # candidate existence, not just a promote onto the shadow's own layer.
+        self._write_ancestor_lore(self.series, "alice", "Alice", entry_type="lore:character")
+        node_index_gate.invalidate()
+        self.service.fork_lore_entry("alice")  # keeps the id at book01; series shadow remains
+        node_index_gate.invalidate()
+        universe_layer_id = self.service._metadata_schema_layer_id(self.universe)
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.promote_lore_entry("alice", universe_layer_id)
+        self.assertEqual(ctx.exception.status_code, 409)
+        # Nothing mutated: no duplicate at the universe, the book keeps its fork.
+        self.assertFalse(any((self.universe / "lore").glob("*.md")))
+        self.assertTrue(any((self.root / "lore").glob("*.md")))
 
     # --- 2: refusals -------------------------------------------------------
 

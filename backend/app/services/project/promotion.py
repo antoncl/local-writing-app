@@ -274,6 +274,30 @@ class PromotionMixin:
         if dest is None or dest.folder not in valid_destinations:
             raise ProjectServiceError("Not a declared ancestor project.", 400)
 
+        # The id must not already exist at ANY other layer in the chain (#2025).
+        # For an entry owned here that only happens via a fork: a fork keeps the id,
+        # so the forked-from ancestor's file stays a *shadow* candidate. Promoting
+        # the fork anywhere up the chain then duplicates the id — onto the shadow's
+        # own layer it collides (a hard same-layer error); onto a layer BELOW the
+        # shadow the shadow masks the promoted copy (the edits vanish); onto a layer
+        # ABOVE it the promoted copy masks the shadow. All three are the corruption
+        # #2025 refuses, so the check is candidate *existence*, not the destination
+        # layer alone (an earlier draft checked only `dest`, missing the
+        # promote-past-the-shadow case). `candidates` scans every file claiming the
+        # id — overrides are excluded — so it sees the shadow the by_id winner (the
+        # local fork) masks. Refuse: the exact inverse of fork's "already lives
+        # here; nothing to fork" guard — the caller's edits belong in the owning
+        # layer's canon or a layer override, not a duplicating promote.
+        if any(
+            candidate.source_layer_id != open_layer_id
+            for candidate in index.candidates.get(entry_id, [])
+        ):
+            raise ProjectServiceError(
+                f"{noun} {entry_id} already exists at an ancestor layer; promoting would "
+                "duplicate the id. Edit it where it is owned, or override it, instead.",
+                409,
+            )
+
         return entry, dest, index, root
 
     def _folds_after_promotion(

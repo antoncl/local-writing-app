@@ -231,6 +231,23 @@ class PromoteLoreTests(unittest.TestCase):
         self.assertEqual(self._snapshot_files(self.series), before_series)
         self.assertTrue(any((self.root / "lore").glob("*.md")))
 
+    def test_promoting_a_fork_past_its_shadow_to_a_farther_ancestor_is_refused(self) -> None:
+        # The shadow can sit BETWEEN the destination and here: fork from the series,
+        # then promote to the UNIVERSE (grandparent). The series shadow would mask
+        # the promoted universe copy — so the guard must refuse this too, by
+        # candidate existence, not just a promote onto the shadow's own layer.
+        self._write_ancestor_lore(self.series, "alice", "Alice", entry_type="lore:character")
+        node_index_gate.invalidate()
+        self.service.fork_lore_entry("alice")  # keeps the id at book01; series shadow remains
+        node_index_gate.invalidate()
+        universe_layer_id = self.service._metadata_schema_layer_id(self.universe)
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.promote_lore_entry("alice", universe_layer_id)
+        self.assertEqual(ctx.exception.status_code, 409)
+        # Nothing mutated: no duplicate at the universe, the book keeps its fork.
+        self.assertFalse(any((self.universe / "lore").glob("*.md")))
+        self.assertTrue(any((self.root / "lore").glob("*.md")))
+
     # --- 2: refusals -------------------------------------------------------
 
     def test_promote_refuses_inherited(self) -> None:

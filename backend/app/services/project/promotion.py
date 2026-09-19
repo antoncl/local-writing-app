@@ -274,6 +274,22 @@ class PromotionMixin:
         if dest is None or dest.folder not in valid_destinations:
             raise ProjectServiceError("Not a declared ancestor project.", 400)
 
+        # The destination must not already own an entry with this id (#2025). The
+        # only way that arises is fork-then-promote-back: a fork keeps the id, so
+        # the forked-from ancestor's file stays a *shadow* candidate for it — and
+        # promoting the fork back onto that ancestor would mint a second same-layer
+        # file with the same id (a hard index error) and resurrect its pre-fork
+        # snapshot history. `entry_for_layer` scans candidates (not the by_id
+        # winner, which is the local fork), so it sees that shadow. Refuse, the
+        # exact inverse of fork's "already lives here; nothing to fork" guard —
+        # the caller's edits belong in the ancestor's own canon or a layer
+        # override, not a promote onto what already owns the id.
+        if index.entry_for_layer(entry_id, dest.id) is not None:
+            raise ProjectServiceError(
+                f"{noun} {entry_id} is already owned by {dest.label}; there is nothing to promote onto it.",
+                409,
+            )
+
         return entry, dest, index, root
 
     def _folds_after_promotion(

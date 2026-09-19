@@ -154,6 +154,24 @@ class PromotePromptTests(unittest.TestCase):
         self.assertIn(top.id, [s.id for s in self.service.list_snapshots("prompta", kind="prompt").snapshots])
         self.assertIn(member.id, [s.id for s in self.service.list_snapshots("snip", kind="prompt").snapshots])
 
+    def test_promoting_onto_a_layer_that_already_owns_the_id_is_refused(self) -> None:
+        # #2025 parity for prompts: prompts have no fork-keeps-id op, so manufacture
+        # the duplicate-id-across-layers state directly — the same id owned at both
+        # the series and the book. The shared _promotion_guard must still refuse
+        # promoting book→series (the destination already owns the id).
+        self._write_ancestor_prompt(self.series, "gp", "General Prompt", body="Ancestor.")
+        self._write_ancestor_prompt(self.root, "gp", "General Prompt", body="Local.")
+        node_index_gate.invalidate()
+        with self.assertRaises(ProjectServiceError) as pctx:
+            self.service.preview_prompt_promotion("gp", self.series_layer_id)
+        self.assertEqual(pctx.exception.status_code, 409)
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.promote_prompt_entry("gp", self.series_layer_id)
+        self.assertEqual(ctx.exception.status_code, 409)
+        # No mutation: still exactly one `gp` file at each layer.
+        self.assertEqual(len(list((self.series / "prompts").glob("*.md"))), 1)
+        self.assertEqual(len(list((self.root / "prompts").glob("*.md"))), 1)
+
     def test_leftover_override_is_removed_by_the_promotion(self) -> None:
         # #1854: the book overrode a series prompt's colour, then the prompt moved
         # into the book (a prompt clone mints a new id, so for prompts this is a

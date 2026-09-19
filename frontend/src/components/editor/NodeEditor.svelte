@@ -3,24 +3,20 @@
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
   import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
-  import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
-  import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
   import FootDock from "@/components/editor/FootDock.svelte";
   import EditorRail from "@/components/editor/EditorRail.svelte";
   import { editorRailLayout } from "@/lib/stores/editorRailLayout.svelte";
-  import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
-  import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
   import { refreshTagNodes, resolveAdoptedTagFields } from "@/lib/stores/tagNodes";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
   import { notchWhen } from "@/lib/utils/snapshotTime";
-  import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import PromptInvocationDialog from "@/components/editor/PromptInvocationDialog.svelte";
   import EditorBodyHost from "@/components/editor/EditorBodyHost.svelte";
   import EditorHeader from "@/components/editor/EditorHeader.svelte";
+  import EditorRailContent from "@/components/editor/EditorRailContent.svelte";
   import { createSectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
@@ -856,94 +852,25 @@
      chat) or the whole pane (none-shape). Defined once as a snippet so the
      long prop list isn't duplicated across the two host slots. -->
 {#snippet metaContent()}
-  {#if metadataSchema}
-    <MetadataPanel
-      entryType={entryType}
-      status={status}
-      metadata={metadata}
-      documentKind={documentKind}
-      documentLabel={documentLabel}
-      documentEntryTypes={documentEntryTypes}
-      metadataFieldIds={metadataFieldIds}
-      loreEntries={loreEntries}
-      promptEntries={promptEntries}
-      structure={structure}
-      researchStructure={researchStructure}
-      implicitContextMatcher={implicitContextMatcher}
-      excludeId={scene?.id ?? null}
-      sourceLayerId={scene?.source_layer_id ?? null}
-      sourceLayerLabel={scene?.source_layer_label ?? null}
-      createLayerId={createLayerId}
-      overriddenFields={overriddenFieldsForPanel}
-      computedFieldString={computedFieldString}
-      effectiveOverrides={scrubbed ? scrub.overrides : null}
-      compare={snapshotCompare ?? entryCompare}
-      readOnly={editorReadOnly}
-      sectionsInBody={bodyShape === "prose"}
-      onGoToSection={(fieldId) => sectionRegistry.focus(fieldId)}
-      onEntryTypeChange={(next) => updateEntryType(next)}
-      onStatusChange={(next) => updateStatus(next)}
-      onMetadataChange={(next) => { metadata = next; emitChange(); }}
-      onCustomData={() => onCustomData?.({ entryType, kind: documentKind })}
-      onNavigate={(payload) => onNavigate?.(payload)}
-      onResetField={documentKind === "lore" || documentKind === "prompt" ? onResetField : undefined}
-      resolvedCascade={resolvedCascade}
-    />
-    {#key scene?.id ?? ""}
-      <BacklinksPanel
-        backlinks={backlinks}
-        loreEntries={loreEntries}
-        structure={structure}
-        onNavigate={(detail) => onNavigate?.(detail)}
-      />
-    {/key}
-    {#if scene?.id}
-      <!-- The Conversations surface (ADR-0051 S3/S5): the chats about this node,
-           resume-first, + a ＋New menu — the launcher that replaced the
-           silent-spawn brainstorm verb. Mounted on EVERY node (#711): the panel
-           self-hides when there is nothing to resume and no prompt `offer_on`s
-           this node's type, so the kind allow-list that used to gate it here was
-           redundant. Keyed on the node id so its expand / menu state resets when
-           the open node changes. -->
-      {#key scene.id}
-        <ConversationsPanel
-          subjectId={scene.id}
-          subjectTitle={title}
-          subjectEntryType={entryType}
-          asOfScene={scrub.anchorSceneId}
-          asOfSceneTitle={structure ? findNodeBySceneId(structure.root, scrub.anchorSceneId)?.title ?? "" : ""}
-          {promptEntries}
-          {metadataSchema}
-          {hostPaneId}
-        />
-      {/key}
-    {/if}
-    {#if documentKind === "lore" && scene?.id}
-      <!-- The mutation SCRUBBER relocated to the foot dock (ADR-0088 S2 §5),
-           where it shares one dock and a mode control with the snapshot track.
-           The mutation TIMELINE stays here in the rail — a separate view of the
-           same ordered dataset; the ADR moves only the beads scrubber. -->
-      <MutationTimeline
-        units={scrub.units}
-        activeIndex={scrub.index}
-        onSelect={(index) => {
-          // Engaging the mutation axis from the rail returns the snapshot axis to
-          // Live, so the two are never both engaged (ADR-0088 S2): the foot dock
-          // follows the engaged axis, and this keeps them mutually exclusive even
-          // though the rail drives scrub outside the dock.
-          void snapshots.park(null);
-          void scrub.scrubTo(index);
-        }}
-        onNavigate={(payload) => onNavigate?.(payload)}
-      />
-      <!-- Mutation sets (ADR-0055 §3): the mutation sets pinned to this entity,
-           + ＋New to author another. The entity-side home for proposing a change
-           the writer later places in a scene. -->
-      {#key scene.id}
-        <PinnedSetsPanel entityId={scene.id} entityEntryType={entryType} />
-      {/key}
-    {/if}
-  {/if}
+  <EditorRailContent
+    model={{
+      metadataSchema, entryType, status, metadata, documentKind, documentLabel,
+      documentEntryTypes, metadataFieldIds, scene, createLayerId, overriddenFieldsForPanel,
+      scrubbed, scrub, compare: snapshotCompare ?? entryCompare, editorReadOnly, bodyShape,
+      resolvedCascade, backlinks, title, hostPaneId,
+    }}
+    deps={{ loreEntries, promptEntries, structure, researchStructure, implicitContextMatcher, sectionRegistry, computedFieldString }}
+    on={{
+      entryTypeChange: (next) => updateEntryType(next),
+      statusChange: (next) => updateStatus(next),
+      metadataChange: (next) => { metadata = next; emitChange(); },
+      customData: () => onCustomData?.({ entryType, kind: documentKind }),
+      navigate: (payload) => onNavigate?.(payload),
+      resetField: (fieldId) => onResetField?.(fieldId),
+      goToSection: (fieldId) => sectionRegistry.focus(fieldId),
+      park: () => { void snapshots.park(null); },
+    }}
+  />
 {/snippet}
 
 <!-- The detached Details pane renders the SAME `metaContent`; this thin wrapper

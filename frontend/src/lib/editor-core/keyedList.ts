@@ -19,6 +19,22 @@ export function keyedListKeyMember(field: MetadataFieldDefinition | undefined | 
   return refKeys.length === 1 ? refKeys[0] : null;
 }
 
+/** The ref/tag members of a group-shaped `list` field (mirrors the backend
+ *  `ref_members`, `backend/app/services/project/metadata_refs.py:86-102`):
+ *  every `item_members` entry typed `entity_ref` or `entity_ref_list`. Empty
+ *  for a scalar list (`item_scalar`), a field with no such member, or
+ *  anything that isn't a `list` at all. */
+export function refMembersOf(
+  field: MetadataFieldDefinition | undefined | null,
+): { key: string; type: "entity_ref" | "entity_ref_list" }[] {
+  if (!field || field.type !== "list" || field.item_scalar) return [];
+  return (field.item_members ?? [])
+    .filter((member): member is typeof member & { type: "entity_ref" | "entity_ref_list" } =>
+      member.type === "entity_ref" || member.type === "entity_ref_list",
+    )
+    .map((member) => ({ key: member.key, type: member.type }));
+}
+
 /** One list item's identity. A plain string item IS its id (today's
  *  `entity_ref_list` shape, and the scalar case in general); a folded record
  *  item's id is its key member's value, when that value is a non-empty

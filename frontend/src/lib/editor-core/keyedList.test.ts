@@ -2,7 +2,7 @@
 // Pure functions — no Svelte mount needed. Mirrors the backend twin,
 // `keyed_list_key` (`backend/app/services/project/metadata_refs.py:105-118`).
 import { describe, expect, it } from "vitest";
-import { itemMemberDetail, keyedListKeyMember, listItemKey } from "./keyedList";
+import { itemMemberDetail, keyedListKeyMember, listItemKey, refMembersOf } from "./keyedList";
 import type { MetadataFieldDefinition } from "@/lib/types";
 
 function field(over: Partial<MetadataFieldDefinition>): MetadataFieldDefinition {
@@ -76,6 +76,36 @@ describe("listItemKey", () => {
 
   it("null for a non-string, non-object item", () => {
     expect(listItemKey(RELATIONSHIP, 42 as never)).toBeNull();
+  });
+});
+
+describe("refMembersOf (#2075, mirrors backend ref_members)", () => {
+  it("collects the entity_ref / entity_ref_list item_members, typed", () => {
+    expect(refMembersOf(RELATIONSHIP)).toEqual([{ key: "to", type: "entity_ref" }]);
+    expect(
+      refMembersOf(
+        field({
+          type: "list",
+          item_scalar: false,
+          item_members: [
+            { key: "to", name: "To", type: "entity_ref" },
+            { key: "allies", name: "Allies", type: "entity_ref_list" },
+            { key: "notes", name: "Notes", type: "text" },
+          ],
+        }),
+      ),
+    ).toEqual([
+      { key: "to", type: "entity_ref" },
+      { key: "allies", type: "entity_ref_list" },
+    ]);
+  });
+
+  it("empty for a scalar list, a member-less group, an entity_ref_list, or undefined/null", () => {
+    expect(refMembersOf(field({ type: "list", item_scalar: true, item_members: [{ key: "value", name: "Value", type: "entity_ref" }] }))).toEqual([]);
+    expect(refMembersOf(field({ type: "list", item_scalar: false, item_members: [{ key: "a", name: "A", type: "text" }] }))).toEqual([]);
+    expect(refMembersOf(field({ type: "entity_ref_list" }))).toEqual([]);
+    expect(refMembersOf(undefined)).toEqual([]);
+    expect(refMembersOf(null)).toEqual([]);
   });
 });
 

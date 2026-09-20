@@ -7,7 +7,7 @@
 // it (the references store today). The evaluator only reads the map — it never
 // mutates it — so the returned map's sets are the canonical membership.
 
-import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
+import { keyedListKeyMember, refMembersOf } from "@/lib/editor-core/keyedList";
 import type { MetadataSchema, ReferenceGraphEdge } from "@/lib/types";
 
 // The ids one node references through its `entity_ref` / `entity_ref_list`
@@ -38,6 +38,24 @@ export function forwardRefsOf(
       if (typeof value === "string" && value) refs.add(value);
     } else if (field.type === "entity_ref_list" && Array.isArray(value)) {
       for (const item of value) if (typeof item === "string" && item) refs.add(item);
+    } else if (field.type === "list" && Array.isArray(value)) {
+      // A reference-keyed / ref-bearing list (#2067): a save that only edits an
+      // item's ref/tag member changes the item, not the list identity, so the
+      // change-gate must walk one level into each item to see it.
+      const members = refMembersOf(field);
+      if (members.length === 0) continue;
+      for (const item of value) {
+        if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+        const record = item as Record<string, unknown>;
+        for (const member of members) {
+          const memberValue = record[member.key];
+          if (member.type === "entity_ref") {
+            if (typeof memberValue === "string" && memberValue) refs.add(memberValue);
+          } else if (member.type === "entity_ref_list" && Array.isArray(memberValue)) {
+            for (const v of memberValue) if (typeof v === "string" && v) refs.add(v);
+          }
+        }
+      }
     }
   }
   return refs;
@@ -94,9 +112,54 @@ export function projectReferences(
   return out;
 }
 
-// One row in `buildKeyedReferrerIndex`'s reverse index: the entry holding the
-// item, and the reference-keyed list field it lives in.
-export type KeyedReferrer = { referrerId: string; fieldId: string };
+// One row in a field-qualified reverse index: the entry holding the
+// reference, and the field it references through. `KeyedReferrer` is kept as
+// an alias — it named the same row shape before the field index widened
+// beyond reference-keyed lists (#2075, ADR-0089 §6).
+export type FieldReferrer = { referrerId: string; fieldId: string };
+export type KeyedReferrer = FieldReferrer;
+
+// Shared loop behind `buildReferrerFieldIndex` and `buildKeyedReferrerIndex`:
+// invert the field-qualified `edges` into target id → referrer rows, keeping
+// only edges whose field passes `keep` (all of them when omitted), and
+// deduped per (referrer, field) so a list field naming the same target twice
+// through the same field (e.g. a duplicate id in an `entity_ref_list` member)
+// contributes one row.
+function buildFieldReferrerIndex(
+  edges: ReferenceGraphEdge[] | null | undefined,
+  keep?: (fieldId: string) => boolean,
+): Map<string, FieldReferrer[]> {
+  const index = new Map<string, FieldReferrer[]>();
+  if (!edges) return index;
+  const seenByTarget = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    if (keep && !keep(edge.field_id)) continue;
+    let seen = seenByTarget.get(edge.dst);
+    if (!seen) {
+      seen = new Set<string>();
+      seenByTarget.set(edge.dst, seen);
+    }
+    const dedupeKey = `${edge.src}::${edge.field_id}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    const row: FieldReferrer = { referrerId: edge.src, fieldId: edge.field_id };
+    const existing = index.get(edge.dst);
+    if (existing) existing.push(row);
+    else index.set(edge.dst, [row]);
+  }
+  return index;
+}
+
+// The field-qualified reverse index (#2067, ADR-0089 §6): target id → every
+// entry that references it, tagged with the field the reference lives in.
+// Unfiltered — every `entity_ref` / `entity_ref_list` field and every
+// reference-keyed list counts, unlike `buildKeyedReferrerIndex` below. Feeds
+// the References panel's per-field rows.
+export function buildReferrerFieldIndex(
+  edges: ReferenceGraphEdge[] | null | undefined,
+): Map<string, FieldReferrer[]> {
+  return buildFieldReferrerIndex(edges);
+}
 
 // The reverse index behind the delete-orphan warning (ADR-0089 §9): target id
 // → every entry that holds a relationship item keyed by it. Built from the
@@ -108,15 +171,6 @@ export function buildKeyedReferrerIndex(
   edges: ReferenceGraphEdge[] | null | undefined,
   schema: MetadataSchema | null | undefined,
 ): Map<string, KeyedReferrer[]> {
-  const index = new Map<string, KeyedReferrer[]>();
-  if (!edges || !schema) return index;
-  for (const edge of edges) {
-    const field = schema.fields[edge.field_id];
-    if (keyedListKeyMember(field) === null) continue;
-    const row: KeyedReferrer = { referrerId: edge.src, fieldId: edge.field_id };
-    const existing = index.get(edge.dst);
-    if (existing) existing.push(row);
-    else index.set(edge.dst, [row]);
-  }
-  return index;
+  if (!schema) return new Map();
+  return buildFieldReferrerIndex(edges, (fieldId) => keyedListKeyMember(schema.fields[fieldId]) !== null);
 }

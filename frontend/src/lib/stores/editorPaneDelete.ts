@@ -14,9 +14,10 @@ import { backlinksFor } from "@/lib/views/backlinks";
 import {
   keyedReferrerIndexStore,
   referenceIndexStore,
+  referrerFieldIndexStore,
   refreshReferenceIndexInBackground,
 } from "@/lib/stores/references";
-import { setLoreEntries } from "@/lib/stores/lore";
+import { loreEntriesStore, setLoreEntries } from "@/lib/stores/lore";
 import { setPromptEntries } from "@/lib/stores/prompts";
 import { setPlotTemplates } from "@/lib/stores/plotTemplates";
 import { deletePlotline } from "@/lib/stores/plotlines";
@@ -64,7 +65,13 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
   try {
     // The open node's referrers (#194): membership from the in-memory reverse
     // index, rows resolved on demand — same helper the backlinks panel uses.
-    backlinks = await backlinksFor(sceneId, get(referenceIndexStore));
+    backlinks = await backlinksFor(
+      sceneId,
+      get(referenceIndexStore),
+      get(referrerFieldIndexStore),
+      get(metadataSchemaStore),
+      get(loreEntriesStore),
+    );
   } catch (error) {
     console.warn("Failed to fetch backlinks", error);
   }

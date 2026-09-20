@@ -3,10 +3,11 @@
 // surface needs a mount test asserting rows render (#642/#724). The #49 runes
 // port also turns the `navigate` CustomEvent into an `onNavigate` callback prop;
 // the second test locks that the navigation target still reaches the parent.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import BacklinksPanel from "./BacklinksPanel.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
+import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
 import type { Backlink } from "@/lib/types";
 
 function backlink(over: Partial<Backlink> = {}): Backlink {
@@ -24,6 +25,11 @@ function backlink(over: Partial<Backlink> = {}): Backlink {
 // Null schema is a valid state (schema not yet loaded); the type pill then falls
 // back to the raw entry_type, so it never collides with a row's title text.
 afterEach(() => metadataSchemaStore.set(null));
+
+// railSectionCollapse is a global singleton persisted to localStorage (#1444) —
+// reset "references" to collapsed before each test so a prior test's expand
+// doesn't leak into the next one's initial state.
+beforeEach(() => railSectionCollapse.set("references", false));
 
 describe("BacklinksPanel", () => {
   it("renders the reference roster with its count (a display pane's mount test)", () => {
@@ -48,5 +54,15 @@ describe("BacklinksPanel", () => {
     await fireEvent.click(screen.getByText("References"));
     await fireEvent.click(screen.getByText("Mira"));
     expect(onNavigate).toHaveBeenCalledWith({ id: "lore_1", kind: "lore", entryType: "lore:character" });
+  });
+
+  // #2075 (ADR-0089 §6): a row's detail line — the field name, or a keyed-list
+  // item's non-key members — renders under the title via NodeRow's `detail` prop.
+  it("renders a row's detail line when the backlink carries one", async () => {
+    render(BacklinksPanel, {
+      props: { backlinks: [backlink({ detail: "kinship · estranged" })] },
+    });
+    await fireEvent.click(screen.getByText("References"));
+    expect(screen.getByText("kinship · estranged")).toBeInTheDocument();
   });
 });

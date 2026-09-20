@@ -10,6 +10,8 @@ import RailTagLine from "./RailTagLine.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { clearTagNodes, tagNodesStore } from "@/lib/stores/tagNodes";
 import { referenceIndexStore, clearReferenceIndex } from "@/lib/stores/references";
+import { tagChipHexByTitle } from "@/lib/utils/pickerStripes";
+import { setPalette } from "@/lib/utils/colors";
 import { api } from "@/lib/api";
 import type { LoreEntrySummary, MetadataFieldDefinition, MetadataSchema, TagEntry } from "@/lib/types";
 
@@ -78,6 +80,38 @@ describe("RailTagLine — rest display grouping", () => {
     const hit = screen.getByTestId("rail-tag-line");
     expect(hit.textContent).toBe("pov · river");
     expect(hit.querySelector(".tag-line-vocab")).toBeNull();
+  });
+
+  it("each name takes its tag's colour, resolved as the chips resolve it (#2060)", () => {
+    // The palette is machine state (loaded on app start); seed the two swatches
+    // the recipe can land on: the tag's own, and the tag kind's default.
+    setPalette([
+      { id: "violet", label: "Violet", hex: "#8b5cf6" },
+      { id: "graphite", label: "Graphite", hex: "#6b7280" },
+    ]);
+    const coloured: TagEntry[] = [
+      { id: "tag_pov", title: "pov", entry_type: "tag:house", metadata: { color: "violet" } },
+      { id: "tag_river", title: "river", entry_type: "tag:house", metadata: {} },
+    ];
+    tagNodesStore.set(coloured);
+    try {
+      render(RailTagLine, {
+        props: { field: openField, fieldId: "tags", fieldLabel: "Tags", value: ["tag_pov", "tag_river", "tag_nope"], editing: false, onOpen: noop, onClose: noop, onChange: noop },
+      });
+      const expected = tagChipHexByTitle(coloured, SCHEMA, "tag:house");
+      const names = Array.from(document.querySelectorAll(".tag-line-name"));
+      const styleOf = (title: string) => names.find((n) => n.textContent === title)?.getAttribute("style") ?? "";
+      // The tag's own swatch.
+      expect(expected.get("pov")).toBe("#8b5cf6");
+      expect(styleOf("pov")).toContain("--tag-text: #8b5cf6");
+      // No swatch of its own → the tag kind's default, exactly what the chips show.
+      expect(expected.get("river")).toBe("#6b7280");
+      expect(styleOf("river")).toContain("--tag-text: #6b7280");
+      // A missing id keeps its missing treatment and no hue.
+      expect(styleOf("tag_nope")).toBe("");
+    } finally {
+      setPalette([]);
+    }
   });
 
   it("two vocabularies: vocab-labelled groups joined by the divider", () => {

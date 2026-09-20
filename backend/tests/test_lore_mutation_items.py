@@ -295,6 +295,23 @@ class ValidationTests(_RelationshipFixture):
         self._new_scene("Chapter 19", self._close("r12", "c19"))
         self.assertEqual(self._warnings(), [])
 
+    def test_a_unit_that_adds_and_edits_the_same_item_is_clean(self) -> None:
+        # Carrier rows share their unit's offset (ADR-0016): the add row counts
+        # for the replace row after it, exactly as the resolver applies them.
+        item = quote(encode_item({"to": self.peter, "kind": "witness"}), safe="")
+        unit = (
+            f"<!-- mutate:entity={self.mara};name=Meets;id=u1\n"
+            f"field={FIELD};op=add;value={item};id=a1\n"
+            f"field={FIELD}.{self.peter}.state;op=replace;value=wary;id=r1\n"
+            "-->"
+        )
+        scene = self._new_scene("Chapter 9", f"At the gate. {unit} After.")
+        self.assertEqual(self._warnings(), [])
+        self.assertEqual(
+            self._item(self._items(scene), self.peter),
+            {"to": self.peter, "kind": "witness", "state": "wary"},
+        )
+
 
 class WriteRuleTests(_RelationshipFixture):
     def test_save_refuses_a_second_item_for_the_same_target(self) -> None:

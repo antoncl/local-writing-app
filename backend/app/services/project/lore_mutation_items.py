@@ -160,7 +160,7 @@ def fold_keyed_items(
     for index, item in enumerate(base_items if isinstance(base_items, list) else []):
         key = item_key(item, keyed.key_member)
         if key is None:
-            slots[f"\x00{index}"] = item
+            slots[f"\x00{index}"] = dict(item) if isinstance(item, dict) else item
             continue
         key = canonical(key)
         if key in slots:

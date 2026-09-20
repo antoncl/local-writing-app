@@ -220,12 +220,18 @@ class LoreMutationValidationMixin:
         self, checks: _MarkerChecks, marker: MutationMarker, keyed: KeyedList
     ) -> set[str]:
         """The keys `marker`'s entry holds in `keyed` just before the marker —
-        the resolver's answer at the position one character earlier, or the
-        base items when nothing live addresses the list there."""
+        the resolver's answer at the marker's own offset with the marker itself
+        excluded (carrier rows share their unit's offset, so an item added by
+        an earlier row of the same unit counts, exactly as the resolver applies
+        it), or the base items when nothing live addresses the list there."""
         if checks.mutations is None:
             checks.mutations = self.build_mutations_index()
         state = self.effective_state(
-            marker.entity_id, marker.scene_id, position=marker.offset - 1, index=checks.mutations
+            marker.entity_id,
+            marker.scene_id,
+            position=marker.offset,
+            index=checks.mutations,
+            exclude={marker.marker_id},
         )
         items = state.get(keyed.field_id)
         if items is None:

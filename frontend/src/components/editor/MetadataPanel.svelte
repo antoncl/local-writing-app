@@ -765,8 +765,12 @@
   /* #2061: the row's 22px disclosure gutter exists so a field's glyph sits
      under a group head's caret. With no group heads on the type (known rows
      or fold), it is dead space that left every label 32px right of the wide
-     values' edge — so icons, labels and value lines share the prose edge. */
-  .scene-metadata.front-matter.no-disc :global(.fr-disc) {
+     values' edge — so icons, labels and value lines share the prose edge.
+     Only the EMPTY gutter goes: the folding-list caret shares the slot's
+     class (`.fr-disc-toggle`), and though no foldable list reaches the front
+     matter today (lists are index rows there), a control must never be
+     hidden by a spacing rule. */
+  .scene-metadata.front-matter.no-disc :global(.fr-disc:not(.fr-disc-toggle)) {
     display: none;
   }
   .scene-metadata.front-matter > .rail-fold-body {

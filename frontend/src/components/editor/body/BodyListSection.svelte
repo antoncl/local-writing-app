@@ -301,6 +301,14 @@
     margin-inline: auto;
     padding: 0 56px;
     box-sizing: border-box;
+    /* #2049: the measure is in `ch`, and `ch` resolves in the element's OWN
+       font. This block must measure in the prose font `.editor-body` measures
+       in, or its 72ch is 72 smaller UI-font zeros: the sections come out
+       narrower than the prose, and their gutter, headings, spine and ordinal
+       land ~50px right of the prose's. UI children that used to inherit the
+       pane's sans (item rows, fold line, add button) pin it back. */
+    font-family: var(--serif);
+    font-size: var(--fs-prose);
   }
   .bs-h2 {
     margin: var(--sp-4) 0 var(--sp-2);
@@ -459,6 +467,7 @@
   }
   .bs-add-item {
     display: block;
+    font-family: var(--sans);
     margin: var(--sp-3) 0 0;
     background: none;
     border: 0;

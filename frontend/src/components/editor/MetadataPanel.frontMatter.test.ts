@@ -93,5 +93,18 @@ describe("MetadataPanel — front matter layout (#2054)", () => {
     // The empty `role` folds behind the same summary line as in the rail, and
     // the index rows do not count as empties.
     expect(screen.getByText("1 more field")).toBeInTheDocument();
+    // #2061: no group heads anywhere (known rows or fold) → the rows' disclosure
+    // gutter is dropped so icons, labels and wide values share one edge.
+    expect(document.querySelector(".scene-metadata.front-matter.no-disc")).not.toBeNull();
+  });
+
+  it("front matter keeps the disclosure gutter when the type has a group, even one that is folded (#2061)", () => {
+    metadataSchemaStore.set({
+      ...SCHEMA,
+      fields: { ...SCHEMA.fields, role: { name: "Role", type: "text", group: "Arc" } },
+    } as unknown as MetadataSchema);
+    mount("front-matter");
+    expect(document.querySelector(".scene-metadata.front-matter")).not.toBeNull();
+    expect(document.querySelector(".scene-metadata.no-disc")).toBeNull();
   });
 });

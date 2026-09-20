@@ -448,22 +448,45 @@
   }
   .tag-line-navigate:hover { text-decoration: underline; }
 
+  /* The edit state keeps the rest line's shape (#2059): the tokens with the
+     input at their end, on the same line(s) as the names, and the completion
+     list FLOATING under that line rather than laid out in flow — so the row
+     never grows past its token line and nothing below it moves while a tag
+     is typed (in the front matter the prose used to shift 73px). */
+  .tag-line-edit { position: relative; }
   .tag-line-tokens { display: flex; flex-wrap: wrap; align-items: baseline; }
 
-  .tag-line-input {
+  .tag-line-tokens > .tag-line-input {
     font: inherit;
     border: none;
     border-bottom: 1px solid var(--accent);
     background: none;
+    /* Sized to its text, never to the line. The global text-input rule
+       (styles.css, `input:not([type=checkbox]):not([type=radio])`) sets
+       `width: 100%` at a specificity a lone class cannot beat, which put the
+       input on a line of its own at full width; the parent-qualified selector
+       outranks it. */
+    field-sizing: content;
+    flex: 0 1 auto;
     min-width: 6ch;
+    max-width: 100%;
     width: auto;
+    margin: 0;
     padding: 0 2px;
     color: var(--text);
     outline: none;
   }
 
   .tag-line-complete {
-    margin: 4px 0 0;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: var(--z-dropdown);
+    min-width: 220px;
+    max-width: 100%;
+    max-height: 40vh;
+    overflow: auto;
+    margin: 2px 0 0;
     padding: 2px 0;
     list-style: none;
     border: 1px solid var(--border);

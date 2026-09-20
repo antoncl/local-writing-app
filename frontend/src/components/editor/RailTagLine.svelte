@@ -11,6 +11,7 @@
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { singleConcreteTarget, createTargetFor, hasTitleMatch } from "@/lib/utils/pickerCreate";
   import { peekAnchor } from "@/lib/actions/peekAnchor";
+  import { resolveColor } from "@/lib/utils/colors";
   import { buildPeekTarget } from "@/lib/utils/peekTarget";
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -79,16 +80,28 @@
   }
 
   const ids = $derived(Array.isArray(value) ? value.map((v) => String(v)) : []);
-  type ResolvedTag = { id: string; title: string; entryType: string | null; missing: boolean };
+  // `hex` (#2060): the tag's colour, resolved exactly as NodeRow's chips and
+  // the picker pills resolve it (`tagChipHexByTitle` → `resolveColor`): the
+  // tag's own swatch, else its vocabulary's, else the tag kind's — so the
+  // line and the chips read as one vocabulary. Null only for a missing id.
+  type ResolvedTag = { id: string; title: string; entryType: string | null; missing: boolean; hex: string | null };
   const items = $derived.by((): ResolvedTag[] => {
     const byId = $tagById;
     return ids.map((id) => {
       const canonical = canonicalIdIn(byId, id);
       const tag = byId.get(canonical);
-      if (!tag) return { id, title: id, entryType: null, missing: true };
-      return { id, title: tag.title, entryType: tag.entry_type, missing: false };
+      if (!tag) return { id, title: id, entryType: null, missing: true, hex: null };
+      const color = tag.metadata?.color;
+      const hex = resolveColor(typeof color === "string" ? color : null, tag.entry_type, "tag", schema)?.hex ?? null;
+      return { id, title: tag.title, entryType: tag.entry_type, missing: false, hex };
     });
   });
+  // Colour is a lens (design-language): the name's text takes the hue, no
+  // glyph and no pill. The chip recipe's `--tag-text` var, so a theme that
+  // retunes chips retunes the line.
+  function nameStyle(item: ResolvedTag): string | undefined {
+    return item.hex ? `--tag-text: ${item.hex}` : undefined;
+  }
   const isEmpty = $derived(ids.length === 0);
 
   // Grouping (rest display only): one flat run when every resolved tag shares
@@ -316,7 +329,7 @@
   }
 </script>
 
-{#snippet nameSpan(item: ResolvedTag, navigable: boolean)}{#if item.missing}<span class="tag-line-name missing">{item.title}</span>{:else if navigable}<button type="button" class="tag-line-name tag-line-navigate" data-tag-id={item.id} onclick={() => navigate(item.id, item.entryType)}>{item.title}</button>{:else}<span class="tag-line-name" data-tag-id={item.id}>{item.title}</span>{/if}{/snippet}
+{#snippet nameSpan(item: ResolvedTag, navigable: boolean)}{#if item.missing}<span class="tag-line-name missing">{item.title}</span>{:else if navigable}<button type="button" class="tag-line-name tag-line-navigate" data-tag-id={item.id} style={nameStyle(item)} onclick={() => navigate(item.id, item.entryType)}>{item.title}</button>{:else}<span class="tag-line-name" data-tag-id={item.id} style={nameStyle(item)}>{item.title}</span>{/if}{/snippet}
 
 {#snippet lineBody(navigable: boolean)}{#if singleVocab}{#each items as item, i (item.id + i)}{#if i > 0}{" · "}{/if}{@render nameSpan(item, navigable)}{/each}{:else}{#each restGroups as group, gi (group.key)}{#if gi > 0}<span class="tag-line-divider">|</span>{/if}{#if group.label}<span class="tag-line-vocab">{`${group.label}: `}</span>{/if}{#each group.items as item, ii (item.id + ii)}{#if ii > 0}{" · "}{/if}{@render nameSpan(item, navigable)}{/each}{/each}{/if}{/snippet}
 
@@ -332,7 +345,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="tag-line-hit tag-line-edit" bind:this={rootEl} onfocusout={onRootFocusOut}>
     <div class="tag-line-tokens">
-      {#each items as item, i (item.id + i)}{#if i > 0}{" · "}{/if}<span class="tag-line-name" class:missing={item.missing}>{item.title}</span>{/each}{#if items.length > 0}{" · "}{/if}
+      {#each items as item, i (item.id + i)}{#if i > 0}{" · "}{/if}<span class="tag-line-name" class:missing={item.missing} style={nameStyle(item)}>{item.title}</span>{/each}{#if items.length > 0}{" · "}{/if}
       <input
         type="text"
         class="tag-line-input"
@@ -385,7 +398,13 @@
     data-testid="rail-tag-line"
     aria-label={ariaLabel}
     title={field.description || (isEmpty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}`)}
-    onclick={(e) => onOpen(fieldId, (e.currentTarget as HTMLElement).closest(".field-row") as HTMLElement)}
+    onclick={(e) => {
+      // #2065: opening the line unmounts this button, and the anchor's
+      // teardown does not close a card it opened — so a card raised by hover
+      // would float over the editor's completion list off a detached anchor.
+      closePeek();
+      onOpen(fieldId, (e.currentTarget as HTMLElement).closest(".field-row") as HTMLElement);
+    }}
     use:peekAnchor={{ delegate: ".tag-line-name[data-tag-id]", onOpen: openPeek, onClose: closePeek }}
   >
     {#if isEmpty}
@@ -435,7 +454,6 @@
 
   .tag-line-vocab { color: var(--text-3); margin-right: 4px; }
   .tag-line-divider { color: var(--text-3); margin: 0 6px; }
-  .missing { color: var(--danger); }
 
   .tag-line-navigate {
     border: none;
@@ -447,6 +465,12 @@
     cursor: pointer;
   }
   .tag-line-navigate:hover { text-decoration: underline; }
+  /* #2060: a name takes its tag's hue (set per name as `--tag-text`, the
+     chips' variable); the line's own grey where a tag carries none. After
+     `.tag-line-navigate` so the hue wins its `color: inherit`; `.missing`
+     after both so an unresolved id keeps the danger colour. */
+  .tag-line-name { color: var(--tag-text, inherit); }
+  .missing { color: var(--danger); }
 
   /* The edit state keeps the rest line's shape (#2059): the tokens with the
      input at their end, on the same line(s) as the names, and the completion

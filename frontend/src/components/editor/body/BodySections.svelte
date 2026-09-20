@@ -11,6 +11,7 @@
   // #2043: a `list` field whose item shape carries a long_text member is
   // material too — it renders AFTER the long_text sections above, one
   // BodyListSection per field, one sub-section per item.
+  import { untrack } from "svelte";
   import type { Editor } from "@tiptap/core";
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import FieldValue from "@/components/widgets/FieldValue.svelte";
@@ -118,12 +119,18 @@
   // or hidden) reshuffles `orderedIds`, so every mounted editor re-registers
   // under its current index — otherwise the bridge would still walk the
   // order the sections had when they mounted.
+  // Keyed on the ORDER as a string, not the array: `orderedIds` now reads the
+  // list items (#2043), so it is a fresh array on every metadata write — every
+  // keystroke in any section — while the order itself rarely changes.
+  const orderedKey = $derived(orderedIds.join("|"));
   $effect(() => {
-    void orderedIds;
-    for (const [fieldId, editor] of mounted) {
-      register.unregister(editor);
-      register.register(sectionIndex(fieldId), fieldId, editor);
-    }
+    void orderedKey;
+    untrack(() => {
+      for (const [fieldId, editor] of mounted) {
+        register.unregister(editor);
+        register.register(sectionIndex(fieldId), fieldId, editor);
+      }
+    });
   });
 
   // MetadataLongTextEditor's `value` is a plain string; `metadata[id]` is the

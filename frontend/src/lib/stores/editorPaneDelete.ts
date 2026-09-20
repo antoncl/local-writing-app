@@ -65,13 +65,11 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
   try {
     // The open node's referrers (#194): membership from the in-memory reverse
     // index, rows resolved on demand — same helper the backlinks panel uses.
-    backlinks = await backlinksFor(
-      sceneId,
-      get(referenceIndexStore),
-      get(referrerFieldIndexStore),
-      get(metadataSchemaStore),
-      get(loreEntriesStore),
-    );
+    backlinks = await backlinksFor(sceneId, get(referenceIndexStore), {
+      fieldIndex: get(referrerFieldIndexStore),
+      schema: get(metadataSchemaStore),
+      loreEntries: get(loreEntriesStore),
+    });
   } catch (error) {
     console.warn("Failed to fetch backlinks", error);
   }

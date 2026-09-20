@@ -98,9 +98,7 @@ describe("candidatesToBacklinks — one row per (referrer, field) with a field i
     const rows = candidatesToBacklinks(
       [candidate({ id: "mara", title: "Mara" })],
       "tomas",
-      fieldRows,
-      SCHEMA,
-      LORE_ENTRIES,
+      { fieldRows, schema: SCHEMA, loreEntries: LORE_ENTRIES },
     );
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.field_id).sort()).toEqual(["mentor", "relationships"]);
@@ -111,9 +109,7 @@ describe("candidatesToBacklinks — one row per (referrer, field) with a field i
     const [row] = candidatesToBacklinks(
       [candidate({ id: "mara", title: "Mara" })],
       "tomas",
-      fieldRows,
-      SCHEMA,
-      LORE_ENTRIES,
+      { fieldRows, schema: SCHEMA, loreEntries: LORE_ENTRIES },
     );
     expect(row.field_name).toBe("Relationships");
     expect(row.detail).toBe("kinship · estranged");
@@ -124,9 +120,7 @@ describe("candidatesToBacklinks — one row per (referrer, field) with a field i
     const [row] = candidatesToBacklinks(
       [candidate({ id: "mara", title: "Mara" })],
       "tomas",
-      fieldRows,
-      SCHEMA,
-      LORE_ENTRIES,
+      { fieldRows, schema: SCHEMA, loreEntries: LORE_ENTRIES },
     );
     expect(row.field_name).toBe("Mentor");
     expect(row.detail).toBe("Mentor");
@@ -137,15 +131,13 @@ describe("candidatesToBacklinks — one row per (referrer, field) with a field i
     const [row] = candidatesToBacklinks(
       [candidate({ id: "mara", title: "Mara" })],
       "tomas",
-      fieldRows,
-      SCHEMA,
-      [], // no lore entries loaded
+      { fieldRows, schema: SCHEMA, loreEntries: [] }, // no lore entries loaded
     );
     expect(row.detail).toBe("Relationships");
   });
 
   it("drops a row whose referrer id doesn't resolve (deleted during the stale-index window)", () => {
     const fieldRows: FieldReferrer[] = [{ referrerId: "gone", fieldId: "mentor" }];
-    expect(candidatesToBacklinks([], "tomas", fieldRows, SCHEMA, LORE_ENTRIES)).toEqual([]);
+    expect(candidatesToBacklinks([], "tomas", { fieldRows, schema: SCHEMA, loreEntries: LORE_ENTRIES })).toEqual([]);
   });
 });

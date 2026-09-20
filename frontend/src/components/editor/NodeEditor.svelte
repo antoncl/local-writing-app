@@ -373,7 +373,7 @@
     lastBacklinksSceneId = anchorId;
     const req = ++backlinksReq;
     try {
-      const next = await backlinksFor(anchorId, referenceIndex, fieldIndex, metadataSchema, loreEntries);
+      const next = await backlinksFor(anchorId, referenceIndex, { fieldIndex, schema: metadataSchema, loreEntries });
       if (req === backlinksReq) backlinks = next;
     } catch {
       if (req === backlinksReq) backlinks = [];

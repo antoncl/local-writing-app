@@ -49,13 +49,28 @@ function keyedItemDetail(
 // Map resolved referrer candidates → panel rows, sorted by kind then title
 // then field name for a stable panel. Pure, so the mapping/sort is
 // unit-testable off the wire.
+/** What attributes a referrer to the field it references through (ADR-0089
+ *  §6): the anchor's (referrer, field) rows from the field index, the schema
+ *  for field names and shapes, and the lore entries whose keyed-list items
+ *  supply a row's detail. Absent `fieldRows`, rows are any-field as before. */
+export type BacklinkAttribution = {
+  fieldRows?: readonly FieldReferrer[] | null;
+  schema?: MetadataSchema | null;
+  loreEntries?: readonly LoreEntrySummary[] | null;
+};
+
+export type BacklinkContext = {
+  fieldIndex?: ReadonlyMap<string, FieldReferrer[]> | null;
+  schema?: MetadataSchema | null;
+  loreEntries?: readonly LoreEntrySummary[] | null;
+};
+
 export function candidatesToBacklinks(
   candidates: readonly ReferenceCandidate[],
   anchorId?: string,
-  fieldRows?: readonly FieldReferrer[] | null,
-  schema?: MetadataSchema | null,
-  loreEntries?: readonly LoreEntrySummary[] | null,
+  attribution: BacklinkAttribution = {},
 ): Backlink[] {
+  const { fieldRows, schema, loreEntries } = attribution;
   if (!fieldRows) {
     return anyFieldBacklinks(candidates, anchorId).sort(
       (a, b) => a.kind.localeCompare(b.kind) || a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
@@ -99,14 +114,13 @@ export function candidatesToBacklinks(
 export async function backlinksFor(
   anchorId: string,
   referenceIndex: ReadonlyMap<string, ReadonlySet<string>> | null | undefined,
-  fieldIndex?: ReadonlyMap<string, FieldReferrer[]> | null,
-  schema?: MetadataSchema | null,
-  loreEntries?: readonly LoreEntrySummary[] | null,
+  context: BacklinkContext = {},
 ): Promise<Backlink[]> {
+  const { fieldIndex, schema, loreEntries } = context;
   const fieldRows = fieldIndex?.get(anchorId);
   const referrerIds =
     fieldRows !== undefined ? [...new Set(fieldRows.map((r) => r.referrerId))] : [...projectReferences([anchorId], referenceIndex)];
   if (referrerIds.length === 0) return [];
   const { candidates } = await api.resolveReferences(referrerIds);
-  return candidatesToBacklinks(candidates, anchorId, fieldRows, schema, loreEntries);
+  return candidatesToBacklinks(candidates, anchorId, { fieldRows, schema, loreEntries });
 }

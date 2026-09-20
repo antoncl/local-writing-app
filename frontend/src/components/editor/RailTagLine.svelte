@@ -398,7 +398,13 @@
     data-testid="rail-tag-line"
     aria-label={ariaLabel}
     title={field.description || (isEmpty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}`)}
-    onclick={(e) => onOpen(fieldId, (e.currentTarget as HTMLElement).closest(".field-row") as HTMLElement)}
+    onclick={(e) => {
+      // #2065: opening the line unmounts this button, and the anchor's
+      // teardown does not close a card it opened — so a card raised by hover
+      // would float over the editor's completion list off a detached anchor.
+      closePeek();
+      onOpen(fieldId, (e.currentTarget as HTMLElement).closest(".field-row") as HTMLElement);
+    }}
     use:peekAnchor={{ delegate: ".tag-line-name[data-tag-id]", onOpen: openPeek, onClose: closePeek }}
   >
     {#if isEmpty}

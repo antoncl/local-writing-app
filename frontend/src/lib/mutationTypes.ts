@@ -2,6 +2,8 @@
 // keep that barrel under the file-size cap; re-exported from `@/lib/types` so
 // it stays the single import surface.
 
+import type { MetadataValue } from "./metadataTypes";
+
 // Mid-scene lore mutation records (#33). A marker sets one field of one lore
 // entry to a new value at a prose position; the timeline is manuscript-ordered.
 export type MutationMarkerRecord = {
@@ -70,10 +72,16 @@ export type MutationSetEntryList = {
   entries: MutationSetEntrySummary[];
 };
 
+// One field's effective value (ADR-0089 §3): scalar → string; flat
+// collection → string[]; list field → its folded items (each item a
+// member-key → value map).
+export type EffectiveFieldValue = string | string[] | Record<string, MetadataValue>[];
+
 export type EffectiveStateResponse = {
   entity_id: string;
   scene_id: string;
   position: number | null;
-  // Scalar fields resolve to a string; collection fields to a string[] (ADR-0009).
-  values: Record<string, string | string[]>;
+  // Scalar → string; flat collection → string[]; list field → its folded
+  // items (ADR-0089 §3).
+  values: Record<string, EffectiveFieldValue>;
 };

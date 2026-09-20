@@ -43,6 +43,9 @@ from app.services.project.errors import ProjectServiceError
 from app.services.project.metadata_refs import (
     UNCHANGED,
     RefOccurrence,
+    dedupe_keyed_lists,
+    duplicate_item_keys,
+    keyed_list_key,
     member_as_field,
     rewrite_ref_occurrences,
 )
@@ -394,6 +397,25 @@ class MetadataValuesMixin:
                         node_index=node_index,
                         schema=schema,
                     )
+                )
+        return errors
+
+    def _keyed_list_duplicate_errors(
+        self, label: str, metadata: dict[str, Any], schema: MetadataSchema
+    ) -> list[str]:
+        """One item per target per reference-keyed list (ADR-0089 §1) — a
+        WRITE-side rule, deliberately outside `_validate_entry_metadata`, which
+        also runs on read: a duplicate already on disk reads fine and project
+        validation warns about it, but a save may not create one."""
+        errors: list[str] = []
+        for field_id, value in metadata.items():
+            key_member = keyed_list_key(schema.fields.get(field_id))
+            if key_member is None:
+                continue
+            for key in duplicate_item_keys(value, key_member):
+                errors.append(
+                    f"{label} metadata field {field_id} holds more than one item for {key}; "
+                    f"a reference-keyed list holds one item per target."
                 )
         return errors
 
@@ -832,6 +854,9 @@ class MetadataValuesMixin:
 
         cleaned, changed = rewrite_ref_occurrences(metadata, schema, _canonicalise)
         if changed:
+            # Two items whose targets merged onto one id now share a key: the
+            # first wins (ADR-0089 §1), the same collapse the eager sweep applies.
+            dedupe_keyed_lists(cleaned, schema)
             metadata.clear()
             metadata.update(cleaned)
         return changed
@@ -1154,6 +1179,9 @@ class MetadataValuesMixin:
         )
         if not changed:
             return
+        # Two items of a reference-keyed list that collapsed onto one key: the
+        # first wins (ADR-0089 §1).
+        dedupe_keyed_lists(cleaned, schema)
         try:
             front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
         except ProjectServiceError:

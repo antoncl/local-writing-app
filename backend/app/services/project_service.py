@@ -40,6 +40,7 @@ from app.services.project.layers import LayerWalkMixin
 from app.services.project.library_tenant import LibraryTenantMixin
 from app.services.project.lifecycle import ProjectLifecycleMixin
 from app.services.project.lore import LoreEntriesMixin
+from app.services.project.lore_mutation_validation import LoreMutationValidationMixin
 from app.services.project.lore_mutations import LoreMutationsMixin
 from app.services.project.manuscript import ManuscriptMixin
 from app.services.project.metadata_values import MetadataValuesMixin
@@ -94,6 +95,7 @@ class ProjectService(
     EmbeddedTodosMixin,
     LoreEntriesMixin,
     LoreMutationsMixin,
+    LoreMutationValidationMixin,
     LayerWalkMixin,
     LibraryTenantMixin,
     ManuscriptMixin,

@@ -68,4 +68,10 @@ describe("FieldValue (#1108)", () => {
     mount(field("long_text"), "");
     expect(screen.getByText("—")).toBeTruthy();
   });
+
+  it("a list of records renders member values joined with ' · ', never '[object Object]' (#698/ADR-0089 §3: a folded relationship item)", () => {
+    mount(field("text"), [{ who: "lore_a", role: "squire" }]);
+    expect(screen.getByText("lore_a · squire")).toBeTruthy();
+    expect(screen.queryByText(/object Object/)).toBeNull();
+  });
 });

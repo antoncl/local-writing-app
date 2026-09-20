@@ -17,6 +17,7 @@ import { countWords } from "@/lib/utils/wordCount";
 import { listHasProseItems } from "@/lib/editor-core/bodySections";
 import type {
   DocumentKind,
+  EffectiveFieldValue,
   EntryMetadata,
   MetadataFieldDefinition,
   MetadataSchema,
@@ -35,7 +36,7 @@ export type RailRowContext = {
   status: string;
   hasOwnFields: boolean;
   ownFieldSet: Set<string>;
-  effectiveOverrides: Record<string, string | string[]> | null;
+  effectiveOverrides: Record<string, EffectiveFieldValue> | null;
   overriddenFields: string[];
   compare: {
     fields: Record<string, { was: unknown; now: unknown }>;
@@ -347,6 +348,19 @@ function isListIndex(ctx: RailRowContext, field: MetadataFieldDefinition): boole
   return ctx.listsInBody && field.type === "entity_ref_list" && !isTagListField(field, ctx.schema);
 }
 
+// A list item's id for the summary below. A folded item (ADR-0089 §3: a
+// `list` field's effective value is its items, not ids) is an object keyed by
+// its item_group's members — its id is the ONE `entity_ref` member's value;
+// an item with no such single member, or a non-string/empty one, is skipped
+// rather than stringified into "[object Object]". A plain id keeps today's path.
+function listItemId(field: MetadataFieldDefinition | undefined, item: MetadataValue): string | null {
+  if (typeof item !== "object" || item === null || Array.isArray(item)) return String(item);
+  const refMembers = (field?.item_members ?? []).filter((member) => member.type === "entity_ref");
+  if (refMembers.length !== 1) return null;
+  const key = (item as Record<string, MetadataValue>)[refMembers[0].key];
+  return typeof key === "string" && key !== "" ? key : null;
+}
+
 // The list-index row's summary line: the total count, then a per-entry-type
 // breakdown in first-appearance order ("12 · 5 Characters, 4 Locations"). An
 // id `resolveListMemberType` can't resolve counts as "missing" — the same
@@ -354,7 +368,10 @@ function isListIndex(ctx: RailRowContext, field: MetadataFieldDefinition): boole
 // a stale/broken ref, just folded into the summary instead of a row of its own.
 function listSummary(ctx: RailRowContext, fieldId: string): string {
   const value = displayValue(ctx, fieldId);
-  const ids = Array.isArray(value) ? value.map((v) => String(v)) : [];
+  const field = ctx.schema.fields[fieldId];
+  const ids = Array.isArray(value)
+    ? value.map((v) => listItemId(field, v)).filter((id): id is string => id != null)
+    : [];
   if (ids.length === 0) return "";
   const order: string[] = [];
   const counts = new Map<string, number>();

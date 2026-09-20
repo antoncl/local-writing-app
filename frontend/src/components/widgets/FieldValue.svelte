@@ -18,6 +18,7 @@
   import {
     coerceStringList,
     isMetadataValuePresent,
+    metadataValueDisplayString,
     normalizeListFieldValue,
   } from "@/lib/utils/schemaTypeHelpers";
   import type {
@@ -88,11 +89,11 @@
   // this once selects read at rest).
   const selectDisplayValue = $derived(isRequiredSelect(field) && !currentValue ? field.default : currentValue);
 
+  // #698/ADR-0089 §3: a list of records (now also a folded relationship item)
+  // must render its member values, never "[object Object]" — delegate to the
+  // one record-aware display rule instead of hand-rolling join/stringify.
   function metadataValueString(v: MetadataValue | undefined): string {
-    if (Array.isArray(v)) return v.join(", ");
-    if (v === null || v === undefined) return "";
-    if (typeof v === "object") return JSON.stringify(v);
-    return String(v);
+    return metadataValueDisplayString(v);
   }
 
   function metadataValueBool(v: MetadataValue | undefined): boolean {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -113,14 +113,16 @@ class EffectiveStateResponse(BaseModel):
     position) — the fields with a live mutation there, each mapped to its
     winning value. Drives the lore-card time-slider re-render (#33).
 
-    Scalar fields resolve to a string; collection fields (multi_select / tags /
+    Scalar fields resolve to a string; collection fields (multi_select /
     entity_ref_list) resolve to a `list[str]` — the datatype matches the field
-    (ADR-0009)."""
+    (ADR-0009). A reference-keyed list resolves to its folded items, a list of
+    member maps; the member paths its records address never leave the resolver
+    (ADR-0089 §3)."""
 
     entity_id: str
     scene_id: str
     position: int | None = None
-    values: dict[str, str | list[str]] = Field(default_factory=dict)
+    values: dict[str, str | list[str] | list[dict[str, Any]]] = Field(default_factory=dict)
 
 
 class ReferenceCandidate(BaseModel):

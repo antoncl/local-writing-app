@@ -24,6 +24,13 @@ Two forms, per ADR-0081 §1:
 for ``entity_ref``, each item for ``entity_ref_list``), so the index's edge walk
 and the AI structural hop (#2066, ADR-0089 §8) read a value the same way.
 
+:func:`keyed_list_key` is the shape predicate of ADR-0089 §1 — a group-shaped
+list whose item group has exactly one ``entity_ref`` member is keyed by that
+member, one item per target — and :func:`dedupe_keyed_lists` is the collapse
+the merge sweep applies when two items' targets merge onto one id (first wins).
+Both live here so the save, the resolver, the sweep and the validator agree on
+which member is the key.
+
 Groups do not nest in groups (a ``GroupMember`` is a scalar/ref/tag field, never
 another list/group), so the descent is exactly one level — bounded, not
 open-ended.
@@ -93,6 +100,69 @@ def ref_members(field: MetadataFieldDefinition) -> dict[str, MetadataFieldDefini
     members = field.item_members or []
     found = {m.key: member_as_field(m) for m in members if m.type in REF_FIELD_TYPES}
     return found or None
+
+
+def keyed_list_key(field: MetadataFieldDefinition | None) -> str | None:
+    """The key member of a reference-keyed list (ADR-0089 §1): a group-shaped
+    ``list`` whose item group has exactly one ``entity_ref`` member. ``None``
+    for every other field, including a group with two reference members (no
+    member is *the* key) or with only an ``entity_ref_list`` member (a list
+    cannot key an item)."""
+    if field is None:
+        return None
+    members = ref_members(field)
+    if members is None:
+        return None
+    keys = [key for key, member in members.items() if member.type == "entity_ref"]
+    return keys[0] if len(keys) == 1 else None
+
+
+def duplicate_item_keys(items: Any, key_member: str) -> list[str]:
+    """The keys a reference-keyed list holds more than once, in first-seen
+    order. Items without a key are not counted."""
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for item in items if isinstance(items, list) else []:
+        key = item.get(key_member) if isinstance(item, dict) else None
+        if not isinstance(key, str) or not key:
+            continue
+        if key in seen and key not in duplicates:
+            duplicates.append(key)
+        seen.add(key)
+    return duplicates
+
+
+def dedupe_keyed_items(items: list[Any], key_member: str) -> list[Any]:
+    """``items`` with every later item for an already-seen key dropped — the
+    first wins. Items without a key pass through."""
+    seen: set[str] = set()
+    kept: list[Any] = []
+    for item in items:
+        key = item.get(key_member) if isinstance(item, dict) else None
+        if isinstance(key, str) and key:
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append(item)
+    return kept
+
+
+def dedupe_keyed_lists(metadata: dict[str, Any], schema: MetadataSchema) -> bool:
+    """Collapse duplicate keys in every reference-keyed list of ``metadata``,
+    in place, first wins (ADR-0089 §1's merge rule). Returns whether anything
+    changed. Applied after a reference rewrite, never on a plain read: two
+    items that already share a key on disk are tolerated and reported by
+    project validation, not silently dropped."""
+    changed = False
+    for field_id, value in list(metadata.items()):
+        key_member = keyed_list_key(schema.fields.get(field_id))
+        if key_member is None or not isinstance(value, list):
+            continue
+        deduped = dedupe_keyed_items(value, key_member)
+        if len(deduped) != len(value):
+            metadata[field_id] = deduped
+            changed = True
+    return changed
 
 
 def iter_ref_occurrences(

@@ -13,6 +13,7 @@
   import { effectiveFieldHidden, metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
   import type {
     DocumentKind,
+    EffectiveFieldValue,
     EntryMetadata,
     EntryTypeDefinition,
     LoreEntrySummary,
@@ -74,7 +75,7 @@
     // rail renders effective values read-only. `effectiveOverrides` holds ONLY
     // the mutated fields (the backend override map) — membership IS the "this
     // changed by here" signal, no diffing. Base values render for the rest.
-    effectiveOverrides?: Record<string, string | string[]> | null;
+    effectiveOverrides?: Record<string, EffectiveFieldValue> | null;
     // Snapshot compare (ADR-0044 §F, #409). Deliberately NOT `effectiveOverrides`
     // with a flag: that axis draws a `⤳` beside the name, and a snapshot
     // difference must never get a glyph. A glyph marks what is true about the

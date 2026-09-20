@@ -56,6 +56,7 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from dataclasses import field as dc_field
+from typing import Any
 from urllib.parse import quote, unquote
 
 from app.models import (
@@ -65,6 +66,15 @@ from app.models import (
     UpdateMutationRequest,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.lore_mutation_items import (
+    ItemRecord,
+    KeyedList,
+    fold_keyed_items,
+    keyed_lists_from,
+    list_record,
+    member_record,
+    split_member_path,
+)
 from app.services.project.markers import MarkerMixin
 from app.services.project.node_index import NodeIndex
 from app.services.tree_structure import TreeStructureService
@@ -266,6 +276,22 @@ class MutationsIndex:
     closes_by_start: dict[str, tuple[int, int]] = dc_field(default_factory=dict)
 
 
+@dataclass
+class _Fold:
+    """Working state of one `effective_state` call: the result under
+    construction plus the lazily-read base values, field types and
+    reference-keyed lists, and the item records set aside for the per-key
+    fold (ADR-0089 §3)."""
+
+    entity_id: str
+    idx: MutationsIndex
+    field_types: dict[str, str] | None
+    effective: dict[str, str | list[str] | list[dict[str, Any]]] = dc_field(default_factory=dict)
+    base: dict[str, object] | None = None
+    keyed: dict[str, KeyedList] | None = None
+    item_records: dict[str, list[ItemRecord]] = dc_field(default_factory=dict)
+
+
 class LoreMutationsMixin(MarkerMixin):
     def _scan_scene_mutations(self, scene: Scene) -> Iterator[MutationMarker]:
         """Yield every mutation marker in one scene body, in prose order,
@@ -345,81 +371,7 @@ class LoreMutationsMixin(MarkerMixin):
         for group in sorted((g for g in groups if g), key=lambda g: g[0].offset):
             yield from group
 
-    # ----- validation (#53) ----------------------------------------------
-
-    def _validate_scene_mutations(
-        self, scene_id: str, body: str, schema: object, node_index: object
-    ) -> list[str]:
-        """Validate every mutation value in a scene body against its target
-        field's constraints — a mutation value IS a field value (ADR-0007), so it
-        reuses `_validate_metadata_field_value`, the same validator base values
-        run through. Called from validate_project (save_scene never blocks on
-        mutation validity — the editor supplies typed values)."""
-        errors: list[str] = []
-        fields = getattr(schema, "fields", {})
-        entry_types = getattr(schema, "entry_types", {})
-        by_id = getattr(node_index, "by_id", {})
-        for marker in self._iter_body_mutations(body, scene_id):
-            label = (
-                f"Scene {scene_id} mutation of {marker.entity_id}.{marker.field}"
-            )
-            # Parity with base metadata validation (ADR-0007): the entity must
-            # exist and be a lore entry, and the field must be defined for its
-            # entry_type — not merely present somewhere in the global schema.
-            index_entry = by_id.get(marker.entity_id)
-            if index_entry is None or getattr(index_entry, "kind", None) != "lore":
-                errors.append(f"{label} targets unknown lore entity {marker.entity_id}.")
-                continue
-            if marker.field in INTRINSIC_MUTABLE_FIELDS:
-                # title/body are the node's own free-text fields (not schema
-                # fields but always present and mutable — the #33 name-change
-                # case mutates `title`); no constraints to check.
-                continue
-            field = fields.get(marker.field)
-            if field is None:
-                errors.append(f"{label} targets unknown field {marker.field}.")
-                continue
-            entry_type = getattr(index_entry, "entry_type", "")
-            allowed = getattr(entry_types.get(entry_type), "fields", None) or []
-            if marker.field not in allowed:
-                errors.append(
-                    f"{label} field {marker.field} is not defined for entry_type {entry_type}."
-                )
-                continue
-            field_type = getattr(field, "type", "")
-            is_collection = field_type in COLLECTION_FIELD_TYPES
-            if marker.op == "remove" and not is_collection:
-                errors.append(
-                    f"{label} op remove is only valid on collection fields "
-                    f"(multi_select/tags/entity_ref_list), not {field_type}."
-                )
-                continue
-            if marker.op == "add" and not (
-                is_collection or field_type in TEXT_APPEND_FIELD_TYPES
-            ):
-                errors.append(
-                    f"{label} op add is only valid on collection or text fields "
-                    f"(multi_select/tags/entity_ref_list/text/long_text), not {field_type}."
-                )
-                continue
-            if is_collection:
-                # A collection value is validated as a list: add/remove carry one
-                # element (validate that element), replace carries the whole
-                # comma-joined value (ADR-0009). The item validator already
-                # item-checks the three collection types.
-                value: object = (
-                    [marker.value]
-                    if marker.op in {"add", "remove"}
-                    else _split_collection_value(marker.value)
-                )
-            else:
-                value = self._coerce_mutation_value(marker.value, field_type)
-            errors.extend(
-                self._validate_metadata_field_value(
-                    label, marker.field, value, field, node_index=node_index, schema=schema
-                )
-            )
-        return errors
+    # ----- value coercion (#53) -----------------------------------------
 
     def _coerce_mutation_value(self, value: str, field_type: str) -> object:
         """Coerce a marker's url-decoded string to the field's native type so the
@@ -654,20 +606,23 @@ class LoreMutationsMixin(MarkerMixin):
         index: MutationsIndex | None = None,
         exclude: frozenset[str] | set[str] = frozenset(),
         field_types: dict[str, str] | None = None,
-    ) -> dict[str, str | list[str]]:
+    ) -> dict[str, str | list[str] | list[dict[str, Any]]]:
         """Effective mutation overrides for `entity_id` as of (scene, position).
 
         Returns only the fields carrying a **live** mutation, each mapped to its
         winning value; the caller overlays these onto the entry's base field
         values (ADR-0003, ADR-0006). Scalar fields resolve to a **string** —
         among the records live at (scene, position), the latest-started replace
-        wins. Collection fields (multi_select / tags / entity_ref_list) resolve
-        to a **`list[str]`** = `(base ∪ live adds) ∖ live removes`, remove-wins
+        wins. Collection fields (multi_select / entity_ref_list) resolve to a
+        **`list[str]`** = `(base ∪ live adds) ∖ live removes`, remove-wins
         (ADR-0009); the datatype matches the field. Text fields (text /
         long_text, incl. intrinsic title/body) additionally accept `add` as
         **append**: base (or latest live replace) + live adds in start order,
         space-joined for text, paragraph-joined for long_text (ADR-0009
-        amendment).
+        amendment). A reference-keyed list (ADR-0089 §3) resolves to its
+        **items**, a `list[dict]`: the records for the list field and for its
+        `<field>.<target id>.<member>` paths fold into one value, positional per
+        key, and the member paths never appear in the result.
 
         A record is live iff its start is at or before the resolution point in
         manuscript order — earlier scene always, same scene only if its marker
@@ -682,7 +637,8 @@ class LoreMutationsMixin(MarkerMixin):
 
         `field_types` (field id -> type) may be passed to resolve many entries
         without re-reading the schema per call (see `effective_names`); when
-        omitted it is read lazily, once, on the first add/remove op."""
+        omitted it is read lazily, once, on the first add/remove op or the first
+        record that may address a list."""
         idx = index or self.build_mutations_index()
         records = idx.by_entity.get(entity_id)
         if not records:
@@ -694,27 +650,100 @@ class LoreMutationsMixin(MarkerMixin):
         live_by_field = self._live_records_by_field(
             idx, records, target_pos, position, exclude
         )
-        effective: dict[str, str | list[str]] = {}
-        base: dict[str, object] | None = None
+        fold = _Fold(entity_id, idx, field_types)
         for field, live in live_by_field.items():
-            if any(m.op in {"add", "remove"} for m in live):
-                # add/remove needs the entry's base value and the field's type
-                # (collection set-resolve vs text append). Both read lazily,
-                # once, only when such an op is in play.
-                if base is None:
-                    base = self._entity_base_values(entity_id)
-                if field_types is None:
-                    field_types = self._mutation_field_types()
-                field_type = field_types.get(field, "text")
-                if field_type in COLLECTION_FIELD_TYPES:
-                    effective[field] = self._resolve_collection(field, live, base)
-                else:
-                    effective[field] = self._resolve_text_append(
-                        field, field_type, live, base
-                    )
-            else:
-                effective[field] = live[-1].value
-        return effective
+            if not self._take_item_records(fold, field, live):
+                self._fold_flat_field(fold, field, live)
+        self._fold_item_records(fold)
+        return fold.effective
+
+    def _take_item_records(self, fold: _Fold, field: str, live: list[MutationMarker]) -> bool:
+        """Set aside the records that address a reference-keyed list — the list
+        field's own `add`/`remove` (and an ignored whole-list replace) or a
+        `<field>.<target id>.<member>` path — for the per-key fold. False when
+        the field is anything else, so it resolves as a flat field."""
+        if "." not in field and not any(m.op in {"add", "remove"} for m in live):
+            # A replace-only field: only a `list` can still be a keyed list
+            # (whose whole-list replace is ignored, §2); anything else is flat.
+            if fold.field_types is None:
+                fold.field_types = self._mutation_field_types()
+            if fold.field_types.get(field) != "list":
+                return False
+        if fold.keyed is None:
+            fold.keyed = self._keyed_lists()
+        target = fold.keyed.get(field)
+        if target is not None:
+            fold.item_records.setdefault(field, []).extend(list_record(target, m) for m in live)
+            return True
+        path = split_member_path(field, fold.keyed) if "." in field else None
+        if path is None:
+            return False
+        target, key, member = path
+        fold.item_records.setdefault(target.field_id, []).extend(
+            member_record(m, key, member) for m in live
+        )
+        return True
+
+    def _fold_flat_field(self, fold: _Fold, field: str, live: list[MutationMarker]) -> None:
+        """Resolve one scalar, text or flat-collection field (ADR-0009): a
+        collection set-fold or a text append when an add/remove is live, else
+        the latest-started replace — `live` is pre-sorted, so its last record."""
+        if not any(m.op in {"add", "remove"} for m in live):
+            fold.effective[field] = live[-1].value
+            return
+        # add/remove needs the entry's base value and the field's type
+        # (collection set-resolve vs text append). Both read lazily, once,
+        # only when such an op is in play.
+        base = self._fold_base(fold)
+        if fold.field_types is None:
+            fold.field_types = self._mutation_field_types()
+        field_type = fold.field_types.get(field, "text")
+        if field_type in COLLECTION_FIELD_TYPES:
+            fold.effective[field] = self._resolve_collection(field, live, base)
+        else:
+            fold.effective[field] = self._resolve_text_append(field, field_type, live, base)
+
+    def _fold_item_records(self, fold: _Fold) -> None:
+        """Fold every reference-keyed list's records onto its base items,
+        positional per key (ADR-0089 §3), keys matched through the node
+        index's `canonical_id` so a record written against a merged-away id
+        still finds its item (§1)."""
+        if not fold.item_records or fold.keyed is None:
+            return
+        base = self._fold_base(fold)
+        for field_id, item_records in fold.item_records.items():
+            item_records.sort(
+                key=lambda r: (fold.idx.scene_order.get(r.marker.scene_id, 0), r.marker.offset)
+            )
+            fold.effective[field_id] = fold_keyed_items(
+                base.get(field_id),
+                fold.keyed[field_id],
+                item_records,
+                self._coerce_mutation_value,
+                self._canonical_key,
+            )
+
+    def _fold_base(self, fold: _Fold) -> dict[str, object]:
+        if fold.base is None:
+            fold.base = self._entity_base_values(fold.entity_id)
+        return fold.base
+
+    def _keyed_lists(self) -> dict[str, KeyedList]:
+        """The reference-keyed lists the (cached) schema declares; empty on a
+        read failure, so their records then resolve as any unknown field's."""
+        try:
+            return keyed_lists_from(self.read_metadata_schema())
+        except ProjectServiceError:
+            return {}
+
+    def _canonical_key(self, key: str) -> str:
+        """An item key through the node index's `canonical_id`, so a record
+        written against an id later merged away still finds its item
+        (ADR-0089 §1); identity when no index can be read."""
+        try:
+            return self._build_node_index().canonical_id(key)
+        except ProjectServiceError:
+            return key
 
     def _live_records_by_field(
         self,

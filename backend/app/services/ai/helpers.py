@@ -271,7 +271,8 @@ def _effective_overlay_updates(
 
 def _coerce_effective_value(project: ProjectService, schema: Any, field: str, raw: Any) -> Any:
     """Coerce one `effective_state` value to its field's native type: a collection
-    already resolves to the list to hand back as-is (ADR-0009); a scalar marker is
+    (ADR-0009) or a reference-keyed list's items (ADR-0089 §3) already resolve to
+    the list to hand back as-is; a scalar marker is
     a string that `_coerce_mutation_value` turns back into a number/bool/etc. so an
     as-of value matches a book-start value. Used by the `entry(x, at=…)` overlay."""
     if isinstance(raw, list):

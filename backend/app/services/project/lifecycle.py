@@ -53,6 +53,7 @@ from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION
 from app.services.project.code_fence import unwrap_whole_body_code_fence
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import INHERITS_KEY, MANIFEST_FILENAME, LayerVisitor
+from app.services.project.lore_mutation_items import keyed_lists_from
 from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project.tree_configs import (
@@ -984,8 +985,9 @@ class ProjectLifecycleMixin:
         errors.extend(scene_errors)
         warnings.extend(scene_warnings)
 
-        lore_errors, code_fenced_bodies = self._validate_lore_entries(node_index, metadata_schema)
+        lore_errors, lore_warnings, code_fenced_bodies = self._validate_lore_entries(node_index, metadata_schema)
         errors.extend(lore_errors)
+        warnings.extend(lore_warnings)
 
         todo_errors, todo_warnings = self._validate_todo_anchors(scene_ids)
         errors.extend(todo_errors)
@@ -1057,6 +1059,16 @@ class ProjectLifecycleMixin:
         as warnings, not errors."""
         errors: list[str] = []
         warnings: list[str] = []
+        # Built once for the pass, and only when the schema declares a
+        # reference-keyed list: an item record (ADR-0089 §2) is checked against
+        # the list its entry holds at the marker's position, which is a resolver
+        # question, not a per-marker one. Any other project skips the walk.
+        mutations = None
+        if metadata_schema is not None and keyed_lists_from(metadata_schema):
+            try:
+                mutations = self.build_mutations_index()
+            except ProjectServiceError:
+                mutations = None
         for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "manuscript"), key=lambda item: item.id):
             scene_id = entry.id
             path = entry.path
@@ -1070,22 +1082,29 @@ class ProjectLifecycleMixin:
                 status = str(front_matter.get("status") or "draft")
                 if metadata_schema:
                     errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "manuscript:scene"), status, metadata, metadata_schema, node_index))
-                    warnings.extend(self._validate_scene_mutations(scene_id, body, metadata_schema, node_index))
+                    warnings.extend(
+                        self._validate_scene_mutations(
+                            scene_id, body, metadata_schema, node_index, mutations=mutations
+                        )
+                    )
             except ProjectServiceError as exc:
                 errors.append(exc.message)
         return errors, warnings
 
     def _validate_lore_entries(
         self, node_index: NodeIndex, metadata_schema: MetadataSchema | None
-    ) -> tuple[list[str], list[CodeFencedBody]]:
+    ) -> tuple[list[str], list[str], list[CodeFencedBody]]:
         """Per-lore-entry front-matter + metadata checks, plus the whole-body
-        code-fence flag (#1628). Returns (errors, code_fenced): the fence flag is
-        advisory (the entry loads fine, it just renders as source), so it rides
-        its own list rather than errors/warnings and drives an unwrap offer.
+        code-fence flag (#1628). Returns (errors, warnings, code_fenced): the
+        fence flag is advisory (the entry loads fine, it just renders as source),
+        so it rides its own list rather than errors/warnings and drives an
+        unwrap offer; a reference-keyed list holding a target twice is a warning
+        (tolerated on read, refused on write — ADR-0089 §1).
 
         One pass over the lore bodies serves both — the fence check reads the
         very body the metadata checks already loaded."""
         errors: list[str] = []
+        warnings: list[str] = []
         code_fenced: list[CodeFencedBody] = []
         # Only flag entries the open project OWNS: unwrapping writes through the
         # normal lore save, which refuses to rewrite an inherited ancestor's body
@@ -1106,9 +1125,10 @@ class ProjectLifecycleMixin:
                 metadata = self._normalise_metadata(front_matter.get("metadata"), path)
                 if metadata_schema:
                     errors.extend(self._validate_lore_entry_metadata(entry_id, str(entry_type or "lore:note"), metadata, metadata_schema, node_index))
+                    warnings.extend(self._keyed_list_duplicate_errors(f"Lore Entry {entry_id}", metadata, metadata_schema))
             except ProjectServiceError as exc:
                 errors.append(exc.message)
-        return errors, code_fenced
+        return errors, warnings, code_fenced
 
     def _validate_todo_anchors(self, scene_ids: set[str]) -> tuple[list[str], list[str]]:
         """TODO/anchor integrity. Returns (errors, warnings): a dangling scene or

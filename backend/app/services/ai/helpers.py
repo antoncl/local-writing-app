@@ -732,15 +732,13 @@ def _collect_lore_refs_from_metadata(metadata: Any, schema: MetadataSchema) -> s
     group-list item (ADR-0081's one traversal; #2066, ADR-0089 §8).
 
     Same `lore_` filter as before: this is the *lore* context's seed and hop
-    walk, so a reference to a scene, tag or prompt is not a lore seed. The one
-    exclusion the reference index makes, `merged_into`, holds here too — a merge
-    redirect is not a reference (ADR-0082 §5)."""
+    walk, so a reference to a scene, tag or prompt is not a lore seed (which is
+    also why the index's `merged_into` exclusion needs no twin here: that field
+    lives on tags and names a tag)."""
     found: set[str] = set()
     if not isinstance(metadata, dict):
         return found
     for occ in iter_ref_occurrences(metadata, schema):
-        if occ.field_id == "merged_into":
-            continue
         for target in occurrence_targets(occ):
             if _is_lore_id(target):
                 found.add(target)

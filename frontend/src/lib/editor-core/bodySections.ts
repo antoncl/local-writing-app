@@ -9,6 +9,7 @@
 // even with a single member field (#2009 decided) — unlike the rail's own
 // section model, which only heads a block once there is more than one.
 import { effectiveFieldHidden, effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
+import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
 import type { MetadataFieldDefinition, MetadataSchema, MetadataValue } from "@/lib/types";
 import type { GroupMember } from "@/lib/schemaTypes";
 
@@ -62,8 +63,12 @@ export function buildBodySections(
 // `item_type: long_text` (one member keyed "value") qualifies the same way.
 
 /** Whether this field is a list whose items carry prose — the one rule the
- *  section builder, the rail's index row and the body renderer all share. */
+ *  section builder, the rail's index row and the body renderer all share.
+ *  ADR-0089 §6: a reference-keyed list (`keyedListKeyMember`) is a
+ *  reference-list tab regardless of its members, even a `long_text` one —
+ *  the key outranks the prose gate. */
 export function listHasProseItems(field: MetadataFieldDefinition | null | undefined): boolean {
+  if (keyedListKeyMember(field)) return false;
   return !!field && field.type === "list" && (field.item_members ?? []).some((m) => m.type === "long_text");
 }
 

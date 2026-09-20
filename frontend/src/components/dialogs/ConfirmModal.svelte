@@ -15,6 +15,10 @@
     // When set, render a "Don't show this again" checkbox; the parent
     // receives its value in onConfirm and persists suppression per key.
     dontShowAgainKey?: string;
+    // Alternative sink for the same checkbox (ADR-0089 §9): a suppression
+    // that isn't a plain localStorage key. Either this or `dontShowAgainKey`
+    // shows the checkbox; the parent's onConfirm still receives the value.
+    onDontShowAgain?: () => Promise<void>;
     onConfirm: () => Promise<void> | void;
     // Optional second resolution rendered next to the primary (e.g.
     // "Discard changes and close"); Cancel still means "do neither".
@@ -65,7 +69,7 @@
     {#if confirmState.cannotBeUndone}
       <p class="confirm-modal-undo"><i class="ti ti-alert-triangle" aria-hidden="true"></i> This cannot be undone.</p>
     {/if}
-    {#if confirmState.dontShowAgainKey}
+    {#if confirmState.dontShowAgainKey || confirmState.onDontShowAgain}
       <label class="confirm-modal-dsa">
         <input type="checkbox" bind:checked={dontShowAgain} />
         Don't show this again

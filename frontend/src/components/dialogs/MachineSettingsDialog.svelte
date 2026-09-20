@@ -59,6 +59,9 @@
     // seeded from the persisted `settings` on each open, and commits via
     // `onApplyPolicy` — mirroring the per-project AIPolicyModal.
     onApplyPolicy = async () => false,
+    // Delete-orphan warning toggle (ADR-0089 §9). Same reasoning as
+    // onApplyPolicy: its own sparse write, not folded into the batched draft.
+    onSetWarnOnOrphaningDelete = async () => {},
     // The AI-connection test, re-homed from the Project pane (#629): it pings the
     // default assistant's provider, so it belongs beside the providers it tests.
     // The host owns the gate — the ping needs an open project with AI access, so
@@ -71,6 +74,7 @@
     onCancel?: () => void;
     onSave?: () => void;
     onApplyPolicy?: (policy: AIPolicy) => Promise<boolean>;
+    onSetWarnOnOrphaningDelete?: (value: boolean) => Promise<void>;
     health?: {
       onCheck: () => void;
       result: AIHealthResponse | null;
@@ -415,6 +419,22 @@
               chain at once. Leave empty and each project stands alone, inheriting nothing. The
               project switcher reads recent projects from this config too.
             </small>
+          </label>
+
+          <!--
+            Deliberately NOT part of the batched draft/onSave, like ai_policy
+            above: it's a "don't show again" answered from the confirm dialog
+            itself (ADR-0089 §9), so re-enabling it here writes immediately
+            through its own sparse PUT rather than waiting for Save.
+          -->
+          <label class="choice-row">
+            <input
+              type="checkbox"
+              checked={settings?.warn_on_orphaning_delete ?? true}
+              onchange={(event) =>
+                void onSetWarnOnOrphaningDelete((event.currentTarget as HTMLInputElement).checked)}
+            />
+            Warn before a delete orphans relationship items
           </label>
         {:else if activeTab === "updates"}
           <section class="updates-surface">

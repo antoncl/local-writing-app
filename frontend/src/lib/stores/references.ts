@@ -5,13 +5,23 @@
 // `writable` for legacy-safe reads. Rebuilt from one bulk `referenceGraph()`
 // payload so backlinks compose with set algebra instead of a per-node call.
 
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
-import { buildReferenceIndex } from "@/lib/views/referenceIndex";
+import { metadataSchemaStore } from "@/lib/stores/schema";
+import { buildKeyedReferrerIndex, buildReferenceIndex, type KeyedReferrer } from "@/lib/views/referenceIndex";
 
 const EMPTY: ReadonlyMap<string, ReadonlySet<string>> = new Map();
+const EMPTY_KEYED_REFERRERS: ReadonlyMap<string, KeyedReferrer[]> = new Map();
 
 export const referenceIndexStore = writable<ReadonlyMap<string, ReadonlySet<string>>>(EMPTY);
+
+// The reverse index behind the delete-orphan warning (ADR-0089 §9): target id
+// → every entry holding a relationship item keyed by it. Filled from the same
+// `referenceGraph()` fetch as `referenceIndexStore`, so the two never drift
+// out of sync with each other.
+export const keyedReferrerIndexStore = writable<ReadonlyMap<string, KeyedReferrer[]>>(
+  EMPTY_KEYED_REFERRERS,
+);
 
 // Monotonic request token guarding the fire-and-forget refresh (#200). Callers
 // fire `void refreshReferenceIndex()` on save/delete/open, so rapid mutations
@@ -24,9 +34,10 @@ let generation = 0;
 
 export async function refreshReferenceIndex(): Promise<void> {
   const token = ++generation;
-  const { refs } = await api.referenceGraph();
+  const { refs, edges } = await api.referenceGraph();
   if (token !== generation) return; // superseded by a newer refresh or a clear
   referenceIndexStore.set(buildReferenceIndex(refs));
+  keyedReferrerIndexStore.set(buildKeyedReferrerIndex(edges, get(metadataSchemaStore)));
 }
 
 // Fire-and-forget variant for the save/delete callers that trigger a refresh in
@@ -44,4 +55,5 @@ export function refreshReferenceIndexInBackground(): void {
 export function clearReferenceIndex(): void {
   generation++; // supersede any in-flight refresh so it can't repopulate the store
   referenceIndexStore.set(EMPTY);
+  keyedReferrerIndexStore.set(EMPTY_KEYED_REFERRERS);
 }

@@ -32,6 +32,28 @@ const SCHEMA = {
   },
 } as unknown as MetadataSchema;
 
+// ADR-0089 §6 (#2072): a reference-keyed `list` earns a body tab too — the
+// key outranks the prose gate, whether or not the shape carries a long_text
+// member.
+const KEYED_SCHEMA = {
+  version: 1,
+  entry_types: {
+    "lore:character": { name: "Character", kind: "lore", fields: ["relationships"] },
+  },
+  fields: {
+    relationships: {
+      name: "Relationships",
+      type: "list",
+      options: [],
+      item_scalar: false,
+      item_members: [
+        { key: "to", name: "To", type: "entity_ref" },
+        { key: "notes", name: "Notes", type: "long_text" },
+      ],
+    },
+  },
+} as unknown as MetadataSchema;
+
 describe("listTabFieldIds", () => {
   it("lists entity_ref_list fields in schema order, excluding tag lists / hidden / intrinsic", () => {
     expect(listTabFieldIds(SCHEMA, "lore:character")).toEqual(["allies", "kin"]);
@@ -40,6 +62,10 @@ describe("listTabFieldIds", () => {
   it("returns [] with no schema or entry type", () => {
     expect(listTabFieldIds(null, "lore:character")).toEqual([]);
     expect(listTabFieldIds(SCHEMA, null)).toEqual([]);
+  });
+
+  it("#2072: admits a reference-keyed `list` field too, even one with a long_text member", () => {
+    expect(listTabFieldIds(KEYED_SCHEMA, "lore:character")).toEqual(["relationships"]);
   });
 });
 

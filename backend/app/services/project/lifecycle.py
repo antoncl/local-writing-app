@@ -1126,6 +1126,7 @@ class ProjectLifecycleMixin:
                 if metadata_schema:
                     errors.extend(self._validate_lore_entry_metadata(entry_id, str(entry_type or "lore:note"), metadata, metadata_schema, node_index))
                     warnings.extend(self._keyed_list_duplicate_errors(f"Lore Entry {entry_id}", metadata, metadata_schema))
+                    warnings.extend(self._orphaned_item_warnings(f"Lore Entry {entry_id}", metadata, metadata_schema))
             except ProjectServiceError as exc:
                 errors.append(exc.message)
         return errors, warnings, code_fenced

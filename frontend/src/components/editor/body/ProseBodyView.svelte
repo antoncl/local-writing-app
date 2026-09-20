@@ -32,6 +32,7 @@
     threeWayReconcile,
   } from "@/lib/editor-core/documentBoundary";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
+  import { markdownOffsetAt as markdownOffsetAtDoc } from "@/lib/editor-core/markdownOffset";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import {
     ImplicitContextHighlight,
@@ -615,6 +616,19 @@
     }
   }
 
+  /** A ProseMirror doc position as the scene-markdown char offset the
+   *  /mutate dialog authors at (ADR-0089 §4). `undefined` — end of scene,
+   *  the unchanged behaviour — when there's no live editor or the mapping
+   *  throws (a doc shape the serializer can't walk). */
+  function markdownOffsetAt(pos: number): number | undefined {
+    if (!editor) return undefined;
+    try {
+      return markdownOffsetAtDoc(editor.state.doc, editor.state.schema, pos);
+    } catch {
+      return undefined;
+    }
+  }
+
   function autocompleteSlashFilter(cmd: SlashCommand) {
     if (!editor) return;
     const { selection } = editor.state;
@@ -736,7 +750,13 @@
             ? loreEntries.find((entry) => (entry.title ?? "").toLowerCase() === name)
             : null;
           if (closing) mutationDialogs?.openClose(match?.id ?? "");
-          else void mutationDialogs?.openAuthoring(match?.id ?? "");
+          else {
+            // The insertion point after clearSlashTrigger() has removed the
+            // "/mutate …" text (ADR-0089 §4): the dialog's baseline resolves
+            // here, not at the end of the scene.
+            const pos = editor?.state.selection.from;
+            void mutationDialogs?.openAuthoring(match?.id ?? "", pos !== undefined ? markdownOffsetAt(pos) : undefined);
+          }
         },
       },
       ...promptEntriesForSurface(promptCtx, "cursor")
@@ -1174,15 +1194,20 @@
         },
         handleKeyDown: handleEditorKeydown,
         handleClickOn: (_view, pos, node) => {
-          // Click a mutation pill → edit the whole unit (#69) in place.
+          // Click a mutation pill → edit the whole unit (#69) in place. The
+          // baseline resolves at the pill's OWN position (ADR-0089 §4), not
+          // the end of the scene.
           if (node.type.name === "mutation") {
-            void mutationDialogs?.openEdit({
-              markerId: String(node.attrs.markerId ?? ""),
-              entity: String(node.attrs.entity ?? ""),
-              name: String(node.attrs.name ?? ""),
-              group: String(node.attrs.group ?? ""),
-              rows: unitRows(node.attrs),
-            });
+            void mutationDialogs?.openEdit(
+              {
+                markerId: String(node.attrs.markerId ?? ""),
+                entity: String(node.attrs.entity ?? ""),
+                name: String(node.attrs.name ?? ""),
+                group: String(node.attrs.group ?? ""),
+                rows: unitRows(node.attrs),
+              },
+              markdownOffsetAt(pos),
+            );
             return true;
           }
           // Click a close pill → delete it (reopens the interval). It carries no

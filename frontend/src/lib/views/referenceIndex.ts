@@ -7,7 +7,8 @@
 // it (the references store today). The evaluator only reads the map — it never
 // mutates it — so the returned map's sets are the canonical membership.
 
-import type { MetadataSchema } from "@/lib/types";
+import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
+import type { MetadataSchema, ReferenceGraphEdge } from "@/lib/types";
 
 // The ids one node references through its `entity_ref` / `entity_ref_list`
 // fields — the frontend mirror of the backend `_reference_edges_for_entry`
@@ -91,4 +92,31 @@ export function projectReferences(
     if (referrers) for (const r of referrers) out.add(r);
   }
   return out;
+}
+
+// One row in `buildKeyedReferrerIndex`'s reverse index: the entry holding the
+// item, and the reference-keyed list field it lives in.
+export type KeyedReferrer = { referrerId: string; fieldId: string };
+
+// The reverse index behind the delete-orphan warning (ADR-0089 §9): target id
+// → every entry that holds a relationship item keyed by it. Built from the
+// field-qualified `edges` (not `refs`, which drops the field), keeping only
+// edges whose field is a reference-keyed list — an ordinary `entity_ref` /
+// `entity_ref_list` field's edges are not item keys and would over-warn on an
+// unrelated delete.
+export function buildKeyedReferrerIndex(
+  edges: ReferenceGraphEdge[] | null | undefined,
+  schema: MetadataSchema | null | undefined,
+): Map<string, KeyedReferrer[]> {
+  const index = new Map<string, KeyedReferrer[]>();
+  if (!edges || !schema) return index;
+  for (const edge of edges) {
+    const field = schema.fields[edge.field_id];
+    if (keyedListKeyMember(field) === null) continue;
+    const row: KeyedReferrer = { referrerId: edge.src, fieldId: edge.field_id };
+    const existing = index.get(edge.dst);
+    if (existing) existing.push(row);
+    else index.set(edge.dst, [row]);
+  }
+  return index;
 }

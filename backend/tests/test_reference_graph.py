@@ -27,6 +27,7 @@ from project_fixtures import open_test_project
 from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
+    ReferenceGraphEdge,
     SaveLoreEntryRequest,
     SaveSceneRequest,
     UpsertMetadataFieldRequest,
@@ -88,6 +89,24 @@ class ReferenceGraphTests(unittest.TestCase):
         alice = self._make("Alice")
         self._save(alice, "Alice", {"ally": "", "rivals": []})
         self.assertEqual(self.service.reference_graph().refs, {})
+
+    def test_edges_are_field_qualified_alongside_refs(self) -> None:
+        """ADR-0089 §9: `edges` is additive — same targets as `refs`, kept
+        field-qualified instead of flattened."""
+        alice = self._make("Alice")
+        bob = self._make("Bob")
+        mara = self._make("Mara")
+        self._save(alice, "Alice", {"ally": bob, "rivals": [mara, bob]})
+
+        graph = self.service.reference_graph()
+        self.assertEqual(
+            graph.edges,
+            [
+                ReferenceGraphEdge(src=alice, dst=bob, field_id="ally"),
+                ReferenceGraphEdge(src=alice, dst=mara, field_id="rivals"),
+                ReferenceGraphEdge(src=alice, dst=bob, field_id="rivals"),
+            ],
+        )
 
     def test_dedupes_repeated_targets(self) -> None:
         alice = self._make("Alice")
@@ -400,6 +419,71 @@ class SceneEdgeTests(unittest.TestCase):
         rows = self.service._backlinks_to_targets({hero, foil})
 
         self.assertEqual([(link.id, link.field_id) for link in rows], [(scene_id, "characters")])
+
+
+class KeyedListEdgeTests(unittest.TestCase):
+    """ADR-0089 §9: an entry holding a relationship item keyed by a target
+    yields an edge `(entry, target, <list field id>)`, same as a plain
+    `entity_ref` field — the keyed-referrer index behind the delete-orphan
+    warning reads `edges` for exactly this."""
+
+    FIELD = "relationships"
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Keyed List Edge Tests")
+        self._add_relationships_field()
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _add_relationships_field(self) -> None:
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("groups", {})["relationship"] = {
+            "name": "Relationship",
+            "members": [
+                {"key": "to", "name": "Who", "type": "entity_ref"},
+                {"key": "kind", "name": "Kind", "type": "text"},
+            ],
+        }
+        data.setdefault("fields", {})[self.FIELD] = {
+            "name": "Relationships",
+            "type": "list",
+            "item_group": "relationship",
+        }
+        character = data["entry_types"].get("lore:character") or {}
+        own = list(character.get("fields") or [])
+        if self.FIELD not in own:
+            own.insert(0, self.FIELD)
+        character["fields"] = own
+        data["entry_types"]["lore:character"] = character
+        self.service._write_yaml(schema_path, data)
+
+    def _make(self, title: str) -> str:
+        return self.service.create_lore_entry(
+            CreateLoreEntryRequest(title=title, entry_type="lore:character")
+        ).id
+
+    def test_an_item_keyed_by_a_target_yields_a_field_qualified_edge(self) -> None:
+        mara = self._make("Mara")
+        tomas = self._make("Tomas")
+        self.service.save_lore_entry(
+            mara,
+            SaveLoreEntryRequest(
+                title="Mara",
+                body="",
+                entry_type="lore:character",
+                metadata={self.FIELD: [{"to": tomas, "kind": "kinship"}]},
+            ),
+        )
+
+        graph = self.service.reference_graph()
+        self.assertIn(
+            ReferenceGraphEdge(src=mara, dst=tomas, field_id=self.FIELD),
+            graph.edges,
+        )
 
 
 if __name__ == "__main__":

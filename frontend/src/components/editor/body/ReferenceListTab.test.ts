@@ -38,7 +38,9 @@ function baseModel(over: Record<string, unknown> = {}) {
     fieldId: "kin",
     entryType: "lore:character",
     fieldLabel: "Kin",
-    ids: ["char_tomas", "char_elena", "loc_rivendell"],
+    items: ["char_tomas", "char_elena", "loc_rivendell"],
+    keyMember: null,
+    effectiveItems: null,
     readOnly: false,
     schema: SCHEMA,
     nodeId: "",
@@ -96,7 +98,7 @@ describe("ReferenceListTab (#2010)", () => {
   it("an unknown id renders a Missing row with the .missing pill", () => {
     const { container } = render(ReferenceListTab, {
       props: {
-        model: baseModel({ ids: ["char_tomas", "ghost_1"] }),
+        model: baseModel({ items: ["char_tomas", "ghost_1"] }),
         deps: baseDeps(),
         on: baseOn(),
       },
@@ -275,5 +277,150 @@ describe("ReferenceListTab — scroll memory (#2013)", () => {
     await fireEvent.scroll(body);
     (frame as unknown as FrameRequestCallback)(0);
     expect(bodyMemory.scrollFor(NODE_ID, "list:kin")).toBe(40);
+  });
+});
+
+describe("ReferenceListTab — reference-keyed lists (ADR-0089 #2072)", () => {
+  const REL_SCHEMA = {
+    version: 1,
+    entry_types: {
+      "lore:character": { name: "Character", kind: "lore", fields: [] },
+    },
+    fields: {
+      relationships: {
+        name: "Relationships",
+        type: "list",
+        options: [],
+        item_scalar: false,
+        item_members: [
+          { key: "to", name: "To", type: "entity_ref", picker_config: { sources: [{ kind: "lore" }] } },
+          { key: "kind", name: "Kind", type: "text" },
+          { key: "state", name: "State", type: "text" },
+        ],
+      },
+    },
+  } as unknown as MetadataSchema;
+  const REL_FIELD = REL_SCHEMA.fields.relationships as MetadataFieldDefinition;
+  const REL_ENTRIES: LoreEntrySummary[] = [
+    { id: "char_tomas", title: "Tomas", body: "", entry_type: "lore:character", metadata: {} },
+    { id: "char_elena", title: "Elena", body: "", entry_type: "lore:character", metadata: {} },
+    { id: "char_mara", title: "Mara", body: "", entry_type: "lore:character", metadata: {} },
+  ];
+
+  function relModel(over: Record<string, unknown> = {}) {
+    return {
+      field: REL_FIELD,
+      fieldId: "relationships",
+      entryType: "lore:character",
+      fieldLabel: "Relationships",
+      items: [
+        { to: "char_tomas", kind: "kinship", state: "estranged" },
+        { to: "char_elena", kind: "rivalry", state: "" },
+      ],
+      keyMember: "to",
+      effectiveItems: null,
+      readOnly: false,
+      schema: REL_SCHEMA,
+      nodeId: "",
+      ...over,
+    };
+  }
+  const relDeps = (over: Record<string, unknown> = {}) => baseDeps({ loreEntries: REL_ENTRIES, ...over });
+
+  beforeEach(() => metadataSchemaStore.set(REL_SCHEMA));
+
+  it("rows render the targets' titles with the member detail", () => {
+    render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on: baseOn() } });
+    expect(screen.getByText("Tomas")).toBeInTheDocument();
+    expect(screen.getByText("kinship · estranged")).toBeInTheDocument();
+    expect(screen.getByText("Elena")).toBeInTheDocument();
+    // Elena's blank `state` member drops out of the detail join (#698).
+    expect(screen.getByText("rivalry")).toBeInTheDocument();
+  });
+
+  it("picking a new target appends an item with only the key set and keeps other items' members intact", async () => {
+    const on = baseOn();
+    render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add Relationships" }));
+    await tick();
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    await fireEvent.click(within(menu).getByRole("button", { name: "Expand Character" }));
+    await tick();
+    await fireEvent.click(within(menu).getByText("Mara").closest("button")!);
+    await tick();
+    expect(on.change).toHaveBeenCalledWith([
+      { to: "char_tomas", kind: "kinship", state: "estranged" },
+      { to: "char_elena", kind: "rivalry", state: "" },
+      { to: "char_mara" },
+    ]);
+  });
+
+  it("picking an already-picked target through the add menu removes it, never duplicates the key", async () => {
+    // NodePicker's own toggle (`isPicked` against the `value` it's fed) turns
+    // a re-pick of an already-selected candidate into a REMOVE, so a
+    // duplicate-add can never reach the tab's fold through real interaction —
+    // this is the shape that invariant takes end to end.
+    const on = baseOn();
+    render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add Relationships" }));
+    await tick();
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    await fireEvent.click(within(menu).getByRole("button", { name: "Expand Character" }));
+    await tick();
+    await fireEvent.click(within(menu).getByText("Tomas").closest("button")!);
+    await tick();
+    expect(on.change).toHaveBeenCalledWith([{ to: "char_elena", kind: "rivalry", state: "" }]);
+  });
+
+  it("remove (×) drops the right item, keeping the rest untouched", async () => {
+    const on = baseOn();
+    render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on } });
+    const tomasRow = screen.getByText("Tomas").closest(".node-row") as HTMLElement;
+    await fireEvent.click(tomasRow.querySelector(".row-action-delete") as HTMLElement);
+    expect(on.change).toHaveBeenCalledWith([{ to: "char_elena", kind: "rivalry", state: "" }]);
+  });
+
+  it("an orphaned item (a blank key) renders as orphaned and can be removed", async () => {
+    const on = baseOn();
+    render(ReferenceListTab, {
+      props: {
+        model: relModel({
+          items: [
+            { to: "", kind: "kinship", state: "gone" },
+            { to: "char_elena", kind: "rivalry", state: "" },
+          ],
+        }),
+        deps: relDeps(),
+        on,
+      },
+    });
+    expect(screen.getByText("(no target)")).toBeInTheDocument();
+    expect(screen.getByText("Orphaned")).toBeInTheDocument();
+    const orphanRow = screen.getByText("(no target)").closest(".node-row") as HTMLElement;
+    await fireEvent.click(orphanRow.querySelector(".row-action-delete") as HTMLElement);
+    expect(on.change).toHaveBeenCalledWith([{ to: "char_elena", kind: "rivalry", state: "" }]);
+  });
+
+  it("a scrubbed effective item shows the mutation mark on its detail, read-only", () => {
+    render(ReferenceListTab, {
+      props: {
+        model: relModel({
+          readOnly: true,
+          effectiveItems: [
+            { to: "char_tomas", kind: "kinship", state: "reconciled" },
+            { to: "char_elena", kind: "rivalry", state: "" },
+          ],
+        }),
+        deps: relDeps(),
+        on: baseOn(),
+      },
+    });
+    const tomasRow = screen.getByText("Tomas").closest(".node-row") as HTMLElement;
+    expect(within(tomasRow).getByTitle("Changed by here")).toBeInTheDocument();
+    expect(within(tomasRow).getByText("kinship · reconciled")).toBeInTheDocument();
+    // Read-only (scrubbed): no click-to-edit affordance on the detail.
+    expect(tomasRow.querySelector(".ref-item-detail-toggle")).toBeNull();
+    const elenaRow = screen.getByText("Elena").closest(".node-row") as HTMLElement;
+    expect(within(elenaRow).queryByTitle("Changed by here")).toBeNull();
   });
 });

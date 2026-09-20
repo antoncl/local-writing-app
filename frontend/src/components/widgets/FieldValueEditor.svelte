@@ -74,6 +74,12 @@
     // create_missing is not offered here at all; see ReferencePicker for the
     // full rule. Only MetadataPanel passes a defined value.
     createLayerId?: string | null | undefined;
+    // `list` field only, forwarded to ListValueEditor verbatim (ADR-0089 §2,
+    // #2072): a keyed item row's key never changes in place and a target
+    // can't be picked twice — both opt-in via these, undefined (the default)
+    // leaves every other `list` field untouched.
+    lockedKeys?: { member: string; keys: string[] } | undefined;
+    uniqueMember?: string | undefined;
   }
 
   let {
@@ -96,6 +102,8 @@
     excludeId = null,
     onNavigate,
     createLayerId = undefined,
+    lockedKeys = undefined,
+    uniqueMember = undefined,
   }: Props = $props();
 
   const label = $derived(ariaLabel ?? field.name);
@@ -312,6 +320,8 @@
     {researchStructure}
     {excludeId}
     {createLayerId}
+    {lockedKeys}
+    {uniqueMember}
   />
 {:else if field.type === "color"}
   <SwatchPicker value={currentValue || null} onChange={(id) => emit(id ?? "")} />

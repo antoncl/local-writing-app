@@ -45,6 +45,7 @@ from app.models import (
     MetadataSchema,
     ReferenceCandidate,
     ReferenceCandidatesResponse,
+    ReferenceGraphEdge,
     ReferenceGraphResponse,
     ReferenceResolveResponse,
 )
@@ -1058,7 +1059,14 @@ class ReferencesMixin:
         survivor here too, or the frontend would count a redirected reference
         against a tag that left every picker. Deduped per src after folding —
         two carriers of the same merged id, or one carrier of the merged id
-        alongside the survivor itself, collapse to one edge, not two."""
+        alongside the survivor itself, collapse to one edge, not two.
+
+        `edges` (ADR-0089 §9) is the same forward adjacency kept field-qualified
+        instead of flattened, for a caller (the keyed-referrer index behind the
+        delete-orphan warning) that needs to know *which* field an edge came
+        through. Same `INCLUDE_FIELD_ID` exclusion and the same `canonical_id`
+        fold as `refs`, deduped per `(src, field_id)` after folding — the
+        field-qualified equivalent of `refs`'s per-src dedupe."""
         node_index = self._build_node_index()
         refs = {
             src: deduped
@@ -1067,7 +1075,18 @@ class ReferencesMixin:
                 node_index.canonical_id(edge.dst) for edge in edges if edge.field_id != INCLUDE_FIELD_ID
             )))
         }
-        return ReferenceGraphResponse(refs=refs)
+        edges: list[ReferenceGraphEdge] = []
+        for src, src_edges in node_index.edges_by_src.items():
+            seen: set[tuple[str, str]] = set()
+            for edge in src_edges:
+                if edge.field_id == INCLUDE_FIELD_ID:
+                    continue
+                dst = node_index.canonical_id(edge.dst)
+                if (edge.field_id, dst) in seen:
+                    continue
+                seen.add((edge.field_id, dst))
+                edges.append(ReferenceGraphEdge(src=src, dst=dst, field_id=edge.field_id))
+        return ReferenceGraphResponse(refs=refs, edges=edges)
 
     def prompts_including_snippet(self, snippet_id: str) -> set[str]:
         """The ids of every prompt that transitively `{% include %}`s

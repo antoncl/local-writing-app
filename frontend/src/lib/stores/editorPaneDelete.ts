@@ -11,7 +11,11 @@ import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { backlinksFor } from "@/lib/views/backlinks";
-import { referenceIndexStore, refreshReferenceIndexInBackground } from "@/lib/stores/references";
+import {
+  keyedReferrerIndexStore,
+  referenceIndexStore,
+  refreshReferenceIndexInBackground,
+} from "@/lib/stores/references";
 import { setLoreEntries } from "@/lib/stores/lore";
 import { setPromptEntries } from "@/lib/stores/prompts";
 import { setPlotTemplates } from "@/lib/stores/plotTemplates";
@@ -24,6 +28,7 @@ import { researchStructureStore, setResearchStructure, setStructure } from "@/li
 import { refreshTodos } from "@/lib/stores/todos";
 import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
+import { metadataSchemaStore } from "@/lib/stores/schema";
 import type { EditorPaneState } from "@/lib/editor-core/editorPaneModel";
 import type { Backlink } from "@/lib/types";
 
@@ -31,11 +36,18 @@ import type { Backlink } from "@/lib/types";
 // EditorPanesController instance satisfies it structurally; a narrow interface
 // keeps the coupling explicit and this module ignorant of the rest of the
 // controller (and of its private autosave/save-chain state).
+//
+// `orphanWarning` is injected the same way (avoids a cycle with
+// projectSession, which imports editorPanes) — `enabled()` reads the machine
+// setting, `suppress()` writes it when the confirm dialog's "don't show this
+// again" is ticked for THIS warning (ADR-0089 §9). Optional so a host built
+// before it's wired (or a test double) just gets no orphan sentence.
 export interface DeletePaneHost {
   panes: EditorPaneState[];
   activeChatId: string | null;
   tearDown(id: string): void;
   setStatus(message: string): void;
+  orphanWarning?: { enabled: () => boolean; suppress: () => Promise<void> };
 }
 
 export async function requestDeleteScene(host: DeletePaneHost, id: string): Promise<void> {
@@ -69,11 +81,37 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
       documentKind
     ] ?? "Delete Prompt";
   const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
-  const message =
+  let message =
     backlinks.length > 0
       ? `${baseMessage}\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} this — those links will become broken:`
       : baseMessage;
   const details = backlinks.map((link) => `${link.title} — ${link.field_name}`);
+
+  // ADR-0089 §9: a keyed referrer is a relationship-list ITEM naming this node
+  // as its target, not an ordinary reference — deleting it leaves the item on
+  // disk with a blank key (an orphan), so it gets its own sentence rather than
+  // folding into the backlinks list above. Gated on the machine setting; a
+  // delete with no keyed referrers changes nothing here.
+  const orphanWarningEnabled = host.orphanWarning?.enabled() ?? false;
+  const keyedReferrers = orphanWarningEnabled ? (get(keyedReferrerIndexStore).get(sceneId) ?? []) : [];
+  let onDontShowAgain: (() => Promise<void>) | undefined;
+  if (keyedReferrers.length > 0 && host.orphanWarning) {
+    const schema = get(metadataSchemaStore);
+    let titleById = new Map<string, string>();
+    try {
+      const { candidates } = await api.resolveReferences([...new Set(keyedReferrers.map((r) => r.referrerId))]);
+      titleById = new Map(candidates.map((c) => [c.id, c.title]));
+    } catch (error) {
+      console.warn("Failed to resolve keyed referrers", error);
+    }
+    const owners = keyedReferrers
+      .map((r) => `${titleById.get(r.referrerId) ?? r.referrerId} — ${schema?.fields[r.fieldId]?.name ?? r.fieldId}`)
+      .join(", ");
+    const noun = keyedReferrers.length === 1 ? "relationship item points" : "relationship items point";
+    message = `${message}\n\n${keyedReferrers.length} ${noun} at this entry (${owners}); they will be kept as orphaned items and reported by Validate.`;
+    onDontShowAgain = () => host.orphanWarning!.suppress();
+  }
+
   confirmService.request({
     title: titleLabel,
     message,
@@ -81,6 +119,7 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
     confirmLabel: titleLabel,
     destructive: true,
     onConfirm: () => deleteScene(host, id),
+    onDontShowAgain,
   });
 }
 

@@ -6,6 +6,7 @@
 // in declared field order, no state of its own.
 import { isTagListField } from "@/lib/utils/pickerCreate";
 import { effectiveFieldHidden, effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
+import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
 import type { BodyShape, EntryMetadata, MetadataSchema } from "@/lib/types";
 
 export type BodyTab = {
@@ -18,9 +19,11 @@ export type BodyTab = {
   count?: number;
 };
 
-/** Every `entity_ref_list` field of `entryType` that earns its own body tab —
- *  schema order, tag lists / hidden / intrinsic fields excluded. Shared by
- *  `buildBodyTabs` and the rail (`fieldRowModel.ts`'s `listsInBody` gate). */
+/** Every `entity_ref_list` field of `entryType`, plus every reference-keyed
+ *  `list` field (ADR-0089 §6 — the key outranks the prose gate), that earns
+ *  its own body tab — schema order, tag lists / hidden / intrinsic fields
+ *  excluded. Shared by `buildBodyTabs` and the rail (`fieldRowModel.ts`'s
+ *  `listsInBody` gate). */
 export function listTabFieldIds(
   schema: MetadataSchema | null | undefined,
   entryType: string | null | undefined,
@@ -30,7 +33,7 @@ export function listTabFieldIds(
   const out: string[] = [];
   for (const id of fieldIds) {
     const field = schema.fields[id];
-    if (!field || field.type !== "entity_ref_list") continue;
+    if (!field || (field.type !== "entity_ref_list" && !keyedListKeyMember(field))) continue;
     if (field.intrinsic) continue;
     if (isTagListField(field, schema)) continue;
     if (effectiveFieldHidden(schema, entryType, id)) continue;

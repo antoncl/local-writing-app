@@ -137,6 +137,12 @@ class MachineSettings(BaseModel):
     # rolling bleeding-edge prerelease. Default `stable` — an unconfigured
     # install should not be told a nightly is newer than its release.
     update_channel: UpdateChannel = "stable"
+    # Whether a scene delete that would orphan a relationship item (ADR-0089
+    # §9) warns the writer first. A "do not warn again" choice is a preference
+    # about prompts, not about the project, so it lives here rather than in
+    # project state — default true, since an orphaned item is a silent loss
+    # the writer should opt out of, not into.
+    warn_on_orphaning_delete: bool = True
 
 
 def _guard_against_unisolated_test_config() -> None:
@@ -656,7 +662,7 @@ def merge_update(current: MachineSettings, patch: dict[str, Any]) -> MachineSett
     # Plain scalar passthroughs: set when present and non-null. `ai_policy`'s
     # Literal bound on MachineSettings rejects a bad value at the final
     # model_validate, so an out-of-set string never persists.
-    for key in ("default_provider", "ai_policy", "update_channel"):
+    for key in ("default_provider", "ai_policy", "update_channel", "warn_on_orphaning_delete"):
         if key in patch and patch[key] is not None:
             base[key] = patch[key]
     if "default_models" in patch and isinstance(patch["default_models"], dict):

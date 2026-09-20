@@ -15,6 +15,7 @@ import { fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { countWords } from "@/lib/utils/wordCount";
 import { listHasProseItems } from "@/lib/editor-core/bodySections";
+import { keyedListKeyMember, listItemKey } from "@/lib/editor-core/keyedList";
 import type {
   DocumentKind,
   EffectiveFieldValue,
@@ -342,23 +343,14 @@ function listSectionSummary(ctx: RailRowContext, fieldId: string): string {
 }
 
 // #2010: an entity_ref_list row becomes an index row when its editor lives in
-// a body tab instead of the rail. A tags field never routes here — it keeps
-// its own mono-line treatment (#2007) regardless of `listsInBody`.
+// a body tab instead of the rail. #2072/ADR-0089 §6: a reference-keyed `list`
+// routes here too — the key outranks the prose gate (`listHasProseItems`,
+// bodySections.ts), so a relationships-style field is a list-index row
+// whether or not its items carry prose. A tags field never routes here — it
+// keeps its own mono-line treatment (#2007) regardless of `listsInBody`.
 function isListIndex(ctx: RailRowContext, field: MetadataFieldDefinition): boolean {
-  return ctx.listsInBody && field.type === "entity_ref_list" && !isTagListField(field, ctx.schema);
-}
-
-// A list item's id for the summary below. A folded item (ADR-0089 §3: a
-// `list` field's effective value is its items, not ids) is an object keyed by
-// its item_group's members — its id is the ONE `entity_ref` member's value;
-// an item with no such single member, or a non-string/empty one, is skipped
-// rather than stringified into "[object Object]". A plain id keeps today's path.
-function listItemId(field: MetadataFieldDefinition | undefined, item: MetadataValue): string | null {
-  if (typeof item !== "object" || item === null || Array.isArray(item)) return String(item);
-  const refMembers = (field?.item_members ?? []).filter((member) => member.type === "entity_ref");
-  if (refMembers.length !== 1) return null;
-  const key = (item as Record<string, MetadataValue>)[refMembers[0].key];
-  return typeof key === "string" && key !== "" ? key : null;
+  if (!ctx.listsInBody || isTagListField(field, ctx.schema)) return false;
+  return field.type === "entity_ref_list" || !!keyedListKeyMember(field);
 }
 
 // The list-index row's summary line: the total count, then a per-entry-type
@@ -370,7 +362,7 @@ function listSummary(ctx: RailRowContext, fieldId: string): string {
   const value = displayValue(ctx, fieldId);
   const field = ctx.schema.fields[fieldId];
   const ids = Array.isArray(value)
-    ? value.map((v) => listItemId(field, v)).filter((id): id is string => id != null)
+    ? value.map((v) => listItemKey(field, v)).filter((id): id is string => id != null)
     : [];
   if (ids.length === 0) return "";
   const order: string[] = [];

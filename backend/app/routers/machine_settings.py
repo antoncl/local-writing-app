@@ -40,6 +40,7 @@ def _build_settings_view(masked: dict[str, Any]) -> MachineSettingsView:
         display=masked.get("display", {}),
         ai_policy=masked.get("ai_policy", "off"),
         update_channel=masked.get("update_channel", "stable"),
+        warn_on_orphaning_delete=masked.get("warn_on_orphaning_delete", True),
         config_path=str(machine_settings_service.config_path()),
         config_dir=str(machine_settings_service.config_dir()),
     )

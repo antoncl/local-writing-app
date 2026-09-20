@@ -41,6 +41,7 @@ function view(ai_policy: MachineSettingsView["ai_policy"]): MachineSettingsView 
     display: DISPLAY,
     ai_policy,
     update_channel: "stable",
+    warn_on_orphaning_delete: true,
     config_path: "C:/config.yaml",
     config_dir: "C:/",
   };

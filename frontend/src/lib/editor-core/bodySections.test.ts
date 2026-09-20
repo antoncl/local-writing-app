@@ -130,6 +130,18 @@ describe("listHasProseItems / buildBodyListSections (#2043)", () => {
     expect(listHasProseItems(null)).toBe(false);
   });
 
+  it("#2072/ADR-0089 §6: a reference-keyed list is never a prose section, even with a long_text member — the key outranks the gate", () => {
+    const keyed = field({
+      type: "list",
+      item_scalar: false,
+      item_members: [
+        { key: "to", name: "To", type: "entity_ref" },
+        { key: "notes", name: "Notes", type: "long_text" },
+      ],
+    });
+    expect(listHasProseItems(keyed)).toBe(false);
+  });
+
   it("splits the shape into the title member (first text), the prose members and the fact members, in shape order", () => {
     const s = schema({ beats: BEATS }, ["beats"]);
     const [section] = buildBodyListSections(s, "character");

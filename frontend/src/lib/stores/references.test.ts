@@ -8,10 +8,27 @@ vi.mock("@/lib/api", () => ({ api: { referenceGraph } }));
 
 import {
   clearReferenceIndex,
+  keyedReferrerIndexStore,
   referenceIndexStore,
   refreshReferenceIndex,
   refreshReferenceIndexInBackground,
 } from "./references";
+import { metadataSchemaStore } from "./schema";
+import type { MetadataSchema } from "@/lib/types";
+
+// A reference-keyed list field (ADR-0089 §1) beside an ordinary
+// entity_ref_list, so the sibling store's schema-filtered build is exercised.
+const KEYED_SCHEMA = {
+  version: 1,
+  entry_types: { character: { name: "Character", kind: "lore", fields: ["relationships"] } },
+  fields: {
+    relationships: {
+      type: "list",
+      item_group: "relationship",
+      item_members: [{ key: "to", name: "Who", type: "entity_ref" }],
+    },
+  },
+} as unknown as MetadataSchema;
 
 // A deferred promise whose resolve is exposed, so a test can force a fetch to
 // settle at a chosen moment (and thus in a chosen order relative to others).
@@ -91,5 +108,36 @@ describe("refreshReferenceIndexInBackground (#200 fire-and-forget)", () => {
     refreshReferenceIndexInBackground();
     await flush();
     expect(get(referenceIndexStore).get("bob")).toEqual(new Set(["alice"]));
+  });
+});
+
+describe("keyedReferrerIndexStore (ADR-0089 §9) — filled from the same fetch", () => {
+  beforeEach(() => {
+    referenceGraph.mockReset();
+    clearReferenceIndex();
+    metadataSchemaStore.set(null);
+  });
+
+  it("builds the keyed-referrer index from the graph's edges + the live schema", async () => {
+    metadataSchemaStore.set(KEYED_SCHEMA);
+    referenceGraph.mockResolvedValueOnce({
+      refs: { mara: ["tomas"] },
+      edges: [{ src: "mara", dst: "tomas", field_id: "relationships" }],
+    });
+    await refreshReferenceIndex();
+    expect(get(keyedReferrerIndexStore).get("tomas")).toEqual([
+      { referrerId: "mara", fieldId: "relationships" },
+    ]);
+  });
+
+  it("a clear empties it too", async () => {
+    metadataSchemaStore.set(KEYED_SCHEMA);
+    referenceGraph.mockResolvedValueOnce({
+      refs: { mara: ["tomas"] },
+      edges: [{ src: "mara", dst: "tomas", field_id: "relationships" }],
+    });
+    await refreshReferenceIndex();
+    clearReferenceIndex();
+    expect(get(keyedReferrerIndexStore).size).toBe(0);
   });
 });

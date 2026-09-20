@@ -19,6 +19,13 @@ export type ConfirmationRequest = {
   destructive: boolean;
   cannotBeUndone?: boolean;
   dontShowAgainKey?: string;
+  // An alternative "don't show this again" sink, for a suppression that isn't
+  // a plain localStorage key (ADR-0089 §9: the delete-orphan warning is a
+  // machine setting, since it's a preference about prompts, not a project).
+  // Renders the same checkbox as `dontShowAgainKey`; when both are absent, no
+  // checkbox shows. Mutually exclusive with `dontShowAgainKey` in practice —
+  // a request sets one or the other, never both.
+  onDontShowAgain?: () => Promise<void>;
   onConfirm: () => Promise<void>;
   // Optional second resolution (e.g. "Discard changes and close" next to
   // "Overwrite and close"). Cancel/backdrop still means "do neither".
@@ -78,8 +85,12 @@ class ConfirmService {
     const current = this.active;
     if (!current) return;
     this.active = null;
-    if (dontShowAgain && current.dontShowAgainKey) {
-      this.#suppress(current.dontShowAgainKey);
+    if (dontShowAgain) {
+      if (current.onDontShowAgain) {
+        await current.onDontShowAgain();
+      } else if (current.dontShowAgainKey) {
+        this.#suppress(current.dontShowAgainKey);
+      }
     }
     await this.onRun(current.onConfirm);
   }

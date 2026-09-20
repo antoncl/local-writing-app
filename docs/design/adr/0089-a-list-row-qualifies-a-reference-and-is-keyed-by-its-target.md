@@ -107,7 +107,9 @@ scene marker, with the existing grammar and url-encoding:
 
 Interval close (ADR-0010) applies to any of the three records. Whole-list `replace` is rejected
 by the validator for a group-shaped list; it is the grammar's default op and would erase every
-row from that point, and it has no story use.
+row from that point, and it has no story use. A mutation value is a field value (ADR-0007): the
+row an `add` carries is decoded and validated against the list's `item_members` exactly as a base
+row is, and a `replace` value is validated as the member's type.
 
 The validator gains one check, next to the entity-existence check it mirrors: a `replace` or
 `remove` must name a row that exists at that position, in the base or as a live `add`. A
@@ -135,9 +137,10 @@ For a group-shaped list the diff is by row key, and it writes three record shape
 the way a stop comes into being.
 
 The dialog passes the cursor position as the baseline position. Today it resolves at end of
-scene (PR #74's recorded deviation from ADR-0017); with row keys that deviation can offer a row
-created later in the same scene and then emit a `remove` that kills it, so the deviation ends
-with this work.
+scene (PR #74's recorded deviation from ADR-0017, made because the frontend has no mapping from
+the editor's cursor to a markdown offset); with row keys that deviation can offer a row created
+later in the same scene and then emit a `remove` that kills it, so this work builds that mapping
+and the deviation ends.
 
 Reviewing and editing a stop that already exists is the scrubber. ADR-0013 makes the card show
 effective values at a stop; ADR-0042 §5 rules that editing at a stop edits that stop's unit. The
@@ -230,7 +233,7 @@ deleted target is caught.
   re-edited, because rows reuse an id only on unchanged `(op, value)`
   (`frontend/src/lib/editor-core/mutationListEdit.ts:72`); and a pre-id snapshot restored later
   re-mints every id on the way out. The target is already the identity the writer means.
-- **Qualifier as separate reference-list fields** (`allies`, `rivals`, …), grouped by a view.
+- **One reference-list field per kind** (`allies`, `rivals`, …), grouped by a view.
   Works today at zero code, and is the baseline this ADR must beat: it has no per-target state and
   explodes when kinds and states multiply.
 - **Knowledge as a plain `knows: entity_ref_list` with `add` and close.** Arrival, retraction
@@ -239,10 +242,11 @@ deleted target is caught.
 - **A relation the hop passes through** (a node kind the traversal treats as transparent). A
   special case in the one traversal for one kind.
 - **Mutation-only relations, no base rows** (the reserved `knower=` scope generalised,
-  `docs/design/mid-scene-lore-mutations.md` §3.2, never implemented). Puts world facts in prose
+  `docs/design/mid-scene-lore-mutations.md` §3.2 and ADR-0001's forward-compatibility list,
+  never implemented). Puts world facts in prose
   files and loses lore-page authoring. The reserved scope is retired by this ADR; a knowledge row
   covers it.
-- **Storing the qualifier on the target** (Tomas carries `regarded_by_mara`). Wrong owner,
+- **Storing the row on the target** (Tomas carries `regarded_by_mara`). Wrong owner,
   schema explosion.
 - **A paired "incoming" line inside the owner's tab, and a built-in "known by".** A backlink drawn
   inside a field's own rendering, nowhere else in the app; both dissolve into the References

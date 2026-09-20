@@ -152,12 +152,16 @@
     {#if fieldId === "status"}
       <ColoredSelect value={String(value ?? "")} options={field.options} ariaLabel={fieldLabel} placeholder="(no status)" onChange={pick} />
     {:else if singleRef}
-      <!-- The picker (pill + swap / add trigger), only while open (#2058). -->
+      <!-- The picker (pill + swap / add trigger), only while open (#2058). The
+           row drives the picker's pill fold and a single reference has nothing
+           to fold, so it is always expanded (uncontrolled, the #1216 caret
+           would start it folded and hide the one pill). -->
       <FieldValueEditor
         {field}
         allowUnset={true}
         embedded={true}
         controlled={true}
+        expanded={true}
         {value}
         ariaLabel={fieldLabel}
         loreEntries={refDeps.loreEntries}
@@ -188,13 +192,16 @@
     </div>
     {#if singleRef && refTarget}
       <!-- The same hit target, plus the peek anchor (#2058): `use:` cannot be
-           conditional, so the anchored variant is its own element. -->
+           conditional, so the anchored variant is its own element. Opening the
+           row unmounts this button, and the action's teardown does not close
+           a card it opened — so the click closes the peek itself, or the card
+           would float over the picker off a detached anchor. -->
       <button
         type="button"
         class="fr-rest-hit"
         aria-label={`Edit ${fieldLabel}: ${restText}`}
         title={field.description || `Edit ${fieldLabel}`}
-        onclick={(e) => onOpen(fieldId, e.currentTarget.closest(".field-row") as HTMLElement)}
+        onclick={(e) => { peekAt = null; onOpen(fieldId, e.currentTarget.closest(".field-row") as HTMLElement); }}
         use:peekAnchor={{ onOpen: (anchor) => { peekAt = anchor; }, onClose: () => { peekAt = null; } }}
       ></button>
     {:else}

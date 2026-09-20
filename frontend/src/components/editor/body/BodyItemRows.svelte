@@ -13,6 +13,9 @@
   import { leavesRow } from "@/components/editor/RailScalarCell.svelte";
   import { buildRailRowModel, isRowEmpty, type RailRowContext } from "@/lib/rail/fieldRowModel";
   import { buildRefResolver } from "@/lib/utils/refResolve";
+  import { assistantEntriesStore } from "@/lib/stores/assistants";
+  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
+  import { tagById } from "@/lib/stores/tagNodes";
   import type { GroupMember } from "@/lib/schemaTypes";
   import type {
     DocumentKind,
@@ -166,9 +169,19 @@
   );
 
   // #2058: an item's single reference rests as its target's name; the same
-  // id → node walk the panel's rows use, over the rosters this component holds.
+  // id → node walk the panel's rows use, over the rosters this component holds
+  // plus the global assistant / plot / tag rosters (read directly, as
+  // MetadataPanel and ReferencePicker do), so a beat's reference to a
+  // plotline or an assistant resolves to its title, not its id.
   const resolveRef = $derived(
-    buildRefResolver({ structure: deps.structure, loreEntries: deps.loreEntries, promptEntries: deps.promptEntries }),
+    buildRefResolver({
+      structure: deps.structure,
+      loreEntries: deps.loreEntries,
+      promptEntries: deps.promptEntries,
+      assistantEntries: $assistantEntriesStore,
+      plotEntries: $plotlineEntriesStore,
+      tagById: $tagById,
+    }),
   );
   const rowDeps = $derived<RailRowDeps>({
     readOnly: model.readOnly,

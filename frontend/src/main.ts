@@ -3,6 +3,7 @@ import App from "./App.svelte";
 import { startSessionPresence } from "./lib/sessionPresence";
 import "./lib/icons/generated/tabler-subset.css";
 import "./styles.css";
+import "./styles/prose.css";
 
 const app = mount(App, {
   target: document.getElementById("app")!,

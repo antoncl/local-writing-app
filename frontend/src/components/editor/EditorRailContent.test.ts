@@ -54,8 +54,23 @@ describe("EditorRailContent", () => {
     expect(backlinks.closest(".scene-metadata")).not.toBeNull();
   });
 
-  function renderRail() {
+  it("`facts` renders the rows as front matter with no trailing sections (#2054)", () => {
+    renderRail("facts");
+    expect(document.querySelector(".scene-metadata.front-matter")).not.toBeNull();
+    expect(document.querySelector(".scene-backlinks")).toBeNull();
+    expect(document.querySelector('[data-testid="rail-appendix"]')).toBeNull();
+  });
+
+  it("`trailing` renders only the trailing sections, as the appendix (#2054)", () => {
+    renderRail("trailing");
+    expect(document.querySelector(".scene-metadata")).toBeNull();
+    const appendix = document.querySelector('[data-testid="rail-appendix"]');
+    expect(appendix?.querySelector(".scene-backlinks")).not.toBeNull();
+  });
+
+  function renderRail(part: "rail" | "facts" | "trailing" = "rail") {
     render(EditorRailContent, {
+      part,
       model: {
         metadataSchema: SCHEMA,
         entryType: "lore:note",

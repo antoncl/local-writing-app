@@ -162,6 +162,11 @@
     // the prose, so they share its column and never become grid children of
     // the editor panel (the regression that emptied the body and cut the rail).
     sections?: Snippet;
+    // Front matter / appendix (#2054): the rail's facts above the free body and
+    // its trailing material after the sections, while the rail is collapsed.
+    // Inside the frame for the same reason the sections are.
+    frontMatter?: Snippet;
+    appendix?: Snippet;
   }
 
   let {
@@ -186,6 +191,8 @@
     neighbours = null,
     onEditorReady = () => {},
     sections = undefined,
+    frontMatter = undefined,
+    appendix = undefined,
   }: Props = $props();
 
   // ---------- Custom TipTap extensions ----------
@@ -1162,7 +1169,7 @@
       content: "",
       editorProps: {
         attributes: {
-          class: "editor-body",
+          class: "editor-body prose-column",
           spellcheck: "true",
         },
         handleKeyDown: handleEditorKeydown,
@@ -1312,7 +1319,7 @@
   class:empty-editor={editorEmpty}
   class:lore-editor={documentKind === "lore"}
   class="editor-wrap"
-  class:has-sections={Boolean(sections)}
+  class:has-sections={Boolean(sections || appendix)}
   data-testid="prose-editor"
   bind:this={editorFrame}
   onmousedown={(event) => {
@@ -1320,11 +1327,12 @@
     // 780px column or below short content) — focus the editor at the
     // end of the doc so the cursor lands where the user expects.
     if (event.target === event.currentTarget) {
-      // With body sections below the prose (#2030), a gutter click beside or
-      // under a section is that section's business, not the body's — only a
-      // click level with the prose falls through to it.
-      const proseBottom = editorElement?.getBoundingClientRect().bottom;
-      if (sections && proseBottom !== undefined && event.clientY > proseBottom) return;
+      // With body sections below the prose (#2030) or front matter above it
+      // (#2054), a gutter click beside those blocks is their business, not
+      // the body's — only a click level with the prose falls through to it.
+      const prose = editorElement?.getBoundingClientRect();
+      if (prose && (sections || appendix) && event.clientY > prose.bottom) return;
+      if (prose && frontMatter && event.clientY < prose.top) return;
       event.preventDefault();
       editor?.chain().focus("end").run();
     }
@@ -1362,6 +1370,11 @@
   <!-- `prose-body` is the free body's own mount; the frame (`prose-editor`)
        also holds one editor per long_text section (#2009), so a locator that
        wants THE body must anchor here, not on the frame. -->
+  {#if frontMatter}
+    <!-- Front matter (#2054): the rail's facts at the head of the document,
+         on the prose column so the block's edges are the prose's. -->
+    <div class="prose-front-matter prose-column" data-testid="prose-front-matter">{@render frontMatter()}</div>
+  {/if}
   <div bind:this={editorElement} data-testid="prose-body"></div>
   {#if sections}
     <!-- Body sections (#2009) live INSIDE the scroll frame, after the prose:
@@ -1370,6 +1383,11 @@
          (the body's 1fr row collapses, a block centres on its own width, the
          rail loses its span). In here, prose and sections are one column. -->
     <div class="prose-sections">{@render sections()}</div>
+  {/if}
+  {#if appendix}
+    <!-- The appendix (#2054): the rail's trailing material after the last
+         section, ending the frame with the sections' clearance. -->
+    <div class="prose-appendix prose-column" data-testid="prose-appendix">{@render appendix()}</div>
   {/if}
 </div>
 

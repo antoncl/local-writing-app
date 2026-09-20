@@ -199,7 +199,7 @@
 </script>
 
 <section
-  class="bs-block bs-list"
+  class="bs-block bs-list prose-column"
   class:compact={model.density === "compact"}
   id={model.density === "compact" ? undefined : `section-${model.section.id}`}
   data-field-section={model.section.id}
@@ -321,21 +321,9 @@
 </section>
 
 <style>
-  .bs-block {
-    width: 100%;
-    max-width: var(--prose-measure);
-    margin-inline: auto;
-    padding: 0 56px;
-    box-sizing: border-box;
-    /* #2049: the measure is in `ch`, and `ch` resolves in the element's OWN
-       font. This block must measure in the prose font `.editor-body` measures
-       in, or its 72ch is 72 smaller UI-font zeros: the sections come out
-       narrower than the prose, and their gutter, headings, spine and ordinal
-       land ~50px right of the prose's. UI children that used to inherit the
-       pane's sans (item rows, fold line, add button) pin it back. */
-    font-family: var(--serif);
-    font-size: var(--fs-prose);
-  }
+  /* The block's column (measure, gutter, prose font so `ch` resolves alike,
+     #2049) is the shared `.prose-column` rule in styles.css (#2051). UI
+     children (item rows, fold line, add button) pin the sans back. */
   .bs-h2 {
     margin: var(--sp-4) 0 var(--sp-2);
     padding-top: var(--sp-3);

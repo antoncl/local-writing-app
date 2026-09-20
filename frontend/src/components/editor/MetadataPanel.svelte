@@ -30,7 +30,7 @@
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { buildRefResolver } from "@/lib/utils/refResolve";
-  import { buildRailRowModel, isFlipped, isFlipResolve, isMutated, isRowEmpty, type RailRowContext } from "@/lib/rail/fieldRowModel";
+  import { buildRailRowModel, isFlipped, isFlipResolve, isListIndex, isMutated, isRowEmpty, isSectionIndex, type RailRowContext } from "@/lib/rail/fieldRowModel";
 
   interface Props {
     entryType: string;
@@ -129,6 +129,12 @@
     // axis — a manuscript node is never layer-inherited (book-scoped), so the two
     // axes never collide on one row. Null when the node declares no cascade.
     resolvedCascade?: Record<string, ResolvedCascadeField> | null;
+    // #2054 front matter: the same rows at the head of the document while the
+    // rail is collapsed — two to a line at the prose measure, at the item
+    // rows' compact density, without the index rows (the sections are headed
+    // right below the block, the lists are tabs in the strip above it). The
+    // host passes no `trailing` in this layout: that material is the appendix.
+    layout?: "rail" | "front-matter";
   }
 
   let {
@@ -165,6 +171,7 @@
     onResetField,
     resolvedCascade = null,
     trailing,
+    layout = "rail",
   }: Props = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14
@@ -348,6 +355,7 @@
     if (!field) return false;
     if (field.intrinsic && !isFlipResolve(ctx, fieldId)) return false;
     if (effectiveFieldHidden(metadataSchema, entryType, fieldId)) return false;
+    if (layout === "front-matter" && (isSectionIndex(ctx, field) || isListIndex(ctx, field))) return false;
     return field.type !== "computed" || computedFieldString(fieldId) !== "";
   }
 
@@ -530,7 +538,7 @@
   <button type="button" class="rail-type-action" onclick={() => { close(); onCustomData?.(); }}>Edit type…</button>
 {/snippet}
 
-<section class="scene-metadata" aria-label={`${documentLabel} details`}>
+<section class="scene-metadata" class:front-matter={layout === "front-matter"} aria-label={`${documentLabel} details`}>
   <!-- The head is one fact — the entry's type — and reads as one (#1904, #1884):
        glyph + name + caret, the rail's own ColoredSelect in its quiet face. The
        type list opens on click; "Edit type…" lives behind it as the trailing
@@ -715,6 +723,45 @@
   .rail-fold { display: inline-flex; align-items: center; gap: 17px; margin: 2px 0 0; padding: 6px 12px 6px 12px; border: none; background: none; color: var(--text-3); font: inherit; font-size: var(--fs-sm); cursor: pointer; text-align: left; }
   .rail-fold:hover { color: var(--text-2); }
   .rail-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+
+  /* Front matter (#2054): the same rows, two to a line at the head of the
+     document, at the item rows' compact density (BodyItemRows). Everything
+     that is not a fact row spans: the type head, the notices, the group heads,
+     the fold line; so does a line-valued row (`.wide`, the rail's own rule,
+     and the tags line, which the rail keeps un-wide but is a line all the same).
+     An open row keeps its cell: a column is as wide as the rail, so the rail's
+     controls fit without spanning and nothing jumps on click. The fold body is
+     `display: contents` so its rows flow into the same grid. The wrapper is
+     the prose column (serif, for the measure); the block pins the UI font. */
+  .scene-metadata.front-matter {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--sp-6);
+    align-items: start;
+    padding: 0 0 var(--sp-2);
+    font-family: var(--sans);
+    font-size: var(--fs-sm);
+  }
+  .scene-metadata.front-matter > .rail-type,
+  .scene-metadata.front-matter > .rail-type-warning,
+  .scene-metadata.front-matter > .rail-provenance,
+  .scene-metadata.front-matter > .rail-assistant,
+  .scene-metadata.front-matter > .rail-fold,
+  .scene-metadata.front-matter :global(.rail-group-head),
+  .scene-metadata.front-matter :global(.field-row.wide),
+  .scene-metadata.front-matter :global(.field-row:has(.tag-line-hit)) {
+    grid-column: 1 / -1;
+  }
+  .scene-metadata.front-matter > .rail-fold-body {
+    display: contents;
+  }
+  .scene-metadata.front-matter > .rail-type,
+  .scene-metadata.front-matter > .rail-fold {
+    padding-inline: 0;
+  }
+  .scene-metadata.front-matter :global(.field-row) {
+    padding: 3px 0;
+  }
 
   /* L1 section headers live in styles.css (shared with the type
      editor); only the Field row chrome is scoped per-component. */

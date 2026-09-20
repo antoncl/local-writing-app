@@ -1,0 +1,195 @@
+/* Prose editor surface (#2054 split): the TipTap frame, the prose column
+   (#2051), body sections, paragraph presentation, scene breaks, tables and
+   search-match reveal — global because ProseMirror owns that DOM, so Svelte
+   scoping never sees it. Everything else global stays in styles.css. */
+
+.editor-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  background: var(--surface);
+  /* Click-fall-through-to-end-of-doc: when the user clicks in the gutter
+     around the centered 780px column, the wrap intercepts it and focuses
+     the editor (see NodeEditor.svelte). The cursor here signals
+     that intent. */
+  cursor: text;
+}
+
+/* Body sections (#2009, #2030): the long_text sections render INSIDE the
+   .editor-wrap scroll frame, after the prose, as one column. With sections
+   present the prose must not force-fill the frame (its `flex: 1 0 auto`
+   below would push every section under the fold even for a one-line body);
+   it keeps a few lines of minimum height so an empty body is still a place
+   to click. The bottom padding mirrors `.editor-body`'s so the last section
+   clears the frame. */
+.editor-wrap.has-sections > .editor-body {
+  flex: 0 0 auto;
+  min-height: 12em;
+}
+.prose-sections {
+  width: 100%;
+  padding-bottom: 46px;
+}
+/* With an appendix after the sections (#2054) the sections no longer end the
+   frame; the appendix carries the bottom clearance. */
+.prose-sections:has(+ .prose-appendix) {
+  padding-bottom: var(--sp-4);
+}
+
+/* The prose column (#2051): every box that shares the prose's edges takes this
+   ONE rule — the editor, the body sections, the read-only overlay's content,
+   the front matter and the appendix (#2054). The centered reading column the
+   editor was always meant to have (#1246): capped at --prose-measure and
+   centred, so a wide Details rail eats the gutter rather than the line length.
+   The measure is in `ch`, and `ch` resolves in the element's OWN font, so the
+   rule pins the prose font: a box measuring 72ch in the UI sans comes out
+   ~86px narrower than the prose (#2049). UI content inside such a box pins its
+   own font back; each box keeps only its own vertical padding. */
+.prose-column {
+  width: 100%;
+  max-width: var(--prose-measure);
+  margin-inline: auto;
+  padding-inline: 56px;
+  box-sizing: border-box;
+  font-family: var(--serif);
+  font-size: var(--fs-prose);
+}
+
+.editor-body {
+  /* flex: 1 0 auto inside the .editor-wrap flex column makes the
+     editable area grow to fill vertical space without clamping content,
+     so the body always extends to at least the wrap's height. The column
+     itself (measure, gutter, font) is `.prose-column`, above. */
+  flex: 1 0 auto;
+  padding-block: 10px 46px;
+  outline: none;
+  line-height: 1.65;
+}
+
+/* Prose paragraph presentation (#127 / #575). Scoped to direct children so
+   headings and table-cell paragraphs are untouched. The three custom props are
+   written to :root by applyProsePresentation; the fallbacks are the flush,
+   left-aligned, block-spaced default. --prose-para-gap is set to 0 (collapsing
+   the blank line between paragraphs) only when first-line indent is on. */
+.editor-body > p {
+  text-align: var(--prose-align, left);
+  text-indent: var(--prose-indent, 0);
+  margin-block: 0 var(--prose-para-gap, 1em);
+}
+
+.editor-body h1,
+.editor-body h2,
+.editor-body h3 {
+  font-family: var(--serif);
+  line-height: 1.25;
+}
+
+/* Scene break (#1239): the horizontalRule node reads as a quiet centered dinkus
+   (`* * *`, matching what is saved to disk), not the browser-default beveled
+   line. The trailing letter-spacing adds a phantom gap on the right, so an
+   equal padding-left recenters the glyph group. */
+.editor-body hr {
+  border: 0;
+  height: auto;
+  margin: 1.7em 0;
+  text-align: center;
+  color: var(--text-3);
+  font-family: var(--serif);
+}
+
+.editor-body hr::before {
+  content: "* * *";
+  padding-left: 0.5em;
+  letter-spacing: 0.5em;
+}
+
+.editor-body hr.ProseMirror-selectednode {
+  color: var(--text-2);
+}
+
+.editor-body table {
+  table-layout: fixed;
+  border-collapse: collapse;
+  width: 100%;
+  margin: 20px 0;
+  border: 1px solid var(--border-strong);
+  font-family: var(--sans);
+  font-size: var(--fs-lg);
+  line-height: 1.45;
+}
+
+.editor-body th,
+.editor-body td {
+  min-width: 1em;
+  border: 1px solid var(--border-strong);
+  padding: 7px 9px;
+  vertical-align: top;
+}
+
+.editor-body th {
+  background: var(--panel);
+  font-weight: 700;
+}
+
+/* A cell selection (drag across cells) — prosemirror-tables marks the cells,
+   the app paints them (#1896). An overlay rather than a background, so a
+   header cell tints as visibly as a body cell; scoped to the ProseMirror root,
+   so every prose editor (the body, the rail's long_text fields) gets it. */
+.ProseMirror td,
+.ProseMirror th {
+  position: relative;
+}
+
+.ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+}
+
+.editor-body th p,
+.editor-body td p {
+  margin: 0;
+}
+
+.editor-body .todo-anchor {
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--star) 10%, transparent);
+  color: inherit;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--star);
+  text-underline-offset: 0.18em;
+}
+
+.editor-body .todo-anchor:hover {
+  background: color-mix(in oklab, var(--star) 16%, transparent);
+}
+
+.editor-body .todo-anchor[data-todo-status="done"] {
+  background: color-mix(in oklab, var(--text-3) 10%, transparent);
+  text-decoration-color: var(--text-3);
+  opacity: 0.72;
+}
+
+.editor-body .todo-anchor.todo-anchor-highlight {
+  background: color-mix(in oklab, var(--star) 28%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--star) 16%, transparent);
+}
+/* Search-match reveal (#1925): opening a search hit marks the query's
+   matches in the editor — a TipTap decoration in prose
+   (searchMatchHighlight.ts), a CodeMirror decoration in a code body
+   (codeSearchReveal.ts), one pair of classes. The current match is the
+   one the hit named. */
+.search-match {
+  background: color-mix(in oklab, var(--warn) 18%, transparent);
+  border-radius: var(--r-sm);
+}
+.search-match-current {
+  background: color-mix(in oklab, var(--warn) 38%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--warn) 22%, transparent);
+}

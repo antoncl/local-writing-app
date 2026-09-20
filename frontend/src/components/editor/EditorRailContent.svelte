@@ -89,13 +89,83 @@
     model: RailContentModel;
     deps: RailContentDeps;
     on: RailContentCallbacks;
+    // #2054: which part of the content to render. `rail` is the whole rail
+    // (the fact rows with the trailing sections inside, #2037). While the rail
+    // is collapsed on a prose body the SAME content renders in the document
+    // as two blocks: `facts` = the rows as front matter (MetadataPanel's
+    // front-matter layout, no trailing), `trailing` = the appendix after the
+    // body. Never both a rail and the blocks: one editor per value.
+    part?: "rail" | "facts" | "trailing";
   }
 
-  let { model, deps, on }: Props = $props();
+  let { model, deps, on, part = "rail" }: Props = $props();
 </script>
 
-{#if model.metadataSchema}
+{#snippet trailing()}
+  {#key model.scene?.id ?? ""}
+    <BacklinksPanel
+      backlinks={model.backlinks}
+      loreEntries={deps.loreEntries}
+      structure={deps.structure}
+      onNavigate={(detail) => on.navigate(detail)}
+    />
+  {/key}
+  {#if model.scene?.id}
+    <!-- The Conversations surface (ADR-0051 S3/S5): the chats about this node,
+         resume-first, + a ＋New menu — the launcher that replaced the
+         silent-spawn brainstorm verb. Mounted on EVERY node (#711): the panel
+         self-hides when there is nothing to resume and no prompt `offer_on`s
+         this node's type, so the kind allow-list that used to gate it here was
+         redundant. Keyed on the node id so its expand / menu state resets when
+         the open node changes. -->
+    {#key model.scene.id}
+      <ConversationsPanel
+        subjectId={model.scene.id}
+        subjectTitle={model.title}
+        subjectEntryType={model.entryType}
+        asOfScene={model.scrub.anchorSceneId}
+        asOfSceneTitle={deps.structure ? findNodeBySceneId(deps.structure.root, model.scrub.anchorSceneId)?.title ?? "" : ""}
+        promptEntries={deps.promptEntries}
+        metadataSchema={model.metadataSchema}
+        hostPaneId={model.hostPaneId}
+      />
+    {/key}
+  {/if}
+  {#if model.documentKind === "lore" && model.scene?.id}
+    <!-- The mutation SCRUBBER relocated to the foot dock (ADR-0088 S2 §5),
+         where it shares one dock and a mode control with the snapshot track.
+         The mutation TIMELINE stays here in the rail — a separate view of the
+         same ordered dataset; the ADR moves only the beads scrubber. -->
+    <MutationTimeline
+      units={model.scrub.units}
+      activeIndex={model.scrub.index}
+      onSelect={(index) => {
+        // Engaging the mutation axis from the rail returns the snapshot axis to
+        // Live, so the two are never both engaged (ADR-0088 S2): the foot dock
+        // follows the engaged axis, and this keeps them mutually exclusive even
+        // though the rail drives scrub outside the dock.
+        void on.park();
+        void model.scrub.scrubTo(index);
+      }}
+      onNavigate={(payload) => on.navigate(payload)}
+    />
+    <!-- Mutation sets (ADR-0055 §3): the mutation sets pinned to this entity,
+         + ＋New to author another. The entity-side home for proposing a change
+         the writer later places in a scene. -->
+    {#key model.scene.id}
+      <PinnedSetsPanel entityId={model.scene.id} entityEntryType={model.entryType} />
+    {/key}
+  {/if}
+{/snippet}
+
+{#if part === "trailing"}
+  <!-- The appendix (#2054): the rail's trailing sections after the body, in
+       the rail's order. UI content inside the prose column, so the font is
+       pinned back. -->
+  <div class="rail-appendix" data-testid="rail-appendix">{@render trailing()}</div>
+{:else if model.metadataSchema}
   <MetadataPanel
+    layout={part === "facts" ? "front-matter" : "rail"}
     entryType={model.entryType}
     status={model.status}
     metadata={model.metadata}
@@ -128,65 +198,18 @@
     onNavigate={(payload) => on.navigate(payload)}
     onResetField={model.documentKind === "lore" || model.documentKind === "prompt" ? on.resetField : undefined}
     resolvedCascade={model.resolvedCascade}
-  >
-    <!-- #2037: the trailing sections render INSIDE MetadataPanel, between its
-         known rows and the empty-field fold, so "N more fields" is the last
-         entry in the rail rather than sitting above Backlinks/Conversations. -->
-    {#snippet trailing()}
-      {#key model.scene?.id ?? ""}
-        <BacklinksPanel
-          backlinks={model.backlinks}
-          loreEntries={deps.loreEntries}
-          structure={deps.structure}
-          onNavigate={(detail) => on.navigate(detail)}
-        />
-      {/key}
-      {#if model.scene?.id}
-        <!-- The Conversations surface (ADR-0051 S3/S5): the chats about this node,
-             resume-first, + a ＋New menu — the launcher that replaced the
-             silent-spawn brainstorm verb. Mounted on EVERY node (#711): the panel
-             self-hides when there is nothing to resume and no prompt `offer_on`s
-             this node's type, so the kind allow-list that used to gate it here was
-             redundant. Keyed on the node id so its expand / menu state resets when
-             the open node changes. -->
-        {#key model.scene.id}
-          <ConversationsPanel
-            subjectId={model.scene.id}
-            subjectTitle={model.title}
-            subjectEntryType={model.entryType}
-            asOfScene={model.scrub.anchorSceneId}
-            asOfSceneTitle={deps.structure ? findNodeBySceneId(deps.structure.root, model.scrub.anchorSceneId)?.title ?? "" : ""}
-            promptEntries={deps.promptEntries}
-            metadataSchema={model.metadataSchema}
-            hostPaneId={model.hostPaneId}
-          />
-        {/key}
-      {/if}
-      {#if model.documentKind === "lore" && model.scene?.id}
-        <!-- The mutation SCRUBBER relocated to the foot dock (ADR-0088 S2 §5),
-             where it shares one dock and a mode control with the snapshot track.
-             The mutation TIMELINE stays here in the rail — a separate view of the
-             same ordered dataset; the ADR moves only the beads scrubber. -->
-        <MutationTimeline
-          units={model.scrub.units}
-          activeIndex={model.scrub.index}
-          onSelect={(index) => {
-            // Engaging the mutation axis from the rail returns the snapshot axis to
-            // Live, so the two are never both engaged (ADR-0088 S2): the foot dock
-            // follows the engaged axis, and this keeps them mutually exclusive even
-            // though the rail drives scrub outside the dock.
-            void on.park();
-            void model.scrub.scrubTo(index);
-          }}
-          onNavigate={(payload) => on.navigate(payload)}
-        />
-        <!-- Mutation sets (ADR-0055 §3): the mutation sets pinned to this entity,
-             + ＋New to author another. The entity-side home for proposing a change
-             the writer later places in a scene. -->
-        {#key model.scene.id}
-          <PinnedSetsPanel entityId={model.scene.id} entityEntryType={model.entryType} />
-        {/key}
-      {/if}
-    {/snippet}
-  </MetadataPanel>
+    trailing={part === "rail" ? trailing : undefined}
+  />
+  <!-- #2037: in the rail the trailing sections render INSIDE MetadataPanel,
+       between its known rows and the empty-field fold, so "N more fields" is
+       the last entry in the rail rather than sitting above Backlinks /
+       Conversations. As front matter (#2054) the panel gets no trailing. -->
 {/if}
+
+<style>
+  /* The panels size their own text with tokens; only the family needs pinning
+     back from the prose column's serif. */
+  .rail-appendix {
+    font-family: var(--sans);
+  }
+</style>

@@ -32,7 +32,7 @@ from app.models import (
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.code_fence import unwrap_whole_body_code_fence
 from app.services.project.errors import ProjectServiceError
-from app.services.project.overrides import LayerOverride
+from app.services.project.overrides import LayerOverride, OverrideShapes
 
 
 class LoreEntriesMixin:
@@ -41,7 +41,7 @@ class LoreEntriesMixin:
         # Read once for the override fold's field types (#314) — cached (#394),
         # and only consulted when a chain actually carries overrides.
         has_overrides = bool(index.overrides_by_target)
-        field_types = self._schema_field_types(self.read_metadata_schema()) if has_overrides else {}
+        shapes = self._override_shapes(self.read_metadata_schema()) if has_overrides else OverrideShapes.empty()
         open_layer_id = self._metadata_schema_layer_id(self._require_project()) if has_overrides else ""
         entries: list[LoreEntrySummary] = []
         for entry in index.by_id.values():
@@ -59,7 +59,9 @@ class LoreEntriesMixin:
             # ignores any leftover override, matching read_lore_entry.
             override_records = index.overrides_by_target.get(entry.id)
             if override_records and entry.source_layer_id != open_layer_id:
-                metadata, _ = self.materialize_override_metadata(metadata, override_records, field_types)
+                metadata, _ = self.materialize_override_metadata(
+                    metadata, override_records, shapes, canonical=index.canonical_id
+                )
             entries.append(
                 LoreEntrySummary(
                     id=entry.id,
@@ -127,7 +129,7 @@ class LoreEntriesMixin:
         override_records = index.overrides_by_target.get(node_id)
         if override_records and index_entry is not None and index_entry.source_layer_id != self._metadata_schema_layer_id(self._require_project()):
             metadata, overridden_fields = self.materialize_override_metadata(
-                metadata, override_records, self._schema_field_types(schema)
+                metadata, override_records, self._override_shapes(schema), canonical=index.canonical_id
             )
         # Heal stale fields (retired by a schema change) and dangling
         # references before validation — see _strip_unknown_metadata_fields
@@ -307,7 +309,7 @@ class LoreEntriesMixin:
         override captures metadata field changes only in PR 1.
         """
         schema = self._schema_as_authored(authoring_layer=authoring_layer.folder)
-        field_types = self._schema_field_types(schema)
+        shapes = self._override_shapes(schema)
         owning_front_matter = self._read_front_matter_only(winner.path, strict=True)
         base_metadata = self._normalise_metadata(owning_front_matter.get("metadata"), winner.path)
         # The base an override at L diffs against is the effective value of every
@@ -316,7 +318,9 @@ class LoreEntriesMixin:
         records_above = [
             record for record in index.overrides_by_target.get(entry_id, []) if record.layer_rank < authoring_layer.rank
         ]
-        base_above_layer, _ = self.materialize_override_metadata(base_metadata, records_above, field_types)
+        base_above_layer, _ = self.materialize_override_metadata(
+            base_metadata, records_above, shapes, canonical=index.canonical_id
+        )
         # Symmetry with the read (#698): `submitted` is the client's echo of
         # `read_lore_entry`, whose list values were healed by
         # `_strip_unknown_list_members` — heal the raw base the same way, or a
@@ -343,6 +347,11 @@ class LoreEntriesMixin:
         # default may differ from L's (a book that redeclares the field). Spell
         # it literally with that schema before the as-of-L diff reads it (#1917).
         submitted = self._explicit_select_defaults(submitted, request.entry_type, self.read_metadata_schema())
+        # One item per target (ADR-0089 §1) is checked on the submission, before
+        # the by-key diff reads a repeated key as its first item.
+        duplicate_errors = self._keyed_list_duplicate_errors(f"Lore Entry {entry_id}", submitted, schema)
+        if duplicate_errors:
+            raise ProjectServiceError(" ".join(duplicate_errors), 422)
 
         current_revision = self._composite_revision([winner.path, *self._override_paths_for_target(index, entry_id)])
         if request.base_revision and request.base_revision != current_revision:
@@ -357,11 +366,13 @@ class LoreEntriesMixin:
         # a full revert-to-canon does.
         if request.clear_override_fields:
             cleared = set(request.clear_override_fields)
-            rows = [row for row in rows if row.field not in cleared]
+            rows = [row for row in rows if self._override_row_field(row, shapes.keyed) not in cleared]
         # Validate the entry *as L would resolve it* against L's own roster — a
         # field only the book defines cannot be stored at a series (ADR-0045 §4).
         preview = LayerOverride(entry_id, authoring_layer.id, authoring_layer.rank, authoring_layer.label, winner.path, tuple(rows))
-        effective_at_layer, _ = self.materialize_override_metadata(base_above_layer, [preview], field_types)
+        effective_at_layer, _ = self.materialize_override_metadata(
+            base_above_layer, [preview], shapes, canonical=index.canonical_id
+        )
         metadata_errors = self._validate_lore_entry_metadata(entry_id, request.entry_type, effective_at_layer, schema, index)
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)

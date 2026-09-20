@@ -300,13 +300,12 @@ class PromotePromptTests(unittest.TestCase):
             self.service.promote_prompt_entry("genprompt", "not-a-real-layer")
         self.assertEqual(ctx2.exception.status_code, 400)
 
-    # --- 1a (ADR-0081 §4): a prompt's nested origin-local ref blocks too -----
+    # --- 1a (ADR-0089 §5): a prompt's nested origin-local ref stays behind too --
 
-    def test_prompt_nested_origin_local_ref_blocks_promotion(self) -> None:
+    def test_prompt_nested_origin_local_ref_stays_behind(self) -> None:
         # A prompt's metadata carries refs like any node; a nested one pointing at
-        # an origin-local target refuses the promotion (same channel as a lore
-        # node — the shared `_partition_node_metadata` block, wired into the prompt
-        # plan alongside the §6 include refusal).
+        # an origin-local target stays behind as the origin's `add` record (the
+        # shared `_partition_node_metadata` partition), no longer a refusal.
         self._define_group_list_field_at(self.universe, "bonds", "who", entry_type="prompt:general")
         (self.root / "lore").mkdir(parents=True, exist_ok=True)
         self.service._write_node_entry_file(
@@ -317,13 +316,17 @@ class PromotePromptTests(unittest.TestCase):
         )
 
         plan = self.service.preview_prompt_promotion("genprompt", self.series_layer_id)
-        self.assertIsNotNone(plan.blocked_reason)
-        self.assertIn("The Rusty Anchor", plan.blocked_reason)
+        self.assertIsNone(plan.blocked_reason)
 
-        with self.assertRaises(ProjectServiceError) as ctx:
-            self.service.promote_prompt_entry("genprompt", self.series_layer_id)
-        self.assertEqual(ctx.exception.status_code, 422)
-        self.assertEqual(list((self.series / "prompts").glob("*.md")), [])
+        self.service.promote_prompt_entry("genprompt", self.series_layer_id)
+        self.assertTrue(any((self.series / "prompts").glob("*.md")))
+        rows = [
+            row
+            for path in (self.root / "overrides").glob("*.md")
+            for row in (self.service._read_front_matter_only(path, strict=True).get("rows") or [])
+        ]
+        self.assertEqual([(row["field"], row["op"]) for row in rows], [("bonds", "add")])
+        self.assertEqual(self.service.read_prompt_entry("genprompt").metadata.get("bonds"), [{"who": "rustyanchor"}])
 
     # --- 2: include closure cascades ---------------------------------------
 

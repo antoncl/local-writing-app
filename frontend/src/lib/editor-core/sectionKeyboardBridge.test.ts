@@ -253,6 +253,29 @@ describe("createSectionRegistry", () => {
     expect(goalNeighbours.next).toBeNull();
   });
 
+  it("focus on a list id lands on the list's first item editor in document order (#2052)", () => {
+    const registry = createSectionRegistry();
+    const bio = mount();
+    const beat0function = mount();
+    const beat0guidance = mount();
+    const beat1function = mount();
+    registry.register(1, "bio", bio);
+    // Registered out of document order on purpose: the pick is by index, not insertion.
+    registry.register(4, "beats[1].function", beat1function);
+    registry.register(3, "beats[0].guidance", beat0guidance);
+    registry.register(2, "beats[0].function", beat0function);
+    // Park the caret at the END of the target so a focus at its start is observable.
+    beat0function.commands.setTextSelection(beat0function.state.doc.content.size - 1);
+    beat1function.commands.setTextSelection(beat1function.state.doc.content.size - 1);
+    registry.focus("beats");
+    expect(beat0function.state.selection.from).toBe(1);
+    expect(beat1function.state.selection.from).not.toBe(1);
+    // A direct id still wins over the prefix walk; an unknown id is a no-op.
+    registry.focus("beats[1].function");
+    expect(beat1function.state.selection.from).toBe(1);
+    registry.focus("nothing");
+  });
+
   it("unregister removes the named editor, by identity, from both maps", () => {
     const registry = createSectionRegistry();
     const body = mount();

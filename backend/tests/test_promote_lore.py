@@ -15,6 +15,7 @@ The chain mirrors `test_fork_lore.py` / `test_layer_overrides.py`:
 
 from __future__ import annotations
 
+import json
 import shutil
 import unittest
 from pathlib import Path
@@ -92,7 +93,13 @@ class PromoteLoreTests(unittest.TestCase):
         )
 
     def _define_group_list_field_at(
-        self, folder: Path, field_id: str, member_key: str, *, entry_type: str = "lore:character"
+        self,
+        folder: Path,
+        field_id: str,
+        member_key: str,
+        *,
+        entry_type: str = "lore:character",
+        extra_members: list[dict] | None = None,
     ) -> None:
         """Author a `list`-of-`item_group` field at `folder` whose named group has
         one `entity_ref` member `member_key`. `item_members` is resolver-derived
@@ -102,7 +109,10 @@ class PromoteLoreTests(unittest.TestCase):
         data = self.service._read_yaml(path)
         data.setdefault("groups", {})[f"{field_id}_grp"] = {
             "name": field_id.capitalize(),
-            "members": [{"key": member_key, "name": member_key.capitalize(), "type": "entity_ref"}],
+            "members": [
+                {"key": member_key, "name": member_key.capitalize(), "type": "entity_ref"},
+                *(extra_members or []),
+            ],
         }
         data.setdefault("fields", {})[field_id] = {
             "name": field_id.capitalize(),
@@ -312,29 +322,60 @@ class PromoteLoreTests(unittest.TestCase):
         # The full list folds back at the origin via the override.
         self.assertEqual(self.service.read_lore_entry("alice").metadata.get("allies"), ["nimitz"])
 
-    # --- 3c (ADR-0081 §4): a nested origin-local ref BLOCKS the promotion ----
+    # --- 3c (ADR-0089 §5): a nested origin-local ref STAYS BEHIND as a record --
 
-    def test_nested_origin_local_ref_blocks_promotion(self) -> None:
-        # A nested group-list ref can't stay behind as an override the way a
-        # top-level ref does (no structured-list override yet, #698 v1), so an
-        # origin-local target refuses the promotion rather than dangling at dest.
+    def _origin_rows(self) -> list[dict]:
+        files = list((self.root / OVERRIDES_FOLDER).glob("*.md"))
+        self.assertEqual(len(files), 1, files)
+        return list(self.service._read_front_matter_only(files[0], strict=True).get("rows") or [])
+
+    def test_nested_origin_local_ref_stays_behind_as_an_item_record(self) -> None:
+        # The item whose key is origin-local stays at the origin as an `add`
+        # record of the book's override (journey 13); the visible item travels.
         self._define_group_list_field_at(self.universe, "bonds", "who")
         self._write_ancestor_lore(self.root, "rustyanchor", "The Rusty Anchor", entry_type="lore:note")
+        self._write_ancestor_lore(self.universe, "nimitz", "Nimitz", entry_type="lore:note")
         self._write_ancestor_lore(
             self.root, "alice", "Alice",
-            metadata={"bonds": [{"who": "rustyanchor"}]}, entry_type="lore:character",
+            metadata={"bonds": [{"who": "rustyanchor"}, {"who": "nimitz"}]}, entry_type="lore:character",
         )
 
         plan = self.service.preview_lore_promotion("alice", self.series_layer_id)
-        self.assertIsNotNone(plan.blocked_reason)
-        self.assertIn("The Rusty Anchor", plan.blocked_reason)
+        self.assertIsNone(plan.blocked_reason)
 
-        with self.assertRaises(ProjectServiceError) as ctx:
-            self.service.promote_lore_entry("alice", self.series_layer_id)
-        self.assertEqual(ctx.exception.status_code, 422)
-        # Refused as a whole: nothing moved.
-        self.assertTrue(any((self.root / "lore").glob("*.md")))
-        self.assertEqual(list((self.series / "lore").glob("*.md")), [])
+        self.service.promote_lore_entry("alice", self.series_layer_id)
+        self.assertEqual(self._raw_metadata(self.series, "alice").get("bonds"), [{"who": "nimitz"}])
+        rows = self._origin_rows()
+        self.assertEqual([(row["field"], row["op"]) for row in rows], [("bonds", "add")])
+        self.assertEqual(json.loads(rows[0]["value"]), {"who": "rustyanchor"})
+        # Read from the book the override folds the item back; the series never sees it.
+        self.assertEqual(
+            self.service.read_lore_entry("alice").metadata.get("bonds"), [{"who": "nimitz"}, {"who": "rustyanchor"}]
+        )
+        series_alice = ProjectService(WorkScope(root=self.series)).read_lore_entry("alice")
+        self.assertNotIn({"who": "rustyanchor"}, series_alice.metadata.get("bonds") or [])
+
+    def test_hidden_member_of_a_travelling_item_stays_as_a_replace_record(self) -> None:
+        # The key is visible, so the item travels; a reference member naming an
+        # origin-local node is dropped from the travelling copy and stays behind
+        # as a `replace` on the member path.
+        self._define_group_list_field_at(
+            self.universe, "bonds", "who",
+            extra_members=[{"key": "seen_by", "name": "Seen by", "type": "entity_ref_list"}],
+        )
+        self._write_ancestor_lore(self.root, "rustyanchor", "The Rusty Anchor", entry_type="lore:note")
+        self._write_ancestor_lore(self.universe, "nimitz", "Nimitz", entry_type="lore:note")
+        self._write_ancestor_lore(
+            self.root, "alice", "Alice",
+            metadata={"bonds": [{"who": "nimitz", "seen_by": ["rustyanchor"]}]}, entry_type="lore:character",
+        )
+
+        self.service.promote_lore_entry("alice", self.series_layer_id)
+        self.assertEqual(self._raw_metadata(self.series, "alice").get("bonds"), [{"who": "nimitz"}])
+        self.assertEqual(self._origin_rows(), [{"field": "bonds.nimitz.seen_by", "op": "replace", "value": "rustyanchor"}])
+        self.assertEqual(
+            self.service.read_lore_entry("alice").metadata.get("bonds"), [{"who": "nimitz", "seen_by": ["rustyanchor"]}]
+        )
 
     def test_nested_ref_visible_at_destination_travels(self) -> None:
         # The counterpart: a nested ref whose target is already visible at the

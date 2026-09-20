@@ -35,6 +35,7 @@ from app.models.schema import PromptContextStrategy
 from app.services.ai.effective_inputs import SnippetSource
 from app.services.project.computed_metadata import strip_computed_fields
 from app.services.project.errors import ProjectServiceError
+from app.services.project.overrides import OverrideShapes
 from app.services.project.prompt_disposition import prompt_disposition, prompt_runnable
 
 if TYPE_CHECKING:
@@ -78,7 +79,7 @@ class PromptEntriesMixin:
         # reads only id/title/entry_type — so that hot path never folds, exactly as
         # it never runs the effective-inputs pass.
         has_overrides = fold_overrides and bool(index.overrides_by_target)
-        field_types = self._schema_field_types(schema) if has_overrides else {}
+        shapes = self._override_shapes(schema) if has_overrides else OverrideShapes.empty()
         open_layer_id = self._metadata_schema_layer_id(root) if has_overrides else ""
         entries: list[PromptEntrySummary] = []
         for entry in index.by_id.values():
@@ -99,7 +100,9 @@ class PromptEntriesMixin:
             # caller's opt-in (`fold_overrides`), so an unasked path never enters here.
             override_records = index.overrides_by_target.get(entry.id) if has_overrides else None
             if override_records and entry.source_layer_id != open_layer_id:
-                metadata, _ = self.materialize_override_metadata(metadata, override_records, field_types)
+                metadata, _ = self.materialize_override_metadata(
+                    metadata, override_records, shapes, canonical=index.canonical_id
+                )
             entries.append(
                 PromptEntrySummary(
                     id=entry.id,
@@ -305,7 +308,7 @@ class PromptEntriesMixin:
             and index_entry.source_layer_id != self._metadata_schema_layer_id(root)
         ):
             metadata, overridden_fields = self.materialize_override_metadata(
-                metadata, override_records, self._schema_field_types(schema)
+                metadata, override_records, self._override_shapes(schema), canonical=index.canonical_id
             )
         # Hide references whose target is gone, exactly as the scene/lore/research
         # read paths do (#345) — the schema editor can put an `entity_ref` on any
@@ -441,7 +444,7 @@ class PromptEntriesMixin:
         """
         self._check_entry_type_kind(request.entry_type, "prompt")
         schema = self.read_metadata_schema()
-        field_types = self._schema_field_types(schema)
+        shapes = self._override_shapes(schema)
 
         owning_front_matter, canon_body = self._read_markdown_with_front_matter(winner.path, strict=True)
         # rstrip matches the trailing-whitespace tolerance the clone path already
@@ -483,7 +486,9 @@ class PromptEntriesMixin:
             for record in index.overrides_by_target.get(entry_id, [])
             if record.layer_rank < authoring_layer.rank
         ]
-        base_above_layer, _ = self.materialize_override_metadata(base_metadata, records_above, field_types)
+        base_above_layer, _ = self.materialize_override_metadata(
+            base_metadata, records_above, shapes, canonical=index.canonical_id
+        )
         # Symmetry with the read: `submitted` is the client's echo of
         # `read_prompt_entry`, whose dangling references were stripped and whose
         # selects were canonicalised — a base that still carries them would mint
@@ -508,7 +513,7 @@ class PromptEntriesMixin:
         # then deletes the override file below.
         if request.clear_override_fields:
             cleared = set(request.clear_override_fields)
-            rows = [row for row in rows if row.field not in cleared]
+            rows = [row for row in rows if self._override_row_field(row, shapes.keyed) not in cleared]
 
         if rows:
             # Photograph the prior delta before overwriting it (a first-ever

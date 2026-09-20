@@ -30,7 +30,8 @@ from app.models import (
     PromptEntry,
 )
 from app.services.project.errors import ProjectServiceError
-from app.services.project.metadata_refs import ref_members
+from app.services.project.lore_mutation_items import KeyedList, keyed_lists_from
+from app.services.project.metadata_refs import REF_FIELD_TYPES, ref_members
 from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project.references import INCLUDE_FIELD_ID
@@ -160,21 +161,76 @@ class PromotionMixin:
             return self._partition_entity_ref_list(index, root, dest, field, value)
         return value, None, None
 
+    def _partition_keyed_list(
+        self, index: NodeIndex, root, dest: IndexLayer, keyed: KeyedList, field: str, value: Any
+    ) -> tuple[Any, Any, PromotionStayItem | None]:
+        """A reference-keyed list partitions per item (ADR-0089 §5): an item
+        whose key is not visible at `dest` stays behind whole; an item whose
+        other reference members name hidden nodes travels without them. Either
+        way the FULL original list stays, so the settle diff (`_settle_origin_override`
+        → `_diff_metadata_to_override_rows`) writes the origin's records — an
+        `add` per hidden item, a `replace` per filtered member — the way a
+        top-level ref already stays behind. Nothing hidden: travels whole."""
+        if not isinstance(value, list):
+            return value, None, None
+        travelling: list[Any] = []
+        hidden: list[str] = []
+        for item in value:
+            copy, names = self._travelling_item(index, root, dest, keyed, item)
+            hidden.extend(names)
+            if copy is not None:
+                travelling.append(copy)
+        if not hidden:
+            return value, None, None
+        names = ", ".join(dict.fromkeys(hidden))
+        stay = PromotionStayItem(field=field, reason=f"references {names}, not visible at {dest.label}")
+        return (travelling or None), value, stay
+
+    def _travelling_item(
+        self, index: NodeIndex, root, dest: IndexLayer, keyed: KeyedList, item: Any
+    ) -> tuple[Any, list[str]]:
+        """One item's travelling copy and the titles of the hidden nodes it
+        named: `None` when its key is hidden (the item stays whole), else the
+        item with each hidden reference member dropped or narrowed to the
+        visible ids. Ids are canonicalised before the visibility test, as the
+        flat `entity_ref_list` partition does (ADR-0082 §5)."""
+        if not isinstance(item, dict):
+            return item, []
+        copy = dict(item)
+        hidden: list[str] = []
+        for member, member_field in keyed.member_fields.items():
+            if member not in item or member_field.type not in REF_FIELD_TYPES:
+                continue
+            ids = list(dict.fromkeys(index.canonical_id(i) for i in _member_ref_ids(item[member], member_field.type)))
+            visible = [i for i in ids if self._target_visible_from_destination(index, root, i, dest.id)]
+            unseen = [i for i in ids if i not in visible]
+            hidden.extend(index.by_id[i].title if i in index.by_id else i for i in unseen)
+            if unseen and member == keyed.key_member:
+                return None, hidden
+            travel_value: Any = (visible[0] if visible else None) if member_field.type == "entity_ref" else (visible or None)
+            if travel_value is None:
+                copy.pop(member, None)
+            else:
+                copy[member] = travel_value
+        return copy, hidden
+
     def _blocked_nested_refs(
         self, index: NodeIndex, root, dest: IndexLayer, field_def: Any, field: str, value: Any
     ) -> list[str]:
         """Block reasons for a group-list field whose item_group members reference
-        a node not visible at `dest` (ADR-0081 §4).
+        a node not visible at `dest` (ADR-0081 §4) — for a list that is NOT keyed
+        by one reference member. A keyed list partitions per item instead
+        (`_partition_keyed_list`, ADR-0089 §5).
 
         A top-level ref that isn't visible at the destination stays behind as an
-        origin override; a nested ref can't, because a structured `list` override
-        has no representation yet (#698 v1, `_diff_metadata_to_override_rows`
-        refuses it). Rather than let the field travel whole and leave a dangling
-        ref at the destination, the promotion refuses and names the offending
-        reference — parity with the §6 dynamic-include refusal. `ref_members`
-        only surfaces `entity_ref`/`entity_ref_list` group members (`tags` is
-        retired, ADR-0082 slice 2b), so this only ever blocks on a real
-        reference.
+        origin override; a nested ref in an unkeyed list can't, because a
+        structured `list` override has no representation (#698 v1,
+        `_diff_metadata_to_override_rows` refuses it). Rather than let the field
+        travel whole and leave a dangling ref at the destination, the promotion
+        refuses and names the offending reference — parity with the §6
+        dynamic-include refusal. `ref_members` only surfaces
+        `entity_ref`/`entity_ref_list` group members (`tags` is retired,
+        ADR-0082 slice 2b), so this only ever blocks on a real reference.
         """
         members = ref_members(field_def) if field_def is not None else None
         if not members or not isinstance(value, list):
@@ -215,6 +271,7 @@ class PromotionMixin:
         """
         origin_schema = self.read_metadata_schema()
         origin_types = self._schema_field_types(origin_schema)
+        keyed_lists = keyed_lists_from(origin_schema)
         dest_schema = self.read_metadata_schema(up_to_layer_id=dest.id)
         dest_types = self._schema_field_types(dest_schema)
 
@@ -226,7 +283,12 @@ class PromotionMixin:
 
         for field, value in metadata.items():
             field_type = origin_types.get(field, "text")
-            travel_value, stay_value, item = self._partition_field(index, root, dest, field_type, field, value)
+            if field in keyed_lists:
+                travel_value, stay_value, item = self._partition_keyed_list(
+                    index, root, dest, keyed_lists[field], field, value
+                )
+            else:
+                travel_value, stay_value, item = self._partition_field(index, root, dest, field_type, field, value)
             if travel_value is not None:
                 travels[field] = travel_value
             if stay_value is not None:
@@ -238,7 +300,7 @@ class PromotionMixin:
                 # the file, just invisible at the destination until the
                 # definition itself is promoted.
                 invisible.append(field)
-            if field_type == "list":
+            if field_type == "list" and field not in keyed_lists:
                 blocked.extend(
                     self._blocked_nested_refs(index, root, dest, origin_schema.fields.get(field), field, value)
                 )
@@ -326,17 +388,17 @@ class PromotionMixin:
         `node_title` names a cascaded include member; None is the node itself.
         """
         open_layer_id = self._metadata_schema_layer_id(root)
-        field_types = self._schema_field_types(self.read_metadata_schema())
+        shapes = self._override_shapes(self.read_metadata_schema())
         items: list[PromotionFoldItem] = []
         running = dict(metadata)
         records = sorted(index.overrides_by_target.get(node_id, []), key=lambda record: record.layer_rank)
         for record in records:
             if record.layer_id == open_layer_id:
                 continue
-            running, touched = self.materialize_override_metadata(running, [record], field_types)
+            running, touched = self.materialize_override_metadata(running, [record], shapes)
             for field in touched:
                 item = PromotionFoldItem(field=field, layer=record.layer_label, node=node_title)
-                if field in field_types and item not in items:
+                if field in shapes.field_types and item not in items:
                     items.append(item)
         return items
 

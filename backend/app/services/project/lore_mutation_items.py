@@ -35,11 +35,20 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
-from app.models import MutationMarker
 from app.models.schema import MetadataFieldDefinition
 from app.services.project.metadata_refs import keyed_list_key, member_as_field
+
+
+class MutationRecord(Protocol):
+    """What a record offers the grammar and the fold — a scene marker
+    (`MutationMarker`) and an override row (`MutationSetRow`) alike, which is
+    what makes ADR-0089 §5's "one record grammar for markers and overrides"
+    literal: the same classification and the same fold read both."""
+
+    op: str
+    value: str
 
 
 @dataclass(frozen=True)
@@ -117,13 +126,13 @@ class ItemRecord:
     it addresses (``None`` when undecodable or a whole-list replace), the
     member for a member record, and the decoded item for an ``add``."""
 
-    marker: MutationMarker
+    marker: MutationRecord
     key: str | None = None
     member: str | None = None
     item: dict[str, Any] | None = None
 
 
-def list_record(keyed: KeyedList, marker: MutationMarker) -> ItemRecord:
+def list_record(keyed: KeyedList, marker: MutationRecord) -> ItemRecord:
     """Classify a record whose token is the list field itself."""
     if marker.op == "add":
         item = decode_item(marker.value)
@@ -134,7 +143,7 @@ def list_record(keyed: KeyedList, marker: MutationMarker) -> ItemRecord:
     return ItemRecord(marker)  # whole-list replace: ignored (§2)
 
 
-def member_record(marker: MutationMarker, key: str, member: str) -> ItemRecord:
+def member_record(marker: MutationRecord, key: str, member: str) -> ItemRecord:
     """Classify a record whose token is a member path."""
     return ItemRecord(marker, key=key, member=member)
 

@@ -36,12 +36,25 @@ overrides are deferred with body/title overrides, see `lore.py`).
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from app.models import MetadataFieldDefinition, MetadataSchema, MutationSetRow
 from app.services.project.errors import ProjectServiceError
+from app.services.project.lore_mutation_items import (
+    ItemRecord,
+    KeyedList,
+    encode_item,
+    fold_keyed_items,
+    item_key,
+    keyed_lists_from,
+    list_record,
+    member_path,
+    member_record,
+    split_member_path,
+)
 from app.services.project.lore_mutations import (
     COLLECTION_FIELD_TYPES,
     _as_str_list,
@@ -60,6 +73,46 @@ def _required_select_reading(definition: MetadataFieldDefinition, value: Any) ->
     if definition.required_select and value in (None, ""):
         return definition.default
     return value
+
+
+def _same_key(key: str) -> str:
+    return key
+
+
+def _items_by_key(value: Any, key_member: str) -> dict[str, dict[str, Any]]:
+    """A reference-keyed list's items by key, first wins; unkeyed items dropped."""
+    out: dict[str, dict[str, Any]] = {}
+    for item in value if isinstance(value, list) else []:
+        key = item_key(item, key_member)
+        if key is not None and key not in out:
+            out[key] = item
+    return out
+
+
+def _member_record_value(value: Any, member_type: str) -> str:
+    """A member's value as a record's string — the spelling the fold coerces
+    back through `_coerce_mutation_value`: empty for absent, `true`/`false`
+    for a boolean, comma-joined for a collection member, `str()` otherwise."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return ",".join(str(item) for item in value if str(item))
+    return str(value)
+
+
+@dataclass(frozen=True)
+class OverrideShapes:
+    """What the override fold knows about the schema: each field's declared
+    type, and the reference-keyed lists (ADR-0089 §5) whose rows fold per key."""
+
+    field_types: dict[str, str]
+    keyed: dict[str, KeyedList]
+
+    @classmethod
+    def empty(cls) -> OverrideShapes:
+        return cls({}, {})
 
 
 @dataclass(frozen=True)
@@ -156,7 +209,7 @@ class LayerOverridesMixin:
         """
         if not index.overrides_by_target or schema is None:
             return
-        field_types = self._schema_field_types(schema)
+        shapes = self._override_shapes(schema)
         open_layer_id = self._metadata_schema_layer_id(root)
         for target_id, records in index.overrides_by_target.items():
             candidates = index.candidates.get(target_id)
@@ -197,7 +250,7 @@ class LayerOverridesMixin:
             except ProjectServiceError:
                 continue
             base_metadata = self._normalise_metadata(front_matter.get("metadata"), winner.path)
-            folded_metadata, _ = self.materialize_override_metadata(base_metadata, records, field_types)
+            folded_metadata, _ = self.materialize_override_metadata(base_metadata, records, shapes)
             index.edges_by_layer_src[(winner.source_layer_id, target_id)] = self._reference_edges_for_entry(
                 winner, schema, front_matter={"metadata": folded_metadata}
             )
@@ -304,11 +357,19 @@ class LayerOverridesMixin:
 
     # --- the fold -----------------------------------------------------------
 
+    def _override_shapes(self, schema: Any) -> OverrideShapes:
+        """What the fold needs to know about the schema, derived once per
+        caller: every field's declared type, and the reference-keyed lists
+        whose rows fold per key (ADR-0089 §5)."""
+        return OverrideShapes(self._schema_field_types(schema), keyed_lists_from(schema))
+
     def materialize_override_metadata(
         self,
         base: dict[str, Any],
         records: list[LayerOverride],
-        field_types: dict[str, str],
+        shapes: OverrideShapes,
+        *,
+        canonical: Callable[[str], str] | None = None,
     ) -> tuple[dict[str, Any], list[str]]:
         """Fold `records` onto `base`, descendant-wins per item.
 
@@ -316,16 +377,70 @@ class LayerOverridesMixin:
         overridden when an override row in the chain writes to it — the tell the
         `ti-versions` mark renders (PR 2), whether or not the value coincides with
         canon. Records are applied outermost-first so the nearest descendant wins.
+
+        A reference-keyed list's rows are the marker grammar's three records
+        (ADR-0089 §5): `add` carries an item, `replace` on
+        `<field>.<target id>.<member>` a member, `remove` a target id. They are
+        set aside in chain order and folded once per list, positional per key
+        (the same fold the scene resolver runs), keys matched through
+        `canonical` when the caller has an index (a record written against an
+        id later merged away still finds its item); the list's own field id is
+        what `touched` reports, never a member path. A `replace` with an empty
+        value on such a list is the clear #698 v1 files may still hold — every
+        row before it is moot and the fold starts from nothing — and a
+        non-empty whole-list replace is not a record of this class (§2).
         """
         result = dict(base)
         touched: list[str] = []
+        item_rows: dict[str, list[ItemRecord]] = {}
+        cleared: set[str] = set()
         for record in sorted(records, key=lambda record: record.layer_rank):
             for row in record.rows:
-                field_type = field_types.get(row.field, "text")
-                applied = self._apply_override_row(result, row, field_type)
-                if applied and row.field not in touched:
-                    touched.append(row.field)
+                target = self._keyed_row_target(row, shapes.keyed)
+                if target is None:
+                    field_type = shapes.field_types.get(row.field, "text")
+                    if self._apply_override_row(result, row, field_type) and row.field not in touched:
+                        touched.append(row.field)
+                    continue
+                keyed, item_record = target
+                if row.field == keyed.field_id and row.op == "replace":
+                    if row.value != "":
+                        continue
+                    item_rows[keyed.field_id] = []
+                    cleared.add(keyed.field_id)
+                else:
+                    item_rows.setdefault(keyed.field_id, []).append(item_record)
+                if keyed.field_id not in touched:
+                    touched.append(keyed.field_id)
+        for field_id, rows in item_rows.items():
+            base_items = [] if field_id in cleared else result.get(field_id)
+            result[field_id] = fold_keyed_items(
+                base_items, shapes.keyed[field_id], rows, self._coerce_mutation_value, canonical or _same_key
+            )
         return result, touched
+
+    @staticmethod
+    def _keyed_row_target(row: MutationSetRow, keyed: dict[str, KeyedList]) -> tuple[KeyedList, ItemRecord] | None:
+        """The reference-keyed list a row addresses — by its own field id or by
+        a `<field>.<target id>.<member>` path — with the row classified for the
+        fold; `None` for a row on any other field."""
+        target = keyed.get(row.field)
+        if target is not None:
+            return target, list_record(target, row)
+        path = split_member_path(row.field, keyed) if "." in row.field else None
+        if path is None:
+            return None
+        target, key, member = path
+        return target, member_record(row, key, member)
+
+    @staticmethod
+    def _override_row_field(row: MutationSetRow, keyed: dict[str, KeyedList]) -> str:
+        """The field a row belongs to as the author sees it: a member path's
+        list, else the row's own field — what a reset-to-inherited names."""
+        if row.field in keyed or "." not in row.field:
+            return row.field
+        path = split_member_path(row.field, keyed)
+        return path[0].field_id if path is not None else row.field
 
     def _apply_override_row(
         self, result: dict[str, Any], row: MutationSetRow, field_type: str
@@ -397,6 +512,7 @@ class LayerOverridesMixin:
         an ancestor's pick is a delta like any other, where the bare absent key
         would diff to a blank the save then refuses."""
         fields = schema.fields
+        keyed_lists = keyed_lists_from(schema)
         rows: list[MutationSetRow] = []
         # Only fields in L's own roster can be stored at L. A field the client
         # round-trips that is defined only *below* L (the entry is edited from the
@@ -406,6 +522,12 @@ class LayerOverridesMixin:
         for field in sorted(f for f in (set(base) | set(submitted)) if f in fields):
             definition = fields[field]
             field_type = definition.type
+            if field in keyed_lists:
+                # A reference-keyed list diffs BY KEY (ADR-0089 §5): a new key is
+                # an `add` of the whole item, a missing key a `remove`, a changed
+                # member a `replace` on the member path. A reorder alone is no delta.
+                rows.extend(self._keyed_list_override_rows(keyed_lists[field], base.get(field), submitted.get(field)))
+                continue
             if field_type in COLLECTION_FIELD_TYPES:
                 base_items = _as_str_list(base.get(field))
                 new_items = _as_str_list(submitted.get(field))
@@ -423,6 +545,35 @@ class LayerOverridesMixin:
         return rows
 
     @staticmethod
+    def _keyed_list_override_rows(keyed: KeyedList, base_value: Any, new_value: Any) -> list[MutationSetRow]:
+        """The sparse delta between two reference-keyed lists, as records: an
+        `add` (the whole item, JSON) per key only `new_value` holds, a `replace`
+        on the member path per member that differs for a key both hold, a
+        `remove` per key only `base_value` holds. Items without a key cannot be
+        addressed by a record and contribute nothing; a repeated key reads as
+        its first item (the save refuses duplicates before diffing)."""
+        before = _items_by_key(base_value, keyed.key_member)
+        after = _items_by_key(new_value, keyed.key_member)
+        rows: list[MutationSetRow] = []
+        for key, item in after.items():
+            base_item = before.get(key)
+            if base_item is None:
+                rows.append(MutationSetRow(field=keyed.field_id, op="add", value=encode_item(item)))
+                continue
+            for member, member_field in keyed.member_fields.items():
+                if member == keyed.key_member:
+                    continue
+                new_text = _member_record_value(item.get(member), member_field.type)
+                if new_text != _member_record_value(base_item.get(member), member_field.type):
+                    rows.append(
+                        MutationSetRow(field=member_path(keyed.field_id, key, member), op="replace", value=new_text)
+                    )
+        for key in before:
+            if key not in after:
+                rows.append(MutationSetRow(field=keyed.field_id, op="remove", value=key))
+        return rows
+
+    @staticmethod
     def _scalar_override_row(field: str, field_type: str, new_value: Any) -> MutationSetRow:
         """The `replace` row that sets a scalar field to `new_value`."""
         if field_type == "list":
@@ -431,12 +582,14 @@ class LayerOverridesMixin:
             # representation here — str() would persist a Python repr the fold
             # then serves as the value. Clearing IS representable (value=""
             # folds to []), so the revert gesture keeps working; anything else
-            # refuses loudly. Structured override rows are a filed follow-up.
+            # refuses loudly. A list keyed by its one reference member has its
+            # own records and never reaches here (ADR-0089 §5).
             if new_value in (None, "", []):
                 return MutationSetRow(field=field, op="replace", value="")
             raise ProjectServiceError(
-                f"Ordered-list field {field} cannot be overridden from a "
-                "descendant layer yet; edit the entry in the project that owns it.",
+                f"Ordered-list field {field} cannot be overridden from a descendant "
+                "layer; edit the entry in the project that owns it (a list keyed by "
+                "one reference member can be, ADR-0089).",
                 422,
             )
         # A field omitted from the payload clears to empty, matching an owned

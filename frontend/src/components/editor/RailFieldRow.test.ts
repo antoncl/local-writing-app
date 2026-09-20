@@ -15,11 +15,13 @@ import type { MetadataSchema, TagEntry } from "@/lib/types";
 const SCHEMA = {
   version: 1,
   entry_types: {
-    "lore:character": { name: "Character", kind: "lore", fields: ["alias", "cost", "tags", "kin", "bio", "hue"] },
+    "lore:character": { name: "Character", kind: "lore", fields: ["alias", "cost", "tags", "kin", "bio", "hue", "home"] },
+    "lore:location": { name: "Location", kind: "lore", fields: [] },
     "tag:theme": { name: "Theme", kind: "tag" },
   },
   fields: {
     alias: { name: "Alias", type: "text", options: [] },
+    home: { name: "Home", type: "entity_ref", options: [], picker_config: { sources: [{ kind: "lore" }] } },
     cost: { name: "Cost", type: "computed", options: [], computed: { fn: "cost" } },
     kin: { name: "Kin", type: "entity_ref_list", options: [], picker_config: { sources: [{ kind: "lore" }] } },
     bio: { name: "Bio", type: "long_text", options: [] },
@@ -98,6 +100,42 @@ describe("RailFieldRow", () => {
     expect(row.classList.contains("scalar")).toBe(true);
     expect(screen.getByText("Alias")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Edit Alias/ })).toBeTruthy();
+  });
+
+  it("a single reference rests as one line with the target's name, and opens through the callbacks (#2058)", async () => {
+    const resolveRef = (id: string) => (id === "lore_thr" ? { id, kind: "lore", title: "The Painted Threshold", entry_type: "lore:location" } : null);
+    const model = buildRailRowModel(baseCtx({ metadata: { home: "lore_thr" } }), "home");
+    expect(model.scalar).toBe(true);
+    expect(model.singleRef).toBe(true);
+    expect(model.closesOnPick).toBe(true);
+    const on = baseCallbacks();
+    const { container } = render(RailFieldRow, { props: { model, deps: baseDeps({ resolveRef }), on } });
+    expect(container.querySelector(".field-row.scalar")).not.toBeNull();
+    expect(screen.getByTestId("rail-ref-name").textContent).toBe("The Painted Threshold");
+    // No picker at rest: the pill + trigger that stacked to two lines are gone.
+    expect(container.querySelector(".reference-picker")).toBeNull();
+    const hit = screen.getByRole("button", { name: "Edit Home: The Painted Threshold" });
+    await fireEvent.click(hit);
+    expect(on.open).toHaveBeenCalledWith("home", expect.any(HTMLElement));
+  });
+
+  it("a single reference shows its stored id at rest when nothing resolves it, and the picker while open (#2058)", () => {
+    const rest = buildRailRowModel(baseCtx({ metadata: { home: "lore_gone" } }), "home");
+    const first = render(RailFieldRow, { props: { model: rest, deps: baseDeps(), on: baseCallbacks() } });
+    expect(screen.getByTestId("rail-ref-name").textContent).toBe("lore_gone");
+    first.unmount();
+    const open = buildRailRowModel(baseCtx({ metadata: { home: "lore_gone" }, openFieldId: "home" }), "home");
+    const { container } = render(RailFieldRow, { props: { model: open, deps: baseDeps(), on: baseCallbacks() } });
+    expect(container.querySelector(".field-row.editing")).not.toBeNull();
+    expect(container.querySelector(".reference-picker")).not.toBeNull();
+  });
+
+  it("a read-only single reference stays the plain read-only picker (#2058)", () => {
+    const model = buildRailRowModel(baseCtx({ metadata: { home: "lore_thr" }, readOnly: true }), "home");
+    expect(model.scalar).toBe(false);
+    const { container } = render(RailFieldRow, { props: { model, deps: baseDeps({ readOnly: true }), on: baseCallbacks() } });
+    expect(container.querySelector(".reference-picker")).not.toBeNull();
+    expect(container.querySelector('[data-testid="rail-ref-name"]')).toBeNull();
   });
 
   it("a computed model renders .fr-computed and the lock glyph", () => {

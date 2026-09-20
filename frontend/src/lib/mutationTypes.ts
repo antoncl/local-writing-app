@@ -26,6 +26,17 @@ export type MutationMarkerList = {
   items: MutationMarkerRecord[];
 };
 
+// One row of a wholesale mutation-unit rewrite (ADR-0042 §5, ADR-0089 S5) —
+// the wire shape `PUT /scenes/{scene_id}/mutations/units/{unit_id}` takes.
+// Mirrors the backend's `MutationUnitRow`: a blank `id` mints a fresh record
+// id, a given id is kept.
+export type MutationUnitRow = {
+  field: string;
+  op: string; // "replace" | "add" | "remove"
+  value: string;
+  id: string;
+};
+
 // Reusable mutation set (#62): a body-less Node kind — an ordered list of
 // (field, op, value) rows + a target lore entry-type. The entity is bound at
 // apply time (a template), and applying expands to independent inline markers.

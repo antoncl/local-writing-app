@@ -83,6 +83,50 @@ export class LoreScrubController {
     }
   }
 
+  /** Re-fetch the entity's markers and re-resolve at the SAME stop (#2074,
+   *  ADR-0042 §5) — after a scrub-stop edit rewrites the current unit's rows.
+   *  Re-anchors by the current unit's id first; a carrier shrinking to one
+   *  row can rename the unit (its id becomes the surviving row's id), so this
+   *  falls back to whichever unit now holds any of the previous unit's record
+   *  ids, and finally to base (0) when the unit vanished entirely (its rows
+   *  all removed). Unlike `load()` this does NOT reset to base up front — the
+   *  whole point is staying put. */
+  async reload(): Promise<void> {
+    const entityId = this.#entityId;
+    if (!entityId) return;
+    const priorUnit = this.index > 0 ? (this.units[this.index - 1] ?? null) : null;
+    const priorUnitId = priorUnit?.unitId ?? null;
+    const priorMarkerIds = priorUnit?.records.map((r) => r.marker_id) ?? [];
+    const seq = ++this.#seq;
+    const fresh = () => seq === this.#seq && this.#entityId === entityId;
+    let items: MutationMarkerRecord[];
+    try {
+      const res = await api.getEntityMutations(entityId);
+      if (!fresh()) return;
+      items = res.items;
+    } catch {
+      if (fresh()) {
+        this.markers = [];
+        this.index = 0;
+        this.overrides = null;
+      }
+      return;
+    }
+    this.markers = items;
+    if (priorUnitId === null) return; // wasn't scrubbed to a unit — nothing to re-anchor
+    const units = this.units;
+    let targetIndex = units.findIndex((u) => u.unitId === priorUnitId);
+    if (targetIndex === -1) {
+      targetIndex = units.findIndex((u) => u.records.some((r) => priorMarkerIds.includes(r.marker_id)));
+    }
+    if (targetIndex === -1) {
+      this.index = 0;
+      this.overrides = null;
+      return;
+    }
+    await this.scrubTo(targetIndex + 1);
+  }
+
   /** ← / → along the mutation axis: one stop, clamped to [0, units.length], no
    *  wrap — the mirror of `SnapshotStripController.step`, so the ADR-0088 foot
    *  dock drives both axes with the same gesture (§4). Stop 0 is base (editable);

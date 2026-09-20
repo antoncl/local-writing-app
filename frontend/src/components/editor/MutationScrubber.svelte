@@ -17,11 +17,17 @@
     units,
     index,
     onScrub,
+    stopEditable = false,
   }: {
     units: MutationUnitGroup[];
     /** 0 = base (editable); i ≥ 1 = as of units[i-1]. */
     index: number;
     onScrub: (index: number) => void;
+    /** True when the open node's list tab is editable AT THIS STOP (#2074,
+     *  ADR-0042 §5) — threaded from where the scrubber is rendered rather than
+     *  read off the scrub controller here, so every other node's caption stays
+     *  the plain read-only one. */
+    stopEditable?: boolean;
   } = $props();
 
   // Per-stop labels: originating scene, disambiguated when one scene holds
@@ -79,6 +85,8 @@
   <span class="scrub-asof" class:scrubbed={index > 0}>
     {#if index === 0}
       Base — book start
+    {:else if stopEditable}
+      As of {stopLabels[index - 1]} · editing this stop
     {:else}
       As of {stopLabels[index - 1]} · read-only
     {/if}

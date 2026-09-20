@@ -25,11 +25,16 @@
     scrub,
     documentKind,
     writesLabel = null,
+    stopEditable = false,
   }: {
     snapshots: SnapshotStripController;
     scrub: LoreScrubController;
     documentKind: DocumentKind;
     writesLabel?: string | null;
+    /** #2074, ADR-0042 §5: the open node's list tab is editable AT THIS STOP —
+     *  forwarded to MutationScrubber's caption. Default false keeps every
+     *  other node's caption the plain read-only one. */
+    stopEditable?: boolean;
   } = $props();
 
   let footEl = $state<HTMLElement | null>(null);
@@ -174,6 +179,7 @@
         units={scrub.units}
         index={scrub.index}
         onScrub={(index) => void scrub.scrubTo(index)}
+        {stopEditable}
       />
     {/if}
   </div>

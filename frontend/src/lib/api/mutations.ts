@@ -1,4 +1,4 @@
-import type { EffectiveStateResponse, MutationMarkerList, Scene } from "@/lib/types";
+import type { EffectiveStateResponse, MutationMarkerList, MutationUnitRow, Scene } from "@/lib/types";
 import { request } from "./core";
 
 export const mutationsApi = {
@@ -34,7 +34,11 @@ export const mutationsApi = {
       `/lore/${entityId}/effective?scene=${encodeURIComponent(sceneId)}${posQuery}${excludeQuery}`,
     );
   },
-  updateMutation(sceneId: string, markerId: string, updates: { entity_id?: string; field?: string; value?: string }) {
+  updateMutation(
+    sceneId: string,
+    markerId: string,
+    updates: { entity_id?: string; field?: string; op?: string; value?: string; name?: string; group?: string },
+  ) {
     return request<Scene>(`/scenes/${sceneId}/mutations/${markerId}`, {
       method: "PATCH",
       body: JSON.stringify(updates),
@@ -43,6 +47,16 @@ export const mutationsApi = {
   deleteMutation(sceneId: string, markerId: string) {
     return request<Scene>(`/scenes/${sceneId}/mutations/${markerId}`, {
       method: "DELETE",
+    });
+  },
+  // Replace a unit's rows wholesale (ADR-0042 §5, ADR-0089 S5) — the write
+  // behind editing the lore card at a scrub stop, where the stop IS the unit
+  // and the card has no cursor. `name` null keeps the carrier head's name; an
+  // empty `rows` removes the unit.
+  rewriteMutationUnit(sceneId: string, unitId: string, body: { rows: MutationUnitRow[]; name?: string | null }) {
+    return request<Scene>(`/scenes/${sceneId}/mutations/units/${unitId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
     });
   },
 };

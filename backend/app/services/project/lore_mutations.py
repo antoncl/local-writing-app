@@ -53,7 +53,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from typing import Any
@@ -62,6 +62,7 @@ from urllib.parse import quote, unquote
 from app.models import (
     MutationMarker,
     MutationMarkerList,
+    RewriteMutationUnitRequest,
     Scene,
     UpdateMutationRequest,
 )
@@ -244,6 +245,29 @@ def _render_mutation_unit(
         "-->",
     ]
     return "\n".join(lines)
+
+
+def _unit_rows_from_request(
+    request: RewriteMutationUnitRequest, keep_ids: set[str], new_id: Callable[[str], str]
+) -> list[CarrierRow]:
+    """The rewritten unit's rows: a row keeps its id only when the unit already
+    held that id (a foreign or blank id is minted fresh), values url-encoded."""
+    rows: list[CarrierRow] = []
+    for row in request.rows:
+        row_id = row.id if row.id and row.id in keep_ids else new_id("mut")
+        rows.append(CarrierRow(field=row.field, op=row.op or "replace", raw_value=quote(row.value, safe=""), row_id=row_id))
+    return rows
+
+
+def _render_rewritten_unit(
+    request: RewriteMutationUnitRequest, entity: str, raw_name: str, unit_id: str, rows: list[CarrierRow]
+) -> str:
+    """The rewritten unit in canonical form; no rows removes it. The request's
+    name, when given, renames the head (url-encoded like every marker value)."""
+    if not rows:
+        return ""
+    name = quote(request.name, safe="") if request.name is not None else raw_name
+    return _render_mutation_unit(entity, name, unit_id, rows)
 
 
 @dataclass
@@ -921,6 +945,66 @@ class LoreMutationsMixin(MarkerMixin):
             marker_id,
             lambda body: self._rewrite_mutation_record(body, marker_id, None),
         )
+
+    def rewrite_mutation_unit(
+        self, scene_id: str, unit_id: str, request: RewriteMutationUnitRequest
+    ) -> Scene:
+        """Replace one unit's rows wholesale, without a full body save — the
+        write behind editing the lore card at a scrub stop (ADR-0042 §5,
+        ADR-0089 S5): the stop is the unit, so a member changed there rewrites
+        the unit's `replace` record and an item added or removed there becomes
+        an `add`/`remove` row of the same unit. `unit_id` is a carrier's head
+        id or a single-line marker's id (a one-row unit). The carrier head
+        (entity, name unless the request renames it) is kept; the result
+        renders in canonical form, so one row degenerates to a single-line
+        marker whose id is that row's, and a one-row unit growing to several
+        keeps `unit_id` on the head while its original row, which shared the
+        id, gets a fresh one (two markers must not share an id; a close that
+        named the old id addresses the unit, which is what it meant). Empty
+        rows remove the unit. Like every marker edit, this never blocks on
+        value validity — validate_project reports strays. Returns the updated
+        scene so an open pane can reconcile."""
+        return self._apply_scene_marker_edit(
+            scene_id,
+            "Mutation unit",
+            unit_id,
+            lambda body: self._rewrite_unit_rows(body, unit_id, request),
+        )
+
+    def _rewrite_unit_rows(
+        self, body: str, unit_id: str, request: RewriteMutationUnitRequest
+    ) -> tuple[str, bool]:
+        """The unit rewrite behind `rewrite_mutation_unit`: the carrier whose
+        head id is `unit_id`, else the single-line marker whose id is."""
+        found = False
+
+        def replace_carrier(match: re.Match[str]) -> str:
+            nonlocal found
+            if found or match.group("id") != unit_id:
+                return match.group(0)
+            parsed = _parse_carrier_rows(match)
+            if parsed is None:
+                return match.group(0)
+            found = True
+            rows = _unit_rows_from_request(request, {row.row_id for row in parsed}, self._new_id)
+            return _render_rewritten_unit(request, match.group("entity"), match.group("name") or "", unit_id, rows)
+
+        def replace_single(match: re.Match[str]) -> str:
+            nonlocal found
+            if found or match.group("id") != unit_id:
+                return match.group(0)
+            found = True
+            # The one-row unit's id is its row's id and its unit id at once: a
+            # single surviving row keeps it, a grown unit keeps it on the head
+            # and re-mints the row so no two markers share an id.
+            keep = {unit_id} if len(request.rows) == 1 else set()
+            rows = _unit_rows_from_request(request, keep, self._new_id)
+            return _render_rewritten_unit(request, match.group("entity"), match.group("name") or "", unit_id, rows)
+
+        new_body = MUTATION_CARRIER_PATTERN.sub(replace_carrier, body)
+        if found:
+            return new_body, True
+        return MUTATION_MARKER_PATTERN.sub(replace_single, body), found
 
     def _rewrite_mutation_record(
         self, body: str, marker_id: str, request: UpdateMutationRequest | None

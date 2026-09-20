@@ -6,6 +6,7 @@
 // widget-routing gates (bodySections/bodyTabs/fieldRowModel, #2043/#2010's
 // gates widened by ADR-0089 §6) and ReferenceListTab (the tab itself).
 import { metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
+import type { KeyedListShape } from "@/lib/editor-core/mutationListEdit";
 import type { MetadataFieldDefinition, MetadataValue } from "@/lib/types";
 
 /** The key member of a reference-keyed list, or null for every other field —
@@ -49,4 +50,18 @@ export function itemMemberDetail(field: MetadataFieldDefinition | undefined | nu
     })
     .filter(Boolean)
     .join(" · ");
+}
+
+/** A reference-keyed list's shape (ADR-0089 §5), read off the resolver-stamped
+ *  `item_members`: the key member (empty string when the field isn't one —
+ *  callers only reach here for an item row, where it always resolves) and
+ *  every member's declared type, for `keyedListRowsFromEdit`'s member diff.
+ *  Shared by the dialogs' chip/lock wiring, the authoring form's seeding, and
+ *  the scrub-stop rewrite (`mutationStopEdit.ts`). A lib module, not a
+ *  component's module script — moved here (#2074) so mutationStopEdit.ts can
+ *  import it without importing a `.svelte` file's module script. */
+export function keyedShapeFor(def: MetadataFieldDefinition): KeyedListShape {
+  const memberTypes: Record<string, string> = {};
+  for (const member of def.item_members ?? []) memberTypes[member.key] = member.type;
+  return { keyMember: keyedListKeyMember(def) ?? "", memberTypes };
 }

@@ -268,17 +268,31 @@ scene-seed sites at `:89` and `:157`). This is a standalone fix, and it is gated
 today: not walked under `named` expansion, `manual_only` targets subtracted, dropped first under
 the lore budget (ADR-0086). The prompt claim this ADR relies on is §7, not the hop.
 
-### 9 — A purged key makes a dangling item; no read path removes an item
+### 9 — A delete that would orphan an item warns first; an orphan is a validation finding, never a silent state
 
-Delete-purge and the read-side heal share one value-level visitor (`rewrite_ref_occurrences`,
-`backend/app/services/project/metadata_refs.py:120`): purge writes `""` into a purged reference
-(`_purge_metadata_refs`, `backend/app/services/project/metadata_values.py:911`), and the heal
-blanks any reference that no longer matches the picker and writes the cleaned metadata back on
-the next save (`_strip_dangling_references`, `:771`). Dropping the item there would turn a
-narrowed `picker_config` into a silent loss of every item's other members. So both keep writing
-`""` (ADR-0081 acceptance 4: only the matched reference value changes). An item with a blank key
-is a **dangling item**: kept on disk, hidden from the prompt and the index, shown as dangling in
-the tab, flagged by validation; records addressing it validate as dangling per §2.
+The key rule in §1 exists so that nothing can dangle by accident. A delete must hold to the same
+standard. Two parts:
+
+**Before the delete.** When the node being deleted is the key of any item in the project, the
+delete confirmation says so and names the count, read from the reverse reference index the app
+already keeps (`ReferenceEdge`, §6). The writer answers yes or no; a "do not warn again" choice
+is a machine setting, since it is a preference about prompts, not about the project. A delete
+routed through the pane's confirm request (`editorPaneDelete`, `frontend/src/lib/stores/`) is
+where the warning attaches; a delete with no referrers asks nothing new.
+
+**After the delete.** Delete-purge and the read-side heal share one value-level visitor
+(`rewrite_ref_occurrences`, `backend/app/services/project/metadata_refs.py:120`): purge writes
+`""` into a purged reference (`_purge_metadata_refs`,
+`backend/app/services/project/metadata_values.py:911`), and the heal blanks any reference that
+no longer matches the picker and writes the cleaned metadata back on the next save
+(`_strip_dangling_references`, `:771`). Dropping the item there would turn a narrowed
+`picker_config` into a silent loss of every item's other members, so both keep writing `""`
+(ADR-0081 acceptance 4: only the matched reference value changes). An item with a blank key is
+an **orphaned item**. It is kept on disk, hidden from the prompt and the index, shown as orphaned
+in the tab, and **project validation reports it**, the way `validate_project` already reports a
+dangling TODO anchor (`backend/app/services/project/lifecycle.py:1114`): the item, its list, its
+owner, and every record addressing it. The writer resolves it by removing the item or pointing a
+new item at the right node; no read path removes it for them.
 
 An item gained by a marker is not in the index and is not scrubbed, because the index reads
 stored metadata only (`_reference_edges_for_entry`, `backend/app/services/project/references.py:897`),
@@ -362,7 +376,8 @@ deleted target is caught.
    promotion leaves an item behind as the origin's records.
 4. **S3 — the tab.** Detail line from the item, keyed by target, members editable at stop 0, the
    write contract as items, the widened gates; the mutation dialog's item rows diffed by key at
-   the insertion position with record ids reused by `(op, key)`; dangling items shown as such.
+   the insertion position with record ids reused by `(op, key)`; the delete warning with its
+   machine setting; orphaned items shown as such and reported by `validate_project`.
 5. **S4 — the prompt.** One line per item for reference-keyed lists, per-item overlay before
    render.
 6. **S5 — editing at a stop** for lists (ADR-0042 §5), the tab scrubbed to a stop as its editor.
@@ -403,8 +418,10 @@ this ADR's "Proposed" status.
     and is absent when Chapter 3 is open.
 11. On the note "Peter has no alibi", the References field lists the characters whose base items
     point at it, with each item's kind and state as the detail.
-12. Deleting Tomas leaves Mara's item with a blank target, shown as dangling in the tab and absent
-    from the prompt; the Chapter 12 record validates as dangling.
+12. Deleting Tomas first says that one item on Mara points at him and asks yes or no. On yes,
+    Mara's item is left with a blank target, shown as orphaned in the tab and absent from the
+    prompt, and project validation lists it together with the Chapter 12 record that addresses
+    it, until the writer removes the item or re-points one.
 13. In a book that inherits Mara from the series, the writer adds an item for a book-only
     character and changes Tomas's state. Both save as the book's override records, fold into
     Mara's tab in the book, and promoting Mara to the series leaves the book-only item behind at

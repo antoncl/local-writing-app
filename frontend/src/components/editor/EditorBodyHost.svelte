@@ -83,6 +83,9 @@
     // (never unmounting — TipTap state/undo must survive a tab switch) the
     // shape's own body view underneath.
     activeBodyTab: string;
+    // #2043: forwarded to BodySections' list-section item rows — the same
+    // layer a metadata-rail picker targets for `create_missing` (ADR-0082 §2).
+    createLayerId: string | null;
   }
 
   interface BodyHostDeps {
@@ -347,6 +350,15 @@
           onMetadataChange={(next) => on.metadataChange(next)}
           implicitContextMatcher={deps.implicitContextMatcher}
           register={deps.sectionRegistry}
+          documentKind={model.documentKind}
+          loreEntries={deps.loreEntries}
+          promptEntries={deps.promptEntries}
+          structure={deps.structure}
+          researchStructure={deps.researchStructure}
+          excludeId={model.scene?.id ?? null}
+          createLayerId={model.createLayerId}
+          tagTitleById={$tagTitleById}
+          onNavigate={(payload) => on.navigate(payload)}
         />
       {/snippet}
     </ProseBodyView>

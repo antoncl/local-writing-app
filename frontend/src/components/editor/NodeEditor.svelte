@@ -999,7 +999,7 @@
       scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, metadata,
       metadataSchema, editorReadOnly, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
       overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, detailsDetached, chatTitleField, metaContent,
-      activeBodyTab,
+      activeBodyTab, createLayerId,
     }}
     deps={{
       loreEntries, promptEntries, assistantEntries, availableScenes, structure, researchStructure,

@@ -197,7 +197,7 @@
     if (row.itemBaseline === undefined) return [];
     const def = fieldDefFor(row.field, schema);
     const keyed = keyedShapeFor(def);
-    const edited = asItemList(row.value, keyed.keyMember);
+    const edited = asItemList(row.value);
     const chips: Chip[] = [];
     for (const draft of keyedListRowsFromEdit(row.field, keyed, row.itemBaseline, edited, [])) {
       if (draft.op === "add") {

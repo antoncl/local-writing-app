@@ -86,11 +86,11 @@ export function collectionRowsFromEdit(
   const reusable = new Map<string, string>();
   for (const record of existing) {
     if (record.id && (record.op === "add" || record.op === "remove")) {
-      reusable.set(`${record.op}${record.value.trim()}`, record.id);
+      reusable.set(`${record.op}\u001f${record.value.trim()}`, record.id);
     }
   }
   const row = (op: "add" | "remove", value: string): MutationRowDraft => {
-    const id = reusable.get(`${op}${value}`);
+    const id = reusable.get(`${op}\u001f${value}`);
     return { ...(id ? { id } : {}), field, op, value };
   };
   return [
@@ -142,8 +142,7 @@ function itemKey(item: ItemRecord, keyMember: string): string | null {
  *  entries are dropped rather than fed to a widget that expects a member map
  *  (a guard, not a feature — mirrors `asMembershipList`'s drop of a
  *  non-primitive membership item). */
-export function asItemList(value: unknown, keyMember: string): ItemRecord[] {
-  void keyMember; // shape guard only; key presence is itemsByKey's job
+export function asItemList(value: unknown): ItemRecord[] {
   return Array.isArray(value) ? value.filter(isPlainRecord) : [];
 }
 
@@ -203,8 +202,7 @@ export function splitMemberPath(token: string, field: string): { key: string; me
  *  member, `String()` otherwise. Mirrors the backend's `_member_record_value`
  *  (`memberType` is unused there too — kept for signature parity / future
  *  type-aware spellings). */
-export function memberRecordValue(value: MetadataValue | undefined, memberType: string): string {
-  void memberType;
+export function memberRecordValue(value: MetadataValue | undefined): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean).join(",");
@@ -273,9 +271,8 @@ export function keyedListRowsFromEdit(
     }
     for (const member of Object.keys(keyed.memberTypes)) {
       if (member === keyed.keyMember) continue;
-      const memberType = keyed.memberTypes[member];
-      const newText = memberRecordValue(item[member], memberType);
-      if (newText === memberRecordValue(baseItem[member], memberType)) continue;
+      const newText = memberRecordValue(item[member]);
+      if (newText === memberRecordValue(baseItem[member])) continue;
       const token = memberPath(field, key, member);
       const id = reuseByToken.get(token);
       rows.push({ ...(id ? { id } : {}), field: token, op: "replace", value: newText });
@@ -307,7 +304,7 @@ export function composeKeyedItems(
   baselineItems.forEach((item, index) => {
     const key = itemKey(item, keyed.keyMember);
     if (key === null) {
-      slots.set(` ${index}`, { ...item });
+      slots.set(`\u0000${index}`, { ...item });
       return;
     }
     if (!slots.has(key)) slots.set(key, { ...item, [keyed.keyMember]: key });

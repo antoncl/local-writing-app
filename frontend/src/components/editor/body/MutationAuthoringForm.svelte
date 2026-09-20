@@ -154,8 +154,8 @@
   // `asMembershipList` (a `list` field's value is a member map, not a scalar).
   function itemBaseline(field: string, keyMember: string): Record<string, MetadataValue>[] {
     const effective = effectiveValues?.[field];
-    if (effective !== undefined) return asItemList(effective, keyMember);
-    return asItemList((entity?.metadata ?? {})[field], keyMember);
+    if (effective !== undefined) return asItemList(effective);
+    return asItemList((entity?.metadata ?? {})[field]);
   }
 
   // The reference-keyed list a row's raw field token addresses — its own field
@@ -344,7 +344,7 @@
   function itemRowDrafts(row: FormRow): MutationRowDraft[] {
     if (row.itemBaseline === undefined) return [];
     const keyed = keyedShapeFor(fieldDefFor(row.field, schema));
-    const edited = asItemList(row.value, keyed.keyMember);
+    const edited = asItemList(row.value);
     return keyedListRowsFromEdit(row.field, keyed, row.itemBaseline, edited, row.collectionRecords ?? []);
   }
 

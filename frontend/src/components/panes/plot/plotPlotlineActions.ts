@@ -1,7 +1,8 @@
 // The actions a PlotPlotlineNode invokes for ON-NODE editing (ADR-0053 §3). Provided
-// by the PlotEditor via Svelte context so the presentational plotline node stays free
-// of store/api imports (and mountable in happy-dom for its render test — where the
-// context is ABSENT, so the node renders its read-only roster, exactly as in S2a).
+// by the PlotEditor via Svelte context so the plotline node's own script stays free of
+// store/api imports and mounts in happy-dom for its render test (where the context is
+// ABSENT, so the node renders its read-only roster, exactly as in S2a). The one store
+// reader under it is PlotBeatSections (#2043 slice 3), mounted only while expanded.
 //
 // A plotline is edited in place on the board (ADR-0038 §A expand-on-select): the node's
 // header toggles it expanded, and expanded it hosts a rename / recolour / beat editor.

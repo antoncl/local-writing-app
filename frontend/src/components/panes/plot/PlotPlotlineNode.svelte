@@ -31,6 +31,7 @@
   import { getSwatch } from "@/lib/utils/colors";
   import { setPlotBeatDrag } from "@/lib/plot/plotDnd";
   import { withStampedBeatIds } from "@/lib/plot/beatRoster";
+  import { createDebouncedCommit } from "@/lib/plot/debouncedCommit";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import PlotBeatSections from "./PlotBeatSections.svelte";
   import { CARD_DRAG_HANDLE_CLASS, type PlotPlotlineData } from "@/lib/plot/plotBoardLayout";
@@ -115,14 +116,23 @@
       // that queued save a no-op and silently drop the edit. It's invisible while
       // collapsed and overwritten by the next expand's reload.
       loadError = null;
+      // The editor is going away: a section save still waiting on its debounce runs
+      // now (nothing left to coalesce), so the next expand's reload reads it back.
+      sectionCommit.flush();
       return;
     }
-    void reload();
+    void reload(true);
   });
 
-  async function reload(): Promise<void> {
+  // `afterPendingSaves` (the expand path): a re-expand inside the debounce window — a
+  // double-click on the header right after a keystroke — must not GET the entry before
+  // the save the collapse just flushed has landed, or the stale copy would replace the
+  // draft that save was made from. The failed-save resync calls it plain: it runs
+  // INSIDE the chain, and waiting on the chain from there would wait on itself.
+  async function reload(afterPendingSaves = false): Promise<void> {
     if (!actions) return;
     loadError = null;
+    if (afterPendingSaves) await commitChain;
     try {
       const entry = await actions.loadPlotline(id!);
       if (!isExpanded) return; // collapsed while loading — drop the result
@@ -144,21 +154,8 @@
   // `draft` immediately but the SAVE is debounced. Name/colour keep their own immediate
   // commit (blur-triggered, so already infrequent).
   const SECTION_SAVE_DEBOUNCE_MS = 600;
-  let commitTimer: ReturnType<typeof setTimeout> | null = null;
-  function scheduleCommit(): void {
-    if (commitTimer !== null) clearTimeout(commitTimer);
-    commitTimer = setTimeout(() => {
-      commitTimer = null;
-      commit();
-    }, SECTION_SAVE_DEBOUNCE_MS);
-  }
-  onDestroy(() => {
-    if (commitTimer !== null) {
-      clearTimeout(commitTimer);
-      commitTimer = null;
-      commit();
-    }
-  });
+  const sectionCommit = createDebouncedCommit(commit, SECTION_SAVE_DEBOUNCE_MS);
+  onDestroy(sectionCommit.flush);
   async function doCommit(): Promise<void> {
     if (!draft || !actions) return;
     const target = draft;
@@ -206,7 +203,7 @@
   function applySectionMetadata(metadata: EntryMetadata): void {
     if (!draft) return;
     draft.metadata = metadata;
-    scheduleCommit();
+    sectionCommit.schedule();
   }
 
   function onTitleKeydown(e: KeyboardEvent): void {

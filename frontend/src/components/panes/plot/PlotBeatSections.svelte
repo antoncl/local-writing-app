@@ -20,11 +20,11 @@
   import { structureStore, researchStructureStore } from "@/lib/stores/structure";
   import { tagTitleById } from "@/lib/stores/tagNodes";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
-  import { buildBodyListSections, listItemEditorId } from "@/lib/editor-core/bodySections";
+  import { buildBodyListSections, listItemEditorId, listItemsOf } from "@/lib/editor-core/bodySections";
   import { createSectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import { createSectionEditorRoster } from "@/lib/editor-core/sectionEditorRoster.svelte";
   import BodyListSection from "@/components/editor/body/BodyListSection.svelte";
-  import type { EntryMetadata, MetadataValue, PlotlineEntry } from "@/lib/types";
+  import type { EntryMetadata, PlotlineEntry } from "@/lib/types";
 
   interface Props {
     entry: PlotlineEntry; // CharacterArcEntry is the same shape
@@ -34,10 +34,7 @@
   let { entry, onChange }: Props = $props();
 
   const sections = $derived(buildBodyListSections($metadataSchemaStore, entry.entry_type));
-  function items(listId: string): MetadataValue[] {
-    const value = entry.metadata[listId];
-    return Array.isArray(value) ? (value as MetadataValue[]) : [];
-  }
+  const items = (listId: string) => listItemsOf(entry.metadata, listId);
 
   const register = createSectionRegistry();
   const orderedIds = $derived(

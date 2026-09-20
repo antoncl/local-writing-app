@@ -15,7 +15,7 @@
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import FieldValue from "@/components/widgets/FieldValue.svelte";
   import BodyListSection from "@/components/editor/body/BodyListSection.svelte";
-  import { buildBodySections, buildBodyListSections, listItemEditorId } from "@/lib/editor-core/bodySections";
+  import { buildBodySections, buildBodyListSections, listItemEditorId, listItemsOf } from "@/lib/editor-core/bodySections";
   import { createSectionEditorRoster } from "@/lib/editor-core/sectionEditorRoster.svelte";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
@@ -79,10 +79,7 @@
 
   const groups = $derived(buildBodySections(schema, entryType));
   const listSections = $derived(buildBodyListSections(schema, entryType));
-  function listItems(listId: string): MetadataValue[] {
-    const value = metadata[listId];
-    return Array.isArray(value) ? (value as MetadataValue[]) : [];
-  }
+  const listItems = (listId: string) => listItemsOf(metadata, listId);
   // Registry indices run in document order across every section (1-based —
   // index 0 is the free body), a flat lookup over the schema-ordered groups
   // followed by every list item's own prose members.

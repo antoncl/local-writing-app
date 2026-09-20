@@ -1,10 +1,11 @@
 // The actions a PlotArcNode invokes for ON-NODE editing (ADR-0080 §5 / Amendment 1).
 // Mirrors plotPlotlineActions.ts — a character arc is the plotline's sibling beat-
 // holder, edited the same way (expand-in-place, load-full-entry-on-expand, whole-entry
-// save). Provided by PlotEditor via Svelte context so the presentational arc node stays
-// free of store/api imports (and mountable in happy-dom for its render test — where the
+// save). Provided by PlotEditor via Svelte context so the arc node's own script stays
+// free of store/api imports and mounts in happy-dom for its render test (where the
 // context is ABSENT, so the node renders its read-only roster, mirroring PlotPlotlineNode's
-// S2a degrade).
+// S2a degrade). The one store reader under it is PlotBeatSections (#2043 slice 3),
+// mounted only while expanded.
 //
 // Two differences from the plotline actions, both because an arc is never a card's
 // primary/colour thread (§4) and has no dedicated full-pane editor this slice:

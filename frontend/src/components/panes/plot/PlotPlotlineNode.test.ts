@@ -11,7 +11,7 @@ import PlotPlotlineNode from "./PlotPlotlineNode.svelte";
 import type { PlotPlotlineData } from "@/lib/plot/plotBoardLayout";
 import { PLOT_PLOTLINE_ACTIONS, type PlotPlotlineActions } from "./plotPlotlineActions";
 import { PLOT_DND_MIME } from "@/lib/plot/plotDnd";
-import type { MetadataSchema, PlotlineEntry } from "@/lib/types";
+import type { MetadataSchema, MetadataValue, PlotlineEntry } from "@/lib/types";
 
 // PlotBeatSections/BodyListSection (#2043 slice 3) now render the beats; TipTap never
 // mounts under happy-dom (#642), so MetadataLongTextEditor is swapped for the stub.
@@ -302,6 +302,31 @@ describe("PlotPlotlineNode on-node editing (ADR-0053 §3)", () => {
     fakeActions().mount(); // default fakeActions omits onOpenInEditor
     await screen.findByPlaceholderText("Plotline name"); // wait for the editor to expand
     expect(screen.queryByRole("button", { name: "Open in editor" })).toBeNull();
+  });
+
+  it("stamps the backend-minted id of a new beat onto the draft, so the next save carries it", async () => {
+    // The fake save mints an id for any beat without one (what the backend does).
+    const flushed: Array<{ revision: string; metadata: Record<string, unknown> }> = [];
+    fakeActions({
+      save: async (e) => {
+        flushed.push(e);
+        const beats = (e.metadata.instance_beats as Array<Record<string, MetadataValue>>).map((b, i) =>
+          typeof b.id === "string" && b.id ? b : { ...b, id: `minted_${i}` },
+        );
+        return { ...e, revision: `r${flushed.length + 1}`, metadata: { ...e.metadata, instance_beats: beats } };
+      },
+    }).mount();
+    await screen.findByPlaceholderText("Plotline name");
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add item" }));
+    await waitFor(() => expect(flushed.length).toBe(1), { timeout: 2000 });
+    expect((flushed[0].metadata.instance_beats as unknown[])[2]).toEqual({});
+    // A later edit to that beat sends the stamped id back, not a blank the backend would
+    // re-mint, over the revision the first save advanced to.
+    const input = screen.getByRole("textbox", { name: "Specialized beats 3 title" });
+    await fireEvent.change(input, { target: { value: "Payoff" } });
+    await waitFor(() => expect(flushed.length).toBe(2), { timeout: 2000 });
+    expect((flushed[1].metadata.instance_beats as unknown[])[2]).toEqual({ title: "Payoff", id: "minted_2" });
+    expect(flushed[1].revision).toBe("r2");
   });
 
   it("removing a beat saves the shortened roster", async () => {

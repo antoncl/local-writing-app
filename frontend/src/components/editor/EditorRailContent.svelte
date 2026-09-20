@@ -207,8 +207,9 @@
 {/if}
 
 <style>
+  /* The panels size their own text with tokens; only the family needs pinning
+     back from the prose column's serif. */
   .rail-appendix {
     font-family: var(--sans);
-    font-size: var(--fs-md);
   }
 </style>

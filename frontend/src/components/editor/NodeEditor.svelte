@@ -751,7 +751,10 @@
   // material as an appendix after it. Never both: the rail is collapsed to its
   // edge tab (the way back) while the blocks show, and a detached rail keeps
   // its pane. Other shapes keep their collapsed rail with nothing shown.
-  let frontMatterMode = $derived(!!scene && !railIsPane && !railOpen && !detailsDetached && bodyShape === "prose");
+  // Gated on the schema like the rail itself: no schema, no rail, no blocks.
+  let frontMatterMode = $derived(
+    !!scene && !!metadataSchema && !railIsPane && !railOpen && !detailsDetached && bodyShape === "prose",
+  );
   // Offer detach only where there is a host pane AND a rail to tear out.
   let canDetachDetails = $derived(!!hostPaneId && !!scene && !!metadataSchema && !railIsPane);
 
@@ -1019,7 +1022,7 @@
       scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, metadata,
       metadataSchema, editorReadOnly, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
       overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, detailsDetached, chatTitleField, metaContent,
-      frontMatter: frontMatterMode ? frontMatter : null, appendix: frontMatterMode ? appendix : null,
+      frontMatter: frontMatterMode ? frontMatter : undefined, appendix: frontMatterMode ? appendix : undefined,
       activeBodyTab, createLayerId,
     }}
     deps={{

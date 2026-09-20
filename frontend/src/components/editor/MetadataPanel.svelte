@@ -727,7 +727,8 @@
   /* Front matter (#2054): the same rows, two to a line at the head of the
      document, at the item rows' compact density (BodyItemRows). Everything
      that is not a fact row spans: the type head, the notices, the group heads,
-     the fold line; so does a line-valued row (`.wide`, the rail's own rule).
+     the fold line; so does a line-valued row (`.wide`, the rail's own rule,
+     and the tags line, which the rail keeps un-wide but is a line all the same).
      An open row keeps its cell: a column is as wide as the rail, so the rail's
      controls fit without spanning and nothing jumps on click. The fold body is
      `display: contents` so its rows flow into the same grid. The wrapper is
@@ -747,7 +748,8 @@
   .scene-metadata.front-matter > .rail-assistant,
   .scene-metadata.front-matter > .rail-fold,
   .scene-metadata.front-matter :global(.rail-group-head),
-  .scene-metadata.front-matter :global(.field-row.wide) {
+  .scene-metadata.front-matter :global(.field-row.wide),
+  .scene-metadata.front-matter :global(.field-row:has(.tag-line-hit)) {
     grid-column: 1 / -1;
   }
   .scene-metadata.front-matter > .rail-fold-body {

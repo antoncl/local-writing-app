@@ -78,6 +78,12 @@
     // The rail/backlinks/conversations content, defined in NodeEditor. Only
     // the none-shape branch (the rail-is-pane case) renders it here.
     metaContent: import("svelte").Snippet;
+    // #2054 front matter: the rail's facts / trailing material as document
+    // blocks while the rail is collapsed on a prose body; null with the rail
+    // open (never both — one editor per value). Rendered INSIDE the prose
+    // frame and the read-only overlay, never as siblings (the grid, #2030).
+    frontMatter: import("svelte").Snippet | null;
+    appendix: import("svelte").Snippet | null;
     // #2010: the body tab strip's current selection, owned by NodeEditor. A
     // `list:<fieldId>` value renders ReferenceListTab for that field, hiding
     // (never unmounting — TipTap state/undo must survive a tab switch) the
@@ -297,6 +303,8 @@
       label="Effective body (read-only)"
       ribbon={bodyMutated ? `Body as of ${model.scrub.units[model.scrub.index - 1]?.records[0]?.scene_path || "scene"} — mutated` : ""}
       ribbonMark="⤳"
+      frontMatter={model.frontMatter ?? undefined}
+      appendix={model.appendix ?? undefined}
     />
   {:else if model.snapshotParked}
     <!-- The parked snapshot, on the same overlay: the live buffer stays
@@ -307,6 +315,8 @@
       ribbon={model.snapshotRibbon}
       tone="snapshot"
       onRunClick={(regionId, kind) => model.snapshots.adopt(regionId, kind)}
+      frontMatter={model.frontMatter ?? undefined}
+      appendix={model.appendix ?? undefined}
     />
   {:else if model.entryReview.hasReview && model.entryReview.proposal}
     <EntryReviewOverlay review={model.entryReview} />
@@ -337,6 +347,8 @@
     onRequestInputsDialog={(payload) => on.requestInputsDialog(payload)}
     neighbours={() => deps.sectionRegistry.neighboursFor(0)}
     onEditorReady={(editor, phase) => phase === "ready" ? deps.sectionRegistry.register(0, null, editor) : deps.sectionRegistry.unregister(editor)}
+    frontMatter={model.frontMatter ?? undefined}
+    appendix={model.appendix ?? undefined}
     >
       <!-- The long_text sections (#2009) render inside the prose view's own
            scroll frame, never as siblings: the panel grid places direct

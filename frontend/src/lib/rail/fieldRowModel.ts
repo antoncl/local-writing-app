@@ -510,6 +510,7 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
 
 // Exported for MetadataPanel: the empty-fold partition (`isRowEmpty`,
 // `isFlipped`/`isMutated` exempt a flipped/mutated row from folding even when
-// its value reads empty) and `rendersRow`'s intrinsic-flip carve-out
-// (`isFlipResolve`) all still live in the panel.
-export { isRowEmpty, isFlipped, isMutated, isFlipResolve };
+// its value reads empty), `rendersRow`'s intrinsic-flip carve-out
+// (`isFlipResolve`) and its front-matter carve-out (#2054: no index rows,
+// `isSectionIndex`/`isListIndex`) all still live in the panel.
+export { isRowEmpty, isFlipped, isMutated, isFlipResolve, isSectionIndex, isListIndex };

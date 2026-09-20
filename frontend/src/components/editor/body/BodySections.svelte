@@ -111,7 +111,7 @@
 {#each groups as group (group.group ?? group.fields[0].id)}
   {#if group.group === null}
     {@const field = group.fields[0]}
-    <section class="bs-block" data-field-section={field.id} id={`section-${field.id}`}>
+    <section class="bs-block prose-column" data-field-section={field.id} id={`section-${field.id}`}>
       <h2 class="bs-h2">{field.label} <span class="bs-caption">long text</span></h2>
       <div class="bs-body">
         {#if readOnly}
@@ -131,7 +131,7 @@
       </div>
     </section>
   {:else}
-    <div class="bs-block">
+    <div class="bs-block prose-column">
       <h2 class="bs-h2">{group.label} <span class="bs-caption">group</span></h2>
       {#each group.fields as field (field.id)}
         <section class="bs-field" data-field-section={field.id} id={`section-${field.id}`}>
@@ -167,25 +167,9 @@
 <style>
   /* Body Sections (#2009): the stack shares the prose body's centred reading
      column, so headed metadata sections read as one continuous page with the
-     prose above them — not a second, rail-styled surface. */
-  .bs-block {
-    /* The same box as `.editor-body` (styles.css): full width, capped at the
-       measure, centred, padding inside the box — so a heading's left edge
-       sits exactly on the prose's left edge. */
-    width: 100%;
-    max-width: var(--prose-measure);
-    margin-inline: auto;
-    padding: 0 56px;
-    box-sizing: border-box;
-    /* #2049: the measure is in `ch`, and `ch` resolves in the element's OWN
-       font. This block must measure in the prose font `.editor-body` measures
-       in, or its 72ch is 72 smaller UI-font zeros: the sections come out
-       narrower than the prose, and their gutter, headings, spine and ordinal
-       land ~50px right of the prose's. UI children that used to inherit the
-       pane's sans (item rows, fold line, add button) pin it back. */
-    font-family: var(--serif);
-    font-size: var(--fs-prose);
-  }
+     prose above them — not a second, rail-styled surface. The column itself
+     (measure, gutter, prose font so `ch` resolves alike, #2049) is the shared
+     `.prose-column` rule in styles.css (#2051); the block adds nothing. */
   .bs-field {
     display: block;
   }

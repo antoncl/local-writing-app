@@ -1,5 +1,6 @@
 <script lang="ts">
 
+  import { untrack } from "svelte";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
   import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
@@ -723,10 +724,15 @@
   // Persist the collapse toggle per project (#1246) — but only for shapes that
   // honour the stored preference. Chat/view force-collapse on load and the
   // fields-only pane has no rail, so neither should overwrite the preference.
+  // The store is read UNTRACKED (#2054): this effect follows THIS pane's
+  // toggle only. Tracking the store made two open panes whose rails disagree
+  // rewrite the preference in turns (effect_update_depth_exceeded, the pane
+  // went dead); the preference is the last toggle and applies on the next
+  // node load, as it always did.
   $effect(() => {
     if (!scene || railIsPane || bodyShape === "chat" || bodyShape === "view") return;
     const collapsed = !railOpen;
-    if (editorRailLayout.collapsed !== collapsed) editorRailLayout.setCollapsed(collapsed);
+    if (untrack(() => editorRailLayout.collapsed) !== collapsed) editorRailLayout.setCollapsed(collapsed);
   });
 
   // ---- Detach Details into a subordinate pane (ADR-0062 reuse, #1258) --------
@@ -740,6 +746,12 @@
   // local flag (snapping the rail back + orphaning the pane). The layout survives
   // that remount, so the husk stays and the new instance re-registers the content.
   const detailsDetached = $derived(!!detailsPaneId && workspaceLayout.isPlaced(detailsPaneId));
+  // Front matter (#2054): the rail's existing collapse gains a meaning on a
+  // prose body — its facts render at the head of the document and its trailing
+  // material as an appendix after it. Never both: the rail is collapsed to its
+  // edge tab (the way back) while the blocks show, and a detached rail keeps
+  // its pane. Other shapes keep their collapsed rail with nothing shown.
+  let frontMatterMode = $derived(!!scene && !railIsPane && !railOpen && !detailsDetached && bodyShape === "prose");
   // Offer detach only where there is a host pane AND a rail to tear out.
   let canDetachDetails = $derived(!!hostPaneId && !!scene && !!metadataSchema && !railIsPane);
 
@@ -885,10 +897,12 @@
 </script>
 
 <!-- Metadata + backlinks, rendered into either the side rail (prose/code/
-     chat) or the whole pane (none-shape). Defined once as a snippet so the
-     long prop list isn't duplicated across the two host slots. -->
-{#snippet metaContent()}
+     chat), the whole pane (none-shape), or — as front matter + appendix
+     (#2054) — the document. Defined once as a snippet so the long prop list
+     isn't duplicated across the host slots; `part` picks the slice. -->
+{#snippet metaContent(part: "rail" | "facts" | "trailing" = "rail")}
   <EditorRailContent
+    {part}
     model={{
       metadataSchema, entryType, status, metadata, documentKind, documentLabel,
       documentEntryTypes, metadataFieldIds, scene, createLayerId, overriddenFieldsForPanel,
@@ -918,6 +932,12 @@
 {#snippet detailsPaneBody(_spec: ViewSpec | undefined)}
   <div class="details-pane-scroll">{@render metaContent()}</div>
 {/snippet}
+
+<!-- The document blocks (#2054): the rail's facts above the body, its trailing
+     material after it. EditorBodyHost mounts them inside the prose frame and
+     the read-only overlay; null while the rail is open. -->
+{#snippet frontMatter()}{@render metaContent("facts")}{/snippet}
+{#snippet appendix()}{@render metaContent("trailing")}{/snippet}
 
 <!-- Register the detached pane's content while Details is torn out (#1258). A
      fresh registrar mounts on detach and tears down on reattach — same shape as
@@ -999,6 +1019,7 @@
       scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, metadata,
       metadataSchema, editorReadOnly, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
       overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, detailsDetached, chatTitleField, metaContent,
+      frontMatter: frontMatterMode ? frontMatter : null, appendix: frontMatterMode ? appendix : null,
       activeBodyTab, createLayerId,
     }}
     deps={{

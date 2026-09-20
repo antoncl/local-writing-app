@@ -19,6 +19,8 @@
     ribbonMark = "",
     tone = "mutation",
     onRunClick,
+    frontMatter = undefined,
+    appendix = undefined,
   }: {
     html: string;
     label: string;
@@ -34,6 +36,12 @@
      *  affordance (§J) — and this is a pointer gesture only, so the compare
      *  view's whole keyboard stays free for A/S/B (§I). */
     onRunClick?: (regionId: number, kind: "now" | "was") => void;
+    /** Front matter / appendix (#2054): the rail's facts and trailing material
+     *  as document blocks while the rail is collapsed — the same blocks the
+     *  live prose frame renders, so the facts stay with the document in every
+     *  lens (read-only here, like the rail would be). */
+    frontMatter?: import("svelte").Snippet;
+    appendix?: import("svelte").Snippet;
   } = $props();
 
   let contentEl: HTMLElement | undefined = $state();
@@ -78,10 +86,16 @@
       {ribbon}
     </div>
   {/if}
-  <div class="effective-body-content" bind:this={contentEl}>
+  {#if frontMatter}
+    <div class="effective-front-matter prose-column" data-testid="overlay-front-matter">{@render frontMatter()}</div>
+  {/if}
+  <div class="effective-body-content prose-column" bind:this={contentEl}>
     <!-- eslint-disable-next-line svelte/no-at-html-tags — sceneMarkdownToHtml output, same trust level as the editor load path -->
     {@html html}
   </div>
+  {#if appendix}
+    <div class="effective-appendix prose-column" data-testid="overlay-appendix">{@render appendix()}</div>
+  {/if}
 </div>
 
 <style>
@@ -106,15 +120,19 @@
     background: color-mix(in srgb, var(--overlay-tone) 10%, transparent);
     border-bottom: 1px solid color-mix(in srgb, var(--overlay-tone) 30%, transparent);
   }
+  /* The column (measure, gutter, font) is the live editor's own `.prose-column`
+     rule (#2051), so scrubbing / parking a snapshot never jumps the column
+     width, position or type size (#1246). */
   .effective-body-content {
-    padding: 12px 24px 24px;
-    /* Same centered measure as the live editor (#1246) so scrubbing / parking a
-       snapshot never jumps the column width or position. */
-    max-width: var(--prose-measure);
-    margin-inline: auto;
-    font-size: var(--fs-lg);
+    padding-block: 12px 24px;
     line-height: 1.65;
     color: var(--text);
+  }
+  .effective-front-matter {
+    padding-top: 4px;
+  }
+  .effective-appendix {
+    padding-bottom: 24px;
   }
   /* Mirror the editor's prose-presentation prefs (#127 / #575) so the scrub /
      snapshot overlay never diverges from the live surface. Scoped to direct

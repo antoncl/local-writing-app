@@ -3,14 +3,44 @@
 // that must DISPLAY its beat roster, so — like PlotCardNode — a mount test asserts the
 // content renders ([[reference_component_test_harness]]). The node imports nothing from
 // @xyflow/svelte, so it mounts here on its own (the SvelteFlow canvas is not headless).
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import { waitFor } from "@testing-library/svelte";
+import { metadataSchemaStore } from "@/lib/stores/schema";
 import PlotPlotlineNode from "./PlotPlotlineNode.svelte";
 import type { PlotPlotlineData } from "@/lib/plot/plotBoardLayout";
 import { PLOT_PLOTLINE_ACTIONS, type PlotPlotlineActions } from "./plotPlotlineActions";
 import { PLOT_DND_MIME } from "@/lib/plot/plotDnd";
-import type { PlotlineEntry } from "@/lib/types";
+import type { MetadataSchema, PlotlineEntry } from "@/lib/types";
+
+// PlotBeatSections/BodyListSection (#2043 slice 3) now render the beats; TipTap never
+// mounts under happy-dom (#642), so MetadataLongTextEditor is swapped for the stub.
+vi.mock("@/components/widgets/MetadataLongTextEditor.svelte", async () => {
+  const stub = await import("@/components/editor/body/BodySections.mockLongText.svelte");
+  return { default: stub.default };
+});
+
+const SCHEMA = {
+  version: 1,
+  entry_types: {
+    "plot:plotline": { name: "Plotline", kind: "plot", fields: ["instance_beats"] },
+  },
+  fields: {
+    instance_beats: {
+      name: "Specialized beats",
+      type: "list",
+      options: [],
+      item_members: [
+        { key: "title", name: "Title", type: "text" },
+        { key: "function", name: "Function", type: "long_text" },
+        { key: "guidance", name: "Guidance", type: "long_text" },
+        { key: "specifics", name: "Specifics", type: "long_text" },
+        { key: "required", name: "Required", type: "boolean" },
+        { key: "id", name: "Id", type: "text" },
+      ],
+    },
+  },
+} as unknown as MetadataSchema;
 
 const data = (over: Partial<PlotPlotlineData> = {}): PlotPlotlineData => ({
   title: "Main plot",
@@ -73,6 +103,8 @@ function fakeActions(over: Partial<PlotPlotlineActions> = {}) {
   };
 }
 
+beforeEach(() => metadataSchemaStore.set(SCHEMA));
+
 describe("PlotPlotlineNode", () => {
   it("renders the plotline title and its whole beat roster in order", () => {
     render(PlotPlotlineNode, { props: { data: data() } });
@@ -108,9 +140,9 @@ describe("PlotPlotlineNode", () => {
 
   it("stays read-only with no actions context (the S2a / mount-test degrade)", () => {
     render(PlotPlotlineNode, { props: { data: data() } });
-    // No editor: the roster shows as text, not inputs, and there's no Add-beat control.
+    // No editor: the roster shows as text, not inputs, and there's no Add-item control.
     expect(screen.queryByPlaceholderText("Plotline name")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Add beat" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add item/ })).toBeNull();
   });
 });
 
@@ -195,12 +227,11 @@ describe("PlotPlotlineNode on-node editing (ADR-0053 §3)", () => {
 
   it("expands into an editor that loads the plotline's name and beats", async () => {
     fakeActions().mount();
-    // The name loads from the full entry, and each beat is an editable title input.
+    // The name loads from the full entry, and each beat is the section's title input.
     const name = await screen.findByPlaceholderText("Plotline name");
     expect((name as HTMLInputElement).value).toBe("Main plot");
-    const beatInputs = screen.getAllByPlaceholderText("Beat title") as HTMLInputElement[];
+    const beatInputs = screen.getAllByRole("textbox", { name: /Specialized beats \d+ title/ }) as HTMLInputElement[];
     expect(beatInputs.map((i) => i.value)).toEqual(["Setup", "Confrontation"]);
-    expect(screen.getByRole("button", { name: "Add beat" })).toBeTruthy();
   });
 
   it("renaming the plotline saves the edited entry", async () => {
@@ -215,10 +246,31 @@ describe("PlotPlotlineNode on-node editing (ADR-0053 §3)", () => {
   it("adding a beat saves a roster with the new beat appended", async () => {
     const { saved } = fakeActions().mount();
     await screen.findByPlaceholderText("Plotline name");
-    await fireEvent.click(screen.getByRole("button", { name: "Add beat" }));
-    await waitFor(() => expect(saved.length).toBe(1));
-    const beats = saved[0].metadata.instance_beats as Array<{ title: string }>;
-    expect(beats.map((b) => b.title)).toEqual(["Setup", "Confrontation", "New beat"]);
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add item" }));
+    // The section save is debounced (SECTION_SAVE_DEBOUNCE_MS).
+    await waitFor(() => expect(saved.length).toBe(1), { timeout: 2000 });
+    const beats = saved[0].metadata.instance_beats as Array<Record<string, unknown>>;
+    expect(beats).toHaveLength(3);
+    expect(beats[0].title).toBe("Setup");
+    expect(beats[1].title).toBe("Confrontation");
+    expect(beats[2]).toEqual({});
+  });
+
+  it("a beat title edit saves the roster with the new title and the beat's other members intact", async () => {
+    const { saved } = fakeActions().mount();
+    await screen.findByPlaceholderText("Plotline name");
+    const input = screen.getByRole("textbox", { name: "Specialized beats 1 title" }) as HTMLInputElement;
+    await fireEvent.change(input, { target: { value: "Renamed setup" } });
+    await waitFor(() => expect(saved.length).toBe(1), { timeout: 2000 });
+    const beats = saved[0].metadata.instance_beats as Array<Record<string, unknown>>;
+    expect(beats[0]).toEqual({
+      title: "Renamed setup",
+      function: "",
+      guidance: "",
+      specifics: "",
+      required: true,
+      id: "b1",
+    });
   });
 
   it("emptying the name reverts instead of saving an invalid empty title", async () => {
@@ -255,9 +307,8 @@ describe("PlotPlotlineNode on-node editing (ADR-0053 §3)", () => {
   it("removing a beat saves the shortened roster", async () => {
     const { saved } = fakeActions().mount();
     await screen.findByPlaceholderText("Plotline name");
-    const removeButtons = screen.getAllByRole("button", { name: "Remove beat" });
-    await fireEvent.click(removeButtons[0]);
-    await waitFor(() => expect(saved.length).toBe(1));
+    await fireEvent.click(screen.getByRole("button", { name: "Remove item 1" }));
+    await waitFor(() => expect(saved.length).toBe(1), { timeout: 2000 });
     const beats = saved[0].metadata.instance_beats as Array<{ title: string }>;
     expect(beats.map((b) => b.title)).toEqual(["Confrontation"]);
   });

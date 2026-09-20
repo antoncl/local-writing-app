@@ -12,11 +12,11 @@
   // material too — it renders AFTER the long_text sections above, one
   // BodyListSection per field, one sub-section per item.
   import { untrack } from "svelte";
-  import type { Editor } from "@tiptap/core";
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import FieldValue from "@/components/widgets/FieldValue.svelte";
   import BodyListSection from "@/components/editor/body/BodyListSection.svelte";
-  import { buildBodySections, buildBodyListSections, listItemEditorId } from "@/lib/editor-core/bodySections";
+  import { buildBodySections, buildBodyListSections, listItemEditorId, listItemsOf } from "@/lib/editor-core/bodySections";
+  import { createSectionEditorRoster } from "@/lib/editor-core/sectionEditorRoster.svelte";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
   import type {
@@ -79,10 +79,7 @@
 
   const groups = $derived(buildBodySections(schema, entryType));
   const listSections = $derived(buildBodyListSections(schema, entryType));
-  function listItems(listId: string): MetadataValue[] {
-    const value = metadata[listId];
-    return Array.isArray(value) ? (value as MetadataValue[]) : [];
-  }
+  const listItems = (listId: string) => listItemsOf(metadata, listId);
   // Registry indices run in document order across every section (1-based —
   // index 0 is the free body), a flat lookup over the schema-ordered groups
   // followed by every list item's own prose members.
@@ -92,46 +89,15 @@
       listItems(list.id).flatMap((_, index) => list.proseMembers.map((member) => listItemEditorId(list.id, index, member.key))),
     ),
   ]);
-  function sectionIndex(fieldId: string): number {
-    return orderedIds.indexOf(fieldId) + 1;
-  }
+  // `register` is a prop (never reassigned across the life of this component — the host
+  // creates it once), so `untrack` here just documents that this reads its INITIAL value
+  // rather than tracking it reactively (`state_referenced_locally`); the roster keeps
+  // calling into the same registry instance either way.
+  const roster = createSectionEditorRoster(untrack(() => register), () => orderedIds);
 
   function writeField(fieldId: string, value: string) {
     onMetadataChange({ ...metadata, [fieldId]: value });
   }
-
-  // "ready" registers by index/fieldId; "destroy" unregisters by the editor's
-  // own IDENTITY (never by index/fieldId) — a fast remount can register the
-  // NEW instance at the same slot before the OLD one's cleanup runs, and an
-  // index-keyed delete there would evict the live registration (#2009 follow-up).
-  const mounted = new Map<string, Editor>();
-  function handleEditorReady(fieldId: string, editor: Editor, phase: "ready" | "destroy") {
-    if (phase === "ready") {
-      mounted.set(fieldId, editor);
-      register.register(sectionIndex(fieldId), fieldId, editor);
-    } else {
-      mounted.delete(fieldId);
-      register.unregister(editor);
-    }
-  }
-  // A section's document index is not fixed for the life of its editor: a
-  // schema edit while the node is open (a long_text field added, reordered
-  // or hidden) reshuffles `orderedIds`, so every mounted editor re-registers
-  // under its current index — otherwise the bridge would still walk the
-  // order the sections had when they mounted.
-  // Keyed on the ORDER as a string, not the array: `orderedIds` now reads the
-  // list items (#2043), so it is a fresh array on every metadata write — every
-  // keystroke in any section — while the order itself rarely changes.
-  const orderedKey = $derived(orderedIds.join("|"));
-  $effect(() => {
-    void orderedKey;
-    untrack(() => {
-      for (const [fieldId, editor] of mounted) {
-        register.unregister(editor);
-        register.register(sectionIndex(fieldId), fieldId, editor);
-      }
-    });
-  });
 
   // MetadataLongTextEditor's `value` is a plain string; `metadata[id]` is the
   // wider `MetadataValue` (a long_text field only ever stores a string or is
@@ -158,8 +124,8 @@
             value={stringValue(field.id)}
             matcher={implicitContextMatcher}
             onChange={(v) => writeField(field.id, v)}
-            onEditorReady={(editor, phase) => handleEditorReady(field.id, editor, phase)}
-            neighbours={() => register.neighboursFor(sectionIndex(field.id))}
+            onEditorReady={(editor, phase) => roster.editorReady(field.id, editor, phase)}
+            neighbours={() => register.neighboursFor(roster.sectionIndex(field.id))}
           />
         {/if}
       </div>
@@ -179,8 +145,8 @@
                 value={stringValue(field.id)}
                 matcher={implicitContextMatcher}
                 onChange={(v) => writeField(field.id, v)}
-                onEditorReady={(editor, phase) => handleEditorReady(field.id, editor, phase)}
-                neighbours={() => register.neighboursFor(sectionIndex(field.id))}
+                onEditorReady={(editor, phase) => roster.editorReady(field.id, editor, phase)}
+                neighbours={() => register.neighboursFor(roster.sectionIndex(field.id))}
               />
             {/if}
           </div>
@@ -193,8 +159,8 @@
 {#each listSections as list (list.id)}
   <BodyListSection
     model={{ section: list, items: listItems(list.id), readOnly, schema: schema!, entryType, documentKind }}
-    deps={{ register, sectionIndex, implicitContextMatcher, loreEntries, promptEntries, structure, researchStructure, excludeId, createLayerId, tagTitleById }}
-    on={{ change: (items) => onMetadataChange({ ...metadata, [list.id]: items }), editorReady: handleEditorReady, navigate: onNavigate }}
+    deps={{ register, sectionIndex: roster.sectionIndex, implicitContextMatcher, loreEntries, promptEntries, structure, researchStructure, excludeId, createLayerId, tagTitleById }}
+    on={{ change: (items) => onMetadataChange({ ...metadata, [list.id]: items }), editorReady: roster.editorReady, navigate: onNavigate }}
   />
 {/each}
 

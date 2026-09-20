@@ -9,7 +9,7 @@
 // even with a single member field (#2009 decided) — unlike the rail's own
 // section model, which only heads a block once there is more than one.
 import { effectiveFieldHidden, effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
-import type { MetadataFieldDefinition, MetadataSchema } from "@/lib/types";
+import type { MetadataFieldDefinition, MetadataSchema, MetadataValue } from "@/lib/types";
 import type { GroupMember } from "@/lib/schemaTypes";
 
 export type BodySectionField = { id: string; label: string };
@@ -107,4 +107,12 @@ export function buildBodyListSections(
  *  document, stable while the item keeps its index. */
 export function listItemEditorId(listId: string, index: number, memberKey: string): string {
   return `${listId}[${index}].${memberKey}`;
+}
+
+/** The items of a list field's value: the stored array, or none when the value is
+ *  absent or not an array. The one reading shared by every host of a list section
+ *  (BodySections, the plot board's PlotBeatSections). */
+export function listItemsOf(metadata: Record<string, MetadataValue>, listId: string): MetadataValue[] {
+  const value = metadata[listId];
+  return Array.isArray(value) ? (value as MetadataValue[]) : [];
 }

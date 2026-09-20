@@ -34,6 +34,9 @@
     schema: MetadataSchema;
     entryType: string;
     documentKind: DocumentKind;
+    /** "compact" (#2043 slice 3): the plot board hosts the same section inside a
+     *  node, at node scale — smaller heading type, no outer gutter/measure. */
+    density?: "prose" | "compact";
   }
   interface Deps {
     register: SectionRegistry;
@@ -174,7 +177,17 @@
   }
 </script>
 
-<section class="bs-block bs-list" id={`section-${model.section.id}`} data-field-section={model.section.id} bind:this={rootEl}>
+<section
+  class="bs-block bs-list"
+  class:compact={model.density === "compact"}
+  id={model.density === "compact" ? undefined : `section-${model.section.id}`}
+  data-field-section={model.section.id}
+  bind:this={rootEl}
+>
+  <!-- The `id={`section-…`}` anchor is the editor document's Go-to target
+       (RailFieldRow's "Go to …" jump / the arrow-bridge focus). A board node
+       (compact density) hosts the SAME section as the NodeEditor body, so it
+       must not shadow that anchor with a second element carrying the same id. -->
   <h2 class="bs-h2">
     {model.section.label}
     <span class="bs-caption">list · {n} {n === 1 ? "item" : "items"}</span>
@@ -400,5 +413,30 @@
   }
   .bs-add-item:hover {
     color: var(--text-2);
+  }
+
+  /* Compact density (#2043 slice 3): a board node hosts this same section at
+     node scale — no outer gutter/measure, smaller heading type. */
+  .bs-block.compact {
+    padding: 0;
+    max-width: none;
+    margin: 0;
+  }
+  .bs-block.compact .bs-h2 {
+    margin: var(--sp-2) 0 var(--sp-1);
+    padding-top: var(--sp-2);
+    font-size: var(--fs-md);
+  }
+  .bs-block.compact .bs-h3 {
+    margin: var(--sp-2) 0 0;
+    font-size: var(--fs-sm);
+  }
+  .bs-block.compact .bs-add,
+  .bs-block.compact .bs-add-item {
+    font-size: var(--fs-sm);
+  }
+  .bs-block.compact :global(.metadata-long-text-body) {
+    font-size: var(--fs-sm);
+    min-height: calc(1.65 * var(--fs-sm));
   }
 </style>

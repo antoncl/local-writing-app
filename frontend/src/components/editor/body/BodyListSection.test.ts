@@ -45,13 +45,13 @@ const ITEMS: MetadataValue[] = [
   { title: "Refusal" },
 ];
 
-function mount(items: MetadataValue[] = ITEMS, readOnly = false) {
+function mount(items: MetadataValue[] = ITEMS, readOnly = false, density?: "prose" | "compact") {
   const onChange = vi.fn();
   const onEditorReady = vi.fn();
   const onNavigate = vi.fn();
   const { container } = render(BodyListSection, {
     props: {
-      model: { section: SECTION, items, readOnly, schema: SCHEMA, entryType: "plot:plotline", documentKind: "plotline" },
+      model: { section: SECTION, items, readOnly, schema: SCHEMA, entryType: "plot:plotline", documentKind: "plotline", density },
       deps: {
         register: { register: () => {}, unregister: () => {}, neighboursFor: () => ({ prev: null, next: null }) },
         sectionIndex: () => 0,
@@ -152,5 +152,19 @@ describe("BodyListSection", () => {
     expect(container.querySelector(".bs-add-item")).toBeNull();
     expect(container.querySelector(".bs-remove")).toBeNull();
     expect(container.querySelectorAll(".fv-static-longtext")).toHaveLength(4);
+  });
+
+  it("compact density sets the class and renders no id on the root (#2043 slice 3)", () => {
+    const { container } = mount(ITEMS, false, "compact");
+    const root = container.querySelector(".bs-block")!;
+    expect(root.classList.contains("compact")).toBe(true);
+    expect(root.id).toBe("");
+  });
+
+  it("default (prose) density keeps the section-{id} anchor", () => {
+    const { container } = mount();
+    const root = container.querySelector(".bs-block")!;
+    expect(root.classList.contains("compact")).toBe(false);
+    expect(root.id).toBe("section-beats");
   });
 });

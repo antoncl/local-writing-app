@@ -5,14 +5,47 @@
 // list-rendering pane — a mount test asserts the content renders
 // ([[reference_component_test_harness]]). The node imports nothing from @xyflow/svelte,
 // so it mounts here on its own (the SvelteFlow canvas is not headless).
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import { waitFor } from "@testing-library/svelte";
+import { metadataSchemaStore } from "@/lib/stores/schema";
 import PlotArcNode from "./PlotArcNode.svelte";
 import type { PlotArcData } from "@/lib/plot/plotBoardLayout";
 import { PLOT_ARC_ACTIONS, type PlotArcActions } from "./plotArcActions";
 import { PLOT_DND_MIME } from "@/lib/plot/plotDnd";
-import type { CharacterArcEntry } from "@/lib/types";
+import type { CharacterArcEntry, MetadataSchema, MetadataValue } from "@/lib/types";
+
+// PlotBeatSections/BodyListSection (#2043 slice 3) now render the beats; TipTap never
+// mounts under happy-dom (#642), so MetadataLongTextEditor is swapped for the stub.
+vi.mock("@/components/widgets/MetadataLongTextEditor.svelte", async () => {
+  const stub = await import("@/components/editor/body/BodySections.mockLongText.svelte");
+  return { default: stub.default };
+});
+
+const SCHEMA = {
+  version: 1,
+  entry_types: {
+    "plot:plotline": { name: "Plotline", kind: "plot", fields: ["instance_beats"] },
+    "plot:character_arc": { name: "Character arc", kind: "plot", fields: ["instance_beats"] },
+  },
+  fields: {
+    instance_beats: {
+      name: "Specialized beats",
+      type: "list",
+      options: [],
+      item_members: [
+        { key: "title", name: "Title", type: "text" },
+        { key: "function", name: "Function", type: "long_text" },
+        { key: "guidance", name: "Guidance", type: "long_text" },
+        { key: "specifics", name: "Specifics", type: "long_text" },
+        { key: "required", name: "Required", type: "boolean" },
+        { key: "id", name: "Id", type: "text" },
+      ],
+    },
+  },
+} as unknown as MetadataSchema;
+
+beforeEach(() => metadataSchemaStore.set(SCHEMA));
 
 const data = (over: Partial<PlotArcData> = {}): PlotArcData => ({
   title: "Elena's redemption",
@@ -114,7 +147,7 @@ describe("PlotArcNode", () => {
   it("stays read-only with no actions context (the mount-test degrade) — does not throw", () => {
     expect(() => render(PlotArcNode, { props: { data: data() } })).not.toThrow();
     expect(screen.queryByPlaceholderText("Arc name")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Add beat" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add item/ })).toBeNull();
   });
 });
 
@@ -153,7 +186,7 @@ describe("PlotArcNode on-node editing (ADR-0080 §5)", () => {
     fakeActions().mount();
     const name = await screen.findByPlaceholderText("Arc name");
     expect((name as HTMLInputElement).value).toBe("Elena's redemption");
-    const beatInputs = screen.getAllByPlaceholderText("Beat title") as HTMLInputElement[];
+    const beatInputs = screen.getAllByRole("textbox", { name: /Specialized beats \d+ title/ }) as HTMLInputElement[];
     expect(beatInputs.map((i) => i.value)).toEqual(["Denial", "Acceptance"]);
   });
 
@@ -169,10 +202,56 @@ describe("PlotArcNode on-node editing (ADR-0080 §5)", () => {
   it("adding a beat saves a roster with the new beat appended", async () => {
     const { saved } = fakeActions().mount();
     await screen.findByPlaceholderText("Arc name");
-    await fireEvent.click(screen.getByRole("button", { name: "Add beat" }));
-    await waitFor(() => expect(saved.length).toBe(1));
-    const beats = saved[0].metadata.instance_beats as Array<{ title: string }>;
-    expect(beats.map((b) => b.title)).toEqual(["Denial", "Acceptance", "New beat"]);
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add item" }));
+    // The section save is debounced (SECTION_SAVE_DEBOUNCE_MS).
+    await waitFor(() => expect(saved.length).toBe(1), { timeout: 2000 });
+    const beats = saved[0].metadata.instance_beats as Array<Record<string, unknown>>;
+    expect(beats).toHaveLength(3);
+    expect(beats[0].title).toBe("Denial");
+    expect(beats[1].title).toBe("Acceptance");
+    expect(beats[2]).toEqual({});
+  });
+
+  it("a beat title edit saves the roster with the new title and the beat's other members intact", async () => {
+    const { saved } = fakeActions().mount();
+    await screen.findByPlaceholderText("Arc name");
+    const input = screen.getByRole("textbox", { name: "Specialized beats 1 title" }) as HTMLInputElement;
+    await fireEvent.change(input, { target: { value: "Renamed denial" } });
+    await waitFor(() => expect(saved.length).toBe(1), { timeout: 2000 });
+    const beats = saved[0].metadata.instance_beats as Array<Record<string, unknown>>;
+    expect(beats[0]).toEqual({
+      title: "Renamed denial",
+      function: "",
+      guidance: "",
+      specifics: "",
+      required: true,
+      id: "b1",
+    });
+  });
+
+  it("stamps the backend-minted id of a new beat onto the draft, so the next save carries it", async () => {
+    // The fake save mints an id for any beat without one (what the backend does).
+    const flushed: Array<{ revision: string; metadata: Record<string, unknown> }> = [];
+    fakeActions({
+      save: async (e) => {
+        flushed.push(e);
+        const beats = (e.metadata.instance_beats as Array<Record<string, MetadataValue>>).map((b, i) =>
+          typeof b.id === "string" && b.id ? b : { ...b, id: `minted_${i}` },
+        );
+        return { ...e, revision: `r${flushed.length + 1}`, metadata: { ...e.metadata, instance_beats: beats } };
+      },
+    }).mount();
+    await screen.findByPlaceholderText("Arc name");
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add item" }));
+    await waitFor(() => expect(flushed.length).toBe(1), { timeout: 2000 });
+    expect((flushed[0].metadata.instance_beats as unknown[])[2]).toEqual({});
+    // A later edit to that beat sends the stamped id back, not a blank the backend would
+    // re-mint, over the revision the first save advanced to.
+    const input = screen.getByRole("textbox", { name: "Specialized beats 3 title" });
+    await fireEvent.change(input, { target: { value: "Payoff" } });
+    await waitFor(() => expect(flushed.length).toBe(2), { timeout: 2000 });
+    expect((flushed[1].metadata.instance_beats as unknown[])[2]).toEqual({ title: "Payoff", id: "minted_2" });
+    expect(flushed[1].revision).toBe("r2");
   });
 
   it("the expanded editor offers Delete character arc, which calls onDelete", async () => {

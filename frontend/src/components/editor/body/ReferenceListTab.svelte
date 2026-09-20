@@ -263,7 +263,7 @@
 </script>
 
 <div class="ref-list-tab" role="tabpanel" id={`body-tabpanel-${model.fieldId}`} aria-label={model.fieldLabel}>
-  <div class="ref-list-head">
+  <div class="ref-list-head prose-column">
     <span class="ref-list-label"
       >{model.fieldLabel}{#if model.ids.length > 0}<span class="ref-list-count">{model.ids.length}</span>{/if}</span
     >
@@ -292,7 +292,7 @@
       {/if}
     </span>
   </div>
-  <div class="ref-list-body" bind:this={refListBody}>
+  <div class="ref-list-body prose-column" bind:this={refListBody}>
     <ViewNodeList
       view={{
         spec: viewSpec,
@@ -374,17 +374,21 @@
     display: contents;
   }
 
-  /* Shares the prose measure, matching the body's own reading column. */
+  /* The head and the body sit on the prose column (`.prose-column`, #2051 /
+     #2056): the same measure, gutter and — for the `ch` to resolve alike —
+     prose font as the body's own reading column. The tab's content is UI
+     (a caps label, controls, list rows), so the children pin the UI family
+     back; their sizes are their own tokens. */
   .ref-list-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    max-width: var(--prose-measure);
-    margin-inline: auto;
-    width: 100%;
-    box-sizing: border-box;
-    padding: 18px 56px 10px;
+    padding-block: 18px 10px;
+  }
+  .ref-list-head > :global(*),
+  .ref-list-body > :global(*) {
+    font-family: var(--sans);
   }
 
   /* The one caps-label recipe (design-language.md §2). */
@@ -431,11 +435,6 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
-    max-width: var(--prose-measure);
-    margin-inline: auto;
-    padding: 0 56px;
-    box-sizing: border-box;
-    width: 100%;
   }
 
   /* Matches the backlinks-pill / ReferencePicker recipe so every ref-type

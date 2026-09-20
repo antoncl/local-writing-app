@@ -2,8 +2,7 @@
   // Shared row model + field-scoping logic for the two mutation dialogs
   // (/mutate authoring + the set editor). One row = one (field, op, value)
   // change; the same shape a saved set stores and a marker carries.
-  import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
-  import type { KeyedListShape } from "@/lib/editor-core/mutationListEdit";
+  import { keyedListKeyMember, keyedShapeFor } from "@/lib/editor-core/keyedList";
   import type { MetadataFieldDefinition, MetadataSchema, MetadataValue } from "@/lib/types";
 
   export type MutationRow = {
@@ -115,16 +114,11 @@
     return { ...def, type: "select" };
   }
 
-  // A reference-keyed list's shape (ADR-0089 §5), read off the resolver-stamped
-  // `item_members`: the key member (empty string when the field isn't one —
-  // callers only reach here for an item row, where it always resolves) and
-  // every member's declared type, for `keyedListRowsFromEdit`'s member diff.
-  // Shared by the dialogs' chip/lock wiring and the authoring form's seeding.
-  export function keyedShapeFor(def: MetadataFieldDefinition): KeyedListShape {
-    const memberTypes: Record<string, string> = {};
-    for (const member of def.item_members ?? []) memberTypes[member.key] = member.type;
-    return { keyMember: keyedListKeyMember(def) ?? "", memberTypes };
-  }
+  // `keyedShapeFor` now lives in `@/lib/editor-core/keyedList` (a lib module
+  // must not import a component's module script, and mutationStopEdit.ts
+  // needs it too) — re-exported here so MutationAuthoringForm's existing
+  // import off this module script keeps working unchanged.
+  export { keyedShapeFor };
 </script>
 
 <script lang="ts">

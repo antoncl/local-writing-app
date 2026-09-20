@@ -20,6 +20,8 @@ from app.main import app
 from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
+    MutationUnitRow,
+    RewriteMutationUnitRequest,
     UpdateMutationRequest,
     UpsertMetadataFieldRequest,
 )
@@ -336,6 +338,98 @@ class CarrierValidationTests(MutationUnitTestBase):
         joined = " ".join(report.warnings)
         self.assertIn("op remove is only valid on collection fields", joined)
         self.assertNotIn("r2", joined)
+
+
+class UnitRewriteTests(MutationUnitTestBase):
+    """ADR-0089 S5 / ADR-0042 §5: the lore card scrubbed to a stop edits that
+    stop's unit — the whole unit's rows are replaced through one call, ids kept
+    when the unit held them, minted otherwise; the head and its name survive."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._save_body(f"Honor rose. {self._carrier()} The fleet cheered.")
+
+    def _row(self, field: str, value: str, row_id: str = "", op: str = "replace") -> MutationUnitRow:
+        return MutationUnitRow(field=field, op=op, value=value, id=row_id)
+
+    def test_rows_are_replaced_wholesale_keeping_the_head_and_known_ids(self) -> None:
+        self.service.rewrite_mutation_unit(
+            self.scene_id, "u1",
+            RewriteMutationUnitRequest(rows=[self._row("rank", "Commodore", "r1"), self._row("rank.x.y", "z")]),
+        )
+        markers = self._scan()
+        self.assertEqual(markers["r1"].value, "Commodore")
+        self.assertNotIn("r2", markers)  # the dropped row is gone
+        added = next(m for m in markers.values() if m.field == "rank.x.y")
+        self.assertTrue(added.marker_id.startswith("mut_"))  # a blank id is minted
+        self.assertEqual({m.unit_id for m in markers.values()}, {"u1"})
+        self.assertEqual({m.unit_name for m in markers.values()}, {"Promotion"})
+        self.assertIn(f"<!-- mutate:entity={self.honor};name=Promotion;id=u1\n", self._body())
+        self.assertIn("The fleet cheered.", self._body())
+
+    def test_a_foreign_id_is_not_adopted(self) -> None:
+        # A row id the unit never held is minted fresh, so a rewrite can never
+        # collide with a record elsewhere in the manuscript.
+        self.service.rewrite_mutation_unit(
+            self.scene_id, "u1", RewriteMutationUnitRequest(rows=[self._row("rank", "Admiral", "stolen")])
+        )
+        self.assertNotIn("stolen", self._scan())
+
+    def test_one_row_degenerates_to_a_single_line_marker_with_the_row_id(self) -> None:
+        self.service.rewrite_mutation_unit(
+            self.scene_id, "u1", RewriteMutationUnitRequest(rows=[self._row("rank", "Admiral", "r1")])
+        )
+        markers = self._scan()
+        self.assertEqual(list(markers), ["r1"])
+        self.assertEqual(markers["r1"].unit_id, "r1")
+        self.assertIn(f"<!-- mutate:entity={self.honor};field=rank;value=Admiral;name=Promotion;id=r1 -->", self._body())
+
+    def test_no_rows_removes_the_unit(self) -> None:
+        self.service.rewrite_mutation_unit(self.scene_id, "u1", RewriteMutationUnitRequest(rows=[]))
+        self.assertEqual(self._scan(), {})
+        self.assertIn("Honor rose.  The fleet cheered.", self._body())
+
+    def test_a_single_line_unit_grows_into_a_carrier_keeping_its_id_on_the_head(self) -> None:
+        self._save_body(f"Alone. <!-- mutate:entity={self.honor};field=rank;value=Captain;id=s1 --> After.")
+        self.service.rewrite_mutation_unit(
+            self.scene_id, "s1",
+            RewriteMutationUnitRequest(rows=[self._row("rank", "Captain", "s1"), self._row("title", "Dame")]),
+        )
+        markers = self._scan()
+        self.assertEqual({m.unit_id for m in markers.values()}, {"s1"})
+        self.assertNotIn("s1", markers)  # the original row was re-minted: no two markers share an id
+        self.assertEqual({m.field for m in markers.values()}, {"rank", "title"})
+        self.assertIn(f"<!-- mutate:entity={self.honor};id=s1\n", self._body())
+
+    def test_a_single_line_unit_edited_in_place_keeps_its_id(self) -> None:
+        self._save_body(f"Alone. <!-- mutate:entity={self.honor};field=rank;value=Captain;id=s1 --> After.")
+        self.service.rewrite_mutation_unit(
+            self.scene_id, "s1", RewriteMutationUnitRequest(rows=[self._row("rank", "Admiral", "s1")])
+        )
+        self.assertEqual(list(self._scan()), ["s1"])
+        self.assertEqual(self._scan()["s1"].value, "Admiral")
+
+    def test_a_name_on_the_request_renames_the_head(self) -> None:
+        self.service.rewrite_mutation_unit(
+            self.scene_id, "u1",
+            RewriteMutationUnitRequest(rows=[self._row("rank", "Captain", "r1"), self._row("title", "Lady Dame", "r2")], name="Coronation"),
+        )
+        self.assertEqual({m.unit_name for m in self._scan().values()}, {"Coronation"})
+
+    def test_unknown_unit_is_404(self) -> None:
+        with self.assertRaises(Exception) as ctx:
+            self.service.rewrite_mutation_unit(self.scene_id, "nope", RewriteMutationUnitRequest(rows=[]))
+        self.assertEqual(getattr(ctx.exception, "status_code", None), 404)
+
+    def test_the_route_rewrites_and_returns_the_scene(self) -> None:
+        response = self.client.put(
+            f"/api/scenes/{self.scene_id}/mutations/units/u1",
+            json={"rows": [{"field": "rank", "op": "replace", "value": "Admiral", "id": "r1"}]},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("value=Admiral", response.json()["body"])
+        missing = self.client.put(f"/api/scenes/{self.scene_id}/mutations/units/nope", json={"rows": []})
+        self.assertEqual(missing.status_code, 404)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@
   import EditorHeader from "@/components/editor/EditorHeader.svelte";
   import EditorRailContent from "@/components/editor/EditorRailContent.svelte";
   import { createSectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
+  import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
   import { characterCostRows, rollupCostFor } from "@/lib/editor-core/characterCost";
@@ -878,6 +879,21 @@
   let hasBody = $derived(bodyShape !== "none");
   // Shared by the rail and Body Sections (#2009) — one node, one read-only verdict.
   let editorReadOnly = $derived(scrubbed || snapshotParked || reviewing || (inheritedReadOnly && documentKind !== "prompt"));
+  // #2074 (ADR-0042 §5): the scrub stop's own unit — the stop IS the unit, so
+  // editing the lore card at a stop edits this. Threaded into EditorBodyHost's
+  // model; `null` off the lore axis or at base (stop 0, editable already).
+  let stopUnit = $derived(scrubbed ? (scrub.units[scrub.index - 1] ?? null) : null);
+  // The foot dock's caption reads "editing this stop" when the OPEN list tab
+  // is a reference-keyed list AND this stop's unit touches the open node —
+  // the same predicate EditorBodyHost's list-tab block applies to its own
+  // readOnly/change routing (no shared model between the two renderers).
+  let stopListFieldId = $derived(activeBodyTab.startsWith("list:") ? activeBodyTab.slice(5) : null);
+  let stopEditable = $derived(
+    scrubbed &&
+      stopListFieldId !== null &&
+      keyedListKeyMember(metadataSchema?.fields[stopListFieldId]) !== null &&
+      (stopUnit?.records.some((r) => r.entity_id === scene?.id) ?? false),
+  );
   $effect.pre(() => {
     if (titleReload && titleReload.token !== lastTitleReloadToken) {
       lastTitleReloadToken = titleReload.token;
@@ -1022,6 +1038,7 @@
       scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, metadata,
       metadataSchema, editorReadOnly, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
       overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, detailsDetached, chatTitleField, metaContent,
+      stopUnit,
       frontMatter: frontMatterMode ? frontMatter : undefined, appendix: frontMatterMode ? appendix : undefined,
       activeBodyTab, createLayerId,
     }}
@@ -1055,7 +1072,7 @@
        exactly ADR-0044's snapshot strip with no mode control. Gated on a prose
        body: the read-only compare overlay is prose. -->
   {#if (documentKind === "manuscript" || documentKind === "lore") && scene && bodyShape === "prose"}
-    <FootDock {snapshots} {scrub} {documentKind} writesLabel={snapshotWritesLabel} />
+    <FootDock {snapshots} {scrub} {documentKind} writesLabel={snapshotWritesLabel} {stopEditable} />
   {/if}
 
   <footer class="status">

@@ -5,10 +5,12 @@
 // read), so the seam must report "no body" as `undefined`, never "": coalescing
 // here would silently capture an empty body for those kinds. The none shape
 // is the one branch that mounts without TipTap, so it is the one under test.
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@/lib/test/component";
 import EditorBodyHost from "./EditorBodyHost.svelte";
-import type { MetadataSchema } from "@/lib/types";
+import { api } from "@/lib/api";
+import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
 
 type Seams = {
   getBody(): string | undefined;
@@ -143,5 +145,100 @@ describe("EditorBodyHost — none shape + a list tab (#2010)", () => {
     expect(remove).not.toBeNull();
     await fireEvent.click(remove!);
     expect(metadataChange).toHaveBeenCalledWith({ kin: ["lore_1"], color: "amber" });
+  });
+});
+
+// #2074 (ADR-0042 §5): a reference-keyed list tab is editable AT A SCRUB STOP
+// whose own unit touches the open node — the change routes through the
+// injected scrub-stop rewrite, never the ordinary whole-field metadataChange.
+const REL_SCHEMA = {
+  version: 1,
+  entry_types: {
+    "lore:character": { name: "Character", kind: "lore", fields: ["relationships"] },
+  },
+  fields: {
+    relationships: {
+      name: "Relationships",
+      type: "list",
+      options: [],
+      item_scalar: false,
+      item_members: [
+        { key: "to", name: "To", type: "entity_ref", picker_config: { sources: [{ kind: "lore" }] } },
+      ],
+    },
+  },
+} as unknown as MetadataSchema;
+
+const REL_ENTRIES: LoreEntrySummary[] = [
+  { id: "char_tomas", title: "Tomas", body: "", entry_type: "lore:character", metadata: {} },
+  { id: "char_elena", title: "Elena", body: "", entry_type: "lore:character", metadata: {} },
+];
+
+describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("a scrubbed model with a stopUnit targeting the node routes a list-tab change through the injected rewrite, not metadataChange", async () => {
+    const stopUnit = {
+      unitId: "mut_head",
+      name: "",
+      records: [
+        {
+          marker_id: "mut_head",
+          entity_id: "char_tomas",
+          field: "relationships",
+          op: "add",
+          value: JSON.stringify({ to: "char_elena" }),
+          name: "",
+          group: "",
+          unit_id: "mut_head",
+          unit_name: "",
+          scene_id: "s1",
+          offset: 5,
+          line: 1,
+          scene_path: "",
+        },
+      ],
+    };
+    const reload = vi.fn().mockResolvedValue(undefined);
+    const scene = { id: "s1" };
+    const getEffective = vi
+      .spyOn(api, "getEntityEffectiveState")
+      .mockResolvedValue({ entity_id: "char_tomas", scene_id: "s1", position: 5, values: {} });
+    const rewrite = vi.spyOn(api, "rewriteMutationUnit").mockResolvedValue(scene as never);
+    const flush = vi.spyOn(editorPanes, "flushSceneIfDirty").mockResolvedValue(undefined);
+    const reconcile = vi.spyOn(editorPanes, "reconcileSceneFromServer").mockResolvedValue(undefined);
+    const metadataChange = vi.fn();
+    const noop = () => {};
+    const { container } = render(EditorBodyHost, {
+      props: {
+        model: baseModel({
+          scene: { id: "char_tomas", title: "Tomas" },
+          entryType: "lore:character",
+          metadata: { relationships: [] },
+          metadataSchema: REL_SCHEMA,
+          activeBodyTab: "list:relationships",
+          scrubbed: true,
+          editorReadOnly: true,
+          stopUnit,
+          scrub: { reload, overrides: { relationships: [{ to: "char_elena" }] } },
+        }),
+        deps: baseDeps({ loreEntries: REL_ENTRIES }),
+        on: { change: noop, focus: noop, openChat: noop, requestInputsDialog: noop, metadataChange, viewSaveState: noop, navigate: noop },
+      } as never,
+    });
+
+    // stopEditable: the effective item renders with a delete affordance (not
+    // the plain read-only detail the base scrub overlay would show).
+    const removeButton = container.querySelector<HTMLButtonElement>(".row-action-delete");
+    expect(removeButton).not.toBeNull();
+    await fireEvent.click(removeButton!);
+
+    await vi.waitFor(() => expect(rewrite).toHaveBeenCalled());
+    expect(getEffective).toHaveBeenCalledWith("char_tomas", "s1", 5, ["mut_head"]);
+    expect(flush).toHaveBeenCalledWith("s1");
+    expect(rewrite).toHaveBeenCalledWith("s1", "mut_head", { rows: [] });
+    expect(reconcile).toHaveBeenCalledWith(scene, "reconcile");
+    expect(reload).toHaveBeenCalled();
+    expect(metadataChange).not.toHaveBeenCalled();
   });
 });

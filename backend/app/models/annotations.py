@@ -108,6 +108,28 @@ class UpdateMutationRequest(BaseModel):
     group: str | None = None
 
 
+class MutationUnitRow(BaseModel):
+    """One row of a rewritten mutation unit (ADR-0042 §5, ADR-0089 S5): the
+    record as the dialog and the resolver spell it, with the url-decoded
+    value. A blank `id` mints a fresh record id; a given id is kept, which is
+    how a re-edited unit keeps the record a later close points at."""
+
+    field: str
+    op: str = "replace"
+    value: str = ""
+    id: str = ""
+
+
+class RewriteMutationUnitRequest(BaseModel):
+    """Replace a unit's rows wholesale — the write behind editing the lore
+    card at a scrub stop, where the stop IS the unit and the card has no
+    cursor (ADR-0042 §5). `name` None keeps the carrier head's name; an empty
+    `rows` removes the unit."""
+
+    rows: list[MutationUnitRow] = Field(default_factory=list)
+    name: str | None = None
+
+
 class EffectiveStateResponse(BaseModel):
     """Effective mutation overrides for one lore entity as of a (scene,
     position) — the fields with a live mutation there, each mapped to its

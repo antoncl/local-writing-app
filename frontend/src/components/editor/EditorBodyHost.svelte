@@ -28,12 +28,17 @@
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
-  import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
+  import { keyedListKeyMember, keyedShapeFor } from "@/lib/editor-core/keyedList";
+  import { asItemList } from "@/lib/editor-core/mutationListEdit";
+  import { rewriteUnitFromItems } from "@/lib/editor-core/mutationStopEdit";
+  import type { MutationUnitGroup } from "@/lib/editor-core/mutationUnits";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
   import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
   import { tagTitleById } from "@/lib/stores/tagNodes";
+  import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import { api } from "@/lib/api";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import type {
     AssistantEntrySummary,
@@ -70,6 +75,10 @@
     overlayBodyHtml: string;
     snapshotRibbon: string;
     scrub: LoreScrubController;
+    // #2074 (ADR-0042 §5): the scrub stop's own unit — the stop IS the unit,
+    // so editing the lore card at a stop edits this. `null` off the lore axis
+    // or at base (stop 0, editable already).
+    stopUnit: MutationUnitGroup | null;
     snapshots: SnapshotStripController;
     entryReview: EntryProposalController;
     detailsDetached: boolean;
@@ -174,6 +183,47 @@
     if (Array.isArray(v)) return v as MetadataValue[];
     if (typeof v === "string" && v) return [v];
     return [];
+  }
+
+  // #2074 (ADR-0042 §5): the list tab is editable AT THIS SCRUB STOP when it's
+  // a reference-keyed list AND the stop's own unit touches the open node — the
+  // unit's own rows are exactly what the rewrite below replaces.
+  let stopEditable = $derived(
+    model.scrubbed &&
+      listFieldId !== null &&
+      model.metadataSchema != null &&
+      keyedListKeyMember(model.metadataSchema.fields[listFieldId]) !== null &&
+      (model.stopUnit?.records.some((r) => r.entity_id === (model.scene?.id ?? "")) ?? false),
+  );
+
+  // Route a list-tab change through the scrub-stop rewrite when the tab is
+  // editable there; otherwise the ordinary whole-field metadataChange. On
+  // failure, log and leave the tab as it was — the reload isn't called, so the
+  // displayed effective items stay whatever they were before the edit.
+  async function handleListChange(fieldId: string, items: MetadataValue[]): Promise<void> {
+    if (stopEditable && model.stopUnit && model.metadataSchema) {
+      try {
+        await rewriteUnitFromItems({
+          unit: model.stopUnit,
+          entityId: model.scene?.id ?? "",
+          field: fieldId,
+          keyed: keyedShapeFor(model.metadataSchema.fields[fieldId]),
+          baseItems: asItemList(model.metadata[fieldId]),
+          editedItems: asItemList(items),
+          deps: {
+            getEntityEffectiveState: api.getEntityEffectiveState,
+            rewriteMutationUnit: api.rewriteMutationUnit,
+            flushSceneIfDirty: (sceneId) => editorPanes.flushSceneIfDirty(sceneId),
+            reconcileSceneFromServer: (scene, mode) => editorPanes.reconcileSceneFromServer(scene, mode),
+          },
+        });
+        await model.scrub.reload();
+      } catch (err) {
+        console.error(err);
+      }
+      return;
+    }
+    on.metadataChange({ ...model.metadata, [fieldId]: items });
   }
 
   let proseBodyView: ProseBodyView | null = $state(null);
@@ -432,7 +482,7 @@
       items: toItemList(model.metadata[listFieldId]),
       keyMember: keyedListKeyMember(model.metadataSchema.fields[listFieldId]),
       effectiveItems: model.scrubbed ? ((model.scrub.overrides?.[listFieldId] as MetadataValue[] | undefined) ?? null) : null,
-      readOnly: model.editorReadOnly,
+      readOnly: model.editorReadOnly && !stopEditable,
       schema: model.metadataSchema,
       nodeId: model.scene?.id ?? "",
     }}
@@ -448,7 +498,7 @@
       createLayerId: model.createLayerId,
     }}
     on={{
-      change: (items) => on.metadataChange({ ...model.metadata, [listFieldId]: items }),
+      change: (items) => void handleListChange(listFieldId, items),
       navigate: (payload) => on.navigate(payload),
     }}
   />

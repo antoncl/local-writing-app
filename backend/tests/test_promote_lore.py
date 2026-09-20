@@ -355,6 +355,19 @@ class PromoteLoreTests(unittest.TestCase):
         series_alice = ProjectService(WorkScope(root=self.series)).read_lore_entry("alice")
         self.assertNotIn({"who": "rustyanchor"}, series_alice.metadata.get("bonds") or [])
 
+    def test_an_orphaned_item_travels_with_its_blank_key(self) -> None:
+        # A blank key (a delete-purge's leftover, ADR-0089 §9) names nothing, so
+        # it is neither hidden nor visible: the item travels as it is.
+        self._define_group_list_field_at(self.universe, "bonds", "who")
+        self._write_ancestor_lore(self.universe, "nimitz", "Nimitz", entry_type="lore:note")
+        self._write_ancestor_lore(
+            self.root, "alice", "Alice",
+            metadata={"bonds": [{"who": ""}, {"who": "nimitz"}]}, entry_type="lore:character",
+        )
+        self.service.promote_lore_entry("alice", self.series_layer_id)
+        self.assertEqual(self._raw_metadata(self.series, "alice").get("bonds"), [{"who": ""}, {"who": "nimitz"}])
+        self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
+
     def test_hidden_member_of_a_travelling_item_stays_as_a_replace_record(self) -> None:
         # The key is visible, so the item travels; a reference member naming an
         # origin-local node is dropped from the travelling copy and stays behind

@@ -501,6 +501,11 @@ class PromptEntriesMixin:
         # Never override the resolver-stamped computed fields (#1684): they are not
         # stored, and a stray echo of `disposition`/`runnable` must not mint a row.
         submitted = strip_computed_fields(submitted, schema)
+        # One item per target (ADR-0089 §1), checked on the submission before the
+        # by-key diff reads a repeated key as its first item — as the lore save does.
+        duplicate_errors = self._keyed_list_duplicate_errors(f"Prompt {entry_id}", submitted, schema)
+        if duplicate_errors:
+            raise ProjectServiceError(" ".join(duplicate_errors), 422)
 
         current_revision = self._composite_revision([winner.path, *self._override_paths_for_target(index, entry_id)])
         if request.base_revision and request.base_revision != current_revision:

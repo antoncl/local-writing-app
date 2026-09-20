@@ -153,6 +153,13 @@ class KeyedListFoldTests(unittest.TestCase):
         result, _ = self._fold(_record(1, MutationSetRow(field="rels.a.weight", op="replace", value="7")))
         self.assertEqual(result["rels"][0]["weight"], 7)
 
+    def test_an_empty_value_unsets_a_non_text_member_and_clears_a_text_one(self) -> None:
+        result, _ = self._fold(
+            _record(1, MutationSetRow(field="rels.a.weight", op="replace", value="")),
+            _record(2, MutationSetRow(field="rels.a.kind", op="replace", value="")),
+        )
+        self.assertEqual(result["rels"], [{"who": "a", "kind": ""}])
+
     def test_nearest_descendant_wins_per_member(self) -> None:
         outer = _record(1, MutationSetRow(field="rels.a.kind", op="replace", value="second"))
         inner = _record(2, MutationSetRow(field="rels.a.kind", op="replace", value="third"))

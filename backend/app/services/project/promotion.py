@@ -202,6 +202,8 @@ class PromotionMixin:
             if member not in item or member_field.type not in REF_FIELD_TYPES:
                 continue
             ids = list(dict.fromkeys(index.canonical_id(i) for i in _member_ref_ids(item[member], member_field.type)))
+            if not ids:
+                continue  # a blank reference (an orphaned item's key, §9) travels as it is
             visible = [i for i in ids if self._target_visible_from_destination(index, root, i, dest.id)]
             unseen = [i for i in ids if i not in visible]
             hidden.extend(index.by_id[i].title if i in index.by_id else i for i in unseen)

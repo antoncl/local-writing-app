@@ -138,6 +138,15 @@ describe("RailFieldRow", () => {
     expect(container.querySelector('[data-testid="rail-ref-name"]')).toBeNull();
   });
 
+  it("a tags row is wide, empty or filled, so the line keeps one shape (#2059)", () => {
+    expect(buildRailRowModel(baseCtx(), "tags").wide).toBe(true);
+    expect(buildRailRowModel(baseCtx({ metadata: { tags: ["tag_a"] } }), "tags").wide).toBe(true);
+    const { container } = render(RailFieldRow, {
+      props: { model: buildRailRowModel(baseCtx({ metadata: { tags: ["tag_a"] } }), "tags"), deps: baseDeps(), on: baseCallbacks() },
+    });
+    expect(container.querySelector(".field-row.wide")).not.toBeNull();
+  });
+
   it("a computed model renders .fr-computed and the lock glyph", () => {
     const model = buildRailRowModel(baseCtx({ computedFieldString: () => "42" }), "cost");
     const { container } = render(RailFieldRow, { props: { model, deps: baseDeps(), on: baseCallbacks() } });

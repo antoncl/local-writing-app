@@ -310,6 +310,11 @@ function isRefFieldType(field: MetadataFieldDefinition): boolean {
 // prior comment history (#1810, #1949) for the full reasoning per type.
 function isWide(ctx: RailRowContext, field: MetadataFieldDefinition, fieldId: string): boolean {
   if (isListIndex(ctx, field) || isSectionIndex(ctx, field)) return false;
+  // A tags field (#2007) is one mono line under its name, at rest and while
+  // editing alike (#2059): wide always, so the row has ONE shape — it used to
+  // sit inline while short and wrap once long, and its edit state jumped
+  // between name-left / input-right and three lines as the tokens grew.
+  if (isTagListField(field, ctx.schema)) return true;
   const populated = isMetadataValuePresent(displayValue(ctx, fieldId));
   return (
     (field.type === "long_text" && !ctx.sectionsInBody) ||

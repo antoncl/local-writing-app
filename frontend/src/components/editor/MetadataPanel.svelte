@@ -336,6 +336,11 @@
   const UNGROUPED_LABEL = "General";
   const showGroupHeads = $derived(sections.some((s) => s.group !== null));
   const showFoldHeads = $derived(showGroupHeads || foldSections.some((s) => s.group !== null));
+  // #2061: whether ANY rendered row (known or folded, fold open or closed) is
+  // grouped — decided on the schema, not on the heads currently on screen, so
+  // the front matter's gutter never appears the moment a fold with a group
+  // opens and shoves every row 22px.
+  const anyGroupedRow = $derived(renderedFieldIds.some((id) => (metadataSchema.fields[id]?.group ?? "").trim() !== ""));
   const GROUP_DEFAULT = true;
   function groupKey(section: RailSection): string { return `group:${section.group ?? "~ungrouped"}`; }
   function groupExpanded(section: RailSection): boolean { return railSectionCollapse.isExpanded(groupKey(section), GROUP_DEFAULT); }
@@ -539,7 +544,12 @@
   <button type="button" class="rail-type-action" onclick={() => { close(); onCustomData?.(); }}>Edit type…</button>
 {/snippet}
 
-<section class="scene-metadata" class:front-matter={layout === "front-matter"} aria-label={`${documentLabel} details`}>
+<section
+  class="scene-metadata"
+  class:front-matter={layout === "front-matter"}
+  class:no-disc={layout === "front-matter" && !anyGroupedRow}
+  aria-label={`${documentLabel} details`}
+>
   <!-- The head is one fact — the entry's type — and reads as one (#1904, #1884):
        glyph + name + caret, the rail's own ColoredSelect in its quiet face. The
        type list opens on click; "Edit type…" lives behind it as the trailing
@@ -749,9 +759,19 @@
   .scene-metadata.front-matter > .rail-assistant,
   .scene-metadata.front-matter > .rail-fold,
   .scene-metadata.front-matter :global(.rail-group-head),
-  .scene-metadata.front-matter :global(.field-row.wide),
-  .scene-metadata.front-matter :global(.field-row:has(.tag-line-hit)) {
+  .scene-metadata.front-matter :global(.field-row.wide) {
     grid-column: 1 / -1;
+  }
+  /* #2061: the row's 22px disclosure gutter exists so a field's glyph sits
+     under a group head's caret. With no group heads on the type (known rows
+     or fold), it is dead space that left every label 32px right of the wide
+     values' edge — so icons, labels and value lines share the prose edge.
+     Only the EMPTY gutter goes: the folding-list caret shares the slot's
+     class (`.fr-disc-toggle`), and though no foldable list reaches the front
+     matter today (lists are index rows there), a control must never be
+     hidden by a spacing rule. */
+  .scene-metadata.front-matter.no-disc :global(.fr-disc:not(.fr-disc-toggle)) {
+    display: none;
   }
   .scene-metadata.front-matter > .rail-fold-body {
     display: contents;

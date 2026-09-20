@@ -89,6 +89,9 @@ class MachineSettingsView(BaseModel):
     # The update channel this install follows (ADR-0072 S6). Round-trips through
     # the settings dialog so the S7 UI can show/switch it.
     update_channel: UpdateChannel = "stable"
+    # Whether a delete that would orphan a relationship item warns first
+    # (ADR-0089 §9). A machine preference, not a project one.
+    warn_on_orphaning_delete: bool = True
     config_path: str
     # The app-data directory (config_dir()) — parent of config_path, and where
     # the durable logs live: app.log (#1745) and errors.log (#386/#741). Surfaced
@@ -124,6 +127,8 @@ class MachineSettingsUpdate(BaseModel):
     # The update channel (ADR-0072 S6). None = leave untouched. A plain
     # preference, so — unlike ai_policy — it rides the batched settings Save.
     update_channel: UpdateChannel | None = None
+    # Delete-orphan warning toggle (ADR-0089 §9). None = leave untouched.
+    warn_on_orphaning_delete: bool | None = None
 
 
 class AIHealthRequest(BaseModel):

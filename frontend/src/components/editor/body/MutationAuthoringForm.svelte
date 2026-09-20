@@ -14,17 +14,23 @@
     isCollectionType,
     isTextAppendType,
     fieldDefFor,
+    keyedShapeFor,
     toMarkerString,
     type FieldOption,
     type MutationRow,
   } from "@/components/editor/body/MutationFieldRows.svelte";
+  import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
   import { api } from "@/lib/api";
   import { refreshMutationSetEntries } from "@/lib/stores/mutationSets";
   import {
+    asItemList,
     asMembershipList,
     collectionRowsFromEdit,
     composeCollectionValue,
+    composeKeyedItems,
     diffCollectionMembership,
+    keyedListRowsFromEdit,
+    splitMemberPath,
     type CollectionRecord,
   } from "@/lib/editor-core/mutationListEdit";
   import type {
@@ -52,6 +58,7 @@
     initial = null,
     presetEntityId = "",
     sceneId = "",
+    position = null,
     onSubmit,
     onDelete,
     onCancel,
@@ -67,6 +74,12 @@
     presetEntityId?: string;
     /** The authoring scene — the list-edit baseline resolves here (#71). */
     sceneId?: string;
+    /** The scene-markdown char offset the dialog authors at (ADR-0089 §4):
+     *  the baseline is the entity's effective state AT this position, not the
+     *  end of the scene, so an in-flow `/mutate` sees prior mutations only.
+     *  `null`/undefined resolves to the end of the scene (unchanged for every
+     *  caller that can't compute one — see `markdownOffsetAt`). */
+    position?: number | null;
     onSubmit: (draft: MutationUnitDraft) => void;
     onDelete?: (markerId: string) => void;
     onCancel: () => void;
@@ -78,8 +91,12 @@
   // unchanged row keeps its id — and with it any close targeting it. A
   // collection field's records collapse into ONE list-edit row (#71): value is
   // the composed membership, `baseline` the diff base (also flips
-  // MutationFieldRows into list-edit mode), `collectionRecords` the unit's own
-  // records so an unchanged delta keeps its id on re-save.
+  // MutationFieldRows into list-edit mode). A reference-keyed list's records
+  // (ADR-0089 §5, #2072) collapse the same way into ONE item-edit row: value
+  // is the composed items, `itemBaseline` the diff base. Either way,
+  // `collectionRecords` carries the unit's own raw records so an unchanged
+  // delta keeps its id on re-save (a keyed row's records also carry `field`,
+  // since a member `replace` addresses a token, not the row's own field).
   type FormRow = MutationRow & { id?: string; collectionRecords?: CollectionRecord[] };
 
   // The dialog re-mounts on each open ({#if} in the parent), so capturing the
@@ -92,9 +109,10 @@
   // The list-edit baseline (#71, ADR-0017): the entity's EFFECTIVE overrides in
   // this scene, excluding the edited unit's own rows so the diff can't count
   // itself. The scene was flushed before the dialog opened (GH-#45 spine), so
-  // the saved index is current. Resolution is end-of-scene (ADR-0003: only the
-  // inline handler's `selection` destination carries a real cursor offset). `null` = still loading —
-  // the rows area waits so every seeded baseline is deterministic.
+  // the saved index is current. Resolution is at `position` (ADR-0089 §4: the
+  // dialog's own insertion position, when the caller can compute one) — else
+  // end of scene, as before. `null` = still loading — the rows area waits so
+  // every seeded baseline is deterministic.
   let effectiveValues = $state<Record<string, EffectiveFieldValue> | null>(null);
 
   $effect(() => {
@@ -109,7 +127,7 @@
       .map((row) => row.id ?? "")
       .filter(Boolean) as string[];
     api
-      .getEntityEffectiveState(id, sceneId, undefined, exclude)
+      .getEntityEffectiveState(id, sceneId, position ?? undefined, exclude)
       .then((res) => {
         if (!cancelled) effectiveValues = res.values ?? {};
       })
@@ -131,8 +149,30 @@
     return asMembershipList((entity?.metadata ?? {})[field]);
   }
 
+  // Effective items for one reference-keyed list field (ADR-0089 §5): the live
+  // fold if any, else the entry's own stored items — read raw, never through
+  // `asMembershipList` (a `list` field's value is a member map, not a scalar).
+  function itemBaseline(field: string, keyMember: string): Record<string, MetadataValue>[] {
+    const effective = effectiveValues?.[field];
+    if (effective !== undefined) return asItemList(effective);
+    return asItemList((entity?.metadata ?? {})[field]);
+  }
+
+  // The reference-keyed list a row's raw field token addresses — its own field
+  // id (an add/remove) or a `<field>.<key>.<member>` path (a replace) — so
+  // every record for the same list groups into one item-edit row regardless
+  // of which shape it carries. `null` when the token isn't a keyed list's.
+  function keyedFieldFor(rowField: string): string | null {
+    for (const option of fieldOptions) {
+      if (!keyedListKeyMember(option.def)) continue;
+      if (rowField === option.id || splitMemberPath(rowField, option.id) !== null) return option.id;
+    }
+    return null;
+  }
+
   // Seed the form rows once the baseline is known (edit mode): scalar/text
-  // records map 1:1; a collection field's records collapse into one list row.
+  // records map 1:1; a collection field's records collapse into one list row;
+  // a reference-keyed list's records (ADR-0089 §5) collapse into one item row.
   let rowsSeeded = $state(false);
   $effect(() => {
     if (rowsSeeded || !baselineReady) return;
@@ -140,7 +180,22 @@
     if (!initial) return;
     const seeded: FormRow[] = [];
     const collections = new Map<string, { row: FormRow; records: CollectionRecord[] }>();
+    const itemLists = new Map<string, { row: FormRow; records: CollectionRecord[] }>();
     for (const row of initial.rows) {
+      const listField = keyedFieldFor(row.field);
+      if (listField) {
+        let slot = itemLists.get(listField);
+        if (!slot) {
+          slot = {
+            row: { field: listField, op: "replace", value: [], collectionRecords: [] },
+            records: [],
+          };
+          itemLists.set(listField, slot);
+          seeded.push(slot.row);
+        }
+        slot.records.push({ id: row.id ?? undefined, op: row.op || "replace", value: row.value, field: row.field });
+        continue;
+      }
       const def = fieldDefFor(row.field, schema);
       if (isCollectionType(def.type)) {
         let slot = collections.get(row.field);
@@ -166,6 +221,13 @@
       const baseline = collectionBaseline(field);
       slot.row.baseline = baseline;
       slot.row.value = composeCollectionValue(baseline, slot.records);
+      slot.row.collectionRecords = slot.records;
+    }
+    for (const [field, slot] of itemLists) {
+      const keyed = keyedShapeFor(fieldDefFor(field, schema));
+      const baseline = itemBaseline(field, keyed.keyMember);
+      slot.row.itemBaseline = baseline;
+      slot.row.value = composeKeyedItems(field, keyed, baseline, slot.records);
       slot.row.collectionRecords = slot.records;
     }
     rows = seeded;
@@ -242,9 +304,12 @@
   }
 
   // Fields scope to the entity's resolved entry type (edit mode included — the
-  // whole unit is editable, #69).
+  // whole unit is editable, #69). This form HAS an entity baseline, so it also
+  // offers a reference-keyed list (ADR-0089 §2/§5) as an item editor — the
+  // one `list` shape the set editor still excludes (it authors a template
+  // with no entity, so it has no baseline to diff against).
   const fieldOptions = $derived.by((): FieldOption[] =>
-    entity ? buildFieldOptions(schema, entity.entry_type) : [],
+    entity ? buildFieldOptions(schema, entity.entry_type, true) : [],
   );
 
   const entityRefField: MetadataFieldDefinition = {
@@ -261,13 +326,26 @@
   }
 
   // A list-edit row contributes when its membership diff is non-empty (an
-  // emptied list = N removes, still a real change); other rows when filled.
+  // emptied list = N removes, still a real change); an item-edit row when its
+  // add/replace/remove diff is non-empty; other rows when filled.
   function rowContributes(row: FormRow): boolean {
+    if (row.itemBaseline !== undefined) {
+      return itemRowDrafts(row).length > 0;
+    }
     if (row.baseline !== undefined) {
       const diff = diffCollectionMembership(row.baseline, asMembershipList(row.value));
       return diff.adds.length > 0 || diff.removes.length > 0;
     }
     return isFilled(row.value);
+  }
+
+  // An item-edit row's add/replace/remove records against its baseline
+  // (ADR-0089 §5), reusing ids from the unit's own prior records.
+  function itemRowDrafts(row: FormRow): MutationRowDraft[] {
+    if (row.itemBaseline === undefined) return [];
+    const keyed = keyedShapeFor(fieldDefFor(row.field, schema));
+    const edited = asItemList(row.value);
+    return keyedListRowsFromEdit(row.field, keyed, row.itemBaseline, edited, row.collectionRecords ?? []);
   }
 
   const canSubmit = $derived(Boolean(entity) && rows.some(rowContributes));
@@ -278,10 +356,16 @@
     entityId = next;
   }
 
-  // A fresh row for a field: collection fields open in list-edit mode (#71),
-  // seeded with the effective membership; everything else starts blank.
+  // A fresh row for a field: a reference-keyed list opens in item-edit mode
+  // (ADR-0089 §5), a collection field in list-edit mode (#71), both seeded
+  // with the effective value; everything else starts blank.
   function seedRowFor(fieldId: string): FormRow {
     const def = fieldDefFor(fieldId, schema);
+    const keyMember = keyedListKeyMember(def);
+    if (keyMember) {
+      const baseline = itemBaseline(fieldId, keyMember);
+      return { field: fieldId, op: "replace", value: [...baseline], itemBaseline: baseline, collectionRecords: [] };
+    }
     if (isCollectionType(def.type)) {
       const baseline = collectionBaseline(fieldId);
       return { field: fieldId, op: "replace", value: [...baseline], baseline, collectionRecords: [] };
@@ -312,6 +396,13 @@
     if (!entity) return;
     const unitRows: MutationRowDraft[] = [];
     for (const row of rows) {
+      // Item-edit rows (ADR-0089 §5): diff the edited items against the
+      // baseline and emit add/replace/remove records into this unit; deltas
+      // unchanged since the last edit keep their record ids.
+      if (row.itemBaseline !== undefined) {
+        unitRows.push(...itemRowDrafts(row));
+        continue;
+      }
       // List-edit rows (#71): diff the edited membership against the baseline
       // and emit plain add/remove records into this unit; deltas unchanged
       // since the last edit keep their record ids.

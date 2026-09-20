@@ -440,6 +440,32 @@ class DisplaySettingsTests(unittest.TestCase):
         self.assertTrue(display.paragraph_indent)  # not reset to False
 
 
+class WarnOnOrphaningDeleteTests(unittest.TestCase):
+    """Delete-orphan warning toggle (ADR-0089 §9) — a machine preference, not
+    a project one, since a "don't show again" choice is about prompts."""
+
+    def setUp(self) -> None:
+        clear_test_scope()
+        self.client = TestClient(app)
+
+    def test_view_defaults_true_when_unset(self) -> None:
+        view = self.client.get("/api/settings/machine").json()
+        self.assertTrue(view["warn_on_orphaning_delete"])
+
+    def test_put_persists_false(self) -> None:
+        returned = self.client.put("/api/settings/machine", json={"warn_on_orphaning_delete": False})
+        self.assertEqual(returned.status_code, 200, returned.text)
+        self.assertFalse(returned.json()["warn_on_orphaning_delete"])
+        self.assertFalse(ms.load_settings().warn_on_orphaning_delete)
+
+    def test_partial_patch_preserves_it(self) -> None:
+        self.client.put("/api/settings/machine", json={"warn_on_orphaning_delete": False})
+        self.client.put("/api/settings/machine", json={"default_provider": "anthropic"})
+        settings = ms.load_settings()
+        self.assertFalse(settings.warn_on_orphaning_delete)
+        self.assertEqual(settings.default_provider, "anthropic")
+
+
 class AppWideAiPolicyTests(unittest.TestCase):
     """The application-global default AI policy (#746) — the chain's floor."""
 

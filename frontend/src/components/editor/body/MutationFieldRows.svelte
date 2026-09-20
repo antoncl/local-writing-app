@@ -2,6 +2,8 @@
   // Shared row model + field-scoping logic for the two mutation dialogs
   // (/mutate authoring + the set editor). One row = one (field, op, value)
   // change; the same shape a saved set stores and a marker carries.
+  import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
+  import type { KeyedListShape } from "@/lib/editor-core/mutationListEdit";
   import type { MetadataFieldDefinition, MetadataSchema, MetadataValue } from "@/lib/types";
 
   export type MutationRow = {
@@ -15,6 +17,13 @@
      *  the set editor, which keeps authoring literal (field, op, value) rows —
      *  a template has no entity, so there is no baseline to diff against. */
     baseline?: string[];
+    /** Item-edit mode for a reference-keyed list row (ADR-0089 §2/§5, #2072):
+     *  the effective ITEMS at the authoring position — the same idea as
+     *  `baseline` but for a `list` field's folded item-map shape, so its own
+     *  `ListValueEditor` renders directly (no per-element expansion) and the
+     *  diff emits `add`/`replace`/`remove` records per key/member. Mutually
+     *  exclusive with `baseline`. */
+    itemBaseline?: Record<string, MetadataValue>[];
   };
 
   export const COLLECTION_TYPES = ["multi_select", "entity_ref_list"];
@@ -54,16 +63,25 @@
   }
 
   // The mutable fields for an entry type: intrinsic title/body + its resolved
-  // schema fields, minus computed (derived) and `list` (#698: the marker
-  // grammar is string-typed — a structured item has no honest representation
-  // in a mutation row, and String() would write "[object Object]" into the
-  // scene body; per-item mutation ops for lists are a follow-up).
-  export function buildFieldOptions(schema: MetadataSchema | null, entryType: string): FieldOption[] {
+  // schema fields, minus computed (derived) and most `list` fields (#698: the
+  // marker grammar is string-typed — a structured item has no honest
+  // representation in a mutation row, and String() would write
+  // "[object Object]" into the scene body). A reference-keyed list (ADR-0089
+  // §2/§5) is the one `list` shape that DOES have a record grammar — offered
+  // only when `allowItemLists` is set, since it needs an entity baseline to
+  // diff against (the /mutate authoring form has one; the set editor, which
+  // authors a template with no entity, does not and keeps skipping every list).
+  export function buildFieldOptions(
+    schema: MetadataSchema | null,
+    entryType: string,
+    allowItemLists = false,
+  ): FieldOption[] {
     const opts = INTRINSIC_FIELDS.map((f) => ({ id: f.id, label: f.def.name, def: f.def }));
     const seen = new Set(opts.map((o) => o.id));
     for (const id of schema?.entry_types[entryType]?.fields ?? []) {
       const def = schema?.fields[id];
-      if (!def || def.type === "computed" || def.type === "list") continue;
+      if (!def || def.type === "computed") continue;
+      if (def.type === "list" && !(allowItemLists && keyedListKeyMember(def))) continue;
       // The resolver injects the intrinsic identity triple (title/entry_type/id)
       // into every type's resolved membership (schema.py). title is already
       // seeded above and entry_type/id aren't author-mutable, so skip anything
@@ -87,11 +105,25 @@
   // The item-widget field def for an add/remove op: a collection resolves to
   // its single-element type (entity_ref_list → entity_ref, multi_select →
   // select), so each add/remove marker carries one element. A list-edit row
-  // (baseline present, #71) always uses the field's own widget.
+  // (baseline present, #71) always uses the field's own widget — as does an
+  // item-edit row (itemBaseline present, ADR-0089 §5): `def.type === "list"`
+  // already fails `isCollectionType`, so it falls through unchanged either
+  // way and `FieldValueEditor` mounts `ListValueEditor` directly.
   export function effectiveFieldDef(row: MutationRow, def: MetadataFieldDefinition): MetadataFieldDefinition {
     if (!isCollectionType(def.type) || row.baseline !== undefined || row.op === "replace") return def;
     if (def.type === "entity_ref_list") return { ...def, type: "entity_ref" };
     return { ...def, type: "select" };
+  }
+
+  // A reference-keyed list's shape (ADR-0089 §5), read off the resolver-stamped
+  // `item_members`: the key member (empty string when the field isn't one —
+  // callers only reach here for an item row, where it always resolves) and
+  // every member's declared type, for `keyedListRowsFromEdit`'s member diff.
+  // Shared by the dialogs' chip/lock wiring and the authoring form's seeding.
+  export function keyedShapeFor(def: MetadataFieldDefinition): KeyedListShape {
+    const memberTypes: Record<string, string> = {};
+    for (const member of def.item_members ?? []) memberTypes[member.key] = member.type;
+    return { keyMember: keyedListKeyMember(def) ?? "", memberTypes };
   }
 </script>
 
@@ -101,8 +133,12 @@
   // below the caption — long_text gets room instead of a squeezed inline slot.
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import {
+    asItemList,
     asMembershipList,
+    decodeItem,
     diffCollectionMembership,
+    keyedListRowsFromEdit,
+    splitMemberPath,
   } from "@/lib/editor-core/mutationListEdit";
   import type { LoreEntrySummary, PromptEntrySummary, StructureDocument } from "@/lib/types";
 
@@ -146,11 +182,46 @@
     return fieldOptions.find((f) => f.id === fieldId)?.label ?? fieldId;
   }
 
+  function itemChipLabel(id: string): string {
+    return loreEntries.find((e) => e.id === id)?.title ?? id;
+  }
+
+  type Chip = { op: "add" | "remove" | "replace"; label: string };
+
+  // An item row's chips (ADR-0089 §5): the same add/replace/remove records
+  // `submit` will emit, rendered as "+ <target>" / "− <target>" /
+  // "<member> → value" — the reference-keyed twin of the flat-collection
+  // chips below. `existing` is irrelevant here (chips never show an id), so
+  // the diff runs against an empty reuse set.
+  function itemEditChips(row: MutationRow): Chip[] {
+    if (row.itemBaseline === undefined) return [];
+    const def = fieldDefFor(row.field, schema);
+    const keyed = keyedShapeFor(def);
+    const edited = asItemList(row.value);
+    const chips: Chip[] = [];
+    for (const draft of keyedListRowsFromEdit(row.field, keyed, row.itemBaseline, edited, [])) {
+      if (draft.op === "add") {
+        const decoded = decodeItem(draft.value);
+        const id = decoded ? String(decoded[keyed.keyMember] ?? "") : "";
+        chips.push({ op: "add", label: itemChipLabel(id) });
+      } else if (draft.op === "remove") {
+        chips.push({ op: "remove", label: itemChipLabel(draft.value) });
+      } else {
+        const path = splitMemberPath(draft.field, row.field);
+        if (!path) continue;
+        const memberName = def.item_members?.find((m) => m.key === path.member)?.name ?? path.member;
+        chips.push({ op: "replace", label: `${memberName} → ${draft.value}` });
+      }
+    }
+    return chips;
+  }
+
   // List-edit transparency chips (#71): the add/remove records the diff will
   // emit, kept visible while the list is edited — the author still authors
   // deltas; the widget just compiles them. Entity-ref values display as the
   // entry's title (the stored record still carries the id).
-  function listEditChips(row: MutationRow): { op: "add" | "remove"; label: string }[] {
+  function listEditChips(row: MutationRow): Chip[] {
+    if (row.itemBaseline !== undefined) return itemEditChips(row);
     if (row.baseline === undefined) return [];
     const isRefList = fieldDefFor(row.field, schema).type === "entity_ref_list";
     const label = (value: string) =>
@@ -160,6 +231,24 @@
       ...adds.map((value) => ({ op: "add" as const, label: label(value) })),
       ...removes.map((value) => ({ op: "remove" as const, label: label(value) })),
     ];
+  }
+
+  // The locked/unique member forwarded to a keyed item row's `ListValueEditor`
+  // (ADR-0089 §2): the key never changes once an item exists, and a target
+  // can't be picked twice — both are display-only guards, not validation.
+  function itemLockedKeys(row: MutationRow): { member: string; keys: string[] } | undefined {
+    if (row.itemBaseline === undefined) return undefined;
+    const keyed = keyedShapeFor(fieldDefFor(row.field, schema));
+    if (!keyed.keyMember) return undefined;
+    const keys = row.itemBaseline
+      .map((item) => item[keyed.keyMember])
+      .filter((value): value is string => typeof value === "string" && value.length > 0);
+    return { member: keyed.keyMember, keys };
+  }
+
+  function itemUniqueMember(row: MutationRow): string | undefined {
+    if (row.itemBaseline === undefined) return undefined;
+    return keyedShapeFor(fieldDefFor(row.field, schema)).keyMember || undefined;
   }
 </script>
 
@@ -239,16 +328,18 @@
           structure={structure}
           researchStructure={researchStructure}
           implicitContextMatcher={implicitContextMatcher}
+          lockedKeys={itemLockedKeys(row)}
+          uniqueMember={itemUniqueMember(row)}
           onChange={(v) => onRowChange(i, { value: v })}
         />
       </div>
-      {#if row.baseline !== undefined}
+      {#if row.baseline !== undefined || row.itemBaseline !== undefined}
         {@const chips = listEditChips(row)}
         {#if chips.length > 0}
           <div class="mrow-chips" aria-label="Derived records">
             {#each chips as chip (chip.op + chip.label)}
               <span class="mrow-chip" class:remove={chip.op === "remove"}>
-                {chip.op === "add" ? "+" : "−"}{chip.label}
+                {#if chip.op === "add"}+{:else if chip.op === "remove"}−{/if}{chip.label}
               </span>
             {/each}
           </div>

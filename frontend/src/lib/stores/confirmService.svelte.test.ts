@@ -76,4 +76,55 @@ describe("confirmService resolution", () => {
     expect(confirmed).toBe(true);
     expect(cancelled).toBe(false);
   });
+
+  it("ticking dontShowAgain with a plain dontShowAgainKey still suppresses via localStorage", async () => {
+    confirmService.request({
+      title: "T",
+      message: "M",
+      confirmLabel: "Go",
+      destructive: true,
+      dontShowAgainKey: "some-key",
+      onConfirm: async () => {},
+    });
+    await confirmService.resolve(true);
+    expect(localStorage.getItem("confirmSuppress:some-key")).toBe("1");
+  });
+
+  it("ticking dontShowAgain with onDontShowAgain routes there instead of localStorage (ADR-0089 §9)", async () => {
+    let suppressed = false;
+    let confirmed = false;
+    confirmService.request({
+      title: "T",
+      message: "M",
+      confirmLabel: "Go",
+      destructive: true,
+      onDontShowAgain: async () => {
+        suppressed = true;
+      },
+      onConfirm: async () => {
+        confirmed = true;
+      },
+    });
+    await confirmService.resolve(true);
+    expect(suppressed).toBe(true);
+    expect(confirmed).toBe(true);
+    // No localStorage key was ever named for this request, so nothing to check
+    // there — the point is onDontShowAgain fired instead of the localStorage path.
+  });
+
+  it("leaving dontShowAgain unticked never calls onDontShowAgain", async () => {
+    let suppressed = false;
+    confirmService.request({
+      title: "T",
+      message: "M",
+      confirmLabel: "Go",
+      destructive: true,
+      onDontShowAgain: async () => {
+        suppressed = true;
+      },
+      onConfirm: async () => {},
+    });
+    await confirmService.resolve(false);
+    expect(suppressed).toBe(false);
+  });
 });

@@ -212,6 +212,13 @@
     editorPanes.setError = (message) => { error = message; };
     // The hover card over a lore-name match follows it here (#1923).
     implicitContextOpener.open = (entryId) => void run(() => editorPanes.openLore(entryId));
+    // Delete-orphan warning (ADR-0089 §9). Injected rather than imported to
+    // avoid a cycle with projectSession (which imports editorPanes via
+    // editorPaneDelete's host).
+    editorPanes.orphanWarning = {
+      enabled: () => projectSession.machineSettings?.warn_on_orphaning_delete ?? true,
+      suppress: () => projectSession.setWarnOnOrphaningDelete(false),
+    };
     editorPanes.onProjectNodeSaved = (title) => {
       projectTitle = title;
       if (appState.name === "projectOpen") {
@@ -1259,6 +1266,7 @@
     onCancel={() => projectSession.cancelMachineSettings()}
     onSave={() => void projectSession.saveMachineSettings()}
     onApplyPolicy={(policy) => projectSession.saveAiPolicy(policy)}
+    onSetWarnOnOrphaningDelete={(value) => projectSession.setWarnOnOrphaningDelete(value)}
     health={{
       onCheck: () => void aiSettings.runHealthCheck(),
       result: aiSettings.healthResult,

@@ -64,6 +64,9 @@ export type MachineSettingsView = {
   ai_policy: AIPolicy;
   // The update channel this install follows (ADR-0072 S6).
   update_channel: UpdateChannel;
+  // Whether a delete that would orphan a relationship item warns first
+  // (ADR-0089 §9). A machine preference, not a project one.
+  warn_on_orphaning_delete: boolean;
   config_path: string;
   // The app-data folder (parent of config_path) holding the durable logs
   // (app.log, errors.log) — surfaced so a user can find them (#1750).
@@ -80,6 +83,7 @@ export type MachineSettingsUpdate = {
   display?: DisplaySettings;
   ai_policy?: AIPolicy;
   update_channel?: UpdateChannel;
+  warn_on_orphaning_delete?: boolean;
 };
 
 // Editor-side draft for MachineSettingsDialog. Flat (provider keys hoisted

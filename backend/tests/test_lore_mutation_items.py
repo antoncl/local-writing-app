@@ -341,6 +341,32 @@ class WriteRuleTests(_RelationshipFixture):
         self.assertEqual(entry_path.id, self.mara)
 
 
+class OrphanedItemWarningTests(_RelationshipFixture):
+    """ADR-0089 §9: deleting an item's target leaves it on disk with a blank
+    key (the purge writes `""`, never drops the item), and `validate_project`
+    reports it — the item's other members summarised, never joined to a
+    scene's marker record (the marker validator already covers that)."""
+
+    def test_deleting_the_target_leaves_a_blank_key_and_a_validation_warning(self) -> None:
+        self.service.delete_lore_entry(self.tomas)
+
+        entry = self.service.read_lore_entry(self.mara)
+        items = entry.metadata[FIELD]
+        self.assertEqual(len(items), 2)
+        orphan = next(item for item in items if item["to"] == "")
+        self.assertEqual(orphan["kind"], "kinship")
+
+        warnings = self.service.validate_project().warnings
+        matches = [w for w in warnings if "orphaned item" in w]
+        self.assertEqual(len(matches), 1, warnings)
+        self.assertIn(FIELD, matches[0])
+        self.assertIn("kinship", matches[0])
+
+    def test_no_orphans_emits_no_warning(self) -> None:
+        warnings = self.service.validate_project().warnings
+        self.assertFalse(any("orphaned item" in w for w in warnings), warnings)
+
+
 class ModuleTests(unittest.TestCase):
     """The pure pieces: the shape predicate, the path grammar, the fold."""
 

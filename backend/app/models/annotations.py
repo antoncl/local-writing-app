@@ -157,15 +157,32 @@ class Backlink(BaseModel):
     field_name: str
 
 
+class ReferenceGraphEdge(BaseModel):
+    """One field-qualified forward edge (ADR-0089 §9): `src` references `dst`
+    through `field_id`. Additive alongside `ReferenceGraphResponse.refs` — the
+    frontend's keyed-referrer index (which entries hold a relationship item
+    keyed by a given target) needs to know *which field* an edge came through,
+    which the flattened `refs` dict deliberately discards."""
+
+    src: str
+    dst: str
+    field_id: str
+
+
 class ReferenceGraphResponse(BaseModel):
     """Forward reference adjacency for the whole project (#184 Phase 2): each
     node id → the ids it references through any entity_ref / entity_ref_list
     field. The frontend inverts this into a reverse index the view evaluator's
     computed `references` field projects over (`field_of(set, "references")`),
     so backlinks compose with set algebra instead of a bespoke per-node call.
-    Only nodes that reference something appear as keys."""
+    Only nodes that reference something appear as keys.
+
+    `edges` carries the same forward adjacency field-qualified and undeduped
+    across fields (ADR-0089 §9) — kept alongside `refs`, not instead of it, so
+    existing consumers of `refs` are unaffected."""
 
     refs: dict[str, list[str]] = Field(default_factory=dict)
+    edges: list[ReferenceGraphEdge] = Field(default_factory=list)
 
 
 class StructureNodeDeletePreview(BaseModel):

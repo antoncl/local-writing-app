@@ -58,9 +58,14 @@
     model: Model;
     deps: Deps;
     on: Callbacks;
+    // #2072/ADR-0089 §1: a reference-keyed list's key member never changes on
+    // a saved item — the tab passes its own key here so that ONE member
+    // renders read-only, the rest editable as normal. Absent/empty for every
+    // other caller (BodyListSection's plot-beat items have no such rule).
+    disabledKeys?: string[];
   }
 
-  let { model, deps, on }: Props = $props();
+  let { model, deps, on, disabledKeys = [] }: Props = $props();
 
   // A per-item schema so `buildRailRowModel` (built for a real entry type) has
   // something to resolve labels/options/etc. off — the item's members become
@@ -211,7 +216,11 @@
 
 <div class="bs-item-rows" data-testid="item-rows">
   {#each shownKeys as key (key)}
-    <RailFieldRow model={buildRailRowModel(ctx, key)} deps={rowDeps} on={callbacks} />
+    <RailFieldRow
+      model={buildRailRowModel(disabledKeys.includes(key) ? { ...ctx, readOnly: true } : ctx, key)}
+      deps={rowDeps}
+      on={callbacks}
+    />
   {/each}
   {#if emptyKeys.length > 0}
     <button

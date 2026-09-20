@@ -9,6 +9,7 @@ import { tick } from "svelte";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import MutationAuthoringForm from "./MutationAuthoringForm.svelte";
 import { api } from "@/lib/api";
+import { encodeItem } from "@/lib/editor-core/mutationListEdit";
 import type {
   LoreEntrySummary,
   MetadataSchema,
@@ -170,5 +171,129 @@ describe("MutationAuthoringForm — place-on-apply (ADR-0055 §5)", () => {
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(place).not.toHaveBeenCalled(); // a reusable set stays a pure read
+  });
+});
+
+describe("MutationAuthoringForm — dialog-own baseline position (ADR-0089 §4)", () => {
+  it("fetches the effective state at the passed position, not the end of scene", async () => {
+    const effective = vi.spyOn(api, "getEntityEffectiveState").mockResolvedValue({
+      entity_id: "mira",
+      scene_id: "scene1",
+      position: 42,
+      values: {},
+    });
+    vi.spyOn(api, "listMutationSetEntries").mockResolvedValue({ entries: [] });
+    render(MutationAuthoringForm, {
+      props: {
+        loreEntries: [lore("mira", "Mira")],
+        schema: SCHEMA,
+        presetEntityId: "mira",
+        sceneId: "scene1",
+        position: 42,
+        onSubmit: NOOP,
+        onCancel: NOOP,
+      },
+    });
+    await tick();
+    await tick();
+
+    expect(effective).toHaveBeenCalledWith("mira", "scene1", 42, []);
+  });
+});
+
+describe("MutationAuthoringForm — reference-keyed list item editing (ADR-0089 §5, #2072)", () => {
+  const KEYED_SCHEMA = {
+    version: 1,
+    entry_types: {
+      "lore:character": { name: "Character", kind: "lore", fields: ["relationships"] },
+    },
+    fields: {
+      relationships: {
+        name: "Relationships",
+        type: "list",
+        options: [],
+        item_members: [
+          { key: "to", name: "To", type: "entity_ref" },
+          { key: "active", name: "Active", type: "boolean" },
+        ],
+      },
+    },
+  } as unknown as MetadataSchema;
+
+  function renderKeyedUnit() {
+    vi.spyOn(api, "getEntityEffectiveState").mockResolvedValue({
+      entity_id: "mira",
+      scene_id: "scene1",
+      position: null,
+      // The baseline EXCLUDES this unit's own records (lore_a, the replace on
+      // lore_c) — the server-side `exclude` contract (#71, ADR-0017 for the
+      // collection case; the same fetch serves the item-edit baseline).
+      values: {
+        relationships: [
+          { to: "lore_c", active: true },
+          { to: "lore_d", active: true },
+        ],
+      },
+    });
+    const onSubmit = vi.fn();
+    render(MutationAuthoringForm, {
+      props: {
+        loreEntries: [lore("mira", "Mira")],
+        schema: KEYED_SCHEMA,
+        sceneId: "scene1",
+        initial: {
+          markerId: "m1",
+          entity: "mira",
+          name: "",
+          rows: [
+            { id: "rec_add_a", field: "relationships", op: "add", value: encodeItem({ to: "lore_a", active: true }) },
+            { id: "rec_replace_c", field: "relationships.lore_c.active", op: "replace", value: "false" },
+          ],
+        },
+        onSubmit,
+        onCancel: NOOP,
+      },
+    });
+    return onSubmit;
+  }
+
+  it("seeds the keyed field from the composed effective items — the baseline plus this unit's own prior records", async () => {
+    renderKeyedUnit();
+    await tick();
+    await tick();
+
+    // lore_c and lore_d come from the baseline; lore_a from this unit's own
+    // prior `add` record — all three visible without any interaction.
+    expect(screen.getByText("lore_c")).toBeInTheDocument();
+    expect(screen.getByText("lore_d")).toBeInTheDocument();
+    expect(screen.getByText("lore_a")).toBeInTheDocument();
+  });
+
+  it("emits add/replace/remove with preserved ids on submit", async () => {
+    const onSubmit = renderKeyedUnit();
+    await tick();
+    await tick();
+
+    // Remove the baseline item lore_d (items render in composed order:
+    // lore_c, lore_d, lore_a).
+    const removeButtons = screen.getAllByRole("button", { name: "Remove item" });
+    await fireEvent.click(removeButtons[1]);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const draft = onSubmit.mock.calls[0][0];
+    expect(draft.rows).toEqual(
+      expect.arrayContaining([
+        // The add is unchanged — reuses its existing id.
+        { id: "rec_add_a", field: "relationships", op: "add", value: encodeItem({ to: "lore_a", active: true }) },
+        // The replace re-derives from raw baseline vs the composed value —
+        // still differs (true → false), so it's re-emitted, reusing its id.
+        { id: "rec_replace_c", field: "relationships.lore_c.active", op: "replace", value: "false" },
+        // A fresh remove for the baseline item just deleted — no prior id.
+        { field: "relationships", op: "remove", value: "lore_d" },
+      ]),
+    );
+    expect(draft.rows).toHaveLength(3);
   });
 });

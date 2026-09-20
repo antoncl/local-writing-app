@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildReferenceIndex, forwardRefsOf, projectReferences, sameRefSet } from "./referenceIndex";
-import type { MetadataSchema } from "@/lib/types";
+import { buildKeyedReferrerIndex, buildReferenceIndex, forwardRefsOf, projectReferences, sameRefSet } from "./referenceIndex";
+import type { MetadataSchema, ReferenceGraphEdge } from "@/lib/types";
 
 // A minimal schema: a `character` type carrying one scalar ref (`mentor`), one
 // ref list (`allies`), and a non-ref text field (`title`) that must be ignored.
@@ -102,5 +102,62 @@ describe("projectReferences (#194 Phase 2c)", () => {
     expect(projectReferences([], reverse).size).toBe(0);
     expect(projectReferences(["bob"], null).size).toBe(0);
     expect(projectReferences(["bob"], undefined).size).toBe(0);
+  });
+});
+
+// A schema carrying one reference-keyed list (`relationships`, ADR-0089 §1: a
+// group-shaped list whose item group has exactly one entity_ref member) beside
+// an ordinary entity_ref_list (`allies`), so the filter can be pinned against
+// a field it must exclude.
+const KEYED_SCHEMA = {
+  version: 1,
+  entry_types: {
+    character: { name: "Character", kind: "lore", fields: ["relationships", "allies"] },
+  },
+  fields: {
+    relationships: {
+      type: "list",
+      item_group: "relationship",
+      item_members: [
+        { key: "to", name: "Who", type: "entity_ref" },
+        { key: "kind", name: "Kind", type: "text" },
+      ],
+    },
+    allies: { type: "entity_ref_list" },
+  },
+} as unknown as MetadataSchema;
+
+describe("buildKeyedReferrerIndex (ADR-0089 §9)", () => {
+  it("keeps only edges through a reference-keyed list field", () => {
+    const edges: ReferenceGraphEdge[] = [
+      { src: "mara", dst: "tomas", field_id: "relationships" },
+      { src: "alice", dst: "bob", field_id: "allies" },
+    ];
+    const index = buildKeyedReferrerIndex(edges, KEYED_SCHEMA);
+    expect(index.get("tomas")).toEqual([{ referrerId: "mara", fieldId: "relationships" }]);
+    expect(index.has("bob")).toBe(false); // allies is an ordinary entity_ref_list, not keyed
+  });
+
+  it("accumulates more than one referrer for the same target", () => {
+    const edges: ReferenceGraphEdge[] = [
+      { src: "mara", dst: "tomas", field_id: "relationships" },
+      { src: "ilse", dst: "tomas", field_id: "relationships" },
+    ];
+    const index = buildKeyedReferrerIndex(edges, KEYED_SCHEMA);
+    expect(index.get("tomas")).toEqual([
+      { referrerId: "mara", fieldId: "relationships" },
+      { referrerId: "ilse", fieldId: "relationships" },
+    ]);
+  });
+
+  it("is empty for missing/nullish edges or schema", () => {
+    expect(buildKeyedReferrerIndex(null, KEYED_SCHEMA).size).toBe(0);
+    expect(buildKeyedReferrerIndex(undefined, KEYED_SCHEMA).size).toBe(0);
+    expect(buildKeyedReferrerIndex([{ src: "mara", dst: "tomas", field_id: "relationships" }], null).size).toBe(0);
+  });
+
+  it("skips an edge through an unknown field id", () => {
+    const index = buildKeyedReferrerIndex([{ src: "mara", dst: "tomas", field_id: "no_such_field" }], KEYED_SCHEMA);
+    expect(index.size).toBe(0);
   });
 });

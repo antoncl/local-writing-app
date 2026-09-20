@@ -7,6 +7,13 @@
   // itself; ReferencePicker (still used for a compact/inline rail field, and
   // for a non-`multiple` `entity_ref`) keeps its own pill rendering unchanged.
   //
+  // ADR-0089 §6 (#2072) widens this tab to a reference-KEYED `list` field —
+  // items are member records keyed by their one `entity_ref` member, not bare
+  // ids. `model.keyMember` tells the two shapes apart: null is today's plain
+  // `entity_ref_list` (each item IS the id string, byte-identical to before);
+  // a real key resolves each item to its target's row, the item's other
+  // members as the row's detail line, editable in place (BodyItemRows).
+  //
   // NO view switcher in this slice (out of scope, #2010): ViewSwitcher is
   // pane-scoped by kind; a tab-scoped view key is a follow-up.
   import { onMount, tick } from "svelte";
@@ -14,11 +21,14 @@
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import PeekCard, { type PeekCardDeps } from "@/components/widgets/PeekCard.svelte";
+  import BodyItemRows from "@/components/editor/body/BodyItemRows.svelte";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { resolveColor } from "@/lib/utils/colors";
+  import { isMetadataValuePresent } from "@/lib/utils/schemaTypeHelpers";
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { buildPeekTarget } from "@/lib/utils/peekTarget";
   import { peekAnchor } from "@/lib/actions/peekAnchor";
+  import { itemMemberDetail, listItemKey } from "@/lib/editor-core/keyedList";
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   import { liveTags } from "@/lib/stores/tagNodes";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -29,10 +39,12 @@
   import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
   import type {
     AssistantEntrySummary,
+    DocumentKind,
     EntryMetadata,
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataSchema,
+    MetadataValue,
     NavigateTarget,
     NodePickerConfig,
     NodePickerRef,
@@ -40,10 +52,13 @@
     PromptEntrySummary,
     StructureDocument,
   } from "@/lib/types";
+  import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
 
   // The tab's universe node — a ResolvedRef widened with a `missing` sentinel
-  // (a "Missing" row, ReferencePicker's own pill treatment) and a always-
-  // string `entry_type` so it satisfies EvalNode.
+  // (a "Missing" row, ReferencePicker's own pill treatment), an `orphaned`
+  // sentinel (ADR-0089 §9 — a keyed item whose target was deleted, kept on
+  // disk with a blank key) and an always-string `entry_type` so it satisfies
+  // EvalNode.
   type RefTabNode = {
     id: string;
     kind: string;
@@ -53,6 +68,29 @@
     // declared so the search filter can read aliases and tag ids (#2038).
     metadata?: EntryMetadata;
     missing?: boolean;
+    orphaned?: boolean;
+  };
+
+  // One displayed row's bookkeeping — the item alongside its resolved
+  // identity, keyed off the base list (`model.items`) so removal/edit find
+  // the right underlying item regardless of scrub. Reused across nodes,
+  // pickers and the peek card so there's ONE fold, not several.
+  type RowEntry = {
+    // The node id this row renders as: the item's key, or a synthetic id for
+    // an orphan (ADR-0089 §9 — stable per orphan position, never a real id).
+    id: string;
+    key: string | null;
+    item: MetadataValue;
+    orphaned: boolean;
+    // True when scrubbed AND this item's non-key members differ from the
+    // base item at the same key (ADR-0089 §6) — including a key with no base
+    // item at all (an item a mutation `add` brought into being).
+    mutated: boolean;
+    // Index into the DISPLAYED source array (`model.effectiveItems ??
+    // model.items`) — used only to remove/re-key an orphan by position, and
+    // only reachable while unscrubbed (removal/edit UI hides under scrub), so
+    // this always lines up with `model.items` when it matters.
+    sourceIndex: number;
   };
 
   interface Model {
@@ -63,7 +101,17 @@
     // separate views.
     entryType: string;
     fieldLabel: string;
-    ids: string[];
+    // The field's stored items: plain id strings for today's `entity_ref_list`
+    // (keyMember null), member records for a reference-keyed `list`
+    // (ADR-0089 §1/§6, keyMember non-null).
+    items: MetadataValue[];
+    // Non-null for a reference-keyed list — the member holding each item's
+    // target (`keyedListKeyMember`, `@/lib/editor-core/keyedList`).
+    keyMember: string | null;
+    // The effective items at the current scrub point (ADR-0089 §3's folded
+    // contract), or null when not scrubbed / no override at this field. When
+    // present the tab renders THESE instead of `items`.
+    effectiveItems: MetadataValue[] | null;
     readOnly: boolean;
     schema: MetadataSchema | null;
     // The open node's id (#2013) — needed only to key the scroll-position
@@ -82,10 +130,15 @@
     // never reaches this tab in the first place, #2010's own field is never a
     // tags field; this only covers a stray tag id inside another list).
     tagTitleById?: ReadonlyMap<string, string>;
+    // Threaded through to a keyed item's inline editor (BodyItemRows) — the
+    // same collaborators BodySections/BodyListSection pass it (#2043).
+    implicitContextMatcher?: CompiledMatcher | null;
+    excludeId?: string | null;
+    createLayerId?: string | null;
   }
 
   interface Callbacks {
-    change: (ids: string[]) => void;
+    change: (items: MetadataValue[]) => void;
     navigate: (payload: NavigateTarget) => void;
   }
 
@@ -112,10 +165,54 @@
     }),
   );
 
-  function toNode(id: string): RefTabNode {
-    const resolved = resolver(id);
+  // ADR-0089 §6: fold `model.items`/`model.effectiveItems` into one row list
+  // per key. Presence of a scrub override swaps the DISPLAYED items to the
+  // effective set; the base (`model.items`) stays the fold this reads from
+  // for the "did this item change" mark and for remove/edit, which only ever
+  // act while unscrubbed.
+  const entries = $derived.by((): RowEntry[] => {
+    const source = model.effectiveItems ?? model.items;
+    const baseByKey = new Map<string, MetadataValue>();
+    for (const item of model.items) {
+      const key = listItemKey(model.field, item);
+      if (key) baseByKey.set(key, item);
+    }
+    let orphanIndex = 0;
+    return source.map((item, sourceIndex) => {
+      const key = listItemKey(model.field, item);
+      if (key) {
+        const mutated = model.effectiveItems != null && !!model.keyMember && itemMembersDiffer(model.field, baseByKey.get(key), item);
+        return { id: key, key, item, orphaned: false, mutated, sourceIndex };
+      }
+      // A blank/absent key on a keyed list is an orphaned item (ADR-0089 §9);
+      // a plain entity_ref_list's items are always strings, so this branch is
+      // keyed-list-only in practice. The synthetic id is stable per ORPHAN
+      // POSITION (not the source index), so reordering non-orphan items around
+      // it doesn't relabel it mid-session.
+      const id = `__orphan_${orphanIndex++}`;
+      return { id, key: null, item, orphaned: true, mutated: false, sourceIndex };
+    });
+  });
+  const entryByNodeId = $derived(new Map(entries.map((entry) => [entry.id, entry])));
+  const ids = $derived(entries.map((entry) => entry.id));
+
+  // Per-member diff (ADR-0089 §6) — never a whole-item JSON compare, whose
+  // key order isn't guaranteed to match between the stored base and the
+  // resolver-folded effective value.
+  function itemMembersDiffer(field: MetadataFieldDefinition, base: MetadataValue | undefined, effective: MetadataValue): boolean {
+    const baseRecord = (typeof base === "object" && base !== null && !Array.isArray(base) ? base : {}) as Record<string, MetadataValue>;
+    const effRecord = (typeof effective === "object" && effective !== null && !Array.isArray(effective) ? effective : {}) as Record<
+      string,
+      MetadataValue
+    >;
+    return (field.item_members ?? []).some((member) => JSON.stringify(baseRecord[member.key] ?? null) !== JSON.stringify(effRecord[member.key] ?? null));
+  }
+
+  function toNode(entry: RowEntry): RefTabNode {
+    if (entry.orphaned) return { id: entry.id, kind: "lore", title: "(no target)", entry_type: "", orphaned: true };
+    const resolved = resolver(entry.key!);
     if (resolved) return { ...resolved, entry_type: resolved.entry_type ?? "" };
-    return { id, kind: "lore", title: id, entry_type: "", missing: true };
+    return { id: entry.key!, kind: "lore", title: entry.key!, entry_type: "", missing: true };
   }
 
   // The universe IS the field's own picked ids, in order (ADR-0035 §3 — a
@@ -123,9 +220,15 @@
   // ReferencePicker's own selected-refs list uses via `nodeSet`). `hand_picked`
   // + `sort: manual` keep exactly this order; `group_by: entry_type` is the
   // same shape `defaultView("lore")` renders.
-  const nodes = $derived(model.ids.map(toNode));
+  const nodes = $derived(entries.map(toNode));
 
-  const pickerConfig = $derived({ ...(model.field.picker_config ?? {}), multiple: true } as NodePickerConfig);
+  // A keyed list's picker source lives on the KEY MEMBER (ADR-0089 §1's
+  // `to: entity_ref` carries `picker_config`, not the field itself); a plain
+  // `entity_ref_list` keeps its own `field.picker_config` as before.
+  const keyMemberPickerConfig = $derived(
+    model.keyMember ? (model.field.item_members ?? []).find((m) => m.key === model.keyMember)?.picker_config ?? null : model.field.picker_config ?? null,
+  );
+  const pickerConfig = $derived({ ...(keyMemberPickerConfig ?? {}), multiple: true } as NodePickerConfig);
 
   // --- View switcher (#2039) ------------------------------------------------
   // The tab renders a view, so it gets the ▤ switcher every pane has — keyed
@@ -138,7 +241,7 @@
   const listKind = $derived.by(() => {
     // A saved-view ref source (`{ view }`) names no kind of its own.
     const kinds = new Set(
-      (model.field.picker_config?.sources ?? []).map((s) => ("kind" in s ? s.kind : null)).filter((k): k is string => !!k),
+      (keyMemberPickerConfig?.sources ?? []).map((s) => ("kind" in s ? s.kind : null)).filter((k): k is string => !!k),
     );
     return kinds.size === 1 ? [...kinds][0]! : null;
   });
@@ -149,23 +252,76 @@
       ? { ...chosenSpec, kind: listKind! }
       : {
           kind: "lore",
-          expr: { hand_picked: model.ids },
+          expr: { hand_picked: ids },
           sort: { by: "manual" },
           group_by: [{ field: "entry_type", order: "label" }],
         },
   );
   const selectedRefs = $derived(
     nodes
-      .filter((n) => !n.missing)
+      .filter((n) => !n.missing && !n.orphaned)
       .map((n): NodePickerRef => ({ id: n.id, kind: n.kind as NodePickerRef["kind"], title: n.title, entry_type: n.entry_type })),
   );
 
+  // ADR-0089 §1/§3: add appends `{ [keyMember]: id }`, remove drops the item
+  // by key — every other item's object is untouched (a plain re-derivation
+  // from ids would lose their members). An id already keying an item is
+  // simply never treated as "added" (the set-difference below already
+  // excludes it), which is the refusal §1 requires.
   function handlePickerChange(detail: { value: NodePickerRef[] }) {
-    on.change(detail.value.map((ref) => ref.id));
+    const newIds = detail.value.map((ref) => ref.id);
+    const keyMember = model.keyMember;
+    if (!keyMember) {
+      on.change(newIds);
+      return;
+    }
+    const currentKeys = new Set(model.items.map((item) => listItemKey(model.field, item)).filter((k): k is string => k !== null));
+    const nextIdSet = new Set(newIds);
+    const kept = model.items.filter((item) => {
+      const key = listItemKey(model.field, item);
+      return key === null || nextIdSet.has(key); // an orphan (no key) is never touched by the picker
+    });
+    const added = [...new Set(newIds.filter((id) => !currentKeys.has(id)))];
+    const appended = added.map((id) => ({ [keyMember]: id }) as MetadataValue);
+    on.change([...kept, ...appended]);
   }
 
   function removeId(id: string) {
-    on.change(model.ids.filter((other) => other !== id));
+    const entry = entryByNodeId.get(id);
+    if (model.keyMember && entry?.orphaned) {
+      on.change(model.items.filter((_, i) => i !== entry.sourceIndex));
+      return;
+    }
+    on.change(model.items.filter((item) => listItemKey(model.field, item) !== id));
+  }
+
+  function itemHasOtherMembersSet(item: MetadataValue, keyMember: string): boolean {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) return false;
+    return Object.entries(item as Record<string, MetadataValue>).some(([key, value]) => key !== keyMember && isMetadataValuePresent(value));
+  }
+
+  function replaceItemByKey(key: string, updater: (record: Record<string, MetadataValue>) => Record<string, MetadataValue>) {
+    on.change(
+      model.items.map((item) => {
+        if (listItemKey(model.field, item) !== key) return item;
+        const record = (typeof item === "object" && item !== null && !Array.isArray(item) ? item : {}) as Record<string, MetadataValue>;
+        return updater(record);
+      }),
+    );
+  }
+
+  function writeItemMember(entry: RowEntry, memberKey: string, value: MetadataValue) {
+    if (!entry.key) return; // an orphan has no key to write a member under
+    replaceItemByKey(entry.key, (record) => ({ ...record, [memberKey]: value }));
+  }
+
+  function clearItemMember(entry: RowEntry, memberKey: string) {
+    if (!entry.key) return;
+    replaceItemByKey(entry.key, (record) => {
+      const next = { ...record };
+      delete next[memberKey];
+      return next;
+    });
   }
 
   function entryTypeName(entryType: string, kind: string): string {
@@ -198,7 +354,7 @@
   // --- Peek card (#2011): hover/focus a row for a preview -----------------
   let peek = $state<{ node: RefTabNode; anchor: HTMLElement } | null>(null);
   function openPeek(node: RefTabNode, anchor: HTMLElement) {
-    if (node.missing) return;
+    if (node.missing || node.orphaned) return;
     peek = { node, anchor };
   }
   function closePeek() {
@@ -221,16 +377,47 @@
     assistantEntries: deps.assistantEntries,
     tagEntries: $liveTags,
   });
+  // ADR-0089 §1: a saved item's key never changes. Re-pointing works when the
+  // item has nothing else set yet (a fresh pick) or is already orphaned (§9 —
+  // that's exactly how a writer resolves one); otherwise the swap is a no-op.
   function peekSwap(id: string) {
     if (!peek) return;
-    on.change(model.ids.map((x) => (x === peek!.node.id ? id : x)));
+    const keyMember = model.keyMember;
+    if (!keyMember) {
+      on.change(model.items.map((item) => (item === peek!.node.id ? id : item)));
+      closePeek();
+      return;
+    }
+    const entry = entryByNodeId.get(peek.node.id);
     closePeek();
+    if (!entry) return;
+    if (model.items.some((item) => listItemKey(model.field, item) === id)) return; // already keys another item
+    if (entry.orphaned) {
+      on.change(
+        model.items.map((item, i) => {
+          if (i !== entry.sourceIndex) return item;
+          const record = (typeof item === "object" && item !== null && !Array.isArray(item) ? item : {}) as Record<string, MetadataValue>;
+          return { ...record, [keyMember]: id };
+        }),
+      );
+      return;
+    }
+    if (entry.key && !itemHasOtherMembersSet(entry.item, keyMember)) {
+      replaceItemByKey(entry.key, () => ({ [keyMember]: id }));
+    }
   }
   function peekRemove() {
     if (!peek) return;
     removeId(peek.node.id);
     closePeek();
   }
+
+  // --- Item editor (ADR-0089 §6 stop 0): expand a keyed row in place -------
+  let openItemId = $state<string | null>(null);
+  function toggleItemEditor(id: string) {
+    openItemId = openItemId === id ? null : id;
+  }
+  const itemDocumentKind = $derived((model.schema?.entry_types[model.entryType]?.kind ?? "lore") as DocumentKind);
 
   // --- Scroll-position memory (#2013) --------------------------------------
   // Surface key mirrors ProseBodyView's "body": "list:<fieldId>" per field, so
@@ -265,7 +452,7 @@
 <div class="ref-list-tab" role="tabpanel" id={`body-tabpanel-${model.fieldId}`} aria-label={model.fieldLabel}>
   <div class="ref-list-head prose-column">
     <span class="ref-list-label"
-      >{model.fieldLabel}{#if model.ids.length > 0}<span class="ref-list-count">{model.ids.length}</span>{/if}</span
+      >{model.fieldLabel}{#if ids.length > 0}<span class="ref-list-count">{ids.length}</span>{/if}</span
     >
     <span class="ref-list-actions">
       {#if listKind}
@@ -303,7 +490,7 @@
       searchPlaceholder="Filter"
       filter={filterNode}
       onDblClick={(node) => {
-        if (!node.missing) on.navigate({ id: node.id, kind: node.kind, entryType: node.entry_type });
+        if (!node.missing && !node.orphaned) on.navigate({ id: node.id, kind: node.kind, entryType: node.entry_type });
       }}
       row={refRow}
     >
@@ -330,27 +517,82 @@
 {/if}
 
 {#snippet refRow(node: RefTabNode, ctx: RowCtx<RefTabNode>)}
-  {@const hex = node.missing ? null : pillHexFor(node)}
+  {@const entry = entryByNodeId.get(node.id)}
+  {@const unresolved = !!(node.missing || node.orphaned)}
+  {@const hex = unresolved ? null : pillHexFor(node)}
+  {@const detail = model.keyMember && entry && !entry.orphaned ? itemMemberDetail(model.field, entry.item) : ""}
+  {@const editable = !!model.keyMember && !unresolved && !model.readOnly}
+  {#snippet itemEditor()}
+    {#if entry}
+      <div class="ref-item-editor">
+        <BodyItemRows
+          model={{
+            members: model.field.item_members ?? [],
+            record: (typeof entry.item === "object" && entry.item !== null && !Array.isArray(entry.item) ? entry.item : {}) as Record<
+              string,
+              MetadataValue
+            >,
+            readOnly: model.readOnly,
+            schema: model.schema!,
+            entryType: model.entryType,
+            documentKind: itemDocumentKind,
+            itemKey: `${model.fieldId}:${node.id}`,
+          }}
+          deps={{
+            loreEntries: deps.loreEntries,
+            promptEntries: deps.promptEntries,
+            structure: deps.structure,
+            researchStructure: deps.researchStructure,
+            implicitContextMatcher: deps.implicitContextMatcher ?? null,
+            excludeId: deps.excludeId ?? null,
+            createLayerId: deps.createLayerId ?? null,
+            tagTitleById: deps.tagTitleById ?? new Map(),
+          }}
+          on={{
+            write: (key, value) => writeItemMember(entry, key, value),
+            clear: (key) => clearItemMember(entry, key),
+            navigate: (payload) => on.navigate(payload),
+          }}
+          disabledKeys={model.keyMember ? [model.keyMember] : []}
+        />
+      </div>
+    {/if}
+  {/snippet}
   <div class="ref-row-anchor" use:peekAnchor={{ onOpen: (anchor) => openPeek(node, anchor), onClose: closePeek }}>
     <NodeRow
-      title={node.missing ? "Missing" : node.title}
+      title={node.missing ? "Missing" : node.orphaned ? "(no target)" : node.title}
       depth={ctx.depth}
       stripeColor={null}
-      typeIcon={entryTypeIconClass(node.entry_type, model.schema)}
+      typeIcon={unresolved ? null : entryTypeIconClass(node.entry_type, model.schema)}
       onDblClick={ctx.onDblClick}
+      nested={editable && openItemId === node.id ? itemEditor : undefined}
     >
+      {#snippet detailSlot()}
+        {#if editable}
+          <button
+            type="button"
+            class="ref-item-detail-toggle"
+            aria-expanded={openItemId === node.id}
+            aria-label={`${openItemId === node.id ? "Collapse" : "Edit"} ${node.title}`}
+            onclick={() => toggleItemEditor(node.id)}
+          >{#if detail}<small>{detail}</small>{/if}{#if entry?.mutated}<span class="ref-item-mutated" title="Changed by here">⤳</span>{/if}</button>
+        {:else if detail}
+          <small>{detail}{#if entry?.mutated}<span class="ref-item-mutated" title="Changed by here">⤳</span>{/if}</small>
+        {/if}
+      {/snippet}
       {#snippet trailing()}
         <span
           class="ref-type-pill"
           class:has-color={!!hex}
           class:missing={node.missing}
+          class:orphaned={node.orphaned}
           style={hex ? `--chip-base: ${hex}` : ""}
-        >{node.missing ? "Missing" : entryTypeName(node.entry_type, node.kind)}</span>
+        >{node.missing ? "Missing" : node.orphaned ? "Orphaned" : entryTypeName(node.entry_type, node.kind)}</span>
         {#if !model.readOnly}
           <button
             type="button"
             class="row-action-delete"
-            aria-label={`Remove ${node.missing ? "Missing" : node.title} from ${model.fieldLabel}`}
+            aria-label={`Remove ${node.missing ? "Missing" : node.orphaned ? "the orphaned item" : node.title} from ${model.fieldLabel}`}
             title="Remove"
             onclick={() => removeId(node.id)}
           >×</button>
@@ -462,10 +704,45 @@
     background: color-mix(in srgb, var(--chip-base) 22%, black 78%);
     color: color-mix(in srgb, var(--chip-base) 70%, var(--text) 30%);
   }
-  .ref-type-pill.missing {
+  .ref-type-pill.missing,
+  .ref-type-pill.orphaned {
     background: var(--danger-soft);
     border-color: var(--danger-border);
     color: var(--danger);
+  }
+
+  /* The detail line doubles as the item-editor toggle for a keyed list
+     (ADR-0089 §6) — a plain text button, no button chrome of its own, so it
+     reads exactly like the static `<small>` it replaces. */
+  .ref-item-detail-toggle {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+  .ref-item-detail-toggle:hover :global(small) {
+    color: var(--text-2);
+  }
+  .ref-item-detail-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-radius: var(--r-sm);
+  }
+
+  /* Mutation mark (#64/ADR-0089 §6) — the in-prose pill's vocabulary. */
+  .ref-item-mutated {
+    margin-left: 4px;
+    color: var(--mutation-color);
+    font-weight: 700;
+  }
+
+  .ref-item-editor {
+    padding-block: 2px 4px;
   }
 
   .muted {

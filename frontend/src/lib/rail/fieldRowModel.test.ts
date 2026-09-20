@@ -48,14 +48,14 @@ const SCHEMA = {
       picker_config: { create_missing: true, sources: [{ kind: "tag", expr: { type: "tag:tag" } }] },
     },
     // ADR-0089 §3/§6: a reference-keyed list's effective value folds to items
-    // (member maps), not ids. isListIndex/listSummary stay entity_ref_list-only
-    // in this slice (the tab's own gate widening is S3) — item_members is
-    // exercised here regardless, since a list field's folded items can reach
-    // listSummary once that gate widens, and the guard must already hold.
+    // (member maps), not ids — and #2072 widens isListIndex to admit a
+    // group-shaped `list` keyed by its one `entity_ref` member, same as an
+    // entity_ref_list.
     relationships: {
       name: "Relationships",
-      type: "entity_ref_list",
+      type: "list",
       options: [],
+      item_scalar: false,
       item_members: [
         { key: "who", name: "Who", type: "entity_ref" },
         { key: "role", name: "Role", type: "select" },
@@ -259,6 +259,21 @@ describe("buildRailRowModel", () => {
       );
       expect(model.listSummary).not.toContain("[object Object]");
       expect(model.listSummary).toBe("1 Character");
+    });
+
+    it("#2072: a reference-keyed list (a group-shaped `list`, not entity_ref_list) is a list index too, and isWide short-circuits through it", () => {
+      const model = buildRailRowModel(
+        baseCtx({ listsInBody: true, metadata: { relationships: [{ who: "lore_a", role: "squire" }] } }),
+        "relationships",
+      );
+      expect(model.listIndex).toBe(true);
+      expect(model.wide).toBe(false);
+    });
+
+    it("#2072: without listsInBody, a reference-keyed list stays the plain wide rail row", () => {
+      const model = buildRailRowModel(baseCtx({ metadata: { relationships: [{ who: "lore_a", role: "squire" }] } }), "relationships");
+      expect(model.listIndex).toBe(false);
+      expect(model.wide).toBe(true);
     });
   });
 });

@@ -40,6 +40,8 @@ from app.services.ai.selector_eval import is_empty
 from app.services.color_snap import nearest_swatch_id
 from app.services.machine_settings import palette as machine_palette
 from app.services.project.errors import ProjectServiceError
+from app.services.project.field_values import display_value
+from app.services.project.lore_mutation_items import item_key, keyed_lists_from
 from app.services.project.metadata_refs import (
     UNCHANGED,
     RefOccurrence,
@@ -418,6 +420,42 @@ class MetadataValuesMixin:
                     f"a reference-keyed list holds one item per target."
                 )
         return errors
+
+    def _orphaned_item_warnings(
+        self, label: str, metadata: dict[str, Any], schema: MetadataSchema
+    ) -> list[str]:
+        """One warning per **orphaned item** (ADR-0089 §9): a reference-keyed
+        list item whose key member is absent or blank because its target was
+        deleted. Delete-purge and the read-side dangling-strip both blank a
+        purged key to `""` rather than drop the item (`_purge_metadata_refs`,
+        `_strip_dangling_references`), so the item survives on disk with no
+        key — this is where that state stops being silent.
+
+        Deliberately does NOT try to join a scene mutation record to the
+        orphan: after the purge the item no longer knows its old key, and
+        every scene record still addressing a deleted key is already reported
+        by the marker validator ("names no item <key> at this point",
+        `lore_mutation_validation.py`) — a second report here would duplicate
+        that finding under a different heading."""
+        warnings: list[str] = []
+        keyed_lists = keyed_lists_from(schema)
+        for field_id, keyed in keyed_lists.items():
+            items = metadata.get(field_id)
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict) or item_key(item, keyed.key_member) is not None:
+                    continue
+                # `display_value` on the item dict joins its member values with
+                # " · ", skipping the (now-blank) key member itself — the same
+                # collapsed-row summary the rail shows, e.g. "kinship · reconciled".
+                summary = display_value(item)
+                detail = f"{summary}; its target was deleted" if summary else "its target was deleted"
+                warnings.append(
+                    f"{label} metadata field {field_id} holds an orphaned item ({detail}); "
+                    f"remove it or point a new item at the right entry."
+                )
+        return warnings
 
     @staticmethod
     def _group_member_as_field(member: GroupMember) -> MetadataFieldDefinition:

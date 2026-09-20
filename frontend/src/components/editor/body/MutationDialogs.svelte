@@ -41,6 +41,10 @@
   let authoringOpen = $state(false);
   let presetEntityId = $state("");
   let editInitial = $state<MutationUnitDraft | null>(null);
+  // The dialog's own insertion position (ADR-0089 §4): the scene-markdown
+  // char offset the baseline resolves at. `null`/undefined = end of scene,
+  // unchanged from before the reversal.
+  let authoringPosition = $state<number | null | undefined>(undefined);
   let closeOpen = $state(false);
   let closePresetEntityId = $state("");
 
@@ -57,17 +61,19 @@
     }
   }
 
-  export async function openAuthoring(preset = "") {
+  export async function openAuthoring(preset = "", position?: number | null) {
     await flushFirst();
     editInitial = null;
     presetEntityId = preset;
+    authoringPosition = position;
     authoringOpen = true;
   }
 
-  export async function openEdit(initial: MutationUnitDraft) {
+  export async function openEdit(initial: MutationUnitDraft, position?: number | null) {
     await flushFirst();
     presetEntityId = "";
     editInitial = initial;
+    authoringPosition = position;
     authoringOpen = true;
   }
 
@@ -103,6 +109,7 @@
     initial={editInitial}
     {presetEntityId}
     {sceneId}
+    position={authoringPosition}
     onSubmit={handleSubmit}
     onDelete={handleDelete}
     onCancel={() => (authoringOpen = false)}

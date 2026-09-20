@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { editorPanes } from "./editorPanes.svelte";
 import { createEmptyEditorPane, type EditorPaneState, type DocumentRef } from "@/lib/editor-core/editorPaneModel";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
+import { keyedReferrerIndexStore } from "@/lib/stores/references";
 import { setResearchStructure } from "@/lib/stores/structure";
 import { api } from "@/lib/api";
 import type { EditableDocument, StructureDocument, PlotBoardProjection } from "@/lib/types";
@@ -63,6 +64,8 @@ describe("editorPaneDelete: per-kind delete routing", () => {
   afterEach(() => {
     editorPanes.reset();
     setResearchStructure(null);
+    keyedReferrerIndexStore.set(new Map());
+    editorPanes.orphanWarning = { enabled: () => false, suppress: async () => {} };
   });
 
   it("lore → api.deleteLoreEntry, never api.deleteScene", async () => {
@@ -176,5 +179,74 @@ describe("editorPaneDelete: per-kind delete routing", () => {
     await deleteVia(paneFor("lore", "lore:character"));
     await Promise.resolve(); // let the fire-and-forget refresh initiate
     expect(api.listChatSessions).toHaveBeenCalled(); // stubbed in beforeEach
+  });
+});
+
+// ADR-0089 §9: a keyed referrer (an entry holding a relationship item keyed by
+// the node being deleted) gets its own sentence + "don't show again" checkbox,
+// gated on the `orphanWarning` host hook injected in App.onMount.
+describe("editorPaneDelete: the delete-orphan warning", () => {
+  let requested: {
+    message: string;
+    onDontShowAgain?: () => Promise<void>;
+    onConfirm: () => Promise<void>;
+  };
+
+  beforeEach(() => {
+    editorPanes.reset();
+    vi.restoreAllMocks();
+    vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {}, edges: [] });
+    vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] });
+    vi.spyOn(api, "deleteLoreEntry").mockResolvedValue({ entries: [] });
+    vi.spyOn(api, "resolveReferences").mockResolvedValue({
+      candidates: [
+        { id: "referrer_1", title: "Mara", kind: "lore", entry_type: "lore:character", summary: "", found: true },
+      ],
+    });
+    vi.spyOn(confirmService, "request").mockImplementation((req: typeof requested) => {
+      requested = req;
+    });
+    editorPanes.panes = [paneFor("lore", "lore:character")];
+  });
+
+  afterEach(() => {
+    editorPanes.reset();
+    keyedReferrerIndexStore.set(new Map());
+    editorPanes.orphanWarning = { enabled: () => false, suppress: async () => {} };
+  });
+
+  it("names the count and owner, and wires onDontShowAgain to suppress(), when there are keyed referrers and the warning is enabled", async () => {
+    keyedReferrerIndexStore.set(new Map([[NODE_ID, [{ referrerId: "referrer_1", fieldId: "relationships" }]]]));
+    const suppress = vi.fn().mockResolvedValue(undefined);
+    editorPanes.orphanWarning = { enabled: () => true, suppress };
+
+    await editorPanes.requestDeleteScene("pane_1");
+
+    expect(requested.message).toContain("1 relationship item points at this entry");
+    expect(requested.message).toContain("Mara");
+    expect(requested.message).toContain("orphaned items");
+    expect(requested.onDontShowAgain).toBeTypeOf("function");
+
+    await requested.onDontShowAgain?.();
+    expect(suppress).toHaveBeenCalled();
+  });
+
+  it("leaves the request unchanged when there are no keyed referrers", async () => {
+    editorPanes.orphanWarning = { enabled: () => true, suppress: vi.fn() };
+
+    await editorPanes.requestDeleteScene("pane_1");
+
+    expect(requested.message).not.toContain("orphaned");
+    expect(requested.onDontShowAgain).toBeUndefined();
+  });
+
+  it("shows neither the sentence nor the checkbox when the warning is disabled", async () => {
+    keyedReferrerIndexStore.set(new Map([[NODE_ID, [{ referrerId: "referrer_1", fieldId: "relationships" }]]]));
+    editorPanes.orphanWarning = { enabled: () => false, suppress: vi.fn() };
+
+    await editorPanes.requestDeleteScene("pane_1");
+
+    expect(requested.message).not.toContain("orphaned");
+    expect(requested.onDontShowAgain).toBeUndefined();
   });
 });

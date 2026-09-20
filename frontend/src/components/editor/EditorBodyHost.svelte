@@ -28,6 +28,7 @@
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
+  import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
@@ -43,6 +44,7 @@
     EntryMetadata,
     LoreEntrySummary,
     MetadataSchema,
+    MetadataValue,
     NavigateTarget,
     PromptContextStrategy,
     PromptEntrySummary,
@@ -164,8 +166,12 @@
       ? model.activeBodyTab.slice(5)
       : null,
   );
-  function toIdList(v: unknown): string[] {
-    if (Array.isArray(v)) return v.map((item) => String(item));
+  // #2072/ADR-0089 §1: a list field's items may be plain id strings (a
+  // today's `entity_ref_list`) or member records (a reference-keyed list) —
+  // pass them through as-is; stringifying an object here would turn a keyed
+  // item into "[object Object]".
+  function toItemList(v: unknown): MetadataValue[] {
+    if (Array.isArray(v)) return v as MetadataValue[];
     if (typeof v === "string" && v) return [v];
     return [];
   }
@@ -413,14 +419,19 @@
 {/if}
 {#if listFieldId && model.metadataSchema}
   <!-- #2010: the active tab is a list tab — render its full editor as a
-       direct grid child, alongside the (hidden, still-mounted) shape body. -->
+       direct grid child, alongside the (hidden, still-mounted) shape body.
+       #2072/ADR-0089 §6: `keyMember` widens the tab to a reference-keyed
+       `list`; `effectiveItems` threads the scrub overlay so the tab reads the
+       Chapter-N items, not the base, while scrubbed. -->
   <ReferenceListTab
     model={{
       field: model.metadataSchema.fields[listFieldId],
       fieldId: listFieldId,
       entryType: model.entryType,
       fieldLabel: effectiveFieldLabel(model.metadataSchema, model.entryType, listFieldId),
-      ids: toIdList(model.metadata[listFieldId]),
+      items: toItemList(model.metadata[listFieldId]),
+      keyMember: keyedListKeyMember(model.metadataSchema.fields[listFieldId]),
+      effectiveItems: model.scrubbed ? ((model.scrub.overrides?.[listFieldId] as MetadataValue[] | undefined) ?? null) : null,
       readOnly: model.editorReadOnly,
       schema: model.metadataSchema,
       nodeId: model.scene?.id ?? "",
@@ -432,9 +443,12 @@
       structure: deps.structure,
       researchStructure: deps.researchStructure,
       tagTitleById: $tagTitleById,
+      implicitContextMatcher: deps.implicitContextMatcher,
+      excludeId: model.scene?.id ?? null,
+      createLayerId: model.createLayerId,
     }}
     on={{
-      change: (ids) => on.metadataChange({ ...model.metadata, [listFieldId]: ids }),
+      change: (items) => on.metadataChange({ ...model.metadata, [listFieldId]: items }),
       navigate: (payload) => on.navigate(payload),
     }}
   />

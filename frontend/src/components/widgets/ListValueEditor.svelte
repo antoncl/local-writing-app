@@ -46,6 +46,15 @@
     // ReferencePicker verbatim — undefined (the default) means create_missing
     // is not offered. See ReferencePicker for the full rule.
     createLayerId?: string | null | undefined;
+    // A reference-keyed list's item editor (ADR-0089 §2, #2072), both opt-in —
+    // undefined (the default) leaves every other `list` field untouched:
+    // · lockedKeys: disables `member`'s widget on an item whose current value
+    //   is in `keys` (the baseline items) — the key never changes in place,
+    //   only add/remove change which target holds a slot.
+    // · uniqueMember: a quiet no-op (no popup) refuses setting `uniqueMember`
+    //   to a value another item already holds — one item per target.
+    lockedKeys?: { member: string; keys: string[] } | undefined;
+    uniqueMember?: string | undefined;
   }
 
   let {
@@ -60,6 +69,8 @@
     researchStructure = null,
     excludeId = null,
     createLayerId = undefined,
+    lockedKeys = undefined,
+    uniqueMember = undefined,
   }: Props = $props();
 
   const members = $derived(field.item_members ?? []);
@@ -107,7 +118,24 @@
     return isRecord(item) ? (item[member.key] ?? null) : null;
   }
 
+  /** A reference-keyed item's key member, locked once the item is one of the
+   *  baseline's (ADR-0089 §2): the key never changes in place, only
+   *  add/remove change which target holds a slot. */
+  function isMemberLocked(item: MetadataValue, member: GroupMember): boolean {
+    if (!lockedKeys || member.key !== lockedKeys.member) return false;
+    const current = itemMemberValue(item, member);
+    return typeof current === "string" && lockedKeys.keys.includes(current);
+  }
+
   function setMemberValue(index: number, member: GroupMember, next: MetadataValue) {
+    // One item per target (ADR-0089 §2): a quiet no-op, no popup, when another
+    // item already holds the value being set on the unique member.
+    if (uniqueMember === member.key && typeof next === "string" && next) {
+      const clash = items.some(
+        (other, otherIndex) => otherIndex !== index && itemMemberValue(other, member) === next,
+      );
+      if (clash) return;
+    }
     const copy = items.slice();
     if (scalarItems) {
       copy[index] = next;
@@ -246,6 +274,7 @@
                     field={memberField(member)}
                     value={itemMemberValue(item, member)}
                     onChange={(next) => setMemberValue(index, member, next)}
+                    readOnly={isMemberLocked(item, member)}
                     {implicitContextMatcher}
                     {loreEntries}
                     {promptEntries}
@@ -267,7 +296,7 @@
               field={memberField(members[0])}
               value={itemMemberValue(item, members[0])}
               onChange={(next) => setMemberValue(index, members[0], next)}
-              {readOnly}
+              readOnly={readOnly || isMemberLocked(item, members[0])}
               {implicitContextMatcher}
               {loreEntries}
               {promptEntries}

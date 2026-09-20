@@ -269,6 +269,17 @@ class ProjectSession {
     });
   }
 
+  // The delete-orphan warning's "don't show again" (ADR-0089 §9) — a machine
+  // preference, not localStorage, since it lives beside the other prompt
+  // toggles rather than the project. Sparse partial PUT, same shape as
+  // `saveDefaultProjectsFolder`; the confirm dialog's checkbox routes here via
+  // `editorPanes.orphanWarning.suppress` instead of `dontShowAgainKey`.
+  async setWarnOnOrphaningDelete(value: boolean): Promise<void> {
+    await this.run(async () => {
+      this.machineSettings = await api.updateMachineSettings({ warn_on_orphaning_delete: value });
+    });
+  }
+
   // Write a single provider credential from the wizard's AI step (#547). Sparse
   // partial PUT: `merge_update` skips unsent fields and preserves masked ones,
   // so adding one key never clobbers the others. Re-syncs `machineSettings` so

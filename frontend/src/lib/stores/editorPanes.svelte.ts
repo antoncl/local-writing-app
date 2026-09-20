@@ -166,6 +166,16 @@ class EditorPanesController {
   // row highlight). Lives here because it's a projection of the editor surface.
   activeChatId = $state<string | null>(null);
 
+  // Delete-orphan warning hooks (ADR-0089 §9), read by editorPaneDelete via
+  // this controller's `DeletePaneHost` surface. Injected rather than imported
+  // to avoid a cycle with projectSession (which imports editorPanes); set in
+  // App.onMount. Defaults keep a controller built before the host wires them
+  // inert: no orphan sentence/checkbox, suppress a no-op.
+  orphanWarning: { enabled: () => boolean; suppress: () => Promise<void> } = {
+    enabled: () => false,
+    suppress: async () => {},
+  };
+
   // Monotonic token source for metadata-reload signals (plain — not reactive).
   nextMetadataReloadToken = 1;
 

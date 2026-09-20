@@ -1246,7 +1246,11 @@
      canvas (the default layout spaces the bands from the tallest node AT REST), so a
      sibling placed under it would otherwise paint over the editor being typed in.
      One step below the menu lift, so a kebab menu on any node still wins; several
-     nodes may be expanded at once, and between them DOM order decides, as before. */
+     nodes may be expanded at once, and between them DOM order decides, as before.
+     Also one step below SvelteFlow's own selection lift (a selected node gets an
+     inline z-index of 1000): clicking a neighbour brings THAT node to the front of
+     the open editor, since the click says which node the writer is working on, and
+     clicking back into the editor selects its node and restores the order. */
   .board-canvas :global(.svelte-flow__node:has(.plot-plotline.expanded)),
   .board-canvas :global(.svelte-flow__node:has(.plot-arc.expanded)) {
     z-index: 900 !important;

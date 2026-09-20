@@ -109,6 +109,13 @@ export function listItemEditorId(listId: string, index: number, memberKey: strin
   return `${listId}[${index}].${memberKey}`;
 }
 
+/** Whether `editorId` names a prose editor inside the list `listId` (#2052):
+ *  the one place that knows the `list[index].member` shape besides the
+ *  minter above. */
+export function isListItemEditorId(listId: string, editorId: string): boolean {
+  return editorId.startsWith(`${listId}[`);
+}
+
 /** The items of a list field's value: the stored array, or none when the value is
  *  absent or not an array. The one reading shared by every host of a list section
  *  (BodySections, the plot board's PlotBeatSections). */

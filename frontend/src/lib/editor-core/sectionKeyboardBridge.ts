@@ -9,6 +9,7 @@
 import { TextSelection, type EditorState } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/core";
 import type { EditorView } from "@tiptap/pm/view";
+import { isListItemEditorId } from "./bodySections";
 
 export type SectionEdge = "start" | "end";
 
@@ -125,7 +126,11 @@ export type SectionRegistry = {
    *  since callers invoke it lazily (at keypress time), never cache the
    *  result across a render. */
   neighboursFor: (index: number) => SectionNeighbours;
-  /** Focus the start of the section registered for `fieldId`, if any. */
+  /** Focus the start of the section registered for `fieldId`, if any. A
+   *  list section (#2052) registers no editor under its own id — its editors
+   *  are per item (`list[i].member`) — so the jump lands on the first such
+   *  editor in document order; an empty list has none and the jump is
+   *  scroll-only. */
   focus: (fieldId: string) => void;
 };
 
@@ -163,8 +168,24 @@ export function createSectionRegistry(): SectionRegistry {
   }
 
   function focus(fieldId: string): void {
-    const editor = byField.get(fieldId);
+    const editor = byField.get(fieldId) ?? firstEditorWithin(fieldId);
     if (editor) focusStart(editor);
+  }
+
+  // The lowest document index among the editors registered inside `listId`.
+  function firstEditorWithin(listId: string): Editor | undefined {
+    let best: Editor | undefined;
+    let bestIndex = Infinity;
+    for (const [editorId, editor] of byField) {
+      if (!isListItemEditorId(listId, editorId)) continue;
+      for (const [index, candidate] of byIndex) {
+        if (candidate === editor && index < bestIndex) {
+          bestIndex = index;
+          best = editor;
+        }
+      }
+    }
+    return best;
   }
 
   return { register, unregister, neighboursFor, focus };

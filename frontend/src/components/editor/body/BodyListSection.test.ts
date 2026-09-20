@@ -45,15 +45,17 @@ const ITEMS: MetadataValue[] = [
   { title: "Refusal" },
 ];
 
-function mount(items: MetadataValue[] = ITEMS, readOnly = false, density?: "prose" | "compact") {
+const registerFocus = vi.fn();
+
+function mount(items: MetadataValue[] = ITEMS, readOnly = false, density?: "prose" | "compact", section: BodyListSectionType = SECTION) {
   const onChange = vi.fn();
   const onEditorReady = vi.fn();
   const onNavigate = vi.fn();
   const { container } = render(BodyListSection, {
     props: {
-      model: { section: SECTION, items, readOnly, schema: SCHEMA, entryType: "plot:plotline", documentKind: "plotline", density },
+      model: { section, items, readOnly, schema: SCHEMA, entryType: "plot:plotline", documentKind: "plotline", density },
       deps: {
-        register: { register: () => {}, unregister: () => {}, neighboursFor: () => ({ prev: null, next: null }) },
+        register: { register: () => {}, unregister: () => {}, neighboursFor: () => ({ prev: null, next: null }), focus: registerFocus },
         sectionIndex: () => 0,
         implicitContextMatcher: null,
         loreEntries: [],
@@ -117,6 +119,25 @@ describe("BodyListSection", () => {
     onChange.mockClear();
     await fireEvent.keyDown(input1, { key: "ArrowUp", ctrlKey: true });
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("Ctrl+ArrowDown from inside a prose member reorders the item and refocuses that member at its new index (#2052)", async () => {
+    registerFocus.mockClear();
+    const { container, onChange } = mount();
+    // Item 1's second prose member (Guidance) — the chord comes from its editor, not the title.
+    const guidance = container.querySelectorAll(".bs-item")[0].querySelectorAll('[data-testid="mock-long-text"]')[1];
+    await fireEvent.keyDown(guidance, { key: "ArrowDown", ctrlKey: true });
+    expect(onChange).toHaveBeenCalledWith([ITEMS[1], ITEMS[0]]);
+    expect(registerFocus).toHaveBeenCalledWith("beats[1].guidance");
+  });
+
+  it("an item shape with no title member still reorders by keyboard from its prose (#2052)", async () => {
+    const noTitle: BodyListSectionType = { ...SECTION, titleKey: null, factMembers: [] };
+    const { container, onChange } = mount([{ function: "one" }, { function: "two" }], false, undefined, noTitle);
+    expect(container.querySelector(".bs-item-title")).toBeNull();
+    const second = container.querySelectorAll(".bs-item")[1].querySelector('[data-testid="mock-long-text"]')!;
+    await fireEvent.keyDown(second, { key: "ArrowUp", ctrlKey: true });
+    expect(onChange).toHaveBeenCalledWith([{ function: "two" }, { function: "one" }]);
   });
 
   it("item fact members render as rail rows, folding empties per item", async () => {

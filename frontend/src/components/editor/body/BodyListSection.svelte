@@ -112,32 +112,51 @@
 
   let rootEl = $state<HTMLElement | null>(null);
 
+  // Ctrl/Meta+↑/↓ reorders the item that contains the focused element
+  // (#2052). Bound on the item block, not the title input, so it works from
+  // the title, a fact row's editor or a prose member — and for an item shape
+  // with no title member, whose heading is static text. The section keyboard
+  // bridge declines modified arrows, so TipTap lets the chord bubble up here.
   async function itemKeydown(e: KeyboardEvent, index: number) {
-    if ((e.ctrlKey || e.metaKey) && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-      e.preventDefault();
-      // The title input commits on `change` (blur/Enter), so a reorder mid-
-      // edit carries the uncommitted title along instead of dropping it: the
-      // array is rebuilt from the input's live value, then reordered, in ONE
-      // write (a write-then-reorder pair would reorder the stale prop).
-      const typed = (e.currentTarget as HTMLInputElement).value;
-      const current = items.slice();
-      if (model.section.titleKey && typed !== titleOf(items[index])) {
-        current[index] = { ...recordOf(current[index]), [model.section.titleKey]: typed };
-      }
-      let refocus: number | null = null;
-      if (e.key === "ArrowUp" && index > 0) {
-        on.change(reorderByPosition(current, index, index - 1, "before"));
-        refocus = index - 1;
-      } else if (e.key === "ArrowDown" && index < items.length - 1) {
-        on.change(reorderByPosition(current, index, index + 1, "after"));
-        refocus = index + 1;
-      }
-      if (refocus !== null) {
-        await tick();
-        rootEl?.querySelector<HTMLElement>(`[data-list-item="${model.section.id}:${refocus}"] .bs-item-title`)?.focus();
-      }
-      return;
+    if (!(e.ctrlKey || e.metaKey) || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    e.preventDefault();
+    const origin = e.target as HTMLElement;
+    const titleInput = origin.classList.contains("bs-item-title") ? (origin as HTMLInputElement) : null;
+    const memberIndex = titleInput ? -1 : memberIndexOf(index, origin);
+    // The title input commits on `change` (blur/Enter), so a reorder mid-
+    // edit carries the uncommitted title along instead of dropping it: the
+    // array is rebuilt from the input's live value, then reordered, in ONE
+    // write (a write-then-reorder pair would reorder the stale prop).
+    const current = items.slice();
+    if (titleInput && model.section.titleKey && titleInput.value !== titleOf(items[index])) {
+      current[index] = { ...recordOf(current[index]), [model.section.titleKey]: titleInput.value };
     }
+    let target: number | null = null;
+    if (e.key === "ArrowUp" && index > 0) {
+      on.change(reorderByPosition(current, index, index - 1, "before"));
+      target = index - 1;
+    } else if (e.key === "ArrowDown" && index < items.length - 1) {
+      on.change(reorderByPosition(current, index, index + 1, "after"));
+      target = index + 1;
+    }
+    if (target === null) return;
+    await tick();
+    // Focus follows the moved item. Items are keyed by index, so the DOM stays
+    // put and the values move: refocus the same slot at the new index — the
+    // prose member the chord came from (via the registry, caret at its start),
+    // else the title input.
+    const member = memberIndex >= 0 ? model.section.proseMembers[memberIndex] : undefined;
+    if (member) deps.register.focus(listItemEditorId(model.section.id, target, member.key));
+    else rootEl?.querySelector<HTMLElement>(`[data-list-item="${model.section.id}:${target}"] .bs-item-title`)?.focus();
+  }
+  // Which prose member of item `index` contains `el`, by rendered order (the
+  // members render in `proseMembers` order); -1 when none (a fact row, the heading).
+  function memberIndexOf(index: number, el: HTMLElement): number {
+    const members = rootEl?.querySelectorAll(`[data-list-item="${model.section.id}:${index}"] .bs-member`) ?? [];
+    return Array.from(members).findIndex((m) => m.contains(el));
+  }
+
+  function titleKeydown(e: KeyboardEvent, index: number) {
     if (e.key === "Escape") {
       const target = e.currentTarget as HTMLInputElement;
       target.value = titleOf(items[index]);
@@ -196,6 +215,10 @@
     {/if}
   </h2>
   {#each items as item, index (index)}
+    <!-- The keydown on the block is a chord bridge for its focusable descendants
+         (the title input, the fact rows' editors, the prose editors); the block
+         itself is never a focus target, so the a11y rule's concern does not apply. -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <section
       class="bs-item"
       class:drop-before={dropTarget?.index === index && dropTarget.position === "before"}
@@ -205,6 +228,7 @@
       ondragover={(e) => dragOver(e, index)}
       ondrop={(e) => drop(e, index)}
       ondragleave={() => dragLeave(index)}
+      onkeydown={(e) => itemKeydown(e, index)}
     >
       <h3 class="bs-h3 bs-item-head">
         <span class="bs-ord">{index + 1}</span>
@@ -215,7 +239,7 @@
             aria-label={`${model.section.label} ${index + 1} title`}
             value={titleOf(item)}
             onchange={(e) => writeMember(index, model.section.titleKey!, e.currentTarget.value)}
-            onkeydown={(e) => itemKeydown(e, index)}
+            onkeydown={(e) => titleKeydown(e, index)}
           />
         {:else}
           <span class="bs-item-title-text">{titleOf(item) || `Item ${index + 1}`}</span>

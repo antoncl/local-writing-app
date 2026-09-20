@@ -268,7 +268,8 @@
              sparse item is as tall as what it holds. The class follows the
              value; `:focus-within` in the styles keeps the block open while
              the caret is inside an emptied editor. -->
-        <div class="bs-member" class:is-empty={!stringOf(memberValue(item, member.key))}>
+        {@const text = stringOf(memberValue(item, member.key))}
+        <div class="bs-member" class:is-empty={!text}>
           <h4 class="bs-h4">{member.name || member.key}</h4>
           <div class="bs-body">
             {#if model.readOnly}
@@ -276,7 +277,7 @@
             {:else}
               <MetadataLongTextEditor
                 ariaLabel={`${model.section.label} ${index + 1} ${member.name}`}
-                value={stringOf(memberValue(item, member.key))}
+                value={text}
                 matcher={deps.implicitContextMatcher}
                 onChange={(v) => writeMember(index, member.key, v)}
                 onEditorReady={(editor, phase) => on.editorReady(listItemEditorId(model.section.id, index, member.key), editor, phase)}
@@ -375,7 +376,9 @@
     bottom: 0.1em;
     border-left: 2px solid var(--divider);
   }
-  .bs-item:hover::before,
+  /* The pointer lights a spine only while no item in the list holds the caret;
+     once one does, the accent means "the caret is here" and nothing else. */
+  .bs-list:not(:focus-within) .bs-item:hover::before,
   .bs-item:focus-within::before {
     border-left-color: var(--accent-emphasis);
   }
@@ -481,7 +484,7 @@
     font-size: var(--fs-md);
   }
   .bs-block.compact .bs-h3 {
-    margin: var(--sp-2) 0 0;
+    margin: 0;
     font-size: var(--fs-sm);
   }
   .bs-block.compact .bs-add,

@@ -1,6 +1,8 @@
 # ADR-0089: A relationship is a list item keyed by its reference, and it follows the mutation rules
 
-- **Status:** Proposed (2026-09-20). Replaces the shape sketched on #2012 (a `relation` kind).
+- **Status:** Accepted — 2026-09-20, Anton Lauridsen; text landed as Proposed in PR #2068 (authored
+  by Claude), accepted in PR #2069. Replaces the shape sketched on #2012 (a `relation` kind). Reviewed twice before acceptance (a brainstorm
+  round and a round against the ADR text); Anton's ruling on orphaned items (§9) came out of the second.
 - **Feature:** relationships and "who knows what when" as metadata (#2012, section B3 of the
   metadata-material epic #2005).
 - **Relates to:** ADR-0081 (references at any depth — the item shape and the one traversal),
@@ -384,8 +386,8 @@ deleted target is caught.
 7. **S6 — References with the field in the payload.** Graph payload, frontend index and refresh
    gate (#2067), and the view detail from the referrer's item.
 
-S1 and S2 are the data model. S3 through S6 are surfaces on shipped widgets. Nothing starts on
-this ADR's "Proposed" status.
+S1 and S2 are the data model. S3 through S6 are surfaces on shipped widgets. Acceptance alone
+starts nothing; each slice gets its own issue and an explicit go.
 
 ## The journey that defines done
 

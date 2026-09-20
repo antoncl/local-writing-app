@@ -394,6 +394,7 @@
     model={{
       field: model.metadataSchema.fields[listFieldId],
       fieldId: listFieldId,
+      entryType: model.entryType,
       fieldLabel: effectiveFieldLabel(model.metadataSchema, model.entryType, listFieldId),
       ids: toIdList(model.metadata[listFieldId]),
       readOnly: model.editorReadOnly,

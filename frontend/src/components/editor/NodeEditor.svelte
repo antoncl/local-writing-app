@@ -29,7 +29,7 @@
   import { metadataSchemaLayersStore, metadataSchemaStore } from "@/lib/stores/schema";
   import { snapshotLayerId } from "@/lib/utils/layerAuthoring";
   import { readOnlyInPlace } from "@/lib/utils/provenance";
-  import { referenceIndexStore } from "@/lib/stores/references";
+  import { referenceIndexStore, referrerFieldIndexStore } from "@/lib/stores/references";
   import { backlinksFor } from "@/lib/views/backlinks";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
@@ -362,15 +362,18 @@
   let backlinksReq = 0;
   // Backlinks = the open node's referrers (#194): membership from the in-memory
   // reverse index, rows from `resolve_references`. A request token drops out-of-
-  // order resolves when the anchor or the index changes mid-flight.
+  // order resolves when the anchor or the index changes mid-flight. The field
+  // index + schema + loreEntries (#2075, ADR-0089 §6) give each row its own
+  // field/detail instead of collapsing to one any-field row per referrer.
   async function refreshBacklinks(
     anchorId: string,
     referenceIndex: ReadonlyMap<string, ReadonlySet<string>>,
+    fieldIndex: ReadonlyMap<string, import("@/lib/views/referenceIndex").FieldReferrer[]>,
   ) {
     lastBacklinksSceneId = anchorId;
     const req = ++backlinksReq;
     try {
-      const next = await backlinksFor(anchorId, referenceIndex);
+      const next = await backlinksFor(anchorId, referenceIndex, { fieldIndex, schema: metadataSchema, loreEntries });
       if (req === backlinksReq) backlinks = next;
     } catch {
       if (req === backlinksReq) backlinks = [];
@@ -900,14 +903,15 @@
       title = titleReload.title;
     }
   });
-  // Re-source backlinks when the open node changes or the reverse index rebuilds
-  // (a referrer was saved/deleted) — reading the index also closes the open-during
-  // -initial-load race the old one-shot fetch had.
+  // Re-source backlinks when the open node changes or either reverse index
+  // rebuilds (a referrer was saved/deleted) — reading the index also closes the
+  // open-during-initial-load race the old one-shot fetch had.
   $effect.pre(() => {
     const anchorId = sceneId;
     const referenceIndex = $referenceIndexStore;
+    const fieldIndex = $referrerFieldIndexStore;
     if (anchorId) {
-      void refreshBacklinks(anchorId, referenceIndex);
+      void refreshBacklinks(anchorId, referenceIndex, fieldIndex);
     } else if (lastBacklinksSceneId !== null) {
       lastBacklinksSceneId = null;
       backlinks = [];

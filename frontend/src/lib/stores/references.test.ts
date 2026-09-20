@@ -10,6 +10,7 @@ import {
   clearReferenceIndex,
   keyedReferrerIndexStore,
   referenceIndexStore,
+  referrerFieldIndexStore,
   refreshReferenceIndex,
   refreshReferenceIndexInBackground,
 } from "./references";
@@ -139,5 +140,37 @@ describe("keyedReferrerIndexStore (ADR-0089 §9) — filled from the same fetch"
     await refreshReferenceIndex();
     clearReferenceIndex();
     expect(get(keyedReferrerIndexStore).size).toBe(0);
+  });
+});
+
+describe("referrerFieldIndexStore (#2075, ADR-0089 §6) — the unfiltered field index", () => {
+  beforeEach(() => {
+    referenceGraph.mockReset();
+    clearReferenceIndex();
+  });
+
+  it("builds the field index from the same fetch's edges, no schema needed", async () => {
+    referenceGraph.mockResolvedValueOnce({
+      refs: { mara: ["tomas"], alice: ["tomas"] },
+      edges: [
+        { src: "mara", dst: "tomas", field_id: "relationships" },
+        { src: "alice", dst: "tomas", field_id: "allies" },
+      ],
+    });
+    await refreshReferenceIndex();
+    expect(get(referrerFieldIndexStore).get("tomas")).toEqual([
+      { referrerId: "mara", fieldId: "relationships" },
+      { referrerId: "alice", fieldId: "allies" },
+    ]);
+  });
+
+  it("a clear empties it too", async () => {
+    referenceGraph.mockResolvedValueOnce({
+      refs: { mara: ["tomas"] },
+      edges: [{ src: "mara", dst: "tomas", field_id: "relationships" }],
+    });
+    await refreshReferenceIndex();
+    clearReferenceIndex();
+    expect(get(referrerFieldIndexStore).size).toBe(0);
   });
 });

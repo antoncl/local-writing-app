@@ -101,7 +101,7 @@
 
 {#snippet backlinkRow(link: BacklinkNode, ctx: RowCtx<BacklinkNode>)}
   {@const pillHex = backlinkSwatchHex(link)}
-  <NodeRow title={link.title} depth={ctx.depth} onClick={ctx.onClick}>
+  <NodeRow title={link.title} detail={link.detail} depth={ctx.depth} onClick={ctx.onClick}>
     {#snippet trailing()}
       <span
         class="backlink-type-pill"

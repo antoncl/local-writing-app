@@ -8,10 +8,17 @@
 import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
 import { metadataSchemaStore } from "@/lib/stores/schema";
-import { buildKeyedReferrerIndex, buildReferenceIndex, type KeyedReferrer } from "@/lib/views/referenceIndex";
+import {
+  buildKeyedReferrerIndex,
+  buildReferenceIndex,
+  buildReferrerFieldIndex,
+  type FieldReferrer,
+  type KeyedReferrer,
+} from "@/lib/views/referenceIndex";
 
 const EMPTY: ReadonlyMap<string, ReadonlySet<string>> = new Map();
 const EMPTY_KEYED_REFERRERS: ReadonlyMap<string, KeyedReferrer[]> = new Map();
+const EMPTY_FIELD_REFERRERS: ReadonlyMap<string, FieldReferrer[]> = new Map();
 
 export const referenceIndexStore = writable<ReadonlyMap<string, ReadonlySet<string>>>(EMPTY);
 
@@ -21,6 +28,14 @@ export const referenceIndexStore = writable<ReadonlyMap<string, ReadonlySet<stri
 // out of sync with each other.
 export const keyedReferrerIndexStore = writable<ReadonlyMap<string, KeyedReferrer[]>>(
   EMPTY_KEYED_REFERRERS,
+);
+
+// The field-qualified reverse index (#2067, ADR-0089 §6): target id → every
+// entry that references it, tagged with the field. Unfiltered (every ref
+// field, not just reference-keyed lists) — feeds the References panel's
+// per-field rows. Filled from the same fetch as the two indexes above.
+export const referrerFieldIndexStore = writable<ReadonlyMap<string, FieldReferrer[]>>(
+  EMPTY_FIELD_REFERRERS,
 );
 
 // Monotonic request token guarding the fire-and-forget refresh (#200). Callers
@@ -38,6 +53,7 @@ export async function refreshReferenceIndex(): Promise<void> {
   if (token !== generation) return; // superseded by a newer refresh or a clear
   referenceIndexStore.set(buildReferenceIndex(refs));
   keyedReferrerIndexStore.set(buildKeyedReferrerIndex(edges, get(metadataSchemaStore)));
+  referrerFieldIndexStore.set(buildReferrerFieldIndex(edges));
 }
 
 // Fire-and-forget variant for the save/delete callers that trigger a refresh in
@@ -56,4 +72,5 @@ export function clearReferenceIndex(): void {
   generation++; // supersede any in-flight refresh so it can't repopulate the store
   referenceIndexStore.set(EMPTY);
   keyedReferrerIndexStore.set(EMPTY_KEYED_REFERRERS);
+  referrerFieldIndexStore.set(EMPTY_FIELD_REFERRERS);
 }

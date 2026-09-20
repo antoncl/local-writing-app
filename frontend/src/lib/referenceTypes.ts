@@ -28,6 +28,11 @@ export type Backlink = {
   entry_type: string;
   field_id: string;
   field_name: string;
+  // The row's secondary line (#2075, ADR-0089 §6): a reference-keyed list
+  // item's non-key members (`itemMemberDetail`) when the referrer's item is
+  // known, otherwise the field's own name. Absent for the any-field fallback
+  // path (no field index loaded), which carries no per-field attribution.
+  detail?: string;
 };
 
 // What a navigate affordance (backlink row, reference pill) hands the shell to open a

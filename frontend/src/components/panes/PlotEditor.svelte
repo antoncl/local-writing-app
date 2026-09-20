@@ -1242,6 +1242,15 @@
   .board-canvas :global(.svelte-flow__node:has(.arc-menu)) {
     z-index: 1000 !important;
   }
+  /* The same lift for an EXPANDED plotline / arc (#2046): its editor grows over the
+     canvas (the default layout spaces the bands from the tallest node AT REST), so a
+     sibling placed under it would otherwise paint over the editor being typed in.
+     One step below the menu lift, so a kebab menu on any node still wins; several
+     nodes may be expanded at once, and between them DOM order decides, as before. */
+  .board-canvas :global(.svelte-flow__node:has(.plot-plotline.expanded)),
+  .board-canvas :global(.svelte-flow__node:has(.plot-arc.expanded)) {
+    z-index: 900 !important;
+  }
   .board-hint {
     padding: 16px;
   }

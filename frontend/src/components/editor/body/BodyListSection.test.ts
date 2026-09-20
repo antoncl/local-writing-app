@@ -140,6 +140,20 @@ describe("BodyListSection", () => {
     expect(onChange).toHaveBeenCalledWith([{ function: "two" }, { function: "one" }]);
   });
 
+  it("a title-less item reordered from its fact rows refocuses its first prose member (#2052 review)", async () => {
+    registerFocus.mockClear();
+    const noTitle: BodyListSectionType = {
+      ...SECTION,
+      titleKey: null,
+      factMembers: [{ key: "required", name: "Required", type: "boolean" }],
+    };
+    const { container, onChange } = mount([{ function: "one", required: true }, { function: "two", required: false }], false, undefined, noTitle);
+    const rows = container.querySelectorAll(".bs-item")[1].querySelector(".bs-item-rows")!;
+    await fireEvent.keyDown(rows, { key: "ArrowUp", ctrlKey: true });
+    expect(onChange).toHaveBeenCalledWith([{ function: "two", required: false }, { function: "one", required: true }]);
+    expect(registerFocus).toHaveBeenCalledWith("beats[0].function");
+  });
+
   it("item fact members render as rail rows, folding empties per item", async () => {
     const { container } = mount();
     const items = container.querySelectorAll(".bs-item");

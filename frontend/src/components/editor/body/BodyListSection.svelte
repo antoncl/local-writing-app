@@ -144,10 +144,12 @@
     // Focus follows the moved item. Items are keyed by index, so the DOM stays
     // put and the values move: refocus the same slot at the new index — the
     // prose member the chord came from (via the registry, caret at its start),
-    // else the title input.
-    const member = memberIndex >= 0 ? model.section.proseMembers[memberIndex] : undefined;
-    if (member) deps.register.focus(listItemEditorId(model.section.id, target, member.key));
-    else rootEl?.querySelector<HTMLElement>(`[data-list-item="${model.section.id}:${target}"] .bs-item-title`)?.focus();
+    // else the title input, else (a title-less shape, chord from a fact row)
+    // the item's first prose member, which every list section has.
+    const member = memberIndex >= 0 ? model.section.proseMembers[memberIndex] : model.section.proseMembers[0];
+    const title = rootEl?.querySelector<HTMLElement>(`[data-list-item="${model.section.id}:${target}"] .bs-item-title`);
+    if (memberIndex < 0 && title) title.focus();
+    else if (member) deps.register.focus(listItemEditorId(model.section.id, target, member.key));
   }
   // Which prose member of item `index` contains `el`, by rendered order (the
   // members render in `proseMembers` order); -1 when none (a fact row, the heading).

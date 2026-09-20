@@ -91,6 +91,9 @@ export type RailRowModel = {
   flipAdopted: boolean;
   empty: boolean;
   scalar: boolean;
+  // #2058: a single `entity_ref` — a rest/open row (`scalar`) whose rest face
+  // is the resolved name and whose open face is the picker.
+  singleRef: boolean;
   editing: boolean;
   wide: boolean;
   // #2009: this row is a long_text index row (its editor lives in a body
@@ -389,17 +392,20 @@ function isFoldableList(ctx: RailRowContext, field: MetadataFieldDefinition, fie
   return field.type === "entity_ref_list" && isMetadataValuePresent(displayValue(ctx, fieldId));
 }
 
-// Read at rest, edit on demand (#1884 slice 4).
-const SCALAR_TYPES = new Set(["text", "number", "boolean", "select", "multi_select", "date"]);
+// Read at rest, edit on demand (#1884 slice 4). A single reference joins
+// them (#2058): at rest its picker (pill + trigger) wrapped to two lines in
+// any narrow slot; the rest face is the resolved name on one line.
+const SCALAR_TYPES = new Set(["text", "number", "boolean", "select", "multi_select", "date", "entity_ref"]);
 function isScalarRow(ctx: RailRowContext, field: MetadataFieldDefinition, fieldId: string): boolean {
   // A field-level read-only (e.g. ai_temperature on a no-sampling model) has
   // no edit state to toggle into — it stays the plain read-only editor.
   if (fieldReadOnly(ctx, fieldId) || isFlipResolve(ctx, fieldId)) return false;
   return fieldId === "status" || SCALAR_TYPES.has(field.type);
 }
-// Single-pick controls: the pick IS the edit, so the row returns to rest on change.
+// Single-pick controls: the pick IS the edit, so the row returns to rest on
+// change. A single reference resolves in one pick like a select (#2058).
 function closesOnPick(field: MetadataFieldDefinition, fieldId: string): boolean {
-  return fieldId === "status" || field.type === "select" || field.type === "boolean";
+  return fieldId === "status" || field.type === "select" || field.type === "boolean" || field.type === "entity_ref";
 }
 
 /** Build the row model for one field. Only called once `rendersRow(fieldId)`
@@ -468,6 +474,7 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
     flipAdopted,
     empty,
     scalar,
+    singleRef: field.type === "entity_ref",
     editing,
     wide,
     sectionIndex,

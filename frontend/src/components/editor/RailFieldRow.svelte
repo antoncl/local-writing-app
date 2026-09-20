@@ -8,8 +8,13 @@
   // (`RailRowCallbacks`).
   import type { LoreEntrySummary, MetadataValue, NavigateTarget, PromptEntrySummary, StructureDocument } from "@/lib/types";
 
+  import type { PeekableRef } from "@/lib/utils/peekTarget";
   export type RailRowDeps = {
     readOnly: boolean;
+    // #2058: the host's id → node walk (`buildRefResolver`), so a single
+    // reference's rest face can show the name and peek the target. Absent,
+    // the rest face shows the stored id.
+    resolveRef?: (id: string) => PeekableRef | null;
     createLayerId?: string | null;
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
@@ -302,6 +307,9 @@
         onOpen={on.open}
         onClose={on.close}
         onChange={(v) => on.write(model.fieldId, v)}
+        resolveRef={deps.resolveRef}
+        refDeps={deps}
+        onNavigate={(target) => on.navigate(target)}
       />
     {/if}
     {#if model.mutated}

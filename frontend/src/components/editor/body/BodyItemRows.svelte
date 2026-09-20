@@ -12,6 +12,7 @@
   import RailFieldRow, { type RailRowDeps, type RailRowCallbacks } from "@/components/editor/RailFieldRow.svelte";
   import { leavesRow } from "@/components/editor/RailScalarCell.svelte";
   import { buildRailRowModel, isRowEmpty, type RailRowContext } from "@/lib/rail/fieldRowModel";
+  import { buildRefResolver } from "@/lib/utils/refResolve";
   import type { GroupMember } from "@/lib/schemaTypes";
   import type {
     DocumentKind,
@@ -164,8 +165,14 @@
       : model.members.map((m) => m.key).filter((k) => !emptyKeys.includes(k)),
   );
 
+  // #2058: an item's single reference rests as its target's name; the same
+  // id → node walk the panel's rows use, over the rosters this component holds.
+  const resolveRef = $derived(
+    buildRefResolver({ structure: deps.structure, loreEntries: deps.loreEntries, promptEntries: deps.promptEntries }),
+  );
   const rowDeps = $derived<RailRowDeps>({
     readOnly: model.readOnly,
+    resolveRef,
     createLayerId: deps.createLayerId,
     loreEntries: deps.loreEntries,
     promptEntries: deps.promptEntries,

@@ -507,6 +507,7 @@
   // split) — everything else a row needs comes off its own `RailRowModel`.
   const deps = $derived<RailRowDeps>({
     readOnly,
+    resolveRef: listMemberResolver,
     createLayerId,
     loreEntries,
     promptEntries,

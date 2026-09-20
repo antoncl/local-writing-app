@@ -32,6 +32,7 @@
     MutationUnitDraft,
   } from "@/lib/editor-core/mutationNodes";
   import type {
+    EffectiveFieldValue,
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataSchema,
@@ -94,7 +95,7 @@
   // the saved index is current. Resolution is end-of-scene (ADR-0003: only the
   // inline handler's `selection` destination carries a real cursor offset). `null` = still loading —
   // the rows area waits so every seeded baseline is deterministic.
-  let effectiveValues = $state<Record<string, string | string[]> | null>(null);
+  let effectiveValues = $state<Record<string, EffectiveFieldValue> | null>(null);
 
   $effect(() => {
     const id = entityId;

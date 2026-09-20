@@ -280,6 +280,9 @@ class LoreEntriesMixin:
         metadata_errors = self._validate_lore_entry_metadata(node_id, entry.entry_type, entry.metadata, schema, index)
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
+        duplicate_errors = self._keyed_list_duplicate_errors(f"Lore Entry {node_id}", entry.metadata, schema)
+        if duplicate_errors:
+            raise ProjectServiceError(" ".join(duplicate_errors), 422)
         # Before the write: photograph the pre-save bytes at the node's OWNING
         # layer (an ancestor for a direct-edit-of-canon save), which
         # `_snapshot_store_root` resolves from `node_id` (ADR-0043 Am. 2).
@@ -437,6 +440,9 @@ class LoreEntriesMixin:
         )
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
+        duplicate_errors = self._keyed_list_duplicate_errors(f"Lore Entry {entry_id}", entry.metadata, schema)
+        if duplicate_errors:
+            raise ProjectServiceError(" ".join(duplicate_errors), 422)
         self._write_lore_entry_file(self._filepath_for_new_node(root / "lore", entry.title), entry)
         # The fork copied the effective (already-folded) value down, so this
         # project's own override for the id is now redundant — drop it so it does

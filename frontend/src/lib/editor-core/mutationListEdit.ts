@@ -25,9 +25,17 @@ export interface CollectionRecord {
 const dedupe = (items: string[]): string[] => dedupeList(items);
 
 /** Coerce an effective/base field value (list, or a comma-joined marker
- *  string) to a clean membership list. */
+ *  string) to a clean membership list. A `list` field's effective value may
+ *  now fold to member-map items (ADR-0089 §3) rather than plain ids — `list`
+ *  fields don't reach this dialog yet (MutationFieldRows skips them), so a
+ *  non-primitive item here is dropped rather than stringified into
+ *  "[object Object]": a guard, not a feature. */
 export function asMembershipList(value: unknown): string[] {
-  if (Array.isArray(value)) return dedupe(value.map((item) => String(item)));
+  if (Array.isArray(value)) {
+    return dedupe(
+      value.filter((item) => typeof item === "string" || typeof item === "number").map((item) => String(item)),
+    );
+  }
   if (typeof value === "string") return dedupe(splitCommaList(value));
   return [];
 }

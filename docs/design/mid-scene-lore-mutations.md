@@ -113,7 +113,9 @@ central pointer table.
   - additive → an `op=add` (v1.1 also `op=remove`; see the v1.1 doc §1);
   - close → a separate close-marker referencing an `id` (v1.1 doc §2);
   - naming → an optional `name=` label (+ `group=` for co-authored sets), a label not a frame (v1.1 doc §6);
-  - per-knower → an optional `knower=<lore-id>` scope.
+  - per-knower → an optional `knower=<lore-id>` scope. *Retired by ADR-0089: what a character
+    knows is an item of a reference-keyed list on that character's own entry, mutated with the
+    ordinary records — no scope on the marker.*
 
 ### 3.3 Performance & the index
 Displaying a lore card must not scan all scenes. A derived `mutations_by_entity` index lives
@@ -340,7 +342,8 @@ is composition over shipped patterns — evidence the feature does not warrant a
 **v2+ (post-v1.1):**
 - **Per-knower / perspectival knowledge** — Peter knowing X must not imply Alice knows X. The
   grammar's optional `knower` scope + additive facts scoped to a knower grow into this without
-  a rewrite; not built until after v1.1.
+  a rewrite; not built until after v1.1. *Settled differently by ADR-0089: the knower is the
+  entry that owns the list, and the fact is an item keyed by its reference.*
 
 **Out of scope / deferred:**
 - `book_start_overrides` (`project.md starting_state`) — deferred (a standalone book needs

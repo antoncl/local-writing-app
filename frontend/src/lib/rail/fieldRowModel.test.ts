@@ -47,6 +47,20 @@ const SCHEMA = {
       options: [],
       picker_config: { create_missing: true, sources: [{ kind: "tag", expr: { type: "tag:tag" } }] },
     },
+    // ADR-0089 §3/§6: a reference-keyed list's effective value folds to items
+    // (member maps), not ids. isListIndex/listSummary stay entity_ref_list-only
+    // in this slice (the tab's own gate widening is S3) — item_members is
+    // exercised here regardless, since a list field's folded items can reach
+    // listSummary once that gate widens, and the guard must already hold.
+    relationships: {
+      name: "Relationships",
+      type: "entity_ref_list",
+      options: [],
+      item_members: [
+        { key: "who", name: "Who", type: "entity_ref" },
+        { key: "role", name: "Role", type: "select" },
+      ],
+    },
     status: {
       name: "Status",
       type: "select",
@@ -231,6 +245,20 @@ describe("buildRailRowModel", () => {
       const model = buildRailRowModel(baseCtx({ listsInBody: true, metadata: { tags: ["tag_1"] } }), "tags");
       expect(model.listIndex).toBe(false);
       expect(model.isTagList).toBe(true);
+    });
+
+    it("a folded relationship item (ADR-0089 §3) summarizes by its entity_ref key member, never '[object Object]'", () => {
+      const model = buildRailRowModel(
+        baseCtx({
+          listsInBody: true,
+          metadata: {},
+          effectiveOverrides: { relationships: [{ who: "lore_a", role: "squire" }] },
+          resolveListMemberType: (id) => (id === "lore_a" ? "lore:character" : null),
+        }),
+        "relationships",
+      );
+      expect(model.listSummary).not.toContain("[object Object]");
+      expect(model.listSummary).toBe("1 Character");
     });
   });
 });

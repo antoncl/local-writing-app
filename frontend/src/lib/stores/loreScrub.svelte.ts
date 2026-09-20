@@ -6,14 +6,14 @@
 // and the rail's mutation list — two views of one dataset, fetched once here.
 import { api } from "@/lib/api";
 import { groupMutationUnits } from "@/lib/editor-core/mutationUnits";
-import type { MutationMarkerRecord } from "@/lib/types";
+import type { EffectiveFieldValue, MutationMarkerRecord } from "@/lib/types";
 
 export class LoreScrubController {
   markers = $state<MutationMarkerRecord[]>([]);
   index = $state(0);
   /** Override map of ONLY the mutated fields at the scrub point (may include
    *  the intrinsic `title` / `body`). Membership = "changed by here". */
-  overrides = $state<Record<string, string | string[]> | null>(null);
+  overrides = $state<Record<string, EffectiveFieldValue> | null>(null);
   units = $derived(groupMutationUnits(this.markers));
   /** The scene the card is currently scrubbed to — the anchor a conversation
    *  reads its subject as-of (ADR-0055 §1). Base (index 0) → "" = book-start.

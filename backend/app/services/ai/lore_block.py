@@ -26,6 +26,7 @@ from app.services.ai.helpers import (
     _scene_id_of,
     _xml_safe_tag,
 )
+from app.services.project.field_values import display_value
 from app.services.project.metadata_refs import ref_members
 from app.services.project.schema_summary import summary_values
 
@@ -425,4 +426,8 @@ def _scalar_text(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, list):
         return ", ".join(_scalar_text(item) for item in value)
+    if isinstance(value, dict):
+        # A list item reaching the scalar fallback (an entry read without its
+        # schema): its member values, never a Python dict repr.
+        return display_value(value)
     return str(value)

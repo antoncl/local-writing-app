@@ -254,7 +254,7 @@
         class="fr-rest-hit fr-section-index"
         aria-label={`Go to ${model.fieldLabel}`}
         onclick={() => on.goToSection(model.fieldId)}
-      >{model.empty ? "empty" : model.wordCount === 1 ? "1 word" : `${model.wordCount} words`}</button>
+      >{model.empty ? "empty" : model.sectionSummary ?? (model.wordCount === 1 ? "1 word" : `${model.wordCount} words`)}</button>
     {:else if model.listIndex}
       <!-- #2010: the field's editor lives in a body tab instead of the rail —
            this row is an index into it. Per-type summary; an empty list reads

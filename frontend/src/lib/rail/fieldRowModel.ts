@@ -14,6 +14,7 @@ import { effectiveFieldLabel, isMetadataValuePresent, metadataValueDisplayString
 import { fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { countWords } from "@/lib/utils/wordCount";
+import { listHasProseItems } from "@/lib/editor-core/bodySections";
 import type {
   DocumentKind,
   EntryMetadata,
@@ -96,6 +97,9 @@ export type RailRowModel = {
   // section instead) — `wordCount` is over the field's current value.
   sectionIndex: boolean;
   wordCount: number;
+  // #2043: a list-of-prose-items section index row reads an item count
+  // instead of a word count; null for a long_text index row.
+  sectionSummary: string | null;
   // #2010: this row is an entity_ref_list index row (its editor lives in a
   // body tab instead) — `listSummary` is the per-type count line.
   listIndex: boolean;
@@ -302,7 +306,7 @@ function isRefFieldType(field: MetadataFieldDefinition): boolean {
 // compact types keep their control inline on the right. See MetadataPanel's
 // prior comment history (#1810, #1949) for the full reasoning per type.
 function isWide(ctx: RailRowContext, field: MetadataFieldDefinition, fieldId: string): boolean {
-  if (isListIndex(ctx, field)) return false;
+  if (isListIndex(ctx, field) || isSectionIndex(ctx, field)) return false;
   const populated = isMetadataValuePresent(displayValue(ctx, fieldId));
   return (
     (field.type === "long_text" && !ctx.sectionsInBody) ||
@@ -313,9 +317,19 @@ function isWide(ctx: RailRowContext, field: MetadataFieldDefinition, fieldId: st
 }
 
 // #2009: a long_text row becomes an index row when its editor lives in a body
-// section instead of the rail.
+// section instead of the rail; #2043: so does a list whose items carry prose
+// (its items are the body's repeating sub-sections).
 function isSectionIndex(ctx: RailRowContext, field: MetadataFieldDefinition): boolean {
-  return ctx.sectionsInBody && field.type === "long_text";
+  return ctx.sectionsInBody && (field.type === "long_text" || listHasProseItems(field));
+}
+
+// The list-section index row's line: the item count ("5 items"); "" when
+// empty (the row reads "empty" through the same branch as a long_text row).
+function listSectionSummary(ctx: RailRowContext, fieldId: string): string {
+  const value = displayValue(ctx, fieldId);
+  const count = Array.isArray(value) ? value.length : 0;
+  if (count === 0) return "";
+  return count === 1 ? "1 item" : `${count} items`;
 }
 
 // #2010: an entity_ref_list row becomes an index row when its editor lives in
@@ -457,7 +471,8 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
     editing,
     wide,
     sectionIndex,
-    wordCount: sectionIndex ? countWords(metadataValueString(value)) : 0,
+    wordCount: sectionIndex && field.type === "long_text" ? countWords(metadataValueString(value)) : 0,
+    sectionSummary: sectionIndex && field.type === "list" ? listSectionSummary(ctx, fieldId) : null,
     listIndex,
     listSummary: listIndex ? listSummary(ctx, fieldId) : "",
     colorRow,

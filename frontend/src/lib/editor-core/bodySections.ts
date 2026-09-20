@@ -9,7 +9,8 @@
 // even with a single member field (#2009 decided) — unlike the rail's own
 // section model, which only heads a block once there is more than one.
 import { effectiveFieldHidden, effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
-import type { MetadataSchema } from "@/lib/types";
+import type { MetadataFieldDefinition, MetadataSchema } from "@/lib/types";
+import type { GroupMember } from "@/lib/schemaTypes";
 
 export type BodySectionField = { id: string; label: string };
 
@@ -48,4 +49,62 @@ export function buildBodySections(
     groups[index].fields.push({ id, label });
   }
   return groups;
+}
+
+// ---- Repeating sections (#2043) --------------------------------------------
+// A `list` field whose item shape carries a long_text member is material too:
+// it renders as a headed section AFTER the long_text sections, one sub-section
+// per item, the item's long_text members as stacked editors and its other
+// members as rail rows (an item is a node editor in miniature). A list of
+// scalar items (follow_ups) is a fact list and stays in the rail. The rule
+// reads the resolver-stamped `item_members` (never `item_type`, which the
+// resolver may have overridden — metadataTypes.ts), so the scalar sugar
+// `item_type: long_text` (one member keyed "value") qualifies the same way.
+
+/** Whether this field is a list whose items carry prose — the one rule the
+ *  section builder, the rail's index row and the body renderer all share. */
+export function listHasProseItems(field: MetadataFieldDefinition | null | undefined): boolean {
+  return !!field && field.type === "list" && (field.item_members ?? []).some((m) => m.type === "long_text");
+}
+
+export type BodyListSection = {
+  id: string;
+  label: string;
+  /** The member whose value heads each item (the first `text` member), or null
+   *  when the shape has none — then the item's ordinal is its heading. */
+  titleKey: string | null;
+  /** The item's long_text members, in shape order — each a stacked editor. */
+  proseMembers: GroupMember[];
+  /** Every other member (never the title, never prose) — the item's rail rows. */
+  factMembers: GroupMember[];
+};
+
+export function buildBodyListSections(
+  schema: MetadataSchema | null | undefined,
+  entryType: string | null | undefined,
+): BodyListSection[] {
+  if (!schema || !entryType) return [];
+  const fieldIds = schema.entry_types[entryType]?.fields ?? [];
+  const sections: BodyListSection[] = [];
+  for (const id of fieldIds) {
+    const field = schema.fields[id];
+    if (!listHasProseItems(field) || field!.intrinsic) continue;
+    if (effectiveFieldHidden(schema, entryType, id)) continue;
+    const members = field!.item_members ?? [];
+    const title = members.find((m) => m.type === "text") ?? null;
+    sections.push({
+      id,
+      label: effectiveFieldLabel(schema, entryType, id),
+      titleKey: title?.key ?? null,
+      proseMembers: members.filter((m) => m.type === "long_text"),
+      factMembers: members.filter((m) => m.type !== "long_text" && m !== title),
+    });
+  }
+  return sections;
+}
+
+/** The keyboard-bridge id of one item's one prose editor: unique across the
+ *  document, stable while the item keeps its index. */
+export function listItemEditorId(listId: string, index: number, memberKey: string): string {
+  return `${listId}[${index}].${memberKey}`;
 }

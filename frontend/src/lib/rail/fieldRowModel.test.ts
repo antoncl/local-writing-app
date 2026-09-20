@@ -8,12 +8,33 @@ import type { MetadataSchema } from "@/lib/types";
 const SCHEMA = {
   version: 1,
   entry_types: {
-    "lore:character": { name: "Character", kind: "lore", fields: ["alias", "allies", "tags", "status", "bio"] },
+    "lore:character": { name: "Character", kind: "lore", fields: ["alias", "allies", "tags", "status", "bio", "beats", "follow_ups"] },
     "tag:tag": { name: "Tag", kind: "tag" },
   },
   fields: {
     alias: { name: "Alias", type: "text", options: [] },
     bio: { name: "Bio", type: "long_text", options: [] },
+    // #2043: a list whose items carry prose (a repeating body section) and one
+    // whose items are scalars (a fact list that stays in the rail).
+    beats: {
+      name: "Beats",
+      type: "list",
+      options: [],
+      item_group: "plot_beat",
+      item_scalar: false,
+      item_members: [
+        { key: "title", name: "Title", type: "text" },
+        { key: "function", name: "Function", type: "long_text" },
+      ],
+    },
+    follow_ups: {
+      name: "Follow-ups",
+      type: "list",
+      options: [],
+      item_type: "text",
+      item_scalar: true,
+      item_members: [{ key: "value", name: "Value", type: "text" }],
+    },
     allies: {
       name: "Allies",
       type: "entity_ref_list",
@@ -131,6 +152,41 @@ describe("buildRailRowModel", () => {
     expect(model.sectionIndex).toBe(true);
     expect(model.wordCount).toBe(0);
     expect(model.empty).toBe(true);
+    expect(model.sectionSummary).toBeNull();
+  });
+
+  describe("list sections (#2043)", () => {
+    it("with sectionsInBody, a list whose items carry prose is a non-wide index row reading the item count", () => {
+      const model = buildRailRowModel(
+        baseCtx({ sectionsInBody: true, metadata: { beats: [{ title: "One" }, { title: "Two" }, {}] } }),
+        "beats",
+      );
+      expect(model.sectionIndex).toBe(true);
+      expect(model.wide).toBe(false);
+      expect(model.sectionSummary).toBe("3 items");
+      expect(model.wordCount).toBe(0);
+    });
+
+    it("one item reads singular; an empty list reads empty through the same branch", () => {
+      expect(buildRailRowModel(baseCtx({ sectionsInBody: true, metadata: { beats: [{}] } }), "beats").sectionSummary).toBe("1 item");
+      const empty = buildRailRowModel(baseCtx({ sectionsInBody: true, metadata: {} }), "beats");
+      expect(empty.sectionIndex).toBe(true);
+      expect(empty.empty).toBe(true);
+      expect(empty.sectionSummary).toBe("");
+    });
+
+    it("without sectionsInBody, the list is the plain wide rail row it always was", () => {
+      const model = buildRailRowModel(baseCtx({ metadata: { beats: [{}] } }), "beats");
+      expect(model.sectionIndex).toBe(false);
+      expect(model.wide).toBe(true);
+      expect(model.sectionSummary).toBeNull();
+    });
+
+    it("a list of scalar items is a fact list: wide in the rail even with sectionsInBody", () => {
+      const model = buildRailRowModel(baseCtx({ sectionsInBody: true, metadata: { follow_ups: ["a"] } }), "follow_ups");
+      expect(model.sectionIndex).toBe(false);
+      expect(model.wide).toBe(true);
+    });
   });
 
   describe("listsInBody (#2010)", () => {

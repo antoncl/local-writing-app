@@ -121,9 +121,21 @@ class RefsInGroupsAdjacencyTests(unittest.TestCase):
         # ...alongside its id as the join key (a top-level ref carries both, §4).
         self.assertIn(self.sidekick, block)
 
-    def test_lore_block_keeps_the_ref_joinable_as_id_and_name(self) -> None:
-        # The roster renders as a JSON array; the nested ref is a `{"id","name"}`
-        # map so the model reads the name AND can join on the id.
+    def test_lore_block_renders_a_keyed_item_as_one_line(self) -> None:
+        # `roster` has exactly one entity_ref member, so it is a reference-keyed
+        # list (ADR-0089 §1) and renders one line per item (§7): the target's
+        # name with its id as the join key, the other members as values.
+        block = _format_lore_block(self.service, [self.hero])
+        self.assertIn(f'<item id="{self.sidekick}">Pip: squire</item>', block)
+        self.assertNotIn('{"who"', block)
+
+    def test_lore_block_keeps_json_for_a_list_that_is_not_keyed(self) -> None:
+        # Two reference members: no member is THE key, so the list keeps the
+        # JSON render with each nested ref as a `{"id","name"}` map.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data["groups"]["rel"]["members"].append({"key": "also", "name": "Also", "type": "entity_ref"})
+        self.service._write_yaml(schema_path, data)
         block = _format_lore_block(self.service, [self.hero])
         start = block.index("<roster>") + len("<roster>")
         payload = json.loads(block[start:block.index("</roster>")].strip())

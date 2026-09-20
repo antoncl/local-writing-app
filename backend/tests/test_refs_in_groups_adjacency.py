@@ -7,6 +7,11 @@ must wrap a nested ref to an `EntryRef` so a template resolves the target's
 fields, and the lore-block renderer must resolve a nested ref's id to the
 target's name — parity with a top-level ref's `<field id>Name</field>`.
 
+Pass 3 (ADR-0089 §8, #2066) is the *selection* side of the same gap: the
+structural one hop and the scene's own structural refs used to read top-level
+`lore_` values only, so a target named inside a group item was rendered but
+never fanned into context.
+
 The promotion adjacency pass is pinned in `test_promote_lore.py` (it reuses that
 module's layer-chain fixture).
 """
@@ -20,9 +25,16 @@ from tempfile import TemporaryDirectory
 
 from project_fixtures import open_test_project
 
-from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+from app.models import (
+    ChatSessionJournalEntry,
+    CreateLoreEntryRequest,
+    CreateSceneRequest,
+    SaveLoreEntryRequest,
+    SaveSceneRequest,
+)
 from app.services.ai.helpers import create_environment_for_project
 from app.services.ai.lore_block import _format_lore_block
+from app.services.ai.lore_selection import _relevant_lore_ids, _select_lore
 from app.services.ai.templates import render_template
 
 
@@ -58,12 +70,13 @@ class RefsInGroupsAdjacencyTests(unittest.TestCase):
             "type": "list",
             "item_group": "rel",
         }
-        character = data["entry_types"].get("lore:character") or {}
-        own = list(character.get("fields") or [])
-        if "roster" not in own:
-            own.insert(0, "roster")
-        character["fields"] = own
-        data["entry_types"]["lore:character"] = character
+        for type_key in ("lore:character", "manuscript:scene"):
+            definition = data["entry_types"].get(type_key) or {}
+            own = list(definition.get("fields") or [])
+            if "roster" not in own:
+                own.insert(0, "roster")
+            definition["fields"] = own
+            data["entry_types"][type_key] = definition
         self.service._write_yaml(schema_path, data)
 
     def _make_hero(self) -> str:
@@ -116,6 +129,38 @@ class RefsInGroupsAdjacencyTests(unittest.TestCase):
         payload = json.loads(block[start:block.index("</roster>")].strip())
         self.assertEqual(payload[0]["who"], {"id": self.sidekick, "name": "Pip"})
         self.assertEqual(payload[0]["role"], "squire")
+
+    # --- Pass 3: the structural hop and scene seeds descend as well ----------
+
+    def test_structural_hop_fans_a_nested_ref_into_context(self) -> None:
+        # A detected hero seeds the hop; Pip is named only inside a roster item.
+        journal = [
+            ChatSessionJournalEntry(
+                entry_id=self.hero, title="Seren", source="user_message", added_at_turn=1
+            )
+        ]
+        selection = _select_lore(self.service, None, journal)
+        self.assertEqual(
+            {(c.id, c.source) for c in selection.inferred},
+            {(self.hero, "user_message"), (self.sidekick, "structural_hop")},
+        )
+
+    def test_a_scene_roster_item_is_a_structural_scene_ref(self) -> None:
+        # The scene-seed sites run the same collector: a ref inside a scene's
+        # own group-list item is an explicit structural ref, not a hop.
+        scene = self.service.create_scene(CreateSceneRequest(title="Arrival"))
+        self.service.save_scene(
+            scene.id,
+            SaveSceneRequest(
+                title="Arrival",
+                body="",
+                base_revision=scene.revision,
+                metadata={"roster": [{"who": self.sidekick, "role": "guide"}]},
+            ),
+        )
+        scene = self.service.read_scene(scene.id)
+        self.assertEqual(_relevant_lore_ids(self.service, scene, "explicit"), [self.sidekick])
+        self.assertIn(self.sidekick, _select_lore(self.service, scene, []).declared)
 
 
 if __name__ == "__main__":  # pragma: no cover

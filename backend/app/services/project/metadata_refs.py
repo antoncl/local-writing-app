@@ -20,6 +20,10 @@ Two forms, per ADR-0081 §1:
   only when a change actually lands in it (a read-path heal that changes nothing
   stays cheap). For delete-purge and dangling-strip.
 
+:func:`occurrence_targets` turns one occurrence into the node ids it names (one
+for ``entity_ref``, each item for ``entity_ref_list``), so the index's edge walk
+and the AI structural hop (#2066, ADR-0089 §8) read a value the same way.
+
 Groups do not nest in groups (a ``GroupMember`` is a scalar/ref/tag field, never
 another list/group), so the descent is exactly one level — bounded, not
 open-ended.
@@ -112,6 +116,17 @@ def iter_ref_occurrences(
             for member_key, member_field in members.items():
                 if member_key in item:
                     yield RefOccurrence(field_id, member_key, member_field, item[member_key])
+
+
+def occurrence_targets(occ: RefOccurrence) -> list[Any]:
+    """The candidate target(s) one ref occurrence names — the single value for
+    ``entity_ref``, each item for ``entity_ref_list``, nothing otherwise. Values
+    are returned as stored: the caller decides what counts as an id."""
+    if occ.field.type == "entity_ref":
+        return [occ.value]
+    if occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
+        return list(occ.value)
+    return []
 
 
 def rewrite_ref_occurrences(

@@ -38,10 +38,12 @@ from app.services.ai.field_contract import FieldContract
 from app.services.ai.plot_prompt_context import render_plot_context
 from app.services.ai.sessions import AISession
 from app.services.error_log import append_error_line
+from app.services.project.metadata_refs import iter_ref_occurrences, occurrence_targets
 from app.services.project.narration import resolved_narration as _resolve_narration_gate
 from app.services.tree_structure import TreeStructureService
 
 if TYPE_CHECKING:
+    from app.models.schema import MetadataSchema
     from app.services.project_service import ProjectService
 
 # Sentinel distinguishing "the `at=` anchor was omitted" (use the prompt's
@@ -724,18 +726,22 @@ def _is_scene_id(value: Any) -> bool:
     )
 
 
-def _collect_lore_refs_from_metadata(metadata: Any) -> set[str]:
-    """Walk a metadata dict looking for lore IDs in entity_ref / list values."""
+def _collect_lore_refs_from_metadata(metadata: Any, schema: MetadataSchema) -> set[str]:
+    """The lore ids a node's metadata references — through every `entity_ref` /
+    `entity_ref_list` occurrence the schema declares, top-level or inside a
+    group-list item (ADR-0081's one traversal; #2066, ADR-0089 §8).
+
+    Same `lore_` filter as before: this is the *lore* context's seed and hop
+    walk, so a reference to a scene, tag or prompt is not a lore seed (which is
+    also why the index's `merged_into` exclusion needs no twin here: that field
+    lives on tags and names a tag)."""
     found: set[str] = set()
     if not isinstance(metadata, dict):
         return found
-    for value in metadata.values():
-        if _is_lore_id(value):
-            found.add(value)
-        elif isinstance(value, list):
-            for item in value:
-                if _is_lore_id(item):
-                    found.add(item)
+    for occ in iter_ref_occurrences(metadata, schema):
+        for target in occurrence_targets(occ):
+            if _is_lore_id(target):
+                found.add(target)
     return found
 
 

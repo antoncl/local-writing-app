@@ -86,7 +86,7 @@ def _relevant_lore_ids(
         # The `never` chokepoint is applied once, inside the struct builder.
         return _select_lore(project, scene, journal, used_ids).ids
     scene_metadata = _attr_or_item(scene, "metadata")
-    scene_refs = _collect_lore_refs_from_metadata(scene_metadata)
+    scene_refs = _collect_lore_refs_from_metadata(scene_metadata, project.read_metadata_schema())
     used = set(used_ids or [])
     ids = sorted(used) if mode == "used" else sorted(scene_refs | used)
     # Chokepoint filter: drop any "never"-policy entries that may have arrived via
@@ -154,7 +154,9 @@ def _select_lore(
     expand one hop — that stays the implicit `use_lore()` path's job. An author
     who wants a use()'d node's neighbours loops its refs and use()s them.
     """
-    scene_refs = _collect_lore_refs_from_metadata(_attr_or_item(scene, "metadata"))
+    scene_refs = _collect_lore_refs_from_metadata(
+        _attr_or_item(scene, "metadata"), project.read_metadata_schema()
+    )
     # The three context policies from ONE lore scan (not one scan per policy).
     policies = _lore_policy_ids(project)
     # Always-included entries (context_policy = "always") feed every implicit
@@ -306,17 +308,20 @@ class _Candidates:
     def offer_structural_hop(
         self, project: ProjectService, seeds: set[str], manual_only: set[str]
     ) -> None:
-        """One structural hop through each seed's own entity_ref metadata.
-        Like the alias/textual scans, this AUTOMATIC route honors
+        """One structural hop through each seed's own references — top-level
+        `entity_ref` / `entity_ref_list` fields and the reference members of a
+        group-list item alike (#2066, ADR-0089 §8), through the one traversal
+        the reference index walks. Like the alias/textual scans, this AUTOMATIC route honors
         `manual_only` ("explicit picker only"): a transitive ref to such an
         entry is NOT fanned in — it stays reachable via the scene's own refs
         or use() (#1024). `never` needs no filter here: `_select_lore` applies
         the chokepoint once, to every route."""
+        schema = project.read_metadata_schema()
         for entry_id in sorted(seeds):
             entry = _safe_read_node(project, entry_id)
             if entry is None:
                 continue
-            hop_refs = _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"))
+            hop_refs = _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"), schema)
             self.offer_all(hop_refs - manual_only, "structural_hop")
 
 

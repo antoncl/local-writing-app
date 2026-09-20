@@ -51,7 +51,7 @@ from app.models import (
 from app.services.project.errors import ProjectServiceError
 from app.services.project.index_collect import IndexCollectMixin
 from app.services.project.layers import MANIFEST_FILENAME, SCHEMA_FILENAME, LayerVisitor
-from app.services.project.metadata_refs import RefOccurrence, iter_ref_occurrences
+from app.services.project.metadata_refs import iter_ref_occurrences, occurrence_targets
 
 # re-exported: importers use this path (see `__all__` below)
 from app.services.project.node_families import (
@@ -952,21 +952,11 @@ class ReferencesMixin:
             # away from.
             if occ.field_id == "merged_into":
                 continue
-            for target in self._ref_occurrence_candidates(occ):
+            for target in occurrence_targets(occ):
                 if isinstance(target, str) and target and (occ.field_id, target) not in seen:
                     seen.add((occ.field_id, target))
                     edges.append(ReferenceEdge(src=src_id, dst=target, field_id=occ.field_id))
         return edges
-
-    @staticmethod
-    def _ref_occurrence_candidates(occ: RefOccurrence) -> list[object]:
-        """The candidate target(s) one ref occurrence names — a single value
-        for `entity_ref`, each item for `entity_ref_list`, nothing otherwise."""
-        if occ.field.type == "entity_ref":
-            return [occ.value]
-        if occ.field.type == "entity_ref_list" and isinstance(occ.value, list):
-            return list(occ.value)
-        return []
 
     def _extract_include_edges(self, index: NodeIndex, schema: MetadataSchema | None) -> None:
         """Record each prompt's literal `{% include %}` tags as reference edges

@@ -387,8 +387,10 @@ class PromptRenderTests(_RelationshipFixture):
         # No target summary rides on the line, and Tomas's own block is there
         # only when he is in context.
         self.assertNotIn("summary=", self._block([self.mara], ch14).split("<relationships>")[1].split("</relationships>")[0])
-        self.assertNotIn("Tomas Vell\" ", self._block([self.mara], ch14).split("</relationships>")[1])
+        outside = self._block([self.mara], ch14).split("</relationships>")[1]
+        self.assertNotIn(self.tomas, outside)  # no block of his own unless he is in context
         both = self._block([self.mara, self.tomas], ch14)
+        self.assertIn(f'id="{self.tomas}"', both.split("</relationships>")[1])
         self.assertEqual(both.count("<relationships"), 1)  # Tomas holds no items of his own
 
     def test_journey_10_a_marker_born_item_renders_from_its_scene_on(self) -> None:

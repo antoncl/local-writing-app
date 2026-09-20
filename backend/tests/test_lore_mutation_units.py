@@ -421,6 +421,13 @@ class UnitRewriteTests(MutationUnitTestBase):
             self.service.rewrite_mutation_unit(self.scene_id, "nope", RewriteMutationUnitRequest(rows=[]))
         self.assertEqual(getattr(ctx.exception, "status_code", None), 404)
 
+    def test_a_row_the_grammar_cannot_parse_is_refused_before_the_rewrite(self) -> None:
+        before = self._body()
+        for bad in ({"field": "rank", "op": "append", "value": "x", "id": "r1"}, {"field": "ra nk", "value": "x"}):
+            response = self.client.put(f"/api/scenes/{self.scene_id}/mutations/units/u1", json={"rows": [bad]})
+            self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self._body(), before)
+
     def test_the_route_rewrites_and_returns_the_scene(self) -> None:
         response = self.client.put(
             f"/api/scenes/{self.scene_id}/mutations/units/u1",

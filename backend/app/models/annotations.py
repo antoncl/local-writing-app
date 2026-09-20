@@ -114,10 +114,12 @@ class MutationUnitRow(BaseModel):
     value. A blank `id` mints a fresh record id; a given id is kept, which is
     how a re-edited unit keeps the record a later close points at."""
 
-    field: str
-    op: str = "replace"
+    # Constrained to what the carrier row grammar parses, so a row the file
+    # could not read back is refused before the unit is rewritten.
+    field: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    op: Literal["add", "remove", "replace"] = "replace"
     value: str = ""
-    id: str = ""
+    id: str = Field(default="", pattern=r"^[A-Za-z0-9_-]*$")
 
 
 class RewriteMutationUnitRequest(BaseModel):

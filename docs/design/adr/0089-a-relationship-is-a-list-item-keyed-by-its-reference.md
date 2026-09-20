@@ -1,7 +1,7 @@
 # ADR-0089: A relationship is a list item keyed by its reference, and it follows the mutation rules
 
-- **Status:** Accepted — 2026-09-20, Anton Lauridsen, PR #2068 (authored by Claude). Replaces the
-  shape sketched on #2012 (a `relation` kind). Reviewed twice before acceptance (a brainstorm
+- **Status:** Accepted — 2026-09-20, Anton Lauridsen; text landed as Proposed in PR #2068 (authored
+  by Claude), accepted in PR #2069. Replaces the shape sketched on #2012 (a `relation` kind). Reviewed twice before acceptance (a brainstorm
   round and a round against the ADR text); Anton's ruling on orphaned items (§9) came out of the second.
 - **Feature:** relationships and "who knows what when" as metadata (#2012, section B3 of the
   metadata-material epic #2005).

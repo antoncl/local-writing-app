@@ -1,6 +1,8 @@
 # ADR-0009: Collection mutations use add/remove; effective_state returns typed lists
 
-- Status: Accepted (v1.1) — 0.4.0, 2026-07-01 · **Amended 2026-07-02: text append**
+- Status: Accepted (v1.1) — 0.4.0, 2026-07-01 · **Amended 2026-07-02: text append** ·
+  **Amended 2026-09-20 by ADR-0089: group-shaped lists are a third live collection class with
+  per-key, positional presence; flat collections keep remove-wins**
 - Feature: #33 mid-scene lore mutations · Doc: `mid-scene-lore-mutations-v1.1.md` §1 · Issue: #58
 - Refines: ADR-0002 (combine rule), ADR-0006 (contract), ADR-0007 (validation)
 

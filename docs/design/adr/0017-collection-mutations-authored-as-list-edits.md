@@ -1,6 +1,7 @@
 # ADR-0017: Collection mutations are authored as list edits, diffed against the effective baseline
 
-- Status: Accepted — 0.4.0 authoring rework, 2026-07-02
+- Status: Accepted — 0.4.0 authoring rework, 2026-07-02 · **Amended 2026-09-20 by ADR-0089:
+  group-shaped lists diff by key, against the baseline at the dialog's own insertion position**
 - Feature: #33 mid-scene lore mutations · Doc: `mutation-unit-authoring.md` §3 · Issue: #71
 - Layers over: ADR-0009 (storage/resolution unchanged) · Uses: ADR-0003 (position-granular
   effective state)

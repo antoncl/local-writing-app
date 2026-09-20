@@ -205,10 +205,10 @@
 </div>
 
 <style>
+  /* No left border of its own since #2047: the item's spine (BodyListSection)
+     carries that line for the whole item, rows included. */
   .bs-item-rows {
     margin: 0 0 var(--sp-2);
-    padding-left: var(--sp-2);
-    border-left: 2px solid var(--divider);
     font-size: var(--fs-sm);
   }
   .bs-item-rows :global(.field-row) {

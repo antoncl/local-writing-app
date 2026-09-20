@@ -263,20 +263,27 @@
         />
       {/if}
       {#each model.section.proseMembers as member (member.key)}
-        <h4 class="bs-h4">{member.name || member.key}</h4>
-        <div class="bs-body">
-          {#if model.readOnly}
-            <FieldValue field={memberField(member)} value={memberValue(item, member.key)} ariaLabel={member.name} />
-          {:else}
-            <MetadataLongTextEditor
-              ariaLabel={`${model.section.label} ${index + 1} ${member.name}`}
-              value={stringOf(memberValue(item, member.key))}
-              matcher={deps.implicitContextMatcher}
-              onChange={(v) => writeMember(index, member.key, v)}
-              onEditorReady={(editor, phase) => on.editorReady(listItemEditorId(model.section.id, index, member.key), editor, phase)}
-              neighbours={() => deps.register.neighboursFor(deps.sectionIndex(listItemEditorId(model.section.id, index, member.key)))}
-            />
-          {/if}
+        <!-- #2047: an empty member rests as ONE line (label · the editor's own
+             "+" glyph) and unfolds to a block while it holds focus or text, so a
+             sparse item is as tall as what it holds. The class follows the
+             value; `:focus-within` in the styles keeps the block open while
+             the caret is inside an emptied editor. -->
+        <div class="bs-member" class:is-empty={!stringOf(memberValue(item, member.key))}>
+          <h4 class="bs-h4">{member.name || member.key}</h4>
+          <div class="bs-body">
+            {#if model.readOnly}
+              <FieldValue field={memberField(member)} value={memberValue(item, member.key)} ariaLabel={member.name} />
+            {:else}
+              <MetadataLongTextEditor
+                ariaLabel={`${model.section.label} ${index + 1} ${member.name}`}
+                value={stringOf(memberValue(item, member.key))}
+                matcher={deps.implicitContextMatcher}
+                onChange={(v) => writeMember(index, member.key, v)}
+                onEditorReady={(editor, phase) => on.editorReady(listItemEditorId(model.section.id, index, member.key), editor, phase)}
+                neighbours={() => deps.register.neighboursFor(deps.sectionIndex(listItemEditorId(model.section.id, index, member.key)))}
+              />
+            {/if}
+          </div>
         </div>
       {/each}
     </section>
@@ -307,7 +314,7 @@
     gap: var(--sp-2);
   }
   .bs-h3 {
-    margin: var(--sp-3) 0 var(--sp-1);
+    margin: 0 0 var(--sp-1);
     font-family: var(--serif);
     font-size: var(--fs-lg);
     font-weight: 400;
@@ -342,10 +349,56 @@
     gap: var(--sp-2);
   }
   .bs-ord {
+    position: absolute;
+    left: -44px;
+    top: 0.45em;
     font-family: var(--mono);
     font-size: var(--fs-xs);
     color: var(--text-3);
-    min-width: 1.4em;
+  }
+  /* #2047 · segmentation: an item is one block with a SPINE in the gutter — the
+     fact rows' left border, pulled out of the text column and run from the
+     heading to the last member — and the ordinal beside it. The spine takes
+     the accent while the pointer or the caret is inside the item, the signal
+     the rail's active row uses. The text column keeps the prose's left edge:
+     no box, no tint, no divider between items (the section's own hairline is
+     the only line across the measure). */
+  .bs-item {
+    position: relative;
+    margin-top: var(--sp-4);
+  }
+  .bs-item::before {
+    content: "";
+    position: absolute;
+    left: -18px;
+    top: 0.35em;
+    bottom: 0.1em;
+    border-left: 2px solid var(--divider);
+  }
+  .bs-item:hover::before,
+  .bs-item:focus-within::before {
+    border-left-color: var(--accent-emphasis);
+  }
+  /* An empty member rests as one line: label, then the editor (whose own
+     `is-empty` "+" glyph is the affordance) beside it at one line tall. While
+     the caret is inside, or once it holds text, it is a block again. */
+  .bs-member.is-empty:not(:focus-within) {
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+  }
+  .bs-member.is-empty:not(:focus-within) .bs-h4 {
+    margin: var(--sp-1) 0;
+  }
+  .bs-member.is-empty:not(:focus-within) .bs-body {
+    margin-top: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .bs-member.is-empty:not(:focus-within) :global(.metadata-long-text-body) {
+    min-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
   }
   .bs-item-title {
     flex: 1 1 auto;
@@ -434,6 +487,17 @@
   .bs-block.compact .bs-add,
   .bs-block.compact .bs-add-item {
     font-size: var(--fs-sm);
+  }
+  .bs-block.compact .bs-item {
+    padding-left: 12px;
+    margin-top: var(--sp-3);
+  }
+  .bs-block.compact .bs-item::before {
+    left: 0;
+  }
+  .bs-block.compact .bs-ord {
+    position: static;
+    min-width: 1.4em;
   }
   .bs-block.compact :global(.metadata-long-text-body) {
     font-size: var(--fs-sm);

@@ -167,4 +167,14 @@ describe("BodyListSection", () => {
     expect(root.classList.contains("compact")).toBe(false);
     expect(root.id).toBe("section-beats");
   });
+
+  it("flags an empty long_text member so it rests as one line; a filled one is a block (#2047)", () => {
+    // Item 1 has Function text and no Guidance; item 2 has neither.
+    const { container } = mount();
+    const members = [...container.querySelectorAll(".bs-member")];
+    expect(members).toHaveLength(4);
+    expect(members.map((m) => m.classList.contains("is-empty"))).toEqual([false, true, true, true]);
+    // The label stays inside the member block, so the one-line rest state keeps its name.
+    expect(members[1].querySelector(".bs-h4")?.textContent).toBe("Guidance");
+  });
 });

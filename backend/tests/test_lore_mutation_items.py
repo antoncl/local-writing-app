@@ -367,6 +367,47 @@ class OrphanedItemWarningTests(_RelationshipFixture):
         self.assertFalse(any("orphaned item" in w for w in warnings), warnings)
 
 
+class PromptRenderTests(_RelationshipFixture):
+    """ADR-0089 §7 (S4): the lore block renders an entry's OWN relationship
+    items, one line each, effective as of the scene, never the other side's."""
+
+    def _block(self, ids: list[str], scene: str | None = None) -> str:
+        from app.services.ai.lore_block import _format_lore_block
+
+        index = self.service.build_mutations_index() if scene else None
+        return _format_lore_block(self.service, ids, scene=scene, index=index)
+
+    def test_journey_9_the_block_reads_the_effective_item_lines(self) -> None:
+        ch3 = self._new_scene("Chapter 3", "Cold words.")
+        ch12 = self._new_scene("Chapter 12", self._replace(self.tomas, "state", "reconciled", "r12"))
+        ch14 = self._new_scene("Chapter 14", "Later.")
+        self.assertIn(f'<item id="{self.tomas}">Tomas Vell: kinship, reconciled, 1</item>', self._block([self.mara], ch14))
+        self.assertIn(f'<item id="{self.tomas}">Tomas Vell: kinship, estranged, 1</item>', self._block([self.mara], ch3))
+        self.assertIn(f'<item id="{self.ilse}">Ilse: debt, owed, 2</item>', self._block([self.mara], ch12))
+        # No target summary rides on the line, and Tomas's own block is there
+        # only when he is in context.
+        self.assertNotIn("summary=", self._block([self.mara], ch14).split("<relationships>")[1].split("</relationships>")[0])
+        self.assertNotIn("Tomas Vell\" ", self._block([self.mara], ch14).split("</relationships>")[1])
+        both = self._block([self.mara, self.tomas], ch14)
+        self.assertEqual(both.count("<relationships"), 1)  # Tomas holds no items of his own
+
+    def test_journey_10_a_marker_born_item_renders_from_its_scene_on(self) -> None:
+        ch3 = self._new_scene("Chapter 3", "Early.")
+        ch9 = self._new_scene("Chapter 9", self._add({"to": self.peter, "kind": "witness", "state": "deduced"}, "a9"))
+        self.assertIn(f'<item id="{self.peter}">Peter: witness, deduced</item>', self._block([self.mara], ch9))
+        self.assertNotIn("Peter", self._block([self.mara], ch3))
+        self.assertNotIn("Peter", self._block([self.mara]))
+
+    def test_an_orphaned_item_is_hidden_from_the_prompt(self) -> None:
+        path = next(p for p in (self.root / "lore").glob("*.md") if self.mara in p.read_text(encoding="utf-8"))
+        front_matter, body = self.service._read_markdown_with_front_matter(path, strict=True)
+        front_matter["metadata"][FIELD] = [{"to": "", "kind": "kinship", "state": "gone"}, self.base[1]]
+        self.service._write_markdown_with_front_matter(path, front_matter, body)
+        block = self._block([self.mara])
+        self.assertNotIn("gone", block)
+        self.assertIn(f'<item id="{self.ilse}">', block)
+
+
 class ModuleTests(unittest.TestCase):
     """The pure pieces: the shape predicate, the path grammar, the fold."""
 

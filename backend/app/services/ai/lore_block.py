@@ -27,7 +27,8 @@ from app.services.ai.helpers import (
     _xml_safe_tag,
 )
 from app.services.project.field_values import display_value
-from app.services.project.metadata_refs import ref_members
+from app.services.project.lore_mutation_items import item_key
+from app.services.project.metadata_refs import keyed_list_key, ref_members
 from app.services.project.schema_summary import summary_values
 
 if TYPE_CHECKING:
@@ -319,6 +320,9 @@ def _render_field_element(
     if field_type == "long_text":
         return f"  <{tag}>\n{xml_escape(str(value))}\n  </{tag}>"
     if field_type == "list":
+        key_member = keyed_list_key(field)
+        if key_member is not None:
+            return _render_keyed_items(project, schema, tag, field, key_member, value)
         # A list of scalars or member-keyed maps — quote it as JSON so the shape
         # is unambiguous (mirrors the `fields()` descriptor's "JSON array of …").
         # A nested entity_ref member is resolved to `{"id","name"}` so the model
@@ -327,6 +331,47 @@ def _render_field_element(
         rendered = _resolve_list_refs(project, schema, field, value)
         return f"  <{tag}>\n{xml_escape(json.dumps(rendered, ensure_ascii=False))}\n  </{tag}>"
     return f"  <{tag}>{xml_escape(_scalar_text(value))}</{tag}>"
+
+
+def _render_keyed_items(
+    project: ProjectService, schema: Any, tag: str, field: Any, key_member: str, value: Any
+) -> str:
+    """A reference-keyed list (ADR-0089 §7): the entry's OWN items, one line
+    each — `<item id="…">Target Name: member, member</item>` — the key member
+    as the target's name with its id as the join key and NO target summary
+    (the target's own block carries it when in context), the other members as
+    their values in member order, empty ones skipped, a prose member folded
+    onto the line. The value is the folded items when a scene is in play
+    (`_effective_overlay_updates` hands them through), so a marker-born item
+    renders from its scene on. An orphaned item (blank key, §9) is hidden.
+    The lore block never renders the other side's items: what Tomas holds
+    toward Mara is in his block, and reaches the prompt when he is in context."""
+    members = [m for m in (getattr(field, "item_members", None) or []) if m.key != key_member]
+    lines: list[str] = []
+    for item in value if isinstance(value, list) else []:
+        key = item_key(item, key_member)
+        if key is None:
+            continue
+        name, _summary = _ref_target(project, schema, key)
+        parts = [text for m in members if (text := _member_line_text(project, schema, item.get(m.key), m.type))]
+        text = f"{name}: {', '.join(parts)}" if parts else name
+        lines.append(f"    <item id={quoteattr(key)}>{xml_escape(text)}</item>")
+    if not lines:
+        return f"  <{tag} />"
+    return f"  <{tag}>\n" + "\n".join(lines) + f"\n  </{tag}>"
+
+
+def _member_line_text(project: ProjectService, schema: Any, value: Any, member_type: str) -> str:
+    """One member's value as it sits on an item line: a reference member as
+    its target's name, a list of references as names joined by " / ",
+    anything else as its scalar text on one line."""
+    if _is_empty_value(value):
+        return ""
+    if member_type == "entity_ref":
+        return _ref_target(project, schema, str(value))[0]
+    if member_type == "entity_ref_list" and isinstance(value, list):
+        return " / ".join(_ref_target(project, schema, str(ref))[0] for ref in value if ref)
+    return " ".join(_scalar_text(value).split())
 
 
 def _resolve_list_refs(project: ProjectService, schema: Any, field: Any, value: Any) -> Any:

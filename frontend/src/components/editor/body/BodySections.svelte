@@ -177,6 +177,14 @@
     margin-inline: auto;
     padding: 0 56px;
     box-sizing: border-box;
+    /* #2049: the measure is in `ch`, and `ch` resolves in the element's OWN
+       font. This block must measure in the prose font `.editor-body` measures
+       in, or its 72ch is 72 smaller UI-font zeros: the sections come out
+       narrower than the prose, and their gutter, headings, spine and ordinal
+       land ~50px right of the prose's. UI children that used to inherit the
+       pane's sans (item rows, fold line, add button) pin it back. */
+    font-family: var(--serif);
+    font-size: var(--fs-prose);
   }
   .bs-field {
     display: block;

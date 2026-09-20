@@ -209,6 +209,7 @@
      carries that line for the whole item, rows included. */
   .bs-item-rows {
     margin: 0 0 var(--sp-2);
+    font-family: var(--sans);
     font-size: var(--fs-sm);
   }
   .bs-item-rows :global(.field-row) {
@@ -220,6 +221,7 @@
     border: 0;
     padding: 2px 0;
     color: var(--text-3);
+    font-family: var(--sans);
     font-size: var(--fs-sm);
     cursor: pointer;
   }

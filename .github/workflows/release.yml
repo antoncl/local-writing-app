@@ -265,8 +265,9 @@ jobs:
           mkdir -p "$staging"
           cp -a dist/local-writing-app "$staging/"
           cp packaging/linux/install-server.sh "$staging/"
+          cp packaging/linux/update-server.sh "$staging/"
           cp packaging/linux/README-server.md "$staging/"
-          chmod +x "$staging/install-server.sh"
+          chmod +x "$staging/install-server.sh" "$staging/update-server.sh"
           tar -czf "${staging}.tar.gz" "$staging"
         env:
           PLAT: ${{ matrix.platform }}

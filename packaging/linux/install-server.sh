@@ -34,6 +34,13 @@ mkdir -p "${INSTALL_DIR}"
 cp -a "${here}/${APP_NAME}/." "${INSTALL_DIR}/"
 chmod +x "${INSTALL_DIR}/${APP_NAME}"
 
+# Keep the updater alongside the install so "update later" has a stable path,
+# even if the user deletes the extracted tarball.
+if [ -f "${here}/update-server.sh" ]; then
+  cp "${here}/update-server.sh" "${INSTALL_DIR}/"
+  chmod +x "${INSTALL_DIR}/update-server.sh"
+fi
+
 cat > "${SERVICE_PATH}" <<EOF
 [Unit]
 Description=Local Writing App (local-first fiction writing)
@@ -58,7 +65,11 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now "${APP_NAME}.service"
+# enable (on boot) + restart (now): restart also starts a stopped unit, so this
+# is correct for a fresh install AND an update — `enable --now` would leave an
+# already-running service on the old binary after the files are swapped.
+systemctl enable "${APP_NAME}.service"
+systemctl restart "${APP_NAME}.service"
 
 ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
@@ -66,4 +77,7 @@ echo "Done. The app is running as a service."
 echo "  Open on your LAN:  http://${ip:-<this-box-ip>}:${PORT}"
 echo "  Status:            systemctl status ${APP_NAME}"
 echo "  Logs:              journalctl -u ${APP_NAME} -f"
+if [ -x "${INSTALL_DIR}/update-server.sh" ]; then
+  echo "  Update later:      sudo ${INSTALL_DIR}/update-server.sh"
+fi
 echo "  Uninstall:         systemctl disable --now ${APP_NAME}; rm ${SERVICE_PATH} ${INSTALL_DIR} -r"

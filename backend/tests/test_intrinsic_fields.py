@@ -208,6 +208,24 @@ class IntrinsicFieldTests(unittest.TestCase):
         self.assertIn("conversations", schema.entry_types["lore:character"].fields)
         self.assertIn("conversations", schema.entry_types["manuscript:scene"].fields)
 
+    def test_mutation_sets_is_a_builtin_node_set_computed_field(self) -> None:
+        # ADR-0089 Amendment 1 §4 (#2101 slice C2): the Mutation sets rail
+        # panel is promoted to a computed collection field with a bound
+        # renderer, exactly like `conversations` — no stored value, but a
+        # declared node-set payload and a seeded default tab Section. Unlike
+        # `conversations`, it is lore-scoped: seeded ONLY onto lore:base.
+        schema = self.service.read_metadata_schema()
+        mutation_sets = schema.fields.get("mutation_sets")
+        self.assertIsNotNone(mutation_sets, "mutation_sets catalog field is missing")
+        assert mutation_sets is not None  # narrow for the type checker
+        self.assertEqual(mutation_sets.category, "computed")
+        self.assertEqual(mutation_sets.type, "computed")
+        self.assertEqual(mutation_sets.name, "Mutation sets")
+        self.assertEqual((mutation_sets.computed or {}).get("value_type"), "node_set")
+        self.assertEqual(mutation_sets.group, "Mutation sets")
+        self.assertIn("mutation_sets", schema.entry_types["lore:character"].fields)
+        self.assertNotIn("mutation_sets", schema.entry_types["manuscript:scene"].fields)
+
     def test_title_is_not_stored_in_metadata_after_save(self) -> None:
         # Declaring title/id/entry_type as fields must not cause them to be
         # persisted into the metadata dict — storage stays in front matter.

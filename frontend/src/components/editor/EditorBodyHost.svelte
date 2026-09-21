@@ -26,6 +26,7 @@
   import ViewBodyView from "@/components/editor/body/ViewBodyView.svelte";
   import ReferenceListTab from "@/components/editor/body/ReferenceListTab.svelte";
   import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
+  import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
@@ -517,6 +518,15 @@
             metadataSchema={model.metadataSchema}
             hostPaneId={deps.hostPaneId}
           />
+        {/key}
+      {:else if model.metadataSchema.fields[fieldId]?.type === "computed" && model.metadataSchema.fields[fieldId]?.computed?.function === "mutation_sets"}
+        <!-- ADR-0089 Amendment 1 §4 (#2101, slice C2): Mutation sets promoted
+             from a trailing rail panel to a computed collection field's tab —
+             same component, same props, bound by field instead of hardcoded
+             in EditorRailContent's `trailing` snippet. Lore-scoped (the field
+             is only seeded onto lore:base), same as before. -->
+        {#key model.scene?.id ?? ""}
+          <PinnedSetsPanel entityId={model.scene?.id ?? ""} entityEntryType={model.entryType} />
         {/key}
       {:else}
         <ReferenceListTab

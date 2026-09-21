@@ -1,7 +1,7 @@
 <script lang="ts">
   // The rail's metadata + backlinks + lore-mutation content (#2029 follow-up,
-  // Conversations moved out to a body tab in ADR-0089 Amendment 1 §4, #2101):
-  // moved VERBATIM out of NodeEditor's `metaContent`
+  // Conversations and Mutation sets moved out to body tabs in ADR-0089
+  // Amendment 1 §4, #2101): moved VERBATIM out of NodeEditor's `metaContent`
   // snippet, which now just renders this component. Stays a component (not a
   // snippet itself) because it holds no shell state of its own — everything it
   // reads comes down through `{ model, deps, on }` (#2022's RailFieldRow
@@ -13,7 +13,6 @@
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
-  import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
   import type { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ResolvedCascadeField } from "@/lib/manuscriptTypes";
@@ -127,12 +126,6 @@
       }}
       onNavigate={(payload) => on.navigate(payload)}
     />
-    <!-- Mutation sets (ADR-0055 §3): the mutation sets pinned to this entity,
-         + ＋New to author another. The entity-side home for proposing a change
-         the writer later places in a scene. -->
-    {#key model.scene.id}
-      <PinnedSetsPanel entityId={model.scene.id} entityEntryType={model.entryType} />
-    {/key}
   {/if}
 {/snippet}
 

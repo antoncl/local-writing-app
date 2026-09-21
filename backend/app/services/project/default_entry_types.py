@@ -101,7 +101,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "name": "Entry",
         "kind": "lore",
         "abstract": True,
-        "fields": ["aliases", "tags", "related_entries", "color", "context_policy", "conversations"],
+        "fields": ["aliases", "tags", "related_entries", "color", "context_policy", "conversations", "mutation_sets"],
         "color": "slate-blue",
         # Lore entries call their title a "Name" (#116). Expressed as a
         # per-type label override on the intrinsic `title` field rather

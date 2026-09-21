@@ -52,6 +52,7 @@ AUTHORABLE_COMPUTED_FUNCTIONS: tuple[str, ...] = ("word_count", "counter", "cost
 BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
     "references",
     "conversations",
+    "mutation_sets",
     "assistant_listed",
     "assistant_position",
     "path",
@@ -740,6 +741,22 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "computed",
             "computed": {"function": "conversations", "value_type": "node_set"},
             "group": "Conversations",
+        },
+        "mutation_sets": {
+            # The Mutation sets surface (ADR-0055 §3) promoted to a computed
+            # collection field (ADR-0089 Amendment 1 §4, slice C2): the
+            # mutation sets pinned to this entity, rendered by the existing
+            # PinnedSetsPanel bound to this field's tab. Like `conversations`
+            # it has NO stored/materialized value — it is resolved by the
+            # panel's own store, not by computed_metadata.py (the loose
+            # function dispatch there simply skips the unknown
+            # `mutation_sets` function). `group` seeds its default tab
+            # Section so the shipped rail placement doesn't move on upgrade
+            # (Amendment 1 §5). Lore-scoped: seeded only onto lore:base.
+            "name": "Mutation sets",
+            "type": "computed",
+            "computed": {"function": "mutation_sets", "value_type": "node_set"},
+            "group": "Mutation sets",
         },
         "layer": {
             # The inheritance LAYER a node is resolved from (#1928) — the

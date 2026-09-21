@@ -31,7 +31,8 @@ case "${self}" in
     tmpself="$(mktemp)"
     cp "${self}" "${tmpself}"
     chmod +x "${tmpself}"
-    exec "${tmpself}" "$@"
+    # Hand the copy's path forward so the re-exec'd run deletes it on exit.
+    LWA_UPDATE_SELFCOPY="${tmpself}" exec "${tmpself}" "$@"
     ;;
 esac
 
@@ -45,6 +46,10 @@ download() {  # url dest
   if command -v curl >/dev/null 2>&1; then curl -fL -o "$2" "$1"
   elif command -v wget >/dev/null 2>&1; then wget -O "$2" "$1"
   else echo "Need curl or wget to download updates." >&2; exit 1; fi
+}
+# Pull a top-level JSON string field's value from stdin (no jq dependency).
+json_field() {  # field-name  (reads stdin)
+  grep -oE "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]+\"" | head -1 | sed -E 's/.*"([^"]+)"$/\1/'
 }
 
 # Map this machine's architecture onto a release asset suffix.
@@ -72,18 +77,14 @@ RUN_USER="$(sed -n 's/^User=//p' "${SERVICE_PATH}" | head -1)"
 strip_v() { printf '%s' "${1#v}"; }
 
 # Latest published version (release tag), and the version currently running.
-latest_tag="$(fetch "https://api.github.com/repos/${REPO}/releases/latest" \
-  | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
-  | sed -E 's/.*"([^"]+)"$/\1/')"
+latest_tag="$(fetch "https://api.github.com/repos/${REPO}/releases/latest" | json_field tag_name || true)"
 if [ -z "${latest_tag}" ]; then
   echo "Couldn't determine the latest release. Check your network and try again." >&2
   exit 1
 fi
 latest="$(strip_v "${latest_tag}")"
 
-running="$(fetch "http://127.0.0.1:${PORT}/api/version" 2>/dev/null \
-  | grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
-  | sed -E 's/.*"([^"]+)"$/\1/' || true)"
+running="$(fetch "http://127.0.0.1:${PORT}/api/version" 2>/dev/null | json_field version || true)"
 
 if [ "${FORCE}" -eq 0 ] && [ -n "${running}" ] && [ "${running}" = "${latest}" ]; then
   echo "Already up to date (version ${running})."
@@ -93,13 +94,17 @@ echo "Updating ${running:-unknown} -> ${latest} (${ARCH}, port ${PORT})..."
 
 # Download and unpack the latest release into a temp dir we clean up on exit.
 tmp="$(mktemp -d)"
-trap 'rm -rf "${tmp}"' EXIT
+cleanup() {
+  rm -rf "${tmp}"
+  if [ -n "${LWA_UPDATE_SELFCOPY:-}" ]; then rm -f "${LWA_UPDATE_SELFCOPY}"; fi
+}
+trap cleanup EXIT
 echo "Downloading ${ASSET}..."
 download "https://github.com/${REPO}/releases/latest/download/${ASSET}" "${tmp}/${ASSET}"
 tar -xzf "${tmp}/${ASSET}" -C "${tmp}"
 
 new_installer="${tmp}/${APP_NAME}-linux-${ARCH}-server/install-server.sh"
-if [ ! -x "${new_installer}" ]; then
+if [ ! -f "${new_installer}" ]; then
   echo "Downloaded archive is missing install-server.sh — aborting." >&2
   exit 1
 fi
@@ -109,8 +114,6 @@ LWA_PORT="${PORT}" RUN_USER="${RUN_USER}" bash "${new_installer}"
 
 # Confirm what's actually running now.
 sleep 2
-now="$(fetch "http://127.0.0.1:${PORT}/api/version" 2>/dev/null \
-  | grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
-  | sed -E 's/.*"([^"]+)"$/\1/' || true)"
+now="$(fetch "http://127.0.0.1:${PORT}/api/version" 2>/dev/null | json_field version || true)"
 echo
 echo "Update complete. Now running version ${now:-${latest}}."

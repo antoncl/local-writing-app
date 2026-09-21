@@ -65,7 +65,11 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now "${APP_NAME}.service"
+# enable (on boot) + restart (now): restart also starts a stopped unit, so this
+# is correct for a fresh install AND an update — `enable --now` would leave an
+# already-running service on the old binary after the files are swapped.
+systemctl enable "${APP_NAME}.service"
+systemctl restart "${APP_NAME}.service"
 
 ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo

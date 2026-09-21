@@ -171,6 +171,21 @@ def _arm_auto_shutdown(server: uvicorn.Server, *, poll_interval: float = 1.0) ->
     threading.Thread(target=_watch, daemon=True).start()
 
 
+def _preview_import_probe() -> None:
+    """Import the modules the AI preview/send path loads lazily, so a frozen build
+    with an undecompressable PYZ entry among them fails at self-check.
+
+    These mirror the lazy imports in `services/ai/preview.py::_preview_lore_tiers`.
+    Kept as explicit imports (not a `pkgutil.walk_packages` sweep) so they are
+    guaranteed to execute under PyInstaller's FrozenImporter — a walk can silently
+    enumerate nothing frozen and become a no-op. If that lazy set grows, add to it
+    here. `noqa: F401` — imported for the load side effect, never referenced.
+    """
+    import app.services.ai.context_expander  # noqa: F401
+    import app.services.ai.lore_block  # noqa: F401
+    import app.services.ai.lore_selection  # noqa: F401
+
+
 def self_check() -> int:
     """Exercise the assembled runtime end-to-end, in-process; return 0 ok / 1 failed.
 
@@ -194,6 +209,15 @@ def self_check() -> int:
             service.read_structure()       # node-index build identity + schema resolution
             service.list_lore_entries()     # node-index load
             service.list_prompt_entries()   # built-in Library resolution
+        # A frozen build stores each pure module as its own compressed PYZ entry;
+        # a bad entry only surfaces when that module is FIRST imported. The AI
+        # chat/preview path imports several modules lazily, at request time
+        # (`preview.py` `_preview_lore_tiers`), so an undecompressable entry among
+        # them ships silently past both this smoke and the browser E2E (neither
+        # sends a chat) — then a user's first chat 500s with `zlib.error:
+        # incorrect header check`. Import that lazy chain here so such a build
+        # fails in CI, on this platform, instead of on a headless Pi.
+        _preview_import_probe()
     except Exception as exc:
         print(f"self-check: FAILED - {type(exc).__name__}: {exc}")
         traceback.print_exc()

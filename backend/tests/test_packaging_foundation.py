@@ -151,6 +151,37 @@ def test_self_check_opens_a_project() -> None:
     assert self_check() == 0
 
 
+def test_self_check_probes_the_lazy_preview_chain() -> None:
+    # The probe must actually load the preview modules that are only imported
+    # lazily at request time — that's the whole point (a frozen build with a bad
+    # PYZ entry among them would raise here). Loading them locks the names against
+    # drift: rename one and this fails, signalling the probe needs updating.
+    import sys
+
+    from app.server import _preview_import_probe
+
+    _preview_import_probe()
+    for name in (
+        "app.services.ai.context_expander",
+        "app.services.ai.lore_block",
+        "app.services.ai.lore_selection",
+    ):
+        assert name in sys.modules
+
+
+def test_self_check_fails_when_a_preview_module_cannot_load(monkeypatch) -> None:
+    # A frozen build whose lazy preview chain can't import (the arm64 `zlib:
+    # incorrect header check`) must make --self-check FAIL, so CI catches it
+    # instead of a user's first chat. Simulate that by making the probe raise.
+    from app import server
+
+    def boom() -> None:
+        raise RuntimeError("simulated undecompressable preview module")
+
+    monkeypatch.setattr(server, "_preview_import_probe", boom)
+    assert server.self_check() == 1
+
+
 def test_version_endpoint_reports_running_version() -> None:
     from importlib.metadata import version as _pkg_version
 

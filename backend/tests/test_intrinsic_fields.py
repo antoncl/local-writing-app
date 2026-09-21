@@ -169,11 +169,14 @@ class IntrinsicFieldTests(unittest.TestCase):
         self.assertEqual(fields["color"].category, "stored")
 
     def test_references_is_a_builtin_node_set_computed_field(self) -> None:
-        # #184 Phase 2b (ADR-0031 §G): `references` (any-field backlinks) is a
-        # built-in catalog computed field. It carries no stored value (resolved
-        # at view-eval time from the reverse index) but DECLARES its node-set
-        # output payload via `computed.value_type` so the view designer can type
-        # its `field_of` handles. It is NOT seeded into any type's membership.
+        # #184 Phase 2b (ADR-0031 §G), promoted to the merged "References" body
+        # tab in ADR-0089 Amendment 1 §4 (#2101 slice C3): `references` (any-
+        # field backlinks) is a built-in catalog computed field. It carries no
+        # stored value (resolved at view-eval time from the reverse index) but
+        # DECLARES its node-set output payload via `computed.value_type` so the
+        # view designer can type its `field_of` handles, and now carries a
+        # "References" group so it merges into one tab with `related_entries`
+        # (the outgoing list) — same seeding as `conversations` (#2101 C1).
         schema = self.service.read_metadata_schema()
         references = schema.fields.get("references")
         self.assertIsNotNone(references, "references catalog field is missing")
@@ -182,12 +185,24 @@ class IntrinsicFieldTests(unittest.TestCase):
         self.assertEqual(references.type, "computed")
         self.assertEqual(references.name, "References")
         self.assertEqual((references.computed or {}).get("value_type"), "node_set")
-        for entry_type_id, definition in schema.entry_types.items():
-            self.assertNotIn(
-                "references",
-                definition.fields,
-                f"references should not be seeded into {entry_type_id} membership",
-            )
+        self.assertEqual(references.group, "References")
+        self.assertIn("references", schema.entry_types["manuscript:scene"].fields)
+        self.assertIn("references", schema.entry_types["lore:character"].fields)
+
+    def test_related_entries_has_the_references_group_and_precedes_references(self) -> None:
+        # ADR-0089 Amendment 1 §4 (#2101 slice C3): `related_entries` (the
+        # editable outgoing list) shares the "References" group with the
+        # read-only `references` backlinks field, merging both into one body
+        # tab. It must precede `references` in lore:character's resolved
+        # fields so the merged tab renders Related Entries (outgoing) first,
+        # then the backlinks panel (incoming).
+        schema = self.service.read_metadata_schema()
+        related_entries = schema.fields.get("related_entries")
+        self.assertIsNotNone(related_entries, "related_entries catalog field is missing")
+        assert related_entries is not None  # narrow for the type checker
+        self.assertEqual(related_entries.group, "References")
+        fields = schema.entry_types["lore:character"].fields
+        self.assertLess(fields.index("related_entries"), fields.index("references"))
 
     def test_conversations_is_a_builtin_node_set_computed_field(self) -> None:
         # ADR-0089 Amendment 1 §4 (#2101 slice C1): the Conversations rail

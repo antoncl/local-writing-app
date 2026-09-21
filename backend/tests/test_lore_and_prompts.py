@@ -45,7 +45,16 @@ class LoreAndPromptTests(MetadataValidationBase):
         self.assertIn("tags", schema.entry_types["lore:note"].fields)
         self.assertEqual(
             schema.entry_types["lore:base"].own_fields,
-            ["aliases", "tags", "related_entries", "color", "context_policy", "conversations", "mutation_sets"],
+            [
+                "aliases",
+                "tags",
+                "related_entries",
+                "color",
+                "context_policy",
+                "conversations",
+                "mutation_sets",
+                "references",
+            ],
         )
         # Character ships a reasonable out-of-the-box field set (#1316):
         # role + pronouns + home_place, plus character_cost (Phase C2

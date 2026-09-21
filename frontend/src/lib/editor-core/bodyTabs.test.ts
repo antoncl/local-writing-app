@@ -206,4 +206,47 @@ describe("buildBodyTabs", () => {
   it("a tag list stays excluded from the strip regardless of grouping", () => {
     expect(listTabFieldIds(SCHEMA, "lore:character")).not.toContain("tags");
   });
+
+  // ADR-0089 Amendment 1 (#2101, slice C3): the References tab merges an
+  // entity_ref_list (related_entries, outgoing) and a computed node_set
+  // (references, incoming backlinks) — the first real merge of two DIFFERENT
+  // field kinds sharing a Section, proving the merge machinery is type-blind.
+  it("two fields sharing group 'References' (an entity_ref_list + a computed node_set) merge into ONE tab labeled 'References'", () => {
+    const schema = {
+      version: 1,
+      entry_types: {
+        "lore:character": {
+          name: "Character",
+          kind: "lore",
+          fields: ["alias", "related_entries", "references"],
+        },
+      },
+      fields: {
+        alias: { name: "Alias", type: "text", options: [] },
+        related_entries: {
+          name: "Related Entries",
+          type: "entity_ref_list",
+          options: [],
+          group: "References",
+          picker_config: { sources: [{ kind: "lore" }] },
+        },
+        references: {
+          name: "References",
+          type: "computed",
+          computed: { function: "references", value_type: "node_set" },
+          group: "References",
+        },
+      },
+    } as unknown as MetadataSchema;
+    const tabs = buildBodyTabs(schema, "lore:character", "prose", { related_entries: ["lore_1"] });
+    expect(tabs.map((t) => t.id)).toEqual(["body", "list:group:References"]);
+    const references = tabs.find((t) => t.id === "list:group:References")!;
+    expect(references).toEqual({
+      id: "list:group:References",
+      kind: "list",
+      label: "References",
+      fieldIds: ["related_entries", "references"],
+      count: 1,
+    });
+  });
 });

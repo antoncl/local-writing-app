@@ -528,6 +528,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ),
             "type": "entity_ref_list",
             "picker_config": {"sources": [{"kind": "lore"}]},
+            "group": "References",
         },
         "subject": {
             # ADR-0051 S2: what a chat is *about* — the node it was opened
@@ -726,6 +727,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "References",
             "type": "computed",
             "computed": {"function": "references", "value_type": "node_set"},
+            "group": "References",
         },
         "conversations": {
             # The Conversations surface (ADR-0051 S3/S5) promoted to a computed

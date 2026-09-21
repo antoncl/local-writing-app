@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
 // EditorRailContent (#2029 follow-up; Conversations and Mutation sets moved
-// to body tabs in ADR-0089 Amendment 1 §4, #2101): a smoke test only —
-// MetadataPanel and BacklinksPanel mount fine under happy-dom. `scene: null`
-// here keeps this test network-free (the #973 network guard other rail tests
-// dodge the same way) while still proving the rail's own wiring — the type
-// head + the always-mounted BacklinksPanel — renders through the new
+// to body tabs in ADR-0089 Amendment 1 §4, #2101; References — the outgoing
+// related_entries list AND the BacklinksPanel — moved to the merged
+// "References" body tab in slice C3, so this rail no longer renders
+// BacklinksPanel at all): a smoke test only — MetadataPanel mounts fine
+// under happy-dom. `scene: null` here keeps this test network-free (the
+// #973 network guard other rail tests dodge the same way) while still
+// proving the rail's own wiring — the type head and the trailing snippet
+// (now just MutationTimeline, lore-scoped) — renders through the new
 // `{ model, deps, on }` seam.
 import { beforeEach, describe, expect, it } from "vitest";
 import { render, screen } from "@/lib/test/component";
@@ -35,37 +38,38 @@ beforeEach(() => {
 });
 
 describe("EditorRailContent", () => {
-  it("renders the type head and the backlinks panel with no scene open", () => {
+  it("renders the type head with no scene open", () => {
     renderRail();
     expect(document.querySelector(".rail-type")).not.toBeNull();
     expect(screen.getByText("Note")).toBeInTheDocument();
   });
 
-  it("the empty-field fold is the LAST entry in the rail, below the backlinks panel (#2037)", () => {
-    // `remark` is empty, so the fold renders; the trailing sections render
-    // inside MetadataPanel between its rows and the fold.
+  it("the empty-field fold renders inside the metadata panel (#2037)", () => {
+    // `remark` is empty, so the fold renders. With no scene open the
+    // trailing MutationTimeline doesn't mount either (lore-scoped on
+    // `model.scene?.id` — References/BacklinksPanel moved out to the body
+    // tab strip entirely in ADR-0089 Amendment 1 §4 slice C3, #2101), so
+    // this only proves the fold's own placement now.
     renderRail();
     const fold = document.querySelector('[data-testid="rail-fold-toggle"]') as HTMLElement;
-    const backlinks = document.querySelector(".scene-backlinks") as HTMLElement;
     expect(fold).not.toBeNull();
-    expect(backlinks).not.toBeNull();
-    expect(backlinks.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(fold.closest(".scene-metadata")).not.toBeNull();
-    expect(backlinks.closest(".scene-metadata")).not.toBeNull();
   });
 
   it("`facts` renders the rows as front matter with no trailing sections (#2054)", () => {
     renderRail("facts");
     expect(document.querySelector(".scene-metadata.front-matter")).not.toBeNull();
-    expect(document.querySelector(".scene-backlinks")).toBeNull();
     expect(document.querySelector('[data-testid="rail-appendix"]')).toBeNull();
   });
 
-  it("`trailing` renders only the trailing sections, as the appendix (#2054)", () => {
+  it("`trailing` renders the appendix with no metadata rows (#2054)", () => {
+    // References (Related Entries + BacklinksPanel) moved to the body tab
+    // strip (slice C3); with no scene open the lore-only MutationTimeline
+    // doesn't mount, so the appendix is empty here — this only proves the
+    // `part="trailing"` slot boundary (no `.scene-metadata`).
     renderRail("trailing");
     expect(document.querySelector(".scene-metadata")).toBeNull();
-    const appendix = document.querySelector('[data-testid="rail-appendix"]');
-    expect(appendix?.querySelector(".scene-backlinks")).not.toBeNull();
+    expect(document.querySelector('[data-testid="rail-appendix"]')).not.toBeNull();
   });
 
   function renderRail(part: "rail" | "facts" | "trailing" = "rail") {

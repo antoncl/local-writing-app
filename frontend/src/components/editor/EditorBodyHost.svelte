@@ -27,6 +27,7 @@
   import ReferenceListTab from "@/components/editor/body/ReferenceListTab.svelte";
   import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
   import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
+  import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
@@ -47,6 +48,7 @@
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
   import type {
     AssistantEntrySummary,
+    Backlink,
     BodyShape,
     DocumentKind,
     EditableDocument,
@@ -74,6 +76,10 @@
     // Conversations tab names a launched chat "<subject> — <prompt>", same as
     // the rail's ConversationsPanel used `model.title` for.
     title: string;
+    // The open node's incoming references (ADR-0089 Amendment 1 §4, slice
+    // C3, #2101): threaded through the same way `title` was in C1, for the
+    // References tab's BacklinksPanel below.
+    backlinks: Backlink[];
     metadata: EntryMetadata;
     metadataSchema: MetadataSchema | null;
     editorReadOnly: boolean;
@@ -528,6 +534,18 @@
         {#key model.scene?.id ?? ""}
           <PinnedSetsPanel entityId={model.scene?.id ?? ""} entityEntryType={model.entryType} />
         {/key}
+      {:else if model.metadataSchema.fields[fieldId]?.type === "computed" && model.metadataSchema.fields[fieldId]?.computed?.function === "references"}
+        <!-- ADR-0089 Amendment 1 §4 (#2101, slice C3): incoming backlinks —
+             read-only, so no `on.change` wiring, unlike the editable
+             `related_entries` ReferenceListTab this stacks below/above in the
+             merged "References" tab (field order: related_entries then
+             references, per default_entry_types.py). -->
+        <BacklinksPanel
+          backlinks={model.backlinks}
+          loreEntries={deps.loreEntries}
+          structure={deps.structure}
+          onNavigate={(payload) => on.navigate(payload)}
+        />
       {:else}
         <ReferenceListTab
           model={{

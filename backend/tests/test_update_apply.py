@@ -83,15 +83,14 @@ def test_run_success_spawns_installer_and_requests_shutdown(monkeypatch) -> None
     assert ua.current_status().state == "applying"
 
 
-def test_run_verify_fails_on_truncated_download(monkeypatch) -> None:
-    # Reports more bytes than it actually wrote — the sanity check must catch it
-    # and must NOT hand off to the installer.
-    def short_download(url, dest, on_progress):
-        dest.write_bytes(b"x" * 10)
-        return 999
+def test_run_error_on_empty_download(monkeypatch) -> None:
+    # An empty file must be refused and must NOT hand off to the installer.
+    def empty_download(url, dest, on_progress):
+        dest.write_bytes(b"")
+        return 0
 
     spawned = {"count": 0}
-    monkeypatch.setattr(ua, "_download", short_download)
+    monkeypatch.setattr(ua, "_download", empty_download)
     monkeypatch.setattr(ua, "_spawn_installer", lambda path: spawned.__setitem__("count", spawned["count"] + 1))
     monkeypatch.setattr(ua.runtime_control, "request_shutdown", lambda: True)
 
@@ -101,6 +100,42 @@ def test_run_verify_fails_on_truncated_download(monkeypatch) -> None:
     assert status.state == "error"
     assert status.detail
     assert spawned["count"] == 0
+
+
+class _FakeStream:
+    """Stands in for `httpx.stream(...)` — a context manager that is also the
+    response, yielding fixed chunks under a declared Content-Length."""
+
+    def __init__(self, chunks, content_length):
+        self._chunks = chunks
+        self.headers = {"Content-Length": str(content_length)}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def raise_for_status(self):
+        pass
+
+    def iter_bytes(self):
+        yield from self._chunks
+
+
+def test_download_raises_on_short_read(monkeypatch, tmp_path) -> None:
+    # Body ends at 10 bytes but Content-Length said 20 — a real completeness
+    # check, not the tautology of comparing a file to its own byte count.
+    monkeypatch.setattr(ua.httpx, "stream", lambda *a, **k: _FakeStream([b"x" * 10], 20))
+    with pytest.raises(RuntimeError):
+        ua._download("http://x", tmp_path / "f", lambda frac: None)
+
+
+def test_download_returns_written_when_complete(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(ua.httpx, "stream", lambda *a, **k: _FakeStream([b"x" * 8, b"y" * 12], 20))
+    dest = tmp_path / "f"
+    assert ua._download("http://x", dest, lambda frac: None) == 20
+    assert dest.stat().st_size == 20
 
 
 def test_run_download_failure_becomes_error_not_crash(monkeypatch) -> None:

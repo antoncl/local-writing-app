@@ -64,9 +64,16 @@ class _State:
         with self._lock:
             self._status = self._status.model_copy(update=fields)
 
-    def busy(self) -> bool:
+    def begin(self) -> bool:
+        """Atomically start a fresh apply if none is running; False if one is.
+
+        Check-and-set under one lock so two concurrent POSTs can't both spawn a
+        worker (single-flight, independent of the UI disabling the button)."""
         with self._lock:
-            return self._status.state in ("downloading", "verifying", "applying")
+            if self._status.state in ("downloading", "verifying", "applying"):
+                return False
+            self._status = UpdateApplyStatus(state="downloading", progress=0.0)
+            return True
 
 
 _state = _State()
@@ -106,6 +113,10 @@ def _download(url: str, dest, on_progress) -> int:
                 written += len(chunk)
                 if total:
                     on_progress(min(1.0, written / total))
+    # Catch a stream that ended short of its declared length without erroring —
+    # a real completeness check (vs. the tautology of size-vs-own-byte-count).
+    if total and written != total:
+        raise RuntimeError(f"incomplete download ({written} of {total} bytes)")
     return written
 
 
@@ -144,10 +155,11 @@ def _run(channel: UpdateChannel) -> None:
         written = _download(url, dest, lambda frac: _state.set(progress=frac))
 
         _state.set(state="verifying", progress=1.0)
-        # Unsigned builds (ADR-0072 §10): we can't verify a signature, so this is
-        # a sanity check — a truncated/empty download would otherwise be run.
-        if written <= 0 or not dest.exists() or dest.stat().st_size != written:
-            raise RuntimeError("the downloaded installer looks incomplete")
+        # Unsigned builds (ADR-0072 §10): we can't verify a signature. `_download`
+        # already fails a short read against Content-Length; here we just refuse
+        # an empty/missing file before handing it to the installer.
+        if written <= 0 or not dest.exists():
+            raise RuntimeError("the downloaded installer is empty")
 
         _state.set(state="applying")
         logger.info("Update: launching installer and stopping for replacement")
@@ -172,8 +184,7 @@ def start_apply(channel: UpdateChannel) -> UpdateApplyStatus:
             detail="In-app install isn't available on this platform yet.",
         )
         return _state.get()
-    if _state.busy():
-        return _state.get()
-    _state.set(state="downloading", progress=0.0, detail=None)
+    if not _state.begin():
+        return _state.get()  # one already running
     threading.Thread(target=_run, args=(channel,), daemon=True).start()
     return _state.get()

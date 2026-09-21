@@ -213,6 +213,11 @@ records.
 
 ### 6 — Display: the reference-list tab, the item as the target row's detail
 
+> **Amended by [Amendment 1](#amendment-1--the-section-selects-the-tab-body-and-the-derived-collections-are-fields-2026-09-21):**
+> *which* tab a collection field occupies is now the field's level-1 Section (blank → the Body tab),
+> not one-tab-per-field; body and the derived collections (References/Conversations/Mutation sets)
+> become fields. The item/detail contract this section describes is unchanged.
+
 A list whose items point at nodes renders as a list of those nodes' rows: the reference-list tab
 (`frontend/src/components/editor/body/ReferenceListTab.svelte`, a `ViewNodeList` over NodeRows)
 with the item's other members as the detail line NodeRow already supports (`detail`,
@@ -428,3 +433,129 @@ starts nothing; each slice gets its own issue and an explicit go.
     character and changes Tomas's state. Both save as the book's override records, fold into
     Mara's tab in the book, and promoting Mara to the series leaves the book-only item behind at
     the book.
+
+---
+
+## Amendment 1 — The Section selects the tab; body and the derived collections are fields (2026-09-21)
+
+**Status: proposed (2026-09-21).** Raised by Anton after dogfooding the shipped metadata rework.
+Verified against `b4f2aca0` (2026-09-21).
+
+### The problem
+The rework made metadata fields author-ordered and grouped, but three things stayed hardcoded
+outside that reach:
+
+1. **Body cannot move.** `body` is a conditional intrinsic spliced in right after `title`
+   (`_build_entry_type_membership` / `_entry_type_resolves_body`,
+   `backend/app/services/project/schema_inheritance.py`), deliberately kept out of `own_fields`, and
+   the prose editor is a fixed mount the field loop skips (`bodySections.ts`: "the body field
+   itself … is never a section — it's the prose above"). A scene wants brief→draft — the compact
+   fields, then Summary, then prose — but the prose is pinned second and there is no handle for it.
+2. **Tab membership is a UI rule, not an authored one.** The strip is keyed one-tab-per-
+   `entity_ref_list`-field and labeled by the field (`buildBodyTabs` / `listTabFieldIds`,
+   `frontend/src/lib/editor-core/bodyTabs.ts`). The author cannot rename a tab, cannot put two
+   reference fields under one tab, and cannot choose whether a reference field is a tab at all.
+3. **The node's derived collections aren't fields.** References, Conversations and Mutation sets are
+   bespoke trailing rail panels (`EditorRailContent.svelte`) stacked at the foot of the Body. They
+   carry no field identity, so they cannot be reordered, cannot take a Section, and never appear in
+   the schema editor — even though References is already the reverse of the `references` computed
+   field (§6).
+
+### The decision
+The field system already carries order and a level-1 group (Section). Extend its reach to all three,
+adding no new field property.
+
+1. **A collection field's Section names its tab.** For a `list` or *multiple* `entity_ref` field,
+   its level-1 Section — the field's own group, declared on the field in the schema — is the name of
+   the tab it renders in; a **blank Section renders it inline in the Body tab.** A type's tabs are
+   the distinct Sections among its collection fields, in first-appearance order — the same order
+   MetadataPanel already uses to bucket fields into their groups (`buildSections`,
+   `frontend/src/components/editor/MetadataPanel.svelte`). This is a metadata-schema concept, not
+   view-result `group_by` (ADR-0037); the two share the word "group" and nothing else.
+2. **Section does two jobs, by field type — one knob, chosen deliberately.** For a scalar,
+   `long_text`, or *single* `entity_ref` field, Section stays a rail group exactly as today; such a
+   field never leaves the Body and never claims a tab. For a `list` / multiple-`entity_ref` field, a
+   named Section is a tab. Two properties would be cleaner; one is simpler to author, and field
+   definition is already near its complexity ceiling — this is the accepted trade (Anton).
+3. **Body is a positionable field.** Body stops being spliced at a fixed offset; it becomes an
+   orderable intrinsic field with a **blank Section (Body tab)** and an authorable order, and its
+   prose mount renders at that ordered position in the field flow instead of a pinned slot. Scene
+   defaults body **last** (after Summary/Dynamics); lore and other reference types default it
+   **first**, unchanged on screen. `has_body` still gates whether body is present at all.
+4. **The derived collections become computed fields with bound renderers.** References (already the
+   reverse of the `references` computed field), Conversations and Mutation sets are registered as
+   **computed collection fields** whose value is derived and whose renderer is the existing panel
+   component — surfaced, not rebuilt. They gain field identity: they appear in the schema editor,
+   reorder with the other fields, and take a Section like any collection field.
+5. **Default Sections preserve the shipped tabs — this is the behavior migration.** Section-keyed
+   tabs with no seeding would fold every current tab into the Body. The built-ins seed: scene
+   `characters` → Section **"Characters"**; the lore related field → **"Related Entries"**;
+   References / Conversations / Mutation sets → their default Sections. Nothing visibly moves on
+   upgrade.
+
+### Anti-goals
+- **Not a new field property.** Tab assignment is the existing level-1 Section gated by field type,
+  not a second attribute. The whole point is to add no knob.
+- **Not a contradiction of this ADR's "no kind-query tab" anti-goal.** That bound the *relationship*
+  class, which stores its items in the owner's metadata. It does not bind a **computed** field,
+  whose nature is to be derived. References/Conversations/Mutation sets are computed collections,
+  never stored relationship items — the distinction is authorship, not appearance.
+- **Not a new widget for the panels.** The reference-list tab and the three panels keep their
+  components; this changes which tab a field lands in and gives body and the derived collections
+  field identity, not how any item renders. §6's item/detail contract and §7's prose render are
+  untouched.
+- **Not a tab for scalars or single refs.** Only `list` and multiple-`entity_ref` collections claim
+  a tab; a lone reference is a field, not a tab's worth of content, and stays inline in the Body.
+- **Not sub-tab nesting.** A tab shows its fields; a level-2 group does not become a sub-tab or an
+  in-tab section.
+- **Not a storage change.** Section is already stored on the field; body placement is field order;
+  the derived collections are computed. No new on-disk shape, no migration — as with the parent ADR.
+
+### Conformance (adds anchors)
+(a) a `list` field with Section "X" renders behind a tab "X"; two collection fields sharing Section
+"X" share one tab. (b) a blank-Section reference list renders inline in the Body, not as a tab. (c) a
+single `entity_ref` with a Section stays a rail group — no tab. (d) with body ordered last on the
+scene type the prose renders after Summary; on a lore type body renders first. (e)
+References/Conversations/Mutation sets render in their seeded tabs and move when their Section
+changes, each keeping its behavior (+New, stage/place). (f) the built-in seeding regression-locks
+the Characters and Related Entries tabs against the pre-amendment screen.
+
+### Not in scope / unaffected
+- The reference-list item model (§§1–5), the item/detail display (§6), the prompt render (§7), the
+  structural hop (§8) and orphan handling (§9) are untouched. This amendment is about **which tab a
+  collection field occupies** and **that body and the derived collections are fields** — nothing
+  about how a relationship item is stored, resolved, or rendered.
+- `long_text` body sections (Summary, Dynamics) stay in the Body; only `list` / multiple-
+  `entity_ref` fields are tab-eligible.
+
+### Slices
+1. **A — body is a positionable field.** Body carries an authorable order and blank Section; the
+   prose mount renders at its ordered position; scene seeds body last, reference types first.
+   Anchor (d).
+2. **B — Section-keyed tabs.** `buildBodyTabs` keys tabs by the collection field's Section (blank →
+   Body), first-appearance order; default Sections seeded on the built-in collection fields. No new
+   field types. Anchors (a)(b)(c)(f).
+3. **C — the derived collections as computed fields.** References/Conversations/Mutation sets
+   registered as computed collection fields with bound renderers and default Sections; the
+   trailing-panel wiring in `EditorRailContent` retired in favor of the field/Section/tab path.
+   Anchor (e).
+
+Each slice gets its own issue and an explicit go; acceptance of this amendment starts nothing.
+
+### The journey that defines done
+1. The writer opens a scene. It reads top to bottom: the compact fields, Summary, Dynamics, then the
+   prose — body is ordered last on the scene type. A lore note still opens prose-first.
+2. In the schema editor the writer drags `body` above Summary on the scene type; the prose editor
+   moves up the page to match. No other field moves.
+3. The writer renames the scene's Characters tab by setting that field's Section to "Cast"; the tab
+   is now "Cast". Clearing the Section drops the field into the Body tab as an inline reference list.
+4. The writer adds a "Locations" reference-list field and gives it Section "Cast"; Characters and
+   Locations render under the one "Cast" tab.
+5. References, Conversations and Mutation sets appear in the schema editor as computed fields. The
+   writer drags Conversations above References; the tab order follows. Each still behaves as before —
+   +New starts a conversation, a set is staged and placed.
+6. The writer adds a single `entity_ref` "narrator" field with a Section; it stays a labeled row
+   inside the Body's rail group, never a tab.
+7. After upgrade a colleague opens the same project on the shipped build: Characters, Related
+   Entries, References, Conversations and Mutation sets are where they were, because the built-in
+   Sections were seeded.

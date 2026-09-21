@@ -6,8 +6,8 @@ import { restoredBodyTab } from "./bodyTabRestore";
 import type { BodyTab } from "./bodyTabs";
 
 const TABS: BodyTab[] = [
-  { id: "body", kind: "body", label: "Body" },
-  { id: "list:kin", kind: "list", label: "Kin", fieldId: "kin" },
+  { id: "body", kind: "body", label: "Body", fieldIds: [] },
+  { id: "list:kin", kind: "list", label: "Kin", fieldIds: ["kin"] },
 ];
 
 describe("restoredBodyTab", () => {

@@ -217,6 +217,14 @@ describe("proseRendersAfterSections", () => {
     expect(proseRendersAfterSections(s, "character")).toBe(true);
   });
 
+  it("counts a #2043 list-with-prose section, not just long_text — body after it renders after sections", () => {
+    // `beats` is a list whose items carry a long_text member, so it renders in
+    // the sections block like a long_text field; body ordered after it must
+    // read as prose-after-sections (regression: long_text-only would miss it).
+    const s = schema({ beats: BEATS }, ["title", "status", "beats", "body"]);
+    expect(proseRendersAfterSections(s, "character")).toBe(true);
+  });
+
   it("is false without a schema, an entry type, or a body field", () => {
     expect(proseRendersAfterSections(null, "character")).toBe(false);
     expect(proseRendersAfterSections(schema({}, ["body"]), null)).toBe(false);

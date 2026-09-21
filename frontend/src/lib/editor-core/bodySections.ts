@@ -69,7 +69,11 @@ export function proseRendersAfterSections(
   let lastSectionOrderIndex = -1;
   fieldIds.forEach((id, index) => {
     const field = schema.fields[id];
-    if (!field || field.type !== "long_text") return;
+    // A body section is a long_text field OR a #2043 list-with-prose field —
+    // the same set BodySections renders (mirrors fieldRowModel's `isListIndex`
+    // rule, `long_text || listHasProseItems`), so the ordering decision matches
+    // what actually appears in the sections block.
+    if (!field || (field.type !== "long_text" && !listHasProseItems(field))) return;
     if (field.intrinsic) return;
     if (effectiveFieldHidden(schema, entryType, id)) return;
     lastSectionOrderIndex = index;

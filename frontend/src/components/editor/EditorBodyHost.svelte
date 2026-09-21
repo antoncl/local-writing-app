@@ -41,7 +41,7 @@
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { api } from "@/lib/api";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
-  import { listTabFieldIds, tabIdForField } from "@/lib/editor-core/bodyTabs";
+  import { fieldsInTab } from "@/lib/editor-core/bodyTabs";
   import type {
     AssistantEntrySummary,
     BodyShape,
@@ -175,13 +175,7 @@
   // "body"/"details" tab. Guarded against a non-string/absent `activeBodyTab`
   // (a test double, or a host mid-migration) rather than assuming the prop is
   // always well-formed.
-  let activeListFieldIds = $derived(
-    typeof model.activeBodyTab === "string" && model.activeBodyTab.startsWith("list:")
-      ? listTabFieldIds(model.metadataSchema, model.entryType).filter(
-          (id) => tabIdForField(model.metadataSchema, model.entryType, id) === model.activeBodyTab,
-        )
-      : [],
-  );
+  let activeListFieldIds = $derived(fieldsInTab(model.metadataSchema, model.entryType, model.activeBodyTab));
   // Kept for the simple "is a list tab open" boolean gates below (which body
   // view to hide) — any member of the active tab does, since every field in
   // one tab shows/hides together.

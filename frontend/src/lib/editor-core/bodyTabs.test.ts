@@ -3,7 +3,7 @@
 // `listTabFieldIds`/`tabIdForField` are plain functions over a
 // MetadataSchema, mirroring bodySections.test.ts's shape.
 import { describe, expect, it } from "vitest";
-import { buildBodyTabs, listTabFieldIds, tabIdForField } from "./bodyTabs";
+import { buildBodyTabs, fieldsInTab, listTabFieldIds, tabIdForField } from "./bodyTabs";
 import type { MetadataSchema } from "@/lib/types";
 
 const SCHEMA = {
@@ -106,6 +106,16 @@ describe("tabIdForField", () => {
 
   it("returns the field id for a field with no group at all (today's built-ins pre-seed)", () => {
     expect(tabIdForField(SCHEMA, "lore:character", "allies")).toBe("list:allies");
+  });
+});
+
+describe("fieldsInTab", () => {
+  it("is the inverse of tabIdForField: group members, a blank tab's one field, [] off a list tab", () => {
+    expect(fieldsInTab(GROUPED_SCHEMA, "lore:character", "list:group:Cast")).toEqual(["allies", "locations"]);
+    expect(fieldsInTab(GROUPED_SCHEMA, "lore:character", "list:group:Family")).toEqual(["kin"]);
+    expect(fieldsInTab(GROUPED_SCHEMA, "lore:character", "list:standalone")).toEqual(["standalone"]);
+    expect(fieldsInTab(GROUPED_SCHEMA, "lore:character", "body")).toEqual([]);
+    expect(fieldsInTab(GROUPED_SCHEMA, "lore:character", undefined)).toEqual([]);
   });
 });
 

@@ -69,6 +69,21 @@ export function listTabFieldIds(
   return out;
 }
 
+/** The list field(s) a tab id holds (ADR-0089 Amendment 1, #2100) — the inverse
+ *  of `tabIdForField`: a group-keyed tab's members, or a blank-Section fallback
+ *  tab's single field. `[]` for the body/details tab (any non-`list:` id, or a
+ *  non-string/absent tab). Shared by EditorBodyHost (which fields the tab
+ *  renders) and NodeEditor (the foot-dock stop logic) so they read one
+ *  membership. */
+export function fieldsInTab(
+  schema: MetadataSchema | null | undefined,
+  entryType: string | null | undefined,
+  tabId: string | null | undefined,
+): string[] {
+  if (typeof tabId !== "string" || !tabId.startsWith("list:")) return [];
+  return listTabFieldIds(schema, entryType).filter((id) => tabIdForField(schema, entryType, id) === tabId);
+}
+
 /** The strip's tabs for one open node: a leading "Body" (or, for the `none`
  *  shape, "Details" — the rail-as-pane content that IS that node's body) tab,
  *  then one tab per list field's `tabIdForField` bucket, in first-appearance

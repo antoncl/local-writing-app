@@ -35,7 +35,7 @@
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
   import { deriveBodyShape, documentLabelFor } from "@/lib/editor-core/documentPresentation";
   import { wireReviewFreeze } from "@/lib/editor-core/reviewFreeze.svelte";
-  import { buildBodyTabs, listTabFieldIds, tabIdForField } from "@/lib/editor-core/bodyTabs";
+  import { buildBodyTabs, fieldsInTab, tabIdForField } from "@/lib/editor-core/bodyTabs";
   import { restoredBodyTab } from "@/lib/editor-core/bodyTabRestore";
   import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
 
@@ -894,13 +894,7 @@
   // Section tab is `list:group:<group>`), so this resolves the OPEN tab's
   // member fields the same way EditorBodyHost/the rail jump do, via
   // `tabIdForField`, rather than slicing the tab id.
-  let stopListFieldIds = $derived(
-    activeBodyTab.startsWith("list:")
-      ? listTabFieldIds(metadataSchema, entryType).filter(
-          (id) => tabIdForField(metadataSchema, entryType, id) === activeBodyTab,
-        )
-      : [],
-  );
+  let stopListFieldIds = $derived(fieldsInTab(metadataSchema, entryType, activeBodyTab));
   let stopEditable = $derived(
     scrubbed &&
       stopListFieldIds.some((id) => keyedListKeyMember(metadataSchema?.fields[id]) !== null) &&

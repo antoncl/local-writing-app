@@ -48,6 +48,27 @@ export type UpdateCheck = {
   latest_url: string | null;
   reachable: boolean;
   detail: string | null;
+  // Whether this build/platform can install in-app (ADR-0072 S6, #2083). When
+  // false the UI offers only `latest_url`; when true, "Install and restart".
+  can_apply: boolean;
+};
+
+// Progress of an in-app update install (`/api/updates/apply`, ADR-0072 S6).
+// `progress` is a 0..1 download fraction; once `state` is "applying" the server
+// is stopping to be replaced, so the poll is expected to drop. "unsupported" =
+// no in-app apply on this platform yet.
+export type UpdateApplyState =
+  | "idle"
+  | "downloading"
+  | "verifying"
+  | "applying"
+  | "error"
+  | "unsupported";
+
+export type UpdateApplyStatus = {
+  state: UpdateApplyState;
+  progress: number;
+  detail: string | null;
 };
 
 export type MachineSettingsView = {

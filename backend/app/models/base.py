@@ -47,6 +47,15 @@ AIPolicy = Literal["off", "local-only", "cloud-allowed"]
 # edge prerelease. Choosing one *is* "subscribing" — there is no separate opt-in.
 UpdateChannel = Literal["stable", "nightly"]
 
+# The phase of an in-app "download + swap-on-restart" apply (ADR-0072 S6, #2083).
+# `idle` = nothing running; `downloading`/`verifying` = fetching the release asset;
+# `applying` = the installer was handed off and the app is stopping to be replaced;
+# `error` = it failed (see `detail`); `unsupported` = no in-app apply on this
+# platform/build (fall back to the release page).
+UpdateApplyState = Literal[
+    "idle", "downloading", "verifying", "applying", "error", "unsupported"
+]
+
 
 MetadataValue = str | int | float | bool | None | list[Any] | dict[str, Any]
 

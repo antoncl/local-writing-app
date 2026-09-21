@@ -40,3 +40,9 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; IconFilename: "{app}\icon.ico"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon
+
+[Run]
+; Relaunch after install. No `skipifsilent`, so the in-app updater's silent
+; reinstall (setup.exe /VERYSILENT, ADR-0072 S6 #2083) relaunches the app too;
+; an interactive install shows this as the usual checked "launch now" option.
+Filename: "{app}\{#MyAppExe}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall

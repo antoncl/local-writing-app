@@ -39,6 +39,7 @@ import threading
 import uvicorn
 
 from app.main import app
+from app.services import runtime_control
 from app.services.machine_settings import bind_address
 from app.services.product_log import configure_product_logging, guard_std_streams
 from app.services.session_presence import presence
@@ -231,6 +232,9 @@ def main(argv: list[str] | None = None) -> None:
     # logger and land in the file log (#1745) instead of uvicorn's default
     # console-only handlers.
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_config=None))
+    # Register the server so the update installer can request the same graceful
+    # stop the auto-shutdown watcher uses (#2083), without importing the web layer.
+    runtime_control.register_server(server)
     if _should_open_browser(args, host):
         # One loopback-desktop condition, two consequences: open the browser once
         # the socket is live, and quit when the last tab closes (#1365/#1378).

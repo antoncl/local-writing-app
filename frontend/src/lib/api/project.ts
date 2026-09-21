@@ -7,6 +7,7 @@ import type {
   DirectoryRoot,
   MachineSettingsUpdate,
   MachineSettingsView,
+  UpdateApplyStatus,
   UpdateCheck,
   PathProbe,
   ProjectInfo,
@@ -133,6 +134,14 @@ export const projectApi = {
   // S6). Never throws for "offline" — that comes back as `reachable: false`.
   checkForUpdate() {
     return request<UpdateCheck>("/updates/check");
+  },
+  // Start the in-app download + swap-on-restart install (ADR-0072 S6, #2083).
+  // Returns the initial status; poll `updateApplyStatus()` for progress.
+  applyUpdate() {
+    return request<UpdateApplyStatus>("/updates/apply", { method: "POST" });
+  },
+  updateApplyStatus() {
+    return request<UpdateApplyStatus>("/updates/apply/status");
   },
   updateMachineSettings(update: MachineSettingsUpdate) {
     return request<MachineSettingsView>("/settings/machine", {

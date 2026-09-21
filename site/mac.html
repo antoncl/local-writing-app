@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download for macOS — Local Writing App</title>
+<meta name="description" content="Install Local Writing App on macOS (Apple Silicon). Includes the one-time step around Gatekeeper's 'unidentified developer' block and why it appears.">
+<link rel="canonical" href="https://antoncl.github.io/local-writing-app/mac.html">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap">
+    <a class="home" href="index.html">Local Writing App</a>
+    <nav>
+      <a href="download.html">All downloads</a>
+      <a href="https://github.com/antoncl/local-writing-app">GitHub</a>
+    </nav>
+  </div>
+</div>
+
+<div class="page-head">
+  <div class="wrap wrap-narrow">
+    <p class="kicker">macOS</p>
+    <h1>Download for macOS</h1>
+    <p>Apple Silicon (M1 and later). Open the disk image and drag the app to Applications.</p>
+    <div class="dl-primary">
+      <a class="btn btn-solid" href="https://github.com/antoncl/local-writing-app/releases/latest/download/local-writing-app-macos-arm64.dmg">Download disk image (.dmg)</a>
+    </div>
+    <p class="dl-sub">Apple Silicon only. On an older Intel Mac, build from source — see the <a href="https://github.com/antoncl/local-writing-app">GitHub repo</a>. macOS support is experimental.</p>
+  </div>
+</div>
+
+<div class="block">
+  <div class="wrap wrap-narrow">
+    <div class="warn">
+      <h3>macOS will block it the first time — that's expected</h3>
+      <p>On first open, macOS says the app <strong>&ldquo;can&rsquo;t be opened because it is from an unidentified developer&rdquo;</strong> (or that it can&rsquo;t be verified). Nothing is wrong. To open it once:</p>
+      <p><strong>Right-click</strong> (or Control-click) the app in Applications and choose <strong>Open</strong>, then confirm <strong>Open</strong> in the dialog. If you don&rsquo;t see the option, go to <strong>System Settings &rarr; Privacy &amp; Security</strong>, scroll down, and click <strong>Open Anyway</strong>.</p>
+      <p>On newer macOS you may instead see <strong>&ldquo;&hellip; is damaged and can&rsquo;t be opened&rdquo;</strong> &mdash; that&rsquo;s the same unsigned-app block, worded differently. Clear it once in Terminal, then open the app normally:</p>
+      <pre class="cmd">xattr -dr com.apple.quarantine "/Applications/Local Writing App.app"</pre>
+      <p class="why">Why it happens: macOS clears this warning only for apps signed and notarized through Apple&rsquo;s paid Developer Program ($99/year). This is a free, open-source project that ships unsigned rather than build that in. The full source is public, so you can inspect or build it yourself.</p>
+    </div>
+  </div>
+</div>
+
+<div class="block">
+  <div class="wrap wrap-narrow">
+    <h2>Install</h2>
+    <ol class="steps">
+      <li><strong>Download</strong> the disk image above and open it.</li>
+      <li><strong>Drag the app</strong> into your Applications folder.</li>
+      <li><strong>Open it the first time</strong> with right-click &rarr; Open (see above). After that, it opens normally.</li>
+      <li>The app opens in your browser at a local address on your own machine.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="block">
+  <div class="wrap wrap-narrow">
+    <h2>Not on macOS?</h2>
+    <p><a href="download.html">See downloads for Windows and Linux &rarr;</a></p>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <p>MIT licensed · <a href="https://github.com/antoncl/local-writing-app">Source on GitHub</a> · <a href="https://github.com/antoncl/local-writing-app/issues">Issues</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

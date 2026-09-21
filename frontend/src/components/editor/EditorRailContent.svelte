@@ -1,6 +1,7 @@
 <script lang="ts">
-  // The rail's metadata + backlinks + conversations + lore-mutation content
-  // (#2029 follow-up): moved VERBATIM out of NodeEditor's `metaContent`
+  // The rail's metadata + backlinks + lore-mutation content (#2029 follow-up,
+  // Conversations moved out to a body tab in ADR-0089 Amendment 1 §4, #2101):
+  // moved VERBATIM out of NodeEditor's `metaContent`
   // snippet, which now just renders this component. Stays a component (not a
   // snippet itself) because it holds no shell state of its own — everything it
   // reads comes down through `{ model, deps, on }` (#2022's RailFieldRow
@@ -11,10 +12,8 @@
   // `metaContent` comment.
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
-  import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
   import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
-  import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
   import type { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ResolvedCascadeField } from "@/lib/manuscriptTypes";
@@ -110,27 +109,6 @@
       onNavigate={(detail) => on.navigate(detail)}
     />
   {/key}
-  {#if model.scene?.id}
-    <!-- The Conversations surface (ADR-0051 S3/S5): the chats about this node,
-         resume-first, + a ＋New menu — the launcher that replaced the
-         silent-spawn brainstorm verb. Mounted on EVERY node (#711): the panel
-         self-hides when there is nothing to resume and no prompt `offer_on`s
-         this node's type, so the kind allow-list that used to gate it here was
-         redundant. Keyed on the node id so its expand / menu state resets when
-         the open node changes. -->
-    {#key model.scene.id}
-      <ConversationsPanel
-        subjectId={model.scene.id}
-        subjectTitle={model.title}
-        subjectEntryType={model.entryType}
-        asOfScene={model.scrub.anchorSceneId}
-        asOfSceneTitle={deps.structure ? findNodeBySceneId(deps.structure.root, model.scrub.anchorSceneId)?.title ?? "" : ""}
-        promptEntries={deps.promptEntries}
-        metadataSchema={model.metadataSchema}
-        hostPaneId={model.hostPaneId}
-      />
-    {/key}
-  {/if}
   {#if model.documentKind === "lore" && model.scene?.id}
     <!-- The mutation SCRUBBER relocated to the foot dock (ADR-0088 S2 §5),
          where it shares one dock and a mode control with the snapshot track.
@@ -202,8 +180,8 @@
   />
   <!-- #2037: in the rail the trailing sections render INSIDE MetadataPanel,
        between its known rows and the empty-field fold, so "N more fields" is
-       the last entry in the rail rather than sitting above Backlinks /
-       Conversations. As front matter (#2054) the panel gets no trailing. -->
+       the last entry in the rail rather than sitting above Backlinks. As
+       front matter (#2054) the panel gets no trailing. -->
 {/if}
 
 <style>

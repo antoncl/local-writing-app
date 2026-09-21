@@ -269,6 +269,7 @@ class MetadataFieldTests(MetadataValidationBase):
                 "summary",
                 "dynamics",
                 "body",
+                "conversations",
                 "mood",
                 "tension",
             ],

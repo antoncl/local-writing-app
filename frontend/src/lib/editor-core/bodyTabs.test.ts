@@ -92,6 +92,30 @@ describe("listTabFieldIds", () => {
   it("#2072: admits a reference-keyed `list` field too, even one with a long_text member", () => {
     expect(listTabFieldIds(KEYED_SCHEMA, "lore:character")).toEqual(["relationships"]);
   });
+
+  it("ADR-0089 Amendment 1 §4 (#2101): admits a computed node_set field too — a derived collection with a bound renderer, keyed by its Section like any other", () => {
+    const schema = {
+      version: 1,
+      entry_types: {
+        "lore:character": {
+          name: "Character",
+          kind: "lore",
+          fields: ["alias", "conversations"],
+        },
+      },
+      fields: {
+        alias: { name: "Alias", type: "text", options: [] },
+        conversations: {
+          name: "Conversations",
+          type: "computed",
+          computed: { function: "conversations", value_type: "node_set" },
+          group: "Conversations",
+        },
+      },
+    } as unknown as MetadataSchema;
+    expect(listTabFieldIds(schema, "lore:character")).toEqual(["conversations"]);
+    expect(tabIdForField(schema, "lore:character", "conversations")).toBe("list:group:Conversations");
+  });
 });
 
 describe("tabIdForField", () => {

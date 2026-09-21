@@ -25,6 +25,7 @@
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
   import ViewBodyView from "@/components/editor/body/ViewBodyView.svelte";
   import ReferenceListTab from "@/components/editor/body/ReferenceListTab.svelte";
+  import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
@@ -42,6 +43,7 @@
   import { api } from "@/lib/api";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import { fieldsInTab } from "@/lib/editor-core/bodyTabs";
+  import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
   import type {
     AssistantEntrySummary,
     BodyShape,
@@ -67,6 +69,10 @@
     rawBodyLanguage: EntryBodyLanguage;
     loadedSceneId: string | null;
     entryType: string;
+    // The open node's own title (ADR-0089 Amendment 1 §4, #2101): the
+    // Conversations tab names a launched chat "<subject> — <prompt>", same as
+    // the rail's ConversationsPanel used `model.title` for.
+    title: string;
     metadata: EntryMetadata;
     metadataSchema: MetadataSchema | null;
     editorReadOnly: boolean;
@@ -495,35 +501,54 @@
        the tab reads the Chapter-N items, not the base, while scrubbed. -->
   <div class="list-tab-host" class:list-tab-host-stacked={activeListFieldIds.length > 1}>
     {#each activeListFieldIds as fieldId (fieldId)}
-      <ReferenceListTab
-        model={{
-          field: model.metadataSchema.fields[fieldId],
-          fieldId,
-          entryType: model.entryType,
-          fieldLabel: effectiveFieldLabel(model.metadataSchema, model.entryType, fieldId),
-          items: toItemList(model.metadata[fieldId]),
-          keyMember: keyedListKeyMember(model.metadataSchema.fields[fieldId]),
-          effectiveItems: model.scrubbed ? ((model.scrub.overrides?.[fieldId] as MetadataValue[] | undefined) ?? null) : null,
-          readOnly: model.editorReadOnly && !stopEditableFor(fieldId),
-          schema: model.metadataSchema,
-          nodeId: model.scene?.id ?? "",
-        }}
-        deps={{
-          loreEntries: deps.loreEntries,
-          promptEntries: deps.promptEntries,
-          assistantEntries: deps.assistantEntries,
-          structure: deps.structure,
-          researchStructure: deps.researchStructure,
-          tagTitleById: $tagTitleById,
-          implicitContextMatcher: deps.implicitContextMatcher,
-          excludeId: model.scene?.id ?? null,
-          createLayerId: model.createLayerId,
-        }}
-        on={{
-          change: (items) => void handleListChange(fieldId, items),
-          navigate: (payload) => on.navigate(payload),
-        }}
-      />
+      {#if model.metadataSchema.fields[fieldId]?.type === "computed" && model.metadataSchema.fields[fieldId]?.computed?.function === "conversations"}
+        <!-- ADR-0089 Amendment 1 §4 (#2101): Conversations promoted from a
+             trailing rail panel to a computed collection field's tab — same
+             component, same props, bound by field instead of hardcoded in
+             EditorRailContent's `trailing` snippet. -->
+        {#key model.scene?.id ?? ""}
+          <ConversationsPanel
+            subjectId={model.scene?.id ?? ""}
+            subjectTitle={model.title}
+            subjectEntryType={model.entryType}
+            asOfScene={model.scrub.anchorSceneId}
+            asOfSceneTitle={deps.structure ? findNodeBySceneId(deps.structure.root, model.scrub.anchorSceneId)?.title ?? "" : ""}
+            promptEntries={deps.promptEntries}
+            metadataSchema={model.metadataSchema}
+            hostPaneId={deps.hostPaneId}
+          />
+        {/key}
+      {:else}
+        <ReferenceListTab
+          model={{
+            field: model.metadataSchema.fields[fieldId],
+            fieldId,
+            entryType: model.entryType,
+            fieldLabel: effectiveFieldLabel(model.metadataSchema, model.entryType, fieldId),
+            items: toItemList(model.metadata[fieldId]),
+            keyMember: keyedListKeyMember(model.metadataSchema.fields[fieldId]),
+            effectiveItems: model.scrubbed ? ((model.scrub.overrides?.[fieldId] as MetadataValue[] | undefined) ?? null) : null,
+            readOnly: model.editorReadOnly && !stopEditableFor(fieldId),
+            schema: model.metadataSchema,
+            nodeId: model.scene?.id ?? "",
+          }}
+          deps={{
+            loreEntries: deps.loreEntries,
+            promptEntries: deps.promptEntries,
+            assistantEntries: deps.assistantEntries,
+            structure: deps.structure,
+            researchStructure: deps.researchStructure,
+            tagTitleById: $tagTitleById,
+            implicitContextMatcher: deps.implicitContextMatcher,
+            excludeId: model.scene?.id ?? null,
+            createLayerId: model.createLayerId,
+          }}
+          on={{
+            change: (items) => void handleListChange(fieldId, items),
+            navigate: (payload) => on.navigate(payload),
+          }}
+        />
+      {/if}
     {/each}
   </div>
 {/if}

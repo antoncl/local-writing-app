@@ -51,6 +51,7 @@ INTRINSIC_FIELD_KEYS: tuple[str, ...] = ("title", "entry_type", "id")
 AUTHORABLE_COMPUTED_FUNCTIONS: tuple[str, ...] = ("word_count", "counter", "cost")
 BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
     "references",
+    "conversations",
     "assistant_listed",
     "assistant_position",
     "path",
@@ -724,6 +725,21 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "References",
             "type": "computed",
             "computed": {"function": "references", "value_type": "node_set"},
+        },
+        "conversations": {
+            # The Conversations surface (ADR-0051 S3/S5) promoted to a computed
+            # collection field (ADR-0089 Amendment 1 §4): the chats about this
+            # node, rendered by the existing ConversationsPanel bound to this
+            # field's tab. Like `references` it has NO stored/materialized
+            # value — it is resolved by the panel's own store, not by
+            # computed_metadata.py (the loose function dispatch there simply
+            # skips the unknown `conversations` function). `group` seeds its
+            # default tab Section so the shipped rail placement doesn't move
+            # on upgrade (Amendment 1 §5).
+            "name": "Conversations",
+            "type": "computed",
+            "computed": {"function": "conversations", "value_type": "node_set"},
+            "group": "Conversations",
         },
         "layer": {
             # The inheritance LAYER a node is resolved from (#1928) — the

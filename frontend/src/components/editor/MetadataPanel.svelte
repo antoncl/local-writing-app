@@ -355,13 +355,18 @@
   // section builder, so a block never shows a head over zero rows (#1884 slice
   // 3): intrinsic identity fields have dedicated controls (unless one is an
   // active flip, ADR-0046 3b), per-type hidden fields stay hidden, and a
-  // valueless computed field is rail noise (#1684).
+  // valueless computed field is rail noise (#1684). ADR-0089 Amendment 1 §4
+  // (#2101): a computed node-set field (References/Conversations/Mutation
+  // sets) is a TAB-ONLY collection with a bound renderer, never a rail row —
+  // explicit rather than leaning on its computed string always being empty,
+  // since that's incidental, not its contract.
   function rendersRow(fieldId: string): boolean {
     const field = metadataSchema.fields[fieldId];
     if (!field) return false;
     if (field.intrinsic && !isFlipResolve(ctx, fieldId)) return false;
     if (effectiveFieldHidden(metadataSchema, entryType, fieldId)) return false;
     if (layout === "front-matter" && (isSectionIndex(ctx, field) || isListIndex(ctx, field))) return false;
+    if (field.type === "computed" && field.computed?.value_type === "node_set") return false;
     return field.type !== "computed" || computedFieldString(fieldId) !== "";
   }
 

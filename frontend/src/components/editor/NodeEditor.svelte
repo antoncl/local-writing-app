@@ -1046,7 +1046,7 @@
   <EditorBodyHost
     bind:this={bodyHost}
     model={{
-      scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, metadata,
+      scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, title, metadata,
       metadataSchema, editorReadOnly, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
       overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, detailsDetached, chatTitleField, metaContent,
       stopUnit,

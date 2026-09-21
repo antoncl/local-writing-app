@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download for Linux (headless / server) — Local Writing App</title>
+<meta name="description" content="Run Local Writing App as a systemd service on a headless Linux box and reach the UI from any browser on your network. x64 and arm64 builds.">
+<link rel="canonical" href="https://antoncl.github.io/local-writing-app/linux-headless.html">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap">
+    <a class="home" href="index.html">Local Writing App</a>
+    <nav>
+      <a href="download.html">All downloads</a>
+      <a href="https://github.com/antoncl/local-writing-app">GitHub</a>
+    </nav>
+  </div>
+</div>
+
+<div class="page-head">
+  <div class="wrap wrap-narrow">
+    <p class="kicker">Linux &middot; headless / server</p>
+    <h1>Run it as a server</h1>
+    <p>Install the backend on a box with no desktop &mdash; a home server, a NAS, a Raspberry Pi &mdash; and reach the writing UI from any browser on your network. A tarball plus a one-command systemd installer.</p>
+    <div class="dl-primary">
+      <a class="btn btn-solid" href="https://github.com/antoncl/local-writing-app/releases/latest/download/local-writing-app-linux-x64-server.tar.gz">Download server (x64)</a>
+    </div>
+    <p class="dl-sub">On ARM64 (e.g. a Raspberry Pi), use the <a href="https://github.com/antoncl/local-writing-app/releases/latest/download/local-writing-app-linux-arm64-server.tar.gz">arm64 server build</a>.</p>
+  </div>
+</div>
+
+<div class="block">
+  <div class="wrap wrap-narrow">
+    <div class="warn">
+      <h3>This mode has no password &mdash; trusted networks only</h3>
+      <p>The server binds to your whole network (<strong>0.0.0.0</strong>) so other machines can reach it, and it has <strong>no login</strong>. Anyone who can reach the box can open your projects.</p>
+      <p class="why">Only run it this way on a private network you trust, for a single trusted user. Don&rsquo;t expose the port to the public internet.</p>
+    </div>
+  </div>
+</div>
+
+<div class="block">
+  <div class="wrap wrap-narrow">
+    <h2>Install as a service</h2>
+    <ol class="steps">
+      <li><strong>Download and extract</strong> the tarball on the box.</li>
+      <li><strong>Run the installer</strong> from the extracted folder. It installs to <code>/opt/local-writing-app</code>, sets up a systemd service that starts on boot, and runs it as your user (not root):</li>
+    </ol>
+    <pre class="cmd">tar -xzf local-writing-app-linux-x64-server.tar.gz
+cd local-writing-app-linux-x64-server
+sudo ./install-server.sh</pre>
+    <p style="margin-top: 14px;">When it finishes, it prints the LAN address to open, e.g. <code>http://192.168.1.20:8787</code>. Change the port by exporting <code>LWA_PORT</code> before running the installer.</p>
+  </div>
+</div>
+
+<div class="block">
+  <div class="wrap wrap-narrow">
+    <h2>Manage it</h2>
+    <pre class="cmd">systemctl status local-writing-app      <span class="c"># is it running?</span>
+journalctl -u local-writing-app -f      <span class="c"># follow the logs</span>
+sudo systemctl disable --now local-writing-app   <span class="c"># stop &amp; uninstall service</span></pre>
+  </div>
+</div>
+
+<div class="block">
+  <div class="wrap wrap-narrow">
+    <h2>Just want it on your own desktop?</h2>
+    <p>Use the <a href="linux-desktop.html">Linux desktop build &rarr;</a> &mdash; a single AppImage, no service, no root.</p>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <p>MIT licensed · <a href="https://github.com/antoncl/local-writing-app">Source on GitHub</a> · <a href="https://github.com/antoncl/local-writing-app/issues">Issues</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

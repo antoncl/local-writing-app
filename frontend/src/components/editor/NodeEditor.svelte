@@ -35,7 +35,7 @@
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
   import { deriveBodyShape, documentLabelFor } from "@/lib/editor-core/documentPresentation";
   import { wireReviewFreeze } from "@/lib/editor-core/reviewFreeze.svelte";
-  import { buildBodyTabs } from "@/lib/editor-core/bodyTabs";
+  import { buildBodyTabs, listTabFieldIds, tabIdForField } from "@/lib/editor-core/bodyTabs";
   import { restoredBodyTab } from "@/lib/editor-core/bodyTabRestore";
   import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
 
@@ -887,14 +887,23 @@
   // model; `null` off the lore axis or at base (stop 0, editable already).
   let stopUnit = $derived(scrubbed ? (scrub.units[scrub.index - 1] ?? null) : null);
   // The foot dock's caption reads "editing this stop" when the OPEN list tab
-  // is a reference-keyed list AND this stop's unit touches the open node —
-  // the same predicate EditorBodyHost's list-tab block applies to its own
-  // readOnly/change routing (no shared model between the two renderers).
-  let stopListFieldId = $derived(activeBodyTab.startsWith("list:") ? activeBodyTab.slice(5) : null);
+  // holds a reference-keyed list field AND this stop's unit touches the open
+  // node — the same predicate EditorBodyHost's list-tab block applies to its
+  // own readOnly/change routing (no shared model between the two renderers).
+  // #2100: a tab id no longer always decodes straight to a field id (a merged
+  // Section tab is `list:group:<group>`), so this resolves the OPEN tab's
+  // member fields the same way EditorBodyHost/the rail jump do, via
+  // `tabIdForField`, rather than slicing the tab id.
+  let stopListFieldIds = $derived(
+    activeBodyTab.startsWith("list:")
+      ? listTabFieldIds(metadataSchema, entryType).filter(
+          (id) => tabIdForField(metadataSchema, entryType, id) === activeBodyTab,
+        )
+      : [],
+  );
   let stopEditable = $derived(
     scrubbed &&
-      stopListFieldId !== null &&
-      keyedListKeyMember(metadataSchema?.fields[stopListFieldId]) !== null &&
+      stopListFieldIds.some((id) => keyedListKeyMember(metadataSchema?.fields[id]) !== null) &&
       (stopUnit?.records.some((r) => r.entity_id === scene?.id) ?? false),
   );
   $effect.pre(() => {
@@ -941,7 +950,11 @@
       navigate: (payload) => onNavigate?.(payload),
       resetField: (fieldId) => onResetField?.(fieldId),
       goToSection: (fieldId) => sectionRegistry.focus(fieldId),
-      goToList: (fieldId) => setBodyTab(`list:${fieldId}`),
+      // #2100: the rail's jump target for a list-index row — computed via the
+      // SAME `tabIdForField` the strip itself buckets fields with, so a
+      // grouped Section's row jumps into the merged tab, never a stale
+      // `list:<fieldId>` id the strip no longer has.
+      goToList: (fieldId) => setBodyTab(tabIdForField(metadataSchema, entryType, fieldId)),
       park: () => { void snapshots.park(null); },
     }}
   />

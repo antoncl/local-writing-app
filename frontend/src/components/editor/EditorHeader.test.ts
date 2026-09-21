@@ -98,9 +98,9 @@ describe("EditorHeader", () => {
 
   describe("body tab strip (#2010)", () => {
     const tabs = [
-      { id: "body" as const, kind: "body" as const, label: "Body" },
-      { id: "list:relationships" as const, kind: "list" as const, label: "Relationships", fieldId: "relationships", count: 2 },
-      { id: "list:allies" as const, kind: "list" as const, label: "Allies", fieldId: "allies" },
+      { id: "body" as const, kind: "body" as const, label: "Body", fieldIds: [] },
+      { id: "list:relationships" as const, kind: "list" as const, label: "Relationships", fieldIds: ["relationships"], count: 2 },
+      { id: "list:allies" as const, kind: "list" as const, label: "Allies", fieldIds: ["allies"] },
     ];
 
     it("renders Body, Relationships 2, Allies (empty, no count)", () => {

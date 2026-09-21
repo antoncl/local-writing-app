@@ -149,7 +149,7 @@
               class="body-tab"
               class:active={model.activeBodyTab === tab.id}
               aria-selected={model.activeBodyTab === tab.id}
-              aria-controls={tab.fieldId ? `body-tabpanel-${tab.fieldId}` : undefined}
+              aria-controls={tab.fieldIds.length > 0 ? tab.fieldIds.map((id) => `body-tabpanel-${id}`).join(" ") : undefined}
               tabindex={model.activeBodyTab === tab.id ? 0 : -1}
               onclick={() => on.selectBodyTab(tab.id)}
             >{tab.label}{#if tab.count !== undefined}<span class="body-tab-count">{tab.count}</span>{/if}</button>

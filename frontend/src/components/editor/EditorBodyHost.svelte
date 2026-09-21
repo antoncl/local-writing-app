@@ -41,6 +41,7 @@
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { api } from "@/lib/api";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
+  import { listTabFieldIds, tabIdForField } from "@/lib/editor-core/bodyTabs";
   import type {
     AssistantEntrySummary,
     BodyShape,
@@ -168,14 +169,23 @@
     characterCostUsd = $bindable({}),
   }: Props = $props();
 
-  // #2010: the active body tab's field id, or null on the "body"/"details" tab.
-  // Guarded against a non-string/absent `activeBodyTab` (a test double, or a
-  // host mid-migration) rather than assuming the prop is always well-formed.
-  let listFieldId = $derived(
+  // #2010/#2100: the active tab's list field ids — plural since ADR-0089
+  // Amendment 1's group-keyed tabs can merge several list fields into one
+  // tab (`tabIdForField`, shared with `buildBodyTabs`) — or [] on the
+  // "body"/"details" tab. Guarded against a non-string/absent `activeBodyTab`
+  // (a test double, or a host mid-migration) rather than assuming the prop is
+  // always well-formed.
+  let activeListFieldIds = $derived(
     typeof model.activeBodyTab === "string" && model.activeBodyTab.startsWith("list:")
-      ? model.activeBodyTab.slice(5)
-      : null,
+      ? listTabFieldIds(model.metadataSchema, model.entryType).filter(
+          (id) => tabIdForField(model.metadataSchema, model.entryType, id) === model.activeBodyTab,
+        )
+      : [],
   );
+  // Kept for the simple "is a list tab open" boolean gates below (which body
+  // view to hide) — any member of the active tab does, since every field in
+  // one tab shows/hides together.
+  let listFieldId = $derived(activeListFieldIds[0] ?? null);
   // #2072/ADR-0089 §1: a list field's items may be plain id strings (a
   // today's `entity_ref_list`) or member records (a reference-keyed list) —
   // pass them through as-is; stringifying an object here would turn a keyed
@@ -186,23 +196,26 @@
     return [];
   }
 
-  // #2074 (ADR-0042 §5): the list tab is editable AT THIS SCRUB STOP when it's
+  // #2074 (ADR-0042 §5): a list field is editable AT THIS SCRUB STOP when it's
   // a reference-keyed list AND the stop's own unit touches the open node — the
-  // unit's own rows are exactly what the rewrite below replaces.
-  let stopEditable = $derived(
-    model.scrubbed &&
-      listFieldId !== null &&
+  // unit's own rows are exactly what the rewrite below replaces. Per-field
+  // (#2100): a merged tab's fields aren't necessarily all keyed alike, so this
+  // is a function of the field rather than a single tab-wide flag.
+  function stopEditableFor(fieldId: string): boolean {
+    return (
+      model.scrubbed &&
       model.metadataSchema != null &&
-      keyedListKeyMember(model.metadataSchema.fields[listFieldId]) !== null &&
-      (model.stopUnit?.records.some((r) => r.entity_id === (model.scene?.id ?? "")) ?? false),
-  );
+      keyedListKeyMember(model.metadataSchema.fields[fieldId]) !== null &&
+      (model.stopUnit?.records.some((r) => r.entity_id === (model.scene?.id ?? "")) ?? false)
+    );
+  }
 
-  // Route a list-tab change through the scrub-stop rewrite when the tab is
+  // Route a list-tab change through the scrub-stop rewrite when the field is
   // editable there; otherwise the ordinary whole-field metadataChange. On
   // failure, log and leave the tab as it was — the reload isn't called, so the
   // displayed effective items stay whatever they were before the edit.
   async function handleListChange(fieldId: string, items: MetadataValue[]): Promise<void> {
-    if (stopEditable && model.stopUnit && model.metadataSchema) {
+    if (stopEditableFor(fieldId) && model.stopUnit && model.metadataSchema) {
       try {
         await rewriteUnitFromItems({
           unit: model.stopUnit,
@@ -475,41 +488,50 @@
     />
   </div>
 {/if}
-{#if listFieldId && model.metadataSchema}
-  <!-- #2010: the active tab is a list tab — render its full editor as a
-       direct grid child, alongside the (hidden, still-mounted) shape body.
-       #2072/ADR-0089 §6: `keyMember` widens the tab to a reference-keyed
-       `list`; `effectiveItems` threads the scrub overlay so the tab reads the
-       Chapter-N items, not the base, while scrubbed. -->
-  <ReferenceListTab
-    model={{
-      field: model.metadataSchema.fields[listFieldId],
-      fieldId: listFieldId,
-      entryType: model.entryType,
-      fieldLabel: effectiveFieldLabel(model.metadataSchema, model.entryType, listFieldId),
-      items: toItemList(model.metadata[listFieldId]),
-      keyMember: keyedListKeyMember(model.metadataSchema.fields[listFieldId]),
-      effectiveItems: model.scrubbed ? ((model.scrub.overrides?.[listFieldId] as MetadataValue[] | undefined) ?? null) : null,
-      readOnly: model.editorReadOnly && !stopEditable,
-      schema: model.metadataSchema,
-      nodeId: model.scene?.id ?? "",
-    }}
-    deps={{
-      loreEntries: deps.loreEntries,
-      promptEntries: deps.promptEntries,
-      assistantEntries: deps.assistantEntries,
-      structure: deps.structure,
-      researchStructure: deps.researchStructure,
-      tagTitleById: $tagTitleById,
-      implicitContextMatcher: deps.implicitContextMatcher,
-      excludeId: model.scene?.id ?? null,
-      createLayerId: model.createLayerId,
-    }}
-    on={{
-      change: (items) => void handleListChange(listFieldId, items),
-      navigate: (payload) => on.navigate(payload),
-    }}
-  />
+{#if activeListFieldIds.length > 0 && model.metadataSchema}
+  <!-- #2010/#2100: the active tab is a list tab — render its full editor(s)
+       as direct grid child(ren), alongside the (hidden, still-mounted) shape
+       body. `.list-tab-host` is `display: contents` for the common one-field
+       tab (byte-identical to before this stayed a single grid child); a
+       merged Section tab (ADR-0089 Amendment 1, several `fieldIds`) instead
+       stacks its fields, each already carrying its own field-label heading
+       (ReferenceListTab's `.ref-list-head`), inside one scroll container.
+       #2072/ADR-0089 §6: `keyMember` widens a tab's field to a
+       reference-keyed `list`; `effectiveItems` threads the scrub overlay so
+       the tab reads the Chapter-N items, not the base, while scrubbed. -->
+  <div class="list-tab-host" class:list-tab-host-stacked={activeListFieldIds.length > 1}>
+    {#each activeListFieldIds as fieldId (fieldId)}
+      <ReferenceListTab
+        model={{
+          field: model.metadataSchema.fields[fieldId],
+          fieldId,
+          entryType: model.entryType,
+          fieldLabel: effectiveFieldLabel(model.metadataSchema, model.entryType, fieldId),
+          items: toItemList(model.metadata[fieldId]),
+          keyMember: keyedListKeyMember(model.metadataSchema.fields[fieldId]),
+          effectiveItems: model.scrubbed ? ((model.scrub.overrides?.[fieldId] as MetadataValue[] | undefined) ?? null) : null,
+          readOnly: model.editorReadOnly && !stopEditableFor(fieldId),
+          schema: model.metadataSchema,
+          nodeId: model.scene?.id ?? "",
+        }}
+        deps={{
+          loreEntries: deps.loreEntries,
+          promptEntries: deps.promptEntries,
+          assistantEntries: deps.assistantEntries,
+          structure: deps.structure,
+          researchStructure: deps.researchStructure,
+          tagTitleById: $tagTitleById,
+          implicitContextMatcher: deps.implicitContextMatcher,
+          excludeId: model.scene?.id ?? null,
+          createLayerId: model.createLayerId,
+        }}
+        on={{
+          change: (items) => void handleListChange(fieldId, items),
+          navigate: (payload) => on.navigate(payload),
+        }}
+      />
+    {/each}
+  </div>
 {/if}
 
 <style>
@@ -540,5 +562,26 @@
   .none-body-host.hidden,
   .view-body-host.hidden {
     display: none;
+  }
+
+  /* #2100/ADR-0089 Amendment 1: `display: contents` for the common one-field
+     tab keeps ReferenceListTab a direct grid child exactly as before this
+     wrapper existed. A merged Section tab (2+ fieldIds) instead becomes the
+     scroll container itself, stacking each field's own full-height editor at
+     its natural size rather than every one fighting for the whole row. */
+  .list-tab-host {
+    display: contents;
+  }
+  .list-tab-host.list-tab-host-stacked {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+    height: 100%;
+    overflow: auto;
+  }
+  .list-tab-host.list-tab-host-stacked > :global(.ref-list-tab) {
+    flex: 0 0 auto;
+    height: auto;
   }
 </style>

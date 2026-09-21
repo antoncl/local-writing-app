@@ -188,10 +188,6 @@ class _FakeResponse:
         self.text = text
         self.status_code = status_code
 
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise httpx.HTTPStatusError("boom", request=None, response=None)
-
 
 def test_sha256_file_hashes_in_blocks(tmp_path) -> None:
     payload = b"the quick brown fox" * 100_000  # spans several 1 MiB blocks
@@ -228,6 +224,13 @@ def test_expected_sha256_none_on_network_error(monkeypatch) -> None:
         raise httpx.ConnectError("no route")
 
     monkeypatch.setattr(ua.httpx, "get", boom)
+    assert ua._expected_sha256("nightly", ua._platform_asset()) is None
+
+
+def test_expected_sha256_none_on_server_error(monkeypatch) -> None:
+    # A transient 5xx/403 for the manifest must degrade to unverified (like a
+    # network failure), NOT hard-fail an update whose asset already downloaded.
+    monkeypatch.setattr(ua.httpx, "get", lambda *a, **k: _FakeResponse("", status_code=503))
     assert ua._expected_sha256("nightly", ua._platform_asset()) is None
 
 

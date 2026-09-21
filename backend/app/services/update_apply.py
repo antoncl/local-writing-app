@@ -160,9 +160,12 @@ def _expected_sha256(channel: UpdateChannel, asset: str) -> str | None:
         )
     except httpx.HTTPError:
         return None
-    if resp.status_code == 404:
+    # Any non-200 — a 404 on a release predating the manifest, or a transient
+    # 5xx/403 — means we can't read the manifest. Degrade to unverified, exactly
+    # like the network failure above, rather than hard-failing a legitimate
+    # update whose asset already downloaded.
+    if resp.status_code != 200:
         return None
-    resp.raise_for_status()
     for line in resp.text.splitlines():
         parts = line.split()
         # `<sha256>  <name>` (coreutils text mode); a binary-mode line prefixes

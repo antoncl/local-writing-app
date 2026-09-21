@@ -169,6 +169,37 @@ def test_self_check_probes_the_lazy_preview_chain() -> None:
         assert name in sys.modules
 
 
+def test_probe_covers_the_lazy_preview_imports() -> None:
+    # Drift guard: if a new lazy import is added to _preview_lore_tiers, the probe
+    # must import it too — otherwise a bad PYZ entry for that new module ships
+    # silently again, the exact blind spot this guard exists to close. Derive both
+    # sets from source so they can't quietly diverge. `sessions` is excluded: it is
+    # also imported at preview.py's module top, so self-check already loads it.
+    import ast
+    import inspect
+
+    from app import server
+    from app.services.ai import preview
+
+    tree = ast.parse(inspect.getsource(preview))
+    eager = {n.module for n in tree.body if isinstance(n, ast.ImportFrom) and n.module}
+    lazy: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_preview_lore_tiers":
+            lazy = {
+                s.module
+                for s in ast.walk(node)
+                if isinstance(s, ast.ImportFrom) and s.module
+            }
+    lazy_only = {m for m in lazy if m.startswith("app.services.ai.") and m not in eager}
+    assert lazy_only, "expected _preview_lore_tiers to have lazy-only preview imports"
+
+    probe = ast.parse(inspect.getsource(server._preview_import_probe))
+    probed = {a.name for n in ast.walk(probe) if isinstance(n, ast.Import) for a in n.names}
+    missing = lazy_only - probed
+    assert not missing, f"_preview_import_probe must import {missing} (see _preview_lore_tiers)"
+
+
 def test_self_check_fails_when_a_preview_module_cannot_load(monkeypatch) -> None:
     # A frozen build whose lazy preview chain can't import (the arm64 `zlib:
     # incorrect header check`) must make --self-check FAIL, so CI catches it

@@ -11,7 +11,6 @@
   // detach/reattach never re-mounts this content — see NodeEditor's own
   // `metaContent` comment.
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
-  import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
   import type { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
@@ -100,14 +99,6 @@
 </script>
 
 {#snippet trailing()}
-  {#key model.scene?.id ?? ""}
-    <BacklinksPanel
-      backlinks={model.backlinks}
-      loreEntries={deps.loreEntries}
-      structure={deps.structure}
-      onNavigate={(detail) => on.navigate(detail)}
-    />
-  {/key}
   {#if model.documentKind === "lore" && model.scene?.id}
     <!-- The mutation SCRUBBER relocated to the foot dock (ADR-0088 S2 §5),
          where it shares one dock and a mode control with the snapshot track.

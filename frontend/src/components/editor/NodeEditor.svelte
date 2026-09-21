@@ -1049,7 +1049,7 @@
       scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, title, metadata,
       metadataSchema, editorReadOnly, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
       overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, detailsDetached, chatTitleField, metaContent,
-      stopUnit,
+      stopUnit, backlinks,
       frontMatter: frontMatterMode ? frontMatter : undefined, appendix: frontMatterMode ? appendix : undefined,
       activeBodyTab, createLayerId,
     }}

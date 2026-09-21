@@ -5,9 +5,12 @@
 #     sudo /opt/local-writing-app/update-server.sh          # from an install
 #     sudo ./update-server.sh                                # from a tarball
 #
-# It downloads the latest release for this machine's architecture and re-runs
-# that release's own install-server.sh, so the install logic always matches the
-# version being installed. Pass --force to reinstall even if already current.
+# It follows the update channel this install is configured for (stable or
+# nightly, read from the running app) and downloads that channel's latest release
+# for this machine's architecture, then re-runs that release's own
+# install-server.sh so the install logic always matches the version installed.
+#   --force             reinstall even if already current / the app can't be reached
+#   LWA_CHANNEL=nightly override the channel (otherwise taken from the running app)
 set -euo pipefail
 
 APP_NAME="local-writing-app"
@@ -51,6 +54,10 @@ download() {  # url dest
 json_field() {  # field-name  (reads stdin)
   grep -oE "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]+\"" | head -1 | sed -E 's/.*"([^"]+)"$/\1/'
 }
+# Pull a top-level JSON boolean field's value ("true"/"false") from stdin.
+json_bool() {  # field-name  (reads stdin)
+  grep -oE "\"$1\"[[:space:]]*:[[:space:]]*(true|false)" | head -1 | grep -oE 'true|false'
+}
 
 # Map this machine's architecture onto a release asset suffix.
 case "$(uname -m)" in
@@ -74,23 +81,46 @@ PORT="$(sed -n 's/^Environment=LWA_PORT=//p' "${SERVICE_PATH}" | head -1)"
 PORT="${PORT:-8787}"
 RUN_USER="$(sed -n 's/^User=//p' "${SERVICE_PATH}" | head -1)"
 
-strip_v() { printf '%s' "${1#v}"; }
-
-# Latest published version (release tag), and the version currently running.
-latest_tag="$(fetch "https://api.github.com/repos/${REPO}/releases/latest" | json_field tag_name || true)"
-if [ -z "${latest_tag}" ]; then
-  echo "Couldn't determine the latest release. Check your network and try again." >&2
-  exit 1
+# Ask the running app what channel it follows and whether an update exists — the
+# same channel-aware verdict the in-app checker uses, so a nightly install is
+# never told "up to date" against a stable release (or downgraded onto one).
+check="$(fetch "http://127.0.0.1:${PORT}/api/updates/check" 2>/dev/null || true)"
+channel=""
+available=""
+reachable=""
+if [ -n "${check}" ]; then
+  channel="$(printf '%s' "${check}" | json_field channel || true)"
+  available="$(printf '%s' "${check}" | json_bool update_available || true)"
+  reachable="$(printf '%s' "${check}" | json_bool reachable || true)"
 fi
-latest="$(strip_v "${latest_tag}")"
+# Env override wins; otherwise the app's configured channel; otherwise stable.
+channel="${LWA_CHANNEL:-${channel:-stable}}"
+
+if [ "${FORCE}" -eq 0 ]; then
+  if [ -z "${check}" ]; then
+    echo "Couldn't reach the running app on port ${PORT} to check for updates." >&2
+    echo "Start the service, or re-run with --force to reinstall the latest anyway." >&2
+    exit 1
+  fi
+  if [ "${reachable}" != "true" ]; then
+    echo "The app couldn't reach GitHub to check for updates. Try again later, or use --force." >&2
+    exit 1
+  fi
+  if [ "${available}" != "true" ]; then
+    echo "Already up to date (${channel} channel)."
+    exit 0
+  fi
+fi
 
 running="$(fetch "http://127.0.0.1:${PORT}/api/version" 2>/dev/null | json_field version || true)"
+echo "Updating ${running:-unknown} on the ${channel} channel (${ARCH}, port ${PORT})..."
 
-if [ "${FORCE}" -eq 0 ] && [ -n "${running}" ] && [ "${running}" = "${latest}" ]; then
-  echo "Already up to date (version ${running})."
-  exit 0
-fi
-echo "Updating ${running:-unknown} -> ${latest} (${ARCH}, port ${PORT})..."
+# Where the channel's assets live: stable = the latest non-prerelease release;
+# nightly = the rolling `nightly` prerelease tag.
+case "${channel}" in
+  nightly) asset_base="https://github.com/${REPO}/releases/download/nightly" ;;
+  *)       asset_base="https://github.com/${REPO}/releases/latest/download" ;;
+esac
 
 # Download and unpack the latest release into a temp dir we clean up on exit.
 tmp="$(mktemp -d)"
@@ -100,7 +130,7 @@ cleanup() {
 }
 trap cleanup EXIT
 echo "Downloading ${ASSET}..."
-download "https://github.com/${REPO}/releases/latest/download/${ASSET}" "${tmp}/${ASSET}"
+download "${asset_base}/${ASSET}" "${tmp}/${ASSET}"
 tar -xzf "${tmp}/${ASSET}" -C "${tmp}"
 
 new_installer="${tmp}/${APP_NAME}-linux-${ARCH}-server/install-server.sh"
@@ -116,4 +146,4 @@ LWA_PORT="${PORT}" RUN_USER="${RUN_USER}" bash "${new_installer}"
 sleep 2
 now="$(fetch "http://127.0.0.1:${PORT}/api/version" 2>/dev/null | json_field version || true)"
 echo
-echo "Update complete. Now running version ${now:-${latest}}."
+echo "Update complete. Now running version ${now:-unknown} (${channel} channel)."

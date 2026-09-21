@@ -344,6 +344,41 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         self.assertIn("summary", scene_definition.fields)
         self.assertIn("status", scene_definition.own_fields)
 
+    def test_scene_body_renders_after_summary_and_dynamics(self) -> None:
+        # ADR-0089 Amendment 1 (#2099): a scene reads brief→draft — the prose
+        # body comes AFTER its long_text sections. Driven by scene's built-in
+        # `display_order`, not a hardcoded "if scene" branch in the resolver.
+        fields = self.service.read_metadata_schema().entry_types["manuscript:scene"].fields
+        body_index = fields.index("body")
+        self.assertGreater(body_index, fields.index("summary"))
+        self.assertGreater(body_index, fields.index("dynamics"))
+
+    def test_lore_body_still_precedes_a_long_text_field(self) -> None:
+        # Unchanged behaviour: a lore (non-scene) body-bearing type keeps its
+        # prose FIRST — `body` is spliced right after `title`, and only
+        # scene's own `display_order` reorders it. Add a long_text field to
+        # a lore type via a project layer (no display_order) and confirm body
+        # still leads it.
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "entry_types": {
+                    "lore:character": {
+                        "name": "Character",
+                        "kind": "lore",
+                        "parent": "lore:base",
+                        "fields": ["backstory"],
+                    }
+                },
+                "fields": {
+                    "backstory": {"name": "Backstory", "type": "long_text"},
+                },
+            },
+        )
+        fields = self.service.read_metadata_schema().entry_types["lore:character"].fields
+        self.assertLess(fields.index("body"), fields.index("backstory"))
+
     def test_scene_entry_type_defaults_to_wysiwyg_markdown(self) -> None:
         schema = self.service.read_metadata_schema()
         scene = schema.entry_types["manuscript:scene"]

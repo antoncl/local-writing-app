@@ -26,6 +26,18 @@ The service binds `0.0.0.0` so other machines can reach it, and the app has **no
 login**. Only run it on a **trusted private network**, for a single trusted user.
 Do not expose it to the internet.
 
+## Update
+
+```bash
+sudo /opt/local-writing-app/update-server.sh
+```
+
+It downloads the latest release for this machine's architecture, reinstalls it
+**keeping your current port and service user**, and restarts. It skips the
+download if you're already on the latest version (pass `--force` to reinstall
+anyway). The installer also leaves a copy of `update-server.sh` next to the
+extracted tarball, so `sudo ./update-server.sh` works there too.
+
 ## Manage it
 
 ```bash

@@ -59,6 +59,15 @@ sudo ./install-server.sh</pre>
 
 <div class="block">
   <div class="wrap wrap-narrow">
+    <h2>Update later</h2>
+    <p>One command pulls the latest release, keeps your current port and service user, and restarts:</p>
+    <pre class="cmd">sudo /opt/local-writing-app/update-server.sh</pre>
+    <p class="arch-note">It skips the download if you&rsquo;re already on the latest version (<code>--force</code> reinstalls anyway).</p>
+  </div>
+</div>
+
+<div class="block">
+  <div class="wrap wrap-narrow">
     <h2>Manage it</h2>
     <pre class="cmd">systemctl status local-writing-app      <span class="c"># is it running?</span>
 journalctl -u local-writing-app -f      <span class="c"># follow the logs</span>

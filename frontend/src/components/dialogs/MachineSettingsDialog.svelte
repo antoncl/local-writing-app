@@ -10,6 +10,7 @@
     MachineSettingsDraft,
     MachineSettingsView,
     ProviderCredentialsView,
+    UpdateApplyStatus,
     UpdateCheck,
   } from "@/lib/types";
   import type { AIPolicyDraft } from "@/lib/stores/aiSettings.svelte";
@@ -141,6 +142,51 @@
     // Reading channelDirty registers the dep; clear a now-stale result.
     if (channelDirty) updateResult = null;
   });
+
+  // In-app install (ADR-0072 S6, #2083) — only offered when the check reports
+  // `can_apply`. Start the download+swap, then poll status; when the server
+  // stops to be replaced the poll fails, which is the expected "restarting" end.
+  let updateApplying = $state(false);
+  let applyStatus = $state<UpdateApplyStatus | null>(null);
+  let applyError = $state<string | null>(null);
+  async function runInstallUpdate() {
+    if (updateApplying) return;
+    updateApplying = true;
+    applyError = null;
+    applyStatus = null;
+    try {
+      const started = await api.applyUpdate();
+      applyStatus = started;
+      if (started.state === "unsupported") {
+        applyError = started.detail ?? "In-app install isn't available here.";
+        return;
+      }
+      while (true) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        let status: UpdateApplyStatus;
+        try {
+          status = await api.updateApplyStatus();
+        } catch {
+          // The server going away mid-apply is the expected end: the installer
+          // is replacing it and will relaunch. Show the restarting state.
+          applyStatus = { state: "applying", progress: 1, detail: null };
+          break;
+        }
+        applyStatus = status;
+        if (status.state === "error") {
+          applyError = status.detail ?? "The update failed.";
+          break;
+        }
+        if (status.state === "idle") break;
+        // downloading / verifying / applying: keep polling (applying ends when
+        // the poll above starts failing as the server stops).
+      }
+    } catch {
+      applyError = "Couldn't start the update.";
+    } finally {
+      updateApplying = false;
+    }
+  }
 
   // Force a refetch of the live price catalogue (ADR-0083). On demand — cached
   // prices are otherwise authoritative until asked to refresh. Also clears any
@@ -498,10 +544,30 @@
                   A newer {updateResult.channel === "nightly" ? "build" : "version"} is available{updateResult.latest
                     ? `: ${updateResult.latest}`
                     : ""}.
-                  {#if updateResult.latest_url}
+                  {#if !updateResult.can_apply && updateResult.latest_url}
                     <a href={updateResult.latest_url} target="_blank" rel="noopener noreferrer">Open the release page ↗</a>
                   {/if}
                 </p>
+                {#if updateResult.can_apply}
+                  <div class="button-row">
+                    <button type="button" disabled={updateApplying} onclick={runInstallUpdate}>
+                      {updateApplying ? "Installing…" : "Install and restart"}
+                    </button>
+                    {#if updateResult.latest_url}
+                      <a class="muted" href={updateResult.latest_url} target="_blank" rel="noopener noreferrer">or open the release page ↗</a>
+                    {/if}
+                  </div>
+                  {#if applyStatus?.state === "downloading"}
+                    <small class="muted">Downloading… {Math.round((applyStatus.progress ?? 0) * 100)}%</small>
+                  {:else if applyStatus?.state === "verifying"}
+                    <small class="muted">Verifying the download…</small>
+                  {:else if applyStatus?.state === "applying"}
+                    <small class="muted">Installing and restarting — this window will reload shortly.</small>
+                  {/if}
+                  {#if applyError}
+                    <p class="update-result fail">{applyError}</p>
+                  {/if}
+                {/if}
               {:else if updateResult.detail}
                 <p class="update-result info">{updateResult.detail}.</p>
               {:else}

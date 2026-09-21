@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.models.base import (
     AIPolicy,
     MetadataValue,
+    UpdateApplyState,
     UpdateChannel,
 )
 from app.models.schema import MetadataSchema
@@ -76,6 +77,24 @@ class UpdateCheck(BaseModel):
     latest_url: str | None = None
     reachable: bool = True
     # A short human note when a check can't produce a verdict (offline, no stamp).
+    detail: str | None = None
+    # Whether this build/platform can install the update in-app (ADR-0072 S6,
+    # #2083). False on a source run and on platforms without an apply path yet —
+    # the UI then offers only `latest_url`. Computed at the route, not from GitHub.
+    can_apply: bool = False
+
+
+class UpdateApplyStatus(BaseModel):
+    """Progress of an in-app update install (ADR-0072 S6, #2083).
+
+    Polled by the UI after it POSTs to start an install. `progress` is a 0..1
+    download fraction (only meaningful while `state == "downloading"`). Once
+    `state == "applying"` the installer has been handed off and the server is
+    stopping to be replaced, so the poll connection is expected to drop.
+    """
+
+    state: UpdateApplyState = "idle"
+    progress: float = 0.0
     detail: str | None = None
 
 

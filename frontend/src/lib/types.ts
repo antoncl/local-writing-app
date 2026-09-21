@@ -71,6 +71,8 @@ export type {
   MachineSettingsDraft,
   UpdateChannel,
   UpdateCheck,
+  UpdateApplyState,
+  UpdateApplyStatus,
 } from "./machineTypes";
 
 // AI wire types live in ./aiTypes (#763.5) — extracted to keep this barrel

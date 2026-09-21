@@ -102,6 +102,7 @@ from app.models.base import (
     MetadataValue,
     PromptInputType,
     SelectOption,
+    UpdateApplyState,
     UpdateChannel,
 )
 from app.models.entries import (
@@ -216,6 +217,7 @@ from app.models.project import (
     ProspectiveProjectNode,
     ProspectiveProjectNodeRequest,
     SaveProjectNodeRequest,
+    UpdateApplyStatus,
     UpdateCheck,
     UpdateProjectSettingsRequest,
 )
@@ -515,6 +517,8 @@ __all__ = [
     "TodoDocument",
     "TodoItem",
     "UnlistAssistantRequest",
+    "UpdateApplyState",
+    "UpdateApplyStatus",
     "UpdateChannel",
     "UpdateCheck",
     "UpdateEmbeddedTodoRequest",

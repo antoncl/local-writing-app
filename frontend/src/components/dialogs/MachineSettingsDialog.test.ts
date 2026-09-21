@@ -10,6 +10,8 @@ vi.mock("@/lib/api", () => ({
   api: {
     getVersion: vi.fn(async () => ({ version: "9.9.9", build: null })),
     checkForUpdate: vi.fn(),
+    applyUpdate: vi.fn(),
+    updateApplyStatus: vi.fn(),
     checkOllamaHost: vi.fn(),
     revealLogs: vi.fn(async () => ({ config_dir: "C:/appdata" })),
   },
@@ -218,6 +220,7 @@ describe("MachineSettingsDialog — updates tab (ADR-0072 S7)", () => {
     latest_url: null,
     reachable: true,
     detail: null,
+    can_apply: false,
   };
 
   const openUpdatesTab = () => fireEvent.click(screen.getByRole("tab", { name: "Updates" }));
@@ -243,6 +246,40 @@ describe("MachineSettingsDialog — updates tab (ADR-0072 S7)", () => {
     await fireEvent.click(checkBtn());
     const link = (await screen.findByRole("link", { name: /release page/ })) as HTMLAnchorElement;
     expect(link.href).toContain("v9.9.10");
+  });
+
+  it("offers 'Install and restart' when the build can apply in-app (#2083)", async () => {
+    (api.checkForUpdate as Mock).mockResolvedValue({
+      ...UP_TO_DATE,
+      update_available: true,
+      latest: "v9.9.10",
+      latest_url: "https://example.test/releases/v9.9.10",
+      can_apply: true,
+    });
+    (api.applyUpdate as Mock).mockResolvedValue({ state: "downloading", progress: 0, detail: null });
+    // End the poll immediately so no real 1s timer lingers past the test.
+    (api.updateApplyStatus as Mock).mockResolvedValue({ state: "idle", progress: 1, detail: null });
+    mount("off");
+    await openUpdatesTab();
+    await fireEvent.click(checkBtn());
+    const installBtn = await screen.findByRole("button", { name: /Install and restart/ });
+    await fireEvent.click(installBtn);
+    expect(api.applyUpdate as Mock).toHaveBeenCalled();
+  });
+
+  it("shows only the release link (no install button) when the build can't apply", async () => {
+    (api.checkForUpdate as Mock).mockResolvedValue({
+      ...UP_TO_DATE,
+      update_available: true,
+      latest: "v9.9.10",
+      latest_url: "https://example.test/releases/v9.9.10",
+      can_apply: false,
+    });
+    mount("off");
+    await openUpdatesTab();
+    await fireEvent.click(checkBtn());
+    expect(await screen.findByRole("link", { name: /release page/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Install and restart/ })).not.toBeInTheDocument();
   });
 
   it("reports 'on the latest' when nothing is newer", async () => {

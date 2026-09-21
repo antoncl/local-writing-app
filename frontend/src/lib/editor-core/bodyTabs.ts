@@ -47,10 +47,12 @@ export function tabIdForField(
 }
 
 /** Every `entity_ref_list` field of `entryType`, plus every reference-keyed
- *  `list` field (ADR-0089 §6 — the key outranks the prose gate), that earns
- *  its own body tab — schema order, tag lists / hidden / intrinsic fields
- *  excluded. Shared by `buildBodyTabs` and the rail (`fieldRowModel.ts`'s
- *  `listsInBody` gate). */
+ *  `list` field (ADR-0089 §6 — the key outranks the prose gate) and every
+ *  computed node-set field (ADR-0089 Amendment 1 §4 — References,
+ *  Conversations, Mutation sets: a derived collection with a bound renderer,
+ *  never a rail row), that earns its own body tab — schema order, tag lists /
+ *  hidden / intrinsic fields excluded. Shared by `buildBodyTabs` and the rail
+ *  (`fieldRowModel.ts`'s `listsInBody` gate). */
 export function listTabFieldIds(
   schema: MetadataSchema | null | undefined,
   entryType: string | null | undefined,
@@ -60,7 +62,8 @@ export function listTabFieldIds(
   const out: string[] = [];
   for (const id of fieldIds) {
     const field = schema.fields[id];
-    if (!field || (field.type !== "entity_ref_list" && !keyedListKeyMember(field))) continue;
+    const isComputedNodeSet = field?.type === "computed" && field.computed?.value_type === "node_set";
+    if (!field || (field.type !== "entity_ref_list" && !keyedListKeyMember(field) && !isComputedNodeSet)) continue;
     if (field.intrinsic) continue;
     if (isTagListField(field, schema)) continue;
     if (effectiveFieldHidden(schema, entryType, id)) continue;

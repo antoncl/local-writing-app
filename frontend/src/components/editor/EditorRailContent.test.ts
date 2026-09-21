@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
-// EditorRailContent (#2029 follow-up): a smoke test only — MetadataPanel and
-// BacklinksPanel mount fine under happy-dom, but ConversationsPanel and
-// PinnedSetsPanel only render when `model.scene?.id` is set, and they reach
-// out to the API on mount (the #973 network guard other rail tests dodge the
-// same way). `scene: null` here keeps this test network-free while still
-// proving the rail's own wiring — the type head + the always-mounted
-// BacklinksPanel — renders through the new `{ model, deps, on }` seam.
+// EditorRailContent (#2029 follow-up; Conversations moved to a body tab in
+// ADR-0089 Amendment 1 §4, #2101): a smoke test only — MetadataPanel and
+// BacklinksPanel mount fine under happy-dom, but PinnedSetsPanel only renders
+// when `model.scene?.id` is set, and it reaches out to the API on mount (the
+// #973 network guard other rail tests dodge the same way). `scene: null`
+// here keeps this test network-free while still proving the rail's own
+// wiring — the type head + the always-mounted BacklinksPanel — renders
+// through the new `{ model, deps, on }` seam.
 import { beforeEach, describe, expect, it } from "vitest";
 import { render, screen } from "@/lib/test/component";
 import EditorRailContent from "./EditorRailContent.svelte";

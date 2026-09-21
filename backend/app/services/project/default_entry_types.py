@@ -14,7 +14,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "name": "Manuscript",
         "kind": "manuscript",
         "abstract": True,
-        "fields": ["number", "summary", "color"],
+        "fields": ["number", "summary", "color", "conversations"],
         # Number POSTFIX (#1144 follow-up): the counter is reorder-live, so it
         # trails the title ("Act 1", "Chapter 3") rather than prefixing it. New
         # nodes are auto-named WITHOUT a baked-in number (see nextAutoName), so
@@ -101,7 +101,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "name": "Entry",
         "kind": "lore",
         "abstract": True,
-        "fields": ["aliases", "tags", "related_entries", "color", "context_policy"],
+        "fields": ["aliases", "tags", "related_entries", "color", "context_policy", "conversations"],
         "color": "slate-blue",
         # Lore entries call their title a "Name" (#116). Expressed as a
         # per-type label override on the intrinsic `title` field rather
@@ -154,7 +154,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "name": "Research",
         "kind": "research",
         "abstract": True,
-        "fields": [],
+        "fields": ["conversations"],
         "has_body": False,
     },
     "research:topic": {
@@ -210,7 +210,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "name": "Plot",
         "kind": "plot",
         "abstract": True,
-        "fields": [],
+        "fields": ["conversations"],
     },
     "plot:thread": {
         # Abstract beat-holder base (ADR-0080 §1): the contract a plotline and a
@@ -337,7 +337,14 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "name": "Prompt",
         "kind": "prompt",
         "abstract": True,
-        "fields": ["preferred_assistant_id", "assistant_tags", "color", "disposition", "runnable"],
+        "fields": [
+            "preferred_assistant_id",
+            "assistant_tags",
+            "color",
+            "disposition",
+            "runnable",
+            "conversations",
+        ],
         "has_body": True,
         "body_editor": "code",
         "body_language": "jinja2",
@@ -380,6 +387,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
             "color",
             "listed",
             "position",
+            "conversations",
         ],
         "has_body": False,
         "color": "graphite",
@@ -410,6 +418,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
             "series_number",
             "path",
             "project_cost",
+            "conversations",
         ],
         "has_body": True,
         "color": "violet",
@@ -430,7 +439,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         # `staged_set` (ADR-0055 S4): the mutation set a committing brainstorm
         # OWNS — a second entity_ref, into the mutation_set kind, earning the
         # chat->set edge exactly as `subject` earns chat->subject.
-        "fields": ["subject", "staged_set", "color"],
+        "fields": ["subject", "staged_set", "color", "conversations"],
         "has_body": False,
         "body_shape": "chat",
         "color": "graphite",

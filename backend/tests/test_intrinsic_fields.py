@@ -189,6 +189,25 @@ class IntrinsicFieldTests(unittest.TestCase):
                 f"references should not be seeded into {entry_type_id} membership",
             )
 
+    def test_conversations_is_a_builtin_node_set_computed_field(self) -> None:
+        # ADR-0089 Amendment 1 §4 (#2101 slice C1): the Conversations rail
+        # panel is promoted to a computed collection field with a bound
+        # renderer, exactly like `references` — no stored value, but a
+        # declared node-set payload and a seeded default tab Section so the
+        # shipped rail placement doesn't move on upgrade. Seeded into the
+        # near-universal bases (every node with a scene id).
+        schema = self.service.read_metadata_schema()
+        conversations = schema.fields.get("conversations")
+        self.assertIsNotNone(conversations, "conversations catalog field is missing")
+        assert conversations is not None  # narrow for the type checker
+        self.assertEqual(conversations.category, "computed")
+        self.assertEqual(conversations.type, "computed")
+        self.assertEqual(conversations.name, "Conversations")
+        self.assertEqual((conversations.computed or {}).get("value_type"), "node_set")
+        self.assertEqual(conversations.group, "Conversations")
+        self.assertIn("conversations", schema.entry_types["lore:character"].fields)
+        self.assertIn("conversations", schema.entry_types["manuscript:scene"].fields)
+
     def test_title_is_not_stored_in_metadata_after_save(self) -> None:
         # Declaring title/id/entry_type as fields must not cause them to be
         # persisted into the metadata dict — storage stays in front matter.

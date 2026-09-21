@@ -39,6 +39,8 @@
       <h3>macOS will block it the first time — that's expected</h3>
       <p>On first open, macOS says the app <strong>&ldquo;can&rsquo;t be opened because it is from an unidentified developer&rdquo;</strong> (or that it can&rsquo;t be verified). Nothing is wrong. To open it once:</p>
       <p><strong>Right-click</strong> (or Control-click) the app in Applications and choose <strong>Open</strong>, then confirm <strong>Open</strong> in the dialog. If you don&rsquo;t see the option, go to <strong>System Settings &rarr; Privacy &amp; Security</strong>, scroll down, and click <strong>Open Anyway</strong>.</p>
+      <p>On newer macOS you may instead see <strong>&ldquo;&hellip; is damaged and can&rsquo;t be opened&rdquo;</strong> &mdash; that&rsquo;s the same unsigned-app block, worded differently. Clear it once in Terminal, then open the app normally:</p>
+      <pre class="cmd">xattr -dr com.apple.quarantine "/Applications/Local Writing App.app"</pre>
       <p class="why">Why it happens: macOS clears this warning only for apps signed and notarized through Apple&rsquo;s paid Developer Program ($99/year). This is a free, open-source project that ships unsigned rather than build that in. The full source is public, so you can inspect or build it yourself.</p>
     </div>
   </div>

@@ -122,9 +122,13 @@
   (function () {
     var ua = navigator.userAgent || "";
     var target = null, label = null;
-    if (/Windows/i.test(ua)) { target = "windows.html"; label = "Download for Windows"; }
-    else if (/Mac OS X|Macintosh/i.test(ua)) { target = "mac.html"; label = "Download for macOS"; }
-    else if (/Linux|X11|CrOS/i.test(ua) && !/Android/i.test(ua)) { target = "linux-desktop.html"; label = "Download for Linux"; }
+    // There is no mobile build, and iOS UAs contain "Mac OS X" / "Macintosh",
+    // so exclude phones/tablets up front and let them fall back to the hub.
+    if (!/iPhone|iPad|iPod|Android/i.test(ua)) {
+      if (/Windows/i.test(ua)) { target = "windows.html"; label = "Download for Windows"; }
+      else if (/Mac OS X|Macintosh/i.test(ua)) { target = "mac.html"; label = "Download for macOS"; }
+      else if (/Linux|X11|CrOS/i.test(ua)) { target = "linux-desktop.html"; label = "Download for Linux"; }
+    }
     if (target) {
       var btn = document.getElementById("download-cta");
       btn.setAttribute("href", target);

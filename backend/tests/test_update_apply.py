@@ -67,6 +67,23 @@ def test_platform_asset_linux(monkeypatch) -> None:
     assert ua._platform_asset() == ua._LINUX_APPIMAGE_ASSET
 
 
+def test_platform_asset_macos(monkeypatch) -> None:
+    monkeypatch.setattr(ua.sys, "platform", "darwin")
+    assert ua._platform_asset() == ua._MACOS_DMG_ASSET
+
+
+def test_macos_app_path_finds_enclosing_bundle(monkeypatch) -> None:
+    monkeypatch.setattr(
+        ua.sys, "executable", "/Applications/Local Writing App.app/Contents/MacOS/local-writing-app"
+    )
+    assert ua._macos_app_path() == "/Applications/Local Writing App.app"
+
+
+def test_macos_app_path_none_when_not_in_bundle(monkeypatch) -> None:
+    monkeypatch.setattr(ua.sys, "executable", "/opt/local-writing-app/local-writing-app")
+    assert ua._macos_app_path() is None
+
+
 # --- platform gating (frozen only; Linux needs $APPIMAGE) ------------------
 
 
@@ -89,6 +106,21 @@ def test_apply_unsupported_frozen_linux_without_appimage(monkeypatch) -> None:
     monkeypatch.setattr(ua.sys, "frozen", True, raising=False)
     monkeypatch.setattr(ua.sys, "platform", "linux")
     monkeypatch.delenv("APPIMAGE", raising=False)
+    assert ua.apply_supported() is False
+
+
+def test_apply_supported_frozen_macos_in_bundle(monkeypatch) -> None:
+    monkeypatch.setattr(ua.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(ua.sys, "platform", "darwin")
+    monkeypatch.setattr(ua, "_macos_app_path", lambda: "/Applications/Local Writing App.app")
+    assert ua.apply_supported() is True
+
+
+def test_apply_unsupported_frozen_macos_not_in_bundle(monkeypatch) -> None:
+    # A raw onedir/zip run on macOS has no `.app` to swap.
+    monkeypatch.setattr(ua.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(ua.sys, "platform", "darwin")
+    monkeypatch.setattr(ua, "_macos_app_path", lambda: None)
     assert ua.apply_supported() is False
 
 
@@ -212,6 +244,37 @@ def test_spawn_appimage_swap_launches_detached_helper(monkeypatch) -> None:
     # positional args to the helper: pid, new path, current AppImage path
     assert argv[-1] == "/home/u/Apps/local-writing-app.AppImage"
     assert argv[-2] == "/tmp/new.AppImage"
+    assert seen["kwargs"].get("start_new_session") is True
+
+
+# --- the dmg swap helper (macOS) -------------------------------------------
+
+
+def test_spawn_macos_swap_raises_when_not_in_a_bundle(monkeypatch) -> None:
+    monkeypatch.setattr(ua, "_macos_app_path", lambda: None)
+    with pytest.raises(RuntimeError):
+        ua._spawn_macos_swap("/tmp/new.dmg")
+
+
+def test_spawn_macos_swap_launches_detached_helper(monkeypatch) -> None:
+    monkeypatch.setattr(ua, "_macos_app_path", lambda: "/Applications/Local Writing App.app")
+    monkeypatch.setattr(ua.tempfile, "mkdtemp", lambda **k: "/tmp/lwa-update-mnt-X")
+    seen: dict[str, object] = {}
+
+    def fake_popen(argv, **kwargs):
+        seen["argv"] = argv
+        seen["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(ua.subprocess, "Popen", fake_popen)
+    ua._spawn_macos_swap("/tmp/new.dmg")
+
+    argv = seen["argv"]
+    assert argv[0] == "/bin/sh" and argv[1] == "-c"
+    # positional args to the helper: pid, dmg, target .app, mountpoint
+    assert argv[-1] == "/tmp/lwa-update-mnt-X"
+    assert argv[-2] == "/Applications/Local Writing App.app"
+    assert argv[-3] == "/tmp/new.dmg"
     assert seen["kwargs"].get("start_new_session") is True
 
 

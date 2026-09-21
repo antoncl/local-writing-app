@@ -4,15 +4,18 @@
 channel and hands off to the platform installer so the app is replaced and
 relaunched — "download + swap-on-restart".
 
-Two apply paths so far, one per install form:
+One apply path per install form:
 - **Windows** (#2083): download `setup.exe`, run it silently; the Inno stable
   AppId upgrades in place and a `[Run]` entry relaunches it.
 - **Linux AppImage** (#2089): download the new `.AppImage`, then a detached
   helper waits for this process to exit, replaces the running file (path from
   `$APPIMAGE`) and relaunches — an AppImage can't swap itself while mounted.
+- **macOS** (#2090): download the `.dmg` (the zip is the raw onedir, only the
+  dmg carries the `.app`), then a detached helper mounts it, replaces the
+  installed `.app`, clears the unsigned-build quarantine attr, and reopens it.
 
-macOS (#2090) and the Linux headless tarball (that's `update-server.sh`) are not
-here; they report ``unsupported`` and the UI keeps the release-page link.
+The Linux headless tarball updates via `update-server.sh`, not here; an
+unsupported build reports ``unsupported`` and the UI keeps the release-page link.
 
 Flow: `start_apply()` kicks off a background worker (download -> verify ->
 apply) and returns immediately; the UI polls `current_status()`. The apply step
@@ -28,7 +31,9 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import threading
+from pathlib import PurePosixPath
 
 import httpx
 
@@ -44,6 +49,7 @@ logger = logging.getLogger("app.update_apply")
 # headless tarball updates via update-server.sh.
 _WINDOWS_SETUP_ASSET = "local-writing-app-windows-x64-setup.exe"
 _LINUX_APPIMAGE_ASSET = "local-writing-app-linux-x64.AppImage"
+_MACOS_DMG_ASSET = "local-writing-app-macos-arm64.dmg"
 _DOWNLOAD_TIMEOUT_SECONDS = 300.0
 _HEADERS = {"User-Agent": "local-writing-app-updater"}
 
@@ -60,20 +66,51 @@ _APPIMAGE_SWAP = (
     'exec "$target"'
 )
 
+# Detached macOS helper: wait for the app (pid $1) to exit, mount the dmg ($2) at
+# a fixed mountpoint ($4), copy the new bundle beside the installed one ($3) and
+# swap it in only if the copy succeeds (so a failure never destroys the app),
+# detach, clear the unsigned-build quarantine attr, and reopen. The final `open`
+# is unconditional — a failed update still relaunches the untouched old app.
+_MACOS_SWAP = (
+    'pid="$1"; dmg="$2"; app="$3"; mnt="$4"; '
+    'while kill -0 "$pid" 2>/dev/null; do sleep 0.5; done; '
+    'if hdiutil attach -nobrowse -quiet -mountpoint "$mnt" "$dmg"; then '
+    '  new="$app.update-new"; rm -rf "$new"; '
+    '  if cp -R "$mnt/$(basename "$app")" "$new"; then rm -rf "$app" && mv "$new" "$app"; fi; '
+    '  hdiutil detach -quiet "$mnt" 2>/dev/null; rmdir "$mnt" 2>/dev/null; '
+    'fi; '
+    'xattr -dr com.apple.quarantine "$app" 2>/dev/null; '
+    'open "$app"'
+)
+
 
 def apply_supported() -> bool:
     """Whether this build/platform can install an update in-app.
 
     A source run has nothing to replace. Frozen Windows always can; frozen Linux
-    only when running *as an AppImage* (`$APPIMAGE` set) — the portable zip and
-    the headless tarball (update-server.sh) have no in-app path. macOS is #2090."""
+    only when running *as an AppImage* (`$APPIMAGE` set); frozen macOS only when
+    running from a `.app` bundle. The portable zip and the headless tarball
+    (update-server.sh) have no in-app path."""
     if not getattr(sys, "frozen", False):
         return False
     if sys.platform == "win32":
         return True
     if sys.platform.startswith("linux"):
         return bool(os.environ.get("APPIMAGE"))
+    if sys.platform == "darwin":
+        return _macos_app_path() is not None
     return False
+
+
+def _macos_app_path() -> str | None:
+    """The `.app` bundle we're running from, or None if not in one (a raw onedir
+    / zip run). Walk up from the executable to the enclosing `*.app`. macOS paths
+    are POSIX — `PurePosixPath` keeps this correct (and testable) off-Mac too."""
+    executable = PurePosixPath(sys.executable)
+    for candidate in (executable, *executable.parents):
+        if candidate.name.endswith(".app"):
+            return str(candidate)
+    return None
 
 
 class _State:
@@ -115,6 +152,8 @@ def _platform_asset() -> str:
     """The release asset to download for this platform's in-app apply."""
     if sys.platform == "win32":
         return _WINDOWS_SETUP_ASSET
+    if sys.platform == "darwin":
+        return _MACOS_DMG_ASSET
     return _LINUX_APPIMAGE_ASSET
 
 
@@ -196,10 +235,31 @@ def _spawn_appimage_swap(new_path) -> None:
     )
 
 
+def _spawn_macos_swap(dmg_path) -> None:
+    """Hand the downloaded dmg to a detached helper that swaps the `.app` after
+    we exit. Uses a fixed temp mountpoint so no `hdiutil` output parsing is
+    needed; `start_new_session` keeps the helper alive past our shutdown and
+    preserves the env so the reopened app finds the user's GUI session."""
+    app = _macos_app_path()
+    if not app:
+        raise RuntimeError("not running from a .app bundle")
+    mountpoint = tempfile.mkdtemp(prefix="lwa-update-mnt-")
+    subprocess.Popen(  # noqa: S603 - fixed argv, our own inlined helper script
+        ["/bin/sh", "-c", _MACOS_SWAP, "lwa-update", str(os.getpid()), str(dmg_path), app, mountpoint],
+        start_new_session=True,
+        close_fds=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def _apply(dest) -> None:
     """Hand the downloaded asset to the platform's swap-and-relaunch mechanism."""
     if sys.platform == "win32":
         _spawn_installer(dest)
+    elif sys.platform == "darwin":
+        _spawn_macos_swap(dest)
     else:
         _spawn_appimage_swap(dest)
 

@@ -32,11 +32,17 @@ Do not expose it to the internet.
 sudo /opt/local-writing-app/update-server.sh
 ```
 
-It downloads the latest release for this machine's architecture, reinstalls it
-**keeping your current port and service user**, and restarts. It skips the
-download if you're already on the latest version (pass `--force` to reinstall
-anyway). The installer also leaves a copy of `update-server.sh` next to the
-extracted tarball, so `sudo ./update-server.sh` works there too.
+It follows the **update channel** this install is set to (stable or nightly — the
+same setting the app's Updates screen uses), downloads that channel's latest
+release for this machine's architecture, reinstalls it **keeping your current
+port and service user**, and restarts. It asks the running app whether an update
+is actually available and skips the download if you're already current.
+
+- `--force` — reinstall even if already current, or if the app can't be reached.
+- `LWA_CHANNEL=nightly sudo -E .../update-server.sh` — override the channel.
+
+The installer also leaves a copy of `update-server.sh` next to the extracted
+tarball, so `sudo ./update-server.sh` works there too.
 
 ## Manage it
 

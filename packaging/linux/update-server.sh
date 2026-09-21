@@ -94,6 +94,10 @@ if [ -n "${check}" ]; then
   reachable="$(printf '%s' "${check}" | json_bool reachable || true)"
 fi
 # Env override wins; otherwise the app's configured channel; otherwise stable.
+# Track that last fallback so we can warn before proceeding — assuming stable on
+# a nightly box (e.g. --force with the service stopped) would silently downgrade.
+channel_defaulted=0
+if [ -z "${LWA_CHANNEL:-}" ] && [ -z "${channel}" ]; then channel_defaulted=1; fi
 channel="${LWA_CHANNEL:-${channel:-stable}}"
 
 if [ "${FORCE}" -eq 0 ]; then
@@ -110,6 +114,11 @@ if [ "${FORCE}" -eq 0 ]; then
     echo "Already up to date (${channel} channel)."
     exit 0
   fi
+fi
+
+if [ "${channel_defaulted}" -eq 1 ]; then
+  echo "Note: couldn't read the update channel from the app; assuming stable." >&2
+  echo "      If this is a nightly install, re-run with LWA_CHANNEL=nightly." >&2
 fi
 
 running="$(fetch "http://127.0.0.1:${PORT}/api/version" 2>/dev/null | json_field version || true)"

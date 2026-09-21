@@ -4,23 +4,28 @@
 channel and hands off to the platform installer so the app is replaced and
 relaunched — "download + swap-on-restart".
 
-**Windows only for now** — the primary desktop platform and the cleanest path:
-the Inno installer has a stable AppId, so running the freshly downloaded
-`setup.exe` silently upgrades in place and a `[Run]` entry relaunches it. Other
-platforms report ``unsupported`` and the UI keeps offering the release-page link;
-the Linux (#2089) and macOS (#2090) apply paths are separate slices.
+Two apply paths so far, one per install form:
+- **Windows** (#2083): download `setup.exe`, run it silently; the Inno stable
+  AppId upgrades in place and a `[Run]` entry relaunches it.
+- **Linux AppImage** (#2089): download the new `.AppImage`, then a detached
+  helper waits for this process to exit, replaces the running file (path from
+  `$APPIMAGE`) and relaunches — an AppImage can't swap itself while mounted.
+
+macOS (#2090) and the Linux headless tarball (that's `update-server.sh`) are not
+here; they report ``unsupported`` and the UI keeps the release-page link.
 
 Flow: `start_apply()` kicks off a background worker (download -> verify ->
 apply) and returns immediately; the UI polls `current_status()`. The apply step
-spawns the installer detached and asks the server to stop gracefully
+hands off detached and asks the server to stop gracefully
 (`runtime_control.request_shutdown`) so this process exits and its files can be
-replaced; the installer then relaunches the app. There is deliberately no
-silent/background auto-update — a human clicks "install", and only the official
-release asset for the pinned repo is ever fetched, over HTTPS.
+replaced, then the app relaunches. There is deliberately no silent/background
+auto-update — a human clicks "install", and only the official release asset for
+the pinned repo is ever fetched, over HTTPS.
 """
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -34,18 +39,41 @@ from app.services.updates import GITHUB_REPO
 
 logger = logging.getLogger("app.update_apply")
 
-# Windows x64 is the only built desktop installer that upgrades in place today.
+# The in-place-upgradable desktop assets, one per supported platform. Both are
+# x64 only — the arm64 desktop ships as a portable zip (no in-app apply) and the
+# headless tarball updates via update-server.sh.
 _WINDOWS_SETUP_ASSET = "local-writing-app-windows-x64-setup.exe"
+_LINUX_APPIMAGE_ASSET = "local-writing-app-linux-x64.AppImage"
 _DOWNLOAD_TIMEOUT_SECONDS = 300.0
 _HEADERS = {"User-Agent": "local-writing-app-updater"}
+
+# Detached POSIX helper: wait for the running app (pid $1) to exit, move the new
+# AppImage ($2) over the current one ($3), make it executable, and relaunch. An
+# AppImage is a mounted read-only image, so it can only be replaced from outside
+# the running process — hence a helper that outlives it. The final `exec` is
+# unconditional: if the swap fails (e.g. a non-writable dir) the old AppImage is
+# untouched, so we still relaunch it rather than leave the user with no app.
+_APPIMAGE_SWAP = (
+    'pid="$1"; new="$2"; target="$3"; '
+    'while kill -0 "$pid" 2>/dev/null; do sleep 0.5; done; '
+    'mv -f "$new" "$target" && chmod +x "$target"; '
+    'exec "$target"'
+)
 
 
 def apply_supported() -> bool:
     """Whether this build/platform can install an update in-app.
 
-    Only a frozen Windows build: a source run has nothing to replace, and the
-    Linux/macOS apply paths aren't built yet (#2089/#2090)."""
-    return sys.platform == "win32" and bool(getattr(sys, "frozen", False))
+    A source run has nothing to replace. Frozen Windows always can; frozen Linux
+    only when running *as an AppImage* (`$APPIMAGE` set) — the portable zip and
+    the headless tarball (update-server.sh) have no in-app path. macOS is #2090."""
+    if not getattr(sys, "frozen", False):
+        return False
+    if sys.platform == "win32":
+        return True
+    if sys.platform.startswith("linux"):
+        return bool(os.environ.get("APPIMAGE"))
+    return False
 
 
 class _State:
@@ -83,13 +111,20 @@ def current_status() -> UpdateApplyStatus:
     return _state.get()
 
 
+def _platform_asset() -> str:
+    """The release asset to download for this platform's in-app apply."""
+    if sys.platform == "win32":
+        return _WINDOWS_SETUP_ASSET
+    return _LINUX_APPIMAGE_ASSET
+
+
 def _asset_url(channel: UpdateChannel) -> str:
     # stable = the latest non-prerelease; nightly = the rolling `nightly` tag.
     if channel == "nightly":
         base = f"https://github.com/{GITHUB_REPO}/releases/download/nightly"
     else:
         base = f"https://github.com/{GITHUB_REPO}/releases/latest/download"
-    return f"{base}/{_WINDOWS_SETUP_ASSET}"
+    return f"{base}/{_platform_asset()}"
 
 
 def _download(url: str, dest, on_progress) -> int:
@@ -142,6 +177,33 @@ def _spawn_installer(installer_path) -> None:
     )
 
 
+def _spawn_appimage_swap(new_path) -> None:
+    """Hand the new AppImage to a detached helper that swaps it in after we exit.
+
+    `start_new_session` detaches the helper from our process group so it survives
+    our shutdown; it inherits the environment (DISPLAY etc.) so the relaunched
+    app can open the browser."""
+    target = os.environ.get("APPIMAGE")
+    if not target:
+        raise RuntimeError("not running as an AppImage ($APPIMAGE unset)")
+    subprocess.Popen(  # noqa: S603 - fixed argv, our own inlined helper script
+        ["/bin/sh", "-c", _APPIMAGE_SWAP, "lwa-update", str(os.getpid()), str(new_path), target],
+        start_new_session=True,
+        close_fds=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _apply(dest) -> None:
+    """Hand the downloaded asset to the platform's swap-and-relaunch mechanism."""
+    if sys.platform == "win32":
+        _spawn_installer(dest)
+    else:
+        _spawn_appimage_swap(dest)
+
+
 def _run(channel: UpdateChannel) -> None:
     """Background worker: download -> verify -> apply. Never raises to the caller
     — failures land in the status as ``error`` with a short detail."""
@@ -149,7 +211,7 @@ def _run(channel: UpdateChannel) -> None:
         _state.set(state="downloading", progress=0.0, detail=None)
         target_dir = config_dir() / "updates"
         target_dir.mkdir(parents=True, exist_ok=True)
-        dest = target_dir / _WINDOWS_SETUP_ASSET
+        dest = target_dir / _platform_asset()
         url = _asset_url(channel)
         logger.info("Update: downloading %s", url)
         written = _download(url, dest, lambda frac: _state.set(progress=frac))
@@ -157,16 +219,16 @@ def _run(channel: UpdateChannel) -> None:
         _state.set(state="verifying", progress=1.0)
         # Unsigned builds (ADR-0072 §10): we can't verify a signature. `_download`
         # already fails a short read against Content-Length; here we just refuse
-        # an empty/missing file before handing it to the installer.
+        # an empty/missing file before handing it on.
         if written <= 0 or not dest.exists():
-            raise RuntimeError("the downloaded installer is empty")
+            raise RuntimeError("the downloaded update is empty")
 
         _state.set(state="applying")
-        logger.info("Update: launching installer and stopping for replacement")
-        _spawn_installer(dest)
-        # Exit gracefully so our files unlock; the installer replaces them and
-        # relaunches. If there's no server to stop (shouldn't happen on a frozen
-        # desktop launch), the installer's /CLOSEAPPLICATIONS still handles it.
+        logger.info("Update: handing off to the installer and stopping for replacement")
+        _apply(dest)
+        # Exit gracefully so our files unlock; the installer/helper replaces them
+        # and relaunches. On Windows the installer's /CLOSEAPPLICATIONS is a
+        # backstop; on Linux the helper waits for this pid to exit first.
         runtime_control.request_shutdown()
     except Exception as exc:  # noqa: BLE001 - any failure becomes a status, not a crash
         logger.warning("Update apply failed: %s", exc)

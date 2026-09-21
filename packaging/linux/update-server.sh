@@ -140,6 +140,37 @@ cleanup() {
 trap cleanup EXIT
 echo "Downloading ${ASSET}..."
 download "${asset_base}/${ASSET}" "${tmp}/${ASSET}"
+
+# Verify the download against the release's SHA256SUMS before trusting it. The
+# builds are unsigned (ADR-0072 §10), but a published checksum still turns a
+# corrupt or truncated download — or on-disk bit-rot that curl/gzip wouldn't
+# catch — into a clean failure here instead of a mystifying crash after install.
+# A release predating the manifest (or GitHub hiccup) -> warn and proceed, so an
+# update off an older release still works; a manifest that omits our asset, or a
+# mismatch, aborts.
+sha256_of() {  # file -> bare hex digest on stdout
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  else shasum -a 256 "$1" | awk '{print $1}'; fi
+}
+if download "${asset_base}/SHA256SUMS" "${tmp}/SHA256SUMS" 2>/dev/null && [ -s "${tmp}/SHA256SUMS" ]; then
+  expected="$(awk -v f="${ASSET}" '{sub(/^\*/,"",$2)} $2 == f {print $1}' "${tmp}/SHA256SUMS" | head -1)"
+  if [ -z "${expected}" ]; then
+    echo "SHA256SUMS has no entry for ${ASSET} — refusing to install unverified." >&2
+    exit 1
+  fi
+  actual="$(sha256_of "${tmp}/${ASSET}")"
+  if [ "${expected}" != "${actual}" ]; then
+    echo "Checksum mismatch for ${ASSET}: the download is corrupt — not installing." >&2
+    echo "  expected ${expected}" >&2
+    echo "  actual   ${actual}" >&2
+    echo "Re-run to download again." >&2
+    exit 1
+  fi
+  echo "Checksum verified."
+else
+  echo "Note: this release publishes no SHA256SUMS; skipping checksum verification." >&2
+fi
+
 tar -xzf "${tmp}/${ASSET}" -C "${tmp}"
 
 new_installer="${tmp}/${APP_NAME}-linux-${ARCH}-server/install-server.sh"

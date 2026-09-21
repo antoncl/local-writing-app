@@ -50,11 +50,14 @@ _HEADERS = {"User-Agent": "local-writing-app-updater"}
 # Detached POSIX helper: wait for the running app (pid $1) to exit, move the new
 # AppImage ($2) over the current one ($3), make it executable, and relaunch. An
 # AppImage is a mounted read-only image, so it can only be replaced from outside
-# the running process — hence a helper that outlives it.
+# the running process — hence a helper that outlives it. The final `exec` is
+# unconditional: if the swap fails (e.g. a non-writable dir) the old AppImage is
+# untouched, so we still relaunch it rather than leave the user with no app.
 _APPIMAGE_SWAP = (
     'pid="$1"; new="$2"; target="$3"; '
     'while kill -0 "$pid" 2>/dev/null; do sleep 0.5; done; '
-    'mv -f "$new" "$target" && chmod +x "$target" && exec "$target"'
+    'mv -f "$new" "$target" && chmod +x "$target"; '
+    'exec "$target"'
 )
 
 

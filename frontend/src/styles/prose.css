@@ -32,9 +32,12 @@
   width: 100%;
   padding-bottom: 46px;
 }
-/* With an appendix after the sections (#2054) the sections no longer end the
-   frame; the appendix carries the bottom clearance. */
-.prose-sections:has(+ .prose-appendix) {
+/* With an appendix after the sections (#2054), or the prose body itself
+   (ADR-0089 Amendment 1, #2099: `proseAfterSections` reorders sections ahead
+   of the prose), the sections no longer end the frame — whatever follows
+   carries the bottom clearance instead. */
+.prose-sections:has(+ .prose-appendix),
+.prose-sections:has(+ [data-testid="prose-body"]) {
   padding-bottom: var(--sp-4);
 }
 

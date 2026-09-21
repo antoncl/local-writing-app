@@ -29,6 +29,7 @@
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { keyedListKeyMember, keyedShapeFor } from "@/lib/editor-core/keyedList";
+  import { proseRendersAfterSections } from "@/lib/editor-core/bodySections";
   import { asItemList } from "@/lib/editor-core/mutationListEdit";
   import { rewriteUnitFromItems } from "@/lib/editor-core/mutationStopEdit";
   import type { MutationUnitGroup } from "@/lib/editor-core/mutationUnits";
@@ -231,6 +232,12 @@
   let chatBodyView: ChatBodyView | null = $state(null);
   let viewBodyView: ViewBodyView | null = $state(null);
 
+  // ADR-0089 Amendment 1 (#2099): whether the prose body renders after its
+  // long_text sections (a scene's brief→draft order) instead of before them
+  // (a lore/reference entry, unchanged) — derived from `body`'s position in
+  // the resolved field order, never a hardcoded "if scene" branch.
+  let proseAfterSections = $derived(proseRendersAfterSections(model.metadataSchema, model.entryType));
+
   // Effective intrinsics at the scrub point, needed by the prose branch's
   // "mutated" ribbon below. Title/body may be mutated too (ADR-0009
   // amendment) — scope is total, the whole card travels. (Moved verbatim from
@@ -405,6 +412,7 @@
     onEditorReady={(editor, phase) => phase === "ready" ? deps.sectionRegistry.register(0, null, editor) : deps.sectionRegistry.unregister(editor)}
     frontMatter={model.frontMatter}
     appendix={model.appendix}
+    {proseAfterSections}
     >
       <!-- The long_text sections (#2009) render inside the prose view's own
            scroll frame, never as siblings: the panel grid places direct

@@ -168,6 +168,12 @@
     // Inside the frame for the same reason the sections are.
     frontMatter?: Snippet;
     appendix?: Snippet;
+    // ADR-0089 Amendment 1 (#2099): whether the prose mount renders AFTER the
+    // sections block (a scene's brief→draft order) instead of before it (a
+    // lore/reference entry, unchanged). Computed by the host from `body`'s
+    // position in the resolved field order (`proseRendersAfterSections`,
+    // `lib/editor-core/bodySections.ts`) — never decided in here.
+    proseAfterSections?: boolean;
   }
 
   let {
@@ -194,6 +200,7 @@
     sections = undefined,
     frontMatter = undefined,
     appendix = undefined,
+    proseAfterSections = false,
   }: Props = $props();
 
   // ---------- Custom TipTap extensions ----------
@@ -1355,9 +1362,15 @@
       // With body sections below the prose (#2030) or front matter above it
       // (#2054), a gutter click beside those blocks is their business, not
       // the body's — only a click level with the prose falls through to it.
+      // ADR-0089 Amendment 1 (#2099): with `proseAfterSections`, sections sit
+      // ABOVE the prose (with front matter) and only the appendix sits below —
+      // the reverse of the default order — so which side each block gates
+      // depends on where it actually renders.
       const prose = editorElement?.getBoundingClientRect();
-      if (prose && (sections || appendix) && event.clientY > prose.bottom) return;
-      if (prose && frontMatter && event.clientY < prose.top) return;
+      const aboveProse = Boolean(frontMatter) || (proseAfterSections && Boolean(sections));
+      const belowProse = Boolean(appendix) || (!proseAfterSections && Boolean(sections));
+      if (prose && belowProse && event.clientY > prose.bottom) return;
+      if (prose && aboveProse && event.clientY < prose.top) return;
       event.preventDefault();
       editor?.chain().focus("end").run();
     }
@@ -1394,24 +1407,39 @@
 
   <!-- `prose-body` is the free body's own mount; the frame (`prose-editor`)
        also holds one editor per long_text section (#2009), so a locator that
-       wants THE body must anchor here, not on the frame. -->
+       wants THE body must anchor here, not on the frame. Its position relative
+       to `sections` is driven by `proseAfterSections` (ADR-0089 Amendment 1,
+       #2099): a scene reads brief→draft (sections, THEN prose); a lore/
+       reference entry keeps prose first (the default, unchanged). Either way
+       prose and sections stay direct children of this column, just reordered. -->
   {#if frontMatter}
     <!-- Front matter (#2054): the rail's facts at the head of the document,
          on the prose column so the block's edges are the prose's. -->
     <div class="prose-front-matter prose-column" data-testid="prose-front-matter">{@render frontMatter()}</div>
   {/if}
-  <div bind:this={editorElement} data-testid="prose-body"></div>
-  {#if sections}
-    <!-- Body sections (#2009) live INSIDE the scroll frame, after the prose:
-         the editor panel is a CSS grid that assigns rows/columns by direct
-         child, so anything mounted beside this view becomes its own grid item
-         (the body's 1fr row collapses, a block centres on its own width, the
-         rail loses its span). In here, prose and sections are one column. -->
-    <div class="prose-sections">{@render sections()}</div>
+  {#if proseAfterSections}
+    {#if sections}
+      <!-- Body sections (#2009) live INSIDE the scroll frame, BEFORE the prose
+           here — the editor panel is a CSS grid that assigns rows/columns by
+           direct child, so anything mounted beside this view becomes its own
+           grid item (the body's 1fr row collapses, a block centres on its own
+           width, the rail loses its span). In here, prose and sections are one
+           column. -->
+      <div class="prose-sections">{@render sections()}</div>
+    {/if}
+    <div bind:this={editorElement} data-testid="prose-body"></div>
+  {:else}
+    <div bind:this={editorElement} data-testid="prose-body"></div>
+    {#if sections}
+      <!-- Body sections (#2009) live INSIDE the scroll frame, after the prose:
+           same grid-child reasoning as above. -->
+      <div class="prose-sections">{@render sections()}</div>
+    {/if}
   {/if}
   {#if appendix}
     <!-- The appendix (#2054): the rail's trailing material after the last
-         section, ending the frame with the sections' clearance. -->
+         section (or the prose, when `proseAfterSections`), ending the frame
+         with its clearance. -->
     <div class="prose-appendix prose-column" data-testid="prose-appendix">{@render appendix()}</div>
   {/if}
 </div>

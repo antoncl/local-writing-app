@@ -43,10 +43,13 @@ class IntrinsicFieldTests(unittest.TestCase):
         # Injected leading (title first), and NOT counted as own_fields so the
         # editor renders them as built-in rather than type-owned. A body-bearing
         # type carries `body` as the second intrinsic, after title (ADR-0059 §B).
-        scene = self.service.read_metadata_schema().entry_types["manuscript:scene"]
-        self.assertEqual(scene.fields[:4], ["title", "body", "entry_type", "id"])
+        # `research:note` (not `manuscript:scene`, which carries its own
+        # `display_order` moving `body` after its long_text sections — ADR-0089
+        # Amendment 1, #2099) shows the un-reordered default.
+        note = self.service.read_metadata_schema().entry_types["research:note"]
+        self.assertEqual(note.fields[:4], ["title", "body", "entry_type", "id"])
         for key in (*INTRINSIC_FIELD_KEYS, "body"):
-            self.assertNotIn(key, scene.own_fields)
+            self.assertNotIn(key, note.own_fields)
 
     def test_intrinsic_field_defs_are_marked(self) -> None:
         fields = self.service.read_metadata_schema().fields

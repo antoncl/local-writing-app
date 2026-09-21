@@ -244,16 +244,18 @@ class MetadataFieldTests(MetadataValidationBase):
         self.assertIn("mood", schema.fields)
         self.assertIn("tension", schema.fields)
         # Intrinsic identity fields (#116) lead every type's resolved list; a
-        # body-bearing type carries `body` as the second intrinsic (ADR-0059 §B).
+        # body-bearing type carries `body` as the conditional intrinsic (ADR-0059
+        # §B), but scene's built-in `display_order` (ADR-0089 Amendment 1, #2099)
+        # moves it after the long_text sections (summary, dynamics) — a
+        # brief→draft read order. `mood`/`tension` are this test's own extra
+        # fields, unnamed in the order, so they trail in resolved position.
         self.assertEqual(
             schema.entry_types["manuscript:scene"].fields,
             [
                 "title",
-                "body",
                 "entry_type",
                 "id",
                 "number",
-                "summary",
                 "color",
                 "status",
                 "pov_mode",
@@ -262,9 +264,11 @@ class MetadataFieldTests(MetadataValidationBase):
                 "characters",
                 "location",
                 "tags",
-                "dynamics",
                 "word_count",
                 "cost",
+                "summary",
+                "dynamics",
+                "body",
                 "mood",
                 "tension",
             ],

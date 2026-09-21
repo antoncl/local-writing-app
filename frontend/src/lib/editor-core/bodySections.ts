@@ -52,6 +52,36 @@ export function buildBodySections(
   return groups;
 }
 
+/** ADR-0089 Amendment 1 (#2099): whether the free body renders AFTER its
+ *  long_text sections (a scene reads brief→draft) rather than before them (a
+ *  lore/reference entry, the default). Driven purely by `body`'s position in
+ *  the type's resolved field order relative to the sections `buildBodySections`
+ *  selects — never a hardcoded "if scene" branch. A type with no eligible
+ *  section stays with prose first (there is nothing to be "after"). */
+export function proseRendersAfterSections(
+  schema: MetadataSchema | null | undefined,
+  entryType: string | null | undefined,
+): boolean {
+  if (!schema || !entryType) return false;
+  const fieldIds = schema.entry_types[entryType]?.fields ?? [];
+  const bodyOrderIndex = fieldIds.indexOf("body");
+  if (bodyOrderIndex === -1) return false;
+  let lastSectionOrderIndex = -1;
+  fieldIds.forEach((id, index) => {
+    const field = schema.fields[id];
+    // A body section is a long_text field OR a #2043 list-with-prose field —
+    // the same set BodySections renders (mirrors fieldRowModel's `isListIndex`
+    // rule, `long_text || listHasProseItems`), so the ordering decision matches
+    // what actually appears in the sections block.
+    if (!field || (field.type !== "long_text" && !listHasProseItems(field))) return;
+    if (field.intrinsic) return;
+    if (effectiveFieldHidden(schema, entryType, id)) return;
+    lastSectionOrderIndex = index;
+  });
+  if (lastSectionOrderIndex === -1) return false;
+  return bodyOrderIndex > lastSectionOrderIndex;
+}
+
 // ---- Repeating sections (#2043) --------------------------------------------
 // A `list` field whose item shape carries a long_text member is material too:
 // it renders as a headed section AFTER the long_text sections, one sub-section

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildBodyListSections, buildBodySections, listHasProseItems, listItemEditorId } from "./bodySections";
+import { buildBodyListSections, buildBodySections, listHasProseItems, listItemEditorId, proseRendersAfterSections } from "./bodySections";
 import type { MetadataFieldDefinition, MetadataSchema } from "@/lib/types";
 
 function field(over: Partial<MetadataFieldDefinition>): MetadataFieldDefinition {
@@ -180,5 +180,54 @@ describe("listHasProseItems / buildBodyListSections (#2043)", () => {
 
   it("listItemEditorId is unique per list, item and member", () => {
     expect(listItemEditorId("beats", 2, "function")).toBe("beats[2].function");
+  });
+});
+
+// ADR-0089 Amendment 1 (#2099): prose renders after its sections when `body`
+// sits behind the last eligible long_text section in the resolved field order.
+describe("proseRendersAfterSections", () => {
+  it("is true for a scene-like order — body last, after summary and dynamics", () => {
+    const s = schema(
+      { summary: field({ name: "Summary" }), dynamics: field({ name: "Dynamics" }) },
+      ["title", "status", "summary", "dynamics", "body"],
+    );
+    expect(proseRendersAfterSections(s, "character")).toBe(true);
+  });
+
+  it("is false for a lore-like order — body first, ahead of its long_text fields", () => {
+    const s = schema({ bio: field({ name: "Bio" }) }, ["title", "body", "aliases", "bio"]);
+    expect(proseRendersAfterSections(s, "character")).toBe(false);
+  });
+
+  it("is false with no eligible section, even when body trails other fields", () => {
+    const s = schema({}, ["title", "status", "body"]);
+    expect(proseRendersAfterSections(s, "character")).toBe(false);
+  });
+
+  it("ignores hidden and intrinsic long_text fields when finding the last section", () => {
+    const s = schema(
+      {
+        secret: field({ name: "Secret", hidden: true }),
+        summary: field({ name: "Summary" }),
+      },
+      ["title", "summary", "secret", "body"],
+    );
+    // `secret` is hidden, so `summary` is the last eligible section — body
+    // (after both) still renders after it.
+    expect(proseRendersAfterSections(s, "character")).toBe(true);
+  });
+
+  it("counts a #2043 list-with-prose section, not just long_text — body after it renders after sections", () => {
+    // `beats` is a list whose items carry a long_text member, so it renders in
+    // the sections block like a long_text field; body ordered after it must
+    // read as prose-after-sections (regression: long_text-only would miss it).
+    const s = schema({ beats: BEATS }, ["title", "status", "beats", "body"]);
+    expect(proseRendersAfterSections(s, "character")).toBe(true);
+  });
+
+  it("is false without a schema, an entry type, or a body field", () => {
+    expect(proseRendersAfterSections(null, "character")).toBe(false);
+    expect(proseRendersAfterSections(schema({}, ["body"]), null)).toBe(false);
+    expect(proseRendersAfterSections(schema({ bio: field({ name: "Bio" }) }, ["bio"]), "character")).toBe(false);
   });
 });

@@ -48,19 +48,55 @@ def test_start_apply_reports_unsupported_when_gated(monkeypatch) -> None:
 def test_asset_url_stable_uses_latest() -> None:
     url = ua._asset_url("stable")
     assert "/releases/latest/download/" in url
-    assert url.endswith(ua._WINDOWS_SETUP_ASSET)
+    assert url.endswith(ua._platform_asset())
 
 
 def test_asset_url_nightly_uses_nightly_tag() -> None:
     url = ua._asset_url("nightly")
     assert "/releases/download/nightly/" in url
-    assert url.endswith(ua._WINDOWS_SETUP_ASSET)
+    assert url.endswith(ua._platform_asset())
+
+
+def test_platform_asset_windows(monkeypatch) -> None:
+    monkeypatch.setattr(ua.sys, "platform", "win32")
+    assert ua._platform_asset() == ua._WINDOWS_SETUP_ASSET
+
+
+def test_platform_asset_linux(monkeypatch) -> None:
+    monkeypatch.setattr(ua.sys, "platform", "linux")
+    assert ua._platform_asset() == ua._LINUX_APPIMAGE_ASSET
+
+
+# --- platform gating (frozen only; Linux needs $APPIMAGE) ------------------
+
+
+def test_apply_supported_frozen_windows(monkeypatch) -> None:
+    monkeypatch.setattr(ua.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(ua.sys, "platform", "win32")
+    assert ua.apply_supported() is True
+
+
+def test_apply_supported_frozen_linux_appimage(monkeypatch) -> None:
+    monkeypatch.setattr(ua.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(ua.sys, "platform", "linux")
+    monkeypatch.setenv("APPIMAGE", "/home/u/Apps/local-writing-app.AppImage")
+    assert ua.apply_supported() is True
+
+
+def test_apply_unsupported_frozen_linux_without_appimage(monkeypatch) -> None:
+    # A frozen Linux run that isn't an AppImage (portable zip / headless tarball)
+    # has no in-app apply path — update-server.sh handles the tarball.
+    monkeypatch.setattr(ua.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(ua.sys, "platform", "linux")
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    assert ua.apply_supported() is False
 
 
 # --- the download -> verify -> apply state machine -------------------------
 
 
-def test_run_success_spawns_installer_and_requests_shutdown(monkeypatch) -> None:
+def test_run_success_applies_and_requests_shutdown(monkeypatch) -> None:
+    # Stub the platform apply step so this is deterministic on any OS.
     calls: dict[str, object] = {}
 
     def fake_download(url, dest, on_progress):
@@ -70,7 +106,7 @@ def test_run_success_spawns_installer_and_requests_shutdown(monkeypatch) -> None
         return 2048
 
     monkeypatch.setattr(ua, "_download", fake_download)
-    monkeypatch.setattr(ua, "_spawn_installer", lambda path: calls.__setitem__("spawned", path))
+    monkeypatch.setattr(ua, "_apply", lambda path: calls.__setitem__("applied", path))
     monkeypatch.setattr(
         ua.runtime_control, "request_shutdown", lambda: calls.__setitem__("shutdown", True) or True
     )
@@ -78,20 +114,20 @@ def test_run_success_spawns_installer_and_requests_shutdown(monkeypatch) -> None
     ua._run("nightly")
 
     assert "/releases/download/nightly/" in calls["url"]
-    assert calls.get("spawned") is not None
+    assert calls.get("applied") is not None
     assert calls.get("shutdown") is True
     assert ua.current_status().state == "applying"
 
 
 def test_run_error_on_empty_download(monkeypatch) -> None:
-    # An empty file must be refused and must NOT hand off to the installer.
+    # An empty file must be refused and must NOT hand off to the apply step.
     def empty_download(url, dest, on_progress):
         dest.write_bytes(b"")
         return 0
 
-    spawned = {"count": 0}
+    applied = {"count": 0}
     monkeypatch.setattr(ua, "_download", empty_download)
-    monkeypatch.setattr(ua, "_spawn_installer", lambda path: spawned.__setitem__("count", spawned["count"] + 1))
+    monkeypatch.setattr(ua, "_apply", lambda path: applied.__setitem__("count", applied["count"] + 1))
     monkeypatch.setattr(ua.runtime_control, "request_shutdown", lambda: True)
 
     ua._run("stable")
@@ -99,7 +135,7 @@ def test_run_error_on_empty_download(monkeypatch) -> None:
     status = ua.current_status()
     assert status.state == "error"
     assert status.detail
-    assert spawned["count"] == 0
+    assert applied["count"] == 0
 
 
 class _FakeStream:
@@ -143,11 +179,40 @@ def test_run_download_failure_becomes_error_not_crash(monkeypatch) -> None:
         raise RuntimeError("network went away")
 
     monkeypatch.setattr(ua, "_download", boom)
-    monkeypatch.setattr(ua, "_spawn_installer", lambda path: pytest.fail("must not spawn"))
+    monkeypatch.setattr(ua, "_apply", lambda path: pytest.fail("must not apply"))
 
     ua._run("stable")  # must not raise
 
     assert ua.current_status().state == "error"
+
+
+# --- the AppImage swap helper (Linux) --------------------------------------
+
+
+def test_spawn_appimage_swap_raises_without_appimage_env(monkeypatch) -> None:
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    with pytest.raises(RuntimeError):
+        ua._spawn_appimage_swap("/tmp/new.AppImage")
+
+
+def test_spawn_appimage_swap_launches_detached_helper(monkeypatch) -> None:
+    monkeypatch.setenv("APPIMAGE", "/home/u/Apps/local-writing-app.AppImage")
+    seen: dict[str, object] = {}
+
+    def fake_popen(argv, **kwargs):
+        seen["argv"] = argv
+        seen["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(ua.subprocess, "Popen", fake_popen)
+    ua._spawn_appimage_swap("/tmp/new.AppImage")
+
+    argv = seen["argv"]
+    assert argv[0] == "/bin/sh" and argv[1] == "-c"
+    # positional args to the helper: pid, new path, current AppImage path
+    assert argv[-1] == "/home/u/Apps/local-writing-app.AppImage"
+    assert argv[-2] == "/tmp/new.AppImage"
+    assert seen["kwargs"].get("start_new_session") is True
 
 
 def test_start_apply_is_idempotent_while_busy(monkeypatch) -> None:

@@ -27,6 +27,7 @@ the pinned repo is ever fetched, over HTTPS.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import subprocess
@@ -50,7 +51,12 @@ logger = logging.getLogger("app.update_apply")
 _WINDOWS_SETUP_ASSET = "local-writing-app-windows-x64-setup.exe"
 _LINUX_APPIMAGE_ASSET = "local-writing-app-linux-x64.AppImage"
 _MACOS_DMG_ASSET = "local-writing-app-macos-arm64.dmg"
+# The per-release checksum manifest (release.yml publish job): `<sha256>  <asset>`
+# lines, GNU coreutils format. Ships beside the assets so an unsigned download
+# can still be verified (ADR-0072 §10).
+_SUMS_ASSET = "SHA256SUMS"
 _DOWNLOAD_TIMEOUT_SECONDS = 300.0
+_SUMS_TIMEOUT_SECONDS = 30.0
 _HEADERS = {"User-Agent": "local-writing-app-updater"}
 
 # Detached POSIX helper: wait for the running app (pid $1) to exit, move the new
@@ -157,13 +163,55 @@ def _platform_asset() -> str:
     return _LINUX_APPIMAGE_ASSET
 
 
-def _asset_url(channel: UpdateChannel) -> str:
+def _release_base(channel: UpdateChannel) -> str:
     # stable = the latest non-prerelease; nightly = the rolling `nightly` tag.
     if channel == "nightly":
-        base = f"https://github.com/{GITHUB_REPO}/releases/download/nightly"
-    else:
-        base = f"https://github.com/{GITHUB_REPO}/releases/latest/download"
-    return f"{base}/{_platform_asset()}"
+        return f"https://github.com/{GITHUB_REPO}/releases/download/nightly"
+    return f"https://github.com/{GITHUB_REPO}/releases/latest/download"
+
+
+def _asset_url(channel: UpdateChannel) -> str:
+    return f"{_release_base(channel)}/{_platform_asset()}"
+
+
+def _sha256_file(path) -> str:
+    """The hex SHA-256 of a file, read in 1 MiB blocks (the asset is tens of MB —
+    never slurp it whole)."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _expected_sha256(channel: UpdateChannel, asset: str) -> str | None:
+    """The published SHA-256 for `asset`, read from the release's SHA256SUMS.
+
+    Returns None when the manifest is *absent* (a release predating it, or GitHub
+    unreachable) — the caller then installs unverified, so an old release still
+    updates. A manifest that exists but omits our asset is a packaging bug, so we
+    fail closed (raise) rather than silently skip: every current release lists it.
+    """
+    url = f"{_release_base(channel)}/{_SUMS_ASSET}"
+    try:
+        resp = httpx.get(
+            url, follow_redirects=True, timeout=_SUMS_TIMEOUT_SECONDS, headers=_HEADERS
+        )
+    except httpx.HTTPError:
+        return None
+    # Any non-200 — a 404 on a release predating the manifest, or a transient
+    # 5xx/403 — means we can't read the manifest. Degrade to unverified, exactly
+    # like the network failure above, rather than hard-failing a legitimate
+    # update whose asset already downloaded.
+    if resp.status_code != 200:
+        return None
+    for line in resp.text.splitlines():
+        parts = line.split()
+        # `<sha256>  <name>` (coreutils text mode); a binary-mode line prefixes
+        # the name with '*', which we strip.
+        if len(parts) == 2 and parts[1].lstrip("*") == asset:
+            return parts[0].lower()
+    raise RuntimeError(f"{_SUMS_ASSET} has no entry for {asset}")
 
 
 def _download(url: str, dest, on_progress) -> int:
@@ -277,11 +325,24 @@ def _run(channel: UpdateChannel) -> None:
         written = _download(url, dest, lambda frac: _state.set(progress=frac))
 
         _state.set(state="verifying", progress=1.0)
-        # Unsigned builds (ADR-0072 §10): we can't verify a signature. `_download`
-        # already fails a short read against Content-Length; here we just refuse
-        # an empty/missing file before handing it on.
+        # Unsigned builds (ADR-0072 §10): no signature to check, but the release
+        # publishes a SHA256SUMS manifest, so we verify the download against it —
+        # turning a corrupt/truncated asset into a clean failure instead of a
+        # broken install. `_download` already caught a short read; here we refuse
+        # an empty file, then match the published hash when the manifest exists.
         if written <= 0 or not dest.exists():
             raise RuntimeError("the downloaded update is empty")
+        asset = _platform_asset()
+        expected = _expected_sha256(channel, asset)
+        if expected is not None:
+            actual = _sha256_file(dest)
+            if actual != expected:
+                raise RuntimeError(
+                    f"checksum mismatch for {asset}: expected {expected}, got {actual}"
+                )
+            logger.info("Update: checksum verified")
+        else:
+            logger.warning("Update: release publishes no %s; installing unverified", _SUMS_ASSET)
 
         _state.set(state="applying")
         logger.info("Update: handing off to the installer and stopping for replacement")

@@ -379,6 +379,25 @@ jobs:
           test "${#files[@]}" -ge 1
           printf '%s\n' "${files[@]}" > "$RUNNER_TEMP/assets.txt"
 
+      # Publish a SHA256SUMS manifest beside the assets. The builds are unsigned
+      # (ADR-0072 §10), so this is the integrity check the in-app updater and the
+      # headless update-server.sh verify a download against — a corrupt or
+      # truncated asset then fails cleanly instead of installing broken. Hashed by
+      # BASENAME (consumers download by asset name; the files sit under
+      # artifacts/<name>/ here), and appended to the upload list so both channels
+      # ship it. Computed before it is added, so it never hashes itself.
+      - name: Compute SHA256SUMS over the release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          sums="$RUNNER_TEMP/SHA256SUMS"
+          : > "$sums"
+          while IFS= read -r f; do
+            ( cd "$(dirname "$f")" && sha256sum "$(basename "$f")" ) >> "$sums"
+          done < "$RUNNER_TEMP/assets.txt"
+          echo "SHA256SUMS:"; cat "$sums"
+          echo "$sums" >> "$RUNNER_TEMP/assets.txt"
+
       - name: Publish stable release
         if: needs.gate.outputs.channel == 'stable'
         env:

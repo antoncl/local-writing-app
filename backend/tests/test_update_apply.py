@@ -7,8 +7,10 @@ the routes. Nothing here spawns a real process or stops a real server.
 """
 from __future__ import annotations
 
+import hashlib
 import threading
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -138,6 +140,8 @@ def test_run_success_applies_and_requests_shutdown(monkeypatch) -> None:
         return 2048
 
     monkeypatch.setattr(ua, "_download", fake_download)
+    # No manifest -> install unverified; the checksum path has its own tests below.
+    monkeypatch.setattr(ua, "_expected_sha256", lambda channel, asset: None)
     monkeypatch.setattr(ua, "_apply", lambda path: calls.__setitem__("applied", path))
     monkeypatch.setattr(
         ua.runtime_control, "request_shutdown", lambda: calls.__setitem__("shutdown", True) or True
@@ -204,6 +208,112 @@ def test_download_returns_written_when_complete(monkeypatch, tmp_path) -> None:
     dest = tmp_path / "f"
     assert ua._download("http://x", dest, lambda frac: None) == 20
     assert dest.stat().st_size == 20
+
+
+# --- checksum verification (SHA256SUMS) ------------------------------------
+
+
+class _FakeResponse:
+    """Stands in for `httpx.get(...)` returning the SHA256SUMS manifest."""
+
+    def __init__(self, text: str, status_code: int = 200):
+        self.text = text
+        self.status_code = status_code
+
+
+def test_sha256_file_hashes_in_blocks(tmp_path) -> None:
+    payload = b"the quick brown fox" * 100_000  # spans several 1 MiB blocks
+    f = tmp_path / "blob"
+    f.write_bytes(payload)
+    assert ua._sha256_file(f) == hashlib.sha256(payload).hexdigest()
+
+
+def test_expected_sha256_parses_the_matching_line(monkeypatch) -> None:
+    asset = ua._platform_asset()
+    manifest = (
+        "aaaa  local-writing-app-linux-x64.zip\n"
+        f"{'b' * 64}  {asset}\n"
+        "cccc  local-writing-app-macos-arm64.dmg\n"
+    )
+    monkeypatch.setattr(ua.httpx, "get", lambda *a, **k: _FakeResponse(manifest))
+    assert ua._expected_sha256("nightly", asset) == "b" * 64
+
+
+def test_expected_sha256_strips_binary_mode_asterisk(monkeypatch) -> None:
+    asset = ua._platform_asset()
+    monkeypatch.setattr(ua.httpx, "get", lambda *a, **k: _FakeResponse(f"{'d' * 64} *{asset}\n"))
+    assert ua._expected_sha256("stable", asset) == "d" * 64
+
+
+def test_expected_sha256_none_on_absent_manifest(monkeypatch) -> None:
+    # A release predating the manifest returns 404 -> None (install unverified).
+    monkeypatch.setattr(ua.httpx, "get", lambda *a, **k: _FakeResponse("", status_code=404))
+    assert ua._expected_sha256("stable", ua._platform_asset()) is None
+
+
+def test_expected_sha256_none_on_network_error(monkeypatch) -> None:
+    def boom(*a, **k):
+        raise httpx.ConnectError("no route")
+
+    monkeypatch.setattr(ua.httpx, "get", boom)
+    assert ua._expected_sha256("nightly", ua._platform_asset()) is None
+
+
+def test_expected_sha256_none_on_server_error(monkeypatch) -> None:
+    # A transient 5xx/403 for the manifest must degrade to unverified (like a
+    # network failure), NOT hard-fail an update whose asset already downloaded.
+    monkeypatch.setattr(ua.httpx, "get", lambda *a, **k: _FakeResponse("", status_code=503))
+    assert ua._expected_sha256("nightly", ua._platform_asset()) is None
+
+
+def test_expected_sha256_raises_when_manifest_omits_asset(monkeypatch) -> None:
+    # Manifest present but missing our asset is a packaging bug -> fail closed.
+    monkeypatch.setattr(
+        ua.httpx, "get", lambda *a, **k: _FakeResponse("aaaa  some-other-asset.zip\n")
+    )
+    with pytest.raises(RuntimeError):
+        ua._expected_sha256("nightly", ua._platform_asset())
+
+
+def test_run_error_on_checksum_mismatch(monkeypatch) -> None:
+    # A complete download whose hash doesn't match the manifest must NOT install.
+    def fake_download(url, dest, on_progress):
+        dest.write_bytes(b"corrupt bytes")
+        return 13
+
+    applied = {"count": 0}
+    monkeypatch.setattr(ua, "_download", fake_download)
+    monkeypatch.setattr(ua, "_expected_sha256", lambda channel, asset: "f" * 64)
+    monkeypatch.setattr(ua, "_apply", lambda path: applied.__setitem__("count", 1))
+    monkeypatch.setattr(ua.runtime_control, "request_shutdown", lambda: True)
+
+    ua._run("nightly")
+
+    status = ua.current_status()
+    assert status.state == "error"
+    assert "checksum" in (status.detail or "").lower()
+    assert applied["count"] == 0
+
+
+def test_run_installs_when_checksum_matches(monkeypatch) -> None:
+    payload = b"the real asset bytes"
+
+    def fake_download(url, dest, on_progress):
+        dest.write_bytes(payload)
+        return len(payload)
+
+    applied = {"count": 0}
+    monkeypatch.setattr(ua, "_download", fake_download)
+    monkeypatch.setattr(
+        ua, "_expected_sha256", lambda channel, asset: hashlib.sha256(payload).hexdigest()
+    )
+    monkeypatch.setattr(ua, "_apply", lambda path: applied.__setitem__("count", 1))
+    monkeypatch.setattr(ua.runtime_control, "request_shutdown", lambda: True)
+
+    ua._run("stable")
+
+    assert ua.current_status().state == "applying"
+    assert applied["count"] == 1
 
 
 def test_run_download_failure_becomes_error_not_crash(monkeypatch) -> None:

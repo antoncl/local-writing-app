@@ -76,7 +76,7 @@ _MACOS_SWAP = (
     'while kill -0 "$pid" 2>/dev/null; do sleep 0.5; done; '
     'if hdiutil attach -nobrowse -quiet -mountpoint "$mnt" "$dmg"; then '
     '  new="$app.update-new"; rm -rf "$new"; '
-    '  if cp -R "$mnt/$(basename "$app")" "$new"; then rm -rf "$app" && mv "$new" "$app"; fi; '
+    '  if ditto "$mnt/$(basename "$app")" "$new"; then rm -rf "$app" && mv "$new" "$app"; fi; '
     '  hdiutil detach -quiet "$mnt" 2>/dev/null; rmdir "$mnt" 2>/dev/null; '
     'fi; '
     'xattr -dr com.apple.quarantine "$app" 2>/dev/null; '

@@ -69,6 +69,7 @@ from app.models.ai import (
 from app.models.annotations import (
     Backlink,
     ChangeCandidate,
+    ChangeCandidateLayer,
     ChangeCandidateReason,
     ChangeCandidateRoute,
     ChangeCandidateSet,
@@ -324,6 +325,7 @@ __all__ = [
     "AssistantEntrySummary",
     "Backlink",
     "ChangeCandidate",
+    "ChangeCandidateLayer",
     "ChangeCandidateReason",
     "ChangeCandidateRoute",
     "ChangeCandidateSet",

@@ -129,6 +129,7 @@ export type {
   ChangeCandidateTier,
   ChangeCandidateReason,
   ChangeCandidate,
+  ChangeCandidateLayer,
   ChangeCandidateSet,
   ChangeMessage,
   PropagateRequest,

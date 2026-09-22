@@ -428,3 +428,71 @@ Also fixed in wording, not in substance: §6's pruning of an item whose dependen
 `repair_project` (the writer's explicit Repair, the only caller of today's anchor reconciliation),
 not on open; and `list_snapshots` has no filter, so "the newest propagation baseline" is a filter
 on the sidecar's origin inside the candidate service.
+
+## Amendment 3 — The change at a layer is every file that composes the source there (2026-09-22)
+
+Read against `541a9019` (master after S3, PR #2123). Resolves #2121, found in S2a's review.
+
+### The problem
+
+S1 measured the change against the source's **owning layer's file** and S2a snapshotted that
+file as the baseline. That is right for the case ADR-0087 taught (a book override must not
+read as a change of the series file) and wrong for its mirror: a change the writer makes **as a
+book-layer override delta** on an inherited source touches no owning file, so Propagate from
+the book reports nothing changed, a marker on the overridden field ranks as untouched, and the
+confirm snapshots the unchanged series file as the baseline. The Propose message had the
+inverse defect: its *after* side was the folded composite and its *before* side the owning
+snapshot, so a book override showed up as a change the diff had just said was not one.
+
+The fold is never a file, so it cannot be snapshotted; but every file that contributes to it
+can. `_composite_revision` (`backend/app/services/project/overrides.py`, `_override_paths_for_target`)
+already names that set: the owning file plus each override delta on the way down to the open
+layer.
+
+### The decision
+
+1. **The change at the open layer L is the set of files that compose the source at L**: the
+   owning layer's file and every override delta at a layer strictly between the owner and L,
+   plus L's own delta when it has one. Each file is measured **against its own baseline in its
+   own snapshot lane** — the owning file in the base lane (as today), a delta in its layer's
+   override lane (`capture_snapshot(..., layer_id=)`, ADR-0087 §3b). No fold is ever compared
+   to a file.
+2. **A delta's change is its rows.** A delta file holds `rows` (`{field, op, value}`), not
+   metadata (`overrides.py`, `_write_override_file`), and the snapshot pipeline reads it as
+   empty metadata; so a delta's diff compares its parsed rows, baseline against now, and a
+   field changed when any row on that field (the field id is the segment before the first
+   dot) differs. `changed_fields` is the **union** over every composing file; `body_changed`
+   comes from the owning file alone, since deltas have no body. A delta that has no
+   propagation baseline yet (created since the last propagation, or before this amendment)
+   counts every field it touches as changed.
+3. **Confirm captures every composing file** that exists, each with `origin="propagation"` in
+   its own lane. A layer without a delta gets nothing to capture and nothing is invented.
+4. **The API keeps one `baseline_snapshot_id`**: the owning file's, the lane the "since"
+   selector lists. A delta's baseline is always the newest propagation-origin snapshot in its
+   lane; an explicit "since" applies to the owning lane only, and the whole-entry choice
+   applies to every lane. The response gains one additive field, `layers`, one entry per
+   composing file with `{layer_id, layer_label, is_override, baseline_snapshot_id,
+   changed_fields, whole}`, so a surface can say "and the book's override" without
+   re-deriving it. A review item's `source.snapshot_id` stays the owning baseline.
+5. **The Propose message renders both sides folded.** *Before* = the owning snapshot's
+   metadata with every delta's baseline rows applied through `materialize_override_metadata`
+   (the same fold the live read uses, in the same layer order); *after* = the live folded
+   entry, as today. Both sides then are the entry as the AI sees it, at two times.
+
+### Anti-goals
+
+- Not a fold snapshot: the composite is never written to the store.
+- Not a new lane: deltas use ADR-0087 §3b's override lanes as they are.
+- Not a change to what a review item records, to the confirm's writes beyond the extra
+  captures, or to §5's invariant.
+- Not a frontend change beyond the optional `layers` type; the since-selector stays on the
+  owning lane.
+
+### Journey addition
+
+14. Series owns Marek. In the book the writer overrides `rank` to Sergeant, settles, and
+    presses Propagate from the book. Chapter 5's marker on `rank` ranks as declared, changed;
+    the diff and the Propose message both read Captain → Sergeant; Confirm captures the
+    series file's baseline in its lane and the book delta's baseline in the book's override
+    lane. A later edit to Marek's body at the series reports the body only, the override
+    unchanged.

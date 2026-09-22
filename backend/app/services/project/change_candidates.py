@@ -16,17 +16,20 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.models import (
     ChangeCandidate,
+    ChangeCandidateLayer,
     ChangeCandidateReason,
     ChangeCandidateSet,
     LoreEntry,
+    MutationSetRow,
 )
 from app.services.ai.name_matcher import compile_name_matcher, scan_name_matcher
 from app.services.project.errors import ProjectServiceError
 from app.services.project.field_values import same_rendered_value
-from app.services.project.node_index import NodeIndex, NodeIndexEntry
+from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntry
 from app.services.project.snapshot_diff import NON_FIELD_KEYS
 from app.services.project.snapshot_witness import unwitnessed_field_ids
 
@@ -112,6 +115,20 @@ class _RawReason:
         return (_ROUTE_ORDER[self.reason.route], changed_rank, self.seq)
 
 
+@dataclass(frozen=True)
+class ComposingFile:
+    """One file that composes the source at the open layer (ADR-0090
+    Amendment 3): the owning layer's file, or an override delta strictly
+    below it and at or above the open layer. `_composing_files` returns the
+    owning file first, then deltas in ascending rank."""
+
+    layer_id: str
+    layer_label: str
+    layer_rank: int
+    is_override: bool
+    path: Path
+
+
 class ChangeCandidatesMixin:
     """Composed onto `ProjectService`. `change_candidates` is the read-only S1
     slice of ADR-0090 — it writes nothing and opens no files beyond what the
@@ -133,7 +150,7 @@ class ChangeCandidatesMixin:
         source_lore_entry = self.read_lore_entry(source)
 
         resolved_baseline = self._resolve_change_candidate_baseline(source, baseline_snapshot_id)
-        changed_fields, body_changed, whole_entry = self._change_candidate_diff(
+        changed_fields, body_changed, whole_entry, layers = self._change_candidate_diff(
             source, resolved_baseline
         )
 
@@ -201,6 +218,7 @@ class ChangeCandidatesMixin:
             body_changed=body_changed,
             whole_entry=whole_entry,
             items=items,
+            layers=layers,
         )
 
     def _resolve_change_candidate_baseline(
@@ -216,21 +234,133 @@ class ChangeCandidatesMixin:
         )
         return newest.id if newest is not None else ""
 
+    def _composing_layer_bounds(self, source: str) -> tuple[int, int, dict[str, IndexLayer]]:
+        """`(owner rank, open-layer rank, every layer by id)` for `source` —
+        the range an override delta must fall in to compose the source at the
+        open layer (`owner < rank <= open`).
+
+        `overrides_by_target`'s `layer_rank` is stamped from the FULL cold
+        walk (`_resolve_index_cold`: `include_machine=True,
+        include_library=True`) — `layer_by_id`'s default walk omits both,
+        which renumbers every rank and breaks the comparison. Ranks are
+        therefore looked up from the same full walk."""
+        index = self._build_node_index()
+        owner = index.by_id[source]
+        root = self._require_project()
+        full_layers = {
+            layer.id: layer
+            for layer in self.collect_layers(root, include_machine=True, include_library=True)
+        }
+        owner_layer = full_layers.get(owner.source_layer_id)
+        owner_rank = owner_layer.rank if owner_layer is not None else 0
+        open_layer = full_layers.get(self._metadata_schema_layer_id(root))
+        open_rank = open_layer.rank if open_layer is not None else owner_rank
+        return owner_rank, open_rank, full_layers
+
+    def _removed_delta_layers(self, source_id: str, kind: str, composing: list[ComposingFile]) -> list[ChangeCandidateLayer]:
+        """Amendment 3 §1–2's mirror case: a delta that composed the source at
+        the last propagation and has since been REMOVED is a change too — its
+        fields fell back to the layer above. Such a lane has a propagation
+        baseline but no delta file now, so `_composing_files` (which reads the
+        index's existing deltas) cannot see it; walk the layers in range
+        instead and read the baseline's rows as the fields that changed."""
+        index = self._build_node_index()
+        source = index.canonical_id(source_id)
+        owner_rank, open_rank, full_layers = self._composing_layer_bounds(source)
+        present = {file.layer_id for file in composing}
+        removed: list[ChangeCandidateLayer] = []
+        for layer in sorted(full_layers.values(), key=lambda layer: layer.rank):
+            if layer.id in present or not (owner_rank < layer.rank <= open_rank):
+                continue
+            baseline = self.newest_snapshot_with_origin(
+                source_id, "propagation", kind=kind, layer_id=layer.id
+            )
+            if baseline is None:
+                continue
+            root, node_id, _ = self._resolve_snapshot_target(source_id, kind, layer_id=layer.id)
+            baseline_front_matter, _ = self._read_markdown_with_front_matter(
+                self._snapshots_dir(root, node_id) / f"{baseline.id}.md"
+            )
+            rows = self._parse_override_rows(baseline_front_matter.get("rows"))
+            removed.append(
+                ChangeCandidateLayer(
+                    layer_id=layer.id,
+                    layer_label=layer.label,
+                    is_override=True,
+                    baseline_snapshot_id=baseline.id,
+                    changed_fields=sorted({row.field.split(".", 1)[0] for row in rows}),
+                    whole=False,
+                )
+            )
+        return removed
+
+    def _composing_files(self, source_id: str) -> list[ComposingFile]:
+        """ADR-0090 Amendment 3: every file that composes `source_id` at the
+        open layer — the owning layer's file first, then each override delta
+        strictly below the owner and at or above the open layer, ascending by
+        rank. A layer with no delta contributes nothing (the composing set is
+        never invented)."""
+        index = self._build_node_index()
+        source = index.canonical_id(source_id)
+        owner = index.by_id[source]
+        owner_rank, open_rank, _full_layers = self._composing_layer_bounds(source)
+        files = [
+            ComposingFile(
+                layer_id=owner.source_layer_id,
+                layer_label=owner.source_layer_label,
+                layer_rank=owner_rank,
+                is_override=False,
+                path=owner.path,
+            )
+        ]
+        records = index.overrides_by_target.get(source, [])
+        for record in sorted(records, key=lambda record: record.layer_rank):
+            if owner_rank < record.layer_rank <= open_rank:
+                files.append(
+                    ComposingFile(
+                        layer_id=record.layer_id,
+                        layer_label=record.layer_label,
+                        layer_rank=record.layer_rank,
+                        is_override=True,
+                        path=record.path,
+                    )
+                )
+        return files
+
     def _change_candidate_diff(
         self, source_id: str, baseline_snapshot_id: str | None
-    ) -> tuple[list[str], bool, bool]:
-        """`(changed_fields, body_changed, whole_entry)` for `source_id`
-        against `baseline_snapshot_id` — or the "everything counts" answer
-        when no baseline was given. A baseline id that does not exist lets
-        `read_snapshot`'s 404 propagate.
+    ) -> tuple[list[str], bool, bool, list[ChangeCandidateLayer]]:
+        """`(changed_fields, body_changed, whole_entry, layers)` for
+        `source_id` against `baseline_snapshot_id` — or the "everything
+        counts" answer when no baseline was given. A baseline id that does
+        not exist lets `read_snapshot`'s 404 propagate. `changed_fields` is
+        the union over every composing file (Amendment 3); `body_changed`
+        comes from the owning file alone, since a delta has no body.
 
-        A snapshot photographs ONE layer's file (ADR-0087), so the now-side is
-        that same file read back through the same `_snapshot_state`
-        normalisation — never `read_lore_entry`, whose folded composite would
-        report every book override as a change the owning file never made."""
-        if not baseline_snapshot_id:
-            return [], True, True
+        A snapshot photographs ONE layer's file (ADR-0087), so the owning
+        file's now-side is that same file read back through the same
+        `_snapshot_state` normalisation — never `read_lore_entry`, whose
+        folded composite would report every book override as a change the
+        owning file never made. Each override delta is measured against its
+        OWN baseline in its OWN lane (`_override_delta_diff`), never against
+        the owning file's."""
+        composing = self._composing_files(source_id)
         kind = self.node_snapshot_kind(source_id)
+        if not baseline_snapshot_id:
+            layers = [
+                ChangeCandidateLayer(
+                    layer_id=file.layer_id,
+                    layer_label=file.layer_label,
+                    is_override=file.is_override,
+                    baseline_snapshot_id="",
+                    changed_fields=[],
+                    whole=True,
+                )
+                for file in composing
+            ]
+            return [], True, True, layers
+
+        owner = composing[0]
         detail = self.read_snapshot(source_id, baseline_snapshot_id, kind=kind)
         root, node_id, path = self._resolve_snapshot_target(source_id, kind)
         if path is None:
@@ -239,13 +369,89 @@ class ChangeCandidatesMixin:
         now = self._snapshot_state(front_matter, node_id, self._snapshots_dir(root, node_id))
         now_metadata = now["metadata"]
         keys = (set(detail.metadata) | set(now_metadata)) - NON_FIELD_KEYS
-        changed_fields = sorted(
+        owner_changed = sorted(
             key
             for key in keys
             if not same_rendered_value(detail.metadata.get(key), now_metadata.get(key))
         )
         was_body = detail.body.replace("\r\n", "\n")
-        return changed_fields, was_body != now_body.replace("\r\n", "\n"), False
+        body_changed = was_body != now_body.replace("\r\n", "\n")
+
+        union_fields = set(owner_changed)
+        layers = [
+            ChangeCandidateLayer(
+                layer_id=owner.layer_id,
+                layer_label=owner.layer_label,
+                is_override=False,
+                baseline_snapshot_id=baseline_snapshot_id,
+                changed_fields=owner_changed,
+                whole=False,
+            )
+        ]
+        for delta in composing[1:]:
+            delta_changed, delta_baseline_id, delta_whole = self._override_delta_diff(
+                source_id, kind, delta
+            )
+            union_fields.update(delta_changed)
+            layers.append(
+                ChangeCandidateLayer(
+                    layer_id=delta.layer_id,
+                    layer_label=delta.layer_label,
+                    is_override=True,
+                    baseline_snapshot_id=delta_baseline_id,
+                    changed_fields=sorted(delta_changed),
+                    whole=delta_whole,
+                )
+            )
+        for removed in self._removed_delta_layers(source_id, kind, composing):
+            union_fields.update(removed.changed_fields)
+            layers.append(removed)
+        return sorted(union_fields), body_changed, False, layers
+
+    def _override_delta_diff(
+        self, source_id: str, kind: str, delta: ComposingFile
+    ) -> tuple[set[str], str, bool]:
+        """`(changed_fields, baseline_snapshot_id, whole)` for one override
+        delta's own lane (Amendment 3 §2): no propagation baseline in this
+        lane yet counts every field its current rows touch as changed
+        (`whole=True`, the "created since the last propagation, or before
+        this amendment" case); otherwise the rows differ field by field, as
+        `(field, op, value)` triples, baseline against now."""
+        baseline = self.newest_snapshot_with_origin(
+            source_id, "propagation", kind=kind, layer_id=delta.layer_id
+        )
+        current_front_matter = self._read_front_matter_only(delta.path, strict=True)
+        current_rows = self._parse_override_rows(current_front_matter.get("rows"))
+        if baseline is None:
+            changed = {row.field.split(".", 1)[0] for row in current_rows}
+            return changed, "", True
+        root, node_id, _ = self._resolve_snapshot_target(source_id, kind, layer_id=delta.layer_id)
+        baseline_front_matter, _ = self._read_markdown_with_front_matter(
+            self._snapshots_dir(root, node_id) / f"{baseline.id}.md"
+        )
+        baseline_rows = self._parse_override_rows(baseline_front_matter.get("rows"))
+        changed = self._delta_changed_fields(baseline_rows, current_rows)
+        return changed, baseline.id, False
+
+    @staticmethod
+    def _delta_changed_fields(
+        baseline_rows: list[MutationSetRow], current_rows: list[MutationSetRow]
+    ) -> set[str]:
+        """The field ids whose row set — `(field, op, value)` triples grouped
+        by the field id (the segment before the first dot) — differs between
+        `baseline_rows` and `current_rows`, including a field present on only
+        one side."""
+
+        def by_field(rows: list[MutationSetRow]) -> dict[str, set[tuple[str, str, str]]]:
+            grouped: dict[str, set[tuple[str, str, str]]] = {}
+            for row in rows:
+                field_id = row.field.split(".", 1)[0]
+                grouped.setdefault(field_id, set()).add((row.field, row.op, row.value))
+            return grouped
+
+        before = by_field(baseline_rows)
+        now = by_field(current_rows)
+        return {field_id for field_id in set(before) | set(now) if before.get(field_id) != now.get(field_id)}
 
     def _add_mention_reasons(
         self,

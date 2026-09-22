@@ -322,14 +322,22 @@ class SceneSnapshotsMixin:
         return SnapshotList(snapshots=self._snapshot_records(root, node_id))
 
     def newest_snapshot_with_origin(
-        self, node_id: str, origin: str, *, kind: str = "manuscript"
+        self,
+        node_id: str,
+        origin: str,
+        *,
+        kind: str = "manuscript",
+        layer_id: str | None = None,
     ) -> Snapshot | None:
         """The newest snapshot of `node_id` whose sidecar names this `origin`
-        (ADR-0090 §1) — the propagation baseline default. `list_snapshots` is
-        already `(captured_at, id)`-sorted oldest first, so the newest match
-        is simply the last one."""
+        (ADR-0090 §1) — the propagation baseline default. `layer_id`
+        (Amendment 3) resolves an override delta's own lane instead of the
+        base lane. `list_snapshots` is already `(captured_at, id)`-sorted
+        oldest first, so the newest match is simply the last one."""
         matches = [
-            record for record in self.list_snapshots(node_id, kind=kind).snapshots if record.origin == origin
+            record
+            for record in self.list_snapshots(node_id, kind=kind, layer_id=layer_id).snapshots
+            if record.origin == origin
         ]
         return matches[-1] if matches else None
 

@@ -16,20 +16,24 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from layer_fixtures import declare_full_chain
 from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
     CreateLoreEntryRequest,
+    CreateSceneRequest,
     CreateTodoRequest,
     MetadataFieldDefinition,
     PropagateRequest,
     SaveLoreEntryRequest,
+    SaveSceneRequest,
     TodoDocument,
     TodoSource,
     UpdateTodoRequest,
     UpsertMetadataFieldRequest,
 )
+from app.scope import WorkScope
 from app.services.ai.lore_block import _render_lore_entries
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
@@ -456,6 +460,119 @@ class ChangePropagationTests(unittest.TestCase):
         self.assertEqual(res_whole.status_code, 200, res_whole.text)
         self.assertNotIn("Before:", res_whole.json()["text"])
         self.assertEqual(res_whole.json()["baseline_snapshot_id"], "")
+
+
+class LayeredPropagationTests(unittest.TestCase):
+    """ADR-0090 Amendment 3 (#2121): confirm captures every EXISTING composing
+    file in its own lane, and the Propose message folds both sides — a book
+    override on an inherited source is a real change, measured and captured
+    in the book's own lane, never read off the unaffected series file."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.series = self.base / "series"
+        self.root = self.series / "book01"
+        self.service = ProjectService.created_at(self.root, "Book 1")
+        declare_full_chain(self.service, self.root, self.base)
+        self.service._write_yaml(
+            self.base / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "fields": {
+                    "rank": {"name": "rank", "type": "text", "label": "Rank"},
+                },
+                "entry_types": {"lore:character": {"fields": ["rank"]}},
+            },
+        )
+        series_writer = ProjectService(WorkScope(root=self.series))
+        declare_full_chain(series_writer, self.series, self.base)
+        self.marek = series_writer.create_lore_entry(
+            CreateLoreEntryRequest(title="Marek Vell", entry_type="lore:character")
+        ).id
+        series_writer.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+            ),
+        )
+        layers = self.service.collect_layers(self.root)
+        self.series_id = next(layer.id for layer in layers if layer.folder == self.series)
+        self.book_id = next(layer.id for layer in layers if layer.folder == self.root)
+        self.ch5 = self._new_scene(
+            "Chapter Five",
+            f"<!-- mutate:entity={self.marek};field=rank;value=Captain;id=m_rank -->",
+        )
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _new_scene(self, title: str, body: str) -> str:
+        scene = self.service.create_scene(CreateSceneRequest(title=title))
+        self.service.save_scene(scene.id, SaveSceneRequest(title=title, body=body))
+        return scene.id
+
+    def test_confirm_captures_the_owner_and_every_existing_override_lane(self) -> None:
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        kind = self.service.node_snapshot_kind(self.marek)
+        self.assertEqual(
+            self.service.list_snapshots(self.marek, kind=kind, layer_id=self.book_id).snapshots, []
+        )
+
+        response = self.service.propagate_change(self.marek, PropagateRequest(kept=[self.ch5]))
+
+        self.assertEqual(response.snapshot.origin, "propagation")
+        book_snapshots = self.service.list_snapshots(
+            self.marek, kind=kind, layer_id=self.book_id
+        ).snapshots
+        self.assertEqual(len(book_snapshots), 1)
+        self.assertEqual(book_snapshots[0].origin, "propagation")
+        self.assertEqual([s.id for s in response.layer_snapshots], [book_snapshots[0].id])
+
+        # With nothing changed since, a fresh read reports nothing on either
+        # lane — the book lane now has its own baseline too.
+        changed = self.service.change_candidates(self.marek)
+        self.assertEqual(changed.changed_fields, [])
+        book_layer = next(layer for layer in changed.layers if layer.layer_id == self.book_id)
+        self.assertFalse(book_layer.whole)
+        self.assertEqual(book_layer.changed_fields, [])
+
+    def test_change_message_folds_the_override_into_before_and_after(self) -> None:
+        # Confirm once while the source is unoverridden — the owning baseline
+        # freezes rank=Captain; the book has no delta yet, so nothing else is
+        # captured.
+        self.service.propagate_change(self.marek, PropagateRequest(kept=[self.ch5]))
+
+        # Now the book overrides rank to Sergeant — a change the confirm above
+        # never saw.
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+
+        message = self.service.change_message(self.marek)
+        self.assertIn("Before:", message.text)
+        before_section, after_section = message.text.split("After:", 1)
+        self.assertIn("<rank>Captain</rank>", before_section)
+        self.assertIn("<rank>Sergeant</rank>", after_section)
 
 
 if __name__ == "__main__":

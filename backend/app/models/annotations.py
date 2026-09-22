@@ -187,11 +187,32 @@ class ChangeCandidate(BaseModel):
     reasons: list[ChangeCandidateReason] = Field(default_factory=list)
 
 
+class ChangeCandidateLayer(BaseModel):
+    """One file that composes the source at the open layer (ADR-0090
+    Amendment 3): the owning layer's file (`is_override=False`) or an
+    override delta strictly between the owner and the open layer. Each is
+    measured against its OWN baseline in its OWN snapshot lane —
+    `baseline_snapshot_id=""` means this lane had no propagation baseline yet,
+    so `whole=True` and `changed_fields` lists every field its current rows
+    touch (a delta) or is empty with the caller's own whole-entry meaning (the
+    owning file, when the top-level baseline is empty)."""
+
+    layer_id: str
+    layer_label: str
+    is_override: bool
+    baseline_snapshot_id: str = ""
+    changed_fields: list[str] = Field(default_factory=list)
+    whole: bool
+
+
 class ChangeCandidateSet(BaseModel):
     """The candidate set for one settled lore change (ADR-0090 §2) — a list of
     `(node, reasons)` and nothing else; no score, no threshold, no cut.
     `whole_entry=True` (no baseline given) means every field counts as changed,
-    so every `mutates_source` marker ranks as `declared`."""
+    so every `mutates_source` marker ranks as `declared`. `changed_fields` is
+    the union over every composing file (Amendment 3); `layers` names each
+    one's own lane so a surface can say "and the book's override" without
+    re-deriving it."""
 
     source_id: str
     baseline_snapshot_id: str = ""
@@ -199,6 +220,7 @@ class ChangeCandidateSet(BaseModel):
     body_changed: bool
     whole_entry: bool
     items: list[ChangeCandidate] = Field(default_factory=list)
+    layers: list[ChangeCandidateLayer] = Field(default_factory=list)
 
 
 class ChangeMessage(BaseModel):
@@ -227,11 +249,15 @@ class PropagateRequest(BaseModel):
 class PropagateResponse(BaseModel):
     """What confirming a propagation writes, and nothing else (ADR-0090 §5):
     one review item per kept candidate, in candidate order, and the new
-    baseline snapshot of the source. No dependent's file is touched."""
+    baseline snapshot of the source. No dependent's file is touched.
+    `layer_snapshots` (Amendment 3) is the same capture for every existing
+    override delta between the owner and the open layer, one per lane;
+    `snapshot` stays the owning capture."""
 
     todos: TodoDocument
     created: list[str] = Field(default_factory=list)
     snapshot: Snapshot
+    layer_snapshots: list[Snapshot] = Field(default_factory=list)
 
 
 class EffectiveStateResponse(BaseModel):

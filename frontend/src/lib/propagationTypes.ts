@@ -38,9 +38,25 @@ export type ChangeCandidate = {
   reasons: ChangeCandidateReason[];
 };
 
+/** One file that composes the source at the open layer (ADR-0090 Amendment
+ *  3): the owning layer's file (`is_override=false`) or an override delta
+ *  strictly between the owner and the open layer, each measured against its
+ *  own baseline in its own snapshot lane. `baseline_snapshot_id=""` means
+ *  this lane had no propagation baseline yet, so `whole=true`. */
+export type ChangeCandidateLayer = {
+  layer_id: string;
+  layer_label: string;
+  is_override: boolean;
+  baseline_snapshot_id: string;
+  changed_fields: string[];
+  whole: boolean;
+};
+
 /** The candidate set for one settled lore change — a list of `(node, reasons)`
  *  and nothing else; no score, no threshold, no cut. `whole_entry=true` (no
- *  baseline given) means every field counts as changed. */
+ *  baseline given) means every field counts as changed. `changed_fields` is
+ *  the union over every composing file (Amendment 3); `layers` names each
+ *  one's own lane. */
 export type ChangeCandidateSet = {
   source_id: string;
   baseline_snapshot_id: string;
@@ -48,6 +64,7 @@ export type ChangeCandidateSet = {
   body_changed: boolean;
   whole_entry: boolean;
   items: ChangeCandidate[];
+  layers?: ChangeCandidateLayer[];
 };
 
 /** The confirm step's write: the candidates the writer kept, measured
@@ -60,11 +77,14 @@ export type PropagateRequest = {
 
 /** What confirming a propagation writes, and nothing else: one review item
  *  per kept candidate, in candidate order, and the new baseline snapshot of
- *  the source. No dependent's file is touched. */
+ *  the source. No dependent's file is touched. `layer_snapshots` (Amendment
+ *  3) is the same capture for every existing override delta between the
+ *  owner and the open layer, one per lane. */
 export type PropagateResponse = {
   todos: TodoDocument;
   created: string[];
   snapshot: Snapshot;
+  layer_snapshots?: Snapshot[];
 };
 
 /** ADR-0090 §4: the pre-filled first message for a review item's Propose

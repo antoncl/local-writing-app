@@ -15,6 +15,8 @@ module is the one place that writes.
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.models import (
     ChangeCandidate,
     ChangeCandidateSet,
@@ -27,6 +29,7 @@ from app.models import (
 from app.services.ai.lore_block import _render_lore_entries, _render_node_xml
 from app.services.project.change_candidates import SCENE_ENTRY_TYPE
 from app.services.project.errors import ProjectServiceError
+from app.services.project.overrides import LayerOverride
 
 
 class ChangePropagationMixin:
@@ -63,12 +66,23 @@ class ChangePropagationMixin:
         todos, created_items = self._create_todo_items(requests)
 
         # The new baseline — the only write to the source, and the only other
-        # write this endpoint makes (ADR-0090 §1).
+        # write this endpoint makes (ADR-0090 §1). Amendment 3: every EXISTING
+        # override delta between the owner and the open layer gets its own
+        # baseline too, in its own lane; a layer with no delta gets nothing
+        # invented.
         snapshot = self.capture_snapshot(candidates.source_id, kind=kind, origin="propagation")
+        layer_snapshots = [
+            self.capture_snapshot(
+                candidates.source_id, kind=kind, layer_id=file.layer_id, origin="propagation"
+            )
+            for file in self._composing_files(candidates.source_id)
+            if file.is_override
+        ]
         return PropagateResponse(
             todos=todos,
             created=[item.id for item in created_items],
             snapshot=snapshot,
+            layer_snapshots=layer_snapshots,
         )
 
     def _propagation_source_title(self, source_id: str) -> str:
@@ -111,9 +125,11 @@ class ChangePropagationMixin:
         `now` is the source rendered exactly as the AI already sees a lore
         entry (`_render_lore_entries` — the folded, live entry); `before`
         (only when a baseline resolved) reads the baseline snapshot's bytes
-        through `read_snapshot` and renders them with the same
-        `_render_node_xml` the live render uses, so the two sides are
-        byte-comparable XML."""
+        through `read_snapshot`, folds in every override delta's OWN baseline
+        rows (Amendment 3 §5 — the composite is never a file, so it is folded
+        here rather than read), and renders the result with the same
+        `_render_node_xml` the live render uses, so the two sides are entries
+        as the AI sees them, at two times."""
         index = self._build_node_index()
         source = index.canonical_id(source_id)
         source_entry = index.by_id.get(source)
@@ -129,9 +145,12 @@ class ChangePropagationMixin:
             kind = self.node_snapshot_kind(source)
             detail = self.read_snapshot(source, resolved_baseline, kind=kind)
             schema = self.read_metadata_schema()
+            folded_metadata = self._fold_propagation_baseline_metadata(
+                source, kind, detail.metadata, schema
+            )
             before_entry = {
                 "title": detail.title,
-                "metadata": detail.metadata,
+                "metadata": folded_metadata,
                 "body": detail.body,
                 "entry_type": source_entry.entry_type,
             }
@@ -151,3 +170,42 @@ class ChangePropagationMixin:
                 "entry warrants; if nothing follows, say so."
             )
         return ChangeMessage(source_id=source, baseline_snapshot_id=resolved_baseline, text=text)
+
+    def _fold_propagation_baseline_metadata(
+        self, source_id: str, kind: str, base_metadata: dict, schema: Any
+    ) -> dict:
+        """Amendment 3 §5: the *before* side folds the owning baseline's
+        metadata with every override delta's OWN propagation baseline rows —
+        the same fold the live read uses (`materialize_override_metadata`),
+        outermost-first as `_composing_files` already orders them. A delta
+        with no propagation baseline yet contributes nothing to *before*: it
+        is not yet part of what the last propagation measured."""
+        shapes = self._override_shapes(schema)
+        records: list[LayerOverride] = []
+        for file in self._composing_files(source_id):
+            if not file.is_override:
+                continue
+            baseline = self.newest_snapshot_with_origin(
+                source_id, "propagation", kind=kind, layer_id=file.layer_id
+            )
+            if baseline is None:
+                continue
+            root, node_id, _ = self._resolve_snapshot_target(source_id, kind, layer_id=file.layer_id)
+            baseline_front_matter, _ = self._read_markdown_with_front_matter(
+                self._snapshots_dir(root, node_id) / f"{baseline.id}.md"
+            )
+            rows = tuple(self._parse_override_rows(baseline_front_matter.get("rows")))
+            records.append(
+                LayerOverride(
+                    target_id=source_id,
+                    layer_id=file.layer_id,
+                    layer_rank=file.layer_rank,
+                    layer_label=file.layer_label,
+                    path=file.path,
+                    rows=rows,
+                )
+            )
+        if not records:
+            return dict(base_metadata)
+        folded, _touched = self.materialize_override_metadata(dict(base_metadata), records, shapes)
+        return folded

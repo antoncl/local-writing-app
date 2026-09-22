@@ -82,7 +82,9 @@
   .theme{border:1px solid var(--border); background:var(--surface); color:var(--text-2); border-radius:var(--r-md); padding:4px 8px; cursor:pointer; font-size:var(--fs-md);}
 
   /* ---- the surface: a dialog-sized card (surface class to decide, see notes) ---- */
-  .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--elev-3); overflow:hidden;}
+  /* An editor-tab body (Amendment 1): flat, no dialog elevation, no role=dialog. */
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden;}
+  .v.same{background:transparent; color:var(--text); box-shadow:inset 0 0 0 1px var(--divider);}
   .card-head{display:flex; align-items:baseline; gap:var(--sp-3); padding:var(--sp-4) var(--sp-5) var(--sp-3); border-bottom:1px solid var(--divider);}
   .card-head h2{font-family:var(--serif); font-size:var(--fs-xl); font-weight:var(--w-bold); margin:0;}
   .card-head .src{font-family:var(--serif); color:var(--text);}
@@ -167,15 +169,15 @@
     <button class="theme" id="theme" title="Cycle theme" aria-label="Cycle theme">◐ theme</button>
   </div>
 
-  <div class="card" role="dialog" aria-labelledby="ttl">
+  <div class="card" role="region" aria-labelledby="ttl">
     <div class="card-head">
       <h2 id="ttl">Propagate <span class="src">Marek Vell</span></h2>
       <div class="since">
         <label for="since">since</label>
         <select id="since">
-          <option>last propagation · 14 Sep, 21:04</option>
-          <option>snapshot · 9 Sep, 10:12</option>
-          <option>the whole entry</option>
+          <option value="last">last propagation · 14 Sep, 21:04</option>
+          <option value="older">snapshot · 9 Sep, 10:12</option>
+          <option value="whole">the whole entry</option>
         </select>
       </div>
     </div>
@@ -185,14 +187,10 @@
 
       <aside class="diff" aria-label="What changed in Marek Vell">
         <h3>What changed</h3>
-        <p class="sub">2 fields and the body, since 14 Sep.</p>
-        <div class="frow"><div class="k">rank</div><div><span class="v was">Captain</span><span class="v now">Sergeant</span></div></div>
-        <div class="frow"><div class="k">aliases</div><div><span class="v was">the Captain</span><span class="v now">the Captain</span><span class="v now">the Sergeant</span></div></div>
-        <div class="prose">
-          <p>Marek Vell has kept the Weir gate for eleven years. He drinks at the Weir Tavern and pays for it.</p>
-          <p><span class="now">After the Ashford business he was broken to sergeant. The Guard kept him because nobody else knows the gate, and he kept the tavern table because nobody else dared take it.</span></p>
-        </div>
-        <div class="legend"><span class="v was">was</span> the baseline &nbsp; <span class="v now">now</span> the entry today &nbsp;·&nbsp; one colour rule, from ADR-0044</div>
+        <p class="sub" id="diff-sub"></p>
+        <div id="diff-rows"></div>
+        <div class="prose" id="diff-prose"></div>
+        <div class="legend"><span class="v was">was</span> the baseline &nbsp; <span class="v now">now</span> the entry today &nbsp;·&nbsp; unchanged text carries no tint &nbsp;·&nbsp; one colour rule, from ADR-0044</div>
       </aside>
     </div>
 
@@ -220,7 +218,7 @@
         <li><b>Three groups, not four routes.</b> Rows group by tier — Declared, Markers on untouched fields, Mentions — because that is the order the writer reads in. The route is the detail line, not the heading.</li>
         <li><b>Declared and untouched-marker rows start ticked; mentions start unticked.</b> The default is what the routes already say about signal.</li>
         <li><b>“All” / “none” per group</b>, quiet text at the group header's right, for the sixteen-mentions case.</li>
-        <li><b>The stripe is the kind</b> (lore violet, scene green); the kind word trails in caps for the screen reader and the colour-blind.</li>
+        <li><b>The stripe is the kind</b> (lore violet, scene green); the kind word trails in caps for the screen reader and the colour-blind. The design language has no scene kind colour today — <code>--k-scene</code> here is a proposed token, to be added to §2 by S2b's PR or replaced by whatever the manuscript body stripe already uses.</li>
         <li><b>“Since” lives in the header.</b> Default is the last propagation; the writer may pick any snapshot or the whole entry, and the right pane re-renders.</li>
         <li><b>The primary says what it does</b>: “Confirm 5 review items”, never a bare OK.</li>
       </ul>
@@ -268,7 +266,34 @@
     {key:"untouched", label:"Markers on untouched fields", folded:false},
     {key:"mentions", label:"Mentions", folded:true},
   ];
-  const esc = s => s;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  // The source's change, per "since" choice. Unchanged values carry no tint
+  // (ADR-0044: the colour says which version text belongs to; "both" = none).
+  const diffs = {
+    last:  {sub:"2 fields and the body, since 14 Sep.",
+            rows:[["rank",[["was","Captain"],["now","Sergeant"]]],
+                  ["aliases",[["same","the Captain"],["now","the Sergeant"]]]],
+            prose:[["same","Marek Vell has kept the Weir gate for eleven years. He drinks at the Weir Tavern and pays for it."],
+                   ["now","After the Ashford business he was broken to sergeant. The Guard kept him because nobody else knows the gate, and he kept the tavern table because nobody else dared take it."]]},
+    older: {sub:"3 fields and the body, since 9 Sep.",
+            rows:[["rank",[["was","Lieutenant"],["now","Sergeant"]]],
+                  ["aliases",[["same","the Captain"],["now","the Sergeant"]]],
+                  ["posting",[["was","Weir Gate"],["now","Watch Barracks"]]]],
+            prose:[["same","Marek Vell has kept the Weir gate for eleven years."],["now"," He drinks at the Weir Tavern and pays for it."],
+                   ["now","After the Ashford business he was broken to sergeant. The Guard kept him because nobody else knows the gate, and he kept the tavern table because nobody else dared take it."]]},
+    whole: {sub:"No baseline: the whole entry counts as the change.",
+            rows:[["rank",[["now","Sergeant"]]],["aliases",[["now","the Captain"],["now","the Sergeant"]]],["posting",[["now","Watch Barracks"]]]],
+            prose:[["now","Marek Vell has kept the Weir gate for eleven years. He drinks at the Weir Tavern and pays for it."],
+                   ["now","After the Ashford business he was broken to sergeant. The Guard kept him because nobody else knows the gate, and he kept the tavern table because nobody else dared take it."]]},
+  };
+  function renderDiff(){
+    const d = diffs[document.getElementById("since").value];
+    document.getElementById("diff-sub").textContent = d.sub;
+    document.getElementById("diff-rows").innerHTML = d.rows.map(([k, vals]) =>
+      `<div class="frow"><div class="k">${esc(k)}</div><div>${vals.map(([c,v])=>`<span class="v ${c}">${esc(v)}</span>`).join("")}</div></div>`).join("");
+    document.getElementById("diff-prose").innerHTML = d.prose.map(([c,t]) =>
+      c==="same" ? `<p>${esc(t)}</p>` : `<p><span class="${c}">${esc(t)}</span></p>`).join("");
+  }
   function row(r){
     return `<label class="nr ${r.on?"":"off"}" data-kind="${r.kind}" data-id="${r.id}">
       <input type="checkbox" ${r.on?"checked":""} aria-label="Keep ${r.title}" />
@@ -283,7 +308,7 @@
       const items = data[g.key];
       const kept = items.filter(i=>i.on).length;
       return `<div class="group ${g.folded?"folded":""}" data-group="${g.key}">
-        <div class="group-h"><button class="fold" type="button" aria-label="Fold ${g.label}"></button>${g.label}
+        <div class="group-h"><button class="fold" type="button" aria-expanded="${!g.folded}" aria-label="${g.folded?"Unfold":"Fold"} ${g.label}"></button>${g.label}
           <span class="g-count">${kept} of ${items.length}</span>
           <button class="g-all" type="button" data-all="${g.key}">${kept===items.length?"none":"all"}</button></div>
         <div class="rows">${items.map(row).join("")}</div>
@@ -312,7 +337,9 @@
     r.dataset.theme = cur==="auto" ? "dark" : cur==="dark" ? "light" : "";
     if(!r.dataset.theme) delete r.dataset.theme;
   });
+  document.getElementById("since").addEventListener("change", renderDiff);
   render();
+  renderDiff();
 </script>
 </body>
 </html>

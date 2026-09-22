@@ -7,6 +7,7 @@
 // passed around as a bag of closures.
 
 import { coerceInputValue, decodePickerValue, encodePickerValue } from "@/lib/utils/promptInputs";
+import { expandSelectorsInEncodedValue, type SelectorRoster } from "@/lib/views/pickerSelectors";
 import {
   inlineDestinationFor,
   outputHandlerFor,
@@ -273,6 +274,32 @@ export function promptEntriesOfferedOn(
 // for a prompt with no includes).
 export function effectivePromptInputs(entry: PromptEntrySummary): PromptInputDefinition[] {
   return entry.effective_inputs ?? entry.inputs ?? [];
+}
+
+// Seam 0 (#2129, folded #2130 review): the input-coercion loop that used to be
+// hand-copied at every invocation surface — `renderAndLockPromptTemplate` /
+// `fetchChatEstimate` (chat), the invocation dialog's estimate + submit, and
+// the prompt-author preview. For each of the declared inputs, read the draft
+// (defaulting to ""), coerce it to the input's declared type, expand any
+// selector refs a `context_pick` carries against the surface's roster, and
+// keep only the non-null/non-empty results. Takes the already-resolved
+// declared list (effectivePromptInputs, or a caller's own derived variant —
+// PromptPreviewPane already keeps one) rather than the entry, so a surface
+// with no live `PromptEntrySummary` can still call it.
+export function inputValuesFromDrafts(
+  declared: PromptInputDefinition[],
+  drafts: Record<string, string>,
+  roster: SelectorRoster,
+): Record<string, unknown> {
+  const inputs: Record<string, unknown> = {};
+  for (const input of declared) {
+    const raw = drafts[input.name] ?? "";
+    let coerced = coerceInputValue(raw, input.type);
+    if (input.type === "context_pick")
+      coerced = expandSelectorsInEncodedValue(coerced as string, roster);
+    if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
+  }
+  return inputs;
 }
 
 // The "N prompts / M chats" text for the snippet dependency advisory (ADR-0061

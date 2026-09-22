@@ -72,3 +72,61 @@ export function formattingToolbarActions(editor: Editor, hasText: boolean, inTab
   const { marks, style, table } = formattingToolbarParts(editor, hasText, inTable);
   return [...marks, ...(style ? [style] : []), ...(table ? [table] : [])];
 }
+
+/** A prompt entry offered on the toolbar's "Revise" affordance — just the two
+ *  fields it renders, so this module doesn't need the full prompt-entry type.
+ *  Generic over the caller's own entry type (ProseBodyView's is the full
+ *  `PromptEntrySummary`) so `runPrompt` gets the exact type back, not this
+ *  narrowed one. */
+export type ReviseEntry = { id: string; title: string };
+
+export type BodyToolbarOptions<T extends ReviseEntry> = {
+  hasText: boolean;
+  inTable: boolean;
+  /** A scene, not another prose body (a lore entry) — Revise and TODO are
+   *  scene concerns: a prompt run is refused outside a scene, and the
+   *  embedded-TODO index scans scenes. */
+  isScene: boolean;
+  /** The selection surface's prompt entries; ignored unless isScene. */
+  reviseEntries: T[];
+  runPrompt: (entry: T) => void | Promise<void>;
+  markTodo: () => void;
+};
+
+/** ProseBodyView's floating selection toolbar (#1223): the shared formatting
+ *  core plus Revise (one button, or a menu over ≥2 entries) and TODO — both
+ *  scene-only — built onto the same marks/style/table parts the rail's
+ *  long_text fields use. Extracted from ProseBodyView so the component keeps
+ *  only the ~6-line call site that computes `isScene`/`reviseEntries` and
+ *  wires `runPrompt`/`markTodo`. */
+export function bodyToolbarActions<T extends ReviseEntry>(editor: Editor, options: BodyToolbarOptions<T>): ToolbarAction[] {
+  const { hasText, inTable, isScene, reviseEntries, runPrompt, markTodo } = options;
+  const { marks, style, table } = formattingToolbarParts(editor, hasText, inTable);
+  const actions: ToolbarAction[] = [];
+  if (hasText && style) {
+    const reviseAction: ToolbarAction | null =
+      !isScene || reviseEntries.length === 0
+        ? null
+        : reviseEntries.length === 1
+          ? {
+              kind: "button",
+              id: `ai-revise:${reviseEntries[0].id}`,
+              label: `✨ ${reviseEntries[0].title}`,
+              run: () => runPrompt(reviseEntries[0]),
+            }
+          : {
+              kind: "menu",
+              id: "ai-revise",
+              label: "✨ Revise",
+              items: reviseEntries.map((entry) => ({
+                id: `ai-revise:${entry.id}`,
+                label: entry.title,
+                run: () => runPrompt(entry),
+              })),
+            };
+    actions.push(...marks, ...(reviseAction ? [reviseAction] : []), style);
+    if (isScene) actions.push({ kind: "button", id: "todo", label: "TODO", run: markTodo });
+  }
+  if (table) actions.push(table);
+  return actions;
+}

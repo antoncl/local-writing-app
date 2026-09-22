@@ -14,8 +14,9 @@
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import { api } from "@/lib/api";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
-  import { coerceInputValue, friendlyTemplateError } from "@/lib/utils/promptInputs";
-  import { buildSelectorRoster, expandSelectorsInEncodedValue } from "@/lib/views/pickerSelectors";
+  import { friendlyTemplateError } from "@/lib/utils/promptInputs";
+  import { buildSelectorRoster } from "@/lib/views/pickerSelectors";
+  import { inputValuesFromDrafts } from "@/lib/editor-core/promptResolution";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { cardEntriesStore } from "@/lib/stores/plotCards";
   import { promptPreviewDrafts } from "@/lib/stores/promptPreviewDrafts.svelte";
@@ -229,14 +230,7 @@
       record.lastRenderKey = "";
       return;
     }
-    const inputs: Record<string, unknown> = {};
-    for (const declared of promptPreviewDeclaredInputs) {
-      const raw = record.inputDrafts[declared.name] ?? "";
-      let coerced = coerceInputValue(raw, declared.type);
-      if (declared.type === "context_pick")
-        coerced = expandSelectorsInEncodedValue(coerced as string, selectorRoster);
-      if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
-    }
+    const inputs = inputValuesFromDrafts(promptPreviewDeclaredInputs, record.inputDrafts, selectorRoster);
     const key = JSON.stringify({ rawBody, sceneId: record.sceneId, inputs });
     if (key === record.lastRenderKey && !record.error) return;
     record.lastRenderKey = key;

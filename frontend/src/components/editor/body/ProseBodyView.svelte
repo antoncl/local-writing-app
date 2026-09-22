@@ -22,7 +22,7 @@
 
   import { onMount, tick, type Snippet } from "svelte";
   import { Editor } from "@tiptap/core";
-  import { TextSelection, type Transaction } from "@tiptap/pm/state";
+  import type { Transaction } from "@tiptap/pm/state";
   import type { EditorView } from "@tiptap/pm/view";
   import { proseStarterKit } from "@/lib/editor-core/proseStarterKit";
   import {
@@ -39,11 +39,9 @@
     REBUILD_META,
     implicitContextIds,
   } from "@/lib/editor-core/implicitContextHighlight";
-  import {
-    SearchMatchHighlight,
-    firstMentionReveal,
-    type SearchReveal,
-  } from "@/lib/editor-core/searchMatchHighlight";
+  import { SearchMatchHighlight, type SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
+  import { PendingReveals } from "@/lib/editor-core/pendingReveals";
+  import { TodoAnchors } from "@/lib/editor-core/todoAnchors";
   import { handleSectionArrow } from "@/lib/editor-core/sectionKeyboardBridge";
   import {
     InteriorityReveal,
@@ -63,7 +61,6 @@
   import {
     closeLabelFromDoc,
     dedupeMutationIds,
-    revealMutationPill,
     transactionInsertsMutation,
     unitRows,
   } from "@/lib/editor-core/mutationNodes";
@@ -88,7 +85,7 @@
     type FloatingMenuState,
     type ToolbarAction,
   } from "@/lib/editor-core/selectionToolbar";
-  import { formattingToolbarParts } from "@/lib/editor-core/formattingToolbarActions";
+  import { bodyToolbarActions } from "@/lib/editor-core/formattingToolbarActions";
   import { visibleSelectionRect, selectionEndpointRect } from "@/lib/editor-core/selectionRects";
   import { tableExtensions } from "@/lib/editor-core/alignedTable";
   import ProseSlashMenu from "./ProseSlashMenu.svelte";
@@ -287,13 +284,20 @@
   let selectionToolbarActions: ToolbarAction[] = $state([]);
   let slashMenu: SlashMenuState = $state({ visible: false, x: 0, y: 0, selectedIndex: 0, mode: "commands", gridRows: 1, gridCols: 1 });
   let openToolbarMenuId: string | null = $state(null);
-  let reconcilingTodoAnchors = false;
   let reconcilingMutationIds = false;
-  let highlightedTodoId: string | null = null;
 
   // V2: per-scene continuation cost rollup. Resets when you switch
   // scenes or reload the page. Frontend-only. Bound out as props above.
   let lastSeenSceneIdForCost: string | null = $state(null);
+
+  // TODO-anchor mark operations (selection→TODO, dedupe, DOM sync, the
+  // scroll-and-pulse reveal) — extracted to lib/editor-core/todoAnchors.ts
+  // (#2126). Not `$state`: its own fields are read only
+  // from inside the class.
+  const todoAnchors = new TodoAnchors({
+    getEditor: () => editor,
+    getElement: () => editorElement ?? null,
+  });
 
   // The inline AI-suggestion pipeline (fire prompt → stream into the doc →
   // accept/revert/retry). Owns its own AI `$state`; the host reads it for the
@@ -396,8 +400,8 @@
       editor.commands.setContent(html || "<p></p>", { emitUpdate: false });
     }
     loadedSceneId = sceneId;
-    enforceUniqueTodoAnchors();
-    syncTodoAnchorDomState(true);
+    todoAnchors.enforceUnique();
+    todoAnchors.syncDomState();
     if (!reconcile) {
       editor.view.updateState(stateAtDocumentBoundary(editor.state));
     }
@@ -405,8 +409,7 @@
     syncEditorEmpty();
     updateSelectionMenu();
     publishImplicitContext();
-    applyPendingReveal();
-    applyPendingReviewReveal();
+    reveals.apply(loadedSceneId, editor, editorElement ?? null);
     // Restore the remembered scroll (#2013) on a real open only, once the
     // just-set content has laid out. A frame with no height (the node reopened
     // on a list tab, so this host is hidden) holds the offset for the
@@ -429,8 +432,7 @@
   export function clearEditor(): void {
     editor?.commands.clearContent(false);
     loadedSceneId = null;
-    pendingReveal = null;
-    pendingReviewReveal = null;
+    reveals.clear();
     liveWordCount = 0;
     syncEditorEmpty();
   }
@@ -463,64 +465,39 @@
     return editorHtmlToSceneMarkdown(editor.getHTML());
   }
 
-  // A search hit's reveal (#1925), applied once the document it targets is
-  // loaded: the hit's pane may have just opened, and `loadScene` finishes
-  // after the opener's tick. Keyed to that document — a load of any other
-  // (the pane moved on) drops it rather than marking a document nobody
-  // searched. The editor marks the matches itself (searchMatchHighlight.ts):
-  // no markdown offset crosses this seam.
-  let pendingReveal: { sceneId: string; reveal: SearchReveal } | null = null;
+  // Search-hit reveals (#1925) and review-item reveals (#2124) — queued until
+  // the document they target is loaded (the hit's pane may have just
+  // opened, and `loadScene` finishes after the opener's tick) — live in
+  // PendingReveals (lib/editor-core/pendingReveals.ts); these exports are
+  // its call sites.
+  const reveals = new PendingReveals();
+
+  // Shared shape behind the three reveal exports below: queue against the
+  // open scene's id, then apply immediately iff that scene is the LOADED one
+  // (a reveal for a pane whose `loadScene` hasn't finished yet stays queued).
+  // `current` is captured once so the closure never needs a `scene!` — `scene`
+  // is re-checked null-safe by the guard above it.
+  function queueReveal(queue: (id: string) => void): void {
+    if (!scene) return;
+    const current = scene;
+    queue(current.id);
+    if (loadedSceneId === current.id) reveals.apply(loadedSceneId, editor, editorElement ?? null);
+  }
 
   export function revealSearchMatch(reveal: SearchReveal): void {
-    if (!scene) return;
-    pendingReveal = { sceneId: scene.id, reveal };
-    if (loadedSceneId === scene.id) applyPendingReveal();
+    queueReveal((id) => reveals.queueSearch(id, reveal));
   }
 
-  function applyPendingReveal(): void {
-    const pending = pendingReveal;
-    pendingReveal = null;
-    if (!pending || !editor || pending.sceneId !== loadedSceneId) return;
-    editor.commands.revealSearchMatch(pending.reveal);
+  export function revealMutationMarker(markerId: string): void {
+    queueReveal((id) => reveals.queueReview(id, { markerId }));
   }
 
-  // #2124: a review item's reveal, queued the same way `pendingReveal` is —
-  // the pane may not have loaded this scene yet. `mutates_source` reveals its
-  // own marker's pill (mutationNodes.ts); every other reason reveals the
-  // source's first mention by name (searchMatchHighlight.ts), a silent no-op
-  // with nothing to find.
-  let pendingReviewReveal: { sceneId: string; markerId?: string; names?: string[] } | null = null;
-
-  function queueReviewReveal(target: { markerId?: string; names?: string[] }): void {
-    if (!scene) return;
-    pendingReviewReveal = { sceneId: scene.id, ...target };
-    if (loadedSceneId === scene.id) applyPendingReviewReveal();
-  }
-  export const revealMutationMarker = (markerId: string): void => queueReviewReveal({ markerId });
-  export const revealFirstMention = (names: string[]): void => queueReviewReveal({ names });
-
-  function applyPendingReviewReveal(): void {
-    const pending = pendingReviewReveal;
-    pendingReviewReveal = null;
-    if (!pending || !editor || !editorElement || pending.sceneId !== loadedSceneId) return;
-    if (pending.markerId) revealMutationPill(editorElement, pending.markerId);
-    const reveal = pending.names ? firstMentionReveal(editor.state.doc, pending.names) : null;
-    if (reveal) editor.commands.revealSearchMatch(reveal);
+  export function revealFirstMention(names: string[]): void {
+    queueReveal((id) => reveals.queueReview(id, { names }));
   }
 
   export function highlightEmbeddedTodo(todoId: string): void {
-    if (!editorElement) return;
-    const target = editorElement.querySelector<HTMLElement>(`[data-todo-id="${CSS.escape(todoId)}"]`);
-    if (!target) return;
-    highlightedTodoId = todoId;
-    syncTodoAnchorDomState(true);
-    target.scrollIntoView({ block: "center", behavior: "smooth" });
-    window.setTimeout(() => {
-      if (highlightedTodoId === todoId) {
-        highlightedTodoId = null;
-        syncTodoAnchorDomState(true);
-      }
-    }, 2400);
+    todoAnchors.highlight(todoId);
   }
 
   // Called from NodeEditor.submitInputsDialog after the user fills inputs.
@@ -901,63 +878,23 @@
     openToolbarMenuId = openToolbarMenuId === actionId ? null : actionId;
   }
 
-  // Builds the unified menu (#1223). The formatting group (B/I/S, Style)
-  // applies to a text selection; the Table menu applies in a table. Both can
-  // be present (a selection inside a table). The formatting parts are the
-  // shared core the rail's long_text fields use too (#1893); the body adds
-  // Revise and To-do for a SCENE only — a prompt run is refused outside a
-  // scene, and the embedded-todo index scans scenes.
+  // Builds the unified menu (#1223): the shared formatting core (marks, style,
+  // table — lib/editor-core/formattingToolbarActions.ts, shared with the
+  // rail's long_text fields, #1893) plus Revise and To-do for a SCENE only —
+  // a prompt run is refused outside a scene, and the embedded-todo index
+  // scans scenes.
   function getSelectionToolbarActions(hasText: boolean, inTable: boolean): ToolbarAction[] {
     if (!editor) return [];
-    const { marks, style, table } = formattingToolbarParts(editor, hasText, inTable);
     const isScene = documentKind === "manuscript";
-    const actions: ToolbarAction[] = [];
-    if (hasText && style) {
-      const reviseEntries = isScene ? promptEntriesForSurface(promptCtx, "selection") : [];
-      const reviseAction: ToolbarAction | null =
-        reviseEntries.length === 0
-          ? null
-          : reviseEntries.length === 1
-            ? {
-                kind: "button",
-                id: `ai-revise:${reviseEntries[0].id}`,
-                label: `✨ ${reviseEntries[0].title}`,
-                run: () => focusAndRun(() => aiSuggestion.runPromptEntry(reviseEntries[0])),
-              }
-            : {
-                kind: "menu",
-                id: "ai-revise",
-                label: "✨ Revise",
-                items: reviseEntries.map((entry) => ({
-                  id: `ai-revise:${entry.id}`,
-                  label: entry.title,
-                  run: () => focusAndRun(() => aiSuggestion.runPromptEntry(entry)),
-                })),
-              };
-      actions.push(...marks, ...(reviseAction ? [reviseAction] : []), style);
-      if (isScene) actions.push({ kind: "button", id: "todo", label: "TODO", run: markSelectionAsTodo });
-    }
-    if (table) actions.push(table);
-    return actions;
-  }
-
-  // ---------- TODO anchors ----------
-  function markSelectionAsTodo() {
-    if (!editor) return;
-    const { from, to } = editor.state.selection;
-    const selectedText = selectedPlainText();
-    if (!selectedText) return;
-    const anchorId = createTodoId();
-    const docEnd = editor.state.doc.content.size;
-    if (from >= to || from > docEnd || to > docEnd) return;
-    editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from, to)));
-    editor.chain().focus().setMark("todoAnchor", { anchorId, status: "open", note: "" }).run();
-    window.setTimeout(() => syncTodoAnchorDomState(true), 0);
-  }
-
-  function createTodoId() {
-    const randomId = globalThis.crypto?.randomUUID?.().replace(/-/g, "") ?? Math.random().toString(16).slice(2);
-    return `todo_${randomId.slice(0, 12)}`;
+    const reviseEntries = promptEntriesForSurface(promptCtx, "selection");
+    return bodyToolbarActions(editor, {
+      hasText,
+      inTable,
+      isScene,
+      reviseEntries,
+      runPrompt: (entry) => focusAndRun(() => aiSuggestion.runPromptEntry(entry)),
+      markTodo: () => todoAnchors.markSelection(),
+    });
   }
 
   // The `/mutate` dialogs (#33, #69) live in MutationDialogs (state + submit
@@ -978,61 +915,6 @@
     reconcilingMutationIds = false;
     return changed;
   }
-
-  function selectedPlainText() {
-    if (!editor) return "";
-    const { selection } = editor.state;
-    return editor.state.doc.textBetween(selection.from, selection.to, " ").trim();
-  }
-
-  function enforceUniqueTodoAnchors() {
-    const seenAnchorIds = new Set<string>();
-    return removeTodoAnchors((anchorId) => {
-      if (seenAnchorIds.has(anchorId)) return true;
-      seenAnchorIds.add(anchorId);
-      return false;
-    });
-  }
-
-  function removeTodoAnchors(shouldRemove: (anchorId: string) => boolean) {
-    if (!editor || reconcilingTodoAnchors) return false;
-    const markType = editor.state.schema.marks.todoAnchor;
-    if (!markType) return false;
-
-    let transaction = editor.state.tr.setMeta("addToHistory", false);
-    editor.state.doc.descendants((node, position) => {
-      if (!node.isText) return true;
-      for (const mark of node.marks) {
-        if (mark.type !== markType) continue;
-        const anchorId = String(mark.attrs.anchorId ?? "");
-        if (anchorId && shouldRemove(anchorId)) {
-          transaction = transaction.removeMark(position, position + node.nodeSize, mark);
-        }
-      }
-      return true;
-    });
-
-    if (!transaction.docChanged) return false;
-    reconcilingTodoAnchors = true;
-    editor.view.dispatch(transaction);
-    reconcilingTodoAnchors = false;
-    window.setTimeout(() => syncTodoAnchorDomState(true), 0);
-    return true;
-  }
-
-  function syncTodoAnchorDomState(_force = false) {
-    if (!editorElement) return;
-    for (const element of editorElement.querySelectorAll<HTMLElement>("[data-todo-anchor-id]")) {
-      element.dataset.todoId = element.dataset.todoAnchorId;
-      delete element.dataset.todoAnchorId;
-    }
-    for (const element of editorElement.querySelectorAll<HTMLElement>("[data-todo-id]")) {
-      element.classList.toggle("todo-anchor-highlight", element.dataset.todoId === highlightedTodoId);
-      const status = element.dataset.todoStatus === "done" ? "done" : "open";
-      element.title = status === "done" ? "Completed TODO" : "Open TODO";
-    }
-  }
-
 
   // ---------- Editor lifecycle ----------
   function isEmptyTextblock(view: EditorView) {
@@ -1182,14 +1064,14 @@
   // emit one `body-change` event to the parent (NodeEditor) so it can
   // compose its full save payload (title + body + status + ...).
   function handleEditorUpdate(transaction?: Transaction) {
-    if (!enforceUniqueMutationIds(transaction) && !enforceUniqueTodoAnchors()) {
+    if (!enforceUniqueMutationIds(transaction) && !todoAnchors.enforceUnique()) {
       // Skip the body-change emit when a unique-id reconciler made a doc
       // change — its own transaction re-fires onUpdate, so the non-reconciler
       // edits below run on that second pass.
       syncEditorEmpty();
       updateSelectionMenu();
       updateSlashMenuFromContent();
-      syncTodoAnchorDomState(true);
+      todoAnchors.syncDomState();
       updateLiveWordCount();
       publishImplicitContext();
       onBodyChange?.();

@@ -26,11 +26,10 @@
     chatPromptPickList,
     effectivePromptInputs,
     entryIdFromPickValue,
-    resolutionSceneIdFromInputs,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
-  import { coerceInputValue, isInputMissing } from "@/lib/utils/promptInputs";
-  import { buildSelectorRoster, expandSelectorsInEncodedValue } from "@/lib/views/pickerSelectors";
+  import { isInputMissing } from "@/lib/utils/promptInputs";
+  import { buildSelectorRoster } from "@/lib/views/pickerSelectors";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
@@ -40,16 +39,12 @@
   import type {
     AssistantEntrySummary,
     ChangedPick,
-    ChatEstimate,
     ChatMessage,
     ChatSession,
     ChatSessionJournalEntry,
     ChatSessionMessage,
     EditableDocument,
     LoreEntrySummary,
-    LoreFit,
-    PreviewCacheBlock,
-    PreviewMessage,
     PromptEntrySummary,
     SaveChatSessionRequest,
     StructureDocument,
@@ -59,6 +54,7 @@
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { ChatCommitController } from "@/lib/stores/chatCommit.svelte";
+  import { ChatEstimateController } from "@/lib/stores/chatEstimate.svelte";
   import { composerPrefills } from "@/lib/stores/composerPrefill.svelte";
   import { refreshChatSessions } from "@/lib/stores/chats";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
@@ -81,8 +77,10 @@
     seedInputDraftsFromEntry,
     seedPickInputDraft,
     subjectRefFromEntryType,
+    templateInputsFromDrafts,
     ttlChipsFor,
   } from "@/components/editor/body/chat/chatInputs";
+  import { lockPromptTemplate } from "@/components/editor/body/chat/promptTemplateLock";
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
   import { structureNodeTitle } from "@/lib/utils/nodeTitle";
   import { isNearBottom, NEAR_BOTTOM_PX } from "@/lib/utils/scrollAnchor";
@@ -204,39 +202,8 @@
   // The composer instance, for the imperative clear on send (#1083).
   let composerRef: { setValue: (v: string) => void; focus: () => void } | null = $state(null);
   // The Context door (and both picker chips) live in ChatComposerBar (#1086);
-  // this view feeds it chatPreviewMessages below and the two pick callbacks
-  // (pickPromptForChat / pickAssistantForChat).
-  // The rendered messages from the last successful estimate fetch (system +
-  // any templated initial turns). Null when no prompt is bound (freeform: no
-  // system message) or the template hasn't rendered yet (unfilled inputs).
-  let chatPreviewMessages: PreviewMessage[] | null = $state(null);
-  // The send-path cache blocks (system + attached lore tiers) WITH text — what
-  // the model actually receives. The preview popover renders these so the lore
-  // is visible; it lives only in a cache block, never the rendered template.
-  let chatPreviewCacheBlocks: PreviewCacheBlock[] = $state([]);
-  // ADR-0086 S2: the turn-0 preview's own budget fit and its left-out entries'
-  // rendered elements, one cell — what the door's "Left out" section reads
-  // before the first send. Once a turn has reported, the last reporting turn's
-  // `lore_fit` takes over (a stopped or streaming turn never receives one, so
-  // it must not hide the last that did) and a left-out entry's XML is rendered
-  // on request instead (chatLoreXml).
-  let chatPreviewLore: { fit: LoreFit | null; leftOutXml: Record<string, string> } | null =
-    $state(null);
-  const NO_XML: Record<string, string> = {};
-  const doorTurn = $derived(lastReportedTurn(chatHistory));
-  // `$derived.by`, not `$derived(...)`: a nullable `$state` union narrows to
-  // `never` inside a plain derived expression (the S1 cost_usd_total trap).
-  const doorLoreFit = $derived.by(() =>
-    doorTurn ? (doorTurn.lore_fit ?? null) : (chatPreviewLore?.fit ?? null),
-  );
-  const doorLoreLeftOutXml = $derived.by(() =>
-    doorTurn ? NO_XML : (chatPreviewLore?.leftOutXml ?? NO_XML),
-  );
-  function fetchLeftOutXml(entryId: string): Promise<string | null> {
-    const chatId = chatSession?.id;
-    if (!chatId) return Promise.resolve(null);
-    return api.chatLoreXml(chatId, entryId).then((r) => r.xml);
-  }
+  // this view feeds it estimate.previewMessages below and the two pick
+  // callbacks (pickPromptForChat / pickAssistantForChat).
 
   // ---- declared-inputs state (filled before first send for prompt-bound chats) ----
   // Per-input draft values keyed by input.name. JSON-encoded for list-shaped
@@ -250,16 +217,39 @@
   // TTL chips' "remaining" recompute live. Anything else that wants a
   // 1Hz refresh can read this too.
   let ttlTick = $state(0);
-  // Next-turn estimate. Recomputed whenever the inputs that drive it
-  // change (prompt, assistant, drafts). Null when no prompt is bound —
-  // a freeform brief renders no template so there's nothing to estimate
-  // pre-send (the per-turn actuals on the assistant reply tell the user
-  // what it cost retroactively).
-  let chatEstimate: ChatEstimate | null = $state(null);
-  // Stale-response guard: every fetch grabs ourToken = ++chatEstimateToken;
-  // on resolve we drop the response if the token moved. Out-of-order
-  // resolutions are common when the user types fast.
-  let chatEstimateToken = 0;
+  // The turn-0 estimate/preview state (#2129, extracted from this component):
+  // the next-turn cost estimate, the rendered preview messages + cache blocks
+  // that back the Context door, and the turn-0 lore-budget fit, plus the
+  // stale-response token guard — see lib/stores/chatEstimate.svelte.ts, incl.
+  // the ADR-0076 S2 lore-gate mirroring `mayCaptureLoreGate` gates. Constructed
+  // here, ABOVE doorLoreFit/doorLoreLeftOutXml below, which read it eagerly (a
+  // `$derived.by` evaluates immediately when reached).
+  const estimate = new ChatEstimateController({
+    getPromptEntry: () => activePromptEntry,
+    getInputs: () =>
+      activePromptEntry ? templateInputsFromDrafts(activePromptEntry, chatInputDrafts, selectorRoster) : {},
+    getSubject: () => chatSubject,
+    getAssistantId: () => chatAssistantId,
+    mayCaptureLoreGate: () => !isLocked && !chatRunning && !chatSystemPrompt,
+    setLoreEnabled: (v) => {
+      chatLoreEnabled = v;
+    },
+  });
+  const NO_XML: Record<string, string> = {};
+  const doorTurn = $derived(lastReportedTurn(chatHistory));
+  // `$derived.by`, not `$derived(...)`: a nullable `$state` union narrows to
+  // `never` inside a plain derived expression (the S1 cost_usd_total trap).
+  const doorLoreFit = $derived.by(() =>
+    doorTurn ? (doorTurn.lore_fit ?? null) : (estimate.previewLore?.fit ?? null),
+  );
+  const doorLoreLeftOutXml = $derived.by(() =>
+    doorTurn ? NO_XML : (estimate.previewLore?.leftOutXml ?? NO_XML),
+  );
+  function fetchLeftOutXml(entryId: string): Promise<string | null> {
+    const chatId = chatSession?.id;
+    if (!chatId) return Promise.resolve(null);
+    return api.chatLoreXml(chatId, entryId).then((r) => r.xml);
+  }
 
   // ADR-0046 entry-patch commit orchestration lives in its own per-instance rune
   // controller (#849); this view keeps the chat session + cost accounting and
@@ -405,9 +395,7 @@
     chatInput = "";
     chatRewound = false;
     chatSystemPrompt = "";
-    chatPreviewMessages = null;
-    chatPreviewCacheBlocks = [];
-    chatPreviewLore = null;
+    estimate.reset();
     chatPromptEntryId = "";
     chatAssistantId = "";
     chatSubject = "";
@@ -807,7 +795,7 @@
   // field, so system-only prose can't be sent alone → "messages must not be
   // empty"). Read off the estimate preview so the send button knows before the
   // send-time lock render.
-  const promptEndsInUserTurn = $derived(endsInUserTurn(chatPreviewMessages));
+  const promptEndsInUserTurn = $derived(endsInUserTurn(estimate.previewMessages));
 
   async function sendChat() {
     if (chatRunning || commit.committing) return;
@@ -883,61 +871,29 @@
   }
 
   // First-send template render. Mirrors App.svelte's
-  // renderAndLockPromptTemplate (the source of truth). Called from
-  // sendChat right before the first user turn ships, when the chat is
-  // bound to a prompt that hasn't been rendered yet. After this the
-  // preset is locked (chatSystemPrompt is non-empty, chatHistory may
-  // hold initial turns); subsequent sends skip this path.
+  // renderAndLockPromptTemplate (the source of truth). Called from sendChat
+  // right before the first user turn ships, when the chat is bound to a
+  // prompt that hasn't been rendered yet. After this the preset is locked
+  // (chatSystemPrompt is non-empty, chatHistory may hold initial turns);
+  // subsequent sends skip this path. The render + lock itself is the pure
+  // `lockPromptTemplate` helper (chat/promptTemplateLock.ts, #2129) — this
+  // wrapper builds the coerced+expanded inputs (chatInputs.ts'
+  // templateInputsFromDrafts, Seam 0) and assigns the six locked fields.
   async function renderAndLockPromptTemplate(entry: PromptEntrySummary): Promise<boolean> {
-    const inputs: Record<string, unknown> = {};
-    for (const input of effectivePromptInputs(entry)) {
-      const raw = chatInputDrafts[input.name] ?? "";
-      let coerced = coerceInputValue(raw, input.type);
-      if (input.type === "context_pick")
-        coerced = expandSelectorsInEncodedValue(coerced as string, selectorRoster);
-      if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
-    }
-    try {
-      const preview = await api.aiPreview({
-        template_source: entry.body,
-        // ADR-0051 S5: the chat's scene comes from its subject (backend-derived),
-        // not a stored target_scene_id. An explicit scene_ref input still wins.
-        target_scene_id: "",
-        subject: chatSubject,
-        inputs,
-        resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
-        commit: false,
-      });
-      // Render errors come back as 200 + preview.error from /api/ai/preview
-      // (exploratory endpoint). At first-send we DO want to surface them —
-      // the user is committing to a model call that won't have a valid prompt.
-      if (preview.error) {
-        chatError = `Couldn't render prompt template: ${preview.error.message}`;
-        return false;
-      }
-      const messages = preview.messages ?? [];
-      const flatten = (blocks: { text: string }[]) => blocks.map((b) => b.text).join("");
-      const systemBlocks = messages
-        .filter((m) => m.role === "system")
-        .map((m) => flatten(m.blocks));
-      const initialTurns = messages
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({ role: m.role as "user" | "assistant", content: flatten(m.blocks) }));
-      chatSystemPrompt = systemBlocks.join("\n\n");
-      // ADR-0057 §2: capture the execution-derived lore gate from this lock
-      // render. Whether the template actually called relevant_lore() decides
-      // whether the send path injects any lore; persisted with the system
-      // prompt via the very next persistActiveChat.
-      chatLoreEnabled = preview.lore_enabled ?? false;
-      chatUsedNodeIds = preview.used_node_ids ?? [];
-      chatUsedNodeHints = preview.used_node_hints ?? {};
-      chatFieldContractStored = preview.field_contract_stored ?? [];
-      if (initialTurns.length > 0) chatHistory = [...initialTurns];
-      return true;
-    } catch (e) {
-      chatError = `Couldn't render prompt template: ${(e as Error).message}`;
+    const inputs = templateInputsFromDrafts(entry, chatInputDrafts, selectorRoster);
+    const result = await lockPromptTemplate(entry, { subject: chatSubject, inputs });
+    if (!result.ok) {
+      chatError = result.error;
       return false;
     }
+    const { lock } = result;
+    chatSystemPrompt = lock.systemPrompt;
+    chatLoreEnabled = lock.loreEnabled;
+    chatUsedNodeIds = lock.usedNodeIds;
+    chatUsedNodeHints = lock.usedNodeHints;
+    chatFieldContractStored = lock.fieldContractStored;
+    if (lock.initialTurns.length > 0) chatHistory = [...lock.initialTurns];
+    return true;
   }
 
   const runClear = async () => {
@@ -975,93 +931,10 @@
     return () => clearInterval(ttlInterval);
   });
 
-  async function fetchChatEstimate(): Promise<void> {
-    // Invalidate any in-flight fetch FIRST — including on the early returns.
-    // Bumping after them let a previous chat's response land after a switch to
-    // a promptless chat (same token, isLocked false) and write that chat's
-    // lore gate onto this one (S2 review).
-    const ourToken = ++chatEstimateToken;
-    if (!chatPromptEntryId) {
-      chatEstimate = null;
-      chatPreviewMessages = null;
-      chatPreviewCacheBlocks = [];
-      chatPreviewLore = null;
-      return;
-    }
-    const entry = promptEntries.find((p) => p.id === chatPromptEntryId);
-    if (!entry) {
-      chatEstimate = null;
-      chatPreviewMessages = null;
-      chatPreviewCacheBlocks = [];
-      chatPreviewLore = null;
-      return;
-    }
-    const inputs: Record<string, unknown> = {};
-    for (const declared of effectivePromptInputs(entry)) {
-      const raw = chatInputDrafts[declared.name] ?? "";
-      let coerced = coerceInputValue(raw, declared.type);
-      if (declared.type === "context_pick")
-        coerced = expandSelectorsInEncodedValue(coerced as string, selectorRoster);
-      if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
-    }
-    try {
-      const preview = await api.aiPreview({
-        template_source: entry.body,
-        // ADR-0051 S5: scene derives from the chat's subject (see first-send).
-        target_scene_id: "",
-        subject: chatSubject,
-        inputs,
-        resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
-        commit: false,
-        assistant_id: chatAssistantId || null,
-      });
-      if (ourToken !== chatEstimateToken) return;
-      // Preview render errors come back as 200 + preview.error. Don't show
-      // them in the estimate strip — they'll surface when the user sends.
-      if (preview.error) {
-        chatEstimate = null;
-        chatPreviewMessages = null;
-        chatPreviewCacheBlocks = [];
-        chatPreviewLore = null;
-        return;
-      }
-      chatPreviewMessages = preview.messages ?? null;
-      // Keep the block TEXT (the estimate strip strips it to label/tokens); the
-      // preview popover needs it to show the attached lore.
-      chatPreviewCacheBlocks = preview.cache_blocks ?? [];
-      chatPreviewLore = { fit: preview.lore_fit ?? null, leftOutXml: preview.lore_left_out_xml ?? {} };
-      // ADR-0076 S2: pre-lock, this fetch is the only place the lore gate is
-      // known — mirror the lock render's capture (renderAndLockPromptTemplate)
-      // so the Context door's "lore-enabled" annotation is live while the
-      // writer is still filling inputs. Once the lock render has captured the
-      // authoritative value it owns the field — guard on the SAME signals the
-      // lock sets (system prompt) plus the in-flight send, not just isLocked:
-      // during the first send's persist await the history is still empty, so a
-      // stale estimate resolving in that window would clobber the lock's
-      // capture and persist a wrong gate (S2 review).
-      if (!isLocked && !chatRunning && !chatSystemPrompt) {
-        chatLoreEnabled = preview.lore_enabled ?? false;
-      }
-      chatEstimate = {
-        tokens: preview.estimated_tokens ?? 0,
-        cost_usd: preview.estimated_cost_usd ?? null,
-        cached: preview.cached ?? null,
-        warnings: preview.warnings ?? [],
-        // The meta line now reads these summaries for the cache term
-        // (ADR-0084 §6, `cacheTermSecondsFor`) — the door still reads the
-        // FULL blocks via chatPreviewCacheBlocks above for text/entries.
-        cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
-          label: b.label,
-          tokens: b.tokens,
-          tier: b.tier,
-          cached: b.cached,
-          ttl_seconds: b.ttl_seconds,
-        })),
-      };
-    } catch {
-      // Non-render failure — same UX.
-    }
-  }
+  // fetchChatEstimate moved to lib/stores/chatEstimate.svelte.ts as
+  // ChatEstimateController.fetch() (#2129) — the `estimate` instance
+  // constructed above; the $effect.pre below still lists its own deps and
+  // calls `void estimate.fetch()`.
 
   // ttlChipsFor (per-slot TTL chips) moved to chat/chatInputs.ts (#99).
   // It reads ttlTick so chips recompute live, and activeChatCacheWriteTimes
@@ -1193,7 +1066,7 @@
   // locked chat whose inputs form is no longer mounted (S2 review).
   let sendBlockingInputs = $derived(isLocked ? [] : missingRequiredInputs);
   let ttlChips = $derived(
-    ttlChipsFor(activeChatCacheWriteTimes, ttlTick, cacheTermSecondsFor(chatEstimate)),
+    ttlChipsFor(activeChatCacheWriteTimes, ttlTick, cacheTermSecondsFor(estimate.estimate)),
   );
   // The session-cost line's number (ADR-0076 decision 6, Amendment 3): the
   // snapshot's total, which every server response that changed it assigns —
@@ -1208,7 +1081,7 @@
     chatAssistantId;
     chatInputDrafts;
     promptEntries.length;
-    void fetchChatEstimate();
+    void estimate.fetch();
   });
 </script>
 
@@ -1231,8 +1104,8 @@
       {assistantScope}
       {scopedDefaultId}
       {chatSystemPrompt}
-      {chatPreviewMessages}
-      previewCacheBlocks={chatPreviewCacheBlocks}
+      chatPreviewMessages={estimate.previewMessages}
+      previewCacheBlocks={estimate.previewCacheBlocks}
       loreFit={doorLoreFit}
       loreLeftOutXml={doorLoreLeftOutXml}
       {fetchLeftOutXml}
@@ -1270,7 +1143,7 @@
       />
     {/if}
 
-    <ChatMetaLine estimate={chatEstimate} {ttlChips} {sessionCostUsd} />
+    <ChatMetaLine estimate={estimate.estimate} {ttlChips} {sessionCostUsd} />
 
     {#if chatError}
       <p class="cbv-error">{chatError}</p>

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Editor } from "@tiptap/core";
-import { formattingToolbarActions, formattingToolbarParts } from "./formattingToolbarActions";
+import { bodyToolbarActions, formattingToolbarActions, formattingToolbarParts } from "./formattingToolbarActions";
 import { setSelectionHeading, wrapSelectionBlock } from "./blockTransforms";
 import { isToolbarSeparator, isToolbarSubmenu, type ToolbarAction, type ToolbarMenuEntry } from "./selectionToolbar";
 
@@ -139,5 +139,90 @@ describe("formattingToolbarActions (the rail's long_text toolbar, #1884 slice 1)
     expect(actionIds(formattingToolbarActions(editor, true, true))).toEqual(["bold", "italic", "strike", "style", "table"]);
     expect(actionIds(formattingToolbarActions(editor, false, true))).toEqual(["table"]);
     expect(formattingToolbarActions(editor, false, false)).toEqual([]);
+  });
+});
+
+describe("bodyToolbarActions (ProseBodyView's toolbar, #1893 seam extraction)", () => {
+  const entryA = { id: "prompt_a", title: "Tighten" };
+  const entryB = { id: "prompt_b", title: "Loosen" };
+
+  it("one revise entry: a button labelled with its title, that runs it", () => {
+    const { editor } = makeEditor();
+    const runPrompt = vi.fn();
+    const actions = bodyToolbarActions(editor, {
+      hasText: true,
+      inTable: false,
+      isScene: true,
+      reviseEntries: [entryA],
+      runPrompt,
+      markTodo: vi.fn(),
+    });
+    expect(actionIds(actions)).toEqual(["bold", "italic", "strike", "ai-revise:prompt_a", "style", "todo"]);
+    const revise = actions.find((a) => a.id === "ai-revise:prompt_a");
+    if (!revise || revise.kind !== "button") throw new Error("expected a button");
+    expect(revise.label).toBe("✨ Tighten");
+    void revise.run();
+    expect(runPrompt).toHaveBeenCalledWith(entryA);
+  });
+
+  it("two revise entries: a menu with both items", () => {
+    const { editor } = makeEditor();
+    const runPrompt = vi.fn();
+    const actions = bodyToolbarActions(editor, {
+      hasText: true,
+      inTable: false,
+      isScene: true,
+      reviseEntries: [entryA, entryB],
+      runPrompt,
+      markTodo: vi.fn(),
+    });
+    const revise = actions.find((a) => a.id === "ai-revise");
+    if (!revise || revise.kind !== "menu") throw new Error("expected a menu");
+    expect(leafIds(revise.items)).toEqual(["ai-revise:prompt_a", "ai-revise:prompt_b"]);
+    runLeaf(revise.items, "ai-revise:prompt_b");
+    expect(runPrompt).toHaveBeenCalledWith(entryB);
+  });
+
+  it("isScene false: no Revise, no TODO", () => {
+    const { editor } = makeEditor();
+    const actions = bodyToolbarActions(editor, {
+      hasText: true,
+      inTable: false,
+      isScene: false,
+      reviseEntries: [entryA],
+      runPrompt: vi.fn(),
+      markTodo: vi.fn(),
+    });
+    expect(actionIds(actions)).toEqual(["bold", "italic", "strike", "style"]);
+  });
+
+  it("table only (caret in a table, no selection): just the table action", () => {
+    const { editor } = makeEditor();
+    const actions = bodyToolbarActions(editor, {
+      hasText: false,
+      inTable: true,
+      isScene: true,
+      reviseEntries: [],
+      runPrompt: vi.fn(),
+      markTodo: vi.fn(),
+    });
+    expect(actionIds(actions)).toEqual(["table"]);
+  });
+
+  it("the TODO button delegates to markTodo", () => {
+    const { editor } = makeEditor();
+    const markTodo = vi.fn();
+    const actions = bodyToolbarActions(editor, {
+      hasText: true,
+      inTable: false,
+      isScene: true,
+      reviseEntries: [],
+      runPrompt: vi.fn(),
+      markTodo,
+    });
+    const todo = actions.find((a) => a.id === "todo");
+    if (!todo || todo.kind !== "button") throw new Error("expected a button");
+    void todo.run();
+    expect(markTodo).toHaveBeenCalledTimes(1);
   });
 });

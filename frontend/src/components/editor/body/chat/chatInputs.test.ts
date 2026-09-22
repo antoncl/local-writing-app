@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+import type { NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 import {
   cacheTermSecondsFor,
   carrySubjectSeeds,
@@ -12,10 +12,12 @@ import {
   seedPickInputDraft,
   seedSubjectEntryInput,
   subjectRefFromEntryType,
+  templateInputsFromDrafts,
   ttlChipsFor,
 } from "./chatInputs";
 import type { ChatEstimate } from "@/lib/types";
 import { isInputMissing } from "@/lib/utils/promptInputs";
+import { buildSelectorRoster } from "@/lib/views/pickerSelectors";
 
 // Minimal input factory — only the fields the helpers read.
 const input = (type: PromptInputDefinition["type"], extra: Partial<PromptInputDefinition> = {}): PromptInputDefinition =>
@@ -390,6 +392,42 @@ describe("formatCacheTerm", () => {
 
   it("formats hours at/above 3600s", () => {
     expect(formatCacheTerm(3600)).toBe("1h");
+  });
+});
+
+describe("templateInputsFromDrafts (#2129 — the shared coerce+expand loop)", () => {
+  const promptWithInputs = (inputs: PromptInputDefinition[]): PromptEntrySummary =>
+    ({ id: "p", title: "P", inputs }) as PromptEntrySummary;
+
+  it("coerces a text input, drops an empty one, and expands a context_pick selector", () => {
+    const villain: NodePickerRef = { id: "tagged:lore:villain", kind: "tag", title: "villain", selector: { kind: "lore", expr: { tagged: "villain" } } };
+    const roster = buildSelectorRoster({
+      loreEntries: [
+        { id: "lore_a", title: "Vex", entry_type: "lore:character", metadata: { tags: ["villain"] } },
+        { id: "lore_b", title: "Mara", entry_type: "lore:character", metadata: { tags: ["hero"] } },
+      ] as never,
+    });
+    const entry = promptWithInputs([
+      { name: "note", type: "text" } as PromptInputDefinition,
+      { name: "empty", type: "text" } as PromptInputDefinition,
+      { name: "picks", type: "context_pick" } as PromptInputDefinition,
+    ]);
+    const drafts = {
+      note: "hello",
+      empty: "",
+      picks: JSON.stringify([villain]),
+    };
+    const result = templateInputsFromDrafts(entry, drafts, roster);
+    expect(result.note).toBe("hello");
+    expect(result.empty).toBeUndefined();
+    expect(JSON.parse(result.picks as string)).toEqual([
+      { id: "lore_a", kind: "lore", title: "Vex", entry_type: "lore:character" },
+    ]);
+  });
+
+  it("returns {} for a prompt with no drafts filled in", () => {
+    const entry = promptWithInputs([{ name: "note", type: "text" } as PromptInputDefinition]);
+    expect(templateInputsFromDrafts(entry, {}, buildSelectorRoster({}))).toEqual({});
   });
 });
 

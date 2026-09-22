@@ -3,6 +3,7 @@
 // and are unit-testable in isolation.
 import { effectivePromptInputs } from "@/lib/editor-core/promptResolution";
 import { coerceInputValue, decodePickerValue, isListShapedInputType } from "@/lib/utils/promptInputs";
+import { expandSelectorsInEncodedValue, type SelectorRoster } from "@/lib/views/pickerSelectors";
 import type { ChatEstimate, NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
 export function defaultDraftFor(input: PromptInputDefinition): string {
@@ -197,6 +198,28 @@ export function decodeChatInputDrafts(
     drafts[name] = typeof value === "string" ? value : JSON.stringify(value);
   }
   return drafts;
+}
+
+// Seam 0 (#2129): the input-coercion loop `renderAndLockPromptTemplate` and
+// `fetchChatEstimate` both ran — for each of the prompt's EFFECTIVE inputs,
+// read the draft (defaulting to ""), coerce it to the input's declared type,
+// expand any selector refs a `context_pick` carries against the surface's
+// roster, and keep only the non-null/non-empty results. One function so the
+// lock render and the estimate preview can never drift on what they send.
+export function templateInputsFromDrafts(
+  entry: PromptEntrySummary,
+  drafts: Record<string, string>,
+  roster: SelectorRoster,
+): Record<string, unknown> {
+  const inputs: Record<string, unknown> = {};
+  for (const input of effectivePromptInputs(entry)) {
+    const raw = drafts[input.name] ?? "";
+    let coerced = coerceInputValue(raw, input.type);
+    if (input.type === "context_pick")
+      coerced = expandSelectorsInEncodedValue(coerced as string, roster);
+    if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
+  }
+  return inputs;
 }
 
 // isInputMissing moved to promptInputs.ts (#1482) — one predicate, shared by

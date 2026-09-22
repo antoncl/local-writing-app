@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.models import (
+    ChangeCandidateSet,
     CreateLoreEntryRequest,
     CreateMutationSetEntryRequest,
     CreatePromptEntryRequest,
@@ -94,6 +95,16 @@ def get_entity_effective_state(
         return EffectiveStateResponse(
             entity_id=entity_id, scene_id=scene, position=pos, values=values
         )
+
+
+@router.get("/api/lore/{entity_id}/change-candidates", response_model=ChangeCandidateSet)
+def list_change_candidates(
+    project: CurrentProject, entity_id: str, baseline: str | None = None
+) -> ChangeCandidateSet:
+    """The ADR-0090 §2 candidate set for a settled change to `entity_id` — read
+    only, writes nothing."""
+    with translate_errors():
+        return project.change_candidates(entity_id, baseline)
 
 
 @router.put("/api/lore/{entry_id}", response_model=LoreEntry)

@@ -68,6 +68,11 @@ from app.models.ai import (
 )
 from app.models.annotations import (
     Backlink,
+    ChangeCandidate,
+    ChangeCandidateReason,
+    ChangeCandidateRoute,
+    ChangeCandidateSet,
+    ChangeCandidateTier,
     CreateTodoRequest,
     EffectiveStateResponse,
     EmbeddedTodo,
@@ -314,6 +319,11 @@ __all__ = [
     "AssistantEntryList",
     "AssistantEntrySummary",
     "Backlink",
+    "ChangeCandidate",
+    "ChangeCandidateReason",
+    "ChangeCandidateRoute",
+    "ChangeCandidateSet",
+    "ChangeCandidateTier",
     "ChangedPick",
     "ChatChangedPicksResponse",
     "ChatLoreXmlResponse",

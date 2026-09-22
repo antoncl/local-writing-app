@@ -132,6 +132,51 @@ class RewriteMutationUnitRequest(BaseModel):
     name: str | None = None
 
 
+ChangeCandidateRoute = Literal[
+    "references_source", "referenced_by_source", "mutates_source", "mentions_source"
+]
+ChangeCandidateTier = Literal["declared", "marker_untouched", "mention"]
+
+
+class ChangeCandidateReason(BaseModel):
+    """One route a `ChangeCandidate` was found by (ADR-0090 §2). `field_id` is
+    the referencing field for the two reference routes and the marker's field
+    for `mutates_source`; `marker_id` and `field_changed` are `mutates_source`
+    only — `field_changed` is whether the marker's own field is among the
+    diff's `changed_fields` (always True when there is no baseline)."""
+
+    route: ChangeCandidateRoute
+    field_id: str = ""
+    marker_id: str = ""
+    field_changed: bool = False
+
+
+class ChangeCandidate(BaseModel):
+    """One dependent of a settled change, with every route that found it
+    (ADR-0090 §2). A node reachable by more than one route appears once."""
+
+    id: str
+    kind: str
+    entry_type: str
+    title: str
+    tier: ChangeCandidateTier
+    reasons: list[ChangeCandidateReason] = Field(default_factory=list)
+
+
+class ChangeCandidateSet(BaseModel):
+    """The candidate set for one settled lore change (ADR-0090 §2) — a list of
+    `(node, reasons)` and nothing else; no score, no threshold, no cut.
+    `whole_entry=True` (no baseline given) means every field counts as changed,
+    so every `mutates_source` marker ranks as `declared`."""
+
+    source_id: str
+    baseline_snapshot_id: str = ""
+    changed_fields: list[str] = Field(default_factory=list)
+    body_changed: bool
+    whole_entry: bool
+    items: list[ChangeCandidate] = Field(default_factory=list)
+
+
 class EffectiveStateResponse(BaseModel):
     """Effective mutation overrides for one lore entity as of a (scene,
     position) — the fields with a live mutation there, each mapped to its

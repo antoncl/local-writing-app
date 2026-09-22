@@ -396,6 +396,12 @@ class ChangePropagationTests(unittest.TestCase):
         candidates_after = self.client.get(f"/api/lore/{self.marek}/change-candidates")
         self.assertEqual(candidates_after.status_code, 200, candidates_after.text)
         self.assertEqual(candidates_after.json()["baseline_snapshot_id"], body["snapshot"]["id"])
+        # Amendment 3's additive fields reach the wire: a flat project has one
+        # composing file (the owner) and no delta captures.
+        self.assertEqual(body["layer_snapshots"], [])
+        layers = candidates_after.json()["layers"]
+        self.assertEqual([layer["is_override"] for layer in layers], [False])
+        self.assertEqual(layers[0]["baseline_snapshot_id"], body["snapshot"]["id"])
 
         forced_whole = self.client.get(
             f"/api/lore/{self.marek}/change-candidates", params={"baseline": ""}

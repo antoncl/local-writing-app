@@ -522,6 +522,48 @@ class LayeredBaselineTests(unittest.TestCase):
         self.assertFalse(by_layer[self.book_id].whole)
         self.assertEqual(by_layer[self.book_id].changed_fields, ["rank"])
 
+    def test_a_delta_at_an_intermediate_layer_composes_the_source(self) -> None:
+        """Owner at the base, delta at the series, opened from the book: the
+        series delta lies strictly between owner and open layer and must be
+        in the composing set (`owner < rank <= open`) — the filter the
+        full-walk rank lookup exists for."""
+        base_writer = ProjectService(WorkScope(root=self.base))
+        declare_full_chain(base_writer, self.base, self.base)
+        hollis = base_writer.create_lore_entry(
+            CreateLoreEntryRequest(title="Hollis Brand", entry_type="lore:character")
+        ).id
+        base_writer.save_lore_entry(
+            hollis,
+            SaveLoreEntryRequest(
+                title="Hollis Brand", body="Quartermaster.", entry_type="lore:character", metadata={"rank": "Corporal"}
+            ),
+        )
+        kind = self.service.node_snapshot_kind(hollis)
+        baseline = self.service.capture_snapshot(hollis, kind=kind)
+        # A series-layer override, written from the open book with an explicit
+        # authoring layer between the owner and the book.
+        self.service.save_lore_entry(
+            hollis,
+            SaveLoreEntryRequest(
+                title="Hollis Brand",
+                body="Quartermaster.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.series_id,
+            ),
+        )
+
+        result = self.service.change_candidates(hollis, baseline_snapshot_id=baseline.id)
+        self.assertEqual(result.changed_fields, ["rank"])
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        self.assertNotIn(self.book_id, by_layer)  # the book holds no delta
+        series_layer = by_layer[self.series_id]
+        self.assertTrue(series_layer.is_override)
+        self.assertTrue(series_layer.whole)
+        self.assertEqual(series_layer.changed_fields, ["rank"])
+        owner_layer = next(layer for layer in result.layers if not layer.is_override)
+        self.assertEqual(owner_layer.changed_fields, [])
+
     def test_a_removed_delta_is_a_change_of_its_fields(self) -> None:
         """Amendment 3's mirror case: a delta that composed the source at the
         last propagation and has since been removed makes its fields fall

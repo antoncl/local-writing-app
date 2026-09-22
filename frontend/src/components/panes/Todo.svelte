@@ -9,6 +9,8 @@
   // slot, the editable description its body, the open/delete actions its
   // trailing slot. Every mutation routes through the todoActions controller
   // (intentful backend endpoints) and is passed in as a callback.
+  import { reviewItemSourceDetail } from "@/lib/utils/reviewItemDetail";
+
   let {
     todos,
     embeddedTodos,
@@ -25,6 +27,7 @@
     onUpdateEmbeddedTodoNote,
     onOpenEmbeddedTodo,
     onDeleteEmbeddedTodo,
+    nodeTitle,
   }: {
     todos: TodoItem[];
     embeddedTodos: EmbeddedTodoRecord[];
@@ -39,7 +42,17 @@
     onUpdateEmbeddedTodoNote: (item: EmbeddedTodoRecord, note: string) => void;
     onOpenEmbeddedTodo: (item: EmbeddedTodoRecord) => void;
     onDeleteEmbeddedTodo: (item: EmbeddedTodoRecord) => void;
+    // ADR-0090 §3/§6: resolves a review item's source id to its title, when a
+    // cheap lookup exists (App threads the lore-entries roster). Absent lookup
+    // or an unresolved id both fall back to showing the bare id.
+    nodeTitle?: (id: string) => string | undefined;
   } = $props();
+
+  function sourceDetailLine(item: TodoItem): string | null {
+    if (!item.source) return null;
+    const title = nodeTitle?.(item.source.node_id) ?? item.source.node_id;
+    return `review item · ${reviewItemSourceDetail(item.source, title)}`;
+  }
 </script>
 
 <div class="todo-entry">
@@ -93,6 +106,8 @@
         {#snippet trailing()}
           {#if item.scene_id}
             <button class="todo-open" type="button" onclick={() => onOpenFileTodo(item)}>Open scene</button>
+          {:else if item.node_id}
+            <button class="todo-open" type="button" onclick={() => onOpenFileTodo(item)}>Open entry</button>
           {:else}
             <span class="todo-source">Project</span>
           {/if}
@@ -112,6 +127,9 @@
               onblur={(event) => onUpdateTodoText(item, event.currentTarget.value)}
               onkeydown={(event) => onTodoTextKeydown(event, item)}
             ></textarea>
+            {#if sourceDetailLine(item)}
+              <p class="todo-review-source">{sourceDetailLine(item)}</p>
+            {/if}
           </div>
         {/snippet}
       </NodeCard>
@@ -190,6 +208,15 @@
     font-weight: var(--w-bold);
     letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+
+  /* ADR-0090 §3/§6: a review item's provenance line — quiet, sentence case
+     (unlike `.todo-source`'s uppercase badge, which names a SCOPE, not a
+     sentence). */
+  .todo-review-source {
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
 
   .todo-open {

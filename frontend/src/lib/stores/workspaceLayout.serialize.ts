@@ -73,6 +73,11 @@ export const HOMES: Record<string, string> = {
   // per-tab. Being in HOMES also makes it a known region, so it now survives a
   // reload — PlotBoardPane refetches the projection on restore.
   plotEditor: G_EDITOR,
+  // The Propagate confirm surface (ADR-0090 §7/Amendment 2 §3) is an on-demand
+  // editor tab, not a node document — homes with plotEditor so it tabs beside
+  // the open documents. Not in any preset: it only ever appears via
+  // `ensureVisible` from the Propagate action.
+  propagate: G_EDITOR,
   todo: G_TOOLS,
   search: G_TOOLS,
   // Project AI spend rollup (#10): a stats surface, so it homes with the other
@@ -319,6 +324,7 @@ const MIN_WIDTHS: Record<string, number> = {
   chats: 240,
   // A canvas wants elbow room — match the editor documents it tabs beside.
   plotEditor: EDITOR_MIN_WIDTH,
+  propagate: EDITOR_MIN_WIDTH,
   todo: 200,
   search: 220,
 };

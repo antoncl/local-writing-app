@@ -28,6 +28,7 @@ function snapshot(id: string, capturedAt: string, contentWrittenAt: string, rete
     content_written_at: contentWrittenAt,
     retention,
     description: "",
+    origin: "",
     schema_version: 5,
   };
 }

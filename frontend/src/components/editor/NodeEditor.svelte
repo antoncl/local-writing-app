@@ -630,6 +630,15 @@
     return bodyHost?.tryMergeProse(baseBody, remoteBody) ?? Promise.resolve(null);
   }
 
+  // ADR-0090 Amendment 2 §2: the pending-park intent a review item's source
+  // open consumes — park the foot dock on the baseline snapshot, in compare
+  // mode, the same call the strip's own "park here" gesture makes. A failed
+  // park (an unknown/deleted snapshot) is a silent no-op — `snapshots.park`
+  // already leaves the controller live rather than throwing.
+  export function parkSnapshot(id: string) {
+    void snapshots.park(id);
+  }
+
   $effect.pre(() => {
     if (metadataReload && metadataReload.token !== lastMetadataReloadToken) {
       lastMetadataReloadToken = metadataReload.token;

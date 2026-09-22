@@ -158,10 +158,32 @@ class TodoActions {
     });
   }
 
+  // ADR-0090 §3/Amendment 2 §2: a review item's source opens FIRST — parked
+  // on its baseline snapshot when the item names one — and the dependent
+  // (this item's own scope) opens LAST, so it ends up the focused pane. A
+  // writer-authored todo (no `source`) is unaffected: just its own open.
   async openFileTodo(item: TodoItem): Promise<void> {
-    if (!item.scene_id) return;
+    if (!item.scene_id && !item.node_id) return;
     await this.run(async () => {
-      await editorPanes.openScene(item.scene_id!);
+      if (item.source) {
+        const source = item.source;
+        await editorPanes.openLore(source.node_id);
+        if (source.snapshot_id) {
+          // The pane may have just been created: let it mount before the
+          // park reaches its snapshot controller (mirrors the search-hit
+          // reveal's own setTimeout, #1925).
+          window.setTimeout(() => editorPanes.parkSnapshotInOpenPane(source.node_id, source.snapshot_id), 0);
+        }
+      }
+      if (item.node_id) {
+        await editorPanes.openLore(item.node_id);
+      } else if (item.scene_id) {
+        await editorPanes.openScene(item.scene_id);
+        // TODO(#2116 S2b follow-up): scroll the scene to item.source?.marker_id
+        // — no existing per-pane handle reveals a mutation marker by id
+        // (grepped editorPaneComponents / highlightMutation / revealMarker /
+        // scrollToMarker); building one is out of this slice's scope.
+      }
     });
   }
 }

@@ -109,6 +109,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
             "context_policy",
             "conversations",
             "mutation_sets",
+            "review_items",
             "references",
         ],
         "color": "slate-blue",

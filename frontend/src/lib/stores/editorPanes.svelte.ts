@@ -120,6 +120,9 @@ interface EditorPaneComponentHandle {
   revealSearchMatch: (reveal: SearchReveal) => void;
   // Rung 2 (ADR-0077). Required so svelte-check fails if NodeEditor drops the forwarder.
   tryMergeProse: (baseBody: string, remoteBody: string) => Promise<string | null>;
+  // ADR-0090 Amendment 2 §2: park the pane's foot dock on a snapshot (compare
+  // mode) — the pending-park intent a review item's source open consumes.
+  parkSnapshot: (snapshotId: string) => void;
 }
 
 const AUTO_SAVE_IDLE_MS = 6000;
@@ -1153,6 +1156,16 @@ class EditorPanesController {
     const pane = this.panes.find((candidate) => candidate.document?.id === nodeId);
     if (!pane) return;
     this.editorPaneComponents[pane.id]?.revealSearchMatch(reveal);
+  }
+
+  // ADR-0090 Amendment 2 §2: park a review item's source in compare mode on
+  // the baseline snapshot — the pane may have just been created (its
+  // controller mounts async), so a missing handle or a failed park is a
+  // silent no-op; the pane already stays put with nothing parked.
+  parkSnapshotInOpenPane(nodeId: string, snapshotId: string): void {
+    const pane = this.panes.find((candidate) => candidate.document?.id === nodeId);
+    if (!pane) return;
+    this.editorPaneComponents[pane.id]?.parkSnapshot(snapshotId);
   }
 
   // The generic post-write reconcile entry point (ADR-0085 §5) — extracted to

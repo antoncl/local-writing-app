@@ -29,6 +29,10 @@ export type Snapshot = {
    *  denormalized title — empty on every automatic snapshot and every explicit
    *  one taken in flow, which is the common case (ADR-0044 §L). */
   description: string;
+  /** Which mechanism captured this snapshot as its own baseline, additive and
+   *  optional (ADR-0090 §1) — `""` for an ordinary capture, `"propagation"`
+   *  for the baseline a confirmed Propagate leaves behind. */
+  origin: string;
   schema_version: number;
 };
 

@@ -36,6 +36,9 @@
     collapsible?: boolean;
     state: PickTreeState;
     title: string;
+    /** One-line reason text under the title (ADR-0090 §7: a candidate's routes
+     * must stay visible) — passed straight through to NodeRow's `detail` prop. */
+    detail?: string | null;
     /** The kind-colour hex for the row's curved stripe (ADR-0066), or null. */
     stripeColor?: string | null;
     /** A count badge (descendant scenes / live members), or null for a plain leaf. */
@@ -44,6 +47,10 @@
     countNoun: string;
     /** Explicit plural when it isn't `countNoun + "s"` ("match" → "matches"). */
     countNounPlural?: string;
+    /** Verbatim replacement for the count badge's text (e.g. "4 of 4") — a
+     * kept-of-total reading `count`/`countNoun` alone can't express. Wins over
+     * `count` when set. */
+    countText?: string;
     onToggle: () => void;
     onCollapse: () => void;
   }
@@ -98,6 +105,7 @@
         {/if}
         <NodeRow
           title={row.title}
+          detail={row.detail ?? null}
           stripeColor={row.stripeColor ?? null}
           selected={isPickable(row) ? rowSelected(row.state) : undefined}
           groupHeader={row.isContainer && !isPickable(row)}
@@ -120,7 +128,9 @@
             {/if}
           {/snippet}
           {#snippet trailing()}
-            {#if row.count !== null}
+            {#if row.countText !== undefined}
+              <span class="ctx-row-count">{row.countText}</span>
+            {:else if row.count !== null}
               <span class="ctx-row-count"
                 >{row.count} {row.count === 1 ? row.countNoun : (row.countNounPlural ?? `${row.countNoun}s`)}</span
               >

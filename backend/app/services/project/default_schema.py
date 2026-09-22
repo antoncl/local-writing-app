@@ -53,6 +53,7 @@ BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
     "references",
     "conversations",
     "mutation_sets",
+    "review_items",
     "assistant_listed",
     "assistant_position",
     "path",
@@ -759,6 +760,21 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "computed",
             "computed": {"function": "mutation_sets", "value_type": "node_set"},
             "group": "Mutation sets",
+        },
+        "review_items": {
+            # ADR-0090 Amendment 2 §1: the open review items whose dependent
+            # is this entry, a computed collection field tab like
+            # `conversations` / `mutation_sets` — rendered by
+            # ReviewItemsPanel bound to this field's tab. NO stored value —
+            # resolved by the panel's own store (the `$todosStore` filter),
+            # not by computed_metadata.py (the loose function dispatch there
+            # simply skips the unknown `review_items` function). Lore-scoped:
+            # seeded only onto lore:base — a scene's review items show in the
+            # todo pane, not on a field tab.
+            "name": "Review items",
+            "type": "computed",
+            "computed": {"function": "review_items", "value_type": "node_set"},
+            "group": "Review items",
         },
         "layer": {
             # The inheritance LAYER a node is resolved from (#1928) — the

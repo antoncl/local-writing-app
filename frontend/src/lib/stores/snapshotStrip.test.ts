@@ -63,6 +63,7 @@ const SNAPSHOT = {
   content_written_at: "2026-07-21T18:00:00.000000+00:00",
   retention: "kept" as const,
   description: "",
+  origin: "",
   schema_version: 5,
 };
 

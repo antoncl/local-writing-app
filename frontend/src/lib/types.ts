@@ -123,6 +123,17 @@ export type {
   SaveChatSessionRequest,
 } from "./aiTypes";
 
+// ADR-0090 propagation wire types — see ./propagationTypes.
+export type {
+  ChangeCandidateRoute,
+  ChangeCandidateTier,
+  ChangeCandidateReason,
+  ChangeCandidate,
+  ChangeCandidateSet,
+  PropagateRequest,
+  PropagateResponse,
+} from "./propagationTypes";
+
 export * from "./workspaceTypes";
 export * from "./manuscriptTypes";
 export * from "./loreTypes";

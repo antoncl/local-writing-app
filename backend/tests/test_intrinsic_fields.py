@@ -241,6 +241,23 @@ class IntrinsicFieldTests(unittest.TestCase):
         self.assertIn("mutation_sets", schema.entry_types["lore:character"].fields)
         self.assertNotIn("mutation_sets", schema.entry_types["manuscript:scene"].fields)
 
+    def test_review_items_is_a_builtin_node_set_computed_field(self) -> None:
+        # ADR-0090 Amendment 2 §1: review items get the same computed
+        # collection field tab as `conversations` / `mutation_sets` — no
+        # stored value, resolved by ReviewItemsPanel's own store. Lore-scoped:
+        # seeded ONLY onto lore:base (a scene's items show in the todo pane).
+        schema = self.service.read_metadata_schema()
+        review_items = schema.fields.get("review_items")
+        self.assertIsNotNone(review_items, "review_items catalog field is missing")
+        assert review_items is not None  # narrow for the type checker
+        self.assertEqual(review_items.category, "computed")
+        self.assertEqual(review_items.type, "computed")
+        self.assertEqual(review_items.name, "Review items")
+        self.assertEqual((review_items.computed or {}).get("value_type"), "node_set")
+        self.assertEqual(review_items.group, "Review items")
+        self.assertIn("review_items", schema.entry_types["lore:character"].fields)
+        self.assertNotIn("review_items", schema.entry_types["manuscript:scene"].fields)
+
     def test_title_is_not_stored_in_metadata_after_save(self) -> None:
         # Declaring title/id/entry_type as fields must not cause them to be
         # persisted into the metadata dict — storage stays in front matter.

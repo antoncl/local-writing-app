@@ -19,11 +19,14 @@ from project_fixtures import open_test_project
 from app.main import app
 from app.models import (
     CreateLoreEntryRequest,
+    CreateSceneRequest,
     MetadataFieldDefinition,
     SaveLoreEntryRequest,
+    SaveSceneRequest,
     UpsertMetadataFieldRequest,
 )
 from app.scope import WorkScope
+from app.services.project.node_index_gate import node_index_gate
 from app.services.project_service import ProjectService
 
 
@@ -244,6 +247,20 @@ class ChangeCandidatesTests(unittest.TestCase):
         self.assertLess(order.index(self.ch11), order.index(self.weir_tavern))
         self.assertLess(order.index(self.ch11), order.index(self.ch9))
 
+    def test_layers_is_one_entry_for_a_non_layered_project(self) -> None:
+        """Amendment 3: a project with no ancestor chain has exactly one
+        composing file — the owning file itself."""
+        snapshot = self.service.capture_snapshot(
+            self.marek, kind=self.service.node_snapshot_kind(self.marek)
+        )
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=snapshot.id)
+        self.assertEqual(len(result.layers), 1)
+        layer = result.layers[0]
+        self.assertFalse(layer.is_override)
+        self.assertEqual(layer.baseline_snapshot_id, snapshot.id)
+        self.assertEqual(layer.changed_fields, result.changed_fields)
+        self.assertFalse(layer.whole)
+
     def test_two_markers_on_one_field_in_one_scene_are_two_reasons(self) -> None:
         """The marker id is part of a reason's identity: a scene that mutates
         the same field twice lists both markers, in prose order."""
@@ -378,6 +395,14 @@ class LayeredBaselineTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
+    def _new_scene(self, title: str, body: str) -> str:
+        """A book-scoped scene, created directly through the book-level
+        service — scenes are never inherited (ADR-0039/0040), so this always
+        writes at `self.root`."""
+        scene = self.service.create_scene(CreateSceneRequest(title=title))
+        self.service.save_scene(scene.id, SaveSceneRequest(title=title, body=body))
+        return scene.id
+
     def test_book_override_is_not_a_change_of_the_series_file(self) -> None:
         # The book overrides rank (an explicit write target below the owning
         # layer = a sparse override delta); the series file still says Captain.
@@ -393,6 +418,12 @@ class LayeredBaselineTests(unittest.TestCase):
         )
         kind = self.service.node_snapshot_kind(self.marek)
         snapshot = self.service.capture_snapshot(self.marek, kind=kind)
+        # The book's own lane also gets a baseline — as a real Propagate
+        # confirm would (Amendment 3 §3) — so its later diff measures the
+        # override against ITS OWN prior state, not "no baseline yet".
+        self.service.capture_snapshot(
+            self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
+        )
         # Change only the series body, at the series layer.
         self.service.save_lore_entry(
             self.marek,
@@ -407,6 +438,199 @@ class LayeredBaselineTests(unittest.TestCase):
         result = self.service.change_candidates(self.marek, baseline_snapshot_id=snapshot.id)
         self.assertEqual(result.changed_fields, [])
         self.assertTrue(result.body_changed)
+
+        # Amendment 3: the composing set is the series file plus the book's
+        # override delta, each its own lane. The book's lane is unchanged
+        # since its own baseline, so it reports nothing and `whole=False`.
+        self.assertEqual(len(result.layers), 2)
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        self.assertEqual(set(by_layer), {self.series_id, self.book_id})
+        self.assertFalse(by_layer[self.series_id].is_override)
+        self.assertTrue(by_layer[self.book_id].is_override)
+        self.assertFalse(by_layer[self.book_id].whole)
+        self.assertEqual(by_layer[self.book_id].changed_fields, [])
+
+    def test_book_override_ranks_declared_and_widens_changed_fields(self) -> None:
+        """The #2121 case: a book-layer override on an inherited field IS a
+        change, measured in its own lane — not a no-op read off the
+        unaffected series file. A marker on the overridden field ranks
+        `declared`, changed."""
+        kind = self.service.node_snapshot_kind(self.marek)
+        baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        ch5 = self._new_scene(
+            "Chapter Five",
+            f"<!-- mutate:entity={self.marek};field=rank;value=Sergeant;id=m_rank -->",
+        )
+
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=baseline.id)
+        self.assertEqual(result.changed_fields, ["rank"])
+        self.assertFalse(result.whole_entry)
+
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        book_layer = by_layer[self.book_id]
+        self.assertTrue(book_layer.is_override)
+        self.assertTrue(book_layer.whole)
+        self.assertEqual(book_layer.changed_fields, ["rank"])
+        self.assertEqual(by_layer[self.series_id].changed_fields, [])
+
+        ch5_item = next(item for item in result.items if item.id == ch5)
+        self.assertEqual(ch5_item.tier, "declared")
+        reason = next(r for r in ch5_item.reasons if r.route == "mutates_source")
+        self.assertTrue(reason.field_changed)
+
+    def test_delta_edit_measures_against_its_own_lane_baseline(self) -> None:
+        """Once the book's lane has its own propagation baseline, a later
+        override edit changes only that lane's field."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        kind = self.service.node_snapshot_kind(self.marek)
+        owning_baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        self.service.capture_snapshot(
+            self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
+        )
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Major"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=owning_baseline.id)
+        self.assertEqual(result.changed_fields, ["rank"])
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        self.assertFalse(by_layer[self.book_id].whole)
+        self.assertEqual(by_layer[self.book_id].changed_fields, ["rank"])
+
+    def test_a_delta_at_an_intermediate_layer_composes_the_source(self) -> None:
+        """Owner at the base, delta at the series, opened from the book: the
+        series delta lies strictly between owner and open layer and must be
+        in the composing set (`owner < rank <= open`) — the filter the
+        full-walk rank lookup exists for."""
+        base_writer = ProjectService(WorkScope(root=self.base))
+        declare_full_chain(base_writer, self.base, self.base)
+        hollis = base_writer.create_lore_entry(
+            CreateLoreEntryRequest(title="Hollis Brand", entry_type="lore:character")
+        ).id
+        base_writer.save_lore_entry(
+            hollis,
+            SaveLoreEntryRequest(
+                title="Hollis Brand", body="Quartermaster.", entry_type="lore:character", metadata={"rank": "Corporal"}
+            ),
+        )
+        kind = self.service.node_snapshot_kind(hollis)
+        baseline = self.service.capture_snapshot(hollis, kind=kind)
+        # A series-layer override, written from the open book with an explicit
+        # authoring layer between the owner and the book.
+        self.service.save_lore_entry(
+            hollis,
+            SaveLoreEntryRequest(
+                title="Hollis Brand",
+                body="Quartermaster.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.series_id,
+            ),
+        )
+
+        result = self.service.change_candidates(hollis, baseline_snapshot_id=baseline.id)
+        self.assertEqual(result.changed_fields, ["rank"])
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        self.assertNotIn(self.book_id, by_layer)  # the book holds no delta
+        series_layer = by_layer[self.series_id]
+        self.assertTrue(series_layer.is_override)
+        self.assertTrue(series_layer.whole)
+        self.assertEqual(series_layer.changed_fields, ["rank"])
+        owner_layer = next(layer for layer in result.layers if not layer.is_override)
+        self.assertEqual(owner_layer.changed_fields, [])
+
+    def test_a_removed_delta_is_a_change_of_its_fields(self) -> None:
+        """Amendment 3's mirror case: a delta that composed the source at the
+        last propagation and has since been removed makes its fields fall
+        back to the layer above — a change, read from the lane's baseline
+        rows, although no delta file exists any more."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        kind = self.service.node_snapshot_kind(self.marek)
+        owning_baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        self.service.capture_snapshot(
+            self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
+        )
+        self.service._drop_layer_overrides_for_target(self.root, self.marek)
+        node_index_gate.invalidate()
+
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=owning_baseline.id)
+        self.assertEqual(result.changed_fields, ["rank"])
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        book_layer = by_layer[self.book_id]
+        self.assertTrue(book_layer.is_override)
+        self.assertFalse(book_layer.whole)
+        self.assertEqual(book_layer.changed_fields, ["rank"])
+        self.assertEqual(by_layer[self.series_id].changed_fields, [])
+
+    def test_series_body_edit_after_layered_baselines_leaves_rank_untouched(self) -> None:
+        """With both lanes freshly baselined, editing only the series body
+        reports the body alone — the untouched override lane contributes
+        nothing."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        kind = self.service.node_snapshot_kind(self.marek)
+        owning_baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        self.service.capture_snapshot(
+            self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
+        )
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate, eleven years.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self.series_id,
+            ),
+        )
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=owning_baseline.id)
+        self.assertNotIn("rank", result.changed_fields)
+        self.assertTrue(result.body_changed)
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        self.assertFalse(by_layer[self.book_id].whole)
+        self.assertEqual(by_layer[self.book_id].changed_fields, [])
 
 
 if __name__ == "__main__":

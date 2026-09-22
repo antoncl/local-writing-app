@@ -283,3 +283,22 @@ export function removeMutationNode(editor: Editor, markerId: string): void {
   const node = editor.state.doc.nodeAt(pos);
   if (node) editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
 }
+
+/** A temporary ring on a pill (#2124's review-item reveal) — mirrors the
+ *  embedded-TODO highlight's timer, styled beside `.mutation-pill` in
+ *  styles.css. Not a new resting state: just "you're here". */
+export const MUTATION_PILL_REVEALED_CLASS = "mutation-pill-revealed";
+const MUTATION_PILL_REVEAL_MS = 2400;
+
+/** Scroll a marker's pill into view and flash it — the reveal side of a
+ *  review item whose reason is `mutates_source`. False (a no-op for the
+ *  caller) when the pill isn't in the DOM: a deleted marker, or the doc not
+ *  loaded into `editorElement` yet (the caller queues in that case). */
+export function revealMutationPill(editorElement: HTMLElement, markerId: string): boolean {
+  const target = editorElement.querySelector<HTMLElement>(`[data-mutation-id="${CSS.escape(markerId)}"]`);
+  if (!target) return false;
+  target.classList.add(MUTATION_PILL_REVEALED_CLASS);
+  target.scrollIntoView({ block: "center", behavior: "smooth" });
+  window.setTimeout(() => target.classList.remove(MUTATION_PILL_REVEALED_CLASS), MUTATION_PILL_REVEAL_MS);
+  return true;
+}

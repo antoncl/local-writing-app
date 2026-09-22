@@ -307,6 +307,8 @@ describe("autosaveOnce — through the real controller (#457)", () => {
         highlightEmbeddedTodo: vi.fn(),
         revealSearchMatch: vi.fn(),
         parkSnapshot: vi.fn(),
+        revealMutationMarker: vi.fn(),
+        revealFirstMention: vi.fn(),
       },
     };
     return tryMergeProse;
@@ -438,6 +440,8 @@ describe("flushReviewCommit — changed-on-disk recovery (#1965)", () => {
         highlightEmbeddedTodo: vi.fn(),
         revealSearchMatch: vi.fn(),
         parkSnapshot: vi.fn(),
+        revealMutationMarker: vi.fn(),
+        revealFirstMention: vi.fn(),
       },
     };
   }

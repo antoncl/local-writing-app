@@ -628,6 +628,16 @@
     bodyHost?.revealSearchMatch(reveal);
   }
 
+  // A review item's scene open (#2124): reveal its `mutates_source` marker,
+  // or its source's first mention.
+  export function revealMutationMarker(markerId: string) {
+    bodyHost?.revealMutationMarker(markerId);
+  }
+
+  export function revealFirstMention(names: string[]) {
+    bodyHost?.revealFirstMention(names);
+  }
+
   // Rung 2 of the reconcile ladder (ADR-0077): forward the prose three-way merge
   // to the body view. Absent body view (chat/view) → null, i.e. non-prose, so the
   // 409 handler falls to the dialog.

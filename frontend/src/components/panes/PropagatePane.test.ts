@@ -9,7 +9,7 @@ import PropagatePane from "./PropagatePane.svelte";
 import { propagate } from "@/lib/stores/propagate.svelte";
 import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
 import { api } from "@/lib/api";
-import type { ChangeCandidateSet, LoreEntry, SnapshotList } from "@/lib/types";
+import type { ChangeCandidateSet, LoreEntry, SnapshotDetail, SnapshotList } from "@/lib/types";
 
 function fixture(): ChangeCandidateSet {
   return {
@@ -78,5 +78,63 @@ describe("PropagatePane (ADR-0090 §7)", () => {
     await fireEvent.click(guardButton);
 
     expect(screen.getByRole("button", { name: "Confirm 2 review items" })).toBeInTheDocument();
+  });
+});
+
+// #2125: the diff tints only the ITEMS that changed within a list field, not
+// the whole joined value — an item on both sides carries no tint at all.
+describe("PropagatePane — list-field diff tinting (#2125)", () => {
+  const withBaseline: ChangeCandidateSet = { ...fixture(), baseline_snapshot_id: "snap_1", whole_entry: false };
+  const snapshotDetail: SnapshotDetail = {
+    snapshot: {
+      id: "snap_1",
+      snapshot_of: "lore_marek",
+      captured_at: "2026-07-21T18:00:00.000000+00:00",
+      content_written_at: "2026-07-21T18:00:00.000000+00:00",
+      retention: "kept",
+      description: "",
+      origin: "",
+      schema_version: 1,
+    },
+    title: "Marek Vell",
+    status: "",
+    metadata: { aliases: ["the Captain"] },
+    body: "…",
+  };
+
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    workspaceLayout.reset();
+    propagate.close();
+    vi.spyOn(api, "listChangeCandidates").mockResolvedValue(withBaseline);
+    vi.spyOn(api, "listNodeSnapshots").mockResolvedValue({ snapshots: [] } as SnapshotList);
+    vi.spyOn(api, "readNodeSnapshot").mockResolvedValue(snapshotDetail);
+  });
+
+  it("renders a kept alias 'same' and a newly added one 'now'", async () => {
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue({
+      ...liveEntry,
+      metadata: { aliases: ["the Captain", "the Sergeant"] },
+    });
+    await propagate.open("lore_marek", "Marek Vell");
+    render(PropagatePane);
+
+    const kept = await screen.findByText("the Captain");
+    expect(kept.className).toContain("same");
+    expect(kept.className).not.toContain("pill-was");
+    expect(kept.className).not.toContain("pill-now");
+
+    const added = screen.getByText("the Sergeant");
+    expect(added.className).toContain("pill-now");
+  });
+
+  it("renders a removed alias 'was'", async () => {
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue({ ...liveEntry, metadata: { aliases: [] } });
+    await propagate.open("lore_marek", "Marek Vell");
+    render(PropagatePane);
+
+    const removed = await screen.findByText("the Captain");
+    expect(removed.className).toContain("pill-was");
+    expect(removed.className).not.toContain("same");
   });
 });

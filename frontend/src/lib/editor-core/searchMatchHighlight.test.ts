@@ -12,6 +12,7 @@ import {
   compileSearchPattern,
   findMatches,
   findMatchesInContext,
+  firstMatchPosition,
   SearchMatchHighlight,
   type SearchReveal,
 } from "./searchMatchHighlight";
@@ -175,5 +176,27 @@ describe("chooseMatch", () => {
 
   it("is -1 with nothing to choose from", () => {
     expect(chooseMatch([], { ...found, excerpt: "Aetheria", ordinal: 0 })).toBe(-1);
+  });
+});
+
+// #2124: the first-mention reveal picks the earliest of several candidate
+// names — built on the same scan+pattern the search-hit reveal uses.
+describe("firstMatchPosition", () => {
+  it("returns the earliest position for a name that occurs more than once", () => {
+    const editor = editorWith("<p>Then the Captain spoke. Later, the Captain left.</p>");
+    const pos = firstMatchPosition(editor.state.doc, "the Captain", { matchCase: false, wholeWord: true });
+    expect(pos).not.toBeNull();
+    expect(editor.state.doc.textBetween(pos!, pos! + 11)).toBe("the Captain");
+  });
+
+  it("is null for a name absent from the document", () => {
+    const editor = editorWith("<p>Nothing here but quiet.</p>");
+    expect(firstMatchPosition(editor.state.doc, "the Captain", { matchCase: false, wholeWord: true })).toBeNull();
+  });
+
+  it("respects wholeWord — a name that is only a substring does not match", () => {
+    const editor = editorWith("<p>The Captaincy was a formality.</p>");
+    expect(firstMatchPosition(editor.state.doc, "Captain", { matchCase: false, wholeWord: true })).toBeNull();
+    expect(firstMatchPosition(editor.state.doc, "Captain", { matchCase: false, wholeWord: false })).not.toBeNull();
   });
 });

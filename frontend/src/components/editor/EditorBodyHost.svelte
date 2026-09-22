@@ -297,6 +297,18 @@
     else proseBodyView?.revealSearchMatch(reveal);
   }
 
+  // A review item's scene open (#2124): reveal its `mutates_source` marker,
+  // or its source's first mention. Prose body only — `proseBodyView` is only
+  // bound when `bodyShape === "prose"`, so every other shape is a silent
+  // no-op (no mutation pills, no name matcher, in a code/chat/view body).
+  export function revealMutationMarker(markerId: string): void {
+    proseBodyView?.revealMutationMarker(markerId);
+  }
+
+  export function revealFirstMention(names: string[]): void {
+    proseBodyView?.revealFirstMention(names);
+  }
+
   // Rung 2 of the reconcile ladder (ADR-0077): forward the prose three-way merge
   // to the body view. Absent body view (chat/view) → null, i.e. non-prose, so the
   // 409 handler falls to the dialog.

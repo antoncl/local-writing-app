@@ -39,7 +39,11 @@
     REBUILD_META,
     implicitContextIds,
   } from "@/lib/editor-core/implicitContextHighlight";
-  import { SearchMatchHighlight, type SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
+  import {
+    SearchMatchHighlight,
+    firstMentionReveal,
+    type SearchReveal,
+  } from "@/lib/editor-core/searchMatchHighlight";
   import { handleSectionArrow } from "@/lib/editor-core/sectionKeyboardBridge";
   import {
     InteriorityReveal,
@@ -59,6 +63,7 @@
   import {
     closeLabelFromDoc,
     dedupeMutationIds,
+    revealMutationPill,
     transactionInsertsMutation,
     unitRows,
   } from "@/lib/editor-core/mutationNodes";
@@ -401,6 +406,7 @@
     updateSelectionMenu();
     publishImplicitContext();
     applyPendingReveal();
+    applyPendingReviewReveal();
     // Restore the remembered scroll (#2013) on a real open only, once the
     // just-set content has laid out. A frame with no height (the node reopened
     // on a list tab, so this host is hidden) holds the offset for the
@@ -424,6 +430,7 @@
     editor?.commands.clearContent(false);
     loadedSceneId = null;
     pendingReveal = null;
+    pendingReviewReveal = null;
     liveWordCount = 0;
     syncEditorEmpty();
   }
@@ -475,6 +482,30 @@
     pendingReveal = null;
     if (!pending || !editor || pending.sceneId !== loadedSceneId) return;
     editor.commands.revealSearchMatch(pending.reveal);
+  }
+
+  // #2124: a review item's reveal, queued the same way `pendingReveal` is —
+  // the pane may not have loaded this scene yet. `mutates_source` reveals its
+  // own marker's pill (mutationNodes.ts); every other reason reveals the
+  // source's first mention by name (searchMatchHighlight.ts), a silent no-op
+  // with nothing to find.
+  let pendingReviewReveal: { sceneId: string; markerId?: string; names?: string[] } | null = null;
+
+  function queueReviewReveal(target: { markerId?: string; names?: string[] }): void {
+    if (!scene) return;
+    pendingReviewReveal = { sceneId: scene.id, ...target };
+    if (loadedSceneId === scene.id) applyPendingReviewReveal();
+  }
+  export const revealMutationMarker = (markerId: string): void => queueReviewReveal({ markerId });
+  export const revealFirstMention = (names: string[]): void => queueReviewReveal({ names });
+
+  function applyPendingReviewReveal(): void {
+    const pending = pendingReviewReveal;
+    pendingReviewReveal = null;
+    if (!pending || !editor || !editorElement || pending.sceneId !== loadedSceneId) return;
+    if (pending.markerId) revealMutationPill(editorElement, pending.markerId);
+    const reveal = pending.names ? firstMentionReveal(editor.state.doc, pending.names) : null;
+    if (reveal) editor.commands.revealSearchMatch(reveal);
   }
 
   export function highlightEmbeddedTodo(todoId: string): void {

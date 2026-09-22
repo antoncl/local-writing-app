@@ -17,6 +17,7 @@ import { api } from "@/lib/api";
 import { chatSessions } from "@/lib/stores/chatSessions.svelte";
 import { composerPrefills } from "@/lib/stores/composerPrefill.svelte";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+import { loreEntriesStore } from "@/lib/stores/lore";
 import { reviewProposals } from "@/lib/stores/reviewProposals.svelte";
 import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
 import {
@@ -189,11 +190,33 @@ class TodoActions {
       if (item.node_id) {
         await editorPanes.openLore(item.node_id);
       } else if (item.scene_id) {
-        await editorPanes.openScene(item.scene_id);
-        // TODO(#2116 S2b follow-up): scroll the scene to item.source?.marker_id
-        // — no existing per-pane handle reveals a mutation marker by id
-        // (grepped editorPaneComponents / highlightMutation / revealMarker /
-        // scrollToMarker); building one is out of this slice's scope.
+        const sceneId = item.scene_id;
+        await editorPanes.openScene(sceneId);
+        // #2124: land the writer on the reason the item exists, not just the
+        // scene. `mutates_source` names its own marker; every other reason
+        // falls to the source's first mention by name — its effective
+        // name-set as of THIS scene (the same set the editor's own
+        // implicit-context underlines use), falling back to the lore
+        // roster's title when the names endpoint has nothing for it.
+        if (item.source) {
+          const source = item.source;
+          if (source.reason === "mutates_source" && source.marker_id) {
+            editorPanes.revealMutationMarkerInOpenPane(sceneId, source.marker_id);
+          } else {
+            let names: string[] = [];
+            try {
+              const effectiveNames = await api.getSceneEffectiveNames(sceneId);
+              names = effectiveNames[source.node_id] ?? [];
+            } catch (error) {
+              console.warn("Review item's source names could not be loaded", source.node_id, error);
+            }
+            if (names.length === 0) {
+              const rosterTitle = get(loreEntriesStore).find((entry) => entry.id === source.node_id)?.title;
+              if (rosterTitle) names = [rosterTitle];
+            }
+            if (names.length > 0) editorPanes.revealFirstMentionInOpenPane(sceneId, names);
+          }
+        }
       }
     });
   }

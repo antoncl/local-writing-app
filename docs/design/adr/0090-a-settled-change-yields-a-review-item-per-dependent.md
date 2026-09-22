@@ -400,3 +400,31 @@ rows ticked by default, mentions folded and unticked, all/none per group, "since
 header, the primary naming what it writes. **Provisional by design:** the layout is validated
 only by use on live projects, so S2 ships it as drawn and the first dogfooding pass is where it
 changes. Nothing in §1–§6 moves.
+
+## Amendment 2 — Three premises corrected against the tree before S2 (2026-09-22)
+
+Read against `92f82329` (master after S1, PR #2118) while spec'ing S2; symbols first, numbers
+second.
+
+1. **"The rail lists review items" is stale.** ADR-0089 Amendment 1 §4 (#2101) moved
+   Conversations, Backlinks and Mutation sets out of the rail's trailing slot onto **computed
+   collection field tabs** (`EditorBodyHost.svelte`, the `activeListFieldIds` dispatch on
+   `computed.function`; seeds in `default_entry_types.py`). Review items follow that shape, not
+   the rail: a computed collection field (function `review_items`, one line in the default entry
+   types like `conversations`) whose tab is a NodeList of the node's open review items. §3's rail
+   paragraph is superseded by this.
+2. **"Nothing new drawn" for open-with-compare was wrong.** The snapshot controller is
+   per-pane (`SnapshotStripController`, instantiated in `NodeEditor.svelte`), nothing outside a
+   pane can park it, and there is no open-at-snapshot call. Opening a review item's source
+   parked on the baseline needs one small piece of plumbing: a pending-park intent on the pane
+   the editor consumes on mount, modelled on `highlightEmbeddedTodoInOpenPane`. Named here so S2b
+   budgets for it; the surface it lands on is still ADR-0088's dock, unchanged.
+3. **"Editor tab" is an on-demand region homed in the editor group.** A `DocumentRef` is always
+   a node; a propagation is not one. The mechanism for a non-node surface is the plot board's:
+   a named region in `workspaceLayout` made visible with `ensureVisible`, which the tiled shell
+   renders as a closable tab in its home group. Amendment 1 stands; this is how it is built.
+
+Also fixed in wording, not in substance: §6's pruning of an item whose dependent is gone runs in
+`repair_project` (the writer's explicit Repair, the only caller of today's anchor reconciliation),
+not on open; and `list_snapshots` has no filter, so "the newest propagation baseline" is a filter
+on the sidecar's origin inside the candidate service.

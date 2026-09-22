@@ -83,6 +83,27 @@ describe("listDiff — per-item tint for an array field", () => {
     expect(listDiff([], [])).toEqual([]);
   });
 
+  it("counts duplicates — a removed or added repeat is a change", () => {
+    expect(listDiff(["a", "a"], ["a"])).toEqual([
+      { state: "same", text: "a" },
+      { state: "was", text: "a" },
+    ]);
+    expect(listDiff(["a"], ["a", "a"])).toEqual([
+      { state: "same", text: "a" },
+      { state: "now", text: "a" },
+    ]);
+  });
+
+  it("reads a record item by its member values, never as [object Object]", () => {
+    const was = [{ target: "lore_tomas", kind: "kinship", state: "estranged" }];
+    const now = [{ target: "lore_tomas", kind: "kinship", state: "reconciled" }, { target: "lore_ilse", kind: "rival", state: "" }];
+    expect(listDiff(was, now)).toEqual([
+      { state: "was", text: "lore_tomas · kinship · estranged" },
+      { state: "now", text: "lore_tomas · kinship · reconciled" },
+      { state: "now", text: "lore_ilse · rival" },
+    ]);
+  });
+
   it("a non-array side is treated as empty, or as one item when a real scalar", () => {
     expect(listDiff(null, ["a"])).toEqual([{ state: "now", text: "a" }]);
     expect(listDiff("a", ["a", "b"])).toEqual([

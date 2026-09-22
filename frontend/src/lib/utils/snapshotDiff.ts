@@ -816,16 +816,46 @@ export function listDiff(
 ): { state: "same" | "was" | "now"; text: string }[] | null {
   if (!Array.isArray(was) && !Array.isArray(now)) return null;
   const toItems = (value: unknown): string[] => {
-    if (Array.isArray(value)) return value.map(String);
+    if (Array.isArray(value)) return value.map(listItemText);
     if (value === null || value === undefined || value === "") return [];
-    return [String(value)];
+    return [listItemText(value)];
   };
   const wasItems = toItems(was);
   const nowItems = toItems(now);
-  const nowSet = new Set(nowItems);
-  const wasSet = new Set(wasItems);
+  // Multiset, not set: a duplicated item removed (or added) is a change too.
+  const nowCounts = new Map<string, number>();
+  for (const text of nowItems) nowCounts.set(text, (nowCounts.get(text) ?? 0) + 1);
   const out: { state: "same" | "was" | "now"; text: string }[] = [];
-  for (const text of wasItems) out.push({ state: nowSet.has(text) ? "same" : "was", text });
-  for (const text of nowItems) if (!wasSet.has(text)) out.push({ state: "now", text });
+  for (const text of wasItems) {
+    const left = nowCounts.get(text) ?? 0;
+    if (left > 0) {
+      nowCounts.set(text, left - 1);
+      out.push({ state: "same", text });
+    } else {
+      out.push({ state: "was", text });
+    }
+  }
+  for (const text of nowItems) {
+    const left = nowCounts.get(text) ?? 0;
+    if (left > 0) {
+      nowCounts.set(text, left - 1);
+      out.push({ state: "now", text });
+    }
+  }
   return out;
+}
+
+/** One list item as the text a pill shows and compares by. A scalar is its
+ *  string; a record item (an ADR-0089 group item — a relationship with its
+ *  key reference and members) is its non-empty member values joined with
+ *  " · ", the same reading the search corpus gives such an item, never
+ *  "[object Object]". */
+function listItemText(item: unknown): string {
+  if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+    return Object.values(item as Record<string, unknown>)
+      .filter((member) => member !== null && member !== undefined && member !== "")
+      .map(String)
+      .join(" · ");
+  }
+  return String(item);
 }

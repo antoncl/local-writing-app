@@ -1034,9 +1034,10 @@ button.row-action-add.active {
    ring, not a new resting state, so it reads as "you're here" rather than a
    permanent pill variant. */
 .editor-body .mutation-pill.mutation-pill-revealed {
-  outline: 2px solid var(--accent);
+  /* Stays in the pill's own violet family (one colour system per element). */
+  outline: 2px solid var(--mutation-color);
   outline-offset: 2px;
-  background: var(--accent-soft);
+  background: color-mix(in oklab, var(--mutation-color) 26%, transparent);
 }
 /* Interval-close pill (#59) — same violet family, but hollow (dashed border,
    no fill) to read as "this ends a change" rather than "a change happens here". */

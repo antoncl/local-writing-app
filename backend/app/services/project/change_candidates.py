@@ -1,9 +1,9 @@
 """ADR-0090 §2: the candidate set for a settled change to one lore entry.
 
 Composed onto `ProjectService`; resolves `_build_node_index` (references.py),
-`read_snapshot` / `node_snapshot_kind` (scene_snapshots.py), `read_lore_entry`
-(lore.py), `build_mutations_index` (lore_mutations.py) and `_search_corpus`
-(search_corpus_build.py) via MRO.
+`read_snapshot` / `node_snapshot_kind` / `newest_snapshot_with_origin`
+(scene_snapshots.py), `read_lore_entry` (lore.py), `build_mutations_index`
+(lore_mutations.py) and `_search_corpus` (search_corpus_build.py) via MRO.
 
 Four named routes, each a reason a node might depend on the source: a field
 reference in either direction, a mid-scene mutation marker, or a textual
@@ -51,12 +51,18 @@ _ROUTE_ORDER = {
 }
 
 
+# The one place the scene entry type is spelled for ADR-0090: the candidate
+# filter here and the confirm step's scope choice (change_propagation.py)
+# must agree, or a scene candidate silently becomes a node-scoped item.
+SCENE_ENTRY_TYPE = "manuscript:scene"
+
+
 def _is_candidate_node(entry: NodeIndexEntry) -> bool:
     """ADR-0090 §2's node filter: lore entries at any layer, plus the open
     book's own scenes (book-scoped, never inherited). Never tags, chats,
     prompts, plots, research, or the source itself — the caller excludes
     the source by id."""
-    return entry.kind == "lore" or entry.entry_type == "manuscript:scene"
+    return entry.kind == "lore" or entry.entry_type == SCENE_ENTRY_TYPE
 
 
 def _corpus_entry_mentions(matcher, corpus_entry, prose_fields: frozenset[str]) -> bool:
@@ -114,6 +120,11 @@ class ChangeCandidatesMixin:
     def change_candidates(
         self, source_id: str, baseline_snapshot_id: str | None = None
     ) -> ChangeCandidateSet:
+        """`baseline_snapshot_id` semantics (ADR-0090 §1): `None` (no query
+        param at all) defaults to the newest snapshot a previous propagation
+        left on the source, or the whole entry when there is none; `""` (a
+        query param given empty, e.g. `?baseline=`) means the whole entry
+        explicitly, bypassing the default; any other value is used as given."""
         index = self._build_node_index()
         source = index.canonical_id(source_id)
         source_entry = index.by_id.get(source)
@@ -121,8 +132,9 @@ class ChangeCandidatesMixin:
             raise ProjectServiceError("Unknown lore entry.", 404)
         source_lore_entry = self.read_lore_entry(source)
 
+        resolved_baseline = self._resolve_change_candidate_baseline(source, baseline_snapshot_id)
         changed_fields, body_changed, whole_entry = self._change_candidate_diff(
-            source, baseline_snapshot_id
+            source, resolved_baseline
         )
 
         reasons_by_id: dict[str, list[_RawReason]] = {}
@@ -184,12 +196,25 @@ class ChangeCandidatesMixin:
 
         return ChangeCandidateSet(
             source_id=source,
-            baseline_snapshot_id=baseline_snapshot_id or "",
+            baseline_snapshot_id=resolved_baseline,
             changed_fields=changed_fields,
             body_changed=body_changed,
             whole_entry=whole_entry,
             items=items,
         )
+
+    def _resolve_change_candidate_baseline(
+        self, source: str, baseline_snapshot_id: str | None
+    ) -> str:
+        """`None` defaults to the newest propagation baseline on `source`, or
+        `""` (the whole entry) when there is none; any other value — including
+        an explicit `""` — is returned unchanged (ADR-0090 §1)."""
+        if baseline_snapshot_id is not None:
+            return baseline_snapshot_id
+        newest = self.newest_snapshot_with_origin(
+            source, "propagation", kind=self.node_snapshot_kind(source)
+        )
+        return newest.id if newest is not None else ""
 
     def _change_candidate_diff(
         self, source_id: str, baseline_snapshot_id: str | None

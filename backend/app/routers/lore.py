@@ -23,6 +23,8 @@ from app.models import (
     PromotionTarget,
     PromptEntry,
     PromptEntryList,
+    PropagateRequest,
+    PropagateResponse,
     SaveLoreEntryRequest,
     SaveMutationSetEntryRequest,
     SavePromptEntryRequest,
@@ -102,7 +104,10 @@ def list_change_candidates(
     project: CurrentProject, entity_id: str, baseline: str | None = None
 ) -> ChangeCandidateSet:
     """The ADR-0090 §2 candidate set for a settled change to `entity_id` — read
-    only, writes nothing."""
+    only, writes nothing. `baseline`: an absent query param arrives here as
+    `None` and defaults to the newest propagation baseline (or the whole
+    entry, absent one); `?baseline=` arrives as `""` and forces the whole
+    entry explicitly; any other value names that snapshot."""
     with translate_errors():
         return project.change_candidates(entity_id, baseline)
 
@@ -111,6 +116,15 @@ def list_change_candidates(
 def save_lore_entry(project: CurrentProject, entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
     with translate_errors():
         return project.save_lore_entry(entry_id, request)
+
+
+@router.post("/api/lore/{entity_id}/propagate", response_model=PropagateResponse)
+def propagate_change(project: CurrentProject, entity_id: str, request: PropagateRequest) -> PropagateResponse:
+    """ADR-0090 §1: the confirm half of Propagate — writes one review item per
+    kept candidate and captures the source's new baseline snapshot. Never a
+    dependent."""
+    with translate_errors():
+        return project.propagate_change(entity_id, request)
 
 
 @router.post("/api/lore/{entry_id}/fork", response_model=LoreEntry)

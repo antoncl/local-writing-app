@@ -262,6 +262,9 @@ class SceneSnapshotsMixin:
             # every one the author never annotated — the common case (ADR-0044
             # §L). Empty string, never `None`, so the field is uniform.
             description=str(data.get("description") or ""),
+            # Absent on every snapshot taken before ADR-0090 and on every
+            # ordinary capture — same shape as `description`.
+            origin=str(data.get("origin") or ""),
             schema_version=int(data.get("schema_version") or 0),
         )
 
@@ -317,6 +320,18 @@ class SceneSnapshotsMixin:
     ) -> SnapshotList:
         root, node_id, _ = self._resolve_snapshot_target(scene_id, kind, layer_id=layer_id)
         return SnapshotList(snapshots=self._snapshot_records(root, node_id))
+
+    def newest_snapshot_with_origin(
+        self, node_id: str, origin: str, *, kind: str = "manuscript"
+    ) -> Snapshot | None:
+        """The newest snapshot of `node_id` whose sidecar names this `origin`
+        (ADR-0090 §1) — the propagation baseline default. `list_snapshots` is
+        already `(captured_at, id)`-sorted oldest first, so the newest match
+        is simply the last one."""
+        matches = [
+            record for record in self.list_snapshots(node_id, kind=kind).snapshots if record.origin == origin
+        ]
+        return matches[-1] if matches else None
 
     def read_snapshot(
         self,
@@ -518,15 +533,27 @@ class SceneSnapshotsMixin:
         *,
         kind: str = "manuscript",
         layer_id: str | None = None,
+        origin: str = "",
     ) -> Snapshot:
-        """The camera: an explicit, never-thinned capture of the current state."""
+        """The camera: an explicit, never-thinned capture of the current state.
+
+        `origin` (ADR-0090 §1) names the mechanism that took this snapshot as
+        its own baseline — `""` for the ordinary, author-pressed camera,
+        `"propagation"` for the baseline a confirmed Propagate leaves.
+        """
         root, node_id, path = self._resolve_snapshot_target(scene_id, kind, layer_id=layer_id)
         if path is None:
             # An override target (§3b) with no delta at this layer: there is no
             # authored file to photograph. Override a field first, then snapshot it.
             raise ProjectServiceError("There is no override at this layer to snapshot.", 404)
         return self._capture(
-            root, node_id, path, retention="kept", dynamic_context=dynamic_context, kind=kind
+            root,
+            node_id,
+            path,
+            retention="kept",
+            dynamic_context=dynamic_context,
+            kind=kind,
+            origin=origin,
         )
 
     def _capture(
@@ -538,6 +565,7 @@ class SceneSnapshotsMixin:
         retention: str,
         dynamic_context: list[str] | None = None,
         kind: str = "manuscript",
+        origin: str = "",
     ) -> Snapshot:
         """Copy `path`'s bytes into the store and write the sidecar beside them.
 
@@ -594,6 +622,10 @@ class SceneSnapshotsMixin:
             "retention": retention,
             "schema_version": migrations.CURRENT_VERSION,
         }
+        # Written only when non-empty — same shape as `description`, absent on
+        # every ordinary capture rather than stored as an empty string.
+        if origin:
+            record["origin"] = origin
         # `None` means the build failed, and then no witness is written at all.
         # Storing an empty one instead made the comparison accept it as real and
         # answer "nothing changed" — an affirmative all-clear from a build that

@@ -4,14 +4,39 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.models.snapshots import Snapshot
+
+# ADR-0090 §2: the route a change-candidate reason was found by. Defined here,
+# ahead of `TodoSource`, because a review item's source names its FIRST
+# reason's route (§3) and `ChangeCandidateReason` below reuses the same alias.
+ChangeCandidateRoute = Literal[
+    "references_source", "referenced_by_source", "mutates_source", "mentions_source"
+]
+
+
+class TodoSource(BaseModel):
+    """Where a review item's change came from (ADR-0090 §3): the source
+    entry, the baseline it was measured from (`""` = the whole entry, not a
+    snapshot), the route of the candidate's first reason, and — only when
+    that reason is `mutates_source` — the marker it names."""
+
+    node_id: str
+    snapshot_id: str = ""
+    reason: ChangeCandidateRoute
+    marker_id: str = ""
+
 
 class TodoItem(BaseModel):
     id: str
     text: str
     status: Literal["open", "done"] = "open"
-    scope: Literal["project", "scene"] = "project"
+    scope: Literal["project", "scene", "node"] = "project"
     scene_id: str | None = None
     anchor_id: str | None = None
+    # ADR-0090 §3: a `node`-scoped item's dependent, and the source block a
+    # review item the app wrote carries (absent on a writer-authored todo).
+    node_id: str | None = None
+    source: TodoSource | None = None
 
 
 class TodoDocument(BaseModel):
@@ -20,15 +45,17 @@ class TodoDocument(BaseModel):
 
 class CreateTodoRequest(BaseModel):
     text: str = Field(min_length=1)
-    scope: Literal["project", "scene"] = "project"
+    scope: Literal["project", "scene", "node"] = "project"
     scene_id: str | None = None
     anchor_id: str | None = None
+    node_id: str | None = None
+    source: TodoSource | None = None
 
 
 class UpdateTodoRequest(BaseModel):
     text: str | None = None
     status: Literal["open", "done"] | None = None
-    scope: Literal["project", "scene"] | None = None
+    scope: Literal["project", "scene", "node"] | None = None
     scene_id: str | None = None
 
 
@@ -132,9 +159,6 @@ class RewriteMutationUnitRequest(BaseModel):
     name: str | None = None
 
 
-ChangeCandidateRoute = Literal[
-    "references_source", "referenced_by_source", "mutates_source", "mentions_source"
-]
 ChangeCandidateTier = Literal["declared", "marker_untouched", "mention"]
 
 
@@ -175,6 +199,26 @@ class ChangeCandidateSet(BaseModel):
     body_changed: bool
     whole_entry: bool
     items: list[ChangeCandidate] = Field(default_factory=list)
+
+
+class PropagateRequest(BaseModel):
+    """The confirm step's write (ADR-0090 §1/§3/§5): the candidates the
+    writer kept, measured against the same baseline semantics as the
+    read-only candidate endpoint. `kept` may not be empty — the service
+    refuses a confirm that keeps nothing, before any write."""
+
+    baseline_snapshot_id: str | None = None
+    kept: list[str] = Field(default_factory=list)
+
+
+class PropagateResponse(BaseModel):
+    """What confirming a propagation writes, and nothing else (ADR-0090 §5):
+    one review item per kept candidate, in candidate order, and the new
+    baseline snapshot of the source. No dependent's file is touched."""
+
+    todos: TodoDocument
+    created: list[str] = Field(default_factory=list)
+    snapshot: Snapshot
 
 
 class EffectiveStateResponse(BaseModel):

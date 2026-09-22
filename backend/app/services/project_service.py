@@ -26,6 +26,10 @@ from app.services.machine_settings import touch_recent_project
 from app.services.project.ai_invocations import AiInvocationsMixin
 from app.services.project.assistants import AssistantEntriesMixin
 from app.services.project.change_candidates import ChangeCandidatesMixin
+from app.services.project.change_propagation import ChangePropagationMixin
+from app.services.project.change_propagation_validation import (
+    ChangePropagationValidationMixin,
+)
 from app.services.project.chats import ChatSessionsMixin
 from app.services.project.client_errors import ErrorLogMixin
 from app.services.project.computed_metadata import ComputedMetadataMixin
@@ -91,6 +95,8 @@ class ProjectService(
     AiInvocationsMixin,
     AssistantEntriesMixin,
     ChangeCandidatesMixin,
+    ChangePropagationMixin,
+    ChangePropagationValidationMixin,
     ChatSessionsMixin,
     ErrorLogMixin,
     ComputedMetadataMixin,

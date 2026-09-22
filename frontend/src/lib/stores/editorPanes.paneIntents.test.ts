@@ -17,6 +17,8 @@ function handle() {
     reloadScene: vi.fn(),
     tryMergeProse: vi.fn(),
     parkSnapshot: vi.fn(),
+    revealMutationMarker: vi.fn(),
+    revealFirstMention: vi.fn(),
   };
 }
 
@@ -56,5 +58,31 @@ describe("pane intents wait for the pane's handle", () => {
     editorPanes.editorPaneComponents = { p3: h as never };
     vi.advanceTimersByTime(1000);
     expect(h.parkSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("reveals a mutation marker once the pane and its handle both exist (#2124)", () => {
+    editorPanes.revealMutationMarkerInOpenPane("scene_1", "m_rank");
+    vi.advanceTimersByTime(250);
+    editorPanes.panes = [{ ...createEmptyEditorPane("p1"), document: { type: "manuscript", id: "scene_1" } }];
+    vi.advanceTimersByTime(250);
+    const h = handle();
+    editorPanes.editorPaneComponents = { p1: h as never };
+    vi.advanceTimersByTime(250);
+    expect(h.revealMutationMarker).toHaveBeenCalledTimes(1);
+    expect(h.revealMutationMarker).toHaveBeenCalledWith("m_rank");
+    vi.advanceTimersByTime(2000);
+    expect(h.revealMutationMarker).toHaveBeenCalledTimes(1);
+  });
+
+  it("reveals a first mention once the pane and its handle both exist (#2124)", () => {
+    editorPanes.revealFirstMentionInOpenPane("scene_1", ["Marek Vell", "the Captain"]);
+    vi.advanceTimersByTime(250);
+    editorPanes.panes = [{ ...createEmptyEditorPane("p1"), document: { type: "manuscript", id: "scene_1" } }];
+    vi.advanceTimersByTime(250);
+    const h = handle();
+    editorPanes.editorPaneComponents = { p1: h as never };
+    vi.advanceTimersByTime(250);
+    expect(h.revealFirstMention).toHaveBeenCalledTimes(1);
+    expect(h.revealFirstMention).toHaveBeenCalledWith(["Marek Vell", "the Captain"]);
   });
 });

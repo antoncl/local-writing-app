@@ -94,6 +94,40 @@ function commonPrefix(a: string, b: string): number {
   return n;
 }
 
+/** The earliest document position of a whole-document, case-insensitive (by
+ *  default) match of `query` — the first-mention reveal (#2124) picking the
+ *  earliest of several candidate names. `null` when `query` does not occur
+ *  in `doc` at all. Built on the same `scanDoc` + `compileSearchPattern` the
+ *  search-hit reveal uses, so it marks exactly what a search for `query`
+ *  would find — never an occurrence the backend's own query wouldn't. */
+export function firstMatchPosition(
+  doc: PMNode,
+  query: string,
+  opts: { matchCase: boolean; wholeWord: boolean },
+): number | null {
+  const matches = scanDoc(doc, compileSearchPattern(query, opts.matchCase, opts.wholeWord));
+  if (matches.length === 0) return null;
+  return matches.reduce((min, match) => Math.min(min, match.start), Infinity);
+}
+
+/** A review item's "first mention" reveal (#2124): the earliest of several
+ *  candidate names (a source's effective name-set), as a `SearchReveal` ready
+ *  for `editor.commands.revealSearchMatch` — or `null` when none occurs in
+ *  `doc` at all, the caller's silent-no-op case. Whole-word, case-insensitive:
+ *  a name reveal is never an exact-case literal search. */
+export function firstMentionReveal(doc: PMNode, names: string[]): SearchReveal | null {
+  let bestName: string | null = null;
+  let bestPos = Infinity;
+  for (const name of names) {
+    const pos = firstMatchPosition(doc, name, { matchCase: false, wholeWord: true });
+    if (pos !== null && pos < bestPos) {
+      bestPos = pos;
+      bestName = name;
+    }
+  }
+  return bestName === null ? null : { query: bestName, matchCase: false, wholeWord: true, excerpt: "", ordinal: 0 };
+}
+
 /** Which of the editor's matches the hit is.
  *
  *  The hit's ordinal among its node's body hits would be exact if the editor

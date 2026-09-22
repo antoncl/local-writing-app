@@ -1030,6 +1030,14 @@ button.row-action-add.active {
 .editor-body .mutation-pill:hover {
   background: color-mix(in oklab, var(--mutation-color) 26%, transparent);
 }
+/* A review item's "reveal the mutation marker" open (#2124) — a temporary
+   ring, not a new resting state, so it reads as "you're here" rather than a
+   permanent pill variant. */
+.editor-body .mutation-pill.mutation-pill-revealed {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: var(--accent-soft);
+}
 /* Interval-close pill (#59) — same violet family, but hollow (dashed border,
    no fill) to read as "this ends a change" rather than "a change happens here". */
 .editor-body .mutation-pill-close {

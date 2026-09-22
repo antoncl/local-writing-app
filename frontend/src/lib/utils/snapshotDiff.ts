@@ -802,3 +802,30 @@ export function fieldDiffs(
   }
   return diffs;
 }
+
+/** One list item's diff state, for a field whose value is (or was) an array —
+ *  ADR-0044's one-colour rule: the tint says which version a bit of text
+ *  belongs to, so an item present on both sides carries none (#2125). A
+ *  non-array side is treated as empty (or as a single stringified item when
+ *  it's a non-empty scalar), so a field that changed shape still diffs
+ *  sensibly. Items compare as `String(x)`; the order is every `was` item
+ *  first (in its own order), then every `now`-only item (in its own order). */
+export function listDiff(
+  was: unknown,
+  now: unknown,
+): { state: "same" | "was" | "now"; text: string }[] | null {
+  if (!Array.isArray(was) && !Array.isArray(now)) return null;
+  const toItems = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value.map(String);
+    if (value === null || value === undefined || value === "") return [];
+    return [String(value)];
+  };
+  const wasItems = toItems(was);
+  const nowItems = toItems(now);
+  const nowSet = new Set(nowItems);
+  const wasSet = new Set(wasItems);
+  const out: { state: "same" | "was" | "now"; text: string }[] = [];
+  for (const text of wasItems) out.push({ state: nowSet.has(text) ? "same" : "was", text });
+  for (const text of nowItems) if (!wasSet.has(text)) out.push({ state: "now", text });
+  return out;
+}

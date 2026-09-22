@@ -11,7 +11,7 @@
   import { propagate } from "@/lib/stores/propagate.svelte";
   import { api } from "@/lib/api";
   import { notchWhen, inNotchOrder } from "@/lib/utils/snapshotTime";
-  import { diffRuns, fieldDiffs } from "@/lib/utils/snapshotDiff";
+  import { diffRuns, fieldDiffs, listDiff } from "@/lib/utils/snapshotDiff";
   import { renderDiffRuns } from "@/lib/utils/diffRuns";
   import type { ChangeCandidate, ChangeCandidateReason, ChangeCandidateTier, FieldDiff } from "@/lib/types";
 
@@ -209,13 +209,20 @@
         {:else}
           {#each diffFieldIds as fieldId (fieldId)}
             {@const diff = diffFieldsState[fieldId]}
+            {@const items = listDiff(diff.was, diff.now)}
             <div class="frow">
               <div class="frow-key">{fieldId}</div>
               <div class="frow-vals">
-                {#if diff.was !== null && diff.was !== undefined}
-                  <span class="pill pill-was">{formatFieldValue(diff.was)}</span>
+                {#if items}
+                  {#each items as item, index (index)}
+                    <span class="pill" class:same={item.state === "same"} class:pill-was={item.state === "was"} class:pill-now={item.state === "now"}>{item.text}</span>
+                  {/each}
+                {:else}
+                  {#if diff.was !== null && diff.was !== undefined}
+                    <span class="pill pill-was">{formatFieldValue(diff.was)}</span>
+                  {/if}
+                  <span class="pill pill-now">{formatFieldValue(diff.now)}</span>
                 {/if}
-                <span class="pill pill-now">{formatFieldValue(diff.now)}</span>
               </div>
             </div>
           {/each}
@@ -225,6 +232,7 @@
             </div>
           {/if}
           <div class="legend">
+            <span class="pill same">unchanged</span>
             <span class="pill pill-was">was</span> the baseline &nbsp;
             <span class="pill pill-now">now</span> the entry today
           </div>
@@ -362,6 +370,14 @@
     border-radius: var(--r-sm);
     margin: 1px 4px 1px 0;
     font-size: var(--fs-sm);
+  }
+
+  /* ADR-0044's one-colour rule: the tint says which version the text belongs
+     to, so an item unchanged between was/now carries none (#2125). */
+  .pill.same {
+    background: transparent;
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--divider);
   }
 
   .pill-was {

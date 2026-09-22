@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from "vitest";
 import fixtures from "./fieldDiffs.fixtures.json";
-import { fieldDiffs, sameRenderedValue } from "./snapshotDiff";
+import { fieldDiffs, listDiff, sameRenderedValue } from "./snapshotDiff";
 import type { FieldDiff } from "@/lib/types";
 
 interface Case {
@@ -60,5 +60,34 @@ describe("sameRenderedValue — a missing key and an empty one read alike", () =
   it("lists compare structurally and by order", () => {
     expect(sameRenderedValue(["a", "b"], ["a", "b"])).toBe(true);
     expect(sameRenderedValue(["a", "b"], ["b", "a"])).toBe(false);
+  });
+});
+
+// #2125: the Propagate diff tints only the items that actually changed —
+// an item present on both sides carries no tint at all.
+describe("listDiff — per-item tint for an array field", () => {
+  it("null for a field where neither side is an array", () => {
+    expect(listDiff("rank", "captain")).toBeNull();
+    expect(listDiff(null, undefined)).toBeNull();
+  });
+
+  it("kept, removed, added — in was-order then now-only order", () => {
+    expect(listDiff(["the Captain", "the Sergeant"], ["the Captain", "the Corporal"])).toEqual([
+      { state: "same", text: "the Captain" },
+      { state: "was", text: "the Sergeant" },
+      { state: "now", text: "the Corporal" },
+    ]);
+  });
+
+  it("both empty is an empty list, not null", () => {
+    expect(listDiff([], [])).toEqual([]);
+  });
+
+  it("a non-array side is treated as empty, or as one item when a real scalar", () => {
+    expect(listDiff(null, ["a"])).toEqual([{ state: "now", text: "a" }]);
+    expect(listDiff("a", ["a", "b"])).toEqual([
+      { state: "same", text: "a" },
+      { state: "now", text: "b" },
+    ]);
   });
 });

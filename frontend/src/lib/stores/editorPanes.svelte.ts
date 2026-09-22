@@ -123,6 +123,11 @@ interface EditorPaneComponentHandle {
   // ADR-0090 Amendment 2 §2: park the pane's foot dock on a snapshot (compare
   // mode) — the pending-park intent a review item's source open consumes.
   parkSnapshot: (snapshotId: string) => void;
+  // #2124: a review item's dependent scene opens scrolled to its
+  // `mutates_source` marker, or (every other reason) to the source's first
+  // mention by name.
+  revealMutationMarker: (markerId: string) => void;
+  revealFirstMention: (names: string[]) => void;
 }
 
 const AUTO_SAVE_IDLE_MS = 6000;
@@ -1168,6 +1173,16 @@ class EditorPanesController {
   // silent no-op; the pane already stays put with nothing parked.
   parkSnapshotInOpenPane(nodeId: string, snapshotId: string): void {
     this.#withPaneHandle(nodeId, (handle) => handle.parkSnapshot(snapshotId));
+  }
+
+  // #2124: the same shape as parkSnapshotInOpenPane — a review item's dependent
+  // scene may still be opening when the reveal intent lands.
+  revealMutationMarkerInOpenPane(sceneId: string, markerId: string): void {
+    this.#withPaneHandle(sceneId, (handle) => handle.revealMutationMarker(markerId));
+  }
+
+  revealFirstMentionInOpenPane(sceneId: string, names: string[]): void {
+    this.#withPaneHandle(sceneId, (handle) => handle.revealFirstMention(names));
   }
 
   // An intent aimed at a pane the same gesture is still creating (ADR-0090

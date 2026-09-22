@@ -1,10 +1,13 @@
 import type {
+  ChangeCandidateSet,
   EntryPatchExtraction,
   LoreEntry,
   LoreEntryList,
   MoveLoreNoteToResearchResponse,
   PromotionTarget,
   PromotionPlan,
+  PropagateRequest,
+  PropagateResponse,
 } from "@/lib/types";
 import { request } from "./core";
 
@@ -119,5 +122,23 @@ export const loreApi = {
       `/lore/${encodeURIComponent(entryId)}/move-to-research`,
       { method: "POST" },
     );
+  },
+  // ADR-0090 §2: the read-only candidate set for a settled change. `baseline`
+  // semantics (backend `lore.py`): `undefined` sends no query param at all
+  // (defaults to the newest propagation baseline, or the whole entry absent
+  // one); `""` sends `?baseline=` (forces the whole entry); any other value
+  // names that snapshot explicitly.
+  listChangeCandidates(entryId: string, baseline?: string) {
+    const path = `/lore/${encodeURIComponent(entryId)}/change-candidates`;
+    if (baseline === undefined) return request<ChangeCandidateSet>(path);
+    return request<ChangeCandidateSet>(`${path}?baseline=${encodeURIComponent(baseline)}`);
+  },
+  // ADR-0090 §1/§3/§5: the confirm half of Propagate — writes one review item
+  // per kept candidate and a new baseline snapshot of the source.
+  propagateChange(entryId: string, body: PropagateRequest) {
+    return request<PropagateResponse>(`/lore/${encodeURIComponent(entryId)}/propagate`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   },
 };

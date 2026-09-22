@@ -38,6 +38,9 @@
   import AIPolicyModal from "@/components/dialogs/AIPolicyModal.svelte";
   import ValidateModal from "@/components/dialogs/ValidateModal.svelte";
   import PromoteAction from "@/components/dialogs/PromoteAction.svelte";
+  import PropagateAction from "@/components/dialogs/PropagateAction.svelte";
+  import PropagatePane from "@/components/panes/PropagatePane.svelte";
+  import { propagate } from "@/lib/stores/propagate.svelte";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
   import TopBar from "@/components/chrome/TopBar.svelte";
@@ -847,6 +850,11 @@
       prompts: { title: "Prompts", body: promptsBody, actions: promptsActions, view: { kind: "prompt", switcher: true }, closable: true, onClose: closeRegion("prompts") },
       plotTemplates: { title: "Plot templates", body: plotTemplatesBody, actions: plotTemplatesActions, view: { kind: "plot" }, closable: true, onClose: closeRegion("plotTemplates") },
       plotEditor: { title: "Plot board", body: plotEditorBody, closable: true, onClose: closeRegion("plotEditor") },
+      // onClose calls the store directly (not closeRegion) so closing the tab
+      // (e.g. the pane's × ) also resets propagate's state — removePanel alone
+      // would leave a stale candidate set for the next open. propagate.close()
+      // itself calls removePanel, so this is the whole teardown in one call.
+      propagate: { title: "Propagate", body: propagateBody, closable: true, onClose: () => propagate.close() },
       mutations: { title: "Reusable mutations", body: mutationsBody, actions: mutationsActions, closable: true, onClose: closeRegion("mutations") },
       assistants: { title: "Assistants", body: assistantsBody, actions: assistantsActions, view: { kind: "assistant", switcher: true }, closable: true, onClose: closeRegion("assistants") },
       chats: { title: "Chats", body: chatsBody, actions: chatsActions, view: { kind: "chat", switcher: true }, closable: true, onClose: closeRegion("chats") },
@@ -973,6 +981,12 @@
     </div>
   {/snippet}
 
+  {#snippet propagateBody()}
+    <div class="pane-content">
+      <PropagatePane />
+    </div>
+  {/snippet}
+
   {#snippet mutationsActions()}
     <button class="pin-button" type="button" title="New mutation set" aria-label="New mutation set" onmousedown={(event) => event.stopPropagation()} onclick={() => openNewMutationSet()}>+</button>
   {/snippet}
@@ -1067,6 +1081,7 @@
         </button>
       {/if}
       <PromoteAction documentKind={editorPane.document?.type} entry={editorPane.scene} ownLayerId={$projectLayerIdStore} />
+      <PropagateAction documentKind={editorPane.document?.type} entry={editorPane.scene} />
       <!-- The project node is its own window; deleting it would remove
            `project.md` (#750). Offer Delete on every other kind, never on the
            project itself — belt to the requestDeleteScene guard's braces. -->
@@ -1228,6 +1243,7 @@
         onUpdateEmbeddedTodoNote={(item, note) => todoActions.updateEmbeddedTodoNote(item, note)}
         onOpenEmbeddedTodo={(item) => todoActions.openEmbeddedTodo(item)}
         onDeleteEmbeddedTodo={(item) => todoActions.deleteEmbeddedTodo(item)}
+        nodeTitle={(id) => loreEntries.find((entry) => entry.id === id)?.title}
       />
     </div>
   {/snippet}

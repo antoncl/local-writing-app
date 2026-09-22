@@ -23,6 +23,14 @@ describe("workspaceLayout region homing (#757)", () => {
     expect(workspaceLayout.groupOf("plotEditor")?.id).toBe(G_EDITOR);
   });
 
+  it("homes the Propagate confirm surface to the central editor group", () => {
+    // ADR-0090 Amendment 2 §3: an on-demand region, not a document — same
+    // shape as the plot board, so it tabs beside the open documents rather
+    // than docking to the narrow side column.
+    workspaceLayout.ensureVisible("propagate");
+    expect(workspaceLayout.groupOf("propagate")?.id).toBe(G_EDITOR);
+  });
+
   it("still homes a side region (lore) to the side column", () => {
     workspaceLayout.ensureVisible("lore");
     expect(workspaceLayout.groupOf("lore")?.id).toBe(G_SIDE);

@@ -53,6 +53,7 @@ class LoreAndPromptTests(MetadataValidationBase):
                 "context_policy",
                 "conversations",
                 "mutation_sets",
+                "review_items",
                 "references",
             ],
         )

@@ -17,6 +17,7 @@ import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { aiSpend } from "@/lib/stores/aiSpend.svelte";
 
 export { openPlotBoardPane } from "@/lib/stores/plotBoard";
+export { openPropagatePane } from "@/lib/stores/propagate.svelte";
 
 export function openPromptsPane(): void {
   workspaceLayout.ensureVisible("prompts");

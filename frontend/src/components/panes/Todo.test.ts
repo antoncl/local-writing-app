@@ -10,8 +10,33 @@ import { render, screen, fireEvent } from "@/lib/test/component";
 import Todo from "./Todo.svelte";
 import type { EmbeddedTodoRecord, TodoItem } from "@/lib/types";
 
-function fileTodo(id: string, text: string, scene_id: string | null = null): TodoItem {
-  return { id, text, status: "open", scope: scene_id ? "scene" : "project", scene_id };
+function fileTodo(
+  id: string,
+  text: string,
+  scene_id: string | null = null,
+  extra: Partial<TodoItem> = {},
+): TodoItem {
+  return {
+    id,
+    text,
+    status: "open",
+    scope: scene_id ? "scene" : "project",
+    scene_id,
+    ...extra,
+  };
+}
+
+// A review item (ADR-0090 §3): node-scoped, with a `source` block naming the
+// change it followed from.
+function nodeTodo(id: string, text: string, node_id: string): TodoItem {
+  return {
+    id,
+    text,
+    status: "open",
+    scope: "node",
+    node_id,
+    source: { node_id: "lore_marek", snapshot_id: "snap_1", reason: "mentions_source", marker_id: "" },
+  };
 }
 
 function embedded(todo_id: string, text: string, scene_path: string): EmbeddedTodoRecord {
@@ -73,5 +98,29 @@ describe("Todo pane — rows render", () => {
     const field = screen.getByDisplayValue("Buy milk");
     expect(field.closest(".todo-text-stack")).not.toBeNull();
     expect(field).toHaveAttribute("data-gramm", "false");
+  });
+
+  // ADR-0090 §3/§6: a review item is `node`-scoped and carries a `source` —
+  // it renders "Open entry" (not "Open scene"/"Project") and its provenance
+  // line, and opening it routes through the same onOpenFileTodo callback.
+  it("renders a node-scoped review item's 'Open entry' button and source line", async () => {
+    const onOpenFileTodo = vi.fn();
+    const item = nodeTodo("t1", "Follow up on Marek Vell's change", "guard");
+    render(Todo, {
+      props: {
+        ...baseProps(),
+        todos: [item],
+        onOpenFileTodo,
+        nodeTitle: (id: string) => (id === "lore_marek" ? "Marek Vell" : undefined),
+      },
+    });
+
+    expect(screen.getByDisplayValue("Follow up on Marek Vell's change")).toBeInTheDocument();
+    const openButton = screen.getByRole("button", { name: "Open entry" });
+    expect(openButton).toBeInTheDocument();
+    expect(screen.getByText(/review item ·.*from Marek Vell/)).toBeInTheDocument();
+
+    await fireEvent.click(openButton);
+    expect(onOpenFileTodo).toHaveBeenCalledWith(item);
   });
 });

@@ -28,6 +28,7 @@
   import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
   import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
+  import ReviewItemsPanel from "@/components/editor/ReviewItemsPanel.svelte";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
@@ -533,6 +534,14 @@
              is only seeded onto lore:base), same as before. -->
         {#key model.scene?.id ?? ""}
           <PinnedSetsPanel entityId={model.scene?.id ?? ""} entityEntryType={model.entryType} />
+        {/key}
+      {:else if model.metadataSchema.fields[fieldId]?.type === "computed" && model.metadataSchema.fields[fieldId]?.computed?.function === "review_items"}
+        <!-- ADR-0090 Amendment 2 §1: review items promoted straight to a
+             computed collection field's tab (never a rail slot) — the open
+             `node`-scoped todos whose dependent is this entry. Lore-scoped
+             (the field is only seeded onto lore:base). -->
+        {#key model.scene?.id ?? ""}
+          <ReviewItemsPanel nodeId={model.scene?.id ?? ""} nodeTitle={model.title} />
         {/key}
       {:else if model.metadataSchema.fields[fieldId]?.type === "computed" && model.metadataSchema.fields[fieldId]?.computed?.function === "references"}
         <!-- ADR-0089 Amendment 1 §4 (#2101, slice C3): incoming backlinks —

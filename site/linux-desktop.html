@@ -42,6 +42,7 @@
     </ol>
     <pre class="cmd">chmod +x local-writing-app-linux-x64.AppImage
 ./local-writing-app-linux-x64.AppImage</pre>
+    <p class="arch-note">These commands are for the x64 AppImage. There&rsquo;s no arm64 AppImage &mdash; on ARM64, download the <a href="https://github.com/antoncl/local-writing-app/releases/latest/download/local-writing-app-linux-arm64.zip">arm64 portable zip</a> instead, unzip it, and run the app inside.</p>
     <p style="margin-top: 14px;">The app opens in your browser at a local address on your own machine.</p>
     <p class="arch-note">If it fails with an error about <code>libfuse.so.2</code> or &ldquo;AppImages require FUSE to run&rdquo;: some newer distributions (e.g. Ubuntu 22.04+) don&rsquo;t ship the older FUSE library by default. Install it once with <code>sudo apt install libfuse2</code> (Debian/Ubuntu) or your distro&rsquo;s equivalent, then run the AppImage again.</p>
   </div>

@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Propagate Confirm</title>
+<meta name="description" content="Interactive study for ADR-0090 §7: the one new surface — a source's change beside its candidates, tickable, grouped by route, the mention group folded." />
+<style>
+  /* ---- tokens: LIGHT (bare :root) — verbatim from docs/design/design-language.md §2 ---- */
+  :root{
+    --app-bg:#f5f7f6; --board:#f4f6f5; --surface:#ffffff; --panel:#edf3f1; --inset:#f1f5f3;
+    --tier1:#e6efe9; --tier2:#d6e4dd; --tier3:#c4d7cd; --tier-rail:#aec1b8;
+    --border:#cbd6d2; --border-strong:#b4c2bc; --divider:#e2e8e5;
+    --text:#242424; --text-2:#4d5753; --text-3:#74817b;
+    --accent:#2f6f5e; --accent-strong:#234e43; --accent-deep:#1c3f36; --accent-emphasis:#234e43;
+    --accent-soft:#edf6f2; --accent-soft2:#dff0ea; --accent-drop:#d9ecdf;
+    --star:#6b5a0c; --star-soft:#f3eed2; --star-border:#c8b896;
+    --danger:#a64a4a; --danger-soft:#fbeeee; --danger-border:#e2c4c2; --danger-emphasis:#8f3a3a;
+    --warn:#8a520d; --warn-soft:#fff4e6; --warn-border:#f0d29a;
+    --k-lore:#5b5ca8; --k-lore-soft:#ececf6; --k-lore-border:#c9cbe8; --k-lore-text:#43448a;
+    --k-scene:#3d7a6a;
+    --mutation-color:#7c5cbf;
+    --diff-now:#7d6353; --diff-now-soft:#f2ebe3; --diff-now-edge:#cfbdaa;
+    --diff-was:#566b7a; --diff-was-soft:#e7edf1; --diff-was-edge:#b1c2ce;
+    --shadow:rgba(36,36,36,0.06); --shadow2:rgba(36,36,36,0.10); --shadow-pane:rgba(36,36,36,0.13);
+    --scrim:rgba(25,40,35,0.28);
+
+    --sans:"Segoe UI",system-ui,sans-serif; --serif:Georgia,"Times New Roman",serif; --mono:Consolas,ui-monospace,monospace;
+    --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:15px; --fs-xl:16px; --fs-2xl:20px; --fs-prose:16px;
+    --w-regular:400; --w-medium:500; --w-semibold:600; --w-bold:700;
+    --sp-0:2px; --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+    --r-sm:4px; --r-md:6px; --r-lg:10px; --r-pill:999px;
+    --elev-1:0 2px 8px var(--shadow); --elev-2:0 6px 18px var(--shadow2); --elev-3:0 16px 36px var(--shadow-pane);
+    color-scheme:light;
+  }
+  /* ---- tokens: DARK ---- */
+  :root:not([data-theme="light"]){}
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+    --app-bg:#14181a; --board:#181c1a; --surface:#1f2522; --panel:#20272a; --inset:#242a28;
+    --tier1:#29322e; --tier2:#333e39; --tier3:#404d47; --tier-rail:#46534c;
+    --border:#3a4541; --border-strong:#4a5651; --divider:#2a322f;
+    --text:#e8edeb; --text-2:#a9b6b0; --text-3:#7e8a84;
+    --accent:#6cc4a6; --accent-strong:#4ea88c; --accent-deep:#2f7a64; --accent-emphasis:#7cc0a1;
+    --accent-soft:#1f3a32; --accent-soft2:#2a4a3f; --accent-drop:#1d3026;
+    --star:#d4b94e; --star-soft:#3a3216; --star-border:#5e5430;
+    --danger:#d97070; --danger-soft:#3a2424; --danger-border:#5a3838; --danger-emphasis:#e58a8a;
+    --warn:#e6c084; --warn-soft:#2c2414; --warn-border:#5a4a24;
+    --k-lore:#9a9bd6; --k-lore-soft:#2a2c46; --k-lore-border:#3a3d62; --k-lore-text:#b6b8e4;
+    --k-scene:#6fb8a3;
+    --mutation-color:#9a7fe0;
+    --diff-now:#d9a184; --diff-now-soft:#3b2a21; --diff-now-edge:#6d4a36;
+    --diff-was:#8fb6d2; --diff-was-soft:#1f2d38; --diff-was-edge:#3d5a70;
+    --shadow:rgba(0,0,0,0.40); --shadow2:rgba(0,0,0,0.50); --shadow-pane:rgba(0,0,0,0.55);
+    --scrim:rgba(0,0,0,0.50); color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --app-bg:#14181a; --board:#181c1a; --surface:#1f2522; --panel:#20272a; --inset:#242a28;
+    --tier1:#29322e; --tier2:#333e39; --tier3:#404d47; --tier-rail:#46534c;
+    --border:#3a4541; --border-strong:#4a5651; --divider:#2a322f;
+    --text:#e8edeb; --text-2:#a9b6b0; --text-3:#7e8a84;
+    --accent:#6cc4a6; --accent-strong:#4ea88c; --accent-deep:#2f7a64; --accent-emphasis:#7cc0a1;
+    --accent-soft:#1f3a32; --accent-soft2:#2a4a3f; --accent-drop:#1d3026;
+    --star:#d4b94e; --star-soft:#3a3216; --star-border:#5e5430;
+    --danger:#d97070; --danger-soft:#3a2424; --danger-border:#5a3838; --danger-emphasis:#e58a8a;
+    --warn:#e6c084; --warn-soft:#2c2414; --warn-border:#5a4a24;
+    --k-lore:#9a9bd6; --k-lore-soft:#2a2c46; --k-lore-border:#3a3d62; --k-lore-text:#b6b8e4;
+    --k-scene:#6fb8a3;
+    --mutation-color:#9a7fe0;
+    --diff-now:#d9a184; --diff-now-soft:#3b2a21; --diff-now-edge:#6d4a36;
+    --diff-was:#8fb6d2; --diff-was-soft:#1f2d38; --diff-was-edge:#3d5a70;
+    --shadow:rgba(0,0,0,0.40); --shadow2:rgba(0,0,0,0.50); --shadow-pane:rgba(0,0,0,0.55);
+    --scrim:rgba(0,0,0,0.50); color-scheme:dark;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--board); color:var(--text); font-family:var(--sans); font-size:var(--fs-md); padding:var(--sp-5) var(--sp-4) var(--sp-6);}
+  .page{max-width:1080px; margin:0 auto;}
+  .page-head{display:flex; align-items:flex-start; justify-content:space-between; gap:var(--sp-4); margin-bottom:var(--sp-4);}
+  .page-head h1{font-family:var(--serif); font-weight:var(--w-bold); font-size:var(--fs-2xl); margin:0 0 var(--sp-1);}
+  .page-head p{margin:0; color:var(--text-2); max-width:70ch;}
+  .theme{border:1px solid var(--border); background:var(--surface); color:var(--text-2); border-radius:var(--r-md); padding:4px 8px; cursor:pointer; font-size:var(--fs-md);}
+
+  /* ---- the surface: a dialog-sized card (surface class to decide, see notes) ---- */
+  /* An editor-tab body (Amendment 1): flat, no dialog elevation, no role=dialog. */
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden;}
+  .v.same{background:transparent; color:var(--text); box-shadow:inset 0 0 0 1px var(--divider);}
+  .card-head{display:flex; align-items:baseline; gap:var(--sp-3); padding:var(--sp-4) var(--sp-5) var(--sp-3); border-bottom:1px solid var(--divider);}
+  .card-head h2{font-family:var(--serif); font-size:var(--fs-xl); font-weight:var(--w-bold); margin:0;}
+  .card-head .src{font-family:var(--serif); color:var(--text);}
+  .since{margin-left:auto; display:flex; align-items:center; gap:var(--sp-2); color:var(--text-2); font-size:var(--fs-sm);}
+  .since select{font:inherit; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); padding:3px 6px;}
+
+  .body{display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); min-height:480px;}
+  @media (max-width:760px){ .body{grid-template-columns:1fr;} .diff{border-left:0; border-top:1px solid var(--divider);} }
+
+  /* ---- left: candidates (NodeList of NodeRows, grouped by tier) ---- */
+  .list{padding:var(--sp-2) 0 var(--sp-3); overflow:auto;}
+  .group-h{display:flex; align-items:center; gap:var(--sp-2); padding:var(--sp-3) var(--sp-5) var(--sp-1);
+    font-size:var(--fs-xs); font-weight:var(--w-semibold); letter-spacing:.07em; text-transform:uppercase; color:var(--text-3);}
+  .group-h .g-count{font-weight:var(--w-regular); letter-spacing:0; text-transform:none; color:var(--text-3);}
+  .group-h .g-all{margin-left:auto; font-weight:var(--w-regular); letter-spacing:0; text-transform:none; color:var(--accent-emphasis); background:none; border:0; cursor:pointer; font-size:var(--fs-xs); padding:0;}
+  .group-h .g-all:hover{text-decoration:underline;}
+  .fold{background:none; border:0; color:var(--text-3); cursor:pointer; padding:0 2px; font-size:var(--fs-sm); line-height:1;}
+  .group.folded .rows{display:none;}
+  .group.folded .fold::before{content:"▸";} .group .fold::before{content:"▾";}
+
+  .nr{display:grid; grid-template-columns:auto 4px minmax(0,1fr) auto; align-items:center; column-gap:var(--sp-2);
+    padding:6px var(--sp-5) 6px var(--sp-4); cursor:default;}
+  .nr:hover{background:var(--inset);}
+  .nr.off .title,.nr.off .detail{color:var(--text-3);}
+  .nr input{margin:0; accent-color:var(--accent); width:14px; height:14px;}
+  .stripe{width:4px; height:26px; border-radius:2px; background:var(--k-lore);}
+  .nr[data-kind="scene"] .stripe{background:var(--k-scene);}
+  .main{min-width:0;}
+  .title{font-size:var(--fs-md); color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .detail{font-size:var(--fs-sm); color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px;}
+  .detail .sep{color:var(--text-3); margin:0 4px;}
+  .detail code{font-family:var(--mono); font-size:var(--fs-xs); background:var(--inset); padding:0 4px; border-radius:3px; color:var(--text-2);}
+  .detail .mut{color:var(--mutation-color); font-weight:var(--w-semibold);}
+  .detail .changed{color:var(--accent-emphasis);}
+  .detail q{font-family:var(--serif); color:var(--text-2);}
+  .kind{font-size:var(--fs-xs); color:var(--text-3); letter-spacing:.04em; text-transform:uppercase;}
+
+  /* ---- right: the source's change, one colour rule (was = cool, now = warm) ---- */
+  .diff{border-left:1px solid var(--divider); padding:var(--sp-3) var(--sp-5) var(--sp-4); overflow:auto; background:var(--panel);}
+  .diff h3{font-family:var(--serif); font-size:var(--fs-lg); font-weight:var(--w-bold); margin:0 0 var(--sp-1);}
+  .diff .sub{font-size:var(--fs-sm); color:var(--text-2); margin:0 0 var(--sp-3);}
+  .frow{display:grid; grid-template-columns:96px 1fr; column-gap:var(--sp-3); padding:6px 0; border-top:1px solid var(--divider); font-size:var(--fs-md);}
+  .frow .k{color:var(--text-3); font-size:var(--fs-sm); padding-top:2px;}
+  .v{display:inline-block; padding:1px 6px; border-radius:var(--r-sm); margin:1px 4px 1px 0;}
+  .was{background:var(--diff-was-soft); color:var(--diff-was); box-shadow:inset 0 0 0 1px var(--diff-was-edge);}
+  .now{background:var(--diff-now-soft); color:var(--diff-now); box-shadow:inset 0 0 0 1px var(--diff-now-edge);}
+  .prose{font-family:var(--serif); font-size:var(--fs-prose); line-height:1.55; color:var(--text); margin-top:var(--sp-3); border-top:1px solid var(--divider); padding-top:var(--sp-3);}
+  .prose p{margin:0 0 .6em;}
+  .prose .now{display:inline; padding:0 3px;}
+  .legend{font-size:var(--fs-xs); color:var(--text-3); margin-top:var(--sp-3);}
+  .legend .v{font-size:var(--fs-xs); padding:0 5px;}
+
+  /* ---- footer: words for the primary, the count is the state ---- */
+  .foot{display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-5); border-top:1px solid var(--divider); background:var(--surface);}
+  .foot .note{color:var(--text-3); font-size:var(--fs-sm);}
+  .foot .spacer{flex:1;}
+  .btn{font:inherit; font-size:var(--fs-md); border-radius:var(--r-md); padding:6px 14px; cursor:pointer; border:1px solid var(--border); background:var(--surface); color:var(--text-2);}
+  .btn:hover{background:var(--inset);}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:var(--w-semibold);}
+  .btn.primary:hover{background:var(--accent-strong);}
+  .btn.primary:disabled{opacity:.5; cursor:default;}
+
+  /* ---- notes for the iteration ---- */
+  .notes{margin-top:var(--sp-6); display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:var(--sp-4);}
+  section.block{background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:var(--sp-4) var(--sp-5);}
+  section.block > h2{font-family:var(--serif); font-size:var(--fs-xl); font-weight:var(--w-bold); margin:0 0 var(--sp-2);}
+  section.block p, section.block li{color:var(--text-2); font-size:var(--fs-md); line-height:1.5;}
+  section.block ul{margin:0; padding-left:18px;}
+  section.block b{color:var(--text);}
+  .toast{position:fixed; left:50%; bottom:24px; transform:translate(-50%,16px); opacity:0; pointer-events:none;
+    background:var(--accent); color:#fff; padding:9px 15px; border-radius:var(--r-md); box-shadow:var(--elev-2); font-size:var(--fs-md); transition:opacity 160ms ease-out, transform 160ms ease-out;}
+  .toast.show{opacity:1; transform:translate(-50%,0);}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>Propagate — the confirm surface</h1>
+      <p>ADR-0090 §7. The writer has settled a change to <b>Marek Vell</b> and pressed Propagate. The app shows who may need to follow, and the writer decides. Nothing is written until Confirm, and then only todos and a snapshot of Marek.</p>
+    </div>
+    <button class="theme" id="theme" title="Cycle theme" aria-label="Cycle theme">◐ theme</button>
+  </div>
+
+  <div class="card" role="region" aria-labelledby="ttl">
+    <div class="card-head">
+      <h2 id="ttl">Propagate <span class="src">Marek Vell</span></h2>
+      <div class="since">
+        <label for="since">since</label>
+        <select id="since">
+          <option value="last">last propagation · 14 Sep, 21:04</option>
+          <option value="older">snapshot · 9 Sep, 10:12</option>
+          <option value="whole">the whole entry</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="body">
+      <div class="list" id="list"></div>
+
+      <aside class="diff" aria-label="What changed in Marek Vell">
+        <h3>What changed</h3>
+        <p class="sub" id="diff-sub"></p>
+        <div id="diff-rows"></div>
+        <div class="prose" id="diff-prose"></div>
+        <div class="legend"><span class="v was">was</span> the baseline &nbsp; <span class="v now">now</span> the entry today &nbsp;·&nbsp; unchanged text carries no tint &nbsp;·&nbsp; one colour rule, from ADR-0044</div>
+      </aside>
+    </div>
+
+    <div class="foot">
+      <span class="note" id="note"></span>
+      <span class="spacer"></span>
+      <button class="btn" type="button">Cancel</button>
+      <button class="btn primary" type="button" id="confirm">Confirm</button>
+    </div>
+  </div>
+
+  <div class="notes">
+    <section class="block">
+      <h2>What the ADR fixes</h2>
+      <ul>
+        <li><b>A tick per candidate.</b> Nothing is a review item until the writer keeps it.</li>
+        <li><b>Reasons visible.</b> The detail line under every row says why it is here — the field, the marker, the quoted mention — in the vocabulary the app already uses (⤳ is the mutation mark).</li>
+        <li><b>The mention group folds.</b> A hub character mentioned in sixteen places must not bury the five declared dependents. Folded shows the count; unfolding is one click; nothing in it is ticked by default.</li>
+        <li><b>The diff in view.</b> The change the writer is propagating stays beside the list the whole time — was cool, now warm, the same colour rule as the snapshot compare.</li>
+      </ul>
+    </section>
+    <section class="block">
+      <h2>What this mockup proposes (iterate here)</h2>
+      <ul>
+        <li><b>Three groups, not four routes.</b> Rows group by tier — Declared, Markers on untouched fields, Mentions — because that is the order the writer reads in. The route is the detail line, not the heading.</li>
+        <li><b>Declared and untouched-marker rows start ticked; mentions start unticked.</b> The default is what the routes already say about signal.</li>
+        <li><b>“All” / “none” per group</b>, quiet text at the group header's right, for the sixteen-mentions case.</li>
+        <li><b>The stripe is the kind</b> (lore violet, scene green); the kind word trails in caps for the screen reader and the colour-blind. The design language has no scene kind colour today — <code>--k-scene</code> here is a proposed token, to be added to §2 by S2b's PR or replaced by whatever the manuscript body stripe already uses.</li>
+        <li><b>“Since” lives in the header.</b> Default is the last propagation; the writer may pick any snapshot or the whole entry, and the right pane re-renders.</li>
+        <li><b>The primary says what it does</b>: “Confirm 5 review items”, never a bare OK.</li>
+      </ul>
+    </section>
+    <section class="block">
+      <h2>Settled: an editor tab</h2>
+      <p>Drawn as a dialog-sized card for the study only. <b>Anton, 2026-09-22: the surface is an editor tab</b> (“Propagate Marek Vell”) in the perennial editor region, closable, so a candidate can be opened beside it before deciding — the surface taxonomy (design-language.md §4) makes modality the last resort. The layout stands as drawn, provisionally: a test on live data is the only real validation, so S2 ships this and the first dogfooding pass is where it changes (ADR-0090 Amendment 1).</p>
+    </section>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+  const data = {
+    declared: [
+      {id:"guard", kind:"lore", title:"City Guard", on:true, reasons:[`<code>captain</code> refers to Marek`]},
+      {id:"ilse", kind:"lore", title:"Ilse Vell", on:true, reasons:[`<code>relationships</code> refers to Marek`, `mentions <q>her father the captain</q>`]},
+      {id:"barracks", kind:"lore", title:"Watch Barracks", on:true, reasons:[`Marek's <code>posting</code> refers here`]},
+      {id:"ch5", kind:"scene", title:"Chapter 5 · The Gate", on:true, reasons:[`<span class="mut">⤳</span> <code>rank</code> <span class="changed">changed</span>`]},
+    ],
+    untouched: [
+      {id:"ch11", kind:"scene", title:"Chapter 11 · Ashford", on:true, reasons:[`<span class="mut">⤳</span> <code>whereabouts</code> untouched by this change`]},
+    ],
+    mentions: [
+      {id:"weir", kind:"lore", title:"Weir Tavern", on:false, reasons:[`mentions <q>Marek Vell</q>`]},
+      {id:"ch9", kind:"scene", title:"Chapter 9 · The Usual Table", on:false, reasons:[`mentions <q>the Captain</q> ×2`]},
+      {id:"ch2", kind:"scene", title:"Chapter 2 · Muster", on:false, reasons:[`mentions <q>Marek</q>`]},
+      {id:"ch3", kind:"scene", title:"Chapter 3 · Rain", on:false, reasons:[`mentions <q>the Captain</q>`]},
+      {id:"ch6", kind:"scene", title:"Chapter 6 · Ledger", on:false, reasons:[`mentions <q>Marek Vell</q>`]},
+      {id:"ch7", kind:"scene", title:"Chapter 7 · The Wall", on:false, reasons:[`mentions <q>Marek</q> ×3`]},
+      {id:"ch8", kind:"scene", title:"Chapter 8 · Ash", on:false, reasons:[`mentions <q>the Captain</q>`]},
+      {id:"ch10", kind:"scene", title:"Chapter 10 · Court", on:false, reasons:[`mentions <q>Marek Vell</q>`]},
+      {id:"ch12", kind:"scene", title:"Chapter 12 · Below", on:false, reasons:[`mentions <q>Marek</q>`]},
+      {id:"ch13", kind:"scene", title:"Chapter 13 · The Ford", on:false, reasons:[`mentions <q>the Captain</q>`]},
+      {id:"ch14", kind:"scene", title:"Chapter 14 · Vows", on:false, reasons:[`mentions <q>Marek</q>`]},
+      {id:"ch15", kind:"scene", title:"Chapter 15 · Reckoning", on:false, reasons:[`mentions <q>Marek Vell</q> ×2`]},
+      {id:"ch16", kind:"scene", title:"Chapter 16 · Gatefall", on:false, reasons:[`mentions <q>the Captain</q>`]},
+      {id:"ch17", kind:"scene", title:"Chapter 17 · Embers", on:false, reasons:[`mentions <q>Marek</q>`]},
+      {id:"hollis", kind:"lore", title:"Hollis Brand", on:false, reasons:[`mentions <q>the Captain</q>`]},
+      {id:"gatehouse", kind:"lore", title:"The Gatehouse", on:false, reasons:[`mentions <q>Marek Vell</q>`]},
+    ],
+  };
+  const groups = [
+    {key:"declared", label:"Declared", folded:false},
+    {key:"untouched", label:"Markers on untouched fields", folded:false},
+    {key:"mentions", label:"Mentions", folded:true},
+  ];
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  // The source's change, per "since" choice. Unchanged values carry no tint
+  // (ADR-0044: the colour says which version text belongs to; "both" = none).
+  const diffs = {
+    last:  {sub:"2 fields and the body, since 14 Sep.",
+            rows:[["rank",[["was","Captain"],["now","Sergeant"]]],
+                  ["aliases",[["same","the Captain"],["now","the Sergeant"]]]],
+            prose:[["same","Marek Vell has kept the Weir gate for eleven years. He drinks at the Weir Tavern and pays for it."],
+                   ["now","After the Ashford business he was broken to sergeant. The Guard kept him because nobody else knows the gate, and he kept the tavern table because nobody else dared take it."]]},
+    older: {sub:"3 fields and the body, since 9 Sep.",
+            rows:[["rank",[["was","Lieutenant"],["now","Sergeant"]]],
+                  ["aliases",[["same","the Captain"],["now","the Sergeant"]]],
+                  ["posting",[["was","Weir Gate"],["now","Watch Barracks"]]]],
+            prose:[["same","Marek Vell has kept the Weir gate for eleven years."],["now"," He drinks at the Weir Tavern and pays for it."],
+                   ["now","After the Ashford business he was broken to sergeant. The Guard kept him because nobody else knows the gate, and he kept the tavern table because nobody else dared take it."]]},
+    whole: {sub:"No baseline: the whole entry counts as the change.",
+            rows:[["rank",[["now","Sergeant"]]],["aliases",[["now","the Captain"],["now","the Sergeant"]]],["posting",[["now","Watch Barracks"]]]],
+            prose:[["now","Marek Vell has kept the Weir gate for eleven years. He drinks at the Weir Tavern and pays for it."],
+                   ["now","After the Ashford business he was broken to sergeant. The Guard kept him because nobody else knows the gate, and he kept the tavern table because nobody else dared take it."]]},
+  };
+  function renderDiff(){
+    const d = diffs[document.getElementById("since").value];
+    document.getElementById("diff-sub").textContent = d.sub;
+    document.getElementById("diff-rows").innerHTML = d.rows.map(([k, vals]) =>
+      `<div class="frow"><div class="k">${esc(k)}</div><div>${vals.map(([c,v])=>`<span class="v ${c}">${esc(v)}</span>`).join("")}</div></div>`).join("");
+    document.getElementById("diff-prose").innerHTML = d.prose.map(([c,t]) =>
+      c==="same" ? `<p>${esc(t)}</p>` : `<p><span class="${c}">${esc(t)}</span></p>`).join("");
+  }
+  function row(r){
+    return `<label class="nr ${r.on?"":"off"}" data-kind="${r.kind}" data-id="${r.id}">
+      <input type="checkbox" ${r.on?"checked":""} aria-label="Keep ${r.title}" />
+      <span class="stripe"></span>
+      <span class="main"><span class="title">${esc(r.title)}</span><span class="detail">${r.reasons.join('<span class="sep">·</span>')}</span></span>
+      <span class="kind">${r.kind}</span>
+    </label>`;
+  }
+  function render(){
+    const list = document.getElementById("list");
+    list.innerHTML = groups.map(g => {
+      const items = data[g.key];
+      const kept = items.filter(i=>i.on).length;
+      return `<div class="group ${g.folded?"folded":""}" data-group="${g.key}">
+        <div class="group-h"><button class="fold" type="button" aria-expanded="${!g.folded}" aria-label="${g.folded?"Unfold":"Fold"} ${g.label}"></button>${g.label}
+          <span class="g-count">${kept} of ${items.length}</span>
+          <button class="g-all" type="button" data-all="${g.key}">${kept===items.length?"none":"all"}</button></div>
+        <div class="rows">${items.map(row).join("")}</div>
+      </div>`;
+    }).join("");
+    const total = groups.reduce((n,g)=>n+data[g.key].filter(i=>i.on).length,0);
+    document.getElementById("confirm").textContent = total ? `Confirm ${total} review item${total===1?"":"s"}` : "Confirm";
+    document.getElementById("confirm").disabled = !total;
+    document.getElementById("note").textContent = total ? `Writes ${total} todo${total===1?"":"s"} and a snapshot of Marek. Nothing else.` : "Nothing kept — nothing will be written.";
+  }
+  document.getElementById("list").addEventListener("change", e => {
+    const lab = e.target.closest(".nr"); if(!lab) return;
+    const g = lab.closest(".group").dataset.group;
+    const it = data[g].find(i=>i.id===lab.dataset.id); it.on = e.target.checked; render();
+  });
+  document.getElementById("list").addEventListener("click", e => {
+    const all = e.target.closest("[data-all]");
+    if(all){ const g = all.dataset.all; const on = data[g].some(i=>!i.on); data[g].forEach(i=>i.on=on); render(); return; }
+    if(e.target.closest(".fold")){ const g = groups.find(x=>x.key===e.target.closest(".group").dataset.group); g.folded=!g.folded; render(); }
+  });
+  document.getElementById("confirm").addEventListener("click", () => {
+    const t = document.getElementById("toast"); t.textContent = document.getElementById("note").textContent; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 1800);
+  });
+  document.getElementById("theme").addEventListener("click", () => {
+    const r = document.documentElement; const cur = r.dataset.theme || "auto";
+    r.dataset.theme = cur==="auto" ? "dark" : cur==="dark" ? "light" : "";
+    if(!r.dataset.theme) delete r.dataset.theme;
+  });
+  document.getElementById("since").addEventListener("change", renderDiff);
+  render();
+  renderDiff();
+</script>
+</body>
+</html>

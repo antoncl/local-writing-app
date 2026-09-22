@@ -389,3 +389,14 @@ issue and an explicit go. #66 is not a slice.
 12. At no point in 1–11 has the app written to the City Guard, Ilse, the Barracks or either
     scene, and no marker was created, changed or closed by anything but the writer. Every
     change was a save the writer made after a diff.
+
+## Amendment 1 — The confirm surface is an editor tab (2026-09-22)
+
+Anton, on the §7 mockup (PR #2119): the confirm surface is an **editor tab** in the perennial
+editor region ("Propagate Marek Vell"), closable, never a dialog — a writer will want to open a
+candidate beside it before deciding, and the surface taxonomy makes modality the last resort.
+The mockup's layout stands as drawn for now: three groups by tier, declared and untouched-marker
+rows ticked by default, mentions folded and unticked, all/none per group, "since" in the
+header, the primary naming what it writes. **Provisional by design:** the layout is validated
+only by use on live projects, so S2 ships it as drawn and the first dogfooding pass is where it
+changes. Nothing in §1–§6 moves.

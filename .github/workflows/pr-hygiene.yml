@@ -15,6 +15,10 @@ on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
 
+# The script only reads $GITHUB_EVENT_PATH; it never calls the API (#2110).
+permissions:
+  contents: read
+
 jobs:
   pr-hygiene:
     runs-on: ubuntu-latest

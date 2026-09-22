@@ -210,6 +210,37 @@ describe("parking", () => {
     expect(strip.parked).toBe(null);
     expect(strip.bodyHtml).toBe("");
   });
+
+  // ADR-0090 Amendment 2 §2: a review item's source pane may be created by
+  // the same gesture that parks it, so the park can arrive before `load()`
+  // has given the controller a target. It is held and applied by that load,
+  // never dropped into Live.
+  it("a park that arrives before load is applied by the load", async () => {
+    listSnapshots.mockResolvedValue({ snapshots: [SNAPSHOT] });
+    readSnapshot.mockImplementation(async () => detail());
+    snapshotDrift.mockResolvedValue(NO_CHANGE);
+    const strip = new SnapshotStripController();
+    strip.readLive = () => LIVE;
+    await strip.park("snap_1");
+    expect(strip.parked).toBe(null);
+    expect(readSnapshot).not.toHaveBeenCalled();
+    strip.load("scene_1");
+    await vi.waitFor(() => expect(strip.parked).toBe("snap_1"));
+    expect(strip.runs.length).toBe(4);
+  });
+
+  it("a park that arrives before load is dropped by a load with no target", async () => {
+    const strip = new SnapshotStripController();
+    await strip.park("snap_1");
+    strip.load(null);
+    listSnapshots.mockResolvedValue({ snapshots: [SNAPSHOT] });
+    readSnapshot.mockImplementation(async () => detail());
+    snapshotDrift.mockResolvedValue(NO_CHANGE);
+    strip.load("scene_1");
+    await vi.waitFor(() => expect(strip.snapshots.length).toBe(1));
+    expect(strip.parked).toBe(null);
+    expect(readSnapshot).not.toHaveBeenCalled();
+  });
 });
 
 /**

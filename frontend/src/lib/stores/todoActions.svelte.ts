@@ -167,12 +167,20 @@ class TodoActions {
     await this.run(async () => {
       if (item.source) {
         const source = item.source;
-        await editorPanes.openLore(source.node_id);
-        if (source.snapshot_id) {
-          // The pane may have just been created: let it mount before the
-          // park reaches its snapshot controller (mirrors the search-hit
-          // reveal's own setTimeout, #1925).
-          window.setTimeout(() => editorPanes.parkSnapshotInOpenPane(source.node_id, source.snapshot_id), 0);
+        // A source that no longer exists is a kept review item by design
+        // (ADR-0090 §6: a warning, never pruned) — its failure to open must
+        // not stop the dependent from opening.
+        try {
+          await editorPanes.openLore(source.node_id);
+          if (source.snapshot_id) {
+            // The pane may have just been created: let it mount before the
+            // park reaches its snapshot controller (mirrors the search-hit
+            // reveal's own setTimeout, #1925). The controller itself holds a
+            // park that arrives before its target is loaded.
+            window.setTimeout(() => editorPanes.parkSnapshotInOpenPane(source.node_id, source.snapshot_id), 0);
+          }
+        } catch (error) {
+          console.warn("Review item's source could not be opened", source.node_id, error);
         }
       }
       if (item.node_id) {

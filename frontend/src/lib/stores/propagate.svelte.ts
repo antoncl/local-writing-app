@@ -30,6 +30,10 @@ export class PropagateController {
   folded = new SvelteSet<ChangeCandidateTier>(["mention"]);
   loading = $state(false);
   error = $state<string | null>(null);
+  // Every fetch carries the sequence it started under; a result that lands
+  // after a newer open()/setBaseline() is dropped, so two rapid opens can
+  // never show one source's candidates under another's title.
+  #seq = 0;
 
   // Every `declared` and `marker_untouched` candidate starts kept; every
   // `mention` starts unkept (ADR-0090 §7 / Amendment 1) — re-applied after
@@ -52,6 +56,7 @@ export class PropagateController {
     this.baseline = undefined;
     this.error = null;
     this.loading = true;
+    const seq = ++this.#seq;
     // Bring the tab into view AT ONCE — it shows its own loading state while
     // the candidate set and the snapshot list resolve (mirrors the plot
     // board's fetch-then-show, #1920).
@@ -61,13 +66,15 @@ export class PropagateController {
         api.listChangeCandidates(sourceId),
         api.listNodeSnapshots(sourceId),
       ]);
+      if (seq !== this.#seq) return;
       this.candidates = candidates;
       this.snapshots = snapshotList.snapshots;
       this.#applyDefaultKept();
     } catch (error) {
+      if (seq !== this.#seq) return;
       this.error = error instanceof Error ? error.message : String(error);
     } finally {
-      this.loading = false;
+      if (seq === this.#seq) this.loading = false;
     }
   }
 
@@ -99,13 +106,17 @@ export class PropagateController {
     this.baseline = value;
     this.loading = true;
     this.error = null;
+    const seq = ++this.#seq;
     try {
-      this.candidates = await api.listChangeCandidates(this.sourceId, value);
+      const candidates = await api.listChangeCandidates(this.sourceId, value);
+      if (seq !== this.#seq) return;
+      this.candidates = candidates;
       this.#applyDefaultKept();
     } catch (error) {
+      if (seq !== this.#seq) return;
       this.error = error instanceof Error ? error.message : String(error);
     } finally {
-      this.loading = false;
+      if (seq === this.#seq) this.loading = false;
     }
   }
 
@@ -132,6 +143,7 @@ export class PropagateController {
   // Safe to call twice (App's `onClose` and a successful `confirm()` both
   // reach here) — `removePanel` on an already-gone panel is a no-op.
   close(): void {
+    this.#seq++;
     workspaceLayout.removePanel("propagate");
     this.sourceId = null;
     this.sourceTitle = "";

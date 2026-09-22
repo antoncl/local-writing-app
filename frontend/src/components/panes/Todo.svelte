@@ -127,7 +127,7 @@
               onblur={(event) => onUpdateTodoText(item, event.currentTarget.value)}
               onkeydown={(event) => onTodoTextKeydown(event, item)}
             ></textarea>
-            {#if sourceDetailLine(item)}
+            {#if item.source}
               <p class="todo-review-source">{sourceDetailLine(item)}</p>
             {/if}
           </div>

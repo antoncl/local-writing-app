@@ -255,6 +255,11 @@ export class SnapshotStripController {
   // and with one shared token the flip cancelled the fetch it was waiting on,
   // leaving a parked notch with an empty overlay and no runs to flip.
   #fetch = 0;
+  // A park that arrived before `load()` gave this controller a target (ADR-0090
+  // Amendment 2 §2: a review item's source pane may be created by the same
+  // gesture that parks it). Applied once, by the next `load()` that has a
+  // backend; dropped by a `load(null)`.
+  #pendingPark: string | null = null;
   #render = 0;
 
   // ---- entering compare mode (#409 review) ----------------------------------
@@ -313,9 +318,15 @@ export class SnapshotStripController {
     this.#clearDiff();
     if (!backend) {
       this.snapshots = [];
+      this.#pendingPark = null;
       return () => {};
     }
     void this.refresh();
+    if (this.#pendingPark !== null) {
+      const pending = this.#pendingPark;
+      this.#pendingPark = null;
+      void this.park(pending);
+    }
     return () => {
       if (this.#backend?.key === backend.key) this.#backend = null;
     };
@@ -346,6 +357,12 @@ export class SnapshotStripController {
    *  parks; the runs carry all the text, so every later flip is a re-render. */
   async park(snapshotId: string | null): Promise<void> {
     const backend = this.#backend;
+    if (snapshotId && !backend) {
+      // No target yet — the pane is still mounting. Keep the intent for the
+      // `load()` that follows rather than silently returning to Live.
+      this.#pendingPark = snapshotId;
+      return;
+    }
     if (!snapshotId || !backend) {
       // Live needs no round trip, so it happens at once.
       this.parked = null;

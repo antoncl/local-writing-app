@@ -9,7 +9,6 @@
   // Never writes anything itself: opening a row routes through the same
   // `todoActions.openFileTodo` the Todo pane uses (opens the source parked on
   // its baseline, then this dependent, per ADR-0090 §3/Amendment 2 §2).
-  import { get } from "svelte/store";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import RailSectionHeader from "@/components/editor/RailSectionHeader.svelte";
@@ -27,15 +26,15 @@
   );
 
   // The source's title, off the cheapest lookup already loaded (lore is the
-  // only kind ADR-0090 sources from) — falls back to the bare id when the
-  // source entry isn't in the roster (deleted, or a project the roster
-  // hasn't loaded yet).
-  function sourceTitleFor(sourceId: string): string {
-    return get(loreEntriesStore).find((entry) => entry.id === sourceId)?.title ?? sourceId;
-  }
+  // only kind ADR-0090 sources from) — read through the store's own
+  // subscription so a roster that loads after this panel mounts re-renders
+  // the titles; falls back to the bare id when the source entry isn't in the
+  // roster (deleted, or a project the roster hasn't loaded yet).
+  let titleById = $derived(new Map($loreEntriesStore.map((entry) => [entry.id, entry.title] as const)));
 
   function detailFor(item: TodoItem): string | null {
-    return item.source ? reviewItemSourceDetail(item.source, sourceTitleFor(item.source.node_id)) : null;
+    if (!item.source) return null;
+    return reviewItemSourceDetail(item.source, titleById.get(item.source.node_id) ?? item.source.node_id);
   }
 
   const COLLAPSE_KEY = "reviewItems";

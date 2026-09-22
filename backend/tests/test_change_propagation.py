@@ -27,6 +27,7 @@ from app.models import (
     SaveLoreEntryRequest,
     TodoDocument,
     TodoSource,
+    UpdateTodoRequest,
     UpsertMetadataFieldRequest,
 )
 from app.services.project.errors import ProjectServiceError
@@ -248,6 +249,34 @@ class ChangePropagationTests(unittest.TestCase):
             self.assertEqual(ctx.exception.status_code, 422)
         after = _hash_tree(self.root)
         self.assertEqual(before, after)
+
+    def test_duplicate_kept_ids_collapse_to_one_item(self) -> None:
+        response = self.service.propagate_change(
+            self.marek, PropagateRequest(kept=[self.city_guard, self.city_guard, self.ch5, self.ch5])
+        )
+        self.assertEqual(len(response.created), 2)
+        targets = [(item.node_id or item.scene_id) for item in response.todos.items]
+        self.assertEqual(sorted(targets), sorted([self.city_guard, self.ch5]))
+
+    def test_scene_review_item_survives_repair(self) -> None:
+        """A scene review item has a `scene_id` and no anchor; repair's anchor
+        reconciliation must leave it alone."""
+        response = self.service.propagate_change(self.marek, PropagateRequest(kept=[self.ch5, self.ch9]))
+        self.service.repair_project()
+        after = {item.id for item in self.service.read_todos().items}
+        self.assertEqual(after, set(response.created))
+
+    def test_update_cannot_make_a_node_scope_without_a_node(self) -> None:
+        todos = self.service.create_todo(CreateTodoRequest(text="plain"))
+        plain = todos.items[-1].id
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.update_todo(plain, UpdateTodoRequest(scope="node"))
+        self.assertEqual(ctx.exception.status_code, 422)
+        # A review item keeps its node scope through an ordinary status update.
+        response = self.service.propagate_change(self.marek, PropagateRequest(kept=[self.city_guard]))
+        updated = self.service.update_todo(response.created[0], UpdateTodoRequest(status="done"))
+        item = next(i for i in updated.items if i.id == response.created[0])
+        self.assertEqual((item.scope, item.node_id, item.status), ("node", self.city_guard, "done"))
 
     def test_unknown_source_is_404(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:

@@ -51,12 +51,18 @@ _ROUTE_ORDER = {
 }
 
 
+# The one place the scene entry type is spelled for ADR-0090: the candidate
+# filter here and the confirm step's scope choice (change_propagation.py)
+# must agree, or a scene candidate silently becomes a node-scoped item.
+SCENE_ENTRY_TYPE = "manuscript:scene"
+
+
 def _is_candidate_node(entry: NodeIndexEntry) -> bool:
     """ADR-0090 §2's node filter: lore entries at any layer, plus the open
     book's own scenes (book-scoped, never inherited). Never tags, chats,
     prompts, plots, research, or the source itself — the caller excludes
     the source by id."""
-    return entry.kind == "lore" or entry.entry_type == "manuscript:scene"
+    return entry.kind == "lore" or entry.entry_type == SCENE_ENTRY_TYPE
 
 
 def _corpus_entry_mentions(matcher, corpus_entry, prose_fields: frozenset[str]) -> bool:

@@ -67,10 +67,17 @@ class TodosMixin:
                     item.text = request.text
                 if request.status is not None:
                     item.status = request.status
-                if request.scope is not None:
-                    item.scope = request.scope
                 if request.scene_id is not None:
                     item.scene_id = request.scene_id
+                if request.scope is not None:
+                    # The same rule `_create_todo_items` enforces: a scope
+                    # must have its home. A node home is only ever set by the
+                    # confirm step, so an update can keep it, never mint it.
+                    if request.scope == "node" and not item.node_id:
+                        raise ProjectServiceError("A node-scoped TODO needs a node_id.", 422)
+                    if request.scope == "scene" and not item.scene_id:
+                        raise ProjectServiceError("A scene-scoped TODO needs a scene_id.", 422)
+                    item.scope = request.scope
                 self._write_yaml(root / "todo.yaml", todos.model_dump())
                 return todos
         raise ProjectServiceError(f"TODO {todo_id} does not exist.", 404)

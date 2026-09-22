@@ -23,11 +23,8 @@ from app.models import (
     PropagateResponse,
     TodoSource,
 )
+from app.services.project.change_candidates import SCENE_ENTRY_TYPE
 from app.services.project.errors import ProjectServiceError
-
-# A scene candidate is a manuscript node (ADR-0090 §2's own entry_type check,
-# `_is_candidate_node`); every other candidate is a lore entry.
-_SCENE_ENTRY_TYPE = "manuscript:scene"
 
 
 class ChangePropagationMixin:
@@ -40,9 +37,17 @@ class ChangePropagationMixin:
         kept_ids = set(request.kept)
         if not kept_ids:
             raise ProjectServiceError("Nothing kept.", 422)
-        for candidate_id in kept_ids:
+        for candidate_id in sorted(kept_ids):
             if candidate_id not in by_id:
                 raise ProjectServiceError(f"{candidate_id} is not a candidate.", 422)
+
+        # Every refusal happens before the first write, including the one the
+        # camera would raise: a source with no file to photograph (an override
+        # target with no delta) must fail here, not after the todos landed.
+        kind = self.node_snapshot_kind(candidates.source_id)
+        _root, _node_id, path = self._resolve_snapshot_target(candidates.source_id, kind)
+        if path is None:
+            raise ProjectServiceError("The source has no file to snapshot as a baseline.", 404)
 
         # Candidate order, not the order `kept` happened to list them in — the
         # same order the confirm surface showed them (ADR-0090 §7).
@@ -53,17 +58,13 @@ class ChangePropagationMixin:
             self._propagation_todo_request(candidate, candidates, source_title)
             for candidate in ordered
         ]
-        _todos, created_items = self._create_todo_items(requests)
+        todos, created_items = self._create_todo_items(requests)
 
         # The new baseline — the only write to the source, and the only other
         # write this endpoint makes (ADR-0090 §1).
-        snapshot = self.capture_snapshot(
-            candidates.source_id,
-            kind=self.node_snapshot_kind(candidates.source_id),
-            origin="propagation",
-        )
+        snapshot = self.capture_snapshot(candidates.source_id, kind=kind, origin="propagation")
         return PropagateResponse(
-            todos=self.read_todos(),
+            todos=todos,
             created=[item.id for item in created_items],
             snapshot=snapshot,
         )
@@ -90,7 +91,7 @@ class ChangePropagationMixin:
             marker_id=first_reason.marker_id if first_reason.route == "mutates_source" else "",
         )
         text = f"Follow up on {source_title}'s change"
-        if candidate.entry_type == _SCENE_ENTRY_TYPE:
+        if candidate.entry_type == SCENE_ENTRY_TYPE:
             return CreateTodoRequest(
                 text=text, scope="scene", scene_id=candidate.id, source=source
             )

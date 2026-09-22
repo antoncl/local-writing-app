@@ -31,6 +31,7 @@
 import type { DiffView, EntryMetadata, MetadataFieldDefinition, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
 import type { FieldFlip } from "@/lib/utils/entryRevision";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
+import { reviewProposals } from "@/lib/stores/reviewProposals.svelte";
 import { createTargetFor } from "@/lib/utils/pickerCreate";
 
 /** One structured (non-prose) field the patch proposes, reviewed as an atomic
@@ -115,6 +116,11 @@ export class EntryProposalController {
   // body flip compares against. A callback, not fed state, because the host owns
   // the prose buffer (mirrors `SnapshotStripController.readLive`).
   readCurrentBody: (() => string) | null = null;
+  // ADR-0090 §4: called with a review item's id when a commit adopts a patch
+  // that Propose seeded (the hand-off `reviewProposals` carries) — the host
+  // marks it done. The controller itself never imports `@/lib/api` (see the
+  // module note); the actual write is the host's, like every other adoption.
+  onReviewItemAdopted: ((reviewItemId: string) => void | Promise<void>) | null = null;
 
   /** The patch committed for the open node, or null. Purely proposal-driven —
    *  a node reviews iff a brainstorm committed a patch for its id. */
@@ -396,15 +402,25 @@ export class EntryProposalController {
     }
     this.resetResolution();
     this.clear();
+    // ADR-0090 §4: a proposal launched FROM a review item's Propose carries a
+    // hand-off (never a schema field — see `reviewProposals`'s own note); this
+    // is commit's one success path, so an adopted patch marks that item done.
+    if (this.nodeId) {
+      const reviewItemId = reviewProposals.take(this.nodeId);
+      if (reviewItemId) await this.onReviewItemAdopted?.(reviewItemId);
+    }
     return true;
   }
 
   /** Discard the review — "Don't save" / Discard. Nothing was written during the
    *  frozen review, so this only drops the proposal and the accumulated
-   *  resolution; the entry is left exactly as it was. */
+   *  resolution; the entry is left exactly as it was. Declining leaves a
+   *  review item's Propose hand-off's target OPEN — only the hand-off itself
+   *  clears, so a later, unrelated commit on this node can't misattribute. */
   abandon(): void {
     this.resetResolution();
     this.clear();
+    if (this.nodeId) reviewProposals.take(this.nodeId);
   }
 
   /** Dismiss the proposal for the open node. Low-level: prefer commit/abandon,

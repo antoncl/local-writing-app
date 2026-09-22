@@ -8,18 +8,47 @@
   //
   // Never writes anything itself: opening a row routes through the same
   // `todoActions.openFileTodo` the Todo pane uses (opens the source parked on
-  // its baseline, then this dependent, per ADR-0090 §3/Amendment 2 §2).
+  // its baseline, then this dependent, per ADR-0090 §3/Amendment 2 §2). Each
+  // row also gets a Propose tile (ADR-0090 §4) — the SAME ＋New prompt roster
+  // ConversationsPanel offers on this entry's own type, since Propose opens a
+  // conversation on this entry (the dependent), not on the row's source.
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import RailSectionHeader from "@/components/editor/RailSectionHeader.svelte";
+  import Popover from "@/components/chrome/Popover.svelte";
+  import PromptMenu from "@/components/editor/PromptMenu.svelte";
+  import { buildPromptMenuTree } from "@/lib/editor-core/promptMenuTree";
+  import {
+    promptEntriesOfferedOn,
+    type PromptResolutionContext,
+  } from "@/lib/editor-core/promptResolution";
+  import { seedConversationInputs } from "@/components/editor/body/chat/chatInputs";
   import { todosStore } from "@/lib/stores/todos";
   import { loreEntriesStore } from "@/lib/stores/lore";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { todoActions } from "@/lib/stores/todoActions.svelte";
   import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
   import { reviewItemSourceDetail } from "@/lib/utils/reviewItemDetail";
-  import type { TodoItem } from "@/lib/types";
+  import type { PromptEntrySummary, TodoItem } from "@/lib/types";
 
-  let { nodeId, nodeTitle }: { nodeId: string; nodeTitle: string } = $props();
+  let {
+    nodeId,
+    nodeTitle,
+    subjectEntryType = "",
+    promptEntries,
+    asOfScene = "",
+    asOfSceneTitle = "",
+  }: {
+    nodeId: string;
+    nodeTitle: string;
+    subjectEntryType?: string;
+    promptEntries: PromptEntrySummary[];
+    // The card's as-of scene (ADR-0055 §1) — Propose reads the dependent as
+    // of the same scene the Conversations ＋New would, never book-start.
+    asOfScene?: string;
+    asOfSceneTitle?: string;
+  } = $props();
 
   let items = $derived(
     $todosStore.filter((item) => item.scope === "node" && item.node_id === nodeId && item.status === "open"),
@@ -40,6 +69,37 @@
   const COLLAPSE_KEY = "reviewItems";
   const COLLAPSE_DEFAULT = true;
   const expanded = $derived(railSectionCollapse.isExpanded(COLLAPSE_KEY, COLLAPSE_DEFAULT));
+
+  // Propose (ADR-0090 §4): the same prompt-offer resolution ConversationsPanel's
+  // ＋New menu uses, scoped to THIS entry's own type — identical for every row,
+  // since Propose always opens on this entry, never on a row's source.
+  let ctx = $derived<PromptResolutionContext>({
+    metadataSchema: $metadataSchemaStore,
+    promptEntries,
+    loreEntries: [],
+    availableScenes: [],
+    hiddenPromptIds: $hiddenLibraryStore,
+  });
+  let proposePrompts = $derived(promptEntriesOfferedOn(ctx, subjectEntryType));
+  let proposeMenu = $derived(buildPromptMenuTree(proposePrompts));
+
+  // One popover open at a time; each row's trigger button is keyed by item id
+  // so the popover (a DOM sibling of the button that opened it, per
+  // Popover.svelte's in-flow anchoring) drops from the right row.
+  let openItemId = $state<string | null>(null);
+  let triggerEls = $state<Record<string, HTMLButtonElement | null>>({});
+
+  async function pickPrompt(item: TodoItem, prompt: PromptEntrySummary): Promise<void> {
+    openItemId = null;
+    const seededInputs = seedConversationInputs(
+      prompt,
+      nodeId,
+      nodeTitle,
+      subjectEntryType,
+      asOfScene ? { id: asOfScene, title: asOfSceneTitle } : null,
+    );
+    await todoActions.proposeFromReviewItem(item, prompt, seededInputs, { subjectTitle: nodeTitle });
+  }
 </script>
 
 <section class="review-items" aria-label={`Review items for ${nodeTitle}`}>
@@ -61,7 +121,44 @@
             title={item.text}
             detail={detailFor(item)}
             onClick={() => void todoActions.openFileTodo(item)}
-          />
+          >
+            {#snippet trailing()}
+              <div class="ri-propose-anchor">
+                <button
+                  type="button"
+                  bind:this={triggerEls[item.id]}
+                  title={proposePrompts.length > 0 ? "Propose…" : "No prompt is offered on this type"}
+                  aria-label={`Propose a follow-up for ${item.text}`}
+                  aria-haspopup="menu"
+                  aria-expanded={openItemId === item.id}
+                  disabled={proposePrompts.length === 0}
+                  onmousedown={(event) => event.stopPropagation()}
+                  onclick={(event) => {
+                    event.stopPropagation();
+                    openItemId = openItemId === item.id ? null : item.id;
+                  }}
+                ><i class="ti ti-message-plus" aria-hidden="true"></i></button>
+                {#if proposePrompts.length > 0}
+                  <Popover
+                    open={openItemId === item.id}
+                    triggerEl={triggerEls[item.id] ?? null}
+                    onClose={() => {
+                      if (openItemId === item.id) openItemId = null;
+                    }}
+                    role="menu"
+                    id={`review-item-propose-${item.id}`}
+                    label="Propose a follow-up"
+                    offset={6}
+                    anchor="right"
+                    minWidth="200px"
+                    maxWidth="320px"
+                  >
+                    <PromptMenu nodes={proposeMenu} onSelect={(prompt) => void pickPrompt(item, prompt)} />
+                  </Popover>
+                {/if}
+              </div>
+            {/snippet}
+          </NodeRow>
         {/each}
       </NodeList>
     </div>
@@ -79,6 +176,13 @@
     padding: 8px;
     background: var(--tier1);
     border-radius: 10px;
+  }
+
+  /* The Propose popover's in-flow anchor — a Popover panel positions itself
+     absolutely against its nearest `position: relative` ancestor. */
+  .ri-propose-anchor {
+    position: relative;
+    display: inline-flex;
   }
 
   .muted {

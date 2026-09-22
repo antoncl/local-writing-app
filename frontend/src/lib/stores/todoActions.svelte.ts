@@ -14,7 +14,10 @@
 import { tick } from "svelte";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
+import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+import { composerPrefills } from "@/lib/stores/composerPrefill.svelte";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+import { reviewProposals } from "@/lib/stores/reviewProposals.svelte";
 import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
 import {
   embeddedTodosStore,
@@ -22,7 +25,7 @@ import {
   setTodos,
   todosStore,
 } from "@/lib/stores/todos";
-import type { EmbeddedTodoRecord, Scene, SearchHit, TodoItem } from "@/lib/types";
+import type { EmbeddedTodoRecord, PromptEntrySummary, Scene, SearchHit, TodoItem } from "@/lib/types";
 
 class TodoActions {
   // The Todo pane's "Add" compose field (two-way bound).
@@ -192,6 +195,48 @@ class TodoActions {
         // (grepped editorPaneComponents / highlightMutation / revealMarker /
         // scrollToMarker); building one is out of this slice's scope.
       }
+    });
+  }
+
+  // ADR-0090 §4: the adopt side of Propose — a committed patch marks the
+  // review item done. Here, not in the editor host: every todo write goes
+  // through this controller and lands the returned document in the store.
+  async markReviewItemDone(reviewItemId: string): Promise<void> {
+    await this.run(async () => {
+      setTodos((await api.updateTodo(reviewItemId, { status: "done" })).items);
+    });
+  }
+
+  // ADR-0090 §4: Propose — open a conversation on the review item's dependent
+  // (the node this item lives on), its first message pre-filled with the
+  // source's change. Lore dependents only (a scene item has no Propose, per
+  // §4's scene paragraph): guarded by `item.source && item.node_id`.
+  async proposeFromReviewItem(
+    item: TodoItem,
+    prompt: PromptEntrySummary,
+    seededInputs: Record<string, unknown>,
+    opts: { subjectTitle: string },
+  ): Promise<void> {
+    const source = item.source;
+    const nodeId = item.node_id;
+    if (!source || !nodeId) return;
+    await this.run(async () => {
+      const message = await api.changeMessage(source.node_id, source.snapshot_id);
+      const chatId = await chatSessions.openChatFromPromptEntry(prompt, seededInputs, null, {
+        subject: nodeId,
+        subjectTitle: opts.subjectTitle,
+      });
+      // `openChatFromPromptEntry` swallows a failed create into "" — nothing
+      // opened, so nothing to hold or hand off (a stray hand-off would mark
+      // this item done on an unrelated later commit on this node).
+      if (!chatId) return;
+      // Recorded only once the conversation exists.
+      reviewProposals.set(nodeId, item.id);
+      // The message is held for THAT chat's composer, not pushed at a pane:
+      // the pane is created and remounted by this same gesture, and every
+      // load of the chat re-applies the hold until the writer edits or sends
+      // (composerPrefill.svelte.ts, browser-verified).
+      composerPrefills.set(chatId, message.text);
     });
   }
 }

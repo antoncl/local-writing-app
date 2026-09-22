@@ -1,6 +1,7 @@
 <script lang="ts">
 
   import { untrack } from "svelte";
+  import { todoActions } from "@/lib/stores/todoActions.svelte";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
   import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
@@ -513,6 +514,10 @@
   entryReview.onFlush = () => {
     if (scene?.id) return onFlushReviewCommit?.(scene.id);
   };
+  // ADR-0090 §4: mark a review item done once its Propose-launched patch adopts.
+  // The write goes through the todo controller like every other todo write;
+  // its `run` surfaces a failure without undoing the adopt.
+  entryReview.onReviewItemAdopted = (reviewItemId) => todoActions.markReviewItemDone(reviewItemId);
 
   // A node under an open brainstorm review is a frozen transaction (#634): the
   // rail/title go read-only and the host suppresses autosave, so the diff's

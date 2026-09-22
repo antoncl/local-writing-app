@@ -130,6 +130,7 @@ export type {
   ChangeCandidateReason,
   ChangeCandidate,
   ChangeCandidateSet,
+  ChangeMessage,
   PropagateRequest,
   PropagateResponse,
 } from "./propagationTypes";

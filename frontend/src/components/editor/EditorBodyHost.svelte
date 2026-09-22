@@ -327,6 +327,7 @@
     if (model.documentKind === "chat") chatBodyView?.setTitleFromPane(next);
     if (model.documentKind === "view") viewBodyView?.setTitleFromPane(next);
   }
+
 </script>
 
 {#if model.bodyShape === "none"}
@@ -541,7 +542,14 @@
              `node`-scoped todos whose dependent is this entry. Lore-scoped
              (the field is only seeded onto lore:base). -->
         {#key model.scene?.id ?? ""}
-          <ReviewItemsPanel nodeId={model.scene?.id ?? ""} nodeTitle={model.title} />
+          <ReviewItemsPanel
+            nodeId={model.scene?.id ?? ""}
+            nodeTitle={model.title}
+            subjectEntryType={model.entryType}
+            promptEntries={deps.promptEntries}
+            asOfScene={model.scrub.anchorSceneId}
+            asOfSceneTitle={deps.structure ? findNodeBySceneId(deps.structure.root, model.scrub.anchorSceneId)?.title ?? "" : ""}
+          />
         {/key}
       {:else if model.metadataSchema.fields[fieldId]?.type === "computed" && model.metadataSchema.fields[fieldId]?.computed?.function === "references"}
         <!-- ADR-0089 Amendment 1 §4 (#2101, slice C3): incoming backlinks —

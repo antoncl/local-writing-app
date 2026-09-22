@@ -59,6 +59,7 @@
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { ChatCommitController } from "@/lib/stores/chatCommit.svelte";
+  import { composerPrefills } from "@/lib/stores/composerPrefill.svelte";
   import { refreshChatSessions } from "@/lib/stores/chats";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -361,6 +362,11 @@
       chatSession = session;
       loadedChatId = chatId;
       applyChatSession(session);
+      // ADR-0090 §4: a Propose prefill outlives every load of this chat until
+      // the writer edits or sends (see composerPrefill.svelte.ts). The
+      // composer's `value` prop carries it in whether or not it is mounted yet.
+      const prefill = composerPrefills.peek(chatId);
+      if (prefill !== null) chatInput = prefill;
       await tick();
       scrollToBottom();
     } catch (err) {
@@ -655,6 +661,7 @@
     }, 500);
   }
 
+
   function appendToActiveChatJournal(added: ChatSessionJournalEntry[]): void {
     if (!added.length) return;
     // Keyed by (id, source), not id: a better-ranked re-mention is a second
@@ -849,6 +856,7 @@
       userIdx = chatHistory.length - 1;
     }
     chatInput = "";
+    if (scene?.id) composerPrefills.clear(scene.id);
     // Also clear imperatively (#1083): the reactive value-sync can wedge, so a
     // clear the user must always see can't depend on it alone.
     composerRef?.setValue("");
@@ -1282,6 +1290,7 @@
       onChange={(next) => {
         chatInput = next;
         chatRewound = false;
+        if (scene?.id) composerPrefills.clear(scene.id);
       }}
       onKeydown={handleChatInputKeydown}
       onFocus={() => onFocus?.()}

@@ -109,6 +109,58 @@ export function seedPickInputDraft(entry: PromptEntrySummary, name: string, subj
   return typeof seeded === "string" ? seeded : JSON.stringify(seeded);
 }
 
+// A subject-anchored conversation launch's `as_of` seed — the scene the
+// subject's time-travel slider is at (ADR-0055 §1). `null` = book-start, no
+// seed at all (keeps a prompt without an `as_of` input's inputs clean).
+export type ConversationAsOf = { id: string; title: string } | null;
+
+// The "＋New" / "Propose" launch's shared input seed (ADR-0051 S2 /
+// ADR-0090 §4): `entry` (the subject, in whatever shape that input's declared
+// type stores), `entry_type` when the prompt declares that required hidden
+// input (#1694), and `as_of` when the subject has a non-book-start anchor
+// (#1485). Extracted from ConversationsPanel's `startNew` so a review item's
+// Propose (which has no rail/menu context, just a prompt + a node id) seeds a
+// launch identically rather than re-deriving the same three lines.
+export function seedConversationInputs(
+  prompt: PromptEntrySummary,
+  subjectId: string,
+  subjectTitle: string,
+  subjectEntryType: string,
+  asOfScene: ConversationAsOf,
+): Record<string, unknown> {
+  // The subject's kind is the FQN prefix of its entry_type (kind:key).
+  const subjectKind = (subjectEntryType.split(":")[0] || "lore") as NodePickerRef["kind"];
+  const seededInputs: Record<string, unknown> = {
+    entry: seedSubjectEntryInput(prompt, {
+      id: subjectId,
+      kind: subjectKind,
+      title: subjectTitle,
+      entryType: subjectEntryType || undefined,
+    }),
+  };
+  // ADR-0067 Amendment 1: a commit prompt's target entry_type is a required,
+  // caller-supplied input. On this revise path the subject's own type IS that
+  // value — seed it alongside `entry` for any prompt that declares the input,
+  // so the required (hidden) `entry_type` is satisfied without the writer
+  // touching it.
+  if (subjectEntryType && prompt.inputs?.some((i) => i.name === "entry_type")) {
+    seededInputs.entry_type = subjectEntryType;
+  }
+  // Seed the read anchor onto the prompt's `as_of` scene input — hidden from
+  // the chat strip but persisted, so impersonate reads the subject as-of the
+  // slider's scene; omitted at book-start (a prompt without an `as_of` input
+  // ignores the seed).
+  if (asOfScene) {
+    seededInputs.as_of = seedPickInput(prompt, "as_of", {
+      id: asOfScene.id,
+      kind: "manuscript",
+      title: asOfScene.title || asOfScene.id,
+      entryType: "manuscript:scene",
+    });
+  }
+  return seededInputs;
+}
+
 // One SubjectRef from an entry's identity: the FQN prefix of an entry_type IS
 // its node kind (kind:key, #77) — the heuristic both launch sites share.
 // (ViewBodyView prefers the schema's `entry_types[fqn].kind` with this as

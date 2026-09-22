@@ -30,6 +30,7 @@ from app.models import (
     UpdateTodoRequest,
     UpsertMetadataFieldRequest,
 )
+from app.services.ai.lore_block import _render_lore_entries
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
 
@@ -397,9 +398,64 @@ class ChangePropagationTests(unittest.TestCase):
         )
         self.assertTrue(forced_whole.json()["whole_entry"])
 
+    def test_change_message_after_block_matches_render_lore_entries(self) -> None:
+        """ADR-0090 §4's rendering parity: the message's "After:" block IS the
+        lore block the AI already sees — never a second, drifting formatter.
+        (Lives here, not in test_ai_helpers.py, which sits at the size cap.)"""
+        message = self.service.change_message(self.marek, "")
+        entries = _render_lore_entries(self.service, [self.marek])
+        self.assertIn(entries[0][1], message.text)
+
     def test_http_empty_kept_is_422(self) -> None:
         res = self.client.post(f"/api/lore/{self.marek}/propagate", json={"kept": []})
         self.assertEqual(res.status_code, 422, res.text)
+
+    # ----- change message (ADR-0090 §4) -----------------------------------------
+
+    def test_change_message_with_baseline_shows_before_and_after(self) -> None:
+        self.service.propagate_change(self.marek, PropagateRequest(kept=[self.city_guard]))
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant", "aliases": ["the Captain"], "posting": self.barracks},
+            ),
+        )
+        message = self.service.change_message(self.marek)
+        self.assertIn("Captain", message.text)
+        self.assertIn("Sergeant", message.text)
+        self.assertIn("Before:", message.text)
+        self.assertIn("After:", message.text)
+        self.assertNotEqual(message.baseline_snapshot_id, "")
+
+    def test_change_message_without_baseline_has_no_before(self) -> None:
+        message = self.service.change_message(self.marek, "")
+        self.assertEqual(message.baseline_snapshot_id, "")
+        self.assertNotIn("Before:", message.text)
+        self.assertIn("no earlier baseline", message.text)
+        self.assertIn("Captain", message.text)
+
+    def test_change_message_unknown_source_is_404(self) -> None:
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.change_message("not-a-real-id")
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_http_change_message_matches_service(self) -> None:
+        self.service.propagate_change(self.marek, PropagateRequest(kept=[self.city_guard]))
+        service_message = self.service.change_message(self.marek)
+
+        res = self.client.get(f"/api/lore/{self.marek}/change-message")
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(res.json()["text"], service_message.text)
+
+        res_whole = self.client.get(
+            f"/api/lore/{self.marek}/change-message", params={"baseline": ""}
+        )
+        self.assertEqual(res_whole.status_code, 200, res_whole.text)
+        self.assertNotIn("Before:", res_whole.json()["text"])
+        self.assertEqual(res_whole.json()["baseline_snapshot_id"], "")
 
 
 if __name__ == "__main__":

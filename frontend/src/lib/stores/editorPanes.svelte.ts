@@ -126,6 +126,10 @@ interface EditorPaneComponentHandle {
 }
 
 const AUTO_SAVE_IDLE_MS = 6000;
+// A pane intent (park / prefill) polls for the target pane's handle at this
+// cadence, for at most this many attempts (~3 s) — see `#withPaneHandle`.
+const PANE_INTENT_INTERVAL_MS = 100;
+const PANE_INTENT_ATTEMPTS = 30;
 // Ceiling on a dirty run, re-armed once (never per keystroke), so an unbroken
 // burst still reaches disk. This is deliberately the app's CRASH-DURABILITY
 // number (#455), not just an anti-chattiness knob: clean exits now flush via the
@@ -1163,9 +1167,24 @@ class EditorPanesController {
   // controller mounts async), so a missing handle or a failed park is a
   // silent no-op; the pane already stays put with nothing parked.
   parkSnapshotInOpenPane(nodeId: string, snapshotId: string): void {
-    const pane = this.panes.find((candidate) => candidate.document?.id === nodeId);
-    if (!pane) return;
-    this.editorPaneComponents[pane.id]?.parkSnapshot(snapshotId);
+    this.#withPaneHandle(nodeId, (handle) => handle.parkSnapshot(snapshotId));
+  }
+
+  // An intent aimed at a pane the same gesture is still creating (ADR-0090
+  // Amendment 2 §2): the pane's `document` lands after an async load and its
+  // NodeEditor registers its handle a tick after mounting, so a single
+  // `setTimeout(…, 0)` from the caller is not enough. Poll briefly for both;
+  // give up silently after PANE_INTENT_ATTEMPTS — the pane simply opens
+  // without the intent, which is the documented degraded behaviour.
+  #withPaneHandle(documentId: string, apply: (handle: EditorPaneComponentHandle) => void, attempt = 0): void {
+    const pane = this.panes.find((candidate) => candidate.document?.id === documentId);
+    const handle = pane ? this.editorPaneComponents[pane.id] : undefined;
+    if (pane && handle) {
+      apply(handle);
+      return;
+    }
+    if (attempt >= PANE_INTENT_ATTEMPTS) return;
+    setTimeout(() => this.#withPaneHandle(documentId, apply, attempt + 1), PANE_INTENT_INTERVAL_MS);
   }
 
   // The generic post-write reconcile entry point (ADR-0085 §5) — extracted to

@@ -37,6 +37,11 @@ describe("openChatFromPromptEntry — reverse-index refresh (ADR-0051 S3)", () =
     expect(refreshReferenceIndexInBackground).toHaveBeenCalledTimes(1);
   });
 
+  it("resolves to the created session's id (ADR-0090 §4: Propose needs it to prefill)", async () => {
+    const chatId = await chatSessions.openChatFromPromptEntry(PROMPT, {}, null, { subject: "hero" });
+    expect(chatId).toBe("chat-1");
+  });
+
   it("does not refresh for a subject-less chat (e.g. a scene chat)", async () => {
     await chatSessions.openChatFromPromptEntry(PROMPT, {}, null, {});
     expect(refreshReferenceIndexInBackground).not.toHaveBeenCalled();

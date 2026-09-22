@@ -1,5 +1,6 @@
 import type {
   ChangeCandidateSet,
+  ChangeMessage,
   EntryPatchExtraction,
   LoreEntry,
   LoreEntryList,
@@ -140,5 +141,12 @@ export const loreApi = {
       method: "POST",
       body: JSON.stringify(body),
     });
+  },
+  // ADR-0090 §4: the pre-filled Propose message — read-only, writes nothing.
+  // Same `baseline` tri-state as `listChangeCandidates`.
+  changeMessage(entryId: string, baseline?: string) {
+    const path = `/lore/${encodeURIComponent(entryId)}/change-message`;
+    if (baseline === undefined) return request<ChangeMessage>(path);
+    return request<ChangeMessage>(`${path}?baseline=${encodeURIComponent(baseline)}`);
   },
 };

@@ -201,6 +201,19 @@ class ChangeCandidateSet(BaseModel):
     items: list[ChangeCandidate] = Field(default_factory=list)
 
 
+class ChangeMessage(BaseModel):
+    """ADR-0090 §4: the pre-filled first message for a review item's Propose
+    conversation — the source rendered before/after its change (or, absent a
+    baseline, the whole entry) plus the follow-up question. `baseline_snapshot_id`
+    echoes the baseline actually used (same tri-state as `change_candidates`:
+    `""` means the whole entry, not a snapshot). Never sent — only fills the
+    chat composer; the writer still presses Send."""
+
+    source_id: str
+    baseline_snapshot_id: str = ""
+    text: str
+
+
 class PropagateRequest(BaseModel):
     """The confirm step's write (ADR-0090 §1/§3/§5): the candidates the
     writer kept, measured against the same baseline semantics as the

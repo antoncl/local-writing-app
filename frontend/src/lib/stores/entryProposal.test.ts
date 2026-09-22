@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mocked so the round 2 (Y1/Y8) host-simulation tests can control
 // `api.createTagEntry` without hitting the network — the controller itself
@@ -12,6 +12,7 @@ vi.mock("@/lib/api", () => ({ api: { listTagEntries, createTagEntry } }));
 
 import { EntryProposalController } from "./entryProposal.svelte";
 import { entryBrainstorm } from "./entryBrainstorm.svelte";
+import { reviewProposals } from "./reviewProposals.svelte";
 import { clearTagNodes, resolveAdoptedTagFieldValue, tagNodesStore } from "./tagNodes";
 import { createTargetFor } from "@/lib/utils/pickerCreate";
 import type { EntryPatch, MetadataSchema } from "@/lib/types";
@@ -274,6 +275,60 @@ describe("EntryProposalController", () => {
     expect(onAdoptBody).not.toHaveBeenCalled();
     expect(c.proposal).toBeNull();
     expect(c.hasPendingChanges).toBe(false);
+  });
+
+  // ADR-0090 §4: a proposal launched FROM a review item's Propose carries a
+  // hand-off (reviewProposals, keyed on the node) that an adopted commit
+  // consumes to mark the item done; a discard clears it without marking done.
+  describe("review-item hand-off (ADR-0090 §4)", () => {
+    afterEach(() => {
+      reviewProposals.take("e1");
+    });
+
+    it("commit adopting a patch marks the recorded review item done, and clears the hand-off", async () => {
+      const c = entryController("e1");
+      c.onAdoptBody = vi.fn();
+      c.onEmitChange = vi.fn();
+      c.onFlush = vi.fn();
+      const onReviewItemAdopted = vi.fn();
+      c.onReviewItemAdopted = onReviewItemAdopted;
+      entryBrainstorm.propose("e1", patch("new body"));
+      reviewProposals.set("e1", "todo_review_1");
+
+      c.setBodyResolution("new body");
+      await c.commit();
+
+      expect(onReviewItemAdopted).toHaveBeenCalledWith("todo_review_1");
+      expect(reviewProposals.peek("e1")).toBeNull();
+    });
+
+    it("commit with no recorded hand-off never calls onReviewItemAdopted", async () => {
+      const c = entryController("e1");
+      c.onAdoptBody = vi.fn();
+      c.onEmitChange = vi.fn();
+      c.onFlush = vi.fn();
+      const onReviewItemAdopted = vi.fn();
+      c.onReviewItemAdopted = onReviewItemAdopted;
+      entryBrainstorm.propose("e1", patch("new body"));
+
+      c.setBodyResolution("new body");
+      await c.commit();
+
+      expect(onReviewItemAdopted).not.toHaveBeenCalled();
+    });
+
+    it("abandon (discard) clears the hand-off without marking anything done", () => {
+      const c = entryController("e1");
+      const onReviewItemAdopted = vi.fn();
+      c.onReviewItemAdopted = onReviewItemAdopted;
+      entryBrainstorm.propose("e1", patch("body"));
+      reviewProposals.set("e1", "todo_review_1");
+
+      c.abandon();
+
+      expect(onReviewItemAdopted).not.toHaveBeenCalled();
+      expect(reviewProposals.peek("e1")).toBeNull();
+    });
   });
 
   it("resetResolution clears adoptions so a superseded proposal starts clean", () => {

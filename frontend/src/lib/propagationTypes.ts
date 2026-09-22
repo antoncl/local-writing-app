@@ -66,3 +66,13 @@ export type PropagateResponse = {
   created: string[];
   snapshot: Snapshot;
 };
+
+/** ADR-0090 §4: the pre-filled first message for a review item's Propose
+ *  conversation — the source rendered before/after its change (or, absent a
+ *  baseline, the whole entry) plus the follow-up question. Never sent — only
+ *  fills the chat composer; the writer still presses Send. */
+export type ChangeMessage = {
+  source_id: string;
+  baseline_snapshot_id: string;
+  text: string;
+};

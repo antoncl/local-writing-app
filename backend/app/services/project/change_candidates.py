@@ -14,6 +14,7 @@ route appears once, carrying every route that found it; the set is a list of
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from app.models import (
@@ -27,6 +28,15 @@ from app.services.project.errors import ProjectServiceError
 from app.services.project.field_values import same_rendered_value
 from app.services.project.node_index import NodeIndex, NodeIndexEntry
 from app.services.project.snapshot_diff import NON_FIELD_KEYS
+from app.services.project.snapshot_witness import unwitnessed_field_ids
+
+# The fields whose story-time records rename the source (ADR-0008): a marker
+# on one of these gives the source another name the prose may use.
+_NAME_FIELDS = ("title", "aliases")
+
+# A corpus label is the field id, dotted for a group member, `[n]`-suffixed
+# for a list item (`_iter_metadata_search_values`, search.py).
+_LIST_ITEM_SUFFIX = re.compile(r"\[\d+\]$")
 
 # Tiers, in display order (declared outranks a marker on an untouched field,
 # which outranks the noisy textual-mention route).
@@ -47,6 +57,23 @@ def _is_candidate_node(entry: NodeIndexEntry) -> bool:
     prompts, plots, research, or the source itself — the caller excludes
     the source by id."""
     return entry.kind == "lore" or entry.entry_type == "manuscript:scene"
+
+
+def _corpus_entry_mentions(matcher, corpus_entry, prose_fields: frozenset[str]) -> bool:
+    """Whether one corpus entry names the source in its body or in a prose
+    field. Each text is scanned on its own, never concatenated. A list item's
+    joined member text (`label[n]`) is skipped: its key is a reference already,
+    and that is the declared routes' business."""
+    if scan_name_matcher(matcher, corpus_entry.body):
+        return True
+    for label, value in corpus_entry.metadata_values:
+        if _LIST_ITEM_SUFFIX.search(label):
+            continue
+        if label.rsplit(".", 1)[-1] not in prose_fields:
+            continue
+        if scan_name_matcher(matcher, value):
+            return True
+    return False
 
 
 def _tier_for(reasons: list[ChangeCandidateReason]) -> str:
@@ -95,7 +122,7 @@ class ChangeCandidatesMixin:
         source_lore_entry = self.read_lore_entry(source)
 
         changed_fields, body_changed, whole_entry = self._change_candidate_diff(
-            source, baseline_snapshot_id, source_lore_entry
+            source, baseline_snapshot_id
         )
 
         reasons_by_id: dict[str, list[_RawReason]] = {}
@@ -132,6 +159,7 @@ class ChangeCandidatesMixin:
             )
 
         mindex = self.build_mutations_index()
+        story_names: list[str] = []
         for marker in mindex.by_entity.get(source, []):
             field_changed = whole_entry or marker.field in changed_fields
             add_reason(
@@ -143,8 +171,10 @@ class ChangeCandidatesMixin:
                     field_changed=field_changed,
                 ),
             )
+            if marker.field in _NAME_FIELDS:
+                story_names.extend(part.strip() for part in marker.value.split(",") if part.strip())
 
-        self._add_mention_reasons(index, source, source_lore_entry, add_reason)
+        self._add_mention_reasons(index, source, source_lore_entry, story_names, add_reason)
 
         items = [
             self._change_candidate_item(index, node_id, raw_reasons)
@@ -162,45 +192,66 @@ class ChangeCandidatesMixin:
         )
 
     def _change_candidate_diff(
-        self, source_id: str, baseline_snapshot_id: str | None, entry: LoreEntry
+        self, source_id: str, baseline_snapshot_id: str | None
     ) -> tuple[list[str], bool, bool]:
         """`(changed_fields, body_changed, whole_entry)` for `source_id`
         against `baseline_snapshot_id` — or the "everything counts" answer
         when no baseline was given. A baseline id that does not exist lets
-        `read_snapshot`'s 404 propagate."""
+        `read_snapshot`'s 404 propagate.
+
+        A snapshot photographs ONE layer's file (ADR-0087), so the now-side is
+        that same file read back through the same `_snapshot_state`
+        normalisation — never `read_lore_entry`, whose folded composite would
+        report every book override as a change the owning file never made."""
         if not baseline_snapshot_id:
             return [], True, True
         kind = self.node_snapshot_kind(source_id)
         detail = self.read_snapshot(source_id, baseline_snapshot_id, kind=kind)
-        keys = (set(detail.metadata) | set(entry.metadata)) - NON_FIELD_KEYS
+        root, node_id, path = self._resolve_snapshot_target(source_id, kind)
+        if path is None:
+            raise ProjectServiceError("The entry has no file to compare against.", 404)
+        front_matter, now_body = self._read_markdown_with_front_matter(path)
+        now = self._snapshot_state(front_matter, node_id, self._snapshots_dir(root, node_id))
+        now_metadata = now["metadata"]
+        keys = (set(detail.metadata) | set(now_metadata)) - NON_FIELD_KEYS
         changed_fields = sorted(
             key
             for key in keys
-            if not same_rendered_value(detail.metadata.get(key), entry.metadata.get(key))
+            if not same_rendered_value(detail.metadata.get(key), now_metadata.get(key))
         )
         was_body = detail.body.replace("\r\n", "\n")
-        now_body = entry.body.replace("\r\n", "\n")
-        return changed_fields, was_body != now_body, False
+        return changed_fields, was_body != now_body.replace("\r\n", "\n"), False
 
     def _add_mention_reasons(
-        self, index: NodeIndex, source: str, entry: LoreEntry, add_reason
+        self,
+        index: NodeIndex,
+        source: str,
+        entry: LoreEntry,
+        story_names: list[str],
+        add_reason,
     ) -> None:
         """Route 4 (`mentions_source`): a scan of the ADR-0085 search corpus
-        for the source's title/aliases, over both scene and lore bodies plus
-        their metadata values — scanned separately, never concatenated, so a
-        multi-word name cannot match across a value boundary.
+        for the source's names — its title and `aliases`, plus every name a
+        story-time marker on those fields gave it (ADR-0008) — over scene and
+        lore bodies and their `long_text` fields. Each text is scanned on its
+        own, never concatenated, so a multi-word name cannot match across a
+        value boundary.
 
-        **Echo rule:** a metadata value that, stripped and case-folded,
-        exactly equals one of the names is a reference field's own resolved
-        title echoing the source, not a mention — skipped."""
+        Only the corpus values whose label is a prose field are scanned
+        (`unwitnessed_field_ids`: `long_text`, and lists with a `long_text`
+        member); every other value is a scalar or a reference's resolved
+        title, which is the declared routes' business. A list item's joined
+        member text is skipped too: its key is a reference already."""
         title = entry.title or ""
         names = [title] if title else []
         aliases = entry.metadata.get("aliases")
         if isinstance(aliases, list):
             names.extend(str(alias) for alias in aliases if alias)
+        names.extend(story_names)
+        names = [name for name in names if name.strip()]
         if not names:
             return
-        norm_names = {name.strip().casefold() for name in names if name.strip()}
+        prose_fields = unwitnessed_field_ids(self.read_metadata_schema())
         matcher = compile_name_matcher([(source, names)])
         for node_id, corpus_entry in self._search_corpus().items():
             if node_id == source:
@@ -208,15 +259,8 @@ class ChangeCandidatesMixin:
             candidate_entry = index.by_id.get(node_id)
             if candidate_entry is None or not _is_candidate_node(candidate_entry):
                 continue
-            if scan_name_matcher(matcher, corpus_entry.body):
+            if _corpus_entry_mentions(matcher, corpus_entry, prose_fields):
                 add_reason(node_id, ChangeCandidateReason(route="mentions_source"))
-                continue
-            for _label, value in corpus_entry.metadata_values:
-                if value.strip().casefold() in norm_names:
-                    continue
-                if scan_name_matcher(matcher, value):
-                    add_reason(node_id, ChangeCandidateReason(route="mentions_source"))
-                    break
 
     def _change_candidate_item(
         self, index: NodeIndex, node_id: str, raw_reasons: list[_RawReason]

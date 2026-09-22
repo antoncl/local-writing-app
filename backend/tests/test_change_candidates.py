@@ -13,6 +13,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from layer_fixtures import declare_full_chain
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -22,6 +23,7 @@ from app.models import (
     SaveLoreEntryRequest,
     UpsertMetadataFieldRequest,
 )
+from app.scope import WorkScope
 from app.services.project_service import ProjectService
 
 
@@ -257,6 +259,33 @@ class ChangeCandidatesTests(unittest.TestCase):
             [("mutates_source", "rank", "m_a"), ("mutates_source", "rank", "m_b")],
         )
 
+    def test_mention_inside_a_long_text_field_counts(self) -> None:
+        """The corpus scan covers prose fields, not just the body: a character
+        whose `backstory` names the source is a mention candidate, while a
+        reference field's resolved title (City Guard's `captain`) is not."""
+        _define_field(self.service, "backstory", "long_text", "Backstory")
+        hollis = self._make_lore(
+            "Hollis Brand", body="", metadata={"backstory": "He served under the Captain at the gate."}
+        )
+        result = self.service.change_candidates(self.marek)
+        by_id = {item.id: item for item in result.items}
+        self.assertEqual(by_id[hollis].tier, "mention")
+        self.assertEqual([r.route for r in by_id[hollis].reasons], ["mentions_source"])
+        self.assertEqual([r.route for r in by_id[self.city_guard].reasons], ["references_source"])
+
+    def test_story_time_names_from_markers_widen_the_mention_scan(self) -> None:
+        """ADR-0008: a marker on `title` or `aliases` gives the source a name
+        the later prose uses; the scan must know it."""
+        renamed = self._new_scene(
+            "Chapter Twenty",
+            f"<!-- mutate:entity={self.marek};field=title;value=The%20Wolf;id=m_title -->",
+        )
+        later = self._new_scene("Chapter Twenty-One", "Nobody spoke to the Wolf that night.")
+        result = self.service.change_candidates(self.marek)
+        by_id = {item.id: item for item in result.items}
+        self.assertEqual([r.route for r in by_id[renamed].reasons], ["mutates_source"])
+        self.assertEqual([r.route for r in by_id[later].reasons], ["mentions_source"])
+
     def test_unknown_baseline_propagates_404(self) -> None:
         with self.assertRaises(Exception) as ctx:
             self.service.change_candidates(self.marek, baseline_snapshot_id="nope")
@@ -307,6 +336,77 @@ class ChangeCandidatesTests(unittest.TestCase):
 
 
 _TIER_RANK = {"declared": 0, "marker_untouched": 1, "mention": 2}
+
+
+class LayeredBaselineTests(unittest.TestCase):
+    """A snapshot photographs ONE layer's file (ADR-0087), so the baseline diff
+    must read that file back — never the folded composite, which would report
+    a book override as a change the series file never made."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.series = self.base / "series"
+        self.root = self.series / "book01"
+        self.service = ProjectService.created_at(self.root, "Book 1")
+        declare_full_chain(self.service, self.root, self.base)
+        self.service._write_yaml(
+            self.base / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "fields": {
+                    "rank": {"name": "rank", "type": "text", "label": "Rank"},
+                },
+                "entry_types": {"lore:character": {"fields": ["rank"]}},
+            },
+        )
+        series_writer = ProjectService(WorkScope(root=self.series))
+        declare_full_chain(series_writer, self.series, self.base)
+        self.marek = series_writer.create_lore_entry(
+            CreateLoreEntryRequest(title="Marek Vell", entry_type="lore:character")
+        ).id
+        series_writer.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell", body="Keeper of the gate.", entry_type="lore:character", metadata={"rank": "Captain"}
+            ),
+        )
+        layers = self.service.collect_layers(self.root)
+        self.series_id = next(layer.id for layer in layers if layer.folder == self.series)
+        self.book_id = next(layer.id for layer in layers if layer.folder == self.root)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_book_override_is_not_a_change_of_the_series_file(self) -> None:
+        # The book overrides rank (an explicit write target below the owning
+        # layer = a sparse override delta); the series file still says Captain.
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        kind = self.service.node_snapshot_kind(self.marek)
+        snapshot = self.service.capture_snapshot(self.marek, kind=kind)
+        # Change only the series body, at the series layer.
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate, eleven years.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self.series_id,
+            ),
+        )
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=snapshot.id)
+        self.assertEqual(result.changed_fields, [])
+        self.assertTrue(result.body_changed)
 
 
 if __name__ == "__main__":

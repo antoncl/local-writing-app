@@ -173,11 +173,15 @@ it:
   is the marker (§3).
 - **`mentions_source`** — the candidate's body or a `long_text` field names the source's title or
   an alias, found with the same compiled matcher the AI path uses, over lore entries and scenes
-  alike. This is the route that catches "her father the captain"; it is also the noisy one, and
-  it ranks last.
+  alike. The text scanned is the ADR-0085 search corpus (`CorpusEntry.body` and
+  `metadata_values`, `backend/app/services/project/search_corpus.py:22`), which the node-index
+  lifecycle already maintains for every node — a Propagate opens no files. This is the route
+  that catches "her father the captain"; it is also the noisy one, and it ranks last.
 
-Candidates are lore entries and scenes in the index winner view, any layer. A node reachable by
-more than one route lists every route and ranks by the first. The source itself is not a
+Candidates are the lore entries of the index winner view at any layer, and the open book's own
+scenes — scenes are book-scoped and never inherited (ADR-0039/0040), so there is no layer walk
+for them. A node reachable by more than one route appears **once**, lists every route, and
+ranks by the first. The source itself is not a
 candidate, and neither is an entry the source merely names in its own prose: the question is
 who depends on the source, and the source's declared references are the only outgoing route
 counted. The set is a list of `(node, reasons)` and nothing else; no score, no threshold.
@@ -187,18 +191,22 @@ how the mention group is kept from burying the rest is the confirm surface's job
 ### 3 — A review item is a todo with a home and a source
 
 `TodoItem` gains a third scope, `node`, with `node_id` naming a lore dependent, and an
-optional `source` block: `{node_id, snapshot_id, reason}`. A scene dependent needs no new
-scope: it uses the existing `scene` scope and `anchor_id`, anchored at the marker for the
-`mutates_source` route and at the first mention otherwise, so the todo lands in the prose where
-the writer has to look. `text` is generated ("Follow up on Marek Vell's change") and stays
-editable. `status` is the existing `open` | `done`. Dismissing a wrong candidate is marking it
+optional `source` block: `{node_id, snapshot_id, reason, marker_id?}`. A scene dependent needs
+no new scope: it uses the existing `scene` scope and `scene_id`, and **no anchor is written** —
+a todo anchor is an HTML-comment range inside the scene body (`TODO_ANCHOR_PATTERN`,
+`backend/app/services/project/scene_todos.py:19`), and writing one would be the app writing
+the dependent. Instead the `source` block carries the marker's client-minted `marker_id`
+(`MutationMarker`, `backend/app/models/annotations.py:59`) for the `mutates_source` route, and
+nothing for a mention; opening the item locates the marker by id, or re-runs the matcher for
+the first mention, live. `anchor_id` stays what it is today: the writer's own anchor, never the
+app's. `text` is generated ("Follow up on Marek Vell's change") and stays editable. `status` is the existing `open` | `done`. Dismissing a wrong candidate is marking it
 done; deleting it is deleting a todo. Nothing else is new on the model. `CreateTodoRequest`
 accepts the same fields, so a writer can create a review item by hand against any node, with or
 without a source. That is the authorable path the app's own items use, and it is why the review
 item is a todo and not a kind.
 
 A review item shows wherever todos show. Opening one opens the dependent — a lore entry on its
-card, a scene at the anchor — and opens the source in a second pane parked on the baseline
+card, a scene scrolled to the marker or the first mention — and opens the source in a second pane parked on the baseline
 snapshot in compare mode: ADR-0088's foot dock doing what it already does, read-only, with
 nothing new drawn. The load-bearing part is that the writer never has to go and find what
 changed.
@@ -213,9 +221,11 @@ From a review item, **Propose** opens a conversation on the dependent (ADR-0051)
 prompt the Conversations menu already offers on that node's type, with its first user message
 pre-filled: the source before the change and after it, rendered as the AI already sees a lore
 entry, and one question — what here needs to follow. The baseline rendering reads the
-snapshot's bytes through the store's `read_snapshot`; nothing new is parsed, nothing is added to
-the prompt vocabulary, and the name matcher pulls the source's current entry into context on
-its own because the message names it.
+snapshot's bytes through the store's `read_snapshot`; nothing new is parsed and nothing is added
+to the prompt vocabulary. The message is what the model can count on. The source's current
+entry will usually arrive as well, because the message names it and ADR-0075 journals a
+user-message mention, but that is *inferred* lore and ADR-0086's budget may drop it; nothing
+here relies on it.
 
 What happens next is what happens in any conversation. On a lore dependent, a prompt that
 commits (`extract_to_node` with a `commit` block) produces the ADR-0046 patch, reviewed as
@@ -234,8 +244,10 @@ later thread that adds one has drifted.
 
 ### 6 — A missing end is a validation finding, not a silent state
 
-A review item whose dependent no longer exists is removed, as orphaned scene anchors are today.
-A review item whose source no longer exists keeps its item and is reported by `validate_project`
+A review item whose dependent no longer exists is removed. Today's reconciliation
+(`lifecycle.py:1225`) walks scene anchor comments only; the `node`-scoped case is new code in
+the same pass, keyed on the dependent's id resolving in the index, and the ADR says so here so
+that no slice assumes it exists. A review item whose source no longer exists keeps its item and is reported by `validate_project`
 (`ProjectValidation`, `backend/app/models/project.py:306`) like a dangling anchor: the change
 that made the item is still real, and the writer decides. A review item whose baseline snapshot
 was deleted opens with the whole source as the change. Deleting a source is not itself a
@@ -300,8 +312,8 @@ mention group folded, the diff in view.
 
 ## Consequences
 
-- **Storage:** `TodoItem` gains `scope: "node"`, `node_id`, `source`; the snapshot sidecar gains
-  an optional origin. All additive and optional, so **no migration**, on the same footing as
+- **Storage:** `TodoItem` gains `scope: "node"`, `node_id`, `source` (with its optional
+  `marker_id`); the snapshot sidecar gains an optional origin. No scene body is touched. All additive and optional, so **no migration**, on the same footing as
   ADR-0086's three optional fields. A `todo.yaml` from before this ADR reads unchanged.
 - **API:** two lore endpoints, a read-only candidate set and a confirm; `CreateTodoRequest`
   widened; the existing entry-patch, mutation and conversation endpoints unchanged.
@@ -342,15 +354,16 @@ issue and an explicit go. #66 is not a slice.
    gains a paragraph on why. Three saves over an hour. Nothing else happens.
 2. Settled, the writer presses Propagate on Marek. The confirm surface shows, declared first:
    the City Guard (references Marek in its `captain` field), Ilse (a relationship item pointing
-   at Marek), the Watch Barracks (Marek's `posting` field points at it), and Chapter 5 (a marker
-   on Marek's `rank`, the field that changed, where the story promotes him). After them, Chapter
-   11 (a marker on Marek's `whereabouts`, untouched by the change). Folded under "mentions":
-   the Weir Tavern, Ilse again ("her father the captain"), and fourteen scenes. Beside the
-   list, Marek at the last propagation against Marek now. The writer unfolds the mentions,
+   at Marek, and, listed as her second reason, her body's "her father the captain"), the Watch
+   Barracks (Marek's `posting` field points at it), and Chapter 5 (a marker on Marek's `rank`,
+   the field that changed, where the story promotes him). After them, Chapter 11 (a marker on
+   Marek's `whereabouts`, untouched by the change). Folded under "mentions": the Weir Tavern and
+   fourteen scenes; Ilse is not repeated there. Beside the list, Marek at the last propagation
+   against Marek now. The writer unfolds the mentions,
    keeps Chapter 9 ("the captain's usual table"), unticks the rest and Chapter 11, and confirms.
-3. Five review items appear: three on lore entries, two anchored in scenes at the marker and at
-   the mention. Marek's foot dock shows a new snapshot. Nothing on the City Guard, Ilse, the
-   Barracks, Chapter 5 or Chapter 9 has changed.
+3. Five review items appear: three on lore entries, two on scenes, the Chapter 5 one carrying
+   the marker's id. Marek's foot dock shows a new snapshot. Nothing on the City Guard, Ilse, the
+   Barracks, Chapter 5 or Chapter 9 has changed — not even an anchor comment.
 4. The writer opens the City Guard's item. The entry opens, and Marek opens beside it parked on
    the baseline in compare mode. The writer clears the `captain` field by hand, saves, and marks
    the item done.
@@ -360,10 +373,10 @@ issue and an explicit go. #66 is not a slice.
    sentence in the body. The writer sees the diff, edits the sentence, adopts. Ilse saves; the
    item is done.
 6. The Barracks item the writer marks done unchanged after reading it: the posting still holds.
-7. The Chapter 5 item opens the scene at the marker. The promotion still stands in the story;
+7. The Chapter 5 item opens the scene scrolled to the marker, found by its id. The promotion still stands in the story;
    the writer leaves the marker as it is and closes the item. Had it needed changing, the
    mutation dialog would have been the tool, and the writer's hand the one on it.
-8. The Chapter 9 item opens the scene at the mention. The writer rewrites the sentence and
+8. The Chapter 9 item opens the scene scrolled to the first mention, found live. The writer rewrites the sentence and
    closes the item.
 9. A week later Marek's `aliases` gain "the Sergeant". Propagate measures from the snapshot
    taken in step 2, not from Marek's creation, and offers only what that change touches.

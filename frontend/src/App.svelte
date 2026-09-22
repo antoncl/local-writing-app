@@ -952,7 +952,7 @@
         onCloneEntry={(id) => run(() => editorPanes.forkPrompt(id))}
         onRunEntry={(id) => {
           const entry = promptEntries.find((p) => p.id === id);
-          if (entry) run(() => chatSessions.openChatFromPromptEntry(entry, {}, null));
+          if (entry) run(async () => { await chatSessions.openChatFromPromptEntry(entry, {}, null); });
         }}
       />
     </div>

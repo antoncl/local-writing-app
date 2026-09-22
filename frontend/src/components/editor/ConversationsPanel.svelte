@@ -39,11 +39,10 @@
     promptEntriesOfferedOn,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
-  import { seedPickInput, seedSubjectEntryInput } from "@/components/editor/body/chat/chatInputs";
+  import { seedConversationInputs } from "@/components/editor/body/chat/chatInputs";
   import type {
     ChatSessionSummary,
     MetadataSchema,
-    NodePickerRef,
     PromptEntrySummary,
   } from "@/lib/types";
 
@@ -127,41 +126,16 @@
     menuOpen = false;
     if (!prompt || !subjectId) return;
     // This node IS the subject (ADR-0051 S2): stamp it so the new chat surfaces
-    // here and is named after this node, and seed it into the prompt's `entry`
-    // target in that input's own shape (#1094) — a `context_pick` (the revise
-    // prompts' target) needs an array-shaped ref, not the bare id that made a
-    // required plotline/plot-card target fail "Missing required" on send. The
-    // subject's kind is the FQN prefix of its entry_type (kind:key).
-    const subjectKind = (subjectEntryType.split(":")[0] || "lore") as NodePickerRef["kind"];
-    const seededInputs: Record<string, unknown> = {
-      entry: seedSubjectEntryInput(prompt, {
-        id: subjectId,
-        kind: subjectKind,
-        title: subjectTitle,
-        entryType: subjectEntryType || undefined,
-      }),
-    };
-    // ADR-0067 Amendment 1: a commit prompt's target entry_type is a required,
-    // caller-supplied input. On this revise path the subject's own type IS that
-    // value — seed it alongside `entry` for any prompt that declares the input, so
-    // the required (hidden) `entry_type` is satisfied without the writer touching it.
-    if (subjectEntryType && prompt.inputs?.some((i) => i.name === "entry_type")) {
-      seededInputs.entry_type = subjectEntryType;
-    }
-    // Seed the read anchor onto the prompt's `as_of` scene input (ADR-0055 §1) —
-    // hidden from the chat strip but persisted, so impersonate reads the subject
-    // as-of the slider's scene; omitted at book-start (a prompt without an
-    // `as_of` input ignores the seed). Shape-aware (#1485): `as_of` is a
-    // `context_pick` on impersonate, and a bare scene id round-trips through
-    // the wire coercion to "[]" — silently reading the character at book-start.
-    if (asOfScene) {
-      seededInputs.as_of = seedPickInput(prompt, "as_of", {
-        id: asOfScene,
-        kind: "manuscript",
-        title: asOfSceneTitle || asOfScene,
-        entryType: "manuscript:scene",
-      });
-    }
+    // here and is named after this node. The three-input seed (entry / entry_type
+    // / as_of) is shared with the review-item Propose launch — see
+    // seedConversationInputs's own doc comment.
+    const seededInputs = seedConversationInputs(
+      prompt,
+      subjectId,
+      subjectTitle,
+      subjectEntryType,
+      asOfScene ? { id: asOfScene, title: asOfSceneTitle } : null,
+    );
     await chatSessions.openChatFromPromptEntry(prompt, seededInputs, null, {
       parentPaneId: hostPaneId,
       subject: subjectId,

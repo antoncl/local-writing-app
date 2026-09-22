@@ -18,11 +18,13 @@ from __future__ import annotations
 from app.models import (
     ChangeCandidate,
     ChangeCandidateSet,
+    ChangeMessage,
     CreateTodoRequest,
     PropagateRequest,
     PropagateResponse,
     TodoSource,
 )
+from app.services.ai.lore_block import _render_lore_entries, _render_node_xml
 from app.services.project.change_candidates import SCENE_ENTRY_TYPE
 from app.services.project.errors import ProjectServiceError
 
@@ -96,3 +98,56 @@ class ChangePropagationMixin:
                 text=text, scope="scene", scene_id=candidate.id, source=source
             )
         return CreateTodoRequest(text=text, scope="node", node_id=candidate.id, source=source)
+
+    def change_message(
+        self, source_id: str, baseline_snapshot_id: str | None = None
+    ) -> ChangeMessage:
+        """ADR-0090 §4: the pre-filled first message for a review item's
+        Propose conversation — resolved through the SAME index/baseline
+        semantics `change_candidates` uses, so Propose measures the identical
+        change the confirm surface showed. Never writes anything; only fills
+        a chat composer the writer still sends.
+
+        `now` is the source rendered exactly as the AI already sees a lore
+        entry (`_render_lore_entries` — the folded, live entry); `before`
+        (only when a baseline resolved) reads the baseline snapshot's bytes
+        through `read_snapshot` and renders them with the same
+        `_render_node_xml` the live render uses, so the two sides are
+        byte-comparable XML."""
+        index = self._build_node_index()
+        source = index.canonical_id(source_id)
+        source_entry = index.by_id.get(source)
+        if source_entry is None or source_entry.kind != "lore":
+            raise ProjectServiceError("Unknown lore entry.", 404)
+        resolved_baseline = self._resolve_change_candidate_baseline(source, baseline_snapshot_id)
+        title = source_entry.title or source
+
+        now_pairs = _render_lore_entries(self, [source], None, None, index)
+        now_xml = now_pairs[0][1] if now_pairs else ""
+
+        if resolved_baseline:
+            kind = self.node_snapshot_kind(source)
+            detail = self.read_snapshot(source, resolved_baseline, kind=kind)
+            schema = self.read_metadata_schema()
+            before_entry = {
+                "title": detail.title,
+                "metadata": detail.metadata,
+                "body": detail.body,
+                "entry_type": source_entry.entry_type,
+            }
+            before_xml = _render_node_xml(self, schema, before_entry, source, {})
+            text = (
+                f"{title} changed since the last propagation.\n\n"
+                f"Before:\n{before_xml}\n\n"
+                f"After:\n{now_xml}\n\n"
+                "What in this entry needs to follow from that change? Propose only "
+                "what the change warrants; if nothing follows, say so."
+            )
+        else:
+            text = (
+                f"{title} is the source of a change; there is no earlier baseline, "
+                f"so here is the entry as it stands.\n\n{now_xml}\n\n"
+                "What in this entry needs to follow from it? Propose only what the "
+                "entry warrants; if nothing follows, say so."
+            )
+        return ChangeMessage(source_id=source, baseline_snapshot_id=resolved_baseline, text=text)

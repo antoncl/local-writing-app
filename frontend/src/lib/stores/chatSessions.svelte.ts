@@ -69,8 +69,13 @@ class ChatSessions {
       // brainstorm names itself "Draft <Type>" rather than "Revise entry" (#695).
       titleOverride?: string;
     } = {},
-  ): Promise<void> {
+  ): Promise<string> {
     const { assistantId = "", parentPaneId = null, subjectTitle = "" } = opts;
+    // ADR-0090 §4: Propose needs the created session's id back, to prefill its
+    // composer once the pane mounts — set from inside the (error-swallowing)
+    // `run` action, so a failed create simply leaves this "" for every existing
+    // caller, which already ignores the return.
+    let createdSessionId = "";
     await this.run(async () => {
       // ADR-0051 S5: a chat launched *from* a scene (sceneId set) with no
       // explicit subject is about that scene — the scene becomes its subject,
@@ -89,6 +94,7 @@ class ChatSessions {
         title,
         subject,
       });
+      createdSessionId = session.id;
       if (Object.keys(inputs).length > 0) {
         // Persist resolved inputs via the unified node path so ChatBodyView
         // restores them as drafts on load. Echo subject so it's never dropped
@@ -126,6 +132,7 @@ class ChatSessions {
       }
       this.setStatus(`Opened ${entry.title} as a chat`);
     });
+    return createdSessionId;
   }
 
   async deleteChatSessionFromPane(chatId: string): Promise<void> {

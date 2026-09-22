@@ -5,6 +5,7 @@ from fastapi import APIRouter
 
 from app.models import (
     ChangeCandidateSet,
+    ChangeMessage,
     CreateLoreEntryRequest,
     CreateMutationSetEntryRequest,
     CreatePromptEntryRequest,
@@ -110,6 +111,19 @@ def list_change_candidates(
     entry explicitly; any other value names that snapshot."""
     with translate_errors():
         return project.change_candidates(entity_id, baseline)
+
+
+@router.get("/api/lore/{entity_id}/change-message", response_model=ChangeMessage)
+def get_change_message(
+    project: CurrentProject, entity_id: str, baseline: str | None = None
+) -> ChangeMessage:
+    """ADR-0090 §4: the pre-filled first message for a review item's Propose
+    conversation — read only, writes nothing. `baseline`: same tri-state as
+    `change-candidates` (absent → the newest propagation baseline or the
+    whole entry; `?baseline=` → the whole entry explicitly; any other value
+    names that snapshot)."""
+    with translate_errors():
+        return project.change_message(entity_id, baseline)
 
 
 @router.put("/api/lore/{entry_id}", response_model=LoreEntry)

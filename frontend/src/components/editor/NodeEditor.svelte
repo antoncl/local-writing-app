@@ -1,6 +1,8 @@
 <script lang="ts">
 
   import { untrack } from "svelte";
+  import { api } from "@/lib/api";
+  import { refreshTodos } from "@/lib/stores/todos";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
   import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
@@ -512,6 +514,15 @@
   // (frozen) timer and PUTs once (body + metadata together).
   entryReview.onFlush = () => {
     if (scene?.id) return onFlushReviewCommit?.(scene.id);
+  };
+  // ADR-0090 §4: mark a review item done once its Propose-launched patch adopts.
+  entryReview.onReviewItemAdopted = async (reviewItemId) => {
+    try {
+      await api.updateTodo(reviewItemId, { status: "done" });
+      await refreshTodos();
+    } catch (err) {
+      console.warn("Could not mark the review item done", reviewItemId, err);
+    }
   };
 
   // A node under an open brainstorm review is a frozen transaction (#634): the

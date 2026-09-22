@@ -106,7 +106,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
 
   it("resumes an existing thread on row click instead of spawning", async () => {
     const openChat = vi.spyOn(editorPanes, "openChat").mockResolvedValue(undefined);
-    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue("chat-new");
     renderPanel();
 
     await fireEvent.click(screen.getByRole("button", { name: /Recent brainstorm/ }));
@@ -115,7 +115,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
   });
 
   it("＋New spawns a chat with this node stamped as the subject", async () => {
-    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue("chat-new");
     renderPanel([chatPrompt("p-revise", "Brainstorm a revision", ["lore:character"])]);
 
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
@@ -134,7 +134,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     // ADR-0067 Amendment 1: revise-entry declares a required (hidden) `entry_type`
     // input; on this revise path the subject's own type IS that value, so it's
     // seeded alongside `entry` — otherwise the required hidden input is unfillable.
-    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue("chat-new");
     const reviseEntry = {
       id: "p-revise-entry",
       title: "Revise entry",
@@ -167,7 +167,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     // array of NodePickerRefs). A bare-id seed made isInputMissing throw, so a
     // plotline/plot-card revise failed "Missing required" on send. The subject's
     // kind is the FQN prefix of its entry_type.
-    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue("chat-new");
     const revisePlotline = {
       id: "p-revise-plotline",
       title: "Revise plotline",
@@ -195,7 +195,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     // Impersonate's real shape: `as_of` is a hidden context_pick. The old bare
     // scene-id seed was erased to "[]" by the wire coercion — entry(at=[]) read
     // the character at BOOK-START and the slider was silently ignored.
-    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue("chat-new");
     const impersonate = {
       ...chatPrompt("p-imp", "Impersonate", ["lore:character"]),
       inputs: [{ name: "as_of", type: "context_pick", hidden: true }],
@@ -228,7 +228,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
   });
 
   it("a prompt without an as_of input still gets the bare-id pass-through (ignored downstream)", async () => {
-    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue("chat-new");
     render(ConversationsPanel, {
       props: {
         subjectId: "hero",
@@ -253,7 +253,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
   });
 
   it("omits as_of when the slider is at book-start, keeping inputs clean", async () => {
-    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue("chat-new");
     // renderPanel leaves asOfScene at its "" default (base / book-start).
     renderPanel([chatPrompt("p-imp", "Impersonate", ["lore:character"])]);
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
@@ -269,7 +269,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
   });
 
   it("folds '/'-titled prompts into a submenu the ＋New menu drills into (#832)", async () => {
-    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue("chat-new");
     renderPanel([
       chatPrompt("p-tone", "Revise/Tone", ["lore:character"]),
       chatPrompt("p-length", "Revise/Length", ["lore:character"]),

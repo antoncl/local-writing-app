@@ -564,6 +564,32 @@ class LoreEntrySnapshotRoundTripTests(unittest.TestCase):
         self.assertEqual(described.status_code, 200, described.text)
         self.assertEqual(described.json()["description"], "the ledger before the rewrite")
 
+    def test_snapshot_origin_round_trips_and_finds_the_newest_propagation_snapshot(self) -> None:
+        # ADR-0090 §1: the sidecar's additive `origin` field, and the helper
+        # that finds the newest propagation baseline.
+        plain = self.service.capture_snapshot(self.entry_id, kind="lore")
+        self.assertEqual(
+            self.service.read_snapshot(self.entry_id, plain.id, kind="lore").snapshot.origin, ""
+        )
+
+        first = self.service.capture_snapshot(self.entry_id, kind="lore", origin="propagation")
+        second = self.service.capture_snapshot(self.entry_id, kind="lore", origin="propagation")
+        self.assertEqual(
+            self.service.read_snapshot(self.entry_id, second.id, kind="lore").snapshot.origin,
+            "propagation",
+        )
+        listed = self.service.list_snapshots(self.entry_id, kind="lore").snapshots
+        self.assertEqual(
+            {snap.id: snap.origin for snap in listed},
+            {plain.id: "", first.id: "propagation", second.id: "propagation"},
+        )
+
+        newest = self.service.newest_snapshot_with_origin(self.entry_id, "propagation", kind="lore")
+        self.assertEqual(newest.id, second.id)
+        self.assertIsNone(
+            self.service.newest_snapshot_with_origin(self.entry_id, "something_else", kind="lore")
+        )
+
     def test_delete_removes_the_snapshot_and_returns_the_remainder(self) -> None:
         snapshot = self._capture()
         response = self.client.delete(

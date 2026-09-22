@@ -993,6 +993,11 @@ class ProjectLifecycleMixin:
         errors.extend(todo_errors)
         warnings.extend(todo_warnings)
 
+        # ADR-0090 §6: a review item's dependent/source ends.
+        node_todo_errors, node_todo_warnings = self._validate_todo_node_refs(node_index)
+        errors.extend(node_todo_errors)
+        warnings.extend(node_todo_warnings)
+
         return ProjectValidation(
             valid=not errors,
             warnings=warnings,
@@ -1236,6 +1241,10 @@ class ProjectLifecycleMixin:
                     continue
                 valid_anchor_refs.add((item.scene_id, item.anchor_id))
             kept_items.append(item)
+
+        # ADR-0090 §6: the node-scoped twin of the drops above — a missing
+        # SOURCE is never pruned, only a missing dependent.
+        kept_items = self._drop_unknown_node_todos(node_index, kept_items)
 
         if len(kept_items) != len(todos.items):
             todos.items = kept_items

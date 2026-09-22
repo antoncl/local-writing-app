@@ -169,6 +169,12 @@ class Snapshot(BaseModel):
     # destroys what makes it a witness. Setting a description never touches
     # either.
     description: str = ""
+    # Which mechanism captured this snapshot as its own baseline, additive and
+    # optional (ADR-0090 §1) — `""` for an ordinary capture, `"propagation"`
+    # for the baseline a confirmed Propagate leaves behind. Same shape as
+    # `description`: original data, never rewritten once written, read by
+    # `newest_snapshot_with_origin` rather than by the writer choosing.
+    origin: str = ""
     # The schema version in force at capture. Snapshots are immutable, so a
     # restore that crosses a version boundary runs the ladder over that one body
     # on the way out — the stored record is never rewritten (ADR-0043).

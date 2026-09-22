@@ -1,5 +1,5 @@
-// Editor-side operations on the `todoAnchor` mark (embedded TODOs, #1893's
-// selection-toolbar "TODO" action and the TODO pane's reveal/reconcile
+// Editor-side operations on the `todoAnchor` mark (embedded TODOs, the
+// selection toolbar's TODO action (#1223) and the TODO pane's reveal/reconcile
 // paths), extracted from ProseBodyView so the component keeps only the
 // call-site one-liners. Plain (no runes): every field here is read only from
 // inside this class — the template never touches it.

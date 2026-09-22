@@ -22,7 +22,7 @@ export type PromptTemplateLockResult =
   | { ok: false; error: string };
 
 /** Render + lock a prompt template for the chat's first send. `inputs` is the
- * already-coerced+expanded input set (chatInputs.ts' templateInputsFromDrafts);
+ * already-coerced+expanded input set (promptResolution.ts' inputValuesFromDrafts);
  * `subject` is the chat's bound subject. Pure — no component state read or
  * written; the caller assigns the six locked fields on success. */
 export async function lockPromptTemplate(

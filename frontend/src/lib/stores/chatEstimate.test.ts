@@ -149,4 +149,40 @@ describe("ChatEstimateController (#2129)", () => {
     await controller.fetch();
     expect(controller.estimate).toBe(priorEstimate);
   });
+
+  it("the request carries target_scene_id '', commit false, the subject, the resolution scene id, and assistant_id (mirrors promptTemplateLock.test.ts)", async () => {
+    aiPreview.mockResolvedValue({ messages: [], warnings: [], char_count: 0, rendered: true } as never);
+    const scoped = { id: "p1", title: "P", body: "t", inputs: [{ name: "as_of", type: "scene_ref" }] } as unknown as PromptEntrySummary;
+    const inputs = { as_of: "scene_42" };
+    const deps = makeDeps({
+      getPromptEntry: () => scoped,
+      getInputs: () => inputs,
+      getSubject: () => "chat_9",
+      getAssistantId: () => "",
+    });
+    await new ChatEstimateController(deps).fetch();
+    expect(aiPreview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        template_source: "t",
+        target_scene_id: "",
+        commit: false,
+        subject: "chat_9",
+        resolution_scene_id: "scene_42",
+        inputs,
+        assistant_id: null,
+      }),
+    );
+
+    aiPreview.mockClear();
+    const deps2 = makeDeps({
+      getPromptEntry: () => scoped,
+      getInputs: () => inputs,
+      getSubject: () => "chat_9",
+      getAssistantId: () => "asst_1",
+    });
+    await new ChatEstimateController(deps2).fetch();
+    expect(aiPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ assistant_id: "asst_1" }),
+    );
+  });
 });

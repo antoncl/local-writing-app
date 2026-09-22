@@ -472,22 +472,28 @@
   // its call sites.
   const reveals = new PendingReveals();
 
-  export function revealSearchMatch(reveal: SearchReveal): void {
+  // Shared shape behind the three reveal exports below: queue against the
+  // open scene's id, then apply immediately iff that scene is the LOADED one
+  // (a reveal for a pane whose `loadScene` hasn't finished yet stays queued).
+  // `current` is captured once so the closure never needs a `scene!` — `scene`
+  // is re-checked null-safe by the guard above it.
+  function queueReveal(queue: (id: string) => void): void {
     if (!scene) return;
-    reveals.queueSearch(scene.id, reveal);
-    if (loadedSceneId === scene.id) reveals.apply(loadedSceneId, editor, editorElement ?? null);
+    const current = scene;
+    queue(current.id);
+    if (loadedSceneId === current.id) reveals.apply(loadedSceneId, editor, editorElement ?? null);
+  }
+
+  export function revealSearchMatch(reveal: SearchReveal): void {
+    queueReveal((id) => reveals.queueSearch(id, reveal));
   }
 
   export function revealMutationMarker(markerId: string): void {
-    if (!scene) return;
-    reveals.queueReview(scene.id, { markerId });
-    if (loadedSceneId === scene.id) reveals.apply(loadedSceneId, editor, editorElement ?? null);
+    queueReveal((id) => reveals.queueReview(id, { markerId }));
   }
 
   export function revealFirstMention(names: string[]): void {
-    if (!scene) return;
-    reveals.queueReview(scene.id, { names });
-    if (loadedSceneId === scene.id) reveals.apply(loadedSceneId, editor, editorElement ?? null);
+    queueReveal((id) => reveals.queueReview(id, { names }));
   }
 
   export function highlightEmbeddedTodo(todoId: string): void {
@@ -880,7 +886,7 @@
   function getSelectionToolbarActions(hasText: boolean, inTable: boolean): ToolbarAction[] {
     if (!editor) return [];
     const isScene = documentKind === "manuscript";
-    const reviseEntries = isScene ? promptEntriesForSurface(promptCtx, "selection") : [];
+    const reviseEntries = promptEntriesForSurface(promptCtx, "selection");
     return bodyToolbarActions(editor, {
       hasText,
       inTable,

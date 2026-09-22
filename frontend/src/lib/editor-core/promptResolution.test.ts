@@ -8,6 +8,7 @@ import {
   finalizePromptRoster,
   hidePromptEntries,
   inheritedInputsFrom,
+  inputValuesFromDrafts,
   isFinalizePrompt,
   promptEntriesForSurface,
   promptEntriesOfferedOn,
@@ -18,9 +19,11 @@ import {
   resolvePromptPositionalArgs,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
+import { buildSelectorRoster } from "@/lib/views/pickerSelectors";
 import type {
   LoreEntrySummary,
   MetadataSchema,
+  NodePickerRef,
   PromptContextStrategy,
   PromptEntrySummary,
   PromptInputDefinition,
@@ -647,5 +650,38 @@ describe("unknown handlers fail closed — including Object.prototype keys (#169
       const entry = prompt("p", "prompt:general", { output: { handler } });
       expect(promptSurfaceFor(ctx(), entry)).toBeNull();
     }
+  });
+});
+
+describe("inputValuesFromDrafts (#2129/#2130 — the shared coerce+expand loop)", () => {
+  it("coerces a text input, drops an empty one, and expands a context_pick selector", () => {
+    const villain: NodePickerRef = { id: "tagged:lore:villain", kind: "tag", title: "villain", selector: { kind: "lore", expr: { tagged: "villain" } } };
+    const roster = buildSelectorRoster({
+      loreEntries: [
+        { id: "lore_a", title: "Vex", entry_type: "lore:character", metadata: { tags: ["villain"] } },
+        { id: "lore_b", title: "Mara", entry_type: "lore:character", metadata: { tags: ["hero"] } },
+      ] as never,
+    });
+    const declared = [
+      { name: "note", type: "text" } as PromptInputDefinition,
+      { name: "empty", type: "text" } as PromptInputDefinition,
+      { name: "picks", type: "context_pick" } as PromptInputDefinition,
+    ];
+    const drafts = {
+      note: "hello",
+      empty: "",
+      picks: JSON.stringify([villain]),
+    };
+    const result = inputValuesFromDrafts(declared, drafts, roster);
+    expect(result.note).toBe("hello");
+    expect(result.empty).toBeUndefined();
+    expect(JSON.parse(result.picks as string)).toEqual([
+      { id: "lore_a", kind: "lore", title: "Vex", entry_type: "lore:character" },
+    ]);
+  });
+
+  it("returns {} for a prompt with no drafts filled in", () => {
+    const declared = [{ name: "note", type: "text" } as PromptInputDefinition];
+    expect(inputValuesFromDrafts(declared, {}, buildSelectorRoster({}))).toEqual({});
   });
 });

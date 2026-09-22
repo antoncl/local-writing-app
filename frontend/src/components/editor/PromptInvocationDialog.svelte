@@ -17,12 +17,13 @@
   import { cardEntriesStore } from "@/lib/stores/plotCards";
   import {
     effectivePromptInputs,
+    inputValuesFromDrafts,
     promptEntryDescription,
     resolutionSceneIdFromInputs,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
-  import { coerceInputValue, isInputMissing } from "@/lib/utils/promptInputs";
-  import { buildSelectorRoster, expandSelectorsInEncodedValue } from "@/lib/views/pickerSelectors";
+  import { isInputMissing } from "@/lib/utils/promptInputs";
+  import { buildSelectorRoster } from "@/lib/views/pickerSelectors";
   import { api } from "@/lib/api";
   import type {
     AssistantEntrySummary,
@@ -157,14 +158,7 @@
     }
     const ourToken = ++estimateToken;
     const declared = effectivePromptInputs(current);
-    const inputs: Record<string, unknown> = {};
-    for (const input of declared) {
-      const raw = drafts[input.name] ?? "";
-      let coerced = coerceInputValue(raw, input.type);
-      if (input.type === "context_pick")
-        coerced = expandSelectorsInEncodedValue(coerced as string, selectorRoster);
-      if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
-    }
+    const inputs = inputValuesFromDrafts(declared, drafts, selectorRoster);
     try {
       const preview = await api.aiPreview({
         template_source: current.body,
@@ -213,14 +207,7 @@
       error = `Missing required: ${missing.map((i) => i.label || i.name).join(", ")}.`;
       return;
     }
-    const values: Record<string, unknown> = {};
-    for (const input of declared) {
-      const raw = drafts[input.name] ?? "";
-      let coerced = coerceInputValue(raw, input.type);
-      if (input.type === "context_pick")
-        coerced = expandSelectorsInEncodedValue(coerced as string, selectorRoster);
-      if (coerced !== null && coerced !== "") values[input.name] = coerced;
-    }
+    const values = inputValuesFromDrafts(declared, drafts, selectorRoster);
     const pickedAssistantId = assistantId;
     lastInvokedEntryId = current.id;
     lastInvokedInputs = values;

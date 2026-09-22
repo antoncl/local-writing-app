@@ -15,8 +15,8 @@ export interface ChatEstimateDeps {
    *  (`promptEntries.find(p => p.id === chatPromptEntryId)`), or null when no
    *  prompt is bound / it isn't in the roster. */
   getPromptEntry: () => PromptEntrySummary | null;
-  /** The coerced+expanded input set for the render (chatInputs.ts'
-   *  templateInputsFromDrafts — Seam 0). */
+  /** The coerced+expanded input set for the render (promptResolution.ts'
+   *  inputValuesFromDrafts — Seam 0). */
   getInputs: () => Record<string, unknown>;
   /** The chat's bound subject ("" for freeform / Chats-pane chats). */
   getSubject: () => string;

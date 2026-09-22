@@ -26,6 +26,7 @@
     chatPromptPickList,
     effectivePromptInputs,
     entryIdFromPickValue,
+    inputValuesFromDrafts,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import { isInputMissing } from "@/lib/utils/promptInputs";
@@ -77,7 +78,6 @@
     seedInputDraftsFromEntry,
     seedPickInputDraft,
     subjectRefFromEntryType,
-    templateInputsFromDrafts,
     ttlChipsFor,
   } from "@/components/editor/body/chat/chatInputs";
   import { lockPromptTemplate } from "@/components/editor/body/chat/promptTemplateLock";
@@ -227,7 +227,9 @@
   const estimate = new ChatEstimateController({
     getPromptEntry: () => activePromptEntry,
     getInputs: () =>
-      activePromptEntry ? templateInputsFromDrafts(activePromptEntry, chatInputDrafts, selectorRoster) : {},
+      activePromptEntry
+        ? inputValuesFromDrafts(effectivePromptInputs(activePromptEntry), chatInputDrafts, selectorRoster)
+        : {},
     getSubject: () => chatSubject,
     getAssistantId: () => chatAssistantId,
     mayCaptureLoreGate: () => !isLocked && !chatRunning && !chatSystemPrompt,
@@ -877,10 +879,10 @@
   // (chatSystemPrompt is non-empty, chatHistory may hold initial turns);
   // subsequent sends skip this path. The render + lock itself is the pure
   // `lockPromptTemplate` helper (chat/promptTemplateLock.ts, #2129) — this
-  // wrapper builds the coerced+expanded inputs (chatInputs.ts'
-  // templateInputsFromDrafts, Seam 0) and assigns the six locked fields.
+  // wrapper builds the coerced+expanded inputs (promptResolution.ts'
+  // inputValuesFromDrafts, Seam 0) and assigns the six locked fields.
   async function renderAndLockPromptTemplate(entry: PromptEntrySummary): Promise<boolean> {
-    const inputs = templateInputsFromDrafts(entry, chatInputDrafts, selectorRoster);
+    const inputs = inputValuesFromDrafts(effectivePromptInputs(entry), chatInputDrafts, selectorRoster);
     const result = await lockPromptTemplate(entry, { subject: chatSubject, inputs });
     if (!result.ok) {
       chatError = result.error;

@@ -87,8 +87,7 @@ export type BodyToolbarOptions<T extends ReviseEntry> = {
    *  scene concerns: a prompt run is refused outside a scene, and the
    *  embedded-TODO index scans scenes. */
   isScene: boolean;
-  /** The "selection" surface's applicable prompt entries — empty for a
-   *  non-scene body. */
+  /** The selection surface's prompt entries; ignored unless isScene. */
   reviseEntries: T[];
   runPrompt: (entry: T) => void | Promise<void>;
   markTodo: () => void;

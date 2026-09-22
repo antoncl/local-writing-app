@@ -198,6 +198,15 @@ class TodoActions {
     });
   }
 
+  // ADR-0090 §4: the adopt side of Propose — a committed patch marks the
+  // review item done. Here, not in the editor host: every todo write goes
+  // through this controller and lands the returned document in the store.
+  async markReviewItemDone(reviewItemId: string): Promise<void> {
+    await this.run(async () => {
+      setTodos((await api.updateTodo(reviewItemId, { status: "done" })).items);
+    });
+  }
+
   // ADR-0090 §4: Propose — open a conversation on the review item's dependent
   // (the node this item lives on), its first message pre-filled with the
   // source's change. Lore dependents only (a scene item has no Propose, per
@@ -217,8 +226,11 @@ class TodoActions {
         subject: nodeId,
         subjectTitle: opts.subjectTitle,
       });
-      // Recorded only once the conversation exists: a failed open must not
-      // leave a hand-off behind for an unrelated later commit on this node.
+      // `openChatFromPromptEntry` swallows a failed create into "" — nothing
+      // opened, so nothing to hold or hand off (a stray hand-off would mark
+      // this item done on an unrelated later commit on this node).
+      if (!chatId) return;
+      // Recorded only once the conversation exists.
       reviewProposals.set(nodeId, item.id);
       // The message is held for THAT chat's composer, not pushed at a pane:
       // the pane is created and remounted by this same gesture, and every

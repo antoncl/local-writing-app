@@ -547,6 +547,8 @@
             nodeTitle={model.title}
             subjectEntryType={model.entryType}
             promptEntries={deps.promptEntries}
+            asOfScene={model.scrub.anchorSceneId}
+            asOfSceneTitle={deps.structure ? findNodeBySceneId(deps.structure.root, model.scrub.anchorSceneId)?.title ?? "" : ""}
           />
         {/key}
       {:else if model.metadataSchema.fields[fieldId]?.type === "computed" && model.metadataSchema.fields[fieldId]?.computed?.function === "references"}

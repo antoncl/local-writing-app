@@ -37,11 +37,17 @@
     nodeTitle,
     subjectEntryType = "",
     promptEntries,
+    asOfScene = "",
+    asOfSceneTitle = "",
   }: {
     nodeId: string;
     nodeTitle: string;
     subjectEntryType?: string;
     promptEntries: PromptEntrySummary[];
+    // The card's as-of scene (ADR-0055 §1) — Propose reads the dependent as
+    // of the same scene the Conversations ＋New would, never book-start.
+    asOfScene?: string;
+    asOfSceneTitle?: string;
   } = $props();
 
   let items = $derived(
@@ -85,7 +91,13 @@
 
   async function pickPrompt(item: TodoItem, prompt: PromptEntrySummary): Promise<void> {
     openItemId = null;
-    const seededInputs = seedConversationInputs(prompt, nodeId, nodeTitle, subjectEntryType, null);
+    const seededInputs = seedConversationInputs(
+      prompt,
+      nodeId,
+      nodeTitle,
+      subjectEntryType,
+      asOfScene ? { id: asOfScene, title: asOfSceneTitle } : null,
+    );
     await todoActions.proposeFromReviewItem(item, prompt, seededInputs, { subjectTitle: nodeTitle });
   }
 </script>

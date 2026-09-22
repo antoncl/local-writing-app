@@ -85,6 +85,21 @@ describe("todoActions.proposeFromReviewItem (ADR-0090 §4)", () => {
     expect(composerPrefills.peek("chat_new")).toBeNull();
   });
 
+  it("records nothing when the create was swallowed into an empty id", async () => {
+    // `openChatFromPromptEntry` runs inside an error-swallowing `run()` and
+    // resolves "" when the create fails.
+    vi.mocked(chatSessions.openChatFromPromptEntry).mockResolvedValueOnce("");
+    await todoActions.proposeFromReviewItem(reviewItem(), PROMPT, {}, { subjectTitle: "Ilse" });
+    expect(reviewProposals.peek("lore_ilse")).toBeNull();
+    expect(composerPrefills.peek("")).toBeNull();
+  });
+
+  it("marks a review item done through the controller", async () => {
+    const updateTodo = vi.spyOn(api, "updateTodo").mockResolvedValue({ items: [] });
+    await todoActions.markReviewItemDone("todo_1");
+    expect(updateTodo).toHaveBeenCalledWith("todo_1", { status: "done" });
+  });
+
   it("is a no-op for a scene item (no node_id — scenes have no Propose)", async () => {
     const item = reviewItem({ scope: "scene", node_id: undefined, scene_id: "scene_1" });
     await todoActions.proposeFromReviewItem(item, PROMPT, {}, { subjectTitle: "Chapter Five" });

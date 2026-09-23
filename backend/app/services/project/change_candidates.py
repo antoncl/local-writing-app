@@ -1,15 +1,20 @@
-"""ADR-0090 §2: the candidate set for a settled change to one lore entry.
+"""ADR-0090 §2 / ADR-0091 §2: the candidate set for a settled change to one
+lore entry.
 
 Composed onto `ProjectService`; resolves `_build_node_index` (references.py),
-`read_snapshot` / `node_snapshot_kind` / `newest_snapshot_with_origin`
-(scene_snapshots.py), `read_lore_entry` (lore.py), `build_mutations_index`
-(lore_mutations.py) and `_search_corpus` (search_corpus_build.py) via MRO.
+`read_snapshot` / `node_snapshot_kind` / `newest_snapshot_with_origin` /
+`newest_snapshot_at_or_before` (scene_snapshots.py), `read_lore_entry` /
+`list_lore_entries` (lore.py), `build_mutations_index` (lore_mutations.py)
+and `_search_corpus` (search_corpus_build.py) via MRO.
 
-Four named routes, each a reason a node might depend on the source: a field
+Five named routes, each a reason a node might depend on the source: a field
 reference in either direction, a mid-scene mutation marker, or a textual
-mention in the ADR-0085 search corpus. A node reachable by more than one
-route appears once, carrying every route that found it; the set is a list of
-`(node, reasons)` and nothing else — no score, no threshold, no cut.
+mention in the ADR-0085 search corpus in either direction — the candidate's
+prose naming the source (`mentions_source`) or the source's own prose naming
+the candidate (`mentioned_by_source`, ADR-0091 S1). A node reachable by more
+than one route appears once, carrying every route that found it; the set is
+a list of `(node, reasons)` and nothing else — no score, no threshold, no
+cut.
 """
 
 from __future__ import annotations
@@ -25,11 +30,18 @@ from app.models import (
     ChangeCandidateSet,
     LoreEntry,
     MutationSetRow,
+    Snapshot,
 )
-from app.services.ai.name_matcher import compile_name_matcher, scan_name_matcher
+from app.services.ai.name_matcher import (
+    CompiledNameMatcher,
+    compile_name_matcher,
+    normalise_name,
+    scan_name_matcher,
+)
 from app.services.project.errors import ProjectServiceError
 from app.services.project.field_values import same_rendered_value
 from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntry
+from app.services.project.search_corpus import CorpusEntry
 from app.services.project.snapshot_diff import NON_FIELD_KEYS
 from app.services.project.snapshot_witness import unwitnessed_field_ids
 
@@ -45,12 +57,16 @@ _LIST_ITEM_SUFFIX = re.compile(r"\[\d+\]$")
 # which outranks the noisy textual-mention route).
 _TIER_ORDER = {"declared": 0, "marker_untouched": 1, "mention": 2}
 
-# The route a reason arrived by, in display order within one candidate.
+# The route a reason arrived by, in display order within one candidate:
+# declared, marker, mention in, mention out. `TodoSource.reason` records the
+# first reason on a candidate (§3), so this order is load-bearing — never
+# reorder the existing entries, only ever append.
 _ROUTE_ORDER = {
     "references_source": 0,
     "referenced_by_source": 1,
     "mutates_source": 2,
     "mentions_source": 3,
+    "mentioned_by_source": 4,
 }
 
 
@@ -68,21 +84,27 @@ def _is_candidate_node(entry: NodeIndexEntry) -> bool:
     return entry.kind == "lore" or entry.entry_type == SCENE_ENTRY_TYPE
 
 
-def _corpus_entry_mentions(matcher, corpus_entry, prose_fields: frozenset[str]) -> bool:
-    """Whether one corpus entry names the source in its body or in a prose
-    field. Each text is scanned on its own, never concatenated. A list item's
-    joined member text (`label[n]`) is skipped: its key is a reference already,
-    and that is the declared routes' business."""
-    if scan_name_matcher(matcher, corpus_entry.body):
-        return True
+def _corpus_entry_mention_ids(
+    matcher: CompiledNameMatcher, corpus_entry: CorpusEntry, prose_fields: frozenset[str]
+) -> set[str]:
+    """The matcher's hit ids over one corpus entry's body and prose fields —
+    the echo rule shared by BOTH mention directions (ADR-0091 §2): only
+    prose is scanned, so a reference value the corpus carries as a resolved
+    title (Marek's `posting` reading "Watch Barracks") is never a textual
+    mention. Each text is scanned on its own, never concatenated. A list
+    item's joined member text (`label[n]`) is skipped: its key is a
+    reference already, and that is the declared routes' business."""
+    ids: set[str] = set()
+    for hit in scan_name_matcher(matcher, corpus_entry.body):
+        ids.add(hit.entry_id)
     for label, value in corpus_entry.metadata_values:
         if _LIST_ITEM_SUFFIX.search(label):
             continue
         if label.rsplit(".", 1)[-1] not in prose_fields:
             continue
-        if scan_name_matcher(matcher, value):
-            return True
-    return False
+        for hit in scan_name_matcher(matcher, value):
+            ids.add(hit.entry_id)
+    return ids
 
 
 def _tier_for(reasons: list[ChangeCandidateReason]) -> str:
@@ -203,7 +225,17 @@ class ChangeCandidatesMixin:
             if marker.field in _NAME_FIELDS:
                 story_names.extend(part.strip() for part in marker.value.split(",") if part.strip())
 
-        self._add_mention_reasons(index, source, source_lore_entry, story_names, add_reason)
+        # Computed once and shared by both mention directions (ADR-0091 S1):
+        # the prose-field id set and the search corpus itself. Inbound first,
+        # outbound second, so `seq` — and so the first-reason order
+        # `TodoSource.reason` records — keeps the shipped declared / marker /
+        # mention-in / mention-out sequence.
+        prose_fields = unwitnessed_field_ids(self.read_metadata_schema())
+        corpus = self._search_corpus()
+        self._add_mention_reasons(
+            index, source, source_lore_entry, story_names, prose_fields, corpus, add_reason
+        )
+        self._add_outbound_mention_reasons(index, source, prose_fields, corpus, add_reason)
 
         items = [
             self._change_candidate_item(index, node_id, raw_reasons)
@@ -257,13 +289,21 @@ class ChangeCandidatesMixin:
         open_rank = open_layer.rank if open_layer is not None else owner_rank
         return owner_rank, open_rank, full_layers
 
-    def _removed_delta_layers(self, source_id: str, kind: str, composing: list[ComposingFile]) -> list[ChangeCandidateLayer]:
+    def _removed_delta_layers(
+        self, source_id: str, kind: str, composing: list[ComposingFile], since: Snapshot
+    ) -> list[ChangeCandidateLayer]:
         """Amendment 3 §1–2's mirror case: a delta that composed the source at
         the last propagation and has since been REMOVED is a change too — its
         fields fell back to the layer above. Such a lane has a propagation
         baseline but no delta file now, so `_composing_files` (which reads the
         index's existing deltas) cannot see it; walk the layers in range
-        instead and read the baseline's rows as the fields that changed."""
+        instead and read the baseline's rows as the fields that changed.
+
+        `since` (ADR-0091 §1) resolves each lane's baseline as the newest
+        snapshot, of any origin, captured at or before the owning baseline's
+        time — never "the newest propagation snapshot regardless" (#2131).
+        No baseline at or before `since` means the lane did not exist at the
+        since and does not now: not a change, so it is skipped."""
         index = self._build_node_index()
         source = index.canonical_id(source_id)
         owner_rank, open_rank, full_layers = self._composing_layer_bounds(source)
@@ -272,8 +312,8 @@ class ChangeCandidatesMixin:
         for layer in sorted(full_layers.values(), key=lambda layer: layer.rank):
             if layer.id in present or not (owner_rank < layer.rank <= open_rank):
                 continue
-            baseline = self.newest_snapshot_with_origin(
-                source_id, "propagation", kind=kind, layer_id=layer.id
+            baseline = self.newest_snapshot_at_or_before(
+                source_id, since.captured_at, kind=kind, layer_id=layer.id
             )
             if baseline is None:
                 continue
@@ -362,6 +402,11 @@ class ChangeCandidatesMixin:
 
         owner = composing[0]
         detail = self.read_snapshot(source_id, baseline_snapshot_id, kind=kind)
+        # ADR-0091 §1's "since": whatever resolved the owning baseline sets
+        # the measure for every lane — each delta lane against its own
+        # newest snapshot captured at or before THIS time, never "the newest
+        # propagation snapshot regardless" (#2131).
+        since = detail.snapshot
         root, node_id, path = self._resolve_snapshot_target(source_id, kind)
         if path is None:
             raise ProjectServiceError("The entry has no file to compare against.", 404)
@@ -390,7 +435,7 @@ class ChangeCandidatesMixin:
         ]
         for delta in composing[1:]:
             delta_changed, delta_baseline_id, delta_whole = self._override_delta_diff(
-                source_id, kind, delta
+                source_id, kind, delta, since
             )
             union_fields.update(delta_changed)
             layers.append(
@@ -403,22 +448,22 @@ class ChangeCandidatesMixin:
                     whole=delta_whole,
                 )
             )
-        for removed in self._removed_delta_layers(source_id, kind, composing):
+        for removed in self._removed_delta_layers(source_id, kind, composing, since):
             union_fields.update(removed.changed_fields)
             layers.append(removed)
         return sorted(union_fields), body_changed, False, layers
 
     def _override_delta_diff(
-        self, source_id: str, kind: str, delta: ComposingFile
+        self, source_id: str, kind: str, delta: ComposingFile, since: Snapshot
     ) -> tuple[set[str], str, bool]:
         """`(changed_fields, baseline_snapshot_id, whole)` for one override
-        delta's own lane (Amendment 3 §2): no propagation baseline in this
-        lane yet counts every field its current rows touch as changed
-        (`whole=True`, the "created since the last propagation, or before
-        this amendment" case); otherwise the rows differ field by field, as
-        `(field, op, value)` triples, baseline against now."""
-        baseline = self.newest_snapshot_with_origin(
-            source_id, "propagation", kind=kind, layer_id=delta.layer_id
+        delta's own lane (Amendment 3 §2): no baseline in this lane at or
+        before `since` (ADR-0091 §1) yet counts every field its current rows
+        touch as changed (`whole=True`, the "created after the since, or
+        before this amendment" case); otherwise the rows differ field by
+        field, as `(field, op, value)` triples, baseline against now."""
+        baseline = self.newest_snapshot_at_or_before(
+            source_id, since.captured_at, kind=kind, layer_id=delta.layer_id
         )
         current_front_matter = self._read_front_matter_only(delta.path, strict=True)
         current_rows = self._parse_override_rows(current_front_matter.get("rows"))
@@ -459,14 +504,17 @@ class ChangeCandidatesMixin:
         source: str,
         entry: LoreEntry,
         story_names: list[str],
+        prose_fields: frozenset[str],
+        corpus: dict[str, CorpusEntry],
         add_reason,
     ) -> None:
-        """Route 4 (`mentions_source`): a scan of the ADR-0085 search corpus
-        for the source's names — its title and `aliases`, plus every name a
+        """Route `mentions_source`: a scan of the ADR-0085 search corpus for
+        the source's names — its title and `aliases`, plus every name a
         story-time marker on those fields gave it (ADR-0008) — over scene and
         lore bodies and their `long_text` fields. Each text is scanned on its
         own, never concatenated, so a multi-word name cannot match across a
-        value boundary.
+        value boundary. `prose_fields` and `corpus` are computed once by the
+        caller and shared with `_add_outbound_mention_reasons`.
 
         Only the corpus values whose label is a prose field are scanned
         (`unwitnessed_field_ids`: `long_text`, and lists with a `long_text`
@@ -482,16 +530,76 @@ class ChangeCandidatesMixin:
         names = [name for name in names if name.strip()]
         if not names:
             return
-        prose_fields = unwitnessed_field_ids(self.read_metadata_schema())
         matcher = compile_name_matcher([(source, names)])
-        for node_id, corpus_entry in self._search_corpus().items():
+        for node_id, corpus_entry in corpus.items():
             if node_id == source:
                 continue
             candidate_entry = index.by_id.get(node_id)
             if candidate_entry is None or not _is_candidate_node(candidate_entry):
                 continue
-            if _corpus_entry_mentions(matcher, corpus_entry, prose_fields):
+            if _corpus_entry_mention_ids(matcher, corpus_entry, prose_fields):
                 add_reason(node_id, ChangeCandidateReason(route="mentions_source"))
+
+    def _lore_name_matcher(
+        self, index: NodeIndex, exclude: str
+    ) -> tuple[CompiledNameMatcher, dict[str, list[str]]]:
+        """The mirror matcher for `mentioned_by_source` (ADR-0091 §2): built
+        from every OTHER lore entry's names — title and `aliases`, folded
+        (`list_lore_entries`), so a book-layer override's aliases count —
+        rather than from the source's own. No story-time marker names here:
+        a note is not read as of any scene.
+
+        `compile_name_matcher` dedups a shared name to one id, so each
+        compiled entity here is a SYNTHETIC entry whose id is the normalised
+        name itself (`normalise_name`, the public alias for the matcher's
+        own dedup/lookup key — the two must stay the same function, not two
+        that could drift). One dict, `by_name`, holds both the
+        representative spelling compiled into the matcher and the real
+        entry ids behind that key; the returned map is a view of the
+        latter, so a name two entries share fans out to both."""
+        by_name: dict[str, tuple[str, list[str]]] = {}
+        for entry in self.list_lore_entries().entries:
+            if entry.id == exclude:
+                continue
+            names = [entry.title] if entry.title else []
+            aliases = entry.metadata.get("aliases")
+            if isinstance(aliases, list):
+                names.extend(str(alias) for alias in aliases if alias)
+            for name in names:
+                name = name.strip()
+                if not name:
+                    continue
+                key = normalise_name(name)
+                _representative, ids = by_name.setdefault(key, (name, []))
+                if entry.id not in ids:
+                    ids.append(entry.id)
+        matcher = compile_name_matcher(
+            [(key, [representative]) for key, (representative, _ids) in by_name.items()]
+        )
+        ids_by_name = {key: ids for key, (_representative, ids) in by_name.items()}
+        return matcher, ids_by_name
+
+    def _add_outbound_mention_reasons(
+        self,
+        index: NodeIndex,
+        source: str,
+        prose_fields: frozenset[str],
+        corpus: dict[str, CorpusEntry],
+        add_reason,
+    ) -> None:
+        """Route `mentioned_by_source` (ADR-0091 S1): the SOURCE's own prose
+        scanned for every OTHER lore entry's name — route `mentions_source`'s
+        loop run the other way, sharing the corpus read and the prose
+        filter. `add_reason` already drops the source itself and
+        non-candidate nodes; lore-only falls out of `_lore_name_matcher`
+        having only lore names in it."""
+        source_entry = corpus.get(source)
+        if source_entry is None:
+            return
+        matcher, ids_by_name = self._lore_name_matcher(index, source)
+        for key in _corpus_entry_mention_ids(matcher, source_entry, prose_fields):
+            for candidate_id in ids_by_name.get(key, []):
+                add_reason(candidate_id, ChangeCandidateReason(route="mentioned_by_source"))
 
     def _change_candidate_item(
         self, index: NodeIndex, node_id: str, raw_reasons: list[_RawReason]

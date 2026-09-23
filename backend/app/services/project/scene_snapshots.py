@@ -341,6 +341,29 @@ class SceneSnapshotsMixin:
         ]
         return matches[-1] if matches else None
 
+    def newest_snapshot_at_or_before(
+        self,
+        node_id: str,
+        captured_at: str,
+        *,
+        kind: str = "manuscript",
+        layer_id: str | None = None,
+    ) -> Snapshot | None:
+        """The newest snapshot of `node_id`, of any origin, captured at or
+        before `captured_at` (ADR-0091 §1's "since" rule) — the resolver an
+        override lane uses once the owning baseline has set the measure for
+        the whole confirm. `captured_at` strings compare correctly as
+        strings, fixed microseconds and all (`_capture`'s docstring above),
+        so this is a linear scan of the already `(captured_at, id)`-sorted
+        `list_snapshots` order for the last one at or before the given time;
+        `None` when none qualifies."""
+        matches = [
+            record
+            for record in self.list_snapshots(node_id, kind=kind, layer_id=layer_id).snapshots
+            if record.captured_at <= captured_at
+        ]
+        return matches[-1] if matches else None
+
     def read_snapshot(
         self,
         scene_id: str,

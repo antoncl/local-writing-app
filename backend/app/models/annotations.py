@@ -6,11 +6,18 @@ from pydantic import BaseModel, Field
 
 from app.models.snapshots import Snapshot
 
-# ADR-0090 §2: the route a change-candidate reason was found by. Defined here,
-# ahead of `TodoSource`, because a review item's source names its FIRST
-# reason's route (§3) and `ChangeCandidateReason` below reuses the same alias.
+# ADR-0090 §2 / ADR-0091 §2: the route a change-candidate reason was found
+# by. Defined here, ahead of `TodoSource`, because a review item's source
+# names its FIRST reason's route (§3) and `ChangeCandidateReason` below
+# reuses the same alias. `mentioned_by_source` (ADR-0091 S1) is the mirror of
+# `mentions_source`: the source's own prose names the candidate, rather than
+# the candidate's prose naming the source.
 ChangeCandidateRoute = Literal[
-    "references_source", "referenced_by_source", "mutates_source", "mentions_source"
+    "references_source",
+    "referenced_by_source",
+    "mutates_source",
+    "mentions_source",
+    "mentioned_by_source",
 ]
 
 
@@ -163,11 +170,14 @@ ChangeCandidateTier = Literal["declared", "marker_untouched", "mention"]
 
 
 class ChangeCandidateReason(BaseModel):
-    """One route a `ChangeCandidate` was found by (ADR-0090 §2). `field_id` is
-    the referencing field for the two reference routes and the marker's field
-    for `mutates_source`; `marker_id` and `field_changed` are `mutates_source`
-    only — `field_changed` is whether the marker's own field is among the
-    diff's `changed_fields` (always True when there is no baseline)."""
+    """One route a `ChangeCandidate` was found by (ADR-0090 §2, ADR-0091 §2).
+    `field_id` is the referencing field for the two reference routes and the
+    marker's field for `mutates_source`; it is empty for both mention
+    routes — `mentions_source` and `mentioned_by_source` — since the route
+    itself names the direction and neither reason names a field. `marker_id`
+    and `field_changed` are `mutates_source` only — `field_changed` is
+    whether the marker's own field is among the diff's `changed_fields`
+    (always True when there is no baseline)."""
 
     route: ChangeCandidateRoute
     field_id: str = ""

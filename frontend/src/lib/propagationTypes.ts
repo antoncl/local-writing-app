@@ -6,12 +6,16 @@
 import type { TodoDocument } from "./todoTypes";
 import type { Snapshot } from "./snapshotTypes";
 
-// ADR-0090 §2: the route a change-candidate reason was found by.
+// ADR-0090 §2 / ADR-0091 §2: the route a change-candidate reason was found
+// by. `mentioned_by_source` (ADR-0091 S1) is the mirror of `mentions_source`:
+// the source's own prose names the candidate, rather than the candidate's
+// prose naming the source.
 export type ChangeCandidateRoute =
   | "references_source"
   | "referenced_by_source"
   | "mutates_source"
-  | "mentions_source";
+  | "mentions_source"
+  | "mentioned_by_source";
 
 export type ChangeCandidateTier = "declared" | "marker_untouched" | "mention";
 

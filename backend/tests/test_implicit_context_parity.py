@@ -15,7 +15,12 @@ from typing import Any
 
 import pytest
 
-from app.services.ai.name_matcher import compile_name_matcher, scan_name_matcher
+from app.services.ai.name_matcher import (
+    _norm,
+    compile_name_matcher,
+    normalise_name,
+    scan_name_matcher,
+)
 
 CORPUS_PATH = Path(__file__).resolve().parents[2] / "spec" / "implicit-context-corpus.json"
 
@@ -26,6 +31,14 @@ def _load_cases() -> list[dict[str, Any]]:
 
 
 CASES = _load_cases()
+
+
+def test_normalise_name_is_the_matchers_own_norm() -> None:
+    """ADR-0091 §2: `normalise_name` (the public alias `change_candidates.py`
+    imports for the outbound Propagate matcher) must be literally this
+    module's own dedup/lookup key — never a second implementation that could
+    drift from the §5 parity surface this file drives."""
+    assert normalise_name is _norm
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c["name"] for c in CASES])

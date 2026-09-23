@@ -12,6 +12,7 @@ const REASON_PHRASE: Record<ChangeCandidateRoute, string> = {
   referenced_by_source: "referenced by the change",
   mutates_source: "⤳ a marker on the change",
   mentions_source: "mentions the change",
+  mentioned_by_source: "named by the change",
 };
 
 /** "<phrase> · from <source title>" — the whole detail line for a review

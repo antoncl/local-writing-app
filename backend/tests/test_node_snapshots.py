@@ -590,6 +590,37 @@ class LoreEntrySnapshotRoundTripTests(unittest.TestCase):
             self.service.newest_snapshot_with_origin(self.entry_id, "something_else", kind="lore")
         )
 
+    def test_newest_snapshot_at_or_before(self) -> None:
+        # ADR-0091 §1's "since" rule: the newest snapshot, of ANY origin, at
+        # or before a given `captured_at` — the boundary is inclusive, and
+        # nothing before the first capture qualifies.
+        first = self.service.capture_snapshot(self.entry_id, kind="lore")
+        second = self.service.capture_snapshot(self.entry_id, kind="lore", origin="propagation")
+        third = self.service.capture_snapshot(self.entry_id, kind="lore")
+
+        self.assertEqual(
+            self.service.newest_snapshot_at_or_before(
+                self.entry_id, third.captured_at, kind="lore"
+            ).id,
+            third.id,
+        )
+        self.assertEqual(
+            self.service.newest_snapshot_at_or_before(
+                self.entry_id, second.captured_at, kind="lore"
+            ).id,
+            second.id,
+        )
+        self.assertEqual(
+            self.service.newest_snapshot_at_or_before(
+                self.entry_id, first.captured_at, kind="lore"
+            ).id,
+            first.id,
+        )
+        before_everything = "2000-01-01T00:00:00.000000+00:00"
+        self.assertIsNone(
+            self.service.newest_snapshot_at_or_before(self.entry_id, before_everything, kind="lore")
+        )
+
     def test_delete_removes_the_snapshot_and_returns_the_remainder(self) -> None:
         snapshot = self._capture()
         response = self.client.delete(

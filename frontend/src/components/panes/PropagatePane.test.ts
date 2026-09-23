@@ -25,6 +25,7 @@ function fixture(): ChangeCandidateSet {
       { id: "weir", kind: "lore", entry_type: "lore:location", title: "Weir Tavern", tier: "mention", reasons: [{ route: "mentions_source", field_id: "", marker_id: "", field_changed: false }] },
       { id: "ch9", kind: "manuscript", entry_type: "manuscript:scene", title: "Chapter 9", tier: "mention", reasons: [{ route: "mentions_source", field_id: "", marker_id: "", field_changed: false }] },
       { id: "ch2", kind: "manuscript", entry_type: "manuscript:scene", title: "Chapter 2", tier: "mention", reasons: [{ route: "mentions_source", field_id: "", marker_id: "", field_changed: false }] },
+      { id: "rumour", kind: "lore", entry_type: "lore:note", title: "The Deserter's Rumour", tier: "mention", reasons: [{ route: "mentioned_by_source", field_id: "", marker_id: "", field_changed: false }] },
     ],
   };
 }
@@ -67,6 +68,13 @@ describe("PropagatePane (ADR-0090 §7)", () => {
     expect(screen.getByText(/refers to Marek Vell/)).toBeInTheDocument();
     expect(screen.getByText(/Marek Vell's `posting` refers here/)).toBeInTheDocument();
     expect(screen.getByText(/untouched by this change/)).toBeInTheDocument();
+  });
+
+  // ADR-0091 S1: the `mentioned_by_source` route's own phrase.
+  it("shows the mentioned_by_source phrase once the mentions group is unfolded", () => {
+    propagate.toggleFold("mention");
+    render(PropagatePane);
+    expect(screen.getByText(/Marek Vell names this entry/)).toBeInTheDocument();
   });
 
   it("reads 'Confirm 3 review items' by default, and updates when a row is toggled", async () => {

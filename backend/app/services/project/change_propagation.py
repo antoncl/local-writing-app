@@ -24,6 +24,7 @@ from app.models import (
     CreateTodoRequest,
     PropagateRequest,
     PropagateResponse,
+    Snapshot,
     TodoSource,
 )
 from app.services.ai.lore_block import _render_lore_entries, _render_node_xml
@@ -69,8 +70,11 @@ class ChangePropagationMixin:
         # write this endpoint makes (ADR-0090 §1). Amendment 3: every EXISTING
         # override delta between the owner and the open layer gets its own
         # baseline too, in its own lane; a layer with no delta gets nothing
-        # invented.
-        snapshot = self.capture_snapshot(candidates.source_id, kind=kind, origin="propagation")
+        # invented. ADR-0091 §1: the delta lanes are captured BEFORE the
+        # owner, so the owning snapshot's time is at or after every delta
+        # snapshot of this confirm — "since" resolves a delta lane by
+        # captured-at-or-before the owning baseline, which needs the owner's
+        # time to be the latest of the two (#2131).
         layer_snapshots = [
             self.capture_snapshot(
                 candidates.source_id, kind=kind, layer_id=file.layer_id, origin="propagation"
@@ -78,6 +82,7 @@ class ChangePropagationMixin:
             for file in self._composing_files(candidates.source_id)
             if file.is_override
         ]
+        snapshot = self.capture_snapshot(candidates.source_id, kind=kind, origin="propagation")
         return PropagateResponse(
             todos=todos,
             created=[item.id for item in created_items],
@@ -125,8 +130,9 @@ class ChangePropagationMixin:
         `now` is the source rendered exactly as the AI already sees a lore
         entry (`_render_lore_entries` — the folded, live entry); `before`
         (only when a baseline resolved) reads the baseline snapshot's bytes
-        through `read_snapshot`, folds in every override delta's OWN baseline
-        rows (Amendment 3 §5 — the composite is never a file, so it is folded
+        through `read_snapshot`, folds in every override delta lane's OWN
+        baseline rows resolved by the same "since" rule `change_candidates`
+        uses (ADR-0091 §1 — the composite is never a file, so it is folded
         here rather than read), and renders the result with the same
         `_render_node_xml` the live render uses, so the two sides are entries
         as the AI sees them, at two times."""
@@ -146,7 +152,7 @@ class ChangePropagationMixin:
             detail = self.read_snapshot(source, resolved_baseline, kind=kind)
             schema = self.read_metadata_schema()
             folded_metadata = self._fold_propagation_baseline_metadata(
-                source, kind, detail.metadata, schema
+                source, kind, detail.metadata, schema, detail.snapshot
             )
             before_entry = {
                 "title": detail.title,
@@ -172,21 +178,26 @@ class ChangePropagationMixin:
         return ChangeMessage(source_id=source, baseline_snapshot_id=resolved_baseline, text=text)
 
     def _fold_propagation_baseline_metadata(
-        self, source_id: str, kind: str, base_metadata: dict, schema: Any
+        self, source_id: str, kind: str, base_metadata: dict, schema: Any, since: Snapshot
     ) -> dict:
         """Amendment 3 §5: the *before* side folds the owning baseline's
-        metadata with every override delta's OWN propagation baseline rows —
-        the same fold the live read uses (`materialize_override_metadata`),
-        outermost-first as `_composing_files` already orders them. A delta
-        with no propagation baseline yet contributes nothing to *before*: it
-        is not yet part of what the last propagation measured."""
+        metadata with every override delta lane's OWN baseline rows — the
+        same fold the live read uses (`materialize_override_metadata`),
+        outermost-first as `_composing_files` already orders them. Each
+        lane's baseline is resolved by ADR-0091 §1's "since" rule — the
+        newest snapshot of that lane, of any origin, captured at or before
+        `since` (the owning baseline's own captured time) — the same
+        resolver `_change_candidate_diff` uses, so the message's *before*
+        side measures the identical change the confirm surface showed. A
+        lane with no baseline at or before `since` contributes nothing to
+        *before*: it did not yet compose the source at that time."""
         shapes = self._override_shapes(schema)
         records: list[LayerOverride] = []
         for file in self._composing_files(source_id):
             if not file.is_override:
                 continue
-            baseline = self.newest_snapshot_with_origin(
-                source_id, "propagation", kind=kind, layer_id=file.layer_id
+            baseline = self.newest_snapshot_at_or_before(
+                source_id, since.captured_at, kind=kind, layer_id=file.layer_id
             )
             if baseline is None:
                 continue

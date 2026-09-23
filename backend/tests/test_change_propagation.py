@@ -555,6 +555,26 @@ class LayeredPropagationTests(unittest.TestCase):
         self.assertFalse(book_layer.whole)
         self.assertEqual(book_layer.changed_fields, [])
 
+    def test_confirm_captures_override_lanes_before_the_owner(self) -> None:
+        """ADR-0091 §1 (#2131): the delta lanes are captured BEFORE the
+        owner, so the owning snapshot's time is at or after every delta
+        snapshot of this confirm — the property "since" relies on to resolve
+        a lane by captured-at-or-before the owning baseline."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        response = self.service.propagate_change(self.marek, PropagateRequest(kept=[self.ch5]))
+        self.assertTrue(response.layer_snapshots)
+        for layer_snapshot in response.layer_snapshots:
+            self.assertLessEqual(layer_snapshot.captured_at, response.snapshot.captured_at)
+
     def test_change_message_folds_the_override_into_before_and_after(self) -> None:
         # Confirm once while the source is unoverridden — the owning baseline
         # freezes rank=Captain; the book has no delta yet, so nothing else is
@@ -579,6 +599,54 @@ class LayeredPropagationTests(unittest.TestCase):
         before_section, after_section = message.text.split("After:", 1)
         self.assertIn("<rank>Captain</rank>", before_section)
         self.assertIn("<rank>Sergeant</rank>", after_section)
+
+    def test_change_message_before_side_follows_the_since(self) -> None:
+        """The message's *before* side resolves each override lane by the
+        SAME "since" rule the candidate diff uses (ADR-0091 §1): naming an
+        older owning snapshot folds THAT confirm's own delta baseline, not
+        whichever delta baseline is newest overall."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        first = self.service.propagate_change(self.marek, PropagateRequest(kept=[self.ch5]))
+
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Major"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        self.service.propagate_change(self.marek, PropagateRequest(kept=[self.ch5]))
+
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Corporal"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+
+        message = self.service.change_message(self.marek, first.snapshot.id)
+        self.assertIn("Before:", message.text)
+        before_section, _after_section = message.text.split("After:", 1)
+        # `first`'s own book-lane delta baseline captured rank=Sergeant — the
+        # state BEFORE the first confirm — never Major, the second confirm's.
+        self.assertIn("<rank>Sergeant</rank>", before_section)
+        self.assertNotIn("<rank>Major</rank>", before_section)
 
 
 if __name__ == "__main__":

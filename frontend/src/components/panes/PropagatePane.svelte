@@ -33,6 +33,8 @@
         return `⤳ \`${reason.field_id}\`` + (reason.field_changed ? " changed" : " untouched by this change");
       case "mentions_source":
         return `mentions ${sourceTitle}`;
+      case "mentioned_by_source":
+        return `${sourceTitle} names this entry`;
     }
   }
 

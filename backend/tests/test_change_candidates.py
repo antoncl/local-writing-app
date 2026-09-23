@@ -1,8 +1,9 @@
-"""ADR-0090 §2 (#2115): the candidate set for a settled change to one lore
-entry — four named routes (references, referenced-by, mutates, mentions),
-each a reason a dependent node might need a look. Read-only: no candidate
-call may write anything, so a hash sweep of the project files brackets every
-assertion group.
+"""ADR-0090 §2 / ADR-0091 §2 (#2115, #2131-#2135): the candidate set for a
+settled change to one lore entry — five named routes (references,
+referenced-by, mutates, mentions in, mentions out), each a reason a
+dependent node might need a look. Read-only: no candidate call may write
+anything, so a hash sweep of the project files brackets every assertion
+group.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from app.models import (
     CreateLoreEntryRequest,
     CreateSceneRequest,
     MetadataFieldDefinition,
+    PropagateRequest,
     SaveLoreEntryRequest,
     SaveSceneRequest,
     UpsertMetadataFieldRequest,
@@ -89,7 +91,7 @@ class ChangeCandidatesTests(unittest.TestCase):
             "The Deserter's Rumour", body="Nobody has traced it back to anyone."
         )
         # Marek's own body names the Rumour by title — a mention FROM the
-        # source, which must not make Rumour a candidate (direction matters).
+        # source — ADR-0091 §2 counts it as `mentioned_by_source`.
         self.service.save_lore_entry(
             self.marek,
             SaveLoreEntryRequest(
@@ -150,10 +152,18 @@ class ChangeCandidatesTests(unittest.TestCase):
         present = self._ids(result)
         self.assertEqual(
             present,
-            {self.city_guard, self.ilse, self.barracks, self.ch5, self.ch11, self.weir_tavern, self.ch9},
+            {
+                self.city_guard,
+                self.ilse,
+                self.barracks,
+                self.ch5,
+                self.ch11,
+                self.weir_tavern,
+                self.ch9,
+                self.rumour,
+            },
         )
         self.assertNotIn(self.marek, present)
-        self.assertNotIn(self.rumour, present)
         self.assertNotIn(self.ch2, present)
 
         by_id = {item.id: item for item in result.items}
@@ -161,6 +171,11 @@ class ChangeCandidatesTests(unittest.TestCase):
             self.assertEqual(by_id[declared_id].tier, "declared", declared_id)
         self.assertEqual(by_id[self.weir_tavern].tier, "mention")
         self.assertEqual(by_id[self.ch9].tier, "mention")
+        self.assertEqual(by_id[self.rumour].tier, "mention")
+        self.assertEqual(
+            [(r.route, r.field_id) for r in by_id[self.rumour].reasons],
+            [("mentioned_by_source", "")],
+        )
         self.assertTrue(result.whole_entry)
         self.assertEqual(result.changed_fields, [])
         self.assertTrue(result.body_changed)
@@ -290,6 +305,148 @@ class ChangeCandidatesTests(unittest.TestCase):
         self.assertEqual([r.route for r in by_id[hollis].reasons], ["mentions_source"])
         self.assertEqual([r.route for r in by_id[self.city_guard].reasons], ["references_source"])
 
+    # --- outbound mentions (ADR-0091 §2, `mentioned_by_source`) ------------
+
+    def test_outbound_mention_from_a_long_text_field_of_the_source(self) -> None:
+        """The source's own `long_text` field, not just its body, is scanned
+        for other entries' names in the outbound direction."""
+        _define_field(self.service, "backstory", "long_text", "Backstory")
+        hollis = self._make_lore("Hollis Brand", body="")
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="He has heard whispers of The Deserter's Rumour.",
+                entry_type="lore:character",
+                metadata={
+                    "rank": "Lieutenant",
+                    "aliases": ["the Captain"],
+                    "posting": self.barracks,
+                    "backstory": "He trained under Hollis Brand at the academy.",
+                },
+            ),
+        )
+        result = self.service.change_candidates(self.marek)
+        by_id = {item.id: item for item in result.items}
+        self.assertEqual([r.route for r in by_id[hollis].reasons], ["mentioned_by_source"])
+
+    def test_outbound_echo_rule_barracks_stays_declared_only(self) -> None:
+        """The Barracks is found by `referenced_by_source` (`posting`)
+        alone: the source's `posting` field resolves to "Watch Barracks" in
+        the corpus, but that resolved title is never scanned as an OUTBOUND
+        mention either — the echo rule is a property of what is scanned
+        (prose only), shared by both directions (ADR-0091 §2)."""
+        result = self.service.change_candidates(self.marek)
+        barracks_item = next(item for item in result.items if item.id == self.barracks)
+        self.assertEqual(
+            [(r.route, r.field_id) for r in barracks_item.reasons],
+            [("referenced_by_source", "posting")],
+        )
+
+    def test_outbound_matches_an_alias(self) -> None:
+        """The outbound matcher is built from every candidate's aliases too,
+        not just its title."""
+        outpost = self._make_lore("Old Watchpost", body="", metadata={"aliases": ["the Ruins"]})
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="He grew up near the Ruins.",
+                entry_type="lore:character",
+                metadata={"rank": "Lieutenant", "aliases": ["the Captain"], "posting": self.barracks},
+            ),
+        )
+        result = self.service.change_candidates(self.marek)
+        by_id = {item.id: item for item in result.items}
+        self.assertEqual([r.route for r in by_id[outpost].reasons], ["mentioned_by_source"])
+
+    def test_outbound_shared_alias_finds_both_entries(self) -> None:
+        """A name two entries share fans out to every id behind it — the
+        matcher itself dedups a name to one id, so the outbound resolver
+        must expand the synthetic hit back to every real entry."""
+        first = self._make_lore("Entry A", body="", metadata={"aliases": ["the Wanderer"]})
+        second = self._make_lore("Entry B", body="", metadata={"aliases": ["the Wanderer"]})
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="He once met the Wanderer on the road.",
+                entry_type="lore:character",
+                metadata={"rank": "Lieutenant", "aliases": ["the Captain"], "posting": self.barracks},
+            ),
+        )
+        result = self.service.change_candidates(self.marek)
+        by_id = {item.id: item for item in result.items}
+        self.assertEqual([r.route for r in by_id[first].reasons], ["mentioned_by_source"])
+        self.assertEqual([r.route for r in by_id[second].reasons], ["mentioned_by_source"])
+
+    def test_both_directions_present_keep_shipped_route_order(self) -> None:
+        """`references_source, mentions_source, mentioned_by_source` — the
+        shipped within-candidate order (declared, marker, mention in, out),
+        unchanged by S1's new route landing last. Ilse already references
+        Marek (`father`) and mentions him (`the captain`); Marek's body is
+        edited here to also name Ilse — the outbound direction."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="He has heard whispers of The Deserter's Rumour, and often thinks of Ilse.",
+                entry_type="lore:character",
+                metadata={"rank": "Lieutenant", "aliases": ["the Captain"], "posting": self.barracks},
+            ),
+        )
+        result = self.service.change_candidates(self.marek)
+        ilse_item = next(item for item in result.items if item.id == self.ilse)
+        self.assertEqual(
+            [r.route for r in ilse_item.reasons],
+            ["references_source", "mentions_source", "mentioned_by_source"],
+        )
+
+    def test_scene_title_in_source_body_is_not_an_outbound_candidate(self) -> None:
+        """The outbound matcher is built from lore entries only (ADR-0091
+        §2) — a scene's title appearing in the source's prose adds no
+        `mentioned_by_source` reason, even though the scene is already a
+        candidate by another route."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="He has heard whispers of The Deserter's Rumour, set during Chapter Five.",
+                entry_type="lore:character",
+                metadata={"rank": "Lieutenant", "aliases": ["the Captain"], "posting": self.barracks},
+            ),
+        )
+        result = self.service.change_candidates(self.marek)
+        ch5_item = next(item for item in result.items if item.id == self.ch5)
+        self.assertNotIn("mentioned_by_source", [r.route for r in ch5_item.reasons])
+
+    def test_context_policy_never_entry_is_still_found_both_directions(self) -> None:
+        """ADR-0091 §2: no `context_policy` filter applies in either mention
+        direction — a `never` entry is still a dependent."""
+        hidden = self._make_lore(
+            "Hidden Contact",
+            body="Marek Vell owes him a debt.",
+            metadata={"context_policy": "never"},
+        )
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body=(
+                    "He has heard whispers of The Deserter's Rumour, and remembers "
+                    "Hidden Contact fondly."
+                ),
+                entry_type="lore:character",
+                metadata={"rank": "Lieutenant", "aliases": ["the Captain"], "posting": self.barracks},
+            ),
+        )
+        result = self.service.change_candidates(self.marek)
+        by_id = {item.id: item for item in result.items}
+        self.assertEqual(
+            sorted(r.route for r in by_id[hidden].reasons),
+            sorted(["mentions_source", "mentioned_by_source"]),
+        )
+
     def test_story_time_names_from_markers_widen_the_mention_scan(self) -> None:
         """ADR-0008: a marker on `title` or `aliases` gives the source a name
         the later prose uses; the scan must know it."""
@@ -417,13 +574,16 @@ class LayeredBaselineTests(unittest.TestCase):
             ),
         )
         kind = self.service.node_snapshot_kind(self.marek)
-        snapshot = self.service.capture_snapshot(self.marek, kind=kind)
-        # The book's own lane also gets a baseline — as a real Propagate
+        # The book's own lane gets a baseline too — as a real Propagate
         # confirm would (Amendment 3 §3) — so its later diff measures the
         # override against ITS OWN prior state, not "no baseline yet".
+        # Captured BEFORE the owning snapshot (ADR-0091 §1: a confirm
+        # captures delta lanes first, the owner last), so the owning
+        # snapshot's "since" still resolves this delta lane at-or-before it.
         self.service.capture_snapshot(
             self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
         )
+        snapshot = self.service.capture_snapshot(self.marek, kind=kind)
         # Change only the series body, at the series layer.
         self.service.save_lore_entry(
             self.marek,
@@ -502,10 +662,12 @@ class LayeredBaselineTests(unittest.TestCase):
             ),
         )
         kind = self.service.node_snapshot_kind(self.marek)
-        owning_baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        # Delta lane captured BEFORE the owner (ADR-0091 §1's confirm order),
+        # so the owning baseline's "since" resolves it at-or-before.
         self.service.capture_snapshot(
             self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
         )
+        owning_baseline = self.service.capture_snapshot(self.marek, kind=kind)
         self.service.save_lore_entry(
             self.marek,
             SaveLoreEntryRequest(
@@ -580,10 +742,12 @@ class LayeredBaselineTests(unittest.TestCase):
             ),
         )
         kind = self.service.node_snapshot_kind(self.marek)
-        owning_baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        # Delta lane captured BEFORE the owner (ADR-0091 §1's confirm order),
+        # so the owning baseline's "since" resolves it at-or-before.
         self.service.capture_snapshot(
             self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
         )
+        owning_baseline = self.service.capture_snapshot(self.marek, kind=kind)
         self.service._drop_layer_overrides_for_target(self.root, self.marek)
         node_index_gate.invalidate()
 
@@ -611,10 +775,12 @@ class LayeredBaselineTests(unittest.TestCase):
             ),
         )
         kind = self.service.node_snapshot_kind(self.marek)
-        owning_baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        # Delta lane captured BEFORE the owner (ADR-0091 §1's confirm order),
+        # so the owning baseline's "since" resolves it at-or-before.
         self.service.capture_snapshot(
             self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
         )
+        owning_baseline = self.service.capture_snapshot(self.marek, kind=kind)
         self.service.save_lore_entry(
             self.marek,
             SaveLoreEntryRequest(
@@ -631,6 +797,159 @@ class LayeredBaselineTests(unittest.TestCase):
         by_layer = {layer.layer_id: layer for layer in result.layers}
         self.assertFalse(by_layer[self.book_id].whole)
         self.assertEqual(by_layer[self.book_id].changed_fields, [])
+
+    # --- ADR-0091 §1's "since" rule (#2131) ---------------------------------
+
+    def test_since_resolves_each_lane_at_or_before(self) -> None:
+        """Each lane's own baseline follows the CHOSEN "since", not
+        "whichever is newest overall": an older "since" resolves the book
+        lane to its own earlier delta baseline and measures from it, a newer
+        "since" to its later one."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        ch5 = self._new_scene(
+            "Chapter Five",
+            f"<!-- mutate:entity={self.marek};field=rank;value=Sergeant;id=m_rank -->",
+        )
+        first = self.service.propagate_change(self.marek, PropagateRequest(kept=[ch5]))
+        b1, d1 = first.snapshot, first.layer_snapshots[0]
+
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Major"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        second = self.service.propagate_change(self.marek, PropagateRequest(kept=[ch5]))
+        b2, d2 = second.snapshot, second.layer_snapshots[0]
+
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Corporal"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+
+        at_b1 = self.service.change_candidates(self.marek, baseline_snapshot_id=b1.id)
+        book_at_b1 = next(layer for layer in at_b1.layers if layer.layer_id == self.book_id)
+        self.assertEqual(book_at_b1.baseline_snapshot_id, d1.id)
+        self.assertEqual(book_at_b1.changed_fields, ["rank"])
+
+        at_b2 = self.service.change_candidates(self.marek, baseline_snapshot_id=b2.id)
+        book_at_b2 = next(layer for layer in at_b2.layers if layer.layer_id == self.book_id)
+        self.assertEqual(book_at_b2.baseline_snapshot_id, d2.id)
+        self.assertEqual(book_at_b2.changed_fields, ["rank"])
+
+    def test_since_older_than_the_delta_counts_it_whole(self) -> None:
+        """A "since" older than the delta's own baseline — an owning
+        snapshot captured before the override, or the delta, existed —
+        treats the lane as never-baselined: the delta counts whole, not
+        measured against a baseline it postdates."""
+        kind = self.service.node_snapshot_kind(self.marek)
+        before_override = self.service.capture_snapshot(self.marek, kind=kind)
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        ch5 = self._new_scene(
+            "Chapter Five",
+            f"<!-- mutate:entity={self.marek};field=rank;value=Sergeant;id=m_rank -->",
+        )
+        # A confirm gives the book lane its own baseline — but it is CAPTURED
+        # after `before_override`, so it must not be found from that "since".
+        self.service.propagate_change(self.marek, PropagateRequest(kept=[ch5]))
+
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=before_override.id)
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        book_layer = by_layer[self.book_id]
+        self.assertTrue(book_layer.whole)
+        self.assertEqual(book_layer.baseline_snapshot_id, "")
+        self.assertEqual(book_layer.changed_fields, ["rank"])
+
+    def test_a_plain_camera_capture_on_the_delta_lane_is_a_baseline(self) -> None:
+        """`newest_snapshot_at_or_before` takes ANY origin — a writer's own
+        plain camera press on the override delta counts as a baseline just
+        the same as a propagation snapshot."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        kind = self.service.node_snapshot_kind(self.marek)
+        # A plain camera capture on the delta lane — no origin at all.
+        self.service.capture_snapshot(self.marek, kind=kind, layer_id=self.book_id)
+        owning_baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Major"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=owning_baseline.id)
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        book_layer = by_layer[self.book_id]
+        self.assertFalse(book_layer.whole)
+        self.assertEqual(book_layer.changed_fields, ["rank"])
+
+    def test_removed_delta_lane_follows_since(self) -> None:
+        """A removed delta lane's baseline is resolved by the same "since"
+        rule: a since chosen before the delta ever had a baseline finds
+        nothing, and a lane that did not exist at the since and does not
+        exist now is not a change at all — the lane is skipped entirely."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        kind = self.service.node_snapshot_kind(self.marek)
+        before_delta_baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        self.service.capture_snapshot(
+            self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
+        )
+        self.service._drop_layer_overrides_for_target(self.root, self.marek)
+        node_index_gate.invalidate()
+
+        result = self.service.change_candidates(
+            self.marek, baseline_snapshot_id=before_delta_baseline.id
+        )
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        self.assertNotIn(self.book_id, by_layer)
 
 
 if __name__ == "__main__":

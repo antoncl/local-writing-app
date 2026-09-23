@@ -125,9 +125,31 @@ class FieldContractBuiltinsTests(unittest.TestCase):
         # turn to hold length constant — the same sentence the commit envelope's
         # revise branch states. Leaving one out pulls that prompt's extraction
         # between an inflated draft in the transcript and the envelope's anchor.
-        for title in ("Revise entry", "Revise plot card", "Revise plotline", "Revise character arc"):
+        # ADR-0091 §4: "Follow a change" commits a body too, so it carries the
+        # same anchor.
+        for title in (
+            "Revise entry",
+            "Revise plot card",
+            "Revise plotline",
+            "Revise character arc",
+            "Follow a change",
+        ):
             prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, title))
             self.assertIn("change the content, not the volume", prompt.body, title)
+
+    def test_follow_a_change_registers_full_proposable_set(self) -> None:
+        # ADR-0091 §4: the built-in Propose default registers the same full
+        # proposable set as Revise entry — body included — for its dependent.
+        note = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Alderman Vane", entry_type="lore:note")
+        )
+        stored = self._stored(
+            builtin_prompt_id(self.service, "Follow a change"),
+            {"entry": note.id, "entry_type": ""},
+        )
+        ids = {f["id"] for f in stored}
+        self.assertEqual(ids, self._proposable_ids("lore:note"))
+        self.assertIn("body", ids)
 
     def test_revise_character_arc_registers_full_proposable_set(self) -> None:
         # ADR-0080 Amendment 2: the arc fixer registers the same generic

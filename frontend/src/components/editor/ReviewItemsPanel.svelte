@@ -20,6 +20,7 @@
   import { buildPromptMenuTree } from "@/lib/editor-core/promptMenuTree";
   import {
     promptEntriesOfferedOn,
+    proposeDefaultPrompt,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import { seedConversationInputs } from "@/components/editor/body/chat/chatInputs";
@@ -83,6 +84,13 @@
   let proposePrompts = $derived(promptEntriesOfferedOn(ctx, subjectEntryType));
   let proposeMenu = $derived(buildPromptMenuTree(proposePrompts));
 
+  // ADR-0091 §4: Propose opens straight on the built-in "Follow a change" when
+  // it is offered — found by title, project-owned shadowing the Library's
+  // (`proposeDefaultPrompt`). The tile keeps the menu button too whenever more
+  // than the default is offered, so the writer can still reach another prompt.
+  let defaultPrompt = $derived(proposeDefaultPrompt(proposePrompts));
+  let showMenuButton = $derived(!defaultPrompt || proposePrompts.length > 1);
+
   // One popover open at a time; each row's trigger button is keyed by item id
   // so the popover (a DOM sibling of the button that opened it, per
   // Popover.svelte's in-flow anchoring) drops from the right row.
@@ -124,21 +132,45 @@
           >
             {#snippet trailing()}
               <div class="ri-propose-anchor">
-                <button
-                  type="button"
-                  bind:this={triggerEls[item.id]}
-                  title={proposePrompts.length > 0 ? "Propose…" : "No prompt is offered on this type"}
-                  aria-label={`Propose a follow-up for ${item.text}`}
-                  aria-haspopup="menu"
-                  aria-expanded={openItemId === item.id}
-                  disabled={proposePrompts.length === 0}
-                  onmousedown={(event) => event.stopPropagation()}
-                  onclick={(event) => {
-                    event.stopPropagation();
-                    openItemId = openItemId === item.id ? null : item.id;
-                  }}
-                ><i class="ti ti-message-plus" aria-hidden="true"></i></button>
-                {#if proposePrompts.length > 0}
+                {#if defaultPrompt}
+                  <!-- ADR-0091 §4: the primary opens the default straight away —
+                       no popover — matching NodeRow's plain trailing-button
+                       idiom for a direct action. -->
+                  <button
+                    type="button"
+                    title={`Propose with ${defaultPrompt.title}`}
+                    aria-label={`Propose a follow-up for ${item.text}`}
+                    onmousedown={(event) => event.stopPropagation()}
+                    onclick={(event) => {
+                      event.stopPropagation();
+                      void pickPrompt(item, defaultPrompt);
+                    }}
+                  ><i class="ti ti-message-plus" aria-hidden="true"></i></button>
+                {/if}
+                {#if showMenuButton}
+                  <button
+                    type="button"
+                    bind:this={triggerEls[item.id]}
+                    class={defaultPrompt ? "row-action-add" : undefined}
+                    title={defaultPrompt
+                      ? "Other prompts…"
+                      : proposePrompts.length > 0
+                        ? "Propose…"
+                        : "No prompt is offered on this type"}
+                    aria-label={defaultPrompt
+                      ? `Other prompts for ${item.text}`
+                      : `Propose a follow-up for ${item.text}`}
+                    aria-haspopup="menu"
+                    aria-expanded={openItemId === item.id}
+                    disabled={!defaultPrompt && proposePrompts.length === 0}
+                    onmousedown={(event) => event.stopPropagation()}
+                    onclick={(event) => {
+                      event.stopPropagation();
+                      openItemId = openItemId === item.id ? null : item.id;
+                    }}
+                  ><i class={defaultPrompt ? "ti ti-dots-vertical" : "ti ti-message-plus"} aria-hidden="true"></i></button>
+                {/if}
+                {#if showMenuButton && proposePrompts.length > 0}
                   <Popover
                     open={openItemId === item.id}
                     triggerEl={triggerEls[item.id] ?? null}

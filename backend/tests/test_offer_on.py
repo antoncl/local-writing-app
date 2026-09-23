@@ -45,6 +45,9 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         "Revise character arc": ["plot:character_arc"],
         "Summarize scene": ["manuscript:scene"],
         "Impersonate": ["lore:character"],
+        # ADR-0091 §4: the Propose default, offered on the same lore:base
+        # anchor as Revise entry.
+        "Follow a change": ["lore:base"],
     }
 
     def setUp(self) -> None:

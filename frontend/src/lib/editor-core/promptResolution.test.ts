@@ -3,9 +3,11 @@ import {
   characterIdFromInputValue,
   chatPromptPickList,
   committingPromptsFor,
+  createCapablePromptsFor,
   dependencyAdvisoryText,
   entryIdFromPickValue,
   finalizePromptRoster,
+  FOLLOW_A_CHANGE_TITLE,
   hidePromptEntries,
   inheritedInputsFrom,
   inputValuesFromDrafts,
@@ -14,6 +16,7 @@ import {
   promptEntriesOfferedOn,
   promptOffersOn,
   promptOnAccept,
+  proposeDefaultPrompt,
   isSnippetType,
   promptSurfaceFor,
   resolvePromptPositionalArgs,
@@ -623,6 +626,39 @@ describe("committingPromptsFor / chatPromptPickList (#1700/#1701)", () => {
     });
   });
 
+  // ADR-0091 §4: a create launch has no entry to give, so create resolution
+  // (the Lore pane's "Draft <type>") skips any committing prompt whose
+  // EFFECTIVE `entry` input is required — the principled rule, not a
+  // "Follow a change" name special-case.
+  describe("createCapablePromptsFor (ADR-0091 §4)", () => {
+    it("keeps a committing prompt whose entry input is absent or optional", () => {
+      const c = typeCtx({ promptEntries: [characterRevise] });
+      expect(createCapablePromptsFor(c, "lore:character").map((p) => p.id)).toEqual(["p-char"]);
+    });
+
+    it("a required-entry committing prompt stays in committingPromptsFor but leaves createCapablePromptsFor", () => {
+      const followUp: PromptEntrySummary = {
+        ...committing("p-follow", "Follow a change", ["lore:character"]),
+        inputs: [{ name: "entry", type: "context_pick", required: true } as PromptInputDefinition],
+      };
+      const c = typeCtx({ promptEntries: [followUp, characterRevise] });
+      expect(committingPromptsFor(c, "lore:character").map((p) => p.id).sort()).toEqual([
+        "p-char",
+        "p-follow",
+      ]);
+      expect(createCapablePromptsFor(c, "lore:character").map((p) => p.id)).toEqual(["p-char"]);
+    });
+
+    it("keeps a committing prompt whose entry input is explicitly optional", () => {
+      const optionalEntry: PromptEntrySummary = {
+        ...committing("p-opt", "Optional Entry Revise", ["lore:character"]),
+        inputs: [{ name: "entry", type: "context_pick", required: false } as PromptInputDefinition],
+      };
+      const c = typeCtx({ promptEntries: [optionalEntry] });
+      expect(createCapablePromptsFor(c, "lore:character").map((p) => p.id)).toEqual(["p-opt"]);
+    });
+  });
+
   describe("chatPromptPickList", () => {
     it("empty subject falls back to conversation prompts minus committing ones (pre-#1701 behaviour)", () => {
       const chatPrompt = { ...impersonate, id: "p-chat-only", context_strategy: null } as PromptEntrySummary;
@@ -637,6 +673,43 @@ describe("committingPromptsFor / chatPromptPickList (#1700/#1701)", () => {
       );
       expect(chatPromptPickList(c, "lore:character").map((p) => p.id)).toEqual(["p-char", "p-base"]);
     });
+  });
+});
+
+// ADR-0091 §4: Propose's default — found by title among an ALREADY-OFFERED
+// roster, project-owned shadowing the Library's, same as `committingPromptsFor`
+// resolves the Lore pane's Draft pick.
+describe("proposeDefaultPrompt (ADR-0091 §4)", () => {
+  function followEntry(id: string, isLibrary: boolean): PromptEntrySummary {
+    return { ...prompt(id, "prompt:general"), title: FOLLOW_A_CHANGE_TITLE, is_library: isLibrary };
+  }
+
+  it("finds the built-in by title among an offered roster", () => {
+    const roster = [followEntry("p-follow", true), prompt("p-other", "prompt:general")];
+    expect(proposeDefaultPrompt(roster)?.id).toBe("p-follow");
+  });
+
+  it("an owned prompt of the same title shadows the Library's", () => {
+    const roster = [followEntry("p-lib", true), followEntry("p-mine", false)];
+    expect(proposeDefaultPrompt(roster)?.id).toBe("p-mine");
+  });
+
+  it("is null when no prompt of that title is offered", () => {
+    expect(proposeDefaultPrompt([prompt("p-other", "prompt:general")])).toBeNull();
+  });
+
+  it("is null for an empty roster", () => {
+    expect(proposeDefaultPrompt([])).toBeNull();
+  });
+
+  it("matches the title case-insensitively", () => {
+    const roster = [{ ...followEntry("p-follow", true), title: "follow a change" }];
+    expect(proposeDefaultPrompt(roster)?.id).toBe("p-follow");
+  });
+
+  it("accepts a caller-supplied title, for a caller that wants a different default", () => {
+    const roster = [prompt("p-x", "prompt:general"), { ...prompt("p-y", "prompt:general"), title: "Custom" }];
+    expect(proposeDefaultPrompt(roster, "Custom")?.id).toBe("p-y");
   });
 });
 

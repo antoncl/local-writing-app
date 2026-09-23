@@ -128,6 +128,8 @@ class StampedReadModelTests(unittest.TestCase):
         "Roleplay": ("Continue", ""),
         "Describe": ("Revise prose", ""),
         "Revise entry": ("Revise entities", ""),
+        # ADR-0091 §4: the Propose default, same shelf as Revise entry.
+        "Follow a change": ("Revise entities", ""),
         # offer_on anchors impersonate to lore:character → Chat but not runnable.
         "Impersonate": ("Chat", ""),
         "Finalize roleplay": ("Snippets", ""),

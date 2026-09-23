@@ -12,7 +12,7 @@
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import {
-    committingPromptsFor,
+    createCapablePromptsFor,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
@@ -101,9 +101,12 @@
   // NO entry (create mode), seeding the target entry_type as a hidden input.
   // Resolution is now PER entry type via `offer_on`, nearest-wins (#1700): each
   // "Draft <Type>" row resolves its own committing prompt through
-  // `committingPromptsFor`, rather than one prompt picked for the whole menu
-  // with no type-compatibility check. Hidden when no compatible instance exists
-  // yet (#606). A temporary home until ADR-0047 contextual actions land.
+  // `createCapablePromptsFor`, rather than one prompt picked for the whole menu
+  // with no type-compatibility check. A create launch has no entry to give, so
+  // ADR-0091 §4 excludes any committing prompt whose `entry` input is required
+  // (e.g. "Follow a change") — the principled rule, not a name special-case.
+  // Hidden when no compatible instance exists yet (#606). A temporary home
+  // until ADR-0047 contextual actions land.
   const brainstormCtx = $derived({
     metadataSchema: schema,
     promptEntries: $promptEntriesStore,
@@ -117,7 +120,7 @@
   // of borrowing an unrelated type's prompt.
   const brainstormChoices = $derived(
     entryTypeChoicesByKind($metadataSchemaStore, "lore").flatMap((choice) => {
-      const prompt = committingPromptsFor(brainstormCtx, choice.id)[0];
+      const prompt = createCapablePromptsFor(brainstormCtx, choice.id)[0];
       return prompt ? [{ choice, prompt }] : [];
     }),
   );

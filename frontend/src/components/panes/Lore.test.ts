@@ -6,14 +6,16 @@
 // by entry_type — so a missing root or a mis-stamped entry_type would render the
 // pane empty. Also guards the runes conversion (#49): props via `$props()`, the
 // `view` as `$derived`, and the search/add-menu local state.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import Lore from "./Lore.svelte";
 import { defaultView } from "@/lib/views/evaluateView";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { clearTagNodes, tagNodesStore } from "@/lib/stores/tagNodes";
-import type { LoreEntrySummary, MetadataSchema, TagEntry } from "@/lib/types";
+import { clearPrompts, promptEntriesStore } from "@/lib/stores/prompts";
+import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+import type { LoreEntrySummary, MetadataSchema, PromptEntrySummary, TagEntry } from "@/lib/types";
 
 // The lore default view resolves the roster to `descendants_of lore:base`, so
 // the concrete sub-type must descend from that root or evaluateView yields
@@ -109,5 +111,79 @@ describe("Lore pane — # tag search (#1468)", () => {
     expect(screen.getByText("Faramir")).toBeInTheDocument();
     await typeSearch(container, "#tag_x");
     expect(screen.queryByText("Faramir")).toBeNull();
+  });
+});
+
+// ADR-0091 §4: "Follow a change" ships with a required `entry` input (no
+// create mode) precisely so create resolution — the "Draft <Type>" menu —
+// skips it and still resolves to "Revise entry" when both built-ins are
+// offered on the type.
+describe("Lore pane — Draft resolution skips an entry-required committing prompt (ADR-0091 §4)", () => {
+  const SCHEMA_WITH_CHARACTER = {
+    entry_types: {
+      "lore:base": { name: "Lore", kind: "lore" },
+      "lore:character": { name: "Character", kind: "lore", parent: "lore:base" },
+    },
+    fields: {},
+  } as unknown as MetadataSchema;
+
+  function reviseEntry(): PromptEntrySummary {
+    return {
+      id: "p-revise",
+      title: "Revise entry",
+      body: "",
+      entry_type: "prompt:general",
+      metadata: {},
+      computed_metadata: {},
+      inputs: [{ name: "entry", type: "context_pick", required: false }],
+      offer_on: ["lore:base"],
+      context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } },
+    } as unknown as PromptEntrySummary;
+  }
+
+  function followAChange(): PromptEntrySummary {
+    return {
+      id: "p-follow",
+      title: "Follow a change",
+      body: "",
+      entry_type: "prompt:general",
+      metadata: {},
+      computed_metadata: {},
+      inputs: [{ name: "entry", type: "context_pick", required: true }],
+      offer_on: ["lore:base"],
+      context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } },
+    } as unknown as PromptEntrySummary;
+  }
+
+  beforeEach(() => {
+    metadataSchemaStore.set(SCHEMA_WITH_CHARACTER);
+  });
+  afterEach(() => {
+    clearPrompts();
+  });
+
+  it("Draft Character opens Revise entry, not Follow a change, when both are offered", async () => {
+    // "Follow a change" sorts before "Revise entry" by title — the required
+    // `entry` is what keeps it out of create resolution, not sort order.
+    promptEntriesStore.set([followAChange(), reviseEntry()]);
+    const openSpy = vi
+      .spyOn(chatSessions, "openChatFromPromptEntry")
+      .mockResolvedValue("chat_1");
+
+    const { component } = render(Lore, {
+      props: {
+        entries: [],
+        viewSpec: defaultView("lore", SCHEMA_WITH_CHARACTER),
+        onOpenEntry: noop,
+      },
+    });
+    (component as unknown as { toggleAddMenu: (event?: MouseEvent) => void }).toggleAddMenu();
+    await tick();
+
+    const draftRow = screen.getByText("✨ Draft Character");
+    await fireEvent.click(draftRow);
+
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(openSpy.mock.calls[0][0]).toEqual(expect.objectContaining({ id: "p-revise" }));
   });
 });

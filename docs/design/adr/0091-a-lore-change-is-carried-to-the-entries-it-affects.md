@@ -77,8 +77,8 @@ The tree has, since ADR-0090, most of the machinery and the wrong model of the c
 When the writer has settled a change to an entry, the app finds every entry and scene whose
 prose or fields may need to follow — the entries the source talks about, the entries that talk
 about the source, the entries bound to it by a reference, the scenes holding a marker on a
-changed field — and shows them beside the change, with the ones the change can actually reach
-already kept. Confirming writes one review item per kept candidate. A review item opens the
+changed field — and shows them beside the change, with the declared ones and the ones the
+change reaches already kept. Confirming writes one review item per kept candidate. A review item opens the
 dependent beside what changed. From it the writer edits by hand, opens the mutation dialog, or
 asks the AI, which opens a conversation whose one job is to say what in this entry must follow
 and to draft exactly that; the draft is reviewed and adopted as ADR-0046 reviews and adopts. The
@@ -186,18 +186,21 @@ untouched fields, then by title. The default depends only on the diff:
   start unkept and folded;
 - **the body changed** (with or without fields), **or the whole entry is the change** —
   every group starts kept and unfolded;
-- **nothing changed** (a pane opened straight after a confirm) — nothing starts kept, every
-  group starts folded, Confirm is disabled, and the pane says so (§7).
+- **nothing changed** — no changed field, the body unchanged, not the whole entry, and no
+  lane whole (a delta created since the baseline is a change even with no field named); the
+  ordinary case is a pane opened straight after a confirm — nothing starts kept, every group
+  starts folded, Confirm is disabled, and the pane says so (§7).
 
 Declared and markers start kept whenever there is a change because they are few, specific and
 cheap to untick; mentions follow the body because prose is the only thing a body change can
 reach. The defaults and fold states are re-applied on open and on every "since" change, the
 writer's own folds included — a since change is a new question. The pane states what it did in
 one line, in one grammar, *what changed: what starts kept*: "The body changed: entries it names
-and that name it start kept, with the declared rows and the markers." / "Fields changed (rank,
-aliases): declared rows and markers start kept; mentions are folded." (more than three fields
-reads "rank, aliases and 2 more") / "No baseline: the whole entry counts as the change;
-everything listed starts kept." ADR-0090's "mentions folded and unticked whatever changed" is
+and that name it start kept, with the declared rows and the markers." / "The body and 2 fields
+changed (rank, aliases): everything listed starts kept." / "Fields changed (rank, aliases):
+declared rows and markers start kept; mentions are folded." (more than three fields reads
+"rank, aliases and 2 more") / "No baseline: the whole entry counts as the change; everything
+listed starts kept." ADR-0090's "mentions folded and unticked whatever changed" is
 withdrawn; its declared-and-markers-ticked default stands. The shipped tests that pin the
 withdrawn rule flip rather than get patched.
 

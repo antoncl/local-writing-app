@@ -143,7 +143,7 @@
       "name": "use",
       "kind": "helper",
       "signature": "use(node, \"stable\"|\"volatile\")",
-      "summary": "`\"\"` — adds the node to what the AI sees. It prints nothing where you write it: the app fetches the node and includes it for you, with no duplicates. Hand it a whole picker selection to add every pick at once. The optional `\"stable\"`/`\"volatile\"` hint nudges caching and can usually be left off."
+      "summary": "`\"\"` — adds the node to what the AI sees. It prints nothing where you write it: the app fetches the node and includes it for you, with no duplicates. Hand it a whole picker selection to add every pick at once. The optional `\"stable\"`/`\"volatile\"` hint nudges caching and can usually be left off. It does not turn automatic lore on — pair it with `use_lore()` for that."
     },
     {
       "name": "use_lore",

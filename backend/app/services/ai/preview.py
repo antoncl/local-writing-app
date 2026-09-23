@@ -678,13 +678,14 @@ def _annotate_rendered_from_env(
 ) -> None:
     """Copy the env-side execution state the render's helpers (`use()`,
     `use_lore()`, `field_contract.store()`) recorded during the template render
-    onto `rendered`, and compute the send-path lore tiers when lore was
-    invoked. Split out of `build_preview` (#1544) so that function's own
-    statement count stays under the complexity gate."""
-    # ADR-0057 §2: carry the execution-derived lore gate off the env (set by the
-    # `use_lore()` / `use()` helpers) onto the rendered result, so the preview
-    # route can surface it and the chat can persist `lore_enabled`. The default
-    # `[False]` covers an env that never registered the helpers.
+    onto `rendered`, and compute the send-path lore tiers when automatic lore
+    was invoked or the render carries `use()` picks (ADR-0092 §7.1). Split out
+    of `build_preview` (#1544) so that function's own statement count stays
+    under the complexity gate."""
+    # ADR-0092 §7.1: carry the execution-derived AUTOMATIC-lore gate off the env
+    # (set by the `use_lore()` helper alone) onto the rendered result, so the
+    # preview route can surface it and the chat can persist `lore_enabled`. The
+    # default `[False]` covers an env that never registered the helper.
     rendered.lore_invoked = bool(getattr(env, "lore_invoked", [False])[0])
     # ADR-0060 §2: carry the author-selected node ids off the env (set by `use()`)
     # onto the rendered result, so the chat can persist `used_node_ids` and the
@@ -698,12 +699,18 @@ def _annotate_rendered_from_env(
     # can persist `field_contract_stored` and the commit reads it back instead
     # of re-rendering a separate extractor.
     rendered.field_contract_stored = list(getattr(getattr(env, "field_contract", None), "stored", None) or [])
-    # ADR-0060 §6: compute the send-path lore the model will receive so the
-    # cache-aware preview can surface it (templates no longer emit lore). Only for a
-    # lore-enabled prompt; `scene` is the same as-of anchor the send path resolves.
-    if rendered.lore_invoked:
+    # ADR-0060 §6, narrowed by ADR-0092 §7.1: compute the send-path lore the
+    # model will receive so the cache-aware preview can surface it (templates
+    # no longer emit lore). For a lore-enabled prompt OR one that merely
+    # carries `use()` picks — the pick-only mirror runs with `automatic=False`
+    # (no detection, picks alone); `scene` is the same as-of anchor the send
+    # path resolves.
+    if rendered.lore_invoked or rendered.used_node_ids:
         _apply_preview_lore_tiers(
-            rendered, _preview_lore_tiers(project_service, scene, rendered, lore_limits)
+            rendered,
+            _preview_lore_tiers(
+                project_service, scene, rendered, lore_limits, automatic=rendered.lore_invoked
+            ),
         )
 
 
@@ -745,6 +752,8 @@ def _preview_lore_tiers(
     scene: Any,
     rendered: RenderedTemplate,
     lore_limits: LoreLimits,
+    *,
+    automatic: bool = True,
 ) -> _PreviewLoreTiers:
     """The send-path lore the model will receive, split into (stable, volatile) XML
     plus their per-entry pairs, for the cache-aware preview (ADR-0060 §6) and the
@@ -754,6 +763,11 @@ def _preview_lore_tiers(
     (unhinted lore volatile; `use(node, "stable")` stable) — and never commits, so
     it cannot touch a live chat's cache baseline. Both tiers resolve as-of `scene`,
     like the send path.
+
+    `automatic=False` (ADR-0092 §7.1) mirrors a pick-only prompt: no detection
+    runs (`preview_journal` stays empty) and the selection is the `use()` picks
+    alone, so the Context door shows their tier rows before the first send with
+    `lore_enabled` false.
 
     The journal fed to selection is the send path's own turn-1 detection
     (#1477, corrected in S2 review): a real send runs `expand_context` over the
@@ -771,21 +785,25 @@ def _preview_lore_tiers(
     from app.services.ai.lore_selection import _budgeted_lore_tiers
     from app.services.ai.sessions import AISession
 
-    rendered_system_text = "\n\n".join(
-        m.text for m in rendered.messages if m.role == "system" and m.text.strip()
-    )
-    preview_journal = expand_context(
-        project_service,
-        "",  # no composer text exists at preview time
-        existing_journal=[],
-        # Mirror the send path (#1634): picker-resolved lore rides in
-        # used_node_ids, so exclude it from the detected journal here too.
-        picked_ids=list(rendered.used_node_ids or []),
-        source="user_message",
-        turn=0,
-        scene=scene,
-        rendered_text=rendered_system_text,
-    )
+    if automatic:
+        rendered_system_text = "\n\n".join(
+            m.text for m in rendered.messages if m.role == "system" and m.text.strip()
+        )
+        preview_journal = expand_context(
+            project_service,
+            "",  # no composer text exists at preview time
+            existing_journal=[],
+            # Mirror the send path (#1634): picker-resolved lore rides in
+            # used_node_ids, so exclude it from the detected journal here too.
+            picked_ids=list(rendered.used_node_ids or []),
+            source="user_message",
+            turn=0,
+            scene=scene,
+            rendered_text=rendered_system_text,
+        )
+    else:
+        # ADR-0092 §7.1: a pick-only mirror runs no detection at all.
+        preview_journal = []
     # ADR-0086 §4: the same select → render → fit → tier the send runs, against
     # a throwaway session — so the estimate is bounded by the same rule, and an
     # empty selection still reports a (zero) fit, as the send does.
@@ -797,6 +815,7 @@ def _preview_lore_tiers(
         session=AISession(id="preview"),
         hints=dict(rendered.used_node_hints or {}),
         limits=lore_limits,
+        automatic=automatic,
     )
     return _PreviewLoreTiers(
         _wrap_lore_block(tiers.stable_entries),

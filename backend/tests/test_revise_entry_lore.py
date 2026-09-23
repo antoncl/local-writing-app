@@ -161,17 +161,16 @@ class FollowAChangeLoreGateTests(unittest.TestCase):
     the send path to detect and fan out the message's mentions.
 
     Mirrors `ReviseEntryLoreGateTests` above, but empirically-verified rather
-    than a literal "gate is off" assertion: `use(e)` (kept, to deliver the
-    dependent) flips the SAME gate `use_lore()` did — `helpers._use` sets the
-    identical `lore_invoked` slot as `helpers._use_lore` (both are declared
-    per-render, not per-call site) — so `chat.lore_enabled` still ends up
-    True for this built-in, same as before the fix. That is correct: the
-    "Relevant lore" include's explicit picks and `use(e)`'s own dependent both
-    still need the gate on to be placed. What #2143 actually removes is the
-    built-in's OWN request for send-time implicit detection over and above
-    those declared picks — verified here as "no `use_lore()` call survives
-    in the rendered template", the render-time signal `build_preview`/`chat.py`
-    read being unaffected by this particular built-in's template shrinking."""
+    than a literal "gate is off" assertion — and, since ADR-0092 §7.1, the
+    gate really IS off: `use(e)` (kept, to deliver the dependent) places a
+    pick without touching the automatic-lore slot — `helpers._use` no longer
+    sets `lore_invoked`; only `helpers._use_lore` does. So `chat.lore_enabled`
+    ends up False for this built-in, and its `use(e)` dependent plus the
+    "Relevant lore" include's explicit picks (which also stopped setting the
+    slot, §7.1) are placed as declared-only picks, automatic lore off. What
+    #2143 removed was the built-in's OWN request for send-time implicit
+    detection over and above those declared picks — verified here as "no
+    `use_lore()` call survives in the rendered template"."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -194,14 +193,41 @@ class FollowAChangeLoreGateTests(unittest.TestCase):
         rendered, _ = self._render({"entry": subject.id, "entry_type": ""})
         self.assertNotIn("use_lore()", rendered)
 
-    def test_the_dependents_own_use_still_flips_the_gate(self) -> None:
-        # use(e) alone (no use_lore()) still flips the gate — needed so the
-        # dependent itself and any "Relevant lore" explicit picks are placed.
+    def test_the_dependents_own_use_does_not_flip_the_gate(self) -> None:
+        # ADR-0092 §7.1: use(e) alone (no use_lore()) does NOT flip the
+        # automatic-lore gate — it places the dependent as a declared pick,
+        # and the "Relevant lore" include's own picks land the same way.
         subject = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Alderman Vane", entry_type="lore:character")
         )
         _, env = self._render({"entry": subject.id, "entry_type": ""})
-        self.assertTrue(env.lore_invoked[0])
+        self.assertFalse(env.lore_invoked[0])
+
+
+class RelevantLoreSnippetGateTests(unittest.TestCase):
+    """ADR-0092 §7.1: the shipped "Relevant lore" snippet stopped calling
+    `use_lore()` — it is the writer's explicit extra picks and nothing more.
+    Including it with a picked entry places that pick (`use()`) without
+    flipping the automatic-lore slot."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Relevant Lore Snippet Gate Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_snippet_places_the_pick_without_flipping_the_gate(self) -> None:
+        entry = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Mirena", entry_type="lore:character")
+        )
+        env = create_environment_for_project(self.service)
+        env.from_string('{% include "Relevant lore" %}').render(
+            inputs={"lore": entry.id}
+        )
+        self.assertFalse(env.lore_invoked[0])
+        self.assertEqual(env.used_nodes, [entry.id])
 
 
 if __name__ == "__main__":

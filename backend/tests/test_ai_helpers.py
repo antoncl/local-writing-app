@@ -936,9 +936,10 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
 
 
 class UseHelperTests(_HelperFixtureBase):
-    """ADR-0060 §2: `use(node)` records the selection onto the env slot that
-    `build_preview` carries to `RenderedTemplate.used_node_ids`, flips the lore
-    gate, and emits nothing inline."""
+    """ADR-0060 §2, narrowed by ADR-0092 §7.1: `use(node)` records the
+    selection onto the env slot that `build_preview` carries to
+    `RenderedTemplate.used_node_ids`, PLACES ONLY (it never flips the
+    automatic-lore gate — only `use_lore()` does), and emits nothing inline."""
 
     def _render(self, template_source: str):
         from app.services.ai.preview import PreviewRequest, build_preview
@@ -957,13 +958,14 @@ class UseHelperTests(_HelperFixtureBase):
         )
         return rendered
 
-    def test_use_records_id_flips_gate_and_emits_nothing(self) -> None:
+    def test_use_records_id_and_emits_nothing(self) -> None:
         rendered = self._render(
             '{% role "system" %}[{{ use("' + self.nimitz["id"] + '") }}]{% endrole %}'
         )
-        # The id is carried to used_node_ids and the lore gate is flipped.
+        # The id is carried to used_node_ids; the automatic-lore gate stays off
+        # (ADR-0092 §7.1 — only `use_lore()` flips it).
         self.assertEqual(rendered.used_node_ids, [self.nimitz["id"]])
-        self.assertTrue(rendered.lore_invoked)
+        self.assertFalse(rendered.lore_invoked)
         # use() emits nothing — the node is backend-placed, not inline. The
         # brackets render adjacent (empty between them) and no body leaks.
         text = "".join(m.text for m in rendered.messages)

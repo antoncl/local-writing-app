@@ -102,3 +102,74 @@ def test_anthropic_system_blocks_carry_every_block() -> None:
     wire = _wire(anthropic_system_blocks(plan))
     assert LORE in wire, "anthropic system payload dropped the lore block"
     assert BASE in wire
+
+
+# --- ADR-0092 §7.1: a pick-only chat's commit turn reaches the wire too. ---
+
+
+def test_a_pick_only_chats_commit_turn_reaches_the_provider_system_blocks(tmp_path, monkeypatch) -> None:
+    # A chat with the flag off but a `use()` pick still commits that pick on
+    # the `"used"` turn (keyed on the picks, never on the flag) — and the real
+    # system_blocks the send path builds must reach the provider's wire, the
+    # same invariant the synthetic cases above guard.
+    monkeypatch.setattr(
+        "app.services.machine_settings.config_path",
+        lambda: tmp_path / "machine_settings.yaml",
+    )
+    from app.models import (
+        CreateChatSessionRequest,
+        CreateLoreEntryRequest,
+        SaveChatSessionRequest,
+        SaveLoreEntryRequest,
+    )
+    from app.services.ai.chat import expand_and_prepare_chat_blocks
+    from app.services.ai.profiles.openai import OpenAIProfile
+    from app.services.project_service import ProjectService
+
+    service = ProjectService.created_at(tmp_path / "project", "Wire Picks")
+    entry = service.create_lore_entry(
+        CreateLoreEntryRequest(title="Sidebar", entry_type="lore:note")
+    )
+    entry = service.save_lore_entry(
+        entry.id,
+        SaveLoreEntryRequest(
+            title="Sidebar",
+            body="A picked aside.",
+            base_revision=entry.revision,
+            entry_type="lore:note",
+            metadata={},
+        ),
+    )
+    chat = service.create_chat_session(
+        CreateChatSessionRequest(title="Picks only", prompt_entry_id="p")
+    )
+    service.save_chat_session(
+        chat.id,
+        SaveChatSessionRequest(
+            title="Picks only",
+            prompt_entry_id="p",
+            lore_enabled=False,
+            used_node_ids=[entry.id],
+        ),
+    )
+    prepared = expand_and_prepare_chat_blocks(
+        service,
+        chat.id,
+        "SYSTEM PROMPT",
+        [{"role": "user", "content": "commit"}],
+        lore_mode="used",
+    )
+    assert prepared.system_blocks
+    call = ChatCall(
+        model="test-model",
+        system_prompt="SYSTEM PROMPT",
+        messages=[{"role": "user", "content": "commit"}],
+        max_tokens=128,
+        system_blocks=prepared.system_blocks,
+    )
+    profile = object.__new__(OpenAIProfile)
+    wire = _wire(profile._build_messages(call))
+    # The wire is JSON-encoded (quotes escaped), so check the id and body text
+    # rather than the raw XML attribute syntax.
+    assert entry.id in wire
+    assert "A picked aside" in wire

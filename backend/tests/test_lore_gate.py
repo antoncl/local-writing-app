@@ -81,6 +81,19 @@ class BuildPreviewLoreInvokedTests(unittest.TestCase):
         )
         self.assertFalse(rendered.lore_invoked)
 
+    def test_use_alone_does_not_set_the_slot(self) -> None:
+        # ADR-0092 §7.1: `use()` places a pick but never sets the automatic-lore
+        # slot — only `use_lore()` does. A template calling `use()` alone must
+        # come back with the gate off and the pick recorded.
+        from app.models import CreateLoreEntryRequest
+
+        entry = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Solo pick", entry_type="lore:note")
+        )
+        rendered = self._render(f'{_SYS}{{{{ use("{entry.id}") }}}}{_END}')
+        self.assertFalse(rendered.lore_invoked)
+        self.assertEqual(rendered.used_node_ids, [entry.id])
+
 
 class LoreEnabledPersistenceTests(unittest.TestCase):
     """`ChatSession.lore_enabled` round-trips and is preserved across saves."""

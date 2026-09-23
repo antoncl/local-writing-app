@@ -134,14 +134,21 @@ def _select_lore(
     used_ids: list[str] | None = None,
     *,
     expansion: LoreExpansion = "one_hop",
+    automatic: bool = True,
 ) -> LoreSelection:
-    """The implicit selection with provenance (ADR-0086 §1): every id is
-    **declared** — the chat's `use()` picks, the scene's structural refs, every
-    `always`-policy entry — or **inferred** — the journal's detections (or, with
-    no journal, the scene's own prose scan and the textual hop) and the
-    structural one-hop. An id reachable both ways is declared. The inferred
-    candidates come back in fit order, and the one `never` chokepoint is
-    applied here, once, to both sets.
+    """The implicit selection with provenance (ADR-0086 §1, narrowed by
+    ADR-0092 §7.1): every id is **declared** or **inferred**. When `automatic`
+    is True (the default), declared is the chat's `use()` picks, the scene's
+    structural refs, and every `always`-policy entry, and inferred is the
+    journal's detections (or, with no journal, the scene's own prose scan and
+    the textual hop) plus the structural one-hop. An id reachable both ways is
+    declared. The inferred candidates come back in fit order, and the one
+    `never` chokepoint is applied here, once, to both sets.
+
+    When `automatic` is False, declared is the `use()` picks ALONE — not the
+    scene's refs, not the `always` entries — inferred is empty, and no
+    detection or expansion runs; `never` still applies to the picks (ADR-0092
+    §7.1: a pick-only send places its picks, minus `never`, and nothing else).
 
     `expansion` (§2b) is the assistant's reach: `one_hop` takes both hops as
     today; `named` keeps only what was actually named — no `depth1_expansion`
@@ -154,6 +161,10 @@ def _select_lore(
     expand one hop — that stays the implicit `use_lore()` path's job. An author
     who wants a use()'d node's neighbours loops its refs and use()s them.
     """
+    if not automatic:
+        never_ids = _never_lore_ids(project)
+        declared = set(used_ids or [])
+        return LoreSelection(frozenset(declared - never_ids), ())
     scene_refs = _collect_lore_refs_from_metadata(
         _attr_or_item(scene, "metadata"), project.read_metadata_schema()
     )
@@ -186,12 +197,17 @@ def _budgeted_lore_tiers(
     session: AISession,
     hints: dict[str, str],
     limits: LoreLimits,
+    automatic: bool = True,
 ) -> BudgetedLoreTiers:
     """The one composition the send and the preview share (ADR-0086 §4):
     select with provenance → render every candidate once → fit the inferred
     set to the budget → tier the kept ids against `session` → hand back the
     kept `(id, xml)` pairs per tier, the left-out entries' elements, and the
     report. The same rule at two times is one function, not two truths.
+
+    `automatic=False` (ADR-0092 §7.1) selects the `use()` picks alone — no
+    detection, no scene refs, no `always` entries — which fits with nothing
+    left out by construction.
 
     Rendering once is the point: the fit decides on rendered size, the tiers
     reuse the same pairs, and a left-out entry is named from the node the
@@ -201,7 +217,9 @@ def _budgeted_lore_tiers(
     # accessors from `helpers`, so this stays out of the module header.
     from app.services.ai.lore_block import _render_lore_entries
 
-    selection = _select_lore(project, scene, journal, used_ids, expansion=limits.expansion)
+    selection = _select_lore(
+        project, scene, journal, used_ids, expansion=limits.expansion, automatic=automatic
+    )
     index = project.build_mutations_index() if scene is not None else None
     titles: dict[str, str] = {}
     rendered = dict(

@@ -763,6 +763,30 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertTrue(all(b["tier"] == "volatile" for b in lore))  # cold, unhinted
         self.assertIn("Honor Harrington", "".join(b["text"] for b in lore))
 
+    def test_pick_only_preview_carries_the_picks_and_reports_lore_enabled_false(self) -> None:
+        # ADR-0092 §7.1: a prompt that only calls `use()` (no `use_lore()`)
+        # mirrors the send's pick-only placement — the preview's `lore_enabled`
+        # is false, but `cache_blocks` still carries the pick's tier row and
+        # `lore_fit` reports it kept with nothing left out.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": (
+                    '{% role "system" %}Write the scene.{% endrole %}'
+                    f'{{{{ use("{self.honor_id}") }}}}'
+                ),
+                "target_scene_id": "",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body["lore_enabled"])
+        lore = [b for b in body["cache_blocks"] if "lore" in b["label"]]
+        self.assertTrue(lore, body["cache_blocks"])
+        self.assertIn("Honor Harrington", "".join(b["text"] for b in lore))
+        self.assertIsNotNone(body["lore_fit"])
+        self.assertEqual(body["lore_fit"]["left_out"], [])
+
     def test_preview_lore_tier_blocks_carry_entry_ids(self) -> None:
         # ADR-0076 S2: each tier block on `cache_blocks` carries `entry_ids` — the
         # tier's own member ids, threaded from `_preview_lore_tiers` through

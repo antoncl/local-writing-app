@@ -163,7 +163,8 @@ def test_context_pick_input_iterates_as_entry_ref_list(tmp_path, monkeypatch):
     assert "first=Alpha" in text
     # {% for p in inputs.picks %}{{ use(p) }} selected BOTH picks, in order.
     assert rendered.used_node_ids == [alpha.id, beta.id]
-    assert rendered.lore_invoked is True
+    # ADR-0092 §7.1: `use()` places, it never sets the automatic-lore slot.
+    assert rendered.lore_invoked is False
 
 
 def test_use_of_whole_pick_list_selects_every_pick(tmp_path, monkeypatch):
@@ -208,7 +209,8 @@ def test_use_of_whole_pick_list_selects_every_pick(tmp_path, monkeypatch):
     )
     # The whole list — both picks recorded, in order — same as the explicit loop.
     assert rendered.used_node_ids == [alpha.id, beta.id]
-    assert rendered.lore_invoked is True
+    # ADR-0092 §7.1: `use()` places, it never sets the automatic-lore slot.
+    assert rendered.lore_invoked is False
 
 
 def test_json_array_of_scalars_is_not_coerced(tmp_path, monkeypatch):
@@ -463,7 +465,8 @@ def test_tag_selector_pick_materializes_to_tagged_lore_end_to_end(tmp_path, monk
     # roster order — not 0 (the bug), not the wrong-tag/wrong-type entries.
     assert "count=2" in text
     assert rendered.used_node_ids == [hit_note.id, hit_loc.id]
-    assert rendered.lore_invoked is True
+    # ADR-0092 §7.1: `use()` places, it never sets the automatic-lore slot.
+    assert rendered.lore_invoked is False
 
 
 def test_unsupported_saved_view_pick_surfaces_a_preview_warning(tmp_path, monkeypatch):
@@ -558,12 +561,14 @@ def test_unsupported_roster_kind_pick_surfaces_a_preview_warning(tmp_path, monke
 
 
 def test_tag_pick_lore_reaches_the_send_lore_tiers_end_to_end(tmp_path, monkeypatch):
-    # The FAITHFUL reproduction (field report): the real chat renders lore via
-    # `{% do use(inputs.lore) %}{{ use_lore() }}` — use_lore() emits nothing; the
-    # lore the model actually receives is the send-path tier block computed from
-    # `used_node_ids` (_preview_lore_tiers -> _relevant_lore_ids -> _format_lore_block).
-    # A tag pick must land its tagged docs in THAT block, not merely in
-    # used_node_ids. Asserting used_node_ids alone (the earlier tests) missed this.
+    # The FAITHFUL reproduction (field report, updated for ADR-0092 §7.1): the
+    # real chat renders lore via `{% do use(inputs.lore) %}` alone — `use()`
+    # emits nothing and never sets the automatic-lore slot; the lore the model
+    # actually receives is the send-path tier block computed from
+    # `used_node_ids` (_preview_lore_tiers -> _budgeted_lore_tiers, declared-only
+    # since automatic lore is off). A tag pick must land its tagged docs in
+    # THAT block, not merely in used_node_ids. Asserting used_node_ids alone
+    # (the earlier tests) missed this.
     monkeypatch.setattr(
         "app.services.machine_settings.config_path",
         lambda: tmp_path / "machine_settings.yaml",
@@ -622,7 +627,7 @@ def test_tag_pick_lore_reaches_the_send_lore_tiers_end_to_end(tmp_path, monkeypa
     rendered, _ = build_preview(
         service,
         PreviewRequest(
-            template_source='{% role "system" %}{% do use(inputs.lore) %}{{ use_lore() }}{% endrole %}',
+            template_source='{% role "system" %}{% do use(inputs.lore) %}{% endrole %}',
             target_scene_id="",
             session_id=None,
             inputs={"lore": picks},
@@ -631,7 +636,9 @@ def test_tag_pick_lore_reaches_the_send_lore_tiers_end_to_end(tmp_path, monkeypa
             commit=False,
         ),
     )
-    assert rendered.lore_invoked is True
+    # ADR-0092 §7.1: `use()` places, it never sets the automatic-lore slot —
+    # the pick-only preview mirror still carries the tagged doc below.
+    assert rendered.lore_invoked is False
     assert rendered.used_node_ids == [hit.id]
     # The real payload: the lore block the model receives must carry the tagged doc.
     lore_block = (rendered.send_lore_stable or "") + (rendered.send_lore_volatile or "")
@@ -678,7 +685,8 @@ def test_relevant_lore_snippet_places_a_picked_entry(tmp_path, monkeypatch):
             commit=False,
         ),
     )
-    assert rendered.lore_invoked is True
+    # ADR-0092 §7.1: the snippet stopped calling `use_lore()` — it places only.
+    assert rendered.lore_invoked is False
     assert rendered.used_node_ids == [entry.id]
     lore_block = (rendered.send_lore_stable or "") + (rendered.send_lore_volatile or "")
     assert "Mirena" in lore_block

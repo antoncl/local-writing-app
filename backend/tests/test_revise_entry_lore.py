@@ -159,7 +159,7 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
 
 
 class FollowAChangeLoreGateTests(unittest.TestCase):
-    """#2143: "Follow a change" no longer calls `auto_lore()` — the built-in's
+    """#2143: "Follow a change" no longer calls the automatic-lore gate (then `use_lore()`, now `auto_lore()`) — the built-in's
     own inferred-lore declaration is gone, so it no longer independently asks
     the send path to detect and fan out the message's mentions.
 

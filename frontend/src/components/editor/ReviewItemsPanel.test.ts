@@ -148,6 +148,89 @@ describe("ReviewItemsPanel (ADR-0090 Amendment 2 §1 / §4 Propose)", () => {
   });
 });
 
+// ADR-0093 §4: a prompt declaring the two hidden change inputs.
+function promptWithChangeInputs(offerOn: string[]): PromptEntrySummary {
+  return {
+    id: "p-change",
+    title: "Prompt with change inputs",
+    body: "",
+    entry_type: "prompt:general",
+    metadata: {},
+    inputs: [
+      { name: "source", type: "context_pick", required: false, hidden: true },
+      { name: "baseline", type: "text", required: false, hidden: true },
+    ],
+    offer_on: offerOn,
+    context_strategy: null,
+  } as unknown as PromptEntrySummary;
+}
+
+describe("ReviewItemsPanel — ADR-0093 §4: seeding the change inputs", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    loreEntriesStore.set([
+      { id: "lore_marek", title: "Marek Vell", body: "", entry_type: "lore:character", metadata: {} },
+    ]);
+    metadataSchemaStore.set(SCHEMA);
+  });
+
+  it("seeds source and baseline from the item's source block", async () => {
+    const propose = vi.spyOn(todoActions, "proposeFromReviewItem").mockResolvedValue(undefined);
+    const item: TodoItem = {
+      ...reviewItem("t1", "guard", "Follow up on Marek Vell's change"),
+      source: { node_id: "lore_marek", snapshot_id: "snap_1", reason: "references_source", marker_id: "" },
+    };
+    todosStore.set([item]);
+
+    render(ReviewItemsPanel, {
+      props: {
+        nodeId: "guard",
+        nodeTitle: "City Guard",
+        subjectEntryType: "lore:character",
+        promptEntries: [promptWithChangeInputs(["lore:character"])],
+      },
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: /Propose a follow-up/ }));
+    await tick();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Prompt with change inputs" }));
+
+    expect(propose).toHaveBeenCalledTimes(1);
+    const [, , seededInputs] = propose.mock.calls[0];
+    expect(seededInputs).toEqual({
+      entry: "guard",
+      source: [{ id: "lore_marek", kind: "lore", title: "Marek Vell" }],
+      baseline: "snap_1",
+    });
+  });
+
+  it("seeds baseline \"\" when the item's source has no snapshot (the whole entry)", async () => {
+    const propose = vi.spyOn(todoActions, "proposeFromReviewItem").mockResolvedValue(undefined);
+    const item = reviewItem("t1", "guard", "Follow up on Marek Vell's change"); // snapshot_id: ""
+    todosStore.set([item]);
+
+    render(ReviewItemsPanel, {
+      props: {
+        nodeId: "guard",
+        nodeTitle: "City Guard",
+        subjectEntryType: "lore:character",
+        promptEntries: [promptWithChangeInputs(["lore:character"])],
+      },
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: /Propose a follow-up/ }));
+    await tick();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Prompt with change inputs" }));
+
+    const [, , seededInputs] = propose.mock.calls[0];
+    expect(seededInputs).toEqual({
+      entry: "guard",
+      source: [{ id: "lore_marek", kind: "lore", title: "Marek Vell" }],
+      baseline: "",
+    });
+  });
+});
+
 // ADR-0091 §4: the two-button tile — a primary that opens the default
 // straight away, and a second "Other prompts…" button for the rest, once
 // something besides the default is offered.

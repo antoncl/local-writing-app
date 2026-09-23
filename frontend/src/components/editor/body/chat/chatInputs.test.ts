@@ -8,6 +8,7 @@ import {
   encodeChatInputDrafts,
   endsInUserTurn,
   formatCacheTerm,
+  seedChangeInputs,
   seedPickInput,
   seedPickInputDraft,
   seedSubjectEntryInput,
@@ -150,6 +151,51 @@ describe("seedPickInput / seedPickInputDraft — bare-id seeds erased to \"[]\" 
     expect(seedPickInput(inherited, "as_of", SCENE2)).toEqual([
       { id: "scene_9", kind: "manuscript", title: "The Vault", entry_type: "manuscript:scene" },
     ]);
+  });
+});
+
+// A prompt declaring `source`/`baseline` inputs of the given types (or
+// neither), for seedChangeInputs' declaration checks (ADR-0093 §4).
+const promptWithChangeInputs = (fields: {
+  source?: PromptInputDefinition["type"];
+  baseline?: PromptInputDefinition["type"];
+}): PromptEntrySummary => {
+  const inputs: PromptInputDefinition[] = [];
+  if (fields.source) inputs.push({ name: "source", type: fields.source } as PromptInputDefinition);
+  if (fields.baseline) inputs.push({ name: "baseline", type: fields.baseline } as PromptInputDefinition);
+  return { id: "p", title: "P", inputs } as PromptEntrySummary;
+};
+
+const SOURCE = { id: "lore_vane", kind: "lore" as const, title: "Alderman Vane" };
+
+describe("seedChangeInputs (ADR-0093 §4 — Propose seeds the change)", () => {
+  it("seeds both inputs, in their declared shape, when the prompt declares both", () => {
+    const prompt = promptWithChangeInputs({ source: "context_pick", baseline: "text" });
+    expect(seedChangeInputs(prompt, SOURCE, "snap_1")).toEqual({
+      source: [{ id: "lore_vane", kind: "lore", title: "Alderman Vane" }],
+      baseline: "snap_1",
+    });
+  });
+
+  it("keeps baseline as \"\" — the whole-entry value is a real seed, not nothing to seed", () => {
+    const prompt = promptWithChangeInputs({ source: "context_pick", baseline: "text" });
+    expect(seedChangeInputs(prompt, SOURCE, "")).toEqual({
+      source: [{ id: "lore_vane", kind: "lore", title: "Alderman Vane" }],
+      baseline: "",
+    });
+  });
+
+  it("omits an undeclared input", () => {
+    const sourceOnly = promptWithChangeInputs({ source: "context_pick" });
+    expect(seedChangeInputs(sourceOnly, SOURCE, "snap_1")).toEqual({
+      source: [{ id: "lore_vane", kind: "lore", title: "Alderman Vane" }],
+    });
+    const baselineOnly = promptWithChangeInputs({ baseline: "text" });
+    expect(seedChangeInputs(baselineOnly, SOURCE, "snap_1")).toEqual({ baseline: "snap_1" });
+  });
+
+  it("a prompt declaring neither input seeds nothing", () => {
+    expect(seedChangeInputs(promptWithChangeInputs({}), SOURCE, "snap_1")).toEqual({});
   });
 });
 

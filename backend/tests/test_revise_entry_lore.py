@@ -208,6 +208,50 @@ class FollowAChangeLoreGateTests(unittest.TestCase):
         _, env = self._render({"entry": subject.id, "entry_type": ""})
         self.assertFalse(env.lore_invoked[0])
 
+    # ----- ADR-0093 §4: the two hidden placing lines ---------------------------
+
+    def test_seeded_source_and_baseline_place_the_snapshot_pick(self) -> None:
+        dependent = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="The Implant", entry_type="lore:character")
+        )
+        source = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Alderman Vane", entry_type="lore:character")
+        )
+        snapshot = self.service.capture_snapshot(
+            source.id, kind=self.service.node_snapshot_kind(source.id)
+        )
+        _, env = self._render(
+            {
+                "entry": dependent.id,
+                "entry_type": "",
+                "source": source.id,
+                "baseline": snapshot.id,
+            }
+        )
+        self.assertEqual(list(env.used_snapshots), [(source.id, snapshot.id)])
+        self.assertIn(source.id, env.used_nodes)
+
+    def test_seeded_source_with_no_baseline_places_the_source_alone(self) -> None:
+        dependent = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="The Implant", entry_type="lore:character")
+        )
+        source = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Alderman Vane", entry_type="lore:character")
+        )
+        _, env = self._render(
+            {"entry": dependent.id, "entry_type": "", "source": source.id}
+        )
+        self.assertEqual(list(env.used_snapshots), [])
+        self.assertIn(source.id, env.used_nodes)
+
+    def test_neither_input_places_no_pick_beyond_entry(self) -> None:
+        dependent = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="The Implant", entry_type="lore:character")
+        )
+        _, env = self._render({"entry": dependent.id, "entry_type": ""})
+        self.assertEqual(list(env.used_snapshots), [])
+        self.assertEqual(list(env.used_nodes), [dependent.id])
+
 
 class RelevantLoreSnippetGateTests(unittest.TestCase):
     """ADR-0092 §7.1: the shipped "Relevant lore" snippet stopped calling

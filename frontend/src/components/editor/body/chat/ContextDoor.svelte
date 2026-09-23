@@ -16,6 +16,7 @@
 -->
 <script lang="ts">
   import { formatTokens } from "@/lib/utils/money";
+  import { relativeTime } from "@/lib/utils/relativeTime";
   import {
     DECLARED_OVER_HINT,
     LEFT_OUT_HINT,
@@ -99,7 +100,10 @@
     | { kind: "root" }
     | { kind: "section"; key: string } // "system" | "tier:<label>" | "turn:<i>" | "inputs" | "journal" | "leftout"
     | { kind: "entry"; tierLabel: string; entryId: string }
-    | { kind: "leftout-entry"; entryId: string };
+    | { kind: "leftout-entry"; entryId: string }
+    // ADR-0093 §3: a snapshot pick's before element, drilled from its tier
+    // panel's own row — `key` is the block's entry_xml key, never a node id.
+    | { kind: "before"; tierLabel: string; key: string };
   let stack = $state<Panel[]>([{ kind: "root" }]);
   const current = $derived(stack[stack.length - 1]);
   function drill(panel: Panel) {
@@ -141,10 +145,26 @@
     drill({ kind: "leftout-entry", entryId });
   }
 
+  // ADR-0093 §3: find a before element by its entry_xml key across every
+  // tier block — the panel stack only carries the key, never the node id.
+  function beforeItem(key: string): { entry_id: string; title: string; captured_at: string } | undefined {
+    for (const block of tierBlocks) {
+      const found = block.snapshots?.find((s) => s.key === key);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
   function panelTitle(panel: Panel): string {
     if (panel.kind === "root") return "Context";
     if (panel.kind === "entry") return titleFor(panel.entryId) ?? panel.entryId;
     if (panel.kind === "leftout-entry") return leftOutTitle(panel.entryId);
+    if (panel.kind === "before") {
+      const item = beforeItem(panel.key);
+      if (!item) return "";
+      const label = titleFor(item.entry_id) || item.title || item.entry_id;
+      return `${label} · as of ${relativeTime(item.captured_at)}`;
+    }
     if (panel.key === "leftout") return "Left out";
     if (panel.key === "system") return "System";
     if (panel.key.startsWith("tier:")) return panel.key.slice("tier:".length);
@@ -188,6 +208,9 @@
           {block.entry_ids?.length ?? 0}
           {(block.entry_ids?.length ?? 0) === 1 ? "entry" : "entries"} ·
           {formatTokens(block.tokens)} tok
+          {#if block.snapshots?.length}
+            · {block.snapshots.length} earlier {block.snapshots.length === 1 ? "state" : "states"}
+          {/if}
         </span>
         <GroupCaret size="xs" collapsed />
       </button>
@@ -263,8 +286,19 @@
     {@const tierLabel = current.key.slice("tier:".length)}
     {@const block = tierBlocks.find((b) => b.label === tierLabel)}
     {#if block}
-      {#if block.entry_ids && block.entry_ids.length > 0}
-        {#each block.entry_ids as id (id)}
+      {#if (block.entry_ids && block.entry_ids.length > 0) || (block.snapshots && block.snapshots.length > 0)}
+        {#each block.snapshots ?? [] as item (item.key)}
+          <button
+            type="button"
+            class="ctx-row"
+            onclick={() => drill({ kind: "before", tierLabel, key: item.key })}
+          >
+            <span class="ctx-row-label">{titleFor(item.entry_id) || item.title || item.entry_id}</span>
+            <span class="ctx-row-sub">as of {relativeTime(item.captured_at)}</span>
+            <GroupCaret size="xs" collapsed />
+          </button>
+        {/each}
+        {#each block.entry_ids ?? [] as id (id)}
           <button
             type="button"
             class="ctx-row"
@@ -328,6 +362,17 @@
   {:else if current.kind === "entry"}
     {@const block = tierBlocks.find((b) => b.label === current.tierLabel)}
     {@const xml = block?.entry_xml?.[current.entryId]}
+    {#if xml}
+      <pre class="ctx-pre">{xml}</pre>
+    {:else}
+      <p class="cbv-meta">This entry rendered no XML.</p>
+    {/if}
+  {:else if current.kind === "before"}
+    <!-- ADR-0093 §3: the drill reads the block's own entry_xml, never the
+         live per-entry lore-xml route — that would show the after under
+         the before's row. -->
+    {@const block = tierBlocks.find((b) => b.label === current.tierLabel)}
+    {@const xml = block?.entry_xml?.[current.key]}
     {#if xml}
       <pre class="ctx-pre">{xml}</pre>
     {:else}

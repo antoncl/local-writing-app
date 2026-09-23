@@ -35,7 +35,6 @@ from app.models import (
     UpsertMetadataFieldRequest,
 )
 from app.scope import WorkScope
-from app.services.ai.lore_block import _render_lore_entries
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
 
@@ -409,21 +408,16 @@ class ChangePropagationTests(unittest.TestCase):
         )
         self.assertTrue(forced_whole.json()["whole_entry"])
 
-    def test_change_message_after_block_matches_render_lore_entries(self) -> None:
-        """ADR-0090 §4's rendering parity: the message's "After:" block IS the
-        lore block the AI already sees — never a second, drifting formatter.
-        (Lives here, not in test_ai_helpers.py, which sits at the size cap.)"""
-        message = self.service.change_message(self.marek, "")
-        entries = _render_lore_entries(self.service, [self.marek])
-        self.assertIn(entries[0][1], message.text)
-
     def test_http_empty_kept_is_422(self) -> None:
         res = self.client.post(f"/api/lore/{self.marek}/propagate", json={"kept": []})
         self.assertEqual(res.status_code, 422, res.text)
 
     # ----- change message (ADR-0090 §4) -----------------------------------------
 
-    def test_change_message_with_baseline_shows_before_and_after(self) -> None:
+    def test_change_message_with_baseline_is_the_question_alone(self) -> None:
+        """ADR-0093 §4: `change_message` no longer renders anything — the
+        change rides as the prompt's snapshot pick, seeded from the review
+        item. `text` is the question with the title, and no XML."""
         self.service.propagate_change(self.marek, PropagateRequest(kept=[self.city_guard]))
         self.service.save_lore_entry(
             self.marek,
@@ -435,18 +429,26 @@ class ChangePropagationTests(unittest.TestCase):
             ),
         )
         message = self.service.change_message(self.marek)
-        self.assertIn("Captain", message.text)
-        self.assertIn("Sergeant", message.text)
-        self.assertIn("Before:", message.text)
-        self.assertIn("After:", message.text)
+        self.assertNotIn("<", message.text)
+        self.assertEqual(
+            message.text,
+            "Marek Vell changed since the last propagation. What in this entry "
+            "needs to follow from that change? Propose only what the change "
+            "warrants; if nothing follows, say so.",
+        )
         self.assertNotEqual(message.baseline_snapshot_id, "")
 
-    def test_change_message_without_baseline_has_no_before(self) -> None:
+    def test_change_message_without_baseline_is_the_question_alone(self) -> None:
         message = self.service.change_message(self.marek, "")
         self.assertEqual(message.baseline_snapshot_id, "")
-        self.assertNotIn("Before:", message.text)
-        self.assertIn("no earlier baseline", message.text)
-        self.assertIn("Captain", message.text)
+        self.assertNotIn("<", message.text)
+        self.assertEqual(
+            message.text,
+            "Marek Vell is the source of a change; there is no earlier baseline, "
+            "so the entry as it stands is in your context. What in this entry "
+            "needs to follow from it? Propose only what the entry warrants; if "
+            "nothing follows, say so.",
+        )
 
     def test_change_message_unknown_source_is_404(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:
@@ -484,7 +486,11 @@ class ChangePropagationTests(unittest.TestCase):
         self.assertIn(f'snapshot="{response.snapshot.id}"', element.xml)
         self.assertIn(f'captured="{response.snapshot.captured_at}"', element.xml)
 
-    def test_render_baseline_element_matches_change_message_before_block(self) -> None:
+    def test_render_baseline_element_resolves_the_baseline_change_message_reports(self) -> None:
+        """ADR-0093 §4: `change_message` no longer renders the before (its
+        `text` is the question alone) — but the baseline id it reports is the
+        one `Follow a change`'s seeded `baseline` input names, and that id
+        resolves through the shared reader to the entry as it was."""
         self.service.propagate_change(self.marek, PropagateRequest(kept=[self.city_guard]))
         self.service.save_lore_entry(
             self.marek,
@@ -498,7 +504,7 @@ class ChangePropagationTests(unittest.TestCase):
         message = self.service.change_message(self.marek)
         assert message.baseline_snapshot_id
         element = self.service.render_baseline_element(self.marek, message.baseline_snapshot_id)
-        self.assertIn(element.xml, message.text)
+        self.assertIn("<rank>Captain</rank>", element.xml)
 
     def test_render_baseline_element_unknown_snapshot_is_404(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:
@@ -650,7 +656,11 @@ class LayeredPropagationTests(unittest.TestCase):
         for layer_snapshot in response.layer_snapshots:
             self.assertLessEqual(layer_snapshot.captured_at, response.snapshot.captured_at)
 
-    def test_change_message_folds_the_override_into_before_and_after(self) -> None:
+    def test_render_baseline_element_folds_the_override_into_the_before(self) -> None:
+        """ADR-0093 §2/§4: the fold that used to show up in the message's
+        "Before:" block is `render_baseline_element`'s job now —
+        `change_message` only reports the baseline id (the question names no
+        XML at all)."""
         # Confirm once while the source is unoverridden — the owning baseline
         # freezes rank=Captain; the book has no delta yet, so nothing else is
         # captured.
@@ -670,15 +680,15 @@ class LayeredPropagationTests(unittest.TestCase):
         )
 
         message = self.service.change_message(self.marek)
-        self.assertIn("Before:", message.text)
-        before_section, after_section = message.text.split("After:", 1)
-        self.assertIn("<rank>Captain</rank>", before_section)
-        self.assertIn("<rank>Sergeant</rank>", after_section)
+        self.assertNotIn("<", message.text)
+        assert message.baseline_snapshot_id
+        element = self.service.render_baseline_element(self.marek, message.baseline_snapshot_id)
+        self.assertIn("<rank>Captain</rank>", element.xml)
 
-    def test_change_message_before_side_follows_the_since(self) -> None:
-        """The message's *before* side resolves each override lane by the
-        SAME "since" rule the candidate diff uses (ADR-0091 §1): naming an
-        older owning snapshot folds THAT confirm's own delta baseline, not
+    def test_render_baseline_element_before_side_follows_the_since(self) -> None:
+        """The before element resolves each override lane by the SAME
+        "since" rule the candidate diff uses (ADR-0091 §1): naming an older
+        owning snapshot folds THAT confirm's own delta baseline, not
         whichever delta baseline is newest overall."""
         self.service.save_lore_entry(
             self.marek,
@@ -716,12 +726,12 @@ class LayeredPropagationTests(unittest.TestCase):
         )
 
         message = self.service.change_message(self.marek, first.snapshot.id)
-        self.assertIn("Before:", message.text)
-        before_section, _after_section = message.text.split("After:", 1)
+        assert message.baseline_snapshot_id
+        element = self.service.render_baseline_element(self.marek, message.baseline_snapshot_id)
         # `first`'s own book-lane delta baseline captured rank=Sergeant — the
         # state BEFORE the first confirm — never Major, the second confirm's.
-        self.assertIn("<rank>Sergeant</rank>", before_section)
-        self.assertNotIn("<rank>Major</rank>", before_section)
+        self.assertIn("<rank>Sergeant</rank>", element.xml)
+        self.assertNotIn("<rank>Major</rank>", element.xml)
 
 
 if __name__ == "__main__":

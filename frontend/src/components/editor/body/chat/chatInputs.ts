@@ -161,6 +161,30 @@ export function seedConversationInputs(
   return seededInputs;
 }
 
+// ADR-0093 §4: the change Propose seeds — the source entry and the owning-lane
+// baseline snapshot id, into whichever of the two hidden inputs the prompt
+// declares (the `entry_type` pattern, ADR-0067 Amendment 1: a hidden input the
+// launching surface fills, never a widget the writer sees). Called with the
+// review item's `source` block: `source` seeds like any other pick target,
+// `baseline` rides as plain text and `""` (the whole entry, no earlier state)
+// is a real value here, not "nothing to seed" — a prompt that declares the
+// input gets it every time.
+export function seedChangeInputs(
+  prompt: PromptEntrySummary,
+  source: SubjectRef,
+  baselineSnapshotId: string,
+): Record<string, unknown> {
+  const declared = effectivePromptInputs(prompt);
+  const seededInputs: Record<string, unknown> = {};
+  if (declared.some((i) => i.name === "source")) {
+    seededInputs.source = seedPickInput(prompt, "source", source);
+  }
+  if (declared.some((i) => i.name === "baseline")) {
+    seededInputs.baseline = baselineSnapshotId;
+  }
+  return seededInputs;
+}
+
 // One SubjectRef from an entry's identity: the FQN prefix of an entry_type IS
 // its node kind (kind:key, #77) — the heuristic both launch sites share.
 // (ViewBodyView prefers the schema's `entry_types[fqn].kind` with this as

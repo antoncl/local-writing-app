@@ -117,11 +117,13 @@ def list_change_candidates(
 def get_change_message(
     project: CurrentProject, entity_id: str, baseline: str | None = None
 ) -> ChangeMessage:
-    """ADR-0090 §4: the pre-filled first message for a review item's Propose
-    conversation — read only, writes nothing. `baseline`: same tri-state as
-    `change-candidates` (absent → the newest propagation baseline or the
-    whole entry; `?baseline=` → the whole entry explicitly; any other value
-    names that snapshot)."""
+    """ADR-0090 §4 / ADR-0093 §4: the pre-filled first message for a review
+    item's Propose conversation — the question alone; read only, writes and
+    renders nothing (the change rides as the prompt's snapshot pick, seeded
+    from the review item, not from this response). `baseline`: same
+    tri-state as `change-candidates` (absent → the newest propagation
+    baseline or the whole entry; `?baseline=` → the whole entry explicitly;
+    any other value names that snapshot)."""
     with translate_errors():
         return project.change_message(entity_id, baseline)
 

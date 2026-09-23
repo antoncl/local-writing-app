@@ -127,6 +127,24 @@ export type PreviewMessage = {
   blocks: PreviewContentBlock[];
 };
 
+// ADR-0093 §1: a `use(node, snapshot=id)` pick — an entry as it was at a
+// snapshot, alongside the entry as it is.
+export type SnapshotPick = {
+  entry_id: string;
+  snapshot_id: string;
+};
+
+// ADR-0093 §3: one before element on a tier block — a snapshot pick's
+// rendered element, placed ahead of the block's live entries. `key` —
+// `"<entry_id>@<snapshot_id>"` — is also its key in `entry_xml`.
+export type PreviewCacheSnapshot = {
+  entry_id: string;
+  snapshot_id: string;
+  captured_at: string;
+  title: string;
+  key: string;
+};
+
 // ADR-0060 §6: one block of the send-path composition the model will receive —
 // the system prefix, the tier-tagged lore the backend places (visible again), then
 // the uncached conversation turns. `tier` is "stable" | "volatile" | null.
@@ -141,7 +159,12 @@ export type PreviewCacheBlock = {
   entry_ids?: string[];
   // ADR-0076 S7: per-entry rendered XML keyed by entry_id, for the Context
   // door's per-entry drill leaf. Additive; empty/absent for non-lore blocks.
+  // ADR-0093 §3: also holds before elements under their own
+  // "<entry_id>@<snapshot_id>" key — entry_ids stays node ids only.
   entry_xml?: Record<string, string>;
+  // ADR-0093 §3: the before elements placed on this block, one per snapshot
+  // pick that landed here, in the same order they appear in entry_xml.
+  snapshots?: PreviewCacheSnapshot[];
   // ADR-0084 §6: the resolved provider's cache-plan projection for this
   // block — whether it's expected to be served from cache, and for how long
   // (null = unknown/uncached).
@@ -207,6 +230,10 @@ export type AIPreviewResponse = {
   used_node_ids?: string[];
   // ADR-0060 §5: per-node volatility priors from use(node, "stable"|"volatile").
   used_node_hints?: Record<string, string>;
+  // ADR-0093 §1: (entry_id, snapshot_id) pairs from use(node, snapshot=id),
+  // captured at the lock render beside used_node_ids/used_node_hints and
+  // persisted as the chat's used_snapshots.
+  used_snapshots?: SnapshotPick[];
   // ADR-0067 S2: the field descriptors this render registered via
   // `{% do field_contract.store(f) %}`, captured at the lock render and
   // persisted as the chat's field_contract_stored — the commit reads it back
@@ -529,6 +556,10 @@ export type ChatSession = {
   used_node_ids?: string[];
   // ADR-0060 §5: per-node volatility priors, captured beside used_node_ids.
   used_node_hints?: Record<string, string>;
+  // ADR-0093 §1: (entry_id, snapshot_id) pairs from use(node, snapshot=id),
+  // captured at the lock render beside used_node_ids/used_node_hints and
+  // stable thereafter. A snapshot pick never joins used_node_ids.
+  used_snapshots?: SnapshotPick[];
   // ADR-0067 S2: the field descriptors this chat's lock render registered via
   // field_contract, captured beside used_node_ids/used_node_hints and stable
   // thereafter. The commit reads this back as the shape to extract.
@@ -599,6 +630,10 @@ export type SaveChatSessionRequest = {
   used_node_ids?: string[];
   // ADR-0060 §5: per-node volatility priors, echoed on save like used_node_ids.
   used_node_hints?: Record<string, string>;
+  // ADR-0093 §1: the snapshot picks, echoed on save like used_node_hints. The
+  // frontend always sends this field on the one payload builder, so a missing
+  // hydrate on load would wipe a persisted chat's snapshot picks with [].
+  used_snapshots?: SnapshotPick[];
   // ADR-0067 S2: the field-contract set the lock render registered, echoed on
   // save like used_node_ids.
   field_contract_stored?: Record<string, unknown>[];

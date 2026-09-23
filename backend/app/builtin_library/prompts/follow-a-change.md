@@ -26,6 +26,26 @@ inputs:
   label: Entry type
   required: true
   hidden: true
+# ADR-0093 §4: the change Propose seeds — the source entry and the owning-lane
+# baseline snapshot id ("" = the whole entry, no earlier state). Hidden and
+# optional like `entry_type`; a ＋New launch leaves both empty and the role
+# asks for the entry instead. A fork keeps, moves or deletes the two placing
+# lines in the body.
+- name: source
+  type: context_pick
+  label: Changed entry
+  required: false
+  hidden: true
+  target:
+    sources:
+    - kind: lore
+    multiple: false
+    presets: []
+- name: baseline
+  type: text
+  label: Baseline snapshot
+  required: false
+  hidden: true
 context_strategy:
   output:
     handler: extract_to_node
@@ -43,7 +63,7 @@ You are helping the author carry a change in one entry to **{{ e.title }}**, whi
 
 Revise only **{{ e.title }}**. Other entries may appear in your context as background; do not revise them, and do not report on them.
 
-Your first message will show a related entry as it changed — before and after, or, when there is no earlier version, as it now stands. If it does not, ask for it before anything else.
+The related entry that changed is in your context. Its state before the change is the element whose opening tag carries a `snapshot` attribute; its current state is the element for the same entry (same `id`) with no `snapshot` attribute. When there is no earlier state, only the current one is there. If neither is in your context, ask for the entry before anything else.
 
 Name the difference, only the difference: say what changed, and nothing more. With no earlier version to compare, name the facts this entry must agree with instead.
 
@@ -58,8 +78,9 @@ These are the fields you can change:
 
 The entry's current content — every field and its body — is provided to you as context.
 {{ use(e) }}
-{# No inferred-lore declaration here (#2143, ADR-0086): the change is already
-   in the message above, and the dependent itself arrives via use(e) — a
+{% if inputs.source is defined and inputs.source %}{% do use(inputs.source) %}{% do use(inputs.source, snapshot=inputs.baseline|default("")) %}{% endif %}
+{# No inferred-lore declaration here (#2143, ADR-0086): the change is
+   placed by the two lines above, and the dependent itself arrives via use(e) — a
    declared pick ADR-0086 never drops. Declaring the inferred corpus as well
    would additionally journal every name the message mentions and pull their
    depth-1 neighbours, turning a one-entry check into a corpus-wide review.

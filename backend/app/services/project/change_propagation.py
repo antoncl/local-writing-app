@@ -27,7 +27,7 @@ from app.models import (
     Snapshot,
     TodoSource,
 )
-from app.services.ai.lore_block import _render_lore_entries, _render_node_xml
+from app.services.ai.lore_block import _render_node_xml
 from app.services.ai.lore_budget import BeforeElement, snapshot_pick_key
 from app.services.project.change_candidates import SCENE_ENTRY_TYPE
 from app.services.project.errors import ProjectServiceError
@@ -165,17 +165,16 @@ class ChangePropagationMixin:
     def change_message(
         self, source_id: str, baseline_snapshot_id: str | None = None
     ) -> ChangeMessage:
-        """ADR-0090 §4: the pre-filled first message for a review item's
-        Propose conversation — resolved through the SAME index/baseline
-        semantics `change_candidates` uses, so Propose measures the identical
-        change the confirm surface showed. Never writes anything; only fills
-        a chat composer the writer still sends.
+        """ADR-0090 §4 / ADR-0093 §4: the pre-filled first message for a
+        review item's Propose conversation — resolved through the SAME
+        index/baseline semantics `change_candidates` uses, so Propose asks
+        about the identical change the confirm surface showed. Never writes
+        anything; only fills a chat composer the writer still sends.
 
-        `now` is the source rendered exactly as the AI already sees a lore
-        entry (`_render_lore_entries` — the folded, live entry); `before`
-        (only when a baseline resolved) is read by the one shared reader,
-        `render_baseline_element` (ADR-0093 §2), so the two sides are entries
-        as the AI sees them, at two times."""
+        The change itself is no longer rendered here: it rides as the
+        prompt's `use(node, snapshot=id)` pick, seeded into the two hidden
+        inputs `Follow a change` declares (`source`/`baseline`) from the
+        review item's own source block. `text` is the question alone."""
         index = self._build_node_index()
         source = index.canonical_id(source_id)
         source_entry = index.by_id.get(source)
@@ -184,25 +183,18 @@ class ChangePropagationMixin:
         resolved_baseline = self._resolve_change_candidate_baseline(source, baseline_snapshot_id)
         title = source_entry.title or source
 
-        now_pairs = _render_lore_entries(self, [source], None, None, index)
-        now_xml = now_pairs[0][1] if now_pairs else ""
-
         if resolved_baseline:
-            element = self.render_baseline_element(source, resolved_baseline)
-            before_xml = element.xml
             text = (
-                f"{title} changed since the last propagation.\n\n"
-                f"Before:\n{before_xml}\n\n"
-                f"After:\n{now_xml}\n\n"
-                "What in this entry needs to follow from that change? Propose only "
-                "what the change warrants; if nothing follows, say so."
+                f"{title} changed since the last propagation. What in this entry "
+                "needs to follow from that change? Propose only what the change "
+                "warrants; if nothing follows, say so."
             )
         else:
             text = (
                 f"{title} is the source of a change; there is no earlier baseline, "
-                f"so here is the entry as it stands.\n\n{now_xml}\n\n"
-                "What in this entry needs to follow from it? Propose only what the "
-                "entry warrants; if nothing follows, say so."
+                "so the entry as it stands is in your context. What in this entry "
+                "needs to follow from it? Propose only what the entry warrants; if "
+                "nothing follows, say so."
             )
         return ChangeMessage(source_id=source, baseline_snapshot_id=resolved_baseline, text=text)
 

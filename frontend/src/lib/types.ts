@@ -92,6 +92,8 @@ export type {
   PreviewContentBlock,
   PreviewMessage,
   PreviewCacheBlock,
+  SnapshotPick,
+  PreviewCacheSnapshot,
   PreviewErrorInfo,
   AIPreviewResponse,
   PromptInputConflict,

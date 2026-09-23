@@ -142,8 +142,10 @@ export const loreApi = {
       body: JSON.stringify(body),
     });
   },
-  // ADR-0090 §4: the pre-filled Propose message — read-only, writes nothing.
-  // Same `baseline` tri-state as `listChangeCandidates`.
+  // ADR-0090 §4: the Propose composer's pre-filled message — read-only,
+  // writes nothing. Renders no XML (ADR-0093 §4): `text` is the question
+  // alone; the change itself rides as the prompt's snapshot pick, seeded
+  // from the review item. Same `baseline` tri-state as `listChangeCandidates`.
   changeMessage(entryId: string, baseline?: string) {
     const path = `/lore/${encodeURIComponent(entryId)}/change-message`;
     if (baseline === undefined) return request<ChangeMessage>(path);

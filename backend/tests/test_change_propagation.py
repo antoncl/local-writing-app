@@ -14,6 +14,7 @@ import hashlib
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from fastapi.testclient import TestClient
 from layer_fixtures import declare_full_chain
@@ -554,6 +555,43 @@ class LayeredPropagationTests(unittest.TestCase):
         book_layer = next(layer for layer in changed.layers if layer.layer_id == self.book_id)
         self.assertFalse(book_layer.whole)
         self.assertEqual(book_layer.changed_fields, [])
+
+    def test_a_failed_delta_capture_leaves_the_owner_untouched(self) -> None:
+        """ADR-0091 §1's reason for the capture order: delta lanes are
+        captured BEFORE the owner, so a failed delta capture raises before
+        the owner is ever touched — no new owning snapshot, the old baseline
+        still pairing with the old delta baselines."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        kind = self.service.node_snapshot_kind(self.marek)
+        owner_before = [
+            snap.id for snap in self.service.list_snapshots(self.marek, kind=kind).snapshots
+        ]
+        real_capture = self.service.capture_snapshot
+
+        def _flaky_capture(*args, **kwargs):
+            if kwargs.get("layer_id") is not None:
+                raise RuntimeError("simulated delta capture failure")
+            return real_capture(*args, **kwargs)
+
+        with (
+            mock.patch.object(self.service, "capture_snapshot", side_effect=_flaky_capture),
+            self.assertRaises(RuntimeError),
+        ):
+            self.service.propagate_change(self.marek, PropagateRequest(kept=[self.ch5]))
+
+        owner_after = [
+            snap.id for snap in self.service.list_snapshots(self.marek, kind=kind).snapshots
+        ]
+        self.assertEqual(owner_before, owner_after)
 
     def test_confirm_captures_override_lanes_before_the_owner(self) -> None:
         """ADR-0091 §1 (#2131): the delta lanes are captured BEFORE the

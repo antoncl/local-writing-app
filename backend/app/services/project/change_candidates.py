@@ -34,8 +34,8 @@ from app.models import (
 )
 from app.services.ai.name_matcher import (
     CompiledNameMatcher,
-    _norm,
     compile_name_matcher,
+    normalise_name,
     scan_name_matcher,
 )
 from app.services.project.errors import ProjectServiceError
@@ -551,12 +551,13 @@ class ChangeCandidatesMixin:
 
         `compile_name_matcher` dedups a shared name to one id, so each
         compiled entity here is a SYNTHETIC entry whose id is the normalised
-        name itself (`_norm`, imported from `name_matcher.py` rather than
-        reimplemented — the two must stay the same key). The returned map
-        expands that synthetic id back to every real lore entry id behind
-        it, so a name two entries share fans out to both."""
-        ids_by_name: dict[str, list[str]] = {}
-        representative: dict[str, str] = {}
+        name itself (`normalise_name`, the public alias for the matcher's
+        own dedup/lookup key — the two must stay the same function, not two
+        that could drift). One dict, `by_name`, holds both the
+        representative spelling compiled into the matcher and the real
+        entry ids behind that key; the returned map is a view of the
+        latter, so a name two entries share fans out to both."""
+        by_name: dict[str, tuple[str, list[str]]] = {}
         for entry in self.list_lore_entries().entries:
             if entry.id == exclude:
                 continue
@@ -568,12 +569,14 @@ class ChangeCandidatesMixin:
                 name = name.strip()
                 if not name:
                     continue
-                key = _norm(name)
-                representative.setdefault(key, name)
-                bucket = ids_by_name.setdefault(key, [])
-                if entry.id not in bucket:
-                    bucket.append(entry.id)
-        matcher = compile_name_matcher([(key, [name]) for key, name in representative.items()])
+                key = normalise_name(name)
+                _representative, ids = by_name.setdefault(key, (name, []))
+                if entry.id not in ids:
+                    ids.append(entry.id)
+        matcher = compile_name_matcher(
+            [(key, [representative]) for key, (representative, _ids) in by_name.items()]
+        )
+        ids_by_name = {key: ids for key, (_representative, ids) in by_name.items()}
         return matcher, ids_by_name
 
     def _add_outbound_mention_reasons(

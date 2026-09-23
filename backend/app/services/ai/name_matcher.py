@@ -61,6 +61,14 @@ def _norm(name: str) -> str:
     return _SEPARATOR_RE.sub(" ", name).strip().lower()
 
 
+# The public name for `_norm` (ADR-0091 §2): the key the outbound Propagate
+# matcher (`_lore_name_matcher`, change_candidates.py) uses to fan a shared
+# name out to every entry behind it, kept as literally the same function as
+# this module's own dedup/lookup key — never a second implementation that
+# could drift from the §5 parity surface.
+normalise_name = _norm
+
+
 def _build_fragment(name: str) -> str:
     """Split on `[\\s-]+`, escape each token, rejoin with `[\\s-]+` so space
     and hyphen are interchangeable in the compiled fragment (§3 rule 4);

@@ -187,6 +187,23 @@ export function committingPromptsFor(
   return ranked.sort((a, b) => a[1] - b[1]).map(([entry]) => entry);
 }
 
+// The committing prompts a CREATE launch (no entry to give) can offer for
+// `entryType` (ADR-0091 §4): `committingPromptsFor` minus any prompt whose
+// EFFECTIVE `entry` input is `required`. A required `entry` is the principled
+// signal that a prompt has no create mode — not a name special-case — so a
+// built-in like "Follow a change" (required `entry`, ADR-0091 §4) drops out of
+// create resolution (the Lore pane's "Draft <type>") while staying in
+// `committingPromptsFor`'s revise-time roster.
+export function createCapablePromptsFor(
+  ctx: PromptResolutionContext,
+  entryType: string,
+): PromptEntrySummary[] {
+  return committingPromptsFor(ctx, entryType).filter((entry) => {
+    const entryInput = effectivePromptInputs(entry).find((input) => input.name === "entry");
+    return !entryInput?.required;
+  });
+}
+
 // The chat composer's "Pick a prompt" roster (#1701). A chat with a seeded
 // subject (`subjectEntryType` non-empty) offers the compatible committing
 // prompts — a draft chat can switch to another revise prompt for the same
@@ -353,6 +370,27 @@ export function findPromptEntry(
 ): PromptEntrySummary | null {
   if (!entryId) return null;
   return ctx.promptEntries.find((entry) => entry.id === entryId) ?? null;
+}
+
+// The title of the built-in Propose opens by default (ADR-0091 §4).
+export const FOLLOW_A_CHANGE_TITLE = "Follow a change";
+
+// Propose's default prompt (ADR-0091 §4): among an ALREADY-OFFERED roster
+// (hidden dropped, `offer_on` applied — e.g. `promptEntriesOfferedOn`'s
+// result), find the one titled `title` with the roster's own case-insensitive
+// compare. Project-owned wins over the Library's (the same shadowing rule
+// includes-by-title already use), so a fork or a writer's own replacement
+// under that title takes over and a renamed fork drops out. Null when no
+// prompt of that title is offered — the caller falls back to the menu alone.
+export function proposeDefaultPrompt(
+  offered: readonly PromptEntrySummary[],
+  title: string = FOLLOW_A_CHANGE_TITLE,
+): PromptEntrySummary | null {
+  const matches = offered.filter(
+    (entry) => entry.title.localeCompare(title, undefined, { sensitivity: "base" }) === 0,
+  );
+  if (matches.length === 0) return null;
+  return matches.find((entry) => !entry.is_library) ?? matches[0];
 }
 
 export function defaultPromptForSurface(

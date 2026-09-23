@@ -502,6 +502,7 @@ class BuiltinLibraryTests(unittest.TestCase):
             "Describe",
             "Expand",
             "Show, don't tell",
+            "Follow a change",
         ):
             pid = builtin_prompt_id(self.service, title)
             body = self.service.read_prompt_entry(pid).body
@@ -511,6 +512,40 @@ class BuiltinLibraryTests(unittest.TestCase):
         for title in ("Rephrase", "Shorten", "Tighten grammar"):
             body = self.service.read_prompt_entry(builtin_prompt_id(self.service, title)).body
             self.assertNotIn("Relevant lore", body, f"{title} stays lore-free")
+
+    def test_follow_a_change_ships_as_the_propose_default(self) -> None:
+        """ADR-0091 §4: the built-in Propose opens on by default — a
+        `prompt:general` Library node offered on `lore:base`, an
+        `extract_to_node` commit reviewed as a visual diff, the same field
+        contract as Revise entry (the body included), and a REQUIRED `entry`
+        input (no create mode) — the word that keeps create resolution from
+        picking it over Revise entry (S3, create resolution skips committing
+        prompts whose `entry` is required)."""
+        follow_id = builtin_prompt_id(self.service, "Follow a change")
+        entries = self._summaries()
+        self.assertIn(follow_id, entries)
+        entry = entries[follow_id]
+        self.assertTrue(entry.is_library)
+        self.assertEqual(entry.entry_type, "prompt:general")
+        self.assertEqual(entry.offer_on, ["lore:base"])
+        full = self.service.read_prompt_entry(follow_id)
+        output = full.context_strategy.output
+        self.assertEqual(output.handler, "extract_to_node")
+        self.assertEqual(output.commit.review, "visual_diff")
+        input_names = {i.name: i for i in full.inputs}
+        self.assertEqual(set(input_names), {"entry", "entry_type"})
+        self.assertTrue(input_names["entry"].required)
+        self.assertTrue(input_names["entry_type"].required)
+        self.assertTrue(input_names["entry_type"].hidden)
+        body = full.body
+        self.assertIn("field_contract.store", body)
+        self.assertIn("use(e)", body)
+        self.assertIn("use_lore()", body)
+        self.assertIn('{% include "Relevant lore" %}', body)
+        self.assertIn('{% include "Project settings" %}', body)
+        self.assertIn("ready to commit", body)
+        self.assertIn("quote the current wording", body)
+        self.assertNotIn("ideation partner", body)
 
     def test_clone_a_library_prompt_into_the_project(self) -> None:
         """Clone (§5): a shipped prompt is lifted into the project under a NEW id

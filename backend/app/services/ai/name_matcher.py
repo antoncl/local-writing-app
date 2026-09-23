@@ -42,6 +42,56 @@ _CLITIC = r"(?:'ll|'re|'ve|'s|'d|')?"
 _BOUNDARY_LEFT = r"(?<![A-Za-z0-9_'])"
 _BOUNDARY_RIGHT = r"(?![A-Za-z0-9_'])"
 
+# #2142 / ADR-0075 §3: an underscore run at a word edge (markdown emphasis,
+# `_The Implant_` / `__strong__`) vs. an intra-word one (`snake_case`,
+# `lore_3071847c0f`) — see `mask_emphasis_underscores` below.
+_UNDERSCORE_RUN_RE = re.compile(r"_+")
+_WORD_EDGE_RE = re.compile(r"[A-Za-z0-9]")
+
+
+def mask_emphasis_underscores(text: str) -> str:
+    """Replace every markdown-emphasis underscore in `text` with a space,
+    same length in, same length out (#2142).
+
+    The boundary class the matcher scans against is the explicit ASCII
+    `[A-Za-z0-9_']` (§3), so `_The Implant_` has no boundary before `T` or
+    after `t` and never matches — this is the SURFACE the backend scans (raw
+    markdown) being brought level with the frontend's (rendered text, where
+    italics are marks, not characters), applied at match time. The boundary
+    class itself stays exactly as ADR-0075 §3 fixed it; only the text handed
+    to `scan_name_matcher` changes, so the ADR-0085 search corpus and its
+    search/replace offsets are untouched.
+
+    A run of one or more underscores is a delimiter — and masked to spaces —
+    when it sits at a word edge: preceded by start-of-text / whitespace /
+    punctuation and followed by a word character (an *opening* delimiter), or
+    preceded by a word character and followed by end-of-text / whitespace /
+    punctuation (a *closing* one); `__strong__`'s two-underscore runs count
+    the same way, by their outer edges. A run with a word character on BOTH
+    sides is intra-word — `snake_case`, `lore_3071847c0f` — and is left
+    alone; a run with neither side touching a word character (an isolated
+    `_` between punctuation/whitespace) is left alone too, since it opens or
+    closes nothing.
+    """
+    if not text:
+        return text
+    chars: list[str] | None = None
+    for m in _UNDERSCORE_RUN_RE.finditer(text):
+        start, end = m.start(), m.end()
+        before = text[start - 1] if start > 0 else ""
+        after = text[end] if end < len(text) else ""
+        before_is_word = bool(before) and _WORD_EDGE_RE.match(before) is not None
+        after_is_word = bool(after) and _WORD_EDGE_RE.match(after) is not None
+        if before_is_word and after_is_word:
+            continue  # intra-word — snake_case, an id — not a delimiter
+        if not (before_is_word or after_is_word):
+            continue  # neither edge touches a word char — opens/closes nothing
+        if chars is None:
+            chars = list(text)
+        for i in range(start, end):
+            chars[i] = " "
+    return text if chars is None else "".join(chars)
+
 
 class NameMatch(NamedTuple):
     start: int
@@ -111,14 +161,27 @@ def scan_name_matcher(matcher: CompiledNameMatcher, text: str) -> list[NameMatch
     casing (the §3 core: longest-match, case-fold, apostrophe-aware boundary,
     possessive-attach). The hit covers the name capture group only — a
     trailing possessive/enclitic is consumed by the match but excluded from
-    the reported span."""
+    the reported span.
+
+    #2142: scans `mask_emphasis_underscores(text)`, not `text` — the ONE place
+    this runs, so every caller (the AI-path scans in `lore_selection.py`, the
+    ADR-0091 corpus scan in `change_candidates.py`) is level without having to
+    remember to mask at each call site, and level with the frontend's
+    `implicitContextMatcher.ts`, which scans rendered text where italics are
+    marks, not characters. Positions and `matched_text` are read back from the
+    ORIGINAL `text`, not the masked one — masking is same-length and never
+    touches a capture group's own span (the underscores it blanks are the
+    boundary characters flanking a name, never inside one), so `start`/`end`
+    address `text` exactly."""
     if not text:
         return []
+    scan_text = mask_emphasis_underscores(text)
     hits: list[NameMatch] = []
-    for m in matcher.regex.finditer(text):
-        matched = m.group(1)
+    for m in matcher.regex.finditer(scan_text):
+        start, end = m.start(1), m.end(1)
+        matched = text[start:end]
         entry_id = matcher.name_to_id.get(_norm(matched))
         if not entry_id:
             continue
-        hits.append(NameMatch(start=m.start(1), end=m.end(1), entry_id=entry_id, matched_text=matched))
+        hits.append(NameMatch(start=start, end=end, entry_id=entry_id, matched_text=matched))
     return hits

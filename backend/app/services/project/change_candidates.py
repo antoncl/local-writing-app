@@ -93,7 +93,11 @@ def _corpus_entry_mention_ids(
     title (Marek's `posting` reading "Watch Barracks") is never a textual
     mention. Each text is scanned on its own, never concatenated. A list
     item's joined member text (`label[n]`) is skipped: its key is a
-    reference already, and that is the declared routes' business."""
+    reference already, and that is the declared routes' business.
+
+    `scan_name_matcher` itself masks emphasis underscores (#2142) before
+    scanning, so `_Marek Vell_` (markdown italics) is found here too, without
+    this function doing anything extra."""
     ids: set[str] = set()
     for hit in scan_name_matcher(matcher, corpus_entry.body):
         ids.add(hit.entry_id)

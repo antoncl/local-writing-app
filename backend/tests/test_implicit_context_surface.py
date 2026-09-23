@@ -130,6 +130,17 @@ class OneShotSurfaceTests(_SurfaceFixtureBase):
         self.assertIn(manticore, ids)  # from the long_text `description` field
         self.assertNotIn(hidden, ids)  # a `text` field is not a detection surface
 
+    def test_name_in_underscore_italics_is_still_detected(self) -> None:
+        """#2142: a name written in markdown italics with underscores
+        (`_Honor Harrington_`) must still be detected in the scene's own
+        prose surface — the raw markdown underscores would otherwise leave
+        the matcher with no boundary on either side of the name."""
+        honor = self._make_lore("Honor Harrington", body="Captain of a ship.")
+        scene_id = self._make_scene(body="_Honor Harrington_ walked onto the bridge.")
+        scene = self.service.read_scene(scene_id)
+        ids = set(_relevant_lore_ids(self.service, scene, "implicit"))
+        self.assertIn(honor, ids)
+
     def test_name_only_in_summary_still_detected_superset_behavior(self) -> None:
         # `summary` (the old sole surface) is itself a long_text field —
         # still covered, now just one of several.

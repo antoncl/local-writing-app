@@ -50,6 +50,56 @@ const CLITIC = "(?:'ll|'re|'ve|'s|'d|')?";
 const BOUNDARY_LEFT = "(?<![A-Za-z0-9_'])";
 const BOUNDARY_RIGHT = "(?![A-Za-z0-9_'])";
 
+// #2142 / ADR-0075 §3: an underscore run at a word edge (markdown emphasis,
+// `_The Implant_` / `__strong__`) vs. an intra-word one (`snake_case`, an id)
+// — see `maskEmphasisUnderscores` below.
+const UNDERSCORE_RUN_RE = /_+/g;
+const WORD_EDGE_RE = /[A-Za-z0-9]/;
+
+/**
+ * Replace every markdown-emphasis underscore in `text` with a space, same
+ * length in, same length out (#2142) — mirrors the backend's
+ * `mask_emphasis_underscores` (`name_matcher.py`) so the two ADR-0075
+ * implementations stay level on every surface; this one scans raw markdown
+ * text too (the editor's chat composer / prose surface), same as the
+ * backend's raw-markdown scans.
+ *
+ * The boundary this matcher scans against is the explicit ASCII
+ * `[A-Za-z0-9_']` (§3, unchanged by this), so `_The Implant_` has no
+ * boundary before `T` or after `t` and never matches without masking first
+ * — only the text handed to `scan` changes, at scan time.
+ *
+ * A run of one or more underscores is a delimiter — and masked to spaces —
+ * when it sits at a word edge: preceded by start-of-text / whitespace /
+ * punctuation and followed by `[A-Za-z0-9]` (an *opening* delimiter), or
+ * preceded by `[A-Za-z0-9]` and followed by end-of-text / whitespace /
+ * punctuation (a *closing* one); `__strong__`'s two-underscore runs count
+ * the same way, by their outer edges. A run with a word character on BOTH
+ * sides is intra-word — `snake_case`, an id — and is left alone; a run with
+ * neither side touching a word character (an isolated `_` between
+ * punctuation/whitespace) is left alone too, since it opens or closes
+ * nothing.
+ */
+export function maskEmphasisUnderscores(text: string): string {
+  if (!text) return text;
+  let chars: string[] | null = null;
+  UNDERSCORE_RUN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = UNDERSCORE_RUN_RE.exec(text)) !== null) {
+    const start = m.index;
+    const end = start + m[0].length;
+    const before = start > 0 ? text[start - 1] : "";
+    const after = end < text.length ? text[end] : "";
+    const beforeIsWord = before !== "" && WORD_EDGE_RE.test(before);
+    const afterIsWord = after !== "" && WORD_EDGE_RE.test(after);
+    if (beforeIsWord && afterIsWord) continue; // intra-word — not a delimiter
+    if (!beforeIsWord && !afterIsWord) continue; // opens/closes nothing
+    if (chars === null) chars = text.split("");
+    for (let i = start; i < end; i++) chars[i] = " ";
+  }
+  return chars === null ? text : chars.join("");
+}
+
 /** Collapse space/hyphen runs to a single ASCII space, trim, lowercase — the
  *  shared dedup/lookup key (§3 rule 4). Matched text can now differ from the
  *  stored name (hyphen vs space), so id resolution can no longer key on raw
@@ -175,19 +225,21 @@ export function compileMatcher(
     lookup,
     scan(text: string): MatchHit[] {
       if (!text) return [];
+      // #2142: scan `maskEmphasisUnderscores(text)`, not `text` — same length,
+      // so positions still address the original; `matchedText` is read back
+      // from `text` too (masking never touches a capture group's own span,
+      // only the underscores flanking it).
+      const scanText = maskEmphasisUnderscores(text);
       const hits: MatchHit[] = [];
       regex.lastIndex = 0;
       let m: RegExpExecArray | null;
-      while ((m = regex.exec(text)) !== null) {
-        const matched = m[1];
+      while ((m = regex.exec(scanText)) !== null) {
+        const start = m.index;
+        const end = start + m[1].length;
+        const matched = text.slice(start, end);
         const id = nameToId.get(norm(matched));
         if (!id) continue;
-        hits.push({
-          start: m.index,
-          end: m.index + matched.length,
-          entryId: id,
-          matchedText: matched,
-        });
+        hits.push({ start, end, entryId: id, matchedText: matched });
       }
       return hits;
     },

@@ -99,6 +99,11 @@
     { "name": "accented name matches case-insensitively (parity-safe non-ASCII)",
       "entities": [ {"id":"e_zoe2","title":"Zoé","aliases":[]} ],
       "text": "ZOÉ waved",
-      "expected": [ {"id":"e_zoe2","start":0,"end":3,"matchedText":"ZOÉ"} ] }
+      "expected": [ {"id":"e_zoe2","start":0,"end":3,"matchedText":"ZOÉ"} ] },
+
+    { "name": "markdown emphasis underscores are masked before scanning (#2142)",
+      "entities": [ {"id":"e_implant","title":"The Implant","aliases":[]} ],
+      "text": "(see _The Implant_)",
+      "expected": [ {"id":"e_implant","start":6,"end":17,"matchedText":"The Implant"} ] }
   ]
 }

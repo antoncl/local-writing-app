@@ -41,6 +41,8 @@ context_strategy:
 {% for f in fields(e) if f.proposable %}{% do field_contract.store(f) %}{% endfor %}
 You are helping the author carry a change in one entry to **{{ e.title }}**, which may need to follow it.
 
+Revise only **{{ e.title }}**. Other entries may appear in your context as background; do not revise them, and do not report on them.
+
 Your first message will show a related entry as it changed — before and after, or, when there is no earlier version, as it now stands. If it does not, ask for it before anything else.
 
 Name the difference, only the difference: say what changed, and nothing more. With no earlier version to compare, name the facts this entry must agree with instead.
@@ -56,7 +58,12 @@ These are the fields you can change:
 
 The entry's current content — every field and its body — is provided to you as context.
 {{ use(e) }}
-{{ use_lore() }}
+{# No inferred-lore declaration here (#2143, ADR-0086): the change is already
+   in the message above, and the dependent itself arrives via use(e) — a
+   declared pick ADR-0086 never drops. Declaring the inferred corpus as well
+   would additionally journal every name the message mentions and pull their
+   depth-1 neighbours, turning a one-entry check into a corpus-wide review.
+   "Relevant lore" below still carries the writer's own explicit picks. #}
 {% include "Relevant lore" %}
 {% include "Project settings" %}
 {% endrole %}

@@ -305,6 +305,17 @@ class ChangeCandidatesTests(unittest.TestCase):
         self.assertEqual([r.route for r in by_id[hollis].reasons], ["mentions_source"])
         self.assertEqual([r.route for r in by_id[self.city_guard].reasons], ["references_source"])
 
+    def test_inbound_mention_in_underscore_italics_is_found(self) -> None:
+        """#2142: a candidate's prose naming the source in markdown italics
+        (`_Marek Vell_`) must still be found — the underscore delimiters
+        would otherwise leave the matcher with no boundary either side of
+        the name. A new lore entry, not the shared `weir_tavern` fixture, so
+        the shared fixture's un-italicised assertions elsewhere stay intact."""
+        tavern = self._make_lore("Quiet Tavern", body="_Marek Vell_ used to drink here.")
+        result = self.service.change_candidates(self.marek)
+        by_id = {item.id: item for item in result.items}
+        self.assertEqual([r.route for r in by_id[tavern].reasons], ["mentions_source"])
+
     # --- outbound mentions (ADR-0091 §2, `mentioned_by_source`) ------------
 
     def test_outbound_mention_from_a_long_text_field_of_the_source(self) -> None:
@@ -324,6 +335,23 @@ class ChangeCandidatesTests(unittest.TestCase):
                     "posting": self.barracks,
                     "backstory": "He trained under Hollis Brand at the academy.",
                 },
+            ),
+        )
+        result = self.service.change_candidates(self.marek)
+        by_id = {item.id: item for item in result.items}
+        self.assertEqual([r.route for r in by_id[hollis].reasons], ["mentioned_by_source"])
+
+    def test_outbound_mention_in_underscore_italics_is_found(self) -> None:
+        """#2142 outbound direction: the source's own prose naming a
+        candidate in markdown italics (`_Hollis Brand_`)."""
+        hollis = self._make_lore("Hollis Brand", body="")
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="He trained under _Hollis Brand_ at the academy.",
+                entry_type="lore:character",
+                metadata={"rank": "Lieutenant", "aliases": ["the Captain"], "posting": self.barracks},
             ),
         )
         result = self.service.change_candidates(self.marek)

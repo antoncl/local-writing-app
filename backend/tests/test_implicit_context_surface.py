@@ -76,6 +76,42 @@ class _SurfaceFixtureBase(unittest.TestCase):
             )
         )
 
+    def _add_lore_field(
+        self, field_id: str, field_type: str, *, entry_type: str = "lore:character"
+    ) -> None:
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layer_id,
+                field_id=field_id,
+                field=MetadataFieldDefinition(name=field_id.title(), type=field_type),
+                entry_type=entry_type,
+            )
+        )
+
+    def _set_lore_field(self, entry_id: str, field_id: str, value: str) -> None:
+        existing = self.service.read_lore_entry(entry_id)
+        self.service.save_lore_entry(
+            entry_id,
+            SaveLoreEntryRequest(
+                title=existing.title,
+                body=existing.body,
+                base_revision=existing.revision,
+                entry_type=existing.entry_type,
+                metadata={**existing.metadata, field_id: value},
+            ),
+        )
+
+    def _make_lore_chat(self, scene_id: str) -> str:
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="RP", prompt_entry_id="p", subject=scene_id)
+        )
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(title="RP", prompt_entry_id="p", lore_enabled=True),
+        )
+        return chat.id
+
     def _make_scene(self, *, body: str = "", metadata: dict | None = None, subject: str | None = None) -> str:
         structure = self.service.create_structure_node(
             CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
@@ -187,16 +223,6 @@ class ChatSendSurfaceTests(_SurfaceFixtureBase):
     scans the resolution scene's prose in addition to the composer message,
     and journals scene-prose hits under `source="scene_prose"`."""
 
-    def _make_lore_chat(self, scene_id: str) -> str:
-        chat = self.service.create_chat_session(
-            CreateChatSessionRequest(title="RP", prompt_entry_id="p", subject=scene_id)
-        )
-        self.service.save_chat_session(
-            chat.id,
-            SaveChatSessionRequest(title="RP", prompt_entry_id="p", lore_enabled=True),
-        )
-        return chat.id
-
     def test_scene_prose_hits_are_journaled_separately_from_composer_hits(self) -> None:
         self._add_scene_field("description", "long_text")
         honor = self._make_lore("Honor Harrington", body="Captain of a ship.")
@@ -251,6 +277,58 @@ class ChatSendSurfaceTests(_SurfaceFixtureBase):
         )
         turn2_ids = {e.entry_id for e in self.service.read_chat_session(chat_id).journal}
         self.assertIn(honor, turn2_ids)
+
+
+class DepthOneHopSurfaceTests(_SurfaceFixtureBase):
+    """#2147: the depth-one textual hop must scan the same prose surface as
+    detection does — a seed's body PLUS every `long_text` field, via the same
+    shared collector (`_prose_texts`) — so a name in a seed's long_text field
+    (a note's `description`, a character's `backstory`) is pulled in exactly
+    as a name in its body already is. Exercised through the chat send path
+    (`expand_and_prepare_chat_blocks`, which drives `_relevant_lore_ids`/
+    `_select_lore` for the turn's lore selection) — the same path
+    `ChatSendSurfaceTests` uses for the scene's own prose surface."""
+
+    def test_seeds_long_text_field_is_offered_as_depth1_expansion(self) -> None:
+        self._add_lore_field("notes", "long_text")
+        honor = self._make_lore("Honor Harrington", body="Captain of a ship.")
+        self._set_lore_field(honor, "notes", "Grew up alongside Nimitz.")
+        nimitz = self._make_lore("Nimitz", body="A treecat.")
+
+        scene_id = self._make_scene(body="Honor Harrington walked onto the bridge.")
+        chat_id = self._make_lore_chat(scene_id)
+
+        expand_and_prepare_chat_blocks(
+            self.service, chat_id, "SYS", [{"role": "user", "content": "begin"}]
+        )
+
+        journal = self.service.read_chat_session(chat_id).journal
+        by_id = {e.entry_id: e for e in journal}
+        self.assertIn(nimitz, by_id)
+        self.assertEqual(by_id[nimitz].source, "depth1_expansion")
+
+    def test_a_hop_founds_long_text_field_is_not_rescanned(self) -> None:
+        # Depth stays strictly one: Nimitz is found via Honor's `notes`
+        # field (above); a name in NIMITZ's own long_text must not be
+        # pulled in through a second hop.
+        self._add_lore_field("notes", "long_text")
+        honor = self._make_lore("Honor Harrington", body="Captain of a ship.")
+        self._set_lore_field(honor, "notes", "Grew up alongside Nimitz.")
+        nimitz = self._make_lore("Nimitz", body="A treecat.")
+        anders = self._make_lore("Anders Pierce", body="A stranger.")
+        self._set_lore_field(nimitz, "notes", "Suspicious of Anders Pierce.")
+
+        scene_id = self._make_scene(body="Honor Harrington walked onto the bridge.")
+        chat_id = self._make_lore_chat(scene_id)
+
+        expand_and_prepare_chat_blocks(
+            self.service, chat_id, "SYS", [{"role": "user", "content": "begin"}]
+        )
+
+        journal = self.service.read_chat_session(chat_id).journal
+        ids = {e.entry_id for e in journal}
+        self.assertIn(nimitz, ids)       # depth 1, via Honor's long_text field
+        self.assertNotIn(anders, ids)    # depth 2 — must stop
 
 
 if __name__ == "__main__":

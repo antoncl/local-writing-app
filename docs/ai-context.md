@@ -87,7 +87,7 @@ what didn't fit, and you can open each one to see what the model would have got.
 
 ## One setting on the entry
 
-Every lore entry has a **Context policy** field with four values:
+Every lore entry has a **Context policy** field with one of four values:
 
 - **Automatic (alias match)** — the default. Noticed when named, followed when
   linked, available to pickers.

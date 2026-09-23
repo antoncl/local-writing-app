@@ -4,7 +4,9 @@
 // per-project round-trip through localStorage, defensive clamping.
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  clampListWidth,
   propagateLayout as layout,
+  PROPAGATE_DIFF_COLUMN_MIN,
   PROPAGATE_LIST_WIDTH_DEFAULT,
   PROPAGATE_LIST_WIDTH_MAX,
   PROPAGATE_LIST_WIDTH_MIN,
@@ -12,6 +14,23 @@ import {
 
 const PATH = "C:/proj/book";
 const KEY = "lwa.propagateSplit:" + PATH;
+
+describe("clampListWidth (the drag's clamp, ADR-0091 §7)", () => {
+  it("holds the fixed bounds in a wide pane", () => {
+    expect(clampListWidth(100, 1200)).toBe(PROPAGATE_LIST_WIDTH_MIN);
+    expect(clampListWidth(900, 1200)).toBe(PROPAGATE_LIST_WIDTH_MAX);
+    expect(clampListWidth(333.4, 1200)).toBe(333);
+  });
+
+  it("caps the list so the diff column keeps its floor in a narrow pane", () => {
+    const pane = 450;
+    expect(clampListWidth(400, pane)).toBe(pane - PROPAGATE_DIFF_COLUMN_MIN);
+  });
+
+  it("never goes below the minimum even in a pane too narrow for the floor", () => {
+    expect(clampListWidth(400, 300)).toBe(PROPAGATE_LIST_WIDTH_MIN);
+  });
+});
 
 describe("propagateLayout", () => {
   beforeEach(() => {

@@ -13,6 +13,20 @@ export const PROPAGATE_LIST_WIDTH_MIN = 220;
 export const PROPAGATE_LIST_WIDTH_MAX = 520;
 export const PROPAGATE_LIST_WIDTH_DEFAULT = 320;
 
+/** The diff column keeps at least this much of the pane whatever the stored
+ *  width says: a 320px list inside a 450px tiled pane otherwise leaves the
+ *  diff unreadable (found in the browser on S2's first pass). */
+export const PROPAGATE_DIFF_COLUMN_MIN = 200;
+
+/** The list width a drag to `px` yields inside a pane `paneWidth` wide: the
+ *  fixed bounds, then the pane-relative cap — never below the minimum even in
+ *  a pane too narrow to honour the diff floor (the grid template applies the
+ *  same floor, so a stored width from a wider pane still renders sanely). */
+export function clampListWidth(px: number, paneWidth: number): number {
+  const paneMax = Math.max(PROPAGATE_LIST_WIDTH_MIN, paneWidth - PROPAGATE_DIFF_COLUMN_MIN);
+  return Math.round(Math.min(PROPAGATE_LIST_WIDTH_MAX, paneMax, Math.max(PROPAGATE_LIST_WIDTH_MIN, px)));
+}
+
 function clamp(value: unknown, min: number, max: number, fallback: number): number {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;

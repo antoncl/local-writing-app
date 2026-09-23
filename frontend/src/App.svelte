@@ -86,7 +86,8 @@
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { workspaceLayout, isEditorPanelId } from "@/lib/stores/workspaceLayout.svelte";
-  import { editorRailLayout } from "@/lib/stores/editorRailLayout.svelte"; import { propagateLayout } from "@/lib/stores/propagateLayout.svelte";
+  import { editorRailLayout } from "@/lib/stores/editorRailLayout.svelte";
+  import { propagateLayout } from "@/lib/stores/propagateLayout.svelte";
   import { type PresetName } from "@/lib/stores/workspaceLayout.serialize";
   import { layoutPresets } from "@/lib/stores/layoutPresets.svelte";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";

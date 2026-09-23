@@ -13,11 +13,11 @@
   import PropagateDiff from "@/components/panes/PropagateDiff.svelte";
   import { propagate } from "@/lib/stores/propagate.svelte";
   import {
+    clampListWidth,
     propagateLayout,
-    PROPAGATE_LIST_WIDTH_MIN,
-    PROPAGATE_LIST_WIDTH_MAX,
+    PROPAGATE_DIFF_COLUMN_MIN,
   } from "@/lib/stores/propagateLayout.svelte";
-  import { notchWhenCaptured, inNotchOrder } from "@/lib/utils/snapshotTime";
+  import { notchWhenCaptured } from "@/lib/utils/snapshotTime";
   import { groupedItems } from "@/lib/utils/candidateGroups";
   import type { CandidateGroup, ChangeCandidate, ChangeCandidateReason } from "@/lib/types";
 
@@ -114,7 +114,11 @@
   // always first. Selected value is the RESOLVED baseline (`candidates`'s
   // own), not the store's explicit request, so the default shows correctly
   // before the writer has touched it.
-  let snapshotsNewestFirst = $derived([...inNotchOrder(propagate.snapshots)].reverse());
+  // Newest CAPTURE first — the API lists snapshots (captured_at, id)-sorted
+  // oldest first, and the labels below read capture time (ADR-0091 §7), so
+  // the order must follow the same clock; `inNotchOrder` (content time) is
+  // the strip's rule, not this selector's.
+  let snapshotsNewestFirst = $derived([...propagate.snapshots].reverse());
   let sinceValue = $derived(propagate.candidates?.baseline_snapshot_id ?? "");
 
   // ADR-0091 §7: the "since" labels read capture time, the same deliberate
@@ -132,19 +136,10 @@
   // shared `SplitHandle`; this pane keeps only the clamp (via
   // `propagateLayout.setListWidth`) and the live width during the drag.
   function onDividerDragStart(): void {}
-  // The diff column keeps at least this much of the pane whatever the stored
-  // width says — a 320px list inside a 450px pane (a narrow tiled region)
-  // otherwise leaves the diff unreadable. The same floor is applied in the
-  // grid template below, so a stored width from a wider pane renders sanely
-  // in a narrower one without being rewritten.
-  const DIFF_COLUMN_MIN = 200;
   function onDividerDrag(event: MouseEvent): void {
     const paneRect = paneEl?.getBoundingClientRect();
     if (!paneRect) return;
-    const paneMax = Math.max(PROPAGATE_LIST_WIDTH_MIN, paneRect.width - DIFF_COLUMN_MIN);
-    propagateLayout.listWidth = Math.round(
-      Math.min(PROPAGATE_LIST_WIDTH_MAX, paneMax, Math.max(PROPAGATE_LIST_WIDTH_MIN, event.clientX - paneRect.left)),
-    );
+    propagateLayout.listWidth = clampListWidth(event.clientX - paneRect.left, paneRect.width);
   }
   function onDividerDragEnd(): void {
     propagateLayout.setListWidth(propagateLayout.listWidth);
@@ -172,7 +167,7 @@
   {:else if propagate.loading && !propagate.candidates}
     <p class="muted">Loading…</p>
   {:else}
-    <div class="propagate-body" style={`grid-template-columns: min(${propagateLayout.listWidth}px, calc(100% - ${DIFF_COLUMN_MIN}px)) auto minmax(0, 1fr)`}>
+    <div class="propagate-body" style={`grid-template-columns: min(${propagateLayout.listWidth}px, calc(100% - ${PROPAGATE_DIFF_COLUMN_MIN}px)) auto minmax(0, 1fr)`}>
       <div class="propagate-list">
         <PickTree {rows} ariaLabel={`Candidates for ${propagate.sourceTitle}`} />
       </div>

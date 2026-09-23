@@ -306,11 +306,27 @@ class LoreEntriesMixin:
         The delta is the diff from the entry's effective value *above* L to the
         metadata the client submitted, validated as of L's schema. Body and title
         overrides are deferred with the rest of ADR-0013's total scope — an
-        override captures metadata field changes only in PR 1.
+        override captures metadata field changes only in PR 1 — so a submitted
+        body or title that differs from the fold above L is REFUSED (#2132), not
+        dropped: an accepted write that changes nothing is the one thing a save
+        must never do. The UI keeps an inherited body read-only in place, so only
+        an API caller or an AI commit path reaches this refusal.
         """
         schema = self._schema_as_authored(authoring_layer=authoring_layer.folder)
         shapes = self._override_shapes(schema)
-        owning_front_matter = self._read_front_matter_only(winner.path, strict=True)
+        owning_front_matter, canon_body = self._read_markdown_with_front_matter(winner.path, strict=True)
+        # No layer overrides body or title, so the fold above L IS the owning
+        # file's. rstrip mirrors the prompt override's tolerance (#1738): the
+        # echo of a read may differ from the file by a trailing newline only.
+        canon_title = str(owning_front_matter.get("title") or "")
+        if request.body.rstrip() != canon_body.rstrip() or request.title != canon_title:
+            label = winner.source_layer_label or "an ancestor"
+            raise ProjectServiceError(
+                f"This entry's body and title are inherited from {label}; a layer below it "
+                "cannot override them. Fork the entry to change them here, or choose the "
+                "owning layer to edit the canon.",
+                422,
+            )
         base_metadata = self._normalise_metadata(owning_front_matter.get("metadata"), winner.path)
         # The base an override at L diffs against is the effective value of every
         # layer *above* L — so the delta captures only what L itself changes, and

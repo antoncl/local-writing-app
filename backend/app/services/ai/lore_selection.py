@@ -37,6 +37,7 @@ from app.services.ai.lore_budget import (
 from app.services.ai.name_matcher import (
     CompiledNameMatcher,
     compile_name_matcher,
+    mask_emphasis_underscores,
     scan_name_matcher,
 )
 from app.services.ai.sessions import AISession
@@ -417,10 +418,12 @@ def _build_scene_matcher(project: ProjectService, scene: Any = None) -> Compiled
 def _scan_matcher_ids(matcher: CompiledNameMatcher, text: str) -> set[str]:
     """Scan `text` against a pre-built `matcher`, returning the matched entry
     ids. The per-text half of the compile-once/scan-many split — pair with
-    `_build_scene_matcher`."""
+    `_build_scene_matcher`. The one choke point every AI-path scan (scene
+    body, every long_text field, one-hop bodies) runs through, so
+    `mask_emphasis_underscores` (#2142) applies to all of them uniformly."""
     if not isinstance(text, str) or not text:
         return set()
-    return {hit.entry_id for hit in scan_name_matcher(matcher, text)}
+    return {hit.entry_id for hit in scan_name_matcher(matcher, mask_emphasis_underscores(text))}
 
 
 def _alias_match(project: ProjectService, text: str, scene: Any = None) -> set[str]:

@@ -155,5 +155,54 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
         self.assertNotIn("First person", rendered)
 
 
+class FollowAChangeLoreGateTests(unittest.TestCase):
+    """#2143: "Follow a change" no longer calls `use_lore()` — the built-in's
+    own inferred-lore declaration is gone, so it no longer independently asks
+    the send path to detect and fan out the message's mentions.
+
+    Mirrors `ReviseEntryLoreGateTests` above, but empirically-verified rather
+    than a literal "gate is off" assertion: `use(e)` (kept, to deliver the
+    dependent) flips the SAME gate `use_lore()` did — `helpers._use` sets the
+    identical `lore_invoked` slot as `helpers._use_lore` (both are declared
+    per-render, not per-call site) — so `chat.lore_enabled` still ends up
+    True for this built-in, same as before the fix. That is correct: the
+    "Relevant lore" include's explicit picks and `use(e)`'s own dependent both
+    still need the gate on to be placed. What #2143 actually removes is the
+    built-in's OWN request for send-time implicit detection over and above
+    those declared picks — verified here as "no `use_lore()` call survives
+    in the rendered template", the render-time signal `build_preview`/`chat.py`
+    read being unaffected by this particular built-in's template shrinking."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Follow A Change Lore Gate Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _render(self, inputs: dict):
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Follow a change"))
+        env = create_environment_for_project(self.service)
+        text = env.from_string(prompt.body).render(inputs=inputs)
+        return text, env
+
+    def test_use_lore_no_longer_appears_in_the_rendered_template(self) -> None:
+        subject = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Alderman Vane", entry_type="lore:character")
+        )
+        rendered, _ = self._render({"entry": subject.id, "entry_type": ""})
+        self.assertNotIn("use_lore()", rendered)
+
+    def test_the_dependents_own_use_still_flips_the_gate(self) -> None:
+        # use(e) alone (no use_lore()) still flips the gate — needed so the
+        # dependent itself and any "Relevant lore" explicit picks are placed.
+        subject = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Alderman Vane", entry_type="lore:character")
+        )
+        _, env = self._render({"entry": subject.id, "entry_type": ""})
+        self.assertTrue(env.lore_invoked[0])
+
+
 if __name__ == "__main__":
     unittest.main()

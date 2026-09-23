@@ -540,12 +540,20 @@ class BuiltinLibraryTests(unittest.TestCase):
         body = full.body
         self.assertIn("field_contract.store", body)
         self.assertIn("use(e)", body)
-        self.assertIn("use_lore()", body)
+        # #2143: use_lore() is gone — the change is in the message and the
+        # dependent arrives via use(e), a declared pick ADR-0086 never drops;
+        # use_lore() additionally pulled the inferred corpus in, turning a
+        # one-entry check into a corpus-wide review.
+        self.assertNotIn("use_lore()", body)
         self.assertIn('{% include "Relevant lore" %}', body)
         self.assertIn('{% include "Project settings" %}', body)
         self.assertIn("ready to commit", body)
         self.assertIn("quote the current wording", body)
         self.assertNotIn("ideation partner", body)
+        # #2143: the scope sentence — read only in your context, revise only
+        # the dependent, never the background entries.
+        self.assertIn("Revise only **", body)
+        self.assertIn("do not report on them", body)
 
     def test_clone_a_library_prompt_into_the_project(self) -> None:
         """Clone (§5): a shipped prompt is lifted into the project under a NEW id

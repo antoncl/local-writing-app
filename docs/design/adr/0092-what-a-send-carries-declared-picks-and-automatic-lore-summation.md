@@ -1,8 +1,8 @@
 # ADR-0092: What a send carries — declared picks, automatic lore, and the three words a prompt has for them (a summation)
 
-- **Status:** Proposed — 2026-09-23; text by Claude from a fact-finding pass with Anton on the
-  first live run of ADR-0091, revised against two cold implementing threads' findings before
-  acceptance (PR #2150). **A summation, qualified by §7.** §§1–6 decide nothing new: they
+- **Status:** Accepted — 2026-09-23, Anton Lauridsen; text by Claude from a fact-finding pass
+  with Anton on the first live run of ADR-0091, revised against two cold implementing
+  threads' findings before acceptance (PR #2150). **A summation, qualified by §7.** §§1–6 decide nothing new: they
   gather, into one document, what the send path does today with the lore a prompt names and
   the lore the app finds on its own — decisions that live across ADR-0057, ADR-0060, ADR-0075,
   ADR-0084 and ADR-0086 and had no single home, so "does `use()` turn on automatic lore?" had

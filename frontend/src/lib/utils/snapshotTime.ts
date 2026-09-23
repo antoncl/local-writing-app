@@ -17,7 +17,7 @@
 // ages: position and list order have to come off the same key, or ← / → walk one
 // sequence while the eye reads another.
 import type { Snapshot } from "@/lib/types";
-import { relativeTime } from "@/lib/utils/relativeTime";
+import { relativeTime, timeOfDay } from "@/lib/utils/relativeTime";
 import { ageMinutes } from "@/lib/utils/snapshotTrack";
 
 /** Milliseconds for an ISO stamp; `0` (the epoch, so: oldest) if unparsable. */
@@ -89,4 +89,22 @@ export function notchTooltip(snapshot: Snapshot, now: Date = new Date()): string
  */
 export function notchWhenCaptured(snapshot: Snapshot | null | undefined, now: Date = new Date()): string {
   return relativeTime(snapshot?.captured_at ?? "", now);
+}
+
+/**
+ * The "since" selector's phrases for a whole list, one per snapshot in the
+ * order given (#2141). The ladder names a day, so two captures on one day read
+ * the same — "yesterday" twice — and the writer can't tell "before Monday's
+ * session" from "after it" without opening both. Where a phrase is shared, each
+ * holder gets its capture time of day appended ("yesterday 08:25"); a phrase
+ * held by one snapshot keeps the short form. A list-level rule, because whether
+ * a label needs the clock depends on its neighbours, not on itself.
+ */
+export function notchWhenCapturedDistinct(snapshots: readonly Snapshot[], now: Date = new Date()): string[] {
+  const phrases = snapshots.map((snapshot) => notchWhenCaptured(snapshot, now));
+  const holders = new Map<string, number>();
+  for (const phrase of phrases) holders.set(phrase, (holders.get(phrase) ?? 0) + 1);
+  return phrases.map((phrase, i) =>
+    (holders.get(phrase) ?? 0) > 1 ? `${phrase} ${timeOfDay(snapshots[i].captured_at)}` : phrase,
+  );
 }

@@ -17,7 +17,7 @@
     propagateLayout,
     PROPAGATE_DIFF_COLUMN_MIN,
   } from "@/lib/stores/propagateLayout.svelte";
-  import { notchWhenCaptured } from "@/lib/utils/snapshotTime";
+  import { notchWhenCapturedDistinct } from "@/lib/utils/snapshotTime";
   import { groupedItems } from "@/lib/utils/candidateGroups";
   import type { CandidateGroup, ChangeCandidate, ChangeCandidateReason } from "@/lib/types";
 
@@ -124,8 +124,11 @@
   // ADR-0091 §7: the "since" labels read capture time, the same deliberate
   // exception `PropagateDiff`'s nothing-changed sentence takes (see
   // `notchWhenCaptured`) — "since" measures from when a baseline was TAKEN.
-  function snapshotLabel(snapshot: (typeof propagate.snapshots)[number]): string {
-    return `${snapshot.origin === "propagation" ? "last propagation" : "snapshot"} · ${notchWhenCaptured(snapshot)}`;
+  // Computed for the list as a whole (#2141): two captures on one day would
+  // both read "yesterday", so a shared phrase carries its clock time too.
+  let sinceWhen = $derived(notchWhenCapturedDistinct(snapshotsNewestFirst));
+  function snapshotLabel(snapshot: (typeof propagate.snapshots)[number], when: string): string {
+    return `${snapshot.origin === "propagation" ? "last propagation" : "snapshot"} · ${when}`;
   }
 
   function onSinceChange(event: Event): void {
@@ -155,8 +158,8 @@
       <label for="propagate-since">since</label>
       <select id="propagate-since" value={sinceValue} onchange={onSinceChange}>
         <option value="">the whole entry</option>
-        {#each snapshotsNewestFirst as snapshot (snapshot.id)}
-          <option value={snapshot.id}>{snapshotLabel(snapshot)}</option>
+        {#each snapshotsNewestFirst as snapshot, i (snapshot.id)}
+          <option value={snapshot.id}>{snapshotLabel(snapshot, sinceWhen[i] ?? "")}</option>
         {/each}
       </select>
     </div>

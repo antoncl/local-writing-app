@@ -122,6 +122,44 @@ describe("PropagatePane — list column (ADR-0091 §2/§7)", () => {
   });
 });
 
+// #2141: two session-boundary snapshots captured on one day read "yesterday"
+// twice; the writer must be able to tell "before Monday's session" from "after".
+describe("PropagatePane — the since selector's same-day labels (#2141)", () => {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const stamp = (hour: number, minute: number): string =>
+    new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), hour, minute).toISOString();
+  const sameDay = (id: string, at: string): SnapshotList["snapshots"][number] => ({
+    id,
+    snapshot_of: "lore_marek",
+    captured_at: at,
+    content_written_at: at,
+    retention: "kept",
+    description: "",
+    origin: "",
+    schema_version: 1,
+  });
+
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    workspaceLayout.reset();
+    propagate.close();
+    vi.spyOn(api, "listChangeCandidates").mockResolvedValue(fixture());
+    vi.spyOn(api, "listNodeSnapshots").mockResolvedValue({
+      snapshots: [sameDay("snap_early", stamp(6, 25)), sameDay("snap_late", stamp(10, 50))],
+    } as SnapshotList);
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue(liveEntry);
+    vi.spyOn(api, "readNodeSnapshot").mockResolvedValue(baselineSnapshot);
+    await propagate.open("lore_marek", "Marek Vell");
+  });
+
+  it("labels two same-day snapshots distinctly, with their capture time of day", () => {
+    render(PropagatePane);
+    const options = screen.getAllByRole("option").map((o) => o.textContent?.trim());
+    expect(options).toEqual(["the whole entry", "snapshot · yesterday 10:50", "snapshot · yesterday 06:25"]);
+  });
+});
+
 describe("PropagatePane — the whole-entry case (ADR-0091 §2)", () => {
   const wholeEntry: ChangeCandidateSet = { ...fixture(), baseline_snapshot_id: "", whole_entry: true, changed_fields: [] };
 

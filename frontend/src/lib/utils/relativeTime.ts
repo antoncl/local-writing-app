@@ -82,3 +82,15 @@ export function relativeTime(at: Date | string | number, now: Date = new Date())
   }
   return when.toLocaleDateString(LOCALE, { day: "numeric", month: "long", year: "numeric" });
 }
+
+/**
+ * The clock time of `at` — "08:25" — for the one case the ladder can't settle
+ * on its own: two instants that land on the same rung (#2141). Same explicit
+ * locale as the ladder, so it reads 24-hour beside "yesterday" rather than
+ * "8:25 AM" out of the OS. Empty for an unparsable stamp, like `relativeTime`.
+ */
+export function timeOfDay(at: Date | string | number): string {
+  const when = at instanceof Date ? at : new Date(at);
+  if (!Number.isFinite(when.getTime())) return "";
+  return when.toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
+}

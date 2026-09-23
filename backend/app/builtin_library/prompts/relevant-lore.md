@@ -25,7 +25,7 @@ inputs:
   author picks here is the writer's explicit extra picks and nothing more —
   placed through the standard lore path by `use()` (the backend renders and
   caches it; nothing is printed inline). It does NOT turn automatic lore on:
-  a prompt that wants that calls `use_lore()` itself (ADR-0092 §7.1). The
+  a prompt that wants that calls `auto_lore()` itself (ADR-0092 §7.1). The
   picker is optional, so the snippet is INERT until something is picked: with
   no selection — or in a context that never even defines `inputs` — it changes
   the prompt not at all (the `is defined` guards hold under StrictUndefined;

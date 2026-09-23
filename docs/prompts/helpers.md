@@ -137,7 +137,7 @@ You are playing {{ char.title }}.
 ## Dynamics
 {{ scene.dynamics }}
 {% endif %}
-{{ use_lore() }}
+{{ auto_lore() }}
 {% if story_so_far(scene) %}
 ## The story so far
 {{ story_so_far(scene) }}
@@ -276,37 +276,39 @@ The story so far:
 - Only scenes with a non-empty `summary` metadata field contribute. Empty-summary scenes are skipped silently.
 - The walk is depth-first through `manuscript.structure.yaml`. Containers (acts, chapters) contribute their own summaries if they have one; otherwise they're invisible structural nodes.
 
-## `use(node, "stable"|"volatile")` and `use_lore()`
+## `use(node, "stable"|"volatile")` and `auto_lore()`
 
-These **select** context; they do not emit it. The template's job is to name what the model should know about — `use(node)` picks one specific node, `use_lore()` enables the scene's implicit lore (the reference-graph retrieval). The backend then does the work: it selects, dedups, places, tiers, and caches the chosen nodes. **Both return an empty string** — nothing lands in the template output where you call them.
+*`auto_lore()` was `use_lore()`* — the old name still works (a deprecated alias removed at 1.0, ADR-0092 §7.2), but rendering it now emits a warning; rename it in your own prompts.
+
+These **select** context; they do not emit it. The template's job is to name what the model should know about — `use(node)` picks one specific node, `auto_lore()` enables the scene's implicit lore (the reference-graph retrieval). The backend then does the work: it selects, dedups, places, tiers, and caches the chosen nodes. **Both return an empty string** — nothing lands in the template output where you call them.
 
 **Signature**
 ```python
 use(node, hint: str | None = None) -> str   # "" — selection side-effect only
-use_lore() -> str                            # "" — enables implicit lore for the scene
+auto_lore() -> str                            # "" — enables implicit lore for the scene
 ```
 
 - `node` accepts an id, an EntryRef, or a picked ref — reach for `use(inputs.character)` to force a specific picked node into context. Handed a **multi-select** `context_pick` (a list), `use()` selects **every** pick, so `use(inputs.places)` pulls them all in one call; this is where it parts ways with `entry()`, which takes only the first of a list. (The explicit `{% for p in inputs.places %}{{ use(p) }}{% endfor %}` loop is equivalent and lets you hint each pick differently.)
 - The optional `hint` is `"stable"` or `"volatile"` — an **advisory** cache-tier prior. It nudges where the backend orders the node in the volatility sequence; correctness (a changed node cannot be served as stable) always wins over the hint.
-- `use_lore()` is the gate for the scene's *implicit* lore: the union of lore the scene references directly, lore whose name appears in the scene summary, and a one-hop expansion. Calling it turns that retrieval on; leaving it out means no implicit lore is pulled.
+- `auto_lore()` is the gate for the scene's *implicit* lore: the union of lore the scene references directly, lore whose name appears in the scene summary, and a one-hop expansion. Calling it turns that retrieval on; leaving it out means no implicit lore is pulled.
 
 **Example**
 ```jinja
 {% role "user" %}
-{{ use_lore() }}
+{{ auto_lore() }}
 {{ use(inputs.pinned_place, "stable") }}
 Scene so far:
 {{ text_before }}
 {% endrole %}
 ```
 
-Nothing above renders lore text into the message — the `use_lore()` / `use(...)` calls emit `""`. The backend places the selected lore into the send-path envelope, tiered by volatility, and the [preview](preview.md) shows exactly where it lands and how it is badged.
+Nothing above renders lore text into the message — the `auto_lore()` / `use(...)` calls emit `""`. The backend places the selected lore into the send-path envelope, tiered by volatility, and the [preview](preview.md) shows exactly where it lands and how it is badged.
 
 **Why selection instead of emission?** The template no longer decides placement or caching. That removes the old cache-coherence footwork — there is no author-managed stable/volatile split, no cache breakpoint to spend, and no double-resolution of a "relevant set." One deterministic ordering, owned by the backend, feeds every provider.
 
 ### Resolving lore as of a different scene
 
-Mid-scene lore mutations (#33) resolve against the prompt's scene by default — `scene.pov.rank`, `entry(x)`, and the lore that `use_lore()` selects all show their effective value at that point. To resolve against a *different* anchor, pass `at=` to `entry`:
+Mid-scene lore mutations (#33) resolve against the prompt's scene by default — `scene.pov.rank`, `entry(x)`, and the lore that `auto_lore()` selects all show their effective value at that point. To resolve against a *different* anchor, pass `at=` to `entry`:
 
 ```jinja
 {# A roleplay prompt with a `scene_ref` input named `as_of`: #}
@@ -317,7 +319,7 @@ A `scene_ref` value injects **no content** — it is only the resolution setting
 
 ## Caching and tiering are not the author's job
 
-There is no author-facing session or stable/volatile split in the template language. A prompt **selects** nodes with `use()` / `use_lore()`; the backend orders the whole envelope by volatility (stable content first), tiers each selected node, and maps that ordering onto each provider's caching primitive. The template author writes meaning, not placement — see [Caching is a backend concern](template-language.md#caching-is-a-backend-concern) and the [preview's cache strip](preview.md#the-cache-strip), which shows the resulting `stable` / `volatile` badging.
+There is no author-facing session or stable/volatile split in the template language. A prompt **selects** nodes with `use()` / `auto_lore()`; the backend orders the whole envelope by volatility (stable content first), tiers each selected node, and maps that ordering onto each provider's caching primitive. The template author writes meaning, not placement — see [Caching is a backend concern](template-language.md#caching-is-a-backend-concern) and the [preview's cache strip](preview.md#the-cache-strip), which shows the resulting `stable` / `volatile` badging.
 
 ## Adding a new helper
 

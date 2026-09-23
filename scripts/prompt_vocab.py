@@ -7,10 +7,10 @@ the two can never disagree about what the reference says. Adding a second
 independent parse of the reference would reintroduce the very duplication this
 cluster (#1270) exists to remove.
 
-The reference is four markdown tables — Variables, Helpers, Filters, Tags. Each
-data row's first column is a code span (the name/signature); the second is a
-one-line summary. ``### `` subsections (the Field-contract subtable) stay inside
-their parent section.
+The reference is five markdown tables — Variables, Helpers, Filters, Tags,
+Deprecated. Each data row's first column is a code span (the name/signature);
+the second is a one-line summary. ``### `` subsections (the Field-contract
+subtable) stay inside their parent section.
 """
 
 from __future__ import annotations
@@ -22,14 +22,14 @@ from typing import NamedTuple
 REPO = Path(__file__).resolve().parents[1]
 REFERENCE = REPO / "docs" / "prompts" / "reference.md"
 
-_KIND_RANK = {"variable": 0, "helper": 1, "filter": 2, "tag": 3}
+_KIND_RANK = {"variable": 0, "helper": 1, "filter": 2, "tag": 3, "deprecated": 4}
 
 
 class Symbol(NamedTuple):
     """One documented vocabulary symbol."""
 
     name: str  # the identifier a template author types
-    kind: str  # "variable" | "helper" | "filter" | "tag"
+    kind: str  # "variable" | "helper" | "filter" | "tag" | "deprecated"
     signature: str  # display / insertion form, e.g. `entry(x, at=scene)`
     summary: str  # the one-line description from reference.md
 
@@ -131,9 +131,28 @@ def _parse_tags(md: str) -> list[Symbol]:
     return out
 
 
+def _parse_deprecated(md: str) -> list[Symbol]:
+    """ADR-0092 §7.2: the Deprecated table — same shape as Helpers (first cell
+    is a code span naming the call), but marked with kind "deprecated" so the
+    generator can flag it and the editor's completion can skip it."""
+    out: list[Symbol] = []
+    for cells in _data_rows(_section(md, "## Deprecated")):
+        sig = _code(cells[0])
+        match = re.match(r"[a-z_][a-z0-9_]*", sig)
+        if match:
+            out.append(Symbol(match.group(), "deprecated", sig, _summary(cells)))
+    return out
+
+
 def parse_reference(md: str) -> list[Symbol]:
     """Every documented symbol, de-duplicated by (kind, name) and stably ordered."""
-    found = _parse_variables(md) + _parse_helpers(md) + _parse_filters(md) + _parse_tags(md)
+    found = (
+        _parse_variables(md)
+        + _parse_helpers(md)
+        + _parse_filters(md)
+        + _parse_tags(md)
+        + _parse_deprecated(md)
+    )
     unique: dict[tuple[str, str], Symbol] = {}
     for symbol in found:
         unique.setdefault((symbol.kind, symbol.name), symbol)

@@ -44,6 +44,12 @@
       "summary": "`str` — body markdown around the cursor; `\"\"` when not dispatched from an editor."
     },
     {
+      "name": "auto_lore",
+      "kind": "helper",
+      "signature": "auto_lore()",
+      "summary": "`\"\"` — automatically includes the lore relevant to this scene: entries it links to, and entries named in its summary. Call it to turn that on; leave it out for no automatic lore."
+    },
+    {
       "name": "character_turns",
       "kind": "helper",
       "signature": "character_turns(scene, character)",
@@ -143,13 +149,7 @@
       "name": "use",
       "kind": "helper",
       "signature": "use(node, \"stable\"|\"volatile\")",
-      "summary": "`\"\"` — adds the node to what the AI sees. It prints nothing where you write it: the app fetches the node and includes it for you, with no duplicates. Hand it a whole picker selection to add every pick at once. The optional `\"stable\"`/`\"volatile\"` hint nudges caching and can usually be left off. It does not turn automatic lore on — pair it with `use_lore()` for that."
-    },
-    {
-      "name": "use_lore",
-      "kind": "helper",
-      "signature": "use_lore()",
-      "summary": "`\"\"` — automatically includes the lore relevant to this scene: entries it links to, and entries named in its summary. Call it to turn that on; leave it out for no automatic lore."
+      "summary": "`\"\"` — adds the node to what the AI sees. It prints nothing where you write it: the app fetches the node and includes it for you, with no duplicates. Hand it a whole picker selection to add every pick at once. The optional `\"stable\"`/`\"volatile\"` hint nudges caching and can usually be left off. It does not turn automatic lore on — pair it with `auto_lore()` for that."
     },
     {
       "name": "json",
@@ -174,6 +174,12 @@
       "kind": "tag",
       "signature": "{% role \"system\"|\"user\"|\"assistant\" %}…{% endrole %}",
       "summary": "Marks the wrapped content's message role. An override: un-roled prose is homed to the base type's default role (usually `system`), so a prose-only prompt just works."
+    },
+    {
+      "name": "use_lore",
+      "kind": "deprecated",
+      "signature": "use_lore()",
+      "summary": "`auto_lore()` — the same call under its real name: it turns automatic lore on and prints nothing."
     }
   ]
 }

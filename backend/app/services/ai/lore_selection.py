@@ -78,7 +78,7 @@ def _relevant_lore_ids(
     `use()` selections (`used_ids`) are EXACT — deduped by id and subject to the
     one `never` chokepoint, but never fan-out seeds (the scene's own refs are the
     only expansion roots) and never a second matcher (ADR-0057 anti-goal). The
-    1-hop graph fan-out stays the implicit `use_lore()` path's job (#1230).
+    1-hop graph fan-out stays the implicit `auto_lore()` path's job (#1230).
     """
     if mode == "pinned_only":
         return []
@@ -158,7 +158,7 @@ def _select_lore(
 
     `use()`'d ids are EXACT: they join the declared set but are NOT fan-out
     seeds. Only the scene's own refs, the `always` entries and the detections
-    expand one hop — that stays the implicit `use_lore()` path's job. An author
+    expand one hop — that stays the implicit `auto_lore()` path's job. An author
     who wants a use()'d node's neighbours loops its refs and use()s them.
     """
     if not automatic:

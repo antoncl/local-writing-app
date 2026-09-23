@@ -2,6 +2,8 @@ import { CompletionContext, type CompletionResult } from "@codemirror/autocomple
 import { EditorState } from "@codemirror/state";
 import { describe, expect, it, vi } from "vitest";
 
+import promptVocabData from "@/lib/generated/promptVocab.json";
+
 import { makePromptCompletionSource } from "./promptCompletion";
 import type { MetadataSchema, PromptInputDefinition } from "./types";
 
@@ -58,6 +60,18 @@ describe("makePromptCompletionSource", () => {
     // filters and tags are not offered as bare identifiers
     expect(result).not.toContain("json");
     expect(result).not.toContain("role");
+  });
+
+  it("ADR-0092 §7.2: manifest carries use_lore as deprecated, never offered", () => {
+    // The generated manifest documents the deprecated alias for completeness,
+    // but no completion list — expression, filter, or tag — should ever offer it.
+    const symbols = (promptVocabData as { symbols: { name: string; kind: string }[] }).symbols;
+    expect(symbols).toContainEqual(expect.objectContaining({ name: "use_lore", kind: "deprecated" }));
+    const expression = labels(run("{{ us"));
+    expect(expression).toContain("auto_lore");
+    expect(expression).not.toContain("use_lore");
+    expect(labels(run("{{ value | us"))).not.toContain("use_lore");
+    expect(labels(run("{% us"))).not.toContain("use_lore");
   });
 
   it("completes declared input names after `inputs.`", () => {

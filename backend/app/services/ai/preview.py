@@ -677,15 +677,16 @@ def _annotate_rendered_from_env(
     rendered: RenderedTemplate, env, project_service, scene, lore_limits: LoreLimits
 ) -> None:
     """Copy the env-side execution state the render's helpers (`use()`,
-    `use_lore()`, `field_contract.store()`) recorded during the template render
+    `auto_lore()`, `field_contract.store()`) recorded during the template render
     onto `rendered`, and compute the send-path lore tiers when automatic lore
     was invoked or the render carries `use()` picks (ADR-0092 §7.1). Split out
     of `build_preview` (#1544) so that function's own statement count stays
     under the complexity gate."""
     # ADR-0092 §7.1: carry the execution-derived AUTOMATIC-lore gate off the env
-    # (set by the `use_lore()` helper alone) onto the rendered result, so the
-    # preview route can surface it and the chat can persist `lore_enabled`. The
-    # default `[False]` covers an env that never registered the helper.
+    # (set by `auto_lore()`, or its deprecated alias `use_lore()`, §7.2) onto the
+    # rendered result, so the preview route can surface it and the chat can
+    # persist `lore_enabled`. The default `[False]` covers an env that never
+    # registered the helper.
     rendered.lore_invoked = bool(getattr(env, "lore_invoked", [False])[0])
     # ADR-0060 §2: carry the author-selected node ids off the env (set by `use()`)
     # onto the rendered result, so the chat can persist `used_node_ids` and the
@@ -699,6 +700,10 @@ def _annotate_rendered_from_env(
     # can persist `field_contract_stored` and the commit reads it back instead
     # of re-rendering a separate extractor.
     rendered.field_contract_stored = list(getattr(getattr(env, "field_contract", None), "stored", None) or [])
+    # ADR-0092 §7.2: carry any deprecation notices (e.g. `use_lore()`'s) off the
+    # env onto the rendered result's warnings, so they ride `warnings` wherever
+    # it already shows — the meta line, the inputs dialog, the editor preview.
+    rendered.warnings.extend(getattr(env, "deprecation_notices", []) or [])
     # ADR-0060 §6, narrowed by ADR-0092 §7.1: compute the send-path lore the
     # model will receive so the cache-aware preview can surface it (templates
     # no longer emit lore). For a lore-enabled prompt OR one that merely

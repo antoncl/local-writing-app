@@ -115,7 +115,7 @@ You are an expert fiction writer.
 {% if 'spelling' in project.metadata %}Use {{ project.spelling }} spelling.{% endif %}
 {% if 'measurement_system' in project.metadata %}Measurements are {{ project.measurement_system }}.{% endif %}
 {% include "House voice" %}
-{{ use_lore() }}
+{{ auto_lore() }}
 {% endrole %}
 
 {% role "user" %}
@@ -136,7 +136,7 @@ Write {{ inputs.words }} words that continue the story:
 {% endrole %}
 ```
 
-`use_lore()` enables the scene's implicit lore — the backend selects, places, tiers, and caches it; the template emits nothing for it. `story_so_far` and `text_before` are documented in [helpers.md](helpers.md); the include (`House voice`) is a snippet node — see [snippets-and-prompts.md](snippets-and-prompts.md).
+`auto_lore()` (was `use_lore()`) enables the scene's implicit lore — the backend selects, places, tiers, and caches it; the template emits nothing for it. `story_so_far` and `text_before` are documented in [helpers.md](helpers.md); the include (`House voice`) is a snippet node — see [snippets-and-prompts.md](snippets-and-prompts.md).
 
 ## Implementation reference
 

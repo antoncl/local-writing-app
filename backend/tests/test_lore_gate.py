@@ -1,8 +1,9 @@
-"""ADR-0057 §2: the execution-derived lore gate.
+"""ADR-0057 §2, renamed by ADR-0092 §7.2: the execution-derived lore gate.
 
-The gate is captured from whether `use_lore()` actually ran during a
-chat's lock render (not a static text-scan, not a user knob) and persisted as
-the chat's `lore_enabled`. These tests cover the two ends of that mechanism:
+The gate is captured from whether `auto_lore()` (or its deprecated alias
+`use_lore()`) actually ran during a chat's lock render (not a static
+text-scan, not a user knob) and persisted as the chat's `lore_enabled`. These
+tests cover the two ends of that mechanism:
 
   - `build_preview` flags `lore_invoked` iff the template executed the helper
     (regardless of whether any lore was returned), which the preview route
@@ -10,6 +11,10 @@ the chat's `lore_enabled`. These tests cover the two ends of that mechanism:
   - `ChatSession.lore_enabled` round-trips through save/read, and a save that
     omits it (a per-turn write) preserves the captured value rather than
     clobbering it to the default.
+
+`use_lore()` is kept until 1.0 as an alias: it sets the same slot as
+`auto_lore()` and additionally emits `USE_LORE_DEPRECATION_NOTICE` into
+`rendered.warnings`, once per render no matter how many times it is called.
 
 The send-path half (gate off → no lore block; Journey C) lives in
 `test_ai_chat.py::ChatEndpointJournalTests`.
@@ -24,6 +29,7 @@ from tempfile import TemporaryDirectory
 from project_fixtures import open_test_project
 
 from app.models import CreateChatSessionRequest, SaveChatSessionRequest
+from app.services.ai.helpers import USE_LORE_DEPRECATION_NOTICE
 from app.services.ai.preview import PreviewRequest, build_preview
 
 _SYS = '{% role "system" %}'
@@ -31,7 +37,7 @@ _END = "{% endrole %}"
 
 
 class BuildPreviewLoreInvokedTests(unittest.TestCase):
-    """`build_preview` records whether `use_lore()` executed."""
+    """`build_preview` records whether `auto_lore()` (or its alias) executed."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -83,8 +89,9 @@ class BuildPreviewLoreInvokedTests(unittest.TestCase):
 
     def test_use_alone_does_not_set_the_slot(self) -> None:
         # ADR-0092 §7.1: `use()` places a pick but never sets the automatic-lore
-        # slot — only `use_lore()` does. A template calling `use()` alone must
-        # come back with the gate off and the pick recorded.
+        # slot — only `auto_lore()` (or its alias `use_lore()`) does. A template
+        # calling `use()` alone must come back with the gate off and the pick
+        # recorded.
         from app.models import CreateLoreEntryRequest
 
         entry = self.service.create_lore_entry(
@@ -93,6 +100,27 @@ class BuildPreviewLoreInvokedTests(unittest.TestCase):
         rendered = self._render(f'{_SYS}{{{{ use("{entry.id}") }}}}{_END}')
         self.assertFalse(rendered.lore_invoked)
         self.assertEqual(rendered.used_node_ids, [entry.id])
+
+    def test_auto_lore_sets_slot_and_emits_no_warning(self) -> None:
+        # ADR-0092 §7.2: the real name is quiet — no deprecation notice.
+        rendered = self._render(f"{_SYS}{{{{ auto_lore() }}}}{_END}")
+        self.assertTrue(rendered.lore_invoked)
+        self.assertEqual(rendered.warnings, [])
+
+    def test_use_lore_alias_sets_slot_and_emits_deprecation_warning(self) -> None:
+        # ADR-0092 §7.2: the deprecated alias sets the same slot as
+        # `auto_lore()` and additionally warns, exactly once.
+        rendered = self._render(f"{_SYS}{{{{ use_lore() }}}}{_END}")
+        self.assertTrue(rendered.lore_invoked)
+        self.assertEqual(rendered.warnings, [USE_LORE_DEPRECATION_NOTICE])
+
+    def test_use_lore_alias_called_thrice_emits_warning_once(self) -> None:
+        # One notice per render, no matter how many times the alias is called.
+        rendered = self._render(
+            f"{_SYS}{{{{ use_lore() }}}}{{{{ use_lore() }}}}{{{{ use_lore() }}}}{_END}"
+        )
+        self.assertTrue(rendered.lore_invoked)
+        self.assertEqual(rendered.warnings, [USE_LORE_DEPRECATION_NOTICE])
 
 
 class LoreEnabledPersistenceTests(unittest.TestCase):

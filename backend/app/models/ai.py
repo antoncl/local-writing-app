@@ -394,7 +394,7 @@ class AIPreviewResponse(BaseModel):
     # Whether the resolved provider caches the prefix at all (the plan's
     # `cached`); null when no assistant is bound.
     cached: bool | None = None
-    # ADR-0057 §2: whether the lore gate (`use_lore()` / `use()`) actually executed
+    # ADR-0057 §2: whether the lore gate (`auto_lore()`) actually executed
     # during this render — the execution-derived lore gate. The frontend captures
     # this at the lock render and persists it as the chat's `lore_enabled`, so the
     # send path knows whether to inject lore at all. Always populated; False when

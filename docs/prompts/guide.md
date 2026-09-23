@@ -100,7 +100,7 @@ what the model should see and let the app place it:
 
 - `{% do use(entry("honor")) %}` — "also include Honor in the context." The app
   adds the node, deduplicates, and orders it; your template emits nothing.
-- `{% do use_lore() %}` — let the app add the scene's relevant lore for you.
+- `{% do auto_lore() %}` (was `use_lore()`) — let the app add the scene's relevant lore for you.
 
 Some ready-made context blocks are emitted directly:
 

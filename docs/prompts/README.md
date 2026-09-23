@@ -34,7 +34,7 @@ This is the user-facing framing — internal docs still use the technical terms 
 
 The AI integration was scoped to fix two specific complaints with Novelcrafter:
 
-1. **Don't bomb the context window.** Lore inclusion is a retrieval problem, not a "dump everything" pass. The reference graph is the retrieval index. A template only *selects* nodes — `use(node)` picks one, `use_lore()` enables the scene's implicit lore — and the backend does the retrieval, dedup, placement, and caching. The template emits nothing for a selection.
+1. **Don't bomb the context window.** Lore inclusion is a retrieval problem, not a "dump everything" pass. The reference graph is the retrieval index. A template only *selects* nodes — `use(node)` picks one, `auto_lore()` (was `use_lore()`) enables the scene's implicit lore — and the backend does the retrieval, dedup, placement, and caching. The template emits nothing for a selection.
 2. **Stable prefix, dynamic suffix.** The backend orders the envelope by volatility — rarely-changing content first, per-call material last — so iterative edits to one lore entry don't invalidate the stable prefix above it. Authors never place cache breakpoints; the ordering is provider-neutral and each adapter maps it to its own caching primitive.
 3. **Local-first.** Every provider runs through the same envelope. Ollama is a first-class provider; Anthropic's prompt caching is exploited where supported and treated as a no-op elsewhere.
 
@@ -63,7 +63,7 @@ A long prompt — persona, world rules, the lore in scope — is mostly the **sa
 To make caching work for you:
 
 - **Put stable content in the `system` role** — persona, world rules, style. It caches for an hour and is reused across turns.
-- **Select lore with `use()` / `use_lore()`; don't paste it.** The backend places it in the right tier and keeps a settled entry as a cheap cache read; a freshly-edited one re-writes just that turn, then re-settles.
+- **Select lore with `use()` / `auto_lore()`; don't paste it.** The backend places it in the right tier and keeps a settled entry as a cheap cache read; a freshly-edited one re-writes just that turn, then re-settles.
 - **The one lever, when you know the churn:** `use(node, "stable")` starts a node in the cached tier from turn one (e.g. a roleplay's POV character, fixed for the whole chat); `use(node, "volatile")` pins one you're actively editing to the cheap-rewrite tier. It is advisory — a `"stable"`-hinted node that actually changes still re-writes, so you never see stale text.
 - **Watch it in the preview.** The [preview](preview.md#the-cache-strip)'s cache strip shows the send-path composition, each block badged `stable` / `volatile` — so you can see what will be reused and what will re-send before you spend a token.
 

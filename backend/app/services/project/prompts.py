@@ -435,12 +435,11 @@ class PromptEntriesMixin:
         as-of-L scoping) — the routing fields are defined once on `prompt:base` at
         the built-in layer and are present at every layer.
 
-        The BODY stays read-only in place: a body change is refused with the same
-        409 the whole-prompt lock raised before this change (#689/#676), so the
-        `editable=False` content-lock invariant is unbroken and only metadata gains
-        the override path. (Prompts diverge here from lore, which silently defers
-        body/title overrides — a prompt's Jinja body is first-class content with a
-        documented in-place lock, so refusing loudly beats dropping the edit.)
+        The BODY and TITLE stay read-only in place: a change to either is refused
+        BEFORE anything is written, with the one refusal the lore override raises
+        for the same condition (`inherited_content_refusal`, #2132/#2159) — the
+        `editable=False` content-lock invariant (#689/#676) is unbroken and only
+        metadata gains the override path. Refusing loudly beats dropping the edit.
         """
         self._check_entry_type_kind(request.entry_type, "prompt")
         schema = self.read_metadata_schema()
@@ -449,12 +448,10 @@ class PromptEntriesMixin:
         owning_front_matter, canon_body = self._read_markdown_with_front_matter(winner.path, strict=True)
         # rstrip matches the trailing-whitespace tolerance the clone path already
         # uses when comparing a copied body (`test_clone_an_ancestor_prompt`).
-        if request.body.rstrip() != canon_body.rstrip():
-            label = winner.source_layer_label or "an ancestor"
-            raise ProjectServiceError(
-                f"This prompt's body is inherited from {label} and is read-only here; "
-                "fork it to change the body.",
-                409,
+        canon_title = str(owning_front_matter.get("title") or "")
+        if request.body.rstrip() != canon_body.rstrip() or request.title != canon_title:
+            raise self.inherited_content_refusal(
+                "prompt", winner.source_layer_label, "Clone the prompt to change them here."
             )
 
         # Resolve the authoring layer L; absent request layer → the open project.

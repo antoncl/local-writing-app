@@ -184,7 +184,7 @@ class PromptOverrideTests(unittest.TestCase):
 
     def test_effective_edges_reflect_a_preferred_assistant_override(self) -> None:
         muse = self._make_assistant("Muse", layer=self.root)
-        self._write_prompt_at(self.series, "describe", "Describe", {})
+        self._write_prompt_at(self.series, "describe", "Revise plotline", {})
 
         # No preferred assistant yet → the assistant has no backlink from the prompt.
         index = self.service._build_node_index()
@@ -288,8 +288,10 @@ class PromptOverrideTests(unittest.TestCase):
 
     def test_a_body_change_to_an_inherited_prompt_is_refused_and_writes_nothing(self) -> None:
         # The body stays read-only in place. A save that changes the body is refused
-        # (409) BEFORE any override is written — even when metadata also changed, so
-        # the refusal is atomic and the effective value is untouched.
+        # BEFORE any override is written — even when metadata also changed, so
+        # the refusal is atomic and the effective value is untouched. The refusal
+        # is the one the lore override raises for the same condition (#2159):
+        # same 422, same sentence.
         self._write_prompt_at(self.series, "revise", "Revise plotline", {"color": "slate"})
         with self.assertRaises(ProjectServiceError) as caught:
             self.service.save_prompt_entry(
@@ -302,9 +304,30 @@ class PromptOverrideTests(unittest.TestCase):
                     authoring_layer_id=self._layer_id(self.root),
                 ),
             )
-        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("cannot be overridden from a layer below it", str(caught.exception))
+        self.assertIn("Clone the prompt", str(caught.exception))
         self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
         self.assertEqual(self.service.read_prompt_entry("revise").metadata["color"], "slate")
+
+    def test_a_title_change_to_an_inherited_prompt_is_refused_the_same_way(self) -> None:
+        # #2159: the title rides the same rule as the body — an override carries
+        # metadata only, so a renamed inherited prompt is refused, not dropped.
+        self._write_prompt_at(self.series, "revise", "Revise plotline", {"color": "slate"})
+        with self.assertRaises(ProjectServiceError) as caught:
+            self.service.save_prompt_entry(
+                "revise",
+                SavePromptEntryRequest(
+                    title="Revise the plotline",
+                    body=self.service.read_prompt_entry("revise").body,
+                    entry_type="prompt:general",
+                    metadata={"color": "amber"},
+                    authoring_layer_id=self._layer_id(self.root),
+                ),
+            )
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("cannot be overridden from a layer below it", str(caught.exception))
+        self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
 
     def test_authoring_at_or_above_the_owning_layer_is_refused(self) -> None:
         # The prompt is owned by the series; an override must sit strictly below it.

@@ -209,7 +209,9 @@ class LayerOverrideTests(unittest.TestCase):
                 ),
             )
         self.assertEqual(caught.exception.status_code, 422)
-        self.assertIn("cannot override", str(caught.exception))
+        # The same sentence the prompt override raises (#2159).
+        self.assertIn("cannot be overridden from a layer below it", str(caught.exception))
+        self.assertIn("Fork the entry", str(caught.exception))
         # Nothing was written anywhere: the ancestor is untouched, no delta
         # exists, and the fold still reads the canon body.
         self.assertEqual(series_file.read_text(encoding="utf-8"), before)

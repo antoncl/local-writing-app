@@ -320,12 +320,10 @@ class LoreEntriesMixin:
         # echo of a read may differ from the file by a trailing newline only.
         canon_title = str(owning_front_matter.get("title") or "")
         if request.body.rstrip() != canon_body.rstrip() or request.title != canon_title:
-            label = winner.source_layer_label or "an ancestor"
-            raise ProjectServiceError(
-                f"This entry's body and title are inherited from {label}; a layer below it "
-                "cannot override them. Fork the entry to change them here, or choose the "
-                "owning layer to edit the canon.",
-                422,
+            raise self.inherited_content_refusal(
+                "entry",
+                winner.source_layer_label,
+                "Fork the entry to change them here, or choose the owning layer to edit the canon.",
             )
         base_metadata = self._normalise_metadata(owning_front_matter.get("metadata"), winner.path)
         # The base an override at L diffs against is the effective value of every

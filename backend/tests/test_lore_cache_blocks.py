@@ -16,6 +16,7 @@ from tempfile import TemporaryDirectory
 from project_fixtures import open_test_project
 
 from app.models import (
+    ChatSessionJournalEntry,
     CreateChatSessionRequest,
     CreateLoreEntryRequest,
     CreateStructureNodeRequest,
@@ -130,14 +131,178 @@ class LoreCacheBlockTests(_LoreCacheFixture):
         self.assertNotIn('name="Premise"', volatile_text)
 
     def test_gate_off_places_no_lore(self) -> None:
-        # A chat that never flipped the gate gets no lore at all, even though the
-        # always-note exists (Journey C).
+        # A chat with NEITHER the flag NOR any `use()` picks gets no lore at all,
+        # even though the always-note exists (Journey C). A chat with picks and
+        # the flag off is a DIFFERENT case (ADR-0092 §7.1) — see
+        # `test_a_pick_only_chat_places_its_picks_with_the_flag_off` below.
         off = self.service.create_chat_session(
             CreateChatSessionRequest(title="Lore-free", prompt_entry_id="prompt_y")
         )
         blocks = self._blocks(off.id, [{"role": "user", "content": "Premise please"}])
         self.assertEqual([b["tier"] for b in blocks], ["stable"])  # only the system prompt
         self.assertTrue(all("Premise" not in b["text"] for b in blocks))
+
+    def test_a_pick_only_chat_places_its_picks_with_the_flag_off(self) -> None:
+        # ADR-0092 §7.1: a chat with picks and the flag off places the picks,
+        # minus `never`, and nothing else — not the scene's own mentions, not
+        # the always-policy entry (the fixture's "Premise").
+        picked = self._make_note("Sidebar", body="A picked aside.")
+        self._make_note("Gaslamp", body="Lit by whale oil.")
+        structure = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+        )
+        act = next(c for c in structure.root.children if c.type == "manuscript:act")
+        added = self.service.create_structure_node(
+            CreateStructureNodeRequest(
+                title="The Departure", entry_type="manuscript:scene", parent_id=act.id
+            )
+        )
+        scene_node = next(c for c in added.root.children if c.id == act.id).children[-1]
+        scene_id = scene_node.scene_id
+        scene = self.service.read_scene(scene_id)
+        self.service.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body="A scene that mentions Gaslamp by name.",
+                base_revision=scene.revision,
+                status="draft",
+                entry_type="manuscript:scene",
+                metadata={},
+            ),
+        )
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Picks only", prompt_entry_id="p", subject=scene_id)
+        )
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="Picks only",
+                prompt_entry_id="p",
+                lore_enabled=False,
+                used_node_ids=[picked],
+            ),
+        )
+        prepared = expand_and_prepare_chat_blocks(
+            self.service, chat.id, "SYSTEM PROMPT", [{"role": "user", "content": "hi"}]
+        )
+        text = "".join(b["text"] for b in prepared.system_blocks or [])
+        self.assertIn('name="Sidebar"', text)
+        self.assertNotIn('name="Gaslamp"', text)  # the scene's own mention: out
+        self.assertNotIn('name="Premise"', text)  # the always-policy entry: out
+        assert prepared.lore_fit is not None
+        self.assertEqual(prepared.lore_fit.left_out, [])
+        after = self.service.read_chat_session(chat.id)
+        self.assertIn(picked, after.seen_revisions)
+
+    def test_a_pick_only_send_keeps_an_existing_journal(self) -> None:
+        # A chat that already carries journal entries (e.g. from an earlier
+        # lore-enabled turn) must not lose them when it's later relocked to a
+        # pick-only prompt (flag off, `used_node_ids` non-empty): the chat
+        # store's journal is append-only, so an echo save with `journal=[]`
+        # would raise "Chat journal is append-only" on its first send.
+        picked = self._make_note("Sidebar", body="A picked aside.")
+        mentioned = self._make_note("OldMention", body="Mentioned earlier.")
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Picks only", prompt_entry_id="p")
+        )
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="Picks only",
+                prompt_entry_id="p",
+                lore_enabled=False,
+                used_node_ids=[picked],
+                journal=[
+                    ChatSessionJournalEntry(
+                        entry_id=mentioned,
+                        title="OldMention",
+                        entry_type="lore:note",
+                        added_at_turn=1,
+                        source="user_message",
+                    )
+                ],
+            ),
+        )
+        prepared = expand_and_prepare_chat_blocks(
+            self.service, chat.id, "SYSTEM PROMPT", [{"role": "user", "content": "hi"}]
+        )
+        text = "".join(b["text"] for b in prepared.system_blocks or [])
+        self.assertIn('name="Sidebar"', text)
+        after = self.service.read_chat_session(chat.id)
+        self.assertEqual([e.entry_id for e in after.journal], [mentioned])
+        self.assertIn(picked, after.seen_revisions)
+
+    def test_a_pick_only_chat_settles_to_the_stable_tier_next_turn(self) -> None:
+        # ADR-0092 §7.1: the pick is committed against the session baseline and
+        # settles exactly like a gated turn's placement.
+        picked = self._make_note("Sidebar", body="A picked aside.")
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Picks only", prompt_entry_id="p")
+        )
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="Picks only",
+                prompt_entry_id="p",
+                lore_enabled=False,
+                used_node_ids=[picked],
+            ),
+        )
+        turn1 = self._blocks(chat.id, [{"role": "user", "content": "hi"}])
+        t1_volatile = "".join(b["text"] for b in turn1 if b["tier"] == "volatile")
+        t1_stable = "".join(b["text"] for b in turn1 if b["tier"] == "stable")
+        self.assertIn('name="Sidebar"', t1_volatile)
+        self.assertNotIn('name="Sidebar"', t1_stable)
+        turn2 = self._blocks(
+            chat.id,
+            [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "ok"},
+                {"role": "user", "content": "more"},
+            ],
+        )
+        t2_stable = "".join(b["text"] for b in turn2 if b["tier"] == "stable")
+        t2_volatile = "".join(b["text"] for b in turn2 if b["tier"] == "volatile")
+        self.assertIn('name="Sidebar"', t2_stable)
+        self.assertNotIn('name="Sidebar"', t2_volatile)
+
+    def test_the_commit_turn_keys_on_picks_not_the_flag(self) -> None:
+        # ADR-0092 §7.1 (amending ADR-0067 Amendment 2 by reference): the commit
+        # turn keys on `used_node_ids`, never on `lore_enabled`.
+        picked = self._make_note("Sidebar", body="A picked aside.")
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Picks only", prompt_entry_id="p")
+        )
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="Picks only",
+                prompt_entry_id="p",
+                lore_enabled=False,
+                used_node_ids=[picked],
+            ),
+        )
+        prepared = expand_and_prepare_chat_blocks(
+            self.service,
+            chat.id,
+            "SYSTEM PROMPT",
+            [{"role": "user", "content": "commit"}],
+            lore_mode="used",
+        )
+        text = "".join(b["text"] for b in prepared.system_blocks or [])
+        self.assertIn('name="Sidebar"', text)
+        # And the mirror: the flag on with no picks commits no lore block, even
+        # though the always-policy Premise exists.
+        flagged = self._make_lore_enabled_chat("Flagged", "prompt_z")
+        prepared_flagged = expand_and_prepare_chat_blocks(
+            self.service,
+            flagged,
+            "SYSTEM PROMPT",
+            [{"role": "user", "content": "commit"}],
+            lore_mode="used",
+        )
+        self.assertTrue(all("Premise" not in b["text"] for b in prepared_flagged.system_blocks or []))
 
     def test_scene_anchored_chat_includes_the_scenes_referenced_lore(self) -> None:
         # The roleplay case: a chat anchored to a scene must place the lore the

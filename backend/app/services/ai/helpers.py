@@ -532,13 +532,15 @@ def register_helpers(
                 _mutations_index_slot.append(None)
         return _mutations_index_slot[0]
 
-    # ADR-0057 §2: the execution-derived lore gate. `use_lore()` / `use()` record
-    # that they ran into this per-render slot; the caller (build_preview) reads it
-    # back after render to persist the chat's `lore_enabled`. The flag tracks
-    # *invocation*, not a non-empty result — a lore-using prompt in a project
-    # with no lore yet is still lore-enabled, so lore added later flows in. A
-    # mutable slot (not a bare bool) so the nested helper flips it through the
-    # closure; envs are per-render, so it never leaks across renders.
+    # ADR-0057 §2, narrowed by ADR-0092 §7.1: the execution-derived AUTOMATIC-lore
+    # gate. Only `use_lore()` sets this per-render slot — `use()` places a pick
+    # without touching it (§7.1 withdraws ADR-0060 §2's "using a node means the
+    # chat is lore-enabled"); the caller (build_preview) reads it back after
+    # render to persist the chat's `lore_enabled`. The flag tracks *invocation*,
+    # not a non-empty result — a lore-using prompt in a project with no lore yet
+    # is still lore-enabled, so lore added later flows in. A mutable slot (not a
+    # bare bool) so the nested helper flips it through the closure; envs are
+    # per-render, so it never leaks across renders.
     lore_invoked_slot: list[bool] = [False]
     env.lore_invoked = lore_invoked_slot  # type: ignore[attr-defined]
 
@@ -596,14 +598,14 @@ def register_helpers(
     # (an id, an EntryRef, or a dict) and records the resolved id — but where a
     # multi-select `context_pick` is a LIST, it records EVERY pick (not `entry()`'s
     # first-wins), so `use(inputs.picks)` selects them all; `_use_values` owns the
-    # split. Flips the lore gate (using a node means the chat is lore-enabled). The
-    # optional second arg is an advisory volatility PRIOR (ADR-0060 §5): it biases
-    # which tier the node starts in but never overrides the per-revision correctness
-    # check (a "stable"-hinted node that changed still re-writes). Emits nothing —
-    # the backend places and caches it — so it also composes inside a loop:
-    # `{% for p in inputs.picks %}{{ use(p, "volatile") }}{% endfor %}`.
+    # split. ADR-0092 §7.1: `use()` places ONLY — it never sets the lore-invoked
+    # slot, so a pick-only prompt gets its picks placed with automatic lore off.
+    # The optional second arg is an advisory volatility PRIOR (ADR-0060 §5): it
+    # biases which tier the node starts in but never overrides the per-revision
+    # correctness check (a "stable"-hinted node that changed still re-writes).
+    # Emits nothing — the backend places and caches it — so it also composes
+    # inside a loop: `{% for p in inputs.picks %}{{ use(p, "volatile") }}{% endfor %}`.
     def _use(value: Any, hint: Any = None) -> str:
-        lore_invoked_slot[0] = True
         _record_use(project, schema, value, hint, used_nodes_slot, used_hints_slot)
         return ""
 

@@ -242,12 +242,16 @@ def _lore_cache_blocks(
     journal_for_send: list[Any],
     scene: Any,
     limits: LoreLimits,
+    *,
+    automatic: bool = True,
 ) -> tuple[list[dict], dict[str, str], LoreFit]:
     """The chat's one deduped lore set, fitted to the assistant's budget and
     placed once *per volatility tier* (docs/design/context-caching.md §4).
     `_select_lore` — the single selector — computes the declared set (`use()`
     picks, scene refs, `always`) and the inferred candidates (journal, structural
-    hop) minus `never`/`manual_only`; every candidate is rendered once;
+    hop) minus `never`/`manual_only` — or, with `automatic=False` (ADR-0092
+    §7.1), the declared set is the `use()` picks alone and inferred is empty;
+    every candidate is rendered once;
     `fit_lore_budget` keeps the declared set whole and as much of the inferred
     set as fits, in fit order (ADR-0086 §3); `_tier_lore_ids` splits the kept ids
     against the chat's in-memory session baseline: entries unchanged since last
@@ -288,6 +292,7 @@ def _lore_cache_blocks(
         session=session,
         hints=dict(chat.used_node_hints),
         limits=limits,
+        automatic=automatic,
     )
     session.commit()
 
@@ -322,10 +327,14 @@ def expand_and_prepare_chat_blocks(
       - session_id for OpenRouter provider stickiness
       - journal_added: lore IDs newly detected on THIS turn (for audit UI)
 
-    ADR-0057 §2/§4: the lore gate. Whether this chat sees lore is the prompt's
-    own choice, read from whether the template flipped the gate at its lock
-    render (`chat.lore_enabled`). Gate off → no send-time detection and no lore
-    block at all, so a deliberately lore-free prompt stays clean (Journey C).
+    ADR-0092 §7.1: the lore gate. `chat.lore_enabled` gates AUTOMATIC lore only
+    — detection and the inferred half of the selection. The chat's own `use()`
+    picks are placed whenever there are any, flag on or off: a pick-only chat
+    (flag off, `used_node_ids` non-empty) still gets its picks tiered and
+    committed like any turn, just with nothing else (no scene refs, no
+    `always` entries, no detection, no hop). A chat with neither the flag nor
+    any picks sends no lore block at all, so a deliberately lore-free prompt
+    stays clean (Journey C).
 
     Placement (docs/design/context-caching.md §4): the backend — not the template
     — selects, dedups, and places lore. The one deduped set is split per turn
@@ -356,16 +365,23 @@ def expand_and_prepare_chat_blocks(
         return PreparedChatTurn(None, None, [], None)
 
     new_entries: list[Any] = []
-    journal_for_send: list[Any] = []
+    # Starts as the chat's existing journal — the append-only guard
+    # (`_resolved_chat_journal`) rejects a save whose incoming ids drop any
+    # prior entry, so a pick-only send (no detection below) must still echo
+    # back everything the chat already carries, not `[]`.
+    journal_for_send: list[Any] = list(chat.journal)
+    # ADR-0092 §7.1: a pick renders as of the chat's scene whether automatic
+    # lore is on or the chat merely carries `use()` picks.
+    has_picks = bool(chat.used_node_ids)
     # Loaded ONCE — the scene EntryRef (body + metadata) shared by detection
     # (ADR-0075 slice 3 scans its prose) and lore rendering, so a lore-enabled
     # turn does exactly one `read_scene` for its resolution scene.
-    scene = _chat_resolution_scene(project, chat) if chat.lore_enabled else None
+    scene = _chat_resolution_scene(project, chat) if (chat.lore_enabled or has_picks) else None
     if chat.lore_enabled and lore_mode == "implicit":
         new_entries = _detect_and_persist_journal(
             project, chat, chat_id, messages_list, scene, system_prompt
         )
-        journal_for_send = list(chat.journal) + new_entries
+        journal_for_send = journal_for_send + new_entries
 
     # Slot 1: system + project-stable (per decisions_implicit_context) — the
     # shared 1h cache block; multi-turn sessions reuse it for hours.
@@ -378,19 +394,28 @@ def expand_and_prepare_chat_blocks(
     if staged_xml:
         blocks.append({"text": staged_xml, "tier": "stable"})
     # Slots 2a/2b: the one deduped lore set, placed once per volatility tier
-    # (stable, then volatile). Only for a lore-enabled chat. The provider adapter
+    # (stable, then volatile). For a lore-enabled chat OR a chat with `use()`
+    # picks (ADR-0092 §7.1) — the picks-only case selects declared-only, no
+    # detection, no scene refs, no `always` entries. The provider adapter
     # caps breakpoints (Anthropic: ≤4) and assigns each tier its ttl — the shared
     # layer only orders stable-first (ADR-0060 §5).
     lore_fit: LoreFit | None = None
-    if chat.lore_enabled and lore_mode == "implicit":
+    if lore_mode == "implicit" and (chat.lore_enabled or has_picks):
         lore_blocks, seen_revisions, lore_fit = _lore_cache_blocks(
-            project, chat, chat_id, journal_for_send, scene, lore_limits
+            project,
+            chat,
+            chat_id,
+            journal_for_send,
+            scene,
+            lore_limits,
+            automatic=chat.lore_enabled,
         )
         blocks.extend(lore_blocks)
         # #1635: persist the last-seen revisions if they changed, so the door's
         # "edited" badge survives a restart and reflects this turn's send. Carry
         # the up-to-date journal (journal_for_send) so this save doesn't regress
-        # the entries _detect_and_persist_journal just wrote.
+        # the entries _detect_and_persist_journal just wrote — for a pick-only
+        # send (no detection) that is just the chat's existing journal, untouched.
         if seen_revisions != chat.seen_revisions:
             project.save_chat_session(
                 chat_id,
@@ -398,11 +423,14 @@ def expand_and_prepare_chat_blocks(
                     chat, journal=journal_for_send, seen_revisions=seen_revisions
                 ),
             )
-    elif chat.lore_enabled:
+    elif has_picks:
         # The read-only turn (#1874): the chat's own `use()` picks, rendered
         # as-of the chat's scene like any lore, in ONE untiered block — the
-        # one-shot form preview uses. It never touches the chat's lore session
-        # or persisted state: no detection, no baseline promotion (which would
+        # one-shot form preview uses. Keys on the picks, never on the flag
+        # (ADR-0092 §7.1, amending ADR-0067 Amendment 2 by reference): a
+        # `use()`-only prompt with the flag off must still commit its picks.
+        # It never touches the chat's lore session or persisted state: no
+        # detection, no baseline promotion (which would
         # demote every settled world entry to volatile on the next ordinary
         # turn), no seen-revisions save (whose empty journal would trip the
         # append-only guard). Tier is nominal — a one-off call caches nothing.

@@ -491,11 +491,16 @@
   // (a $derived over the store) keeps it live on reorder. Non-manuscript panes
   // (lore, chat, research) aren't in the manuscript tree → fall back to the raw
   // scene title, unchanged.
+  // A scene's display title by scene id — the editor tab's title, and (#2145)
+  // the home a todo-pane review item names outside any editor pane.
+  const sceneTitleById = (id: string): string | undefined => {
+    const node = structure?.root ? findNodeBySceneId(structure.root, id) : null;
+    return node ? structureNodeTitle(node, metadataSchema) : undefined;
+  };
   const editorTitle = (id: string) => {
     const pane = editorPaneById(id);
     if (!pane?.scene) return "Editor";
-    const node = structure?.root ? findNodeBySceneId(structure.root, pane.scene.id) : null;
-    return node ? structureNodeTitle(node, metadataSchema) : pane.scene.title;
+    return sceneTitleById(pane.scene.id) ?? pane.scene.title;
   };
   function editorBadge(id: string): { text: string; saved: boolean; error?: boolean } | null {
     const pane = editorPaneById(id);
@@ -1245,7 +1250,7 @@
         onUpdateEmbeddedTodoNote={(item, note) => todoActions.updateEmbeddedTodoNote(item, note)}
         onOpenEmbeddedTodo={(item) => todoActions.openEmbeddedTodo(item)}
         onDeleteEmbeddedTodo={(item) => todoActions.deleteEmbeddedTodo(item)}
-        nodeTitle={(id) => loreEntries.find((entry) => entry.id === id)?.title}
+        nodeTitle={(id) => loreEntries.find((entry) => entry.id === id)?.title ?? sceneTitleById(id)}
       />
     </div>
   {/snippet}

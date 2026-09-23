@@ -13,7 +13,8 @@ import { SvelteSet } from "svelte/reactivity";
 import { api } from "@/lib/api";
 import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
 import { refreshTodos } from "@/lib/stores/todos";
-import type { ChangeCandidateSet, ChangeCandidateTier, Snapshot } from "@/lib/types";
+import { defaultFolded, defaultKept, groupOf, groupedItems } from "@/lib/utils/candidateGroups";
+import type { CandidateGroup, ChangeCandidateSet, Snapshot } from "@/lib/types";
 
 export class PropagateController {
   sourceId = $state<string | null>(null);
@@ -27,7 +28,7 @@ export class PropagateController {
   // `candidates.baseline_snapshot_id`, which is what was actually resolved.
   baseline = $state<string | undefined>(undefined);
   kept = new SvelteSet<string>();
-  folded = new SvelteSet<ChangeCandidateTier>(["mention"]);
+  folded = new SvelteSet<CandidateGroup>();
   loading = $state(false);
   error = $state<string | null>(null);
   // Every fetch carries the sequence it started under; a result that lands
@@ -35,14 +36,18 @@ export class PropagateController {
   // never show one source's candidates under another's title.
   #seq = 0;
 
-  // Every `declared` and `marker_untouched` candidate starts kept; every
-  // `mention` starts unkept (ADR-0090 §7 / Amendment 1) — re-applied after
-  // every load, including a "since" change.
-  #applyDefaultKept(): void {
+  // ADR-0091 §2: the kept AND fold state, both from the diff alone — re-applied
+  // after every load, including a "since" change (a since change is a new
+  // question, the writer's own folds included).
+  #applyDefaults(): void {
     this.kept.clear();
-    for (const item of this.candidates?.items ?? []) {
-      if (item.tier !== "mention") this.kept.add(item.id);
+    this.folded.clear();
+    if (!this.candidates) return;
+    const groups = groupedItems(this.candidates);
+    for (const group of defaultKept(this.candidates)) {
+      for (const item of groups[group]) this.kept.add(item.id);
     }
+    for (const group of defaultFolded(this.candidates)) this.folded.add(group);
   }
 
   async open(sourceId: string, sourceTitle: string): Promise<void> {
@@ -52,7 +57,6 @@ export class PropagateController {
     this.snapshots = [];
     this.kept.clear();
     this.folded.clear();
-    this.folded.add("mention");
     this.baseline = undefined;
     this.error = null;
     this.loading = true;
@@ -69,7 +73,7 @@ export class PropagateController {
       if (seq !== this.#seq) return;
       this.candidates = candidates;
       this.snapshots = snapshotList.snapshots;
-      this.#applyDefaultKept();
+      this.#applyDefaults();
     } catch (error) {
       if (seq !== this.#seq) return;
       this.error = error instanceof Error ? error.message : String(error);
@@ -85,22 +89,22 @@ export class PropagateController {
 
   // The group header's all/none control (the taxonomy's own multi-select
   // idiom — a tri-state pickable header row, not a bespoke button).
-  setGroup(tier: ChangeCandidateTier, on: boolean): void {
+  setGroup(group: CandidateGroup, on: boolean): void {
     for (const item of this.candidates?.items ?? []) {
-      if (item.tier !== tier) continue;
+      if (groupOf(item) !== group) continue;
       if (on) this.kept.add(item.id);
       else this.kept.delete(item.id);
     }
   }
 
-  toggleFold(tier: ChangeCandidateTier): void {
-    if (this.folded.has(tier)) this.folded.delete(tier);
-    else this.folded.add(tier);
+  toggleFold(group: CandidateGroup): void {
+    if (this.folded.has(group)) this.folded.delete(group);
+    else this.folded.add(group);
   }
 
-  // Re-fetches the candidate set against the newly chosen baseline; kept
-  // defaults are re-applied, same as a fresh open (ADR-0090 §7's "since"
-  // re-renders the right pane AND the list).
+  // Re-fetches the candidate set against the newly chosen baseline; the kept
+  // AND fold defaults are re-applied, same as a fresh open — ADR-0091 §2: a
+  // since change is a new question, the writer's own folds included.
   async setBaseline(value: string): Promise<void> {
     if (!this.sourceId) return;
     this.baseline = value;
@@ -111,7 +115,7 @@ export class PropagateController {
       const candidates = await api.listChangeCandidates(this.sourceId, value);
       if (seq !== this.#seq) return;
       this.candidates = candidates;
-      this.#applyDefaultKept();
+      this.#applyDefaults();
     } catch (error) {
       if (seq !== this.#seq) return;
       this.error = error instanceof Error ? error.message : String(error);

@@ -1,28 +1,34 @@
 <script lang="ts">
-  // The Propagate confirm surface (ADR-0090 §7, Amendment 1/2): a settled
-  // change to a lore entry, its candidates tickable and grouped by tier, the
-  // source's diff beside them. An on-demand editor tab (never a dialog — a
-  // candidate can be opened beside it before deciding), homed via
+  // The Propagate confirm surface (ADR-0091 §2/§7): a settled change to a lore
+  // entry, its candidates tickable and grouped from their REASONS (Declared /
+  // Markers / Mentions — never the wire's `tier`), the source's diff beside
+  // them behind a draggable divider. An on-demand editor tab (never a dialog —
+  // a candidate can be opened beside it before deciding), homed via
   // `propagate.svelte.ts` / `workspaceLayout`. Read-only except for the one
-  // Confirm write the store makes; this component only renders state and
-  // forwards gestures to the store.
+  // Confirm write the store makes; this component and `PropagateDiff` (the
+  // diff column, split out so the fetch/rule-line/nothing-changed logic isn't
+  // all in one file) only render state and forward gestures to the store.
   import PickTree, { type PickTreeRow } from "@/components/widgets/PickTree.svelte";
-  import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
+  import SplitHandle from "@/components/widgets/SplitHandle.svelte";
+  import PropagateDiff from "@/components/panes/PropagateDiff.svelte";
   import { propagate } from "@/lib/stores/propagate.svelte";
-  import { api } from "@/lib/api";
-  import { notchWhen, inNotchOrder } from "@/lib/utils/snapshotTime";
-  import { diffRuns, fieldDiffs, listDiff } from "@/lib/utils/snapshotDiff";
-  import { renderDiffRuns } from "@/lib/utils/diffRuns";
-  import type { ChangeCandidate, ChangeCandidateReason, ChangeCandidateTier, FieldDiff } from "@/lib/types";
+  import {
+    clampListWidth,
+    propagateLayout,
+    PROPAGATE_DIFF_COLUMN_MIN,
+  } from "@/lib/stores/propagateLayout.svelte";
+  import { notchWhenCaptured } from "@/lib/utils/snapshotTime";
+  import { groupedItems } from "@/lib/utils/candidateGroups";
+  import type { CandidateGroup, ChangeCandidate, ChangeCandidateReason } from "@/lib/types";
 
-  const TIERS: { key: ChangeCandidateTier; label: string }[] = [
+  const GROUPS: { key: CandidateGroup; label: string }[] = [
     { key: "declared", label: "Declared" },
-    { key: "marker_untouched", label: "Markers on untouched fields" },
-    { key: "mention", label: "Mentions" },
+    { key: "markers", label: "Markers" },
+    { key: "mentions", label: "Mentions" },
   ];
 
-  // ADR-0090 §7: reasons must stay visible, in the app's own vocabulary (⤳ is
-  // the mutation mark). Several reasons on one candidate join with " · ".
+  // ADR-0090/0091 §7: reasons must stay visible, in the app's own vocabulary (⤳
+  // is the mutation mark). Several reasons on one candidate join with " · ".
   function reasonText(sourceTitle: string, reason: ChangeCandidateReason): string {
     switch (reason.route) {
       case "references_source":
@@ -43,35 +49,36 @@
   }
 
   // The candidate list, flattened into PickTree's row shape: one pickable
-  // (tri-state) header row per non-empty tier, then one leaf row per
+  // (tri-state) header row per non-empty group, then one leaf row per
   // candidate at depth 1. The design language has no scene-kind colour, so a
   // scene candidate is left unstriped rather than inventing one.
   let rows = $derived.by<PickTreeRow[]>(() => {
-    const items = propagate.candidates?.items ?? [];
+    if (!propagate.candidates) return [];
+    const groups = groupedItems(propagate.candidates);
     const out: PickTreeRow[] = [];
-    for (const tier of TIERS) {
-      const tierItems = items.filter((item) => item.tier === tier.key);
-      if (tierItems.length === 0) continue;
-      const keptCount = tierItems.filter((item) => propagate.kept.has(item.id)).length;
-      const allKept = keptCount === tierItems.length;
-      const folded = propagate.folded.has(tier.key);
+    for (const group of GROUPS) {
+      const groupItems = groups[group.key];
+      if (groupItems.length === 0) continue;
+      const keptCount = groupItems.filter((item) => propagate.kept.has(item.id)).length;
+      const allKept = keptCount === groupItems.length;
+      const folded = propagate.folded.has(group.key);
       out.push({
-        key: `group:${tier.key}`,
+        key: `group:${group.key}`,
         depth: 0,
         hasChildren: true,
         collapsed: folded,
         isContainer: true,
         pickable: true,
         state: keptCount === 0 ? "off" : allKept ? "on" : "indeterminate",
-        title: tier.label,
+        title: group.label,
         count: null,
         countNoun: "item",
-        countText: `${keptCount} of ${tierItems.length}`,
-        onToggle: () => propagate.setGroup(tier.key, !allKept),
-        onCollapse: () => propagate.toggleFold(tier.key),
+        countText: `${keptCount} of ${groupItems.length}`,
+        onToggle: () => propagate.setGroup(group.key, !allKept),
+        onCollapse: () => propagate.toggleFold(group.key),
       });
       if (folded) continue;
-      for (const item of tierItems) {
+      for (const item of groupItems) {
         out.push({
           key: item.id,
           depth: 1,
@@ -107,78 +114,41 @@
   // always first. Selected value is the RESOLVED baseline (`candidates`'s
   // own), not the store's explicit request, so the default shows correctly
   // before the writer has touched it.
-  let snapshotsNewestFirst = $derived([...inNotchOrder(propagate.snapshots)].reverse());
+  // Newest CAPTURE first — the API lists snapshots (captured_at, id)-sorted
+  // oldest first, and the labels below read capture time (ADR-0091 §7), so
+  // the order must follow the same clock; `inNotchOrder` (content time) is
+  // the strip's rule, not this selector's.
+  let snapshotsNewestFirst = $derived([...propagate.snapshots].reverse());
   let sinceValue = $derived(propagate.candidates?.baseline_snapshot_id ?? "");
 
+  // ADR-0091 §7: the "since" labels read capture time, the same deliberate
+  // exception `PropagateDiff`'s nothing-changed sentence takes (see
+  // `notchWhenCaptured`) — "since" measures from when a baseline was TAKEN.
   function snapshotLabel(snapshot: (typeof propagate.snapshots)[number]): string {
-    return `${snapshot.origin === "propagation" ? "last propagation" : "snapshot"} · ${notchWhen(snapshot)}`;
+    return `${snapshot.origin === "propagation" ? "last propagation" : "snapshot"} · ${notchWhenCaptured(snapshot)}`;
   }
 
   function onSinceChange(event: Event): void {
     void propagate.setBaseline((event.target as HTMLSelectElement).value);
   }
 
-  // ---- The right pane: the source's diff, since the resolved baseline. ----
-  let diffFieldsState = $state<Record<string, FieldDiff>>({});
-  let diffBodyHtml = $state("");
-  let diffLoading = $state(false);
-  let diffError = $state<string | null>(null);
-
-  function formatFieldValue(value: unknown): string {
-    if (value === null || value === undefined || value === "") return "(none)";
-    if (Array.isArray(value)) return value.length ? value.map(String).join(", ") : "(none)";
-    return String(value);
+  // The list/diff divider's drag (ADR-0091 §7): the gesture lives in the
+  // shared `SplitHandle`; this pane keeps only the clamp (via
+  // `propagateLayout.setListWidth`) and the live width during the drag.
+  function onDividerDragStart(): void {}
+  function onDividerDrag(event: MouseEvent): void {
+    const paneRect = paneEl?.getBoundingClientRect();
+    if (!paneRect) return;
+    propagateLayout.listWidth = clampListWidth(event.clientX - paneRect.left, paneRect.width);
+  }
+  function onDividerDragEnd(): void {
+    propagateLayout.setListWidth(propagateLayout.listWidth);
   }
 
-  $effect(() => {
-    const sourceId = propagate.sourceId;
-    const candidates = propagate.candidates;
-    if (!sourceId || !candidates) {
-      diffFieldsState = {};
-      diffBodyHtml = "";
-      return;
-    }
-    const baseline = candidates.baseline_snapshot_id;
-    let cancelled = false;
-    diffLoading = true;
-    diffError = null;
-    void (async () => {
-      try {
-        let wasMetadata: Record<string, unknown> = {};
-        let wasBody = "";
-        if (baseline) {
-          const detail = await api.readNodeSnapshot(sourceId, baseline);
-          wasMetadata = detail.metadata;
-          wasBody = detail.body;
-        }
-        const live = await api.getLoreEntry(sourceId);
-        if (cancelled) return;
-        diffFieldsState = fieldDiffs(wasMetadata, "", live.metadata, "");
-        diffBodyHtml = await renderDiffRuns(diffRuns(wasBody, live.body ?? ""), "both");
-      } catch (error) {
-        if (!cancelled) diffError = error instanceof Error ? error.message : String(error);
-      } finally {
-        if (!cancelled) diffLoading = false;
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  });
-
-  let diffFieldIds = $derived(Object.keys(diffFieldsState).sort());
-  let diffSubtitle = $derived.by(() => {
-    const c = propagate.candidates;
-    if (!c) return "";
-    if (c.whole_entry) return "No baseline: the whole entry counts as the change.";
-    const n = diffFieldIds.length;
-    const baselineSnapshot = propagate.snapshots.find((s) => s.id === c.baseline_snapshot_id);
-    const since = baselineSnapshot ? notchWhen(baselineSnapshot) : "the last propagation";
-    return `${n} field${n === 1 ? "" : "s"}${c.body_changed ? " and the body" : ""}, since ${since}.`;
-  });
+  let paneEl: HTMLElement | undefined = $state();
 </script>
 
-<div class="propagate-pane">
+<div class="propagate-pane" bind:this={paneEl}>
   <div class="propagate-head">
     <h2>Propagate <span class="serif">{propagate.sourceTitle}</span></h2>
     <div class="since">
@@ -197,49 +167,24 @@
   {:else if propagate.loading && !propagate.candidates}
     <p class="muted">Loading…</p>
   {:else}
-    <div class="propagate-body">
+    <div class="propagate-body" style={`grid-template-columns: min(${propagateLayout.listWidth}px, calc(100% - ${PROPAGATE_DIFF_COLUMN_MIN}px)) auto minmax(0, 1fr)`}>
       <div class="propagate-list">
         <PickTree {rows} ariaLabel={`Candidates for ${propagate.sourceTitle}`} />
       </div>
-      <aside class="propagate-diff" aria-label={`What changed in ${propagate.sourceTitle}`}>
-        <h3>What changed</h3>
-        <p class="sub">{diffSubtitle}</p>
-        {#if diffError}
-          <p class="muted">{diffError}</p>
-        {:else if diffLoading}
-          <p class="muted">Loading…</p>
-        {:else}
-          {#each diffFieldIds as fieldId (fieldId)}
-            {@const diff = diffFieldsState[fieldId]}
-            {@const items = listDiff(diff.was, diff.now)}
-            <div class="frow">
-              <div class="frow-key">{fieldId}</div>
-              <div class="frow-vals">
-                {#if items}
-                  {#each items as item, index (index)}
-                    <span class="pill" class:same={item.state === "same"} class:pill-was={item.state === "was"} class:pill-now={item.state === "now"}>{item.text}</span>
-                  {/each}
-                {:else}
-                  {#if diff.was !== null && diff.was !== undefined}
-                    <span class="pill pill-was">{formatFieldValue(diff.was)}</span>
-                  {/if}
-                  <span class="pill pill-now">{formatFieldValue(diff.now)}</span>
-                {/if}
-              </div>
-            </div>
-          {/each}
-          {#if diffBodyHtml}
-            <div class="propagate-prose">
-              <ReadOnlyBodyOverlay html={diffBodyHtml} label="Body change" tone="snapshot" />
-            </div>
-          {/if}
-          <div class="legend">
-            <span class="pill same">unchanged</span>
-            <span class="pill pill-was">was</span> the baseline &nbsp;
-            <span class="pill pill-now">now</span> the entry today
-          </div>
-        {/if}
-      </aside>
+      <SplitHandle
+        orientation="vertical"
+        label="Resize the candidate list"
+        onDragStart={onDividerDragStart}
+        onDrag={onDividerDrag}
+        onDragEnd={onDividerDragEnd}
+        class="propagate-divider"
+      />
+      <PropagateDiff
+        sourceId={propagate.sourceId}
+        sourceTitle={propagate.sourceTitle}
+        candidates={propagate.candidates}
+        snapshots={propagate.snapshots}
+      />
     </div>
 
     <div class="propagate-foot">
@@ -306,7 +251,6 @@
 
   .propagate-body {
     display: grid;
-    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
     min-height: 0;
     flex: 1;
     overflow: hidden;
@@ -314,12 +258,11 @@
 
   @media (max-width: 760px) {
     .propagate-body {
-      grid-template-columns: 1fr;
+      grid-template-columns: 1fr !important;
       overflow: auto;
     }
-    .propagate-diff {
-      border-left: 0;
-      border-top: 1px solid var(--divider);
+    .propagate-body > :global(.propagate-divider) {
+      display: none;
     }
   }
 
@@ -329,81 +272,11 @@
     min-height: 0;
   }
 
-  .propagate-diff {
-    border-left: 1px solid var(--divider);
-    padding: 12px 24px 16px;
-    overflow: auto;
-    background: var(--panel);
-    min-height: 0;
-  }
-
-  .propagate-diff h3 {
-    font-family: var(--serif);
-    font-size: var(--fs-lg);
-    font-weight: var(--w-bold);
-    margin: 0 0 4px;
-  }
-
-  .propagate-diff .sub {
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-    margin: 0 0 12px;
-  }
-
-  .frow {
-    display: grid;
-    grid-template-columns: 96px 1fr;
-    column-gap: 12px;
-    padding: 6px 0;
-    border-top: 1px solid var(--divider);
-    font-size: var(--fs-md);
-  }
-
-  .frow-key {
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    padding-top: 2px;
-    font-family: var(--mono);
-  }
-
-  .pill {
-    display: inline-block;
-    padding: 1px 6px;
-    border-radius: var(--r-sm);
-    margin: 1px 4px 1px 0;
-    font-size: var(--fs-sm);
-  }
-
-  /* ADR-0044's one-colour rule: the tint says which version the text belongs
-     to, so an item unchanged between was/now carries none (#2125). */
-  .pill.same {
-    background: transparent;
-    color: var(--text);
-    box-shadow: inset 0 0 0 1px var(--divider);
-  }
-
-  .pill-was {
-    background: var(--diff-was-soft);
-    color: var(--diff-was);
-    box-shadow: inset 0 0 0 1px var(--diff-was-edge);
-  }
-
-  .pill-now {
-    background: var(--diff-now-soft);
-    color: var(--diff-now);
-    box-shadow: inset 0 0 0 1px var(--diff-now-edge);
-  }
-
-  .propagate-prose {
-    margin-top: 12px;
-    border-top: 1px solid var(--divider);
-    padding-top: 12px;
-  }
-
-  .legend {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    margin-top: 12px;
+  /* The shared SplitHandle sits in the grid's own middle column here (unlike
+     the rail's absolute-inset use) — a normal grid track, not an overlay. */
+  .propagate-body > :global(.propagate-divider) {
+    width: 7px;
+    align-self: stretch;
   }
 
   .propagate-foot {

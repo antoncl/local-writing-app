@@ -9,13 +9,14 @@
   //
   // It owns its own size: a drag handle on the inner edge (left when right-docked,
   // top when bottom-docked), clamped so the rail can never collapse the body.
-  // Document-level mousemove/mouseup deliberately, the same as the pane drag in
-  // App.svelte — the pointer leaves the 7px handle constantly.
+  // The gesture itself (ADR-0091 §7) is the shared `SplitHandle` widget — this
+  // component keeps only the clamp and persistence, in the drag callbacks.
   //
   // The content is a snippet rather than props: the rail does not know or care
   // what a metadata panel needs, and threading its long prop list through here
   // would make this component a second place to maintain that list.
   import type { Snippet } from "svelte";
+  import SplitHandle from "@/components/widgets/SplitHandle.svelte";
   import {
     editorRailLayout as layout,
     RAIL_WIDTH_MIN,
@@ -58,8 +59,11 @@
   // grows the rail.
   let anchorEdge = 0;
 
-  function startResize(event: MouseEvent) {
-    event.preventDefault();
+  // The three `SplitHandle` callbacks: this component keeps only the clamp and
+  // the persistence, matching every host's contract (ADR-0091 §7) — the drag
+  // gesture itself (preventDefault, the document-level listeners) lives in
+  // the shared widget now.
+  function onDragStart(event: MouseEvent) {
     resizing = true;
     const rect = railEl?.getBoundingClientRect();
     anchorEdge =
@@ -67,18 +71,16 @@
         ? (rect?.bottom ?? event.clientY + layout.height)
         : (rect?.right ?? event.clientX + layout.width);
   }
-  function onResizeMove(event: MouseEvent) {
-    if (!resizing) return;
+  function onDrag(event: MouseEvent) {
     // Live-set the store state during the drag (drives the layout reactively);
-    // persistence happens once on mouseup so we don't hammer localStorage.
+    // persistence happens once on drag end so we don't hammer localStorage.
     if (side === "bottom") {
       layout.height = Math.min(RAIL_HEIGHT_MAX, Math.max(RAIL_HEIGHT_MIN, anchorEdge - event.clientY));
     } else {
       layout.width = Math.min(RAIL_WIDTH_MAX, Math.max(RAIL_WIDTH_MIN, anchorEdge - event.clientX));
     }
   }
-  function endResize() {
-    if (!resizing) return;
+  function onDragEnd() {
     resizing = false;
     if (side === "bottom") layout.setHeight(layout.height);
     else layout.setWidth(layout.width);
@@ -88,8 +90,6 @@
     layout.setSide(side === "right" ? "bottom" : "right");
   }
 </script>
-
-<svelte:window onmousemove={onResizeMove} onmouseup={endResize} />
 
 {#if detached}
   <!-- Detached: the content lives in its own subordinate pane (#1258). The rail
@@ -115,14 +115,14 @@
     bind:this={railEl}
     aria-label={label}
   >
-    <button
-      class="rail-resize"
-      class:bottom={side === "bottom"}
-      type="button"
-      title="Drag to resize details"
-      aria-label="Resize details rail"
-      onmousedown={startResize}
-    ></button>
+    <SplitHandle
+      orientation={side === "bottom" ? "horizontal" : "vertical"}
+      label="Resize details rail"
+      {onDragStart}
+      {onDrag}
+      {onDragEnd}
+      class={side === "bottom" ? "rail-resize bottom" : "rail-resize"}
+    />
     <div class="rail-head">
       <span class="rail-head-label">Details</span>
       <button
@@ -201,39 +201,26 @@
     border-top: 1px solid var(--divider);
   }
 
-  /* Drag handle: left edge for the right dock (col-resize), top edge for the
-     bottom dock (row-resize). */
-  .rail-resize {
+  /* Drag handle placement only (ADR-0091 §7): the gesture, the hover/dragging
+     accent stripe, and the cursor all live in the shared `SplitHandle` widget
+     now — this is `:global()` (valid inside a Svelte scoped block, unlike a
+     plain .css file) because the class is passed INTO a child component, so
+     it never carries the rail's own scope attribute. Left edge for the right
+     dock, top edge for the bottom dock. */
+  :global(.rail-resize) {
     position: absolute;
     top: 0;
     left: -3px;
     width: 7px;
     height: 100%;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    cursor: col-resize;
     z-index: 5;
   }
 
-  .rail-resize.bottom {
+  :global(.rail-resize.bottom) {
     top: -3px;
     left: 0;
     width: 100%;
     height: 7px;
-    cursor: row-resize;
-  }
-
-  .rail-resize:hover,
-  .editor-rail.resizing .rail-resize {
-    background: linear-gradient(to right, transparent 0 2px, var(--accent) 2px 4px, transparent 4px);
-  }
-
-  .rail-resize.bottom:hover,
-  .editor-rail.resizing .rail-resize.bottom {
-    background: linear-gradient(to bottom, transparent 0 2px, var(--accent) 2px 4px, transparent 4px);
   }
 
   .editor-rail.resizing {

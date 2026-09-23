@@ -77,3 +77,16 @@ export function notchTooltip(snapshot: Snapshot, now: Date = new Date()): string
   const base = snapshot.retention === "kept" ? `Snapshot · ${when} · kept` : `Snapshot · ${when}`;
   return snapshot.description ? `${base} — ${snapshot.description}` : base;
 }
+
+/**
+ * A DELIBERATE EXCEPTION to this file's own rule (ADR-0091 §7): the Propagate
+ * pane's "since" selector and its nothing-changed sentence read a snapshot's
+ * age by **capture** time, not content time. `notchWhen`'s reasoning (the
+ * strip lays out by when the WRITING happened) doesn't hold here — "since"
+ * measures from when the propagation baseline was TAKEN, and the diff column's
+ * nothing-changed state is asking "how long since I last confirmed", not "how
+ * old is this prose".
+ */
+export function notchWhenCaptured(snapshot: Snapshot | null | undefined, now: Date = new Date()): string {
+  return relativeTime(snapshot?.captured_at ?? "", now);
+}

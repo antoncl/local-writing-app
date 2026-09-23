@@ -31,7 +31,7 @@ describe("propagate store (ADR-0090)", () => {
     propagate.close();
   });
 
-  it("open() shows the pane at once, loads candidates, and applies the kept defaults", async () => {
+  it("open() shows the pane at once, loads candidates, and applies the kept+fold defaults from the diff", async () => {
     const listCandidates = vi.spyOn(api, "listChangeCandidates").mockResolvedValue(candidateSet());
     const listSnapshots = vi
       .spyOn(api, "listNodeSnapshots")
@@ -48,13 +48,55 @@ describe("propagate store (ADR-0090)", () => {
     expect(listCandidates).toHaveBeenCalledWith("lore_marek");
     expect(listSnapshots).toHaveBeenCalledWith("lore_marek");
     expect(propagate.candidates?.source_id).toBe("lore_marek");
-    // Declared + marker_untouched kept; mention unkept.
+    // body_changed: true — ADR-0091 §2's prose case: every group starts kept
+    // and unfolded, mentions included.
+    expect(propagate.kept.has("c1")).toBe(true);
+    expect(propagate.kept.has("c2")).toBe(true);
+    expect(propagate.kept.has("c3")).toBe(true);
+    expect(propagate.folded.size).toBe(0);
+  });
+
+  it("a fields-only change (body unchanged) keeps declared+markers, folds and unkeeps mentions", async () => {
+    vi.spyOn(api, "listChangeCandidates").mockResolvedValue({ ...candidateSet(), body_changed: false });
+    vi.spyOn(api, "listNodeSnapshots").mockResolvedValue({ snapshots: [] } as SnapshotList);
+
+    await propagate.open("lore_marek", "Marek Vell");
+
     expect(propagate.kept.has("c1")).toBe(true);
     expect(propagate.kept.has("c2")).toBe(true);
     expect(propagate.kept.has("c3")).toBe(false);
-    // The mention tier is folded by default.
-    expect(propagate.folded.has("mention")).toBe(true);
+    expect(propagate.folded.has("mentions")).toBe(true);
     expect(propagate.folded.has("declared")).toBe(false);
+  });
+
+  it("a nothing-changed set keeps nothing and folds every group", async () => {
+    vi.spyOn(api, "listChangeCandidates").mockResolvedValue({
+      ...candidateSet(),
+      body_changed: false,
+      changed_fields: [],
+    });
+    vi.spyOn(api, "listNodeSnapshots").mockResolvedValue({ snapshots: [] } as SnapshotList);
+
+    await propagate.open("lore_marek", "Marek Vell");
+
+    expect(propagate.kept.size).toBe(0);
+    expect(propagate.folded.has("declared")).toBe(true);
+    expect(propagate.folded.has("markers")).toBe(true);
+    expect(propagate.folded.has("mentions")).toBe(true);
+  });
+
+  it("setBaseline (a 'since' change) re-applies the defaults, resetting the writer's own folds", async () => {
+    vi.spyOn(api, "listChangeCandidates").mockResolvedValue(candidateSet());
+    vi.spyOn(api, "listNodeSnapshots").mockResolvedValue({ snapshots: [] } as SnapshotList);
+    await propagate.open("lore_marek", "Marek Vell");
+    propagate.toggleFold("declared"); // the writer's own fold
+
+    vi.spyOn(api, "listChangeCandidates").mockResolvedValue({ ...candidateSet(), body_changed: false });
+    await propagate.setBaseline("snap_0");
+
+    // The since change re-derives from the NEW diff, not the writer's prior fold.
+    expect(propagate.folded.has("declared")).toBe(false);
+    expect(propagate.folded.has("mentions")).toBe(true);
   });
 
   it("confirm() posts exactly the kept ids and the resolved baseline, then removes the panel", async () => {
@@ -78,14 +120,14 @@ describe("propagate store (ADR-0090)", () => {
     const removePanel = vi.spyOn(workspaceLayout, "removePanel");
 
     await propagate.open("lore_marek", "Marek Vell");
-    // Un-keep the mention candidate stays unkept by default; keep only c1/c2.
-    expect([...propagate.kept].sort()).toEqual(["c1", "c2"]);
+    // body_changed: true — every candidate starts kept.
+    expect([...propagate.kept].sort()).toEqual(["c1", "c2", "c3"]);
 
     await propagate.confirm();
 
     expect(propagateChange).toHaveBeenCalledWith("lore_marek", {
       baseline_snapshot_id: "snap_1",
-      kept: ["c1", "c2"],
+      kept: ["c1", "c2", "c3"],
     });
     expect(removePanel).toHaveBeenCalledWith("propagate");
     expect(propagate.sourceId).toBeNull();

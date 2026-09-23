@@ -28,6 +28,13 @@ commit, the second call sees the same set as stable. The cache builds up
 naturally over the session.
 
 No expiry yet. Callers drop sessions explicitly via `registry.drop(session_id)`.
+
+ADR-0093 §2: `baseline`/`touched` are keyed by whatever a placed thing is named
+by a string — a lore entry's node id, or a `use(node, snapshot=id)` before
+element's `"<entry_id>@<snapshot_id>"` key (`lore_budget.snapshot_pick_key`).
+`_place_before_elements` is the one caller that snapshots a before under its
+key, tiered by the same `use(node, "stable")` rule (ADR-0060 §5) `_tier_lore_ids`
+applies to ordinary entries.
 """
 
 from __future__ import annotations
@@ -37,7 +44,9 @@ from dataclasses import dataclass, field
 
 @dataclass
 class AISession:
-    """Per-target session state. `id` is caller-supplied (typically a scene_id)."""
+    """Per-target session state. `id` is caller-supplied (typically a scene_id).
+    `baseline`/`touched` keys are node ids or, for a snapshot pick's before
+    element, its `"<entry_id>@<snapshot_id>"` key (ADR-0093 §2)."""
 
     id: str
     baseline: dict[str, str] = field(default_factory=dict)

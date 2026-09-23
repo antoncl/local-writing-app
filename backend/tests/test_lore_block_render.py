@@ -13,6 +13,7 @@ from test_ai_helpers import _HelperFixtureBase
 
 from app.models import SaveLoreEntryRequest
 from app.services.ai.helpers import create_environment_for_project
+from app.services.ai.lore_block import _render_node_xml
 from app.services.ai.lore_selection import _relevant_lore
 from app.services.ai.templates import render_template
 
@@ -137,6 +138,30 @@ class XmlOutputStructureTests(_HelperFixtureBase):
             "Honor &quot;The Salamander&quot; Harrington" in text
             or "Honor \"The Salamander\" Harrington" in text,
             text,
+        )
+
+    def test_extra_attrs_render_after_aliases_quoted(self) -> None:
+        # ADR-0093 §2: `extra_attrs` is how a before element carries
+        # `snapshot`/`captured` — rendered after `aliases`, each quoted via
+        # `quoteattr` like every other attribute.
+        self._update_lore(
+            self.honor["id"],
+            entry_type="lore:character",
+            metadata={"aliases": ["The Salamander"]},
+            body="Captain of the Fearless.",
+        )
+        entry = self.service.read_lore_entry(self.honor["id"])
+        schema = self.service.read_metadata_schema()
+        xml = _render_node_xml(
+            self.service,
+            schema,
+            entry,
+            self.honor["id"],
+            {},
+            extra_attrs={"snapshot": "snap_1", "captured": "2026-01-01T00:00:00"},
+        )
+        self.assertIn(
+            'aliases="The Salamander" snapshot="snap_1" captured="2026-01-01T00:00:00"', xml
         )
 
     def test_story_so_far_wraps_in_story_so_far(self) -> None:

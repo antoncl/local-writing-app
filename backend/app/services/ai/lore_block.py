@@ -198,6 +198,7 @@ def _render_node_xml(
     entry: Any,
     entry_id: str,
     overrides: dict[str, Any],
+    extra_attrs: dict[str, str] | None = None,
 ) -> str:
     """Render one node as an XML block carrying its informative fields.
 
@@ -209,7 +210,8 @@ def _render_node_xml(
     decides which); an `entity_ref` renders as `<field id="...">Target Name</field>`
     so the model can read the legible name AND join to the target's own block by
     id. `body` trails as its own element. Values honor the (scene, position)
-    `effective_state` overlay already applied by the caller.
+    `effective_state` overlay already applied by the caller. `extra_attrs` is
+    how a before element carries `snapshot`/`captured` (ADR-0093 §2).
     """
     entry_type = str(_attr_or_item(entry, "entry_type") or "lore:base")
     # `split(":", 1)[-1]` strips only the kind, so a nested key keeps its
@@ -226,6 +228,8 @@ def _render_node_xml(
     aliases = _effective_aliases(entry, overrides)
     if aliases:
         attrs.append(f"aliases={quoteattr(', '.join(aliases))}")
+    for k, v in (extra_attrs or {}).items():
+        attrs.append(f"{k}={quoteattr(v)}")
     attr_str = " ".join(attrs)
 
     lines = _render_node_field_lines(project, schema, entry, entry_type, overrides)

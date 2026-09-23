@@ -22,8 +22,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
+import gen_prompt_vocab  # noqa: E402
 from check_prompt_vocab_docs import Vocab, _diff_problems  # noqa: E402
-from prompt_vocab import parse_reference  # noqa: E402
+from prompt_vocab import load_reference, parse_reference  # noqa: E402
 
 _REFERENCE_FIXTURE = """\
 ## Variables
@@ -130,6 +131,22 @@ class DeprecatedGateTests(unittest.TestCase):
             any("`auto_lore` is listed as both a helper and deprecated" in p for p in problems),
             problems,
         )
+
+
+class RealReferenceTests(unittest.TestCase):
+    """ADR-0093 §1: the real `docs/prompts/reference.md` and its generated
+    manifest, not the fixture above."""
+
+    def test_use_row_parses_with_the_snapshot_keyword(self) -> None:
+        symbols = parse_reference(load_reference())
+        by_name = {s.name: s for s in symbols}
+        self.assertIn("use", by_name)
+        self.assertEqual(by_name["use"].kind, "helper")
+        self.assertIn("snapshot=id", by_name["use"].signature)
+
+    def test_committed_manifest_equals_the_generators_output(self) -> None:
+        current = gen_prompt_vocab.OUT.read_text(encoding="utf-8")
+        self.assertEqual(current, gen_prompt_vocab.render())
 
 
 if __name__ == "__main__":

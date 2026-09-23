@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 from jinja2 import TemplateError, TemplateNotFound, TemplateSyntaxError, UndefinedError
 
-from app.models import LoreFit, PreviewCacheBlock
+from app.models import LoreFit, PreviewCacheBlock, PreviewCacheSnapshot
 from app.services.ai import tokens as ai_tokens
 from app.services.ai.call_resolver import ResolvedCall
 from app.services.ai.entry_ref import ProjectInfoRef
@@ -30,7 +30,7 @@ from app.services.ai.helpers import (
     _coerce_entry_ref,
     create_environment_for_project,
 )
-from app.services.ai.lore_budget import LoreLimits
+from app.services.ai.lore_budget import BeforeElement, LoreLimits, LorePicks
 from app.services.ai.profiles.cache_strategy import CachePlan
 from app.services.ai.profiles.registry import profile_for
 from app.services.ai.selector_eval import (
@@ -695,6 +695,10 @@ def _annotate_rendered_from_env(
     # ADR-0060 §5: carry the per-node volatility priors (set by `use(node, hint)`)
     # so the chat can persist `used_node_hints` and the send path's tiering reads them.
     rendered.used_node_hints = dict(getattr(env, "used_hints", {}) or {})
+    # ADR-0093 §1: carry the `use(node, snapshot=id)` pairs off the env onto the
+    # rendered result, so the chat can persist `used_snapshots` and the send
+    # path places the before elements.
+    rendered.used_snapshots = list(getattr(env, "used_snapshots", []) or [])
     # ADR-0067 S2: carry the registered field-contract set off the env (set by
     # `{% do field_contract.store(f) %}`) onto the rendered result, so the chat
     # can persist `field_contract_stored` and the commit reads it back instead
@@ -704,13 +708,16 @@ def _annotate_rendered_from_env(
     # env onto the rendered result's warnings, so they ride `warnings` wherever
     # it already shows — the meta line, the inputs dialog, the editor preview.
     rendered.warnings.extend(getattr(env, "deprecation_notices", []) or [])
+    # ADR-0093 §1: carry any render-time warnings (e.g. an unresolved snapshot
+    # pick) off the env onto the rendered result's warnings.
+    rendered.warnings.extend(getattr(env, "render_warnings", []) or [])
     # ADR-0060 §6, narrowed by ADR-0092 §7.1: compute the send-path lore the
     # model will receive so the cache-aware preview can surface it (templates
     # no longer emit lore). For a lore-enabled prompt OR one that merely
-    # carries `use()` picks — the pick-only mirror runs with `automatic=False`
-    # (no detection, picks alone); `scene` is the same as-of anchor the send
-    # path resolves.
-    if rendered.lore_invoked or rendered.used_node_ids:
+    # carries `use()` picks or snapshot picks — the pick-only mirror runs with
+    # `automatic=False` (no detection, picks alone); `scene` is the same as-of
+    # anchor the send path resolves.
+    if rendered.lore_invoked or rendered.used_node_ids or rendered.used_snapshots:
         _apply_preview_lore_tiers(
             rendered,
             _preview_lore_tiers(
@@ -733,6 +740,9 @@ def _apply_preview_lore_tiers(rendered: RenderedTemplate, tiers: _PreviewLoreTie
     rendered.send_lore_volatile_entries = dict(tiers.volatile_entries)
     rendered.send_lore_fit = tiers.fit
     rendered.send_lore_left_out_entries = dict(tiers.left_out_entries)
+    rendered.send_lore_stable_snapshots = tiers.stable_snapshots
+    rendered.send_lore_volatile_snapshots = tiers.volatile_snapshots
+    rendered.warnings.extend(tiers.warnings)
 
 
 @dataclass
@@ -742,7 +752,10 @@ class _PreviewLoreTiers:
     Context door drills into (ADR-0076 S7), plus the budget fit that decided
     the kept set and the left-out entries' own elements (ADR-0086 §5). Ids
     derive from the entry pairs, so a separate readability filter is
-    unnecessary — `_render_lore_entries` already skips unreadable nodes."""
+    unnecessary — `_render_lore_entries` already skips unreadable nodes.
+    ADR-0093 §2: `stable_snapshots`/`volatile_snapshots` are the before
+    elements placed on each tier — never folded into the entry pairs above —
+    and `warnings` names a before the reader couldn't produce."""
 
     stable_xml: str
     volatile_xml: str
@@ -750,6 +763,9 @@ class _PreviewLoreTiers:
     volatile_entries: list[tuple[str, str]]
     fit: LoreFit | None = None
     left_out_entries: dict[str, str] = field(default_factory=dict)
+    stable_snapshots: list[BeforeElement] = field(default_factory=list)
+    volatile_snapshots: list[BeforeElement] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def _preview_lore_tiers(
@@ -790,6 +806,11 @@ def _preview_lore_tiers(
     from app.services.ai.lore_selection import _budgeted_lore_tiers
     from app.services.ai.sessions import AISession
 
+    picks = LorePicks(
+        list(rendered.used_node_ids or []),
+        dict(rendered.used_node_hints or {}),
+        list(rendered.used_snapshots or []),
+    )
     if automatic:
         rendered_system_text = "\n\n".join(
             m.text for m in rendered.messages if m.role == "system" and m.text.strip()
@@ -816,19 +837,21 @@ def _preview_lore_tiers(
         project_service,
         scene,
         preview_journal,
-        list(rendered.used_node_ids or []),
+        picks,
         session=AISession(id="preview"),
-        hints=dict(rendered.used_node_hints or {}),
         limits=lore_limits,
         automatic=automatic,
     )
     return _PreviewLoreTiers(
-        _wrap_lore_block(tiers.stable_entries),
-        _wrap_lore_block(tiers.volatile_entries),
+        _wrap_lore_block(tiers.stable_pairs()),
+        _wrap_lore_block(tiers.volatile_pairs()),
         tiers.stable_entries,
         tiers.volatile_entries,
         tiers.report,
         tiers.left_out_entries,
+        tiers.stable_snapshots,
+        tiers.volatile_snapshots,
+        tiers.warnings,
     )
 
 
@@ -953,8 +976,12 @@ def _preview_send_blocks(
         tier: str | None,
         entry_ids: list[str] | None = None,
         entry_xml: dict[str, str] | None = None,
+        snapshots: list[BeforeElement] | None = None,
     ) -> None:
         if text.strip():
+            xml = dict(entry_xml or {})
+            for before in snapshots or []:
+                xml[before.key] = before.xml
             blocks.append(
                 PreviewCacheBlock(
                     label=label,
@@ -963,7 +990,17 @@ def _preview_send_blocks(
                     tier=tier,
                     text=text,
                     entry_ids=list(entry_ids or []),
-                    entry_xml=dict(entry_xml or {}),
+                    entry_xml=xml,
+                    snapshots=[
+                        PreviewCacheSnapshot(
+                            entry_id=before.entry_id,
+                            snapshot_id=before.snapshot_id,
+                            captured_at=before.captured_at,
+                            title=before.title,
+                            key=before.key,
+                        )
+                        for before in (snapshots or [])
+                    ],
                 )
             )
 
@@ -973,13 +1010,18 @@ def _preview_send_blocks(
     add("system", "system", system_text, "stable")
     # ADR-0076 S2/S7: the tier's member ids and per-entry XML ride along for the
     # Context door's drill (entries, then each entry down to its own element).
+    # ADR-0093 §3: the tier's before elements ride along too, in `snapshots`
+    # and merged into `entry_xml` under their own key — `entry_ids` stays
+    # node ids only.
     add(
         "stable lore", "system", rendered.send_lore_stable, "stable",
         rendered.send_lore_stable_ids, rendered.send_lore_stable_entries,
+        rendered.send_lore_stable_snapshots,
     )
     add(
         "volatile lore", "system", rendered.send_lore_volatile, "volatile",
         rendered.send_lore_volatile_ids, rendered.send_lore_volatile_entries,
+        rendered.send_lore_volatile_snapshots,
     )
     for message in rendered.messages:
         if message.role != "system":

@@ -1,7 +1,10 @@
 # ADR-0091: A lore change is carried to the entries it affects; the app finds them and drafts, the writer decides
 
-- **Status:** Proposed — 2026-09-22; text by Claude from Anton's dogfooding of ADR-0090 the
-  same day. **Supersedes ADR-0090** and its four amendments, which stay in the tree as history.
+- **Status:** Accepted — 2026-09-23, Anton Lauridsen; text by Claude from Anton's dogfooding of
+  ADR-0090 on 2026-09-22, revised against three cold implementing threads' findings before
+  acceptance (PR #2134). **Supersedes ADR-0090** and its four amendments, which stay in the
+  tree as history. Acceptance alone starts nothing: each slice gets its own issue and an
+  explicit go.
   The code ADR-0090 shipped (PRs #2118, #2120, #2122, #2123, #2127, #2128, #2130) stays; §Slices
   says what of it this ADR keeps unchanged, what it changes, and what it adds.
 - **Feature:** keeping related lore entries consistent when one of them changes (#2131, #2132,

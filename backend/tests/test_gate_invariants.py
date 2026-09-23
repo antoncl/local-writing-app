@@ -669,10 +669,15 @@ def test_inline_svgs_splices_a_ref_into_a_marked_safe_block(tmp_path):
     assert body.startswith("<svg ") and body.rstrip().endswith("</svg>")
 
 
-def test_the_ollama_guide_bundles_its_diagrams_inline():
+# Every diagram the guides ship: Ollama context (3) + What the AI sees (4, #2148).
+# A new diagram-bearing guide raises this on purpose, beside GuideView.svg.test.ts.
+_BUNDLED_DIAGRAMS = 7
+
+
+def test_the_diagram_guides_bundle_their_diagrams_inline():
     """The shipped bundle carries raw <svg>, not image refs the viewer can't load."""
     bundle = gen_guides.render()
-    assert bundle.count("<svg ") == 3
+    assert bundle.count("<svg ") == _BUNDLED_DIAGRAMS
     assert ".svg)" not in bundle, "an `![](*.svg)` ref survived inlining"
 
 
@@ -680,7 +685,8 @@ def test_referenced_svgs_actually_finds_the_diagrams():
     """Guards against a vacuous coverage pass: the discovery must not be empty."""
     svgs = gen_guides._referenced_svgs()
     assert "docs/ollama-context/default-vs-fitted.svg" in svgs
-    assert len(svgs) == 3
+    assert "docs/ai-context/two-halves.svg" in svgs
+    assert len(svgs) == _BUNDLED_DIAGRAMS
 
 
 def test_coverage_guard_catches_a_diagram_missing_from_the_filter(monkeypatch):

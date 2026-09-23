@@ -12,6 +12,7 @@ from app.models import (
     CreateChatSessionRequest,
     CreateLoreEntryRequest,
     SaveChatSessionRequest,
+    SnapshotPick,
 )
 
 
@@ -435,6 +436,71 @@ class ChatSeenRevisionsTests(unittest.TestCase):
         self.assertEqual(self.service.read_chat_session(chat.id).seen_revisions, {})
 
 
+class ChatUsedSnapshotsTests(unittest.TestCase):
+    """ADR-0093 §1: `used_snapshots` — the `use(node, snapshot=id)` picks,
+    echoed like `used_node_hints` (None = leave alone; a list, even [], is
+    the new value)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Used Snapshots Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_persist_round_trips(self) -> None:
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        saved = self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="T",
+                used_snapshots=[SnapshotPick(entry_id="lore-1", snapshot_id="snap-1")],
+            ),
+        )
+        self.assertEqual(
+            saved.used_snapshots, [SnapshotPick(entry_id="lore-1", snapshot_id="snap-1")]
+        )
+        self.assertEqual(
+            self.service.read_chat_session(chat.id).used_snapshots,
+            [SnapshotPick(entry_id="lore-1", snapshot_id="snap-1")],
+        )
+
+    def test_none_preserves_the_existing_value(self) -> None:
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="T",
+                used_snapshots=[SnapshotPick(entry_id="lore-1", snapshot_id="snap-1")],
+            ),
+        )
+        # A general save (rename, no used_snapshots) must not drop the captured value.
+        saved = self.service.save_chat_session(chat.id, SaveChatSessionRequest(title="Renamed"))
+        self.assertEqual(
+            saved.used_snapshots, [SnapshotPick(entry_id="lore-1", snapshot_id="snap-1")]
+        )
+        self.assertEqual(
+            self.service.read_chat_session(chat.id).used_snapshots,
+            [SnapshotPick(entry_id="lore-1", snapshot_id="snap-1")],
+        )
+
+    def test_empty_list_clears_the_value(self) -> None:
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="T",
+                used_snapshots=[SnapshotPick(entry_id="lore-1", snapshot_id="snap-1")],
+            ),
+        )
+        saved = self.service.save_chat_session(
+            chat.id, SaveChatSessionRequest(title="T", used_snapshots=[])
+        )
+        self.assertEqual(saved.used_snapshots, [])
+        self.assertEqual(self.service.read_chat_session(chat.id).used_snapshots, [])
+
+
 class ChatChangedPicksTests(unittest.TestCase):
     """#1635: `chat_changed_picks` — picked lore whose current revision differs
     from what the AI last saw."""
@@ -517,6 +583,28 @@ class ChatChangedPicksTests(unittest.TestCase):
                 title="T",
                 used_node_ids=["sc1"],
                 seen_revisions={"sc1": "whatever"},
+            ),
+        )
+        self.assertEqual(self.service.chat_changed_picks(chat.id), [])
+
+    def test_a_snapshot_pick_key_in_seen_revisions_is_never_named_as_an_edited_pick(
+        self,
+    ) -> None:
+        # ADR-0093 §2: `chat_changed_picks` iterates picks (`used_node_ids`),
+        # never `seen_revisions`' keys — so a snapshot pick's
+        # `"<entry_id>@<snapshot_id>"` key, stale or not, is never surfaced
+        # as an "edited" pick.
+        entry = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Aurora", entry_type="lore:character")
+        )
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        key = f"{entry.id}@snap_1"
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="T",
+                # No used_node_ids: `entry` is reachable only via the snapshot key.
+                seen_revisions={key: "stale-revision"},
             ),
         )
         self.assertEqual(self.service.chat_changed_picks(chat.id), [])

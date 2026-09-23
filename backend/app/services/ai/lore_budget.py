@@ -16,12 +16,21 @@ is `lore_selection._budgeted_lore_tiers`.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Literal, get_args
 
 from app.models import LoreFit, LoreFitEntry, LoreSource
 from app.services.ai.profiles.base import default_token_count
+
+
+def snapshot_pick_key(entry_id: str, snapshot_id: str) -> str:
+    """THE one spelling of a snapshot pick's key (ADR-0093 §2) — the string
+    that names a before element wherever a placed thing is named by a
+    string: the session baseline, `seen_revisions`, and the preview's
+    `entry_xml`."""
+    return f"{entry_id}@{snapshot_id}"
 
 # ADR-0086 §2: the resolver's default when the assistant leaves
 # `ai_lore_budget_tokens` blank (or sets it to something that isn't a
@@ -103,6 +112,37 @@ class InferredCandidate:
 
 
 @dataclass(frozen=True)
+class BeforeElement:
+    """A `use(node, snapshot=id)` pick's rendered before element (ADR-0093
+    §2): the entry as it was at a snapshot. `key` — `snapshot_pick_key`'s one
+    spelling — names it wherever a placed thing is named by a string;
+    `revision` is the hash of its rendered bytes, checked against the session
+    baseline under that key to decide its tier."""
+
+    entry_id: str
+    snapshot_id: str
+    captured_at: str
+    title: str
+    key: str
+    xml: str
+
+    @property
+    def revision(self) -> str:
+        return hashlib.sha256(self.xml.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class LorePicks:
+    """The chat's declared picks handed to the selector (ADR-0060 §2/§5 +
+    ADR-0093 §1): the plain `use(node)` ids, their volatility hints, and the
+    `use(node, snapshot=id)` pairs (entry_id, snapshot_id)."""
+
+    ids: list[str]
+    hints: dict[str, str]
+    snapshots: list[tuple[str, str]]
+
+
+@dataclass(frozen=True)
 class LoreSelection:
     """The selector's two sets (ADR-0086 §1). `declared` is never dropped;
     `inferred` is already minus `declared` (precedence: an id reachable both
@@ -141,6 +181,21 @@ class BudgetedLoreTiers:
     report: LoreFit = field(default_factory=lambda: LoreFit(
         budget_tokens=0, used_tokens=0, declared_tokens=0, kept=0
     ))
+    # ADR-0093 §2: the before elements placed in each tier, key-sorted; a
+    # before never joins `stable_entries`/`volatile_entries` (id lists), so it
+    # can never dedupe into the after. `warnings` names a before that could
+    # not be produced (a thinned snapshot, a gone lane, a deleted source).
+    stable_snapshots: list[BeforeElement] = field(default_factory=list)
+    volatile_snapshots: list[BeforeElement] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def stable_pairs(self) -> list[tuple[str, str]]:
+        """Befores first (already key-sorted), then the id-sorted entries —
+        the model reads before then after."""
+        return [(b.key, b.xml) for b in self.stable_snapshots] + self.stable_entries
+
+    def volatile_pairs(self) -> list[tuple[str, str]]:
+        return [(b.key, b.xml) for b in self.volatile_snapshots] + self.volatile_entries
 
 
 def fit_lore_budget(

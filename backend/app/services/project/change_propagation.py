@@ -28,6 +28,7 @@ from app.models import (
     TodoSource,
 )
 from app.services.ai.lore_block import _render_lore_entries, _render_node_xml
+from app.services.ai.lore_budget import BeforeElement, snapshot_pick_key
 from app.services.project.change_candidates import SCENE_ENTRY_TYPE
 from app.services.project.errors import ProjectServiceError
 from app.services.project.overrides import LayerOverride
@@ -118,6 +119,49 @@ class ChangePropagationMixin:
             )
         return CreateTodoRequest(text=text, scope="node", node_id=candidate.id, source=source)
 
+    def render_baseline_element(self, source_id: str, snapshot_id: str) -> BeforeElement:
+        """ADR-0093 §2: the ONE reader of a snapshot pick's before element —
+        extracted from what `change_message` did before this ADR. Reads the
+        baseline snapshot's bytes through `read_snapshot` (raises when the
+        snapshot is thinned or gone; the caller lets it propagate), folds in
+        every override delta lane's OWN baseline rows resolved by the same
+        "since" rule `change_candidates` uses (ADR-0091 §1 — the composite is
+        never a file, so it is folded here rather than read), and renders the
+        result with the same `_render_node_xml` the live render uses, so the
+        before is an entry as the AI sees one, at an earlier time. It
+        canonicalises the id through the index and returns the entry id, the
+        snapshot id, the capture time, the title (the live roster's, falling
+        back to the snapshot's) and the XML."""
+        index = self._build_node_index()
+        source = index.canonical_id(source_id)
+        source_entry = index.by_id.get(source)
+        if source_entry is None or source_entry.kind != "lore":
+            raise ProjectServiceError("Unknown lore entry.", 404)
+        kind = self.node_snapshot_kind(source)
+        detail = self.read_snapshot(source, snapshot_id, kind=kind)
+        schema = self.read_metadata_schema()
+        folded_metadata = self._fold_propagation_baseline_metadata(
+            source, kind, detail.metadata, schema, detail.snapshot
+        )
+        before_entry = {
+            "title": detail.title,
+            "metadata": folded_metadata,
+            "body": detail.body,
+            "entry_type": source_entry.entry_type,
+        }
+        xml = _render_node_xml(
+            self,
+            schema,
+            before_entry,
+            source,
+            {},
+            extra_attrs={"snapshot": snapshot_id, "captured": detail.snapshot.captured_at},
+        )
+        title = source_entry.title or detail.title
+        return BeforeElement(
+            source, snapshot_id, detail.snapshot.captured_at, title, snapshot_pick_key(source, snapshot_id), xml
+        )
+
     def change_message(
         self, source_id: str, baseline_snapshot_id: str | None = None
     ) -> ChangeMessage:
@@ -129,12 +173,8 @@ class ChangePropagationMixin:
 
         `now` is the source rendered exactly as the AI already sees a lore
         entry (`_render_lore_entries` — the folded, live entry); `before`
-        (only when a baseline resolved) reads the baseline snapshot's bytes
-        through `read_snapshot`, folds in every override delta lane's OWN
-        baseline rows resolved by the same "since" rule `change_candidates`
-        uses (ADR-0091 §1 — the composite is never a file, so it is folded
-        here rather than read), and renders the result with the same
-        `_render_node_xml` the live render uses, so the two sides are entries
+        (only when a baseline resolved) is read by the one shared reader,
+        `render_baseline_element` (ADR-0093 §2), so the two sides are entries
         as the AI sees them, at two times."""
         index = self._build_node_index()
         source = index.canonical_id(source_id)
@@ -148,19 +188,8 @@ class ChangePropagationMixin:
         now_xml = now_pairs[0][1] if now_pairs else ""
 
         if resolved_baseline:
-            kind = self.node_snapshot_kind(source)
-            detail = self.read_snapshot(source, resolved_baseline, kind=kind)
-            schema = self.read_metadata_schema()
-            folded_metadata = self._fold_propagation_baseline_metadata(
-                source, kind, detail.metadata, schema, detail.snapshot
-            )
-            before_entry = {
-                "title": detail.title,
-                "metadata": folded_metadata,
-                "body": detail.body,
-                "entry_type": source_entry.entry_type,
-            }
-            before_xml = _render_node_xml(self, schema, before_entry, source, {})
+            element = self.render_baseline_element(source, resolved_baseline)
+            before_xml = element.xml
             text = (
                 f"{title} changed since the last propagation.\n\n"
                 f"Before:\n{before_xml}\n\n"

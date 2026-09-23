@@ -173,3 +173,73 @@ def test_a_pick_only_chats_commit_turn_reaches_the_provider_system_blocks(tmp_pa
     # rather than the raw XML attribute syntax.
     assert entry.id in wire
     assert "A picked aside" in wire
+
+
+# --- ADR-0093 §2: a snapshot pick's before element reaches the wire too. ---
+
+
+def test_a_snapshot_picks_before_element_reaches_the_provider_system_blocks(
+    tmp_path, monkeypatch
+) -> None:
+    # `use(node, snapshot=id)`'s before element rides the stable tier on every
+    # turn — the same last-mile invariant the pick-only case above guards,
+    # for the before's own `snapshot=` attribute.
+    monkeypatch.setattr(
+        "app.services.machine_settings.config_path",
+        lambda: tmp_path / "machine_settings.yaml",
+    )
+    from app.models import (
+        CreateChatSessionRequest,
+        CreateLoreEntryRequest,
+        SaveChatSessionRequest,
+        SaveLoreEntryRequest,
+        SnapshotPick,
+    )
+    from app.services.ai.chat import expand_and_prepare_chat_blocks
+    from app.services.ai.profiles.openai import OpenAIProfile
+    from app.services.project_service import ProjectService
+
+    service = ProjectService.created_at(tmp_path / "project", "Wire Snapshot")
+    entry = service.create_lore_entry(
+        CreateLoreEntryRequest(title="Marek Vell", entry_type="lore:character")
+    )
+    entry = service.save_lore_entry(
+        entry.id,
+        SaveLoreEntryRequest(
+            title="Marek Vell",
+            body="A captain.",
+            base_revision=entry.revision,
+            entry_type="lore:character",
+            metadata={},
+        ),
+    )
+    snapshot = service.capture_snapshot(entry.id, kind="lore", origin="propagation")
+    chat = service.create_chat_session(
+        CreateChatSessionRequest(title="Follow a change", prompt_entry_id="p")
+    )
+    service.save_chat_session(
+        chat.id,
+        SaveChatSessionRequest(
+            title="Follow a change",
+            prompt_entry_id="p",
+            lore_enabled=False,
+            used_snapshots=[SnapshotPick(entry_id=entry.id, snapshot_id=snapshot.id)],
+        ),
+    )
+    prepared = expand_and_prepare_chat_blocks(
+        service, chat.id, "SYSTEM PROMPT", [{"role": "user", "content": "hi"}]
+    )
+    assert prepared.system_blocks
+    stable = [b for b in prepared.system_blocks if b.get("tier") == "stable"]
+    assert any(f'snapshot=\\"{snapshot.id}\\"' in json.dumps(b) for b in stable), stable
+    call = ChatCall(
+        model="test-model",
+        system_prompt="SYSTEM PROMPT",
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=128,
+        system_blocks=prepared.system_blocks,
+    )
+    profile = object.__new__(OpenAIProfile)
+    wire = _wire(profile._build_messages(call))
+    assert entry.id in wire
+    assert snapshot.id in wire

@@ -27,10 +27,12 @@ from app.services.ai.helpers import (
 from app.services.ai.lore_budget import (
     HOP_SOURCES,
     NAMED_SOURCES,
+    BeforeElement,
     BudgetedLoreTiers,
     InferredCandidate,
     LoreExpansion,
     LoreLimits,
+    LorePicks,
     LoreSelection,
     fit_lore_budget,
 )
@@ -40,6 +42,7 @@ from app.services.ai.name_matcher import (
     scan_name_matcher,
 )
 from app.services.ai.sessions import AISession
+from app.services.project.errors import ProjectServiceError
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
@@ -192,10 +195,9 @@ def _budgeted_lore_tiers(
     project: ProjectService,
     scene: Any,
     journal: list[Any] | None,
-    used_ids: list[str],
+    picks: LorePicks,
     *,
     session: AISession,
-    hints: dict[str, str],
     limits: LoreLimits,
     automatic: bool = True,
 ) -> BudgetedLoreTiers:
@@ -212,13 +214,18 @@ def _budgeted_lore_tiers(
     Rendering once is the point: the fit decides on rendered size, the tiers
     reuse the same pairs, and a left-out entry is named from the node the
     render already read. The caller owns what happens to `session` afterwards
-    (the send commits it; the preview's throwaway session is dropped)."""
+    (the send commits it; the preview's throwaway session is dropped).
+
+    `picks.snapshots` (ADR-0093 §2) are placed as their OWN before elements,
+    tiered by `_place_before_elements` against the same `session` — never
+    folded into the id-keyed entries above, so a before can't dedupe into
+    the after."""
     # Function-level import, as in `_relevant_lore`: `lore_block` imports leaf
     # accessors from `helpers`, so this stays out of the module header.
     from app.services.ai.lore_block import _render_lore_entries
 
     selection = _select_lore(
-        project, scene, journal, used_ids, expansion=limits.expansion, automatic=automatic
+        project, scene, journal, picks.ids, expansion=limits.expansion, automatic=automatic
     )
     index = project.build_mutations_index() if scene is not None else None
     titles: dict[str, str] = {}
@@ -226,7 +233,10 @@ def _budgeted_lore_tiers(
         _render_lore_entries(project, selection.ids, scene=scene, index=index, titles=titles)
     )
     fitted = fit_lore_budget(selection, rendered, limits.budget_tokens, titles=titles)
-    stable_ids, volatile_ids = _tier_lore_ids(project, fitted.kept_ids, session, hints)
+    stable_ids, volatile_ids = _tier_lore_ids(project, fitted.kept_ids, session, picks.hints)
+    stable_snapshots, volatile_snapshots, warnings = _place_before_elements(
+        project, picks.snapshots, session
+    )
     return BudgetedLoreTiers(
         stable_entries=[(i, rendered[i]) for i in stable_ids if i in rendered],
         volatile_entries=[(i, rendered[i]) for i in volatile_ids if i in rendered],
@@ -234,7 +244,56 @@ def _budgeted_lore_tiers(
             e.id: rendered[e.id] for e in fitted.report.left_out if e.id in rendered
         },
         report=fitted.report,
+        stable_snapshots=stable_snapshots,
+        volatile_snapshots=volatile_snapshots,
+        warnings=warnings,
     )
+
+
+def _place_before_elements(
+    project: ProjectService, snapshots: list[tuple[str, str]], session: AISession
+) -> tuple[list[BeforeElement], list[BeforeElement], list[str]]:
+    """ADR-0093 §2: render and tier every `use(node, snapshot=id)` pick's
+    before element. Deduped preserving order; a `never`-policy source loses
+    its before silently, as it loses its pick; a before the reader can't
+    produce (a thinned snapshot, a gone lane, a deleted source) places
+    nothing and adds one `warnings` entry — the send places what it can and
+    never fails on a missing before.
+
+    This IS the `use(node, "stable")` rule (§2): stable from the first turn,
+    volatile only when seen-and-changed, checked by the hash of the
+    element's rendered bytes against `session`'s baseline under its key —
+    never the base per-revision rule, whose cold-baseline start would make
+    every before volatile on turn one."""
+    if not snapshots:
+        return [], [], []
+    never = _never_lore_ids(project)
+    seen_pairs: list[tuple[str, str]] = []
+    for pair in snapshots:
+        if pair not in seen_pairs:
+            seen_pairs.append(pair)
+    stable: list[BeforeElement] = []
+    volatile: list[BeforeElement] = []
+    warnings: list[str] = []
+    for entry_id, snapshot_id in seen_pairs:
+        if entry_id in never:
+            continue
+        try:
+            element = project.render_baseline_element(entry_id, snapshot_id)
+        except ProjectServiceError as exc:
+            warnings.append(
+                f"Earlier state of {entry_id} (snapshot {snapshot_id}) could not be "
+                f"placed: {exc.message}"
+            )
+            continue
+        rev = element.revision
+        key = element.key
+        changed = session.seen(key) and not session.is_stable(key, rev)
+        session.snapshot(key, rev)
+        (volatile if changed else stable).append(element)
+    stable.sort(key=lambda b: b.key)
+    volatile.sort(key=lambda b: b.key)
+    return stable, volatile, warnings
 
 
 def _inferred_candidates(

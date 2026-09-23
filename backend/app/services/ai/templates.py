@@ -32,6 +32,7 @@ from jinja2.sandbox import SandboxedEnvironment
 
 if TYPE_CHECKING:
     from app.models import LoreFit
+    from app.services.ai.lore_budget import BeforeElement
 
 ROLE_START = "\x00ROLE_START:"
 ROLE_END = "\x00ROLE_END\x00"
@@ -73,12 +74,22 @@ class RenderedTemplate:
     # the send path's `_tier_lore_ids` as a revision-bounded placement bias. Empty
     # when no node carried a hint.
     used_node_hints: dict[str, str] = field(default_factory=dict)
+    # ADR-0093 §1: `(entry_id, snapshot_id)` pairs from `use(node, snapshot=id)`,
+    # in insertion order, deduped. Set by `build_preview` from the env's
+    # `used_snapshots` slot; persisted on the chat (`ChatSession.used_snapshots`)
+    # and placed in the stable lore block's before elements. Empty when the
+    # template made no snapshot pick.
+    used_snapshots: list[tuple[str, str]] = field(default_factory=list)
     # ADR-0060 §6: the send-path lore the model will receive, split into the two
     # tiers, computed cold (a fresh throwaway session) by `build_preview` so the
     # cache-aware preview can surface it — templates no longer emit lore. Empty when
     # the prompt is not lore-enabled or selects nothing.
     send_lore_stable: str = ""
     send_lore_volatile: str = ""
+    # ADR-0093 §2: the before elements placed in each tier, key-sorted, ahead of
+    # the tier's live entries. Empty when the render made no snapshot pick.
+    send_lore_stable_snapshots: list[BeforeElement] = field(default_factory=list)
+    send_lore_volatile_snapshots: list[BeforeElement] = field(default_factory=list)
     # ADR-0076 S2: the member entry ids behind each tier above, threaded out of
     # `_preview_lore_tiers` so the Context door's tier blocks can carry
     # `PreviewCacheBlock.entry_ids` for drill-down. Empty when not lore-enabled.

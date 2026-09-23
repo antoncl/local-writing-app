@@ -294,6 +294,26 @@ class PreviewMessage(BaseModel):
     blocks: list[PreviewContentBlock]
 
 
+class SnapshotPick(BaseModel):
+    """A `use(node, snapshot=id)` pick — a prompt naming an entry as it was at
+    a snapshot, alongside the entry as it is (ADR-0093 §1)."""
+
+    entry_id: str
+    snapshot_id: str
+
+
+class PreviewCacheSnapshot(BaseModel):
+    """One before element on a tier block (ADR-0093 §3): a snapshot pick's
+    rendered element, placed ahead of the block's live entries. `key` —
+    `"<entry_id>@<snapshot_id>"` — is also its key in `entry_xml`."""
+
+    entry_id: str
+    snapshot_id: str
+    captured_at: str
+    title: str
+    key: str
+
+
 class PreviewCacheBlock(BaseModel):
     """One block of the **send-path composition** the model will receive
     (ADR-0060 §6): the system prefix, the tier-tagged lore the backend places
@@ -322,8 +342,12 @@ class PreviewCacheBlock(BaseModel):
     entry_ids: list[str] = Field(default_factory=list)
     # ADR-0076 S7: per-entry rendered XML keyed by entry_id (order lives in
     # `entry_ids`), for the Context door's per-entry drill leaf. Additive; empty
-    # for non-lore blocks.
+    # for non-lore blocks. ADR-0093 §3: also holds before elements under their
+    # own `"<entry_id>@<snapshot_id>"` key — `entry_ids` stays node ids only.
     entry_xml: dict[str, str] = Field(default_factory=dict)
+    # ADR-0093 §3: the before elements placed on this block, one per snapshot
+    # pick that landed here, in the same order they appear in `entry_xml`.
+    snapshots: list[PreviewCacheSnapshot] = Field(default_factory=list)
 
 
 class PreviewErrorInfo(BaseModel):
@@ -409,6 +433,11 @@ class AIPreviewResponse(BaseModel):
     # keyed by id. Captured at the lock render beside `used_node_ids` and persisted
     # so the send path's tiering reads them. Empty when no node carried a hint.
     used_node_hints: dict[str, str] = Field(default_factory=dict)
+    # ADR-0093 §1: `(entry_id, snapshot_id)` pairs from `use(node, snapshot=id)`,
+    # captured at the lock render beside `used_node_ids`/`used_node_hints` and
+    # persisted as the chat's `used_snapshots`, so the send path places the
+    # before element in the stable lore block.
+    used_snapshots: list[SnapshotPick] = Field(default_factory=list)
     # ADR-0067 S2: the field descriptors this render registered via
     # `{% do field_contract.store(f) %}`, in insertion order. Captured at the lock
     # render alongside `used_node_ids` and persisted as the chat's
@@ -729,6 +758,11 @@ class ChatSession(BaseModel):
     # the lock render beside `used_node_ids` and stable thereafter. The send path's
     # `_tier_lore_ids` reads them as a revision-bounded placement bias. Empty = none.
     used_node_hints: dict[str, str] = Field(default_factory=dict)
+    # ADR-0093 §1: `(entry_id, snapshot_id)` pairs from `use(node, snapshot=id)`,
+    # captured at the lock render beside `used_node_ids`/`used_node_hints` and
+    # stable thereafter. The send path places the before element in the stable
+    # lore block (ADR-0093 §2); a snapshot pick never joins `used_node_ids`.
+    used_snapshots: list[SnapshotPick] = Field(default_factory=list)
     # ADR-0067 S2: the field descriptors this chat's lock render registered via
     # `field_contract`, captured beside `used_node_ids`/`used_node_hints` and
     # stable thereafter. The commit (`run_entry_patch_extraction`) reads this
@@ -754,6 +788,9 @@ class ChatSession(BaseModel):
     # Seeds the in-memory AISession baseline on a cold process (so cache tiers
     # survive restart) and drives the Context door's "edited since last seen"
     # badge for picked lore. Additive-optional (rides front matter; no migration).
+    # ADR-0093 §2: also holds `"<entry_id>@<snapshot_id>"` keys for a snapshot
+    # pick's before element, valued with the hash of its rendered bytes — readers
+    # iterate picks, never this map's keys as nodes.
     seen_revisions: dict[str, str] = Field(default_factory=dict)
 
 
@@ -865,6 +902,11 @@ class SaveChatSessionRequest(BaseModel):
     # None = "leave the captured value alone"; a dict (even {}) is the new value.
     # Only the lock-render save carries it (from the preview response).
     used_node_hints: dict[str, str] | None = None
+    # ADR-0093 §1: the snapshot picks, echoed like `used_node_hints`. None =
+    # "leave the captured value alone" (general saves omit it); a list (even
+    # []) is the new value. Only the lock-render save carries it (from the
+    # preview response's `used_snapshots`).
+    used_snapshots: list[SnapshotPick] | None = None
     # ADR-0067 S2: the field-contract set the lock render registered, echoed like
     # `used_node_ids`. None = "leave the captured value alone" (general saves);
     # a list (even []) is the new value. Only the lock-render save carries it

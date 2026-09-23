@@ -468,6 +468,43 @@ class ChangePropagationTests(unittest.TestCase):
         self.assertNotIn("Before:", res_whole.json()["text"])
         self.assertEqual(res_whole.json()["baseline_snapshot_id"], "")
 
+    # ----- render_baseline_element (ADR-0093 §2) --------------------------------
+
+    def test_render_baseline_element_returns_canonical_id_key_title_and_xml(self) -> None:
+        from app.services.ai.lore_budget import snapshot_pick_key
+
+        response = self.service.propagate_change(
+            self.marek, PropagateRequest(kept=[self.city_guard])
+        )
+        element = self.service.render_baseline_element(self.marek, response.snapshot.id)
+        self.assertEqual(element.entry_id, self.marek)
+        self.assertEqual(element.snapshot_id, response.snapshot.id)
+        self.assertEqual(element.key, snapshot_pick_key(self.marek, response.snapshot.id))
+        self.assertEqual(element.title, "Marek Vell")
+        self.assertIn(f'snapshot="{response.snapshot.id}"', element.xml)
+        self.assertIn(f'captured="{response.snapshot.captured_at}"', element.xml)
+
+    def test_render_baseline_element_matches_change_message_before_block(self) -> None:
+        self.service.propagate_change(self.marek, PropagateRequest(kept=[self.city_guard]))
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="",
+                entry_type="lore:character",
+                metadata={"rank": "Sergeant", "aliases": ["the Captain"], "posting": self.barracks},
+            ),
+        )
+        message = self.service.change_message(self.marek)
+        assert message.baseline_snapshot_id
+        element = self.service.render_baseline_element(self.marek, message.baseline_snapshot_id)
+        self.assertIn(element.xml, message.text)
+
+    def test_render_baseline_element_unknown_snapshot_is_404(self) -> None:
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.render_baseline_element(self.marek, "not-a-real-snapshot")
+        self.assertEqual(ctx.exception.status_code, 404)
+
 
 class LayeredPropagationTests(unittest.TestCase):
     """ADR-0090 Amendment 3 (#2121): confirm captures every EXISTING composing

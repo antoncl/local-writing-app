@@ -26,7 +26,7 @@ from urllib.parse import unquote
 from xml.sax.saxutils import escape as xml_escape
 from xml.sax.saxutils import quoteattr
 
-from jinja2 import pass_context
+from jinja2 import Undefined, pass_context
 from jinja2.sandbox import SandboxedEnvironment
 
 from app.services.ai.entry_patch import (
@@ -67,6 +67,15 @@ DEFAULT_CONTEXT_POLICY = "auto"
 # Module-level so tests can pin the exact text.
 USE_LORE_DEPRECATION_NOTICE = (
     "`use_lore()` is now `auto_lore()`; rename it — the old name is removed at 1.0"
+)
+
+# ADR-0093 §1: `use(node, snapshot=id)` records one warnings entry (deduped)
+# instead of a pair when the call can't resolve to exactly one entry.
+USE_SNAPSHOT_NEEDS_ONE_ENTRY = (
+    "use(…, snapshot=…) needs one entry, not a selection of several; nothing was placed"
+)
+USE_SNAPSHOT_UNRESOLVED = (
+    "use(…, snapshot=…) could not resolve the entry; nothing was placed"
 )
 
 
@@ -190,6 +199,44 @@ def _record_use(
             used_nodes_slot.append(ref.id)
         if hint in ("stable", "volatile"):
             used_hints_slot[ref.id] = hint
+
+
+def _is_empty_snapshot(snapshot: Any) -> bool:
+    """True for `None`, `""`, and a Jinja `Undefined` — an undeclared or
+    unseeded input is the plain pick (ADR-0093 §1). The `Undefined` check
+    comes FIRST: under `StrictUndefined`, `snapshot == ""` itself raises, so
+    the isinstance check must short-circuit before any comparison runs."""
+    if isinstance(snapshot, Undefined):
+        return True
+    return snapshot is None or snapshot == ""
+
+
+def _record_snapshot_use(
+    project: ProjectService,
+    schema: Any,
+    value: Any,
+    snapshot: Any,
+    used_snapshots_slot: list[tuple[str, str]],
+    warnings_slot: list[str],
+) -> None:
+    """Record a `use(node, snapshot=id)` call's pair into the per-render slot
+    (ADR-0093 §1/§2). `node` must resolve to ONE entry, the way `entry()`
+    resolves one; a selection of several, or none, adds one `warnings` entry
+    (deduped — no repeats within a render) and records nothing. The hint is
+    NOT recorded for a snapshot pick (its tier rule is fixed, §2)."""
+    values = _use_values(value)
+    if len(values) != 1:
+        if USE_SNAPSHOT_NEEDS_ONE_ENTRY not in warnings_slot:
+            warnings_slot.append(USE_SNAPSHOT_NEEDS_ONE_ENTRY)
+        return
+    ref = _coerce_entry_ref(project, schema, values[0])
+    if ref is None or not ref.id:
+        if USE_SNAPSHOT_UNRESOLVED not in warnings_slot:
+            warnings_slot.append(USE_SNAPSHOT_UNRESOLVED)
+        return
+    pair = (ref.id, str(snapshot))
+    if pair not in used_snapshots_slot:
+        used_snapshots_slot.append(pair)
 
 
 def _coerce_str_entry_ref(
@@ -542,6 +589,72 @@ def _register_lore_gate(
     env.globals["use_lore"] = _use_lore
 
 
+def _register_use(env: SandboxedEnvironment, project: ProjectService, schema: Any) -> None:
+    """Register `use(node)` / `use(node, "stable"|"volatile")` /
+    `use(node, snapshot=id)` — split out of `register_helpers` (like
+    `_register_lore_gate`) so that function's own statement count stays under
+    the complexity gate.
+    """
+    # ADR-0060 §2: the author-selection channel. `use(node)` records the resolved
+    # node id into this per-render slot (deduped, insertion-ordered); `build_preview`
+    # reads it back after render onto `RenderedTemplate.used_node_ids`, whence it is
+    # persisted on the chat and unioned into the send path's one lore selector — the
+    # SAME dedupped set `relevant_lore` owns, never a rival matcher (ADR-0057
+    # anti-goal). A mutable list (not a bare local) so the nested helper appends
+    # through the closure; envs are per-render, so it never leaks across renders.
+    used_nodes_slot: list[str] = []
+    env.used_nodes = used_nodes_slot  # type: ignore[attr-defined]
+
+    # ADR-0060 §5: the optional volatility hint on `use(node, "stable"|"volatile")`,
+    # keyed by resolved id. Carried beside `used_nodes` (not folded into it, so the
+    # selector's id union is untouched) onto `RenderedTemplate.used_node_hints`,
+    # persisted on the chat, and read by `_tier_lore_ids` as a revision-bounded
+    # placement prior. Only valid hints land here; a node named twice keeps its
+    # last hint.
+    used_hints_slot: dict[str, str] = {}
+    env.used_hints = used_hints_slot  # type: ignore[attr-defined]
+
+    # ADR-0093 §1: the `use(node, snapshot=id)` channel — `(entry_id, snapshot_id)`
+    # pairs, deduped, onto `RenderedTemplate.used_snapshots`. A snapshot pick does
+    # NOT add its node to `used_nodes_slot` — the after is the template's own
+    # `use(node)`.
+    used_snapshots_slot: list[tuple[str, str]] = []
+    env.used_snapshots = used_snapshots_slot  # type: ignore[attr-defined]
+
+    # ADR-0093 §1: render-time warnings — a snapshot pick that couldn't resolve
+    # to one entry. Read back onto `RenderedTemplate.warnings`, like
+    # `deprecation_notices`.
+    render_warnings_slot: list[str] = []
+    env.render_warnings = render_warnings_slot  # type: ignore[attr-defined]
+
+    # ADR-0060 §2/§5: `use(node)` / `use(node, "stable"|"volatile")` — "also include
+    # *this* node in context." Coerces its argument to an EntryRef like `entry()`
+    # (an id, an EntryRef, or a dict) and records the resolved id — but where a
+    # multi-select `context_pick` is a LIST, it records EVERY pick (not `entry()`'s
+    # first-wins), so `use(inputs.picks)` selects them all; `_use_values` owns the
+    # split. ADR-0092 §7.1: `use()` places ONLY — it never sets the lore-invoked
+    # slot, so a pick-only prompt gets its picks placed with automatic lore off.
+    # The optional second arg is an advisory volatility PRIOR (ADR-0060 §5): it
+    # biases which tier the node starts in but never overrides the per-revision
+    # correctness check (a "stable"-hinted node that changed still re-writes).
+    # Emits nothing — the backend places and caches it — so it also composes
+    # inside a loop: `{% for p in inputs.picks %}{{ use(p, "volatile") }}{% endfor %}`.
+    # ADR-0093 §1: `use(node, snapshot=id)` records the pair only — it does not add
+    # the node to the picks (the after is the template's own `use(node)`) and never
+    # reads the store. An empty `snapshot` (`""`, `None`, or an undeclared/unseeded
+    # Jinja input) is the plain `use(node)` call.
+    def _use(value: Any, hint: Any = None, *, snapshot: Any = None) -> str:
+        if _is_empty_snapshot(snapshot):
+            _record_use(project, schema, value, hint, used_nodes_slot, used_hints_slot)
+        else:
+            _record_snapshot_use(
+                project, schema, value, snapshot, used_snapshots_slot, render_warnings_slot
+            )
+        return ""
+
+    env.globals["use"] = _use
+
+
 def register_helpers(
     env: SandboxedEnvironment,
     project: ProjectService,
@@ -596,25 +709,6 @@ def register_helpers(
     deprecation_notices: list[str] = []
     env.deprecation_notices = deprecation_notices  # type: ignore[attr-defined]
 
-    # ADR-0060 §2: the author-selection channel. `use(node)` records the resolved
-    # node id into this per-render slot (deduped, insertion-ordered); `build_preview`
-    # reads it back after render onto `RenderedTemplate.used_node_ids`, whence it is
-    # persisted on the chat and unioned into the send path's one lore selector — the
-    # SAME dedupped set `relevant_lore` owns, never a rival matcher (ADR-0057
-    # anti-goal). A mutable list (not a bare local) so the nested helper appends
-    # through the closure; envs are per-render, so it never leaks across renders.
-    used_nodes_slot: list[str] = []
-    env.used_nodes = used_nodes_slot  # type: ignore[attr-defined]
-
-    # ADR-0060 §5: the optional volatility hint on `use(node, "stable"|"volatile")`,
-    # keyed by resolved id. Carried beside `used_nodes` (not folded into it, so the
-    # selector's id union is untouched) onto `RenderedTemplate.used_node_hints`,
-    # persisted on the chat, and read by `_tier_lore_ids` as a revision-bounded
-    # placement prior. Only valid hints land here; a node named twice keeps its
-    # last hint.
-    used_hints_slot: dict[str, str] = {}
-    env.used_hints = used_hints_slot  # type: ignore[attr-defined]
-
     # ADR-0067 S1: the field contract accumulator. A prompt registers the fields
     # it commits to producing via `{% do field_contract.store(f) %}` and renders
     # their descriptor list with `{{ field_contract.render }}`; the commit path
@@ -631,24 +725,8 @@ def register_helpers(
     env.globals["story_so_far"] = lambda scene: _story_so_far(project, scene)
 
     _register_lore_gate(env, lore_invoked_slot, deprecation_notices)
+    _register_use(env, project, schema)
 
-    # ADR-0060 §2/§5: `use(node)` / `use(node, "stable"|"volatile")` — "also include
-    # *this* node in context." Coerces its argument to an EntryRef like `entry()`
-    # (an id, an EntryRef, or a dict) and records the resolved id — but where a
-    # multi-select `context_pick` is a LIST, it records EVERY pick (not `entry()`'s
-    # first-wins), so `use(inputs.picks)` selects them all; `_use_values` owns the
-    # split. ADR-0092 §7.1: `use()` places ONLY — it never sets the lore-invoked
-    # slot, so a pick-only prompt gets its picks placed with automatic lore off.
-    # The optional second arg is an advisory volatility PRIOR (ADR-0060 §5): it
-    # biases which tier the node starts in but never overrides the per-revision
-    # correctness check (a "stable"-hinted node that changed still re-writes).
-    # Emits nothing — the backend places and caches it — so it also composes
-    # inside a loop: `{% for p in inputs.picks %}{{ use(p, "volatile") }}{% endfor %}`.
-    def _use(value: Any, hint: Any = None) -> str:
-        _record_use(project, schema, value, hint, used_nodes_slot, used_hints_slot)
-        return ""
-
-    env.globals["use"] = _use
     # ADR-0060 §3: one scene-anchored constructor. `entry(x)` resolves x **as of
     # the prompt's ambient `scene`** (the single ADR-0012 anchor) when there is
     # one, book-start when there is not — the common "this node as it is here"

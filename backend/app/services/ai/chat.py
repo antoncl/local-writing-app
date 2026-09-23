@@ -26,7 +26,7 @@ from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai.call_resolver import resolve_call_params
 from app.services.ai.history_budget import apply_history_window
-from app.services.ai.lore_budget import DEFAULT_LORE_LIMITS, LoreLimits
+from app.services.ai.lore_budget import DEFAULT_LORE_LIMITS, LoreLimits, LorePicks
 from app.services.ai.usage import translate_usage_to_cost
 from app.services.project.errors import ProjectServiceError
 
@@ -105,9 +105,10 @@ def _echo_chat_save_request(
 ) -> SaveChatSessionRequest:
     """A send-path save that echoes the chat's locked identity/state and writes
     the given journal (and, when given, the last-seen lore revisions), leaving
-    every "None = preserve" field (lore_enabled, used_node_ids, …) untouched.
-    Shared by the journal-detection save and the #1635 seen-revisions save so a
-    newly echoed field can't be added to one and forgotten in the other."""
+    every "None = preserve" field (lore_enabled, used_node_ids, used_snapshots,
+    …) untouched. Shared by the journal-detection save and the #1635
+    seen-revisions save so a newly echoed field can't be added to one and
+    forgotten in the other."""
     return SaveChatSessionRequest(
         title=chat.title,
         prompt_entry_id=chat.prompt_entry_id,
@@ -267,6 +268,13 @@ def _lore_cache_blocks(
     (`_chat_resolution_scene`) and shared with `_detect_and_persist_journal` —
     avoids a second `read_scene` for the same turn. Returns the blocks, the
     session baseline after commit, and the fit report the send hands back (§5).
+
+    ADR-0093 §2: the chat's `use(node, snapshot=id)` picks place their before
+    elements as their own entries in the stable tier — key-sorted, ahead of
+    the live entries — tiered by the `use(node, "stable")` rule: stable from
+    the first turn, volatile only for the one turn its rendered bytes change.
+    `session.commit()` (below) carries their key into the baseline persisted
+    as `seen_revisions`, same as any other lore entry.
     """
     from app.services.ai.lore_block import _wrap_lore_block
     from app.services.ai.lore_selection import _budgeted_lore_tiers
@@ -284,23 +292,27 @@ def _lore_cache_blocks(
     # in exactly one tier and the selector isn't re-run per partition. The chat's
     # `use(node)` selections join the selector's SAME direct channel (deduped by id,
     # `never`-filtered); their `use(node, hint)` priors bias placement only.
+    picks = LorePicks(
+        list(chat.used_node_ids),
+        dict(chat.used_node_hints),
+        [(p.entry_id, p.snapshot_id) for p in chat.used_snapshots],
+    )
     tiers = _budgeted_lore_tiers(
         project,
         scene,
         journal_for_send,
-        list(chat.used_node_ids),
+        picks,
         session=session,
-        hints=dict(chat.used_node_hints),
         limits=limits,
         automatic=automatic,
     )
     session.commit()
 
     blocks: list[dict] = []
-    stable_xml = _wrap_lore_block(tiers.stable_entries)
+    stable_xml = _wrap_lore_block(tiers.stable_pairs())
     if stable_xml:
         blocks.append({"text": stable_xml, "tier": "stable"})
-    volatile_xml = _wrap_lore_block(tiers.volatile_entries)
+    volatile_xml = _wrap_lore_block(tiers.volatile_pairs())
     if volatile_xml:
         blocks.append({"text": volatile_xml, "tier": "volatile"})
     return blocks, dict(session.baseline), tiers.report
@@ -372,8 +384,10 @@ def expand_and_prepare_chat_blocks(
     # back everything the chat already carries, not `[]`.
     journal_for_send: list[Any] = list(chat.journal)
     # ADR-0092 §7.1: a pick renders as of the chat's scene whether automatic
-    # lore is on or the chat merely carries `use()` picks.
-    has_picks = bool(chat.used_node_ids)
+    # lore is on or the chat merely carries `use()` picks. ADR-0093 §2: a
+    # snapshot pick alone (no live pick at all) also opens placement — the
+    # gate's "has picks" counts both lists.
+    has_picks = bool(chat.used_node_ids or chat.used_snapshots)
     # Loaded ONCE — the scene EntryRef (body + metadata) shared by detection
     # (ADR-0075 slice 3 scans its prose) and lore rendering, so a lore-enabled
     # turn does exactly one `read_scene` for its resolution scene.
@@ -435,6 +449,10 @@ def expand_and_prepare_chat_blocks(
         # demote every settled world entry to volatile on the next ordinary
         # turn), no seen-revisions save (whose empty journal would trip the
         # append-only guard). Tier is nominal — a one-off call caches nothing.
+        # ADR-0093 anti-goal: `used_ids` below is `chat.used_node_ids` ALONE —
+        # a snapshot pick never reaches this "used" selector mode, even when
+        # it is the only pick the chat has (`has_picks` counts it, but the
+        # commit's transcription turn reads picks, not the source).
         from app.services.ai.lore_selection import _relevant_lore
 
         picks_xml = _relevant_lore(

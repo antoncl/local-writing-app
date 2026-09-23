@@ -148,8 +148,8 @@
     {
       "name": "use",
       "kind": "helper",
-      "signature": "use(node, \"stable\"|\"volatile\")",
-      "summary": "`\"\"` — adds the node to what the AI sees. It prints nothing where you write it: the app fetches the node and includes it for you, with no duplicates. Hand it a whole picker selection to add every pick at once. The optional `\"stable\"`/`\"volatile\"` hint nudges caching and can usually be left off. It does not turn automatic lore on — pair it with `auto_lore()` for that."
+      "signature": "use(node, \"stable\"|\"volatile\", snapshot=id)",
+      "summary": "`\"\"` — adds the node to what the AI sees. It prints nothing where you write it: the app fetches the node and includes it for you, with no duplicates. Hand it a whole picker selection to add every pick at once. The optional `\"stable\"`/`\"volatile\"` hint nudges caching and can usually be left off. It does not turn automatic lore on — pair it with `auto_lore()` for that. `snapshot=id` places the entry as it was at that snapshot (an ADR-0087 snapshot id), alongside the live entry if you also `use()` it; an empty snapshot is the plain call. The template never reads the snapshot — the app places it."
     },
     {
       "name": "json",

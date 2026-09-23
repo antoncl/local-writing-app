@@ -27,7 +27,7 @@ def _request(rounds: int) -> AIChatRequest:
     return AIChatRequest(provider="ollama", model="llama3.2", messages=msgs)
 
 
-def _run(request: AIChatRequest, *, budget: int | None, lore_mode: str):
+def _run(request: AIChatRequest, *, budget: int | None, lore_mode: str, system_blocks=None):
     captured: dict = {}
     resolved = ResolvedCall(
         provider="ollama",
@@ -39,7 +39,7 @@ def _run(request: AIChatRequest, *, budget: int | None, lore_mode: str):
     settings = SimpleNamespace(
         providers=SimpleNamespace(ollama_host="http://127.0.0.1:11434")
     )
-    prepared = chat_module.PreparedChatTurn(None, None, [], None, None)
+    prepared = chat_module.PreparedChatTurn(system_blocks, None, [], None, None)
 
     def _fake_expand(project, chat_id, system_prompt, messages_list, **kw):
         captured["expand_messages"] = list(messages_list)
@@ -47,6 +47,7 @@ def _run(request: AIChatRequest, *, budget: int | None, lore_mode: str):
 
     def _fake_chat(call, **kw):
         captured["call_messages"] = list(call.messages)
+        captured["call_system_blocks"] = call.system_blocks
         return SimpleNamespace(
             content="ok", stop_reason="stop", provider="ollama", model="llama3.2",
             latency_ms=1, ok=True, error=None, usage=None,
@@ -93,3 +94,22 @@ def test_commit_used_turn_is_exempt_from_the_window() -> None:
     assert captured["call_messages"] == captured["expand_messages"]
     assert len(captured["call_messages"]) == 9
     assert response.history_fit is None
+
+
+def test_a_windowed_conversation_still_carries_the_snapshot_picks_before() -> None:
+    # ADR-0093 §2: the history window (#1958) trims MESSAGES, never
+    # `system_blocks` — a `use(node, snapshot=id)` pick's before element rides
+    # the stable tier on every turn, so a conversation with round one windowed
+    # out of the messages must still carry it in what reaches the provider.
+    before_block = {"text": 'the before <character snapshot="snap_1">…</character>', "tier": "stable"}
+    response, captured = _run(
+        _request(4), budget=5, lore_mode="implicit", system_blocks=[before_block]
+    )
+    # Round one dropped from the messages…
+    assert captured["call_messages"] == [
+        {"role": "user", "content": "the current question with several words here"}
+    ]
+    assert response.history_fit is not None
+    assert response.history_fit.dropped_rounds == 4
+    # …but the before still rides the (unwindowed) system blocks.
+    assert captured["call_system_blocks"] == [before_block]

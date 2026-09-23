@@ -227,7 +227,9 @@ class ChatSessionsMixin:
         last saw (#1635). Read-only; compares each lore pick's live revision
         against the chat's persisted `seen_revisions`. Never lists an entry the
         AI has not seen yet (not in `seen_revisions`) — that's a pending pick,
-        not an edit."""
+        not an edit. Iterates picks only (`used_node_ids` / context_items); a
+        `"<entry>@<snapshot>"` key `seen_revisions` also carries (ADR-0093 §2)
+        is never read here — a before is never named as an edited pick."""
         chat = self.read_chat_session(chat_id)
         seen = chat.seen_revisions or {}
         # used_node_ids can include scenes/cards — keep only lore entries.
@@ -339,6 +341,14 @@ class ChatSessionsMixin:
                 existing.used_node_hints
                 if request.used_node_hints is None
                 else request.used_node_hints
+            ),
+            # ADR-0093 §1: the snapshot picks, preserved like `used_node_hints`.
+            # None from the request = "leave the captured value alone" (general
+            # saves), so only the lock-render save sets it.
+            used_snapshots=(
+                existing.used_snapshots
+                if request.used_snapshots is None
+                else request.used_snapshots
             ),
             # ADR-0067 S2: the field-contract set the lock render registered,
             # preserved like `used_node_ids`. None from the request = "leave the

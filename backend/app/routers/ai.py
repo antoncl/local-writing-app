@@ -40,6 +40,7 @@ from app.models import (
     PriceRefreshResponse,
     PromptInputConflict,
     PromptInputDefinition,
+    SnapshotPick,
     ValidateEntryDraftRequest,
     ValidateEntryPatchRequest,
 )
@@ -381,6 +382,12 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         used_node_ids=rendered.used_node_ids,
         # ADR-0060 §5: the per-node volatility priors from `use(node, hint)`.
         used_node_hints=rendered.used_node_hints,
+        # ADR-0093 §1: the `(entry_id, snapshot_id)` pairs from `use(node,
+        # snapshot=id)`, captured here so the lock-render save can persist
+        # them as `used_snapshots`.
+        used_snapshots=[
+            SnapshotPick(entry_id=e, snapshot_id=s) for e, s in rendered.used_snapshots
+        ],
         # ADR-0067 S2: the field descriptors this render registered via
         # `field_contract`, captured here so the lock-render save can persist
         # them as the chat's `field_contract_stored`.

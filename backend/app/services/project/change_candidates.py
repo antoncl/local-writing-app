@@ -35,7 +35,6 @@ from app.models import (
 from app.services.ai.name_matcher import (
     CompiledNameMatcher,
     compile_name_matcher,
-    mask_emphasis_underscores,
     normalise_name,
     scan_name_matcher,
 )
@@ -96,18 +95,18 @@ def _corpus_entry_mention_ids(
     item's joined member text (`label[n]`) is skipped: its key is a
     reference already, and that is the declared routes' business.
 
-    Each scanned text is run through `mask_emphasis_underscores` first
-    (#2142) — otherwise `_Marek Vell_` (markdown italics) has no boundary on
-    either side and is invisible to the matcher."""
+    `scan_name_matcher` itself masks emphasis underscores (#2142) before
+    scanning, so `_Marek Vell_` (markdown italics) is found here too, without
+    this function doing anything extra."""
     ids: set[str] = set()
-    for hit in scan_name_matcher(matcher, mask_emphasis_underscores(corpus_entry.body)):
+    for hit in scan_name_matcher(matcher, corpus_entry.body):
         ids.add(hit.entry_id)
     for label, value in corpus_entry.metadata_values:
         if _LIST_ITEM_SUFFIX.search(label):
             continue
         if label.rsplit(".", 1)[-1] not in prose_fields:
             continue
-        for hit in scan_name_matcher(matcher, mask_emphasis_underscores(value)):
+        for hit in scan_name_matcher(matcher, value):
             ids.add(hit.entry_id)
     return ids
 

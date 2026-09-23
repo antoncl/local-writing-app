@@ -161,14 +161,27 @@ def scan_name_matcher(matcher: CompiledNameMatcher, text: str) -> list[NameMatch
     casing (the §3 core: longest-match, case-fold, apostrophe-aware boundary,
     possessive-attach). The hit covers the name capture group only — a
     trailing possessive/enclitic is consumed by the match but excluded from
-    the reported span."""
+    the reported span.
+
+    #2142: scans `mask_emphasis_underscores(text)`, not `text` — the ONE place
+    this runs, so every caller (the AI-path scans in `lore_selection.py`, the
+    ADR-0091 corpus scan in `change_candidates.py`) is level without having to
+    remember to mask at each call site, and level with the frontend's
+    `implicitContextMatcher.ts`, which scans rendered text where italics are
+    marks, not characters. Positions and `matched_text` are read back from the
+    ORIGINAL `text`, not the masked one — masking is same-length and never
+    touches a capture group's own span (the underscores it blanks are the
+    boundary characters flanking a name, never inside one), so `start`/`end`
+    address `text` exactly."""
     if not text:
         return []
+    scan_text = mask_emphasis_underscores(text)
     hits: list[NameMatch] = []
-    for m in matcher.regex.finditer(text):
-        matched = m.group(1)
+    for m in matcher.regex.finditer(scan_text):
+        start, end = m.start(1), m.end(1)
+        matched = text[start:end]
         entry_id = matcher.name_to_id.get(_norm(matched))
         if not entry_id:
             continue
-        hits.append(NameMatch(start=m.start(1), end=m.end(1), entry_id=entry_id, matched_text=matched))
+        hits.append(NameMatch(start=start, end=end, entry_id=entry_id, matched_text=matched))
     return hits

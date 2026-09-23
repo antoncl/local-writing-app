@@ -45,6 +45,11 @@ MASKING_CASES = [
         "(_)",
         "(_)",
     ),
+    (
+        "a trailing unmatched underscore (closing with no opener) is masked",
+        "foo_ bar",
+        "foo  bar",
+    ),
 ]
 
 
@@ -67,15 +72,18 @@ def test_empty_string_stays_empty() -> None:
     assert mask_emphasis_underscores("") == ""
 
 
-def test_scan_name_matcher_on_masked_text_finds_the_underscore_italicised_name() -> None:
-    """Pins #2142: the raw text does NOT match (no boundary either side of
-    `_The Deserter's Rumour_`), but the masked text does."""
+def test_scan_name_matcher_finds_the_underscore_italicised_name() -> None:
+    """Pins #2142: `scan_name_matcher` masks internally now, so RAW markdown
+    with no pre-masking finds `_The Deserter's Rumour_` — before this fix,
+    the underscores were boundary characters and the name never matched at
+    all (no boundary on either side)."""
     matcher = compile_name_matcher([("rumour_1", ["The Deserter's Rumour"])])
     raw = "He heard whispers of _The Deserter's Rumour_."
-    masked = mask_emphasis_underscores(raw)
 
-    assert scan_name_matcher(matcher, raw) == []
-    hits = scan_name_matcher(matcher, masked)
+    hits = scan_name_matcher(matcher, raw)
     assert len(hits) == 1
     assert hits[0].entry_id == "rumour_1"
     assert hits[0].matched_text == "The Deserter's Rumour"
+    # Positions and matched_text address the ORIGINAL text — masking is an
+    # internal, same-length scan-time transform only.
+    assert raw[hits[0].start : hits[0].end] == "The Deserter's Rumour"

@@ -195,13 +195,13 @@ function reviewController(): EntryProposalController {
   return c;
 }
 
-function mountReview(activeBodyTab: string) {
+function mountReview(activeBodyTab: string, bodyShape: "prose" | "code" = "prose") {
   const noop = () => {};
   return render(EditorBodyHost, {
     props: {
       model: baseModel({
         scene: { id: "e1", title: "Mara" },
-        bodyShape: "code",
+        bodyShape,
         loadedSceneId: "e1",
         entryType: "lore:character",
         metadata: { kin: ["lore_1"] },
@@ -219,16 +219,28 @@ function mountReview(activeBodyTab: string) {
   });
 }
 
-describe("EditorBodyHost — the body diff overlay is Body-tab-only", () => {
-  beforeEach(() => entryBrainstorm.clear("e1"));
+// Both body shapes that mount the overlay (prose — the common lore/note case —
+// and code — a prompt template, #711) gate it the same way, by two different
+// template paths (a wrapper `{#if}` for prose, an inline `&&` for code), so both
+// are exercised.
+describe.each(["prose", "code"] as const)("EditorBodyHost — the body diff overlay is Body-tab-only (%s)", (shape) => {
+  beforeEach(() => {
+    entryBrainstorm.clear("e1");
+    // ProseBodyView loads the AI-cost log on mount; keep the seam off the network.
+    vi.spyOn(api, "aiListInvocations").mockResolvedValue({ invocations: [] } as never);
+  });
+  afterEach(() => {
+    entryBrainstorm.clear("e1");
+    vi.restoreAllMocks();
+  });
 
   it("renders the proposal diff overlay on the Body tab", () => {
-    const { container } = mountReview("body");
+    const { container } = mountReview("body", shape);
     expect(container.querySelector(".entry-revision-review")).not.toBeNull();
   });
 
   it("does NOT render the body diff overlay on a list tab", () => {
-    const { container } = mountReview("list:kin");
+    const { container } = mountReview("list:kin", shape);
     // The list tab is active — the diff belongs to the body, not this tab.
     expect(container.querySelector(".entry-revision-review")).toBeNull();
     // …and the list tab itself still renders.

@@ -574,6 +574,21 @@ class LayerOverridesMixin:
         return rows
 
     @staticmethod
+    def inherited_content_refusal(kind: str, layer_label: str | None, remedy: str) -> ProjectServiceError:
+        """The ONE refusal both override saves raise when a submission changes the
+        content an override cannot carry — a node's body or title (#2132, #2159).
+        Overrides are metadata deltas; body and title overrides are deferred, so a
+        changed body or title is refused, never dropped, and the lore and prompt
+        saves answer with the same status and the same sentence. `remedy` is the
+        kind's own way out (fork an entry, clone a prompt)."""
+        label = layer_label or "an ancestor"
+        return ProjectServiceError(
+            f"The body and title of this {kind} are inherited from {label} and cannot be "
+            f"overridden from a layer below it. {remedy}",
+            422,
+        )
+
+    @staticmethod
     def _scalar_override_row(field: str, field_type: str, new_value: Any) -> MutationSetRow:
         """The `replace` row that sets a scalar field to `new_value`."""
         if field_type == "list":

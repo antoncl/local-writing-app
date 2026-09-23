@@ -17,7 +17,7 @@ export const promptsApi = {
   // `authoringLayerId` is the write-target layer L (#1738 / ADR-0039). Prompts
   // have no rail layer picker yet, so it is `null` in practice → the open project:
   // an inherited prompt's metadata edit lands there as a sparse override delta,
-  // while its body stays read-only (the backend 409s a BODY change, and never
+  // while its body stays read-only (the backend 422s a BODY or title change — the same refusal as an inherited lore entry (#2159) — and never
   // rewrites the inherited file). When a layer IS given it must sit below the
   // owning layer; authoring at or above it is refused.
   // `clearOverrideFields` (#1738) names the fields whose override row(s) to DROP

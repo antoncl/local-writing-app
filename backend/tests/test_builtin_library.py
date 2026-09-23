@@ -129,7 +129,7 @@ class BuiltinLibraryTests(unittest.TestCase):
                     metadata={},
                 ),
             )
-        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.status_code, 422)
         # The bundled app file is untouched — read-only by construction.
         self.assertEqual(self._library_path(self.roleplay_id).read_bytes(), before)
 
@@ -195,14 +195,14 @@ class BuiltinLibraryTests(unittest.TestCase):
         """The `editable` read-model flag is the frontend's single source for the
         read-only lock (#689), so it must equal exactly what `save_prompt_entry`
         enforces — proven here by pairing each flag value with the write it
-        promises. If the flag ever drifts from the 409, this fails.
+        promises. If the flag ever drifts from the refusal (422 for a body or title change, #2159; 409 for DELETE), this fails.
         """
         summaries = self._summaries()
         for lib_id in self.library_ids:
             # Inherited Library prompts read as NOT editable on BOTH read models.
             self.assertFalse(summaries[lib_id].editable, f"{lib_id} is inherited")
             self.assertFalse(self.service.read_prompt_entry(lib_id).editable)
-        # editable=False is not decorative: the save it forbids really 409s.
+        # editable=False is not decorative: the save it forbids really refuses (422, the shared inherited-content refusal, #2159).
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.save_prompt_entry(
                 self.roleplay_id,
@@ -214,7 +214,7 @@ class BuiltinLibraryTests(unittest.TestCase):
                     metadata={},
                 ),
             )
-        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.status_code, 422)
         # The read-only guard covers DELETE too (delete_prompt_entry runs the same
         # reject), so editable=False must mirror that as well, not just save.
         with self.assertRaises(ProjectServiceError) as del_ctx:
@@ -736,7 +736,7 @@ class InheritedAncestorPromptCloneTests(unittest.TestCase):
                     metadata={},
                 ),
             )
-        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.status_code, 422)
 
     def test_ancestor_prompt_delete_is_refused(self) -> None:
         # The generalized read-only guard (#676) refuses DELETE of an inherited

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 250" role="img" aria-label="One horizontal bar. A solid left segment, declared, sent whole and not counted. Then the automatic entries in fit order: your message, the prompt, the scene's prose, one step out through prose, one step out through links. A vertical line marks the lore budget; entries past it are hatched and labelled Left out. A note says the links step is dropped first."><style>.l{font-family:var(--sans,"Segoe UI",system-ui,sans-serif)}.m{font-family:var(--mono,Consolas,ui-monospace,monospace)}</style>
+<defs><pattern id="leftout" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="var(--border-strong,#b4c2bc)" stroke-width="2"/></pattern></defs>
+<rect x="-30" y="-30" width="920" height="310" fill="var(--diagram-bg,#ffffff)"/>
+<text x="0" y="14" class="l" font-size="13.5" fill="var(--accent-strong,#234e43)" font-weight="600">Fitting the automatic half to the Lore budget</text>
+<text x="0" y="32" class="m" font-size="10.5" fill="var(--text-3,#74817b)">whole entries, in order of distance from your own words</text>
+<rect x="0" y="60" width="200" height="56" rx="5" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="100" y="84" text-anchor="middle" class="l" font-size="11.5" fill="var(--accent-strong,#234e43)" font-weight="600">Declared</text>
+<text x="100" y="102" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">sent whole, not counted</text>
+<rect x="206" y="60" width="120" height="56" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="266" y="84" text-anchor="middle" class="l" font-size="11.5" fill="var(--text,#242424)">Your message</text>
+<text x="266" y="102" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">1st</text>
+<rect x="332" y="60" width="110" height="56" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="387" y="84" text-anchor="middle" class="l" font-size="11.5" fill="var(--text,#242424)">The prompt</text>
+<text x="387" y="102" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">2nd</text>
+<rect x="448" y="60" width="120" height="56" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="508" y="84" text-anchor="middle" class="l" font-size="11.5" fill="var(--text,#242424)">Scene's prose</text>
+<text x="508" y="102" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">3rd</text>
+<rect x="574" y="60" width="130" height="56" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="639" y="84" text-anchor="middle" class="l" font-size="11.5" fill="var(--text,#242424)">Step out: prose</text>
+<text x="639" y="102" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">4th</text>
+<rect x="710" y="60" width="150" height="56" rx="5" fill="url(#leftout)" stroke="var(--border-strong,#b4c2bc)"/>
+<rect x="710" y="60" width="150" height="56" rx="5" fill="var(--surface,#ffffff)" fill-opacity="0.6" stroke="none"/>
+<text x="785" y="84" text-anchor="middle" class="l" font-size="11.5" fill="var(--text-2,#4d5753)">Step out: links</text>
+<text x="785" y="102" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">5th — dropped first</text>
+<path d="M736 44 V132" fill="none" stroke="var(--danger,#a64a4a)" stroke-width="2"/>
+<text x="736" y="150" text-anchor="middle" class="l" font-size="11" fill="var(--danger,#a64a4a)" font-weight="600">Lore budget (tokens)</text>
+<text x="800" y="150" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">Left out →</text>
+<text x="0" y="192" class="l" font-size="11" fill="var(--text-2,#4d5753)">Each entry is kept or dropped whole; nothing is cut mid-entry. Within a source, the most recently noticed comes first.</text>
+<text x="0" y="212" class="l" font-size="11" fill="var(--text-2,#4d5753)">Blank = 16 000 tokens. 0 = the declared half only. The Context door's Left out section lists what didn't fit this turn.</text>
+</svg>

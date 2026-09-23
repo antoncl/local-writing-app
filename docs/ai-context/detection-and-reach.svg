@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 330" role="img" aria-label="Three surfaces on the left, your message, the prompt on turn one, the scene's prose, feed a noticed set in the middle. From it, two arrows reach one step out: through the noticed entries' prose, scanned once, and through their links, followed once. A dashed cut labelled Named only removes both arrows."><style>.l{font-family:var(--sans,"Segoe UI",system-ui,sans-serif)}.m{font-family:var(--mono,Consolas,ui-monospace,monospace)}</style>
+<rect x="-30" y="-30" width="920" height="390" fill="var(--diagram-bg,#ffffff)"/>
+<text x="0" y="14" class="l" font-size="13.5" fill="var(--accent-strong,#234e43)" font-weight="600">Three surfaces, one name matcher</text>
+<text x="0" y="32" class="m" font-size="10.5" fill="var(--text-3,#74817b)">every entry's Name and aliases, italics included</text>
+<rect x="0" y="48" width="250" height="52" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="12" y="70" class="l" font-size="11.5" fill="var(--text,#242424)">Your latest message</text>
+<text x="12" y="88" class="m" font-size="10.5" fill="var(--text-3,#74817b)">every turn</text>
+<rect x="0" y="112" width="250" height="52" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="12" y="134" class="l" font-size="11.5" fill="var(--text,#242424)">The prompt's text</text>
+<text x="12" y="152" class="m" font-size="10.5" fill="var(--text-3,#74817b)">first turn only</text>
+<rect x="0" y="176" width="250" height="52" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="12" y="198" class="l" font-size="11.5" fill="var(--text,#242424)">The scene's prose</text>
+<text x="12" y="216" class="m" font-size="10.5" fill="var(--text-3,#74817b)">body + long-text fields, each on its own</text>
+<path d="M250 74 H300 V138 M250 138 H300 M250 202 H300 V138 M300 138 H326" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5"/>
+<path d="M320 133 L328 138 L320 143" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5"/>
+<rect x="330" y="96" width="180" height="84" rx="8" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="420" y="128" text-anchor="middle" class="l" font-size="12.5" fill="var(--accent-strong,#234e43)" font-weight="600">Noticed</text>
+<text x="420" y="148" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">plus scene refs</text>
+<text x="420" y="164" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">and Always include</text>
+<path d="M510 120 H556 V74 H606" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5"/>
+<path d="M510 156 H556 V202 H606" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5"/>
+<path d="M600 69 L608 74 L600 79 M600 197 L608 202 L600 207" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5"/>
+<rect x="610" y="48" width="250" height="52" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="622" y="70" class="l" font-size="11.5" fill="var(--text,#242424)">One step out through prose</text>
+<text x="622" y="88" class="m" font-size="10.5" fill="var(--text-3,#74817b)">its own text, scanned once</text>
+<rect x="610" y="176" width="250" height="52" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="622" y="198" class="l" font-size="11.5" fill="var(--text,#242424)">One step out through links</text>
+<text x="622" y="216" class="m" font-size="10.5" fill="var(--text-3,#74817b)">its references, followed once</text>
+<path d="M580 40 V240" fill="none" stroke="var(--danger,#a64a4a)" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="580" y="262" text-anchor="middle" class="l" font-size="11" fill="var(--danger,#a64a4a)" font-weight="600">Lore reach: Named only stops here</text>
+<text x="0" y="296" class="l" font-size="11" fill="var(--text-2,#4d5753)">What the step out finds is not scanned again — the reach is one step, so cross-referenced lore can't cascade.</text>
+<text x="0" y="316" class="l" font-size="11" fill="var(--text-2,#4d5753)">A prompt's pick is not a starting point: picking brings the entry, not its neighbours — unless it is also named.</text>
+</svg>

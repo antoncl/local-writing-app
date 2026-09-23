@@ -84,7 +84,9 @@ entries are relevant to what you're actually writing — it offers the entities 
 found, so the model gets the right context without you attaching anything by hand.
 
 There's no `[[wiki-link]]` or `@mention` to learn; just write, and keep your
-aliases current so nicknames are caught.
+aliases current so nicknames are caught. How those mentions turn into the lore
+an AI chat receives — and the per-entry **Context policy** that keeps a spoiler
+out of it — is covered in **[What the AI sees](#guide:ai-context)**.
 
 ## Tags
 

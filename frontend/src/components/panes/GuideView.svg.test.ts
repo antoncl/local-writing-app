@@ -12,17 +12,24 @@ import { describe, expect, it } from "vitest";
 import { Marked } from "marked";
 import { guides } from "@/lib/generated/guides";
 
-describe("ollama-context guide diagrams", () => {
-  it("bundle inlines the three SVGs and Marked passes them through raw", () => {
-    const guide = guides.find((g) => g.id === "ollama-context");
-    expect(guide, "ollama-context guide is bundled").toBeDefined();
+// Every guide that ships diagrams, with how many it inlines. Adding a diagram to
+// a guide (or a new diagram-bearing guide, #2148) means adding it here.
+const DIAGRAM_GUIDES: Array<[id: string, count: number]> = [
+  ["ollama-context", 3],
+  ["ai-context", 4],
+];
+
+describe.each(DIAGRAM_GUIDES)("%s guide diagrams", (id, count) => {
+  it(`bundle inlines the ${count} SVGs and Marked passes them through raw`, () => {
+    const guide = guides.find((g) => g.id === id);
+    expect(guide, `${id} guide is bundled`).toBeDefined();
 
     // The bundle carries raw inline <svg>, not `![](*.svg)` image refs.
-    expect((guide!.markdown.match(/<svg/g) ?? []).length).toBe(3);
+    expect((guide!.markdown.match(/<svg/g) ?? []).length).toBe(count);
     expect(guide!.markdown).not.toMatch(/!\[[^\]]*\]\([^)]*\.svg\)/);
 
     const html = new Marked().parse(guide!.markdown) as string;
-    expect((html.match(/<svg/g) ?? []).length).toBe(3);
+    expect((html.match(/<svg/g) ?? []).length).toBe(count);
     expect(html).not.toContain("&lt;svg");
     expect(html).not.toContain("<img");
   });

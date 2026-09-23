@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 400" role="img" aria-label="Two columns feeding one block. Declared, on the left: prompt picks, scene references, always-include entries, sent whole. Automatic, on the right, behind the auto_lore() switch: entries named in your message, the prompt on the first turn, and the scene's prose, reaching one step out, fitted to the assistant's budget. Both land in one lore block with each entry once."><style>.l{font-family:var(--sans,"Segoe UI",system-ui,sans-serif)}.m{font-family:var(--mono,Consolas,ui-monospace,monospace)}</style>
+<rect x="-30" y="-30" width="920" height="460" fill="var(--diagram-bg,#ffffff)"/>
+<text x="0" y="14" class="l" font-size="13.5" fill="var(--accent-strong,#234e43)" font-weight="600">Declared — what you named</text>
+<text x="0" y="32" class="m" font-size="10.5" fill="var(--text-3,#74817b)">sent whole, every turn, never counted</text>
+<rect x="0" y="44" width="380" height="228" rx="8" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<rect x="16" y="58" width="348" height="56" rx="5" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="28" y="80" class="l" font-size="11.5" fill="var(--accent-strong,#234e43)" font-weight="600">The prompt's picks</text>
+<text x="28" y="98" class="m" font-size="10.5" fill="var(--text-3,#74817b)">use(inputs.lore) — a Lore picker</text>
+<rect x="16" y="124" width="348" height="56" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="28" y="146" class="l" font-size="11.5" fill="var(--text,#242424)">The scene's own references</text>
+<text x="28" y="164" class="m" font-size="10.5" fill="var(--text-3,#74817b)">its POV character, its location…</text>
+<rect x="16" y="190" width="348" height="56" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="28" y="212" class="l" font-size="11.5" fill="var(--text,#242424)">Entries set to Always include</text>
+<text x="28" y="230" class="m" font-size="10.5" fill="var(--text-3,#74817b)">Context policy on the entry</text>
+<text x="460" y="14" class="l" font-size="13.5" fill="var(--accent-strong,#234e43)" font-weight="600">Automatic — what the app noticed</text>
+<text x="460" y="32" class="m" font-size="10.5" fill="var(--text-3,#74817b)">only when the prompt calls auto_lore()</text>
+<rect x="460" y="44" width="380" height="228" rx="8" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)" stroke-dasharray="6 4"/>
+<rect x="476" y="58" width="348" height="40" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="488" y="83" class="l" font-size="11.5" fill="var(--text,#242424)">Names in your latest message</text>
+<rect x="476" y="106" width="348" height="40" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="488" y="131" class="l" font-size="11.5" fill="var(--text,#242424)">Names in the prompt, on the first turn</text>
+<rect x="476" y="154" width="348" height="40" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="488" y="179" class="l" font-size="11.5" fill="var(--text,#242424)">Names in the scene's prose</text>
+<rect x="476" y="202" width="348" height="52" rx="5" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="488" y="223" class="l" font-size="11.5" fill="var(--accent-strong,#234e43)" font-weight="600">…and one step out from those</text>
+<text x="488" y="241" class="m" font-size="10.5" fill="var(--text-3,#74817b)">fitted to the assistant's Lore budget and Lore reach</text>
+<path d="M190 272 V300 H430 V318" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5"/>
+<path d="M650 272 V300 H430" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5"/>
+<path d="M425 312 L430 320 L435 312" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5"/>
+<rect x="150" y="322" width="560" height="60" rx="8" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="430" y="346" text-anchor="middle" class="l" font-size="12.5" fill="var(--accent-strong,#234e43)" font-weight="600">One lore block — each entry once</text>
+<text x="430" y="366" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">Never include drops an entry from either half, a pick too</text>
+</svg>

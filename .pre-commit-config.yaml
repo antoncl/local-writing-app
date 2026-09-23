@@ -85,7 +85,7 @@ repos:
         # trips CI's regen-clean (#1537). gen_guides.py --check asserts this
         # filter covers all its sources AND every SVG they inline, so the lists
         # can't drift silently: add a source or a diagram, this must widen too.
-        files: ^(docs/(getting-started|lore|custom-fields|mutations|views|plotting|ai-setup|ollama-context|context-picker|roleplay)\.md|docs/ollama-context/[^/]+\.svg|docs/prompts/(guide|reference)\.md|scripts/gen_guides\.py|frontend/src/lib/generated/guides\.ts)$
+        files: ^(docs/(getting-started|lore|custom-fields|mutations|views|plotting|ai-setup|ollama-context|context-picker|ai-context|roleplay)\.md|docs/(ollama-context|ai-context)/[^/]+\.svg|docs/prompts/(guide|reference)\.md|scripts/gen_guides\.py|frontend/src/lib/generated/guides\.ts)$
 
       - id: version-sync
         name: version sync (backend pyproject == frontend package.json, #1299)

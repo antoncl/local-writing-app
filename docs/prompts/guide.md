@@ -102,6 +102,10 @@ what the model should see and let the app place it:
   adds the node, deduplicates, and orders it; your template emits nothing.
 - `{% do auto_lore() %}` (was `use_lore()`) — let the app add the scene's relevant lore for you.
 
+What the app actually places for those two calls — what it notices, how far it
+reaches, how the assistant's budget fits it, and how it is cached — is its own
+guide: **[What the AI sees](#guide:ai-context)**.
+
 Some ready-made context blocks are emitted directly:
 
 - `{{ story_so_far(scene) }}` — a recap of earlier scenes' summaries.

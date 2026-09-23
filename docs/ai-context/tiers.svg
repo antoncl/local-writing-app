@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 312" role="img" aria-label="Three turns side by side. Turn one: every entry in the volatile block. Turn two: the unchanged entries have moved to the stable block; one entry, edited between turns, sits in volatile with an edited badge. Turn three: it has settled into stable too."><style>.l{font-family:var(--sans,"Segoe UI",system-ui,sans-serif)}.m{font-family:var(--mono,Consolas,ui-monospace,monospace)}</style>
+<rect x="-30" y="-30" width="920" height="360" fill="var(--diagram-bg,#ffffff)"/>
+<text x="0" y="14" class="l" font-size="13.5" fill="var(--accent-strong,#234e43)" font-weight="600">Two blocks per turn: stable first, volatile after</text>
+<text x="0" y="32" class="m" font-size="10.5" fill="var(--text-3,#74817b)">stable = unchanged since the last turn, the part the provider's cache can reuse</text>
+<text x="0" y="60" class="l" font-size="12" fill="var(--text,#242424)" font-weight="600">Turn 1</text>
+<text x="0" y="76" class="m" font-size="10.5" fill="var(--text-3,#74817b)">everything is new</text>
+<rect x="0" y="86" width="260" height="60" rx="6" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)" stroke-dasharray="4 3"/>
+<text x="130" y="121" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">stable — empty</text>
+<rect x="0" y="152" width="260" height="120" rx="6" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<text x="12" y="170" class="m" font-size="10.5" fill="var(--text-3,#74817b)">volatile</text>
+<rect x="12" y="178" width="236" height="24" rx="4" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="22" y="195" class="l" font-size="11" fill="var(--text,#242424)">Honor Harrington</text>
+<rect x="12" y="208" width="236" height="24" rx="4" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="22" y="225" class="l" font-size="11" fill="var(--text,#242424)">The Collective</text>
+<rect x="12" y="238" width="236" height="24" rx="4" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="22" y="255" class="l" font-size="11" fill="var(--text,#242424)">Premise</text>
+<text x="300" y="60" class="l" font-size="12" fill="var(--text,#242424)" font-weight="600">Turn 2</text>
+<text x="300" y="76" class="m" font-size="10.5" fill="var(--text-3,#74817b)">you edited The Collective in between</text>
+<rect x="300" y="86" width="260" height="90" rx="6" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="312" y="104" class="m" font-size="10.5" fill="var(--accent-strong,#234e43)">stable — cached</text>
+<rect x="312" y="112" width="236" height="24" rx="4" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="322" y="129" class="l" font-size="11" fill="var(--text,#242424)">Honor Harrington</text>
+<rect x="312" y="142" width="236" height="24" rx="4" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="322" y="159" class="l" font-size="11" fill="var(--text,#242424)">Premise</text>
+<rect x="300" y="182" width="260" height="60" rx="6" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<text x="312" y="200" class="m" font-size="10.5" fill="var(--text-3,#74817b)">volatile</text>
+<rect x="312" y="208" width="236" height="24" rx="4" fill="var(--surface,#ffffff)" stroke="var(--danger,#a64a4a)"/>
+<text x="322" y="225" class="l" font-size="11" fill="var(--text,#242424)">The Collective</text>
+<text x="538" y="225" text-anchor="end" class="m" font-size="10" fill="var(--danger,#a64a4a)">edited</text>
+<text x="600" y="60" class="l" font-size="12" fill="var(--text,#242424)" font-weight="600">Turn 3</text>
+<text x="600" y="76" class="m" font-size="10.5" fill="var(--text-3,#74817b)">nothing changed — it settles</text>
+<rect x="600" y="86" width="260" height="120" rx="6" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="612" y="104" class="m" font-size="10.5" fill="var(--accent-strong,#234e43)">stable — cached</text>
+<rect x="612" y="112" width="236" height="24" rx="4" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="622" y="129" class="l" font-size="11" fill="var(--text,#242424)">Honor Harrington</text>
+<rect x="612" y="142" width="236" height="24" rx="4" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="622" y="159" class="l" font-size="11" fill="var(--text,#242424)">Premise</text>
+<rect x="612" y="172" width="236" height="24" rx="4" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="622" y="189" class="l" font-size="11" fill="var(--text,#242424)">The Collective</text>
+<rect x="600" y="212" width="260" height="30" rx="6" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)" stroke-dasharray="4 3"/>
+<text x="730" y="231" text-anchor="middle" class="m" font-size="10.5" fill="var(--text-3,#74817b)">volatile — empty</text>
+<text x="0" y="278" class="l" font-size="11" fill="var(--text-2,#4d5753)">The chat remembers which versions it last sent, so restarting the app does not reset this.</text>
+<text x="0" y="298" class="l" font-size="11" fill="var(--text-2,#4d5753)">A use(node, "stable") hint starts a pick in the stable block; an entry that actually changed is re-sent regardless.</text>
+</svg>

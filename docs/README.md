@@ -31,6 +31,7 @@ Listed in the viewer's display order (Getting started is the default landing gui
 | Ollama context | `ollama-context` | [ollama-context.md](ollama-context.md) |
 | Writing prompts | `writing-prompts` | [prompts/guide.md](prompts/guide.md) |
 | Context picker | `context-picker` | [context-picker.md](context-picker.md) |
+| What the AI sees | `ai-context` | [ai-context.md](ai-context.md) |
 | Roleplay | `roleplay` | [roleplay.md](roleplay.md) |
 | Prompt reference | `reference` | [prompts/reference.md](prompts/reference.md) |
 

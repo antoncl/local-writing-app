@@ -19,6 +19,7 @@ from project_fixtures import open_test_project
 from app.main import app
 from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
 from app.services.ai.helpers import (
+    USE_SNAPSHOT_NEEDS_AN_ID,
     USE_SNAPSHOT_NEEDS_ONE_ENTRY,
     USE_SNAPSHOT_UNRESOLVED,
 )
@@ -128,6 +129,16 @@ class UseSnapshotRecordTests(unittest.TestCase):
         )
         self.assertEqual(rendered.used_node_ids, [self.entry_id])
         self.assertEqual(rendered.used_snapshots, [])
+
+    def test_non_string_snapshot_warns_and_records_nothing(self) -> None:
+        # A picker selection (a one-element list) handed to `snapshot=` by
+        # mistake is caught at the render, not at the send.
+        rendered = self._render(
+            f'{_SYS}{{{{ use("{self.entry_id}", snapshot=[{{"id": "{self.entry_id}"}}]) }}}}{_END}'
+        )
+        self.assertEqual(rendered.used_snapshots, [])
+        self.assertEqual(rendered.used_node_ids, [])
+        self.assertIn(USE_SNAPSHOT_NEEDS_AN_ID, rendered.warnings)
 
     def test_unresolved_node_warns(self) -> None:
         rendered = self._render(f'{_SYS}{{{{ use("", snapshot="snap_1") }}}}{_END}')

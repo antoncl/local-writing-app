@@ -147,10 +147,13 @@ class LoreSelection:
     """The selector's two sets (ADR-0086 §1). `declared` is never dropped;
     `inferred` is already minus `declared` (precedence: an id reachable both
     ways is declared), deduped by id, and in fit order. Both are past the one
-    `never` chokepoint."""
+    `never` chokepoint. `never` is that chokepoint's set, carried so a later
+    step in the same call (a snapshot pick's before, ADR-0093 §2) applies it
+    without a second lore scan."""
 
     declared: frozenset[str]
     inferred: tuple[InferredCandidate, ...]
+    never: frozenset[str] = frozenset()
 
     @property
     def ids(self) -> list[str]:

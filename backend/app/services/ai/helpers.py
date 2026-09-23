@@ -77,6 +77,9 @@ USE_SNAPSHOT_NEEDS_ONE_ENTRY = (
 USE_SNAPSHOT_UNRESOLVED = (
     "use(…, snapshot=…) could not resolve the entry; nothing was placed"
 )
+USE_SNAPSHOT_NEEDS_AN_ID = (
+    "use(…, snapshot=…) needs a snapshot id, not a selection or a value; nothing was placed"
+)
 
 
 def _entry_context_policy(summary: Any) -> str:
@@ -221,9 +224,15 @@ def _record_snapshot_use(
 ) -> None:
     """Record a `use(node, snapshot=id)` call's pair into the per-render slot
     (ADR-0093 §1/§2). `node` must resolve to ONE entry, the way `entry()`
-    resolves one; a selection of several, or none, adds one `warnings` entry
-    (deduped — no repeats within a render) and records nothing. The hint is
-    NOT recorded for a snapshot pick (its tier rule is fixed, §2)."""
+    resolves one, and `snapshot` must be an id string (a picker selection or
+    any other value handed in by mistake is caught here, not at the send);
+    otherwise one `warnings` entry (deduped — no repeats within a render) and
+    nothing recorded. The hint is NOT recorded for a snapshot pick (its tier
+    rule is fixed, §2)."""
+    if not isinstance(snapshot, str):
+        if USE_SNAPSHOT_NEEDS_AN_ID not in warnings_slot:
+            warnings_slot.append(USE_SNAPSHOT_NEEDS_AN_ID)
+        return
     values = _use_values(value)
     if len(values) != 1:
         if USE_SNAPSHOT_NEEDS_ONE_ENTRY not in warnings_slot:
@@ -234,7 +243,7 @@ def _record_snapshot_use(
         if USE_SNAPSHOT_UNRESOLVED not in warnings_slot:
             warnings_slot.append(USE_SNAPSHOT_UNRESOLVED)
         return
-    pair = (ref.id, str(snapshot))
+    pair = (ref.id, snapshot)
     if pair not in used_snapshots_slot:
         used_snapshots_slot.append(pair)
 

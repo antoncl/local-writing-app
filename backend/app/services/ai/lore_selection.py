@@ -167,7 +167,7 @@ def _select_lore(
     if not automatic:
         never_ids = _never_lore_ids(project)
         declared = set(used_ids or [])
-        return LoreSelection(frozenset(declared - never_ids), ())
+        return LoreSelection(frozenset(declared - never_ids), (), frozenset(never_ids))
     scene_refs = _collect_lore_refs_from_metadata(
         _attr_or_item(scene, "metadata"), project.read_metadata_schema()
     )
@@ -188,7 +188,7 @@ def _select_lore(
     inferred = sorted(
         (c for c in candidates.values() if c.id not in never_ids), key=lambda c: c.fit_key
     )
-    return LoreSelection(frozenset(declared - never_ids), tuple(inferred))
+    return LoreSelection(frozenset(declared - never_ids), tuple(inferred), frozenset(never_ids))
 
 
 def _budgeted_lore_tiers(
@@ -235,7 +235,7 @@ def _budgeted_lore_tiers(
     fitted = fit_lore_budget(selection, rendered, limits.budget_tokens, titles=titles)
     stable_ids, volatile_ids = _tier_lore_ids(project, fitted.kept_ids, session, picks.hints)
     stable_snapshots, volatile_snapshots, warnings = _place_before_elements(
-        project, picks.snapshots, session
+        project, picks.snapshots, session, never=selection.never
     )
     return BudgetedLoreTiers(
         stable_entries=[(i, rendered[i]) for i in stable_ids if i in rendered],
@@ -251,14 +251,18 @@ def _budgeted_lore_tiers(
 
 
 def _place_before_elements(
-    project: ProjectService, snapshots: list[tuple[str, str]], session: AISession
+    project: ProjectService,
+    snapshots: list[tuple[str, str]],
+    session: AISession,
+    *,
+    never: frozenset[str],
 ) -> tuple[list[BeforeElement], list[BeforeElement], list[str]]:
     """ADR-0093 §2: render and tier every `use(node, snapshot=id)` pick's
-    before element. Deduped preserving order; a `never`-policy source loses
-    its before silently, as it loses its pick; a before the reader can't
-    produce (a thinned snapshot, a gone lane, a deleted source) places
-    nothing and adds one `warnings` entry — the send places what it can and
-    never fails on a missing before.
+    before element. Deduped preserving order; a `never`-policy source (the
+    selection's own set — no second lore scan) loses its before silently, as
+    it loses its pick; a before the reader can't produce (a thinned snapshot,
+    a gone lane, a deleted source) places nothing and adds one `warnings`
+    entry — the send places what it can and never fails on a missing before.
 
     This IS the `use(node, "stable")` rule (§2): stable from the first turn,
     volatile only when seen-and-changed, checked by the hash of the
@@ -267,15 +271,10 @@ def _place_before_elements(
     every before volatile on turn one."""
     if not snapshots:
         return [], [], []
-    never = _never_lore_ids(project)
-    seen_pairs: list[tuple[str, str]] = []
-    for pair in snapshots:
-        if pair not in seen_pairs:
-            seen_pairs.append(pair)
     stable: list[BeforeElement] = []
     volatile: list[BeforeElement] = []
     warnings: list[str] = []
-    for entry_id, snapshot_id in seen_pairs:
+    for entry_id, snapshot_id in dict.fromkeys(snapshots):
         if entry_id in never:
             continue
         try:

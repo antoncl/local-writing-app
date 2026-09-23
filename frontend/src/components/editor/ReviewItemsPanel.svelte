@@ -23,7 +23,11 @@
     proposeDefaultPrompt,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
-  import { seedConversationInputs } from "@/components/editor/body/chat/chatInputs";
+  import {
+    seedChangeInputs,
+    seedConversationInputs,
+    type SubjectRef,
+  } from "@/components/editor/body/chat/chatInputs";
   import { todosStore } from "@/lib/stores/todos";
   import { loreEntriesStore } from "@/lib/stores/lore";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -106,6 +110,22 @@
       subjectEntryType,
       asOfScene ? { id: asOfScene, title: asOfSceneTitle } : null,
     );
+    // ADR-0093 §4: the change itself rides as the prompt's snapshot pick,
+    // seeded from the item's source block — the source entry and the
+    // owning-lane baseline snapshot id ("" = the whole entry).
+    if (item.source) {
+      const sourceEntry = $loreEntriesStore.find((entry) => entry.id === item.source?.node_id);
+      const sourceRef: SubjectRef = {
+        id: item.source.node_id,
+        kind: "lore",
+        title: sourceEntry?.title ?? item.source.node_id,
+        entryType: sourceEntry?.entry_type || undefined,
+      };
+      Object.assign(
+        seededInputs,
+        seedChangeInputs(prompt, sourceRef, item.source.snapshot_id ?? ""),
+      );
+    }
     await todoActions.proposeFromReviewItem(item, prompt, seededInputs, { subjectTitle: nodeTitle });
   }
 </script>

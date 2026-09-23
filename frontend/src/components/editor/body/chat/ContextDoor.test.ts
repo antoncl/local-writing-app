@@ -313,4 +313,56 @@ describe("ContextDoor", () => {
     await fireEvent.click(screen.getByText("A"));
     expect(screen.getByText("This entry rendered no XML.")).toBeInTheDocument();
   });
+
+  // ADR-0093 §3: a snapshot pick's before element — its own row, first in the
+  // tier panel, drillable to the block's own entry_xml (never the live route).
+  const BEFORE_XML = '<character id="lore_a" name="A" snapshot="snap_1" captured="…">…before…</character>';
+  const stableBlockWithBefore: PreviewCacheBlock = {
+    label: "stable lore",
+    role: "system",
+    tokens: 300,
+    tier: "stable",
+    text: `<lore>\n${BEFORE_XML}\n</lore>`,
+    entry_ids: [],
+    entry_xml: { "lore_a@snap_1": BEFORE_XML },
+    snapshots: [
+      { entry_id: "lore_a", snapshot_id: "snap_1", captured_at: new Date().toISOString(), title: "A", key: "lore_a@snap_1" },
+    ],
+  };
+
+  it("counts an earlier state on the tier row even with no live entries", () => {
+    render(ContextDoor, { ...baseProps, previewCacheBlocks: [stableBlockWithBefore] });
+    expect(screen.getByText(/0 entries/)).toBeInTheDocument();
+    expect(screen.getByText(/1 earlier state/)).toBeInTheDocument();
+  });
+
+  it("drills the before row to its own XML, never the live per-entry route", async () => {
+    render(ContextDoor, { ...baseProps, previewCacheBlocks: [stableBlockWithBefore] });
+    await fireEvent.click(screen.getByText("stable lore"));
+    expect(screen.getByText(/as of/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByText(/as of/).closest("button")!);
+    expect(screen.getByText(BEFORE_XML)).toBeInTheDocument();
+  });
+
+  it("renders the before row before the live entry rows, when a block carries both", async () => {
+    const both: PreviewCacheBlock = { ...stableBlockWithBefore, entry_ids: ["lore_b"], entry_xml: { ...stableBlockWithBefore.entry_xml, lore_b: XML_B } };
+    render(ContextDoor, { ...baseProps, previewCacheBlocks: [both] });
+    await fireEvent.click(screen.getByText("stable lore"));
+    const rows = screen.getAllByRole("button").map((el) => el.textContent ?? "");
+    const beforeIdx = rows.findIndex((t) => t.includes("as of"));
+    const entryIdx = rows.findIndex((t) => t.includes("B") && !t.includes("as of"));
+    expect(beforeIdx).toBeGreaterThanOrEqual(0);
+    expect(entryIdx).toBeGreaterThan(beforeIdx);
+  });
+
+  it("names nothing about a before under the journal/edited section", async () => {
+    render(ContextDoor, {
+      ...baseProps,
+      previewCacheBlocks: [stableBlockWithBefore],
+      journal: [{ entry_id: "lore_1", title: "Shenzhen Protocol", added_at_turn: 2 }],
+    });
+    await fireEvent.click(screen.getByText("Auto-added this conversation"));
+    expect(screen.queryByText(/as of/)).not.toBeInTheDocument();
+    expect(screen.queryByText("edited")).not.toBeInTheDocument();
+  });
 });

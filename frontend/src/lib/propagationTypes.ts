@@ -97,9 +97,10 @@ export type PropagateResponse = {
 };
 
 /** ADR-0090 §4: the pre-filled first message for a review item's Propose
- *  conversation — the source rendered before/after its change (or, absent a
- *  baseline, the whole entry) plus the follow-up question. Never sent — only
- *  fills the chat composer; the writer still presses Send. */
+ *  conversation — the follow-up question alone (ADR-0093 §4: the change
+ *  itself rides as the prompt's `use(node, snapshot=id)` pick, seeded from
+ *  the review item, not rendered into this text). Never sent — only fills
+ *  the chat composer; the writer still presses Send. */
 export type ChangeMessage = {
   source_id: string;
   baseline_snapshot_id: string;

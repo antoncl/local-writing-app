@@ -227,6 +227,9 @@ picks' field name). No storage changes; no migration.
 
 ## 8 — Deferred, with its constraints: placing an entry at a snapshot
 
+> **Discharged by ADR-0093 (2026-09-23):** the carrier is `use(node, snapshot=id)`; each
+> constraint below has its home in ADR-0093 §5.
+
 A prompt that could place the source's before-state as a block would let ADR-0091 §4's
 message shrink to its question. It is deferred, not sketched, until the message's cost bites
 on a live project; the sizing pass found the constraints any such design must meet, and they

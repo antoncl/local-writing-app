@@ -6,13 +6,15 @@
 // non-empty one gates re-rendering on every later send).
 import { api } from "@/lib/api";
 import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
-import type { PromptEntrySummary } from "@/lib/types";
+import type { PromptEntrySummary, SnapshotPick } from "@/lib/types";
 
 export interface PromptTemplateLock {
   systemPrompt: string;
   loreEnabled: boolean;
   usedNodeIds: string[];
   usedNodeHints: Record<string, string>;
+  // ADR-0093 §1: `use(node, snapshot=id)` picks captured at this render.
+  usedSnapshots: SnapshotPick[];
   fieldContractStored: Record<string, unknown>[];
   initialTurns: { role: "user" | "assistant"; content: string }[];
 }
@@ -63,6 +65,7 @@ export async function lockPromptTemplate(
         loreEnabled: preview.lore_enabled ?? false,
         usedNodeIds: preview.used_node_ids ?? [],
         usedNodeHints: preview.used_node_hints ?? {},
+        usedSnapshots: preview.used_snapshots ?? [],
         fieldContractStored: preview.field_contract_stored ?? [],
         initialTurns,
       },

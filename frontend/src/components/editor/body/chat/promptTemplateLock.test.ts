@@ -29,6 +29,7 @@ describe("lockPromptTemplate (#2129)", () => {
       lore_enabled: true,
       used_node_ids: ["lore_1"],
       used_node_hints: { lore_1: "stable" },
+      used_snapshots: [{ entry_id: "lore_1", snapshot_id: "snap_1" }],
       field_contract_stored: [{ id: "bio" }],
     } as never);
 
@@ -39,6 +40,7 @@ describe("lockPromptTemplate (#2129)", () => {
     expect(result.lock.loreEnabled).toBe(true);
     expect(result.lock.usedNodeIds).toEqual(["lore_1"]);
     expect(result.lock.usedNodeHints).toEqual({ lore_1: "stable" });
+    expect(result.lock.usedSnapshots).toEqual([{ entry_id: "lore_1", snapshot_id: "snap_1" }]);
     expect(result.lock.fieldContractStored).toEqual([{ id: "bio" }]);
     expect(result.lock.initialTurns).toEqual([
       { role: "user", content: "Hi there." },
@@ -59,6 +61,7 @@ describe("lockPromptTemplate (#2129)", () => {
     expect(result.lock.loreEnabled).toBe(false);
     expect(result.lock.usedNodeIds).toEqual([]);
     expect(result.lock.usedNodeHints).toEqual({});
+    expect(result.lock.usedSnapshots).toEqual([]);
     expect(result.lock.fieldContractStored).toEqual([]);
     expect(result.lock.initialTurns).toEqual([]);
     expect(result.lock.systemPrompt).toBe("");

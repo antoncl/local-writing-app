@@ -231,8 +231,10 @@ class TodoActions {
   }
 
   // ADR-0090 §4: Propose — open a conversation on the review item's dependent
-  // (the node this item lives on), its first message pre-filled with the
-  // source's change. Lore dependents only (a scene item has no Propose, per
+  // (the node this item lives on). The first message is the question alone
+  // (ADR-0093 §4); the change itself rides as the prompt's snapshot pick,
+  // seeded from the item's source block by the caller (ReviewItemsPanel's
+  // `pickPrompt`). Lore dependents only (a scene item has no Propose, per
   // §4's scene paragraph): guarded by `item.source && item.node_id`.
   async proposeFromReviewItem(
     item: TodoItem,

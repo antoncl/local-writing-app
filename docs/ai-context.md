@@ -29,6 +29,13 @@ System section. A prompt that only picks — `use()` alone — sends its picks a
 nothing else: no scene references, no always-included entries, no noticing. That is
 deliberate. A prompt built to check *one* entry should not be handed the world.
 
+A prompt can also place an entry as it was at an earlier snapshot, alongside the
+entry as it is now — `use(node, snapshot=id)`. Propose's built-in **Follow a
+change** does this for the entry that changed, so you see what changed without
+re-reading two renders yourself. The earlier state rides the stable tier every
+turn, like a declared pick, so it survives the conversation-history window even
+many turns later.
+
 ![Two columns feeding one block. Declared, on the left: prompt picks, scene references, always-include entries — sent whole. Automatic, on the right, behind the auto_lore() switch: entries named in your message, the prompt on the first turn, and the scene's prose, reaching one step out — fitted to the assistant's budget. Both land in one lore block with each entry once.](ai-context/two-halves.svg)
 
 ## What automatic lore notices
@@ -128,7 +135,11 @@ the first send and after every turn:
   the automatic half is on.
 - **Stable lore / Volatile lore** — the two blocks with their entries. Open an entry
   to see the exact XML the model receives. Rows present with no *lore-enabled*
-  line means "picks placed, automatic off".
+  line means "picks placed, automatic off". An earlier state placed by
+  `use(node, snapshot=id)` appears first in the list of the tier that holds it —
+  the stable tier, except for the one turn after something it refers to was
+  renamed — as an "as of ⟨time⟩" row; the tier row's count includes it as an
+  earlier state.
 - **Auto-added this conversation** — the noticed entries, each with where it was
   noticed and on which turn.
 - **Left out** — what the budget dropped this turn.

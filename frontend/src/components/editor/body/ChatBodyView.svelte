@@ -48,6 +48,7 @@
     LoreEntrySummary,
     PromptEntrySummary,
     SaveChatSessionRequest,
+    SnapshotPick,
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -179,6 +180,9 @@
   // ADR-0060 §5: per-node volatility priors from use(node, hint), mirrored beside
   // chatUsedNodeIds through the same capture/echo path.
   let chatUsedNodeHints: Record<string, string> = {};
+  // ADR-0093 §1: `use(node, snapshot=id)` picks, mirrored beside chatUsedNodeIds/
+  // chatUsedNodeHints through the same capture/echo path.
+  let chatUsedSnapshots: SnapshotPick[] = [];
   // ADR-0067 S2: the field descriptors the prompt registered via field_contract.
   // Captured from the lock render's preview response and echoed on every save,
   // mirrored beside chatUsedNodeIds — the commit reads this back instead of
@@ -405,6 +409,7 @@
     chatLoreEnabled = false;
     chatUsedNodeIds = [];
     chatUsedNodeHints = {};
+    chatUsedSnapshots = [];
     chatFieldContractStored = [];
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
@@ -431,6 +436,10 @@
     chatLoreEnabled = session.lore_enabled ?? false;
     chatUsedNodeIds = session.used_node_ids ?? [];
     chatUsedNodeHints = session.used_node_hints ?? {};
+    // ADR-0093 §1: hydration matters here — the save payload always sends
+    // used_snapshots (see currentChatSessionPayload), so a missing hydrate
+    // would wipe a persisted chat's snapshot picks with [] on the next save.
+    chatUsedSnapshots = session.used_snapshots ?? [];
     chatFieldContractStored = session.field_contract_stored ?? [];
     chatSystemPrompt = session.system_prompt || "";
     chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
@@ -572,6 +581,7 @@
       lore_enabled: chatLoreEnabled,
       used_node_ids: chatUsedNodeIds,
       used_node_hints: chatUsedNodeHints,
+      used_snapshots: chatUsedSnapshots,
       field_contract_stored: chatFieldContractStored,
       pinned: activeChatPinned,
       context_items: [],
@@ -880,7 +890,7 @@
   // subsequent sends skip this path. The render + lock itself is the pure
   // `lockPromptTemplate` helper (chat/promptTemplateLock.ts, #2129) — this
   // wrapper builds the coerced+expanded inputs (promptResolution.ts'
-  // inputValuesFromDrafts, Seam 0) and assigns the six locked fields.
+  // inputValuesFromDrafts, Seam 0) and assigns the locked fields.
   async function renderAndLockPromptTemplate(entry: PromptEntrySummary): Promise<boolean> {
     const inputs = inputValuesFromDrafts(effectivePromptInputs(entry), chatInputDrafts, selectorRoster);
     const result = await lockPromptTemplate(entry, { subject: chatSubject, inputs });
@@ -893,6 +903,7 @@
     chatLoreEnabled = lock.loreEnabled;
     chatUsedNodeIds = lock.usedNodeIds;
     chatUsedNodeHints = lock.usedNodeHints;
+    chatUsedSnapshots = lock.usedSnapshots;
     chatFieldContractStored = lock.fieldContractStored;
     if (lock.initialTurns.length > 0) chatHistory = [...lock.initialTurns];
     return true;

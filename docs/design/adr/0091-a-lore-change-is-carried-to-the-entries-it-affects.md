@@ -7,6 +7,7 @@
   explicit go.
   The code ADR-0090 shipped (PRs #2118, #2120, #2122, #2123, #2127, #2128, #2130) stays; §Slices
   says what of it this ADR keeps unchanged, what it changes, and what it adds.
+- **Amended by:** ADR-0093 (§4, the carrier).
 - **Feature:** keeping related lore entries consistent when one of them changes (#2131, #2132,
   #2133 are the open defects this ADR absorbs; the slices get their own issues).
 - **Relates to:** ADR-0046 (an AI lore edit is a reviewable patch the writer adopts — the stance
@@ -218,6 +219,10 @@ the first mention by name — and opens the source in a second pane parked on th
 compare mode, through a pending-park intent the pane consumes on load.
 
 ### 4 — Propose opens a conversation whose job is to follow the change
+
+> **Amended by ADR-0093 (2026-09-23):** the prompt places the change with
+> `use(node, snapshot=id)` from two hidden inputs Propose seeds; the message is the question.
+> Still no prompt variable, the one vocabulary change is a keyword on a call that exists.
 
 From a review item, **Propose** opens a conversation on the dependent (ADR-0051) with its first
 user message pre-filled: the source before the change and after it, rendered as the AI already

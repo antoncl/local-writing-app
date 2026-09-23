@@ -539,17 +539,28 @@ class BuiltinLibraryTests(unittest.TestCase):
         self.assertEqual(output.handler, "extract_to_node")
         self.assertEqual(output.commit.review, "visual_diff")
         input_names = {i.name: i for i in full.inputs}
-        self.assertEqual(set(input_names), {"entry", "entry_type"})
+        self.assertEqual(set(input_names), {"entry", "entry_type", "source", "baseline"})
         self.assertTrue(input_names["entry"].required)
         self.assertTrue(input_names["entry_type"].required)
         self.assertTrue(input_names["entry_type"].hidden)
+        # ADR-0093 §4: the two hidden inputs Propose seeds — the source entry
+        # and the owning-lane baseline snapshot id, both optional (a ＋New
+        # launch leaves them empty and the role asks for the entry instead).
+        self.assertFalse(input_names["source"].required)
+        self.assertTrue(input_names["source"].hidden)
+        self.assertEqual(input_names["source"].type, "context_pick")
+        self.assertFalse(input_names["baseline"].required)
+        self.assertTrue(input_names["baseline"].hidden)
         body = full.body
         self.assertIn("field_contract.store", body)
         self.assertIn("use(e)", body)
-        # #2143: use_lore() is gone — the change is in the message and the
-        # dependent arrives via use(e), a declared pick ADR-0086 never drops;
-        # use_lore() additionally pulled the inferred corpus in, turning a
-        # one-entry check into a corpus-wide review.
+        # ADR-0093 §4: the two guarded placing lines — the after (an ordinary
+        # pick) and the before (a snapshot pick, "" when there is no baseline).
+        self.assertIn('snapshot=inputs.baseline|default("")', body)
+        # #2143: use_lore() is gone — the change is placed by the two lines
+        # above and the dependent arrives via use(e), a declared pick ADR-0086
+        # never drops; use_lore() additionally pulled the inferred corpus in,
+        # turning a one-entry check into a corpus-wide review.
         self.assertNotIn("use_lore()", body)
         # ADR-0092 §7.2: renamed everywhere, so its deprecated alias shouldn't
         # reappear here either — the built-in is pick-only by design (ADR-0091).
@@ -563,6 +574,10 @@ class BuiltinLibraryTests(unittest.TestCase):
         # the dependent, never the background entries.
         self.assertIn("Revise only **", body)
         self.assertIn("do not report on them", body)
+        # ADR-0093 §4: the role names the `snapshot` attribute instead of
+        # promising a pre-filled first message.
+        self.assertIn("`snapshot` attribute", body)
+        self.assertNotIn("Your first message will show", body)
 
     def test_clone_a_library_prompt_into_the_project(self) -> None:
         """Clone (§5): a shipped prompt is lifted into the project under a NEW id

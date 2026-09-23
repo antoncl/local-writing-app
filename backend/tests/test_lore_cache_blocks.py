@@ -148,6 +148,20 @@ class LoreCacheBlockTests(_LoreCacheFixture):
         # the always-policy entry (the fixture's "Premise").
         picked = self._make_note("Sidebar", body="A picked aside.")
         self._make_note("Gaslamp", body="Lit by whale oil.")
+        rook = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Referenced Rook", entry_type="lore:character")
+        )
+        existing_rook = self.service.read_lore_entry(rook.id)
+        self.service.save_lore_entry(
+            rook.id,
+            SaveLoreEntryRequest(
+                title="Referenced Rook",
+                body="A structurally-referenced character.",
+                base_revision=existing_rook.revision,
+                entry_type="lore:character",
+                metadata={},
+            ),
+        )
         structure = self.service.create_structure_node(
             CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
@@ -168,7 +182,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
                 base_revision=scene.revision,
                 status="draft",
                 entry_type="manuscript:scene",
-                metadata={},
+                metadata={"characters": [rook.id]},
             ),
         )
         chat = self.service.create_chat_session(
@@ -190,6 +204,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
         self.assertIn('name="Sidebar"', text)
         self.assertNotIn('name="Gaslamp"', text)  # the scene's own mention: out
         self.assertNotIn('name="Premise"', text)  # the always-policy entry: out
+        self.assertNotIn('name="Referenced Rook"', text)  # the scene's structural ref: out
         assert prepared.lore_fit is not None
         self.assertEqual(prepared.lore_fit.left_out, [])
         after = self.service.read_chat_session(chat.id)

@@ -678,9 +678,10 @@ def _annotate_rendered_from_env(
 ) -> None:
     """Copy the env-side execution state the render's helpers (`use()`,
     `use_lore()`, `field_contract.store()`) recorded during the template render
-    onto `rendered`, and compute the send-path lore tiers when lore was
-    invoked. Split out of `build_preview` (#1544) so that function's own
-    statement count stays under the complexity gate."""
+    onto `rendered`, and compute the send-path lore tiers when automatic lore
+    was invoked or the render carries `use()` picks (ADR-0092 §7.1). Split out
+    of `build_preview` (#1544) so that function's own statement count stays
+    under the complexity gate."""
     # ADR-0092 §7.1: carry the execution-derived AUTOMATIC-lore gate off the env
     # (set by the `use_lore()` helper alone) onto the rendered result, so the
     # preview route can surface it and the chat can persist `lore_enabled`. The

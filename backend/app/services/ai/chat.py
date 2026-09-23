@@ -321,8 +321,9 @@ def expand_and_prepare_chat_blocks(
         stable}, {staged_change, stable}?, {stable_lore, stable}?, {volatile_lore,
         volatile}?] — the staged_change block (ADR-0055 S4) is present only when the
         chat owns a resolvable mutation set; the two lore blocks (ADR-0057 +
-        docs/design/context-caching.md) only when the chat is lore-enabled and the
-        corresponding tier is non-empty. Each block carries a `tier`, not a ttl;
+        docs/design/context-caching.md) only when the chat is lore-enabled OR
+        carries `use()` picks (ADR-0092 §7.1) and the corresponding tier is
+        non-empty. Each block carries a `tier`, not a ttl;
         the adapter maps tier → ttl/breakpoint and caps the breakpoint count
       - session_id for OpenRouter provider stickiness
       - journal_added: lore IDs newly detected on THIS turn (for audit UI)

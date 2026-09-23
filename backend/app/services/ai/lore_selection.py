@@ -162,7 +162,7 @@ def _select_lore(
     who wants a use()'d node's neighbours loops its refs and use()s them.
     """
     if not automatic:
-        never_ids = _lore_policy_ids(project)["never"]
+        never_ids = _never_lore_ids(project)
         declared = set(used_ids or [])
         return LoreSelection(frozenset(declared - never_ids), ())
     scene_refs = _collect_lore_refs_from_metadata(

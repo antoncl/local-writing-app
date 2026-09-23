@@ -1,8 +1,8 @@
 # What the AI sees
 
-> User guide. Every chat turn sends the model three things: your prompt, the
-> conversation so far, and a block of lore the app chose for you. This guide is
-> about that block — what goes into it, why, and the few places you steer it.
+> User guide. Every chat turn sends the model your prompt, the conversation so
+> far, and a block of lore the app chose for you. This guide is about that
+> block — what goes into it, why, and the few places you steer it.
 > It's automatic by default; the last sections are the parts you can touch.
 
 You never paste your world into a prompt by hand. A prompt *names* what the model
@@ -69,8 +69,8 @@ always-included entries are never counted against them.
 
 - **Lore reach** — *One hop* (the default) or *Named only*. *Named only* keeps
   what was actually named in the message, the prompt or the scene, and drops the
-  step out through prose and links. The Context door still lists the one-step
-  entries as noticed; they just aren't sent.
+  step out through prose and links. The Context door still lists what the prose
+  step noticed; it just isn't sent.
 - **Lore budget (tokens)** — the ceiling on the automatic half, whole entries
   only. Leave it blank for the default of 16 000. Set it to **0** to send the
   declared half alone, whatever the prompt calls.

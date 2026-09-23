@@ -326,8 +326,8 @@ it.
    `Follow a change`, the composer holding the source before and after as today. The Context
    door shows one tier row: The Implant, volatile on the first turn, with no "lore-enabled"
    annotation.
-2. The writer sends. The meta line shows the lore fit with nothing left out; the journal stays
-   empty, because no detection ran. The model names the difference and quotes the one
+2. The writer sends. The meta line shows the lore fit and no "left out" segment, because
+   nothing was; the journal stays empty, because no detection ran. The model names the difference and quotes the one
    sentence in The Implant that must change.
 3. In the writer's own prompt, `use_lore()` still works; the meta line says it is now
    `auto_lore()` on every turn until the writer renames it, and the editor's completion

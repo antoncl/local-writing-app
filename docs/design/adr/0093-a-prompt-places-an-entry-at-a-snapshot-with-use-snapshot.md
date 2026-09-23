@@ -1,8 +1,9 @@
 # ADR-0093: A prompt places an entry as it was at a snapshot with `use(node, snapshot=id)`, and Propose's message shrinks to the question
 
-- **Status:** Proposed — 2026-09-23, text by Claude from Anton's return to ADR-0092 §8 after the
-  ADR-0091 live run. Revised twice before this text: against two cold implementing threads'
-  findings on a first shape, and then to Anton's decision on the producer (PR #2161).
+- **Status:** Accepted — 2026-09-23, Anton Lauridsen; text by Claude from Anton's return to
+  ADR-0092 §8 after the ADR-0091 live run. Revised twice before acceptance: against two cold
+  implementing threads' findings on a first shape, and then to Anton's decision on the
+  producer (PR #2161).
   **Discharges ADR-0092 §8** (the deferred snapshot carrier) and **amends ADR-0091 §4 by
   reference** (§5 below). Acceptance alone starts nothing; each slice gets its own issue and
   an explicit go.

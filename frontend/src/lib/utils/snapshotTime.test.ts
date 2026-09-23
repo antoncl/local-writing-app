@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Snapshot } from "@/lib/types";
-import { inNotchOrder, notchAges, notchTooltip, notchWhen } from "./snapshotTime";
+import { inNotchOrder, notchAges, notchTooltip, notchWhen, notchWhenCapturedDistinct } from "./snapshotTime";
 
 // `relativeTime` formats in the runtime's LOCAL zone (weekday, ordinal, day
 // boundaries), so fixtures feeding a formatted assertion are built from local
@@ -40,6 +40,35 @@ const AUTOMATIC = snapshot(
   "2026-07-23T11:00:00.000",
   "2026-07-09T11:00:00.000",
 );
+
+// #2141: the Propagate pane's "since" labels read CAPTURE time (ADR-0091 §7),
+// and two captures on one day share a rung of the ladder.
+describe("notchWhenCapturedDistinct", () => {
+  const yesterdayEarly = snapshot("snap_a", "2026-07-22T06:25:00.000", "2026-07-22T06:25:00.000");
+  const yesterdayLate = snapshot("snap_b", "2026-07-22T10:50:00.000", "2026-07-22T10:50:00.000");
+  const lastWeek = snapshot("snap_c", "2026-07-18T09:00:00.000", "2026-07-18T09:00:00.000");
+
+  it("appends the capture time of day to every snapshot that shares a phrase", () => {
+    expect(notchWhenCapturedDistinct([yesterdayLate, yesterdayEarly], NOW)).toEqual([
+      "yesterday 10:50",
+      "yesterday 06:25",
+    ]);
+  });
+
+  it("keeps the short form for a phrase held by one snapshot, in the order given", () => {
+    expect(notchWhenCapturedDistinct([yesterdayLate, lastWeek, yesterdayEarly], NOW)).toEqual([
+      "yesterday 10:50",
+      "Saturday",
+      "yesterday 06:25",
+    ]);
+    expect(notchWhenCapturedDistinct([yesterdayEarly], NOW)).toEqual(["yesterday"]);
+  });
+
+  it("reads capture time, not content time, like notchWhenCaptured", () => {
+    const stale = snapshot("snap_d", "2026-07-22T15:00:00.000", "2026-07-01T15:00:00.000");
+    expect(notchWhenCapturedDistinct([stale, yesterdayEarly], NOW)).toEqual(["yesterday 15:00", "yesterday 06:25"]);
+  });
+});
 
 describe("notchAges", () => {
   it("ages a notch by when its content was written, not when the record was made", () => {

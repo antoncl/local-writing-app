@@ -9,7 +9,9 @@ import pytest
 from app.models import (
     ChatSessionJournalEntry,
     CreateLoreEntryRequest,
+    MetadataFieldDefinition,
     SaveLoreEntryRequest,
+    UpsertMetadataFieldRequest,
 )
 from app.services.ai.context_expander import expand_context
 from app.services.project_service import ProjectService
@@ -22,12 +24,27 @@ def project(tmp_path, monkeypatch):
     """Project with three characters wired similarly to the test_ai_helpers
     fixture: Honor (with alias "The Salamander"), Nimitz, and Pavel Young
     (whom Honor's body textually mentions — feeds the depth-1 path).
+
+    `lore:character` also carries a custom `notes` `long_text` field (#2147) —
+    unset by default on every entry, so it changes nothing for tests that
+    don't use it — for the depth-1 hop's own prose-surface (body + long_text)
+    tests.
     """
     monkeypatch.setattr(
         "app.services.machine_settings.config_path",
         lambda: tmp_path / "machine_settings.yaml",
     )
     svc = ProjectService.created_at(tmp_path / "project", "Demo")
+
+    layer_id = svc._metadata_schema_layer_id(svc.root_path)
+    svc.upsert_metadata_field(
+        UpsertMetadataFieldRequest(
+            layer_id=layer_id,
+            field_id="notes",
+            field=MetadataFieldDefinition(name="Notes", type="long_text"),
+            entry_type="lore:character",
+        )
+    )
 
     honor = svc.create_lore_entry(
         CreateLoreEntryRequest(title="Honor Harrington", entry_type="lore:character")
@@ -67,6 +84,20 @@ def project(tmp_path, monkeypatch):
     svc._nimitz_id = nimitz.id
     svc._pavel_id = pavel.id
     return svc
+
+
+def _set_notes(project, entry_id, notes):
+    existing = project.read_lore_entry(entry_id)
+    project.save_lore_entry(
+        entry_id,
+        SaveLoreEntryRequest(
+            title=existing.title,
+            body=existing.body,
+            base_revision=existing.revision,
+            entry_type="lore:character",
+            metadata={**existing.metadata, "notes": notes},
+        ),
+    )
 
 
 # ---- tests ----------------------------------------------------------------
@@ -176,6 +207,76 @@ def test_depth1_does_not_recurse(project):
     assert project._honor_id in ids
     assert project._pavel_id in ids       # depth 1
     assert anders.id not in ids           # depth 2 — must stop
+
+
+# ---- #2147: the hop's prose surface matches detection's --------------------
+# Detection (`_scene_prose_ids`) scans a scene's body PLUS every `long_text`
+# field; the depth-1 hop must scan the same surface on each seed it walks, via
+# the same shared collector (`_prose_texts`).
+
+
+def test_depth1_expansion_from_a_seeds_long_text_field(project):
+    # Honor's `notes` (long_text) names Nimitz — nowhere in Honor's body.
+    # The hop must still pull Nimitz in, exactly as it already does for a
+    # body mention (Pavel).
+    _set_notes(project, project._honor_id, "Grew up alongside Nimitz.")
+
+    out = expand_context(project, "Honor stepped onto the bridge.")
+    by_id = {e.entry_id: e for e in out}
+    assert by_id[project._honor_id].source == "user_message"
+    assert by_id[project._pavel_id].source == "depth1_expansion"  # body, as before
+    assert by_id[project._nimitz_id].source == "depth1_expansion"  # long_text, #2147
+
+
+def test_depth1_does_not_scan_a_hop_founds_long_text_field(project):
+    # Pavel is a hop-found entry (via Honor's body). Depth stays strictly
+    # one: a name in PAVEL's own `notes` field must not be pulled in.
+    anders = project.create_lore_entry(
+        CreateLoreEntryRequest(title="Anders Pierce", entry_type="lore:character")
+    )
+    _set_notes(project, project._pavel_id, "Old friend of Anders Pierce.")
+
+    out = expand_context(project, "Honor returned.")
+    ids = {e.entry_id for e in out}
+    assert project._pavel_id in ids   # depth 1, via Honor's body
+    assert anders.id not in ids       # depth 2 through a long_text field — must stop
+
+
+def test_depth1_name_split_across_body_and_long_text_is_not_falsely_joined(project):
+    # A multi-word name straddling the seed's body end and its long_text
+    # field start must not false-match, on the hop just as on detection
+    # (`_scene_prose_ids`'s own field-boundary test) — the two texts are
+    # scanned SEPARATELY and unioned, never concatenated.
+    bob_smith = project.create_lore_entry(
+        CreateLoreEntryRequest(title="Bob Smith", entry_type="lore:character")
+    )
+    existing = project.read_lore_entry(bob_smith.id)
+    project.save_lore_entry(
+        bob_smith.id,
+        SaveLoreEntryRequest(
+            title=existing.title,
+            body="A quiet man.",
+            base_revision=existing.revision,
+            entry_type="lore:character",
+            metadata={"aliases": []},
+        ),
+    )
+    honor = project.read_lore_entry(project._honor_id)
+    project.save_lore_entry(
+        project._honor_id,
+        SaveLoreEntryRequest(
+            title=honor.title,
+            body="Captain of the Fearless. Introduced herself as Bob",
+            base_revision=honor.revision,
+            entry_type="lore:character",
+            metadata=honor.metadata,
+        ),
+    )
+    _set_notes(project, project._honor_id, "Smith gave a curt nod and said nothing else.")
+
+    out = expand_context(project, "Honor returned.")
+    ids = {e.entry_id for e in out}
+    assert bob_smith.id not in ids
 
 
 def test_dedup_is_set_union(project):

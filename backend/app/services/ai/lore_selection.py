@@ -1,10 +1,10 @@
 """The ADR-0057 one gated lore selector and the ADR-0075 implicit-detection
 surface: scene-relevant lore id selection (`_relevant_lore_ids`/
-`_relevant_lore`), alias/textual matching (`_alias_match`, `_scene_prose_ids`,
-`_textual_one_hop`), context-policy gating (`_always_included_lore_ids`/
-`_never_lore_ids`/`_manual_only_lore_ids`), and per-turn stable/volatile
-tiering (`_tier_lore_ids`). Extracted from `helpers.py` for size (#1497);
-sibling to `name_matcher.py`.
+`_relevant_lore`), alias/textual matching (`_alias_match`, `_prose_texts`,
+`_scene_prose_ids`, `_textual_one_hop`), context-policy gating
+(`_always_included_lore_ids`/`_never_lore_ids`/`_manual_only_lore_ids`), and
+per-turn stable/volatile tiering (`_tier_lore_ids`). Extracted from
+`helpers.py` for size (#1497); sibling to `name_matcher.py`.
 
 ADR-0086: the implicit selection is built by `_select_lore`, which says for
 every id whether the author *declared* it or the app *inferred* it (and by
@@ -518,41 +518,88 @@ def _lore_policy_ids(project: ProjectService) -> dict[str, set[str]]:
     return ids
 
 
+def _prose_texts(entry: Any, schema: Any) -> list[str]:
+    """The prose surface of one `entry` as a list of separate texts — its
+    **body** (if non-blank) plus the value of every `long_text` field
+    declared on its `entry_type` (`summary`, `description`, `notes`, any
+    custom long_text). NOT single-line `text` fields, title/name, or
+    `aliases` (ADR-0075 §2). Texts are returned unjoined — every caller scans
+    them SEPARATELY and unions the id sets, never concatenates, so a
+    multi-word name can't false-match across a field/body boundary.
+
+    The one shared collector behind both halves of the detection surface
+    (#2147): `_scene_prose_ids` (a scene's own scan) and `_textual_one_hop`
+    (the depth-one hop's scan of each seed) both call this, so the two
+    surfaces can't drift apart again.
+    """
+    texts: list[str] = []
+    body = _attr_or_item(entry, "body")
+    if isinstance(body, str) and body.strip():
+        texts.append(body)
+    entry_type = _get_field(entry, "entry_type")
+    definition = schema.entry_types.get(entry_type) if isinstance(entry_type, str) else None
+    field_ids = list(definition.fields) if definition is not None else []
+    for field_id in field_ids:
+        field = schema.fields.get(field_id)
+        if field is None or field.type != "long_text":
+            continue
+        value = _get_field(entry, field_id)
+        if isinstance(value, str) and value.strip():
+            texts.append(value)
+    return texts
+
+
 def _textual_one_hop(
     project: ProjectService,
     entry_ids: set[str],
     scene: Any = None,
     matcher: CompiledNameMatcher | None = None,
 ) -> set[str]:
-    """Scan the body of each given entry for further textual name matches.
+    """Scan each given entry's own prose surface — body plus every
+    `long_text` field on its entry_type, via `_prose_texts` — for further
+    textual name matches.
 
     Used for depth-1 expansion in implicit-context detection: if Honor's
-    body mentions Nimitz by name, Nimitz is pulled in even without an
-    explicit entity_ref linking them. Bodies of newly-discovered entries
-    are NOT rescanned — depth strictly 1 — which prevents cascade
-    explosions on richly cross-referenced lore.
+    body OR a long_text field (a `backstory`, a `description`) mentions
+    Nimitz by name, Nimitz is pulled in even without an explicit entity_ref
+    linking them. The entries discovered here are NOT rescanned — depth
+    strictly 1 — which prevents cascade explosions on richly cross-referenced
+    lore.
+
+    Symmetry rule (#2147): the hop scans EXACTLY the surface
+    `_scene_prose_ids` scans for detection — same collector, same
+    per-text-then-union scan — so a name can't false-match across a
+    body/field boundary on this path either (the prior `"\n".join(bodies)`
+    had that same hole, just with no long_text field yet in play to expose
+    it). ADR-0075 §2's "a matched entity's body" wording predates the
+    slice-3 long_text surface (#1495) and is now stale; the coming
+    lore-pipeline summation ADR states the one rule for both surfaces
+    instead of re-amending 0075 here. The schema is read once for this
+    whole call, not once per seed.
 
     `matcher` lets a caller that already built the scene's matcher (e.g.
     `expand_context`, which scans several surfaces in one detection pass)
     pass it in and skip recompiling; when omitted, one is built here.
 
-    Returns all matches found in the scanned bodies, including the source
-    entries themselves when their body mentions their own name; callers
-    should dedup against the source set.
+    Returns all matches found in the scanned surfaces, including a source
+    entry itself when its own prose mentions its own name; callers should
+    dedup against the source set.
     """
-    bodies: list[str] = []
+    schema = project.read_metadata_schema()
+    texts: list[str] = []
     for entry_id in entry_ids:
         entry = _safe_read_node(project, entry_id)
         if entry is None:
             continue
-        body = _attr_or_item(entry, "body")
-        if isinstance(body, str) and body.strip():
-            bodies.append(body)
-    if not bodies:
+        texts.extend(_prose_texts(entry, schema))
+    if not texts:
         return set()
     if matcher is None:
         matcher = _build_scene_matcher(project, scene)
-    return _scan_matcher_ids(matcher, "\n".join(bodies))
+    found: set[str] = set()
+    for text in texts:
+        found |= _scan_matcher_ids(matcher, text)
+    return found
 
 
 def _scene_prose_ids(
@@ -563,10 +610,11 @@ def _scene_prose_ids(
 ) -> set[str]:
     """The lore ids textually detected in `scene`'s own prose surface — its
     **body** plus the value of every `long_text` field on its entry_type
-    (`summary`, `description`, `notes`, any custom long_text). NOT single-line
-    `text` fields, title/name, or `aliases` (ADR-0075 §2). The single shared
-    definition of "the scene's own detection surface", used by both the
-    one-shot/preview path and the chat send path so they can't drift.
+    (`summary`, `description`, `notes`, any custom long_text), via
+    `_prose_texts`. NOT single-line `text` fields, title/name, or `aliases`
+    (ADR-0075 §2). The single shared definition of "the scene's own detection
+    surface", used by both the one-shot/preview path and the chat send path
+    so they can't drift.
 
     Each text is scanned SEPARATELY and the id sets are UNIONED — never
     concatenated — so a multi-word name can't false-match across a
@@ -582,20 +630,7 @@ def _scene_prose_ids(
     if scene is None:
         return set()
     schema = schema or project.read_metadata_schema()
-    texts: list[str] = []
-    body = _attr_or_item(scene, "body")
-    if isinstance(body, str) and body.strip():
-        texts.append(body)
-    entry_type = _get_field(scene, "entry_type")
-    definition = schema.entry_types.get(entry_type) if isinstance(entry_type, str) else None
-    field_ids = list(definition.fields) if definition is not None else []
-    for field_id in field_ids:
-        field = schema.fields.get(field_id)
-        if field is None or field.type != "long_text":
-            continue
-        value = _get_field(scene, field_id)
-        if isinstance(value, str) and value.strip():
-            texts.append(value)
+    texts = _prose_texts(scene, schema)
     if not texts:
         return set()
     if matcher is None:

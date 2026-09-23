@@ -118,9 +118,37 @@ describe("Todo pane — rows render", () => {
     expect(screen.getByDisplayValue("Follow up on Marek Vell's change")).toBeInTheDocument();
     const openButton = screen.getByRole("button", { name: "Open entry" });
     expect(openButton).toBeInTheDocument();
-    expect(screen.getByText(/review item ·.*from Marek Vell/)).toBeInTheDocument();
+    // The row leads with the HOME the button opens (#2145): the bare id when
+    // no lookup resolves it, never the source twice.
+    expect(screen.getByText(/^guard · mentions the change · from Marek Vell$/)).toBeInTheDocument();
 
     await fireEvent.click(openButton);
     expect(onOpenFileTodo).toHaveBeenCalledWith(item);
+  });
+
+  // #2145: the home resolves live through the same lookup as the source — a
+  // lore dependent by its title, a scene dependent by its scene id.
+  it("leads a review item's line with its home's title, for a lore and a scene dependent", () => {
+    const loreItem = nodeTodo("t1", "Follow up on Marek Vell's change", "lore_guard");
+    const sceneItem: TodoItem = {
+      id: "t2",
+      text: "Follow up on Marek Vell's change",
+      status: "open",
+      scope: "scene",
+      scene_id: "scene_ch5",
+      source: { node_id: "lore_marek", snapshot_id: "snap_1", reason: "mutates_source", marker_id: "m_rank" },
+    };
+    const titles: Record<string, string> = {
+      lore_marek: "Marek Vell",
+      lore_guard: "City Guard",
+      scene_ch5: "Chapter 5 · The Gate",
+    };
+    render(Todo, {
+      props: { ...baseProps(), todos: [loreItem, sceneItem], nodeTitle: (id: string) => titles[id] },
+    });
+
+    expect(screen.getByText("City Guard · mentions the change · from Marek Vell")).toBeInTheDocument();
+    expect(screen.getByText("Chapter 5 · The Gate · ⤳ a marker on the change · from Marek Vell")).toBeInTheDocument();
+    expect(screen.queryByText(/^review item ·/)).not.toBeInTheDocument();
   });
 });

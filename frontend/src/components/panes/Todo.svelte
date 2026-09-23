@@ -48,10 +48,17 @@
     nodeTitle?: (id: string) => string | undefined;
   } = $props();
 
+  // The row leads with the item's HOME — the dependent the "Open entry" /
+  // "Open scene" button opens — so five items that all "follow up on Origin's
+  // change" read apart (#2145). The home is resolved live from the rosters,
+  // never baked into the editable text, so a rename never leaves it stale.
   function sourceDetailLine(item: TodoItem): string | null {
     if (!item.source) return null;
     const title = nodeTitle?.(item.source.node_id) ?? item.source.node_id;
-    return `review item · ${reviewItemSourceDetail(item.source, title)}`;
+    const homeId = item.node_id ?? item.scene_id ?? "";
+    const home = homeId ? (nodeTitle?.(homeId) ?? homeId) : "";
+    const detail = reviewItemSourceDetail(item.source, title);
+    return home ? `${home} · ${detail}` : `review item · ${detail}`;
   }
 </script>
 

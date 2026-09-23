@@ -497,6 +497,12 @@
     const node = structure?.root ? findNodeBySceneId(structure.root, pane.scene.id) : null;
     return node ? structureNodeTitle(node, metadataSchema) : pane.scene.title;
   };
+  // #2145: a scene's display title by scene id, for a row that names a home
+  // outside any editor pane (the todo pane's review items).
+  const sceneTitleById = (id: string): string | undefined => {
+    const node = structure?.root ? findNodeBySceneId(structure.root, id) : null;
+    return node ? structureNodeTitle(node, metadataSchema) : undefined;
+  };
   function editorBadge(id: string): { text: string; saved: boolean; error?: boolean } | null {
     const pane = editorPaneById(id);
     if (!pane) return null;
@@ -1245,7 +1251,7 @@
         onUpdateEmbeddedTodoNote={(item, note) => todoActions.updateEmbeddedTodoNote(item, note)}
         onOpenEmbeddedTodo={(item) => todoActions.openEmbeddedTodo(item)}
         onDeleteEmbeddedTodo={(item) => todoActions.deleteEmbeddedTodo(item)}
-        nodeTitle={(id) => loreEntries.find((entry) => entry.id === id)?.title}
+        nodeTitle={(id) => loreEntries.find((entry) => entry.id === id)?.title ?? sceneTitleById(id)}
       />
     </div>
   {/snippet}

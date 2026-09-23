@@ -44,8 +44,8 @@ If a node's fields are organised into a named group, you can read a member strai
 | `pov(scene)` | The scene's POV character (`lore:character`) or `None` — the scene's OWN `pov` field. For the value a scene *inherits*, use `resolved_narration`. |
 | `resolved_narration(scene)` | The scene's **effective** narration folded down the manuscript structure (ADR-0079): `{mode, character}`. Unlike `pov(scene)`, this resolves inheritance — a scene inheriting its POV from its act or the book reports that value — and drops `character` for `third_omniscient` / `third_objective` modes. `character` is a `lore:character` node (so `resolved_narration(scene).character.title` works) or `None`; `mode` is the `pov_mode` value or `None`. |
 | `is_a(node, entry_type)` | `bool` — kind-of test against the type's `parent:` chain. |
-| `use(node, "stable"\|"volatile")` | `""` — adds the node to what the AI sees. It prints nothing where you write it: the app fetches the node and includes it for you, with no duplicates. Hand it a whole picker selection to add every pick at once. The optional `"stable"`/`"volatile"` hint nudges caching and can usually be left off. It does not turn automatic lore on — pair it with `use_lore()` for that. |
-| `use_lore()` | `""` — automatically includes the lore relevant to this scene: entries it links to, and entries named in its summary. Call it to turn that on; leave it out for no automatic lore. |
+| `use(node, "stable"\|"volatile")` | `""` — adds the node to what the AI sees. It prints nothing where you write it: the app fetches the node and includes it for you, with no duplicates. Hand it a whole picker selection to add every pick at once. The optional `"stable"`/`"volatile"` hint nudges caching and can usually be left off. It does not turn automatic lore on — pair it with `auto_lore()` for that. |
+| `auto_lore()` | `""` — automatically includes the lore relevant to this scene: entries it links to, and entries named in its summary. Call it to turn that on; leave it out for no automatic lore. |
 | `full_outline()` | The manuscript's outline: a nested list of nodes with `.title`, `.summary`, `.children`. |
 | `full_text()` | `str` — every scene's prose in reading order. Heavy — the whole-manuscript escape hatch. For one scene, use the prompt's target `scene` (`scene.body`); `use()` selects **lore**, not scene prose. |
 | `story_so_far(scene)` | `str` — an XML recap of prior scenes' summaries (scenes **1 → n-1**, reading order). A derived, per-scene-deterministic block: it is emitted (not selected) and caches in the stable prefix. |
@@ -81,6 +81,14 @@ Standard Jinja filters (`join`, `length`, `default`, …) work as usual.
 | `{% role "system"\|"user"\|"assistant" %}…{% endrole %}` | Marks the wrapped content's message role. An override: un-roled prose is homed to the base type's default role (usually `system`), so a prose-only prompt just works. |
 | `{% do … %}` | Evaluates an expression for its side effect and emits nothing (Jinja's `ext.do`) — the construct for the side-effecting helpers: `{% do use(node) %}` records a lore pick, `{% do field_contract.store(f) %}` registers a field. |
 | `{% include "Snippet title" %}` | Inlines a `prompt:snippet` node by title (e.g. `Project settings`). |
+
+## Deprecated
+
+Still works, still documented, removed at 1.0. The editor's completion does not offer these names; rendering one adds a warning.
+
+| Call | Use instead |
+| --- | --- |
+| `use_lore()` | `auto_lore()` — the same call under its real name: it turns automatic lore on and prints nothing. |
 
 ## Retired
 

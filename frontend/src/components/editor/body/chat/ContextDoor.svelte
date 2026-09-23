@@ -238,7 +238,7 @@
     {#if loreEnabled}
       <div
         class="cbv-ctx-kv-line"
-        title="The template invoked use_lore() — automatic lore is on: the send path detects and places lore, and the tiers below are where it lands. Picks placed by use() alone show as tier rows without this line."
+        title="The template invoked auto_lore() — automatic lore is on: the send path detects and places lore, and the tiers below are where it lands. Picks placed by use() alone show as tier rows without this line."
       ><strong>lore-enabled</strong> · by this prompt</div>
     {/if}
     {#if systemBlock}

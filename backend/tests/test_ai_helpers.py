@@ -939,7 +939,7 @@ class UseHelperTests(_HelperFixtureBase):
     """ADR-0060 §2, narrowed by ADR-0092 §7.1: `use(node)` records the
     selection onto the env slot that `build_preview` carries to
     `RenderedTemplate.used_node_ids`, PLACES ONLY (it never flips the
-    automatic-lore gate — only `use_lore()` does), and emits nothing inline."""
+    automatic-lore gate — only `auto_lore()` does), and emits nothing inline."""
 
     def _render(self, template_source: str):
         from app.services.ai.preview import PreviewRequest, build_preview
@@ -963,7 +963,7 @@ class UseHelperTests(_HelperFixtureBase):
             '{% role "system" %}[{{ use("' + self.nimitz["id"] + '") }}]{% endrole %}'
         )
         # The id is carried to used_node_ids; the automatic-lore gate stays off
-        # (ADR-0092 §7.1 — only `use_lore()` flips it).
+        # (ADR-0092 §7.1 — only `auto_lore()` flips it).
         self.assertEqual(rendered.used_node_ids, [self.nimitz["id"]])
         self.assertFalse(rendered.lore_invoked)
         # use() emits nothing — the node is backend-placed, not inline. The
@@ -1179,9 +1179,10 @@ class HelperIntegrationTests(_HelperFixtureBase):
             '{% role "system" %}You are a writer.{% endrole %}'
             '{% role "user" %}'
             "POV: {{ pov(scene).title }}\n"
-            # ADR-0060 §2: use_lore() selects lore for backend placement and emits
-            # nothing inline; story_so_far is a surviving derived-recap emitter.
-            "{{ use_lore() }}"
+            # ADR-0060 §2, ADR-0092 §7.2: auto_lore() selects lore for backend
+            # placement and emits nothing inline; story_so_far is a surviving
+            # derived-recap emitter.
+            "{{ auto_lore() }}"
             "Story so far:\n{{ story_so_far(scene) }}"
             "{% endrole %}",
             context={"scene": scene_two},

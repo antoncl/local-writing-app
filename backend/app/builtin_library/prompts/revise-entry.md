@@ -64,9 +64,9 @@ The {{ type_name(draft_type) }} has these fields to develop:
 {{ field_contract.render }}
 {% endif %}
 {# The scene's established lore (world rules, premise, setting, anything marked
-   always-in-context) is selected and placed by the backend; use_lore() just
+   always-in-context) is selected and placed by the backend; auto_lore() just
    turns that on for this prompt. #}
-{{ use_lore() }}
+{{ auto_lore() }}
 {# An optional author-picked "Lore" input for pulling in EXTRA specific entries
    as background — the entry being revised is the subject; this is supporting
    lore around it (e.g. a character's faction). Inert until the author picks

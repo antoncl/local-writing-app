@@ -272,6 +272,12 @@ class BuiltinLibraryTests(unittest.TestCase):
         # The JSON format contract moved to the extraction endpoint (S4) — the
         # seed must NOT emit it, or the model would dump JSON mid-conversation.
         self.assertNotIn('"fields"', revise)
+        # ADR-0092 §7.2: both switched to the renamed gate call; the deprecated
+        # alias must not linger in a shipped built-in.
+        self.assertIn("auto_lore()", roleplay)
+        self.assertNotIn("use_lore()", roleplay)
+        self.assertIn("auto_lore()", revise)
+        self.assertNotIn("use_lore()", revise)
 
     def test_project_settings_snippet_resolves_and_wires_in(self) -> None:
         """#1020 / finishes #317: a built-in `prompt:snippet` surfaces the
@@ -545,6 +551,9 @@ class BuiltinLibraryTests(unittest.TestCase):
         # use_lore() additionally pulled the inferred corpus in, turning a
         # one-entry check into a corpus-wide review.
         self.assertNotIn("use_lore()", body)
+        # ADR-0092 §7.2: renamed everywhere, so its deprecated alias shouldn't
+        # reappear here either — the built-in is pick-only by design (ADR-0091).
+        self.assertNotIn("auto_lore()", body)
         self.assertIn('{% include "Relevant lore" %}', body)
         self.assertIn('{% include "Project settings" %}', body)
         self.assertIn("ready to commit", body)

@@ -19,7 +19,11 @@ import promptVocabData from "@/lib/generated/promptVocab.json";
 import type { MetadataSchema, NodePickerConfig, PromptInputDefinition } from "@/lib/types";
 import { pickerMembership } from "@/lib/utils/pickerSources";
 
-type VocabKind = "variable" | "helper" | "filter" | "tag";
+// ADR-0092 §7.2: "deprecated" is a real manifest kind (the Deprecated table),
+// but it is never offered — the option lists below filter to explicit kinds,
+// so a deprecated symbol (e.g. `use_lore`) type-checks here without ever
+// reaching a completion list.
+type VocabKind = "variable" | "helper" | "filter" | "tag" | "deprecated";
 type VocabSymbol = { name: string; kind: VocabKind; signature: string; summary: string };
 
 const VOCAB = (promptVocabData as { symbols: VocabSymbol[] }).symbols;
@@ -30,6 +34,7 @@ const ICON: Record<VocabKind, string> = {
   helper: "function",
   filter: "function",
   tag: "keyword",
+  deprecated: "function",
 };
 
 function toCompletion(symbol: VocabSymbol): Completion {

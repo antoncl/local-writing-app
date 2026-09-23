@@ -55,8 +55,8 @@ You are playing **{{ char.title }}**.
 
 {% endif %}
 {# Lore is placed by the backend, tiered stable/volatile — see
-   docs/design/context-caching.md §4. use_lore() only flips the lore gate. #}
-{{ use_lore() }}
+   docs/design/context-caching.md §4. auto_lore() only flips the lore gate. #}
+{{ auto_lore() }}
 {% if story_so_far(scene) %}
 ## The story so far
 {{ story_so_far(scene) }}

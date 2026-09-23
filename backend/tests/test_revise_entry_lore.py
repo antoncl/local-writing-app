@@ -1,11 +1,11 @@
-"""ADR-0057 (#1016) + docs/design/context-caching.md §4: the create/revise
-brainstorm *declares* lore use via `use_lore()` and emits **no** lore inline —
-the backend selects, dedups, and places lore at send time, tiered
-stable/volatile.
+"""ADR-0057 (#1016) + docs/design/context-caching.md §4, renamed by ADR-0092
+§7.2: the create/revise brainstorm *declares* lore use via `auto_lore()` and
+emits **no** lore inline — the backend selects, dedups, and places lore at
+send time, tiered stable/volatile.
 
 This guards two things:
 
-- the gate still flips (`use_lore()` sets the invocation flag `build_preview`
+- the gate still flips (`auto_lore()` sets the invocation flag `build_preview`
   reads into `lore_enabled`), so a lore-enabled chat still gets lore; and
 - the template does **not** bake lore back into the rendered prompt — the
   render-time-emission regression this fix removed (it caused a frozen, often
@@ -70,15 +70,18 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
         return text, env
 
     def test_create_render_flips_the_lore_gate(self) -> None:
-        # use_lore() sets the invocation flag, so the chat becomes lore-enabled
+        # auto_lore() sets the invocation flag, so the chat becomes lore-enabled
         # even though nothing is rendered inline.
         _, env = self._render({"entry": "", "entry_type": "lore:character"})
         self.assertTrue(env.lore_invoked[0])
+        # ADR-0092 §7.2: the real name is quiet — no deprecation notice.
+        self.assertEqual(env.deprecation_notices, [])
 
     def test_revise_render_flips_the_lore_gate(self) -> None:
         subject = self._make_note("Alderman Vane", body="A city councilman.")
         _, env = self._render({"entry": subject, "entry_type": ""})
         self.assertTrue(env.lore_invoked[0])
+        self.assertEqual(env.deprecation_notices, [])
 
     def test_render_emits_no_lore_inline_even_with_an_always_note(self) -> None:
         # The regression guard: an always-policy world note must NOT be baked into
@@ -156,7 +159,7 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
 
 
 class FollowAChangeLoreGateTests(unittest.TestCase):
-    """#2143: "Follow a change" no longer calls `use_lore()` — the built-in's
+    """#2143: "Follow a change" no longer calls `auto_lore()` — the built-in's
     own inferred-lore declaration is gone, so it no longer independently asks
     the send path to detect and fan out the message's mentions.
 
@@ -164,13 +167,14 @@ class FollowAChangeLoreGateTests(unittest.TestCase):
     than a literal "gate is off" assertion — and, since ADR-0092 §7.1, the
     gate really IS off: `use(e)` (kept, to deliver the dependent) places a
     pick without touching the automatic-lore slot — `helpers._use` no longer
-    sets `lore_invoked`; only `helpers._use_lore` does. So `chat.lore_enabled`
-    ends up False for this built-in, and its `use(e)` dependent plus the
-    "Relevant lore" include's explicit picks (which also stopped setting the
-    slot, §7.1) are placed as declared-only picks, automatic lore off. What
-    #2143 removed was the built-in's OWN request for send-time implicit
-    detection over and above those declared picks — verified here as "no
-    `use_lore()` call survives in the rendered template"."""
+    sets `lore_invoked`; only `helpers._auto_lore` (and its deprecated alias
+    `helpers._use_lore`) does. So `chat.lore_enabled` ends up False for this
+    built-in, and its `use(e)` dependent plus the "Relevant lore" include's
+    explicit picks (which also stopped setting the slot, §7.1) are placed as
+    declared-only picks, automatic lore off. What #2143 removed was the
+    built-in's OWN request for send-time implicit detection over and above
+    those declared picks — verified here as "no `auto_lore()`/`use_lore()`
+    call survives in the rendered template"."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -192,9 +196,10 @@ class FollowAChangeLoreGateTests(unittest.TestCase):
         )
         rendered, _ = self._render({"entry": subject.id, "entry_type": ""})
         self.assertNotIn("use_lore()", rendered)
+        self.assertNotIn("auto_lore()", rendered)
 
     def test_the_dependents_own_use_does_not_flip_the_gate(self) -> None:
-        # ADR-0092 §7.1: use(e) alone (no use_lore()) does NOT flip the
+        # ADR-0092 §7.1: use(e) alone (no auto_lore()) does NOT flip the
         # automatic-lore gate — it places the dependent as a declared pick,
         # and the "Relevant lore" include's own picks land the same way.
         subject = self.service.create_lore_entry(
@@ -206,7 +211,7 @@ class FollowAChangeLoreGateTests(unittest.TestCase):
 
 class RelevantLoreSnippetGateTests(unittest.TestCase):
     """ADR-0092 §7.1: the shipped "Relevant lore" snippet stopped calling
-    `use_lore()` — it is the writer's explicit extra picks and nothing more.
+    `auto_lore()` — it is the writer's explicit extra picks and nothing more.
     Including it with a picked entry places that pick (`use()`) without
     flipping the automatic-lore slot."""
 

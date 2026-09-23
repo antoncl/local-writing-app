@@ -127,6 +127,7 @@ class Vocab(NamedTuple):
     doc_helpers: set[str]
     doc_filters: set[str]
     doc_vars: set[str]
+    doc_deprecated: set[str]
 
 
 def _sanity_problems(v: Vocab) -> list[str]:
@@ -145,13 +146,30 @@ def _sanity_problems(v: Vocab) -> list[str]:
     return problems
 
 
-def _diff_problems(v: Vocab, md: str) -> list[str]:
+def _helper_and_deprecated_problems(v: Vocab) -> list[str]:
+    """ADR-0092 §7.2: the Helpers/Deprecated half of the diff, split out of
+    `_diff_problems` to keep that function under the complexity gate. A
+    registered global is documented if it appears in EITHER table (a
+    deprecated alias is still registered — that's the whole point of a
+    deprecation period), but a name in both is a contradiction."""
     problems: list[str] = []
     author_globals = v.env_globals - INTERNAL_GLOBALS
-    for name in sorted(author_globals - v.doc_helpers):
+    documented_globals = v.doc_helpers | v.doc_deprecated
+    for name in sorted(author_globals - documented_globals):
         problems.append(f"helper `{name}` is registered (helpers.py) but not documented in reference.md")
     for name in sorted(v.doc_helpers - author_globals):
         problems.append(f"helper `{name}` is documented in reference.md but not registered (renamed/retired?)")
+    for name in sorted(v.doc_deprecated - author_globals):
+        problems.append(
+            f"deprecated helper `{name}` is documented in reference.md but not registered (remove the row)"
+        )
+    for name in sorted(v.doc_helpers & v.doc_deprecated):
+        problems.append(f"`{name}` is listed as both a helper and deprecated")
+    return problems
+
+
+def _diff_problems(v: Vocab, md: str) -> list[str]:
+    problems: list[str] = _helper_and_deprecated_problems(v)
     for name in sorted(v.env_filters - v.doc_filters):
         problems.append(f"filter `{name}` is registered but not documented in reference.md")
     for name in sorted(v.doc_filters - v.env_filters):
@@ -180,6 +198,7 @@ def _collect_problems() -> list[str]:
         doc_helpers=documented["helper"],
         doc_filters=documented["filter"],
         doc_vars=documented["variable"],
+        doc_deprecated=documented["deprecated"],
     )
     sanity = _sanity_problems(vocab)
     if sanity:
@@ -195,7 +214,8 @@ def main() -> int:
             print(f"  - {problem}")
         print(
             "\nFix: update reference.md to match the registration (the code is the source of "
-            "truth), or move a retired symbol to the Retired section."
+            "truth), or move a retired symbol to the Retired section, or a deprecated-but-"
+            "still-registered symbol to the Deprecated section."
         )
         return 1
     print("prompt vocabulary: reference.md matches the registered globals/filters/tags/variables")

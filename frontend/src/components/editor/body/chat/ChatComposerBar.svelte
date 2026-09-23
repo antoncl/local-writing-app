@@ -67,7 +67,7 @@
     chatSystemPrompt: string;
     chatPreviewMessages: PreviewMessage[] | null;
     // The send-path cache blocks (system prompt + attached lore tiers) with their
-    // text — what the model ACTUALLY receives next turn. `use_lore()` and `use()`
+    // text — what the model ACTUALLY receives next turn. `auto_lore()` and `use()`
     // emit nothing into the template, so the lore lives only here, not in
     // `chatSystemPrompt`/`chatPreviewMessages`; the preview must render it or it
     // looks empty (#1546 follow-up).
@@ -78,8 +78,8 @@
     loreFit?: LoreFit | null;
     loreLeftOutXml?: Record<string, string>;
     fetchLeftOutXml?: (entryId: string) => Promise<string | null>;
-    // ADR-0092 §7.1: whether the bound prompt's `use_lore()` gate ran — the
-    // gate is `use_lore()` alone; picks placed by `use()` are placed regardless
+    // ADR-0092 §7.1: whether the bound prompt's `auto_lore()` gate ran — the
+    // gate is `auto_lore()` alone; picks placed by `use()` are placed regardless
     // of this flag. The Context door's System section annotates it (not a
     // call-site marker; see ADR-0076 decision 9's rejected alternative).
     loreEnabled: boolean;

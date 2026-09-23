@@ -160,7 +160,7 @@ lore-rendering change must uphold.
 
 Concretely, for a lore-enabled chat, on every send:
 
-1. **One deduped set** (ADR-0057 §3): `{ explicit(context_items) ∪ auto(journal)
+1. **One deduped set** (ADR-0057 §3): `{ explicit(used_node_ids) ∪ auto(journal)
    ∪ always } − { never, manual_only }`, keyed by id so each node appears once.
 2. **Partitioned against the chat's session baseline, then placed once per tier.**
    "Stable" and "volatile" are a **dynamic, per-turn** distinction — *not* a
@@ -221,7 +221,7 @@ from the uncached user message into the correctly-tiered system blocks.
 - **Templates stop emitting lore.** `roleplay.md` and `revise-entry.md` keep a
   gate-only call (so `lore_enabled` is still captured at the lock render) but no
   longer paste lore text into the prompt. Idiom: **a small, clearly-named gate
-  helper** (e.g. `use_lore()`) is preferred over the obscure `{% set _ =
+  helper** (e.g. `auto_lore()`, was `use_lore()` — ADR-0092 §7.2) is preferred over the obscure `{% set _ =
   relevant_lore() %}` side-effect trick or a silently-empty `{{ relevant_lore()
   }}`; the name documents intent ("this prompt uses lore; the app injects it").
 - **The send path starts using the session baseline that already exists but is
@@ -229,7 +229,7 @@ from the uncached user message into the correctly-tiered system blocks.
   1. `default_registry.get_or_create(<chat key>)` — an in-memory `AISession` per
      chat. **No persisted state, no `ChatSession` field, no migration.**
   2. Compute the one deduped set (reusing `_always_included_lore_ids`, the
-     journal, `context_items`, the `never` / `manual_only` exclusion — one
+     journal, `used_node_ids`, the `never` / `manual_only` exclusion — one
      selector, not a second matcher).
   3. Partition it against the baseline (`session.is_stable(id, revision)`):
      unchanged → a **1-hour** stable lore block (added beside the system prefix);

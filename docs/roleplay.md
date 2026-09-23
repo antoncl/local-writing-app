@@ -81,7 +81,7 @@ You are playing {{ char.title }}.
 {% role "user" %}
 {% if scene.metadata.dynamics %}## Scene dynamics
 {{ scene.metadata.dynamics }}{% endif %}
-{{ use_lore() }}
+{{ auto_lore() }}
 {% if story_so_far(scene) %}## The story so far
 {{ story_so_far(scene) }}{% endif %}
 {% endrole %}
@@ -89,7 +89,7 @@ You are playing {{ char.title }}.
 {{ character_turns(scene, inputs.character) }}
 ```
 
-`use_lore()` flips the lore gate — the backend places the relevant lore itself, tiered stable/volatile for caching. `story_so_far(scene)` supplies the preceding-scenes narrative context.
+`auto_lore()` (was `use_lore()`) flips the lore gate — the backend places the relevant lore itself, tiered stable/volatile for caching. `story_so_far(scene)` supplies the preceding-scenes narrative context.
 
 ## Caching
 

@@ -685,7 +685,7 @@ def test_relevant_lore_snippet_places_a_picked_entry(tmp_path, monkeypatch):
             commit=False,
         ),
     )
-    # ADR-0092 §7.1: the snippet stopped calling `use_lore()` — it places only.
+    # ADR-0092 §7.1: the snippet stopped calling `auto_lore()` — it places only.
     assert rendered.lore_invoked is False
     assert rendered.used_node_ids == [entry.id]
     lore_block = (rendered.send_lore_stable or "") + (rendered.send_lore_volatile or "")

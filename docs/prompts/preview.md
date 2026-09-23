@@ -60,10 +60,10 @@
 | Field | Meaning |
 | --- | --- |
 | `messages` | Role-tagged messages, each broken into content blocks. A block is **just text** — the author does not mark caching, so blocks carry no cache flag. |
-| `warnings` | Author errors that didn't block rendering (unknown role names, nested roles). |
+| `warnings` | Author errors that didn't block rendering (unknown role names, nested roles), and the deprecation notice for `use_lore()`. |
 | `char_count` / `estimated_tokens` | Size of the rendered prompt. `estimated_tokens` sums `cache_blocks`, so it includes the backend-placed lore. |
 | `cache_blocks` | The **send-path composition**, in volatility order — the cache strip. Each block has a `label` (`system`, `stable lore`, `volatile lore`, or a role), a `role`, a `tier` (`"stable"`, `"volatile"`, or `null` for an uncached conversation turn), a `tokens` count, and its `text`. This is where the tiered lore the backend selected appears (made visible again), badged by tier. See [The cache strip](#the-cache-strip). |
-| `lore_enabled` | `true` when the template called `use_lore()`. A prompt that only calls `use()` reports `false` and still carries its picks in `cache_blocks`. |
+| `lore_enabled` | `true` when the template called `auto_lore()` (or its deprecated alias `use_lore()`). A prompt that only calls `use()` reports `false` and still carries its picks in `cache_blocks`. |
 | `used_node_ids` / `used_node_hints` | Ids the template selected with `use()`, and any `use(node, "stable"\|"volatile")` cache-tier hints. |
 | `session_id` | Echo of the supplied session id (or `null`). |
 | `rendered` | `true` if rendering succeeded. |
@@ -87,7 +87,7 @@ A genuine HTTP error (no project open, a 5xx) is still thrown normally.
 `cache_blocks` is what makes preview cache-aware. It is the composition the send path will actually build, in the order the backend lays it down:
 
 1. the **system prefix** (persona and other stable authored system content),
-2. the **tiered lore** the backend selected from the template's `use()` / `use_lore()` calls — placed here on the send path even though the template emitted nothing for it, so preview shows it *again* where it really lands,
+2. the **tiered lore** the backend selected from the template's `use()` / `auto_lore()` calls — placed here on the send path even though the template emitted nothing for it, so preview shows it *again* where it really lands,
 3. the **conversation turns** (the per-call user/assistant material).
 
 Each block is badged with its `tier` — `stable` first, then `volatile`, then the uncached turns (`tier: null`). Stare at this strip to see exactly what will be cached and what will re-send on the next call; you tune it by choosing what to `use()`, not by placing breakpoints.
@@ -105,7 +105,7 @@ You are an expert fiction writer.
 {% endrole %}
 
 {% role "user" %}
-{{ use_lore() }}
+{{ auto_lore() }}
 {% if story_so_far(scene) %}
 The story so far:
 {{ story_so_far(scene) }}
@@ -123,7 +123,7 @@ Write {{ inputs.words }} words that continue the story:
 {% endrole %}
 ```
 
-POST this against a scene, supply `inputs: {"words": 300, "message": "Honor decides to break the engagement."}`, `text_before` from the editor, and a `session_id`. Inspect the response: `messages` holds the rendered turns (the `use_lore()` call emits nothing into them), while `cache_blocks` shows the backend-selected lore placed and tier-badged in the send-path composition.
+POST this against a scene, supply `inputs: {"words": 300, "message": "Honor decides to break the engagement."}`, `text_before` from the editor, and a `session_id`. Inspect the response: `messages` holds the rendered turns (the `auto_lore()` call emits nothing into them), while `cache_blocks` shows the backend-selected lore placed and tier-badged in the send-path composition.
 
 ## Worked example: bare role round-trip (sanity check)
 

@@ -114,10 +114,12 @@
     // seeded from the item's source block — the source entry and the
     // owning-lane baseline snapshot id ("" = the whole entry).
     if (item.source) {
+      const sourceEntry = $loreEntriesStore.find((entry) => entry.id === item.source?.node_id);
       const sourceRef: SubjectRef = {
         id: item.source.node_id,
         kind: "lore",
-        title: titleById.get(item.source.node_id) ?? item.source.node_id,
+        title: sourceEntry?.title ?? item.source.node_id,
+        entryType: sourceEntry?.entry_type || undefined,
       };
       Object.assign(
         seededInputs,

@@ -154,6 +154,11 @@
     }
     return undefined;
   }
+  // One label rule for the before row and its panel head: the roster's live
+  // title, else the title the block carried, else the id.
+  function beforeLabel(item: { entry_id: string; title: string }): string {
+    return titleFor(item.entry_id) || item.title || item.entry_id;
+  }
 
   function panelTitle(panel: Panel): string {
     if (panel.kind === "root") return "Context";
@@ -162,8 +167,7 @@
     if (panel.kind === "before") {
       const item = beforeItem(panel.key);
       if (!item) return "";
-      const label = titleFor(item.entry_id) || item.title || item.entry_id;
-      return `${label} · as of ${relativeTime(item.captured_at)}`;
+      return `${beforeLabel(item)} · as of ${relativeTime(item.captured_at)}`;
     }
     if (panel.key === "leftout") return "Left out";
     if (panel.key === "system") return "System";
@@ -293,7 +297,7 @@
             class="ctx-row"
             onclick={() => drill({ kind: "before", tierLabel, key: item.key })}
           >
-            <span class="ctx-row-label">{titleFor(item.entry_id) || item.title || item.entry_id}</span>
+            <span class="ctx-row-label">{beforeLabel(item)}</span>
             <span class="ctx-row-sub">as of {relativeTime(item.captured_at)}</span>
             <GroupCaret size="xs" collapsed />
           </button>

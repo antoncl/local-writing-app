@@ -199,7 +199,7 @@ describe("ReviewItemsPanel — ADR-0093 §4: seeding the change inputs", () => {
     const [, , seededInputs] = propose.mock.calls[0];
     expect(seededInputs).toEqual({
       entry: "guard",
-      source: [{ id: "lore_marek", kind: "lore", title: "Marek Vell" }],
+      source: [{ id: "lore_marek", kind: "lore", title: "Marek Vell", entry_type: "lore:character" }],
       baseline: "snap_1",
     });
   });
@@ -225,7 +225,7 @@ describe("ReviewItemsPanel — ADR-0093 §4: seeding the change inputs", () => {
     const [, , seededInputs] = propose.mock.calls[0];
     expect(seededInputs).toEqual({
       entry: "guard",
-      source: [{ id: "lore_marek", kind: "lore", title: "Marek Vell" }],
+      source: [{ id: "lore_marek", kind: "lore", title: "Marek Vell", entry_type: "lore:character" }],
       baseline: "",
     });
   });

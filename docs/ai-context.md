@@ -136,8 +136,10 @@ the first send and after every turn:
 - **Stable lore / Volatile lore** — the two blocks with their entries. Open an entry
   to see the exact XML the model receives. Rows present with no *lore-enabled*
   line means "picks placed, automatic off". An earlier state placed by
-  `use(node, snapshot=id)` appears first in the stable tier's list, as an "as of
-  ⟨time⟩" row; the tier row's count includes it as an earlier state.
+  `use(node, snapshot=id)` appears first in the list of the tier that holds it —
+  the stable tier, except for the one turn after something it refers to was
+  renamed — as an "as of ⟨time⟩" row; the tier row's count includes it as an
+  earlier state.
 - **Auto-added this conversation** — the noticed entries, each with where it was
   noticed and on which turn.
 - **Left out** — what the budget dropped this turn.

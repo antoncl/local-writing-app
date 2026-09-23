@@ -1,6 +1,8 @@
 # ADR-0090: A settled change yields a review item per dependent; the app proposes and never writes them
 
-- **Status:** Accepted — 2026-09-22, Anton Lauridsen; text drafted by Claude from a design
+- **Status:** **Superseded by [ADR-0091](0091-a-lore-change-is-carried-to-the-entries-it-affects.md)**
+  (2026-09-22), which restates this design once, body-first, with the amendments folded in;
+  kept as history. Was: Accepted — 2026-09-22, Anton Lauridsen; text drafted by Claude from a design
   conversation, corrected once in that conversation (mutations put on the story-time axis, the
   built-in prompt dropped, the confirm surface named as the one mocked surface), approved in it,
   landed as Accepted in PR #2114. Acceptance alone starts nothing: each slice gets its own issue

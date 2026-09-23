@@ -99,26 +99,36 @@ per-render slot beside the picks and hints (`used_nodes_slot`, `used_hints_slot`
 nothing, like every `use()` call. Its rules:
 
 - `node` must resolve to **one** entry, the way `entry()` resolves one; a snapshot belongs to
-  one entity. A list, or a value that does not resolve, records nothing and adds one
-  `warnings` entry to the render. An empty `snapshot` (`""` or `None`) is the plain
-  `use(node)`: the same tri-state as `ChangeMessage.baseline_snapshot_id`
-  (`backend/app/models/annotations.py`), so a template can pass a seeded baseline straight
-  through and get the live entry when there is none.
+  one entity. A single-select `context_pick` reaches the template as a one-element list
+  (`seedPickInput`, the bind layer), and that resolves to its one entry as `entry()` takes
+  it; a value resolving to several entries, or to none, records nothing and adds one
+  `warnings` entry to the render. An empty `snapshot` — `""`, `None`, or a Jinja undefined,
+  because the environment is `StrictUndefined` and a text input left empty is dropped from
+  the render's inputs by `inputValuesFromDrafts` (`promptResolution.ts`) — is the plain
+  `use(node)`: `""` means the whole entry, as `ChangeMessage.baseline_snapshot_id`
+  (`backend/app/models/annotations.py`) and the review item's source block spell it, so a
+  template can pass a seeded baseline straight through and get the live entry when there is
+  none. Resolution at render is by shape, not existence, as for every `use()`: a well-formed
+  id that names nothing passes here and becomes a missing before at the send (§2). A snapshot
+  pick records the pair only; it does not add the entry to the picks — the after is the
+  template's own `use(node)`.
 - The volatility hint is accepted and ignored on a snapshot pick: its tier rule is fixed (§2).
 - The render does not consult the store. The id is data; whether the snapshot exists is the
   send's and the preview's question (§2), and the estimate that runs at the lock answers it at
   once.
-- **Persistence follows the picks exactly.** `RenderedTemplate` carries `used_snapshots`
-  beside `used_node_ids` and `used_node_hints`; the preview response returns it; the lock
-  render captures it (`renderAndLockPromptTemplate` in `ChatBodyView.svelte` captures the
-  other two from the lock result and echoes them on every save); `SaveChatSessionRequest`
-  and `ChatSession` (`backend/app/models/ai.py`) carry it under the same "None means preserve"
-  rule, so a save that omits it cannot wipe it. One additive, defaulted field, as
-  `used_node_hints` was.
+- **Persistence follows the picks exactly.** `RenderedTemplate` carries `used_snapshots`, a
+  list of `{entry_id, snapshot_id}`, beside `used_node_ids` and `used_node_hints`; the
+  preview response returns it; the lock reads it from that response (`lockPromptTemplate`
+  in `promptTemplateLock.ts` reads the other two there) and `ChatBodyView.svelte` hydrates
+  it from the chat and echoes it on every save through its one payload builder;
+  `SaveChatSessionRequest` and `ChatSession` (`backend/app/models/ai.py`) carry it under the
+  same "None means preserve" rule, so a save that omits it cannot wipe it. One additive,
+  defaulted field, as `used_node_hints` was.
 - **Vocabulary.** The `use()` row in `docs/prompts/reference.md` (the gate-enforced surface,
-  ADR-0060) gains the keyword and one sentence on what it does; the generated manifest and the
-  editor's completion follow from the row. No new name is registered, so the gate's name check
-  is untouched.
+  ADR-0060) gains the keyword and one sentence on what it does; the generated manifest, the
+  guides bundle (the reference is bundled into the guides, and both generators are gates) and
+  the editor's completion follow from the row. No new name is registered, so the gate's name
+  check is untouched.
 
 ### 2 — What the send places: the before is its own element in the stable block
 
@@ -140,20 +150,22 @@ way a pick does (ADR-0092 §7.1): flag on or off, and with no live pick at all �
   not a second; it runs once per send and once per estimate, uncached, which is the cost of
   every pick's render too.
   - The element carries the entry's `id` plus `snapshot="<snapshot id>"` and
-    `captured="<captured_at>"` (the renderer takes extra attributes for exactly this), so the
-    model joins before and after by id and can tell them apart; the system role names the
-    attribute (§4).
+    `captured="<captured_at>"` (the renderer gains an extra-attributes parameter for exactly
+    this; today it emits `id`, `name` and `aliases` only), so the model joins before and after
+    by id and can tell them apart; the system role names the attribute (§4).
   - **Its key is the string `"<entry_id>@<snapshot_id>"`, spelled by one function.** The
     session baseline, the persisted `seen_revisions` and the preview's `entry_xml` are all
     string-keyed maps; the key lives in them beside node ids and never inside the tier's id
     list, so the before cannot dedupe into the after (ADR-0092 §8, Anton's catch) and no
-    consumer that reads the id list ever meets it. `seen_revisions`' docstring says it now
-    holds these keys; `chat_changed_picks` (`chats.py`) iterates picks, so it never reads one
-    as a node and never marks a before edited.
+    consumer that reads the id list ever meets it. The tier result carries befores in fields
+    of their own, never in the entry pair lists that become `entry_ids`. `seen_revisions`'
+    docstring says it now holds these keys; `chat_changed_picks` (`chats.py`) iterates picks,
+    so it never reads one as a node and never marks a before edited.
   - **Its tier follows the rule `use(node, "stable")` follows** (ADR-0060 §5, the `"stable"`
-    branch of `_tier_lore_ids`): stable from the first turn, volatile for the one turn after
-    its bytes change, then stable again. Its revision is the hash of its rendered bytes,
-    checked against the session baseline under its key. ADR-0092 §8 is right that it is not
+    branch of `_tier_lore_ids`), in a tiering step of its own, since that function reads
+    nodes by id and a key is not a node: stable from the first turn, volatile for the one
+    turn after its bytes change, then stable again. Its revision is the hash of its rendered
+    bytes, checked against the session baseline under its key. ADR-0092 §8 is right that it is not
     stable by construction — the renderer resolves reference titles and summaries live, so a
     rename anywhere the source points re-tiers the before once — which is why the check is
     by bytes and not "never".
@@ -180,7 +192,8 @@ way a pick does (ADR-0092 §7.1): flag on or off, and with no live pick at all �
 key — and gains an additive `snapshots` list, one item per before element on the block, on
 whichever tier block holds it: `{entry_id, snapshot_id, captured_at, title, key}`, with the
 element's XML in `entry_xml` under that same `key`. The block carries the key so the door
-never spells it. S1 fills the list on the send path and the preview alike.
+never spells it. S1 fills the list on the preview, the only place a block model exists; the
+send's blocks are text and tier, and the door reads the estimate's preview.
 
 The door is two levels: a **tier row** at the root, a **tier panel** under it. The tier row's
 count names the before: "N entries · 1 earlier state", so a turn-one stable block holding
@@ -201,11 +214,15 @@ lore, and **`baseline`**, a text holding the owning-lane baseline snapshot id, `
 whole entry. Its template places the change in two lines beside the `use(e)` it has:
 
 ```jinja
-{% if inputs.source %}{% do use(inputs.source) %}{% do use(inputs.source, snapshot=inputs.baseline) %}{% endif %}
+{% if inputs.source is defined and inputs.source %}{% do use(inputs.source) %}{% do use(inputs.source, snapshot=inputs.baseline|default("")) %}{% endif %}
 ```
 
-The first line is the after, an ordinary pick; the second is the before, or the same pick
-again when `baseline` is empty, which dedupes by id. A writer who forks the prompt sees both
+The first call is the after, an ordinary pick; the second is the before, or the same pick
+again when `baseline` is empty, which dedupes by id. The guards are the ones `Impersonate`'s
+`as_of` line already carries, and they are load-bearing: the environment is
+`StrictUndefined`, an empty text input is dropped from the render's inputs, and a raw render
+of the built-in (the field-contract test renders it with `entry` and `entry_type` alone)
+supplies neither input. A writer who forks the prompt sees both
 lines and keeps, moves or deletes them; a writer's own prompt gets the change by declaring the
 same two input names. Its system role changes wording, not moves: the related entry that
 changed is in the model's context; its state before the change is the element carrying a
@@ -216,12 +233,15 @@ stays word for word. A fork made before this ships keeps the old sentence about 
 message and no placing lines, and nothing migrates Library forks: that fork's model asks for
 the entry once and the writer edits the fork.
 
-**Propose seeds them.** `proposeFromReviewItem` (`todoActions.svelte.ts`) already resolves the
-baseline through `GET /api/lore/{id}/change-message`; the seeder that fills `entry` and
-`entry_type` (`seedConversationInputs`, `chatInputs.ts`) gains the two: `source` through
-`seedPickInput` from the review item's `source.node_id`, `baseline` from the response's
-`baseline_snapshot_id`, each only when the prompt declares the input. The endpoint keeps its
-shape and renders no XML at all; its `text` shrinks to the question:
+**Propose seeds them from the review item, not from the endpoint.** The Review items tab
+seeds the inputs (`seedConversationInputs`, `chatInputs.ts`) before `proposeFromReviewItem`
+(`todoActions.svelte.ts`) fetches the change message, and the item's `source` block already
+holds both values (ADR-0091 §3): `source` through `seedPickInput` from `source.node_id`,
+titled from the lore roster; `baseline` from `source.snapshot_id`, `""` included; each only
+when the prompt declares the input. A thinned baseline therefore still opens the
+conversation, and the estimate's warning says what is missing (§2). `GET
+/api/lore/{id}/change-message` keeps its shape, renders no XML at all, and supplies the
+question alone; its `text` becomes:
 
 - with a baseline: "⟨Source⟩ changed since the last propagation. What in this entry needs to
   follow from that change? Propose only what the change warrants; if nothing follows, say so."
@@ -304,9 +324,13 @@ rule (§2); *not a wire block* → an element in the stable tier with its own do
 - **Send path:** `render_baseline_element` extracted from `change_message`; the renderer
   takes extra attributes; `_lore_cache_blocks` and `_budgeted_lore_tiers` learn the snapshot
   picks and the before's tier; the gate counts them as picks; the commit turn ignores them.
-- **Frontend:** the lock captures `used_snapshots` and every save echoes it beside the other
-  two lists; the seeder fills `source` and `baseline`; the door gains the count and the before
-  row; `composerPrefills` is unchanged.
+  The fit report does not count a before: `LoreFit` is id-keyed and the budget never touches
+  a declared thing; the estimate's block token count includes its bytes. `change_message`'s
+  before block gains the two attributes in S1, the one visible change before S2.
+- **Frontend:** the lock (`promptTemplateLock.ts`) captures `used_snapshots`, `ChatBodyView`
+  hydrates it and every save echoes it beside the other two lists; the seeder fills `source`
+  and `baseline` from the review item; the door gains the count and the before row, "N
+  earlier states" when several; `composerPrefills` is unchanged.
 - **Built-ins:** `Follow a change` gains the two hidden inputs and the two placing lines; its
   role text as §4; pre-existing forks keep their old sentence and place nothing.
 - **Docs:** `docs/ai-context.md` ("What the AI sees") gains the snapshot pick beside picks
@@ -314,7 +338,8 @@ rule (§2); *not a wire block* → an element in the stable tier with its own do
   is regenerated; ADR-0091 §4 and ADR-0092 §8 get a one-line amendment note pointing here,
   and their README entries say so.
 - **Tests:** `use(node, snapshot=id)` records the pair and emits nothing, ignores the hint,
-  treats `""` as a plain pick, and warns on a list or an unresolvable node; the lock render
+  treats `""` and an undefined as a plain pick, resolves a one-element list, and warns on
+  several entries or an unresolvable node; the lock render
   returns `used_snapshots` and a save that omits it preserves it; a send places the before
   (a wire test: the element, with its `snapshot` attribute, reaches the provider's system
   blocks in the stable tier) and the after as a pick; the before never dedupes into the after;
@@ -325,9 +350,11 @@ rule (§2); *not a wire block* → an element in the stable tier with its own do
   mirror carries it with `lore_enabled` false and the key in `entry_xml`; a conversation
   windowed past round one still carries the change in its system blocks; the door's tier row
   counts the earlier state, its panel lists the before row with "as of", and the drill shows
-  the block's XML (a mount test, the pane displays data); the seeder fills both inputs, and
-  `""` too; Propose holds the question; the built-in body pins the two placing lines and the
-  `snapshot` attribute and no longer says the first message shows the entry; the vocabulary
+  the block's XML (a mount test, the pane displays data); the seeder fills both inputs from the
+  item, and `""` too; Propose holds the question; the built-in's pinned input set grows to
+  four, its body pins the two guarded placing calls and the `snapshot` attribute and no longer
+  says the first message shows the entry, and the field-contract test's raw render of it
+  still passes; the vocabulary
   gate and generator on the changed row. Backend tests near the file-size guard
   (`test_ai_helpers.py` at six lines under the cap, `test_ai_preview.py`) take none of these.
 - **Could a user author this?** Yes, and that is the point: a writer's prompt calls
@@ -338,8 +365,8 @@ rule (§2); *not a wire block* → an element in the stable tier with its own do
 
 1. **S1 — the call, the capture and the send.** §1 and §2 with the preview mirror, the shared
    reader, the block's `snapshots` list, the vocabulary row and its generated artifacts, and
-   every backend test above. Backend, the reference, the manifest; `change_message` still
-   renders, through the reader. Until S2 the frontend does not echo `used_snapshots`, so no
+   every backend test above. Backend, the reference, the manifest and the guides bundle;
+   `change_message` still renders, through the reader. Until S2 the frontend does not echo `used_snapshots`, so no
    chat persists one and nothing changes for a writer.
 2. **S2 — the lock echo, the seeder, the door and the built-in.** §3 and §4: the capture and
    the save echo, the two seeded inputs, the shrunk message, the role text and the placing
@@ -353,8 +380,8 @@ One lane, S1 first: S2's rows, key and role text name what S1 defines.
    a change`; the composer holds one line, the question. The door's stable row reads "0
    entries · 1 earlier state" and its volatile row holds The Implant and the dependent;
    drilling the stable row shows The Implant as of the baseline's time, and drilling that
-   shows the before element with its `snapshot` attribute. The door's locked inputs show the
-   source; the baseline id is a hidden input and does not show.
+   shows the before element with its `snapshot` attribute. Both seeded inputs are hidden, so
+   the door's locked inputs show neither; the rows are where the change is seen.
 2. The writer sends. The model names the difference and quotes the one sentence in the
    dependent that must change. The meta line shows the fit and nothing left out; on the next
    turn the after and the dependent have settled into the stable block beside the before.
@@ -386,4 +413,10 @@ writer must be able to override and customize the prompt, and chose the call: th
 places the change belongs in the prompt's text, and the two inputs it reads are seeded the
 way `entry_type` already is. `entry(node, snapshot=)` stays out, because placing is not
 reading. The findings that were about placement, not about the producer, are in the text
-above.
+above. Two more cold threads planned the slices of this text before acceptance and found:
+the verbatim placing line raised under the strict environment on the whole-entry path and
+on a raw render; the seeder runs before the change-message fetch, so the baseline seeds from
+the review item; a single-select pick is a one-element list; both hidden inputs are hidden
+from the door; the send has no block model; the tier function reads nodes by id; the tier
+result needed fields of its own; the guides bundle regenerates from the row too. Each is in
+the text now.

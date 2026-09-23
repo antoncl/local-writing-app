@@ -808,38 +808,54 @@ export function fieldDiffs(
  *  belongs to, so an item present on both sides carries none (#2125). A
  *  non-array side is treated as empty (or as a single stringified item when
  *  it's a non-empty scalar), so a field that changed shape still diffs
- *  sensibly. Items compare as `String(x)`; the order is every `was` item
- *  first (in its own order), then every `now`-only item (in its own order). */
+ *  sensibly. Items compare by `text` (`String(x)` / the joined-member
+ *  reading) — the compare key, unaffected by `itemLabel` — the order is
+ *  every `was` item first (in its own order), then every `now`-only item (in
+ *  its own order).
+ *
+ *  `itemLabel` (ADR-0091 §7, #2133) lets a caller resolve a reference item to
+ *  its title for DISPLAY only: `label` defaults to `text` when omitted, so two
+ *  ids sharing one title still stay two distinct pills (the compare key is
+ *  never the label). */
 export function listDiff(
   was: unknown,
   now: unknown,
-): { state: "same" | "was" | "now"; text: string }[] | null {
+  itemLabel?: (item: unknown) => string,
+): { state: "same" | "was" | "now"; text: string; label: string }[] | null {
   if (!Array.isArray(was) && !Array.isArray(now)) return null;
-  const toItems = (value: unknown): string[] => {
-    if (Array.isArray(value)) return value.map(listItemText);
+  const toItems = (value: unknown): unknown[] => {
+    if (Array.isArray(value)) return value;
     if (value === null || value === undefined || value === "") return [];
-    return [listItemText(value)];
+    return [value];
   };
+  const labelOf = (item: unknown): string => (itemLabel ? itemLabel(item) : listItemText(item));
   const wasItems = toItems(was);
   const nowItems = toItems(now);
-  // Multiset, not set: a duplicated item removed (or added) is a change too.
+  // Multiset, not set: a duplicated item removed (or added) is a change too —
+  // counted by TEXT, never by label, so label resolution can't merge or split
+  // what the compare key says are duplicates.
   const nowCounts = new Map<string, number>();
-  for (const text of nowItems) nowCounts.set(text, (nowCounts.get(text) ?? 0) + 1);
-  const out: { state: "same" | "was" | "now"; text: string }[] = [];
-  for (const text of wasItems) {
+  for (const item of nowItems) {
+    const text = listItemText(item);
+    nowCounts.set(text, (nowCounts.get(text) ?? 0) + 1);
+  }
+  const out: { state: "same" | "was" | "now"; text: string; label: string }[] = [];
+  for (const item of wasItems) {
+    const text = listItemText(item);
     const left = nowCounts.get(text) ?? 0;
     if (left > 0) {
       nowCounts.set(text, left - 1);
-      out.push({ state: "same", text });
+      out.push({ state: "same", text, label: labelOf(item) });
     } else {
-      out.push({ state: "was", text });
+      out.push({ state: "was", text, label: labelOf(item) });
     }
   }
-  for (const text of nowItems) {
+  for (const item of nowItems) {
+    const text = listItemText(item);
     const left = nowCounts.get(text) ?? 0;
     if (left > 0) {
       nowCounts.set(text, left - 1);
-      out.push({ state: "now", text });
+      out.push({ state: "now", text, label: labelOf(item) });
     }
   }
   return out;
@@ -850,7 +866,7 @@ export function listDiff(
  *  key reference and members) is its non-empty member values joined with
  *  " · ", the same reading the search corpus gives such an item, never
  *  "[object Object]". */
-function listItemText(item: unknown): string {
+export function listItemText(item: unknown): string {
   if (item !== null && typeof item === "object" && !Array.isArray(item)) {
     return Object.values(item as Record<string, unknown>)
       .filter((member) => member !== null && member !== undefined && member !== "")

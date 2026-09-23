@@ -127,6 +127,7 @@ export type {
 export type {
   ChangeCandidateRoute,
   ChangeCandidateTier,
+  CandidateGroup,
   ChangeCandidateReason,
   ChangeCandidate,
   ChangeCandidateLayer,

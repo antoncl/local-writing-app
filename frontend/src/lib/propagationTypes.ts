@@ -19,6 +19,11 @@ export type ChangeCandidateRoute =
 
 export type ChangeCandidateTier = "declared" | "marker_untouched" | "mention";
 
+// ADR-0091 §2/§7: the pane's own grouping, derived from a candidate's reasons
+// (never from the wire's `tier`, which stays on the wire but is no longer
+// read by the pane) — see `candidateGroups.ts`'s `groupOf`.
+export type CandidateGroup = "declared" | "markers" | "mentions";
+
 /** One route a `ChangeCandidate` was found by. `field_id` is the referencing
  *  field for the two reference routes and the marker's field for
  *  `mutates_source`; `marker_id` and `field_changed` are `mutates_source`

@@ -73,9 +73,9 @@ describe("listDiff — per-item tint for an array field", () => {
 
   it("kept, removed, added — in was-order then now-only order", () => {
     expect(listDiff(["the Captain", "the Sergeant"], ["the Captain", "the Corporal"])).toEqual([
-      { state: "same", text: "the Captain" },
-      { state: "was", text: "the Sergeant" },
-      { state: "now", text: "the Corporal" },
+      { state: "same", text: "the Captain", label: "the Captain" },
+      { state: "was", text: "the Sergeant", label: "the Sergeant" },
+      { state: "now", text: "the Corporal", label: "the Corporal" },
     ]);
   });
 
@@ -85,12 +85,12 @@ describe("listDiff — per-item tint for an array field", () => {
 
   it("counts duplicates — a removed or added repeat is a change", () => {
     expect(listDiff(["a", "a"], ["a"])).toEqual([
-      { state: "same", text: "a" },
-      { state: "was", text: "a" },
+      { state: "same", text: "a", label: "a" },
+      { state: "was", text: "a", label: "a" },
     ]);
     expect(listDiff(["a"], ["a", "a"])).toEqual([
-      { state: "same", text: "a" },
-      { state: "now", text: "a" },
+      { state: "same", text: "a", label: "a" },
+      { state: "now", text: "a", label: "a" },
     ]);
   });
 
@@ -98,17 +98,32 @@ describe("listDiff — per-item tint for an array field", () => {
     const was = [{ target: "lore_tomas", kind: "kinship", state: "estranged" }];
     const now = [{ target: "lore_tomas", kind: "kinship", state: "reconciled" }, { target: "lore_ilse", kind: "rival", state: "" }];
     expect(listDiff(was, now)).toEqual([
-      { state: "was", text: "lore_tomas · kinship · estranged" },
-      { state: "now", text: "lore_tomas · kinship · reconciled" },
-      { state: "now", text: "lore_ilse · rival" },
+      { state: "was", text: "lore_tomas · kinship · estranged", label: "lore_tomas · kinship · estranged" },
+      { state: "now", text: "lore_tomas · kinship · reconciled", label: "lore_tomas · kinship · reconciled" },
+      { state: "now", text: "lore_ilse · rival", label: "lore_ilse · rival" },
     ]);
   });
 
   it("a non-array side is treated as empty, or as one item when a real scalar", () => {
-    expect(listDiff(null, ["a"])).toEqual([{ state: "now", text: "a" }]);
+    expect(listDiff(null, ["a"])).toEqual([{ state: "now", text: "a", label: "a" }]);
     expect(listDiff("a", ["a", "b"])).toEqual([
-      { state: "same", text: "a" },
-      { state: "now", text: "b" },
+      { state: "same", text: "a", label: "a" },
+      { state: "now", text: "b", label: "b" },
     ]);
+  });
+
+  // ADR-0091 §7 / #2133: `itemLabel` resolves a reference item to its title for
+  // DISPLAY only — the compare key (`text`) stays the raw id, so two ids that
+  // happen to share a title still count and render as two distinct pills.
+  it("itemLabel resolves each item's display label independently of the compare key", () => {
+    const titleById = new Map([["lore_a", "Ilse"], ["lore_b", "Ilse"]]);
+    const itemLabel = (item: unknown) => titleById.get(String(item)) ?? String(item);
+    const result = listDiff(["lore_a"], ["lore_a", "lore_b"], itemLabel);
+    expect(result).toEqual([
+      { state: "same", text: "lore_a", label: "Ilse" },
+      { state: "now", text: "lore_b", label: "Ilse" },
+    ]);
+    // Two pills, not merged into one, even though both labels read "Ilse".
+    expect(result).toHaveLength(2);
   });
 });

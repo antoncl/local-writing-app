@@ -67,9 +67,11 @@ class LayerOverrideTests(unittest.TestCase):
     def _write_lore_at(self, folder: Path, node_id: str, title: str, metadata: dict) -> None:
         """Write a character file directly at a layer, bypassing the create dance."""
         writer = ProjectService(WorkScope(root=folder))
+        # The body the override saves below echo back unchanged (#2132: a
+        # changed body is refused, never dropped).
         writer._write_lore_entry_file(
             folder / "lore" / f"{node_id}.md",
-            LoreEntry(id=node_id, title=title, body="", revision="", entry_type="lore:character", metadata=metadata),
+            LoreEntry(id=node_id, title=title, body="Body.", revision="", entry_type="lore:character", metadata=metadata),
         )
 
     def _save_override(self, entry_id: str, metadata: dict, *, layer: Path | None = None) -> LoreEntry:
@@ -190,6 +192,59 @@ class LayerOverrideTests(unittest.TestCase):
         # The ancestor was not touched, and no override was written either.
         self.assertEqual(series_file.read_text(encoding="utf-8"), before)
         self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
+
+    # --- #2132: a body or title change cannot ride an override ---------------
+
+    def test_an_override_save_refuses_a_changed_body_instead_of_dropping_it(self) -> None:
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+        series_file = self.series / "lore" / "honor.md"
+        before = series_file.read_text(encoding="utf-8")
+
+        with self.assertRaises(ProjectServiceError) as caught:
+            self.service.save_lore_entry(
+                "honor",
+                SaveLoreEntryRequest(
+                    title="Honor Harrington", body="Keeper of the gate, eleven years.", entry_type="lore:character",
+                    metadata={"rank": "Captain"}, authoring_layer_id=self._layer_id(self.root),
+                ),
+            )
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("cannot override", str(caught.exception))
+        # Nothing was written anywhere: the ancestor is untouched, no delta
+        # exists, and the fold still reads the canon body.
+        self.assertEqual(series_file.read_text(encoding="utf-8"), before)
+        self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
+        self.assertEqual(self.service.read_lore_entry("honor").body.rstrip(), "Body.")
+        self.assertEqual(self.service.read_lore_entry("honor").metadata["rank"], "Commodore")
+
+    def test_an_override_save_refuses_a_changed_title(self) -> None:
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+
+        with self.assertRaises(ProjectServiceError) as caught:
+            self.service.save_lore_entry(
+                "honor",
+                SaveLoreEntryRequest(
+                    title="Dame Honor Harrington", body="Body.", entry_type="lore:character",
+                    metadata={"rank": "Captain"}, authoring_layer_id=self._layer_id(self.root),
+                ),
+            )
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
+
+    def test_an_override_save_tolerates_the_echo_s_trailing_newline(self) -> None:
+        # The client echoes `read_lore_entry`'s body, which may carry a trailing
+        # newline the file does not (or vice versa) — that is not a change.
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+        echoed = self.service.read_lore_entry("honor").body
+        saved = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body=echoed + "\n", entry_type="lore:character",
+                metadata={"rank": "Captain"}, authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        self.assertEqual(saved.metadata["rank"], "Captain")
+        self.assertEqual(saved.overridden_fields, ["rank"])
 
     def test_a_book_local_entry_still_saves_to_its_own_file(self) -> None:
         # An entry the book owns is not inherited, so a plain save works unchanged.

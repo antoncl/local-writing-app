@@ -491,17 +491,16 @@
   // (a $derived over the store) keeps it live on reorder. Non-manuscript panes
   // (lore, chat, research) aren't in the manuscript tree → fall back to the raw
   // scene title, unchanged.
-  const editorTitle = (id: string) => {
-    const pane = editorPaneById(id);
-    if (!pane?.scene) return "Editor";
-    const node = structure?.root ? findNodeBySceneId(structure.root, pane.scene.id) : null;
-    return node ? structureNodeTitle(node, metadataSchema) : pane.scene.title;
-  };
-  // #2145: a scene's display title by scene id, for a row that names a home
-  // outside any editor pane (the todo pane's review items).
+  // A scene's display title by scene id — the editor tab's title, and (#2145)
+  // the home a todo-pane review item names outside any editor pane.
   const sceneTitleById = (id: string): string | undefined => {
     const node = structure?.root ? findNodeBySceneId(structure.root, id) : null;
     return node ? structureNodeTitle(node, metadataSchema) : undefined;
+  };
+  const editorTitle = (id: string) => {
+    const pane = editorPaneById(id);
+    if (!pane?.scene) return "Editor";
+    return sceneTitleById(pane.scene.id) ?? pane.scene.title;
   };
   function editorBadge(id: string): { text: string; saved: boolean; error?: boolean } | null {
     const pane = editorPaneById(id);

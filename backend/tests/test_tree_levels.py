@@ -98,6 +98,25 @@ class NamingTests(LevelsTestCase):
         warnings = self.service._tree_placement_warnings(self.root, MANUSCRIPT_TREE)
         self.assertTrue(any("'Three'" in warning for warning in warnings), warnings)
 
+    def test_a_tree_deeper_than_its_list_still_reorders_but_goes_no_deeper(self) -> None:
+        act = self._add("One")
+        chapter = self._add("Two", act)
+        self._set_levels([{"name": "Act"}, {"name": "Chapter"}, {"name": "Sequence"}])
+        deep = self._add("Three", chapter)
+        other_act = self._add("Four")
+        self._set_levels([{"name": "Act"}, {"name": "Chapter"}], force=True)
+
+        # Act One (three deep) moves below Act Four: as deep as before, allowed.
+        self.service.move_structure_node(act, "root", len(self.service.read_structure().root.children))
+        self.assertEqual([node.id for node in self.service.read_structure().root.children[-2:]], [other_act, act])
+        # A scene makes no container deeper, so it goes into an over-deep one.
+        scene = self._add("Scene", other_act, entry_type="manuscript:scene")
+        self.service.move_structure_node(scene, deep, 0)
+        # But Act One under Act Four would reach level 4: refused.
+        with self.assertRaises(ProjectServiceError) as refused:
+            self.service.move_structure_node(act, other_act, 0)
+        self.assertEqual(refused.exception.status_code, 422)
+
 
 class NumberingTests(LevelsTestCase):
     def _two_acts_of_two(self) -> tuple[list[str], list[str]]:
@@ -152,6 +171,12 @@ class LevelValidationTests(LevelsTestCase):
         act = self._add("One")
         self._set_levels([{"name": "Part"}, {"name": "Chapter"}])
         self.assertEqual(self._node(act).level_name, "Part")
+
+    def test_renaming_one_of_two_same_named_levels_is_not_asked_about(self) -> None:
+        self._set_levels([{"name": "Act"}, {"name": "Act"}])
+        inner = self._add("Two", self._add("One"))
+        self._set_levels([{"name": "Act"}, {"name": "Part"}])  # no 409
+        self.assertEqual(self._node(inner).level_name, "Part")
 
     def test_a_change_that_renames_containers_is_asked_first_then_forced(self) -> None:
         act = self._add("One")

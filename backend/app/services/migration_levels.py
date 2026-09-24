@@ -169,8 +169,10 @@ def _seed_levels(
     if manifest_key == "research_structure":
         return levels or [{"name": name} for name in defaults]
     # A manuscript keeps at least the default two, so a book with only acts
-    # still offers "New Chapter" — the padding is on the container type.
-    return levels + [{"name": name} for name in defaults[len(levels):]]
+    # still offers "New Chapter" — the padding is on the container type, and
+    # skips a name already seeded (a chapters-only book stays [Chapter]).
+    used = {level["name"] for level in levels}
+    return levels + [{"name": name} for name in defaults[len(levels):] if name not in used]
 
 
 def _node_type(node: dict[str, Any], leaf_type: str) -> str:

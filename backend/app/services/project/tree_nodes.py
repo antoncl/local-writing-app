@@ -152,8 +152,17 @@ class TreeNodesMixin:
         list, or onto the next entry because a level above was removed."""
         document = self._read_tree(root, spec)
         old = document.levels
+        old_names = [level.name for level in old]
         new_names = [level.name for level in new]
         affected = 0
+
+        def moved(name: str) -> bool:
+            # The name sits somewhere in the new list it did not sit in the
+            # old one — a level moved, not renamed where it stands.
+            return any(
+                candidate == name and (index >= len(old_names) or old_names[index] != name)
+                for index, candidate in enumerate(new_names)
+            )
 
         def visit(node: StructureNode) -> None:
             nonlocal affected
@@ -164,7 +173,7 @@ class TreeNodesMixin:
                     current = old[child.level - 1].name
                     if child.level > len(new) or (
                         new_names[child.level - 1] != current
-                        and (current in new_names or len(new) < len(old))
+                        and (moved(current) or len(new) < len(old))
                     ):
                         affected += 1
                 visit(child)
@@ -274,9 +283,15 @@ class TreeNodesMixin:
                 raise ProjectServiceError("Cannot move a node into itself or its descendants.", 422)
             target_level = target.level
         # A move never makes a container deeper than the level list (ADR-0094
-        # §5): the UI offers no level past it, and a drag must not either.
-        deepest = target_level + _container_height(node)
-        if deepest > len(document.levels):
+        # §5): the UI offers no level past it, and a drag must not either. A
+        # tree already deeper than the list (a shortened list, a hand edit)
+        # still reorders — only a move that takes a container deeper than it
+        # is now is refused. A scene is no container, so it goes anywhere.
+        height = _container_height(node)
+        deepest = target_level + height
+        current_parent = TreeStructureService.find_parent(document, node_id)
+        current_deepest = ((current_parent.level or 0) if current_parent else 0) + height
+        if height and deepest > len(document.levels) and deepest > current_deepest:
             raise ProjectServiceError(
                 f"That would put a container at level {deepest}, and the level list has "
                 f"{len(document.levels)}.",

@@ -110,6 +110,14 @@ class LevelsMigrationTests(unittest.TestCase):
 
         self.assertEqual(levels, [{"name": "Act", "type": "manuscript:act"}, {"name": "Chapter"}])
 
+    def test_a_chapters_only_book_is_not_padded_with_a_second_chapter(self) -> None:
+        self._scene("c1", "manuscript:chapter", None, 1)
+        self._scene("s1", "manuscript:scene", "c1", 1)
+
+        levels = self._migrate()["manuscript_structure"]["levels"]
+
+        self.assertEqual(levels, [{"name": "Chapter", "type": "manuscript:chapter"}])
+
     def test_a_flat_layer_gets_the_defaults_and_no_schema_file(self) -> None:
         self._scene("s1", "manuscript:scene", None, 1)
         self._scene("s2", None, None, 2)  # no entry_type: a scene, as the index reads it

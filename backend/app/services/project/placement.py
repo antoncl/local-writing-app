@@ -214,9 +214,14 @@ def plan_placement(group: Sequence[Sibling], node_id: str, position: int) -> lis
     others = [sibling for sibling in group if sibling.id != node_id]
     position = max(0, min(position, len(others)))
     current = next((sibling for sibling in group if sibling.id == node_id), None)
-    if current is not None and [sibling.id for sibling in group].index(node_id) == position:
+    if (
+        current is not None
+        and current.rank is not None
+        and [sibling.id for sibling in group].index(node_id) == position
+    ):
         # Already there: the group without the mover, with the mover put back
-        # at `position`, is the group as it reads.
+        # at `position`, is the group as it reads. A node with no rank is not
+        # "there" — it only sorts last by default — so it is always written.
         return []
 
     rank = _new_rank(others, position)

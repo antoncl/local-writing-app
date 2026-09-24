@@ -78,6 +78,12 @@ class PlanPlacementTests(unittest.TestCase):
         self.assertEqual(plan_placement(group, "b", 1), [])
         self.assertEqual(plan_placement(group, "c", 2), [])
 
+    def test_an_unranked_node_at_the_end_is_placed_not_skipped(self) -> None:
+        """A just-created file sits last only because it has no rank; placing
+        it must give it one, or the next placement finds an unranked neighbour."""
+        group = [Sibling("a", 1), Sibling("b", 2), Sibling("new", None)]
+        self.assertEqual(plan_placement(group, "new", 2), [("new", Decimal(3))])
+
     def test_the_renumber_is_correct_at_every_step_mover_included(self) -> None:
         """The case that breaks a renumber which leaves the mover out:
         A=1, B=1, C=2; move C between A and B."""

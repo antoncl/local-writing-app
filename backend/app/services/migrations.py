@@ -55,12 +55,13 @@ from typing import Any
 import yaml
 
 from app.services.atomic_io import atomic_write_text
+from app.services.migration_tree_placement import migrate_layer_tree_placement
 from app.services.yaml_io import load_yaml
 
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 11
+CURRENT_VERSION = 12
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -1127,6 +1128,12 @@ MIGRATIONS: list[MigrationStep] = [
         11,
         "drop the retired per-option derived flag from select options in metadata.schema.yaml (#1911)",
         _drop_option_derived_flags,
+    ),
+    ChainMigration(
+        12,
+        "move the manuscript and research trees onto their nodes' own parent/rank and retire the "
+        "structure yaml files (ADR-0094 S1, #2175)",
+        migrate_layer_tree_placement,
     ),
 ]
 

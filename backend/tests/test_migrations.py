@@ -214,7 +214,9 @@ class MigrationFrameworkTests(unittest.TestCase):
         # description, and comparing the count to len(MIGRATIONS) is
         # self-referential — both survive a no-op mutant.
         self.assertTrue((self.root / "research" / "notes").is_dir())
-        self.assertTrue((self.root / "research.structure.yaml").exists())
+        # v5 created research.structure.yaml; v12 moved the tree onto the nodes
+        # and retired it (ADR-0094).
+        self.assertFalse((self.root / "research.structure.yaml").exists())
 
         # Backup was created
         backup_dir = self.root / BACKUP_DIRNAME
@@ -442,14 +444,16 @@ class ResearchStructureMigrationTests(unittest.TestCase):
         self.assertFalse(research_dir.exists())
         self.assertFalse(structure_path.exists())
 
-        ProjectService.opened_at(self.root)
+        service = ProjectService.opened_at(self.root)
 
         self.assertTrue((self.root / "research" / "notes").is_dir())
-        self.assertTrue(structure_path.exists())
-        tree = yaml.safe_load(structure_path.read_text(encoding="utf-8"))
-        self.assertEqual(tree["root"]["type"], "root")
-        self.assertEqual(tree["root"]["title"], "Research")
-        self.assertEqual(tree["root"]["children"], [])
+        # The whole ladder ran: v5 seeded the tree file, v12 retired it
+        # (ADR-0094); the research tree is empty either way.
+        self.assertFalse(structure_path.exists())
+        tree = service.read_research_structure()
+        self.assertEqual(tree.root.type, "root")
+        self.assertEqual(tree.root.title, "Research")
+        self.assertEqual(tree.root.children, [])
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
 
     def test_migration_preserves_existing_research_structure_file(self) -> None:
@@ -482,11 +486,13 @@ class ResearchStructureMigrationTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        ProjectService.opened_at(self.root)
+        service = ProjectService.opened_at(self.root)
 
-        tree = yaml.safe_load(structure_path.read_text(encoding="utf-8"))
-        self.assertEqual(len(tree["root"]["children"]), 1)
-        self.assertEqual(tree["root"]["children"][0]["title"], "Industrial Revolution")
+        # v5 left the user's tree alone; v12 carried its topic onto a file of
+        # its own (ADR-0094), so it survives the whole ladder.
+        tree = service.read_research_structure()
+        self.assertEqual(len(tree.root.children), 1)
+        self.assertEqual(tree.root.children[0].title, "Industrial Revolution")
 
 
 class InvocationLedgerCsvMigrationTests(unittest.TestCase):

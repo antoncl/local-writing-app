@@ -4,8 +4,8 @@
   adversarial review · **Amendment 1: inheritance is declared, not inferred** · **Amendment 2: one
   traversal; the root is stipulated, not inferred from a stray `metadata.schema.yaml`** · **Amendment
   3: the create-project wizard + authored-field inheritance (→ `create-project-wizard.md`)** ·
-  **Amendment 4 (draft, awaiting review): a layer override may replace an inherited node's title and
-  body (#2184)**
+  **Amendment 4 (draft, awaiting review): a layer override may replace an inherited lore entry's title
+  and body; prompts change only by cloning (#2184)**
 - Feature: #7 (epic) full project hierarchies
 - Companion: ADR-0040 (the index — which *materializes* the chain, not merely caches it)
 - Amends: ADR-0013 (see its Amendment 1) · Gesture UX: **ADR-0042** (co-designed with mutation
@@ -453,7 +453,7 @@ honour is to **never seed a scene at open-time** (which would give a container a
 **`genre` is removed** (pre-1.0, no migration): a keyword cannot carry it; its replacement is a
 Lore-entry treatment, out of scope.
 
-## Amendment 4 — a layer override may replace an inherited node's title and body (2026-09-24)
+## Amendment 4 — a layer override may replace an inherited lore entry's title and body (2026-09-24)
 
 > **Status: draft, awaiting review.** Issue #2184. Citations name functions; where a line number
 > appears it is verified against `8b872ea1` (2026-09-24, master after PR #2187).
@@ -461,7 +461,8 @@ Lore-entry treatment, out of scope.
 **The gap.** *Consequences → Explicitly deferred* says a body override is "Permitted; slice E states
 the interaction". Slice E never stated it. The overrides shipped metadata-only, and a save that
 changes an inherited node's title or body from a lower layer is refused with a 422
-(`inherited_content_refusal`, #2132/#2159). This amendment makes body and title overrides real.
+(`inherited_content_refusal`, #2132/#2159). This amendment makes body and title overrides real **for
+lore**, and decides that prompts do not get them (§5).
 
 **Intent.** In a book, an author rewords the body or retitles an entry inherited from Aetheria. Only
 that book (and its own descendants) sees the change, Aetheria's file stays byte-identical, and "Reset
@@ -523,31 +524,24 @@ row wins. The fold also reports **which layer's row won** the title, for §5.
 The effective title and body apply wherever an inherited node is read for the open project. Each of
 these reads the title (and body) from the owning file today and needs its own change:
 
-- `read_lore_entry`, `list_lore_entries`, `read_prompt_entry` and `_build_prompt_summaries`. This
-  includes `computed_metadata` (word count) derived from the body.
+- `read_lore_entry` and `list_lore_entries`, including `computed_metadata` (word count) derived from
+  the body.
 - The node index's title (`NodeIndexEntry.title`), folded at index build. The index is built per open
   project, so the folded title is well defined. The title fold does not depend on the schema having
   loaded (edges fold only with a schema; a schema typo must not bring canon titles back).
 - The search corpus (`_corpus_entry_for`), which folds no overrides at all today.
-- Prompt rendering: an `{% include %}` of an overridden snippet renders the **effective** body, and
-  the include edges are built from the effective body. Otherwise an override that adds or removes an
-  include is invisible to dependents and to the promotion include checks.
 
 ### 3. The save
 
-`_save_lore_override` and `_save_prompt_override` compare the submission against **the fold of the
-layers above L**, not against the owning file. Today's comparison against the owning file assumes
+`_save_lore_override` compares the submission against **the fold of the layers above L**, not against the owning file. Today's comparison against the owning file assumes
 no layer overrides title or body, and that assumption ends here. A title or body that differs from
 that fold becomes a row; one that equals it produces no row. New title/body rows are built before
 the `clear_override_fields` filter runs, so "Reset to inherited" on `title` or `body` is the same
 request as for any field.
 
-`inherited_content_refusal` goes. The invariant it enforced stays: **an override save refuses, and
-never drops, any part of the submission it cannot carry.** For prompts that includes `inputs`,
-`offer_on` and `context_strategy`, which the override save does not compare today. Once the body is
-editable, an author who adds `{{ new_input }}` and declares the input must get a refusal naming the
-field, not a 200 that silently drops the declaration. Whether those properties become overridable
-is a separate question; this amendment does not decide it.
+For lore, `inherited_content_refusal` goes. The invariant it enforced stays: **an override save
+refuses, and never drops, any part of the submission it cannot carry.** The prompt override save
+keeps the refusal unchanged (§5).
 
 ### 4. An edit is always made against the entry as the authoring layer sees it
 
@@ -559,45 +553,44 @@ for metadata today; with body overrides it would copy a whole rewritten body int
 
 **Choosing an authoring layer re-seeds the pane from the entry as that layer sees it (the fold of
 the layers down to and including it) before any edit is accepted.** Unsaved edits are flushed at the
-current layer first, the same as any pane switch. This covers metadata as well as title and body, and
-it ships in slice 1, before the first body override can exist.
+current layer first, the same as any pane switch. This covers metadata as well as title and body. It
+is tracked as its own bug, #2189, and lands before slice 1, so the first body override can never be
+copied upstream.
 
-### 5. Which nodes: lore and prompts, not the Library
+### 5. Lore only: a prompt's title and body change only by cloning
 
-Body and title overrides apply to the kinds that already have a layer-override save path: **lore and
-prompts**.
+Body and title overrides apply to **lore**. **Prompts do not get them.** The prompt override save
+keeps refusing a changed title or body ("Clone the prompt to change them here",
+`inherited_content_refusal`). An inherited prompt stays `editable=False`, so the editor keeps its
+body and title locked and its "Clone to edit" affordance.
 
-**Library nodes are excluded, on both write and read.** A shipped Library prompt still changes only
-by cloning (ADR-0049 §3, `_reject_inherited_library_write`). A body override on a Library prompt
-would silently stop that prompt receiving the app's own updates, for a text the author never wrote.
-A clone makes that separation visible, and an override would hide it. The save refuses a
-title/body row on a Library node. The fold ignores one (a hand-edited file), failing closed like the
-rest of the Library. Metadata overrides of Library prompts (routing, #1738) are unaffected.
+**Why prompts are different.** A lore entry's body is canon *about the world*. A book legitimately
+knows it differently ("by Book 12 Marek has kept the gate eleven years"), and a later canon
+correction to other fields should still reach it. A prompt's body is its *behaviour*. Overriding it
+changes what the prompt does in one book while it still looks like the inherited prompt. Every later
+improvement to the canon prompt then silently stops reaching that book, for a prompt whose name and
+provenance say it is the shared one. A clone makes that divergence visible and owned. An override
+would hide it.
 
-**A prompt's `editable` flag keeps its meaning**, "the body and title can be written from here". It
-becomes true for an inherited non-Library prompt and stays fail-closed. **The ancestor banner and
-"Clone to edit" key on inheritance, not on `editable`.** Today `paneEntryFromAncestor` (App.svelte)
-decides the banner through `readOnlyInPlace`, which would hide provenance and Clone for every
-inherited prompt the moment `editable` turns true. Inheritance is what `isInherited` in
-`lib/utils/provenance.ts` already answers.
+The Library is the sharpest case of the same argument: a shipped prompt would stop receiving the
+app's own updates for a text the author never wrote (ADR-0049 §3). Excluding prompts as a kind, not
+just Library prompts, is the same reasoning applied consistently.
 
-### 6. Renaming an inherited node is a rename
+This also keeps out of scope everything a prompt body override would drag in: include resolution by
+an overridden title, rendering an overridden snippet into its includers, and prompt properties the
+override row format cannot carry (`inputs`, `offer_on`, `context_strategy`).
 
-Inside the overriding project, the overridden title **is** the node's name everywhere: pickers,
-search and `{% include "…" %}` resolution. An include of the old title then fails to resolve in that
-project, loudly, as it does today when a prompt is renamed at its owning layer. An include by **id**
-is unaffected: ids match before titles.
+Metadata overrides of inherited prompts, including Library prompts (routing, #1738), are unaffected.
 
-**Rejected: resolving by either title.** That would give one node two names in one project, and a
-lookup would be ambiguous as soon as another node took the old name. This is a sharp tool: an author
-who renames an inherited snippet gets hurt the same way as one who renames an owned snippet.
+### 6. Renaming an inherited lore entry is a rename
 
-**An overridden title ranks at the layer that wrote it.** A title tie is broken by layer precedence,
-nearest wins (`resolve_snippet_name`). All three places that rank do so by the node's owning layer
-today: the render loader, the prompt summaries and the include-edge build. They rank an overridden
-title by the layer whose row won (§2), because that is where the name was given. A book that renames
-an inherited snippet to "Voice" therefore shadows an Aetheria snippet already titled "Voice", exactly
-as a book-owned "Voice" would.
+Inside the overriding project, the overridden title **is** the entry's name everywhere: pickers,
+search, and name detection in prose. Implicit lore detection matches the listed title and aliases
+(`lore_selection.py`), so in that book the new name is what it finds. References are by id and are
+unaffected.
+
+**Rejected: matching by either title.** That would give one entry two names in one project. An author
+who wants the old name still recognised adds it as an alias, which is exactly what aliases are for.
 
 ### 7. Change propagation sees title and body rows
 
@@ -656,15 +649,17 @@ Two limits, stated so they are not rediscovered as surprises:
 
 ### Slices (one PR each, in order)
 
+**Prerequisite: #2189** (the authoring-layer re-seed, §4) is merged first.
+
 1. **Lore, end to end, without the provenance surface.**
    - Backend: rows (§1), the fold (§2), the save (§3), reset, and the list, index and search reads.
-   - The authoring-layer re-seed (§4).
    - The promotion plan (§8).
    - Tests first: a snapshot round trip, a pre-amendment fixture (§10), CRLF and a `---` body line,
      and no title/body key in any metadata dict.
    - Fix the stale comments this makes false (the "UI keeps an inherited body read-only" docstring,
      `OVERRIDE_SNAPSHOT_KINDS`).
-   - *Not:* prompts; the title/body provenance tell.
+   - *Not:* any change to prompts (their refusal stays exactly as it is); the title/body provenance
+     tell.
    - *Done when:* in a book, the author edits an Aetheria entry's body and title and saves. The book's
      list, search and reopened entry show the new text. Aetheria's file is byte-identical. Switching
      "Editing at" to Aetheria shows the canon text, not the book's. Resetting `body` restores the
@@ -673,20 +668,11 @@ Two limits, stated so they are not rediscovered as surprises:
    - *Not:* shadow-aware suppression of owning-lane changes.
    - *Done when:* editing a book's body override flags the book's dependents exactly as editing the
      canon body flags them, and Propose shows the before/after of the override edit itself.
-3. **Prompts (§2 rendering, §3, §5, §6).**
-   - The backend path from slice 1, the refusal of uncarried properties, `editable`, the banner keyed
-     on inheritance, include resolution and ranking by the effective title, and the "Editing at" bar
-     that lore already has.
-   - *Not:* Library prompts; alias resolution; making `inputs`/`offer_on`/`context_strategy`
-     overridable.
-   - *Done when:* in a book, the author rewrites an inherited prompt's body, runs it, and gets the new
-     text. A prompt that includes it by title renders the new body too. A Library prompt still offers
-     only Clone, and the ancestor banner still shows on every inherited prompt.
-4. **Lore provenance for title and body (§9).**
+3. **Lore provenance for title and body (§9).**
    - Mockup first, then the tell and the reset.
    - *Done when:* browser-verified on a layered project: edit an inherited entry's body in the book,
      reload, see it marked as an override, reset it, and see the canon body again.
 
 **Out of scope throughout:** appending to or patching an inherited body (whole-body replace only), a
-second override mechanism, any write through to the ancestor file, and tracking renames for
-includes.
+second override mechanism, any write through to the ancestor file, and title or body overrides for
+any kind other than lore.

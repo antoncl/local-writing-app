@@ -43,6 +43,7 @@ from typing import Any
 from app.models import (
     PROJECT_NODE_FILENAME,
     MetadataSchema,
+    ProjectDiskRefresh,
     ReferenceCandidate,
     ReferenceCandidatesResponse,
     ReferenceGraphEdge,
@@ -491,7 +492,7 @@ class ReferencesMixin:
         # writer already passes.
         self._patch_search_corpus(resolved)
 
-    def refresh_node_index_from_disk(self) -> bool:
+    def refresh_node_index_from_disk(self) -> ProjectDiskRefresh:
         """ADR-0040's mid-session refresh hook (#2170): catch edits made outside the app.
 
         A warm memo does no disk work, so a `.md` dropped into `lore/` from
@@ -505,28 +506,44 @@ class ReferencesMixin:
         layer-level yaml that fans out across the chain cannot be patched and
         drops the memo instead; the next read builds cold.
 
-        Returns whether the held index moved — the client's cue to re-pull its
-        node lists. With nothing held there is nothing to compare against, and
-        the next read builds cold from disk, so that reports as changed.
+        Reports whether the held index moved — the client's cue to re-pull its
+        node lists — and which node ids no longer resolve, so the client can
+        close a pane still open on one, as an in-app delete does. With nothing
+        held there is nothing to compare against, and the next read builds cold
+        from disk, so that reports as changed with no known removals.
         """
         root = self._require_project().resolve()
         held = node_index_gate.peek(root)
         if held is None:
-            return True
+            return ProjectDiskRefresh(changed=True)
         layers = list(held.layers)
         on_disk = self._build_index_manifest(layers)
         drifted = tuple(Path(path) for path in diff_manifests(held.manifest, on_disk))
         if not drifted:
-            return False
+            return ProjectDiskRefresh(changed=False)
         _, unplaceable = self._placeable_write_paths(drifted, layers)
         if unplaceable:
             node_index_gate.invalidate()
-            return True
-        # A file that appeared or vanished changes the path set, which the
-        # funnel only patches when told the write is structural. An edit in
-        # place goes through one file at a time, because the signature check
-        # that makes a prose-only save a no-op only runs for a single-file
-        # write — batched, every file the app saved this session would patch.
+        else:
+            self._apply_disk_drift(held, on_disk, drifted)
+        # Resolved rather than peeked: after an invalidate this is the cold
+        # build the client's re-pull would trigger anyway, and comparing ids
+        # across it is what lets a fan-out edit report its removals too.
+        current = self._build_node_index(root)
+        if current is held.index:
+            return ProjectDiskRefresh(changed=False)
+        # By id, not by path: a node deleted in this book but still defined
+        # in an ancestor layer still resolves, so its pane rightly stays open.
+        return ProjectDiskRefresh(changed=True, removed=sorted(held.index.by_id.keys() - current.by_id.keys()))
+
+    def _apply_disk_drift(self, held: ResolvedIndex, on_disk: Manifest, drifted: tuple[Path, ...]) -> None:
+        """Route outside-the-app changes through the write funnel.
+
+        A file that appeared or vanished changes the path set, which the funnel
+        only patches when told the write is structural. An edit in place goes
+        through one file at a time, because the signature check that makes a
+        prose-only save a no-op only runs for a single-file write — batched,
+        every file the app saved this session would patch."""
         appeared_or_vanished = tuple(
             path for path in drifted if held.manifest.get(str(path)) is None or on_disk.get(str(path)) is None
         )
@@ -535,7 +552,6 @@ class ReferencesMixin:
         for path in drifted:
             if path not in appeared_or_vanished:
                 self._apply_index_write((path,), structural=False)
-        return node_index_gate.peek(root) is not held
 
     def _flush_resolved_index(self, resolved: ResolvedIndex) -> None:
         """Write the deferred snapshot for a patched memo (#476).

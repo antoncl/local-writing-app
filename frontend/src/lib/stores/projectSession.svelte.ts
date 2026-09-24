@@ -399,8 +399,9 @@ class ProjectSession {
   // Explorer stayed invisible until a reopen (ADR-0040's accepted exposure). App
   // calls this when the window comes back to the foreground — the moment after
   // an outside edit — and the lists are re-pulled only when the backend reports
-  // that something it indexes moved. Overlapping calls collapse to one: focus
-  // and visibilitychange fire together on a tab switch.
+  // that something it indexes moved. A pane open on a node deleted outside the
+  // app closes, as it would after an in-app delete. Overlapping calls collapse
+  // to one: focus and visibilitychange fire together on a tab switch.
   #diskRefreshInFlight = false;
 
   async refreshFromDisk(): Promise<void> {
@@ -408,8 +409,10 @@ class ProjectSession {
     this.#diskRefreshInFlight = true;
     try {
       await this.run(async () => {
-        const { changed } = await api.refreshProjectFromDisk();
-        if (changed) await this.reloadProjectData();
+        const { changed, removed } = await api.refreshProjectFromDisk();
+        if (!changed) return;
+        editorPanes.closeRemovedNodes(removed);
+        await this.reloadProjectData();
       });
     } finally {
       this.#diskRefreshInFlight = false;

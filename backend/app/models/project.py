@@ -316,9 +316,11 @@ class ProjectValidation(BaseModel):
 class ProjectDiskRefresh(BaseModel):
     """The answer of `POST /api/project/refresh` (#2170): whether files changed
     outside the app moved anything the index holds, so the client knows to
-    re-pull its node lists. False costs the client nothing."""
+    re-pull its node lists (False costs the client nothing), and the ids of
+    nodes deleted outside the app, whose open panes the client closes."""
 
     changed: bool
+    removed: list[str] = Field(default_factory=list)
 
 
 class LoreCodeFencePreview(BaseModel):

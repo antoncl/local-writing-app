@@ -9,6 +9,9 @@ vi.mock("@/lib/api", () => ({ api: { refreshProjectFromDisk } }));
 const { loadProjectData } = vi.hoisted(() => ({ loadProjectData: vi.fn() }));
 vi.mock("@/lib/stores/index", () => ({ loadProjectData }));
 
+const { closeRemovedNodes } = vi.hoisted(() => ({ closeRemovedNodes: vi.fn() }));
+vi.mock("@/lib/stores/editorPanes.svelte", () => ({ editorPanes: { closeRemovedNodes } }));
+
 import { projectSession } from "@/lib/stores/projectSession.svelte";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -26,6 +29,7 @@ describe("refreshFromDisk (#2170)", () => {
     refreshProjectFromDisk.mockReset();
     loadProjectData.mockReset();
     loadProjectData.mockResolvedValue(undefined);
+    closeRemovedNodes.mockReset();
     dataLoaded = 0;
     projectSession.run = async (action) => {
       try {
@@ -41,7 +45,7 @@ describe("refreshFromDisk (#2170)", () => {
   });
 
   it("re-pulls the lists when the backend reports an outside change", async () => {
-    refreshProjectFromDisk.mockResolvedValue({ changed: true });
+    refreshProjectFromDisk.mockResolvedValue({ changed: true, removed: [] });
 
     await projectSession.refreshFromDisk();
 
@@ -49,10 +53,19 @@ describe("refreshFromDisk (#2170)", () => {
     expect(dataLoaded).toBe(1);
   });
 
+  it("closes the panes of nodes deleted outside the app", async () => {
+    refreshProjectFromDisk.mockResolvedValue({ changed: true, removed: ["lore_gone"] });
+
+    await projectSession.refreshFromDisk();
+
+    expect(closeRemovedNodes).toHaveBeenCalledWith(["lore_gone"]);
+    expect(loadProjectData).toHaveBeenCalledTimes(1);
+  });
+
   it("leaves the lists alone when nothing moved", async () => {
     // Every window focus lands here; re-pulling fourteen lists each time would
     // be the cost this answer exists to avoid.
-    refreshProjectFromDisk.mockResolvedValue({ changed: false });
+    refreshProjectFromDisk.mockResolvedValue({ changed: false, removed: [] });
 
     await projectSession.refreshFromDisk();
 
@@ -60,14 +73,14 @@ describe("refreshFromDisk (#2170)", () => {
   });
 
   it("collapses the focus + visibilitychange pair into one request", async () => {
-    const inflight = deferred<{ changed: boolean }>();
+    const inflight = deferred<{ changed: boolean; removed: string[] }>();
     refreshProjectFromDisk.mockReturnValueOnce(inflight.promise);
 
     const first = projectSession.refreshFromDisk();
     await projectSession.refreshFromDisk();
     expect(refreshProjectFromDisk).toHaveBeenCalledTimes(1);
 
-    inflight.resolve({ changed: false });
+    inflight.resolve({ changed: false, removed: [] });
     await first;
   });
 
@@ -75,7 +88,7 @@ describe("refreshFromDisk (#2170)", () => {
     refreshProjectFromDisk.mockRejectedValueOnce(new Error("offline"));
     await projectSession.refreshFromDisk();
 
-    refreshProjectFromDisk.mockResolvedValueOnce({ changed: true });
+    refreshProjectFromDisk.mockResolvedValueOnce({ changed: true, removed: [] });
     await projectSession.refreshFromDisk();
 
     expect(refreshProjectFromDisk).toHaveBeenCalledTimes(2);

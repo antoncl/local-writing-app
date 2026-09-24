@@ -7,7 +7,8 @@ re-sweeps the manifest and routes each drifted path through the write funnel's
 change-gate. These pin both halves of its answer:
 
 - a real outside change (a file added, retitled, deleted, a schema edited)
-  reaches the index and reports `changed`;
+  reaches the index and reports `changed`, and a deletion names the node, so
+  the client can close a pane still open on it;
 - nothing index-relevant moved — including the app's *own* prose saves, which
   leave the held fingerprints behind by design — reports unchanged, so the
   client does not re-pull every list each time the window regains focus.
@@ -66,16 +67,16 @@ class DiskRefreshTestCase(unittest.TestCase):
 class DiskRefreshTests(DiskRefreshTestCase):
     def test_nothing_changed_reports_unchanged(self) -> None:
         self._lore("Seren")
-        self.assertFalse(self.service.refresh_node_index_from_disk())
+        self.assertFalse(self.service.refresh_node_index_from_disk().changed)
 
     def test_a_file_dropped_in_from_outside_appears(self) -> None:
         self._titles()  # warms the memo, as an open session has
         (self.root / "lore" / "Media and Anchors.md").write_text(DROPPED_ENTRY, encoding="utf-8")
         self.assertNotIn("Media and Anchors", self._titles(), "precondition: the warm memo hides it")
 
-        self.assertTrue(self.service.refresh_node_index_from_disk())
+        self.assertTrue(self.service.refresh_node_index_from_disk().changed)
         self.assertIn("Media and Anchors", self._titles())
-        self.assertFalse(self.service.refresh_node_index_from_disk(), "a second refresh found it again")
+        self.assertFalse(self.service.refresh_node_index_from_disk().changed, "a second refresh found it again")
 
     def test_the_apps_own_prose_saves_do_not_read_as_changes(self) -> None:
         """Two, not one: the change-gate compares signatures only for a
@@ -87,37 +88,50 @@ class DiskRefreshTests(DiskRefreshTestCase):
                 entry_id,
                 SaveLoreEntryRequest(title=title, body="A longer body, prose only.", entry_type="lore:character"),
             )
-        self.assertFalse(self.service.refresh_node_index_from_disk())
+        self.assertFalse(self.service.refresh_node_index_from_disk().changed)
 
     def test_an_outside_body_only_edit_reports_unchanged(self) -> None:
         path = self._path(self._lore("Seren"))
         path.write_text(path.read_text(encoding="utf-8") + "\nMore prose from another editor.\n", encoding="utf-8")
-        self.assertFalse(self.service.refresh_node_index_from_disk())
+        self.assertFalse(self.service.refresh_node_index_from_disk().changed)
 
     def test_an_outside_retitle_reaches_the_index(self) -> None:
         path = self._path(self._lore("Seren"))
         path.write_text(path.read_text(encoding="utf-8").replace("title: Seren", "title: Serenity"), encoding="utf-8")
 
-        self.assertTrue(self.service.refresh_node_index_from_disk())
+        refreshed = self.service.refresh_node_index_from_disk()
+        self.assertTrue(refreshed.changed)
+        self.assertEqual(refreshed.removed, [], "a retitle is not a removal; its pane must stay open")
         self.assertIn("Serenity", self._titles())
 
-    def test_an_outside_delete_reaches_the_index(self) -> None:
-        self._path(self._lore("Seren")).unlink()
+    def test_an_outside_delete_reaches_the_index_and_names_the_node(self) -> None:
+        kept = self._lore("Aren")
+        gone = self._lore("Seren")
+        self._path(gone).unlink()
 
-        self.assertTrue(self.service.refresh_node_index_from_disk())
+        refreshed = self.service.refresh_node_index_from_disk()
+        self.assertTrue(refreshed.changed)
+        # The id is what lets the client close a pane still open on it.
+        self.assertEqual(refreshed.removed, [gone])
+        self.assertNotIn(kept, refreshed.removed)
         self.assertNotIn("Seren", self._titles())
 
-    def test_an_outside_schema_edit_drops_the_memo(self) -> None:
-        """A layer yaml fans out across the chain; it cannot be patched."""
-        self._lore("Seren")
+    def test_an_outside_schema_edit_rebuilds_rather_than_patches(self) -> None:
+        """A layer yaml fans out across the chain; it cannot be patched, so the
+        memo is dropped and rebuilt — and a delete riding along is still named."""
+        gone = self._lore("Seren")
+        held = node_index_gate.peek(self.root.resolve())
+        self._path(gone).unlink()
         (self.root / "metadata.schema.yaml").write_text("entry_types: []\n", encoding="utf-8")
 
-        self.assertTrue(self.service.refresh_node_index_from_disk())
-        self.assertIsNone(node_index_gate.peek(self.root.resolve()))
+        refreshed = self.service.refresh_node_index_from_disk()
+        self.assertTrue(refreshed.changed)
+        self.assertEqual(refreshed.removed, [gone])
+        self.assertIsNot(node_index_gate.peek(self.root.resolve()), held)
 
     def test_with_no_memo_held_reports_changed(self) -> None:
         self.assertIsNone(node_index_gate.peek(self.root.resolve()))
-        self.assertTrue(self.service.refresh_node_index_from_disk())
+        self.assertTrue(self.service.refresh_node_index_from_disk().changed)
 
 
 class DiskRefreshRouteTests(DiskRefreshTestCase):
@@ -129,7 +143,7 @@ class DiskRefreshRouteTests(DiskRefreshTestCase):
 
         response = client.post("/api/project/refresh", headers=headers)
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json(), {"changed": True})
+        self.assertEqual(response.json(), {"changed": True, "removed": []})
         titles = {entry["title"] for entry in client.get("/api/lore", headers=headers).json()["entries"]}
         self.assertIn("Media and Anchors", titles)
 

@@ -193,7 +193,7 @@ def validate_project(project: CurrentProject) -> ProjectValidation:
 @router.post("/api/project/refresh", response_model=ProjectDiskRefresh)
 def refresh_project_from_disk(project: CurrentProject) -> ProjectDiskRefresh:
     with translate_errors():
-        return ProjectDiskRefresh(changed=project.refresh_node_index_from_disk())
+        return project.refresh_node_index_from_disk()
 
 
 @router.post("/api/project/repair", response_model=ProjectValidation)

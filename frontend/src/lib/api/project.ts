@@ -171,9 +171,9 @@ export const projectApi = {
     });
   },
   // Catch up with files changed outside the app (#2170); `changed` says whether
-  // the node lists are worth re-pulling.
+  // the node lists are worth re-pulling, `removed` which nodes were deleted.
   refreshProjectFromDisk() {
-    return request<{ changed: boolean }>("/project/refresh", {
+    return request<{ changed: boolean; removed: string[] }>("/project/refresh", {
       method: "POST",
     });
   },

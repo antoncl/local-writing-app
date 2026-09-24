@@ -278,9 +278,10 @@ a user-defined scene type is still a scene.
 (`pov_mode`, `pov`, `tense`) and the display template `{title} {number}`. `research:container`
 carries what `research:topic` carries today, minus `opens_in: tree_container`: a research
 container is a file and opens like any node. A new project's schema has no other container type
-in either tree. Research sub-types become authorable as manuscript ones are: the schema's
-entry-type upsert accepts the `research` kind (`_resolve_upsert_entry_type_id`,
-`services/project/schema.py:324`, omits it today).
+in either tree. Research types must be authorable as manuscript ones are; today the schema's
+entry-type upsert rejects every save of a research type, built-in edits included
+(`_resolve_upsert_entry_type_id`, `services/project/schema.py:324`), which is bug #2174 and is
+fixed on its own, ahead of S2.
 
 **The level list.** Each tree's list lives in `project.yaml`, replacing
 `manuscript_structure.container_types`:

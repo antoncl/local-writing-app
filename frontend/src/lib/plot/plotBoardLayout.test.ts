@@ -25,6 +25,7 @@ import {
   CONTAINER_PAD,
   PLOTLINE_WIDTH,
   type PlotCardData,
+  type PlotBoardNode,
   type PlotContainerData,
 } from "./plotBoardLayout";
 import { setPalette } from "@/lib/utils/colors";
@@ -183,18 +184,47 @@ describe("buildBoardNodes", () => {
     expect(dataOf(nodes, "container:act")).toMatchObject({ count: 2 });
   });
 
-  it("collapses a middle 'part' container with no direct cards, nesting the chapter under the act", () => {
+  // ADR-0094 §9: one nested box per level. A sequence holding cards draws inside its
+  // chapter's box, inside its act's, even though the chapter holds no card directly.
+  it("nests one box per level, each inside its parent's", () => {
     const nodes = buildBoardNodes(
       projection({
-        containers: [container("act", "Act I"), container("part", "Part A", "act"), container("chap", "Chapter 1", "part")],
-        cards: [card("c1", { container: "chap", scene: "s1" })],
+        containers: [container("act", "Act I"), container("chap", "Chapter 1", "act"), container("seq", "Sequence 1", "chap")],
+        cards: [card("c1", { container: "seq", scene: "s1" })],
       }),
     );
-    // The empty middle part draws no box; the chapter nests directly in the act.
-    expect(containerNodes(nodes).map((n) => n.id)).toEqual(["container:act", "container:chap"]);
-    expect(dataOf(nodes, "container:chap")).toMatchObject({ level: 1 });
-    // The act still counts the card transitively.
-    expect(dataOf(nodes, "container:act")).toMatchObject({ count: 1 });
+    expect(containerNodes(nodes).map((n) => n.id)).toEqual(["container:act", "container:chap", "container:seq"]);
+    expect(containerNodes(nodes).map((n) => (n.data as PlotContainerData).level)).toEqual([0, 1, 2]);
+    // Every box counts the card transitively.
+    expect(containerNodes(nodes).map((n) => (n.data as PlotContainerData).count)).toEqual([1, 1, 1]);
+    const inside = (inner: PlotBoardNode, outer: PlotBoardNode) =>
+      inner.position.x > outer.position.x &&
+      inner.position.y > outer.position.y &&
+      inner.position.x + inner.width! < outer.position.x + outer.width! &&
+      inner.position.y + inner.height! < outer.position.y + outer.height!;
+    const [act, chap, seq] = containerNodes(nodes);
+    const c1 = cardNodes(nodes)[0];
+    expect(inside(seq, chap)).toBe(true);
+    expect(inside(chap, act)).toBe(true);
+    expect(inside(c1, seq)).toBe(true);
+    // Deeper boxes stack above their parents, and every card above every box.
+    expect([act.zIndex, chap.zIndex, seq.zIndex]).toEqual([0, 1, 2]);
+    expect(c1.zIndex).toBeGreaterThan(seq.zIndex!);
+  });
+
+  it("wraps a box's child boxes and its own direct cards without overlap", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        containers: [container("act", "Act I"), container("chap", "Chapter 1", "act")],
+        cards: [card("c1", { container: "chap", scene: "s1" }), card("c2", { container: "act", scene: "s2" })],
+      }),
+    );
+    const chap = containerNodes(nodes).find((n) => n.id === "container:chap")!;
+    const act = containerNodes(nodes).find((n) => n.id === "container:act")!;
+    const direct = cardNodes(nodes).find((n) => n.id === "c2")!;
+    // The act's direct card sits below its chapter box, still inside the act.
+    expect(direct.position.y).toBeGreaterThanOrEqual(chap.position.y + chap.height!);
+    expect(direct.position.y + CARD_HEIGHT).toBeLessThan(act.position.y + act.height!);
   });
 
   it("floats a homeless card (no container) outside every box", () => {

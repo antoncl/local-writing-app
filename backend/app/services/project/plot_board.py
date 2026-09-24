@@ -72,7 +72,11 @@ class _PlotBoardLayout(StructureVisitor):
                     self.scene_to_container[node.scene_id] = parent_container
         elif node.id not in self.containers:
             self.containers[node.id] = PlotBoardContainer(
-                id=node.id, title=node.title, parent=parent_container
+                id=node.id,
+                title=node.title,
+                parent=parent_container,
+                level=node.level,
+                level_name=node.level_name,
             )
 
 

@@ -340,6 +340,10 @@ class PlotBoardContainer(BaseModel):
     id: str
     title: str
     parent: str | None = None
+    # ADR-0094 §9: the container's level (1 at the top) and the level list's
+    # name for it — the board nests and styles one box per level.
+    level: int | None = None
+    level_name: str | None = None
 
 
 class PlotBoardBeat(BaseModel):

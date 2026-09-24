@@ -34,9 +34,10 @@ import { getSwatch, resolveColor, resolveColorForKind } from "@/lib/utils/colors
 import { loreEntriesStore } from "@/lib/stores/lore";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 
-// A container box: an act/chapter's title, how many cards it (transitively) holds,
-// and its nesting level (0 = a top-level act, 1 = a box nested inside one). The box
-// is structural, so it carries no colour — plotline is the card's colour axis.
+// A container box: its title, how many cards it (transitively) holds, and its
+// level (0 = a top-level act, 1 = a chapter inside it, 2 = a sequence inside that:
+// one nested box per level, ADR-0094 §9). The box is structural, so it carries no
+// colour — plotline is the card's colour axis.
 //
 // The last three fields serve the resize handle (#878), which lives on the flow
 // wrapper (PlotContainerNodeFlow), not the presentational node: `containerId` is the
@@ -219,9 +220,10 @@ export const CONTAINER_HEADER = 32; // the title-bar band at the top of a box
 export const CONTAINER_GAP = 24; // between sibling boxes / rows / acts
 
 // Base z-index for the interactive nodes (cards + plotlines), above their container
-// boxes (level 0/1). A node with an open kebab menu is lifted above its siblings by a
-// CSS `:has()` rule in PlotEditor (#1095/#1100), not by changing this value.
-export const NODE_Z_INDEX = 2;
+// boxes (one z step per level, ADR-0094 §9, capped just below this). A node with an
+// open kebab menu is lifted above its siblings by a CSS `:has()` rule in PlotEditor
+// (#1095/#1100, at 900+), not by changing this value.
+export const NODE_Z_INDEX = 50;
 
 // The class SvelteFlow's `dragHandle` targets so a container drags ONLY by its header
 // band (#877), a window-titlebar affordance — the transparent interior stays a
@@ -284,8 +286,9 @@ export function containerExtent(box: Box): CoordinateExtent {
 }
 
 // Build the board layout. Cards group by their innermost manuscript container
-// (`card.container`); a container with direct cards renders as a box nested in its
-// top-level act. Homeless cards (no container) lay out loose below every box.
+// (`card.container`); every projected container renders as a box nested in its
+// parent's, one per level (ADR-0094 §9). Homeless cards (no container) lay out loose
+// below every box.
 // `saved` carries per-card position overrides (S7c): a card present there keeps
 // that spot, otherwise it falls to its derived slot inside its container.
 // `savedSizes` carries per-container manual sizes (#878): a container present there
@@ -299,16 +302,9 @@ export function buildBoardNodes(
   const plotlineById = new Map(projection.plotlines.map((line) => [line.id, line]));
   const containerById = new Map(projection.containers.map((c) => [c.id, c]));
 
-  // The top-most ancestor container ("act") of a projected container, walking the
-  // parent chain. A top-level container is its own act.
-  const topAncestor = (id: string): string => {
-    let cur = id;
-    for (;;) {
-      const c = containerById.get(cur);
-      if (!c || c.parent == null || !containerById.has(c.parent)) return cur;
-      cur = c.parent;
-    }
-  };
+  // A container whose parent is not projected is laid out at the top.
+  type Container = PlotBoardProjection["containers"][number];
+  const isTop = (c: Container) => c.parent == null || !containerById.has(c.parent);
 
   // Bucket cards by their innermost container, preserving projection order within a
   // bucket. A card with no (resolvable) container is homeless.
@@ -333,57 +329,59 @@ export function buildBoardNodes(
     }
   }
 
-  // Acts = top-level containers, in reading order (projection.containers is ordered).
-  const acts = projection.containers.filter((c) => c.parent == null);
-  // Inner boxes per act = projected non-top-level containers that hold direct cards,
-  // in reading order. A middle "part" container with no direct cards draws no box —
-  // its chapters render directly in the act (two visible levels for Slice 4).
-  const innerBoxesByAct = new Map<string, PlotBoardProjection["containers"]>();
+  // The container tree, one box per level (ADR-0094 §9). The projection holds only
+  // containers with cards at some depth, plus their ancestors, so every projected
+  // container draws a box: a sequence with cards nests inside its chapter's box,
+  // inside its act's. `projection.containers` is in reading order, so each
+  // container's children come out in reading order too.
+  const tops = projection.containers.filter(isTop);
+  const childrenOf = new Map<string, Container[]>();
   for (const c of projection.containers) {
-    if (c.parent == null) continue;
-    if (!cardsByInner.get(c.id)?.length) continue;
-    const act = topAncestor(c.id);
-    (innerBoxesByAct.get(act) ?? innerBoxesByAct.set(act, []).get(act)!).push(c);
+    if (isTop(c)) continue;
+    (childrenOf.get(c.parent!) ?? childrenOf.set(c.parent!, []).get(c.parent!)!).push(c);
   }
+  // A box's level, 0 at the top: the tree's level when the projection carries it,
+  // else its depth among the projected containers (the same number).
+  const boxLevel = new Map<string, number>();
+  const assignLevels = (c: Container, depth: number): void => {
+    boxLevel.set(c.id, c.level != null ? c.level - 1 : depth);
+    for (const child of childrenOf.get(c.id) ?? []) assignLevels(child, depth + 1);
+  };
+  tops.forEach((c) => assignLevels(c, 0));
 
   // --- Derived (pre-drag) positions: a tidy, non-overlapping default layout that a
-  // pinned position then overrides. Acts stack top-to-bottom; within an act, its
-  // chapter boxes stack, each a single row of cards, then the act's own direct cards.
+  // pinned position then overrides. Top-level boxes stack top-to-bottom; inside a
+  // box, its child boxes stack first, then a row of its own direct cards. `place`
+  // returns the y below the box plus the gap to whatever follows it.
   const derived = new Map<string, BoardXY>();
-  let actY = 0;
-  for (const act of acts) {
-    const innerBoxes = innerBoxesByAct.get(act.id) ?? [];
-    const directCards = cardsByInner.get(act.id) ?? [];
-    const contentX = CONTAINER_PAD; // the act box sits at x = 0; its content is padded in
-    let cursorY = actY + CONTAINER_HEADER + CONTAINER_PAD;
-    for (const box of innerBoxes) {
-      const cards = cardsByInner.get(box.id)!;
-      const cardsX = contentX + CONTAINER_PAD;
-      const cardsY = cursorY + CONTAINER_HEADER + CONTAINER_PAD;
-      cards.forEach((card, i) => derived.set(card.id, { x: cardsX + i * (CARD_WIDTH + CARD_GAP_X), y: cardsY }));
-      cursorY += CONTAINER_HEADER + CONTAINER_PAD + CARD_HEIGHT + CONTAINER_PAD + CONTAINER_GAP;
-    }
+  const place = (container: Container, left: number, top: number): number => {
+    const contentX = left + CONTAINER_PAD;
+    let cursorY = top + CONTAINER_HEADER + CONTAINER_PAD;
+    for (const child of childrenOf.get(container.id) ?? []) cursorY = place(child, contentX, cursorY);
+    const directCards = cardsByInner.get(container.id) ?? [];
     directCards.forEach((card, i) => derived.set(card.id, { x: contentX + i * (CARD_WIDTH + CARD_GAP_X), y: cursorY }));
     if (directCards.length) cursorY += CARD_HEIGHT + CONTAINER_GAP;
-    // Each child already advanced cursorY by a trailing CONTAINER_GAP, which serves
-    // as the gap to the next act; add the act box's own bottom padding on top of it.
-    actY = cursorY + CONTAINER_PAD;
-  }
-  // Homeless cards: a loose row below every act, outside any box (they float).
+    // The last child already advanced cursorY by a trailing CONTAINER_GAP, which
+    // serves as the gap to the next box; add this box's own bottom padding to it.
+    return cursorY + CONTAINER_PAD;
+  };
+  let actY = 0;
+  for (const top of tops) actY = place(top, 0, actY);
+  // Homeless cards: a loose row below every box, outside any box (they float).
   homeless.forEach((card, i) => derived.set(card.id, { x: i * (CARD_WIDTH + CARD_GAP_X), y: actY + CONTAINER_HEADER }));
 
-  // Every projection card is assigned a derived slot above (inner-box, direct-act, or
+  // Every projection card is assigned a derived slot above (in its container or
   // homeless), so `derived.get` is non-null for any real card id — the `!` states that
   // invariant rather than silently defaulting a missing card to the origin.
   const positionOf = (id: string): BoardXY => saved[id] ?? derived.get(id)!;
 
-  // --- Box geometry from FINAL positions (pins applied), computed inner-first so an
-  // act box wraps its chapter boxes and its direct cards. Each auto-wrap box is then
-  // grown to any stored manual size (#878): min-not-override, so content still wins when
-  // it is larger. The grown box drives BOTH the rendered size AND the member cards' drag
-  // extent (#874) — and an act wraps the GROWN chapter boxes (rectOfBox reads innerBox
-  // post-grow), so enlarging a chapter enlarges its act too. The pre-grow (auto-wrap)
-  // size is retained per container as the resize floor the handle can't drag below.
+  // --- Box geometry from FINAL positions (pins applied), computed inner-first so a
+  // box wraps its child boxes and its direct cards. Each auto-wrap box is then grown
+  // to any stored manual size (#878): min-not-override, so content still wins when it
+  // is larger. The grown box drives BOTH the rendered size AND the member cards' drag
+  // extent (#874), and a parent wraps its GROWN child boxes, so enlarging a chapter
+  // enlarges its act too. The pre-grow (auto-wrap) size is retained per container as
+  // the resize floor the handle can't drag below.
   const contentSize = new Map<string, BoardSize>();
   const grow = (id: string, box: Box): Box => {
     contentSize.set(id, { w: box.w, h: box.h });
@@ -391,30 +389,30 @@ export function buildBoardNodes(
     if (!manual) return box;
     return { ...box, w: Math.max(box.w, manual.w), h: Math.max(box.h, manual.h) };
   };
-  const innerBox = new Map<string, Box>();
-  for (const boxes of innerBoxesByAct.values()) {
-    for (const box of boxes) {
-      const cards = cardsByInner.get(box.id)!;
-      innerBox.set(box.id, grow(box.id, boxFromContent(unionRects(cards.map((c) => cardRect(positionOf(c.id)))))));
-    }
-  }
-  const actBox = new Map<string, Box>();
-  for (const act of acts) {
+  const boxOf = new Map<string, Box>();
+  const wrap = (container: Container): Box => {
     const rects: Rect[] = [];
-    for (const box of innerBoxesByAct.get(act.id) ?? []) rects.push(rectOfBox(innerBox.get(box.id)!));
-    for (const card of cardsByInner.get(act.id) ?? []) rects.push(cardRect(positionOf(card.id)));
-    actBox.set(act.id, grow(act.id, boxFromContent(unionRects(rects))));
-  }
+    for (const child of childrenOf.get(container.id) ?? []) rects.push(rectOfBox(wrap(child)));
+    for (const card of cardsByInner.get(container.id) ?? []) rects.push(cardRect(positionOf(card.id)));
+    const box = grow(container.id, boxFromContent(unionRects(rects)));
+    boxOf.set(container.id, box);
+    return box;
+  };
+  tops.forEach(wrap);
 
-  // --- Emit: act boxes behind, then inner boxes, then cards on top (both array
-  // order and explicit zIndex, so a card is always clickable above its container).
+  // --- Emit: boxes outermost first (reading order is pre-order, so a parent always
+  // precedes its children), then cards on top — both array order and explicit
+  // zIndex, so a card is always clickable above every box.
   const nodes: PlotBoardNode[] = [];
-  const pushContainer = (id: string, title: string, level: number, box: Box) => {
+  for (const container of projection.containers) {
+    const box = boxOf.get(container.id);
+    if (!box) continue; // not under any top-level box (a parent cycle): nothing to draw
+    const level = boxLevel.get(container.id) ?? 0;
     // The auto-wrap size is the resize floor (data.minWidth/minHeight); it is always
     // set for a container that renders a box, since `grow` recorded it just above.
-    const content = contentSize.get(id)!;
+    const content = contentSize.get(container.id)!;
     nodes.push({
-      id: containerNodeId(id),
+      id: containerNodeId(container.id),
       type: "plotContainer",
       position: { x: box.x, y: box.y },
       width: box.w,
@@ -426,14 +424,17 @@ export function buildBoardNodes(
       dragHandle: `.${CONTAINER_DRAG_HANDLE_CLASS}`,
       selectable: false,
       connectable: false,
-      zIndex: level,
-      data: { title, count: containerCount.get(id) ?? 0, level, containerId: id, minWidth: content.w, minHeight: content.h },
+      // A deeper box stacks above its parent; every box stays below the cards.
+      zIndex: Math.min(level, NODE_Z_INDEX - 1),
+      data: {
+        title: container.title,
+        count: containerCount.get(container.id) ?? 0,
+        level,
+        containerId: container.id,
+        minWidth: content.w,
+        minHeight: content.h,
+      },
     });
-  };
-
-  for (const act of acts) pushContainer(act.id, act.title, 0, actBox.get(act.id)!);
-  for (const act of acts) {
-    for (const box of innerBoxesByAct.get(act.id) ?? []) pushContainer(box.id, box.title, 1, innerBox.get(box.id)!);
   }
 
   // Arc colour resolution (Amendment 1 §1) — ONE site, used both to denormalise a
@@ -456,12 +457,10 @@ export function buildBoardNodes(
   for (const card of projection.cards) {
     const line = card.plotline ? plotlineById.get(card.plotline) : undefined;
     // Container lock (#873): confine the card's drag to its innermost container box
-    // (the same box the card lays out in), so it can be rearranged inside its act/
-    // chapter but never dragged out. Homeless cards (no rendered box) get no extent
-    // and drag free. The box is looked up where it was computed — inner box for a
-    // chapter card, act box for a card directly in an act.
+    // (the same box the card lays out in), so it can be rearranged inside it but
+    // never dragged out. Homeless cards (no rendered box) get no extent and drag free.
     const cid = card.container != null && containerById.has(card.container) ? card.container : null;
-    const box = cid ? (innerBox.get(cid) ?? actBox.get(cid)) : undefined;
+    const box = cid ? boxOf.get(cid) : undefined;
     nodes.push({
       id: card.id,
       type: "plotCard",

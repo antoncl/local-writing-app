@@ -1189,6 +1189,40 @@ class LoreOverrideSnapshotTests(unittest.TestCase):
         )
         self.assertEqual(refused.status_code, 422, refused.text)
 
+    def test_read_snapshot_of_an_override_lane_returns_its_body_and_title_rows(self) -> None:
+        """Amendment 4 §7: a lore override-lane snapshot returns its OWN
+        `body`/`title` rows — not the delta file's cosmetic label ("X
+        (override)") and not its always-empty body section."""
+        self.service.save_lore_entry(
+            self.entity_id,
+            SaveLoreEntryRequest(
+                title="Captain Seraphine",
+                body="As the book knows her.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self.book_layer,
+            ),
+        )
+        snap = self._capture()
+        live = self.service.read_lore_entry(self.entity_id)
+
+        detail = self.service.read_snapshot(
+            self.entity_id, snap["id"], kind="lore", layer_id=self.book_layer
+        )
+        self.assertEqual(detail.title, live.title)
+        self.assertEqual(detail.body, live.body)
+
+    def test_read_snapshot_of_an_override_lane_with_no_content_rows_is_unchanged(self) -> None:
+        """An override lane whose rows are metadata-only (setUp's rank
+        override) keeps today's behaviour: the delta file's own label as
+        title, an empty body."""
+        snap = self._capture()
+        detail = self.service.read_snapshot(
+            self.entity_id, snap["id"], kind="lore", layer_id=self.book_layer
+        )
+        self.assertEqual(detail.body, "")
+        self.assertIn("(override)", detail.title)
+
 
 class TagSnapshotRoundTripTests(unittest.TestCase):
     """One tag (motif) through the shipped node routes (ADR-0087 S4). A tag is a

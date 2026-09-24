@@ -49,7 +49,7 @@ from app.services import migrations
 from app.services.atomic_io import atomic_write_bytes
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index_gate import node_index_gate
-from app.services.project.overrides import OVERRIDES_FOLDER
+from app.services.project.overrides import OVERRIDES_FOLDER, LayerOverride
 from app.services.project.placement import (
     PARENT_KEY,
     PLACEMENT_KEYS,
@@ -386,17 +386,40 @@ class SceneSnapshotsMixin:
         `title`/`status`/`metadata` come off `_snapshot_state` — the *same*
         normalisation the live side gets from `read_scene` — so the client field
         flip (#583) diffs like against like. Reusing it rather than re-deriving
-        the title here keeps the was-side to one pipeline."""
+        the title here keeps the was-side to one pipeline.
+
+        A **lore override-lane snapshot** (`layer_id` given, `kind == "lore"`)
+        is a photograph of the delta file, not of the entry — `title`/`body`
+        above are the file's own cosmetic label and its always-empty body
+        section, never the lane's `title`/`body` rows (Amendment 4 §7). Fold
+        those rows over the two, the same last-row-wins read
+        `materialize_override_content` gives any lane, on this one file's
+        rows — read via `_read_front_matter_only`, never
+        `_read_markdown_with_front_matter`: the latter locates the closing
+        `---` by substring split, which swallows a literal `body` row's own
+        trailing newline when that row is last (the common case). The
+        owning-lane read (`layer_id is None`) never reaches this."""
         root, node_id, _ = self._resolve_snapshot_target(scene_id, kind, layer_id=layer_id)
         record = self._require_snapshot(root, node_id, snapshot_id)
         snapshots_dir = self._snapshots_dir(root, node_id)
-        front_matter, body = self._read_markdown_with_front_matter(
-            snapshots_dir / f"{snapshot_id}.md"
-        )
+        snapshot_path = snapshots_dir / f"{snapshot_id}.md"
+        front_matter, body = self._read_markdown_with_front_matter(snapshot_path)
         state = self._snapshot_state(front_matter, node_id, snapshots_dir)
+        title = state["title"]
+        if layer_id is not None and kind == "lore":
+            rows = self._parse_override_rows(self._read_front_matter_only(snapshot_path).get("rows"))
+            lane = LayerOverride(
+                target_id=node_id,
+                layer_id=layer_id,
+                layer_rank=0,
+                layer_label="",
+                path=snapshot_path,
+                rows=tuple(rows),
+            )
+            title, body = self.materialize_override_content([lane], title, body)
         return SnapshotDetail(
             snapshot=record,
-            title=state["title"],
+            title=title,
             status=state["status"],
             metadata=state["metadata"],
             body=body,

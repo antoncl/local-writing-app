@@ -75,6 +75,13 @@ _ROUTE_ORDER = {
 # must agree, or a scene candidate silently becomes a node-scoped item.
 SCENE_ENTRY_TYPE = "manuscript:scene"
 
+# Amendment 4 §7: a `title` or `body` row never appears in `changed_fields` —
+# title because the owning lane already excludes it (`NON_FIELD_KEYS`,
+# snapshot_diff.py) and a lane must not add a signal the owning lane lacks;
+# body because a changed body row is folded into `body_changed` instead,
+# exactly as the owning file's body is.
+_NON_FIELD_ROW_KEYS = frozenset({"title", "body"})
+
 
 def _is_candidate_node(entry: NodeIndexEntry) -> bool:
     """ADR-0090 §2's node filter: lore entries at any layer, plus the open
@@ -295,7 +302,7 @@ class ChangeCandidatesMixin:
 
     def _removed_delta_layers(
         self, source_id: str, kind: str, composing: list[ComposingFile], since: Snapshot
-    ) -> list[ChangeCandidateLayer]:
+    ) -> tuple[list[ChangeCandidateLayer], bool]:
         """Amendment 3 §1–2's mirror case: a delta that composed the source at
         the last propagation and has since been REMOVED is a change too — its
         fields fell back to the layer above. Such a lane has a propagation
@@ -307,12 +314,18 @@ class ChangeCandidatesMixin:
         snapshot, of any origin, captured at or before the owning baseline's
         time — never "the newest propagation snapshot regardless" (#2131).
         No baseline at or before `since` means the lane did not exist at the
-        since and does not now: not a change, so it is skipped."""
+        since and does not now: not a change, so it is skipped.
+
+        Returns `(layers, body_changed)`: a removed lane whose baseline rows
+        carried a `body` row falls back to the layer above losing that body
+        override, so it sets `body_changed` the same as an edit would
+        (Amendment 4 §7) — never as a field in `changed_fields`."""
         index = self._build_node_index()
         source = index.canonical_id(source_id)
         owner_rank, open_rank, full_layers = self._composing_layer_bounds(source)
         present = {file.layer_id for file in composing}
         removed: list[ChangeCandidateLayer] = []
+        body_changed = False
         for layer in sorted(full_layers.values(), key=lambda layer: layer.rank):
             if layer.id in present or not (owner_rank < layer.rank <= open_rank):
                 continue
@@ -322,21 +335,31 @@ class ChangeCandidatesMixin:
             if baseline is None:
                 continue
             root, node_id, _ = self._resolve_snapshot_target(source_id, kind, layer_id=layer.id)
-            baseline_front_matter, _ = self._read_markdown_with_front_matter(
-                self._snapshots_dir(root, node_id) / f"{baseline.id}.md"
+            # `_read_front_matter_only`, never `_read_markdown_with_front_matter`:
+            # the latter locates the closing `---` by substring split, which
+            # swallows a literal `body` row's own trailing newline when that
+            # row is last (the common case) — corrupting the very value this
+            # loop compares. `_read_front_matter_only` reads line-by-line up
+            # to the delimiter line and never touches the content bytes.
+            baseline_front_matter = self._read_front_matter_only(
+                self._snapshots_dir(root, node_id) / f"{baseline.id}.md", strict=True
             )
             rows = self._parse_override_rows(baseline_front_matter.get("rows"))
+            if any(row.field == "body" for row in rows):
+                body_changed = True
             removed.append(
                 ChangeCandidateLayer(
                     layer_id=layer.id,
                     layer_label=layer.label,
                     is_override=True,
                     baseline_snapshot_id=baseline.id,
-                    changed_fields=sorted({row.field.split(".", 1)[0] for row in rows}),
+                    changed_fields=sorted(
+                        {row.field.split(".", 1)[0] for row in rows if row.field not in _NON_FIELD_ROW_KEYS}
+                    ),
                     whole=False,
                 )
             )
-        return removed
+        return removed, body_changed
 
     def _composing_files(self, source_id: str) -> list[ComposingFile]:
         """ADR-0090 Amendment 3: every file that composes `source_id` at the
@@ -378,8 +401,10 @@ class ChangeCandidatesMixin:
         `source_id` against `baseline_snapshot_id` — or the "everything
         counts" answer when no baseline was given. A baseline id that does
         not exist lets `read_snapshot`'s 404 propagate. `changed_fields` is
-        the union over every composing file (Amendment 3); `body_changed`
-        comes from the owning file alone, since a delta has no body.
+        the union over every composing file (Amendment 3); `body_changed` is
+        True when the owning file's body changed OR any lane's `body` row
+        changed (added, removed, or a different value) — a body row is
+        never reported as a field in `changed_fields` (Amendment 4 §7).
 
         A snapshot photographs ONE layer's file (ADR-0087), so the owning
         file's now-side is that same file read back through the same
@@ -438,10 +463,11 @@ class ChangeCandidatesMixin:
             )
         ]
         for delta in composing[1:]:
-            delta_changed, delta_baseline_id, delta_whole = self._override_delta_diff(
+            delta_changed, delta_baseline_id, delta_whole, delta_body_changed = self._override_delta_diff(
                 source_id, kind, delta, since
             )
             union_fields.update(delta_changed)
+            body_changed = body_changed or delta_body_changed
             layers.append(
                 ChangeCandidateLayer(
                     layer_id=delta.layer_id,
@@ -452,35 +478,46 @@ class ChangeCandidatesMixin:
                     whole=delta_whole,
                 )
             )
-        for removed in self._removed_delta_layers(source_id, kind, composing, since):
+        removed_layers, removed_body_changed = self._removed_delta_layers(source_id, kind, composing, since)
+        for removed in removed_layers:
             union_fields.update(removed.changed_fields)
             layers.append(removed)
+        body_changed = body_changed or removed_body_changed
         return sorted(union_fields), body_changed, False, layers
 
     def _override_delta_diff(
         self, source_id: str, kind: str, delta: ComposingFile, since: Snapshot
-    ) -> tuple[set[str], str, bool]:
-        """`(changed_fields, baseline_snapshot_id, whole)` for one override
-        delta's own lane (Amendment 3 §2): no baseline in this lane at or
-        before `since` (ADR-0091 §1) yet counts every field its current rows
-        touch as changed (`whole=True`, the "created after the since, or
-        before this amendment" case); otherwise the rows differ field by
-        field, as `(field, op, value)` triples, baseline against now."""
+    ) -> tuple[set[str], str, bool, bool]:
+        """`(changed_fields, baseline_snapshot_id, whole, body_changed)` for
+        one override delta's own lane (Amendment 3 §2): no baseline in this
+        lane at or before `since` (ADR-0091 §1) yet counts every field its
+        current rows touch as changed (`whole=True`, the "created after the
+        since, or before this amendment" case) — including setting
+        `body_changed` when a current row carries `body` (Amendment 4 §7);
+        otherwise the rows differ field by field, as `(field, op, value)`
+        triples, baseline against now, and `body_changed` is whether the
+        lane's `body` row differs baseline-to-now."""
         baseline = self.newest_snapshot_at_or_before(
             source_id, since.captured_at, kind=kind, layer_id=delta.layer_id
         )
         current_front_matter = self._read_front_matter_only(delta.path, strict=True)
         current_rows = self._parse_override_rows(current_front_matter.get("rows"))
         if baseline is None:
-            changed = {row.field.split(".", 1)[0] for row in current_rows}
-            return changed, "", True
+            changed = {
+                row.field.split(".", 1)[0] for row in current_rows if row.field not in _NON_FIELD_ROW_KEYS
+            }
+            body_changed = any(row.field == "body" for row in current_rows)
+            return changed, "", True, body_changed
         root, node_id, _ = self._resolve_snapshot_target(source_id, kind, layer_id=delta.layer_id)
-        baseline_front_matter, _ = self._read_markdown_with_front_matter(
-            self._snapshots_dir(root, node_id) / f"{baseline.id}.md"
+        # See the note in `_removed_delta_layers`: `_read_front_matter_only`,
+        # never `_read_markdown_with_front_matter`, for a `rows:`-only read.
+        baseline_front_matter = self._read_front_matter_only(
+            self._snapshots_dir(root, node_id) / f"{baseline.id}.md", strict=True
         )
         baseline_rows = self._parse_override_rows(baseline_front_matter.get("rows"))
         changed = self._delta_changed_fields(baseline_rows, current_rows)
-        return changed, baseline.id, False
+        body_changed = self._delta_body_changed(baseline_rows, current_rows)
+        return changed, baseline.id, False, body_changed
 
     @staticmethod
     def _delta_changed_fields(
@@ -489,18 +526,38 @@ class ChangeCandidatesMixin:
         """The field ids whose row set — `(field, op, value)` triples grouped
         by the field id (the segment before the first dot) — differs between
         `baseline_rows` and `current_rows`, including a field present on only
-        one side."""
+        one side. `title`/`body` are never included — title because the
+        owning lane never reports it either, body because a changed body row
+        is reported as `body_changed` instead (Amendment 4 §7,
+        `_delta_body_changed`)."""
 
         def by_field(rows: list[MutationSetRow]) -> dict[str, set[tuple[str, str, str]]]:
             grouped: dict[str, set[tuple[str, str, str]]] = {}
             for row in rows:
                 field_id = row.field.split(".", 1)[0]
+                if field_id in _NON_FIELD_ROW_KEYS:
+                    continue
                 grouped.setdefault(field_id, set()).add((row.field, row.op, row.value))
             return grouped
 
         before = by_field(baseline_rows)
         now = by_field(current_rows)
         return {field_id for field_id in set(before) | set(now) if before.get(field_id) != now.get(field_id)}
+
+    @staticmethod
+    def _delta_body_changed(
+        baseline_rows: list[MutationSetRow], current_rows: list[MutationSetRow]
+    ) -> bool:
+        """Whether the lane's `body` row differs baseline-to-now: added,
+        removed, or a changed value (Amendment 4 §7)."""
+
+        def body_value(rows: list[MutationSetRow]) -> str | None:
+            for row in rows:
+                if row.field == "body":
+                    return row.value
+            return None
+
+        return body_value(baseline_rows) != body_value(current_rows)
 
     def _add_mention_reasons(
         self,

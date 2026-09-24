@@ -698,6 +698,22 @@
     });
   }
 
+  // "+ Existing field" (#2180): attach an already-defined field id to the
+  // open type's membership without creating a new shared definition — the
+  // counterpart to createSchemaFieldDraft, which always creates. The form
+  // lives in SchemaTypeEditor; it awaits this handler like applyGroupToType.
+  async function attachSchemaField(fieldId: string): Promise<boolean> {
+    if (!selectedSchemaTypeId || !fieldId) return false;
+    const typeId = selectedSchemaTypeId;
+    const layerId = schemaTypeLayerId || projectSchemaLayerId();
+    return run(async () => {
+      setMetadataSchema(await api.attachMetadataField(layerId, fieldId, typeId));
+      await refreshMetadataSchema();
+      setValidation(await api.validateProject());
+      setStatus("Added field to type");
+    });
+  }
+
   async function removeGroupApplication(index: number) {
     if (!selectedSchemaTypeId) return;
     const typeId = selectedSchemaTypeId;
@@ -991,6 +1007,7 @@
     onToggleFieldInline={toggleSchemaFieldInline}
     onCreateFieldDraft={createSchemaFieldDraft}
     onApplyGroup={applyGroupToType}
+    onAttachField={attachSchemaField}
     onRemoveGroupApplication={removeGroupApplication}
     onManageGroups={() => (groupsManagerOpen = true)}
     onFieldDragStart={onFieldDragStart}

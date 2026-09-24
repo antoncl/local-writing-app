@@ -739,7 +739,10 @@ class MetadataSchemaMixin:
 
         existing_field = self.read_metadata_schema().fields.get(field_id)
         if existing_field is not None and not request.allow_existing:
-            raise ProjectServiceError(f"Metadata field {field_id} already exists.", 422)
+            raise ProjectServiceError(
+                f'Metadata field {field_id} already exists. Use "+ Existing field" to add it to this type.',
+                422,
+            )
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
         fields = layer_data.get("fields")
         if not isinstance(fields, dict):
@@ -747,7 +750,7 @@ class MetadataSchemaMixin:
         inherited = self._schema_above_layer(root, layer_path).fields.get(field_id)
         fields[field_id] = self._layer_field_payload(request.field, inherited, fields.get(field_id))
         layer_data["fields"] = fields
-        self._attach_field_to_entry_type(root, layer_path, layer_data, request, field_id)
+        self._attach_field_to_entry_type(root, layer_path, layer_data, request.entry_type, field_id)
 
         self._validate_candidate_schema(root, layer_path, layer_data)
         self._write_yaml(layer_path, layer_data)
@@ -795,7 +798,7 @@ class MetadataSchemaMixin:
         root: Path,
         layer_path: Path,
         layer_data: dict[str, Any],
-        request: UpsertMetadataFieldRequest,
+        entry_type_id: str,
         field_id: str,
     ) -> None:
         """Add `field_id` to the target entry_type's membership in `layer_data`,
@@ -804,14 +807,14 @@ class MetadataSchemaMixin:
         entry_types = layer_data.get("entry_types")
         if not isinstance(entry_types, dict):
             entry_types = {}
-        entry_type_data = entry_types.get(request.entry_type)
+        entry_type_data = entry_types.get(entry_type_id)
         if not isinstance(entry_type_data, dict):
-            effective_entry_type = self._read_metadata_schema_through_path(root, layer_path).entry_types.get(request.entry_type)
+            effective_entry_type = self._read_metadata_schema_through_path(root, layer_path).entry_types.get(entry_type_id)
             if effective_entry_type is not None:
                 entry_type_data = {"fields": []}
             else:
                 entry_type_data = {
-                    "name": request.entry_type,
+                    "name": entry_type_id,
                     "kind": "manuscript",
                     "fields": [],
                 }
@@ -821,7 +824,7 @@ class MetadataSchemaMixin:
         if field_id not in fields_list:
             fields_list.append(field_id)
         entry_type_data["fields"] = fields_list
-        entry_types[request.entry_type] = entry_type_data
+        entry_types[entry_type_id] = entry_type_data
         layer_data["entry_types"] = entry_types
 
     def move_metadata_field(self, request: MoveMetadataFieldRequest) -> MetadataSchema:

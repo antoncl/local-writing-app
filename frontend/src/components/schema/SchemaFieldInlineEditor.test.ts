@@ -585,3 +585,66 @@ describe("SchemaFieldInlineEditor derived select state (#1911)", () => {
     expect(onSave.mock.calls[0][0].derived).toBeNull();
   });
 });
+
+describe("SchemaFieldInlineEditor id-collision hint (#2180)", () => {
+  it("shows the hint, with a working link, once a NEW draft's id collides with an attachable field", async () => {
+    const onUseExisting = vi.fn();
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: null,
+        selectedFieldId: null,
+        layerId: "proj",
+        existingFieldIds: new Set(["eye_color"]),
+        attachableIds: new Set(["eye_color"]),
+        onSave: vi.fn(),
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+        onUseExisting,
+      },
+    });
+
+    // Typing a name that slugifies to the colliding id surfaces the hint.
+    await fireEvent.input(screen.getByLabelText("Field display name"), { target: { value: "Eye Color" } });
+
+    expect(screen.getByTestId("schema-field-id-collision-hint")).toBeTruthy();
+    const link = screen.getByTestId("schema-field-use-existing-link");
+    await fireEvent.click(link);
+    expect(onUseExisting).toHaveBeenCalledWith("eye_color");
+  });
+
+  it("omits the link when the collision isn't attachable at this layer (still 422s)", async () => {
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: null,
+        selectedFieldId: null,
+        layerId: "proj",
+        existingFieldIds: new Set(["eye_color"]),
+        attachableIds: new Set<string>(),
+        onSave: vi.fn(),
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+
+    await fireEvent.input(screen.getByLabelText("Field display name"), { target: { value: "Eye Color" } });
+
+    expect(screen.getByTestId("schema-field-id-collision-hint")).toBeTruthy();
+    expect(screen.queryByTestId("schema-field-use-existing-link")).toBeNull();
+  });
+
+  it("shows no hint for an EXISTING field being edited (its own id 'collides' with itself)", () => {
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: { name: "Eye color", type: "text", options: [] } as MetadataFieldDefinition,
+        selectedFieldId: "eye_color",
+        layerId: "proj",
+        existingFieldIds: new Set(["eye_color"]),
+        attachableIds: new Set(["eye_color"]),
+        onSave: vi.fn(),
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+    expect(screen.queryByTestId("schema-field-id-collision-hint")).toBeNull();
+  });
+});

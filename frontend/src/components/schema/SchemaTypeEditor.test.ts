@@ -3,7 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import SchemaTypeEditor from "./SchemaTypeEditor.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
-import type { MetadataFieldDefinition, MetadataSchema, MetadataSchemaLayer } from "@/lib/types";
+import type {
+  MetadataFieldDefinition,
+  MetadataSchema,
+  MetadataSchemaLayer,
+  MetadataSchemaOverview,
+} from "@/lib/types";
 
 describe("SchemaTypeEditor reusable groups on built-in types (#1033)", () => {
   it("shows Add group and the Reusable-groups section on a readonly (built-in) type", () => {
@@ -283,5 +288,69 @@ describe("SchemaTypeEditor summary-fields save payload (#2008)", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Save Type" }));
     expect(onSaveType).toHaveBeenCalledWith(expect.objectContaining({ summaryFields: null }));
     metadataSchemaStore.set(null);
+  });
+});
+
+describe("SchemaTypeEditor '+ Existing field' (#2180)", () => {
+  const overviewWithAttachable: MetadataSchemaOverview = {
+    effective_schema: {
+      version: 1,
+      entry_types: {
+        "lore:character": { name: "Character", kind: "lore", fields: ["name"] },
+        "lore:location": { name: "Location", kind: "lore", fields: ["eye_color"] },
+      },
+      fields: {
+        name: { name: "Name", type: "text", options: [] },
+        eye_color: { name: "Eye color", type: "text", options: [] },
+      },
+    },
+    layers: [
+      { id: "proj", label: "Project", folder_path: "/proj", schema_path: "/proj/metadata.schema.yaml", exists: true },
+    ],
+    entry_type_sources: {},
+    field_sources: {
+      name: { layer_id: "proj", layer_label: "Project", built_in: false },
+      eye_color: { layer_id: "proj", layer_label: "Project", built_in: false },
+    },
+  };
+
+  it("shows the button when the type is missing a field defined elsewhere, and Add calls onAttachField with its id", async () => {
+    const onAttachField = vi.fn().mockResolvedValue(true);
+    render(SchemaTypeEditor, {
+      props: {
+        schemaTypeKind: "lore" as const,
+        initialName: "Character",
+        initialTypeId: "lore:character",
+        selectedSchemaTypeId: "lore:character",
+        schemaTypeLayerId: "proj",
+        metadataSchemaOverview: overviewWithAttachable,
+        onSaveType: vi.fn(),
+        onAttachField,
+      },
+    });
+
+    const button = screen.getByRole("button", { name: "Add existing field" });
+    expect(button).toBeTruthy();
+
+    await fireEvent.click(button);
+    const select = screen.getByTestId("schema-field-attach-select") as HTMLSelectElement;
+    expect(select.value).toBe("eye_color");
+    await fireEvent.click(screen.getByTestId("schema-field-attach-add"));
+    expect(onAttachField).toHaveBeenCalledWith("eye_color");
+  });
+
+  it("hides the button when there is nothing left to attach", () => {
+    render(SchemaTypeEditor, {
+      props: {
+        schemaTypeKind: "lore" as const,
+        initialName: "Character",
+        initialTypeId: "lore:character",
+        selectedSchemaTypeId: "lore:character",
+        schemaTypeLayerId: "proj",
+        metadataSchemaOverview: null,
+        onSaveType: vi.fn(),
+      },
+    });
+    expect(screen.queryByRole("button", { name: "Add existing field" })).toBeNull();
   });
 });

@@ -8,6 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.models import (
+    AttachMetadataFieldRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DeleteMetadataGroupRequest,
@@ -62,6 +63,12 @@ def delete_metadata_entry_type(project: CurrentProject, request: DeleteMetadataE
 def upsert_metadata_field(project: CurrentProject, request: UpsertMetadataFieldRequest) -> MetadataSchema:
     with translate_errors():
         return project.upsert_metadata_field(request)
+
+
+@router.post("/api/metadata/schema/entry-types/fields", response_model=MetadataSchema)
+def attach_metadata_field(project: CurrentProject, request: AttachMetadataFieldRequest) -> MetadataSchema:
+    with translate_errors():
+        return project.attach_metadata_field(request)
 
 
 @router.post("/api/metadata/schema/fields/move", response_model=MetadataSchema)

@@ -552,6 +552,16 @@ class EditorPanesController {
     await this.close(id);
   }
 
+  // Close every pane showing a node deleted outside the app (#2170) — the same
+  // tearDown an in-app delete ends with. Not `close()`: its flush-before-close
+  // would try to save to a file that is gone, and fail.
+  closeRemovedNodes(nodeIds: readonly string[]): void {
+    const removed = new Set(nodeIds);
+    for (const pane of this.panes.filter((candidate) => candidate.document && removed.has(candidate.document.id))) {
+      this.tearDown(pane.id);
+    }
+  }
+
   tearDown(id: string): void {
     this.#autosave.cancel(id);
     this.#reviewLocks.delete(id);

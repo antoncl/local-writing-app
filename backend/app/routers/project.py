@@ -21,6 +21,7 @@ from app.models import (
     MoveStructureNodeRequest,
     OpenProjectRequest,
     PathProbe,
+    ProjectDiskRefresh,
     ProjectInfo,
     ProjectNode,
     ProjectValidation,
@@ -187,6 +188,12 @@ def prospective_ai_policy(
 def validate_project(project: CurrentProject) -> ProjectValidation:
     with translate_errors():
         return project.validate_project()
+
+
+@router.post("/api/project/refresh", response_model=ProjectDiskRefresh)
+def refresh_project_from_disk(project: CurrentProject) -> ProjectDiskRefresh:
+    with translate_errors():
+        return project.refresh_node_index_from_disk()
 
 
 @router.post("/api/project/repair", response_model=ProjectValidation)

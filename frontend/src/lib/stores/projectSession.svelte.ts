@@ -394,6 +394,39 @@ class ProjectSession {
     });
   }
 
+  // Catch up with files added, edited or deleted outside the app (#2170). The
+  // backend's index does no disk work while warm, so a lore file dropped in from
+  // Explorer stayed invisible until a reopen (ADR-0040's accepted exposure). App
+  // calls this when the window comes back to the foreground — the moment after
+  // an outside edit — and the lists are re-pulled only when the backend reports
+  // that something it indexes moved. A pane open on a node deleted outside the
+  // app closes, as it would after an in-app delete. Overlapping calls collapse
+  // to one: focus and visibilitychange fire together on a tab switch.
+  #diskRefreshInFlight = false;
+
+  async refreshFromDisk(): Promise<void> {
+    if (this.#diskRefreshInFlight) return;
+    this.#diskRefreshInFlight = true;
+    try {
+      await this.run(async () => {
+        const { changed, removed } = await api.refreshProjectFromDisk();
+        if (!changed) return;
+        editorPanes.closeRemovedNodes(removed);
+        await this.reloadProjectData();
+      });
+    } finally {
+      this.#diskRefreshInFlight = false;
+    }
+  }
+
+  // Re-pull every project-scoped list without touching the workspace — for a
+  // caller whose backend work rebuilt the index from disk (a refresh that found
+  // changes, a Verify). Errors propagate to the caller's run().
+  async reloadProjectData(): Promise<void> {
+    await loadProjectData();
+    this.onProjectDataLoaded();
+  }
+
   // Rewrite this project's `inherits:` declaration (#426).
   //
   // It lives here rather than on aiSettings because of the second half: the

@@ -170,6 +170,13 @@ export const projectApi = {
       method: "POST",
     });
   },
+  // Catch up with files changed outside the app (#2170); `changed` says whether
+  // the node lists are worth re-pulling, `removed` which nodes were deleted.
+  refreshProjectFromDisk() {
+    return request<{ changed: boolean; removed: string[] }>("/project/refresh", {
+      method: "POST",
+    });
+  },
   repairProject() {
     return request<ProjectValidation>("/project/repair", {
       method: "POST",

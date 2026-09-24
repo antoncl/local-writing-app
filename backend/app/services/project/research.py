@@ -385,7 +385,7 @@ class ResearchNotesMixin:
         )
         new_tree_node = StructureNode(
             id=self._new_id("node"),
-            type="note",
+            type="research:note",
             title=source.title,
             scene_id=note_id,
         )

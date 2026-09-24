@@ -37,8 +37,12 @@ import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEn
 // editorPaneReconcile.ts).
 export type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry | TagEntry | ResearchNote;
 
-export const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDocument>> = {
-  lore: (id) => api.getLoreEntry(id),
+// Getters take the pane too (not just the id): the lore getter reads the
+// pane's `authoringLayerId` so a reload — the post-409 reconcile re-fetch, the
+// baseline refresh — re-seeds from the layer the pane is authoring at (#2189),
+// not the open project's fold. Every other kind ignores it.
+export const RELOAD_GETTERS: Record<string, (id: string, pane?: EditorPaneState) => Promise<ReloadableDocument>> = {
+  lore: (id, pane) => api.getLoreEntry(id, pane?.authoringLayerId ?? null),
   prompt: (id) => api.getPromptEntry(id),
   plot_template: (id) => api.getPlotTemplate(id),
   plot_card: (id) => api.getCard(id),
@@ -61,7 +65,7 @@ const SCENE_BACKED_DOCUMENT_TYPES = new Set(["manuscript", "structure_node"]);
 // schema/tag write once fell through the fallback to GET /api/scenes/chat_… → 404
 // (#1977). Kept beside RELOAD_GETTERS so the reload sites share one source of
 // truth for "what can be re-baselined, and how".
-export function reloadGetterFor(type: string): ((id: string) => Promise<ReloadableDocument>) | null {
+export function reloadGetterFor(type: string): ((id: string, pane?: EditorPaneState) => Promise<ReloadableDocument>) | null {
   return RELOAD_GETTERS[type] ?? (SCENE_BACKED_DOCUMENT_TYPES.has(type) ? (id) => api.getScene(id) : null);
 }
 
@@ -286,7 +290,7 @@ export async function reconcileOn409(host: SaveFailureHost, id: string): Promise
   if (!getter) return { outcome: "conflict", remote: null }; // no reloadable baseline → dialog
   let remote: ReloadableDocument;
   try {
-    remote = await getter(sceneId);
+    remote = await getter(sceneId, opening);
   } catch {
     return { outcome: "conflict", remote: null }; // can't re-fetch → dialog (no diff)
   }
@@ -358,7 +362,16 @@ export async function reconcileOn409(host: SaveFailureHost, id: string): Promise
 // the widgets keep the stale local values, and the next edit re-emits them — silently
 // reverting the merge (#1633). One token for both signals is fine: they live in
 // separate per-pane token spaces, and any change from the last token re-seeds.
-function reseedPaneFields(host: SaveFailureHost, id: string, fields: DraftFields): void {
+//
+// Exported: `setEditorPaneAuthoringLayer` (#2189) reuses this to re-seed a
+// pane's title/metadata widgets after an "Editing at" layer switch, the same
+// re-seed a rung-2 merge needs. Takes only the four fields it reads — a lore
+// caller has no `draftInputs`/`draftOfferOn`/`draftContextStrategy` to give it.
+export function reseedPaneFields(
+  host: SaveFailureHost,
+  id: string,
+  fields: Pick<DraftFields, "draftTitle" | "draftStatus" | "draftEntryType" | "draftMetadata">,
+): void {
   const token = host.nextMetadataReloadToken++;
   host.titleReloadsByPane = { ...host.titleReloadsByPane, [id]: { token, title: fields.draftTitle } };
   host.metadataReloadsByPane = {

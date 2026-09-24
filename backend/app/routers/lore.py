@@ -49,9 +49,12 @@ def create_lore_entry(project: CurrentProject, request: CreateLoreEntryRequest) 
 
 
 @router.get("/api/lore/{entry_id}", response_model=LoreEntry)
-def get_lore_entry(project: CurrentProject, entry_id: str) -> LoreEntry:
+def get_lore_entry(project: CurrentProject, entry_id: str, layer_id: str | None = None) -> LoreEntry:
+    """`layer_id` reads the entry as a chosen ancestor layer sees it (#2189) —
+    the "Editing at" rail picker's seed for a save at that layer. Omitted, it
+    reads as the open project does, unchanged."""
     with translate_errors():
-        return project.read_lore_entry(entry_id)
+        return project.read_lore_entry(entry_id, as_of_layer_id=layer_id)
 
 
 @router.get("/api/lore/{entry_id}/unwrap-preview", response_model=LoreCodeFencePreview)

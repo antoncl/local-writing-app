@@ -82,6 +82,7 @@ import {
   offerAutosaveConflictRecovery,
   reconcileOn409,
   reloadGetterFor,
+  reseedPaneFields,
   type ReloadableDocument,
 } from "@/lib/stores/editorPaneSave";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
@@ -341,24 +342,27 @@ class EditorPanesController {
     //    getter (chat, plus assistant/project/view) is skipped — never mis-fetched
     //    as a scene, whose 404 would also reject this whole Promise.all and starve
     //    the panes that CAN refresh (#1977).
+    //  - The dedupe key folds in `authoringLayerId` (#2189): a lore pane reads
+    //    as of its own authoring layer, so two panes on the same entry at
+    //    different layers must not share one fetch.
     const seen = new Set<string>();
-    const targets: { key: string; sceneId: string; getter: (id: string) => Promise<ReloadableDocument> }[] = [];
+    const targets: { key: string; sceneId: string; pane: EditorPaneState; getter: (id: string, pane?: EditorPaneState) => Promise<ReloadableDocument> }[] = [];
     for (const pane of this.panes) {
       if (!pane.document || !pane.scene) continue;
       const getter = reloadGetterFor(pane.document.type);
       if (!getter) continue;
-      const key = `${pane.document.type}:${pane.scene.id}`;
+      const key = `${pane.document.type}:${pane.scene.id}:${pane.authoringLayerId ?? ""}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      targets.push({ key, sceneId: pane.scene.id, getter });
+      targets.push({ key, sceneId: pane.scene.id, pane, getter });
     }
     if (targets.length === 0) return;
-    const refreshedDocuments = await Promise.all(targets.map((target) => target.getter(target.sceneId)));
+    const refreshedDocuments = await Promise.all(targets.map((target) => target.getter(target.sceneId, target.pane)));
     const refreshedByKey = new Map(targets.map((target, index) => [target.key, refreshedDocuments[index]]));
     const nextReloads: Record<string, MetadataReloadSignal> = {};
     this.panes = this.panes.map((pane) => {
       if (!pane.scene || !pane.document) return pane;
-      const refreshedDocument = refreshedByKey.get(`${pane.document.type}:${pane.scene.id}`);
+      const refreshedDocument = refreshedByKey.get(`${pane.document.type}:${pane.scene.id}:${pane.authoringLayerId ?? ""}`);
       if (!refreshedDocument) return pane;
       const draftMetadata = transformDraftMetadata ? transformDraftMetadata(refreshedDocument.metadata) : refreshedDocument.metadata;
       nextReloads[pane.id] = {
@@ -1062,16 +1066,67 @@ class EditorPanesController {
   // rides the next `saveLoreEntry` and routes the write (owning-file direct edit
   // vs sparse override delta at L). Non-sticky — `openLore` reseeds the default.
   //
+  // #2189: for a lore pane this also RESEEDS the pane from L's own view —
+  // title, body, metadata — before any further edit is accepted, so a save at
+  // L is always made against what L sees, never the open project's fold. A
+  // dirty pane flushes at its CURRENT layer first (never silently dropped or
+  // reattributed to the new L). Any other document kind — the picker is
+  // lore-only — just records the id, as before.
+  //
   // Clears `recentlySaved`: the "Saved to <layer>" footer echo reads the CURRENT
   // L, but that flag belongs to the LAST save's target. Changing L within the 2s
   // flash window would otherwise echo the new target as if a write had already
   // landed there — a false provenance claim, the one thing the strip must never
   // make. The picker only calls this on an actual change (its no-op early-return
   // guards it), so nothing legitimate is suppressed.
-  setEditorPaneAuthoringLayer(id: string, layerId: string | null): void {
-    this.panes = this.panes.map((pane) =>
-      pane.id === id ? { ...pane, authoringLayerId: layerId, recentlySaved: false } : pane,
+  async setEditorPaneAuthoringLayer(id: string, layerId: string | null): Promise<void> {
+    const pane = this.panes.find((candidate) => candidate.id === id);
+    if (!pane || pane.authoringLayerId === layerId) return;
+    if (pane.document?.type !== "lore") {
+      this.panes = this.panes.map((candidate) =>
+        candidate.id === id ? { ...candidate, authoringLayerId: layerId, recentlySaved: false } : candidate,
+      );
+      return;
+    }
+    if (pane.dirty) {
+      this.#autosave.cancel(id);
+      const flushed = await this.run(() => this.saveEditorPane(id));
+      if (!flushed) return; // the flush failed — the layer stays put, draft intact
+    }
+    const entryId = pane.document.id;
+    let entry: LoreEntry | undefined;
+    const fetched = await this.run(async () => {
+      entry = await api.getLoreEntry(entryId, layerId);
+    });
+    if (!fetched || !entry) return; // fetch failed — layer unchanged, pane untouched
+    // Re-read: the flush/fetch awaits above may have let the pane close.
+    if (!this.panes.some((candidate) => candidate.id === id)) return;
+    const fetchedEntry = entry;
+    this.panes = this.panes.map((candidate) =>
+      candidate.id === id
+        ? {
+            ...candidate,
+            scene: fetchedEntry,
+            dirty: false,
+            draftTitle: fetchedEntry.title,
+            draftMarkdown: fetchedEntry.body,
+            draftEntryType: fetchedEntry.entry_type,
+            draftMetadata: cloneMetadata(fetchedEntry.metadata),
+            saving: false,
+            recentlySaved: false,
+            authoringLayerId: layerId,
+          }
+        : candidate,
     );
+    // Re-seed NodeEditor's own title/metadata widget state, the same signal a
+    // rung-2 merge and openLore use — replacing the pane's scene alone doesn't.
+    reseedPaneFields(this, id, {
+      draftTitle: fetchedEntry.title,
+      draftStatus: documentStatus(fetchedEntry),
+      draftEntryType: fetchedEntry.entry_type,
+      draftMetadata: cloneMetadata(fetchedEntry.metadata),
+    });
+    await this.editorPaneComponents[id]?.reloadScene?.(fetchedEntry, "boundary");
   }
 
   // ---- Open-pane reconciliation (GH #45) ------------------------------------

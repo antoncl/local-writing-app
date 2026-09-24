@@ -15,6 +15,7 @@ import { editorPanes } from "./editorPanes.svelte";
 import { reloadGetterFor } from "./editorPaneSave";
 import { structureStore } from "@/lib/stores/structure";
 import { api } from "@/lib/api";
+import { createEmptyEditorPane } from "@/lib/editor-core/editorPaneModel";
 import type { Scene, StructureDocument } from "@/lib/types";
 
 const SCENE: Scene = {
@@ -51,8 +52,18 @@ describe("reloadGetterFor — route the baseline reload by kind (#1977)", () => 
     const getLore = vi.spyOn(api, "getLoreEntry").mockResolvedValue({ id: "lore_1" } as never);
     const getScene = vi.spyOn(api, "getScene").mockResolvedValue(SCENE);
     await reloadGetterFor("lore")!("lore_1");
-    expect(getLore).toHaveBeenCalledWith("lore_1");
+    // No pane passed → no authoring layer to read; the lore getter reads
+    // `null` (#2189), which omits the query param.
+    expect(getLore).toHaveBeenCalledWith("lore_1", null);
     expect(getScene).not.toHaveBeenCalled();
+  });
+
+  it("the lore getter reads the pane's own authoring layer (#2189)", async () => {
+    const getLore = vi.spyOn(api, "getLoreEntry").mockResolvedValue({ id: "lore_1" } as never);
+    const pane = createEmptyEditorPane("editor_1");
+    pane.authoringLayerId = "layer_series";
+    await reloadGetterFor("lore")!("lore_1", pane);
+    expect(getLore).toHaveBeenCalledWith("lore_1", "layer_series");
   });
 });
 

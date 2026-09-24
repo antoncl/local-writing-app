@@ -141,19 +141,19 @@ export async function reconcileNodeFromServer(
     return;
   }
   if (docType === "lore") {
-    const entry = (await RELOAD_GETTERS.lore(nodeId)) as LoreEntry;
+    const entry = (await RELOAD_GETTERS.lore(nodeId, pane)) as LoreEntry;
     // A replace never moves a layer — keep the pane's current authoring target.
     resetLorePane(host, nodeId, entry, pane.authoringLayerId);
     await reloadBody(host, pane.id, entry);
     return;
   }
   if (docType === "prompt") {
-    const entry = (await RELOAD_GETTERS.prompt(nodeId)) as PromptEntry;
+    const entry = (await RELOAD_GETTERS.prompt(nodeId, pane)) as PromptEntry;
     resetPromptPane(host, nodeId, entry);
     await reloadBody(host, pane.id, entry);
     return;
   }
-  const fresh = await RELOAD_GETTERS[docType](nodeId);
+  const fresh = await RELOAD_GETTERS[docType](nodeId, pane);
   resetPaneBaseline(host, pane, fresh);
   await reloadBody(host, pane.id, fresh);
 }

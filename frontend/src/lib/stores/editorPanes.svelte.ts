@@ -78,6 +78,7 @@ import {
   refreshAfterSave,
   autosaveOnce,
   offerCloseConflictRecovery,
+  offerCloseSaveFailureRecovery,
   offerAutosaveConflictRecovery,
   reconcileOn409,
   reloadGetterFor,
@@ -402,7 +403,10 @@ class EditorPanesController {
     // trap the pane — the file legitimately changes under an open pane in a
     // local-first app (second window, external editor, another write path) —
     // so offer a recovery choice instead of an un-closeable error loop.
+    // Any OTHER failure must not trap it either (#2186): the same buffer fails the
+    // same way on every retry, so offer discard-and-close.
     let conflict = false;
+    let failure: unknown = null;
     const ok = await this.run(async () => {
       try {
         await this.saveEditorPane(id);
@@ -411,6 +415,7 @@ class EditorPanesController {
           conflict = true;
           return;
         }
+        failure = error;
         throw error;
       }
     });
@@ -425,6 +430,7 @@ class EditorPanesController {
       return;
     }
     if (ok) this.tearDown(id);
+    else if (failure !== null) offerCloseSaveFailureRecovery(this, id, failure);
   }
 
   // ---- AI-review freeze (#634 / ADR-0046 slice 3b) --------------------------

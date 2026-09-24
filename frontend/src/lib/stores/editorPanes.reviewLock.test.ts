@@ -5,6 +5,7 @@ import { confirmService } from "./confirmService.svelte";
 import { createEmptyEditorPane } from "@/lib/editor-core/editorPaneModel";
 import type { DocumentRef } from "@/lib/editor-core/editorPaneModel";
 import type { EditableDocument } from "@/lib/types";
+import { HttpError } from "@/lib/api";
 
 // The AI-review freeze (#634 / ADR-0046 slice 3b). A lore pane holding an open
 // brainstorm proposal is a frozen transaction: autosave is suppressed, the
@@ -204,5 +205,100 @@ describe("editorPanes review freeze (#634)", () => {
     await editorPanes.close("editor_2");
     expect(request).not.toHaveBeenCalled();
     expect(editorPanes.panes.find((p) => p.id === "editor_2")).toBeUndefined();
+  });
+});
+
+// #2186: a close-flush that fails for any reason other than a 409 must not trap
+// the pane. The same buffer fails the same way on every retry, so the close
+// offers "Discard changes and close" instead of an endless refused save.
+describe("editorPanes close after a non-conflict save failure (#2186)", () => {
+  const refusal = new HttpError(
+    "The body and title of this entry are inherited from Aetheria and cannot be overridden from a layer below it.",
+    422,
+    null,
+  );
+  let originalRun: typeof editorPanes.run;
+
+  beforeEach(() => {
+    editorPanes.reset();
+    saveSpy = vi.fn().mockRejectedValue(refusal);
+    (editorPanes as unknown as { saveEditorPane: unknown }).saveEditorPane = saveSpy;
+    // App's run(): swallow the error into the banner and report failure.
+    originalRun = editorPanes.run;
+    editorPanes.run = async (action) => {
+      try {
+        await action();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+  });
+
+  afterEach(() => {
+    editorPanes.run = originalRun;
+    vi.restoreAllMocks();
+  });
+
+  function dirtyLorePane(): void {
+    lorePane("editor_1", "e1");
+    editorPanes.updateEditorPaneDraft("editor_1", "Baseline", "Rejected body", "draft", "lore:character", {});
+  }
+
+  const isOpen = () => editorPanes.panes.some((p) => p.id === "editor_1");
+
+  it("a refused (422) flush offers discard-and-close instead of trapping the pane", async () => {
+    const request = vi.spyOn(confirmService, "request");
+    dirtyLorePane();
+
+    await editorPanes.close("editor_1");
+
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(1);
+    const opts = request.mock.calls[0][0];
+    expect(opts.confirmLabel).toBe("Discard changes and close");
+    expect(opts.message).toContain("cannot be overridden from a layer below it.");
+    // Cancel keeps the buffer so the author can copy it out; confirm closes.
+    expect(isOpen()).toBe(true);
+    await opts.onConfirm();
+    expect(isOpen()).toBe(false);
+  });
+
+  it("a transport failure (backend down) offers the same exit", async () => {
+    const request = vi.spyOn(confirmService, "request");
+    saveSpy.mockRejectedValue(new TypeError("Failed to fetch"));
+    dirtyLorePane();
+
+    await editorPanes.close("editor_1");
+
+    await request.mock.calls[0][0].onConfirm();
+    expect(isOpen()).toBe(false);
+  });
+
+  it("the reported loop: refused review commit, then Don't save, still closes", async () => {
+    const request = vi.spyOn(confirmService, "request");
+    lorePane("editor_1", "e1");
+    const hooks = committer(true);
+    hooks.commit.mockResolvedValue(false); // the commit's PUT was refused
+    await editorPanes.beginReviewLock("e1", hooks);
+    // The commit had already written the adopted content into the pane buffer.
+    editorPanes.updateEditorPaneDraft("editor_1", "Baseline", "Adopted AI body", "draft", "lore:character", {});
+
+    // Close → Save → refused: the pane stays open with its review.
+    await editorPanes.close("editor_1");
+    await request.mock.calls[0][0].onConfirm();
+    expect(isOpen()).toBe(true);
+
+    // Close again → Don't save → the flush of the same buffer is refused →
+    // the discard-and-close exit, which finally closes the pane.
+    await editorPanes.close("editor_1");
+    // onSecondary is fire-and-forget (`() => void …`), so wait for its close.
+    await request.mock.calls[1][0].onSecondary!();
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+    expect(hooks.discard).toHaveBeenCalledTimes(1);
+    const recovery = request.mock.calls[2][0];
+    expect(recovery.confirmLabel).toBe("Discard changes and close");
+    await recovery.onConfirm();
+    expect(isOpen()).toBe(false);
   });
 });

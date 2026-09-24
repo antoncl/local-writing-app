@@ -16,6 +16,7 @@ import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import { HttpError, setKeepaliveSaves, api } from "@/lib/api";
 import { conflictDiffService } from "@/lib/stores/conflictDiffService.svelte";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
 import {
   bodiesEqual,
   cloneMetadata,
@@ -226,6 +227,25 @@ export function offerCloseConflictRecovery(host: SaveFailureHost, id: string, re
         },
       },
     ],
+  });
+}
+
+// The close-flush failed for any reason other than a 409 — a validation refusal
+// (422), a bad request, the backend down. Retrying is pointless (the same buffer
+// fails the same way), so without this the pane could never close (#2186). Offer
+// the one exit that always works: discard the unsaved changes and close. Cancel
+// keeps the pane open with its buffer, so the author can copy text out first.
+export function offerCloseSaveFailureRecovery(host: SaveFailureHost, id: string, error: unknown): void {
+  const raw = (error instanceof Error ? error.message : String(error)).trim();
+  const reason = /[.!?]$/.test(raw) ? raw : `${raw}.`;
+  confirmService.request({
+    title: "Couldn't save changes",
+    message:
+      `"${paneTitle(host, id)}" couldn't be saved: ${reason} ` +
+      "Discard the unsaved changes and close, or keep the pane open to copy them out?",
+    confirmLabel: "Discard changes and close",
+    destructive: true,
+    onConfirm: async () => host.tearDown(id),
   });
 }
 

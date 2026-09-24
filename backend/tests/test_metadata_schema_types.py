@@ -422,11 +422,12 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         self.assertEqual(note.body_editor, "code")
         self.assertEqual(note.body_language, "plain")
 
-    def test_research_topic_opens_in_tree_container(self) -> None:
-        # research:topic is a tree container, not a NodeEditor target (#1199).
+    def test_research_topic_opens_in_the_editor(self) -> None:
+        # A research topic is a file since ADR-0094 §7, so it opens like any
+        # node — it was a tree-only container before (#1199).
         schema = self.service.read_metadata_schema()
         topic = schema.entry_types["research:topic"]
-        self.assertEqual(topic.opens_in, "tree_container")
+        self.assertEqual(topic.opens_in, "editor")
 
     def test_tag_types_opens_in_dialog(self) -> None:
         # A tag is minted from a picker, not authored through the

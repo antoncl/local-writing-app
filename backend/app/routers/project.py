@@ -16,8 +16,6 @@ from app.models import (
     DirectoryEntry,
     DirectoryListing,
     DirectoryRoot,
-    ImportLooseScenesRequest,
-    LooseScene,
     MoveStructureNodeRequest,
     OpenProjectRequest,
     PathProbe,
@@ -212,21 +210,6 @@ def get_structure(project: CurrentProject) -> StructureDocument:
 def create_structure_node(project: CurrentProject, request: CreateStructureNodeRequest) -> StructureDocument:
     with translate_errors():
         return project.create_structure_node(request)
-
-
-@router.get("/api/structure/loose-scenes", response_model=list[LooseScene])
-def list_loose_scenes(project: CurrentProject) -> list[LooseScene]:
-    # Scene files on disk that no manuscript node references — the import offer,
-    # split off the validation report (#635). A read: forces a cold rebuild so
-    # freshly-dropped files show, but touches no project state.
-    with translate_errors():
-        return project.list_loose_scenes()
-
-
-@router.post("/api/structure/import-loose", response_model=StructureDocument)
-def import_loose_scenes(project: CurrentProject, request: ImportLooseScenesRequest) -> StructureDocument:
-    with translate_errors():
-        return project.import_loose_scenes(request.scene_ids)
 
 
 @router.patch("/api/structure/nodes/{node_id}", response_model=StructureDocument)

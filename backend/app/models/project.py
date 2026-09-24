@@ -279,20 +279,6 @@ class ProspectiveAiPolicy(BaseModel):
     source: str | None = None
 
 
-class LooseScene(BaseModel):
-    """A scene file present on disk under `scenes/` but not referenced by the
-    manuscript structure — a candidate for import (#4). Enumerated by
-    `list_loose_scenes` (the `/api/structure/loose-scenes` read); imported
-    (appended at the manuscript root) by `import_loose_scenes`.
-
-    Deliberately NOT part of `ProjectValidation` (#635): validation reports
-    integrity, import is its own surface, and the two used to ride one field."""
-
-    id: str
-    title: str
-    filename: str
-
-
 class CodeFencedBody(BaseModel):
     """A lore entry whose whole body is a single fenced code block (#1628) — a
     paste artifact that renders prose as monospaced source. A *flag*, not a
@@ -329,11 +315,6 @@ class LoreCodeFencePreview(BaseModel):
     declines the unwrap. The write is the normal lore save on commit."""
 
     body: str
-
-
-class ImportLooseScenesRequest(BaseModel):
-    # The loose-scene ids to import. Empty/omitted means "all loose scenes".
-    scene_ids: list[str] = Field(default_factory=list)
 
 
 class DirectoryEntry(BaseModel):

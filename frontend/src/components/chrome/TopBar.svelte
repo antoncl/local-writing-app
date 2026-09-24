@@ -67,7 +67,6 @@
     // the panes above even though the content itself is app-level.
     onOpenGuides = () => {},
     // Loose-scene import — its own home now (#635), a rare project action.
-    onOpenImport = () => {},
     // Manage tags — the one home for both vocabularies (#247 PR-3b), retiring the
     // per-pane "Tags…" buttons. Project-scoped: the rosters need an open project.
     onManageAllTags = () => {},
@@ -119,7 +118,6 @@
     onOpenMutations?: () => void;
     onOpenAiSpend?: () => void;
     onOpenGuides?: () => void;
-    onOpenImport?: () => void;
     onManageAllTags?: () => void;
     onFinalizeRoleplay?: () => void;
     canFinalize?: boolean;
@@ -358,7 +356,6 @@
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenPlotBoard)}>Plot board</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenMutations)}>Mutations</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenAiSpend)}>AI spend</button>
-        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenImport)}>Import documents…</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onManageAllTags)}>Manage all tags…</button>
 
         <div class="switcher-divider" role="separator"></div>

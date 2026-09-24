@@ -58,9 +58,6 @@ export type Scene = {
   source_layer_label?: string;
 };
 
-// A scene file on disk that no manuscript node references — a pending import
-// offer (#4), not an error. Its own read now (#635), not a validation field.
-export type LooseScene = { id: string; title: string; filename: string };
 
 // A lore entry whose whole body is a single fenced code block (#1628) — a paste
 // artifact that renders prose as monospaced source. Reported as a flag, not a

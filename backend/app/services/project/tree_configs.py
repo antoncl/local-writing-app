@@ -1,27 +1,46 @@
-"""Shared tree-config constants (#14 backend split).
+"""The two trees, as configuration (ADR-0094).
 
-The manuscript and research trees are both `TreeStructureService` instances
-parameterised by a `TreeConfig`. These constants used to live at module scope
-in `project_service.py`, but the research slice (`project/research.py`) needs
-`RESEARCH_TREE_CONFIG` too — defining them here lets both the core class and
-the mixin import them without an import cycle (the mixin must not import back
-into `project_service`).
+The manuscript and research trees are one mechanism: nodes of one kind, in one
+folder, each file carrying its own placement (`parent` / `rank`), assembled by
+`TreeNodesMixin`. What differs between them is data, and it lives here.
 """
 
 from __future__ import annotations
 
-from app.services.tree_structure import TreeConfig
+from dataclasses import dataclass
 
-MANUSCRIPT_TREE_CONFIG = TreeConfig(
-    yaml_filename="manuscript.structure.yaml",
+
+@dataclass(frozen=True)
+class TreeSpec:
+    """One tree: which nodes it holds and what its leaves are.
+
+    `kind` — the node kind whose files make up the tree.
+    `folder` — where those files live under a project folder; only the open
+        project's own folder is placed (a tree never spans the inherits chain).
+    `leaf_type` — the entry type that cannot hold other nodes.
+    `root_title` — the synthetic root's display title.
+    `id_prefix` — what a new node's id is minted with (`_new_id`).
+    """
+
+    kind: str
+    folder: str
+    leaf_type: str
+    root_title: str
+    id_prefix: str
+
+
+MANUSCRIPT_TREE = TreeSpec(
+    kind="manuscript",
+    folder="scenes",
+    leaf_type="manuscript:scene",
     root_title="Manuscript",
-    leaf_ref_field="scene_id",
-    leaf_subdir="scenes",
+    id_prefix="manuscript",
 )
 
-RESEARCH_TREE_CONFIG = TreeConfig(
-    yaml_filename="research.structure.yaml",
+RESEARCH_TREE = TreeSpec(
+    kind="research",
+    folder="research/notes",
+    leaf_type="research:note",
     root_title="Research",
-    leaf_ref_field="note_id",
-    leaf_subdir="research/notes",
+    id_prefix="note",
 )

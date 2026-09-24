@@ -22,6 +22,7 @@ from app.models import (
     NodePickerConfig,
 )
 from app.services.project.metadata_refs import REF_FIELD_TYPES
+from app.services.project.placement import PLACEMENT_KEYS, TREE_KINDS
 from app.services.project.schema_validation import ENTRY_TYPE_FQN_RE
 
 
@@ -90,6 +91,25 @@ def _entry_type_summary_field_errors(entry_type_id: str, entry_type, schema: Met
             f"Metadata entry_type {entry_type_id} nominates summary field {field_id} more than once."
         )
     return errors
+
+
+def placement_key_fields(entry_type) -> list[str]:
+    """The fields named `parent` or `rank` a tree kind's type carries
+    (ADR-0094 §1). Those keys are a tree node's placement — read by the tree and
+    shown to views as the containment ref — so a field of that name is shadowed
+    wherever the node is read. Empty for any other kind, where the names are
+    free. The schema saves refuse to *add* one; Verify warns about one a schema
+    already had, rather than every unrelated save failing on it."""
+    if entry_type.kind not in TREE_KINDS:
+        return []
+    return [field_id for field_id in entry_type.fields if field_id in PLACEMENT_KEYS]
+
+
+def placement_key_message(entry_type_id: str, entry_type, field_id: str) -> str:
+    return (
+        f"Node type {entry_type_id} cannot have a field named '{field_id}': on a "
+        f"{entry_type.kind} node it is where the node sits in the tree."
+    )
 
 
 def _entry_type_group_application_errors(entry_type_id: str, entry_type, schema: MetadataSchema) -> list[str]:

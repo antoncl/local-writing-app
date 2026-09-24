@@ -21,8 +21,7 @@ excluded at the index, once, never filtered per consumer (ADR-0043; pinned by
 
 Every method here takes `root` from the caller rather than reading
 `self._require_project()` itself: a capture is a write, so it is a unit of work
-with a resolution scope it carries explicitly (ADR-0045, same reasoning as
-`_manuscript_tree`).
+with a resolution scope it carries explicitly (ADR-0045, #381).
 
 The store is **node-scoped, not scene-scoped** (ADR-0087, #1981). The same
 two-file store keys on any node's canonical id; the public methods take a
@@ -51,6 +50,14 @@ from app.services.atomic_io import atomic_write_bytes
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project.overrides import OVERRIDES_FOLDER
+from app.services.project.placement import (
+    PARENT_KEY,
+    PLACEMENT_KEYS,
+    RANK_KEY,
+    TREE_KINDS,
+    last_authored_mtime_ns,
+    set_placement_in_text,
+)
 
 if TYPE_CHECKING:
     from app.models import LoreEntry, ResearchNote, Scene
@@ -103,14 +110,12 @@ NODE_SNAPSHOT_KINDS = frozenset({"manuscript", "research", "lore", "tag", "promp
 # Kinds whose restore reconciles correctly at ANY writable layer, so an inherited
 # (ancestor-owned) base is snapshottable — not only one owned by the open project.
 # lore heals nothing out of the index (§4): the byte-write plus the index re-fold
-# is the whole restore. scene and research instead keep the node title in a
-# separate structure document their healer rewrites in the OPEN project only
-# (`_update_scene_title_in_structure` / `_update_research_title_in_structure`, both
-# rooted at `_require_project()`), so restoring an ancestor-owned one would leave
-# the ANCESTOR's own tree desynced from the file the restore just rewrote. Both
-# stay open-project-only until that healer is owning-layer-aware — and research IS
-# authored at ancestors (it is walked cross-layer), so this is a live refusal, not
-# a dead branch. (Scenes are root-scoped regardless.) tag joins lore here: a tag is
+# is the whole restore. scene and research are not admitted: each belongs to a
+# tree, and a tree is the open project's own (ADR-0094) — a research note owned by
+# an ancestor has no place in this project's tree, and restoring it here would be
+# an edit to a node this project does not arrange. (Scenes are root-scoped
+# regardless.) Research IS walked cross-layer, so this is a live refusal, not a
+# dead branch. tag joins lore here: a tag is
 # layered and heals nothing on restore — its `merged_into`/`canonical_id` re-resolve
 # from the restored bytes at index-build time (§4), the reference sweep is never
 # replayed — so an ancestor-owned tag restores as safely as an ancestor lore base.
@@ -221,9 +226,9 @@ class SceneSnapshotsMixin:
     """Composed onto `ProjectService`; the project IO helpers it uses
     (`_atomic_write`, `_read_yaml`, `_write_yaml`, `_new_id`,
     `_read_markdown_with_front_matter`, `_path_for_node_id`,
-    `_node_id_for_path`, `layer_by_id`, `_update_scene_title_in_structure`,
-    `_remove_missing_scene_todo_anchors`, `_update_research_title_in_structure`,
-    `read_scene`, `read_research_note`, `read_node`) resolve via MRO."""
+    `_node_id_for_path`, `layer_by_id`, `_remove_missing_scene_todo_anchors`,
+    `_placement_on_disk`, `read_scene`, `read_research_note`, `read_node`)
+    resolve via MRO."""
 
     # ----- store layout -----------------------------------------------------
 
@@ -735,7 +740,9 @@ class SceneSnapshotsMixin:
         store_root, node_id, path = self._resolve_snapshot_target(ref, kind, layer_id=layer_id)
         if path is None or not path.exists():
             return
-        last_save = datetime.fromtimestamp(path.stat().st_mtime, UTC)
+        # A placement write (a drag, a sibling renumber) is not a save
+        # (ADR-0094 §6); the authored mtime skips it.
+        last_save = datetime.fromtimestamp(last_authored_mtime_ns(path) / 1e9, UTC)
         if (datetime.now(UTC) - last_save).total_seconds() <= SESSION_GAP_MINUTES * 60:
             return
         self._capture(
@@ -798,12 +805,28 @@ class SceneSnapshotsMixin:
                 migrations.MigratableDocument(front_matter, body), record.schema_version
             )
 
+        # Placement is not content (ADR-0094 §6): the snapshot's text goes back,
+        # the node stays where it is now. Read before the capture and the write,
+        # while the file still says where the node sits; the restored bytes are
+        # the snapshot's except for these two keys.
+        keep_placement = kind in TREE_KINDS and path.exists()
+        live_parent, live_rank = self._placement_on_disk(path) if keep_placement else (None, None)
+
         self._capture(root, node_id, path, retention="thinned", kind=kind)
 
         if migrated is None:
+            if keep_placement:
+                frozen_bytes = set_placement_in_text(frozen_bytes.decode("utf-8"), live_parent, live_rank).encode("utf-8")
             self._atomic_write_bytes(path, frozen_bytes)
         else:
-            self._write_markdown_with_front_matter(path, migrated.front_matter, migrated.body)
+            front_matter = dict(migrated.front_matter)
+            if keep_placement:
+                front_matter = {key: value for key, value in front_matter.items() if key not in PLACEMENT_KEYS}
+                if live_parent is not None:
+                    front_matter[PARENT_KEY] = live_parent
+                if live_rank is not None:
+                    front_matter[RANK_KEY] = live_rank
+            self._write_markdown_with_front_matter(path, front_matter, migrated.body)
         # (unchanged below) — the explicit structural index write still runs for
         # both branches; the byte branch bypassed the write hook, the migrate
         # branch's `_write_markdown_with_front_matter` also went through it, and
@@ -816,31 +839,24 @@ class SceneSnapshotsMixin:
         # state (#392). Restore is always structural (the content is replaced).
         self._apply_index_write((path,), structural=True)
 
-        front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+        _, body = self._read_markdown_with_front_matter(path, strict=True)
         # The filename stays as it is — it is cosmetic, and reads resolve by id.
-        # The structure title is not: it is what the manuscript tree renders, so
-        # a restore that changed the title has to reach it.
-        self._heal_after_restore(kind, node_id, str(front_matter.get("title") or node_id), body)
+        # The title needs no healing: the trees are built from the node files
+        # (ADR-0094), so the restored title is the tree's title.
+        self._heal_after_restore(kind, node_id, body)
         return self._read_restored_node(kind, node_id)
 
-    def _heal_after_restore(self, kind: str, node_id: str, title: str, body: str) -> None:
-        """Re-sync the out-of-index structure a restore may have changed.
+    def _heal_after_restore(self, kind: str, node_id: str, body: str) -> None:
+        """Re-sync the out-of-index state a restore may have changed.
 
-        A restore replaces the file's bytes, which can change the node's title
-        (and, for a scene, drop an embedded todo anchor). Only two kinds keep a
-        copy of the node title in a *separate* structure document the index
-        write does not touch — a scene (`manuscript.structure.yaml`) and a
-        research note (`research.structure.yaml`); lore/prompt/tag/plot keep no
-        such duplicate and heal nothing beyond the structural index write
-        (ADR-0087 §4). Dispatched by kind rather than always calling the scene
-        healers, which would look up a manuscript tree a research restore has no
-        node in.
+        A restore replaces the file's bytes, which for a scene can drop an
+        embedded todo anchor that `todo.yaml` still points at. No other kind
+        keeps state outside its own file that a restore can strand — the title
+        copies the structure files once kept went with them (ADR-0094) — so
+        they heal nothing beyond the structural index write (ADR-0087 §4).
         """
         if kind == "manuscript":
-            self._update_scene_title_in_structure(node_id, title)
             self._remove_missing_scene_todo_anchors(node_id, body)
-        elif kind == "research":
-            self._update_research_title_in_structure(node_id, title)
 
     def _read_restored_node(self, kind: str, node_id: str) -> Scene | ResearchNote:
         """Read the just-restored node back in its own shape.

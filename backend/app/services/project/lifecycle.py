@@ -56,11 +56,11 @@ from app.services.project.layers import INHERITS_KEY, MANIFEST_FILENAME, LayerVi
 from app.services.project.lore_mutation_items import keyed_lists_from
 from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project.node_index_gate import node_index_gate
-from app.services.project.tree_configs import (
-    MANUSCRIPT_TREE_CONFIG,
-    RESEARCH_TREE_CONFIG,
+from app.services.project.schema_definition_validation import (
+    placement_key_fields,
+    placement_key_message,
 )
-from app.services.tree_structure import TreeStructureService
+from app.services.project.tree_configs import MANUSCRIPT_TREE, RESEARCH_TREE
 
 # A verified project's own structural folders — its guts, never a place a user
 # opens or creates a project. The directory picker hides these when browsing
@@ -223,22 +223,12 @@ class ProjectLifecycleMixin:
             entry_type="manuscript:scene",
             metadata={},
         )
-        self._write_scene_file(self._filepath_for_new_node(root / "scenes", initial_scene.title), initial_scene)
-        # Seed the manuscript tree with one scene leaf so a fresh project
-        # opens to something instead of an empty outline.
-        TreeStructureService(root, MANUSCRIPT_TREE_CONFIG).initialize(
-            leaf_node={
-                "id": self._new_id("node"),
-                "type": "manuscript:scene",
-                "title": initial_scene.title,
-                "scene_id": initial_scene.id,
-                "children": [],
-            },
-        )
-        # Research tree starts empty — no seeded topic or note. The
-        # research pane / kind ships in a later slice; this just ensures
-        # the file exists so validate_project doesn't flag it as missing.
-        TreeStructureService(root, RESEARCH_TREE_CONFIG).initialize()
+        # One scene at the top of the manuscript, so a fresh project opens to
+        # something instead of an empty outline. The tree is its nodes' own
+        # placement (ADR-0094); the research tree starts empty.
+        initial_path = self._filepath_for_new_node(root / MANUSCRIPT_TREE.folder, initial_scene.title)
+        self._write_scene_file(initial_path, initial_scene)
+        self._write_placement(initial_path, None, 1)
         self._write_yaml(root / "todo.yaml", {"items": []})
 
     def _declaration_for_new_project(self, root: Path, requested: list[str] | None) -> list[str]:
@@ -977,9 +967,20 @@ class ProjectLifecycleMixin:
         metadata_schema, schema_warnings, schema_errors = self._validate_metadata_schema_section(root)
         warnings.extend(schema_warnings)
         errors.extend(schema_errors)
+        if metadata_schema is not None:
+            # A field named `parent` / `rank` a tree kind already had before
+            # ADR-0094 reserved them: shadowed in views, so said here.
+            warnings.extend(
+                placement_key_message(entry_type_id, entry_type, field_id)
+                for entry_type_id, entry_type in metadata_schema.entry_types.items()
+                for field_id in placement_key_fields(entry_type)
+            )
 
         scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "manuscript"}
-        errors.extend(self._validate_structure_references(scene_ids))
+        # A node the tree could not place where its file says sits at the top
+        # level instead (ADR-0094 §5); that is advisory, not an integrity error.
+        warnings.extend(self._tree_placement_warnings(root, MANUSCRIPT_TREE))
+        warnings.extend(self._tree_placement_warnings(root, RESEARCH_TREE))
 
         scene_errors, scene_warnings = self._validate_scene_entries(node_index, metadata_schema)
         errors.extend(scene_errors)
@@ -1015,8 +1016,6 @@ class ProjectLifecycleMixin:
             # retired the v3 migration, so if it goes missing this report is
             # how it surfaces; repair_project recreates it.
             "project.md",
-            "manuscript.structure.yaml",
-            "research.structure.yaml",
             "todo.yaml",
         ]:
             if not (root / required).exists():
@@ -1042,19 +1041,6 @@ class ProjectLifecycleMixin:
         except (ProjectServiceError, ValueError) as exc:
             errors.append(f"Invalid metadata schema: {exc}")
         return metadata_schema, warnings, errors
-
-    def _validate_structure_references(self, scene_ids: set[str]) -> list[str]:
-        """Manuscript-structure leaves that point at a scene id no file provides.
-
-        Loose scenes (files on disk no node references) are NOT reported here
-        anymore (#635) — they are an import offer, not an integrity problem.
-        `list_loose_scenes` enumerates them for the Import documents surface.
-        """
-        referenced = TreeStructureService.collect_leaf_ids(self.read_structure().root)
-        return [
-            f"Structure references missing scene {scene_id}."
-            for scene_id in sorted(referenced - scene_ids)
-        ]
 
     def _validate_scene_entries(
         self, node_index: NodeIndex, metadata_schema: MetadataSchema | None

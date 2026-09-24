@@ -37,6 +37,13 @@ from app.services.project.node_index import (
     NodeIndex,
     NodeIndexEntry,
 )
+from app.services.project.placement import (
+    PARENT_KEY,
+    RANK_KEY,
+    TREE_KINDS,
+    parse_parent,
+    parse_rank,
+)
 
 
 class IndexCollectMixin:
@@ -253,6 +260,7 @@ class IndexCollectMixin:
             is_library=layer.is_library,
             forked_from_layer_id=self._forked_from_layer_id(front_matter.get("forked_from")),
             merged_into=self._merged_into(family.kind, front_matter),
+            **self._placement(family.kind, front_matter),
         )
         duplicate = index.entry_for_layer(node_id, layer.id)
         if duplicate is not None:
@@ -337,3 +345,14 @@ class IndexCollectMixin:
             return None
         raw = metadata.get("merged_into")
         return raw.strip() if isinstance(raw, str) and raw.strip() else None
+
+    def _placement(self, kind: str, front_matter: dict[str, Any]) -> dict[str, Any]:
+        """A tree node's `parent` / `rank` (ADR-0094 §1), read off the top level
+        of its front matter. Empty for every kind that is not a tree's, so a
+        stray `parent:` on a lore entry places nothing."""
+        if kind not in TREE_KINDS:
+            return {}
+        return {
+            "parent": parse_parent(front_matter.get(PARENT_KEY)),
+            "rank": parse_rank(front_matter.get(RANK_KEY)),
+        }

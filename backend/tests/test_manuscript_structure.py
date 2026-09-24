@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from pathlib import Path
 
 from metadata_validation_base import MetadataValidationBase
 
@@ -102,21 +102,16 @@ class ManuscriptStructureTests(MetadataValidationBase):
         )
         self.assertEqual(stems, ["Act", "Act (2)"])
 
-    def test_structure_yaml_does_not_persist_computed_metadata(self) -> None:
+    def test_the_tree_is_not_a_file(self) -> None:
+        """ADR-0094: placement lives on the node files; no structure yaml is
+        created, read or required."""
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
             CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act")
         )
-
-        raw = self.service._read_yaml(self.root / "manuscript.structure.yaml")
-
-        def has_computed(node: dict) -> bool:
-            if "computed_metadata" in node:
-                return True
-            return any(has_computed(child) for child in node.get("children", []))
-
-        self.assertFalse(has_computed(raw["root"]))
+        self.assertFalse((self.root / "manuscript.structure.yaml").exists())
+        self.assertFalse((self.root / "research.structure.yaml").exists())
 
     def test_structure_surfaces_scene_metadata_for_filtering(self) -> None:
         """#184 Phase 3: the Draft roster carries each scene's status + full
@@ -149,37 +144,6 @@ class ManuscriptStructureTests(MetadataValidationBase):
         self.assertEqual(node.status, "revised")
         self.assertIsNotNone(node.metadata)
         self.assertEqual(node.metadata["pov"], hero.id)
-
-    def test_structure_yaml_does_not_persist_scene_metadata(self) -> None:
-        """The surfaced `metadata` projection must never echo into the tree
-        YAML — it would drift from the leaf front-matter (same invariant as
-        status/color/computed_metadata)."""
-        from app.models import CreateStructureNodeRequest, SaveSceneRequest
-
-        scene = self.service.read_scene(self.scene_id)
-        self.service.save_scene(
-            self.scene_id,
-            SaveSceneRequest(
-                title=scene.title,
-                body=scene.body,
-                base_revision=scene.revision,
-                status="revised",
-                entry_type="manuscript:scene",
-                metadata={"summary": "Opening beat"},
-            ),
-        )
-        # A structure mutation triggers the write path that must strip it.
-        self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act")
-        )
-        raw = self.service._read_yaml(self.root / "manuscript.structure.yaml")
-
-        def has_metadata(node: dict) -> bool:
-            if "metadata" in node:
-                return True
-            return any(has_metadata(child) for child in node.get("children", []))
-
-        self.assertFalse(has_metadata(raw["root"]))
 
     def test_display_template_inherits_from_manuscript_structure(self) -> None:
         schema = self.service.read_metadata_schema()
@@ -456,70 +420,49 @@ class ManuscriptStructureTests(MetadataValidationBase):
         )
         self.assertEqual(refreshed.title, "First Arrival")
 
-    def _count_structure_writes(self):
-        """Count `TreeStructureService.write` calls while still writing through.
+    def _placement_lines(self, scene_id: str) -> list[str]:
+        path = self.service._path_for_node_id(scene_id, "manuscript")
+        return [
+            line for line in path.read_text(encoding="utf-8").splitlines()
+            if line.startswith(("parent:", "rank:"))
+        ]
 
-        `_manuscript_tree` hands back a fresh service per call, so the count is
-        pinned at the class method (in the spirit of test_node_index_memo.py's
-        `_spy`) rather than on any one instance.
-        """
-        calls = [0]
-        original = TreeStructureService.write
-
-        def counting(inner_self, document):
-            calls[0] += 1
-            return original(inner_self, document)
-
-        return calls, patch.object(TreeStructureService, "write", counting)
-
-    def test_prose_only_save_writes_no_structure(self) -> None:
-        """The common autosave changes only prose; the title in the structure
-        YAML is unchanged, so the whole-file structure rewrite must be skipped
-        (the dominant recurring per-autosave cost, #455)."""
+    def test_a_save_keeps_the_node_where_it_is(self) -> None:
+        """ADR-0094 §1: every save re-emits the placement the file already has;
+        the editor never sends it, so a save cannot move a node."""
         scene = self.service.read_scene(self.scene_id)
-
-        calls, spy = self._count_structure_writes()
-        with spy:
-            self.service.save_scene(
-                self.scene_id,
-                SaveSceneRequest(
-                    title=scene.title,  # unchanged
-                    body=scene.body + "\n\nA new paragraph — prose only.",
-                    status=scene.status,
-                    entry_type=scene.entry_type,
-                    metadata=scene.metadata,
-                ),
-            )
-
-        self.assertEqual(calls[0], 0, "a prose-only save rewrote the structure YAML")
-
-    def test_title_change_save_still_writes_and_reflects_in_structure(self) -> None:
-        """The negative control: a save that changes the title must still write
-        the structure, and the tree must carry the new title."""
-        scene = self.service.read_scene(self.scene_id)
-        structure = self.service.read_structure()
-        scene_node = next(
-            child for child in structure.root.children if child.scene_id == self.scene_id
+        before = self._placement_lines(self.scene_id)
+        self.assertTrue(before, "the seeded scene carries a rank")
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body=scene.body + "\n\nA new paragraph — prose only.",
+                status=scene.status,
+                entry_type=scene.entry_type,
+                metadata=scene.metadata,
+            ),
         )
+        self.assertEqual(self._placement_lines(self.scene_id), before)
 
-        calls, spy = self._count_structure_writes()
-        with spy:
-            self.service.save_scene(
-                self.scene_id,
-                SaveSceneRequest(
-                    title="A Renamed Scene",
-                    body=scene.body,
-                    status=scene.status,
-                    entry_type=scene.entry_type,
-                    metadata=scene.metadata,
-                ),
-            )
-
-        self.assertGreater(calls[0], 0, "a title change did not rewrite the structure")
+    def test_a_title_change_save_reflects_in_the_tree(self) -> None:
+        """The tree's title is the file's title — there is no second copy to
+        keep in step (ADR-0094)."""
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title="A Renamed Scene",
+                body=scene.body,
+                status=scene.status,
+                entry_type=scene.entry_type,
+                metadata=scene.metadata,
+            ),
+        )
         refreshed = next(
             child
             for child in self.service.read_structure().root.children
-            if child.id == scene_node.id
+            if child.id == self.scene_id
         )
         self.assertEqual(refreshed.title, "A Renamed Scene")
 
@@ -818,44 +761,33 @@ class ManuscriptStructureTests(MetadataValidationBase):
             )
         self.assertIn("not a manuscript type", ctx.exception.message)
 
+    def _write_custom_container(self, node_id: str, title: str) -> Path:
+        """A container of a user-defined type, written by hand into scenes/ —
+        the tree takes it from the file like any node (ADR-0094)."""
+        path = self.root / "scenes" / f"{title}.md"
+        path.write_text(
+            f"---\nid: {node_id}\ntitle: {title}\nentry_type: manuscript:part\nrank: 0\nmetadata: {{}}\n---\n",
+            encoding="utf-8",
+        )
+        self.service._maintain_index_after_write(path)
+        return path
+
     def test_structure_accepts_custom_container_type(self) -> None:
-        structure = self.service.read_structure().root
-        structure.children.insert(
-            0,
-            self.service.read_structure().root.model_validate(
-                {
-                    "id": "part_one",
-                    "type": "part",
-                    "title": "Part One",
-                    "children": [],
-                }
-            ),
-        )
-        self.service._write_yaml(
-            self.root / "manuscript.structure.yaml", {"root": structure.model_dump()}
-        )
-        round_tripped = self.service.read_structure()
+        self._write_custom_container("manuscript_part_one", "Part One")
         part = next(
-            child for child in round_tripped.root.children if child.id == "part_one"
+            child
+            for child in self.service.read_structure().root.children
+            if child.id == "manuscript_part_one"
         )
-        self.assertEqual(part.type, "part")
-        self.assertEqual(part.scene_id, None)
+        self.assertEqual(part.type, "manuscript:part")
+        self.assertEqual(part.scene_id, "manuscript_part_one")
 
     def test_scene_helpers_walk_custom_container_types(self) -> None:
         scene_id = self._first_scene_id()
-        root_node = self.service.read_structure().root
-        scene_child = root_node.children[0]
-        custom_branch = root_node.model_validate(
-            {
-                "id": "custom_branch",
-                "type": "part",
-                "title": "Part One",
-                "children": [scene_child.model_dump()],
-            }
-        )
-        new_root = root_node.model_copy(update={"children": [custom_branch]})
-        self.service._write_yaml(
-            self.root / "manuscript.structure.yaml", {"root": new_root.model_dump()}
+        self._write_custom_container("manuscript_part_one", "Part One")
+        # A hand edit: the scene names the part as its parent.
+        self.service._write_placement(
+            self.service._path_for_node_id(scene_id, "manuscript"), "manuscript_part_one", 1
         )
 
         scene_ids = TreeStructureService.collect_leaf_ids(

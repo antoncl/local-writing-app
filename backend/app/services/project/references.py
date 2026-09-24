@@ -718,10 +718,14 @@ class ReferencesMixin:
 
     def _index_signature_from_memo(
         self, index: NodeIndex, path: Path
-    ) -> tuple[str, str, str, str, str | None, tuple[ReferenceEdge, ...]] | None:
+    ) -> tuple[str, str, str, str, str | None, str | None, float | None, tuple[ReferenceEdge, ...]] | None:
         """What the held index records for the file at `path`: its identity
         fields plus its edges. None when no entry there — a brand-new file, which
         is a change, so the caller must patch.
+
+        `parent` / `rank` (ADR-0094 §3) are in it too: the trees are built from
+        them, so a move — which changes nothing else in the file — must read as
+        a change, or the memo would keep serving the node where it was.
 
         `merged_into` (ADR-0082 §5) is in the tuple deliberately, not folded
         into "edges": a merge writes `metadata.merged_into` on the source's own
@@ -735,7 +739,10 @@ class ReferencesMixin:
             for entry in entries:
                 if entry.path == path:
                     edges = tuple(index.edges_by_layer_src.get((entry.source_layer_id, entry.id), ()))
-                    return (entry.id, entry.kind, entry.entry_type, entry.title, entry.merged_into, edges)
+                    return (
+                        entry.id, entry.kind, entry.entry_type, entry.title, entry.merged_into,
+                        entry.parent, entry.rank, edges,
+                    )
         return None
 
     _SIGNATURE_STRUCTURAL = object()

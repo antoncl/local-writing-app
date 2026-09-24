@@ -31,7 +31,6 @@
   import { structureNodeTitle } from "@/lib/utils/nodeTitle";
   import CreateProjectWizard from "@/components/dialogs/CreateProjectWizard.svelte";
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
-  import ImportDocumentsModal from "@/components/dialogs/ImportDocumentsModal.svelte";
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
   import ConflictDiffModal from "@/components/dialogs/ConflictDiffModal.svelte";
   import FinalizeRoleplayDialog from "@/components/dialogs/FinalizeRoleplayDialog.svelte";
@@ -126,7 +125,6 @@
     AssistantEntrySummary,
     CodeFencedBody,
     Scene,
-    LooseScene,
     NavigateTarget,
     NodePickerConfig,
     ProjectInfo,
@@ -166,9 +164,6 @@
   let appState = $state<AppState>({ name: "needsProject" });
   // The finalize-roleplay modal (ADR-0070 S3), opened imperatively from the ≡ menu.
   let finalizeDialog = $state<FinalizeRoleplayDialog | null>(null);
-  // "Import documents" (#635) — the loose-scene adoption surface, opened from the
-  // app menu. Its list comes from its own read, not the validation report.
-  let importDocsOpen = $state(false);
   // The per-project AI policy modal, launched from the project node window's
   // action (#417). App owns the guard, like the other dialogs.
   let aiPolicyModalOpen = $state(false);
@@ -177,8 +172,6 @@
   // validate and repair toggle it so the result never flashes stale.
   let validateModalOpen = $state(false);
   let validating = $state(false);
-  let looseScenes = $state<LooseScene[]>([]);
-  let importBusy = $state(false);
   // The Lore pane owns its own add-menu (a ViewNodeList feature, #112 4c-iv); this
   // ref lets the pane-header "+ Entry" button drive it.
   let loreRef = $state<{ toggleAddMenu: (event?: MouseEvent) => void; isAddMenuOpen: () => boolean }>();
@@ -686,31 +679,6 @@
     });
   }
 
-  async function openImportDocs() {
-    await run(async () => {
-      looseScenes = await api.getLooseScenes();
-      importDocsOpen = true;
-    });
-  }
-
-  async function importLooseScenes(sceneIds: string[]) {
-    await run(async () => {
-      importBusy = true;
-      try {
-        await api.importLooseScenes(sceneIds);
-        await refreshStructure();
-        // Refresh the offer from its own read (#635): imported files drop off the
-        // list; a malformed file the backend skipped stays, so it's still shown.
-        looseScenes = await api.getLooseScenes();
-        const stillLoose = new Set(looseScenes.map((loose) => loose.id));
-        const added = sceneIds.filter((id) => !stillLoose.has(id)).length;
-        status = added === 1 ? "Added 1 document to the manuscript" : `Added ${added} documents to the manuscript`;
-      } finally {
-        importBusy = false;
-      }
-    });
-  }
-
   // AI chat sessions. Per-chat state (history, composer, cost/TTL) lives
   // inside ChatBodyView now; App only tracks the session roster (Chats pane)
   // and which chat is currently open in an editor pane (active-row highlight).
@@ -813,7 +781,6 @@
   onOpenMutations={openMutationsPane}
   onOpenAiSpend={openAiSpendPane}
   onOpenGuides={openGuidePane}
-  onOpenImport={openImportDocs}
   onManageAllTags={openTagsPane}
   canFinalize={canFinalizeRoleplay}
   onFinalizeRoleplay={() => activeScene && finalizeDialog?.open(activeScene)}
@@ -1313,14 +1280,6 @@
           ? "This project's AI access is off, so there is nothing to reach."
           : null,
     }}
-  />
-
-  <ImportDocumentsModal
-    open={importDocsOpen}
-    {looseScenes}
-    busy={importBusy}
-    onClose={() => (importDocsOpen = false)}
-    onImport={importLooseScenes}
   />
 
   <AIPolicyModal open={aiPolicyModalOpen} onClose={() => (aiPolicyModalOpen = false)} />

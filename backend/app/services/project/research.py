@@ -1,28 +1,24 @@
 """Research slice of ProjectService (#14 backend split).
 
-The research tree mirrors the manuscript structure CRUD via
-`TreeStructureService`, but its only leaf type is `note` (entry_type), backed
-by a markdown file under `research/notes/`; containers are `topic`. This mixin
-owns the research tree CRUD, the note leaf IO, and the lore_note→research
-migration. `ProjectService` composes it.
+The research tree works exactly like the manuscript's (ADR-0094): its nodes are
+files under `research/notes/` — notes (`research:note`, the leaf) and the
+containers that hold them — each carrying its own `parent` and `rank`, and the
+tree is built from them by `TreeNodesMixin`. This mixin owns the research tree
+CRUD, the note file IO, and the lore_note→research move. `ProjectService`
+composes it.
 
-Method bodies moved verbatim from project_service.py — the shared helpers they
-call (`self._require_project`, `self.read_metadata_schema`,
-`self._initial_metadata_from_defaults`, `self._new_id`,
-`self._filepath_for_new_node`, `self._path_for_node_id`,
+The shared helpers these methods call (`self._require_project`,
+`self.read_metadata_schema`, `self._initial_metadata_from_defaults`,
+`self._new_id`, `self._filepath_for_new_node`, `self._path_for_node_id`,
 `self._read_markdown_with_front_matter`, `self._write_markdown_with_front_matter`,
 `self._maybe_rename_node_file`, `self._backlinks_to_targets`,
 `self._purge_references_to`, `self._build_node_index`, `self._node_id_for_path`,
 `self._normalise_metadata`, `self._strip_unknown_metadata_fields`,
-`self._strip_dangling_references`, `self._revision`, `self._atomic_write`) plus
-the lore helpers from `LoreEntriesMixin` (`self.read_lore_entry`,
-`self.delete_lore_entry`, `self.list_lore_entries`) still live elsewhere on the
-composed class and resolve through the MRO at call time.
-
-`_manuscript_tree` stays in core — it's used by the manuscript structure CRUD,
-not research. Computed-metadata injection isn't applied here: research's v1
-schema has no counters/status fields that need it (docs/research-strategy.md
-slice 1).
+`self._revision`, `self._atomic_write`, the tree helpers) plus the lore helpers
+(`self.read_lore_entry`, `self.delete_lore_entry`, `self.list_lore_entries`)
+live elsewhere on the composed class and resolve through the MRO at call time.
+Computed-metadata injection isn't applied here: research's schema has no
+counters/status fields that need it (docs/research-strategy.md slice 1).
 """
 
 from __future__ import annotations
@@ -39,28 +35,17 @@ from app.models import (
     ResearchNote,
     SaveResearchNoteRequest,
     StructureDocument,
-    StructureNode,
     StructureNodeDeletePreview,
 )
 from app.services.project.errors import ProjectServiceError
-from app.services.project.tree_configs import RESEARCH_TREE_CONFIG
+from app.services.project.placement import file_lock
+from app.services.project.tree_configs import RESEARCH_TREE
 from app.services.tree_structure import TreeStructureService
 
 
 class ResearchNotesMixin:
-    def _research_tree(self, root: Path) -> TreeStructureService:
-        """The research tree for **`root`**, which the caller must already hold.
-
-        Required, not defaulted — same reasoning as `_manuscript_tree` (#381 /
-        ADR-0045): a unit of work that read the tree, mutated it and wrote it
-        back used to resolve the project twice through the process-wide
-        singleton, so a concurrent `open_project` could land the write in
-        another project's `research.structure.yaml`.
-        """
-        return TreeStructureService(root, RESEARCH_TREE_CONFIG)
-
     def read_research_structure(self) -> StructureDocument:
-        return self._research_tree(self._require_project()).read()
+        return self._read_tree(self._require_project(), RESEARCH_TREE)
 
     def create_research_node(self, request: CreateStructureNodeRequest) -> StructureDocument:
         root = self._require_project()
@@ -77,120 +62,68 @@ class ResearchNotesMixin:
                 f"Entry type {request.entry_type} is abstract and cannot be instantiated.", 422
             )
 
-        tree = self._research_tree(root)
-        document = tree.read()
-
-        parent: StructureNode | None
-        if request.parent_id:
+        document = self._read_tree(root, RESEARCH_TREE)
+        parent_id: str | None = None
+        if request.parent_id and request.parent_id != "root":
             parent = TreeStructureService.find_node(document, request.parent_id)
             if parent is None:
                 raise ProjectServiceError(
                     f"Parent node {request.parent_id} does not exist.", 404
                 )
-            if parent.type == "research:note":
+            if parent.type == RESEARCH_TREE.leaf_type:
                 raise ProjectServiceError(
                     "Cannot add a child under a research note.", 422
                 )
-        else:
-            parent = document.root
+            parent_id = parent.id
 
-        note_id: str | None = None
-        if entry_type.has_body:
-            note_id = self._new_id("note")
-            initial_metadata = self._initial_metadata_from_defaults(request.entry_type, schema)
-            note = ResearchNote(
-                id=note_id,
-                title=request.title,
-                body="",
-                entry_type=request.entry_type,
-                metadata=initial_metadata,
-            )
-            self._write_research_note_file(
-                self._filepath_for_new_node(tree.leaf_dir, request.title),
-                note,
-            )
-
-        new_node = StructureNode(
-            id=self._new_id("node"),
-            type=request.entry_type,
+        # Every research node is a file now, containers included (ADR-0094 §7):
+        # a topic can be opened and carry fields like any node.
+        note_id = self._new_id(RESEARCH_TREE.id_prefix)
+        initial_metadata = self._initial_metadata_from_defaults(request.entry_type, schema)
+        note = ResearchNote(
+            id=note_id,
             title=request.title,
-            scene_id=note_id,  # model field; TreeStructureService maps it to note_id on disk
+            body="",
+            entry_type=request.entry_type,
+            metadata=initial_metadata,
         )
-        TreeStructureService.insert_node(parent, new_node)
-        tree.write(document)
-        return tree.read()
+        self._write_research_note_file(
+            self._filepath_for_new_node(root / RESEARCH_TREE.folder, request.title),
+            note,
+        )
+        self._place_node(root, RESEARCH_TREE, note_id, parent_id, None)
+        return self._read_tree(root, RESEARCH_TREE)
 
     def rename_research_node(self, node_id: str, title: str) -> StructureDocument:
         root = self._require_project()
         clean_title = title.strip()
         if not clean_title:
             raise ProjectServiceError("Title cannot be empty.", 422)
-        tree = self._research_tree(root)
-        document = tree.read()
-        node = TreeStructureService.find_node(document, node_id)
-        if node is None:
-            raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
-        if node.type == "root":
-            raise ProjectServiceError("Cannot rename the root node.", 422)
-        node.title = clean_title
-        if node.scene_id:
-            path = self._path_for_node_id(node.scene_id, "research")
-            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-            front_matter["title"] = clean_title
-            self._write_markdown_with_front_matter(path, front_matter, body)
-            self._maybe_rename_node_file(path, clean_title)
-        tree.write(document)
-        return tree.read()
+        node = self._require_tree_node(self._read_tree(root, RESEARCH_TREE), node_id)
+        path = self._path_for_node_id(node.id, "research")
+        front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+        front_matter["title"] = clean_title
+        self._write_markdown_with_front_matter(path, front_matter, body)
+        self._maybe_rename_node_file(path, clean_title)
+        return self._read_tree(root, RESEARCH_TREE)
 
     def move_research_node(
         self, node_id: str, target_parent_id: str, position: int
     ) -> StructureDocument:
-        root = self._require_project()
-        tree = self._research_tree(root)
-        document = tree.read()
-        node = TreeStructureService.find_node(document, node_id)
-        if node is None:
-            raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
-        if node.type == "root":
-            raise ProjectServiceError("Cannot move the root node.", 422)
-        target_parent = TreeStructureService.find_node(document, target_parent_id)
-        if target_parent is None:
-            raise ProjectServiceError(
-                f"Target parent {target_parent_id} does not exist.", 404
-            )
-        if target_parent.type == "research:note":
-            raise ProjectServiceError("Cannot move a node under a research note.", 422)
-        if TreeStructureService.contains_node(node, target_parent_id):
-            raise ProjectServiceError(
-                "Cannot move a node into itself or its descendants.", 422
-            )
-        removed = TreeStructureService.extract_node(document, node_id)
-        if removed is None:
-            raise ProjectServiceError(
-                f"Could not detach {node_id} from its current parent.", 500
-            )
-        target_parent = TreeStructureService.find_node(document, target_parent_id)
-        if target_parent is None:
-            raise ProjectServiceError("Target parent disappeared after detach.", 500)
-        insert_at = max(0, min(position, len(target_parent.children)))
-        target_parent.children.insert(insert_at, removed)
-        tree.write(document)
-        return tree.read()
+        return self._move_tree_node(
+            self._require_project(), RESEARCH_TREE, node_id, target_parent_id, position
+        )
 
     def cascade_research_delete_preview(
         self, node_id: str
     ) -> StructureNodeDeletePreview:
-        document = self._research_tree(self._require_project()).read()
-        node = TreeStructureService.find_node(document, node_id)
-        if node is None:
-            raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
-        if node.type == "root":
-            raise ProjectServiceError("Cannot delete the root node.", 422)
+        document = self._read_tree(self._require_project(), RESEARCH_TREE)
+        node = self._require_tree_node(document, node_id)
 
         descendant_leaf_count = 0
         descendant_container_count = 0
         for n in TreeStructureService.collect(node, skip_root=True):
-            if n.type == "research:note":
+            if n.type == RESEARCH_TREE.leaf_type:
                 descendant_leaf_count += 1
             else:
                 descendant_container_count += 1
@@ -210,20 +143,11 @@ class ResearchNotesMixin:
 
     def delete_research_node(self, node_id: str) -> StructureDocument:
         root = self._require_project()  # see manuscript.delete_structure_node (#381)
-        tree = self._research_tree(root)
-        document = tree.read()
-        node = TreeStructureService.find_node(document, node_id)
-        if node is None:
-            raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
-        if node.type == "root":
-            raise ProjectServiceError("Cannot delete the root node.", 422)
+        node = self._require_tree_node(self._read_tree(root, RESEARCH_TREE), node_id)
 
+        # Every node in the subtree is a file and its id is its file's id
+        # (ADR-0094 §4): one set is both what to delete and what to purge.
         note_ids = TreeStructureService.collect_leaf_ids(node)
-        # Outbound references can point at either the structure-node id
-        # or the underlying leaf file id, so purge both.
-        purge_ids = TreeStructureService.collect_descendant_ids(
-            node
-        ) | TreeStructureService.collect_leaf_ids(node)
         # Collect first, then delete as one batch (#476) so a research subtree of
         # many notes writes a single coalesced snapshot instead of one per note.
         paths: list[Path] = []
@@ -238,26 +162,31 @@ class ResearchNotesMixin:
             self.delete_scene_snapshots(root, note_id)
         self._delete_node_files(tuple(paths))  # unlink all + un-shadow the memo once
 
-        TreeStructureService.remove_node_by_id(document.root, node_id)
-        tree.write(document)
-        self._purge_references_to(purge_ids, root)
-        return tree.read()
+        self._purge_references_to(set(note_ids), root)
+        return self._read_tree(root, RESEARCH_TREE)
 
     # ----- Research note leaf IO -----
 
     def _write_research_note_file(self, path: Path, note: ResearchNote) -> None:
-        front_matter = yaml.safe_dump(
-            {
-                "id": note.id,
-                "title": note.title,
-                "entry_type": note.entry_type,
-                "metadata": note.metadata,
-            },
-            sort_keys=False,
-            allow_unicode=True,
-        ).strip()
-        body = note.body.rstrip() + "\n" if note.body.strip() else ""
-        self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
+        # Placement is carried over from the file on disk, never taken from the
+        # note being saved (ADR-0094 §1): a save does not move a node. The file
+        # lock spans the read and the write, as `_write_scene_file`'s does.
+        with file_lock(path):
+            front_matter = yaml.safe_dump(
+                self._with_disk_placement(
+                    path,
+                    {
+                        "id": note.id,
+                        "title": note.title,
+                        "entry_type": note.entry_type,
+                        "metadata": note.metadata,
+                    },
+                ),
+                sort_keys=False,
+                allow_unicode=True,
+            ).strip()
+            body = note.body.rstrip() + "\n" if note.body.strip() else ""
+            self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
 
     def read_research_note(self, note_id: str) -> ResearchNote:
         index = self._build_node_index()
@@ -298,9 +227,9 @@ class ResearchNotesMixin:
                 "The note was modified by someone else. Reload and retry.", 409
             )
         node_id = self._node_id_for_path(path, front_matter)
-        # Not as-of-L (#393): research is organised as a per-project tree
-        # (`research.structure.yaml`) and nothing inherits that tree across
-        # layers, so a note is only ever authored at the resolution scope.
+        # Not as-of-L (#393): research is organised as a per-project tree and
+        # nothing inherits that tree across layers (ADR-0094), so a note is only
+        # ever authored at the resolution scope.
         # Inheriting research is arguable in principle — unlike a scene, a note
         # is fairly self-contained — but the tree is the knot: an inherited note
         # has no defined position in the inheriting project's tree, the same
@@ -326,9 +255,6 @@ class ResearchNotesMixin:
         self.maybe_capture_session_boundary(node_id, kind="research")
         self._write_research_note_file(path, note)
         renamed_path = self._maybe_rename_node_file(path, request.title) or path
-        # Keep the research tree title in sync the same way save_scene
-        # does for manuscript.
-        self._update_research_title_in_structure(node_id, request.title)
         return ResearchNote(
             id=node_id,
             title=request.title,
@@ -370,9 +296,7 @@ class ResearchNotesMixin:
                 if value not in (None, "", [], {}):
                     dropped_fields.append(field_id)
 
-        tree = self._research_tree(root)
-        document = tree.read()
-        note_id = self._new_id("note")
+        note_id = self._new_id(RESEARCH_TREE.id_prefix)
         note = ResearchNote(
             id=note_id,
             title=source.title,
@@ -381,16 +305,9 @@ class ResearchNotesMixin:
             metadata=preserved_metadata,
         )
         self._write_research_note_file(
-            self._filepath_for_new_node(tree.leaf_dir, source.title), note
+            self._filepath_for_new_node(root / RESEARCH_TREE.folder, source.title), note
         )
-        new_tree_node = StructureNode(
-            id=self._new_id("node"),
-            type="research:note",
-            title=source.title,
-            scene_id=note_id,
-        )
-        TreeStructureService.insert_node(document.root, new_tree_node)
-        tree.write(document)
+        self._place_node(root, RESEARCH_TREE, note_id, None, None)
 
         # Delete the source lore_note last so a write failure above leaves
         # the original intact. _purge_references_to clears outbound refs
@@ -400,16 +317,7 @@ class ResearchNotesMixin:
 
         return MoveLoreNoteToResearchResponse(
             note_id=note_id,
-            tree=tree.read(),
+            tree=self._read_tree(root, RESEARCH_TREE),
             dropped_fields=sorted(dropped_fields),
             lore=self.list_lore_entries(),
         )
-
-    def _update_research_title_in_structure(self, note_id: str, title: str) -> None:
-        root = self._require_project()
-        tree = self._research_tree(root)
-        document = tree.read()
-        node = TreeStructureService.find_by_leaf_ref(document, note_id)
-        if node is not None:
-            node.title = title
-            tree.write(document)

@@ -3,11 +3,12 @@
 The reference purge was #381's first half and is pinned by
 `test_reference_purge.py`. This is the second: the *tree* writes.
 
-`_manuscript_tree` / `_research_tree` used to resolve the project *again* at
-write time, off a process-wide service whose `root_path` `open_project` swapped
-in place. A concurrent open in that window redirected the write, overwriting the
-**other** project's `manuscript.structure.yaml` with this project's tree —
-irreversible, since the target file is replaced rather than appended to.
+The tree helpers used to resolve the project *again* at write time, off a
+process-wide service whose `root_path` `open_project` swapped in place. A
+concurrent open in that window redirected the write, overwriting the **other**
+project's tree with this project's — irreversible. Since ADR-0094 the tree is
+the nodes' own placement, so the writes that must stay home are node-file
+writes; the invariant is unchanged.
 
 Since #399 the scope is not a field anything can swap: a unit holds a
 `ProjectService` bound to an immutable `WorkScope`. Since #413 there is no
@@ -81,7 +82,6 @@ class StructureWritesStayInTheCallersProjectTests(unittest.TestCase):
         the author is working in. `create_scene` writes a file between the
         capture and the read, so the window is real IO.
         """
-        book1_structure = self.book1 / "manuscript.structure.yaml"
         seeded = _find(self.service.read_structure().root, lambda node: bool(node.scene_id))
 
         real_write = self.service._write_scene_file
@@ -105,23 +105,22 @@ class StructureWritesStayInTheCallersProjectTests(unittest.TestCase):
             "the new scene was not written into book01",
         )
         # book01's own tree survived: the read did not come from book02.
-        self.assertIn(seeded.scene_id, book1_structure.read_text(encoding="utf-8"))
+        self.assertIsNotNone(_find(self.service.read_structure().root, lambda node: node.id == seeded.id))
 
     def test_a_concurrent_open_does_not_redirect_a_manuscript_write(self) -> None:
         created = self.service.create_structure_node(
             _structure_node_request("Act One", "manuscript:act")
         )
         act = _find(created.root, lambda node: node.title == "Act One")
-        scene_node = _find(created.root, lambda node: bool(node.scene_id))
-        book2_structure = self.book2 / "manuscript.structure.yaml"
-        before = book2_structure.read_text(encoding="utf-8")
+        scene_node = _find(created.root, lambda node: node.type == "manuscript:scene")
+        before = _scene_bytes(self.book2)
 
-        self._race_after_reading_the_tree("_read_structure")
+        self._race_after_reading_the_tree("_read_tree")
         self.service.move_structure_node(scene_node.id, act.id, 0)
 
-        self.assertEqual(book2_structure.read_text(encoding="utf-8"), before)
-        moved = self.service._read_yaml(self.book1 / "manuscript.structure.yaml")
-        self.assertIn(scene_node.id, str(moved))
+        self.assertEqual(_scene_bytes(self.book2), before, "the move wrote into book02")
+        moved = _find(self.service.read_structure().root, lambda node: node.id == act.id)
+        self.assertEqual([child.id for child in moved.children], [scene_node.id])
 
     def test_a_concurrent_open_does_not_redirect_a_rename(self) -> None:
         """The instance #399 was filed for.
@@ -144,7 +143,7 @@ class StructureWritesStayInTheCallersProjectTests(unittest.TestCase):
         )
         before = victim.read_text(encoding="utf-8")
 
-        self._race_after_reading_the_tree("_read_structure")
+        self._race_after_reading_the_tree("_read_tree")
         self.service.rename_structure_node(scene_node.id, "Renamed In Book One")
 
         # Tolerates the file being gone rather than merely changed: a rename
@@ -152,10 +151,8 @@ class StructureWritesStayInTheCallersProjectTests(unittest.TestCase):
         # book02's scene as well as rewriting it.
         after = victim.read_text(encoding="utf-8") if victim.exists() else "<the file was moved>"
         self.assertEqual(after, before, "the rename reached book02's scene")
-        self.assertIn(
-            "Renamed In Book One",
-            (self.book1 / "manuscript.structure.yaml").read_text(encoding="utf-8"),
-        )
+        renamed = _find(self.service.read_structure().root, lambda node: node.id == scene_node.id)
+        self.assertEqual(renamed.title, "Renamed In Book One")
 
 
 def _find(node, predicate):
@@ -168,6 +165,10 @@ def _find(node, predicate):
         if found is not None:
             return found
     return None
+
+
+def _scene_bytes(root: Path) -> dict[str, bytes]:
+    return {path.name: path.read_bytes() for path in sorted((root / "scenes").glob("*.md"))}
 
 
 def _scene_file_for(root: Path, stem: str) -> Path:

@@ -7,13 +7,15 @@
 // (the Draft pane only tints, never re-shapes — ADR-0022 — so including
 // containers costs nothing).
 //
-// Each node carries a `parent` metadata ref = its immediate container's node id
-// (unset for roots). This is the materialized backing of the containment
-// relation (ADR-0037 §4): the Draft/Research default view is a recursive Nest on
-// `parent` (`defaultView("scene")`), so the tree is rebuilt by the ordinary Nest
-// evaluator — not a `presentation: "tree"` special case (eradicated by §3). When
-// containment later moves to real stored references (#217), only this backing
-// swaps; the view spec is unchanged.
+// Each node carries a `parent` metadata ref = its immediate container's id
+// (unset for roots). This is the containment relation (ADR-0037 §4): the
+// Draft/Research default view is a recursive Nest on `parent`
+// (`defaultView("scene")`), so the tree is rebuilt by the ordinary Nest evaluator
+// — not a `presentation: "tree"` special case (eradicated by §3). Since ADR-0094
+// each node stores its own `parent` on its file; this adapter projects the parent
+// the backend's built tree HONOURED, never the raw front-matter value — a node
+// whose stored parent is broken sits at the top level of the built tree, and
+// reading the raw value would make it neither a root nor anyone's child.
 
 import type { EvalNode } from "@/lib/views/evaluateView";
 import type { MetadataValue, StructureDocument, StructureNode } from "@/lib/types";
@@ -41,11 +43,9 @@ export function structureToEvalNodes(structure: StructureDocument | null): EvalN
     // divergent stored `metadata.status` to overwrite).
     if (node.status) metadata.status = node.status;
     // The containment ref the Draft/Research Nest joins on (ADR-0037 §4). Roots
-    // leave it unset ⇒ `field: parent unset` seeds them as nest roots. `parent` is
-    // a SYNTHETIC structural key and intentionally wins here; it is not (yet) a
-    // reserved schema key, so a user metadata field literally named `parent` would
-    // be shadowed — a known narrow limitation that dissolves when containment
-    // becomes a real stored reference (#217), when this backing simply swaps.
+    // leave it unset ⇒ `field: parent unset` seeds them as nest roots. `parent`
+    // is reserved on the tree kinds (ADR-0094 §1: the schema refuses a user field
+    // of that name there), so it never shadows a real one.
     if (parentId) metadata.parent = parentId;
     out.push({
       id: node.id,
@@ -62,11 +62,10 @@ export function structureToEvalNodes(structure: StructureDocument | null): EvalN
       // disjoint-keys invariant above is what makes carrying both consistent
       // rather than two sources of truth.
       computed_metadata: node.computed_metadata ?? {},
-      // #201: a scene's canonical identity is its front-matter `scene_id`, which
-      // is what the reverse reference index keys on — while its roster `id` is
-      // the structure `node.id`. Carry it so `field_of(…, references)` bridges
-      // the two id spaces. `||`: a container (no scene_id) or a blank id ⇒ omitted
-      // so `id` is treated as canonical, never a lookup on the empty string.
+      // #201: the id the reverse reference index keys on. Since ADR-0094 a tree
+      // node's id IS its file's id, so this repeats `id`; kept so the evaluator's
+      // `ref_id ?? id` bridge reads one shape for every roster. `||` keeps a blank
+      // one from becoming a lookup on the empty string.
       ref_id: node.scene_id || undefined,
     });
     for (const child of node.children ?? []) walk(child, node.id);

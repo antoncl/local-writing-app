@@ -1,5 +1,4 @@
 import type {
-  LooseScene,
   Scene,
   Snapshot,
   SnapshotDetail,
@@ -18,17 +17,6 @@ export const manuscriptApi = {
     return request<StructureDocument>("/structure/nodes", {
       method: "POST",
       body: JSON.stringify({ title, entry_type: entryType, parent_id: parentId ?? null }),
-    });
-  },
-  getLooseScenes() {
-    // Scene files on disk no manuscript node references — the import offer,
-    // read on its own now (#635) rather than off the validation report.
-    return request<LooseScene[]>("/structure/loose-scenes");
-  },
-  importLooseScenes(sceneIds: string[]) {
-    return request<StructureDocument>("/structure/import-loose", {
-      method: "POST",
-      body: JSON.stringify({ scene_ids: sceneIds }),
     });
   },
   renameStructureNode(nodeId: string, title: string) {

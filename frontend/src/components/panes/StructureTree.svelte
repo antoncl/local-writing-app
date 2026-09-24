@@ -29,11 +29,9 @@
       delete: (nodeId: string) => Promise<StructureDocument>;
     };
     openLeaf: (sceneId: string) => Promise<void>;
-    // Double-click on a container row. Manuscript opens the structure-node
-    // editor; research has none, so it falls through to an inline rename
-    // (groupDblClickRenames).
+    // Double-click on a container row opens the container's own node — an act,
+    // a chapter, a research topic are all files (ADR-0094).
     onGroupDblClick?: (nodeId: string) => void;
-    groupDblClickRenames?: boolean;
     cascadeLabels: {
       leaf: { singular: string; plural: string };
       container: { singular: string; plural: string };
@@ -245,15 +243,10 @@
     });
   }
 
-  // Container double-click: manuscript opens the structure-node editor, research
-  // renames inline (via the wrapper's imperative beginRename). The wrapper cancels
-  // the pending collapse (defer-guard) before invoking this.
+  // Container double-click opens the container. The wrapper cancels the pending
+  // collapse (defer-guard) before invoking this.
   function handleGroupDblClick(node: EvalNode) {
-    if (config.groupDblClickRenames) {
-      list?.beginRename(node.id, node.title);
-    } else {
-      config.onGroupDblClick?.(node.id);
-    }
+    config.onGroupDblClick?.(node.id);
   }
 
   function requestDelete(node: EvalNode) {

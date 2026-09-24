@@ -180,6 +180,34 @@ class PlacementIsNotContentTests(TreeNodesTestCase):
         self.assertEqual(len(self.service.list_snapshots(scene_id).snapshots), before + 1)
 
 
+class PlacementKeysAreReservedTests(TreeNodesTestCase):
+    def _add_field(self, field_id: str, entry_type: str) -> None:
+        from app.models import MetadataFieldDefinition, UpsertMetadataFieldRequest
+
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=self.service._metadata_schema_layer_id(self.root),
+                field_id=field_id,
+                field=MetadataFieldDefinition(name=field_id.title(), type="text"),
+                entry_type=entry_type,
+            )
+        )
+
+    def test_a_tree_kind_cannot_carry_a_field_named_parent_or_rank(self) -> None:
+        """ADR-0094 §1: on a tree node those keys are its placement."""
+        from app.services.project.errors import ProjectServiceError
+
+        for field_id in ("parent", "rank"):
+            with self.assertRaises(ProjectServiceError) as raised:
+                self._add_field(field_id, "manuscript:scene")
+            self.assertEqual(raised.exception.status_code, 422)
+            self.assertIn("where the node sits", raised.exception.message)
+
+    def test_another_kind_may(self) -> None:
+        self._add_field("rank", "lore:character")
+        self.assertIn("rank", self.service.read_metadata_schema().entry_types["lore:character"].fields)
+
+
 class IndexCarriesPlacementTests(TreeNodesTestCase):
     def test_a_warm_reopen_from_the_index_snapshot_keeps_the_tree(self) -> None:
         chapter = self._container("Chapter 1")

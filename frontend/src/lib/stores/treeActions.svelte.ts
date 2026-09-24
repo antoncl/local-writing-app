@@ -275,7 +275,7 @@ class TreeActions {
     let message = `Delete ${typeName} "${node.title}"?`;
     if (cascadeParts.length > 0) {
       message += `\n\nThis will also permanently remove ${cascadeParts.join(" and ")} inside it.`;
-    } else if (node.scene_id) {
+    } else if (node.type === config.leafType) {
       message += ` This removes the ${leafLabels.singular} file from the project.`;
     } else {
       message += ` This removes the ${containerLabels.singular} from the project.`;
@@ -376,8 +376,9 @@ class TreeActions {
       delete: api.deleteResearchNode.bind(api),
     },
     openLeaf: (sceneId) => editorPanes.openResearchNote(sceneId),
-    // Research has no container editor to open, so a group double-click renames.
-    groupDblClickRenames: true,
+    // A topic is a file like any research node (ADR-0094 §7), so a group
+    // double-click opens it — it used to rename, having nothing to open.
+    onGroupDblClick: (nodeId) => void this.run(() => editorPanes.openResearchNote(nodeId)),
     cascadeLabels: {
       leaf: { singular: "note", plural: "notes" },
       container: { singular: "topic", plural: "topics" },

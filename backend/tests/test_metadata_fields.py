@@ -1036,9 +1036,9 @@ class MetadataFieldTests(MetadataValidationBase):
         self.service.upsert_metadata_field(
             UpsertMetadataFieldRequest(
                 layer_id=world_layer.id,
-                field_id="rank",
+                field_id="grade",
                 field=MetadataFieldDefinition(
-                    name="Rank", type="select", options=["a", "b", "c"]
+                    name="Grade", type="select", options=["a", "b", "c"]
                 ),
                 entry_type="manuscript:scene",
             )
@@ -1052,21 +1052,21 @@ class MetadataFieldTests(MetadataValidationBase):
                 base_revision=scene.revision,
                 status=scene.status,
                 entry_type=scene.entry_type,
-                metadata={"rank": "a"},
+                metadata={"grade": "a"},
             ),
         )
         # Reorder only (no rename map) — value must be untouched, not swapped.
         self.service.upsert_metadata_field(
             UpsertMetadataFieldRequest(
                 layer_id=world_layer.id,
-                field_id="rank",
+                field_id="grade",
                 field=MetadataFieldDefinition(
-                    name="Rank", type="select", options=["b", "a", "c"]
+                    name="Grade", type="select", options=["b", "a", "c"]
                 ),
                 entry_type="manuscript:scene",
             )
         )
-        self.assertEqual(self.service.read_scene(self.scene_id).metadata, {"rank": "a"})
+        self.assertEqual(self.service.read_scene(self.scene_id).metadata, {"grade": "a"})
 
     def test_removing_option_clears_value_from_entries(self) -> None:
         world_layer = next(

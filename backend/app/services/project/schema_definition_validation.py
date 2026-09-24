@@ -22,6 +22,7 @@ from app.models import (
     NodePickerConfig,
 )
 from app.services.project.metadata_refs import REF_FIELD_TYPES
+from app.services.project.placement import PLACEMENT_KEYS, TREE_KINDS
 from app.services.project.schema_validation import ENTRY_TYPE_FQN_RE
 
 
@@ -90,6 +91,22 @@ def _entry_type_summary_field_errors(entry_type_id: str, entry_type, schema: Met
             f"Metadata entry_type {entry_type_id} nominates summary field {field_id} more than once."
         )
     return errors
+
+
+def _entry_type_placement_key_errors(entry_type_id: str, entry_type) -> list[str]:
+    """A tree kind's type may not carry a field named `parent` or `rank`
+    (ADR-0094 §1). Those keys are a tree node's placement — its own front
+    matter, read by the tree and shown to views as the containment ref — so a
+    field of that name would be shadowed wherever the node is read. A field of
+    that name on any other kind is untouched."""
+    if entry_type.kind not in TREE_KINDS:
+        return []
+    return [
+        f"Node type {entry_type_id} cannot have a field named '{field_id}': on a "
+        f"{entry_type.kind} node it is where the node sits in the tree."
+        for field_id in entry_type.fields
+        if field_id in PLACEMENT_KEYS
+    ]
 
 
 def _entry_type_group_application_errors(entry_type_id: str, entry_type, schema: MetadataSchema) -> list[str]:
@@ -291,6 +308,8 @@ class MetadataSchemaValidationMixin:
             errors.extend(_entry_type_summary_field_errors(entry_type_id, entry_type, schema))
         for entry_type_id, entry_type in schema.entry_types.items():
             errors.extend(_entry_type_group_application_errors(entry_type_id, entry_type, schema))
+        for entry_type_id, entry_type in schema.entry_types.items():
+            errors.extend(_entry_type_placement_key_errors(entry_type_id, entry_type))
         for field_id, field in schema.fields.items():
             errors.extend(_field_shape_errors(field_id, field, schema))
         return errors

@@ -142,6 +142,44 @@ class LayerOverrideTests(unittest.TestCase):
         self._save_override("honor", {"rank": "Captain"})
         self.assertEqual(self.service.read_lore_entry("honor").metadata["rank"], "Captain")
 
+    def test_an_unchanged_book_save_does_not_pin_a_middle_layers_override(self) -> None:
+        # #2190: `overrides_by_target`'s `layer_rank` is stamped from the FULL
+        # walk (machine + Library included); comparing it against a rank from
+        # the default walk (which omits both) is off by the count left out —
+        # a middle layer's override no longer counts as "above" the book, so
+        # an unchanged save at the book used to pin it as the book's own row.
+        declare_full_chain(ProjectService(WorkScope(root=self.series)), self.series, self.base)
+        self._write_lore_at(self.universe, "honor", "Honor Harrington", {"rank": "Ensign"})
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Body.", entry_type="lore:character",
+                metadata={"rank": "Commodore"}, authoring_layer_id=self._layer_id(self.series),
+            ),
+        )
+        # The book reads the series' override and saves it back UNCHANGED.
+        echo = self.service.read_lore_entry("honor")
+        self.assertEqual(echo.metadata["rank"], "Commodore")
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Body.", entry_type="lore:character",
+                metadata={"rank": "Commodore"}, base_revision=echo.revision,
+                authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        # No book-level override file was minted…
+        self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
+        # …so a later series change still reaches the book.
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Body.", entry_type="lore:character",
+                metadata={"rank": "Admiral"}, authoring_layer_id=self._layer_id(self.series),
+            ),
+        )
+        self.assertEqual(self.service.read_lore_entry("honor").metadata["rank"], "Admiral")
+
     # --- the edge fold -------------------------------------------------
 
     def test_effective_edges_reflect_the_override(self) -> None:
@@ -310,7 +348,8 @@ class LayerOverrideTests(unittest.TestCase):
         # The book redeclares `context_policy` with default `never`; the rail
         # pops the key when `never` is picked. Authoring that pick at the
         # SERIES (whose default is still `auto`) must write `never`, not the
-        # series' default — the echo is read with the schema the client saw.
+        # series' default — the echo written to disk is spelled with the
+        # schema the submitting client (the open book) read with (#1917).
         self.service._write_yaml(
             self.root / "metadata.schema.yaml",
             {"version": 1, "fields": {"context_policy": {"default": "never"}}},
@@ -319,10 +358,14 @@ class LayerOverrideTests(unittest.TestCase):
             self.universe, "lore_honor", "Honor Harrington", {"rank": "Commander", "context_policy": "always"}
         )
         saved = self._save_override("lore_honor", {"rank": "Commander"}, layer=self.series)
-        self.assertNotIn("context_policy", saved.metadata)
-        self.assertEqual(saved.overridden_fields, ["context_policy"])
         text = next((self.series / OVERRIDES_FOLDER).glob("*.md")).read_text(encoding="utf-8")
         self.assertIn("value: never", text)
+        # The save response is as-of the request's own authoring layer (#2189)
+        # — the series, whose own schema does NOT redeclare `context_policy`
+        # with a `never` default, so the override reads back literal there,
+        # not sparse (only the book's redeclared default would strip it).
+        self.assertEqual(saved.metadata["context_policy"], "never")
+        self.assertEqual(saved.overridden_fields, ["context_policy"])
 
     def test_a_delta_holding_the_literal_default_keeps_its_mark(self) -> None:
         # #1917: an import, an AI patch or a pre-#1421 client wrote the default
@@ -529,6 +572,117 @@ class LayerOverrideTests(unittest.TestCase):
         self.assertTrue(any("missing entry honor" in warning for warning in index.warnings))
         # The override file is never promoted to base and never unlinked.
         self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+
+
+class AsOfLayerReadTests(unittest.TestCase):
+    """`read_lore_entry(as_of_layer_id=...)` and the save response it backs
+    (#2189): an edit is made against the entry as a chosen ancestor layer
+    sees it, not the open project's fully folded view — so a save at that
+    layer never copies a descendant's override into canon."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.universe = self.base / "honorverse"
+        self.series = self.universe / "honor-harrington"
+        self.root = self.series / "book01"
+        self.service = ProjectService.created_at(self.root, "Book 1")
+        declare_full_chain(self.service, self.root, self.base)
+        declare_full_chain(ProjectService(WorkScope(root=self.series)), self.series, self.base)
+        self.service._write_yaml(
+            self.base / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "fields": {"rank": {"name": "rank", "type": "text", "label": "Rank"}},
+                "entry_types": {"lore:character": {"fields": ["rank"]}},
+            },
+        )
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _layer_id(self, folder: Path) -> str:
+        return next(layer.id for layer in self.service.collect_layers(self.root) if layer.folder == folder)
+
+    def _write_lore_at(self, folder: Path, node_id: str, title: str, metadata: dict) -> None:
+        writer = ProjectService(WorkScope(root=folder))
+        writer._write_lore_entry_file(
+            folder / "lore" / f"{node_id}.md",
+            LoreEntry(id=node_id, title=title, body="Body.", revision="", entry_type="lore:character", metadata=metadata),
+        )
+
+    def _save_override(self, entry_id: str, metadata: dict, *, layer: Path) -> LoreEntry:
+        return self.service.save_lore_entry(
+            entry_id,
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Body.", entry_type="lore:character",
+                metadata=metadata, authoring_layer_id=self._layer_id(layer),
+            ),
+        )
+
+    def test_as_of_each_layer_sees_its_own_fold(self) -> None:
+        # Owned at the universe (Ensign), overridden at the series (Commodore)
+        # and again at the book (Captain).
+        self._write_lore_at(self.universe, "honor", "Honor Harrington", {"rank": "Ensign"})
+        self._save_override("honor", {"rank": "Commodore"}, layer=self.series)
+        self._save_override("honor", {"rank": "Captain"}, layer=self.root)
+
+        default = self.service.read_lore_entry("honor")
+        self.assertEqual(default.metadata["rank"], "Captain")
+
+        as_series = self.service.read_lore_entry("honor", as_of_layer_id=self._layer_id(self.series))
+        self.assertEqual(as_series.metadata["rank"], "Commodore")
+
+        as_owner = self.service.read_lore_entry("honor", as_of_layer_id=self._layer_id(self.universe))
+        self.assertEqual(as_owner.metadata["rank"], "Ensign")
+        self.assertEqual(as_owner.overridden_fields, [])
+
+        # The composite revision spans the whole chain regardless of L, so the
+        # concurrency check a pane seeded from any of these reads runs against
+        # is the same one.
+        self.assertEqual(default.revision, as_series.revision)
+        self.assertEqual(default.revision, as_owner.revision)
+
+    def test_unknown_as_of_layer_is_rejected(self) -> None:
+        self._write_lore_at(self.universe, "honor", "Honor Harrington", {"rank": "Ensign"})
+        with self.assertRaises(ProjectServiceError) as caught:
+            self.service.read_lore_entry("honor", as_of_layer_id="not-a-layer")
+        self.assertEqual(caught.exception.status_code, 422)
+
+    def test_a_layer_above_the_owner_is_rejected(self) -> None:
+        self._write_lore_at(self.universe, "honor", "Honor Harrington", {"rank": "Ensign"})
+        with self.assertRaises(ProjectServiceError) as caught:
+            self.service.read_lore_entry("honor", as_of_layer_id=self._layer_id(self.base))
+        self.assertEqual(caught.exception.status_code, 422)
+
+    def test_switching_to_the_owning_layer_shows_canon_and_saving_there_keeps_it(self) -> None:
+        # #2189 end-to-end: a book override never rides along into a save made
+        # at the owning layer.
+        self._write_lore_at(self.universe, "honor", "Honor Harrington", {"rank": "Ensign"})
+        self._save_override("honor", {"rank": "Captain"}, layer=self.root)
+
+        as_owner = self.service.read_lore_entry("honor", as_of_layer_id=self._layer_id(self.universe))
+        self.assertEqual(as_owner.metadata["rank"], "Ensign")
+
+        saved = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Honor's new body.", entry_type="lore:character",
+                metadata={"rank": "Ensign"}, authoring_layer_id=self._layer_id(self.universe),
+                base_revision=as_owner.revision,
+            ),
+        )
+        # Canon keeps rank Ensign — the book's Captain override never rode along.
+        # (The direct edit may have renamed the canon file to match the title
+        # it wrote — #392 — so resolve the current path through the index
+        # rather than assume the fixture's filename survived.)
+        canon_path = self.service._build_node_index().by_id["honor"].path
+        canon_front_matter = self.service._read_front_matter_only(canon_path)
+        self.assertEqual(canon_front_matter["metadata"]["rank"], "Ensign")
+        # The book still reads its own override.
+        self.assertEqual(self.service.read_lore_entry("honor").metadata["rank"], "Captain")
+        # The save response equals the as-of-owner view.
+        self.assertEqual(saved.metadata["rank"], "Ensign")
 
 
 if __name__ == "__main__":

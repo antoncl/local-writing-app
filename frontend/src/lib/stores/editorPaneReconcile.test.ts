@@ -116,7 +116,10 @@ describe("reconcileNodeFromServer", () => {
 
     await reconcileNodeFromServer(host, "lore_1", "lore");
 
-    expect(api.getLoreEntry).toHaveBeenCalledWith("lore_1");
+    // The re-fetch reads the pane's OWN authoring layer (#2189) — a replace
+    // never moves it, so the reload must not silently fall back to the open
+    // project's fold.
+    expect(api.getLoreEntry).toHaveBeenCalledWith("lore_1", "layer_a");
     const updated = host.panes.find((candidate) => candidate.id === "p1");
     expect(updated).toMatchObject({
       scene: entry,

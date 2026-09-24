@@ -455,7 +455,9 @@ class PromptEntriesMixin:
             )
 
         # Resolve the authoring layer L; absent request layer → the open project.
-        layer_by_id = {layer.id: layer for layer in self.collect_layers(root)}
+        # Ranks come from the full walk (#2190) so they line up with
+        # `overrides_by_target`'s `layer_rank` — see `_authoring_layers_by_id`.
+        layer_by_id = self._authoring_layers_by_id(root)
         if request.authoring_layer_id:
             authoring_layer = layer_by_id.get(request.authoring_layer_id)
             if authoring_layer is None:

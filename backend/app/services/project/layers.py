@@ -335,6 +335,28 @@ class LayerWalkMixin:
         )
         return collector.layers
 
+    def _authoring_layers_by_id(self, root: Path) -> dict[str, IndexLayer]:
+        """`{layer.id: layer}` for every layer an authoring/owning-layer lookup
+        may name, with `rank` taken from the FULL walk (#2190).
+
+        `overrides_by_target`'s `LayerOverride.layer_rank` is stamped from the
+        cold index build's full walk (`include_machine=True,
+        include_library=True` — `references.py`), while the default
+        `collect_layers(root)` a rail-picker save used to build `layer_by_id`
+        from leaves both out. Comparing a record's `layer_rank` against a rank
+        from the default walk is therefore off by the count of left-out
+        layers — the exact trap `_composing_layer_bounds`
+        (`change_candidates.py`) already documents and guards against. This
+        helper gives every lore/prompt authoring-layer resolution the same
+        full-walk ranks, while MEMBERSHIP (which ids are valid authoring/
+        owning layers at all) stays exactly what it is today: the default
+        walk's ids only — an id outside it (e.g. the machine or Library layer)
+        is still "Unknown authoring layer." / cannot author, filtered out here
+        rather than admitted with a borrowed rank."""
+        default_ids = {layer.id for layer in self.collect_layers(root)}
+        full_layers = self.collect_layers(root, include_machine=True, include_library=True)
+        return {layer.id: layer for layer in full_layers if layer.id in default_ids}
+
     def layer_by_id(self, root: Path, layer_id: str, *, include_machine: bool = False) -> IndexLayer | None:
         """Reverse a `source_layer_id` back to its layer, or None when unknown."""
         return next(

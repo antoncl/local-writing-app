@@ -22,8 +22,12 @@ export const loreApi = {
       body: JSON.stringify({ title, entry_type: entryType }),
     });
   },
-  getLoreEntry(entryId: string) {
-    return request<LoreEntry>(`/lore/${entryId}`);
+  // `layerId` reads the entry as a chosen ancestor layer sees it (#2189) — the
+  // "Editing at" rail picker's seed for a pane before a save at that layer.
+  // Omitted (or falsy), reads as the open project does, unchanged.
+  getLoreEntry(entryId: string, layerId?: string | null) {
+    const query = layerId ? `?layer_id=${encodeURIComponent(layerId)}` : "";
+    return request<LoreEntry>(`/lore/${entryId}${query}`);
   },
   // The entry's body with its whole-body code fence stripped (#1628), read-only —
   // fed into the standard revision review so the user commits or declines the

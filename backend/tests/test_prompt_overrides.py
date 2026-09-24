@@ -174,6 +174,25 @@ class PromptOverrideTests(unittest.TestCase):
             [beta, gamma, romance],
         )
 
+    def test_an_unchanged_book_save_does_not_pin_a_middle_layers_override(self) -> None:
+        # #2190 counterpart for prompts: `overrides_by_target`'s `layer_rank`
+        # is stamped from the full walk (machine + Library included);
+        # comparing it against the default walk's rank (which omits both) is
+        # off by the count left out, so a middle layer's override no longer
+        # counted as "above" the book — an unchanged save at the book used to
+        # pin it as the book's own row.
+        self._write_prompt_at(self.universe, "revise", "Revise plotline", {"color": "slate"})
+        self._save_override("revise", {"color": "amber"}, layer=self.series)
+
+        echo = self.service.read_prompt_entry("revise")
+        self.assertEqual(echo.metadata["color"], "amber")
+        self._save_override("revise", {"color": "amber"}, layer=self.root, base_revision=echo.revision)
+        # No book-level override file was minted…
+        self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
+        # …so a later series change still reaches the book.
+        self._save_override("revise", {"color": "cobalt"}, layer=self.series)
+        self.assertEqual(self.service.read_prompt_entry("revise").metadata["color"], "cobalt")
+
     def test_the_prompt_list_shows_the_effective_overridden_value(self) -> None:
         # list_prompt_entries opts into the fold (the display list must show the
         # effective value); the snippet-render path does not. Pins that opt-in.

@@ -5,11 +5,13 @@
 // read), so the seam must report "no body" as `undefined`, never "": coalescing
 // here would silently capture an empty body for those kinds. The none shape
 // is the one branch that mounts without TipTap, so it is the one under test.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@/lib/test/component";
 import EditorBodyHost from "./EditorBodyHost.svelte";
 import { api } from "@/lib/api";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
+import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
 
 type Seams = {
@@ -173,6 +175,78 @@ const REL_ENTRIES: LoreEntrySummary[] = [
   { id: "char_tomas", title: "Tomas", body: "", entry_type: "lore:character", metadata: {} },
   { id: "char_elena", title: "Elena", body: "", entry_type: "lore:character", metadata: {} },
 ];
+
+// The body diff overlay (a pending AI proposal) covers the body + its long_text
+// sections, which all live on the Body tab. A list tab (References,
+// Conversations, …) takes the body grid slot, so the overlay must render ONLY on
+// the Body tab — otherwise it paints over the active list tab regardless of
+// which tab you pick.
+const REVIEW_SCHEMA = {
+  version: 1,
+  entry_types: { "lore:character": { name: "Character", kind: "lore", fields: ["kin"] } },
+  fields: { kin: { name: "Kin", type: "entity_ref_list", options: [], picker_config: { sources: [{ kind: "lore" }] } } },
+} as unknown as MetadataSchema;
+
+function reviewController(): EntryProposalController {
+  const c = new EntryProposalController();
+  c.nodeId = "e1";
+  c.schema = REVIEW_SCHEMA;
+  entryBrainstorm.propose("e1", { body: "proposed body", fields: {} });
+  return c;
+}
+
+function mountReview(activeBodyTab: string, bodyShape: "prose" | "code" = "prose") {
+  const noop = () => {};
+  return render(EditorBodyHost, {
+    props: {
+      model: baseModel({
+        scene: { id: "e1", title: "Mara" },
+        bodyShape,
+        loadedSceneId: "e1",
+        entryType: "lore:character",
+        metadata: { kin: ["lore_1"] },
+        metadataSchema: REVIEW_SCHEMA,
+        reviewing: true,
+        entryReview: reviewController(),
+        activeBodyTab,
+      }),
+      deps: baseDeps({
+        loreEntries: [{ id: "lore_1", title: "Tomas", entry_type: "lore:character", metadata: {} }],
+        promptDrafts: { drafts: {}, nextDraftId: () => "d1", slugify: (s: string) => s },
+      }),
+      on: { change: noop, focus: noop, openChat: noop, requestInputsDialog: noop, metadataChange: noop, viewSaveState: noop, navigate: noop },
+    } as never,
+  });
+}
+
+// Both body shapes that mount the overlay (prose — the common lore/note case —
+// and code — a prompt template, #711) gate it the same way, by two different
+// template paths (a wrapper `{#if}` for prose, an inline `&&` for code), so both
+// are exercised.
+describe.each(["prose", "code"] as const)("EditorBodyHost — the body diff overlay is Body-tab-only (%s)", (shape) => {
+  beforeEach(() => {
+    entryBrainstorm.clear("e1");
+    // ProseBodyView loads the AI-cost log on mount; keep the seam off the network.
+    vi.spyOn(api, "aiListInvocations").mockResolvedValue({ invocations: [] } as never);
+  });
+  afterEach(() => {
+    entryBrainstorm.clear("e1");
+    vi.restoreAllMocks();
+  });
+
+  it("renders the proposal diff overlay on the Body tab", () => {
+    const { container } = mountReview("body", shape);
+    expect(container.querySelector(".entry-revision-review")).not.toBeNull();
+  });
+
+  it("does NOT render the body diff overlay on a list tab", () => {
+    const { container } = mountReview("list:kin", shape);
+    // The list tab is active — the diff belongs to the body, not this tab.
+    expect(container.querySelector(".entry-revision-review")).toBeNull();
+    // …and the list tab itself still renders.
+    expect(container.querySelector(".ref-list-tab")).not.toBeNull();
+  });
+});
 
 describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5)", () => {
   afterEach(() => vi.restoreAllMocks());

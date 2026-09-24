@@ -360,7 +360,7 @@
   {/if}
 {/if}
 {#if model.bodyShape === "code"}
-  {#if model.entryReview.hasReview && model.entryReview.proposal}
+  {#if listFieldId === null && model.entryReview.hasReview && model.entryReview.proposal}
     <!-- A commit brainstorm reviewed on a code-bodied node (a prompt template —
          #711). Same overlay as prose; the raw body stays mounted and hidden
          beneath (frozen diff base), thawing to the adopted text on commit. -->
@@ -393,6 +393,11 @@
   </div>
 {/if}
 {#if model.bodyShape === "prose"}
+  <!-- The body overlays (scrub / snapshot park / AI-proposal diff) belong to the
+       Body tab only. A list tab (References, Conversations, …) takes the body
+       grid slot below and the body host already hides on `listFieldId !== null`,
+       so an overlay left mounted would paint over the active list tab. -->
+  {#if listFieldId === null}
   {#if model.scrubbed}
     <!-- The effective body as of the scrub point (§4.4). -->
     <ReadOnlyBodyOverlay
@@ -417,6 +422,7 @@
     />
   {:else if model.entryReview.hasReview && model.entryReview.proposal}
     <EntryReviewOverlay review={model.entryReview} />
+  {/if}
   {/if}
   <div
     class="prose-body-host"

@@ -733,6 +733,44 @@ class LayeredPropagationTests(unittest.TestCase):
         self.assertIn("<rank>Sergeant</rank>", element.xml)
         self.assertNotIn("<rank>Major</rank>", element.xml)
 
+    def test_render_baseline_element_folds_a_body_override_into_the_before(self) -> None:
+        """Amendment 4 §7: the before side's body folds the same override
+        lanes' baseline rows the metadata fold already does — a book body
+        override edited after a confirm shows the OLD override body in the
+        before, not the new one and not canon, while the now-state (via
+        `read_lore_entry`) is the new override body."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="As the book first knew him.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        self.service.propagate_change(self.marek, PropagateRequest(kept=[self.ch5]))
+
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="As the book knows him now, years later.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+
+        message = self.service.change_message(self.marek)
+        assert message.baseline_snapshot_id
+        element = self.service.render_baseline_element(self.marek, message.baseline_snapshot_id)
+        self.assertIn("As the book first knew him.", element.xml)
+        self.assertNotIn("As the book knows him now", element.xml)
+
+        now = self.service.read_lore_entry(self.marek)
+        self.assertEqual(now.body.strip(), "As the book knows him now, years later.")
+
 
 if __name__ == "__main__":
     unittest.main()

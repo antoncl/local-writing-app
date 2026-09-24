@@ -140,13 +140,19 @@ class ChangePropagationMixin:
         kind = self.node_snapshot_kind(source)
         detail = self.read_snapshot(source, snapshot_id, kind=kind)
         schema = self.read_metadata_schema()
-        folded_metadata = self._fold_propagation_baseline_metadata(
-            source, kind, detail.metadata, schema, detail.snapshot
+        baseline_records = self._propagation_baseline_records(source, kind, detail.snapshot)
+        folded_metadata = self._fold_propagation_baseline_metadata(baseline_records, detail.metadata, schema)
+        # Amendment 4 §7: the before side's title/body fold the same lanes'
+        # baseline rows, so a book's body-override edit shows the OLD
+        # override body here, not canon (materialize_override_content skips
+        # title/body when folding metadata above).
+        folded_title, folded_body = self.materialize_override_content(
+            baseline_records, detail.title, detail.body
         )
         before_entry = {
-            "title": detail.title,
+            "title": folded_title,
             "metadata": folded_metadata,
-            "body": detail.body,
+            "body": folded_body,
             "entry_type": source_entry.entry_type,
         }
         xml = _render_node_xml(
@@ -198,21 +204,17 @@ class ChangePropagationMixin:
             )
         return ChangeMessage(source_id=source, baseline_snapshot_id=resolved_baseline, text=text)
 
-    def _fold_propagation_baseline_metadata(
-        self, source_id: str, kind: str, base_metadata: dict, schema: Any, since: Snapshot
-    ) -> dict:
-        """Amendment 3 §5: the *before* side folds the owning baseline's
-        metadata with every override delta lane's OWN baseline rows — the
-        same fold the live read uses (`materialize_override_metadata`),
-        outermost-first as `_composing_files` already orders them. Each
-        lane's baseline is resolved by ADR-0091 §1's "since" rule — the
-        newest snapshot of that lane, of any origin, captured at or before
-        `since` (the owning baseline's own captured time) — the same
-        resolver `_change_candidate_diff` uses, so the message's *before*
-        side measures the identical change the confirm surface showed. A
-        lane with no baseline at or before `since` contributes nothing to
-        *before*: it did not yet compose the source at that time."""
-        shapes = self._override_shapes(schema)
+    def _propagation_baseline_records(self, source_id: str, kind: str, since: Snapshot) -> list[LayerOverride]:
+        """Amendment 3 §5 / Amendment 4 §7: every composing delta lane's OWN
+        baseline rows for the *before* side — one `LayerOverride` per lane
+        whose own baseline resolves by ADR-0091 §1's "since" rule (the newest
+        snapshot of that lane, of any origin, captured at or before `since`,
+        the owning baseline's own captured time) — the same resolver
+        `_change_candidate_diff` uses, so *before* measures the identical
+        change the confirm surface showed. A lane with no baseline at or
+        before `since` contributes nothing: it did not yet compose the
+        source at that time. Shared by the metadata fold and the title/body
+        fold so both measure the same lanes at the same baseline."""
         records: list[LayerOverride] = []
         for file in self._composing_files(source_id):
             if not file.is_override:
@@ -223,8 +225,14 @@ class ChangePropagationMixin:
             if baseline is None:
                 continue
             root, node_id, _ = self._resolve_snapshot_target(source_id, kind, layer_id=file.layer_id)
-            baseline_front_matter, _ = self._read_markdown_with_front_matter(
-                self._snapshots_dir(root, node_id) / f"{baseline.id}.md"
+            # `_read_front_matter_only`, never `_read_markdown_with_front_matter`:
+            # the latter locates the closing `---` by substring split, which
+            # swallows a literal `body` row's own trailing newline when that
+            # row is last (the common case) — corrupting the fold this
+            # builds. `_read_front_matter_only` reads line-by-line up to the
+            # delimiter line and never touches the content bytes.
+            baseline_front_matter = self._read_front_matter_only(
+                self._snapshots_dir(root, node_id) / f"{baseline.id}.md", strict=True
             )
             rows = tuple(self._parse_override_rows(baseline_front_matter.get("rows")))
             records.append(
@@ -237,7 +245,17 @@ class ChangePropagationMixin:
                     rows=rows,
                 )
             )
+        return records
+
+    def _fold_propagation_baseline_metadata(
+        self, records: list[LayerOverride], base_metadata: dict, schema: Any
+    ) -> dict:
+        """Amendment 3 §5: the *before* side's metadata, folded from the
+        owning baseline's metadata with `records` (`_propagation_baseline_records`)
+        — the same fold the live read uses (`materialize_override_metadata`),
+        outermost-first as `_composing_files` already orders them."""
         if not records:
             return dict(base_metadata)
+        shapes = self._override_shapes(schema)
         folded, _touched = self.materialize_override_metadata(dict(base_metadata), records, shapes)
         return folded

@@ -262,6 +262,31 @@ class ChangeCandidatesTests(unittest.TestCase):
         self.assertLess(order.index(self.ch11), order.index(self.weir_tavern))
         self.assertLess(order.index(self.ch11), order.index(self.ch9))
 
+    def test_owning_file_retitle_reports_no_field_and_no_body_change(self) -> None:
+        """Amendment 4 §7: a `title` change on the owning file is reported
+        the way it always has been — never as a field in `changed_fields`,
+        and alone it does not set `body_changed`. The parity oracle for the
+        override-lane title tests below."""
+        snapshot = self.service.capture_snapshot(
+            self.marek, kind=self.service.node_snapshot_kind(self.marek)
+        )
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek the Elder",
+                body="He has heard whispers of The Deserter's Rumour.",
+                entry_type="lore:character",
+                metadata={
+                    "rank": "Lieutenant",
+                    "aliases": ["the Captain"],
+                    "posting": self.barracks,
+                },
+            ),
+        )
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=snapshot.id)
+        self.assertNotIn("title", result.changed_fields)
+        self.assertFalse(result.body_changed)
+
     def test_layers_is_one_entry_for_a_non_layered_project(self) -> None:
         """Amendment 3: a project with no ancestor chain has exactly one
         composing file — the owning file itself."""
@@ -978,6 +1003,151 @@ class LayeredBaselineTests(unittest.TestCase):
         )
         by_layer = {layer.layer_id: layer for layer in result.layers}
         self.assertNotIn(self.book_id, by_layer)
+
+    # ----- Amendment 4 §7: title/body override rows -------------------------
+
+    def test_book_body_override_edit_sets_body_changed_never_a_field(self) -> None:
+        """A body row changed in the book's override lane sets `body_changed`
+        exactly as an owning-file body edit does, and never appears as a
+        field in the union or the book lane's own `changed_fields`."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="As the book first knew him.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        kind = self.service.node_snapshot_kind(self.marek)
+        self.service.capture_snapshot(
+            self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
+        )
+        snapshot = self.service.capture_snapshot(self.marek, kind=kind)
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="As the book knows him now, years later.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=snapshot.id)
+        self.assertTrue(result.body_changed)
+        self.assertNotIn("body", result.changed_fields)
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        self.assertNotIn("body", by_layer[self.book_id].changed_fields)
+        self.assertFalse(by_layer[self.book_id].whole)
+        self.assertEqual(by_layer[self.series_id].changed_fields, [])
+
+    def test_book_body_override_unchanged_since_its_baseline_is_not_a_change(self) -> None:
+        """A regression guard: the book's lane baseline is read from a
+        SNAPSHOT copy of the override file, whose `body` row is a multi-line
+        YAML literal block that (in the common row order) ends right at the
+        closing `---`. An unchanged body across that baseline must read as
+        unchanged, not flip `body_changed` on a parser losing the row's
+        trailing newline."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="As the book has always known him.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        kind = self.service.node_snapshot_kind(self.marek)
+        self.service.capture_snapshot(
+            self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
+        )
+        snapshot = self.service.capture_snapshot(self.marek, kind=kind)
+
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=snapshot.id)
+        self.assertFalse(result.body_changed)
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        self.assertFalse(by_layer[self.book_id].whole)
+        self.assertEqual(by_layer[self.book_id].changed_fields, [])
+
+    def test_book_title_override_alone_reports_no_field_and_no_body_change(self) -> None:
+        """A `title` row never appears in `changed_fields`, and alone it does
+        not set `body_changed` — the same shape an owning-file retitle
+        reports (parity oracle:
+        `test_owning_file_retitle_reports_no_field_and_no_body_change`)."""
+        kind = self.service.node_snapshot_kind(self.marek)
+        baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek the Elder",
+                body="Keeper of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=baseline.id)
+        self.assertNotIn("title", result.changed_fields)
+        self.assertFalse(result.body_changed)
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        self.assertNotIn("title", by_layer[self.book_id].changed_fields)
+
+    def test_removed_delta_lane_with_a_body_row_sets_body_changed(self) -> None:
+        """A lane whose override file (holding a `body` row) is removed
+        after the baseline sets `body_changed` — its body falls back to the
+        layer above, exactly as an edit would."""
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="As the book knows him.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+        kind = self.service.node_snapshot_kind(self.marek)
+        self.service.capture_snapshot(
+            self.marek, kind=kind, layer_id=self.book_id, origin="propagation"
+        )
+        owning_baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        self.service._drop_layer_overrides_for_target(self.root, self.marek)
+        node_index_gate.invalidate()
+
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=owning_baseline.id)
+        self.assertTrue(result.body_changed)
+        self.assertNotIn("body", result.changed_fields)
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        self.assertNotIn("body", by_layer[self.book_id].changed_fields)
+
+    def test_new_delta_lane_with_a_body_row_is_whole_and_sets_body_changed(self) -> None:
+        """A lane created after the baseline (no prior baseline in this
+        lane, `whole=True`) with a `body` row sets `body_changed` too."""
+        kind = self.service.node_snapshot_kind(self.marek)
+        baseline = self.service.capture_snapshot(self.marek, kind=kind)
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="As the book knows him.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self.book_id,
+            ),
+        )
+
+        result = self.service.change_candidates(self.marek, baseline_snapshot_id=baseline.id)
+        self.assertTrue(result.body_changed)
+        self.assertNotIn("body", result.changed_fields)
+        by_layer = {layer.layer_id: layer for layer in result.layers}
+        book_layer = by_layer[self.book_id]
+        self.assertTrue(book_layer.whole)
+        self.assertNotIn("body", book_layer.changed_fields)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ from app.services.project.placement import (
     PARENT_KEY,
     RANK_KEY,
     Sibling,
+    file_lock,
     note_placement_write,
     plan_placement,
     set_placement_in_text,
@@ -85,14 +86,17 @@ class TreeNodesMixin:
         Bytes in, bytes out: the text writer translates newlines on Windows,
         which would turn a one-line move into a whole-file change. The write is
         recorded as a placement write, so the session-boundary rule does not
-        count it as a save (§6)."""
-        original = path.read_bytes()
-        updated = set_placement_in_text(original.decode("utf-8"), parent, rank).encode("utf-8")
-        if updated == original:
-            return
-        before = path.stat().st_mtime_ns
-        atomic_write_bytes(path, updated)
-        note_placement_write(path, before, path.stat().st_mtime_ns)
+        count it as a save (§6). Holds the file's lock from read to write, as
+        the typed writers do, so a concurrent save and move cannot undo each
+        other."""
+        with file_lock(path):
+            original = path.read_bytes()
+            updated = set_placement_in_text(original.decode("utf-8"), parent, rank).encode("utf-8")
+            if updated == original:
+                return
+            before = path.stat().st_mtime_ns
+            atomic_write_bytes(path, updated)
+            note_placement_write(path, before, path.stat().st_mtime_ns)
         self._maintain_index_after_write(path)
 
     def _placement_on_disk(self, path: Path) -> tuple[object, object]:

@@ -212,12 +212,17 @@ def _unique_path(folder: Path, title: str) -> Path:
 
 
 def _files_by_id(folder: Path) -> dict[str, Path]:
+    """Each file in the tree's folder by the id the node index gives it: its
+    front-matter `id`, or — for a legacy file without one — its filename stem,
+    which is what a v11 tree file named it by."""
     files: dict[str, Path] = {}
     for path in sorted(folder.glob("*.md")):
         front_matter = _front_matter(path.read_bytes().decode("utf-8", errors="replace"))
         node_id = front_matter.get("id")
         if isinstance(node_id, str) and node_id.strip():
             files.setdefault(node_id.strip(), path)
+        else:
+            files.setdefault(path.stem, path)
     return files
 
 
@@ -245,11 +250,15 @@ def _closing_line(lines: list[str]) -> int | None:
 def _write_placement(path: Path, parent: str | None, rank: int) -> None:
     """Replace `path`'s placement lines, keeping every other byte."""
     original = path.read_bytes()
-    lines = original.decode("utf-8").splitlines(keepends=True)
+    text = original.decode("utf-8").removeprefix("﻿")
+    lines = text.splitlines(keepends=True)
     close = _closing_line(lines)
+    newline = "\r\n" if lines and lines[0].endswith("\r\n") else "\n"
     if close is None:
-        return
-    newline = "\r\n" if lines[0].endswith("\r\n") else "\n"
+        # A legacy file with no front matter keeps its stem id and gains a block
+        # holding just its placement.
+        lines = [f"---{newline}", f"---{newline}", *lines]
+        close = 1
     block = [line for line in lines[1:close] if not _PLACEMENT_LINE.match(line)]
     insert_at = next(
         (index + 1 for index, line in enumerate(block) if _ENTRY_TYPE_LINE.match(line)),

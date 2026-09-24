@@ -140,6 +140,16 @@ class TextEditTests(unittest.TestCase):
         self.assertEqual(content_without_placement(a), content_without_placement(b))
         self.assertEqual(content_without_placement(a), self.SCENE.encode())
 
+    def test_a_file_with_no_front_matter_gains_a_block(self) -> None:
+        """Plain prose dropped into scenes/ is in the tree (§5), so a placement
+        must be writable to it (review finding: it raised)."""
+        placed = set_placement_in_text("Just prose.\n", "manuscript_ch", 2)
+        self.assertEqual(placed, "---\nparent: manuscript_ch\nrank: 2\n---\nJust prose.\n")
+
+    def test_a_byte_order_mark_is_dropped_so_the_block_is_seen(self) -> None:
+        placed = set_placement_in_text("\ufeff" + self.SCENE, None, 1)
+        self.assertTrue(placed.startswith("---\n"))
+
     def test_an_indented_parent_key_in_metadata_is_content(self) -> None:
         text = self.SCENE.replace("metadata: {}", "metadata:\n  parent: someone")
         self.assertIn(b"  parent: someone", content_without_placement(text.encode()))

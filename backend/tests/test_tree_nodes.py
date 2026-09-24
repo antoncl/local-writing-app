@@ -126,6 +126,22 @@ class FilesAreTheTruthTests(TreeNodesTestCase):
         self.assertTrue(self.service.refresh_node_index_from_disk().changed)
         self.assertEqual(self._children(chapter)[-1], "manuscript_dropped01")
 
+    def test_a_raw_file_dropped_in_can_be_placed_and_does_not_block_creation(self) -> None:
+        """Review finding: a file with no front matter sat unranked at the end of
+        the top level, and the next top-level create renumbered through it and
+        crashed. It now gains a block and the create goes through."""
+        (self.root / "scenes" / "Raw notes.md").write_text("Just prose, no front matter.\n", encoding="utf-8")
+        self.service.refresh_node_index_from_disk()
+        act = self._container("Act", "manuscript:act")
+        order = self._children(None)
+        self.assertEqual(order[-1], act)
+        self.assertIn("Raw notes", order)
+        raw = (self.root / "scenes" / "Raw notes.md").read_text(encoding="utf-8")
+        self.assertTrue(raw.startswith("---\nrank: "), raw)
+        self.assertTrue(raw.endswith("Just prose, no front matter.\n"))
+        self.service.move_structure_node("Raw notes", act, 0)
+        self.assertEqual(self._children(act), ["Raw notes"])
+
     def test_a_chapter_deleted_outside_the_app_leaves_its_scenes_at_the_top_with_warnings(self) -> None:
         """Journey step 3."""
         chapter = self._container("Chapter 1")
@@ -202,6 +218,22 @@ class PlacementKeysAreReservedTests(TreeNodesTestCase):
                 self._add_field(field_id, "manuscript:scene")
             self.assertEqual(raised.exception.status_code, 422)
             self.assertIn("where the node sits", raised.exception.message)
+
+    def test_a_field_a_schema_already_had_is_a_warning_not_a_block(self) -> None:
+        """Review finding: an existing field named `rank` on a tree kind must
+        not make every unrelated schema save fail."""
+        schema_path = self.root / "metadata.schema.yaml"
+        import yaml
+
+        data = yaml.safe_load(schema_path.read_text(encoding="utf-8")) or {}
+        data.setdefault("fields", {})["rank"] = {"name": "Rank", "type": "text"}
+        data.setdefault("entry_types", {})["manuscript:scene"] = {"fields": ["rank"]}
+        schema_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        node_index_gate.invalidate()
+
+        self._add_field("mood", "manuscript:scene")  # an unrelated save goes through
+        warnings = self.service.validate_project().warnings
+        self.assertTrue(any("cannot have a field named 'rank'" in w for w in warnings), warnings)
 
     def test_another_kind_may(self) -> None:
         self._add_field("rank", "lore:character")

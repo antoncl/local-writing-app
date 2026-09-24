@@ -56,6 +56,10 @@ from app.services.project.layers import INHERITS_KEY, MANIFEST_FILENAME, LayerVi
 from app.services.project.lore_mutation_items import keyed_lists_from
 from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project.node_index_gate import node_index_gate
+from app.services.project.schema_definition_validation import (
+    placement_key_fields,
+    placement_key_message,
+)
 from app.services.project.tree_configs import MANUSCRIPT_TREE, RESEARCH_TREE
 
 # A verified project's own structural folders — its guts, never a place a user
@@ -963,6 +967,14 @@ class ProjectLifecycleMixin:
         metadata_schema, schema_warnings, schema_errors = self._validate_metadata_schema_section(root)
         warnings.extend(schema_warnings)
         errors.extend(schema_errors)
+        if metadata_schema is not None:
+            # A field named `parent` / `rank` a tree kind already had before
+            # ADR-0094 reserved them: shadowed in views, so said here.
+            warnings.extend(
+                placement_key_message(entry_type_id, entry_type, field_id)
+                for entry_type_id, entry_type in metadata_schema.entry_types.items()
+                for field_id in placement_key_fields(entry_type)
+            )
 
         scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "manuscript"}
         # A node the tree could not place where its file says sits at the top

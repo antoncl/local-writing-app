@@ -58,7 +58,7 @@ from app.services.project.node_index_snapshot import (
 )
 from app.services.project.node_ops import NodeOpsMixin
 from app.services.project.overrides import OVERRIDES_FOLDER, LayerOverridesMixin
-from app.services.project.placement import content_without_placement
+from app.services.project.placement import content_without_placement, file_lock
 from app.services.project.plot import PlotMixin
 from app.services.project.plot_board import PlotBoardMixin
 from app.services.project.plot_context import PlotContextMixin
@@ -626,23 +626,25 @@ class ProjectService(
     def _write_scene_file(self, path: Path, scene: Scene) -> None:
         # Placement is carried over from the file on disk, never taken from the
         # scene being saved (ADR-0094 §1): a save — the editor's, a marker
-        # rewrite's — does not move a node.
-        front_matter = yaml.safe_dump(
-            self._with_disk_placement(
-                path,
-                {
-                    "id": scene.id,
-                    "title": scene.title,
-                    "entry_type": scene.entry_type,
-                    "status": scene.status,
-                    "metadata": scene.metadata,
-                },
-            ),
-            sort_keys=False,
-            allow_unicode=True,
-        ).strip()
-        body = scene.body.rstrip() + "\n" if scene.body.strip() else ""
-        self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
+        # rewrite's — does not move a node. The file lock spans the read and the
+        # write so a concurrent move is neither lost nor able to undo this save.
+        with file_lock(path):
+            front_matter = yaml.safe_dump(
+                self._with_disk_placement(
+                    path,
+                    {
+                        "id": scene.id,
+                        "title": scene.title,
+                        "entry_type": scene.entry_type,
+                        "status": scene.status,
+                        "metadata": scene.metadata,
+                    },
+                ),
+                sort_keys=False,
+                allow_unicode=True,
+            ).strip()
+            body = scene.body.rstrip() + "\n" if scene.body.strip() else ""
+            self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
 
     def _write_lore_entry_file(self, path: Path, entry: LoreEntry) -> None:
         front_matter_data: dict[str, object] = {

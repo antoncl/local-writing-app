@@ -38,6 +38,7 @@ from app.models import (
     StructureNodeDeletePreview,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.placement import file_lock
 from app.services.project.tree_configs import RESEARCH_TREE
 from app.services.tree_structure import TreeStructureService
 
@@ -168,22 +169,24 @@ class ResearchNotesMixin:
 
     def _write_research_note_file(self, path: Path, note: ResearchNote) -> None:
         # Placement is carried over from the file on disk, never taken from the
-        # note being saved (ADR-0094 §1): a save does not move a node.
-        front_matter = yaml.safe_dump(
-            self._with_disk_placement(
-                path,
-                {
-                    "id": note.id,
-                    "title": note.title,
-                    "entry_type": note.entry_type,
-                    "metadata": note.metadata,
-                },
-            ),
-            sort_keys=False,
-            allow_unicode=True,
-        ).strip()
-        body = note.body.rstrip() + "\n" if note.body.strip() else ""
-        self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
+        # note being saved (ADR-0094 §1): a save does not move a node. The file
+        # lock spans the read and the write, as `_write_scene_file`'s does.
+        with file_lock(path):
+            front_matter = yaml.safe_dump(
+                self._with_disk_placement(
+                    path,
+                    {
+                        "id": note.id,
+                        "title": note.title,
+                        "entry_type": note.entry_type,
+                        "metadata": note.metadata,
+                    },
+                ),
+                sort_keys=False,
+                allow_unicode=True,
+            ).strip()
+            body = note.body.rstrip() + "\n" if note.body.strip() else ""
+            self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
 
     def read_research_note(self, note_id: str) -> ResearchNote:
         index = self._build_node_index()

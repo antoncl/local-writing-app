@@ -97,11 +97,21 @@ def set_placement_in_text(text: str, parent: object, rank: object) -> str:
     what keeps a move to the one line it changes: a re-dump would restyle other
     keys, and the blank line the scene writer puts after the block would go too.
     `text` must be the file decoded as-is (no newline translation) — the caller
-    writes the result back as bytes."""
+    writes the result back as bytes.
+
+    A file with no front matter — plain prose dropped into `scenes/` — is in the
+    tree too (§5), so it gains a block holding just its placement; its id stays
+    the filename stem the index already gave it. A leading byte-order mark is
+    dropped, because the readers only see a block that opens the file."""
+    text = text.removeprefix("﻿")
     lines = text.splitlines(keepends=True)
     close = _front_matter_span(lines)
     if close is None:
-        raise ValueError("a tree node's file must open with a front-matter block")
+        newline = "\r\n" if lines and lines[0].endswith("\r\n") else "\n"
+        placement = placement_lines(parent, rank, newline)
+        if not placement:
+            return text
+        return "".join([f"---{newline}", *placement, f"---{newline}", text])
     newline = "\r\n" if lines[0].endswith("\r\n") else "\n"
     block = [line for line in lines[1:close] if not _PLACEMENT_LINE_TEXT.match(line)]
     insert_at = next(
@@ -244,6 +254,28 @@ def plan_placement(group: Sequence[Sibling], node_id: str, position: int) -> lis
     if renumbered.get(node_id) != float(rank):
         writes.append((node_id, rank))
     return writes
+
+
+# ---- one read-modify-write per file at a time -------------------------------
+#
+# A placement write and a typed save both read a node file and write it back:
+# the placement write keeps the prose and changes the placement lines, the save
+# keeps the placement and changes the prose. Interleaved on the threadpool, the
+# later write would carry the earlier read — a drag would put back the prose an
+# autosave just replaced, or a save would put back the rank a drag just wrote.
+# Each such write holds the file's lock from its read to its write.
+
+_file_locks: dict[str, threading.RLock] = {}
+_file_locks_guard = threading.Lock()
+
+
+def file_lock(path: Path) -> threading.RLock:
+    key = str(path.resolve())
+    with _file_locks_guard:
+        lock = _file_locks.get(key)
+        if lock is None:
+            lock = _file_locks[key] = threading.RLock()
+        return lock
 
 
 # ---- placement writes are not saves (ADR-0094 §6) --------------------------

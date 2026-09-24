@@ -93,20 +93,23 @@ def _entry_type_summary_field_errors(entry_type_id: str, entry_type, schema: Met
     return errors
 
 
-def _entry_type_placement_key_errors(entry_type_id: str, entry_type) -> list[str]:
-    """A tree kind's type may not carry a field named `parent` or `rank`
-    (ADR-0094 §1). Those keys are a tree node's placement — its own front
-    matter, read by the tree and shown to views as the containment ref — so a
-    field of that name would be shadowed wherever the node is read. A field of
-    that name on any other kind is untouched."""
+def placement_key_fields(entry_type) -> list[str]:
+    """The fields named `parent` or `rank` a tree kind's type carries
+    (ADR-0094 §1). Those keys are a tree node's placement — read by the tree and
+    shown to views as the containment ref — so a field of that name is shadowed
+    wherever the node is read. Empty for any other kind, where the names are
+    free. The schema saves refuse to *add* one; Verify warns about one a schema
+    already had, rather than every unrelated save failing on it."""
     if entry_type.kind not in TREE_KINDS:
         return []
-    return [
+    return [field_id for field_id in entry_type.fields if field_id in PLACEMENT_KEYS]
+
+
+def placement_key_message(entry_type_id: str, entry_type, field_id: str) -> str:
+    return (
         f"Node type {entry_type_id} cannot have a field named '{field_id}': on a "
         f"{entry_type.kind} node it is where the node sits in the tree."
-        for field_id in entry_type.fields
-        if field_id in PLACEMENT_KEYS
-    ]
+    )
 
 
 def _entry_type_group_application_errors(entry_type_id: str, entry_type, schema: MetadataSchema) -> list[str]:
@@ -308,8 +311,6 @@ class MetadataSchemaValidationMixin:
             errors.extend(_entry_type_summary_field_errors(entry_type_id, entry_type, schema))
         for entry_type_id, entry_type in schema.entry_types.items():
             errors.extend(_entry_type_group_application_errors(entry_type_id, entry_type, schema))
-        for entry_type_id, entry_type in schema.entry_types.items():
-            errors.extend(_entry_type_placement_key_errors(entry_type_id, entry_type))
         for field_id, field in schema.fields.items():
             errors.extend(_field_shape_errors(field_id, field, schema))
         return errors

@@ -50,6 +50,11 @@ from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import SCHEMA_FILENAME
 from app.services.project.node_families import NODE_KINDS
 from app.services.project.node_index import IndexLayer
+from app.services.project.placement import PLACEMENT_KEYS, TREE_KINDS
+from app.services.project.schema_definition_validation import (
+    placement_key_fields,
+    placement_key_message,
+)
 from app.services.project.schema_inheritance import (
     RESOLVER_STAMPED_ENTRY_TYPE_KEYS,
     RESOLVER_STAMPED_FIELD_KEYS,
@@ -307,6 +312,10 @@ class MetadataSchemaMixin:
         schema = self.read_metadata_schema()
         if not request.allow_existing and entry_type_id in schema.entry_types:
             raise ProjectServiceError(f"Node type {entry_type_id} already exists.", 422)
+        existing = schema.entry_types.get(entry_type_id)
+        for field_id in placement_key_fields(request.entry_type):
+            if existing is None or field_id not in existing.fields:
+                raise ProjectServiceError(placement_key_message(entry_type_id, request.entry_type, field_id), 422)
 
         overview = self.read_metadata_schema_overview()
         source = overview.entry_type_sources.get(entry_type_id)
@@ -716,6 +725,17 @@ class MetadataSchemaMixin:
 
         field_id = request.field_id.strip()
         self._validate_upsert_field_request(root, layer_path, request, field_id)
+        # ADR-0094 §1: a tree node's `parent` / `rank` are its placement; adding
+        # a field of either name to a tree kind is refused (an existing one is
+        # left to Verify, so this does not block editing it).
+        target = self.read_metadata_schema().entry_types.get(request.entry_type)
+        if (
+            target is not None
+            and target.kind in TREE_KINDS
+            and field_id in PLACEMENT_KEYS
+            and field_id not in target.fields
+        ):
+            raise ProjectServiceError(placement_key_message(request.entry_type, target, field_id), 422)
 
         existing_field = self.read_metadata_schema().fields.get(field_id)
         if existing_field is not None and not request.allow_existing:

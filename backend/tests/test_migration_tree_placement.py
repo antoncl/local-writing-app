@@ -167,6 +167,26 @@ class TreePlacementMigrationTests(unittest.TestCase):
         self.assertEqual(_front(self.paths[S2])["rank"], 2)
 
 
+class LegacyFileTests(unittest.TestCase):
+    def test_a_file_with_no_id_is_found_by_its_stem_and_keeps_its_place(self) -> None:
+        """Review finding: the live index names a legacy file by its stem, and
+        a v11 tree file pointed at it by that name."""
+        with TemporaryDirectory() as temp:
+            root = Path(temp).resolve() / "book"
+            (root / "scenes").mkdir(parents=True)
+            _write_node(root / "scenes", CHAPTER, "Chapter One", "manuscript:chapter")
+            (root / "scenes" / "Old draft.md").write_text("Legacy prose.\n", encoding="utf-8")
+            tree = {"root": {"id": "root", "type": "root", "title": "Manuscript", "children": [
+                {"id": NODE_CH, "type": "manuscript:chapter", "title": "Chapter One", "scene_id": CHAPTER, "children": [
+                    {"id": NODE_S1, "type": "manuscript:scene", "title": "Old draft", "scene_id": "Old draft", "children": []},
+                ]},
+            ]}}
+            (root / "manuscript.structure.yaml").write_text(yaml.safe_dump(tree), encoding="utf-8")
+            migrate_layer_tree_placement(root, ChainContext())
+            legacy = (root / "scenes" / "Old draft.md").read_text(encoding="utf-8")
+            self.assertEqual(legacy, f"---\nparent: {CHAPTER}\nrank: 1\n---\nLegacy prose.\n")
+
+
 class NoTreeFilesTests(unittest.TestCase):
     def test_a_layer_without_tree_files_is_left_alone(self) -> None:
         with TemporaryDirectory() as temp:

@@ -65,7 +65,8 @@ class ResearchHttpEndpointTests(unittest.TestCase):
 
     def test_fresh_project_has_research_storage_folder(self) -> None:
         self.assertTrue((self.root / "research" / "notes").is_dir())
-        self.assertTrue((self.root / "research.structure.yaml").exists())
+        # ADR-0094: the tree is the nodes' own placement, not a file.
+        self.assertFalse((self.root / "research.structure.yaml").exists())
 
     # --- create -----------------------------------------------------------
 
@@ -95,21 +96,19 @@ class ResearchHttpEndpointTests(unittest.TestCase):
         self.assertIn("title: Lancashire mill towns", content)
         self.assertIn("entry_type: research:note", content)
 
-    def test_create_note_under_topic_links_via_note_id(self) -> None:
-        # Tree YAML uses `note_id` on disk; the API surfaces it as
-        # `scene_id` on the model (TreeStructureService renames).
+    def test_create_note_under_topic_records_the_topic_on_the_note(self) -> None:
+        # ADR-0094 §1: the note's own file says which topic it sits in; the
+        # tree node's id is the file's id, surfaced as `scene_id` too.
         topic = self._create_node("Industrial Revolution", "research:topic")
         topic_id = topic["root"]["children"][0]["id"]
-        self._create_node("Mill towns", "research:note", parent_id=topic_id)
+        tree = self._create_node("Mill towns", "research:note", parent_id=topic_id)
 
-        on_disk = yaml.safe_load(
-            (self.root / "research.structure.yaml").read_text(encoding="utf-8")
-        )
-        outer = on_disk["root"]["children"][0]
-        self.assertEqual(outer["title"], "Industrial Revolution")
-        leaf = outer["children"][0]
-        self.assertIn("note_id", leaf)
-        self.assertNotIn("scene_id", leaf)
+        leaf = tree["root"]["children"][0]["children"][0]
+        self.assertEqual(leaf["id"], leaf["scene_id"])
+        note_file = self.service._path_for_node_id(leaf["id"], "research")
+        front_matter = yaml.safe_load(note_file.read_text(encoding="utf-8").split("---\n")[1])
+        self.assertEqual(front_matter["parent"], topic_id)
+        self.assertEqual(front_matter["rank"], 1)
 
     def test_create_under_note_is_rejected(self) -> None:
         self._create_node("Note A", "research:note")
@@ -215,8 +214,9 @@ class ResearchHttpEndpointTests(unittest.TestCase):
         parent = self._create_node("Topic", "research:topic")
         topic_id = parent["root"]["children"][0]["id"]
         self._create_node("Doomed note", "research:note", parent_id=topic_id)
+        # The topic is a file too (ADR-0094 §7), so the folder holds two.
         self.assertEqual(
-            len(list((self.root / "research" / "notes").glob("*.md"))), 1
+            len(list((self.root / "research" / "notes").glob("*.md"))), 2
         )
         response = self.client.delete(
             f"/api/research-structure/nodes/{topic_id}"

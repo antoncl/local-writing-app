@@ -362,10 +362,11 @@ def _expand_container_picks(
     through untouched.
 
     The container test is structural, not a trust of the ref's `entry_type`: a
-    manuscript-kind pick whose id resolves (via the structure tree) to a node
-    carrying no `scene_id` is a container. Containers are not in the node index
-    (they are structure-YAML nodes, not node files), so this resolves through
-    `read_structure()` — the EntryRef/`read_scene` path cannot see them.
+    manuscript-kind pick whose id resolves in the manuscript tree to a container
+    expands to the scenes beneath it (ADR-0074 slice 4). The tree is built from
+    the nodes' own placement (ADR-0094), and a node's id is its file's id, so a
+    pick of a container means its scenes — there is no second id that meant
+    "the container's own node".
 
     No dedup: overlapping picks (a container and its own descendant scene) can't
     arise in normal use — the picker's absorb rule is the invariant that
@@ -408,11 +409,9 @@ def _might_be_container(item: dict[str, Any]) -> bool:
 
 def _container_node_for_pick(document, item: dict[str, Any]):
     """The container `StructureNode` a pick refers to, or None when the pick is
-    not a manuscript container. A container ref carries the structure-node id, so
-    `find_node` resolves it to a container; a scene ref carries the `scene_id`,
-    which is not a node id, so `find_node` misses and it falls through to the
-    normal EntryRef coercion. Containers are detected by type/children, not
-    `scene_id` — acts and chapters carry their own backing `scene_id`."""
+    not a manuscript container. `find_node` resolves any manuscript id to its
+    node; a scene's node is not a container, so a scene pick falls through to the
+    normal EntryRef coercion. Containers are detected by type/children."""
     if not _is_manuscript_pick(item):
         return None
     node = TreeStructureService.find_node(document, str(item["id"]))

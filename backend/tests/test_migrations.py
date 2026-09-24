@@ -41,15 +41,12 @@ class MigrationFrameworkTests(unittest.TestCase):
         self.assertTrue((self.root / "tags").is_dir())
 
     def test_create_initializes_research_artifacts(self) -> None:
-        # A fresh project ships research/notes/ + an empty
-        # research.structure.yaml so the research feature has somewhere
-        # to land without a migration step.
+        # A fresh project ships research/notes/ so the research feature has
+        # somewhere to land without a migration step. No tree file: the tree
+        # is the nodes' own placement (ADR-0094).
         self.assertTrue((self.root / "research" / "notes").is_dir())
-        structure_path = self.root / "research.structure.yaml"
-        self.assertTrue(structure_path.exists())
-        tree = yaml.safe_load(structure_path.read_text(encoding="utf-8"))
-        self.assertEqual(tree["root"]["title"], "Research")
-        self.assertEqual(tree["root"]["children"], [])
+        self.assertFalse((self.root / "research.structure.yaml").exists())
+        self.assertFalse((self.root / "manuscript.structure.yaml").exists())
 
     def test_backfill_narration_cascade_fields_adds_to_existing_schema(self) -> None:
         # v5→v6 (ADR-0079): an existing project's metadata.schema.yaml predates the

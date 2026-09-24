@@ -50,6 +50,12 @@ class NodeIndexEntry:
     # (backlinks, `tagged:`, title lookup, dangling-check) goes through, so a
     # merged tag's id resolves to its survivor everywhere without a second pass.
     merged_into: str | None = None
+    # Tree kinds only (manuscript, research — ADR-0094 §1/§3): where the node
+    # sits, read from its front matter's `parent` / `rank`. The trees are built
+    # from these, so a move is an index change and a move made outside the app
+    # is one #2170's refresh reports. None for every other kind.
+    parent: str | None = None
+    rank: float | None = None
 
 
 @dataclass(frozen=True)

@@ -174,9 +174,8 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "parent": "research:base",
         "fields": [],
         "has_body": False,
-        # A research topic is a tree container (folder-like grouping node),
-        # not something that opens in a NodeEditor.
-        "opens_in": "tree_container",
+        # A research topic is a container, and since ADR-0094 a file like any
+        # node: it opens in a NodeEditor as an act or chapter does.
     },
     "research:note": {
         # Research note — prose body + tags. Aliases / related_entries

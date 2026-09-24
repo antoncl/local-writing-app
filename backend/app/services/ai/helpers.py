@@ -849,12 +849,6 @@ def _is_lore_id(value: Any) -> bool:
     return isinstance(value, str) and value.startswith("lore_")
 
 
-def _is_scene_id(value: Any) -> bool:
-    return isinstance(value, str) and (
-        value.startswith("scene_") or value.startswith("node_")
-    )
-
-
 def _collect_lore_refs_from_metadata(metadata: Any, schema: MetadataSchema) -> set[str]:
     """The lore ids a node's metadata references — through every `entity_ref` /
     `entity_ref_list` occurrence the schema declares, top-level or inside a

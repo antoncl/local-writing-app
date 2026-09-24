@@ -42,6 +42,7 @@ from app.services.project.node_index import (
     NodeIndexEntry,
     ReferenceEdge,
 )
+from app.services.project.placement import parse_parent, parse_rank
 
 # Bumped whenever the payload's shape changes. Pre-1.0 that is the whole
 # migration story: a mismatch is expected after an upgrade and rebuilds, and no
@@ -51,7 +52,7 @@ from app.services.project.node_index import (
 # stale because the code that produced it changed, with the payload's shape and
 # every project file untouched, and no human-maintained version number catches
 # that reliably.
-SNAPSHOT_FORMAT_VERSION = 3
+SNAPSHOT_FORMAT_VERSION = 4
 
 # Source trees whose contents determine what a build *produces*: the walk, the
 # collectors, the edge extraction, the built-in schema, the models they parse
@@ -232,6 +233,10 @@ def serialize(
                 # another NODE (any tag, possibly in a different layer), not a
                 # layer position, so there is no chain to re-derive on load.
                 "merged_into": entry.merged_into,
+                # ADR-0094 §3: the trees are built from these, so a warm load
+                # that dropped them would open every tree flat.
+                "parent": entry.parent,
+                "rank": entry.rank,
             }
             for entries in index.candidates.values()
             for entry in entries
@@ -451,6 +456,8 @@ def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
                 is_library=layer.is_library,
                 forked_from_layer_id=forked_from_layer_id,
                 merged_into=entry.get("merged_into"),
+                parent=parse_parent(entry.get("parent")),
+                rank=parse_rank(entry.get("rank")),
             )
         )
     # `add` front-inserts, which is only innermost-first if entries arrive in

@@ -1,12 +1,11 @@
 """Manuscript + scenes slice of ProjectService (#14 backend split).
 
-The manuscript tree (acts/chapters/scenes ordering in manuscript.structure.yaml)
-and the Scene leaf files under scenes/. Owns the structure-node CRUD
-(create/move/rename/delete + cascade-delete preview), scene CRUD
-(create/read/save/delete_scene), and read_structure with its computed-metadata
-injection. All tree manipulation goes through TreeStructureService (single
-source of truth since the find_by_leaf_ref untangle). `ProjectService`
-composes this mixin.
+The manuscript tree (acts/chapters/scenes) and the Scene files under scenes/.
+Owns the structure-node CRUD (create/move/rename/delete + cascade-delete
+preview), scene CRUD (create/read/save/delete_scene), and read_structure with
+its computed-metadata injection. Since ADR-0094 the tree is not a file: each
+node's own file carries its `parent` and `rank`, and the tree is built from them
+(`TreeNodesMixin`). `ProjectService` composes this mixin.
 
 Method bodies moved verbatim. Shared helpers resolve through the MRO:
 `self._initial_metadata_from_defaults`, `self._backlinks_to_targets`,
@@ -27,7 +26,6 @@ from typing import Any
 from app.models import (
     CreateSceneRequest,
     CreateStructureNodeRequest,
-    LooseScene,
     MetadataSchema,
     SaveSceneRequest,
     Scene,
@@ -37,8 +35,7 @@ from app.models import (
 )
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.errors import ProjectServiceError
-from app.services.project.node_index_gate import node_index_gate
-from app.services.project.tree_configs import MANUSCRIPT_TREE_CONFIG
+from app.services.project.tree_configs import MANUSCRIPT_TREE
 from app.services.tree_structure import TreeStructureService
 
 
@@ -57,7 +54,7 @@ class ManuscriptMixin:
         author is actually working in. `create_scene` writes a file between the
         capture and this read, so the window is real IO, not an instant.
         """
-        document = self._manuscript_tree(root).read()
+        document = self._read_tree(root, MANUSCRIPT_TREE)
         schema = self.read_metadata_schema(root)
         # One-shot scene front-matter scan: avoids per-leaf read_scene
         # (which does full body parsing). Builds {id → (status, metadata)} so
@@ -154,20 +151,13 @@ class ManuscriptMixin:
         )
         self._write_scene_file(self._filepath_for_new_node(root / "scenes", request.title), scene)
 
-        structure = self._read_structure(root)
-        scene_node = StructureNode(
-            id=self._new_id("node"),
-            type="manuscript:scene",
-            title=request.title,
-            scene_id=scene_id,
-        )
-        parent = TreeStructureService.find_node(structure, request.parent_id) if request.parent_id else None
+        document = self._read_tree(root, MANUSCRIPT_TREE)
+        parent = TreeStructureService.find_node(document, request.parent_id) if request.parent_id else None
         # No (or unknown) parent: drop the quick-added scene into the first
         # container so it lands somewhere visible rather than at the root.
         if parent is None or self._is_leaf_node(parent):
-            parent = self._first_container(structure.root)
-        TreeStructureService.insert_node(parent, scene_node)
-        self._manuscript_tree(root).write(structure)
+            parent = self._first_container(document.root)
+        self._place_node(root, MANUSCRIPT_TREE, scene_id, None if parent is document.root else parent.id, None)
         return self.read_scene(scene_id)
 
     def cascade_delete_preview(self, node_id: str) -> StructureNodeDeletePreview:
@@ -209,14 +199,11 @@ class ManuscriptMixin:
         if node.type == "root":
             raise ProjectServiceError("Cannot delete the root node.", 422)
 
+        # Every node in the subtree has a file — containers included — and a
+        # node's id is its file's id (ADR-0094 §4), so one set is both what to
+        # delete and what to purge references to.
         scene_ids = TreeStructureService.collect_leaf_ids(node)
-        # Snapshot all descendant ids BEFORE we mutate the tree so we
-        # can purge references in one sweep after the file deletions.
-        # Outbound references can point at either the structure-node id
-        # or the underlying leaf file id, so purge both.
-        purge_ids = TreeStructureService.collect_descendant_ids(
-            node
-        ) | TreeStructureService.collect_leaf_ids(node)
+        purge_ids = set(scene_ids)
         # Collect every scene's path first, then delete as one batch (#476): the
         # per-id todo/snapshot cleanup still runs in the loop, but the file
         # deletes and their index maintenance happen once, so a chapter of many
@@ -232,81 +219,27 @@ class ManuscriptMixin:
             self.delete_scene_snapshots(root, scene_id)
         self._delete_node_files(tuple(paths))  # unlink all + un-shadow the memo once
 
-        TreeStructureService.remove_node_by_id(structure.root, node_id)
-        self._manuscript_tree(root).write(structure)
         self._purge_references_to(purge_ids, root)
         return self._read_structure(root)
 
-    def _manuscript_tree(self, root: Path) -> TreeStructureService:
-        """The manuscript tree for **`root`**, which the caller must already
-        hold (#381 / ADR-0045).
-
-        `root` is required rather than defaulted, and that is the whole point.
-        This used to read `self._require_project()` itself, so a unit of work
-        that captured a root, read the structure, mutated it and wrote it back
-        resolved the project **twice** — and `ProjectService` is a process-wide
-        singleton whose `root_path` an `open_project` on another thread swaps in
-        place. The write then landed in whatever project was open by then,
-        overwriting *that* project's `manuscript.structure.yaml` with this
-        one's tree. Same class as the reference purge (fixed in #381's first
-        half), same irreversibility.
-
-        A default would have left the trap armed for the next caller: the
-        invariant is "a unit resolves its scope once", and a parameter that can
-        be omitted is a defense, not an invariant.
-        """
-        return TreeStructureService(root, MANUSCRIPT_TREE_CONFIG)
-
     def move_structure_node(self, node_id: str, target_parent_id: str, position: int) -> StructureDocument:
+        # `root` is captured once and every read and write of this unit goes
+        # through it (#381 / ADR-0045).
         root = self._require_project()
-        structure = self._read_structure(root)
-
-        node = TreeStructureService.find_node(structure, node_id)
-        if node is None:
-            raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
-        if node.type == "root":
-            raise ProjectServiceError("Cannot move the root node.", 422)
-
-        target_parent = TreeStructureService.find_node(structure, target_parent_id)
-        if target_parent is None:
-            raise ProjectServiceError(f"Target parent {target_parent_id} does not exist.", 404)
-
-        if TreeStructureService.contains_node(node, target_parent_id):
-            raise ProjectServiceError("Cannot move a node into itself or its descendants.", 422)
-
-        removed = TreeStructureService.extract_node(structure, node_id)
-        if removed is None:
-            raise ProjectServiceError(f"Could not detach {node_id} from its current parent.", 500)
-
-        target_parent = TreeStructureService.find_node(structure, target_parent_id)
-        if target_parent is None:
-            raise ProjectServiceError("Target parent disappeared after detach.", 500)
-
-        insert_at = max(0, min(position, len(target_parent.children)))
-        target_parent.children.insert(insert_at, removed)
-
-        self._manuscript_tree(root).write(structure)
+        self._move_tree_node(root, MANUSCRIPT_TREE, node_id, target_parent_id, position)
         return self._read_structure(root)
 
     def rename_structure_node(self, node_id: str, title: str) -> StructureDocument:
         root = self._require_project()
-        structure = self._read_structure(root)
-        node = TreeStructureService.find_node(structure, node_id)
-        if node is None:
-            raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
-        if node.type == "root":
-            raise ProjectServiceError("Cannot rename the root node.", 422)
+        node = self._require_tree_node(self._read_tree(root, MANUSCRIPT_TREE), node_id)
         clean_title = title.strip()
         if not clean_title:
             raise ProjectServiceError("Title cannot be empty.", 422)
-        node.title = clean_title
-        if node.scene_id:
-            path = self._path_for_node_id(node.scene_id, "manuscript")
-            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-            front_matter["title"] = clean_title
-            self._write_markdown_with_front_matter(path, front_matter, body)
-            self._maybe_rename_node_file(path, clean_title)
-        self._manuscript_tree(root).write(structure)
+        path = self._path_for_node_id(node.id, "manuscript")
+        front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+        front_matter["title"] = clean_title
+        self._write_markdown_with_front_matter(path, front_matter, body)
+        self._maybe_rename_node_file(path, clean_title)
         return self._read_structure(root)
 
     def create_structure_node(self, request: CreateStructureNodeRequest) -> StructureDocument:
@@ -320,7 +253,7 @@ class ManuscriptMixin:
         if entry_type.abstract:
             raise ProjectServiceError(f"Entry type {request.entry_type} is abstract and cannot be instantiated.", 422)
 
-        structure = self._read_structure(root)
+        document = self._read_tree(root, MANUSCRIPT_TREE)
         file_id = self._new_id("manuscript")
         initial_metadata = self._initial_metadata_from_defaults(request.entry_type, schema)
         initial_status = self._initial_scene_status(schema)
@@ -335,145 +268,11 @@ class ManuscriptMixin:
         )
         self._write_scene_file(self._filepath_for_new_node(root / "scenes", request.title), scene)
 
-        new_node = StructureNode(
-            id=self._new_id("node"),
-            type=request.entry_type,
-            title=request.title,
-            scene_id=file_id,
-        )
-        parent = TreeStructureService.find_node(structure, request.parent_id) if request.parent_id else None
-        # Unknown or leaf parent falls back to the root, matching the
+        # Unknown or leaf parent falls back to the top level, matching the
         # prior hand-rolled insert.
-        if parent is None or self._is_leaf_node(parent):
-            parent = structure.root
-        TreeStructureService.insert_node(parent, new_node)
-        self._manuscript_tree(root).write(structure)
+        parent_id = self._creation_parent(document, MANUSCRIPT_TREE, request.parent_id)
+        self._place_node(root, MANUSCRIPT_TREE, file_id, parent_id, None)
         return self._read_structure(root)
-
-    def _collect_loose_scene_entries(self, root):
-        """Scene files on disk that no manuscript node references (#4), keyed by
-        id, together with the structure they were reconciled against.
-
-        Forces a cold node-index rebuild so files dropped into `scenes/` while
-        the app stayed open are seen (ADR-0040 — a warm memo does no disk work).
-        Shared by `list_loose_scenes` (the read surface) and `import_loose_scenes`
-        so both derive "loose" one way.
-        """
-        node_index_gate.invalidate()
-        node_index = self._build_node_index(root)
-        structure = self._read_structure(root)
-        referenced = TreeStructureService.collect_leaf_ids(structure.root)
-        loose = {
-            entry.id: entry
-            for entry in node_index.by_id.values()
-            if entry.kind == "manuscript" and entry.id not in referenced
-        }
-        return loose, structure
-
-    def list_loose_scenes(self) -> list[LooseScene]:
-        """Enumerate loose scenes for the Import documents surface (#635). The
-        title falls back to the filename stem for a raw dropped file with no
-        front-matter title."""
-        root = self._require_project()
-        loose, _ = self._collect_loose_scene_entries(root)
-        return [
-            LooseScene(
-                id=entry.id,
-                title=entry.title or entry.path.stem,
-                filename=entry.path.name,
-            )
-            for entry in (loose[scene_id] for scene_id in sorted(loose))
-        ]
-
-    def import_loose_scenes(self, scene_ids: list[str] | None = None) -> StructureDocument:
-        """Register scene files present under `scenes/` that no manuscript node
-        references, appending them at the manuscript root (#4).
-
-        Each file is normalised into a canonical scene file: a raw dropped `.md`
-        with no front matter gains an `id`, a `title` (its first heading, else
-        the filename), `entry_type: manuscript:scene`, and `status: draft`; a file
-        that already carries valid front matter keeps it. `scene_ids` None/empty
-        imports every loose scene; otherwise only the listed ids that are in fact
-        loose. A file whose front-matter id already belongs to a manuscript node
-        is a duplicate the node index shadows — it never reaches `loose`, so
-        import cannot overwrite an existing scene. A file too malformed to
-        normalise is skipped (left untouched and loose), so one bad file cannot
-        abort the whole batch.
-        """
-        root = self._require_project()
-        schema = self.read_metadata_schema()
-        # Same "loose" derivation the read surface uses, incl. the cold rebuild
-        # that lets a file dropped into scenes/ while the app stayed open be seen.
-        loose, structure = self._collect_loose_scene_entries(root)
-        wanted = set(scene_ids) if scene_ids else set(loose)
-        targets = [loose[scene_id] for scene_id in sorted(loose) if scene_id in wanted]
-
-        for entry in targets:
-            try:
-                # Everything that can reject a malformed file happens before the
-                # first write: read, entry-type coercion, metadata normalisation.
-                front_matter, body = self._read_markdown_with_front_matter(entry.path)
-                entry_type = self._import_scene_entry_type(front_matter.get("entry_type"), schema)
-                metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
-            except ProjectServiceError:
-                # A malformed loose file (e.g. non-dict metadata, unreadable front
-                # matter) is left untouched and stays loose rather than aborting
-                # the batch — validate already surfaces why. The user fixes it and
-                # re-imports; the good files in the same click still land.
-                continue
-
-            fm_id = front_matter.get("id")
-            # A raw dropped file has no front-matter id (the index keyed it by its
-            # filename stem); mint a canonical one. A file that already carries a
-            # valid id keeps it.
-            final_id = fm_id if isinstance(fm_id, str) and fm_id.strip() else self._new_id("manuscript")
-            title = self._derive_import_title(front_matter.get("title"), body, entry.path)
-            scene = Scene(
-                id=final_id,
-                title=title,
-                body=body,
-                revision="",
-                status=str(front_matter.get("status") or "draft"),
-                entry_type=entry_type,
-                metadata=metadata,
-            )
-            self._write_scene_file(entry.path, scene)
-
-            new_node = StructureNode(
-                id=self._new_id("node"),
-                type=entry_type,
-                title=title,
-                scene_id=final_id,
-            )
-            TreeStructureService.insert_node(structure.root, new_node)
-
-        self._manuscript_tree(root).write(structure)
-        return self._read_structure(root)
-
-    def _import_scene_entry_type(self, raw: object, schema: MetadataSchema) -> str:
-        """The scene entry type to stamp on an imported file: keep the file's own
-        if it names a concrete scene type this schema knows, else `manuscript:scene`."""
-        if isinstance(raw, str):
-            candidate = schema.entry_types.get(raw)
-            if candidate is not None and candidate.kind == "manuscript" and not candidate.abstract:
-                return raw
-        return "manuscript:scene"
-
-    def _derive_import_title(self, raw_title: object, body: str, path: Path) -> str:
-        """Title for an imported scene: its front-matter title, else its first
-        Markdown heading, else the filename stem."""
-        if isinstance(raw_title, str) and raw_title.strip():
-            return raw_title.strip()
-        for line in body.splitlines():
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if stripped.startswith("#"):
-                heading = stripped.lstrip("#").strip()
-                if heading:
-                    return heading
-            break
-        return path.stem
 
     def read_scene(self, scene_id: str) -> Scene:
         index = self._build_node_index()
@@ -586,7 +385,6 @@ class ManuscriptMixin:
         self.maybe_capture_session_boundary(node_id, kind="manuscript", dynamic_context=request.dynamic_context)
         self._write_scene_file(path, scene)
         path = self._maybe_rename_node_file(path, request.title)
-        self._update_scene_title_in_structure(node_id, request.title)
         self._remove_missing_scene_todo_anchors(node_id, request.body)
         return self.read_scene(node_id)
 
@@ -600,14 +398,10 @@ class ManuscriptMixin:
         # A scene and its snapshots are one unit of deletion (ADR-0043): a
         # partial delete leaves exactly the unreachable residue that ADR rejects.
         self.delete_scene_snapshots(root, node_id)
-        structure = self._read_structure(root)
-        scene_node = TreeStructureService.find_by_leaf_ref(structure, node_id)
-        if scene_node is not None:
-            TreeStructureService.remove_node_by_id(structure.root, scene_node.id)
-        self._manuscript_tree(root).write(structure)
         self._remove_scene_todos(node_id)
-        # Strip references to both the scene file id and the structure
-        # node wrapping it from every metadata-bearing entry.
+        # The file was the node; with it gone the tree no longer holds it
+        # (ADR-0094). A scene nested under another (a hand edit) moves to the
+        # top level with a Verify warning rather than going with it.
         self._purge_references_to({scene_id, node_id}, root)
         return self._read_structure(root)
 
@@ -622,11 +416,3 @@ class ManuscriptMixin:
                 if not self._is_leaf_node(child):
                     return self._first_container(child)
         return node
-
-    def _update_scene_title_in_structure(self, scene_id: str, title: str) -> None:
-        root = self._require_project()
-        structure = self._read_structure(root)
-        node = TreeStructureService.find_by_leaf_ref(structure, scene_id)
-        if node is not None and node.title != title:
-            node.title = title
-            self._manuscript_tree(root).write(structure)

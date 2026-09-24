@@ -58,6 +58,7 @@ from app.services.project.node_index_snapshot import (
 )
 from app.services.project.node_ops import NodeOpsMixin
 from app.services.project.overrides import OVERRIDES_FOLDER, LayerOverridesMixin
+from app.services.project.placement import content_without_placement
 from app.services.project.plot import PlotMixin
 from app.services.project.plot_board import PlotBoardMixin
 from app.services.project.plot_context import PlotContextMixin
@@ -81,6 +82,7 @@ from app.services.project.snapshot_diff import SnapshotDiffMixin
 from app.services.project.snapshot_witness import SnapshotWitnessMixin
 from app.services.project.tag_nodes import TagNodesMixin
 from app.services.project.todos import TodosMixin
+from app.services.project.tree_nodes import TreeNodesMixin
 from app.services.project.views import ViewsMixin
 from app.services.yaml_io import load_yaml
 
@@ -135,6 +137,7 @@ class ProjectService(
     SearchReplaceMixin,
     TagNodesMixin,
     TodosMixin,
+    TreeNodesMixin,
     MutationSetEntriesMixin,
     ViewsMixin,
 ):
@@ -621,14 +624,20 @@ class ProjectService(
                 time.sleep(delay)
 
     def _write_scene_file(self, path: Path, scene: Scene) -> None:
+        # Placement is carried over from the file on disk, never taken from the
+        # scene being saved (ADR-0094 §1): a save — the editor's, a marker
+        # rewrite's — does not move a node.
         front_matter = yaml.safe_dump(
-            {
-                "id": scene.id,
-                "title": scene.title,
-                "entry_type": scene.entry_type,
-                "status": scene.status,
-                "metadata": scene.metadata,
-            },
+            self._with_disk_placement(
+                path,
+                {
+                    "id": scene.id,
+                    "title": scene.title,
+                    "entry_type": scene.entry_type,
+                    "status": scene.status,
+                    "metadata": scene.metadata,
+                },
+            ),
             sort_keys=False,
             allow_unicode=True,
         ).strip()
@@ -655,8 +664,10 @@ class ProjectService(
         self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
 
     def _revision(self, path: Path) -> str:
+        # Over the file without its placement lines (ADR-0094 §6): a move, or a
+        # renumber of its siblings, is not an edit an open pane must reconcile.
         digest = hashlib.sha256()
-        digest.update(path.read_bytes())
+        digest.update(content_without_placement(path.read_bytes()))
         return digest.hexdigest()
 
     def _new_id(self, prefix: str) -> str:

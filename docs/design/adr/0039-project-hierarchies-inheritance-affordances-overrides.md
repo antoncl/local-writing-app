@@ -3,7 +3,9 @@
 - Status: **Accepted** — 0.7.0, 2026-07-19 (PR #319) · rewritten 2026-07-19 after two rounds of
   adversarial review · **Amendment 1: inheritance is declared, not inferred** · **Amendment 2: one
   traversal; the root is stipulated, not inferred from a stray `metadata.schema.yaml`** · **Amendment
-  3: the create-project wizard + authored-field inheritance (→ `create-project-wizard.md`)**
+  3: the create-project wizard + authored-field inheritance (→ `create-project-wizard.md`)** ·
+  **Amendment 4 (accepted 2026-09-24): a layer override may replace an inherited lore entry's title
+  and body; prompts change only by cloning (#2184)**
 - Feature: #7 (epic) full project hierarchies
 - Companion: ADR-0040 (the index — which *materializes* the chain, not merely caches it)
 - Amends: ADR-0013 (see its Amendment 1) · Gesture UX: **ADR-0042** (co-designed with mutation
@@ -420,6 +422,7 @@ unsettled builds on sand — and #309 waits on #306.
 - **Overriding a `body` field.** ADR-0013's scope is deliberately total — title, body and every field
   travel. Overrides are per-field and body is a field, so a layer-level body override is expressible
   and lands on 0013's buffer-safe read-only body overlay. Permitted; slice E states the interaction.
+  *(Slice E never did, and the implementation shipped metadata-only. Amendment 4 decides it.)*
 
 ## Amendment 3 — the create-project wizard, and authored-field inheritance (2026-07-25)
 
@@ -449,3 +452,227 @@ honour is to **never seed a scene at open-time** (which would give a container a
 
 **`genre` is removed** (pre-1.0, no migration): a keyword cannot carry it; its replacement is a
 Lore-entry treatment, out of scope.
+
+## Amendment 4 — a layer override may replace an inherited lore entry's title and body (2026-09-24)
+
+> **Status: accepted 2026-09-24** (PR #2188). Issue #2184. Citations name functions; where a line number
+> appears it is verified against `8b872ea1` (2026-09-24, master after PR #2187).
+
+**The gap.** *Consequences → Explicitly deferred* says a body override is "Permitted; slice E states
+the interaction". Slice E never stated it. The overrides shipped metadata-only, and a save that
+changes an inherited node's title or body from a lower layer is refused with a 422
+(`inherited_content_refusal`, #2132/#2159). This amendment makes body and title overrides real **for
+lore**, and decides that prompts do not get them (§5).
+
+**Intent.** In a book, an author rewords the body or retitles an entry inherited from Aetheria. Only
+that book (and its own descendants) sees the change, Aetheria's file stays byte-identical, and "Reset
+to inherited" brings the canon back. This is the per-field override affordance with two more fields,
+not a new affordance.
+
+**Not whole-node override.** *Three edit affordances* rejects whole-node override. A body override is
+not that. Every field it does not touch, including metadata, keeps resolving against the live
+ancestor, so later canon corrections to those fields still arrive. What stops arriving is canon edits
+to the overridden title or body, which is the point of an override. An author who wants the whole
+node detached forks it.
+
+### 1. Storage: two more rows, not a body section
+
+A title or body override is a `replace` row in the existing override file:
+`{field: title, op: replace, value: …}` and `{field: body, op: replace, value: …}`. Title and body
+are text, so `replace` is the only op that applies.
+
+**Rejected: the body in the override file's Markdown body section.** The file already has an empty
+body section (`_write_override_file` passes `""`), and a body there would read more naturally by hand.
+It is rejected for three reasons:
+
+- It gives the delta content of its own. *An override is a delta* calls it a **body-less Node**, and
+  the reason for rejecting a same-id sparse lore entry applies again: a delta must not impersonate a
+  node.
+- Everything that reads override rows would need a second channel. That is the collector
+  (`_read_override_record`), the propagation lanes (`_override_delta_diff`,
+  `_removed_delta_layers`, `_fold_propagation_baseline_metadata`), the promotion plan
+  (`_folds_after_promotion`) and the migration ladder's row conversion (`_convert_override_rows`).
+  Rows reach all of them as they are.
+- An empty override body would be ambiguous: no override, or an override to empty?
+
+**What rows buy.** Snapshot capture and restore already copy the whole override file. The composite
+revision already hashes every override file (`_composite_revision`). Fork already copies the folded
+entry (`fork_lore_entry`). Scene mutations already start from `read_lore_entry`
+(`_entity_base_values`).
+
+**A body row's value is normalised exactly like a body read from a file**: CRLF becomes LF, and
+leading and trailing newlines follow the file read. The save compares after normalising, so an
+unchanged body never produces a row, and a body line that is exactly `---` survives the round trip
+through front matter. The value is written as a YAML literal block (`|`), so the file stays readable
+by hand; the files are the source of truth.
+
+**The override file's own `title:` key is not the title override.** That key is the file's label,
+"X (override)", and it is always built from the canon title. The title override is only ever the
+`title` row. The filename stays cosmetic; the join is `target:`.
+
+### 2. The fold keeps title and body out of metadata
+
+Title and body are schema fields (intrinsic), so a naive fold would write `metadata["title"]`.
+**The fold returns the effective title and body separately from the metadata, and a `title`/`body`
+row never lands in a metadata dict.** This is the fold's job, not each caller's. Leaving it to
+callers leaks the keys into lists, selectors and the override diff. One leak turns into a blank
+title override on the next save.
+
+Composition is unchanged: records are applied in ascending layer rank, so the nearest descendant's
+row wins. The fold also reports **which layer's row won** the title, for §5.
+
+The effective title and body apply wherever an inherited node is read for the open project. Each of
+these reads the title (and body) from the owning file today and needs its own change:
+
+- `read_lore_entry` and `list_lore_entries`, including `computed_metadata` (word count) derived from
+  the body.
+- The node index's title (`NodeIndexEntry.title`), folded at index build. The index is built per open
+  project, so the folded title is well defined. The title fold does not depend on the schema having
+  loaded (edges fold only with a schema; a schema typo must not bring canon titles back).
+- The search corpus (`_corpus_entry_for`), which folds no overrides at all today.
+
+### 3. The save
+
+`_save_lore_override` compares the submission against **the fold of the layers above L**, not against the owning file. Today's comparison against the owning file assumes
+no layer overrides title or body, and that assumption ends here. A title or body that differs from
+that fold becomes a row; one that equals it produces no row. New title/body rows are built before
+the `clear_override_fields` filter runs, so "Reset to inherited" on `title` or `body` is the same
+request as for any field.
+
+For lore, `inherited_content_refusal` goes. The invariant it enforced stays: **an override save
+refuses, and never drops, any part of the submission it cannot carry.** The prompt override save
+keeps the refusal unchanged (§5).
+
+### 4. An edit is always made against the entry as the authoring layer sees it
+
+The "Editing at" bar lets an author in a book choose where a save lands: the book (an override), an
+intermediate layer (an override there), or the owning layer (a direct edit of canon). Today
+`setEditorPaneAuthoringLayer` only records the choice. The pane keeps showing the book's folded
+values, so choosing the owning layer and saving writes the book's overrides into canon. It is latent
+for metadata today; with body overrides it would copy a whole rewritten body into Aetheria.
+
+**Choosing an authoring layer re-seeds the pane from the entry as that layer sees it (the fold of
+the layers down to and including it) before any edit is accepted.** Unsaved edits are flushed at the
+current layer first, the same as any pane switch. This covers metadata as well as title and body. It
+is tracked as its own bug, #2189, and lands before slice 1, so the first body override can never be
+copied upstream.
+
+### 5. Lore only: a prompt's title and body change only by cloning
+
+Body and title overrides apply to **lore**. **Prompts do not get them.** The prompt override save
+keeps refusing a changed title or body ("Clone the prompt to change them here",
+`inherited_content_refusal`). An inherited prompt stays `editable=False`, so the editor keeps its
+body and title locked and its "Clone to edit" affordance.
+
+**Why prompts are different.** A lore entry's body is canon *about the world*. A book legitimately
+knows it differently ("by Book 12 Marek has kept the gate eleven years"), and a later canon
+correction to other fields should still reach it. A prompt's body is its *behaviour*. Overriding it
+changes what the prompt does in one book while it still looks like the inherited prompt. Every later
+improvement to the canon prompt then silently stops reaching that book, for a prompt whose name and
+provenance say it is the shared one. A clone makes that divergence visible and owned. An override
+would hide it.
+
+The Library is the sharpest case of the same argument: a shipped prompt would stop receiving the
+app's own updates for a text the author never wrote (ADR-0049 §3). Excluding prompts as a kind, not
+just Library prompts, is the same reasoning applied consistently.
+
+This also keeps out of scope everything a prompt body override would drag in: include resolution by
+an overridden title, rendering an overridden snippet into its includers, and prompt properties the
+override row format cannot carry (`inputs`, `offer_on`, `context_strategy`).
+
+Metadata overrides of inherited prompts, including Library prompts (routing, #1738), are unaffected.
+
+### 6. Renaming an inherited lore entry is a rename
+
+Inside the overriding project, the overridden title **is** the entry's name everywhere: pickers,
+search, and name detection in prose. Implicit lore detection matches the listed title and aliases
+(`lore_selection.py`), so in that book the new name is what it finds. References are by id and are
+unaffected.
+
+**Rejected: matching by either title.** That would give one entry two names in one project. An author
+who wants the old name still recognised adds it as an alias, which is exactly what aliases are for.
+
+### 7. Change propagation sees title and body rows
+
+`_change_candidate_diff` says `body_changed` "comes from the owning file alone, since a delta has no
+body". That stops being true.
+
+- **A body row changed in any override lane sets `body_changed`**, exactly as a body change in the
+  owning file does. It is never reported as a field in `changed_fields`.
+- **A `title` row is reported the way the owning file's title is.** The owning lane excludes title
+  (`NON_FIELD_KEYS` in `snapshot_diff.py`), so a lane does too. The override lane neither adds nor
+  loses a signal the owning lane has.
+- **The "before" side folds too.** The Propose step renders the baseline next to now
+  (`change_propagation.py`). Its title and body come from the owning baseline's `detail.title` and
+  `detail.body`, unfolded, today, so it would show the AI the canon-versus-override difference instead of the change
+  being followed up. The baseline's title and body are folded from each lane's baseline rows, the
+  same way its metadata already is.
+- **Viewing an override-lane snapshot shows its title and body rows.** Today `read_snapshot` on a
+  lane returns an empty body.
+
+Not changed here, and deliberately out of scope:
+- whether a canon change hidden behind a book's override should still raise that book's review item
+  (the owning lane reports its own changes whatever shadows them, today for metadata and after this
+  for body; that is ADR-0091's to revisit)
+- the fact that a retitle changes what a name mention matches (`mentions_source`), which is equally
+  true of an owning-layer retitle today
+
+### 8. Promotion lists what will fold
+
+The promotion plan (`_folds_after_promotion`) lists the override rows that will fold onto a promoted
+node. Title and body rows are listed like any other, so the plan's "what you see is what you get"
+(ADR-0078 §9) holds for a body override from an intermediate layer. The origin's own override files
+are still settled by `_settle_origin_override`. They are inert while the origin owns the node, so a
+body row there goes the same way as any other row.
+
+### 9. Provenance
+
+*Provenance is first-class* requires an author to see that a value is an override. That now applies
+to title and body, which have no rail row. They are reported separately from `overridden_fields`
+(which stays the metadata rail's list), so the rail does not grow rows it cannot show. Slice 4 brings
+a mockup of the tell and the "Reset to inherited" placement for approval before building. This
+amendment requires only that both exist.
+
+### 10. Storage format
+
+No existing file changes shape and none is rewritten, so there is **no migration ladder step**
+(ADR-0071). A project written before this amendment reads identically after it; slice 1 proves that
+with a fixture.
+
+Two limits, stated so they are not rediscovered as surprises:
+- **An older build opening a newer project.** It would fold a `title` row as an unknown metadata key
+  and read the canon body. The app has no "project too new" guard today, for this or any other
+  format change. Adding one is out of scope.
+- **Override snapshots restore byte-for-byte, outside the ladder.** A future ladder step that
+  rewrites body content (the document ladder) must also rewrite `body` rows, in live override files
+  and in override snapshots, or it will leave them behind.
+
+### Slices (one PR each, in order)
+
+**Prerequisite: #2189** (the authoring-layer re-seed, §4) is merged first.
+
+1. **Lore, end to end, without the provenance surface.**
+   - Backend: rows (§1), the fold (§2), the save (§3), reset, and the list, index and search reads.
+   - The promotion plan (§8).
+   - Tests first: a snapshot round trip, a pre-amendment fixture (§10), CRLF and a `---` body line,
+     and no title/body key in any metadata dict.
+   - Fix the stale comments this makes false (the "UI keeps an inherited body read-only" docstring,
+     `OVERRIDE_SNAPSHOT_KINDS`).
+   - *Not:* any change to prompts (their refusal stays exactly as it is); the title/body provenance
+     tell.
+   - *Done when:* in a book, the author edits an Aetheria entry's body and title and saves. The book's
+     list, search and reopened entry show the new text. Aetheria's file is byte-identical. Switching
+     "Editing at" to Aetheria shows the canon text, not the book's. Resetting `body` restores the
+     canon body.
+2. **Change propagation (§7).**
+   - *Not:* shadow-aware suppression of owning-lane changes.
+   - *Done when:* editing a book's body override flags the book's dependents exactly as editing the
+     canon body flags them, and Propose shows the before/after of the override edit itself.
+3. **Lore provenance for title and body (§9).**
+   - Mockup first, then the tell and the reset.
+   - *Done when:* browser-verified on a layered project: edit an inherited entry's body in the book,
+     reload, see it marked as an override, reset it, and see the canon body again.
+
+**Out of scope throughout:** appending to or patching an inherited body (whole-body replace only), a
+second override mechanism, any write through to the ancestor file, and title or body overrides for
+any kind other than lore.

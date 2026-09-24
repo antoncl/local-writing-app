@@ -4,7 +4,7 @@
   adversarial review · **Amendment 1: inheritance is declared, not inferred** · **Amendment 2: one
   traversal; the root is stipulated, not inferred from a stray `metadata.schema.yaml`** · **Amendment
   3: the create-project wizard + authored-field inheritance (→ `create-project-wizard.md`)** ·
-  **Amendment 4 (draft, awaiting review): a layer override may replace an inherited lore entry's title
+  **Amendment 4 (accepted 2026-09-24): a layer override may replace an inherited lore entry's title
   and body; prompts change only by cloning (#2184)**
 - Feature: #7 (epic) full project hierarchies
 - Companion: ADR-0040 (the index — which *materializes* the chain, not merely caches it)
@@ -455,7 +455,7 @@ Lore-entry treatment, out of scope.
 
 ## Amendment 4 — a layer override may replace an inherited lore entry's title and body (2026-09-24)
 
-> **Status: draft, awaiting review.** Issue #2184. Citations name functions; where a line number
+> **Status: accepted 2026-09-24** (PR #2188). Issue #2184. Citations name functions; where a line number
 > appears it is verified against `8b872ea1` (2026-09-24, master after PR #2187).
 
 **The gap.** *Consequences → Explicitly deferred* says a body override is "Permitted; slice E states

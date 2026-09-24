@@ -1,9 +1,9 @@
 # ADR-0094: A node carries its own place in the tree, and a container is named by its level
 
-- **Status:** Draft — awaiting review. Text by Claude from a design conversation with Anton
-  Lauridsen on 2026-09-24 (#217), revised against two cold implementing threads (one per
-  slice group) before review. Acceptance alone starts nothing; each slice gets its own issue
-  and an explicit go.
+- **Status:** Accepted — 2026-09-24, Anton Lauridsen (PR #2173). Text by Claude from a design
+  conversation with Anton on 2026-09-24 (#217), revised against two cold implementing threads
+  (one per slice group) before review. Each slice gets its own issue; Anton gave the go for
+  the prerequisite fixes and all three slices at acceptance.
 - **Feature:** the manuscript and research trees are stored on the nodes themselves. A node's
   file says which container it sits in and where among its siblings, so the separate structure
   files go away, a change made to the files outside the app shows in the tree, and a move writes

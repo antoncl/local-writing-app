@@ -88,8 +88,8 @@ author edits; a new project has one container type.
 - **Not a live level name in titles.** The level name is used where a container is created,
   outlined and drawn (§7); a container's title is what its author wrote, and renaming a level
   retitles nothing.
-- **No nested research topics.** Research has two kinds of node, topics and notes; its level list
-  has one entry.
+- **No third kind of tree node.** A tree has containers and leaves, nothing else; a level is a
+  name and a type for a container, not a new kind.
 - **No linked list.** A node does not name its neighbour (§Why).
 - **Not undo for tree operations.** None exists today; this ADR does not build it.
 - **Not a new import flow.** The loose-scene import retires (§5); nothing replaces it.
@@ -234,8 +234,8 @@ The v12 migration (§10) rewrites persisted `node_…` ids to the file ids they 
 
   So a chapter deleted outside the app leaves its scenes at the top level with a warning each;
   nothing is deleted or lost.
-- **A container deeper than its tree's level list** (§7) — from a hand edit, from existing
-  nested research topics, or from shortening the list — stays where it is, is named by the
+- **A container deeper than its tree's level list** (§7) — from a hand edit or from shortening
+  the list — stays where it is, is named by the
   list's last entry, and Verify warns. The app never produces one: creation offers no level
   beyond the list, and a move that would push the moved node or any container below it past
   the list is refused.
@@ -265,7 +265,8 @@ content ignore it:
 ### 7 — The level list names, types and numbers containers
 
 Each tree has one **container type** and one **leaf type**: `manuscript:container` and
-`manuscript:scene`; `research:topic` and `research:note`. "Is this a container" is `is_a` the
+`manuscript:scene`; `research:container` and `research:note`. The research container is named
+by its role, as the manuscript's is; "Topic" is a level name, as "Act" is. "Is this a container" is `is_a` the
 container type; "is this a leaf" is `is_a` the leaf type. The name lists and exact tests
 retire — `_CONTAINER_TYPES`, the frontend `CONTAINER_TYPES`, NodePicker's act/chapter filter,
 `_is_leaf_node`, `treeHelpers.isLeafNode`, the `=== config.leafType` tests in
@@ -274,9 +275,12 @@ retire — `_CONTAINER_TYPES`, the frontend `CONTAINER_TYPES`, NodePicker's act/
 a user-defined scene type is still a scene.
 
 `manuscript:container` carries the fields `manuscript:act` and `manuscript:chapter` carry today
-(`pov_mode`, `pov`, `tense`) and the display template `{title} {number}`. A new project's schema
-has no other container type. `research:topic` stays research's container type; it becomes
-openable (its `opens_in: tree_container` goes), because a topic is now a file.
+(`pov_mode`, `pov`, `tense`) and the display template `{title} {number}`. `research:container`
+carries what `research:topic` carries today, minus `opens_in: tree_container`: a research
+container is a file and opens like any node. A new project's schema has no other container type
+in either tree. Research sub-types become authorable as manuscript ones are: the schema's
+entry-type upsert accepts the `research` kind (`_resolve_upsert_entry_type_id`,
+`services/project/schema.py:324`, omits it today).
 
 **The level list.** Each tree's list lives in `project.yaml`, replacing
 `manuscript_structure.container_types`:
@@ -300,9 +304,10 @@ An entry has:
 - **`numbering`** — `restart` (default) or `continuous`; see Numbering.
 
 A new project's lists are `[Act, Chapter]` and `[Topic]`, on the container types. The author
-edits the manuscript list in the project settings (the breadcrumb, beside the inherits
-declaration). The backend validates a list: names non-blank and distinct, types that exist and
-are containers, at least one entry. Removing or reordering entries that containers sit at is
+edits both lists in the project settings (the breadcrumb, beside the inherits declaration). The
+backend validates a list: names non-blank, types that exist and are `is_a` the tree's container
+type, at least one entry. Names may repeat — a research tree two topics deep is
+`[Topic, Topic]`. Removing or reordering entries that containers sit at is
 refused unless confirmed, and the refusal names how many containers would be named by a
 different entry or fall past the end of the list. A list is per project; a book does not
 inherit its series' list.
@@ -339,11 +344,11 @@ today (`<container>`, `<act>` for a migrated project, `<prologue>` for a sub-typ
 `level` attribute with the level name; the outline node gains `level` for templates; the
 vocabulary reference (`docs/prompts/reference.md`) gains the row.
 
-### 8 — Existing books keep their act and chapter types
+### 8 — Existing projects keep their act, chapter and topic types
 
-The v13 migration (§10) does not fold `manuscript:act` and `manuscript:chapter` into the
-container type. It makes them sub-types of `manuscript:container` and binds them to the levels
-they occupy:
+The v13 migration (§10) does not fold `manuscript:act`, `manuscript:chapter` or `research:topic`
+into the container types. It makes the first two sub-types of `manuscript:container` and the
+third a sub-type of `research:container`, and binds each to the levels it occupies:
 
 ```yaml
 manuscript_structure:
@@ -352,13 +357,17 @@ manuscript_structure:
       type: manuscript:act
     - name: Chapter
       type: manuscript:chapter
+research_structure:
+  levels:
+    - name: Topic
+      type: research:topic
 ```
 
-So an existing book keeps every customisation of those types, its prompts offered on
-`manuscript:chapter` still appear, a template testing `is_a('manuscript:chapter')` still
-matches, old snapshots restore to a type that still exists, and "New Chapter" still creates a
-chapter. The two stop being built-ins: v13 writes their definitions into the schema of each
-layer that uses them (§10).
+So an existing project keeps every customisation of those types, its prompts offered on
+`manuscript:chapter` still appear, a template testing `is_a('manuscript:chapter')` or
+`is_a('research:topic')` still matches, old snapshots restore to a type that still exists, and
+"New Chapter" still creates a chapter. The three stop being built-ins: v13 writes their
+definitions into the schema of each layer that uses them (§10).
 
 ### 9 — The plot board nests one box per level
 
@@ -403,15 +412,17 @@ what a step could not place is reported by Verify, through §5's warnings.
 
 **v13 — levels.** For each layer:
 
-1. Where the layer's node files or schema use `manuscript:act` or `manuscript:chapter`, write
-   their full definitions into the layer's `metadata.schema.yaml` — name, icon (`stack-2`,
-   `book`), `kind`, `parent: manuscript:container`, and the layer's own customisation of them,
-   which today is a partial overlay on a built-in and could not stand alone. Remove both from
-   the built-ins.
+1. Where the layer's node files or schema use `manuscript:act`, `manuscript:chapter` or
+   `research:topic`, write their full definitions into the layer's `metadata.schema.yaml` —
+   name, icon (`stack-2`, `book` for act and chapter), `kind`, `parent` (`manuscript:container`
+   or `research:container`), and the layer's own customisation of them, which today is a partial
+   overlay on a built-in and could not stand alone. The built-ins no longer define them.
 2. Seed the level lists from the layer's trees: for each depth, an entry named after the type
-   most containers at that depth have (ties by reading order), with that type; at least
-   `[Act, Chapter]` on their types for a manuscript, so a book with only acts keeps "New
-   Chapter". Research gets `[Topic]`. Remove `container_types`.
+   most containers at that depth have (ties by reading order), with that type. A manuscript gets
+   at least `[Act, Chapter]` on their types, so a book with only acts keeps "New Chapter"; a
+   research tree gets at least `[Topic]` on `research:topic`, and one more `Topic` entry for each
+   depth its topics already nest to, so no existing topic falls past the list. Remove
+   `container_types`.
 
 Nothing else is rewritten: every stored type name still names a type that exists.
 
@@ -463,8 +474,9 @@ pick is skipped.
 - **A per-node level field.** Depth already says it; a field could disagree with the depth.
 - **A live level name in the display.** Authored titles ("The Beginning") would give way to the
   level name wherever the base template used it.
-- **Renaming `research:topic` to `research:container`.** Symmetry of names, bought with a type
-  rewrite across research files, schemas and snapshots; the mechanism is symmetric already.
+- **Keeping `research:topic` as research's container type.** "Topic" is what a research
+  container is called, the way "Act" is what a manuscript container is called; naming the type
+  after one level's name is the act/chapter mistake in a smaller tree.
 - **One migration step for both slices.** Two steps let each slice ship whole; each runs once per
   project.
 
@@ -491,6 +503,8 @@ pick is skipped.
   no `{number}`.
 - **New projects' AI outline** reads `<container level="Act">`; a user template that tests a
   container's type by name must test `level` instead. No built-in does.
+- **Research containers become ordinary nodes:** openable, with fields, and sub-typable through
+  the schema panes.
 - **Docs:** `docs/getting-started.md` (walks the author through Act → Chapter → Scene),
   `docs/schema-yaml-howto.md` (the container sub-typing section, already stale),
   `docs/prompts/helpers.md` (the structure yaml walk, `.entry_type` values),
@@ -537,8 +551,10 @@ One lane, in order: S2's levels are depths in S1's tree, and S3 draws S2's level
    are still Act 1, Act 2.
 9. A new project offers "New Act" at the top and "New Chapter" inside an act; its schema has one
    container type.
-10. In Research they open a topic itself: it is a file, with its own fields. Inside a topic the
-    tree offers notes, not topics.
+10. In Research they open a topic itself: it is a file, with its own fields. A new project's
+    research tree offers notes, not topics, inside a topic; adding a second "Topic" entry to its
+    level list lets topics nest one deeper. An existing project whose topics already nest keeps
+    them nested.
 11. They restore an old snapshot of a scene they have since moved to another chapter. The text
     goes back; the scene stays where it is.
 
@@ -563,5 +579,7 @@ and that placement declared as schema fields would reserve the names on every ki
 found that folding act and chapter into one type loses customisations and renumbers mixed
 books; Anton chose to let a level name its type, new projects born with the container type only
 and existing books keeping act and chapter as its sub-types; set numbering per level with his
-two modes, restart and continuous; confirmed research has one topic level; and agreed that
-titles stay as written.
+two modes, restart and continuous; and agreed that titles stay as written. On research he
+settled that the tree has two kinds of node, a container and a note — the research equivalent of
+the scene — and that the container's type is `research:container`, calling the `research:topic`
+name a long-standing bug; research takes the manuscript's level list as it is.

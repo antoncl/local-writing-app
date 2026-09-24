@@ -332,13 +332,23 @@
     // keepalive hint (whose ~64KB body cap is why the visibility path stays
     // normal). Between them a paragraph typed just before leaving reaches disk.
     const onPageHide = () => void flushDirtyPanesOnHide(editorPanes, { keepalive: true });
+    // Coming back to the window is the moment after an edit made elsewhere —
+    // a file dropped in from Explorer, a `git pull` — so catch up with disk
+    // then (#2170). `focus` covers a window that was visible beside Explorer
+    // all along, which `visibilitychange` alone never reports.
+    const onReturn = () => {
+      if (appState.name === "projectOpen") void projectSession.refreshFromDisk();
+    };
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") void flushDirtyPanesOnHide(editorPanes);
+      else onReturn();
     };
     window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("focus", onReturn);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("focus", onReturn);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       editorPanes.dispose();
       cleanupThemeWiring?.();
@@ -634,6 +644,9 @@
         const result = await api.validateProject();
         setValidation(result);
         status = result.valid ? "Project validation passed" : "Project validation found issues";
+        // Validation rebuilds the index from disk, so it sees files added
+        // outside the app; re-pull the lists so the panes do too (#2170).
+        await projectSession.reloadProjectData();
       });
     } finally {
       validating = false;

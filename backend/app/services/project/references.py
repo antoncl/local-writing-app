@@ -73,6 +73,7 @@ from app.services.project.node_index_snapshot import (
     LoadedSnapshot,
     Manifest,
     SnapshotUnusable,
+    diff_manifests,
     fingerprint_for,
     snapshot_path,
 )
@@ -489,6 +490,52 @@ class ReferencesMixin:
         # ADR-0085 §1: the corpus is patched here, on the one seam every
         # writer already passes.
         self._patch_search_corpus(resolved)
+
+    def refresh_node_index_from_disk(self) -> bool:
+        """ADR-0040's mid-session refresh hook (#2170): catch edits made outside the app.
+
+        A warm memo does no disk work, so a `.md` dropped into `lore/` from
+        Explorer stays invisible for as long as the session stays open. This
+        re-sweeps the chain's manifest and feeds every path it disagrees about
+        through the write funnel above — the same change-gate an in-app save
+        runs. That matters because the held manifest is *expected* to drift: a
+        prose-only save leaves the memo, fingerprints included, untouched. The
+        gate re-derives such a file's signature, finds nothing moved, and
+        no-ops, so only a change the index actually holds publishes. A
+        layer-level yaml that fans out across the chain cannot be patched and
+        drops the memo instead; the next read builds cold.
+
+        Returns whether the held index moved — the client's cue to re-pull its
+        node lists. With nothing held there is nothing to compare against, and
+        the next read builds cold from disk, so that reports as changed.
+        """
+        root = self._require_project().resolve()
+        held = node_index_gate.peek(root)
+        if held is None:
+            return True
+        layers = list(held.layers)
+        on_disk = self._build_index_manifest(layers)
+        drifted = tuple(Path(path) for path in diff_manifests(held.manifest, on_disk))
+        if not drifted:
+            return False
+        _, unplaceable = self._placeable_write_paths(drifted, layers)
+        if unplaceable:
+            node_index_gate.invalidate()
+            return True
+        # A file that appeared or vanished changes the path set, which the
+        # funnel only patches when told the write is structural. An edit in
+        # place goes through one file at a time, because the signature check
+        # that makes a prose-only save a no-op only runs for a single-file
+        # write — batched, every file the app saved this session would patch.
+        appeared_or_vanished = tuple(
+            path for path in drifted if held.manifest.get(str(path)) is None or on_disk.get(str(path)) is None
+        )
+        if appeared_or_vanished:
+            self._apply_index_write(appeared_or_vanished, structural=True)
+        for path in drifted:
+            if path not in appeared_or_vanished:
+                self._apply_index_write((path,), structural=False)
+        return node_index_gate.peek(root) is not held
 
     def _flush_resolved_index(self, resolved: ResolvedIndex) -> None:
         """Write the deferred snapshot for a patched memo (#476).

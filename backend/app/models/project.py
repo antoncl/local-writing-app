@@ -313,6 +313,14 @@ class ProjectValidation(BaseModel):
     code_fenced_bodies: list[CodeFencedBody] = Field(default_factory=list)
 
 
+class ProjectDiskRefresh(BaseModel):
+    """The answer of `POST /api/project/refresh` (#2170): whether files changed
+    outside the app moved anything the index holds, so the client knows to
+    re-pull its node lists. False costs the client nothing."""
+
+    changed: bool
+
+
 class LoreCodeFencePreview(BaseModel):
     """The body of a lore entry with its whole-body code fence stripped (#1628),
     read-only — fed into the standard revision review so the user commits or

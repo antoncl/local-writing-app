@@ -56,6 +56,11 @@ def _render_outline_node(node: dict, *, indent: int) -> str:
     summary = (node.get("summary") or "").strip()
     children = node.get("children") or []
     attrs = [f"title={title}"]
+    # A container's level name (ADR-0094 §7): with one container type the tag
+    # alone no longer says whether this is an act or a chapter.
+    level = node.get("level")
+    if level:
+        attrs.append(f"level={quoteattr(str(level))}")
     if summary:
         attrs.append(f"summary={quoteattr(summary)}")
     attr_str = " ".join(attrs)

@@ -49,9 +49,9 @@ class PreviewEndpointTests(unittest.TestCase):
         self.honor_id = honor.id
 
         structure = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
-        act_node = next(c for c in structure.root.children if c.type == "manuscript:act")
+        act_node = next(c for c in structure.root.children if c.type == "manuscript:container")
         s = self.service.create_structure_node(
             CreateStructureNodeRequest(
                 title="The Departure", entry_type="manuscript:scene", parent_id=act_node.id

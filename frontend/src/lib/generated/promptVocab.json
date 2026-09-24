@@ -83,7 +83,7 @@
       "name": "full_outline",
       "kind": "helper",
       "signature": "full_outline()",
-      "summary": "The manuscript's outline: a nested list of nodes with `.title`, `.summary`, `.children`."
+      "summary": "The manuscript's outline: a nested list of nodes with `.title`, `.summary`, `.level` (a container's level name, such as \"Act\" or \"Chapter\"; empty for a scene), `.children`."
     },
     {
       "name": "full_text",

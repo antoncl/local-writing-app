@@ -18,6 +18,10 @@ export const SCHEMA = {
     "prompt:snippet": { name: "Snippet", kind: "prompt" },
     "prompt:voice_note": { name: "Voice note", kind: "prompt", parent: "prompt:snippet" },
     "prompt:general": { name: "General", kind: "prompt" },
+    // ADR-0094: one container type; a migrated project's act/chapter are its sub-types.
+    "manuscript:container": { name: "Container", kind: "manuscript" },
+    "manuscript:act": { name: "Act", kind: "manuscript", parent: "manuscript:container" },
+    "manuscript:chapter": { name: "Chapter", kind: "manuscript", parent: "manuscript:container" },
     "plot:plotline": { name: "Plotline", kind: "plot" },
     "plot:card": { name: "Card", kind: "plot" },
     "lore:character": { name: "Character", kind: "lore" },

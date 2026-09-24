@@ -209,7 +209,7 @@ full_outline() -> list[OutlineNode]
 {% endfor %}
 ```
 
-**Caveats**: walks `manuscript.structure.yaml` depth-first. Containers without summary metadata still appear with `.summary == ""`. For a flat scene list with bodies (not summaries), use `full_text()`.
+**Caveats**: walks the manuscript tree depth-first; each node's `.level` is its level name ("Act", "Chapter"), empty on a scene. Containers without summary metadata still appear with `.summary == ""`. For a flat scene list with bodies (not summaries), use `full_text()`.
 
 ## `full_text()`
 
@@ -274,7 +274,7 @@ The story so far:
 
 - **Scope is the current book.** Under a nested layout (a Honorverse → series → book folder chain) the recap is the book's own scenes, not the whole universe.
 - Only scenes with a non-empty `summary` metadata field contribute. Empty-summary scenes are skipped silently.
-- The walk is depth-first through `manuscript.structure.yaml`. Containers (acts, chapters) contribute their own summaries if they have one; otherwise they're invisible structural nodes.
+- The walk is depth-first through the manuscript tree. Containers (acts, chapters) contribute their own summaries if they have one; otherwise they're invisible structural nodes.
 
 ## `use(node, "stable"|"volatile")` and `auto_lore()`
 

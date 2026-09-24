@@ -194,8 +194,7 @@ class ComputedMetadataMixin:
             elif function == "counter" and node_id and entry_type:
                 if structure is None:
                     structure = self.read_structure()
-                scope = field.computed.get("scope", "siblings")
-                value = self._compute_counter(structure.root, node_id, entry_type, scope)
+                value = self._counter_value(structure, node_id, entry_type, field_id, field.computed)
                 if value is not None:
                     computed[field_id] = value
             elif function == "cost":
@@ -207,6 +206,17 @@ class ComputedMetadataMixin:
                 if total is not None:
                     computed[field_id] = total
         return computed
+
+    def _counter_value(
+        self, structure: StructureDocument, node_id: str, entry_type: str, field_id: str, spec: dict[str, Any]
+    ) -> int | None:
+        """One node's `{number}`: a container's is by its level, which the tree
+        read already stamped (`_number_containers`, ADR-0094 §7); a scene's is
+        by its type within the field's scope, as before."""
+        node = TreeStructureService.find_node(structure, node_id)
+        if node is not None and node.level is not None:
+            return node.computed_metadata.get(field_id)
+        return self._compute_counter(structure.root, node_id, entry_type, spec.get("scope", "siblings"))
 
     def _compute_invocation_cost(self, scope: str, node_id: str | None) -> float | None:
         # Sum cost_usd across `ai_invocations.yaml` rows matching the scope.
@@ -260,3 +270,50 @@ class ComputedMetadataMixin:
         ordinal = _ManuscriptOrdinal(entry_type, target_scene_id)
         TreeStructureService.walk(root, ordinal)
         return ordinal.result
+
+    def _number_containers(self, document: StructureDocument, schema: MetadataSchema) -> None:
+        """Stamp each container's `{number}` counter by its LEVEL (ADR-0094 §7).
+
+        A container counts among the containers at its own level that show a
+        number — whose display template contains `{number}` — so a Prologue
+        sub-type with a template of `{title}` beside the acts takes no act's
+        number. The level entry's `numbering` says where the count runs:
+        `restart` within the parent (Act 2's chapters are 1, 2), `continuous`
+        through the whole tree (they are 3, 4). The type does not matter: one
+        container type spans every level, and a book that kept its act and
+        chapter types numbers them the same way. A counter field that says
+        `scope: manuscript` runs on whatever the level says — the author asked
+        for that field to count through the book."""
+        levels = document.levels
+        counters: dict[int, int] = {}
+
+        def shows_number(node: StructureNode) -> bool:
+            definition = schema.entry_types.get(node.type)
+            return bool(definition and definition.display_template and "{number}" in definition.display_template)
+
+        def counter_fields(node: StructureNode) -> list[tuple[str, bool]]:
+            """Each counter field on the node's type, and whether it runs on
+            through the book whatever the level says."""
+            definition = schema.entry_types.get(node.type)
+            return [
+                (field_id, (field.computed or {}).get("scope") == "manuscript")
+                for field_id in (definition.fields if definition else [])
+                if (field := schema.fields.get(field_id)) is not None
+                and field.type == "computed"
+                and (field.computed or {}).get("function") == "counter"
+            ]
+
+        def visit(node: StructureNode) -> None:
+            within_parent: dict[int, int] = {}
+            for child in node.children:
+                if child.level is not None and shows_number(child):
+                    counters[child.level] = counters.get(child.level, 0) + 1
+                    within_parent[child.level] = within_parent.get(child.level, 0) + 1
+                    level_runs_on = bool(levels) and levels[min(child.level, len(levels)) - 1].numbering == "continuous"
+                    for field_id, runs_on in counter_fields(child):
+                        child.computed_metadata[field_id] = (
+                            counters[child.level] if runs_on or level_runs_on else within_parent[child.level]
+                        )
+                visit(child)
+
+        visit(document.root)

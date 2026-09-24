@@ -86,9 +86,9 @@ class LoreAndPromptTests(MetadataValidationBase):
         self.assertTrue(schema.entry_types["research:base"].abstract)
         self.assertEqual(schema.entry_types["research:base"].kind, "research")
 
-        self.assertEqual(schema.entry_types["research:topic"].kind, "research")
-        self.assertEqual(schema.entry_types["research:topic"].parent, "research:base")
-        self.assertFalse(schema.entry_types["research:topic"].has_body)
+        self.assertEqual(schema.entry_types["research:container"].kind, "research")
+        self.assertEqual(schema.entry_types["research:container"].parent, "research:base")
+        self.assertFalse(schema.entry_types["research:container"].has_body)
 
         self.assertEqual(schema.entry_types["research:note"].kind, "research")
         self.assertEqual(schema.entry_types["research:note"].parent, "research:base")

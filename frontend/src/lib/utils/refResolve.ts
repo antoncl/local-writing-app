@@ -10,6 +10,7 @@
 // ReferenceListTab's "Missing" row), so this module carries no sentinel /
 // fallback-kind opinion of its own.
 import { canonicalIdIn } from "@/lib/stores/tagNodes";
+import { isLeafNode } from "@/lib/utils/treeHelpers";
 import type {
   AssistantEntrySummary,
   EntryMetadata,
@@ -55,7 +56,7 @@ function flattenScenesAll(
 ): Map<string, { id: string; title: string; entry_type: string; metadata?: EntryMetadata }> {
   const out = new Map<string, { id: string; title: string; entry_type: string; metadata?: EntryMetadata }>();
   const walk = (n: StructureNode) => {
-    if (n.type === "manuscript:scene" && n.scene_id) {
+    if (isLeafNode(n) && n.scene_id) {
       const entryType = (n as unknown as { entry_type?: string }).entry_type ?? "manuscript:scene";
       out.set(n.scene_id, { id: n.scene_id, title: n.title, entry_type: entryType, metadata: n.metadata ?? undefined });
     }

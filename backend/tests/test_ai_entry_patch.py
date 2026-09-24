@@ -662,10 +662,10 @@ class KindAgnosticSeamTests(unittest.TestCase):
         structure = self.service.read_structure()
         doc = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter", entry_type="manuscript:chapter", parent_id=structure.root.id
+                title="Chapter", entry_type="manuscript:container", parent_id=structure.root.id
             )
         )
-        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:chapter")
+        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:container")
         scene = self.service.create_scene(
             CreateSceneRequest(title="Scene", parent_id=chapter_id)
         )
@@ -761,10 +761,10 @@ class SceneSummaryPromptTests(unittest.TestCase):
         structure = self.service.read_structure()
         doc = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter", entry_type="manuscript:chapter", parent_id=structure.root.id
+                title="Chapter", entry_type="manuscript:container", parent_id=structure.root.id
             )
         )
-        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:chapter")
+        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:container")
         created = self.service.create_scene(
             CreateSceneRequest(title="Storm", parent_id=chapter_id)
         )

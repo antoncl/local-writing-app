@@ -23,21 +23,19 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "display_template": "{title} {number}",
         "has_body": False,
     },
-    "manuscript:act": {
-        "name": "Act",
+    "manuscript:container": {
+        # The manuscript's one container type (ADR-0094 §7): what a container
+        # is called — Act, Chapter, Sequence — comes from its level in the
+        # project's level list, not from its type. A project made before
+        # ADR-0094 keeps `manuscript:act` / `manuscript:chapter` as sub-types of
+        # this one, defined in its own schema by the v13 migration.
+        "name": "Container",
         "icon": "stack-2",
         "kind": "manuscript",
         "parent": "manuscript:base",
         # Narration (pov_mode / pov / tense) is authorable at every structure
         # level so it can be overridden here and cascade to the scenes below
         # (ADR-0079).
-        "fields": ["pov_mode", "pov", "tense"],
-    },
-    "manuscript:chapter": {
-        "name": "Chapter",
-        "icon": "book",
-        "kind": "manuscript",
-        "parent": "manuscript:base",
         "fields": ["pov_mode", "pov", "tense"],
     },
     "manuscript:scene": {
@@ -167,15 +165,16 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "fields": ["conversations", "references"],
         "has_body": False,
     },
-    "research:topic": {
-        "name": "Topic",
+    "research:container": {
+        # Research's one container type (ADR-0094 §7), a file like any node that
+        # opens in a NodeEditor. "Topic" is a level name, as "Act" is. A project
+        # made before ADR-0094 keeps `research:topic` as a sub-type of this one.
+        "name": "Container",
         "icon": "folder",
         "kind": "research",
         "parent": "research:base",
         "fields": [],
         "has_body": False,
-        # A research topic is a container, and since ADR-0094 a file like any
-        # node: it opens in a NodeEditor as an act or chapter does.
     },
     "research:note": {
         # Research note — prose body + tags. Aliases / related_entries

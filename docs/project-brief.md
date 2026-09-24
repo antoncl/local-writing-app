@@ -48,7 +48,6 @@ understandable code over fashionable complexity.
 
 ```text
 project.yaml
-manuscript.structure.yaml
 metadata.schema.yaml
 tags.yaml
 scenes/
@@ -62,13 +61,14 @@ Scenes live in `scenes/` as Markdown files. Lore entries will live under
 `lore/`. Tags live in `tags.yaml`. Cache data must be disposable.
 
 `project.yaml` may contain project configuration such as UI preferences,
-default project folder hints, and allowed Manuscript Structure container types.
-It must not become a canonical store for prose or the manuscript tree.
+default project folder hints, and each tree's level list. It must not become a
+canonical store for prose or the manuscript tree.
 
-`manuscript.structure.yaml` is a tree. Scenes are leaf nodes. Organizational
-nodes such as acts, chapters, and sequences are containers chosen from project
-configuration rather than a mandatory default hierarchy. A new empty project
-starts with a single empty Scene in the tree.
+The manuscript is a tree held by the nodes themselves: each file's front matter
+names its `parent` and a `rank` among its siblings (ADR-0094). Scenes are leaf
+nodes. Every organisational node is a container, named by its depth from the
+project's level list — "Act, Chapter" by default, "Act, Chapter, Sequence" if
+the author adds a level — rather than by a mandatory default hierarchy.
 
 ## Backend Responsibilities
 

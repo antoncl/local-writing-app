@@ -114,9 +114,9 @@ class _SurfaceFixtureBase(unittest.TestCase):
 
     def _make_scene(self, *, body: str = "", metadata: dict | None = None, subject: str | None = None) -> str:
         structure = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
-        act = next(c for c in structure.root.children if c.type == "manuscript:act")
+        act = next(c for c in structure.root.children if c.type == "manuscript:container")
         added = self.service.create_structure_node(
             CreateStructureNodeRequest(
                 title="Scene One", entry_type="manuscript:scene", parent_id=act.id

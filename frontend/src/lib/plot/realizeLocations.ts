@@ -5,6 +5,7 @@
 // picker offers; a chosen id becomes `create_scene`'s `parent_id` (the backend
 // already honours it — see test_realize_places_the_scene_under_a_given_parent).
 import type { StructureDocument, StructureNode } from "@/lib/types";
+import { isLeafNode } from "@/lib/utils/treeHelpers";
 
 // A container the writer can realize into. `depth` drives the picker's indent
 // (0 = a top-level act, 1 = a chapter within it, …), so the roster reads as the
@@ -15,9 +16,9 @@ export type PlotRealizeLocation = {
   depth: number;
 };
 
-// Every non-leaf node of the manuscript, in reading (pre-order) order. A leaf is
-// a scene (`type === "manuscript:scene"`, mirroring the backend's `_is_leaf_node`), so
-// only acts/chapters — whatever container types the project declares — are offered.
+// Every container of the manuscript, in reading (pre-order) order — a container
+// is what the tree build stamped with a level (ADR-0094 §7), whatever its type;
+// a scene, or any type that is_a one, is never offered.
 // The root is skipped: a scene directly under it is "homeless", not a real
 // placement. A null structure (not yet loaded) yields an empty roster, and the
 // realize action falls back to the backend default.
@@ -26,7 +27,7 @@ export function realizeLocations(structure: StructureDocument | null): PlotReali
   const out: PlotRealizeLocation[] = [];
   const walk = (node: StructureNode, depth: number): void => {
     for (const child of node.children ?? []) {
-      if (child.type === "manuscript:scene") continue; // a leaf scene — never a container
+      if (isLeafNode(child)) continue; // a leaf scene — never a container
       out.push({ id: child.id, title: child.title, depth });
       walk(child, depth + 1);
     }

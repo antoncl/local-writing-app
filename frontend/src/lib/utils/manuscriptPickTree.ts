@@ -13,6 +13,7 @@
 // `entry_type`, so a scene sub-type can't be mistaken for a container.
 
 import type { NodePickerRef, StructureDocument, StructureNode } from "@/lib/types";
+import { isContainerNode } from "@/lib/utils/treeHelpers";
 
 export type PickState = "on" | "implied" | "indeterminate" | "off";
 
@@ -42,15 +43,9 @@ function readInstanceColor(node: StructureNode): string | null {
 
 const MANUSCRIPT = "manuscript";
 
-// Manuscript container node types (vs leaf scenes). Acts and chapters carry
-// their own `scene_id` (a backing file), so container-vs-scene is NOT
-// `scene_id is None` — it is the node type, or having children (covering any
-// user-defined container level). Mirrors TreeStructureService.is_container.
-const CONTAINER_TYPES = new Set(["root", "manuscript:act", "manuscript:chapter"]);
-
-function isContainer(node: StructureNode): boolean {
-  return CONTAINER_TYPES.has(node.type) || (node.children?.length ?? 0) > 0;
-}
+// Container vs scene by the level the tree build stamped (ADR-0094 §7), not by
+// type name: every container carries its own `scene_id` (a backing file).
+const isContainer = isContainerNode;
 function isScene(node: StructureNode): boolean {
   return !isContainer(node);
 }

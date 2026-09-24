@@ -35,10 +35,10 @@ class _DiagnosticsTestCase(PlotTestCase):
         super().setUp()
         root = self.service.read_structure().root.id
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:chapter", parent_id=root)
+            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:container", parent_id=root)
         )
         self.chapter = next(
-            c.id for c in self.service.read_structure().root.children if c.type == "manuscript:chapter"
+            c.id for c in self.service.read_structure().root.children if c.type == "manuscript:container"
         )
 
     def _scene(self, title: str) -> str:

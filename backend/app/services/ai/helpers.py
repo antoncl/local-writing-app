@@ -1038,10 +1038,11 @@ class _OutlineNode(dict):
 def _full_outline(project: ProjectService) -> list[_OutlineNode]:
     """Manuscript outline as a list of nested nodes.
 
-    Each node carries `title`, `summary`, `entry_type`, `scene_id`, and
+    Each node carries `title`, `summary`, `entry_type`, `level` (a container's
+    level name — "Act", "Chapter" — None for a scene), `scene_id`, and
     `children` (recursive). Walks the manuscript structure in document
-    order. Containers (acts, chapters) carry their own title; the summary
-    comes from the linked scene's metadata when present.
+    order. Containers carry their own title; the summary comes from the node's
+    own metadata when present.
     """
     try:
         structure = project.read_structure()
@@ -1069,6 +1070,8 @@ def _build_outline_node(node: Any, project: ProjectService) -> _OutlineNode:
         title=str(title),
         summary=summary,
         entry_type=str(_attr_or_item(node, "type") or ""),
+        # A container's level name (ADR-0094 §7); None for a scene.
+        level=_attr_or_item(node, "level_name"),
         scene_id=scene_id,
         children=[
             _build_outline_node(child, project)

@@ -41,6 +41,7 @@ class TreeEntry:
 class PlacementProblem:
     node_id: str
     title: str
+    # A predicate that completes "'<title>' (<id>) …" — what Verify prints.
     reason: str
 
 
@@ -69,9 +70,9 @@ def build_tree(
             continue
         target = by_id.get(parent)
         if target is None:
-            reason = f"its parent {parent} is not a node of this tree"
+            reason = f"is shown at the top level because its parent {parent} is not a node of this tree"
         elif is_leaf_type(target.entry_type):
-            reason = f"its parent {target.title or parent} cannot hold other nodes"
+            reason = f"is shown at the top level because its parent {target.title or parent} cannot hold other nodes"
         else:
             honoured[entry.id] = parent
             continue
@@ -81,7 +82,11 @@ def build_tree(
     for node_id in _nodes_on_cycles(honoured):
         honoured[node_id] = None
         entry = by_id[node_id]
-        problems.append(PlacementProblem(node_id, entry.title, "its parent chain loops back to itself"))
+        problems.append(
+            PlacementProblem(
+                node_id, entry.title, "is shown at the top level because its parent chain loops back to itself"
+            )
+        )
 
     children: dict[str | None, list[TreeEntry]] = {}
     for entry in by_id.values():

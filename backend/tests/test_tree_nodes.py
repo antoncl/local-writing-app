@@ -33,7 +33,7 @@ class TreeNodesTestCase(unittest.TestCase):
         node_index_gate.invalidate()
         self.temp_dir.cleanup()
 
-    def _container(self, title: str, entry_type: str = "manuscript:chapter", parent: str | None = None) -> str:
+    def _container(self, title: str, entry_type: str = "manuscript:container", parent: str | None = None) -> str:
         document = self.service.create_structure_node(
             CreateStructureNodeRequest(title=title, entry_type=entry_type, parent_id=parent)
         )
@@ -89,7 +89,7 @@ class MoveTests(TreeNodesTestCase):
         self.assertEqual(self._children(chapter), [scene_id], "the save moved the scene back")
 
     def test_moving_into_a_leaf_or_own_descendant_is_refused(self) -> None:
-        act = self._container("Act", "manuscript:act")
+        act = self._container("Act", "manuscript:container")
         chapter = self._container("Chapter", parent=act)
         scene_id = self.service.create_scene(CreateSceneRequest(title="Scene", parent_id=chapter)).id
         from app.services.project.errors import ProjectServiceError
@@ -132,7 +132,7 @@ class FilesAreTheTruthTests(TreeNodesTestCase):
         crashed. It now gains a block and the create goes through."""
         (self.root / "scenes" / "Raw notes.md").write_text("Just prose, no front matter.\n", encoding="utf-8")
         self.service.refresh_node_index_from_disk()
-        act = self._container("Act", "manuscript:act")
+        act = self._container("Act", "manuscript:container")
         order = self._children(None)
         self.assertEqual(order[-1], act)
         self.assertIn("Raw notes", order)

@@ -192,6 +192,7 @@ from app.models.entries import (
     Scene,
     SnippetDependents,
     StructureDocument,
+    StructureLevel,
     StructureNode,
     UnlistAssistantRequest,
 )
@@ -532,6 +533,7 @@ __all__ = [
     "SnapshotPick",
     "SnippetDependents",
     "StructureDocument",
+    "StructureLevel",
     "StructureNode",
     "StructureNodeDeletePreview",
     "Swatch",

@@ -262,7 +262,8 @@ class TreeActions {
     } catch (error) {
       console.warn("Failed to fetch cascade preview", error);
     }
-    const typeName = entryTypeName(node.type, get(metadataSchemaStore));
+    // A container is named by its level (ADR-0094 §7); a leaf by its type.
+    const typeName = node.level_name || entryTypeName(node.type, get(metadataSchemaStore));
     const leafCount = preview?.descendant_scene_count ?? 0;
     const containerCount = preview?.descendant_container_count ?? 0;
     const leafLabels = config.cascadeLabels.leaf;
@@ -275,7 +276,7 @@ class TreeActions {
     let message = `Delete ${typeName} "${node.title}"?`;
     if (cascadeParts.length > 0) {
       message += `\n\nThis will also permanently remove ${cascadeParts.join(" and ")} inside it.`;
-    } else if (node.type === config.leafType) {
+    } else if (node.level == null) {
       message += ` This removes the ${leafLabels.singular} file from the project.`;
     } else {
       message += ` This removes the ${containerLabels.singular} from the project.`;
@@ -331,6 +332,7 @@ class TreeActions {
   manuscriptTree: TreeConfig = {
     kind: "manuscript",
     leafType: "manuscript:scene",
+    containerType: "manuscript:container",
     getStructure: () => get(structureStore),
     applyStructure: (next) => { setStructure(next); },
     refresh: refreshStructure,
@@ -365,6 +367,7 @@ class TreeActions {
   researchTree: TreeConfig = {
     kind: "research",
     leafType: "research:note",
+    containerType: "research:container",
     getStructure: () => get(researchStructureStore),
     applyStructure: (next) => { setResearchStructure(next); },
     refresh: refreshResearchStructure,

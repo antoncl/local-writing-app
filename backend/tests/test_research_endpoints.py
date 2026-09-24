@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
 from app.main import app
+from app.models import StructureLevel, UpdateProjectSettingsRequest
 
 
 class ResearchHttpEndpointTests(unittest.TestCase):
@@ -71,17 +72,24 @@ class ResearchHttpEndpointTests(unittest.TestCase):
     # --- create -----------------------------------------------------------
 
     def test_create_topic_at_root(self) -> None:
-        self._create_node("Industrial Revolution", "research:topic")
+        self._create_node("Industrial Revolution", "research:container")
         tree = self._read_tree()
         self.assertEqual(len(tree["root"]["children"]), 1)
         topic = tree["root"]["children"][0]
-        self.assertEqual(topic["type"], "research:topic")
+        self.assertEqual(topic["type"], "research:container")
         self.assertEqual(topic["title"], "Industrial Revolution")
 
     def test_create_topic_under_topic(self) -> None:
-        parent = self._create_node("Industrial Revolution", "research:topic")
+        # A topic nested under a topic is 2 deep; a new project's research
+        # tree defaults to one level (ADR-0094 §7), so widen it first.
+        self.service.update_project_settings(
+            UpdateProjectSettingsRequest(
+                research_levels=[StructureLevel(name="Topic"), StructureLevel(name="Topic")]
+            )
+        )
+        parent = self._create_node("Industrial Revolution", "research:container")
         parent_id = parent["root"]["children"][0]["id"]
-        self._create_node("Factory conditions", "research:topic", parent_id=parent_id)
+        self._create_node("Factory conditions", "research:container", parent_id=parent_id)
         tree = self._read_tree()
         outer = tree["root"]["children"][0]
         self.assertEqual(len(outer["children"]), 1)
@@ -99,7 +107,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
     def test_create_note_under_topic_records_the_topic_on_the_note(self) -> None:
         # ADR-0094 §1: the note's own file says which topic it sits in; the
         # tree node's id is the file's id, surfaced as `scene_id` too.
-        topic = self._create_node("Industrial Revolution", "research:topic")
+        topic = self._create_node("Industrial Revolution", "research:container")
         topic_id = topic["root"]["children"][0]["id"]
         tree = self._create_node("Mill towns", "research:note", parent_id=topic_id)
 
@@ -137,7 +145,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
     # --- rename -----------------------------------------------------------
 
     def test_rename_topic(self) -> None:
-        self._create_node("Old", "research:topic")
+        self._create_node("Old", "research:container")
         tree = self._read_tree()
         node_id = tree["root"]["children"][0]["id"]
         response = self.client.patch(
@@ -163,9 +171,14 @@ class ResearchHttpEndpointTests(unittest.TestCase):
     # --- move -------------------------------------------------------------
 
     def test_move_topic_into_another_topic(self) -> None:
-        a = self._create_node("A", "research:topic")
+        self.service.update_project_settings(
+            UpdateProjectSettingsRequest(
+                research_levels=[StructureLevel(name="Topic"), StructureLevel(name="Topic")]
+            )
+        )
+        a = self._create_node("A", "research:container")
         a_id = a["root"]["children"][0]["id"]
-        self._create_node("B", "research:topic")
+        self._create_node("B", "research:container")
         tree = self._read_tree()
         b_id = next(
             child["id"]
@@ -183,9 +196,14 @@ class ResearchHttpEndpointTests(unittest.TestCase):
         self.assertEqual(tree["root"]["children"][0]["children"][0]["title"], "B")
 
     def test_move_into_descendant_is_rejected(self) -> None:
-        parent = self._create_node("Outer", "research:topic")
+        self.service.update_project_settings(
+            UpdateProjectSettingsRequest(
+                research_levels=[StructureLevel(name="Topic"), StructureLevel(name="Topic")]
+            )
+        )
+        parent = self._create_node("Outer", "research:container")
         outer_id = parent["root"]["children"][0]["id"]
-        self._create_node("Inner", "research:topic", parent_id=outer_id)
+        self._create_node("Inner", "research:container", parent_id=outer_id)
         tree = self._read_tree()
         inner_id = tree["root"]["children"][0]["children"][0]["id"]
         response = self.client.post(
@@ -197,7 +215,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
     # --- delete -----------------------------------------------------------
 
     def test_cascade_preview_counts_descendants(self) -> None:
-        parent = self._create_node("Topic", "research:topic")
+        parent = self._create_node("Topic", "research:container")
         topic_id = parent["root"]["children"][0]["id"]
         self._create_node("Note 1", "research:note", parent_id=topic_id)
         self._create_node("Note 2", "research:note", parent_id=topic_id)
@@ -211,7 +229,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
         self.assertEqual(preview["descendant_container_count"], 0)
 
     def test_delete_topic_removes_descendant_note_files(self) -> None:
-        parent = self._create_node("Topic", "research:topic")
+        parent = self._create_node("Topic", "research:container")
         topic_id = parent["root"]["children"][0]["id"]
         self._create_node("Doomed note", "research:note", parent_id=topic_id)
         # The topic is a file too (ADR-0094 §7), so the folder holds two.

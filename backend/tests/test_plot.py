@@ -239,9 +239,9 @@ class CardReferenceTests(PlotTestCase):
     def _make_scene(self, title: str = "Arrival") -> str:
         structure = self.service.read_structure()
         doc = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:chapter", parent_id=structure.root.id)
+            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:container", parent_id=structure.root.id)
         )
-        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:chapter")
+        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:container")
         return self.service.create_scene(CreateSceneRequest(title=title, parent_id=chapter_id)).id
 
     def _raw_metadata_on_disk(self, node_id: str) -> dict:
@@ -387,9 +387,9 @@ class CardOperationTests(PlotTestCase):
     def _chapter(self, title: str = "Chapter") -> str:
         structure = self.service.read_structure()
         doc = self.service.create_structure_node(
-            CreateStructureNodeRequest(title=title, entry_type="manuscript:chapter", parent_id=structure.root.id)
+            CreateStructureNodeRequest(title=title, entry_type="manuscript:container", parent_id=structure.root.id)
         )
-        return next(c.id for c in doc.root.children if c.type == "manuscript:chapter" and c.title == title)
+        return next(c.id for c in doc.root.children if c.type == "manuscript:container" and c.title == title)
 
     def _scene(self, parent_id: str, title: str) -> str:
         return self.service.create_scene(CreateSceneRequest(title=title, parent_id=parent_id)).id
@@ -503,9 +503,9 @@ class CardOperationTests(PlotTestCase):
         service = open_test_project(root, "Perf Project")
         structure = service.read_structure()
         doc = service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:chapter", parent_id=structure.root.id)
+            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:container", parent_id=structure.root.id)
         )
-        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:chapter" and c.title == "Chapter")
+        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:container" and c.title == "Chapter")
         for i in range(scene_count):
             service.create_scene(CreateSceneRequest(title=f"Scene {i}", parent_id=chapter_id))
 
@@ -679,9 +679,9 @@ class PlotBoardProjectionTests(PlotTestCase):
     def _scene(self, title: str) -> str:
         structure = self.service.read_structure()
         doc = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:chapter", parent_id=structure.root.id)
+            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:container", parent_id=structure.root.id)
         )
-        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:chapter")
+        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:container")
         return self.service.create_scene(CreateSceneRequest(title=title, parent_id=chapter_id)).id
 
     def test_empty_board_projects_empty_and_creates_the_singleton(self) -> None:
@@ -826,8 +826,8 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
 
     def test_card_projects_its_innermost_container_with_the_nesting(self) -> None:
         root = self.service.read_structure().root.id
-        act = self._node("Act I", "manuscript:act", root)
-        chapter = self._node("Chapter 1", "manuscript:chapter", act)
+        act = self._node("Act I", "manuscript:container", root)
+        chapter = self._node("Chapter 1", "manuscript:container", act)
         scene = self.service.create_scene(CreateSceneRequest(title="Opening", parent_id=chapter)).id
         card_id = self._card_on("Beat card", scene)
 
@@ -842,10 +842,10 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
 
     def test_containers_are_in_manuscript_reading_order(self) -> None:
         root = self.service.read_structure().root.id
-        act1 = self._node("Act I", "manuscript:act", root)
-        chapter1 = self._node("Chapter 1", "manuscript:chapter", act1)
-        act2 = self._node("Act II", "manuscript:act", root)
-        chapter2 = self._node("Chapter 2", "manuscript:chapter", act2)
+        act1 = self._node("Act I", "manuscript:container", root)
+        chapter1 = self._node("Chapter 1", "manuscript:container", act1)
+        act2 = self._node("Act II", "manuscript:container", root)
+        chapter2 = self._node("Chapter 2", "manuscript:container", act2)
         for title, chapter in (("c1", chapter1), ("c2", chapter2)):
             scene = self.service.create_scene(CreateSceneRequest(title=title, parent_id=chapter)).id
             self._card_on(title, scene)
@@ -856,9 +856,9 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
 
     def test_only_containers_that_hold_a_carded_scene_are_projected(self) -> None:
         root = self.service.read_structure().root.id
-        act = self._node("Act I", "manuscript:act", root)
-        carded = self._node("Carded", "manuscript:chapter", act)
-        empty = self._node("Empty", "manuscript:chapter", act)
+        act = self._node("Act I", "manuscript:container", root)
+        carded = self._node("Carded", "manuscript:container", act)
+        empty = self._node("Empty", "manuscript:container", act)
         # `empty` even holds a scene — but no card points at it, so it is not a
         # board concern and must not be projected.
         self.service.create_scene(CreateSceneRequest(title="lonely", parent_id=empty))
@@ -885,7 +885,7 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
 
     def test_deleting_the_scene_makes_the_card_homeless(self) -> None:
         root = self.service.read_structure().root.id
-        chapter = self._node("Chapter 1", "manuscript:chapter", root)
+        chapter = self._node("Chapter 1", "manuscript:container", root)
         scene = self.service.create_scene(CreateSceneRequest(title="Opening", parent_id=chapter)).id
         card_id = self._card_on("Beat card", scene)
         self.service.delete_scene(scene)
@@ -904,10 +904,10 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
         # Slice 6: each carded scene's reveal-order rank drives the manuscript edge
         # layer. Two acts, one carded scene each — the first reads before the second.
         root = self.service.read_structure().root.id
-        act1 = self._node("Act I", "manuscript:act", root)
-        chapter1 = self._node("Chapter 1", "manuscript:chapter", act1)
-        act2 = self._node("Act II", "manuscript:act", root)
-        chapter2 = self._node("Chapter 2", "manuscript:chapter", act2)
+        act1 = self._node("Act I", "manuscript:container", root)
+        chapter1 = self._node("Chapter 1", "manuscript:container", act1)
+        act2 = self._node("Act II", "manuscript:container", root)
+        chapter2 = self._node("Chapter 2", "manuscript:container", act2)
         scene1 = self.service.create_scene(CreateSceneRequest(title="s1", parent_id=chapter1)).id
         scene2 = self.service.create_scene(CreateSceneRequest(title="s2", parent_id=chapter2)).id
         first = self._card_on("first", scene1)
@@ -939,7 +939,7 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
     def test_cards_on_the_same_scene_share_a_sequence(self) -> None:
         # n cards per scene (ADR §S5) → they sit at the same reveal-order rank.
         root = self.service.read_structure().root.id
-        chapter = self._node("Chapter 1", "manuscript:chapter", root)
+        chapter = self._node("Chapter 1", "manuscript:container", root)
         scene = self.service.create_scene(CreateSceneRequest(title="Opening", parent_id=chapter)).id
         a = self._card_on("a", scene)
         b = self._card_on("b", scene)
@@ -948,7 +948,7 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
 
     def test_detaching_the_scene_clears_the_sequence(self) -> None:
         root = self.service.read_structure().root.id
-        chapter = self._node("Chapter 1", "manuscript:chapter", root)
+        chapter = self._node("Chapter 1", "manuscript:container", root)
         scene = self.service.create_scene(CreateSceneRequest(title="Opening", parent_id=chapter)).id
         card_id = self._card_on("Beat card", scene)
         self.service.delete_scene(scene)

@@ -113,7 +113,7 @@ class TreePlacementMigrationTests(unittest.TestCase):
     def test_the_tree_reads_as_before_and_the_yaml_is_gone(self) -> None:
         """Journey step 1."""
         service = self._open()
-        self.assertEqual(read_project_version(self.root), 12)
+        self.assertEqual(read_project_version(self.root), 13)  # v12, then v13 on the same open
         self.assertFalse((self.root / "manuscript.structure.yaml").exists())
         self.assertFalse((self.root / "research.structure.yaml").exists())
 

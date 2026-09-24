@@ -13,7 +13,10 @@
   // gone with it; `onGroupDblClick` stays (open the container editor).
   export type TreeConfig = {
     kind: "manuscript" | "research";
+    // The leaf type (a scene / note — any type that is_a it is a leaf) and the
+    // container type every container is_a (ADR-0094 §7).
     leafType: string;
+    containerType: string;
     // Live read of App's structure. Used inside handlers (after a mutation the
     // `structure` *prop* is stale until the next tick, but this closure is
     // always current).
@@ -58,6 +61,7 @@
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import ViewNodeList, { type RowCtx, type ViewInput } from "@/components/widgets/ViewNodeList.svelte";
+  import StructureLevelsModal from "@/components/dialogs/StructureLevelsModal.svelte";
   import { getSwatch } from "@/lib/utils/colors";
   import {
     entryTypeChoicesByKind,
@@ -68,6 +72,7 @@
     findStructureNodeById,
     updateNodeTitleInTree,
   } from "@/lib/utils/treeHelpers";
+  import { entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import { applyDisplayTemplate } from "@/lib/utils/nodeTitle";
   import type { EvalNode } from "@/lib/views/evaluateView";
@@ -180,30 +185,75 @@
     return applyDisplayTemplate(node.entry_type, liveTitle ?? node.title, node.metadata, schema);
   }
 
-  function nextAutoName(parentId: string | null, entryType: string): string {
-    const typeName = entryTypeName(entryType, schema);
+  // Each tree node's level (ADR-0094 §7), keyed by id — the view's EvalNodes
+  // don't carry it, and container-vs-leaf is decided by it, not by type name.
+  const levelById = $derived.by(() => {
+    const out = new Map<string, { level: number; name: string }>();
+    const walk = (node: StructureNode) => {
+      if (node.level != null) out.set(node.id, { level: node.level, name: node.level_name ?? "" });
+      for (const child of node.children ?? []) walk(child);
+    };
+    if (structure) walk(structure.root);
+    return out;
+  });
+  const isLeafRow = (node: EvalNode) => !levelById.has(node.id);
+
+  // A container is labelled by its level name ("Act", "Chapter"); a leaf by its type.
+  function nodeLabel(node: EvalNode): string {
+    return levelById.get(node.id)?.name || entryTypeName(node.entry_type, schema);
+  }
+
+  // The level-list editor (ADR-0094 §7), opened from the section header.
+  let levelsOpen = $state(false);
+
+  type AddChoice = { id: string; name: string };
+
+  // What "+" offers inside `parentId` (null = the top): the next level's entry
+  // and that type's concrete sub-types — nothing past the end of the level list
+  // (ADR-0094 §7) — then every leaf type. Scenes/notes go in any container. A
+  // type another level is bound to is that level's, not a variant of this one:
+  // a migrated book's Act and Chapter are both container sub-types, and neither
+  // belongs in a Sequence menu.
+  function addChoices(parentId: string | null): AddChoice[] {
+    const all = entryTypeChoicesByKind(schema, config.kind);
+    const leaves = all.filter((choice) => entryTypeIsA(schema, choice.id, config.leafType));
+    const levels = structure?.levels ?? [];
+    const depth = parentId ? levelById.get(parentId)?.level ?? 0 : 0;
+    const next = levels[depth];
+    if (!next) return leaves;
+    const levelType = next.type ?? config.containerType;
+    const boundElsewhere = new Set(levels.flatMap((level) => (level.type ? [level.type] : [])));
+    const subTypes = all.filter(
+      (choice) =>
+        choice.id !== levelType && !boundElsewhere.has(choice.id) && entryTypeIsA(schema, choice.id, levelType),
+    );
+    return [{ id: levelType, name: next.name }, ...subTypes, ...leaves];
+  }
+
+  function nextAutoName(parentId: string | null, choice: AddChoice): string {
     // When the type's display carries a live computed {number} (the manuscript
     // tree), auto-name WITHOUT a number — the display appends it, so baking one in
     // would double ("Act 1 1") and go stale on reorder. Kinds whose display shows
     // no number (research) still disambiguate siblings in the name itself.
-    const template = schema?.entry_types[entryType]?.display_template ?? "{title}";
-    if (template.includes("{number}")) return typeName;
+    const template = schema?.entry_types[choice.id]?.display_template ?? "{title}";
+    if (template.includes("{number}")) return choice.name;
     const root = config.getStructure()?.root ?? null;
     const parent = !root ? null : parentId ? findStructureNodeById(root, parentId) : root;
-    const siblingCount = parent?.children?.filter((child) => child.type === entryType).length ?? 0;
-    return `${typeName} ${siblingCount + 1}`;
+    const siblingCount = parent?.children?.filter((child) => child.type === choice.id).length ?? 0;
+    return `${choice.name} ${siblingCount + 1}`;
   }
 
   // Generic "+ Add child" creator. Auto-names by sibling count, calls the
   // kind-specific create API, then either drops the user into the editor (leaf)
   // or an inline tree-row rename (non-leaf). The manuscript-scene leaf takes a
   // legacy path through api.createScene that refreshes via the leaf API.
-  async function addTreeChild(parentId: string | null, entryType: string) {
-    const title = nextAutoName(parentId, entryType);
+  async function addTreeChild(parentId: string | null, choice: AddChoice) {
+    const entryType = choice.id;
+    const title = nextAutoName(parentId, choice);
     await run(async () => {
       const before = config.getStructure();
       let createdNodeId: string | null = null;
-      const isLeaf = entryType === config.leafType;
+      const isLeaf = entryTypeIsA(schema, entryType, config.leafType);
       if (config.kind === "manuscript" && isLeaf) {
         const scene = await api.createScene(title, parentId ?? undefined);
         await config.refresh();
@@ -296,6 +346,13 @@
 <div class="section-title">
   <h3>{sectionLabel}</h3>
   <div class="tree-add-controls">
+    {#if structure}
+      <button
+        class="tree-levels-button"
+        title="Name the levels containers sit at"
+        onclick={() => (levelsOpen = true)}
+      >Levels</button>
+    {/if}
     <div class="tree-menu-anchor">
       <button
         class="row-action-add section-add-button"
@@ -308,6 +365,14 @@
   </div>
 </div>
 
+<StructureLevelsModal
+  open={levelsOpen}
+  tree={config.kind}
+  containerType={config.containerType}
+  levels={structure?.levels ?? []}
+  onClose={() => (levelsOpen = false)}
+/>
+
 <ViewNodeList
   bind:this={list}
   {view}
@@ -316,7 +381,7 @@
   active={isActiveNode}
   collapsed={collapse.collapsed}
   onReorder={config.supportsDrag ? handleReorder : undefined}
-  isContainer={(node) => node.entry_type !== config.leafType}
+  isContainer={(node) => !isLeafRow(node)}
   onRename={domainRename}
   onDblClick={handleGroupDblClick}
   {row}
@@ -334,8 +399,8 @@
 {#snippet addMenu({ parentId, close }: { parentId: string | null; close: () => void })}
   <span class="row-add-popover-heading">{parentId === null ? "Add at root" : "Add child"}</span>
   <NodeList density="dense" isEmpty={false}>
-    {#each entryTypeChoicesByKind(schema, config.kind) as choice (choice.id)}
-      <NodeRow title={choice.name} onClick={() => { addTreeChild(parentId, choice.id); close(); }} />
+    {#each addChoices(parentId) as choice (choice.id)}
+      <NodeRow title={choice.name} onClick={() => { addTreeChild(parentId, choice); close(); }} />
     {/each}
   </NodeList>
 {/snippet}
@@ -346,13 +411,13 @@
        cannot diverge. -->
   <button
     class="row-action-delete"
-    title={`Delete ${entryTypeName(node.entry_type, schema)}`}
+    title={`Delete ${nodeLabel(node)}`}
     onclick={(event) => { event.stopPropagation(); requestDelete(node); }}
   >×</button>
 {/snippet}
 
 {#snippet row(node: EvalNode, ctx: RowCtx<EvalNode>)}
-  {@const leaf = node.entry_type === config.leafType}
+  {@const leaf = isLeafRow(node)}
   {@const editing = ctx.editing}
   {@const dragging = ctx.dragging}
   {@const dropPosition = ctx.dropPosition}
@@ -513,6 +578,19 @@
     display: flex;
     align-items: center;
     gap: 4px;
+  }
+
+  /* A quiet word, not a control box — the header's loud action is "+". */
+  .tree-levels-button {
+    padding: 0 4px;
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+  .tree-levels-button:hover {
+    color: var(--text);
   }
 
   /* Fixed-width caret slot on both leaf and container rows so a title's

@@ -1,6 +1,6 @@
 <!--
-  PlotContainerNode — a soft, free-flow act/chapter box on the plot board (ADR-0048
-  S7 Slice 4). A non-interactive backdrop the cards float over: it shows the
+  PlotContainerNode — a soft, free-flow container box on the plot board (ADR-0048
+  S7 Slice 4), one per level (ADR-0094 §9). A non-interactive backdrop the cards float over: it shows the
   container's title and its card count, sized by plotBoardLayout to wrap its member
   cards (a chapter box nests inside its act box via `level`). No @xyflow/svelte imports
   (same reason as PlotCardNode) — drawn by Svelte Flow via the `plotContainer` node type
@@ -21,8 +21,11 @@
 
   let { data }: { id?: string; data: PlotContainerData; selected?: boolean } = $props();
 
-  // Level 0 = a top-level act (stronger), 1 = a box nested inside one (quieter).
+  // One box per level (ADR-0094 §9): the top level is the outer frame, the next
+  // the hairline default, and anything deeper a dashed edge, so three nested
+  // boxes (act, chapter, sequence) stay tellable apart without any fill.
   let isAct = $derived(data.level === 0);
+  let isDeep = $derived(data.level >= 2);
 
   // A board column IS a manuscript act/chapter, so resolve its label through the
   // shared display-title resolver — the reorder-live {number} shows here the same
@@ -36,7 +39,7 @@
   });
 </script>
 
-<div class="plot-container" class:act={isAct}>
+<div class="plot-container" class:act={isAct} class:deep={isDeep} data-level={data.level}>
   <!-- The header is the drag handle (#877): SvelteFlow's `dragHandle` targets this
        class, so the box moves ONLY when grabbed here — a window-titlebar affordance —
        and the transparent interior stays inert (card drags + edges pass through). -->
@@ -67,6 +70,9 @@
      firmer edge alone (no fill); a nested chapter by the hairline default border. */
   .plot-container.act {
     border-color: var(--border-strong);
+  }
+  .plot-container.deep {
+    border-style: dashed;
   }
   .container-head {
     box-sizing: border-box;

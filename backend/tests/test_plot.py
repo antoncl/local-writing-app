@@ -839,6 +839,9 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
         self.assertEqual(by_id[chapter].parent, act)  # chapter nests inside its act
         self.assertIsNone(by_id[act].parent)  # the act is top-level (parent is the root)
         self.assertEqual(by_id[chapter].title, "Chapter 1")
+        # ADR-0094 §9: each box carries its level, which the board nests and styles by.
+        self.assertEqual((by_id[act].level, by_id[act].level_name), (1, "Act"))
+        self.assertEqual((by_id[chapter].level, by_id[chapter].level_name), (2, "Chapter"))
 
     def test_containers_are_in_manuscript_reading_order(self) -> None:
         root = self.service.read_structure().root.id

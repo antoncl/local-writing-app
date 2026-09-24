@@ -49,6 +49,9 @@ export type PlotBoardContainer = {
   id: string;
   title: string;
   parent: string | null;
+  // ADR-0094 §9: the container's level (1 at the top) and its level name.
+  level?: number | null;
+  level_name?: string | null;
 };
 
 // A card→beat link resolved for the board (ADR-0048 S7 Slice 5b; ADR-0053): a beat

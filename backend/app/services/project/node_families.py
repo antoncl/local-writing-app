@@ -95,6 +95,11 @@ LIBRARY_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind in (
 # other kind kept its dangling references forever.
 REFERENCE_BEARING_KINDS = frozenset({family.kind for family in NODE_FAMILIES} | {"project"})
 
+# Every kind a node — and so an entry type — can have: the same set, named for
+# the schema's use. The entry-type upsert once spelled this out by hand and left
+# `research` off it, so no research type could be saved (#2174).
+NODE_KINDS = REFERENCE_BEARING_KINDS
+
 
 def families_for_layer(layer: IndexLayer) -> list[NodeFamily]:
     """Which node families this layer contributes — the per-layer logic the

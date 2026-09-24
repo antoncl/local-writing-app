@@ -172,6 +172,18 @@ describe("buildRailRowModel", () => {
     expect(buildRailRowModel(ctx, "relationships").flipCurrentHint).toBe("lore_x · ally, (orphaned) · foe");
   });
 
+  it("a keyed-list flip falls back to the id when a resolved title is empty (#2168)", () => {
+    const ctx = baseCtx({
+      compare: {
+        fields: { relationships: { was: [], now: [{ who: "lore_y", role: "ally" }] } },
+        side: "was",
+        resolve: { adopted: () => false, onToggle: () => {} },
+      },
+      resolveListMemberTitle: () => "",
+    });
+    expect(buildRailRowModel(ctx, "relationships").flipCurrentHint).toBe("lore_y · ally");
+  });
+
   it("openFieldId === fieldId reads editing", () => {
     const editing = buildRailRowModel(baseCtx({ metadata: { alias: "x" }, openFieldId: "alias" }), "alias");
     expect(editing.editing).toBe(true);

@@ -307,8 +307,9 @@ function flipCurrentHint(ctx: RailRowContext, fieldId: string): string {
     return value
       .map((item) => {
         const id = listItemKey(field, item);
-        // An orphaned item (blank key, ADR-0089 §9) has no target to name.
-        const name = (id ? ctx.resolveListMemberTitle?.(id) : null) ?? id ?? "(orphaned)";
+        // Name the target, else its id; an orphaned item (blank key, ADR-0089
+        // §9) has neither. `||` so an empty/absent title still falls to the id.
+        const name = (id ? ctx.resolveListMemberTitle?.(id) : null) || id || "(orphaned)";
         const detail = itemMemberDetail(field, item);
         return detail ? `${name} · ${detail}` : name;
       })

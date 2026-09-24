@@ -48,6 +48,7 @@ from app.services.project.default_schema import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import SCHEMA_FILENAME
+from app.services.project.node_families import NODE_KINDS
 from app.services.project.node_index import IndexLayer
 from app.services.project.schema_inheritance import (
     RESOLVER_STAMPED_ENTRY_TYPE_KEYS,
@@ -329,14 +330,8 @@ class MetadataSchemaMixin:
         Raises 422 on an unknown kind, a malformed id, a kind/prefix mismatch,
         or self-parenting."""
         entry_type_id = request.entry_type_id.strip()
-        if request.entry_type.kind not in {
-            "manuscript", "lore", "prompt", "assistant", "project", "chat", "mutation_set", "view", "plot", "tag"
-        }:
-            raise ProjectServiceError(
-                "Node type kind must be scene, lore, prompt, assistant, project, chat, mutation_set, view, plot, "
-                "or tag.",
-                422,
-            )
+        if request.entry_type.kind not in NODE_KINDS:
+            raise ProjectServiceError(f"Node type kind must be one of: {', '.join(sorted(NODE_KINDS))}.", 422)
         fqn = entry_type_id if ":" in entry_type_id else f"{request.entry_type.kind}:{entry_type_id}"
         match = ENTRY_TYPE_FQN_RE.fullmatch(fqn)
         if not match:

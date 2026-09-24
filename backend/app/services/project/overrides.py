@@ -526,6 +526,36 @@ class LayerOverridesMixin:
                     body = row.value
         return title, body
 
+    @classmethod
+    def _content_provenance(
+        cls, records: list[LayerOverride], view_layer_id: str, view_layer_rank: int, canon_title: str
+    ) -> tuple[list[str], str | None]:
+        """`(overridden_content, inherited_title)` for `read_lore_entry`
+        (Amendment 4 §9 / #2184 slice 3), as seen from the view layer V
+        (`view_layer_id`/`view_layer_rank` — the as-of authoring layer, or the
+        open project itself).
+
+        `overridden_content` names `title`/`body` only when V's OWN record
+        (`layer_id == view_layer_id`) carries that row — a row from an
+        intermediate layer between the owner and V is, from V, inherited, so
+        it is not marked; this keeps "reset at V" always removing something.
+        `inherited_title` — only set when `title` is marked — is the title as
+        the layers ABOVE V fold it (`layer_rank < view_layer_rank`), i.e.
+        exactly what a reset at V would show."""
+        overridden_content: list[str] = []
+        own_record = next((record for record in records if record.layer_id == view_layer_id), None)
+        if own_record is not None:
+            own_fields = {row.field for row in own_record.rows}
+            if "title" in own_fields:
+                overridden_content.append("title")
+            if "body" in own_fields:
+                overridden_content.append("body")
+        inherited_title = None
+        if "title" in overridden_content:
+            above = [record for record in records if record.layer_rank < view_layer_rank]
+            inherited_title, _ = cls.materialize_override_content(above, canon_title, "")
+        return overridden_content, inherited_title
+
     @staticmethod
     def _keyed_row_target(row: MutationSetRow, keyed: dict[str, KeyedList]) -> tuple[KeyedList, ItemRecord] | None:
         """The reference-keyed list a row addresses — by its own field id or by

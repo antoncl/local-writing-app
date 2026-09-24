@@ -159,6 +159,7 @@ class LoreEntriesMixin:
         # fold both need it. Ranks come from the full walk (#2190) so L's rank
         # lines up with `overrides_by_target`'s `layer_rank`.
         authoring_layer = None
+        view_layer_rank: int | None = None
         if as_of_layer_id is not None and is_inherited_winner and as_of_layer_id != open_layer_id:
             layers_by_id = self._authoring_layers_by_id(root)
             authoring_layer = layers_by_id.get(as_of_layer_id)
@@ -167,6 +168,13 @@ class LoreEntriesMixin:
             owning_layer = layers_by_id.get(index_entry.source_layer_id) if index_entry is not None else None
             if owning_layer is None or authoring_layer.rank < owning_layer.rank:
                 raise ProjectServiceError("That layer cannot author this entry.", 422)
+            view_layer_rank = authoring_layer.rank
+        elif is_inherited_winner and node_id in index.overrides_by_target:
+            # No explicit as-of L: the view is the open project itself. Its
+            # rank is needed for `_content_provenance` (#2184 slice 3) — the
+            # same full-walk numbering as any other layer rank comparison.
+            open_layer = self._authoring_layers_by_id(root).get(open_layer_id)
+            view_layer_rank = open_layer.rank if open_layer is not None else None
 
         # As of L, not the resolution scope: L's own roster, the same rule a
         # write at L is validated against (`_schema_as_authored`). Absent an
@@ -188,12 +196,20 @@ class LoreEntriesMixin:
         # in (#2189) — L == the owning layer folds nothing, i.e. canon.
         title = str(front_matter.get("title") or node_id)
         overridden_fields: list[str] = []
+        overridden_content: list[str] = []
+        inherited_title: str | None = None
         records = self._override_records_for_read(index, node_id, is_inherited_winner, authoring_layer)
         if records:
+            canon_title = title
             metadata, overridden_fields = self.materialize_override_metadata(
                 metadata, records, self._override_shapes(schema), canonical=index.canonical_id
             )
             title, body = self.materialize_override_content(records, title, body)
+            view_layer_id = authoring_layer.id if authoring_layer is not None else open_layer_id
+            if view_layer_rank is not None:
+                overridden_content, inherited_title = self._content_provenance(
+                    records, view_layer_id, view_layer_rank, canon_title
+                )
         # Heal stale fields (retired by a schema change) and dangling
         # references before validation — see _strip_unknown_metadata_fields
         # / _strip_dangling_references for the rationale.
@@ -219,6 +235,8 @@ class LoreEntriesMixin:
             source_layer_label=index_entry.source_layer_label if index_entry else "",
             forked_from=self._forked_from_of(front_matter),
             overridden_fields=overridden_fields,
+            overridden_content=overridden_content,
+            inherited_title=inherited_title,
         )
 
     def preview_lore_code_fence_unwrap(self, entry_id: str) -> str:

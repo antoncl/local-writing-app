@@ -15,7 +15,13 @@
   import type { BodyTab } from "@/lib/editor-core/bodyTabs";
   import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
   import EditorCostHint from "@/components/editor/EditorCostHint.svelte";
+  import OverrideMark from "@/components/editor/OverrideMark.svelte";
   import { INTERIORITY_EYE_SVG } from "@/lib/editor-core/interiorityReveal";
+
+  // The title/body override marks' shape (#2184 slice 3): present ⇒ show the
+  // mark with this text; null ⇒ no mark (not overridden here, or the pane
+  // can't reset). Computed in NodeEditor, which owns the fold/reset logic.
+  type OverrideMarkModel = { chipText: string; tooltip: string; ariaLabel: string };
 
   interface HeaderModel {
     scene: import("@/lib/types").EditableDocument | null;
@@ -40,12 +46,18 @@
     // `entity_ref_list` field. Empty ⇒ no strip (today's rendering).
     tabs: BodyTab[];
     activeBodyTab: string;
+    // #2184 slice 3: null when the open document isn't lore, isn't overridden
+    // here, or the pane can't reset (read-only / no handler).
+    titleOverrideMark: OverrideMarkModel | null;
+    bodyOverrideMark: OverrideMarkModel | null;
   }
 
   interface HeaderCallbacks {
     toggleInteriority: () => void;
     authoringLayerChange?: ((layerId: string | null) => void) | undefined;
     selectBodyTab: (id: string) => void;
+    resetTitleOverride: () => void;
+    resetBodyOverride: () => void;
   }
 
   interface Props {
@@ -90,13 +102,32 @@
   <section class="editor-header">
     {#if model.scene}
       <div class="scene-title-row">
-        <label class="title-label">
-          {model.documentNameLabel}{#if model.titleMutated}<span class="title-mutated-marker" title="Changed by here">⤳</span>{/if}
-          <!-- Same five title-input variants as the chat header, from the one
-               `chatTitleField` snippet — here they sit inside the eyebrow
-               label; chat renders the snippet bare (ADR-0076 S6). -->
-          {@render model.chatTitleField()}
-        </label>
+        <div class="title-cell">
+          <label class="title-label">
+            {model.documentNameLabel}{#if model.titleMutated}<span class="title-mutated-marker" title="Changed by here">⤳</span>{/if}
+            <!-- Same five title-input variants as the chat header, from the one
+                 `chatTitleField` snippet — here they sit inside the eyebrow
+                 label; chat renders the snippet bare (ADR-0076 S6). -->
+            {@render model.chatTitleField()}
+          </label>
+          {#if model.titleOverrideMark}
+            <!-- The title has no rail row, so its override tell sits right after
+                 the input it marks (#2184 slice 3 / ADR-0039 Amendment 4 §9) —
+                 a sibling of `.title-label`, not nested in it: a `<label>`'s
+                 content model allows only ONE labelable descendant (the input
+                 the snippet renders), and `<button>` is labelable too.
+                 Resets at once, like a rail field. -->
+            <span class="title-mark">
+              <OverrideMark
+                testid="title-override-mark"
+                chipText={model.titleOverrideMark.chipText}
+                tooltip={model.titleOverrideMark.tooltip}
+                ariaLabel={model.titleOverrideMark.ariaLabel}
+                onReset={on.resetTitleOverride}
+              />
+            </span>
+          {/if}
+        </div>
         <!-- Interiority reveal (ADR-0070 S2): a shell affordance, present only
              while the scene holds roleplay. Adaptive-stateful — quiet eye when
              idle, gaining the name "Interiority" + a tint while revealing. The
@@ -153,6 +184,23 @@
               tabindex={model.activeBodyTab === tab.id ? 0 : -1}
               onclick={() => on.selectBodyTab(tab.id)}
             >{tab.label}{#if tab.count !== undefined}<span class="body-tab-count">{tab.count}</span>{/if}</button>
+            {#if tab.id === "body" && model.bodyOverrideMark}
+              <!-- The body has no rail row, so its override tell sits on the
+                   Body tab label (#2184 slice 3 / ADR-0039 Amendment 4 §9) —
+                   a SIBLING of the tab button, never nested inside it: `body-tab`
+                   is itself `role="tab"`/interactive, and a nested `<button>`
+                   would be invalid HTML and would fire the tab's onclick too.
+                   The click never switches tabs, because it isn't on the tab. -->
+              <span class="body-tab-mark">
+                <OverrideMark
+                  testid="body-override-mark"
+                  chipText={model.bodyOverrideMark.chipText}
+                  tooltip={model.bodyOverrideMark.tooltip}
+                  ariaLabel={model.bodyOverrideMark.ariaLabel}
+                  onReset={on.resetBodyOverride}
+                />
+              </span>
+            {/if}
           {/each}
         </div>
       {/if}
@@ -240,6 +288,26 @@
     text-transform: uppercase;
   }
 
+  /* Holds the title label + its override mark (#2184 slice 3) side by side in
+     the title row's first grid column — a plain wrapper, not a 3rd grid child
+     of `.scene-title-row`, so the interiority toggle stays in column 2. */
+  .title-cell {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    min-width: 0;
+  }
+  .title-cell .title-label {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  /* The cell aligns to the bottom so the mark sits level with the INPUT, not
+     with the eyebrow + input label block; this lifts it to the input's middle. */
+  .title-mark {
+    display: inline-flex;
+    margin-bottom: var(--sp-3);
+  }
+
   /* #2010 body tab strip — one tab per `entity_ref_list` field plus a
      leading Body/Details tab. Sans, no caps (unlike the title eyebrow):
      these are navigation, not a field label. */
@@ -277,5 +345,14 @@
   .body-tab-count {
     color: var(--text-3);
     font-size: var(--fs-xs);
+  }
+  /* The body override mark (#2184 slice 3) — a sibling of the Body tab
+     button, pulled in with a negative margin so it reads as attached to the
+     tab's own label rather than as its own strip item (`.body-tabs`' gap
+     already spaces every other pair of tabs). */
+  .body-tab-mark {
+    display: inline-flex;
+    align-items: center;
+    margin-left: -6px;
   }
 </style>

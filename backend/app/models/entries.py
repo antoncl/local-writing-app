@@ -693,6 +693,15 @@ class LoreEntry(BaseModel):
     # `ti-versions` override mark against these fields (deferred to #314 slice-E
     # PR 2). Empty for an entry with no overrides above its owning layer.
     overridden_fields: list[str] = Field(default_factory=list)
+    # Title/body have no rail row, so they are reported separately from
+    # `overridden_fields` (Amendment 4 §9 / #2184 slice 3): values in
+    # `"title"`, `"body"` naming which of THIS view layer's own override rows
+    # carry a replace, not merely inherited from an intermediate layer.
+    overridden_content: list[str] = Field(default_factory=list)
+    # Present only when `"title"` is in `overridden_content` — the title as
+    # the layers above this view fold it, i.e. what "Reset to inherited"
+    # would show.
+    inherited_title: str | None = None
 
 
 class LoreEntryList(BaseModel):

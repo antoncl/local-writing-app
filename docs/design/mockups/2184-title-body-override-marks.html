@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  #2184 slice 3 / ADR-0039 Amendment 4 §9 — the override tell for a lore entry's
+  TITLE and BODY, which have no rail row.
+
+  It reuses #471 / #517's one visual language unchanged:
+    · the real ti-versions mark (disc + two trailing arcs) in the --star tint = "overridden here";
+    · no mark and no label = inherited (the default reads quiet);
+    · the action appears only on an overridden value, on hover/focus, ABOVE the mark,
+      and NAMES THE SOURCE: "↩ Reset to Aetheria".
+  Placement is the only new decision: the mark sits on the thing it marks — after the
+  title field, and on the "Body" tab label (the body's own name in the editor).
+
+  Toggle the bench to walk the states. Tokens are COPIES of frontend/src/styles.css;
+  they drift. Do not import.
+-->
+<title>Title and body override marks</title>
+<style>
+*{box-sizing:border-box}
+:root{
+  --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:15px; --fs-2xl:20px; --fs-prose:16px;
+  --sans:"Segoe UI",system-ui,sans-serif; --serif:Georgia,"Times New Roman",serif; --mono:Consolas,ui-monospace,monospace;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+  --r-sm:4px; --r-md:6px; --r-lg:10px;
+  color-scheme:light;
+  --surface:#ffffff; --board:#f4f6f5; --panel:#edf3f1; --inset:#f1f5f3;
+  --border:#cbd6d2; --border-strong:#b4c2bc; --divider:#e2e8e5;
+  --text:#242424; --text-2:#4d5753; --text-3:#74817b;
+  --accent:#2f6f5e; --accent-soft:#edf6f2;
+  --star:#6b5a0c; --star-soft:#f3eed2; --star-border:#c8b896;
+  --danger:#a64a4a; --scrim:rgba(25,40,35,0.28);
+  --shadow2:rgba(36,36,36,0.10); --elev-2:0 6px 18px var(--shadow2); --elev-3:0 16px 36px rgba(36,36,36,0.18);
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --surface:#1f2522; --board:#181c1a; --panel:#20272a; --inset:#242a28;
+  --border:#3a4541; --border-strong:#4a5651; --divider:#2a322f;
+  --text:#e8edeb; --text-2:#a9b6b0; --text-3:#7e8a84;
+  --accent:#6cc4a6; --accent-soft:#1f3a32;
+  --star:#d4b94e; --star-soft:#3a3216; --star-border:#5e5430;
+  --danger:#d97070; --scrim:rgba(0,0,0,0.5);
+  --shadow2:rgba(0,0,0,0.50); --elev-2:0 6px 18px var(--shadow2); --elev-3:0 16px 36px rgba(0,0,0,0.6);
+}
+body{margin:0;background:var(--board);color:var(--text);font-family:var(--sans);font-size:var(--fs-md);line-height:1.45;padding:var(--sp-6) var(--sp-4);}
+.sheet{max-width:860px;margin:0 auto;}
+.eyebrow{font-family:var(--mono);font-size:var(--fs-xs);letter-spacing:.06em;color:var(--text-3);text-transform:uppercase;margin:0 0 var(--sp-2);}
+h1{font-family:var(--serif);font-size:var(--fs-2xl);font-weight:700;margin:0 0 var(--sp-2);}
+.lede{color:var(--text-2);max-width:70ch;margin:0 0 var(--sp-2);}
+code{font-family:var(--mono);font-size:.92em;background:var(--inset);padding:1px 5px;border-radius:var(--r-sm);}
+.bench{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp-3);margin:var(--sp-4) 0 var(--sp-4);display:flex;gap:var(--sp-4);align-items:center;flex-wrap:wrap;}
+.bench-label{font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);margin-right:var(--sp-1);}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;}
+.seg button{border:0;background:var(--surface);color:var(--text-2);font:inherit;font-size:var(--fs-sm);padding:var(--sp-1) var(--sp-3);cursor:pointer;border-right:1px solid var(--border);}
+.seg button:last-child{border-right:0;}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600;}
+
+/* ---- the editor, reduced to what this decision touches ---- */
+.editor{display:grid;grid-template-columns:1fr 240px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--elev-2);overflow:visible;min-height:360px;}
+.main{padding:var(--sp-4) var(--sp-5);border-right:1px solid var(--divider);}
+.cap{font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:600;margin-bottom:var(--sp-1);}
+.title-row{display:flex;align-items:center;gap:var(--sp-2);}
+.title{font-family:var(--serif);font-size:var(--fs-2xl);font-weight:700;border:1px solid transparent;border-radius:var(--r-sm);padding:2px 6px;margin-left:-7px;background:transparent;color:var(--text);min-width:0;flex:0 1 auto;}
+.title:hover{border-color:var(--border);}
+.layerbar{display:flex;align-items:center;gap:var(--sp-2);margin:var(--sp-3) 0;font-size:var(--fs-sm);color:var(--text-3);}
+.layerbar select{font:inherit;font-size:var(--fs-sm);color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:1px 4px;}
+.tabs{display:flex;gap:var(--sp-4);border-bottom:1px solid var(--divider);font-size:var(--fs-sm);}
+.tab{padding:var(--sp-1) 0;color:var(--text-3);display:inline-flex;align-items:center;gap:5px;}
+.tab.on{color:var(--text);font-weight:600;border-bottom:2px solid var(--accent);margin-bottom:-1px;}
+.prose{font-family:var(--serif);font-size:var(--fs-prose);line-height:1.6;padding:var(--sp-4) 0;max-width:60ch;}
+.rail{padding:var(--sp-4) var(--sp-3);background:var(--inset);border-radius:0 var(--r-lg) var(--r-lg) 0;}
+.frow{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-1) 0;font-size:var(--fs-md);}
+.frow .name{color:var(--text-3);width:56px;}
+.frow .val{display:flex;align-items:center;gap:6px;}
+
+/* ---- the one visual language (#471 / #517), unchanged ---- */
+.vmark{position:relative;display:inline-flex;align-items:center;color:var(--star);background:none;border:0;padding:0;cursor:pointer;line-height:1;}
+.vmark svg{width:15px;height:15px;}
+.vmark:focus-visible{outline:2px solid var(--star);outline-offset:2px;border-radius:var(--r-sm);}
+.chip{display:none;position:absolute;bottom:100%;left:0;margin-bottom:3px;align-items:center;gap:3px;padding:2px 8px;white-space:nowrap;
+  background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--r-sm);box-shadow:var(--elev-2);
+  font-family:var(--sans);font-size:var(--fs-xs);font-weight:500;color:var(--star);z-index:5;}
+.chip svg{width:11px;height:11px;}
+.vmark:hover .chip,.vmark:focus-visible .chip,.vmark.demo .chip{display:inline-flex;}
+.hidden{display:none !important;}
+
+/* ---- the confirm the body reset raises ---- */
+.scrim{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;z-index:20;}
+.dialog{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--elev-3);width:min(420px,92vw);padding:var(--sp-4) var(--sp-5);}
+.dialog h2{font-family:var(--sans);font-size:var(--fs-lg);font-weight:600;margin:0 0 var(--sp-2);}
+.dialog p{color:var(--text-2);margin:0 0 var(--sp-2);}
+.dialog .undo{font-size:var(--fs-sm);color:var(--danger);}
+.actions{display:flex;justify-content:flex-end;gap:var(--sp-2);margin-top:var(--sp-4);}
+.btn{font:inherit;font-size:var(--fs-md);padding:var(--sp-1) var(--sp-3);border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;}
+.btn.danger{background:var(--danger);border-color:var(--danger);color:#fff;}
+
+.notes{margin-top:var(--sp-5);display:grid;gap:var(--sp-3);}
+.note{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-3) var(--sp-4);}
+.note h3{font-family:var(--serif);font-size:var(--fs-lg);margin:0 0 var(--sp-1);}
+.note p,.note li{color:var(--text-2);margin:0;}
+.note ul{margin:0;padding-left:1.2em;}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <p class="eyebrow">#2184 · slice 3 · ADR-0039 Amendment 4 §9</p>
+  <h1>Title and body override marks</h1>
+  <p class="lede">A book overrides an inherited entry's <b>title</b> or <b>body</b> the way it already overrides a field. Neither has a rail row, so the existing <code>ti-versions</code> mark moves to the thing it marks: <b>after the title</b>, and <b>on the Body tab</b>. Same tint, same hover chip, same wording as the rail's <i>rank</i> row on the right.</p>
+
+  <div class="bench">
+    <span><span class="bench-label">Editing at</span><span class="seg" id="seg-layer"><button data-v="book" aria-pressed="true">Book 1</button><button data-v="aetheria">Aetheria</button></span></span>
+    <span><span class="bench-label">Book 1 overrides</span><span class="seg" id="seg-what"><button data-v="both" aria-pressed="true">title + body</button><button data-v="body">body only</button><button data-v="none">nothing</button></span></span>
+    <span><span class="bench-label">Theme</span><span class="seg" id="seg-theme"><button data-v="light" aria-pressed="true">light</button><button data-v="dark">dark</button></span></span>
+  </div>
+
+  <div class="editor">
+    <div class="main">
+      <div class="cap">Name</div>
+      <div class="title-row">
+        <input class="title" id="title" size="14" value="Warden Marek" aria-label="Entry name">
+        <button class="vmark" id="title-mark" title="Overridden in Book 1. Aetheria's title is “Marek Vell”." aria-label="Reset the title to Aetheria's">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="5"/><path d="M14 7.5a5 5 0 0 1 0 9"/><path d="M17.5 6.5a7 7 0 0 1 0 11"/></svg>
+          <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg>Reset to Aetheria</span>
+        </button>
+      </div>
+      <div class="layerbar">Editing at <select id="layer-select" aria-label="Editing at"><option value="book">Book 1 (this project)</option><option value="aetheria">Aetheria</option></select></div>
+      <div class="tabs">
+        <span class="tab on">Body
+          <button class="vmark" id="body-mark" title="Overridden in Book 1. The body you see is Book 1's, not Aetheria's." aria-label="Reset the body to Aetheria's">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="5"/><path d="M14 7.5a5 5 0 0 1 0 9"/><path d="M17.5 6.5a7 7 0 0 1 0 11"/></svg>
+            <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg>Reset to Aetheria…</span>
+          </button>
+        </span>
+        <span class="tab">References</span><span class="tab">Mutation sets</span>
+      </div>
+      <div class="prose" id="prose">Keeper of the gate. In Book 1 he has kept it eleven years.</div>
+    </div>
+    <aside class="rail">
+      <div class="cap">Character</div>
+      <div class="frow"><span class="name">rank</span><span class="val" id="rank-val">
+        <span class="vmark" id="rank-mark" title="Overridden in Book 1 — Aetheria's rank is Commodore"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="5"/><path d="M14 7.5a5 5 0 0 1 0 9"/><path d="M17.5 6.5a7 7 0 0 1 0 11"/></svg></span>
+        <span id="rank">Captain</span></span></div>
+      <p style="font-size:var(--fs-xs);color:var(--text-3);margin-top:var(--sp-3)">The rail row as shipped (#517), for comparison.</p>
+    </aside>
+  </div>
+
+  <div class="scrim hidden" id="scrim" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+    <div class="dialog">
+      <h2 id="dlg-title">Reset the body to Aetheria's?</h2>
+      <p>The body Book 1 wrote for <b>Warden Marek</b> is removed, and Book 1 shows Aetheria's body again. The title and fields are not touched.</p>
+      <p class="undo">This can't be undone.</p>
+      <div class="actions"><button class="btn" id="dlg-cancel">Cancel</button><button class="btn danger" id="dlg-ok">Reset body</button></div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><h3>What each mark does</h3><ul>
+      <li><b>Title mark:</b> hover or focus shows “↩ Reset to Aetheria”. Clicking resets at once, like a rail field; the old title is one retype away.</li>
+      <li><b>Body mark:</b> the chip ends in “…” because the click <b>asks first</b>. Resetting throws away prose the author wrote, and removing the override isn't snapshotted.</li>
+      <li><b>Tooltips name the canon:</b> the title's names Aetheria's title; the body's says the text is the book's.</li>
+      <li><b>Keyboard:</b> each mark is a button and a tab stop, so the reset is never hover-only (#517's rule).</li>
+    </ul></div>
+    <div class="note"><h3>What it deliberately doesn't do</h3><ul>
+      <li>No banner, no label, no tinted title or body text. Inherited is the default and reads quiet; only the mark says "overridden".</li>
+      <li>No new glyph and no new colour: the mark and <code>--star</code> are the rail's.</li>
+      <li>No mark at all when "Editing at" is Aetheria: that view <i>is</i> the canon.</li>
+      <li>Prompts get nothing: they change title and body only by cloning (§5).</li>
+    </ul></div>
+  </div>
+</div>
+<script>
+const state={layer:"book",what:"both"};
+const canon={title:"Marek Vell",body:"Keeper of the gate.",rank:"Commodore"};
+const book={title:"Warden Marek",body:"Keeper of the gate. In Book 1 he has kept it eleven years.",rank:"Captain"};
+function render(){
+  const atBook=state.layer==="book";
+  const tOver=atBook&&state.what==="both", bOver=atBook&&state.what!=="none";
+  document.getElementById("title").value=tOver?book.title:canon.title;
+  document.getElementById("prose").textContent=bOver?book.body:canon.body;
+  document.getElementById("rank").textContent=atBook?book.rank:canon.rank;
+  document.getElementById("title-mark").classList.toggle("hidden",!tOver);
+  document.getElementById("body-mark").classList.toggle("hidden",!bOver);
+  document.getElementById("rank-mark").classList.toggle("hidden",!atBook);
+  document.getElementById("layer-select").value=state.layer;
+  for(const [id,key] of [["seg-layer","layer"],["seg-what","what"]])
+    for(const b of document.querySelectorAll(`#${id} button`)) b.setAttribute("aria-pressed",String(b.dataset.v===state[key]));
+}
+function wire(id,key){for(const b of document.querySelectorAll(`#${id} button`)) b.onclick=()=>{state[key]=b.dataset.v;render();};}
+wire("seg-layer","layer");wire("seg-what","what");
+document.getElementById("layer-select").onchange=e=>{state.layer=e.target.value;render();};
+for(const b of document.querySelectorAll("#seg-theme button")) b.onclick=()=>{
+  document.documentElement.dataset.theme=b.dataset.v;
+  for(const x of document.querySelectorAll("#seg-theme button")) x.setAttribute("aria-pressed",String(x===b));
+};
+document.getElementById("title-mark").onclick=()=>{state.what=state.what==="both"?"body":state.what;render();};
+const scrim=document.getElementById("scrim");
+document.getElementById("body-mark").onclick=()=>scrim.classList.remove("hidden");
+document.getElementById("dlg-cancel").onclick=()=>scrim.classList.add("hidden");
+document.getElementById("dlg-ok").onclick=()=>{scrim.classList.add("hidden");state.what="none";render();};
+render();
+</script>
+</body>
+</html>

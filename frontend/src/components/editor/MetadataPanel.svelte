@@ -509,6 +509,7 @@
     sectionsInBody,
     listsInBody,
     resolveListMemberType: (id) => listMemberResolver(id)?.entry_type ?? null,
+    resolveListMemberTitle: (id) => listMemberResolver(id)?.title ?? null,
   });
   function rowModel(fieldId: string) {
     return buildRailRowModel(ctx, fieldId);

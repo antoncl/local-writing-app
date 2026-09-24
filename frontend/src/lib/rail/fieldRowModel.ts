@@ -15,7 +15,7 @@ import { fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { countWords } from "@/lib/utils/wordCount";
 import { listHasProseItems } from "@/lib/editor-core/bodySections";
-import { keyedListKeyMember, listItemKey } from "@/lib/editor-core/keyedList";
+import { itemMemberDetail, keyedListKeyMember, listItemKey } from "@/lib/editor-core/keyedList";
 import type {
   DocumentKind,
   EffectiveFieldValue,
@@ -61,6 +61,10 @@ export type RailRowContext = {
   // row's per-type summary — the same walk `lib/utils/refResolve.ts` shares
   // with ReferencePicker/ReferenceListTab. Absent id (unresolvable) → null.
   resolveListMemberType?: (id: string) => string | null;
+  // A reference-keyed list's target id → its title (ADR-0089 §6), from the same
+  // `buildRefResolver` walk as `resolveListMemberType` — used by the proposal
+  // flip's "Current:" hint so it names targets instead of dumping raw ids.
+  resolveListMemberTitle?: (id: string) => string | null;
   canClearOwn: boolean;
   canResetOverride: boolean;
   readOnly: boolean;
@@ -287,15 +291,28 @@ function isFlipAdopted(ctx: RailRowContext, fieldId: string): boolean {
 
 /** The entry's current value of a flipped field, for the "Current: …" hint —
  *  the row shows the proposed candidate, so the author needs to see what it
- *  would replace. A tag-vocabulary `entity_ref_list` flip (#1797 — the only
- *  `entity_ref_list` type that ever reaches a flip, ADR-0082 §2) resolves its
- *  ids to titles through `tagTitleById` — the candidate side already reads as
- *  titles (known ids) or "new tag" candidates (unmatched titles) above, so
- *  the "Current:" side must match rather than fall back to a bare id. */
+ *  would replace. The candidate side already reads as resolved names, so the
+ *  "Current:" side must match rather than fall back to a bare id / raw record:
+ *  a tag-vocabulary `entity_ref_list` flip (#1797, ADR-0082 §2) resolves its
+ *  ids through `tagTitleById`; a reference-keyed `list` flip (#2168, ADR-0089
+ *  §6) names each target and appends the item's member detail, the same shape
+ *  ListValueEditor renders on the candidate side. */
 function flipCurrentHint(ctx: RailRowContext, fieldId: string): string {
+  const field = ctx.schema.fields[fieldId];
   const value = ctx.compare?.fields[fieldId]?.now as MetadataValue;
-  if (ctx.schema.fields[fieldId]?.type === "entity_ref_list" && Array.isArray(value)) {
+  if (field?.type === "entity_ref_list" && Array.isArray(value)) {
     return value.map((id) => ctx.tagTitleById.get(String(id)) ?? String(id)).join(", ");
+  }
+  if (keyedListKeyMember(field) && Array.isArray(value)) {
+    return value
+      .map((item) => {
+        const id = listItemKey(field, item);
+        // An orphaned item (blank key, ADR-0089 §9) has no target to name.
+        const name = (id ? ctx.resolveListMemberTitle?.(id) : null) ?? id ?? "(orphaned)";
+        const detail = itemMemberDetail(field, item);
+        return detail ? `${name} · ${detail}` : name;
+      })
+      .join(", ");
   }
   return metadataValueString(value);
 }

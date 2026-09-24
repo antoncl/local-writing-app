@@ -135,6 +135,43 @@ describe("buildRailRowModel", () => {
     expect(model.value).toBe("Proposed");
   });
 
+  it("a reference-keyed list flip names each target and appends member detail (#2168)", () => {
+    const ctx = baseCtx({
+      metadata: { relationships: [{ who: "lore_1", role: "ally" }] },
+      compare: {
+        fields: {
+          relationships: {
+            was: [{ who: "lore_1", role: "rival" }],
+            now: [{ who: "lore_1", role: "ally" }],
+          },
+        },
+        side: "was",
+        resolve: { adopted: () => false, onToggle: () => {} },
+      },
+      resolveListMemberTitle: (id) => (id === "lore_1" ? "Mara" : null),
+    });
+    // The "Current:" hint shows the `now` (current) side, target named, not a raw record.
+    expect(buildRailRowModel(ctx, "relationships").flipCurrentHint).toBe("Mara · ally");
+  });
+
+  it("a keyed-list flip falls back to the id, then '(orphaned)', when a target can't be named (#2168)", () => {
+    const ctx = baseCtx({
+      compare: {
+        fields: {
+          relationships: {
+            was: [],
+            now: [{ who: "lore_x", role: "ally" }, { role: "foe" }],
+          },
+        },
+        side: "was",
+        resolve: { adopted: () => false, onToggle: () => {} },
+      },
+      resolveListMemberTitle: () => null,
+    });
+    // Unresolvable id → the id itself; a blank-key (orphaned) item → "(orphaned)".
+    expect(buildRailRowModel(ctx, "relationships").flipCurrentHint).toBe("lore_x · ally, (orphaned) · foe");
+  });
+
   it("openFieldId === fieldId reads editing", () => {
     const editing = buildRailRowModel(baseCtx({ metadata: { alias: "x" }, openFieldId: "alias" }), "alias");
     expect(editing.editing).toBe(true);

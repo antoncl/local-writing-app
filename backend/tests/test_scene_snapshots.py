@@ -518,10 +518,10 @@ class RestoreTests(SnapshotTestCase):
 class DeletionTests(SnapshotTestCase):
     def _chapter_id(self) -> str:
         for node in self.service.read_structure().root.children:
-            if node.type == "manuscript:chapter":
+            if node.type == "manuscript:container":
                 return node.id
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter One", entry_type="manuscript:chapter")
+            CreateStructureNodeRequest(title="Chapter One", entry_type="manuscript:container")
         )
         return self._chapter_id()
 

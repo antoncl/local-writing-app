@@ -12,11 +12,18 @@ export function nodeChildren(node: StructureNode): StructureNode[] {
   return node.children ?? [];
 }
 
-// Leaf nodes are the ones that own an underlying scene file. (Research notes
-// are not reorderable, so this manuscript-flavoured check is only ever reached
-// for the scene tree.)
+// A container is what the backend's tree build stamped with a level — any type
+// that is not the tree's leaf type, empty or not (ADR-0094 §7) — or the root.
+// Children count too, for a tree assembled without the stamp (tests, fixtures).
+// Mirrors TreeStructureService.is_container.
+export function isContainerNode(node: StructureNode): boolean {
+  return node.type === "root" || node.level != null || (node.children?.length ?? 0) > 0;
+}
+
+// A leaf — a scene or a research note, or any type that is_a one — is every
+// node that is not a container.
 export function isLeafNode(node: StructureNode): boolean {
-  return node.type === "manuscript:scene";
+  return !isContainerNode(node);
 }
 
 // Depth-first lookup of a node by id, starting from any subtree root.

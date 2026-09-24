@@ -60,7 +60,7 @@ from app.services.project.schema_definition_validation import (
     placement_key_fields,
     placement_key_message,
 )
-from app.services.project.tree_configs import MANUSCRIPT_TREE, RESEARCH_TREE
+from app.services.project.tree_configs import MANUSCRIPT_TREE, RESEARCH_TREE, TREES
 
 # A verified project's own structural folders — its guts, never a place a user
 # opens or creates a project. The directory picker hides these when browsing
@@ -293,11 +293,11 @@ class ProjectLifecycleMixin:
             "settings": {
                 "theme": "system",
             },
-            "manuscript_structure": {
-                "container_types": [
-                    {"type": "manuscript:act", "label": "Act"},
-                    {"type": "manuscript:chapter", "label": "Chapter"},
-                ]
+            # The trees' level lists (ADR-0094 §7): a new project names its
+            # containers Act, Chapter and Topic, all on the one container type.
+            **{
+                spec.manifest_key: {"levels": [{"name": name} for name in spec.default_levels]}
+                for spec in TREES
             },
         }
 
@@ -360,6 +360,8 @@ class ProjectLifecycleMixin:
             chain=self._project_chain_for_api(root),
             children=self._project_children(root),
             metadata=self._resolved_project_node_metadata(root),
+            manuscript_levels=self._tree_levels(root, MANUSCRIPT_TREE),
+            research_levels=self._tree_levels(root, RESEARCH_TREE),
         )
 
     def _project_chain_for_api(self, root: Path) -> list[ProjectChainLayer]:
@@ -602,6 +604,16 @@ class ProjectLifecycleMixin:
             # longer needs to, because widening it widens it for every project
             # at once rather than for this one.
             manifest[INHERITS_KEY] = self._validated_declaration(request.inherits, root)
+        # The trees' level lists (ADR-0094 §7): validated, and a change that
+        # would rename or strand containers already in the tree is refused
+        # unless confirmed.
+        for spec, levels in ((MANUSCRIPT_TREE, request.manuscript_levels), (RESEARCH_TREE, request.research_levels)):
+            if levels is not None:
+                section = manifest.get(spec.manifest_key)
+                section = dict(section) if isinstance(section, dict) else {}
+                section.pop("container_types", None)
+                section["levels"] = self._validated_levels(root, spec, levels, force=request.force_levels)
+                manifest[spec.manifest_key] = section
         if ai_settings:
             settings["ai"] = ai_settings
         else:

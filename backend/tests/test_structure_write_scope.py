@@ -109,7 +109,7 @@ class StructureWritesStayInTheCallersProjectTests(unittest.TestCase):
 
     def test_a_concurrent_open_does_not_redirect_a_manuscript_write(self) -> None:
         created = self.service.create_structure_node(
-            _structure_node_request("Act One", "manuscript:act")
+            _structure_node_request("Act One", "manuscript:container")
         )
         act = _find(created.root, lambda node: node.title == "Act One")
         scene_node = _find(created.root, lambda node: node.type == "manuscript:scene")

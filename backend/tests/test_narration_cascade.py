@@ -33,13 +33,13 @@ class CascadeResolverTests(unittest.TestCase):
             children=[
                 StructureNode(
                     id="A",
-                    type="manuscript:act",
+                    type="manuscript:container",
                     title="Act 1",
                     scene_id="a",
                     children=[
                         StructureNode(
                             id="C",
-                            type="manuscript:chapter",
+                            type="manuscript:container",
                             title="Ch 1",
                             scene_id="c",
                             children=[
@@ -179,12 +179,12 @@ class NarrationCascadeIntegrationTests(MetadataValidationBase):
 
     def _act_with_pov(self, value: str) -> StructureNode:
         structure = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         act = next(
-            n for n in TreeStructureService.collect(structure.root) if n.type == "manuscript:act"
+            n for n in TreeStructureService.collect(structure.root) if n.type == "manuscript:container"
         )
-        self._set_pov_mode(act.scene_id, "manuscript:act", value)
+        self._set_pov_mode(act.scene_id, "manuscript:container", value)
         return act
 
     def test_freeze_pins_narration_on_first_prose(self) -> None:
@@ -205,7 +205,7 @@ class NarrationCascadeIntegrationTests(MetadataValidationBase):
             SaveSceneRequest(title=wscene.title, body="First prose.", base_revision=wscene.revision),
         )
         # Now move the act's pov_mode.
-        self._set_pov_mode(act_node.scene_id, "manuscript:act", "third_omniscient")
+        self._set_pov_mode(act_node.scene_id, "manuscript:container", "third_omniscient")
 
         root = self.service.read_structure().root
         written = next(n for n in TreeStructureService.collect(root) if n.title == "Written")
@@ -244,7 +244,7 @@ class NarrationCascadeIntegrationTests(MetadataValidationBase):
         act_node = self._act_with_pov("third_limited")
         self.service.create_scene(self._make_create_scene("S", parent_id=act_node.id))
         root = self.service.read_structure().root
-        act = next(n for n in TreeStructureService.collect(root) if n.type == "manuscript:act")
+        act = next(n for n in TreeStructureService.collect(root) if n.type == "manuscript:container")
         scene = next(n for n in act.children if n.type == "manuscript:scene")
         self.assertFalse(scene.resolved_cascade["pov_mode"]["own"])
         self.assertEqual(scene.resolved_cascade["pov_mode"]["source_id"], act.id)
@@ -275,10 +275,10 @@ class NarrationCascadeIntegrationTests(MetadataValidationBase):
         # pipeline — proving scene_front carries CONTAINER own-metadata, not scenes'
         # only (the load-bearing assumption behind cascading at all).
         structure = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         act_node = next(
-            n for n in TreeStructureService.collect(structure.root) if n.type == "manuscript:act"
+            n for n in TreeStructureService.collect(structure.root) if n.type == "manuscript:container"
         )
         act_scene = self.service.read_scene(act_node.scene_id)
         self.service.save_scene(
@@ -287,14 +287,14 @@ class NarrationCascadeIntegrationTests(MetadataValidationBase):
                 title=act_scene.title,
                 body="",
                 base_revision=act_scene.revision,
-                entry_type="manuscript:act",
+                entry_type="manuscript:container",
                 metadata={"pov_mode": "third_limited"},
             ),
         )
         self.service.create_scene(self._make_create_scene("Scene X", parent_id=act_node.id))
 
         root = self.service.read_structure().root
-        act = next(n for n in TreeStructureService.collect(root) if n.type == "manuscript:act")
+        act = next(n for n in TreeStructureService.collect(root) if n.type == "manuscript:container")
         scene = next(n for n in act.children if n.type == "manuscript:scene")
         self.assertEqual(
             scene.resolved_cascade["pov_mode"],

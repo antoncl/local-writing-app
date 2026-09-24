@@ -55,13 +55,14 @@ from typing import Any
 import yaml
 
 from app.services.atomic_io import atomic_write_text
+from app.services.migration_levels import migrate_layer_levels
 from app.services.migration_tree_placement import migrate_layer_tree_placement
 from app.services.yaml_io import load_yaml
 
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 12
+CURRENT_VERSION = 13
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -1134,6 +1135,12 @@ MIGRATIONS: list[MigrationStep] = [
         "move the manuscript and research trees onto their nodes' own parent/rank and retire the "
         "structure yaml files (ADR-0094 S1, #2175)",
         migrate_layer_tree_placement,
+    ),
+    ChainMigration(
+        13,
+        "seed the manuscript/research level lists and keep act/chapter/topic as sub-types of the "
+        "container types (ADR-0094 S2, #2176)",
+        migrate_layer_levels,
     ),
 ]
 

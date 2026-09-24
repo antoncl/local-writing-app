@@ -10,6 +10,7 @@ from app.models.base import (
     UpdateApplyState,
     UpdateChannel,
 )
+from app.models.entries import StructureLevel
 from app.models.schema import MetadataSchema
 
 
@@ -221,6 +222,9 @@ class ProjectInfo(BaseModel):
     # supplied each value) is deliberately not carried here; the editor's
     # inherited/override display is the wizard's review pane (#318, slice 4).
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    # The two trees' level lists (ADR-0094 §7), what the project settings edit.
+    manuscript_levels: list[StructureLevel] = Field(default_factory=list)
+    research_levels: list[StructureLevel] = Field(default_factory=list)
 
 
 class UpdateProjectSettingsRequest(BaseModel):
@@ -239,6 +243,13 @@ class UpdateProjectSettingsRequest(BaseModel):
     # project; they are stored relative so a renamed shelf does not invalidate
     # every book beneath it.
     inherits: list[str] | None = None
+    # A tree's level list (ADR-0094 §7). Partial like the rest: `None` leaves it
+    # alone. A change that would name existing containers by a different entry,
+    # or leave them past the end of the list, is refused (409) unless
+    # `force_levels` confirms it.
+    manuscript_levels: list[StructureLevel] | None = None
+    research_levels: list[StructureLevel] | None = None
+    force_levels: bool = False
 
 
 class ProspectiveProjectNodeRequest(BaseModel):

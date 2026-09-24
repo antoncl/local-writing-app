@@ -363,9 +363,9 @@ class DeferredFlushTests(MemoTestCase):
         per-file writes collapse to a handful of flushes instead of one each."""
         structure = self.service.read_structure()
         doc = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:chapter", parent_id=structure.root.id)
+            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:container", parent_id=structure.root.id)
         )
-        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:chapter")
+        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:container")
         scene_count = 12
         for i in range(scene_count):
             self.service.create_scene(CreateSceneRequest(title=f"Scene {i}", parent_id=chapter_id))

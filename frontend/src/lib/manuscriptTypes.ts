@@ -26,7 +26,20 @@ export type StructureNode = {
   // unset) with provenance. `source_id` null = book default; `own` true = this node
   // set it. Derived, never written. Null when the schema declares no cascade_fields.
   resolved_cascade?: Record<string, ResolvedCascadeField> | null;
+  // ADR-0094 §7: a container's level (its depth among containers, 1 at the top)
+  // and the level list's name for it. Null for a scene/note and for the root.
+  level?: number | null;
+  level_name?: string | null;
   children: StructureNode[];
+};
+
+// One entry of a tree's level list (ADR-0094 §7): what a container at that
+// depth is called, the type it is created as (null = the tree's container
+// type), and whether `{number}` restarts within the parent or runs on.
+export type StructureLevel = {
+  name: string;
+  type?: string | null;
+  numbering?: "restart" | "continuous";
 };
 
 // One resolved cascade field (ADR-0079): the folded value + where it came from.
@@ -43,6 +56,8 @@ export type ResolvedCascadeField = {
 
 export type StructureDocument = {
   root: StructureNode;
+  // The tree's level list, carried with the tree (ADR-0094 §7).
+  levels?: StructureLevel[];
 };
 
 export type Scene = {

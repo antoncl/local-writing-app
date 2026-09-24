@@ -52,10 +52,10 @@ class _CardLinkTestCase(PlotTestCase):
     def _scene(self, title: str = "A Scene") -> str:
         structure = self.service.read_structure()
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:chapter", parent_id=structure.root.id)
+            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:container", parent_id=structure.root.id)
         )
         chapter_id = next(
-            c.id for c in self.service.read_structure().root.children if c.type == "manuscript:chapter"
+            c.id for c in self.service.read_structure().root.children if c.type == "manuscript:container"
         )
         return self.service.create_scene(CreateSceneRequest(title=title, parent_id=chapter_id)).id
 

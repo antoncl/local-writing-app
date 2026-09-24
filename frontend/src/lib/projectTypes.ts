@@ -5,7 +5,7 @@
 import type { AIPolicy } from "./aiTypes";
 import type { MetadataSchema } from "./schemaTypes";
 import type { MetadataValue } from "./metadataTypes";
-import type { CodeFencedBody } from "./manuscriptTypes";
+import type { CodeFencedBody, StructureLevel } from "./manuscriptTypes";
 
 // The wizard review pane's inputs for a *not-yet-created* project (#318 slice
 // 4). The prospective twin of `ProjectInfo.metadata` (#317) plus the provenance
@@ -105,6 +105,9 @@ export type ProjectInfo = {
    * sets is simply absent.
    */
   metadata?: Record<string, unknown>;
+  /** The two trees' level lists (ADR-0094 §7), what project settings edit. */
+  manuscript_levels?: StructureLevel[];
+  research_levels?: StructureLevel[];
 };
 
 export type ProjectNode = {

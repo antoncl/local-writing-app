@@ -163,9 +163,9 @@ class LoreCacheBlockTests(_LoreCacheFixture):
             ),
         )
         structure = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
-        act = next(c for c in structure.root.children if c.type == "manuscript:act")
+        act = next(c for c in structure.root.children if c.type == "manuscript:container")
         added = self.service.create_structure_node(
             CreateStructureNodeRequest(
                 title="The Departure", entry_type="manuscript:scene", parent_id=act.id
@@ -340,9 +340,9 @@ class LoreCacheBlockTests(_LoreCacheFixture):
             ),
         )
         structure = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
-        act = next(c for c in structure.root.children if c.type == "manuscript:act")
+        act = next(c for c in structure.root.children if c.type == "manuscript:container")
         added = self.service.create_structure_node(
             CreateStructureNodeRequest(
                 title="The Departure", entry_type="manuscript:scene", parent_id=act.id

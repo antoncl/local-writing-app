@@ -3,9 +3,11 @@ import { realizeLocations } from "./realizeLocations";
 import type { StructureDocument, StructureNode } from "@/lib/types";
 
 // Terse tree builder. A node with a "manuscript:scene" type is a leaf; anything else is
-// a container. Only id/type/title/children matter to realizeLocations.
+// a container and carries a level, as the backend's tree build stamps every container
+// (ADR-0094 §7) — so an empty chapter is still a container.
 function node(id: string, type: string, title: string, children: StructureNode[] = []): StructureNode {
-  return { id, type, title, children };
+  const container = type !== "manuscript:scene" && type !== "root";
+  return { id, type, title, children, level: container ? 1 : null };
 }
 function doc(...children: StructureNode[]): StructureDocument {
   return { root: node("root", "root", "Manuscript", children) };

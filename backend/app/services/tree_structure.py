@@ -139,15 +139,12 @@ class TreeStructureService:
         """All node ids under a subtree, including `node` itself."""
         return {n.id for n in TreeStructureService.collect(node)}
 
-    # Manuscript container node types (as opposed to leaf scenes). Acts and
-    # chapters carry their own `scene_id` (a backing file), so a node is NOT a
-    # container-vs-scene by `scene_id is None` — it is by type, or by having
-    # children (which covers any user-defined container level).
-    _CONTAINER_TYPES = frozenset({"root", "manuscript:act", "manuscript:chapter"})
-
     @staticmethod
     def is_container(node: StructureNode) -> bool:
-        return node.type in TreeStructureService._CONTAINER_TYPES or bool(node.children)
+        """A container is what the tree build stamped with a level — any type
+        that is not the tree's leaf type (ADR-0094 §7), empty or not — or the
+        root. Children count too, for a tree built outside the stamp."""
+        return node.type == "root" or node.level is not None or bool(node.children)
 
     @staticmethod
     def collect_descendant_scene_ids_ordered(node: StructureNode) -> list[str]:

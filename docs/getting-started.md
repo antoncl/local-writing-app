@@ -65,9 +65,11 @@ Your manuscript lives in the **Draft** pane, under a **Scenes** heading. A fresh
 project starts empty (*"No scenes yet."*).
 
 1. Click the **+** button at the top of the pane. A small menu (**Add at root**)
-   lists the kinds of node you can add — typically **Act**, **Chapter**, and
-   **Scene**. Add an **Act**, then use the **+** on that row (**Add child**) to add
-   a **Chapter**, and a **Scene** under that.
+   lists what you can add here — **Act** and **Scene** at the top. Add an **Act**,
+   then use the **+** on that row (**Add child**) to add a **Chapter**, and a
+   **Scene** under that. Act and Chapter are the project's *levels*: **Levels**,
+   next to the **+**, renames them or adds a deeper one (a **Sequence** under each
+   chapter, say), and sets whether chapter numbers restart in each act or run on.
 2. Click the scene to open it. The body is a normal what-you-see-is-what-you-get
    editor — just start typing.
 3. Type **`/`** anywhere to open the command menu: headings and paragraphs under

@@ -126,11 +126,12 @@ setup, and the exemption ratchet: → `docs/development/quality-gates.md`
 ## Architecture
 
 ### Project format (on disk)
-A project is a folder: `project.yaml`, `manuscript.structure.yaml`,
-`metadata.schema.yaml`, and `scenes/ lore/ prompts/ todo.yaml .cache/`. Scenes
-are Markdown with YAML front matter; the front-matter `id` is canonical identity
-(filenames are not). The manuscript tree (acts/chapters/scenes ordering) lives in
-`manuscript.structure.yaml`, separate from prose.
+A project is a folder: `project.yaml`, `metadata.schema.yaml`, and `scenes/
+lore/ prompts/ todo.yaml .cache/`. Scenes are Markdown with YAML front matter;
+the front-matter `id` is canonical identity (filenames are not). The manuscript
+and research trees live in the nodes themselves — `parent` + fractional `rank`
+in front matter (ADR-0094) — and containers are named by depth from the level
+lists in `project.yaml`, not by type.
 
 ### Layered metadata schema
 The app ships a minimal built-in schema, then **merges every

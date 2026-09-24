@@ -70,11 +70,14 @@ class ResearchNotesMixin:
                 raise ProjectServiceError(
                     f"Parent node {request.parent_id} does not exist.", 404
                 )
-            if parent.type == RESEARCH_TREE.leaf_type:
+            if parent.level is None:
                 raise ProjectServiceError(
                     "Cannot add a child under a research note.", 422
                 )
             parent_id = parent.id
+        if RESEARCH_TREE.leaf_type not in self.entry_type_ancestry(request.entry_type, schema=schema):
+            # A container: only at a level the list names (ADR-0094 §7).
+            self._require_creatable_level(document, parent_id)
 
         # Every research node is a file now, containers included (ADR-0094 §7):
         # a topic can be opened and carry fields like any node.
@@ -123,7 +126,7 @@ class ResearchNotesMixin:
         descendant_leaf_count = 0
         descendant_container_count = 0
         for n in TreeStructureService.collect(node, skip_root=True):
-            if n.type == RESEARCH_TREE.leaf_type:
+            if n.level is None:
                 descendant_leaf_count += 1
             else:
                 descendant_container_count += 1

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -37,11 +37,32 @@ class StructureNode(BaseModel):
     # `own` True = this node set it). Derived, never authored; stripped on write
     # like `metadata`. None when the schema declares no cascade_fields.
     resolved_cascade: dict[str, Any] | None = None
+    # ADR-0094 §7: a container's level — its depth among containers, 1 at the
+    # top — and the level list's name for it (the last entry's name when it
+    # sits deeper than the list). None for a leaf and for the root; stamped by
+    # the tree build, never stored.
+    level: int | None = None
+    level_name: str | None = None
     children: list[StructureNode] = Field(default_factory=list)
+
+
+class StructureLevel(BaseModel):
+    """One entry of a tree's level list (ADR-0094 §7), kept in `project.yaml`.
+    `type` is the entry type a new container at this level is created as —
+    None means the tree's container type; `numbering` is how `{number}` counts
+    at this level: within the parent (`restart`) or through the whole tree
+    (`continuous`)."""
+
+    name: str
+    type: str | None = None
+    numbering: Literal["restart", "continuous"] = "restart"
 
 
 class StructureDocument(BaseModel):
     root: StructureNode
+    # The tree's level list, carried with the tree so the create menu and the
+    # labels read the list the tree was built against.
+    levels: list[StructureLevel] = Field(default_factory=list)
 
 
 class Scene(BaseModel):

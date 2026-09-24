@@ -41,7 +41,8 @@
     stripeForNode,
   } from "@/lib/utils/pickerStripes";
   import { pickerMembership } from "@/lib/utils/pickerSources";
-  import { descendantTypeFqns } from "@/lib/utils/schemaTypeHelpers";
+  import { descendantTypeFqns, entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
+  import { findStructureNodeById, isLeafNode } from "@/lib/utils/treeHelpers";
   import { createTargetFor, hasTitleMatch } from "@/lib/utils/pickerCreate";
   import { buildSelectorRoster, isSelectorRef, membersForSelector } from "@/lib/views/pickerSelectors";
   import { walkViewExpr } from "@/lib/views/walkViewExpr";
@@ -301,7 +302,7 @@
     // they gate scenes, not themselves — combined with the active search match.
     const allowedSceneTypes = new Set(
       [...allowedTypeSet("manuscript")].filter(
-        (fqn) => fqn !== "manuscript:act" && fqn !== "manuscript:chapter",
+        (fqn) => !entryTypeIsA(metadataSchema, fqn, "manuscript:container"),
       ),
     );
     const searching = isSearchActive(search);
@@ -625,7 +626,7 @@
     const allowed = allowedTypeSet("research");
     const out: Array<{ id: string; title: string; entry_type: string; tags: string[] }> = [];
     const walk = (n: StructureNode) => {
-      if (n.type === "research:note" && n.scene_id) {
+      if (isLeafNode(n) && n.scene_id) {
         if (allowed.size === 0 || allowed.has(n.type)) {
           out.push({ id: n.scene_id, title: n.title, entry_type: n.type, tags: readTags(n.metadata) });
         }
@@ -783,19 +784,21 @@
     view: "View",
   };
 
-  // Manuscript container refs (ADR-0074 slice 4b) carry a structural type the
-  // schema may not name; give them stable fallback pill labels.
-  const CONTAINER_LABEL: Record<string, string> = {
-    root: "Manuscript",
-    "manuscript:act": "Act",
-    "manuscript:chapter": "Chapter",
-  };
+  // A manuscript container ref (ADR-0074 slice 4b) is labelled by its level —
+  // "Act", "Chapter" — not its type, which is one type at every level since
+  // ADR-0094 §7. The root has no level; it is the whole manuscript.
+  function containerLabel(ref: NodePickerRef): string | null {
+    if (ref.entry_type === "root") return "Manuscript";
+    if (ref.kind !== "manuscript" || !ref.entry_type) return null;
+    if (!entryTypeIsA(metadataSchema, ref.entry_type, "manuscript:container")) return null;
+    const node = structure ? findStructureNodeById(structure.root, ref.id) : null;
+    return node?.level_name ?? metadataSchema?.entry_types[ref.entry_type]?.name ?? null;
+  }
 
   function chipLabel(ref: NodePickerRef): string {
     if (ref.kind === "preset") return KIND_LABEL_SINGULAR.preset;
-    if (ref.entry_type && CONTAINER_LABEL[ref.entry_type]) {
-      return metadataSchema?.entry_types[ref.entry_type]?.name ?? CONTAINER_LABEL[ref.entry_type];
-    }
+    const container = containerLabel(ref);
+    if (container) return container;
     const subType = ref.entry_type && ref.entry_type !== ref.kind ? ref.entry_type : null;
     const displayName = subType ? metadataSchema?.entry_types[subType]?.name : null;
     return displayName ?? subType ?? KIND_LABEL_SINGULAR[ref.kind] ?? ref.kind;

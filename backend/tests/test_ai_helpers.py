@@ -97,9 +97,9 @@ class _HelperFixtureBase(unittest.TestCase):
 
         # Manuscript structure: Act → Scene 1, Scene 2
         structure = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
-        self.act_node = next(c for c in structure.root.children if c.type == "manuscript:act")
+        self.act_node = next(c for c in structure.root.children if c.type == "manuscript:container")
         s1 = self.service.create_structure_node(
             CreateStructureNodeRequest(
                 title="The Departure", entry_type="manuscript:scene", parent_id=self.act_node.id
@@ -1385,8 +1385,11 @@ class ContextPresetTests(_HelperFixtureBase):
         self.assertIn("The Departure", out)
         self.assertIn("The Arrival", out)
         # Act has children, so it opens and closes (not a self-closing tag).
-        self.assertIn("<act title=\"Act One\">", out)
-        self.assertIn("</act>", out)
+        # ADR-0094 §7: the tag is the type's bare local key (`container` — one
+        # container type for the whole manuscript), and its level name
+        # ("Act") rides as a `level` attribute since the tag no longer says it.
+        self.assertIn('<container title="Act One" level="Act">', out)
+        self.assertIn("</container>", out)
         # Leaf scenes with no children render as self-closing tags.
         self.assertIn("/>", out)
 

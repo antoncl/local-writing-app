@@ -32,8 +32,10 @@ wants the same shape; today it has to pretend to be a flat lore list.
 sibling to `manuscript_structure`.** Two new entry_types: `topic`
 (container, like `act`) and `note` (leaf, like `scene`).
 
-The kind id is `research`. The structure file is
-`research.structure.yaml`, mirroring `manuscript.structure.yaml`. The
+The kind id is `research`. Since ADR-0094 the tree is held by the nodes
+themselves (`parent` / `rank` in each file), and a topic is a
+`research:container` named by the research level list (`Topic` by default);
+a project made earlier keeps `research:topic` as its sub-type. The original
 on-disk layout is `research/topics/<slug>/notes/<slug>.md`, mirroring
 the act/scene folder layout. Topics nest (a topic can contain
 sub-topics), the same way acts can nest.

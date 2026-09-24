@@ -262,7 +262,7 @@ def _sample_structure():
             children=[
                 StructureNode(
                     id="A",
-                    type="manuscript:act",
+                    type="manuscript:container",
                     title="Act One",
                     children=[
                         StructureNode(id="A1", type="manuscript:scene", title="Open", scene_id="s_a1"),
@@ -339,9 +339,9 @@ def test_container_pick_materializes_to_its_scenes_end_to_end(tmp_path, monkeypa
 
     service = ProjectService.created_at(tmp_path / "project", "Picks")
     structure = service.create_structure_node(
-        CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+        CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
     )
-    act = next(c for c in structure.root.children if c.type == "manuscript:act")
+    act = next(c for c in structure.root.children if c.type == "manuscript:container")
     for title in ("The Departure", "The Arrival"):
         service.create_structure_node(
             CreateStructureNodeRequest(title=title, entry_type="manuscript:scene", parent_id=act.id)
@@ -352,7 +352,7 @@ def test_container_pick_materializes_to_its_scenes_end_to_end(tmp_path, monkeypa
     assert len(scene_ids) == 2
 
     # The container ref the tree stores: the act's structure-node id + type.
-    picks = json.dumps([{"id": act.id, "kind": "manuscript", "entry_type": "manuscript:act", "title": "Act One"}])
+    picks = json.dumps([{"id": act.id, "kind": "manuscript", "entry_type": "manuscript:container", "title": "Act One"}])
     rendered, _ = build_preview(
         service,
         PreviewRequest(

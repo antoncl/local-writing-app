@@ -76,6 +76,7 @@ class ManuscriptMixin:
             metadata = meta if isinstance(meta, dict) else {}
             scene_front[scene_id] = (status, metadata)
         self._inject_structure_computed_metadata(document.root, document.root, schema, scene_front)
+        self._number_containers(document, schema)
         if schema.cascade_fields:
             # Narration (and any declared cascade_fields) inherit down the tree
             # (ADR-0079). Guarded so a project that declares none pays neither the
@@ -103,7 +104,9 @@ class ManuscriptMixin:
                 if field is None or field.type != "computed" or not field.computed:
                     continue
                 function = field.computed.get("function")
-                if function == "counter":
+                # A container is numbered by its level, in one pass after this
+                # walk (`_number_containers`, ADR-0094 §7), not by its type.
+                if function == "counter" and node.level is None:
                     scope = field.computed.get("scope", "siblings")
                     value = self._compute_counter(root, node.scene_id, node.type, scope)
                     if value is not None:
@@ -254,6 +257,12 @@ class ManuscriptMixin:
             raise ProjectServiceError(f"Entry type {request.entry_type} is abstract and cannot be instantiated.", 422)
 
         document = self._read_tree(root, MANUSCRIPT_TREE)
+        # Unknown or leaf parent falls back to the top level, matching the
+        # prior hand-rolled insert.
+        parent_id = self._creation_parent(document, MANUSCRIPT_TREE, request.parent_id)
+        if MANUSCRIPT_TREE.leaf_type not in self.entry_type_ancestry(request.entry_type, schema=schema):
+            # A container: only at a level the list names (ADR-0094 §7).
+            self._require_creatable_level(document, parent_id)
         file_id = self._new_id("manuscript")
         initial_metadata = self._initial_metadata_from_defaults(request.entry_type, schema)
         initial_status = self._initial_scene_status(schema)
@@ -267,10 +276,6 @@ class ManuscriptMixin:
             metadata=initial_metadata,
         )
         self._write_scene_file(self._filepath_for_new_node(root / "scenes", request.title), scene)
-
-        # Unknown or leaf parent falls back to the top level, matching the
-        # prior hand-rolled insert.
-        parent_id = self._creation_parent(document, MANUSCRIPT_TREE, request.parent_id)
         self._place_node(root, MANUSCRIPT_TREE, file_id, parent_id, None)
         return self._read_structure(root)
 
@@ -406,7 +411,9 @@ class ManuscriptMixin:
         return self._read_structure(root)
 
     def _is_leaf_node(self, node: StructureNode) -> bool:
-        return node.type == "manuscript:scene"
+        # The tree build stamps every container with its level (ADR-0094 §7),
+        # so a leaf — `manuscript:scene` or any type that is_a it — has none.
+        return node.type != "root" and node.level is None
 
     def _first_container(self, node: StructureNode) -> StructureNode:
         if not self._is_leaf_node(node):

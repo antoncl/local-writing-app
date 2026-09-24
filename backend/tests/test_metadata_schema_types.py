@@ -16,24 +16,26 @@ from app.services.project.errors import ProjectServiceError
 
 class MetadataSchemaTypeTests(MetadataValidationBase):
     def test_default_schema_seeds_act_and_chapter(self) -> None:
+        # ADR-0094 §7: a new project has one manuscript container type —
+        # `manuscript:container` — and Act/Chapter are level names, not
+        # entry types. `manuscript:act`/`manuscript:chapter` are no longer
+        # built-in.
         schema = self.service.read_metadata_schema()
-        self.assertIn("manuscript:act", schema.entry_types)
-        self.assertIn("manuscript:chapter", schema.entry_types)
-        self.assertEqual(schema.entry_types["manuscript:act"].kind, "manuscript")
-        self.assertEqual(schema.entry_types["manuscript:chapter"].kind, "manuscript")
-        self.assertFalse(schema.entry_types["manuscript:act"].abstract)
-        self.assertFalse(schema.entry_types["manuscript:chapter"].abstract)
+        self.assertIn("manuscript:container", schema.entry_types)
+        self.assertEqual(schema.entry_types["manuscript:container"].kind, "manuscript")
+        self.assertFalse(schema.entry_types["manuscript:container"].abstract)
+        self.assertNotIn("manuscript:act", schema.entry_types)
+        self.assertNotIn("manuscript:chapter", schema.entry_types)
 
     def test_act_and_chapter_carry_narration_fields(self) -> None:
         # ADR-0079: narration (pov_mode / pov / tense) is authorable at every
         # structure level so it can be overridden and cascade down to scenes.
-        # Act/chapter shipped with no fields before this.
+        # The manuscript's one container type ships these (ADR-0094 §7).
         schema = self.service.read_metadata_schema()
-        for type_id in ("manuscript:act", "manuscript:chapter"):
-            fields = schema.entry_types[type_id].fields
-            self.assertIn("pov_mode", fields)
-            self.assertIn("pov", fields)
-            self.assertIn("tense", fields)  # #1737
+        fields = schema.entry_types["manuscript:container"].fields
+        self.assertIn("pov_mode", fields)
+        self.assertIn("pov", fields)
+        self.assertIn("tense", fields)  # #1737
 
     def test_new_project_seeds_narration_cascade_fields(self) -> None:
         # ADR-0079: cascade_fields is seeded into the scaffolded metadata.schema.yaml
@@ -64,7 +66,7 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         assert parent is not None
         self.assertTrue(parent.abstract)
         self.assertEqual(parent.kind, "manuscript")
-        for type_id in ["manuscript:act", "manuscript:chapter", "manuscript:scene"]:
+        for type_id in ["manuscript:container", "manuscript:scene"]:
             self.assertEqual(schema.entry_types[type_id].parent, "manuscript:base")
             self.assertIn("summary", schema.entry_types[type_id].fields)
 
@@ -222,8 +224,7 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         overview = self.service.read_metadata_schema_overview()
 
         self.assertTrue(overview.entry_type_sources["manuscript:scene"].built_in)
-        self.assertTrue(overview.entry_type_sources["manuscript:chapter"].built_in)
-        self.assertTrue(overview.entry_type_sources["manuscript:act"].built_in)
+        self.assertTrue(overview.entry_type_sources["manuscript:container"].built_in)
         self.assertFalse(overview.field_sources["weather"].built_in)
 
     def test_builtin_entry_type_color_icon_override_persists(self) -> None:
@@ -327,7 +328,7 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         self.assertEqual(types["lore:character"].own_icon, "user")
         self.assertEqual(types["lore:location"].own_icon, "map-pin")
         self.assertEqual(types["manuscript:scene"].own_icon, "feather")
-        self.assertEqual(types["manuscript:act"].own_icon, "stack-2")
+        self.assertEqual(types["manuscript:container"].own_icon, "stack-2")
         self.assertEqual(types["plot:plotline"].own_icon, "route")
         self.assertEqual(types["assistant:assistant"].own_icon, "sparkles")
         self.assertEqual(types["chat:chat_session"].own_icon, "message-circle")
@@ -424,9 +425,10 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
 
     def test_research_topic_opens_in_the_editor(self) -> None:
         # A research topic is a file since ADR-0094 §7, so it opens like any
-        # node — it was a tree-only container before (#1199).
+        # node — it was a tree-only container before (#1199). The topic's
+        # container type is `research:container`; "Topic" is its level name.
         schema = self.service.read_metadata_schema()
-        topic = schema.entry_types["research:topic"]
+        topic = schema.entry_types["research:container"]
         self.assertEqual(topic.opens_in, "editor")
 
     def test_tag_types_opens_in_dialog(self) -> None:

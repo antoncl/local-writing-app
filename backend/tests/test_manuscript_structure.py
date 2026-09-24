@@ -16,23 +16,25 @@ from app.services.tree_structure import TreeStructureService
 
 class ManuscriptStructureTests(MetadataValidationBase):
     def test_new_project_drops_sequence_from_container_types(self) -> None:
+        """ADR-0094 §7: the manifest no longer keys container types by entry
+        type — it keeps a level list, and a new project's is [Act, Chapter]
+        (Sequence dropped)."""
         manifest = self.service._read_yaml(self.root / "project.yaml")
-        types = [
-            item["type"] for item in manifest["manuscript_structure"]["container_types"]
-        ]
-        self.assertEqual(types, ["manuscript:act", "manuscript:chapter"])
+        levels = [item["name"] for item in manifest["manuscript_structure"]["levels"]]
+        self.assertEqual(levels, ["Act", "Chapter"])
 
     def test_create_structure_node_inserts_container_under_root(self) -> None:
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         act_nodes = [
-            child for child in updated.root.children if child.type == "manuscript:act"
+            child for child in updated.root.children if child.type == "manuscript:container"
         ]
         self.assertEqual(len(act_nodes), 1)
         self.assertEqual(act_nodes[0].title, "Act One")
+        self.assertEqual(act_nodes[0].level_name, "Act")
         self.assertIsNotNone(act_nodes[0].scene_id)
         backing_file = self.service._path_for_node_id(
             act_nodes[0].scene_id, "manuscript"
@@ -44,31 +46,31 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         act_node = next(
-            child for child in updated.root.children if child.type == "manuscript:act"
+            child for child in updated.root.children if child.type == "manuscript:container"
         )
 
         scene = self.service.read_scene(act_node.scene_id)
 
         self.assertEqual(scene.id, act_node.scene_id)
         self.assertEqual(scene.title, "Act One")
-        self.assertEqual(scene.entry_type, "manuscript:act")
+        self.assertEqual(scene.entry_type, "manuscript:container")
 
     def test_structure_carries_counter_in_computed_metadata(self) -> None:
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:container")
         )
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:container")
         )
 
         structure = self.service.read_structure()
         act_nodes = [
-            child for child in structure.root.children if child.type == "manuscript:act"
+            child for child in structure.root.children if child.type == "manuscript:container"
         ]
         numbers = [node.computed_metadata.get("number") for node in act_nodes]
         self.assertEqual(numbers, [1, 2])
@@ -82,12 +84,12 @@ class ManuscriptStructureTests(MetadataValidationBase):
 
         for _ in range(2):
             self.service.create_structure_node(
-                CreateStructureNodeRequest(title="Act", entry_type="manuscript:act")
+                CreateStructureNodeRequest(title="Act", entry_type="manuscript:container")
             )
 
         structure = self.service.read_structure()
         act_nodes = [
-            child for child in structure.root.children if child.type == "manuscript:act"
+            child for child in structure.root.children if child.type == "manuscript:container"
         ]
         self.assertEqual(len(act_nodes), 2)
         # Same title, distinct canonical ids, distinct live numbers.
@@ -108,7 +110,7 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:container")
         )
         self.assertFalse((self.root / "manuscript.structure.yaml").exists())
         self.assertFalse((self.root / "research.structure.yaml").exists())
@@ -146,20 +148,23 @@ class ManuscriptStructureTests(MetadataValidationBase):
         self.assertEqual(node.metadata["pov"], hero.id)
 
     def test_display_template_inherits_from_manuscript_structure(self) -> None:
+        """ADR-0094 §7: act/chapter are no longer entry types — Act and
+        Chapter are level names on the one `manuscript:container` type."""
         schema = self.service.read_metadata_schema()
-        for type_id in ("manuscript:act", "manuscript:chapter", "manuscript:scene"):
+        for type_id in ("manuscript:container", "manuscript:scene"):
             self.assertEqual(
                 schema.entry_types[type_id].display_template, "{title} {number}"
             )
         self.assertEqual(
             schema.entry_types["lore:character"].display_template, "{title}"
         )
+        for retired in ("manuscript:act", "manuscript:chapter", "research:topic"):
+            self.assertNotIn(retired, schema.entry_types)
 
     def test_has_body_inherits_false_for_containers_true_for_scene(self) -> None:
         schema = self.service.read_metadata_schema()
         self.assertFalse(schema.entry_types["manuscript:base"].has_body)
-        self.assertFalse(schema.entry_types["manuscript:act"].has_body)
-        self.assertFalse(schema.entry_types["manuscript:chapter"].has_body)
+        self.assertFalse(schema.entry_types["manuscript:container"].has_body)
         self.assertTrue(schema.entry_types["manuscript:scene"].has_body)
         self.assertTrue(schema.entry_types["lore:character"].has_body)
 
@@ -215,16 +220,16 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:container")
         )
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:container")
         )
         third = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 3", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 3", entry_type="manuscript:container")
         )
         act_nodes = [
-            child for child in third.root.children if child.type == "manuscript:act"
+            child for child in third.root.children if child.type == "manuscript:container"
         ]
 
         scenes = [self.service.read_scene(node.scene_id) for node in act_nodes]
@@ -235,10 +240,10 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:container")
         )
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:container")
         )
         structure = self.service.read_structure()
         act_one = next(
@@ -249,17 +254,17 @@ class ManuscriptStructureTests(MetadataValidationBase):
         )
         self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter 1", entry_type="manuscript:chapter", parent_id=act_one.id
+                title="Chapter 1", entry_type="manuscript:container", parent_id=act_one.id
             )
         )
         self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter 2", entry_type="manuscript:chapter", parent_id=act_one.id
+                title="Chapter 2", entry_type="manuscript:container", parent_id=act_one.id
             )
         )
         self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter 1", entry_type="manuscript:chapter", parent_id=act_two.id
+                title="Chapter 1", entry_type="manuscript:container", parent_id=act_two.id
             )
         )
 
@@ -296,10 +301,10 @@ class ManuscriptStructureTests(MetadataValidationBase):
         )
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:container")
         )
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:container")
         )
         structure = self.service.read_structure()
         act_one = next(
@@ -310,17 +315,17 @@ class ManuscriptStructureTests(MetadataValidationBase):
         )
         self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter 1", entry_type="manuscript:chapter", parent_id=act_one.id
+                title="Chapter 1", entry_type="manuscript:container", parent_id=act_one.id
             )
         )
         self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter 2", entry_type="manuscript:chapter", parent_id=act_one.id
+                title="Chapter 2", entry_type="manuscript:container", parent_id=act_one.id
             )
         )
         self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter 3", entry_type="manuscript:chapter", parent_id=act_two.id
+                title="Chapter 3", entry_type="manuscript:container", parent_id=act_two.id
             )
         )
 
@@ -335,6 +340,8 @@ class ManuscriptStructureTests(MetadataValidationBase):
         second_in_a1 = self.service.read_scene(act_one.children[1].scene_id)
         first_in_a2 = self.service.read_scene(act_two.children[0].scene_id)
 
+        # A counter the author scoped to the manuscript runs on through the
+        # book at each level, whatever the level's own numbering says (ADR-0094 §7).
         self.assertEqual(first_in_a1.computed_metadata.get("number"), 1)
         self.assertEqual(second_in_a1.computed_metadata.get("number"), 2)
         self.assertEqual(first_in_a2.computed_metadata.get("number"), 3)
@@ -343,13 +350,13 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         act_node = next(
-            child for child in updated.root.children if child.type == "manuscript:act"
+            child for child in updated.root.children if child.type == "manuscript:container"
         )
 
-        candidates = self.service.list_reference_candidates(entry_type="manuscript:act")
+        candidates = self.service.list_reference_candidates(entry_type="manuscript:container")
 
         ids = {candidate.id for candidate in candidates.candidates}
         self.assertIn(act_node.scene_id, ids)
@@ -358,15 +365,15 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         act_node = next(
-            child for child in updated.root.children if child.type == "manuscript:act"
+            child for child in updated.root.children if child.type == "manuscript:container"
         )
         updated = self.service.create_structure_node(
             CreateStructureNodeRequest(
                 title="Chapter 1",
-                entry_type="manuscript:chapter",
+                entry_type="manuscript:container",
                 parent_id=act_node.id,
             )
         )
@@ -374,7 +381,7 @@ class ManuscriptStructureTests(MetadataValidationBase):
             child for child in updated.root.children if child.id == act_node.id
         )
         chapters = [
-            child for child in nested_act.children if child.type == "manuscript:chapter"
+            child for child in nested_act.children if child.type == "manuscript:container"
         ]
         self.assertEqual(len(chapters), 1)
         self.assertEqual(chapters[0].title, "Chapter 1")
@@ -392,10 +399,10 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         act_node = next(
-            child for child in updated.root.children if child.type == "manuscript:act"
+            child for child in updated.root.children if child.type == "manuscript:container"
         )
         renamed = self.service.rename_structure_node(act_node.id, "The Departure")
         renamed_act = next(
@@ -475,11 +482,11 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         structure = self.service.read_structure()
         act_node = next(
-            child for child in structure.root.children if child.type == "manuscript:act"
+            child for child in structure.root.children if child.type == "manuscript:container"
         )
         scene = self.service.create_scene(
             self._make_create_scene("Arrival", parent_id=act_node.id)
@@ -500,16 +507,16 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest, SaveSceneRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         structure = self.service.read_structure()
         act_node = next(
-            child for child in structure.root.children if child.type == "manuscript:act"
+            child for child in structure.root.children if child.type == "manuscript:container"
         )
         chapter_doc = self.service.create_structure_node(
             CreateStructureNodeRequest(
                 title="Chapter 1",
-                entry_type="manuscript:chapter",
+                entry_type="manuscript:container",
                 parent_id=act_node.id,
             )
         )
@@ -519,7 +526,7 @@ class ManuscriptStructureTests(MetadataValidationBase):
         chapter_node = next(
             grandchild
             for grandchild in refreshed_act.children
-            if grandchild.type == "manuscript:chapter"
+            if grandchild.type == "manuscript:container"
         )
         scene_a = self.service.create_scene(
             self._make_create_scene("Arrival", parent_id=chapter_node.id)
@@ -572,11 +579,11 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         structure = self.service.read_structure()
         act_node = next(
-            child for child in structure.root.children if child.type == "manuscript:act"
+            child for child in structure.root.children if child.type == "manuscript:container"
         )
         self.service.create_scene(
             self._make_create_scene("Arrival", parent_id=act_node.id)
@@ -605,21 +612,21 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:container")
         )
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:container")
         )
         structure = self.service.read_structure()
         acts = [
-            child for child in structure.root.children if child.type == "manuscript:act"
+            child for child in structure.root.children if child.type == "manuscript:container"
         ]
         act_1, act_2 = acts[0], acts[1]
 
         self.service.move_structure_node(act_2.id, structure.root.id, 0)
         refreshed = self.service.read_structure()
         reordered = [
-            child for child in refreshed.root.children if child.type == "manuscript:act"
+            child for child in refreshed.root.children if child.type == "manuscript:container"
         ]
         self.assertEqual([n.id for n in reordered], [act_2.id, act_1.id])
 
@@ -627,19 +634,19 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:container")
         )
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:container")
         )
         structure = self.service.read_structure()
         acts = [
-            child for child in structure.root.children if child.type == "manuscript:act"
+            child for child in structure.root.children if child.type == "manuscript:container"
         ]
         act_1, act_2 = acts[0], acts[1]
         chapter_doc = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter 1", entry_type="manuscript:chapter", parent_id=act_1.id
+                title="Chapter 1", entry_type="manuscript:container", parent_id=act_1.id
             )
         )
         refreshed_act_1 = next(
@@ -663,15 +670,15 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:container")
         )
         structure = self.service.read_structure()
         act = next(
-            child for child in structure.root.children if child.type == "manuscript:act"
+            child for child in structure.root.children if child.type == "manuscript:container"
         )
         chapter_doc = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter 1", entry_type="manuscript:chapter", parent_id=act.id
+                title="Chapter 1", entry_type="manuscript:container", parent_id=act.id
             )
         )
         refreshed_act = next(
@@ -725,11 +732,11 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         structure = self.service.read_structure()
         act_node = next(
-            child for child in structure.root.children if child.type == "manuscript:act"
+            child for child in structure.root.children if child.type == "manuscript:container"
         )
         original_path = self.service._path_for_node_id(act_node.scene_id, "manuscript")
         self.assertEqual(original_path.name, "Act One.md")
@@ -744,10 +751,10 @@ class ManuscriptStructureTests(MetadataValidationBase):
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
         )
         act_node = next(
-            child for child in updated.root.children if child.type == "manuscript:act"
+            child for child in updated.root.children if child.type == "manuscript:container"
         )
         with self.assertRaises(ProjectServiceError):
             self.service.rename_structure_node(act_node.id, "   ")

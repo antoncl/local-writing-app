@@ -15,7 +15,7 @@
 // the same boundary the editorPanes controller draws for orchestration that's
 // irreducibly coupled to App's many subsystems.
 
-import { api } from "@/lib/api";
+import { HttpError, api } from "@/lib/api";
 import { setPalette } from "@/lib/utils/colors";
 import { applyProsePresentation } from "@/lib/utils/prose-presentation";
 import { get } from "svelte/store";
@@ -35,6 +35,7 @@ import type {
   ProjectInfo,
   ProviderCredentialsView,
   RecentProject,
+  StructureLevel,
   StructureNode,
 } from "@/lib/types";
 
@@ -463,6 +464,39 @@ class ProjectSession {
     } finally {
       this.declarationSaving = false;
     }
+  }
+
+  // Rewrite one tree's level list (ADR-0094 §7). A list that would rename or
+  // strand existing containers comes back 409; that is reported as a
+  // `conflict` carrying the backend's count so the caller can ask, then retry
+  // with `force`. Every other failure goes through `run` like any save. The
+  // tree's level names and numbering are stamped by the backend's tree read,
+  // so the project data is re-pulled after a save.
+  async setLevels(
+    tree: "manuscript" | "research",
+    levels: StructureLevel[],
+    force = false,
+  ): Promise<{ status: "saved" | "failed" } | { status: "conflict"; message: string }> {
+    const body = tree === "manuscript" ? { manuscript_levels: levels } : { research_levels: levels };
+    let conflict: string | null = null;
+    const ok = await this.run(async () => {
+      let updatedProject: ProjectInfo;
+      try {
+        updatedProject = await api.updateProjectSettings({ ...body, force_levels: force });
+      } catch (error) {
+        if (!force && error instanceof HttpError && error.status === 409) {
+          conflict = error.message;
+          return;
+        }
+        throw error;
+      }
+      this.onProjectUpdated(updatedProject);
+      await loadProjectData();
+      this.onProjectDataLoaded();
+      this.setStatus("Updated levels");
+    });
+    if (conflict !== null) return { status: "conflict", message: conflict };
+    return { status: ok ? "saved" : "failed" };
   }
 
   // Eagerly fetch machine settings (so the chat panel + inputs dialog can show

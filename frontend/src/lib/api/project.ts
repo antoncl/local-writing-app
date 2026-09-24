@@ -13,6 +13,7 @@ import type {
   ProjectInfo,
   ProjectNode,
   ProspectiveAiPolicy,
+  StructureLevel,
   ProspectiveProjectNode,
   ProjectValidation,
   SaveProjectNodeRequest,
@@ -98,6 +99,11 @@ export const projectApi = {
     // resolves it (#471); omitting the key leaves it unchanged.
     ai_policy?: AIPolicy | "inherit";
     inherits?: string[];
+    // A tree's level list (ADR-0094 §7). A change that would rename or strand
+    // containers already in the tree is refused (409) unless `force_levels`.
+    manuscript_levels?: StructureLevel[];
+    research_levels?: StructureLevel[];
+    force_levels?: boolean;
   }) {
     return request<ProjectInfo>("/project/settings", {
       method: "PATCH",

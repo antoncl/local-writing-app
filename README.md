@@ -87,8 +87,6 @@ A project is a folder:
 ```text
 project.yaml              # manifest: title, AI policy, UI preferences
 project.md                # the project node itself
-manuscript.structure.yaml # act/chapter/scene ordering
-research.structure.yaml
 metadata.schema.yaml      # this layer's schema contributions
 tags.yaml
 todo.yaml

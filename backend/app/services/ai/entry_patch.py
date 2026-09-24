@@ -128,6 +128,21 @@ def _strip_code_fence(text: str) -> str:
     return inner.strip()
 
 
+def _patch_shaped_or_empty(obj: dict[str, Any]) -> dict[str, Any] | None:
+    """``obj`` if it is legal to honor as a patch — empty (``{}``, "nothing
+    changed") or carrying a ``body``/``fields`` key — else ``None``.
+
+    A non-empty object with neither key is wrong-shaped (#2195): a flat reply
+    like ``{"title": ..., "aliases": ...}`` parses as valid JSON but is not the
+    contracted envelope, and silently honoring it produced an empty patch with
+    no reported reason (nothing in it maps to a real field). Garbled here
+    triggers the caller's one firm retry (`run_entry_patch_extraction`) instead.
+    """
+    if not obj or "body" in obj or "fields" in obj:
+        return obj
+    return None
+
+
 def parse_entry_patch_json(raw: str) -> dict[str, Any] | None:
     """Return the patch object parsed from ``raw``, or ``None`` if garbled.
 
@@ -136,9 +151,11 @@ def parse_entry_patch_json(raw: str) -> dict[str, Any] | None:
     example object, markdown, an emoji). It scans for every balanced ``{`` … ``}``
     span (string-aware, so a ``}`` inside a JSON string doesn't close it), parses
     each, and prefers one shaped like a patch (carries ``body`` or ``fields``)
-    over an incidental object. Returns ``None`` only when no balanced object
-    parses to a JSON *object* — the genuinely garbled condition (pure prose, or
-    no JSON at all), which the caller reports and retries.
+    over an incidental object. Returns ``None`` when no balanced object parses to
+    a JSON *object* at all (pure prose, no JSON), OR when the only candidate(s)
+    found are wrong-shaped — non-empty and carrying neither "body" nor "fields"
+    (#2195) — the genuinely garbled conditions, which the caller reports and
+    retries. A bare ``{}`` (whole reply, or prose-wrapped) always stays legal.
     """
     if not raw or not raw.strip():
         return None
@@ -147,11 +164,11 @@ def parse_entry_patch_json(raw: str) -> dict[str, Any] | None:
 
     # The whole (fence-stripped) reply as a single object — the clean, common
     # case. When the entire reply is one object there is nothing else it could be
-    # (any braces are inside it), so honor it directly; this also covers a bare
-    # "{}" ("nothing changed", per the contract).
+    # (any braces are inside it), so honor it if patch-shaped (or empty); this
+    # also covers a bare "{}" ("nothing changed", per the contract).
     whole = _as_json_dict(candidate)
     if whole is not None:
-        return whole
+        return _patch_shaped_or_empty(whole)
 
     # Prose around one or more objects: scan them out (string-aware) and pick the
     # patch. A patch carries "body" and/or "fields". `is not None`, not
@@ -170,10 +187,11 @@ def parse_entry_patch_json(raw: str) -> dict[str, Any] | None:
         # so report garbled and let the caller's firmer retry get a single object
         # — safer than silently adopting the example.
         return None
-    # No patch-shaped object. Honor a lone embedded object (a prose-wrapped "{}" =
-    # "no changes", or one slightly-misshapen object); multiple non-patch objects
-    # are ambiguous → garbled.
-    return embedded[0] if len(embedded) == 1 else None
+    # No patch-shaped object. Honor a lone embedded EMPTY object (a prose-wrapped
+    # "{}" = "no changes"); a lone non-empty, non-patch-shaped object is no
+    # longer honored (#2195) — multiple objects, or one wrong-shaped one, are
+    # both garbled.
+    return _patch_shaped_or_empty(embedded[0]) if len(embedded) == 1 else None
 
 
 def _as_json_dict(text: str) -> dict[str, Any] | None:

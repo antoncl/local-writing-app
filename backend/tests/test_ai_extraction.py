@@ -787,6 +787,69 @@ class ExtractEndpointTests(unittest.TestCase):
             )
         self.assertEqual(resp.status_code, 404)
 
+    def test_flat_reply_missing_body_and_fields_triggers_a_retry(self) -> None:
+        # #2195: a flat, non-empty object with neither "body" nor "fields" is
+        # wrong-shaped, not honored — `parse_entry_patch_json` reports it
+        # garbled so the one-firm-retry runs, same as any other unreadable
+        # first reply; a proper retry patch is then adopted.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        first = _chat_reply('{"title": "Seren", "aliases": ["The Grey"]}', cost_usd=0.01)
+        second = _chat_reply('{"fields": {"bio": "Fixed on retry."}}', cost_usd=0.02)
+        with self._mock_chat_sequence(first, second) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        body = resp.json()
+        self.assertTrue(body["ok"])
+        self.assertFalse(body["patch"]["garbled"])
+        self.assertEqual(body["patch"]["fields"], {"bio": "Fixed on retry."})
+        self.assertEqual(mock_chat.call_count, 2)
+
+    def test_extraction_ending_garbled_writes_an_errors_log_entry(self) -> None:
+        # A second garble is terminal; the raw reply that produced the final
+        # (unusable) patch is recorded to the project's errors.log so the
+        # author can see what the model actually said (#2195).
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        first = _chat_reply("nope, not json", cost_usd=0.01)
+        second = _chat_reply("still not json", cost_usd=0.02)
+        with self._mock_chat_sequence(first, second):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertTrue(resp.json()["ok"])
+        log = (self.root / "errors.log").read_text(encoding="utf-8")
+        self.assertIn("AI commit produced no usable patch", log)
+        self.assertIn("still not json", log)
+
+    def test_extraction_ending_empty_writes_an_errors_log_entry(self) -> None:
+        # A well-formed but empty patch (no body, no fields) is unusable too —
+        # same diagnostic, so the author isn't left staring at a silent notice
+        # with no way to see what the model actually returned (#2195).
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        reply = _chat_reply('{"fields": {}}', cost_usd=0.01)
+        with self._mock_chat(reply):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertTrue(resp.json()["ok"])
+        log = (self.root / "errors.log").read_text(encoding="utf-8")
+        self.assertIn("AI commit produced no usable patch", log)
+        self.assertIn('{"fields": {}}', log)
+
+    def test_a_successful_extraction_writes_no_errors_log_entry(self) -> None:
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        reply = _chat_reply('{"fields": {"bio": "New bio."}}', cost_usd=0.01)
+        with self._mock_chat(reply):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertTrue(resp.json()["ok"])
+        self.assertFalse((self.root / "errors.log").exists())
+
 
 class EntryTypeForNodeTests(unittest.TestCase):
     def setUp(self) -> None:

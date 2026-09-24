@@ -237,6 +237,7 @@ from app.models.project import (
 from app.models.schema import (
     LIST_ITEM_GROUP_MEMBER_TYPES,
     LIST_ITEM_SCALAR_TYPES,
+    AttachMetadataFieldRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DeleteMetadataGroupRequest,
@@ -326,6 +327,7 @@ __all__ = [
     "AssistantEntry",
     "AssistantEntryList",
     "AssistantEntrySummary",
+    "AttachMetadataFieldRequest",
     "Backlink",
     "ChangeCandidate",
     "ChangeCandidateLayer",

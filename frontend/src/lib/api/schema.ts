@@ -37,6 +37,14 @@ export const schemaApi = {
       body: JSON.stringify({ layer_id: layerId, field_id: fieldId, field, entry_type: entryType, allow_existing: allowExisting, option_migration: optionMigration }),
     });
   },
+  // Attach-only counterpart (#2180): add an already-defined field id to a
+  // type's membership without touching the shared `fields:` definition.
+  attachMetadataField(layerId: string, fieldId: string, entryTypeId: string) {
+    return request<MetadataSchema>("/metadata/schema/entry-types/fields", {
+      method: "POST",
+      body: JSON.stringify({ layer_id: layerId, field_id: fieldId, entry_type_id: entryTypeId }),
+    });
+  },
   moveMetadataField(fieldId: string, targetLayerId: string, entryType = "manuscript:scene") {
     return request<MetadataSchema>("/metadata/schema/fields/move", {
       method: "POST",

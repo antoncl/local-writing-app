@@ -31,6 +31,7 @@
   // the per-row reveal and the new-draft slot share the same configuration.
 
   import { untrack } from "svelte";
+  import SchemaFieldAttachForm from "@/components/schema/SchemaFieldAttachForm.svelte";
   import SchemaFieldInlineEditor, { type FieldDraftPayload } from "@/components/schema/SchemaFieldInlineEditor.svelte";
   import SchemaFieldRow from "@/components/schema/SchemaFieldRow.svelte";
   import SummaryFieldsEditor from "@/components/schema/SummaryFieldsEditor.svelte";
@@ -57,6 +58,7 @@
     type SchemaFieldSection,
     type SchemaKind,
   } from "@/lib/utils/schemaTypeHelpers";
+  import { attachableFields } from "@/lib/utils/attachableFields";
   import type {
     EntryTypeDefinition,
     MetadataFieldDefinition,
@@ -115,6 +117,10 @@
     onMoveField?: (fieldId: string, targetLayerId: string) => void;
     onToggleFieldInline?: (fieldId: string, entryTypeId: string) => void;
     onCreateFieldDraft?: (layerId: string, entryTypeId?: string) => void;
+    // "+ Existing field" (#2180): attach an already-defined field id to this
+    // type's membership. The parent resolves layer/type from its own bound
+    // state (mirrors onApplyGroup) and returns success like it does too.
+    onAttachField?: (fieldId: string) => Promise<boolean>;
     onApplyGroup?: (application: { group_id: string; label: string; key_prefix: string }) => Promise<boolean>;
     onRemoveGroupApplication?: (index: number) => void;
     // Open the reusable-group definition manager (parent owns the modal).
@@ -161,6 +167,7 @@
     onMoveField = () => {},
     onToggleFieldInline = () => {},
     onCreateFieldDraft = () => {},
+    onAttachField = async () => false,
     onApplyGroup = async () => false,
     onRemoveGroupApplication = () => {},
     onManageGroups = () => {},
@@ -270,6 +277,27 @@
     const leaf = slugifyFieldId(value);
     const prefix = nestingLocalPrefix(metadataSchema, schemaTypeKind, schemaTypeParent);
     draftTypeId = prefix && leaf ? `${prefix}:${leaf}` : leaf;
+  }
+
+  // "+ Existing field" (#2180): the attach-only counterpart to "+ Add field".
+  // Uses the same layer the "+ Add field" draft targets — the project layer
+  // when none is explicitly chosen — and the open type.
+  let attachFieldOpen = $state(false);
+  const attachCandidates = $derived(
+    metadataSchemaOverview && selectedSchemaTypeId
+      ? attachableFields(metadataSchemaOverview, selectedSchemaTypeId, schemaTypeLayerId || projectSchemaLayerId())
+      : [],
+  );
+  // Fed to the NEW-field draft's collision hint (#2180): every field id
+  // already defined anywhere, and the subset this layer/type could attach.
+  const draftExistingFieldIds = $derived(new Set(Object.keys(metadataSchema?.fields ?? {})));
+  const draftAttachableIds = $derived(new Set(attachCandidates.map(([fieldId]) => fieldId)));
+
+  // "Add the existing field instead" (#2180): attach the collided id, then
+  // close the draft on success — the same shape as the id-based create flow,
+  // minus creating a new definition.
+  async function useExistingFieldFromDraft(fieldId: string) {
+    if (await onAttachField(fieldId)) onCancelField();
   }
 
   // --- Reusable-groups apply form (transient scoped state — #14 Step 4). The
@@ -491,10 +519,13 @@
         sectionLabels={typeSectionLabels}
         metadataSchemaLayers={metadataSchemaLayers}
         refFieldChoices={refFieldChoices}
+        existingFieldIds={draftExistingFieldIds}
+        attachableIds={draftAttachableIds}
         onSave={onSaveField}
         onCancel={onCancelField}
         onRemove={onRemoveField}
         onMove={(targetLayerId) => { if (selectedSchemaFieldId) onMoveField(selectedSchemaFieldId, targetLayerId); }}
+        onUseExisting={useExistingFieldFromDraft}
       />
     {/snippet}
     <!-- Per-type override affordances, shared by own AND inherited rows
@@ -652,9 +683,24 @@
       <!-- Add a field even on a built-in type (ADR-0029 §A/§H): membership is a
            layer overlay the backend accepts on built-ins, so no forced subtype.
            The draft targets the project layer when none is explicitly chosen. -->
-      {#if expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
+      {#if expandedSchemaFieldId !== NEW_FIELD_SENTINEL && !attachFieldOpen}
         <div class="button-row">
           <button class="add-affordance" type="button" aria-label="Add field" onclick={() => onCreateFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId ?? undefined)}>+ Add field</button>
+          <!-- "+ Existing field" (#2180): attach a field already defined
+               elsewhere — at or above this layer — to this type's membership,
+               without creating a second shared definition. Only shown when
+               there is something to attach. -->
+          {#if attachCandidates.length > 0}
+            <button
+              class="add-affordance"
+              type="button"
+              aria-label="Add existing field"
+              data-testid="schema-attach-existing-field-button"
+              onclick={() => (attachFieldOpen = true)}
+            >
+              + Existing field
+            </button>
+          {/if}
           <!-- The peer "Add group" (#1002): reusable-group define/apply, surfaced
                here instead of only in the section below. Shown on built-in types
                too (#1033), exactly like "Add field" above — a group application is
@@ -662,6 +708,13 @@
                never a rewrite of the built-in declaration. -->
           <button class="add-affordance" type="button" aria-label="Add group" onclick={openAddGroup}>+ Add group</button>
         </div>
+      {/if}
+      {#if attachFieldOpen}
+        <SchemaFieldAttachForm
+          fields={attachCandidates}
+          onAttach={onAttachField}
+          onCancel={() => (attachFieldOpen = false)}
+        />
       {/if}
     </section>
 

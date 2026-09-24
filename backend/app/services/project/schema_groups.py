@@ -14,11 +14,13 @@ import re
 from pathlib import Path
 
 from app.models import (
+    AttachMetadataFieldRequest,
     DeleteMetadataGroupRequest,
     MetadataSchema,
     SetGroupApplicationsRequest,
     UpsertMetadataGroupRequest,
 )
+from app.services.project.default_schema import AUTHORABLE_COMPUTED_FUNCTIONS
 from app.services.project.errors import ProjectServiceError
 from app.services.project.schema_layer_write import (
     CLEARABLE_GROUP_KEYS,
@@ -28,6 +30,62 @@ from app.services.project.schema_layer_write import (
 
 
 class MetadataSchemaGroupsMixin:
+    def attach_metadata_field(self, request: AttachMetadataFieldRequest) -> MetadataSchema:
+        """Attach-only counterpart to `upsert_metadata_field` (#2180): add an
+        already-defined field id to a type's membership at `request.layer_id`
+        WITHOUT touching the shared `fields:` definition — the "+ Existing
+        field" path, for e.g. adding `physical_description` (defined on
+        `lore:character`) to `lore:location` too. Lives here rather than in
+        `schema.py` only for the file-size guard; same MRO composition.
+
+        Visibility rule: only a field definition visible AT OR ABOVE the
+        target layer — defined there or inherited from a parent layer — may
+        be attached — the same rule `_require_item_group_visible` applies to
+        a list's item_group (#698 × ADR-0045): a layer must not depend on a
+        definition its sibling projects can't see. A field only defined in a deeper layer, a built-in
+        intrinsic, or a built-in (non-authorable) computed field are all
+        rejected; those last two the resolver already injects/computes for
+        every type, so "attaching" them would just shadow that with an
+        always-empty local copy.
+        """
+        root = self._require_project()
+        layer_path = self._metadata_schema_layer_path_for_id(root, request.layer_id)
+        if layer_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+
+        visible = self._read_metadata_schema_through_path(root, layer_path)
+        entry_type_id = request.entry_type_id.strip()
+        if entry_type_id not in visible.entry_types:
+            raise ProjectServiceError(f"Unknown node type {entry_type_id}.", 404)
+
+        field_id = request.field_id.strip()
+        field = visible.fields.get(field_id)
+        if field is None:
+            if field_id in self.read_metadata_schema().fields:
+                raise ProjectServiceError(
+                    f"Metadata field {field_id} is not defined at or above this layer; "
+                    "move it up, or attach it in the layer that defines it.",
+                    422,
+                )
+            raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
+        if field.intrinsic or field.category == "intrinsic":
+            raise ProjectServiceError(
+                f"Metadata field {field_id} is built in and cannot be added to another type.", 422
+            )
+        if field.type == "computed" and (field.computed or {}).get("function") not in AUTHORABLE_COMPUTED_FUNCTIONS:
+            raise ProjectServiceError(
+                f"Metadata field {field_id} is built in and cannot be added to another type.", 422
+            )
+
+        if field_id in visible.entry_types[entry_type_id].fields:
+            return self.read_metadata_schema()
+
+        layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+        self._attach_field_to_entry_type(root, layer_path, layer_data, entry_type_id, field_id)
+        self._validate_candidate_schema(root, layer_path, layer_data)
+        self._write_yaml(layer_path, layer_data)
+        return self.read_metadata_schema()
+
     def upsert_metadata_group(self, request: UpsertMetadataGroupRequest) -> MetadataSchema:
         root = self._require_project()
         layer_path = self._metadata_schema_layer_path_for_id(root, request.layer_id)

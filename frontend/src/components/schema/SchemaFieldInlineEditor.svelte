@@ -107,11 +107,21 @@
     // Reference fields the schema declares (#1911) — the `while this reference
     // is set` choices behind a select's derived state.
     refFieldChoices?: { id: string; name: string }[];
+    // #2180 collision hint for a NEW field draft (selectedFieldId null): every
+    // field id already defined anywhere in the effective schema, and the
+    // subset of those this layer/type could actually ATTACH (per
+    // `attachableFields`) — the "Add the existing field instead" link only
+    // shows for the latter (a deeper-layer-only collision still 422s attach).
+    existingFieldIds?: Set<string>;
+    attachableIds?: Set<string>;
     // --- Callback props (parent owns persistence) ---
     onSave?: (payload: FieldDraftPayload) => void;
     onCancel?: () => void;
     onRemove?: () => void;
     onMove?: (targetLayerId: string) => void;
+    // Attach the typed id (already defined elsewhere) instead of creating a
+    // new definition; the parent attaches then closes this draft.
+    onUseExisting?: (fieldId: string) => void;
   }
 
   let {
@@ -123,10 +133,13 @@
     sectionLabels = [],
     metadataSchemaLayers = [],
     refFieldChoices = [],
+    existingFieldIds = new Set(),
+    attachableIds = new Set(),
     onSave = () => {},
     onCancel = () => {},
     onRemove = () => {},
     onMove = () => {},
+    onUseExisting = () => {},
   }: Props = $props();
 
   // --- Draft state (initialized once at mount from `field`) ---
@@ -279,6 +292,13 @@
     ...new Set(sectionLabels.map((s) => s.trim()).filter(Boolean)),
   ]);
   const sectionListId = `sfi-section-list-${(sectionListSeq += 1)}`;
+
+  // #2180: a NEW draft's typed id colliding with an already-defined field
+  // (anywhere in the effective schema) — the create path would 422 with
+  // "already exists"; surface it before that round-trip. `!selectedFieldId`
+  // — an EXISTING field being edited keeps its own id, never a collision.
+  const idCollision = $derived(!selectedFieldId && id.trim() !== "" && existingFieldIds.has(id.trim()));
+  const idAttachable = $derived(idCollision && attachableIds.has(id.trim()));
 
   // Types whose default has no meaning — a computed value is derived, a
   // list's default can't carry structured items (v1, #698), and a reference
@@ -536,6 +556,21 @@
       {/if}
     {/if}
   </div>
+  {#if idCollision}
+    <p class="muted sfi-id-collision" data-testid="schema-field-id-collision-hint">
+      A field with the id <code>{id.trim()}</code> already exists.
+      {#if idAttachable}
+        <button
+          class="link-accent"
+          type="button"
+          data-testid="schema-field-use-existing-link"
+          onclick={() => onUseExisting(id.trim())}
+        >
+          Add the existing field instead
+        </button>
+      {/if}
+    </p>
+  {/if}
   {#if type === "entity_ref" || type === "entity_ref_list"}
     <div class="schema-field-picker-config">
       <NodePickerConfigEditor

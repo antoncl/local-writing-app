@@ -531,6 +531,16 @@ class UpsertMetadataFieldRequest(BaseModel):
     option_migration: dict[str, str] | None = None
 
 
+class AttachMetadataFieldRequest(BaseModel):
+    """Attach-only counterpart to `UpsertMetadataFieldRequest` (#2180): adds an
+    already-defined field id to a type's membership at `layer_id` without
+    touching the shared field definition — the "+ Existing field" path."""
+
+    layer_id: str = Field(min_length=1)
+    field_id: str = Field(min_length=1)
+    entry_type_id: str = Field(min_length=1)
+
+
 class UpsertMetadataEntryTypeRequest(BaseModel):
     layer_id: str = Field(min_length=1)
     entry_type_id: str = Field(min_length=1)

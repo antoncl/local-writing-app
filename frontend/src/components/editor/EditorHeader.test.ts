@@ -46,12 +46,29 @@ function baseModel(over: Record<string, unknown> = {}) {
     chatTitleField: chatTitleField(),
     tabs: [],
     activeBodyTab: "body",
+    titleOverrideMark: null,
+    bodyOverrideMark: null,
     ...over,
   };
 }
 
-function baseOn(over: Partial<{ toggleInteriority: () => void; authoringLayerChange: undefined; selectBodyTab: (id: string) => void }> = {}) {
-  return { toggleInteriority: () => {}, authoringLayerChange: undefined, selectBodyTab: () => {}, ...over };
+function baseOn(
+  over: Partial<{
+    toggleInteriority: () => void;
+    authoringLayerChange: undefined;
+    selectBodyTab: (id: string) => void;
+    resetTitleOverride: () => void;
+    resetBodyOverride: () => void;
+  }> = {},
+) {
+  return {
+    toggleInteriority: () => {},
+    authoringLayerChange: undefined,
+    selectBodyTab: () => {},
+    resetTitleOverride: () => {},
+    resetBodyOverride: () => {},
+    ...over,
+  };
 }
 
 describe("EditorHeader", () => {
@@ -137,6 +154,48 @@ describe("EditorHeader", () => {
         on: baseOn(),
       });
       expect(container.querySelector(".body-tabs")).toBeNull();
+    });
+
+    it("the body override mark sits beside the Body tab and resetting it does not switch tabs (#2184 slice 3)", async () => {
+      const selectBodyTab = vi.fn();
+      const resetBodyOverride = vi.fn();
+      render(EditorHeader, {
+        model: baseModel({
+          tabs,
+          activeBodyTab: "list:allies",
+          bodyOverrideMark: { chipText: "Reset to Aetheria…", tooltip: "Overridden here.", ariaLabel: "Reset the body to Aetheria's" },
+        }),
+        on: baseOn({ selectBodyTab, resetBodyOverride }),
+      });
+      const mark = screen.getByRole("button", { name: "Reset the body to Aetheria's" });
+      await fireEvent.click(mark);
+      expect(resetBodyOverride).toHaveBeenCalledTimes(1);
+      expect(selectBodyTab).not.toHaveBeenCalled();
+    });
+
+    it("no body override mark when bodyOverrideMark is null", () => {
+      render(EditorHeader, { model: baseModel({ tabs, bodyOverrideMark: null }), on: baseOn() });
+      expect(screen.queryByRole("button", { name: /Reset the body/ })).toBeNull();
+    });
+  });
+
+  describe("title override mark (#2184 slice 3)", () => {
+    it("renders and calls on.resetTitleOverride on click, with no confirm", async () => {
+      const resetTitleOverride = vi.fn();
+      render(EditorHeader, {
+        model: baseModel({
+          titleOverrideMark: { chipText: "Reset to Aetheria", tooltip: "Overridden here.", ariaLabel: "Reset the title to Aetheria's" },
+        }),
+        on: baseOn({ resetTitleOverride }),
+      });
+      const mark = screen.getByRole("button", { name: "Reset the title to Aetheria's" });
+      await fireEvent.click(mark);
+      expect(resetTitleOverride).toHaveBeenCalledTimes(1);
+    });
+
+    it("no title override mark when titleOverrideMark is null", () => {
+      render(EditorHeader, { model: baseModel({ titleOverrideMark: null }), on: baseOn() });
+      expect(screen.queryByRole("button", { name: /Reset the title/ })).toBeNull();
     });
   });
 });

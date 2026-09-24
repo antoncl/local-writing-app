@@ -50,6 +50,7 @@
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
+  import OverrideMark from "@/components/editor/OverrideMark.svelte";
   import type { RailRowModel } from "@/lib/rail/fieldRowModel";
 
   interface Props {
@@ -134,16 +135,12 @@
         <!-- The `ti-versions` mark PR 2 ships, made interactive (#517):
              the primary provenance signal AND the reset control. Its
              hover/focus reveals a "Reset to <source>" chip above it. -->
-        <button
-          type="button"
-          class="fr-override-marker fr-reset"
-          title={`Overridden here — reset this value to ${model.sourceLayerLabel ?? "inherited canon"}`}
-          aria-label={`Reset ${model.fieldLabel} to ${model.sourceLayerLabel ?? "the inherited value"}`}
-          onclick={() => on.resetField(model.fieldId)}
-        >
-          <i class="ti ti-versions" aria-hidden="true"></i>
-          <span class="fr-reset-chip"><i class="ti ti-arrow-back-up" aria-hidden="true"></i>Reset to {model.sourceLayerLabel ?? "inherited"}</span>
-        </button>
+        <OverrideMark
+          chipText={`Reset to ${model.sourceLayerLabel ?? "inherited"}`}
+          tooltip={`Overridden here — reset this value to ${model.sourceLayerLabel ?? "inherited canon"}`}
+          ariaLabel={`Reset ${model.fieldLabel} to ${model.sourceLayerLabel ?? "the inherited value"}`}
+          onReset={() => on.resetField(model.fieldId)}
+        />
       {:else}
         <i class="ti ti-versions fr-override-marker" title={`Overridden here — this value comes from a layer override in this project, not from ${model.sourceLayerLabel ?? "inherited canon"}`}></i>
       {/if}
@@ -154,16 +151,12 @@
            so the field inherits again (clearField), and it names the
            ancestor it would fall back to. -->
       {#if model.canResetCascade}
-        <button
-          type="button"
-          class="fr-override-marker fr-reset"
-          title={`Overridden here — reset ${model.fieldLabel} to the value inherited from ${model.cascadeOverrideSourceLabel}`}
-          aria-label={`Reset ${model.fieldLabel} to the value inherited from ${model.cascadeOverrideSourceLabel}`}
-          onclick={() => on.clear(model.fieldId)}
-        >
-          <i class="ti ti-versions" aria-hidden="true"></i>
-          <span class="fr-reset-chip"><i class="ti ti-arrow-back-up" aria-hidden="true"></i>Reset to inherited</span>
-        </button>
+        <OverrideMark
+          chipText="Reset to inherited"
+          tooltip={`Overridden here — reset ${model.fieldLabel} to the value inherited from ${model.cascadeOverrideSourceLabel}`}
+          ariaLabel={`Reset ${model.fieldLabel} to the value inherited from ${model.cascadeOverrideSourceLabel}`}
+          onReset={() => on.clear(model.fieldId)}
+        />
       {:else}
         <i class="ti ti-versions fr-override-marker" title={`Overridden here — differs from the value inherited from ${model.cascadeOverrideSourceLabel}`}></i>
       {/if}
@@ -498,24 +491,11 @@
     font-size: var(--fs-md);
     line-height: 1;
   }
-  /* Clear-to-inherit (#517 / §8): the mark doubles as the reset control. As a
-     button it sheds the browser chrome and anchors the "Reset to <source>" chip;
-     the chip floats above the mark on hover/focus (keyboard-reachable — the
-     button itself is the tab stop, so the reset is never hover-only). */
-  button.fr-override-marker {
-    display: inline-flex;
-    align-items: center;
-    position: relative;
-    padding: 0;
-    border: 0;
-    background: none;
-    cursor: pointer;
-  }
-  button.fr-override-marker:focus-visible {
-    outline: 2px solid var(--star);
-    outline-offset: 2px;
-    border-radius: var(--r-sm);
-  }
+  /* The interactive layer-override mark (button + hover/focus "Reset to
+     <source>" chip) moved to OverrideMark.svelte (#2184 slice 3), which owns
+     its own copy of that CSS — only the STATIC `<i>` mark (no reset
+     affordance) still renders here. `.fr-reset-chip` stays for #522's
+     clear-to-default control below, which is a distinct affordance. */
   .fr-reset-chip {
     display: none;
     position: absolute;
@@ -533,10 +513,6 @@
     color: var(--star);
     white-space: nowrap;
     z-index: 6;
-  }
-  button.fr-override-marker:hover .fr-reset-chip,
-  button.fr-override-marker:focus-visible .fr-reset-chip {
-    display: inline-flex;
   }
   .field-row.wide .fr-val > .fr-override-marker {
     flex: 0 0 auto;

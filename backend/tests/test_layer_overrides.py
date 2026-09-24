@@ -879,6 +879,95 @@ class AsOfLayerReadTests(unittest.TestCase):
         # The save response equals the as-of-owner view.
         self.assertEqual(saved.metadata["rank"], "Ensign")
 
+    # --- provenance: overridden_content / inherited_title (#2184 slice 3) ---
+
+    def test_book_title_and_body_override_marks_both_with_canon_inherited_title(self) -> None:
+        self._write_lore_at(self.universe, "honor", "Marek Vell", {"rank": "Ensign"})
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Warden Marek", body="Keeper of the gate. In Book 1 eleven years.",
+                entry_type="lore:character", metadata={"rank": "Ensign"},
+                authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        read = self.service.read_lore_entry("honor")
+        self.assertEqual(read.overridden_content, ["title", "body"])
+        self.assertEqual(read.inherited_title, "Marek Vell")
+
+    def test_a_middle_layers_body_override_alone_does_not_mark_the_book(self) -> None:
+        self._write_lore_at(self.universe, "honor", "Marek Vell", {"rank": "Ensign"})
+        self._save_override("honor", {"rank": "Ensign"}, layer=self.series)
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Marek Vell", body="The series knows him differently.",
+                entry_type="lore:character", metadata={"rank": "Ensign"},
+                authoring_layer_id=self._layer_id(self.series),
+            ),
+        )
+        # Book echoes the series' body unchanged and overrides nothing itself:
+        # from the book's own view, the series' row is inherited, not "here".
+        book_read = self.service.read_lore_entry("honor")
+        self.assertEqual(book_read.overridden_content, [])
+        # As-of the middle layer, the row IS its own.
+        as_series = self.service.read_lore_entry("honor", as_of_layer_id=self._layer_id(self.series))
+        self.assertEqual(as_series.overridden_content, ["body"])
+
+    def test_a_book_title_override_over_a_middle_layers_title_override(self) -> None:
+        self._write_lore_at(self.universe, "honor", "Marek Vell", {"rank": "Ensign"})
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Series Marek", body="Body.", entry_type="lore:character",
+                metadata={"rank": "Ensign"}, authoring_layer_id=self._layer_id(self.series),
+            ),
+        )
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Book Marek", body="Body.", entry_type="lore:character",
+                metadata={"rank": "Ensign"}, authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        read = self.service.read_lore_entry("honor")
+        self.assertEqual(read.overridden_content, ["title"])
+        self.assertEqual(read.inherited_title, "Series Marek")
+
+    def test_owning_layer_as_of_read_marks_nothing(self) -> None:
+        self._write_lore_at(self.universe, "honor", "Marek Vell", {"rank": "Ensign"})
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Book Marek", body="A book body.", entry_type="lore:character",
+                metadata={"rank": "Ensign"}, authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        as_owner = self.service.read_lore_entry("honor", as_of_layer_id=self._layer_id(self.universe))
+        self.assertEqual(as_owner.overridden_content, [])
+        self.assertIsNone(as_owner.inherited_title)
+
+    def test_resetting_the_title_drops_it_from_overridden_content(self) -> None:
+        self._write_lore_at(self.universe, "honor", "Marek Vell", {"rank": "Ensign"})
+        saved = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Book Marek", body="A book body.", entry_type="lore:character",
+                metadata={"rank": "Ensign"}, authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        self.assertEqual(saved.overridden_content, ["title", "body"])
+        cleared = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Book Marek", body="A book body.", entry_type="lore:character",
+                metadata={"rank": "Ensign"}, authoring_layer_id=self._layer_id(self.root),
+                clear_override_fields=["title"],
+            ),
+        )
+        self.assertEqual(cleared.overridden_content, ["body"])
+        self.assertIsNone(cleared.inherited_title)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,7 @@
   import { metadataSchemaLayersStore, metadataSchemaStore } from "@/lib/stores/schema";
   import { snapshotLayerId } from "@/lib/utils/layerAuthoring";
   import { readOnlyInPlace } from "@/lib/utils/provenance";
+  import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { referenceIndexStore, referrerFieldIndexStore } from "@/lib/stores/references";
   import { backlinksFor } from "@/lib/views/backlinks";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
@@ -906,6 +907,64 @@
   let hasBody = $derived(bodyShape !== "none");
   // Shared by the rail and Body Sections (#2009) — one node, one read-only verdict.
   let editorReadOnly = $derived(scrubbed || snapshotParked || reviewing || (inheritedReadOnly && documentKind !== "prompt"));
+  // Title/body have no rail row, so their override tell renders beside the
+  // thing it marks instead (#2184 slice 3, ADR-0039 Amendment 4 §9): after the
+  // title input, and on the Body tab label. Lore only (§5) — a prompt's title
+  // and body change only by cloning, never by override.
+  let overriddenContentForPanel = $derived(
+    documentKind === "lore" && scene && "overridden_content" in scene
+      ? ((scene as unknown as { overridden_content?: string[] }).overridden_content ?? [])
+      : [],
+  );
+  let inheritedTitleForPanel = $derived(
+    documentKind === "lore" && scene && "inherited_title" in scene
+      ? ((scene as unknown as { inherited_title?: string | null }).inherited_title ?? null)
+      : null,
+  );
+  let contentOverrideSourceLabel = $derived(scene?.source_layer_label ?? "inherited");
+  // Same gate the rail's reset marks use (`MetadataPanel`'s `canResetOverride`):
+  // a reset handler is wired AND the pane is not read-only.
+  let canResetContentOverride = $derived(onResetField != null && !editorReadOnly);
+  let titleOverrideMark = $derived(
+    canResetContentOverride && overriddenContentForPanel.includes("title")
+      ? {
+          chipText: `Reset to ${contentOverrideSourceLabel}`,
+          tooltip:
+            inheritedTitleForPanel != null
+              ? `Overridden here — ${contentOverrideSourceLabel}'s title is "${inheritedTitleForPanel}".`
+              : `Overridden here — ${contentOverrideSourceLabel}'s title.`,
+          ariaLabel: `Reset the title to ${contentOverrideSourceLabel}'s`,
+        }
+      : null,
+  );
+  let bodyOverrideMark = $derived(
+    canResetContentOverride && overriddenContentForPanel.includes("body")
+      ? {
+          chipText: `Reset to ${contentOverrideSourceLabel}…`,
+          tooltip: `Overridden here — the body you see is this layer's, not ${contentOverrideSourceLabel}'s.`,
+          ariaLabel: `Reset the body to ${contentOverrideSourceLabel}'s`,
+        }
+      : null,
+  );
+  // The title mark resets at once, like a rail field (§9's mockup notes). The
+  // body mark asks first — resetting throws away prose this layer wrote, and
+  // removing the override isn't snapshotted.
+  function resetTitleOverride() {
+    onResetField?.("title");
+  }
+  function resetBodyOverride() {
+    const source = contentOverrideSourceLabel;
+    confirmService.request({
+      title: `Reset the body to ${source}'s?`,
+      message: `The body this layer wrote for “${title}” is removed, and it shows ${source}'s body again. The title and fields are not touched.`,
+      confirmLabel: "Reset body",
+      destructive: true,
+      cannotBeUndone: true,
+      onConfirm: async () => {
+        onResetField?.("body");
+      },
+    });
+  }
   // #2074 (ADR-0042 §5): the scrub stop's own unit — the stop IS the unit, so
   // editing the lore card at a stop edits this. Threaded into EditorBodyHost's
   // model; `null` off the lore axis or at base (stop 0, editable already).
@@ -1060,11 +1119,11 @@
       scene, documentKind, bodyShape, documentNameLabel, titleMutated, hasInteriorityBeats,
       interiorityRevealed, liveWordCount, characterCostRowsView, lastInvocationCostUsd,
       sceneSessionCostUsd, rollupCostKind, todoStatusHint, authoringLayerId, recentlySaved, chatTitleField,
-      tabs: bodyTabs, activeBodyTab,
+      tabs: bodyTabs, activeBodyTab, titleOverrideMark, bodyOverrideMark,
     }}
     on={{
       toggleInteriority: () => bodyHost?.toggleInteriority(), authoringLayerChange: onAuthoringLayerChange,
-      selectBodyTab: setBodyTab,
+      selectBodyTab: setBodyTab, resetTitleOverride, resetBodyOverride,
     }}
   />
   <EditorBodyHost

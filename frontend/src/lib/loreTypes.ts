@@ -33,6 +33,14 @@ export type LoreEntry = {
   // computes it during the fold; the rail draws the `ti-versions` override mark
   // against these. Empty for an entry with no overrides above its owning layer.
   overridden_fields?: string[];
+  // Title/body have no rail row, so they are reported separately (Amendment
+  // 4 §9 / #2184 slice 3): "title"/"body" present when THIS view layer's own
+  // override row replaces it — not merely inherited from a layer between the
+  // owner and here.
+  overridden_content?: string[];
+  // Present only when "title" is in overridden_content — the title as the
+  // layers above this view fold it, i.e. what a reset would show.
+  inherited_title?: string | null;
 };
 
 // One leaf in the research tree — prose body + tags-only metadata.

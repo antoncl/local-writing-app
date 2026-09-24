@@ -1058,6 +1058,31 @@ class EditorPanesController {
         entryType: entry.entry_type,
       },
     };
+    // A title or body reset also changes the title WIDGET and the body
+    // EDITOR — the metadata reload signal above does not reach either
+    // (#2184 slice 3). Re-seed both, mirroring `setEditorPaneAuthoringLayer`:
+    // `reseedPaneFields` bumps the title reload token too (it always bumps
+    // both), and `reloadScene` re-seeds the mounted body view (TipTap/code)
+    // from the saved response, so the pane is left clean either way.
+    if (fieldId === "title" || fieldId === "body") {
+      reseedPaneFields(this, pane.id, {
+        draftTitle: entry.title,
+        draftStatus: documentStatus(entry),
+        draftEntryType: entry.entry_type,
+        draftMetadata: cloneMetadata(entry.metadata),
+      });
+      await this.editorPaneComponents[pane.id]?.reloadScene?.(entry, "boundary");
+    }
+    // A reset is a save: the lists/indexes that project over this entry (the
+    // lore list's title and detail line, the prompt roster) refresh the same
+    // way `#performSave` refreshes them, or a reset title keeps showing the
+    // override in the list.
+    await refreshAfterSave(this, {
+      documentKind: pane.document?.type ?? "lore",
+      savedTitle: entry.title,
+      baselineBody: base.body ?? "",
+      draftMarkdown: entry.body,
+    });
     this.setStatus(`Reset ${fieldId} to inherited`);
   }
 

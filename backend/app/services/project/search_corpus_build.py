@@ -8,7 +8,8 @@ Shared helpers it calls (`self._require_project`, `self._build_node_index`,
 `self.read_metadata_schema`, `self._metadata_schema_layer_id`,
 `self._read_markdown_with_front_matter`, `self._normalise_metadata`,
 `self._resolve_reference_titles`, `self._iter_metadata_search_values`,
-`self._composite_revision`, `self._override_paths_for_target`, `self._revision`)
+`self._composite_revision`, `self._override_paths_for_target`, `self._revision`,
+`self.materialize_override_content`)
 resolve through the MRO at call time.
 """
 
@@ -101,6 +102,14 @@ class SearchCorpusMixin:
         body = body.replace("\r\n", "\n")
         entry_type = str(front_matter.get("entry_type") or entry.entry_type)
         title = str(front_matter.get("title") or entry.title or entry.id)
+        if entry.kind == "lore" and entry.source_layer_id != root_layer_id:
+            # An inherited lore winner's title/body fold separately from
+            # metadata (Amendment 4 §2, #2184) — read straight off the OWNING
+            # file above, so an override in the chain must overwrite them here
+            # rather than lose to the canon `front_matter.get("title")`.
+            override_records = index.overrides_by_target.get(entry.id)
+            if override_records:
+                title, body = self.materialize_override_content(override_records, title, body)
         metadata = self._resolve_reference_titles(
             self._normalise_metadata(front_matter.get("metadata"), entry.path),
             entry_type,

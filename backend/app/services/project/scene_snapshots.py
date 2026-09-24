@@ -134,11 +134,13 @@ ANCESTOR_RESTORE_SAFE_KINDS = frozenset({"lore", "tag", "prompt"})
 
 # The kinds whose *overrides* (nearer-layer delta files, ADR-0087 §3b) the node
 # routes can snapshot when addressed by (entity id + authoring layer). lore (S3,
-# #1986) and prompt (S5a, #1990) — both override-aware; a prompt override is a
-# metadata-only delta byte-identical in shape to lore's (a prompt locks its body,
-# so an override never carries body bytes). An override is a sparse delta, not an
-# index node, so it needs its own resolver/guard — see
-# `node_override_snapshot_kind` / `_resolve_override_snapshot_target`.
+# #1986) and prompt (S5a, #1990) — both override-aware. A prompt override stays
+# metadata-only (a prompt's title/body change only by cloning, ADR-0039
+# Amendment 4 §5, never as an override); a lore override may carry `title` /
+# `body` rows since that amendment (#2184), so the two are no longer
+# byte-identical in shape. An override is a sparse delta, not an index node, so
+# it needs its own resolver/guard — see `node_override_snapshot_kind` /
+# `_resolve_override_snapshot_target`.
 OVERRIDE_SNAPSHOT_KINDS = frozenset({"lore", "prompt"})
 
 # The reserved scope at the authoring layer that override snapshot stores nest

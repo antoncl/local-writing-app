@@ -425,6 +425,7 @@ class ReferencesMixin:
             # the folded graph with no scope parameter (#314 / ADR-0039).
             self._collect_all_overrides(index, layers)
             self._fold_override_edges(index, root, schema)
+            self._fold_override_titles(index, root)
         # Include edges (ADR-0061 §5) are extracted here, after the whole chain
         # is collected, because resolving an `{% include %}` name → snippet id
         # needs the complete snippet set — unlike the field edges, which the

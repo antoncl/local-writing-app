@@ -34,6 +34,7 @@ from app.services.project.lore_mutation_items import KeyedList, keyed_lists_from
 from app.services.project.metadata_refs import REF_FIELD_TYPES, ref_members
 from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project.node_index_gate import node_index_gate
+from app.services.project.overrides import LayerOverride
 from app.services.project.references import INCLUDE_FIELD_ID
 
 
@@ -388,12 +389,18 @@ class PromotionMixin:
         field the schema has since retired, or an `add` on a scalar, changes
         nothing on commit and so promises nothing here (ADR-0078 §9).
         `node_title` names a cascaded include member; None is the node itself.
+
+        Title and body rows (Amendment 4 §8, #2184) are listed the same way,
+        via `materialize_override_content` — they are no longer in the
+        metadata fold's `touched`, so they need their own running fold to
+        know which record actually changes the value.
         """
         open_layer_id = self._metadata_schema_layer_id(root)
         shapes = self._override_shapes(self.read_metadata_schema())
         items: list[PromotionFoldItem] = []
         running = dict(metadata)
         records = sorted(index.overrides_by_target.get(node_id, []), key=lambda record: record.layer_rank)
+        content_records: list[LayerOverride] = []
         for record in records:
             if record.layer_id == open_layer_id:
                 continue
@@ -401,6 +408,20 @@ class PromotionMixin:
             for field in touched:
                 item = PromotionFoldItem(field=field, layer=record.layer_label, node=node_title)
                 if field in shapes.field_types and item not in items:
+                    items.append(item)
+            # A stable sentinel pair, not the node's real title/body: only
+            # whether THIS record's rows move the running fold matters, and
+            # comparing the same sentinel before/after isolates exactly that.
+            before_title, before_body = self.materialize_override_content(content_records, "", "")
+            content_records.append(record)
+            after_title, after_body = self.materialize_override_content(content_records, "", "")
+            if after_title != before_title:
+                item = PromotionFoldItem(field="title", layer=record.layer_label, node=node_title)
+                if item not in items:
+                    items.append(item)
+            if after_body != before_body:
+                item = PromotionFoldItem(field="body", layer=record.layer_label, node=node_title)
+                if item not in items:
                     items.append(item)
         return items
 

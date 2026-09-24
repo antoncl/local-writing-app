@@ -231,41 +231,66 @@ class LayerOverrideTests(unittest.TestCase):
         self.assertEqual(series_file.read_text(encoding="utf-8"), before)
         self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
 
-    # --- #2132: a body or title change cannot ride an override ---------------
+    # --- Amendment 4 (#2184): a changed body or title becomes a row ----------
 
-    def test_an_override_save_refuses_a_changed_body_instead_of_dropping_it(self) -> None:
+    def test_an_override_save_writes_a_changed_body_as_a_row(self) -> None:
         self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
         series_file = self.series / "lore" / "honor.md"
         before = series_file.read_text(encoding="utf-8")
 
-        with self.assertRaises(ProjectServiceError) as caught:
-            self.service.save_lore_entry(
-                "honor",
-                SaveLoreEntryRequest(
-                    title="Honor Harrington", body="Keeper of the gate, eleven years.", entry_type="lore:character",
-                    metadata={"rank": "Captain"}, authoring_layer_id=self._layer_id(self.root),
-                ),
-            )
-        self.assertEqual(caught.exception.status_code, 422)
-        # The same sentence the prompt override raises (#2159).
-        self.assertIn("cannot be overridden from a layer below it", str(caught.exception))
-        self.assertIn("Fork the entry", str(caught.exception))
-        # Nothing was written anywhere: the ancestor is untouched, no delta
-        # exists, and the fold still reads the canon body.
+        saved = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Keeper of the gate, eleven years.", entry_type="lore:character",
+                metadata={"rank": "Captain"}, authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        self.assertEqual(saved.body.rstrip(), "Keeper of the gate, eleven years.")
+        self.assertEqual(saved.metadata["rank"], "Captain")
+        # The ancestor is untouched…
         self.assertEqual(series_file.read_text(encoding="utf-8"), before)
-        self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
-        self.assertEqual(self.service.read_lore_entry("honor").body.rstrip(), "Body.")
-        self.assertEqual(self.service.read_lore_entry("honor").metadata["rank"], "Commodore")
+        # …and the book's override carries a body row alongside the metadata row.
+        override_file = next((self.root / OVERRIDES_FOLDER).glob("*.md"))
+        front_matter = self.service._read_front_matter_only(override_file)
+        rows = {row["field"]: row for row in front_matter["rows"]}
+        self.assertEqual(set(rows), {"body", "rank"})
+        self.assertIn("Keeper of the gate", rows["body"]["value"])
+        # Switching "Editing at" to the series still shows canon.
+        as_owner = self.service.read_lore_entry("honor", as_of_layer_id=self._layer_id(self.series))
+        self.assertEqual(as_owner.body.rstrip(), "Body.")
 
-    def test_an_override_save_refuses_a_changed_title(self) -> None:
+    def test_an_override_save_writes_a_changed_title_as_a_row(self) -> None:
         self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
 
+        saved = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Dame Honor Harrington", body="Body.", entry_type="lore:character",
+                metadata={"rank": "Captain"}, authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        self.assertEqual(saved.title, "Dame Honor Harrington")
+        override_file = next((self.root / OVERRIDES_FOLDER).glob("*.md"))
+        front_matter = self.service._read_front_matter_only(override_file)
+        rows = {row["field"]: row for row in front_matter["rows"]}
+        self.assertEqual(set(rows), {"title", "rank"})
+        self.assertEqual(rows["title"]["value"], "Dame Honor Harrington")
+        # The file's own `title:` label is built from CANON, never the override
+        # (§1) — a title override does not relabel/rename the delta file.
+        self.assertEqual(front_matter["title"], "Honor Harrington (override)")
+        as_owner = self.service.read_lore_entry("honor", as_of_layer_id=self._layer_id(self.series))
+        self.assertEqual(as_owner.title, "Honor Harrington")
+
+    def test_a_body_save_still_validates_as_scene_markdown(self) -> None:
+        # An override save carrying a body row runs the same body validation
+        # an owned save runs (Amendment 4 §3) — raw HTML is one of its checks.
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
         with self.assertRaises(ProjectServiceError) as caught:
             self.service.save_lore_entry(
                 "honor",
                 SaveLoreEntryRequest(
-                    title="Dame Honor Harrington", body="Body.", entry_type="lore:character",
-                    metadata={"rank": "Captain"}, authoring_layer_id=self._layer_id(self.root),
+                    title="Honor Harrington", body="<script>alert(1)</script>", entry_type="lore:character",
+                    metadata={"rank": "Commodore"}, authoring_layer_id=self._layer_id(self.root),
                 ),
             )
         self.assertEqual(caught.exception.status_code, 422)
@@ -297,6 +322,176 @@ class LayerOverrideTests(unittest.TestCase):
         )
         self.assertEqual(saved.metadata["rank"], "Midshipman")
         self.assertEqual(saved.overridden_fields, [])
+
+    # --- Amendment 4: unchanged echoes, mid-chain wins, clear, round trip ----
+
+    def test_an_unchanged_echo_including_crlf_and_a_trailing_newline_mints_no_row(self) -> None:
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+        read = self.service.read_lore_entry("honor")
+        for body in (read.body, read.body.replace("\n", "\r\n"), read.body + "\n", read.body.rstrip()):
+            with self.subTest(body=repr(body)):
+                saved = self.service.save_lore_entry(
+                    "honor",
+                    SaveLoreEntryRequest(
+                        title=read.title, body=body, entry_type="lore:character",
+                        metadata={"rank": "Commodore"}, authoring_layer_id=self._layer_id(self.root),
+                    ),
+                )
+                self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
+                self.assertEqual(saved.body, read.body)
+                self.assertEqual(saved.title, read.title)
+
+    def test_a_middle_layers_body_override_wins_until_the_book_changes_it(self) -> None:
+        declare_full_chain(ProjectService(WorkScope(root=self.series)), self.series, self.base)
+        self._write_lore_at(self.universe, "honor", "Honor Harrington", {"rank": "Ensign"})
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="The series knows her differently.", entry_type="lore:character",
+                metadata={"rank": "Ensign"}, authoring_layer_id=self._layer_id(self.series),
+            ),
+        )
+        self.assertEqual(self.service.read_lore_entry("honor").body.rstrip(), "The series knows her differently.")
+
+        # The book echoes the series' body unchanged → no book-level row.
+        echo = self.service.read_lore_entry("honor")
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title=echo.title, body=echo.body, entry_type="lore:character",
+                metadata={"rank": "Ensign"}, base_revision=echo.revision,
+                authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        self.assertFalse((self.root / OVERRIDES_FOLDER).exists())
+        self.assertEqual(self.service.read_lore_entry("honor").body.rstrip(), "The series knows her differently.")
+
+        # The book then changes the body → the book's row wins over the series'.
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="The book knows her differently still.", entry_type="lore:character",
+                metadata={"rank": "Ensign"}, authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        self.assertEqual(self.service.read_lore_entry("honor").body.rstrip(), "The book knows her differently still.")
+        # The series' own delta is untouched.
+        as_series = self.service.read_lore_entry("honor", as_of_layer_id=self._layer_id(self.series))
+        self.assertEqual(as_series.body.rstrip(), "The series knows her differently.")
+
+    def test_clearing_body_or_title_restores_canon_and_drops_the_row(self) -> None:
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Dame Honor Harrington", body="A rewritten body.", entry_type="lore:character",
+                metadata={"rank": "Commodore"}, authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+
+        cleared_body = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Dame Honor Harrington", body="A rewritten body.", entry_type="lore:character",
+                metadata={"rank": "Commodore"}, authoring_layer_id=self._layer_id(self.root),
+                clear_override_fields=["body"],
+            ),
+        )
+        self.assertEqual(cleared_body.body.rstrip(), "Body.")
+        self.assertEqual(cleared_body.title, "Dame Honor Harrington")
+        # A title row still remains, so the file survives.
+        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+
+        cleared_title = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Dame Honor Harrington", body="Body.", entry_type="lore:character",
+                metadata={"rank": "Commodore"}, authoring_layer_id=self._layer_id(self.root),
+                clear_override_fields=["title"],
+            ),
+        )
+        self.assertEqual(cleared_title.title, "Honor Harrington")
+        # Nothing overridden anymore → the file is gone entirely.
+        self.assertFalse(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+
+    def test_a_body_with_a_bare_dash_line_crlf_and_blank_lines_round_trips(self) -> None:
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+        raw = "\r\n\r\nFirst line.\r\n---\r\nLast line.\r\n\r\n"
+        saved = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body=raw, entry_type="lore:character",
+                metadata={"rank": "Commodore"}, authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        expected = "First line.\n---\nLast line.\n"
+        self.assertEqual(saved.body, expected)
+        reread = self.service.read_lore_entry("honor")
+        self.assertEqual(reread.body, expected)
+        # Saving the read back at the SAME layer re-diffs against canon (the
+        # layers ABOVE L, which excludes L's own row) and reproduces the same
+        # normalised value — the round trip is stable either way.
+        resaved = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body=reread.body, entry_type="lore:character",
+                metadata={"rank": "Commodore"}, base_revision=reread.revision,
+                authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        self.assertEqual(resaved.body, expected)
+
+    def test_title_and_body_never_appear_as_metadata_keys(self) -> None:
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Dame Honor Harrington", body="A rewritten body.", entry_type="lore:character",
+                metadata={"rank": "Captain"}, authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+        read = self.service.read_lore_entry("honor")
+        self.assertNotIn("title", read.metadata)
+        self.assertNotIn("body", read.metadata)
+        self.assertNotIn("title", read.overridden_fields)
+        self.assertNotIn("body", read.overridden_fields)
+        as_owner = self.service.read_lore_entry("honor", as_of_layer_id=self._layer_id(self.series))
+        self.assertNotIn("title", as_owner.metadata)
+        self.assertNotIn("body", as_owner.metadata)
+        listing = self.service.list_lore_entries()
+        listed = next(entry for entry in listing.entries if entry.id == "honor")
+        self.assertNotIn("title", listed.metadata)
+        self.assertNotIn("body", listed.metadata)
+        self.assertEqual(listed.title, "Dame Honor Harrington")
+
+    def test_a_pre_amendment_override_file_reads_identically(self) -> None:
+        # #10: a hand-written override with metadata rows only, from before
+        # title/body rows existed. It must fold and read exactly as it did
+        # before this amendment — metadata folded, title and body canon.
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+        (self.root / OVERRIDES_FOLDER).mkdir(parents=True, exist_ok=True)
+        (self.root / OVERRIDES_FOLDER / "Honor Harrington (override).md").write_text(
+            "---\n"
+            "id: override_prewritten\n"
+            "title: Honor Harrington (override)\n"
+            "entry_type: override:override\n"
+            "target: honor\n"
+            "rows:\n"
+            "  - field: rank\n"
+            "    op: replace\n"
+            "    value: Captain\n"
+            "---\n\n",
+            encoding="utf-8",
+        )
+        from app.services.project.node_index_gate import node_index_gate
+
+        node_index_gate.invalidate()
+        read = self.service.read_lore_entry("honor")
+        self.assertEqual(read.metadata["rank"], "Captain")
+        self.assertEqual(read.title, "Honor Harrington")
+        self.assertEqual(read.body.rstrip(), "Body.")
+        self.assertEqual(read.overridden_fields, ["rank"])
 
     def test_a_literal_default_in_the_ancestor_does_not_mint_an_override_row(self) -> None:
         # #1912: the read drops a required select's literal default; the base an

@@ -85,6 +85,30 @@ class ForkLoreTests(unittest.TestCase):
         # The ancestor is still reachable as a shadowed candidate.
         self.assertEqual(len(index.candidates["honor"]), 2)
 
+    def test_fork_copies_the_folded_title_and_body(self) -> None:
+        # Amendment 4 (#2184): the fork copies the EFFECTIVE (already-folded)
+        # entry, so a title/body override the open project holds lands in the
+        # copy, not the ancestor's canon text.
+        self._write_ancestor_lore(self.universe, "honor", "Honor Harrington", entry_type="lore:character")
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Dame Honor Harrington", body="A rewritten body.", entry_type="lore:character",
+                metadata={}, authoring_layer_id=self.service._metadata_schema_layer_id(self.root),
+            ),
+        )
+
+        forked = self.service.fork_lore_entry("honor")
+
+        self.assertEqual(forked.title, "Dame Honor Harrington")
+        self.assertEqual(forked.body.rstrip(), "A rewritten body.")
+        # The book's own override is now redundant and was dropped.
+        self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
+        # The ancestor's canon file is untouched.
+        canon = next((self.universe / "lore").glob("*.md")).read_text(encoding="utf-8")
+        self.assertIn("Honor Harrington", canon)
+        self.assertNotIn("Dame Honor Harrington", canon)
+
     def test_fork_drops_every_copy_of_its_own_override(self) -> None:
         # The fork bakes the folded values into the copy, so the book's own
         # override for the id is redundant and dropped — every file carrying it

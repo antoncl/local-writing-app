@@ -947,6 +947,40 @@ class LoreOverrideSnapshotTests(unittest.TestCase):
         base_file = (self.universe / "lore" / f"{self.entity_id}.md").read_text(encoding="utf-8")
         self.assertIn("Ensign", base_file)
 
+    def test_restore_brings_back_a_body_row(self) -> None:
+        # Amendment 4 (#2184): a body row round-trips through capture/restore
+        # exactly like a metadata row.
+        self.service.save_lore_entry(
+            self.entity_id,
+            SaveLoreEntryRequest(
+                title="Seraphine", body="Book-only backstory.", entry_type="lore:character",
+                metadata={"rank": "Captain"}, authoring_layer_id=self.book_layer,
+            ),
+        )
+        snapshot = self._capture()
+        self.assertEqual(
+            self.service.read_lore_entry(self.entity_id).body.rstrip(), "Book-only backstory."
+        )
+
+        self.service.save_lore_entry(
+            self.entity_id,
+            SaveLoreEntryRequest(
+                title="Seraphine", body="A later rewrite.", entry_type="lore:character",
+                metadata={"rank": "Captain"}, authoring_layer_id=self.book_layer,
+            ),
+        )
+        self.assertEqual(self.service.read_lore_entry(self.entity_id).body.rstrip(), "A later rewrite.")
+
+        restored = self.client.post(
+            f"/api/nodes/{self.entity_id}/snapshots/{snapshot['id']}/restore"
+            f"?layer={self.book_layer}"
+        )
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["body"].rstrip(), "Book-only backstory.")
+        self.assertEqual(
+            self.service.read_lore_entry(self.entity_id).body.rstrip(), "Book-only backstory."
+        )
+
     def test_an_override_capture_writes_no_witness(self) -> None:
         snapshot = self._capture()
         # The override store roots at <book>/.overrides — read there, not the base

@@ -30,16 +30,25 @@ applied outermost-first (ascending `rank`), so the nearest descendant's op wins.
 The op vocabulary is the codebase's existing `replace | add | remove`
 (`MutationSetRow`); ADR-0039's "set" is `replace`. `add`/`remove` apply to
 collection fields; a scalar/text field takes `replace` only (PR 1 — text-append
-overrides are deferred with body/title overrides, see `lore.py`).
+overrides are deferred).
+
+A lore entry's `title` and `body` are also `replace` rows (Amendment 4,
+#2184) — text, so `replace` is the only op that applies to them either. They
+are folded separately from metadata by `materialize_override_content`, never
+as `metadata["title"]` / `metadata["body"]` (§2): see `lore.py`. Prompts do
+not get title/body overrides (Amendment 4 §5) — a changed prompt title or
+body is still refused, see `inherited_content_refusal` below.
 """
 
 from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from app.models import MetadataFieldDefinition, MetadataSchema, MutationSetRow
 from app.services.project.errors import ProjectServiceError
@@ -66,6 +75,24 @@ OVERRIDES_FOLDER = "overrides"
 OVERRIDE_ENTRY_TYPE = "override:override"
 
 
+class _LiteralBlockStr(str):
+    """A YAML string that dumps as a literal block (`|`) instead of a quoted
+    scalar — used only for a multi-line `body` override row's value (§1), so
+    an override file with a body row stays readable by hand. A distinct
+    subclass rather than a formatting flag on `yaml.safe_dump`: only a value
+    explicitly wrapped in this type is ever affected, so registering its
+    representer on `yaml.SafeDumper` (module-load, below) cannot change how
+    any other field or file serialises — nothing else in the codebase
+    constructs one."""
+
+
+def _represent_literal_block(dumper: yaml.SafeDumper, data: str) -> yaml.Node:
+    return dumper.represent_scalar("tag:yaml.org,2002:str", str(data), style="|")
+
+
+yaml.add_representer(_LiteralBlockStr, _represent_literal_block, Dumper=yaml.SafeDumper)
+
+
 def _required_select_reading(definition: MetadataFieldDefinition, value: Any) -> Any:
     """`value` as a required select reads it: blank or absent IS the default
     (#1421, the blank rule `_strip_unknown_metadata_fields` writes by). Any
@@ -77,6 +104,17 @@ def _required_select_reading(definition: MetadataFieldDefinition, value: Any) ->
 
 def _same_key(key: str) -> str:
     return key
+
+
+def normalise_override_body(text: str) -> str:
+    """A body override row's value, normalised exactly as a body read from a
+    file is (Amendment 4 §1): CRLF becomes LF, leading newlines are stripped
+    (mirroring `_read_markdown_with_front_matter`'s `body.lstrip("\\n")`), and
+    a single trailing newline is enforced (mirroring `_write_lore_entry_file`'s
+    `rstrip() + "\\n"`) — so an unchanged body never produces a row, and a
+    row's stored value round-trips through a save/read cycle unchanged."""
+    text = text.replace("\r\n", "\n").lstrip("\n")
+    return text.rstrip() + "\n" if text.strip() else ""
 
 
 def _items_by_key(value: Any, key_member: str) -> dict[str, dict[str, Any]]:
@@ -255,6 +293,41 @@ class LayerOverridesMixin:
                 winner, schema, front_matter={"metadata": folded_metadata}
             )
 
+    def _fold_override_titles(self, index: NodeIndex, root: Path) -> None:
+        """Fold a `title` row onto its target's winning index entry
+        (Amendment 4 / #2184), so the node index — `list_lore_entries`,
+        pickers, search, name detection — shows an overridden title
+        everywhere without a second read.
+
+        Deliberately independent of the schema: unlike `_fold_override_edges`,
+        which needs the schema to extract reference edges, a title is plain
+        text, so this must not skip when the chain's schema failed to load.
+        Runs after `_fold_override_edges` and before `resolve()` — `resolve()`
+        derives `by_id` from `candidates[id][0]`, so replacing the winner
+        in-place here is enough for the fold to reach every reader of `by_id`.
+        """
+        if not index.overrides_by_target:
+            return
+        open_layer_id = self._metadata_schema_layer_id(root)
+        for target_id, records in index.overrides_by_target.items():
+            candidates = index.candidates.get(target_id)
+            if not candidates:
+                continue
+            winner = candidates[0]
+            # Lore only (Amendment 4 §5); an inherited winner only — a
+            # locally-owned entry (a fork) ignores any leftover override,
+            # matching the value fold and `_fold_override_edges`.
+            if winner.kind != "lore" or winner.source_layer_id == open_layer_id:
+                continue
+            title, _ = self.materialize_override_content(records, winner.title, "")
+            if title == winner.title:
+                continue
+            # Replace only the winning candidate — the owning layer's own
+            # candidate entry (further down the list) keeps its canon title,
+            # since it is what "Editing at" the owning layer, and any reader
+            # walking `candidates` past the winner, must still see.
+            candidates[0] = replace(winner, title=title)
+
     def _collect_layer_overrides(self, layer: IndexLayer, index: NodeIndex) -> None:
         """Collect one layer's override files into `index.overrides_by_target`.
 
@@ -313,10 +386,20 @@ class LayerOverridesMixin:
             OVERRIDE_ENTRY_TYPE,
             {},
             "",
-            extra={"target": target_id, "rows": [row.model_dump() for row in rows]},
+            extra={"target": target_id, "rows": [self._override_row_dump(row) for row in rows]},
             omit_empty_metadata=True,
         )
         return path
+
+    @staticmethod
+    def _override_row_dump(row: MutationSetRow) -> dict[str, Any]:
+        """`row.model_dump()`, with a multi-line `body` value wrapped so it
+        dumps as a YAML literal block (§1) instead of a quoted one-liner —
+        every other row's value is untouched."""
+        dumped = row.model_dump()
+        if row.field == "body" and "\n" in dumped.get("value", ""):
+            dumped["value"] = _LiteralBlockStr(dumped["value"])
+        return dumped
 
     def _override_file_for_target(self, layer_folder: Path, target_id: str) -> Path | None:
         """The existing override file this layer holds for `target_id`, matched on
@@ -396,6 +479,12 @@ class LayerOverridesMixin:
         cleared: set[str] = set()
         for record in sorted(records, key=lambda record: record.layer_rank):
             for row in record.rows:
+                if row.field in ("title", "body"):
+                    # Title/body rows are folded separately by
+                    # `materialize_override_content` (§2) — they must never
+                    # land in a metadata dict or its `touched` list, for
+                    # every caller of this fold.
+                    continue
                 target = self._keyed_row_target(row, shapes.keyed)
                 if target is None:
                     field_type = shapes.field_types.get(row.field, "text")
@@ -418,6 +507,24 @@ class LayerOverridesMixin:
                 base_items, shapes.keyed[field_id], rows, self._coerce_mutation_value, canonical or _same_key
             )
         return result, touched
+
+    @staticmethod
+    def materialize_override_content(records: list[LayerOverride], title: str, body: str) -> tuple[str, str]:
+        """`title`/`body` folded with `records`' `title`/`body` rows (Amendment
+        4 §2): a row wins over the input it is given, absent a row the input
+        passes through unchanged — never a dict key, so a caller cannot leak
+        either into metadata by accident.
+
+        Applied outermost-first, same as `materialize_override_metadata`, so
+        the nearest descendant's row wins. Lore only (§5) — a prompt override
+        never carries either row, so this is a no-op on one."""
+        for record in sorted(records, key=lambda record: record.layer_rank):
+            for row in record.rows:
+                if row.field == "title":
+                    title = row.value
+                elif row.field == "body":
+                    body = row.value
+        return title, body
 
     @staticmethod
     def _keyed_row_target(row: MutationSetRow, keyed: dict[str, KeyedList]) -> tuple[KeyedList, ItemRecord] | None:
@@ -575,12 +682,13 @@ class LayerOverridesMixin:
 
     @staticmethod
     def inherited_content_refusal(kind: str, layer_label: str | None, remedy: str) -> ProjectServiceError:
-        """The ONE refusal both override saves raise when a submission changes the
-        content an override cannot carry — a node's body or title (#2132, #2159).
-        Overrides are metadata deltas; body and title overrides are deferred, so a
-        changed body or title is refused, never dropped, and the lore and prompt
-        saves answer with the same status and the same sentence. `remedy` is the
-        kind's own way out (fork an entry, clone a prompt)."""
+        """The prompt override save's refusal when a submission changes a
+        prompt's title or body (#2132, #2159). Lore carries title/body rows
+        since Amendment 4 (#2184) — `_save_lore_override` no longer raises
+        this. Prompts still refuse: their title and body change only by
+        cloning (Amendment 4 §5), never as an override, so a changed body or
+        title is refused, never dropped. `remedy` is the prompt's own way out
+        (clone the prompt)."""
         label = layer_label or "an ancestor"
         return ProjectServiceError(
             f"The body and title of this {kind} are inherited from {label} and cannot be "

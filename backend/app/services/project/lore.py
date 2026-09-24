@@ -27,12 +27,17 @@ from app.models import (
     LoreEntry,
     LoreEntryList,
     LoreEntrySummary,
+    MutationSetRow,
     SaveLoreEntryRequest,
 )
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.code_fence import unwrap_whole_body_code_fence
 from app.services.project.errors import ProjectServiceError
-from app.services.project.overrides import LayerOverride, OverrideShapes
+from app.services.project.overrides import (
+    LayerOverride,
+    OverrideShapes,
+    normalise_override_body,
+)
 
 
 class LoreEntriesMixin:
@@ -54,6 +59,7 @@ class LoreEntriesMixin:
             raw_entry_type = front_matter.get("entry_type") or "lore:note"
             entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "lore:note"
             metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+            title = str(front_matter.get("title") or entry.id)
             # Fold overrides so a list shows the effective value (#314 / ADR-0039),
             # but only onto an inherited entry — a locally-owned winner (a fork)
             # ignores any leftover override, matching read_lore_entry.
@@ -62,10 +68,12 @@ class LoreEntriesMixin:
                 metadata, _ = self.materialize_override_metadata(
                     metadata, override_records, shapes, canonical=index.canonical_id
                 )
+                # Title and body fold separately from metadata (Amendment 4 §2).
+                title, body = self.materialize_override_content(override_records, title, body)
             entries.append(
                 LoreEntrySummary(
                     id=entry.id,
-                    title=str(front_matter.get("title") or entry.id),
+                    title=title,
                     body=body,
                     entry_type=entry_type,
                     metadata=metadata,
@@ -101,6 +109,23 @@ class LoreEntriesMixin:
         )
         self._write_lore_entry_file(self._filepath_for_new_node(root / "lore", request.title), entry)
         return self.read_lore_entry(entry_id)
+
+    @staticmethod
+    def _override_records_for_read(
+        index, node_id: str, is_inherited_winner: bool, authoring_layer
+    ) -> list[LayerOverride]:
+        """The override records `read_lore_entry` folds in for `node_id` — an
+        empty list when there is nothing to fold (no override targets this
+        entry, or it is not an inherited winner), else the chain's records
+        for it, narrowed to `layer_rank <= authoring_layer.rank` when an
+        as-of L is given (#2189) — L == the owning layer then folds nothing,
+        i.e. canon."""
+        records = index.overrides_by_target.get(node_id)
+        if not records or not is_inherited_winner:
+            return []
+        if authoring_layer is not None:
+            records = [record for record in records if record.layer_rank <= authoring_layer.rank]
+        return records
 
     def read_lore_entry(self, entry_id: str, as_of_layer_id: str | None = None) -> LoreEntry:
         """The entry as the open project sees it, or — with `as_of_layer_id` set
@@ -152,25 +177,23 @@ class LoreEntriesMixin:
             else self.read_metadata_schema()
         )
         # Fold the chain's layer overrides onto this inherited entry's canon
-        # (#314 / ADR-0039): the effective value the open project sees, while the
-        # ancestor file stays untouched. `overridden_fields` tells the frontend
-        # which values carry the `ti-versions` override mark (rendered in PR 2).
-        # Overrides apply only to an **inherited** winner — an entry the open
-        # project owns locally (a book-local entry, or a fork that severed
-        # inheritance) ignores any leftover override, so an edit to a fork is
-        # never masked by the delta it copied down. With an as-of L, only the
-        # records at or above L fold in (#2189) — L == the owning layer folds
-        # nothing, i.e. canon.
+        # (#314 / ADR-0039, Amendment 4 §2): the effective metadata, title and
+        # body the open project sees, while the ancestor file stays untouched.
+        # `overridden_fields` tells the frontend which values carry the
+        # `ti-versions` override mark (rendered in PR 2). Overrides apply only
+        # to an **inherited** winner — an entry the open project owns locally
+        # (a book-local entry, or a fork that severed inheritance) ignores any
+        # leftover override, so an edit to a fork is never masked by the delta
+        # it copied down. With an as-of L, only the records at or above L fold
+        # in (#2189) — L == the owning layer folds nothing, i.e. canon.
+        title = str(front_matter.get("title") or node_id)
         overridden_fields: list[str] = []
-        override_records = index.overrides_by_target.get(node_id)
-        if override_records and is_inherited_winner:
-            if authoring_layer is not None:
-                override_records = [
-                    record for record in override_records if record.layer_rank <= authoring_layer.rank
-                ]
+        records = self._override_records_for_read(index, node_id, is_inherited_winner, authoring_layer)
+        if records:
             metadata, overridden_fields = self.materialize_override_metadata(
-                metadata, override_records, self._override_shapes(schema), canonical=index.canonical_id
+                metadata, records, self._override_shapes(schema), canonical=index.canonical_id
             )
+            title, body = self.materialize_override_content(records, title, body)
         # Heal stale fields (retired by a schema change) and dangling
         # references before validation — see _strip_unknown_metadata_fields
         # / _strip_dangling_references for the rationale.
@@ -182,7 +205,7 @@ class LoreEntriesMixin:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         return LoreEntry(
             id=node_id,
-            title=str(front_matter.get("title") or node_id),
+            title=title,
             body=body,
             # A revision that spans the fold (#314): the composite over the owning
             # file plus every override in the chain, so an override edit changes
@@ -359,13 +382,14 @@ class LoreEntriesMixin:
         """Write the consuming layer's sparse override delta on an inherited entry.
 
         The delta is the diff from the entry's effective value *above* L to the
-        metadata the client submitted, validated as of L's schema. Body and title
-        overrides are deferred with the rest of ADR-0013's total scope — an
-        override captures metadata field changes only in PR 1 — so a submitted
-        body or title that differs from the fold above L is REFUSED (#2132), not
-        dropped: an accepted write that changes nothing is the one thing a save
-        must never do. The UI keeps an inherited body read-only in place, so only
-        an API caller or an AI commit path reaches this refusal.
+        metadata the client submitted, validated as of L's schema — plus, since
+        Amendment 4 (#2184), a `title` and/or `body` row when the submission
+        differs from the title/body fold above L (built before
+        `clear_override_fields` runs, so "Reset to inherited" on `title`/`body`
+        is the same request as for any other field). The invariant an override
+        save has always enforced stays: it refuses, and never drops, any part
+        of the submission it cannot carry — the metadata diff below still
+        refuses what it cannot represent (an ordered list, a duplicate key).
 
         Returns the target entry id; the caller (`save_lore_entry`) does the one
         final read, as of the request's own authoring layer (#2189) — this
@@ -374,16 +398,7 @@ class LoreEntriesMixin:
         schema = self._schema_as_authored(authoring_layer=authoring_layer.folder)
         shapes = self._override_shapes(schema)
         owning_front_matter, canon_body = self._read_markdown_with_front_matter(winner.path, strict=True)
-        # No layer overrides body or title, so the fold above L IS the owning
-        # file's. rstrip mirrors the prompt override's tolerance (#1738): the
-        # echo of a read may differ from the file by a trailing newline only.
         canon_title = str(owning_front_matter.get("title") or "")
-        if request.body.rstrip() != canon_body.rstrip() or request.title != canon_title:
-            raise self.inherited_content_refusal(
-                "entry",
-                winner.source_layer_label,
-                "Fork the entry to change them here, or choose the owning layer to edit the canon.",
-            )
         base_metadata = self._normalise_metadata(owning_front_matter.get("metadata"), winner.path)
         # The base an override at L diffs against is the effective value of every
         # layer *above* L — so the delta captures only what L itself changes, and
@@ -394,6 +409,20 @@ class LoreEntriesMixin:
         base_above_layer, _ = self.materialize_override_metadata(
             base_metadata, records_above, shapes, canonical=index.canonical_id
         )
+        # Title and body fold the same way above L (Amendment 4 §3): a layer
+        # between the owning one and L may already override either, and that —
+        # not always the owning file's own value — is what L's submission is
+        # compared against. Body is compared normalised (CRLF/leading-newline/
+        # trailing-newline insensitive, §1) so an echo of the read never mints
+        # a spurious row.
+        title_above, body_above = self.materialize_override_content(records_above, canon_title, canon_body)
+        body_above = normalise_override_body(body_above)
+        submitted_body = normalise_override_body(request.body)
+        content_rows: list[MutationSetRow] = []
+        if request.title != title_above:
+            content_rows.append(MutationSetRow(field="title", op="replace", value=request.title))
+        if submitted_body != body_above:
+            content_rows.append(MutationSetRow(field="body", op="replace", value=submitted_body))
         # Symmetry with the read (#698): `submitted` is the client's echo of
         # `read_lore_entry`, whose list values were healed by
         # `_strip_unknown_list_members` — heal the raw base the same way, or a
@@ -430,16 +459,25 @@ class LoreEntriesMixin:
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Lore Entry changed on disk after it was opened.", 409)
 
-        rows = self._diff_metadata_to_override_rows(base_above_layer, submitted, schema)
+        rows = self._diff_metadata_to_override_rows(base_above_layer, submitted, schema) + content_rows
         # Clear-to-inherit (#517): drop the row(s) for any field the client asked
         # to reset. The submitted metadata still carries the overridden value (the
         # reset gesture does not know the above-L value to echo back), so the diff
         # produced a row for it — dropping it here is what reverts the field to the
         # inherited value. An empty result then deletes the file below, exactly as
-        # a full revert-to-canon does.
+        # a full revert-to-canon does. `_override_row_field` names a title/body
+        # row's field the same as any other's, so `clear_override_fields=["body"]`
+        # / `["title"]` drops them here too.
         if request.clear_override_fields:
             cleared = set(request.clear_override_fields)
             rows = [row for row in rows if self._override_row_field(row, shapes.keyed) not in cleared]
+        # An override save that still carries a body row runs the same body
+        # validation an owned save runs (Amendment 4 §3) — a reset drops the
+        # row above and skips this.
+        if any(row.field == "body" for row in rows):
+            markdown_errors = validate_scene_markdown(request.body)
+            if markdown_errors:
+                raise ProjectServiceError(" ".join(markdown_errors), 422)
         # Validate the entry *as L would resolve it* against L's own roster — a
         # field only the book defines cannot be stored at a series (ADR-0045 §4).
         preview = LayerOverride(entry_id, authoring_layer.id, authoring_layer.rank, authoring_layer.label, winner.path, tuple(rows))
@@ -455,7 +493,10 @@ class LoreEntriesMixin:
             # first-ever override is a silent no-op). A revert-to-canon drop below
             # is an erase, not a session save, so it is deliberately not captured.
             self.maybe_capture_session_boundary(entry_id, kind="lore", layer_id=authoring_layer.id)
-            self._write_override_file(authoring_layer.folder, entry_id, request.title, rows)
+            # The file's own `title:` key is its label ("X (override)"), always
+            # built from CANON title — never the submitted one, so a title
+            # override does not relabel/rename the delta file (§1).
+            self._write_override_file(authoring_layer.folder, entry_id, canon_title, rows)
         else:
             # An empty delta means the author reverted to canon: drop this layer's
             # override rather than leave an inert file (files-are-truth) — every

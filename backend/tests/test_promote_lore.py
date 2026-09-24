@@ -576,6 +576,34 @@ class PromoteLoreTests(unittest.TestCase):
         self.assertEqual(promoted.overridden_fields, ["mood"])
         self.assertEqual(list((self.root / OVERRIDES_FOLDER).glob("*.md")), [])
 
+    def test_plan_lists_title_and_body_fold_items(self) -> None:
+        # Amendment 4 (#2184): a series body/title override on a universe-owned
+        # entry, hand-moved into the book, must show up in the promotion plan
+        # exactly like a metadata override does.
+        self._write_ancestor_lore(self.universe, "alice", "Alice", entry_type="lore:character")
+        self.service.save_lore_entry(
+            "alice",
+            SaveLoreEntryRequest(
+                title="Alicia", body="A different body at the series.", entry_type="lore:character",
+                metadata={}, authoring_layer_id=self.series_layer_id,
+            ),
+        )
+        self.assertTrue(any((self.series / OVERRIDES_FOLDER).glob("*.md")))
+        (self.root / "lore").mkdir(exist_ok=True)
+        shutil.move(self.universe / "lore" / "alice.md", self.root / "lore" / "alice.md")
+        node_index_gate.invalidate()
+        universe_layer_id = self.service._metadata_schema_layer_id(self.universe)
+        series_label = self.service.layer_by_id(self.root, self.series_layer_id).label
+
+        plan = self.service.preview_lore_promotion("alice", universe_layer_id)
+        fields = {(item.field, item.layer) for item in plan.folds_after_promotion}
+        self.assertIn(("title", series_label), fields)
+        self.assertIn(("body", series_label), fields)
+
+        promoted = self.service.promote_lore_entry("alice", universe_layer_id)
+        self.assertEqual(promoted.title, "Alicia")
+        self.assertEqual(promoted.body.rstrip(), "A different body at the series.")
+
     def test_plan_omits_an_ancestor_override_row_the_fold_would_not_apply(self) -> None:
         # The series override writes `mood`, then `mood` is retired from the base
         # schema. The read strips the field after the fold, so nothing changes on

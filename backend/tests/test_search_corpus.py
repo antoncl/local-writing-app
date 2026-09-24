@@ -420,6 +420,73 @@ class OverrideRevisionRefreshTests(unittest.TestCase):
         self.assertEqual(lore_hit.revision, self._fresh_revision("honor"))
 
 
+class OverrideTitleBodyContentTests(unittest.TestCase):
+    """Amendment 4 (#2184): search must find an inherited lore entry's
+    overridden title and body, not the canon text — the corpus reads straight
+    off the owning file, so it must fold separately (`_corpus_entry_for`)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.universe = self.base / "honorverse"
+        self.series = self.universe / "honor-harrington"
+        self.root = self.series / "book01"
+        self.service = ProjectService.created_at(self.root, "Book 1")
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        declare_full_chain(self.service, self.root, self.base)
+        self.service._write_yaml(
+            self.base / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "fields": {"rank": {"name": "rank", "type": "text", "label": "Rank"}},
+                "entry_types": {"lore:character": {"fields": ["rank"]}},
+            },
+        )
+        node_index_gate.invalidate()
+
+    def tearDown(self) -> None:
+        node_index_gate.invalidate()
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def _layer_id(self, folder: Path) -> str:
+        return next(layer.id for layer in self.service.collect_layers(self.root) if layer.folder == folder)
+
+    def test_search_finds_the_overridden_title_and_body(self) -> None:
+        writer = ProjectService(WorkScope(root=self.series))
+        writer._write_lore_entry_file(
+            self.series / "lore" / "honor.md",
+            LoreEntry(
+                id="honor", title="Honor Harrington", body="Keeper of the gate.",
+                revision="", entry_type="lore:character", metadata={"rank": "Commodore"},
+            ),
+        )
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Dame Honor Harrington", body="Keeper of the wormhole junction.",
+                entry_type="lore:character", metadata={"rank": "Commodore"},
+                authoring_layer_id=self._layer_id(self.root),
+            ),
+        )
+
+        body_hits = self.service.search(SearchRequest(query="wormhole")).hits
+        self.assertIn("honor", {h.file_id for h in body_hits})
+        # The stale canon text is no longer findable — the corpus shows the
+        # override, not the owning file.
+        stale_hits = self.service.search(SearchRequest(query="the gate")).hits
+        self.assertNotIn("honor", {h.file_id for h in stale_hits})
+
+        title_hits = self.service.search(SearchRequest(query="Dame Honor")).hits
+        self.assertIn("honor", {h.file_id for h in title_hits})
+
+
 class MaintenanceTests(SearchCorpusTestCase):
     def test_save_updates_the_next_query_without_reopen(self) -> None:
         scene_id = self._new_scene("Scene", "Old aetheria text")

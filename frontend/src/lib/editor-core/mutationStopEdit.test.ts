@@ -1,10 +1,10 @@
-// Pure unit tests for rewriteUnitFromItems (#2074, ADR-0042 §5/ADR-0089 S5) —
-// every collaborator is a plain fake, no store/api import.
+// Pure unit tests for rewriteSetFieldFromItems (ADR-0095 §8) — every
+// collaborator is a plain fake, no store/api import.
 import { describe, expect, it, vi } from "vitest";
 import { encodeItem, type KeyedListShape } from "./mutationListEdit";
 import type { MutationUnitGroup } from "./mutationUnits";
-import { rewriteUnitFromItems, type MutationStopEditDeps } from "./mutationStopEdit";
-import type { EffectiveStateResponse, MetadataValue, MutationMarkerRecord, Scene } from "@/lib/types";
+import { rewriteSetFieldFromItems, type MutationStopEditDeps } from "./mutationStopEdit";
+import type { EffectiveStateResponse, MetadataValue, MutationMarkerRecord, MutationSetEntry } from "@/lib/types";
 
 function rec(over: Partial<MutationMarkerRecord>): MutationMarkerRecord {
   return {
@@ -30,29 +30,54 @@ const RELATIONSHIP: KeyedListShape = {
   memberTypes: { to: "entity_ref", state: "text" },
 };
 
-function fakeDeps(values: Record<string, Record<string, MetadataValue>[]> = {}): MutationStopEditDeps {
+function fakeSet(over: Partial<MutationSetEntry> = {}): MutationSetEntry {
   return {
-    getEntityEffectiveState: vi.fn(
-      async (): Promise<EffectiveStateResponse> => ({ entity_id: "ent1", scene_id: "s1", position: null, values }),
-    ),
-    rewriteMutationUnit: vi.fn(async (): Promise<Scene> => ({ id: "s1" }) as unknown as Scene),
-    flushSceneIfDirty: vi.fn(async () => {}),
-    reconcileSceneFromServer: vi.fn(async () => {}),
+    id: "set1",
+    title: "",
+    revision: "r1",
+    entry_type: "mutation_set:mutation_set",
+    target_entry_type: "lore:character",
+    target_entity: "ent1",
+    rows: [],
+    anchors: [{ anchor_id: "mut_head", scene_id: "s1", scene_title: "Ch 1" }],
+    state: "active",
+    pin_missing: false,
+    source_layer_id: "",
+    source_layer_label: "",
+    ...over,
   };
 }
 
-describe("rewriteUnitFromItems", () => {
-  it("fetches the baseline at the unit's (scene, last offset) with the unit's own record ids excluded", async () => {
+function fakeDeps(over: Partial<MutationStopEditDeps> = {}): MutationStopEditDeps {
+  const set = fakeSet();
+  return {
+    getEntityEffectiveState: vi.fn(
+      async (): Promise<EffectiveStateResponse> => ({ entity_id: "ent1", scene_id: "s1", position: null, values: {} }),
+    ),
+    getMutationSetEntry: vi.fn(async (): Promise<MutationSetEntry> => set),
+    saveMutationSetEntry: vi.fn(async (entry: MutationSetEntry) => entry),
+    upsertMutationSet: vi.fn(),
+    flushSceneIfDirty: vi.fn(async () => {}),
+    ...over,
+  };
+}
+
+describe("rewriteSetFieldFromItems", () => {
+  it("fetches the baseline at the unit's (scene, last offset) EXCLUDING EVERY ANCHOR of the set", async () => {
     const unit: MutationUnitGroup = {
       unitId: "mut_head",
       name: "",
       records: [
-        rec({ marker_id: "m1", unit_id: "mut_head", field: "kin", op: "add", value: encodeItem({ to: "lore_a" }), offset: 5 }),
-        rec({ marker_id: "m2", unit_id: "mut_head", field: "title", op: "replace", value: "New", offset: 9 }),
+        rec({ marker_id: "mut_head.m1", unit_id: "mut_head", set_id: "set1", field: "kin", op: "add", value: encodeItem({ to: "lore_a" }), offset: 5 }),
+        rec({ marker_id: "mut_head.m2", unit_id: "mut_head", set_id: "set1", field: "title", op: "replace", value: "New", offset: 9 }),
       ],
     };
-    const deps = fakeDeps();
-    await rewriteUnitFromItems({
+    const deps = fakeDeps({
+      getMutationSetEntry: vi.fn(async () =>
+        fakeSet({ anchors: [{ anchor_id: "mut_head", scene_id: "s1", scene_title: "" }, { anchor_id: "mut_other", scene_id: "s2", scene_title: "" }] }),
+      ),
+    });
+    await rewriteSetFieldFromItems({
       unit,
       entityId: "ent1",
       field: "kin",
@@ -61,20 +86,32 @@ describe("rewriteUnitFromItems", () => {
       editedItems: [{ to: "lore_a" }],
       deps,
     });
-    expect(deps.getEntityEffectiveState).toHaveBeenCalledWith("ent1", "s1", 9, ["m1", "m2"]);
+    expect(deps.getEntityEffectiveState).toHaveBeenCalledWith("ent1", "s1", 9, ["mut_head", "mut_other"]);
   });
 
-  it("a member edit yields one replace row reusing the unit's record id and keeps the unit's other-field rows", async () => {
+  it("a member edit yields one replace row reusing the set's row id and keeps the set's other-field rows", async () => {
     const unit: MutationUnitGroup = {
       unitId: "mut_head",
       name: "",
       records: [
-        rec({ marker_id: "mut_head", unit_id: "mut_head", field: "kin.lore_a.state", op: "replace", value: "old", offset: 9 }),
-        rec({ marker_id: "m_title", unit_id: "mut_head", field: "title", op: "replace", value: "New Title", offset: 9 }),
+        rec({ marker_id: "mut_head.row_kin", unit_id: "mut_head", set_id: "set1", field: "kin.lore_a.state", op: "replace", value: "old", offset: 9 }),
+        rec({ marker_id: "mut_head.row_title", unit_id: "mut_head", set_id: "set1", field: "title", op: "replace", value: "New Title", offset: 9 }),
       ],
     };
-    const deps = fakeDeps({ kin: [{ to: "lore_a", state: "old" }] });
-    await rewriteUnitFromItems({
+    const deps = fakeDeps({
+      getEntityEffectiveState: vi.fn(
+        async (): Promise<EffectiveStateResponse> => ({ entity_id: "ent1", scene_id: "s1", position: null, values: { kin: [{ to: "lore_a", state: "old" }] } }),
+      ),
+      getMutationSetEntry: vi.fn(async () =>
+        fakeSet({
+          rows: [
+            { id: "row_kin", field: "kin.lore_a.state", op: "replace", value: "old" },
+            { id: "row_title", field: "title", op: "replace", value: "New Title" },
+          ],
+        }),
+      ),
+    });
+    const saved = await rewriteSetFieldFromItems({
       unit,
       entityId: "ent1",
       field: "kin",
@@ -83,22 +120,29 @@ describe("rewriteUnitFromItems", () => {
       editedItems: [{ to: "lore_a", state: "new" }],
       deps,
     });
-    expect(deps.rewriteMutationUnit).toHaveBeenCalledWith("s1", "mut_head", {
-      rows: [
-        { id: "m_title", field: "title", op: "replace", value: "New Title" },
-        { id: "mut_head", field: "kin.lore_a.state", op: "replace", value: "new" },
-      ],
-    });
+    expect(deps.saveMutationSetEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rows: [
+          { id: "row_title", field: "title", op: "replace", value: "New Title" },
+          { id: "row_kin", field: "kin.lore_a.state", op: "replace", value: "new" },
+        ],
+      }),
+    );
+    expect(deps.upsertMutationSet).toHaveBeenCalledWith(saved);
   });
 
-  it("an added item (no existing record on the field) yields a plain add row minting a fresh id", async () => {
+  it("an added item (no existing row on the field) yields a plain add row minting a fresh id", async () => {
     const unit: MutationUnitGroup = {
       unitId: "mut_head",
       name: "",
-      records: [rec({ marker_id: "mut_head", unit_id: "mut_head", field: "title", op: "replace", value: "New Title", offset: 9 })],
+      records: [rec({ marker_id: "mut_head.row_title", unit_id: "mut_head", set_id: "set1", field: "title", op: "replace", value: "New Title", offset: 9 })],
     };
-    const deps = fakeDeps();
-    await rewriteUnitFromItems({
+    const deps = fakeDeps({
+      getMutationSetEntry: vi.fn(async () =>
+        fakeSet({ rows: [{ id: "row_title", field: "title", op: "replace", value: "New Title" }] }),
+      ),
+    });
+    await rewriteSetFieldFromItems({
       unit,
       entityId: "ent1",
       field: "kin",
@@ -107,36 +151,42 @@ describe("rewriteUnitFromItems", () => {
       editedItems: [{ to: "lore_new" }],
       deps,
     });
-    expect(deps.rewriteMutationUnit).toHaveBeenCalledWith("s1", "mut_head", {
-      rows: [
-        { id: "mut_head", field: "title", op: "replace", value: "New Title" },
-        { id: "", field: "kin", op: "add", value: encodeItem({ to: "lore_new" }) },
-      ],
-    });
+    expect(deps.saveMutationSetEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rows: [
+          { id: "row_title", field: "title", op: "replace", value: "New Title" },
+          { id: "", field: "kin", op: "add", value: encodeItem({ to: "lore_new" }) },
+        ],
+      }),
+    );
   });
 
-  it("flushes the scene before the rewrite and reconciles after, returning the re-read scene", async () => {
+  it("flushes the scene, fetches the set, saves it and upserts the result", async () => {
     const order: string[] = [];
     const unit: MutationUnitGroup = {
       unitId: "u1",
       name: "",
-      records: [rec({ marker_id: "u1", unit_id: "u1", field: "kin", op: "add", value: encodeItem({ to: "lore_a" }), offset: 1 })],
+      records: [rec({ marker_id: "u1.r1", unit_id: "u1", set_id: "set1", field: "kin", op: "add", value: encodeItem({ to: "lore_a" }), offset: 1 })],
     };
-    const scene = { id: "s1" } as unknown as Scene;
+    const saved = fakeSet({ id: "set1" });
     const deps: MutationStopEditDeps = {
       getEntityEffectiveState: vi.fn(async (): Promise<EffectiveStateResponse> => ({ entity_id: "ent1", scene_id: "s1", position: null, values: {} })),
       flushSceneIfDirty: vi.fn(async () => {
         order.push("flush");
       }),
-      rewriteMutationUnit: vi.fn(async () => {
-        order.push("rewrite");
-        return scene;
+      getMutationSetEntry: vi.fn(async () => {
+        order.push("get");
+        return fakeSet();
       }),
-      reconcileSceneFromServer: vi.fn(async () => {
-        order.push("reconcile");
+      saveMutationSetEntry: vi.fn(async () => {
+        order.push("save");
+        return saved;
+      }),
+      upsertMutationSet: vi.fn(() => {
+        order.push("upsert");
       }),
     };
-    const result = await rewriteUnitFromItems({
+    const result = await rewriteSetFieldFromItems({
       unit,
       entityId: "ent1",
       field: "kin",
@@ -145,7 +195,19 @@ describe("rewriteUnitFromItems", () => {
       editedItems: [{ to: "lore_a" }],
       deps,
     });
-    expect(order).toEqual(["flush", "rewrite", "reconcile"]);
-    expect(result).toBe(scene);
+    expect(order).toEqual(["flush", "get", "save", "upsert"]);
+    expect(result).toBe(saved);
+  });
+
+  it("throws when the stop's unit has no mutation set", async () => {
+    const unit: MutationUnitGroup = {
+      unitId: "u1",
+      name: "",
+      records: [rec({ marker_id: "u1.r1", unit_id: "u1", set_id: "", field: "kin", op: "add", value: "x", offset: 1 })],
+    };
+    const deps = fakeDeps();
+    await expect(
+      rewriteSetFieldFromItems({ unit, entityId: "ent1", field: "kin", keyed: RELATIONSHIP, baseItems: [], editedItems: [], deps }),
+    ).rejects.toThrow();
   });
 });

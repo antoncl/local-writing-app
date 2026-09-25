@@ -12,6 +12,7 @@ function set(over: Partial<MutationSetEntrySummary>): MutationSetEntrySummary {
     target_entry_type: "lore:character",
     target_entity: "",
     row_count: 1,
+    rows: [],
     anchors: [],
     state: "staged",
     pin_missing: false,

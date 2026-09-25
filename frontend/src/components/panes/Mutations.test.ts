@@ -63,6 +63,7 @@ function summary(over: Partial<MutationSetEntrySummary> = {}): MutationSetEntryS
     target_entry_type: "lore:character",
     target_entity: "",
     row_count: 2,
+    rows: [],
     anchors: [],
     state: "template",
     pin_missing: false,

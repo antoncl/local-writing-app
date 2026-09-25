@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { get } from "svelte/store";
 import { ChatCommitController, type ChatCommitDeps, patchToRows } from "./chatCommit.svelte";
 import { entryBrainstorm } from "./entryBrainstorm.svelte";
+import { mutationSetEntriesStore } from "./mutationSets";
 import { api, HttpError } from "@/lib/api";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
 import type { AIEntryPatch, EntryPatchExtraction, MutationSetEntry } from "@/lib/types";
@@ -704,6 +706,9 @@ describe("ChatCommitController — stageToPendingSet", () => {
     expect(getSet).not.toHaveBeenCalled();
     expect(saveSet).not.toHaveBeenCalled();
     expect(c.committing).toBe(false);
+    // Folded into the store at once (ADR-0095 §2) — the card shows it
+    // without waiting on a full re-list.
+    expect(get(mutationSetEntriesStore).some((entry) => entry.id === "set-9")).toBe(true);
   });
 
   it("attributes the extraction cost and reports dropped fields in the notice", async () => {

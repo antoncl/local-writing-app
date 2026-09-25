@@ -93,12 +93,18 @@
     rows = rows.map((r, i) => (i === index ? { ...r, ...patch } : r));
   }
 
-  const canSave = $derived(title.trim().length > 0 && targetType.length > 0 && rows.length > 0);
+  // ADR-0095 §2: title is optional — an untitled set labels from its rows.
+  const canSave = $derived(targetType.length > 0 && rows.length > 0);
   let saving = $state(false);
+  let saveError = $state("");
 
   async function save() {
     if (!canSave || saving) return;
     saving = true;
+    saveError = "";
+    // Row ids (ADR-0095 §3) are preserved as-is — never stripped — so an
+    // unchanged row keeps the id anything addressing it by `(anchor, row)`
+    // relies on; only a genuinely new row (no `r.id`) sends "".
     const payloadRows = rows.map((r) => ({ id: r.id ?? "", field: r.field, op: r.op, value: toMarkerString(r.value) }));
     try {
       const saved = initial
@@ -120,6 +126,8 @@
       // `mutationsVersion` refreshes.
       upsertMutationSet(saved);
       onSaved();
+    } catch (e) {
+      saveError = e instanceof Error ? e.message : String(e);
     } finally {
       saving = false;
     }
@@ -134,9 +142,12 @@
   ariaLabel="Edit mutation set"
   onCancel={onCancel}
 >
+  {#if saveError}
+    <p class="tset-error" role="alert">{saveError}</p>
+  {/if}
   <label class="tset-field">
-    <span>Name</span>
-    <input value={title} placeholder="e.g. Full Moon transformation" oninput={(e) => (title = e.currentTarget.value)} />
+    <span>Name (optional)</span>
+    <input value={title} placeholder="e.g. Full moon" oninput={(e) => (title = e.currentTarget.value)} />
   </label>
 
   {#if pinned}
@@ -211,5 +222,13 @@
     background: var(--inset);
     color: var(--text);
     font-size: var(--fs-md);
+  }
+  .tset-error {
+    margin: 0 0 12px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: color-mix(in oklab, var(--danger) 12%, transparent);
+    color: var(--danger);
+    font-size: var(--fs-sm);
   }
 </style>

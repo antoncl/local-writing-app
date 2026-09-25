@@ -65,11 +65,26 @@ function baseDeps(over: Partial<MutationPasteDeps> = {}): MutationPasteDeps {
 
 describe("mutationSetLabel", () => {
   it("prefers the title", () => {
-    expect(mutationSetLabel({ title: "Promotion", row_count: 3 })).toBe("Promotion");
+    expect(
+      mutationSetLabel({ title: "Promotion", rows: [{ field: "rank", op: "replace", value: "Captain" }] }),
+    ).toBe("Promotion");
   });
-  it("falls back to a row count for an untitled set", () => {
-    expect(mutationSetLabel({ title: "", row_count: 1 })).toBe("1 change");
-    expect(mutationSetLabel({ title: "", row_count: 3 })).toBe("3 changes");
+  it("falls back to the sole row's auto-label for an untitled single-row set (the pre-ADR-0095 rule)", () => {
+    expect(mutationSetLabel({ title: "", rows: [{ field: "rank", op: "replace", value: "Captain" }] })).toBe(
+      "rank → Captain",
+    );
+  });
+  it("falls back to a row count for an untitled multi-row set", () => {
+    expect(
+      mutationSetLabel({
+        title: "",
+        rows: [
+          { field: "rank", op: "replace", value: "Captain" },
+          { field: "title", op: "replace", value: "The Wolf" },
+          { field: "eyes", op: "replace", value: "silver" },
+        ],
+      }),
+    ).toBe("3 changes");
   });
   it("is empty for no entry (not yet in the roster)", () => {
     expect(mutationSetLabel(undefined)).toBe("");

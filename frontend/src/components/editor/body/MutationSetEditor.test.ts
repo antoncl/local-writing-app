@@ -77,4 +77,50 @@ describe("MutationSetEditor pinned mode (ADR-0055 §3)", () => {
     await tick();
     expect(saveSpy).toHaveBeenCalledWith(expect.objectContaining({ target_entity: "mira" }));
   });
+
+  it("title is optional — an untitled set still saves, preserving row ids", async () => {
+    const saveSpy = vi.spyOn(api, "saveMutationSetEntry").mockResolvedValue({} as MutationSetEntry);
+    const initial = {
+      id: "set_1",
+      title: "",
+      revision: "r1",
+      entry_type: "mutation_set:mutation_set",
+      target_entry_type: "lore:character",
+      target_entity: "mira",
+      rows: [{ id: "row_1", field: "title", op: "replace", value: "The Wolf" }],
+      source_layer_id: "",
+      source_layer_label: "",
+    } as MutationSetEntry;
+    render(MutationSetEditor, {
+      props: { schema: SCHEMA, loreEntries: [MIRA], initial, onSaved: NOOP, onCancel: NOOP },
+    });
+    const saveButton = screen.getByRole("button", { name: "Save" });
+    expect(saveButton).not.toBeDisabled();
+    await fireEvent.click(saveButton);
+    await tick();
+    expect(saveSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ rows: [{ id: "row_1", field: "title", op: "replace", value: "The Wolf" }] }),
+    );
+  });
+
+  it("a failed save shows the error instead of swallowing it", async () => {
+    vi.spyOn(api, "saveMutationSetEntry").mockRejectedValue(new Error("Row 1 (field rank) is not mutable."));
+    const initial = {
+      id: "set_1",
+      title: "Promotion",
+      revision: "r1",
+      entry_type: "mutation_set:mutation_set",
+      target_entry_type: "lore:character",
+      target_entity: "mira",
+      rows: [{ id: "row_1", field: "title", op: "replace", value: "The Wolf" }],
+      source_layer_id: "",
+      source_layer_label: "",
+    } as MutationSetEntry;
+    render(MutationSetEditor, {
+      props: { schema: SCHEMA, loreEntries: [MIRA], initial, onSaved: NOOP, onCancel: NOOP },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await tick();
+    expect(await screen.findByText("Row 1 (field rank) is not mutable.")).toBeInTheDocument();
+  });
 });

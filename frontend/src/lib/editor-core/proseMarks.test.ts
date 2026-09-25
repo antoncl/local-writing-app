@@ -37,6 +37,7 @@ function summary(over: Partial<MutationSetEntrySummary> = {}): MutationSetEntryS
     target_entry_type: "lore:character",
     target_entity: "mira",
     row_count: 1,
+    rows: [{ id: "r1", field: "rank", op: "replace", value: "Captain" }],
     anchors: [],
     state: "active",
     pin_missing: false,
@@ -65,8 +66,27 @@ describe("the pill's label follows the store (ADR-0095 §1)", () => {
     expect(pillText(editor, "a1")).toBe("⤳ Demotion");
   });
 
-  it("labels an untitled set from its row count", () => {
-    mutationSetEntriesStore.set([summary({ id: "s1", title: "", row_count: 3 })]);
+  it("labels an untitled set with ONE row from that row (ADR-0095 §1's pre-ADR-0095 label rule)", () => {
+    mutationSetEntriesStore.set([summary({ id: "s1", title: "", rows: [{ id: "r1", field: "rank", op: "replace", value: "Captain" }] })]);
+    mutationSetRosterLoadedStore.set(true);
+    const editor = makeEditor();
+    editor.chain().insertContent({ type: "mutation", attrs: { setId: "s1", anchorId: "a1" } }).run();
+
+    expect(pillText(editor, "a1")).toBe("⤳ rank → Captain");
+  });
+
+  it("labels an untitled set with several rows by count", () => {
+    mutationSetEntriesStore.set([
+      summary({
+        id: "s1",
+        title: "",
+        rows: [
+          { id: "r1", field: "rank", op: "replace", value: "Captain" },
+          { id: "r2", field: "title", op: "replace", value: "The Wolf" },
+          { id: "r3", field: "eyes", op: "replace", value: "silver" },
+        ],
+      }),
+    ]);
     mutationSetRosterLoadedStore.set(true);
     const editor = makeEditor();
     editor.chain().insertContent({ type: "mutation", attrs: { setId: "s1", anchorId: "a1" } }).run();

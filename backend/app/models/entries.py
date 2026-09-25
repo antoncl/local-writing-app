@@ -1017,6 +1017,12 @@ class MutationSetEntrySummary(BaseModel):
     # kind-neutral edge machinery (§3), unlike top-level `target_entry_type`.
     target_entity: str = ""
     row_count: int = 0
+    # The set's own rows (ADR-0095 §1's untitled-pill label: "the way an
+    # unnamed unit is labelled today" needs the rows themselves, not just
+    # their count) — carried on the roster summary so the pill, the apply
+    # picker and PinnedSetsPanel can all label an untitled set without a
+    # per-set fetch.
+    rows: list[MutationSetRow] = Field(default_factory=list)
     # ADR-0095 §2: computed from the pin and the anchor scan, never stored.
     # Template = no pin; staged = pin, no anchors; active = pin, ≥1 anchor.
     anchors: list[MutationSetAnchor] = Field(default_factory=list)

@@ -58,13 +58,7 @@
     createMutationMark,
     createMutationCloseMark,
   } from "@/lib/editor-core/proseMarks";
-  import {
-    MutationPasteReconciler,
-    recordMutationClipboard,
-    transactionInsertsMutation,
-  } from "@/lib/editor-core/mutationNodes";
-  import { mutationSetByAnchorIdStore, openEditMutationSet } from "@/lib/stores/mutationSets";
-  import { get } from "svelte/store";
+  import { MutationEditorBridge } from "@/lib/editor-core/mutationEditorBridge";
   import MutationDialogs from "./MutationDialogs.svelte";
   import {
     parseSlashBody,
@@ -93,7 +87,6 @@
   import ProseSelectionToolbar from "./ProseSelectionToolbar.svelte";
   import ProseAIToolbar from "./ProseAIToolbar.svelte";
   import { api } from "@/lib/api";
-  import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import {
@@ -260,9 +253,18 @@
   const MutationMark = createMutationMark();
   const MutationCloseMark = createMutationCloseMark();
 
-  // Paste/cut/copy/drag reconciliation (ADR-0095 §7) — one instance per open
-  // prose body, seeded from each freshly loaded document.
-  const mutationPasteReconciler = new MutationPasteReconciler();
+  // The mutation-anchor bridge (ADR-0095 §1/§6/§7): paste/cut/copy
+  // reconciliation and the pill-click → edit-dialog open, extracted to keep
+  // this file under the size cap (`lib/editor-core/mutationEditorBridge.ts`).
+  // One instance per open prose body, seeded from each freshly loaded
+  // document. `mutationDialogs`/`markdownOffsetAt` are declared further down
+  // this script — safe to close over here, since neither is called until
+  // after the component has finished setting up.
+  const mutationBridge = new MutationEditorBridge({
+    isManuscript: () => documentKind === "manuscript",
+    openEditDialog: (set, anchorId, position) => void mutationDialogs?.openEdit(set, anchorId, position),
+    markdownOffsetAt: (pos) => markdownOffsetAt(pos),
+  });
 
   // ---------- State ----------
   let editorFrame = $state<HTMLDivElement>();
@@ -280,7 +282,6 @@
   let selectionToolbarActions: ToolbarAction[] = $state([]);
   let slashMenu: SlashMenuState = $state({ visible: false, x: 0, y: 0, selectedIndex: 0, mode: "commands", gridRows: 1, gridCols: 1 });
   let openToolbarMenuId: string | null = $state(null);
-  let reconcilingMutationIds = false;
 
   // V2: per-scene continuation cost rollup. Resets when you switch
   // scenes or reload the page. Frontend-only. Bound out as props above.
@@ -398,7 +399,7 @@
     loadedSceneId = sceneId;
     // Re-baseline the paste/cut/copy reconciler (ADR-0095 §7) against the
     // just-loaded document — its own on-disk anchors are never "just pasted".
-    mutationPasteReconciler.seed(editor);
+    mutationBridge.seed(editor);
     todoAnchors.enforceUnique();
     todoAnchors.syncDomState();
     if (!reconcile) {
@@ -901,41 +902,6 @@
   // reached through the bound instance's open* methods.
   let mutationDialogs = $state<MutationDialogs | null>(null);
 
-  // The anchor ids inside the current selection (ADR-0095 §7's cut/copy
-  // ledger) — a plain point selection touches none.
-  function selectedMutationAnchorIds(): string[] {
-    if (!editor) return [];
-    const { from, to } = editor.state.selection;
-    if (from === to) return [];
-    const ids: string[] = [];
-    editor.state.doc.nodesBetween(from, to, (node) => {
-      if (node.type.name === "mutation") {
-        const id = String(node.attrs.anchorId ?? "");
-        if (id) ids.push(id);
-      }
-    });
-    return ids;
-  }
-
-  // Re-entrancy guard lives here (the dispatch re-fires onUpdate); the doc work
-  // is in `mutationPasteReconciler` (ADR-0095 §7).
-  function enforceUniqueMutationIds(transaction?: Transaction) {
-    if (!editor || reconcilingMutationIds) return false;
-    // A pasted/dropped/redone pill only ever arrives via an insert; plain
-    // typing can't, so skip the reconcile walk on the keystroke hot path.
-    // Undefined transaction (non-onUpdate callers) falls through and runs it.
-    if (transaction && !transactionInsertsMutation(transaction)) return false;
-    reconcilingMutationIds = true;
-    const changed = mutationPasteReconciler.reconcile(editor, {
-      isManuscript: () => documentKind === "manuscript",
-      knownProjectAnchorIds: () => new Set(get(mutationSetByAnchorIdStore).keys()),
-      copySet: (setId) => api.copyMutationSet(setId),
-      onNotice: (message) => editorPanes.setError(message),
-    });
-    reconcilingMutationIds = false;
-    return changed;
-  }
-
   // ---------- Editor lifecycle ----------
   function isEmptyTextblock(view: EditorView) {
     const { selection } = view.state;
@@ -1084,7 +1050,7 @@
   // emit one `body-change` event to the parent (NodeEditor) so it can
   // compose its full save payload (title + body + status + ...).
   function handleEditorUpdate(transaction?: Transaction) {
-    if (!enforceUniqueMutationIds(transaction) && !todoAnchors.enforceUnique()) {
+    if (!mutationBridge.enforceUnique(editor, transaction) && !todoAnchors.enforceUnique()) {
       // Skip the body-change emit when a unique-id reconciler made a doc
       // change — its own transaction re-fires onUpdate, so the non-reconciler
       // edits below run on that second pass.
@@ -1134,21 +1100,10 @@
         },
         handleKeyDown: handleEditorKeydown,
         handleClickOn: (_view, pos, node) => {
-          // Click a mutation pill → edit its SET (ADR-0095 §6 reworks this
-          // into the pill's own editing surface; until then this opens the
-          // set editor dialog the Mutations pane already has). A pill with
-          // no set yet (missing/mid-copy) has nothing to open.
-          // C2: ADR-0095 §6's pill-dialog editing (baseline resolved at the
-          // pill's own position, linked-set tells) is not built here.
+          // Click a mutation pill → open its own editing surface, the
+          // `/mutate` dialog in edit mode (ADR-0095 §6), via the bridge.
           if (node.type.name === "mutation") {
-            const setId = String(node.attrs.setId ?? "");
-            if (setId) {
-              void api
-                .getMutationSetEntry(setId)
-                .then((entry) => openEditMutationSet(entry))
-                .catch(() => {});
-            }
-            return true;
+            return mutationBridge.handlePillClick(String(node.attrs.setId ?? ""), String(node.attrs.anchorId ?? ""), pos);
           }
           // Click a close pill → delete it (reopens the interval). It carries no
           // editable fields of its own beyond the record it references.
@@ -1163,22 +1118,12 @@
             onFocus?.();
             return false;
           },
-          // ADR-0095 §7: record the app's own cut/copy BEFORE the browser
-          // clears the selection, so the very next paste can tell "kept" from
-          // "copy" apart. A drag-move needs no entry here (see
-          // MutationPasteReconciler's own note) — only the clipboard path.
           cut: () => {
-            const ids = selectedMutationAnchorIds();
-            recordMutationClipboard("cut", ids);
-            // The delete-only transaction cut produces never runs the
-            // reconciler (it inserts nothing) — forget these ids now so a
-            // paste straight back into THIS pane still reads as "just
-            // arrived" instead of "already known".
-            mutationPasteReconciler.forget(ids);
+            mutationBridge.onCut(editor);
             return false;
           },
           copy: () => {
-            recordMutationClipboard("copy", selectedMutationAnchorIds());
+            mutationBridge.onCopy(editor);
             return false;
           },
         },

@@ -61,6 +61,7 @@ class MutationSetEntriesMixin:
                     target_entry_type=str(front_matter.get("target_entry_type") or ""),
                     target_entity=target_entity,
                     row_count=len(rows),
+                    rows=rows,
                     anchors=anchors,
                     state=self._mutation_set_state(target_entity, anchors),
                     pin_missing=self._mutation_set_pin_missing(index, target_entity),

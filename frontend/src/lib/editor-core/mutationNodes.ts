@@ -6,9 +6,9 @@
 // change. This module keeps the doc-mechanical pieces: minting ids,
 // finding/removing a pill, and reconciling paste/cut/copy/drag (ADR-0095
 // §7). The heavier per-pill AUTHORING (create/edit-through-the-pill, ADR-0095
-// §6) lives behind the `/mutate` dialogs (MutationAuthoringForm et al) —
-// those are rebuilt in C2; `applyMutationUnitDraft` below is a deliberate
-// no-op until then (see its own comment).
+// §6) lives behind the `/mutate` dialogs (MutationAuthoringForm et al), which
+// call `insertAnchor` below after creating/copying the set through the API —
+// a pill's document attrs never carry rows or an entity, only the ids.
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import type { CopyMutationSetResult, MutationMarkerRecord } from "@/lib/types";
@@ -275,14 +275,16 @@ export class MutationPasteReconciler {
 // ---------- Labels ----------
 
 /** A set's pill label (ADR-0095 §1): its title, or — for an untitled set — a
- *  count fallback in the shape the old per-row unit label used ("N
- *  changes"). The roster only carries `row_count`, not the rows themselves,
- *  so (unlike the pre-ADR-0095 label) a single-row untitled set can't show
- *  "field → value" here without a per-pill fetch. */
-export function mutationSetLabel(entry: { title: string; row_count: number } | undefined): string {
+ *  label built from its own rows, exactly the way an unnamed unit was
+ *  labelled pre-ADR-0095 (`mutationUnitGroupLabel`): the sole row's
+ *  auto-label ("field → value") for one row, else "N changes". */
+export function mutationSetLabel(
+  entry: { title: string; rows: { field: string; op: string; value: string }[] } | undefined,
+): string {
   if (!entry) return "";
   if (entry.title) return entry.title;
-  return entry.row_count === 1 ? "1 change" : `${entry.row_count} changes`;
+  if (entry.rows.length === 1) return mutationRecordLabel(entry.rows[0]);
+  return `${entry.rows.length} changes`;
 }
 
 /** Auto-label for one resolved record/row (#58/#65): the set's name if set,
@@ -359,34 +361,14 @@ export async function resolveMutationRevealAnchor(
   }
 }
 
-// ---------- C2: the `/mutate` authoring dialogs' draft shape ----------
+// ---------- Row-diff shapes shared by the authoring form + list-edit diffs ----------
 
-/** One field change inside a mutation unit — the authoring dialog's row
- *  shape, unchanged since #69. */
+/** One field change emitted by a list/item diff (`mutationListEdit.ts`) — the
+ *  same shape a mutation-set row carries, with `op`/`id` still optional the
+ *  way a fresh diff record emits them before it's serialized to the wire. */
 export interface MutationRowDraft {
   id?: string | null;
   field: string;
   op?: string;
   value: string;
 }
-
-/** An authored change from MutationAuthoringForm: one entity, N rows. C2
- *  rebuilds what this becomes (a mutation-SET create/save + `insertAnchor`,
- *  ADR-0095 §6) — kept only as the dialog's own draft shape so it still
- *  compiles. */
-export interface MutationUnitDraft {
-  markerId?: string | null;
-  entity: string;
-  name?: string;
-  group?: string;
-  rows: MutationRowDraft[];
-}
-
-// C2: ADR-0095 §6 rebuilds `/mutate` authoring end-to-end — creating a set
-// (`api.createMutationSetEntry`/`saveMutationSetEntry`) and anchoring it
-// (`insertAnchor` above) rather than writing entity/rows/name straight into
-// the pill, which no longer has attrs for any of them (§1: `{ setId,
-// anchorId }` only). Until that lands this is a deliberate no-op —
-// MutationDialogs/MutationAuthoringForm still compile and close normally,
-// they just don't write a pill.
-export function applyMutationUnitDraft(_editor: Editor, _draft: MutationUnitDraft): void {}

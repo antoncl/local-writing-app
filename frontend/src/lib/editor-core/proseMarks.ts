@@ -118,7 +118,7 @@ function renderAnchorPill(dom: HTMLElement, setId: string, anchorId: string, ros
 // A plain module-level snapshot (kept current by one subscription shared by
 // every pill instance) — cheaper than each NodeView re-deriving the Map from
 // the store on every render, and avoids importing `get()` per node.
-let mutationSetsByIdStoreSnapshot: ReadonlyMap<string, { title: string; row_count: number }> | undefined;
+let mutationSetsByIdStoreSnapshot: ReadonlyMap<string, { title: string; rows: { field: string; op: string; value: string }[] }> | undefined;
 mutationSetsByIdStore.subscribe((byId) => {
   mutationSetsByIdStoreSnapshot = byId;
 });
@@ -260,7 +260,7 @@ export const createMutationCloseMark = () =>
     },
   });
 
-let mutationSetByAnchorIdSnapshot: ReadonlyMap<string, { title: string; row_count: number }> | undefined;
+let mutationSetByAnchorIdSnapshot: ReadonlyMap<string, { title: string; rows: { field: string; op: string; value: string }[] }> | undefined;
 mutationSetByAnchorIdStore.subscribe((byAnchor) => {
   mutationSetByAnchorIdSnapshot = byAnchor;
 });

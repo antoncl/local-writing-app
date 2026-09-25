@@ -67,6 +67,11 @@ export type MutationSetEntrySummary = {
   // metadata entity_ref.
   target_entity: string;
   row_count: number;
+  // The set's own rows (ADR-0095 §1): carried on the roster summary so an
+  // untitled set's pill/apply-picker/PinnedSetsPanel label can be built the
+  // way an unnamed unit was labelled pre-ADR-0095 — "field → value" for one
+  // row, "N changes" for several — without a per-set fetch.
+  rows: MutationSetRow[];
   // ADR-0095 §2: computed from the pin and the anchor scan, never stored.
   anchors: MutationSetAnchor[];
   state: MutationSetState;

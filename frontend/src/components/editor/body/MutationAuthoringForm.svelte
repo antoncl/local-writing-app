@@ -1,11 +1,17 @@
 <script lang="ts">
-  // Authoring/edit form for lore mutations (#33, #56, #69). Composes
+  // Authoring/edit form for lore mutation SETS (ADR-0095 §6). Composes
   // MutationDialogShell + MutationFieldRows — the same chrome and row widget
   // as the Mutations-pane set editor, so authoring a change and authoring a
   // set are one UX: "+ Add field change" rows of (field, op, value).
-  // One submit = ONE mutation unit (ADR-0016): entity + optional name + N
-  // rows → one pill. Edit mode (given `initial`) edits the whole unit —
-  // add/remove/change rows, rename — or deletes it.
+  //
+  // Create mode: on confirm, the SET is created first (via the create API);
+  // only on success does the caller (MutationDialogs) insert its anchor at
+  // the cursor — a failed create inserts nothing (ADR-0095 §6, §7's "no path
+  // leaves an anchor naming nothing" carried into authoring).
+  //
+  // Edit mode (given `initial`, the SET fetched from the store/API): saves
+  // the set — the scene document is never touched. The entity picker is
+  // locked (ADR-0095 §6: "the pill dialog cannot change a set's entity").
   import { untrack } from "svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import MutationDialogShell from "@/components/editor/body/MutationDialogShell.svelte";
@@ -20,8 +26,10 @@
     type MutationRow,
   } from "@/components/editor/body/MutationFieldRows.svelte";
   import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
-  import { api } from "@/lib/api";
-  import { refreshMutationSetEntries, upsertMutationSet } from "@/lib/stores/mutationSets";
+  import { api, HttpError } from "@/lib/api";
+  import { mutationSetLabel } from "@/lib/editor-core/mutationNodes";
+  import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import { upsertMutationSet } from "@/lib/stores/mutationSets";
   import {
     asItemList,
     asMembershipList,
@@ -34,16 +42,14 @@
     type CollectionRecord,
   } from "@/lib/editor-core/mutationListEdit";
   import type {
-    MutationRowDraft,
-    MutationUnitDraft,
-  } from "@/lib/editor-core/mutationNodes";
-  import type {
     EffectiveFieldValue,
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataSchema,
     MetadataValue,
+    MutationSetEntry,
     MutationSetEntrySummary,
+    MutationSetRow,
     PromptEntrySummary,
     StructureDocument,
   } from "@/lib/types";
@@ -56,11 +62,13 @@
     researchStructure = null,
     implicitContextMatcher = null,
     initial = null,
+    anchorId = "",
     presetEntityId = "",
     sceneId = "",
     position = null,
-    onSubmit,
-    onDelete,
+    onCreated,
+    onSaved,
+    onRemoveAnchor,
     onCancel,
   }: {
     loreEntries: LoreEntrySummary[];
@@ -69,7 +77,12 @@
     structure?: StructureDocument | null;
     researchStructure?: StructureDocument | null;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
-    initial?: MutationUnitDraft | null;
+    /** Edit mode: the SET this pill anchors, fetched from the store/API
+     *  (ADR-0095 §6). `null` ⇒ create mode. */
+    initial?: MutationSetEntry | null;
+    /** Edit mode: this pill's own anchor id — the baseline excludes it
+     *  (ADR-0095 §6) and it names the anchor Delete removes. */
+    anchorId?: string;
     /** Pre-selected entity id for create mode (e.g. from `/mutate Alice`). */
     presetEntityId?: string;
     /** The authoring scene — the list-edit baseline resolves here (#71). */
@@ -77,42 +90,53 @@
     /** The scene-markdown char offset the dialog authors at (ADR-0089 §4):
      *  the baseline is the entity's effective state AT this position, not the
      *  end of the scene, so an in-flow `/mutate` sees prior mutations only.
-     *  `null`/undefined resolves to the end of the scene (unchanged for every
-     *  caller that can't compute one — see `markdownOffsetAt`). */
+     *  In edit mode this is the PILL's own position, and the baseline also
+     *  excludes the pill's own anchor (ADR-0095 §6). `null`/undefined
+     *  resolves to the end of the scene. */
     position?: number | null;
-    onSubmit: (draft: MutationUnitDraft) => void;
-    onDelete?: (markerId: string) => void;
+    /** Create mode only: the set was created — insert its anchor. */
+    onCreated?: (setId: string) => void;
+    /** Edit mode only: the set was saved — close the dialog. */
+    onSaved?: () => void;
+    /** Edit mode only: remove this pill's ANCHOR from the scene (the set
+     *  itself stays — ADR-0095 §7). */
+    onRemoveAnchor?: () => void;
     onCancel: () => void;
   } = $props();
 
-  const editing = $derived(Boolean(initial?.markerId));
+  const editing = $derived(Boolean(initial));
 
-  // Form rows carry the unit's row ids through the edit round-trip (#69) so an
-  // unchanged row keeps its id — and with it any close targeting it. A
-  // collection field's records collapse into ONE list-edit row (#71): value is
-  // the composed membership, `baseline` the diff base (also flips
+  // Form rows carry the set's row ids through the edit round-trip (ADR-0095
+  // §3) so an unchanged row keeps its id — and with it any close targeting
+  // it. A collection field's records collapse into ONE list-edit row (#71):
+  // value is the composed membership, `baseline` the diff base (also flips
   // MutationFieldRows into list-edit mode). A reference-keyed list's records
   // (ADR-0089 §5, #2072) collapse the same way into ONE item-edit row: value
   // is the composed items, `itemBaseline` the diff base. Either way,
-  // `collectionRecords` carries the unit's own raw records so an unchanged
+  // `collectionRecords` carries the set's own raw records so an unchanged
   // delta keeps its id on re-save (a keyed row's records also carry `field`,
   // since a member `replace` addresses a token, not the row's own field).
   type FormRow = MutationRow & { id?: string; collectionRecords?: CollectionRecord[] };
 
   // The dialog re-mounts on each open ({#if} in the parent), so capturing the
   // initial prop values once is intentional (untrack silences the lint).
-  let entityId = $state(untrack(() => initial?.entity ?? presetEntityId ?? ""));
+  let entityId = $state(untrack(() => initial?.target_entity ?? presetEntityId ?? ""));
   let rows = $state<FormRow[]>([]);
 
   const entity = $derived(loreEntries.find((e) => e.id === entityId) ?? null);
 
-  // The list-edit baseline (#71, ADR-0017): the entity's EFFECTIVE overrides in
-  // this scene, excluding the edited unit's own rows so the diff can't count
-  // itself. The scene was flushed before the dialog opened (GH-#45 spine), so
-  // the saved index is current. Resolution is at `position` (ADR-0089 §4: the
-  // dialog's own insertion position, when the caller can compute one) — else
-  // end of scene, as before. `null` = still loading — the rows area waits so
-  // every seeded baseline is deterministic.
+  // The set carries its own revision (edit mode) so a save-conflict (409) can
+  // reload it and retry with the fresh one, without discarding the writer's
+  // in-progress edits (ADR-0095 §6: "on 409 reload and tell the writer").
+  let revision = $state(untrack(() => initial?.revision ?? ""));
+
+  // The list-edit baseline (#71, ADR-0017): the entity's EFFECTIVE overrides
+  // in this scene, excluding — in edit mode — THIS PILL'S OWN anchor
+  // (ADR-0095 §6: "the baseline is the state at the pill without this
+  // anchor") so the diff can't count itself. The scene was flushed before the
+  // dialog opened (GH-#45 spine), so the saved index is current. Resolution
+  // is at `position` (ADR-0089 §4) — else end of scene. `null` = still
+  // loading — the rows area waits so every seeded baseline is deterministic.
   let effectiveValues = $state<Record<string, EffectiveFieldValue> | null>(null);
 
   $effect(() => {
@@ -123,9 +147,7 @@
     }
     let cancelled = false;
     effectiveValues = null;
-    const exclude = (initial?.rows ?? [])
-      .map((row) => row.id ?? "")
-      .filter(Boolean) as string[];
+    const exclude = editing && anchorId ? [anchorId] : [];
     api
       .getEntityEffectiveState(id, sceneId, position ?? undefined, exclude)
       .then((res) => {
@@ -234,31 +256,24 @@
   });
 
   // #62 in-flow: apply a saved mutation set, or capture the composed change
-  // as a new reusable set. Both only in create mode. §6: an optional name labels
-  // the change (shared across the co-authored group).
+  // as a new reusable template. Both only in create mode. §6: an optional
+  // name titles the set.
   let mode = $state<"manual" | "apply">("manual");
-  let changeName = $state(untrack(() => initial?.name ?? ""));
+  let changeName = $state(untrack(() => initial?.title ?? ""));
   let saveAsSet = $state(false);
   let allSets = $state<MutationSetEntrySummary[]>([]);
   // Type-scoped picker: only sets whose target matches the picked entity's type.
-  // A pinned set (ADR-0055 §3, `target_entity` set) is offered ONLY for its own
-  // entity — never for a different character of the same type — so applying it
-  // pre-fills the pinned entity rather than mis-targeting; reusable (un-pinned)
-  // sets stay offered for every matching entity, unchanged.
-  // C2: ADR-0095 §6 rebuilds this whole apply flow (a template/staged apply
-  // creates + anchors a set through the backend; an active set offers
-  // Copy/Link). Until then, keep the same "not already active" filter the
-  // old `!placed` guard drew, so this dialog still compiles and shows a
-  // plausible list; it does not yet call `insertAnchor` or `copyMutationSet`.
   const applicableSets = $derived(
     entity
-      ? allSets.filter(
-          (s) =>
-            s.target_entry_type === entity.entry_type &&
-            (!s.target_entity || s.target_entity === entity.id) &&
-            s.state !== "active",
-        )
+      ? allSets.filter((s) => s.target_entry_type === entity.entry_type)
       : [],
+  );
+  const applicableTemplates = $derived(applicableSets.filter((s) => s.state === "template"));
+  const applicableStaged = $derived(
+    applicableSets.filter((s) => s.state === "staged" && s.target_entity === entity?.id),
+  );
+  const applicableActive = $derived(
+    applicableSets.filter((s) => s.state === "active" && s.target_entity === entity?.id),
   );
 
   $effect(() => {
@@ -277,39 +292,107 @@
     };
   });
 
-  async function applySet(setId: string) {
-    if (!entity) return;
-    let full;
+  let applyBusy = $state(false);
+  let applyError = $state("");
+
+  // ADR-0095 §6: applying a saved set first flushes every open scene editor
+  // with unsaved changes and refreshes the roster, so every set's state
+  // (template/staged/active) is current when the picker opens.
+  async function openApplyTab() {
+    mode = "apply";
+    applyError = "";
+    applyBusy = true;
     try {
-      full = await api.getMutationSetEntry(setId);
-    } catch {
-      return;
+      await editorPanes.flushDirtyPanes();
+      const res = await api.listMutationSetEntries();
+      allSets = res.entries;
+    } catch (e) {
+      applyError = e instanceof Error ? e.message : String(e);
+    } finally {
+      applyBusy = false;
     }
-    // Stamp the set as ONE unit named after it (#69) — rows stay individually
-    // editable/closeable after.
-    const unitRows: MutationRowDraft[] = full.rows.map((row) => ({
-      field: row.field,
-      op: row.op || "replace",
-      value: row.value,
-    }));
-    if (unitRows.length === 0) return;
-    // C2: `applyMutationUnitDraft` no longer has a `rows` attr to write these
-    // into (ADR-0095 §1 pill attrs are `{ setId, anchorId }` only) — this
-    // in-flow "apply a saved set" is rebuilt in ADR-0095 §6 to anchor `full`
-    // itself (via `insertAnchor`) rather than stamping its rows into a fresh
-    // unit. Left calling the legacy path so the form still compiles.
-    onSubmit({ entity: entity.id, name: full.title, rows: unitRows });
-    // Placement (the stored `placed` flag) is retired (ADR-0095 §2) — a
-    // set's state is now DERIVED from its anchors, so there is nothing left
-    // to flip here; the roster refresh once the anchor lands is what the
-    // rebuilt §6 flow will do instead.
-    void refreshMutationSetEntries();
+  }
+
+  // Apply a saved set (ADR-0095 §6): a template's rows are copied into a
+  // fresh set pinned to the entity, then anchored; a staged set is anchored
+  // directly (it becomes active); an active set is offered as Copy only in
+  // this slice (Link is a later slice); a set from another layer is always
+  // copied. Every branch flushes open scenes and refreshes the roster first
+  // (below, on tab-open) so every set's state is current.
+  async function applyTemplate(set: MutationSetEntrySummary): Promise<void> {
+    if (!entity || applyBusy) return;
+    applyBusy = true;
+    applyError = "";
+    try {
+      const result = await api.copyMutationSet(set.id, entity.id);
+      upsertMutationSet(result.entry);
+      if (result.dropped_rows.length > 0) {
+        editorPanes.setError(
+          `Applied "${mutationSetLabel(set)}", but left out: ${result.dropped_rows.map((r) => r.field).join(", ")} (no longer valid for this entity).`,
+        );
+      }
+      onCreated?.(result.entry.id);
+    } catch (e) {
+      applyError = e instanceof Error ? e.message : String(e);
+    } finally {
+      applyBusy = false;
+    }
+  }
+
+  function applyStaged(set: MutationSetEntrySummary): void {
+    if (applyBusy) return;
+    // Anchoring the set itself is what makes it active (ADR-0095 §6) —
+    // nothing to write beyond the anchor the caller inserts.
+    onCreated?.(set.id);
+  }
+
+  async function copyActive(set: MutationSetEntrySummary): Promise<void> {
+    if (applyBusy) return;
+    applyBusy = true;
+    applyError = "";
+    try {
+      const result = await api.copyMutationSet(set.id);
+      upsertMutationSet(result.entry);
+      if (result.dropped_rows.length > 0) {
+        editorPanes.setError(
+          `Copied "${mutationSetLabel(set)}", but left out: ${result.dropped_rows.map((r) => r.field).join(", ")} (no longer valid for this entity).`,
+        );
+      }
+      onCreated?.(result.entry.id);
+    } catch (e) {
+      applyError = e instanceof Error ? e.message : String(e);
+    } finally {
+      applyBusy = false;
+    }
+  }
+
+  // ADR-0095 §10: a set from an ancestor layer is always copied, never
+  // anchored directly — `source_layer_id` non-empty means it isn't native to
+  // the open project.
+  function fromAnotherLayer(set: MutationSetEntrySummary): boolean {
+    return set.source_layer_id !== "";
+  }
+
+  function pickApplicable(set: MutationSetEntrySummary): void {
+    // A template — native or from another layer — is always copied pinned to
+    // the entity, then anchored (ADR-0095 §6/§10: applying a template never
+    // anchors it directly, layer or no). Everything else from another layer
+    // is always copied too (never anchored directly), keeping its own pin.
+    if (set.state === "template") {
+      void applyTemplate(set);
+    } else if (fromAnotherLayer(set)) {
+      void copyActive(set);
+    } else if (set.state === "staged") {
+      applyStaged(set);
+    } else {
+      void copyActive(set);
+    }
   }
 
   // Fields scope to the entity's resolved entry type (edit mode included — the
-  // whole unit is editable, #69). This form HAS an entity baseline, so it also
-  // offers a reference-keyed list (ADR-0089 §2/§5) as an item editor — the
-  // one `list` shape the set editor still excludes (it authors a template
+  // whole set is editable, ADR-0095 §6). This form HAS an entity baseline, so
+  // it also offers a reference-keyed list (ADR-0089 §2/§5) as an item editor —
+  // the one `list` shape the set editor still excludes (it authors a template
   // with no entity, so it has no baseline to diff against).
   const fieldOptions = $derived.by((): FieldOption[] =>
     entity ? buildFieldOptions(schema, entity.entry_type, true) : [],
@@ -343,19 +426,25 @@
   }
 
   // An item-edit row's add/replace/remove records against its baseline
-  // (ADR-0089 §5), reusing ids from the unit's own prior records.
-  function itemRowDrafts(row: FormRow): MutationRowDraft[] {
+  // (ADR-0089 §5), reusing ids from the set's own prior records.
+  function itemRowDrafts(row: FormRow): MutationSetRow[] {
     if (row.itemBaseline === undefined) return [];
     const keyed = keyedShapeFor(fieldDefFor(row.field, schema));
     const edited = asItemList(row.value);
-    return keyedListRowsFromEdit(row.field, keyed, row.itemBaseline, edited, row.collectionRecords ?? []);
+    return keyedListRowsFromEdit(row.field, keyed, row.itemBaseline, edited, row.collectionRecords ?? []).map(
+      (r) => ({ id: r.id ?? "", field: r.field, op: r.op ?? "replace", value: r.value }),
+    );
   }
 
-  const canSubmit = $derived(Boolean(entity) && rows.some(rowContributes));
+  let saving = $state(false);
+  let saveError = $state("");
+
+  const canSubmit = $derived(Boolean(entity) && rows.some(rowContributes) && !saving);
 
   function selectEntity(value: string | string[]) {
+    if (editing) return; // ADR-0095 §6: the pill dialog cannot re-pin the set.
     const next = Array.isArray(value) ? (value[0] ?? "") : value;
-    if (next !== entityId && !editing) rows = []; // field scope changes with the type
+    if (next !== entityId) rows = []; // field scope changes with the type
     entityId = next;
   }
 
@@ -395,30 +484,32 @@
     });
   }
 
-  function submit() {
-    if (!entity) return;
-    const unitRows: MutationRowDraft[] = [];
+  // Compose the form's rows into a set's row payload — the same expansion
+  // rules the old per-unit authoring used (#69), now targeting a mutation
+  // SET's rows rather than a marker's.
+  function composeRows(): MutationSetRow[] {
+    const setRows: MutationSetRow[] = [];
     for (const row of rows) {
       // Item-edit rows (ADR-0089 §5): diff the edited items against the
-      // baseline and emit add/replace/remove records into this unit; deltas
-      // unchanged since the last edit keep their record ids.
+      // baseline and emit add/replace/remove records; deltas unchanged
+      // since the last edit keep their record ids.
       if (row.itemBaseline !== undefined) {
-        unitRows.push(...itemRowDrafts(row));
+        setRows.push(...itemRowDrafts(row));
         continue;
       }
-      // List-edit rows (#71): diff the edited membership against the baseline
-      // and emit plain add/remove records into this unit; deltas unchanged
-      // since the last edit keep their record ids.
+      // List-edit rows (#71): diff the edited membership against the
+      // baseline and emit plain add/remove records; deltas unchanged since
+      // the last edit keep their record ids.
       if (row.baseline !== undefined) {
         if (!rowContributes(row)) continue;
-        unitRows.push(
-          ...collectionRowsFromEdit(
-            row.field,
-            row.baseline,
-            asMembershipList(row.value),
-            row.collectionRecords ?? [],
-          ),
-        );
+        for (const r of collectionRowsFromEdit(
+          row.field,
+          row.baseline,
+          asMembershipList(row.value),
+          row.collectionRecords ?? [],
+        )) {
+          setRows.push({ id: r.id ?? "", field: r.field, op: r.op ?? "replace", value: r.value });
+        }
         continue;
       }
       if (!isFilled(row.value)) continue;
@@ -428,7 +519,7 @@
           ? row.op || "replace"
           : "replace";
       // add/remove carry one element each; an array-valued item widget expands
-      // to one row per element (doc §1.2) — all inside this ONE unit (#69).
+      // to one row per element (doc §1.2) — all inside this ONE set (#69).
       // replace carries the whole value. The form row's id survives only a 1:1
       // expansion; fan-out rows are new records and mint fresh ids downstream.
       const values =
@@ -436,40 +527,84 @@
           ? row.value.map((item) => toMarkerString(item))
           : [toMarkerString(row.value)];
       for (const value of values) {
-        unitRows.push({
-          ...(values.length === 1 && row.id ? { id: row.id } : {}),
+        setRows.push({
+          id: values.length === 1 && row.id ? row.id : "",
           field: row.field,
           op,
           value,
         });
       }
     }
-    if (unitRows.length === 0) return;
+    return setRows;
+  }
+
+  // Create mode (ADR-0095 §6): the set is created FIRST; only on success does
+  // the caller insert its anchor — a failed create inserts nothing. Edit mode
+  // saves the set in place; the scene document is never touched.
+  async function submit() {
+    if (!entity || saving) return;
+    const setRows = composeRows();
+    if (setRows.length === 0) return;
     const named = changeName.trim();
-    // Capture (§5.3): also save the composed change as a reusable set — the
-    // entity is dropped (rows + target entry-type only), so it's a template.
-    if (!editing && saveAsSet) {
-      void api
-        .createMutationSetEntry({
-          title: named || "Untitled set",
-          target_entry_type: entity.entry_type,
-          rows: unitRows.map((row) => ({
-            id: row.id ?? "",
-            field: row.field,
-            op: row.op || "replace",
-            value: row.value,
-          })),
-        })
-        .then((created) => upsertMutationSet(created))
-        .catch(() => {});
+    saving = true;
+    saveError = "";
+    try {
+      if (editing && initial) {
+        const saved = await api.saveMutationSetEntry({
+          ...initial,
+          revision,
+          title: named,
+          target_entity: initial.target_entity,
+          target_entry_type: initial.target_entry_type,
+          rows: setRows,
+        });
+        upsertMutationSet(saved);
+        onSaved?.();
+        return;
+      }
+      const created = await api.createMutationSetEntry({
+        title: named,
+        target_entity: entity.id,
+        target_entry_type: entity.entry_type,
+        rows: setRows,
+      });
+      upsertMutationSet(created);
+      // Capture (§6): also save the composed change as a reusable template —
+      // the entity is dropped (rows + target entry-type only). A failure here
+      // is surfaced, never swallowed, but doesn't undo the anchor the writer
+      // is about to get — the app's usual notice mechanism carries it.
+      if (saveAsSet) {
+        void api
+          .createMutationSetEntry({
+            title: named,
+            target_entry_type: entity.entry_type,
+            rows: setRows.map((r) => ({ id: "", field: r.field, op: r.op, value: r.value })),
+          })
+          .then((template) => upsertMutationSet(template))
+          .catch((e) => {
+            editorPanes.setError(
+              `Couldn't save this as a reusable set: ${e instanceof Error ? e.message : e}`,
+            );
+          });
+      }
+      onCreated?.(created.id);
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 409 && editing && initial) {
+        // Reload the set's latest revision so a retry doesn't 409 again — the
+        // writer's own in-progress edits in this form are left as they are.
+        try {
+          const fresh = await api.getMutationSetEntry(initial.id);
+          revision = fresh.revision;
+          saveError = "This set changed elsewhere — reloaded the latest version. Review and save again.";
+        } catch {
+          saveError = e.message;
+        }
+      } else {
+        saveError = e instanceof Error ? e.message : String(e);
+      }
+    } finally {
+      saving = false;
     }
-    onSubmit({
-      markerId: initial?.markerId ?? undefined,
-      entity: entity.id,
-      name: named,
-      group: initial?.group ?? "",
-      rows: unitRows,
-    });
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -483,7 +618,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <MutationDialogShell
-  title={editing ? "Edit mutation" : "Record lore mutation"}
+  title={editing ? "Edit mutation set" : "Record lore mutation"}
   subtitle="The change takes effect here and in every later scene."
   ariaLabel="Record lore mutation"
   onCancel={onCancel}
@@ -498,6 +633,7 @@
       promptEntries={promptEntries}
       structure={structure}
       researchStructure={researchStructure}
+      readOnly={editing}
       onChange={(value) => selectEntity(value)}
     />
   </div>
@@ -505,24 +641,59 @@
   {#if entity && !editing && applicableSets.length > 0}
     <div class="mutation-mode" role="tablist">
       <button type="button" class:active={mode === "manual"} onclick={() => (mode = "manual")}>Set fields manually</button>
-      <button type="button" class:active={mode === "apply"} onclick={() => (mode = "apply")}>Apply a saved set</button>
+      <button type="button" class:active={mode === "apply"} onclick={openApplyTab}>Apply a saved set</button>
     </div>
   {/if}
 
   {#if entity && mode === "apply" && !editing}
-    <ul class="set-list">
-      {#each applicableSets as set (set.id)}
-        <li>
-          <button type="button" class="set-row" onclick={() => applySet(set.id)}>
-            <span class="set-name">{set.title}</span>
-            <span class="set-count">{set.row_count} field{set.row_count === 1 ? "" : "s"}</span>
-          </button>
-        </li>
-      {/each}
-    </ul>
+    {#if applyError}
+      <p class="mutation-error" role="alert">{applyError}</p>
+    {/if}
+    {#if applicableTemplates.length > 0}
+      <p class="set-group-heading">Templates for {schema?.entry_types[entity.entry_type]?.name || entity.entry_type}</p>
+      <ul class="set-list">
+        {#each applicableTemplates as set (set.id)}
+          <li>
+            <button type="button" class="set-row" disabled={applyBusy} onclick={() => pickApplicable(set)}>
+              <span class="set-name">{mutationSetLabel(set)}</span>
+              <span class="set-count">{fromAnotherLayer(set) ? "Copy" : "Apply"}</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    {#if applicableStaged.length > 0}
+      <p class="set-group-heading">{entity.title}'s staged sets</p>
+      <ul class="set-list">
+        {#each applicableStaged as set (set.id)}
+          <li>
+            <button type="button" class="set-row" disabled={applyBusy} onclick={() => pickApplicable(set)}>
+              <span class="set-name">{mutationSetLabel(set)}</span>
+              <span class="set-count">{fromAnotherLayer(set) ? "Copy" : "Place"}</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    {#if applicableActive.length > 0}
+      <p class="set-group-heading">{entity.title}'s active sets</p>
+      <ul class="set-list">
+        {#each applicableActive as set (set.id)}
+          <li>
+            <button type="button" class="set-row" disabled={applyBusy} onclick={() => pickApplicable(set)}>
+              <span class="set-name">{mutationSetLabel(set)}</span>
+              <span class="set-count">Copy</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {:else if entity && !baselineReady}
     <p class="mutation-loading">Loading current values…</p>
   {:else if entity}
+    {#if saveError}
+      <p class="mutation-error" role="alert">{saveError}</p>
+    {/if}
     <MutationFieldRows
       rows={rows}
       schema={schema}
@@ -546,21 +717,21 @@
         id="mutation-change-name"
         class="mutation-name-input"
         value={changeName}
-        placeholder="e.g. Full Moon transformation"
+        placeholder="e.g. Full moon"
         oninput={(e) => (changeName = e.currentTarget.value)}
       />
       {#if !editing}
         <label class="mutation-check">
           <input type="checkbox" checked={saveAsSet} onchange={(e) => (saveAsSet = e.currentTarget.checked)} />
-          <span>Save as a reusable set for {entity.entry_type}</span>
+          <span>Save as a reusable set for {schema?.entry_types[entity.entry_type]?.name || entity.entry_type}</span>
         </label>
       {/if}
     </div>
   {/if}
 
   {#snippet footer()}
-    {#if editing && initial?.markerId}
-      <button type="button" class="danger" onclick={() => onDelete?.(initial.markerId!)}>Delete</button>
+    {#if editing}
+      <button type="button" class="danger" title="Remove from this scene" onclick={() => onRemoveAnchor?.()}>Remove from this scene</button>
     {/if}
     <span class="spacer"></span>
     <button type="button" class="ghost" onclick={onCancel}>Cancel</button>
@@ -588,6 +759,14 @@
     margin: 0 0 12px;
     font-size: var(--fs-md);
     color: var(--text-3);
+  }
+  .mutation-error {
+    margin: 0 0 12px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: color-mix(in oklab, var(--danger) 12%, transparent);
+    color: var(--danger);
+    font-size: var(--fs-sm);
   }
   .mutation-check {
     display: flex;
@@ -619,6 +798,12 @@
     color: var(--text);
     font-weight: 600;
   }
+  .set-group-heading {
+    margin: 0 0 4px;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-3);
+  }
   .set-list {
     list-style: none;
     margin: 0 0 12px;
@@ -644,6 +829,10 @@
   }
   .set-row:hover {
     background: var(--inset);
+  }
+  .set-row:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
   .set-count {
     font-size: var(--fs-sm);

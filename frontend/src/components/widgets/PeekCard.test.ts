@@ -59,6 +59,20 @@ describe("PeekCard — node", () => {
     expect(screen.getByText("27")).toBeInTheDocument();
   });
 
+  // #2227: a long value (a tag list) truncates with an ellipsis on one line;
+  // the full text stays available on hover.
+  it("a summary value carries its full text as a hover title", () => {
+    const tags = "Aetheria, Setting, Elysian, flesh trade, Religion, Techne";
+    render(PeekCard, {
+      props: {
+        model: { ...nodeModel, summary: [{ key: "tags", label: "Tags", text: tags }] },
+        anchor: anchorEl(),
+        on: { open: vi.fn(), close: vi.fn() },
+      },
+    });
+    expect(screen.getByText(tags).getAttribute("title")).toBe(tags);
+  });
+
   it("Open always renders and calls on.open", async () => {
     const open = vi.fn();
     render(PeekCard, { props: { model: nodeModel, anchor: anchorEl(), on: { open, close: vi.fn() } } });

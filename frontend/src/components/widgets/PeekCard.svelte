@@ -149,7 +149,7 @@
         {#each summaryRows as row (row.key)}
           <div class="peek-summary-row">
             <span class="peek-summary-label">{row.label}</span>
-            <span class="peek-summary-value">{row.text}</span>
+            <span class="peek-summary-value" title={row.text}>{row.text}</span>
           </div>
         {/each}
       </div>
@@ -232,12 +232,21 @@
     font-size: var(--fs-xs);
   }
 
+  /* A two-column label/value grid. `minmax(0, 1fr)`, not `1fr`: a `1fr` track
+     never shrinks below its content, so a long `nowrap` value (a tag list)
+     widened the column past the card and the ellipsis never applied (#2227). */
   .peek-summary {
     display: grid;
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr);
     column-gap: var(--sp-2);
     row-gap: 4px;
     font-size: var(--fs-sm);
+  }
+  /* The row wrapper adds no box, so its label and value are the grid's cells —
+     otherwise each whole row was one grid item and rows filled the two
+     columns side by side (#2227). */
+  .peek-summary-row {
+    display: contents;
   }
   .peek-summary-label {
     color: var(--text-3);

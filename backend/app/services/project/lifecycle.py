@@ -60,6 +60,10 @@ from app.services.project.schema_definition_validation import (
     placement_key_fields,
     placement_key_message,
 )
+from app.services.project.schema_unknown_keys import (
+    unknown_key_warning,
+    unknown_schema_keys,
+)
 from app.services.project.tree_configs import MANUSCRIPT_TREE, RESEARCH_TREE, TREES
 
 # A verified project's own structural folders — its guts, never a place a user
@@ -1049,10 +1053,50 @@ class ProjectLifecycleMixin:
             # A declared ancestor that is no longer one — a folder moved, or a
             # typo. Dropped by the walk; surfaced here so it is not silent (#309).
             warnings.extend(self.declared_ancestor_warnings(root))
+            # A key the raw layer YAML declares that no field (schema-wide, on
+            # any nested shape) recognises — e.g. ADR-0089's retired
+            # `picker_config: {kinds: [...]}` (#2217). Every backend model
+            # defaults to `extra="ignore"`, so this would otherwise load
+            # silently with the key just dropped.
+            warnings.extend(self._metadata_schema_unknown_key_warnings(root))
             errors.extend(self._validate_metadata_schema_definition(metadata_schema))
         except (ProjectServiceError, ValueError) as exc:
             errors.append(f"Invalid metadata schema: {exc}")
         return metadata_schema, warnings, errors
+
+    def _metadata_schema_unknown_key_warnings(self, root: Path) -> list[str]:
+        """One warning per unknown key across every schema layer that exists
+        in this project's chain (#2217). Reads each layer's raw YAML directly
+        — a second read past the merge cache — since the merge is exactly the
+        place an unrecognised key already vanished; walking the merged
+        `MetadataSchema` instead would see nothing to report."""
+        base_folder = self._metadata_schema_base_folder(root)
+        warnings: list[str] = []
+        for path in self._metadata_schema_layer_paths(root):
+            if not path.exists():
+                continue
+            try:
+                layer_data = self._read_metadata_schema_layer(path)
+            except ProjectServiceError:
+                continue  # already surfaced as a read/definition error above
+            label = self._schema_layer_display_path(path, root, base_folder)
+            for dotted_path, key in unknown_schema_keys(MetadataSchema, layer_data):
+                warnings.append(unknown_key_warning(label, dotted_path, key))
+        return warnings
+
+    def _schema_layer_display_path(self, path: Path, root: Path, base_folder: Path | None) -> str:
+        """`path` relative to the machine projects folder when it is under
+        one (an ancestor layer may sit above `root`), else relative to the
+        project root, else the absolute path as a last resort."""
+        resolved = path.resolve()
+        for anchor in (base_folder, root):
+            if anchor is None:
+                continue
+            try:
+                return resolved.relative_to(anchor.resolve()).as_posix()
+            except ValueError:
+                continue
+        return str(path)
 
     def _validate_scene_entries(
         self, node_index: NodeIndex, metadata_schema: MetadataSchema | None

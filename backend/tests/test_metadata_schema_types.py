@@ -469,5 +469,50 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         self.assertEqual(note.opens_in, "dialog")
 
 
+class UnknownSchemaKeyWarningTests(MetadataValidationBase):
+    """#2217: a hand-edited layer with a typo'd/retired key warns, never
+    rejects — `validate_project` stays `valid` and the schema still loads."""
+
+    def test_unknown_keys_warn_without_failing_validation(self) -> None:
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "fields": {
+                    "mood": {
+                        "name": "Mood",
+                        "type": "select",
+                        "optoins": ["tense", "calm"],
+                    },
+                    "companion": {
+                        "name": "Companion",
+                        "type": "entity_ref",
+                        "picker_config": {"kinds": ["lore"]},
+                    },
+                },
+            },
+        )
+        result = self.service.validate_project()
+        self.assertTrue(result.valid)
+        self.assertTrue(
+            any(
+                "fields.mood has an unknown key `optoins`" in w
+                for w in result.warnings
+            )
+        )
+        self.assertTrue(
+            any(
+                "fields.companion.picker_config has an unknown key `kinds`" in w
+                and "Did you mean `sources`?" in w
+                for w in result.warnings
+            )
+        )
+        # Nothing rejected the load — the field (minus the unknown key) is
+        # still in the effective schema.
+        schema = self.service.read_metadata_schema()
+        self.assertIn("mood", schema.fields)
+        self.assertIn("companion", schema.fields)
+
+
 if __name__ == "__main__":
     unittest.main()

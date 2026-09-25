@@ -53,6 +53,19 @@ export interface AnchoredPopoverParams {
   matchWidth?: boolean;
 }
 
+/** The rect to position off. A `display: contents` anchor (a hover wrapper that
+ *  deliberately adds no layout box, e.g. ReferenceListTab's `.ref-row-anchor`)
+ *  measures as all zeros, which would park the popover in the viewport's
+ *  top-left corner (#2225); measure its first child that has a box instead. */
+export function anchorRect(anchor: HTMLElement): DOMRect {
+  if (getComputedStyle(anchor).display !== "contents") return anchor.getBoundingClientRect();
+  for (const child of Array.from(anchor.children)) {
+    const rect = child.getBoundingClientRect();
+    if (rect.width > 0 || rect.height > 0) return rect;
+  }
+  return anchor.getBoundingClientRect();
+}
+
 export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams) {
   let current = params;
   // Structural, not cosmetic: fixed positioning is what lets the portaled node
@@ -76,7 +89,7 @@ export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams
     // its last real position (review, #1803).
     if (!anchor.isConnected) return;
     const gap = current.gap ?? 6;
-    const r = anchor.getBoundingClientRect();
+    const r = anchorRect(anchor);
     // Applied before the offsetWidth read below so the measured width already
     // includes the floor (#1587); re-applied on every reposition since the
     // anchor can re-render wider after the popover first opened.

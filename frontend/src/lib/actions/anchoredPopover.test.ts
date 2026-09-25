@@ -65,6 +65,24 @@ describe("anchoredPopover", () => {
     handle.destroy();
   });
 
+  it("positions off the first boxed child of a display:contents anchor, not (0, gap) (#2225)", () => {
+    // ReferenceListTab's hover wrapper adds no layout box; its own rect is all
+    // zeros, which parked the peek card in the viewport's top-left corner.
+    const anchor = document.createElement("div");
+    anchor.style.display = "contents";
+    const row = document.createElement("div");
+    anchor.appendChild(row);
+    const pop = document.createElement("div");
+    document.body.append(anchor, pop);
+    row.getBoundingClientRect = () =>
+      ({ left: 300, right: 500, top: 200, bottom: 240, width: 200, height: 40, x: 300, y: 200, toJSON: () => ({}) }) as DOMRect;
+
+    const handle = anchoredPopover(pop, { anchor, gap: 6 });
+    expect(pop.style.left).toBe("300px");
+    expect(pop.style.top).toBe("246px");
+    handle.destroy();
+  });
+
   // #1586/#1587: the two options SwatchPicker/ColoredSelect/the schema
   // type-grid needed to retire their own inline rect-anchoring copies.
   // happy-dom reports zero rects and zero offsetWidth, so both are stubbed.

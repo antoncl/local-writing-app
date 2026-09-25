@@ -284,6 +284,10 @@
     const added = [...new Set(newIds.filter((id) => !currentKeys.has(id)))];
     const appended = added.map((id) => ({ [keyMember]: id }) as MetadataValue);
     on.change([...kept, ...appended]);
+    // #2218: a freshly added item holds only its key, so open its editor at
+    // once — the other members are typed as part of adding (ADR-0089 journey
+    // step 2: "Tomas, kinship, 'estranged'").
+    if (added.length > 0 && hasOtherMembers) openItemId = added[added.length - 1];
   }
 
   function removeId(id: string) {
@@ -417,6 +421,11 @@
   function toggleItemEditor(id: string) {
     openItemId = openItemId === id ? null : id;
   }
+  // Whether an item has anything to edit beyond its key (#2218) — only then
+  // does an empty detail read "Add details…" and does adding open the editor.
+  const hasOtherMembers = $derived(
+    !!model.keyMember && (model.field.item_members ?? []).some((m) => m.key !== model.keyMember),
+  );
   const itemDocumentKind = $derived((model.schema?.entry_types[model.entryType]?.kind ?? "lore") as DocumentKind);
 
   // --- Scroll-position memory (#2013) --------------------------------------
@@ -575,7 +584,7 @@
             aria-expanded={openItemId === node.id}
             aria-label={`${openItemId === node.id ? "Collapse" : "Edit"} ${node.title}`}
             onclick={() => toggleItemEditor(node.id)}
-          >{#if detail}<small>{detail}</small>{/if}{#if entry?.mutated}<span class="ref-item-mutated" title="Changed by here">⤳</span>{/if}</button>
+          >{#if detail}<small>{detail}</small>{:else if hasOtherMembers}<small class="ref-item-add-details">Add details…</small>{/if}{#if entry?.mutated}<span class="ref-item-mutated" title="Changed by here">⤳</span>{/if}</button>
         {:else if detail}
           <small>{detail}{#if entry?.mutated}<span class="ref-item-mutated" title="Changed by here">⤳</span>{/if}</small>
         {/if}
@@ -727,6 +736,12 @@
   }
   .ref-item-detail-toggle:hover :global(small) {
     color: var(--text-2);
+  }
+  /* #2218: the opener for an item whose members are all empty — without it
+     the toggle has no content and collapses to nothing. */
+  .ref-item-add-details {
+    color: var(--text-3);
+    font-style: italic;
   }
   .ref-item-detail-toggle:focus-visible {
     outline: 2px solid var(--accent);

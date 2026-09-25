@@ -532,6 +532,19 @@ class MutationSetStateTests(unittest.TestCase):
         self.assertEqual(len(second.get(set_id, [])), 1)
         self.assertEqual(len(second.get(other_id, [])), 1)
 
+    def test_anchors_by_set_omits_an_anchor_with_an_empty_set_id(self) -> None:
+        # A pill whose copy is in flight or failed serializes with no set id
+        # yet (`<!-- mutate:set=;id=... -->`, review fix #2236) — it
+        # contributes nothing to `anchors_by_set`.
+        scene = self.service.create_scene(CreateSceneRequest(title="Chapter One"))
+        self.service.save_scene(
+            scene.id,
+            SaveSceneRequest(title="Chapter One", body=render_anchor("", "anchor1")),
+        )
+        by_set = self.service.anchors_by_set()
+        self.assertNotIn("", by_set)
+        self.assertNotIn("anchor1", [a.anchor_id for anchors in by_set.values() for a in anchors])
+
 
 class MutationSetCopyTests(unittest.TestCase):
     """ADR-0095 §6: copying a set into the open project — row ids kept,

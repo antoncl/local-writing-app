@@ -148,6 +148,12 @@ class MissingAndUnusableSetTests(_AnchorFixture):
         scene = self._new_scene("Chapter One", render_anchor(set_id, "a1"))
         self.assertEqual(self.service.effective_state(self.honor, scene), {})
 
+    def test_empty_set_id_contributes_nothing(self) -> None:
+        # A pill whose copy is in flight or failed serializes with no set id
+        # yet (review fix #2236): `<!-- mutate:set=;id=a1 -->`.
+        scene = self._new_scene("Chapter One", render_anchor("", "a1"))
+        self.assertEqual(self.service.effective_state(self.honor, scene), {})
+
 
 class DuplicateAnchorTests(_AnchorFixture):
     def test_duplicate_anchor_id_only_the_first_in_manuscript_order_resolves(self) -> None:
@@ -249,6 +255,14 @@ class VerifyWarningTests(_AnchorFixture):
         self._new_scene("Chapter One", render_anchor(set_id, "a1"))
         warnings = self.service.validate_project().warnings
         self.assertTrue(any("entity no longer exists" in w for w in warnings), warnings)
+
+    def test_empty_set_id_warns(self) -> None:
+        # A pill whose copy is in flight or failed (review fix #2236).
+        self._new_scene("Chapter One", render_anchor("", "a1"))
+        warnings = self.service.validate_project().warnings
+        self.assertTrue(
+            any("names no mutation set" in w and "did not complete" in w for w in warnings), warnings
+        )
 
     def test_unpinned_set_warns(self) -> None:
         template = self.service.create_mutation_set_entry(

@@ -258,7 +258,15 @@ export class MutationPasteReconciler {
         if (pos === null) return; // the pill was deleted meanwhile — nothing to fill in
         const node = editor.state.doc.nodeAt(pos);
         if (!node) return;
-        editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, setId: result.entry.id }));
+        // Not an undo step (review fix, #2236): the paste that inserted the
+        // pill is already the undo unit. Without this, one undo after the
+        // copy resolves leaves an intermediate missing-set pill instead of
+        // removing the pasted pill outright.
+        editor.view.dispatch(
+          editor.state.tr
+            .setNodeMarkup(pos, undefined, { ...node.attrs, setId: result.entry.id })
+            .setMeta("addToHistory", false),
+        );
         this.#known.add(job.newAnchorId);
         if (result.dropped_rows.length > 0) {
           deps.onNotice?.(

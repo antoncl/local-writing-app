@@ -411,6 +411,10 @@ class LoreMutationValidationMixin:
     def _validate_anchor_set(
         scene_id: str, anchor_id: str, set_id: str, node_index: object, sets: dict[str, _SetView]
     ) -> list[str]:
+        if not set_id:
+            # A pill whose copy is in flight or failed (review fix #2236):
+            # names no set, contributes nothing to resolution.
+            return [f"A change in {scene_id} names no mutation set — its copy did not complete; delete the pill."]
         view = sets.get(set_id)
         if view is not None:
             if not view.entity_id:

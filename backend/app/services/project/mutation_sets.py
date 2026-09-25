@@ -92,7 +92,8 @@ class MutationSetEntriesMixin:
         return self.read_mutation_set_entry(entry_id)
 
     def read_mutation_set_entry(self, entry_id: str) -> MutationSetEntry:
-        index_entry = self._build_node_index().by_id.get(entry_id)
+        index = self._build_node_index()  # built once, reused below (review fix #2236)
+        index_entry = index.by_id.get(entry_id)
         if index_entry is not None and index_entry.kind == "mutation_set":
             path = index_entry.path
         else:
@@ -111,7 +112,7 @@ class MutationSetEntriesMixin:
             rows=self._parse_mutation_set_rows(front_matter.get("rows")),
             anchors=anchors,
             state=self._mutation_set_state(target_entity, anchors),
-            pin_missing=self._mutation_set_pin_missing(self._build_node_index(), target_entity),
+            pin_missing=self._mutation_set_pin_missing(index, target_entity),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
         )

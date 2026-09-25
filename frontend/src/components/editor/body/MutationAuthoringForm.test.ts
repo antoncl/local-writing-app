@@ -11,10 +11,12 @@ import { render, screen, fireEvent } from "@/lib/test/component";
 import MutationAuthoringForm from "./MutationAuthoringForm.svelte";
 import { api } from "@/lib/api";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+import { metadataSchemaLayersStore } from "@/lib/stores/schema";
 import { encodeItem } from "@/lib/editor-core/mutationListEdit";
 import type {
   LoreEntrySummary,
   MetadataSchema,
+  MetadataSchemaLayer,
   MutationSetEntry,
   MutationSetEntryList,
   MutationSetEntrySummary,
@@ -70,7 +72,10 @@ function fullSet(over: Partial<MutationSetEntry> = {}): MutationSetEntry {
   };
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  metadataSchemaLayersStore.set([]);
+});
 
 describe("MutationAuthoringForm — create (ADR-0095 §6)", () => {
   it("creates the set BEFORE calling onCreated (the caller inserts the anchor only after)", async () => {
@@ -270,6 +275,13 @@ describe("MutationAuthoringForm — apply a saved set (ADR-0095 §6)", () => {
   }
 
   async function openApplyTab() {
+    // Own project layer, distinct from `layered1`'s "series-layer" (#2236
+    // review fix: `fromAnotherLayer` compares against this, not against
+    // non-empty `source_layer_id`) — the native entries above default to
+    // `source_layer_id: ""`, which never counts as inherited regardless.
+    metadataSchemaLayersStore.set([
+      { id: "book", label: "Book", folder_path: "", schema_path: "", exists: true },
+    ] satisfies MetadataSchemaLayer[]);
     vi.spyOn(api, "getEntityEffectiveState").mockResolvedValue({
       entity_id: "mira",
       scene_id: "scene1",
@@ -385,6 +397,91 @@ describe("MutationAuthoringForm — apply a saved set (ADR-0095 §6)", () => {
     await tick();
 
     expect(setError).toHaveBeenCalledWith(expect.stringContaining("rank"));
+  });
+});
+
+describe("MutationAuthoringForm — foreign vs native layer for a staged set (review fix, ADR-0095 §10)", () => {
+  // The backend stamps EVERY node with its layer id, the open project's own
+  // included, so "foreign" must compare against the open project's own layer
+  // id, not test for a non-empty `source_layer_id`.
+  function setupLayers(): void {
+    metadataSchemaLayersStore.set([
+      { id: "root", label: "World", folder_path: "", schema_path: "", exists: true },
+      { id: "book", label: "Book", folder_path: "", schema_path: "", exists: true },
+    ] satisfies MetadataSchemaLayer[]);
+  }
+
+  async function openApplyTabWith(entries: MutationSetEntrySummary[]) {
+    setupLayers();
+    vi.spyOn(api, "getEntityEffectiveState").mockResolvedValue({
+      entity_id: "mira",
+      scene_id: "scene1",
+      position: null,
+      values: {},
+    });
+    vi.spyOn(api, "listMutationSetEntries").mockResolvedValue({ entries } as MutationSetEntryList);
+    vi.spyOn(editorPanes, "flushDirtyPanes").mockResolvedValue(true);
+    const onCreated = vi.fn();
+    render(MutationAuthoringForm, {
+      props: {
+        loreEntries: [lore("mira", "Mira")],
+        schema: SCHEMA,
+        presetEntityId: "mira",
+        sceneId: "scene1",
+        onCreated,
+        onCancel: NOOP,
+      },
+    });
+    await tick();
+    await tick();
+    await fireEvent.click(screen.getByRole("button", { name: "Apply a saved set" }));
+    await tick();
+    await tick();
+    return onCreated;
+  }
+
+  it("a staged set whose source_layer_id equals the project's own layer id is anchored as itself (no copy)", async () => {
+    const copySpy = vi.spyOn(api, "copyMutationSet");
+    const onCreated = await openApplyTabWith([
+      setSummary({
+        id: "staged-own",
+        title: "Mira's scar",
+        state: "staged",
+        target_entity: "mira",
+        source_layer_id: "book",
+      }),
+    ]);
+
+    await fireEvent.click(screen.getByRole("button", { name: /Mira's scar/ }));
+    await tick();
+
+    expect(copySpy).not.toHaveBeenCalled();
+    expect(onCreated).toHaveBeenCalledWith("staged-own");
+  });
+
+  it("a staged set whose source_layer_id differs from the project's own layer id is copied", async () => {
+    const copySpy = vi.spyOn(api, "copyMutationSet").mockResolvedValue({
+      entry: fullSet({ id: "staged-foreign-copy" }),
+      dropped_rows: [],
+    });
+    const onCreated = await openApplyTabWith([
+      setSummary({
+        id: "staged-foreign",
+        title: "Mira's tattoo",
+        state: "staged",
+        target_entity: "mira",
+        source_layer_id: "root",
+      }),
+    ]);
+
+    await fireEvent.click(screen.getByRole("button", { name: /Mira's tattoo/ }));
+    await tick();
+    await tick();
+
+    // Already pinned (unlike a template) — copyActive copies as-is, no
+    // separate re-pin argument (matches the native "active set" copy path).
+    expect(copySpy).toHaveBeenCalledWith("staged-foreign");
+    expect(onCreated).toHaveBeenCalledWith("staged-foreign-copy");
   });
 });
 

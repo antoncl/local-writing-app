@@ -30,6 +30,8 @@
   import { mutationSetLabel } from "@/lib/editor-core/mutationNodes";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { upsertMutationSet } from "@/lib/stores/mutationSets";
+  import { projectLayerIdStore } from "@/lib/stores/schema";
+  import { isInherited } from "@/lib/utils/provenance";
   import {
     asItemList,
     asMembershipList,
@@ -367,10 +369,12 @@
   }
 
   // ADR-0095 §10: a set from an ancestor layer is always copied, never
-  // anchored directly — `source_layer_id` non-empty means it isn't native to
-  // the open project.
+  // anchored directly. The backend stamps every node with its layer id, the
+  // open project's own included (#313), so this compares against the open
+  // project's own layer id — same isInherited/projectLayerIdStore read as
+  // Mutations.svelte's isPromotable — rather than testing non-empty.
   function fromAnotherLayer(set: MutationSetEntrySummary): boolean {
-    return set.source_layer_id !== "";
+    return isInherited({ source_layer_id: set.source_layer_id }, $projectLayerIdStore);
   }
 
   function pickApplicable(set: MutationSetEntrySummary): void {

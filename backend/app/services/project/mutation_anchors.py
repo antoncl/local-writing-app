@@ -22,7 +22,13 @@ import hashlib
 import re
 
 MUTATION_ANCHOR_PATTERN = re.compile(
-    r"<!--\s*mutate:set=(?P<set_id>[A-Za-z0-9_-]+);id=(?P<id>[A-Za-z0-9_-]+)\s*-->",
+    # `set_id` allows empty (`*`, not `+`): a pill whose copy is in flight or
+    # failed serializes with no set id yet (`mutationNodes.ts`'s `#runCopyJob`;
+    # `markdown.ts`'s own pattern already allows it). Such an anchor is caught
+    # here so it round-trips (converter idempotence, restore dedupe,
+    # validation) rather than falling through unmatched — resolution and
+    # `anchors_by_set` then skip it explicitly (it names no set).
+    r"<!--\s*mutate:set=(?P<set_id>[A-Za-z0-9_-]*);id=(?P<id>[A-Za-z0-9_-]+)\s*-->",
 )
 
 MUTATION_ANCHOR_CLOSE_PATTERN = re.compile(

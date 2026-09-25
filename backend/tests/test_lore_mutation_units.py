@@ -25,7 +25,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
-from mutation_helpers import save_scenes_with_mutations
+from mutation_helpers import save_scenes_with_mutations, scan_scene_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -98,7 +98,7 @@ class MutationUnitTestBase(unittest.TestCase):
         # legacy id as both the anchor id and the row id, so every existing
         # `markers["r1"]`-style lookup below still resolves.
         scene = self.service.read_scene(self.scene_id)
-        return {m.row_id: m for m in self.service._scan_scene_mutations(scene)}
+        return {m.row_id: m for m in scan_scene_mutations(self.service, scene)}
 
     def _body(self) -> str:
         return self.service.read_scene(self.scene_id).body
@@ -157,7 +157,7 @@ class CarrierScanTests(MutationUnitTestBase):
             f"Later. {self._carrier()}"
         )
         scene = self.service.read_scene(self.scene_id)
-        ids = [m.row_id for m in self.service._scan_scene_mutations(scene)]
+        ids = [m.row_id for m in scan_scene_mutations(self.service, scene)]
         self.assertEqual(ids, ["m0", "r1", "r2"])
 
     def test_carrier_row_with_op_parses(self) -> None:

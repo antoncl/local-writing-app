@@ -27,8 +27,15 @@ from app.models import (
     SaveSceneRequest,
     UpsertMetadataFieldRequest,
 )
-from app.services.migrations import ChainContext, read_project_version
-from app.services.migrations_mutation_anchors import migrate_layer_mutation_anchors
+from app.services.migrations import CURRENT_VERSION, ChainContext, read_project_version
+from app.services.migrations_mutation_anchors import (
+    _convert_scenes,
+    _match_placed_sets,
+    _mint_row_ids,
+    _scene_paths_by_id,
+    _seed_entity_types,
+    migrate_layer_mutation_anchors,
+)
 from app.services.project.mutation_anchors import derive_anchor_id, derive_set_id
 from app.services.project_service import ProjectService
 
@@ -380,6 +387,133 @@ class _FlatLayerTests(unittest.TestCase):
         self.assertNotIn("placed", placed_front)
         self.assertEqual(placed_front["title"], "Unrelated")
 
+    def test_partial_run_crash_right_after_placed_set_match_completes_on_rerun(self) -> None:
+        """Simulates a crash right after `_match_placed_sets` (review fix
+        #2236): call the steps up to there directly, not the body rewrite —
+        the scene body is still legacy-shaped and the placed file is already
+        gone. A full re-run then finishes: the scene body converts, the
+        chat's `staged_set` still names the converted set, and there is no
+        staged duplicate left over."""
+        body = "<!-- mutate:entity=honor;field=rank;value=Captain;id=m1 -->"
+        _write_scene(self.root / "scenes", "s1", body)
+        placed_id = "mutation_set_placed1"
+        _write_set(
+            self.root / "mutation-sets",
+            placed_id,
+            {
+                "title": "Promotion",
+                "placed": True,
+                "target_entry_type": "lore:character",
+                "metadata": {"target_entity": "honor"},
+                "rows": [{"id": "row_x", "field": "rank", "op": "replace", "value": "Captain"}],
+            },
+        )
+        chat_folder = self.root / "chats"
+        _write_text(
+            chat_folder / "chat1.md",
+            "---\n"
+            + yaml.safe_dump(
+                {
+                    "id": "chat1",
+                    "title": "Chat",
+                    "entry_type": "chat:chat_session",
+                    "metadata": {"staged_set": placed_id},
+                },
+                sort_keys=False,
+            )
+            + "---\n\n",
+        )
+
+        # The steps up to (and including) `_match_placed_sets` — where the
+        # crash is simulated, before `_rewrite_scene_bodies` runs.
+        ctx = ChainContext()
+        _seed_entity_types(self.root, ctx)
+        _mint_row_ids(self.root)
+        paths_by_id = _scene_paths_by_id(self.root)
+        converted = _convert_scenes(self.root, ctx, paths_by_id)
+        _match_placed_sets(self.root, converted)
+
+        scene_path = self.root / "scenes" / "s1.md"
+        _, mid_body = _read(scene_path)
+        self.assertIn("mutate:entity=", mid_body)  # "crash": body not yet rewritten
+        self.assertFalse((self.root / "mutation-sets" / f"{placed_id}.md").exists())
+
+        converted_id = derive_set_id("m1")
+        self._migrate()  # a fresh process resuming would use a fresh ChainContext
+
+        _, new_body = _read(scene_path)
+        self.assertIn("mutate:set=", new_body)
+        self.assertNotIn("mutate:entity=", new_body)
+        self.assertFalse((self.root / "mutation-sets" / f"{placed_id}.md").exists())
+        converted_front, _ = _read(self._set_path(converted_id))
+        self.assertEqual(converted_front["title"], "Promotion")
+        chat_front, _ = _read(chat_folder / "chat1.md")
+        self.assertEqual(chat_front["metadata"]["staged_set"], converted_id)
+        remaining = sorted(p.name for p in (self.root / "mutation-sets").glob("*.md"))
+        self.assertEqual(remaining, [f"{converted_id}.md"])  # no staged duplicate
+
+    def test_partial_run_crash_mid_match_after_reference_rewrite_completes_on_rerun(self) -> None:
+        """The reverse partial (review fix #2236): a crash inside
+        `_match_placed_sets`, between `_rewrite_id_everywhere` and the
+        placed file's `unlink` — the placed file's OWN `id:` has already been
+        rewritten to the winner's id (it's one of `_layer_documents`'s
+        targets too), but the file itself, its `placed: True` and the scene
+        body are all still on disk exactly as before the rewrite. A full
+        re-run still finishes cleanly."""
+        body = "<!-- mutate:entity=honor;field=rank;value=Captain;id=m1 -->"
+        _write_scene(self.root / "scenes", "s1", body)
+        converted_id = derive_set_id("m1")
+        _write_set(
+            self.root / "mutation-sets",
+            converted_id,
+            {
+                "title": "Promotion",
+                "target_entry_type": "lore:character",
+                "metadata": {"target_entity": "honor"},
+                "rows": [{"id": "m1", "field": "rank", "op": "replace", "value": "Captain"}],
+            },
+        )
+        placed_path = _write_set(
+            self.root / "mutation-sets",
+            "mutation_set_placed1",
+            {
+                "id": converted_id,  # already rewritten by _rewrite_id_everywhere
+                "title": "Promotion",
+                "placed": True,
+                "target_entry_type": "lore:character",
+                "metadata": {"target_entity": "honor"},
+                "rows": [{"id": "row_x", "field": "rank", "op": "replace", "value": "Captain"}],
+            },
+        )
+        chat_folder = self.root / "chats"
+        _write_text(
+            chat_folder / "chat1.md",
+            "---\n"
+            + yaml.safe_dump(
+                {
+                    "id": "chat1",
+                    "title": "Chat",
+                    "entry_type": "chat:chat_session",
+                    "metadata": {"staged_set": converted_id},  # already rewritten too
+                },
+                sort_keys=False,
+            )
+            + "---\n\n",
+        )
+
+        self._migrate()
+
+        self.assertFalse(placed_path.exists())
+        remaining = sorted(p.name for p in (self.root / "mutation-sets").glob("*.md"))
+        self.assertEqual(remaining, [f"{converted_id}.md"])
+        converted_front, _ = _read(self._set_path(converted_id))
+        self.assertEqual(converted_front["title"], "Promotion")
+        self.assertNotIn("placed", converted_front)
+        _, new_body = _read(self.root / "scenes" / "s1.md")
+        self.assertIn("mutate:set=", new_body)
+        chat_front, _ = _read(chat_folder / "chat1.md")
+        self.assertEqual(chat_front["metadata"]["staged_set"], converted_id)
+
     def test_placed_flag_dropped_from_every_set_regardless_of_scenes(self) -> None:
         set_id = "mutation_set_template1"
         _write_set(self.root / "mutation-sets", set_id, {"placed": True, "rows": []})
@@ -432,6 +566,23 @@ class _ChainEntityTypeTests(unittest.TestCase):
         ProjectService.opened_at(self.book)
 
         self.assertEqual(read_project_version(self.book), 14)
+        set_id = derive_set_id("m1")
+        front, _ = _read(self.book / "mutation-sets" / f"{set_id}.md")
+        self.assertEqual(front["target_entry_type"], "lore:character")
+        self.assertEqual(front["metadata"]["target_entity"], self.mira)
+
+    def test_ancestor_lore_entry_resolves_when_the_ancestor_is_already_at_v14(self) -> None:
+        """The series is already at CURRENT_VERSION when the book opens — its
+        own chain step never runs (`migration_runner._run_migrations` skips
+        an up-to-date layer), so it never calls `_seed_entity_types` for its
+        own lore. The book's own step must still see Mira's type by reading
+        the series' lore folder directly (review fix #2236, ADR §12 step 0)."""
+        self._rollback(self.series, CURRENT_VERSION)  # undo setUp's rollback
+
+        ProjectService.opened_at(self.book)
+
+        self.assertEqual(read_project_version(self.book), 14)
+        self.assertEqual(read_project_version(self.series), CURRENT_VERSION)
         set_id = derive_set_id("m1")
         front, _ = _read(self.book / "mutation-sets" / f"{set_id}.md")
         self.assertEqual(front["target_entry_type"], "lore:character")

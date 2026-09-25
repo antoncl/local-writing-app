@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 
 from app.services import migrations
+from app.services.migrations_mutation_anchors import split_front_matter_text
 from app.services.project.legacy_mutation_markers import convert_restored_scene
 from app.services.project.mutation_anchors import (
     MUTATION_ANCHOR_CLOSE_PATTERN,
@@ -23,27 +24,6 @@ from app.services.project.mutation_anchors import (
     render_anchor,
     render_close,
 )
-
-
-def split_snapshot_text(text: str) -> tuple[str, str] | None:
-    """`(header including both --- delimiters and the exact separator before
-    the body, body)`, or `None` when `text` has no front matter. The header is
-    kept as raw text, not re-serialised, so a caller that only changes the
-    body (the byte-exact restore branch, ADR-0043) can splice it back and
-    leave the front matter byte-identical when nothing else changed.
-    Line-based (mirrors `migrations_mutation_anchors._split_document`), so a
-    stored snapshot's real `\\r\\n` line endings (Windows — `atomic_write_text`
-    writes through a text-mode handle) still locate the closing delimiter."""
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].rstrip("\r\n") != "---":
-        return None
-    close = next((i for i in range(1, len(lines)) if lines[i].rstrip("\r\n") == "---"), None)
-    if close is None:
-        return None
-    header_lines, body_lines = lines[: close + 1], lines[close + 1 :]
-    while body_lines and body_lines[0].strip("\r\n") == "":
-        header_lines.append(body_lines.pop(0))
-    return "".join(header_lines), "".join(body_lines)
 
 
 class SceneSnapshotMutationsMixin:
@@ -85,7 +65,7 @@ class SceneSnapshotMutationsMixin:
             if new_body != migrated.body:
                 migrated = migrations.MigratableDocument(migrated.front_matter, new_body)
             return migrated, frozen_bytes
-        split = split_snapshot_text(frozen_bytes.decode("utf-8"))
+        split = split_front_matter_text(frozen_bytes.decode("utf-8"))
         if split is None:
             return migrated, frozen_bytes
         header, body = split
@@ -115,9 +95,13 @@ class SceneSnapshotMutationsMixin:
 
         def _replace_anchor(match: re.Match[str]) -> str:
             anchor_id = match.group("id")
-            if anchor_id not in anchor_scene:
+            set_id = match.group("set_id")
+            if anchor_id not in anchor_scene or not set_id:
+                # No set id (a copy still in flight or failed, review fix
+                # #2236): there is nothing to re-mint a copy of, and the
+                # anchor already contributes nothing to resolution.
                 return match.group(0)
-            new_set_id = self._copy_mutation_set_unvalidated(match.group("set_id"))
+            new_set_id = self._copy_mutation_set_unvalidated(set_id)
             new_anchor_id = self._new_id("mut")
             remap[anchor_id] = new_anchor_id
             return render_anchor(new_set_id, new_anchor_id)

@@ -7,12 +7,21 @@ directly, the way `migration_tree_placement.py` and `migration_levels.py` do,
 and never calls a `ProjectService` instance method (a chain step can run
 against an ANCESTOR layer the open service is not bound to).
 
-Per layer, in this order (ADR §12): row ids first, then scenes (markers become
-sets + anchors), then placed-set matching, then dropping the `placed` flag.
-Each step is a no-op on already-migrated input — set files are named after
-their (deterministic) set id, so a re-run overwrites instead of duplicating,
-and a scene whose body has nothing left to convert is never rewritten — so a
-re-run after a crash finishes the job rather than doing it twice.
+Per layer, every write that depends on the conversion happens BEFORE the
+scene bodies are rewritten (ADR §12): row ids first, then legacy scene
+markers are converted and written as SET files (scene bodies untouched), then
+placed-set matching rewrites every reference to a matched placed set —
+including a chat's `staged_set` — and deletes its file, then scene BODIES are
+rewritten from markers to anchors, then the `placed` flag is dropped
+everywhere. This order means a crash right after placed-set matching (the
+step most likely to leave something half-done, since it rewrites references
+across every document in the layer) can never strand a scene body converted
+to anchors ahead of its matched set's rewritten references — a re-run finds
+the scene bodies still legacy-shaped and finishes the job. Each step is a
+no-op on already-migrated input — set files are named after their
+(deterministic) set id, so a re-run overwrites instead of duplicating, and a
+scene whose body has nothing left to convert is never rewritten — so a re-run
+after a crash finishes the job rather than doing it twice.
 """
 
 from __future__ import annotations
@@ -50,8 +59,11 @@ _SKIP_DIRS = frozenset({".cache", ".migration-backups", "snapshots"})
 def migrate_layer_mutation_anchors(root: Path, ctx: ChainContext) -> None:
     _seed_entity_types(root, ctx)
     _mint_row_ids(root)
-    converted = _convert_scenes(root, ctx)
+    paths_by_id = _scene_paths_by_id(root)
+    converted = _convert_scenes(root, ctx, paths_by_id)
     _match_placed_sets(root, converted)
+    if converted is not None:
+        _rewrite_scene_bodies(paths_by_id, converted)
     _drop_placed_flag(root)
 
 
@@ -64,8 +76,19 @@ def _seed_entity_types(root: Path, ctx: ChainContext) -> None:
     step resolves a scene marker's `entity=`, every ancestor's lore is already
     in the map. Ids are minted (`lore_<uuid hex>`) so a collision across layers
     would not happen in practice; `setdefault` keeps the nearer-wins rule
-    consistent with the rest of the chain regardless."""
-    folder = root / "lore"
+    consistent with the rest of the chain regardless.
+
+    Also seeds every DECLARED ancestor's own lore (`_seed_ancestor_entity_types`)
+    — needed because `migration_runner._run_migrations` skips an ancestor's own
+    chain step, and so its own call to this function, once that ancestor is
+    already at v14: without this, an already-migrated ancestor's lore would
+    never reach `ctx.entity_types`, and a scene marker in THIS layer naming
+    one of its entities would resolve with no `target_entry_type`."""
+    _seed_lore_entity_types(root / "lore", ctx)
+    _seed_ancestor_entity_types(root, ctx)
+
+
+def _seed_lore_entity_types(folder: Path, ctx: ChainContext) -> None:
     if not folder.exists():
         return
     for path in sorted(folder.glob("*.md")):
@@ -74,6 +97,20 @@ def _seed_entity_types(root: Path, ctx: ChainContext) -> None:
         entry_type = front_matter.get("entry_type")
         if isinstance(entry_id, str) and entry_id.strip() and isinstance(entry_type, str) and entry_type:
             ctx.entity_types.setdefault(entry_id.strip(), entry_type)
+
+
+def _seed_ancestor_entity_types(root: Path, ctx: ChainContext) -> None:
+    """This layer's DECLARED ancestors (`inherits:` in `root`'s own
+    `project.yaml`, resolved exactly as `_merged_entry_types` resolves
+    ancestor schemas), each ancestor's `lore/` seeded into `ctx.entity_types`.
+    Nearer ancestors are seeded first (`setdefault` — same nearer-wins
+    convention `_seed_entity_types` already uses; ids are minted per-layer so
+    a real collision never happens in practice)."""
+    manifest = _read_yaml_dict(root / _MANIFEST)
+    declared = manifest.get("inherits") if isinstance(manifest.get("inherits"), list) else []
+    folders = [(root / entry.strip()).resolve() for entry in declared if isinstance(entry, str) and entry.strip()]
+    for folder in sorted(folders, key=lambda f: len(f.parts), reverse=True):
+        _seed_lore_entity_types(folder / "lore", ctx)
 
 
 # ---- step 1: row ids ---------------------------------------------------------
@@ -108,22 +145,36 @@ def _mint_row_ids(root: Path) -> None:
 # ---- step 2: markers become sets + anchors -----------------------------------
 
 
-def _convert_scenes(root: Path, ctx: ChainContext) -> ConversionResult | None:
-    """Convert every legacy marker in this layer's own scene files into sets +
-    anchors (ADR §12 steps 2–5). Returns the `ConversionResult`, or `None` when
-    the layer has no scenes at all (most ancestor layers)."""
+def _scene_paths_by_id(root: Path) -> dict[str, Path]:
+    """Every scene file under this layer's `scenes/`, by its front-matter id
+    (not assumed to match the filename — pre-ADR-0094 leftovers can still be
+    named by title). Computed once and shared by `_convert_scenes` (which
+    reads the bodies to convert) and `_rewrite_scene_bodies` (which writes
+    them back, after `_match_placed_sets` has run), so the two steps agree on
+    one view of the layer's scenes."""
     scenes_folder = root / "scenes"
-    if not scenes_folder.exists() or not any(scenes_folder.glob("*.md")):
-        return None
-    # Every scene file by its front-matter id (not assumed to match the
-    # filename — pre-ADR-0094 leftovers can still be named by title).
+    if not scenes_folder.exists():
+        return {}
     paths_by_id: dict[str, Path] = {}
     for path in sorted(scenes_folder.glob("*.md")):
         front_matter = _read_front_matter(path)
         scene_id = front_matter.get("id")
         if isinstance(scene_id, str) and scene_id.strip():
             paths_by_id.setdefault(scene_id.strip(), path)
+    return paths_by_id
 
+
+def _convert_scenes(
+    root: Path, ctx: ChainContext, paths_by_id: dict[str, Path]
+) -> ConversionResult | None:
+    """Convert every legacy marker in this layer's own scenes into sets (ADR
+    §12 steps 2–5) and write the SET files. Scene bodies are NOT rewritten
+    here — `_rewrite_scene_bodies` does that later, after `_match_placed_sets`
+    has rewritten any reference a matched placed set needs (see the module
+    docstring). Returns the `ConversionResult`, or `None` when the layer has
+    no scenes at all (most ancestor layers)."""
+    if not paths_by_id:
+        return None
     entry_types = _merged_entry_types(root)
     order = _manuscript_scene_order(root, entry_types)
     order.extend(scene_id for scene_id in paths_by_id if scene_id not in order)
@@ -135,11 +186,19 @@ def _convert_scenes(root: Path, ctx: ChainContext) -> ConversionResult | None:
     result = convert_legacy_mutations(scenes, entity_type)
     for converted in result.sets:
         _write_converted_set_file(root, converted)
-    for scene_id, new_body in result.bodies.items():
+    return result
+
+
+def _rewrite_scene_bodies(paths_by_id: dict[str, Path], converted: ConversionResult) -> None:
+    """Step 2's scene-body half: legacy markers become anchors in the prose.
+    Runs only after `_match_placed_sets`, so a crash between the two never
+    leaves a scene body converted to anchors ahead of the reference rewrite
+    its matched placed set depends on — a re-run of `_convert_scenes` finds
+    the same (still legacy-shaped) bodies and recomputes the same result."""
+    for scene_id, new_body in converted.bodies.items():
         path = paths_by_id.get(scene_id)
         if path is not None:
             _rewrite_body_only(path, new_body)
-    return result
 
 
 def _write_converted_set_file(root: Path, converted: ConvertedSet) -> None:
@@ -149,10 +208,23 @@ def _write_converted_set_file(root: Path, converted: ConvertedSet) -> None:
     `ProjectService` instance to call. Deterministic input (the converter's ids
     and rows never change across a re-run) means this write is naturally
     idempotent; skip it entirely when the bytes would not change, so a re-run
-    does not churn mtimes."""
+    does not churn mtimes.
+
+    A set already on disk with a non-empty title (inherited from a matched
+    placed set, ADR §12 step 6) KEEPS that title even when `converted.title`
+    is empty: a resumed run reconverts from the still-legacy scene body
+    before that body is rewritten (module docstring: sets are written before
+    scene bodies), and this write must not undo a match that already landed
+    in an earlier, interrupted run (review fix #2236)."""
+    path = root / "mutation-sets" / f"{converted.set_id}.md"
+    title = converted.title
+    if not title and path.exists():
+        existing_title = str(_read_front_matter(path).get("title") or "")
+        if existing_title:
+            title = existing_title
     front_matter: dict[str, Any] = {
         "id": converted.set_id,
-        "title": converted.title,
+        "title": title,
         "entry_type": "mutation_set:mutation_set",
     }
     if converted.entity_id:
@@ -165,7 +237,6 @@ def _write_converted_set_file(root: Path, converted: ConvertedSet) -> None:
     if rows_payload:
         front_matter["rows"] = rows_payload
     text = "---\n" + yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=True).strip() + "\n---\n\n"
-    path = root / "mutation-sets" / f"{converted.set_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = text.encode("utf-8")
     if path.exists() and path.read_bytes() == encoded:
@@ -404,11 +475,11 @@ def _read_front_matter(path: Path) -> dict[str, Any]:
 
 
 def _read_body(path: Path) -> str:
-    split = _split_document(path.read_bytes().decode("utf-8", errors="replace"))
+    split = split_front_matter_text(path.read_bytes().decode("utf-8", errors="replace"))
     return split[1] if split is not None else ""
 
 
-def _split_document(text: str) -> tuple[str, str] | None:
+def split_front_matter_text(text: str) -> tuple[str, str] | None:
     """`(header including both --- delimiters and the exact separator before
     the body, body)` — kept as raw text, not re-serialised, so a caller that
     only changes the body can splice it back and leave the front matter
@@ -417,7 +488,11 @@ def _split_document(text: str) -> tuple[str, str] | None:
     `migration_tree_placement.py`'s `_closing_line`), so it finds the closing
     delimiter whether a real Windows-written file's lines end in `\\n` or
     `\\r\\n` — a raw byte/text split on the literal `"---\\n"` would miss a
-    `\\r\\n`-terminated one entirely."""
+    `\\r\\n`-terminated one entirely.
+
+    Public (not `_`-prefixed): also `scene_snapshot_mutations.py`'s restore
+    path splits a snapshot's frozen bytes the same way (review fix #2236 —
+    one function, not a byte-identical duplicate)."""
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].rstrip("\r\n") != "---":
         return None
@@ -433,7 +508,7 @@ def _split_document(text: str) -> tuple[str, str] | None:
 def _rewrite_body_only(path: Path, new_body: str) -> None:
     original = path.read_bytes()
     text = original.decode("utf-8")
-    split = _split_document(text)
+    split = split_front_matter_text(text)
     if split is None:
         return
     header, body = split

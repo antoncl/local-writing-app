@@ -21,7 +21,7 @@ record or write a close anchor of their own.
 
 from __future__ import annotations
 
-from app.models import SaveSceneRequest
+from app.models import MutationMarker, SaveSceneRequest, Scene
 from app.services.project.legacy_mutation_markers import convert_legacy_mutations
 from app.services.project_service import ProjectService
 
@@ -69,6 +69,16 @@ def save_scenes_with_mutations(
     return {
         converted.unit_id: (converted.set_id, converted.anchor_id) for converted in result.sets
     }
+
+
+def scan_scene_mutations(service: ProjectService, scene: Scene) -> list[MutationMarker]:
+    """Every resolved mutation record in one already-read `scene` (ADR-0095
+    §1/§3/§5) — a test-only stand-in for the retired `_scan_scene_mutations`
+    (review fix #2236: production code resolving more than one scene builds
+    `_mutation_set_views` once itself, e.g. `build_mutations_index`, so the
+    per-call convenience wrapper had no real caller left)."""
+    sets = service._mutation_set_views(service._build_node_index())
+    return list(service._iter_body_mutations(scene.body, scene.id, sets))
 
 
 def _manuscript_order(

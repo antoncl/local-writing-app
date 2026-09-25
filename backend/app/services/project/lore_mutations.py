@@ -41,13 +41,13 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from dataclasses import field as dc_field
+from pathlib import Path
 from typing import Any
 
 from app.models import (
     MutationMarker,
     MutationMarkerList,
     MutationSetRow,
-    Scene,
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.lore_mutation_items import (
@@ -65,6 +65,7 @@ from app.services.project.mutation_anchors import (
     MUTATION_ANCHOR_PATTERN,
 )
 from app.services.project.node_index import NodeIndex
+from app.services.project.node_index_snapshot import Fingerprint, fingerprint_for
 from app.services.tree_structure import TreeStructureService
 
 # Field types whose values are collections; these accept add/remove ops (#58).
@@ -178,15 +179,66 @@ class _SetView:
     usable: bool
 
 
-class LoreMutationsMixin(MarkerMixin):
-    def _scan_scene_mutations(self, scene: Scene) -> Iterator[MutationMarker]:
-        """Yield every resolved mutation record in one scene body, in prose
-        order — the single per-scene scan the index (#51) walks. Builds its
-        own set lookup; callers resolving many scenes should build one with
-        `_mutation_set_views` and call `_iter_body_mutations` directly."""
-        sets = self._mutation_set_views(self._build_node_index())
-        yield from self._iter_body_mutations(scene.body, scene.id, sets)
+@dataclass(frozen=True)
+class _SetFileRead:
+    """The disk-only half of a `_SetView` — everything but `pin_missing`/
+    `usable`, which depend on the CURRENT node index (an entity can be deleted
+    without the set file itself changing) and are always recomputed fresh in
+    `_mutation_set_views`. Cached module-wide in `_SET_FILE_CACHE`, validated
+    by `(mtime_ns, size)` exactly like the anchor scan
+    (`mutation_set_anchors._SCAN_CACHE`), so a set file is re-read only when
+    it actually changed — `revision` (a whole-file hash, expensive) comes from
+    this cached read rather than being recomputed on every build."""
 
+    entity_id: str
+    title: str
+    target_entry_type: str
+    rows: list[MutationSetRow]
+    revision: str
+
+
+# Module-level, not per-instance: a `ProjectService` is constructed fresh per
+# request, so a cache on `self` never survives to the next call (review fix
+# #2236, same reasoning as `mutation_set_anchors._SCAN_CACHE`).
+_SET_FILE_CACHE: dict[Path, tuple[Fingerprint, _SetFileRead]] = {}
+
+
+def _records_for_anchor(
+    view: _SetView,
+    anchor_id: str,
+    scene_id: str,
+    offset: int,
+    line: int,
+    scene_path: str = "",
+) -> list[MutationMarker]:
+    """One `MutationMarker` per row of `view`, at one anchor — the
+    `(anchor id, row id)` record identity ADR-0095 §3 describes. The one place
+    a set's rows become records, shared by `_iter_body_mutations` (single-body
+    scan) and `build_mutations_index` (whole-project build) — review fix
+    #2236, replacing what used to be duplicated construction in each."""
+    return [
+        MutationMarker(
+            marker_id=f"{anchor_id}.{row.id}",
+            entity_id=view.entity_id,
+            field=row.field,
+            op=row.op,
+            value=row.value,
+            name=view.title,
+            unit_id=anchor_id,
+            unit_name=view.title,
+            anchor_id=anchor_id,
+            set_id=view.set_id,
+            row_id=row.id,
+            scene_id=scene_id,
+            offset=offset,
+            line=line,
+            scene_path=scene_path,
+        )
+        for row in view.rows
+    ]
+
+
+class LoreMutationsMixin(MarkerMixin):
     def _iter_body_closes(self, body: str, scene_id: str) -> Iterator[MutationClose]:
         """Regex-walk one raw body for close anchors (#59, ADR-0095 §1)."""
         return self._scan_body_markers(
@@ -203,8 +255,10 @@ class LoreMutationsMixin(MarkerMixin):
         )
 
     def _mutation_set_views(self, index: NodeIndex) -> dict[str, _SetView]:
-        """Every `mutation_set` node belonging to the OPEN project layer, read
-        once per index build (ADR-0095 §2/§5/§10). A set found only in an
+        """Every `mutation_set` node belonging to the OPEN project layer, one
+        per index build (ADR-0095 §2/§5/§10) — the disk read itself is cached
+        module-wide (`_read_set_file`) and only `pin_missing`/`usable` are
+        recomputed fresh here, from THIS build's index. A set found only in an
         ancestor layer is not in this lookup — `index.by_id` resolves to the
         winning (innermost) entry per id, so its path lives outside the open
         project's `mutation-sets/` folder, and it never joins here; an anchor
@@ -216,32 +270,54 @@ class LoreMutationsMixin(MarkerMixin):
         for entry in index.by_id.values():
             if entry.kind != "mutation_set" or entry.path.parent != folder:
                 continue
-            try:
-                front_matter, _ = self._read_markdown_with_front_matter(entry.path, strict=True)
-            except ProjectServiceError:
+            read = self._read_set_file(entry.path)
+            if read is None:
                 continue
-            target_entity = self._mutation_set_target_entity(front_matter)
-            pin_missing = self._mutation_set_pin_missing(index, target_entity)
+            pin_missing = self._mutation_set_pin_missing(index, read.entity_id)
             views[entry.id] = _SetView(
                 set_id=entry.id,
-                entity_id=target_entity,
-                title=str(front_matter.get("title") or ""),
-                target_entry_type=str(front_matter.get("target_entry_type") or ""),
-                rows=self._parse_mutation_set_rows(front_matter.get("rows")),
-                revision=self._revision(entry.path),
+                entity_id=read.entity_id,
+                title=read.title,
+                target_entry_type=read.target_entry_type,
+                rows=read.rows,
+                revision=read.revision,
                 pin_missing=pin_missing,
-                usable=bool(target_entity) and not pin_missing,
+                usable=bool(read.entity_id) and not pin_missing,
             )
         return views
+
+    def _read_set_file(self, path: Path) -> _SetFileRead | None:
+        """One `mutation_set` file's disk-only fields, cached module-wide by
+        `(mtime_ns, size)` (`_SET_FILE_CACHE`) — re-read (and re-hashed for
+        `revision`) only when the file actually changed. `None` when the file
+        can't be read/parsed (mirrors the old inline `try`/`except`)."""
+        resolved = path.resolve()
+        fingerprint = fingerprint_for(resolved)
+        cached = _SET_FILE_CACHE.get(resolved)
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+        try:
+            front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
+        except ProjectServiceError:
+            return None
+        read = _SetFileRead(
+            entity_id=self._mutation_set_target_entity(front_matter),
+            title=str(front_matter.get("title") or ""),
+            target_entry_type=str(front_matter.get("target_entry_type") or ""),
+            rows=self._parse_mutation_set_rows(front_matter.get("rows")),
+            revision=self._revision(path),
+        )
+        _SET_FILE_CACHE[resolved] = (fingerprint, read)
+        return read
 
     def _iter_body_mutations(
         self, body: str, scene_id: str, sets: dict[str, _SetView]
     ) -> Iterator[MutationMarker]:
         """Regex-walk one raw body for anchors (ADR-0095 §1), yielding one
-        record per row of the anchored set, in prose order. Split from
-        `_scan_scene_mutations` so validation (#53) and drift checks can scan
-        a body they already read against a set lookup they already built,
-        without re-scanning the node index per scene.
+        record per row of the anchored set (`_records_for_anchor`), in prose
+        order. Used where validation (#53) and drift checks can scan a body
+        they already read against a set lookup they already built, without
+        re-scanning the node index per scene.
 
         An anchor whose set is not in `sets` (missing, or only in another
         layer, §10) or not `usable` (no pin, or a dead pin, §2) contributes no
@@ -254,23 +330,7 @@ class LoreMutationsMixin(MarkerMixin):
                 continue
             anchor_id = match.group("id")
             line = body[: match.start()].count("\n") + 1
-            for row in view.rows:
-                yield MutationMarker(
-                    marker_id=f"{anchor_id}.{row.id}",
-                    entity_id=view.entity_id,
-                    field=row.field,
-                    op=row.op,
-                    value=row.value,
-                    name=view.title,
-                    unit_id=anchor_id,
-                    unit_name=view.title,
-                    anchor_id=anchor_id,
-                    set_id=view.set_id,
-                    row_id=row.id,
-                    scene_id=scene_id,
-                    offset=match.start(),
-                    line=line,
-                )
+            yield from _records_for_anchor(view, anchor_id, scene_id, match.start(), line)
 
     # ----- value coercion (#53) -----------------------------------------
 
@@ -389,24 +449,9 @@ class LoreMutationsMixin(MarkerMixin):
             if view is None or not view.usable:
                 continue
             line = bodies[scene_id][:offset].count("\n") + 1
-            for row in view.rows:
-                marker = MutationMarker(
-                    marker_id=f"{anchor_id}.{row.id}",
-                    entity_id=view.entity_id,
-                    field=row.field,
-                    op=row.op,
-                    value=row.value,
-                    name=view.title,
-                    unit_id=anchor_id,
-                    unit_name=view.title,
-                    anchor_id=anchor_id,
-                    set_id=set_id,
-                    row_id=row.id,
-                    scene_id=scene_id,
-                    offset=offset,
-                    line=line,
-                    scene_path=scene_paths.get(scene_id, ""),
-                )
+            for marker in _records_for_anchor(
+                view, anchor_id, scene_id, offset, line, scene_paths.get(scene_id, "")
+            ):
                 by_entity.setdefault(marker.entity_id, []).append(marker)
         for records in by_entity.values():
             records.sort(key=lambda m: (scene_order.get(m.scene_id, 0), m.offset))

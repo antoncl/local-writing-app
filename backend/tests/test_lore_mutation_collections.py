@@ -16,7 +16,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
-from mutation_helpers import save_scenes_with_mutations
+from mutation_helpers import save_scenes_with_mutations, scan_scene_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -92,7 +92,7 @@ class CollectionMutationTests(unittest.TestCase):
     def test_scan_parses_op_name_group(self) -> None:
         scene = self._new_scene("Scene Two")
         self._convert(scene, self._marker("clues", "add", "torn%20glove", "c1", name="The%20Glove", group="g1"))
-        marker = next(m for m in self.service._scan_scene_mutations(self.service.read_scene(scene)))
+        marker = next(m for m in scan_scene_mutations(self.service, self.service.read_scene(scene)))
         self.assertEqual(marker.op, "add")
         self.assertEqual(marker.value, "torn glove")
         self.assertEqual(marker.name, "The Glove")
@@ -103,7 +103,7 @@ class CollectionMutationTests(unittest.TestCase):
     def test_v1_marker_defaults_to_replace(self) -> None:
         scene = self._new_scene("Scene Two")
         self._convert(scene, f"<!-- mutate:entity={self.honor};field=rank;value=Captain;id=r1 -->")
-        marker = next(m for m in self.service._scan_scene_mutations(self.service.read_scene(scene)))
+        marker = next(m for m in scan_scene_mutations(self.service, self.service.read_scene(scene)))
         self.assertEqual(marker.op, "replace")
         self.assertEqual(marker.name, "")
         self.assertEqual(marker.group, "")
@@ -115,7 +115,7 @@ class CollectionMutationTests(unittest.TestCase):
         self._convert(scene, self._marker("clues", "add", "torn%20glove", "c1", name="The%20Glove"))
         body = self.service.read_scene(scene).body
         self.client.put(f"/api/scenes/{scene}", json={"title": "Scene Two", "body": body})
-        marker = next(m for m in self.service._scan_scene_mutations(self.service.read_scene(scene)))
+        marker = next(m for m in scan_scene_mutations(self.service, self.service.read_scene(scene)))
         self.assertEqual(marker.op, "add")
         self.assertEqual(marker.value, "torn glove")
         self.assertEqual(marker.name, "The Glove")

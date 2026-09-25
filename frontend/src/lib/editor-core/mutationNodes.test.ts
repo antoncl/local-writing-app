@@ -186,6 +186,42 @@ describe("MutationPasteReconciler — paste/copy (ADR-0095 §7)", () => {
     expect(anchorAttrs(editor, newAnchorId)?.setId).toBe("copied-set");
   });
 
+  it("one undo after a paste-copy resolves removes the pasted pill entirely — no intermediate missing pill (review fix #2236)", async () => {
+    const editor = makeEditor();
+    const reconciler = new MutationPasteReconciler();
+    reconciler.seed(editor);
+    editor.chain().insertContent({ type: "mutation", attrs: { setId: "orig-set", anchorId: "pasted-anchor" } }).run();
+
+    let resolveCopy!: (r: CopyMutationSetResult) => void;
+    const copySet = vi.fn(
+      () => new Promise<CopyMutationSetResult>((resolve) => { resolveCopy = resolve; }),
+    );
+    const deps = baseDeps({ knownProjectAnchorIds: () => new Set(["pasted-anchor"]), copySet });
+
+    reconciler.reconcile(editor, deps);
+    resolveCopy({ entry: { id: "copied-set" } as never, dropped_rows: [] });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The fill-in landed (setId is no longer empty) before undo is tried.
+    const filled: string[] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "mutation") filled.push(String(node.attrs.setId ?? ""));
+    });
+    expect(filled).toEqual(["copied-set"]);
+
+    editor.commands.undo();
+
+    // The fill-in dispatch is not its own undo step (`addToHistory: false`),
+    // so the one undo reaches the paste itself and removes the pill outright
+    // — never landing on the intermediate "missing set" state.
+    const remaining: string[] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "mutation") remaining.push(String(node.attrs.anchorId ?? ""));
+    });
+    expect(remaining).toEqual([]);
+  });
+
   it("leaves the pill missing (no setId) when copySet fails, and surfaces a notice", async () => {
     const editor = makeEditor();
     const reconciler = new MutationPasteReconciler();

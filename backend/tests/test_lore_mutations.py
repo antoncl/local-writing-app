@@ -14,7 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
-from mutation_helpers import save_scenes_with_mutations
+from mutation_helpers import save_scenes_with_mutations, scan_scene_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -73,7 +73,7 @@ class LoreMutationScanTests(unittest.TestCase):
 
     def _scan(self) -> dict[str, object]:
         scene = self.service.read_scene(self.scene_id)
-        return {m.row_id: m for m in self.service._scan_scene_mutations(scene)}
+        return {m.row_id: m for m in scan_scene_mutations(self.service, scene)}
 
     def _body(self) -> str:
         return self.service.read_scene(self.scene_id).body

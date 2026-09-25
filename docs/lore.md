@@ -26,7 +26,7 @@ switcher lets you change it — see the **[Views](#guide:views)** guide.
 2. In the **New entry** popover, pick a type — **Character**, **Location**, or
    whatever your project defines. (If the list is empty, you haven't defined any
    types yet; see **[Custom fields](#guide:custom-fields)**.)
-3. The entry is created — titled *"New Entry"* — and opens straight away, ready to
+3. The entry is created — titled *"Untitled entry"* — and opens straight away, ready to
    rename and fill in.
 
 > If AI is on, the popover also offers **Brainstorm new…** with a **✨ Draft

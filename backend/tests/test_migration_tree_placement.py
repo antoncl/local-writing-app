@@ -18,7 +18,7 @@ from tempfile import TemporaryDirectory
 import yaml
 
 from app.services.migration_tree_placement import migrate_layer_tree_placement
-from app.services.migrations import ChainContext, read_project_version
+from app.services.migrations import CURRENT_VERSION, ChainContext, read_project_version
 from app.services.project_service import ProjectService
 
 ACT, CHAPTER, S1, S2 = "manuscript_act0000001", "manuscript_ch00000001", "manuscript_s100000001", "manuscript_s200000001"
@@ -113,7 +113,9 @@ class TreePlacementMigrationTests(unittest.TestCase):
     def test_the_tree_reads_as_before_and_the_yaml_is_gone(self) -> None:
         """Journey step 1."""
         service = self._open()
-        self.assertEqual(read_project_version(self.root), 13)  # v12, then v13 on the same open
+        # The ladder runs to its end on open (v12, then every later step,
+        # each a no-op past its own change on this fixture).
+        self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
         self.assertFalse((self.root / "manuscript.structure.yaml").exists())
         self.assertFalse((self.root / "research.structure.yaml").exists())
 

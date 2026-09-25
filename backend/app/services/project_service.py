@@ -68,6 +68,7 @@ from app.services.project.promotion import PromotionMixin
 from app.services.project.prompts import PromptEntriesMixin
 from app.services.project.references import ReferencesMixin
 from app.services.project.research import ResearchNotesMixin
+from app.services.project.scene_snapshot_mutations import SceneSnapshotMutationsMixin
 from app.services.project.scene_snapshots import SceneSnapshotsMixin
 from app.services.project.scene_todos import SceneTodoAnchorsMixin
 from app.services.project.schema import MetadataSchemaMixin
@@ -130,6 +131,7 @@ class ProjectService(
     ReferencesMixin,
     ResearchNotesMixin,
     SceneSnapshotsMixin,
+    SceneSnapshotMutationsMixin,
     SceneTodoAnchorsMixin,
     SnapshotDiffMixin,
     SnapshotWitnessMixin,

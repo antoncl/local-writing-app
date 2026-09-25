@@ -57,12 +57,13 @@ import yaml
 from app.services.atomic_io import atomic_write_text
 from app.services.migration_levels import migrate_layer_levels
 from app.services.migration_tree_placement import migrate_layer_tree_placement
+from app.services.migrations_mutation_anchors import migrate_layer_mutation_anchors
 from app.services.yaml_io import load_yaml
 
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 13
+CURRENT_VERSION = 14
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -136,6 +137,11 @@ class ChainContext:
 
     name_to_id: dict[str, str] = field(default_factory=dict)
     machine_names: dict[str, str] = field(default_factory=dict)
+    # v14 (ADR-0095 §12 step 0): every lore entry id -> its entry_type, seeded
+    # from each layer's OWN `lore/` folder as that layer's own step runs —
+    # since layers run outermost first, a descendant's step always sees every
+    # ancestor's lore by the time it resolves a scene marker's `entity=`.
+    entity_types: dict[str, str] = field(default_factory=dict)
 
 
 ChainMigrationFn = Callable[[Path, ChainContext], None]
@@ -1141,6 +1147,11 @@ MIGRATIONS: list[MigrationStep] = [
         "seed the manuscript/research level lists and keep act/chapter/topic as sub-types of the "
         "container types (ADR-0094 S2, #2176)",
         migrate_layer_levels,
+    ),
+    ChainMigration(
+        14,
+        "convert legacy inline mutation markers into mutation_set nodes + anchors (ADR-0095 S1, #2231)",
+        migrate_layer_mutation_anchors,
     ),
 ]
 

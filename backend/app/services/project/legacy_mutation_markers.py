@@ -359,3 +359,152 @@ def convert_legacy_mutations(
     close_replacements = _scan_closes_pass(scenes, registry)
     bodies = _apply_edits(scenes, registry.replacements, close_replacements)
     return ConversionResult(bodies=bodies, sets=registry.sets)
+
+
+# ----- ADR-0095 §11: restore-time conversion of one scene body ---------------
+
+
+@dataclass
+class _RestoreRegistry:
+    """Working state of `convert_restored_scene`'s unit pass, scoped to ONE
+    body — the single-scene twin of `_Registry`."""
+
+    occurrence_count: dict[str, int]
+    unit_occurrences: dict[str, list[tuple[int, str]]]  # unit id -> [(offset, anchor id), ...]
+    group_members: dict[str, list[tuple[int, str]]]
+    row_to_unit: dict[str, str]
+    replacements: list[tuple[int, int, str]]
+    sets_to_create: list[ConvertedSet]
+
+
+def _register_restored_unit(
+    registry: _RestoreRegistry,
+    scene_id: str,
+    unit: _Unit,
+    entity_type: Callable[[str], str | None],
+    set_exists: Callable[[str], bool],
+) -> None:
+    """One unit's anchor/set id, tried in the order the migration would have
+    preferred them (see `convert_restored_scene`'s docstring), recorded for
+    the close pass and queued for the body-span replacement.
+
+    When NEITHER candidate exists, occurrence `k` (1-indexed within this
+    body) cannot fall back to the bare first-occurrence id for every `k`: two
+    occurrences of the same unit id can never both be the project's first.
+    Only `k == 1` can honestly claim that. `k >= 2` falls back to the
+    per-scene id for the `(k - 1)`-th repeat in THIS scene instead — the id
+    `convert_legacy_mutations` would give a scene's own `(k - 1)`-th repeat of
+    a unit id whose true first occurrence is earlier in the same scene (its
+    `repeats_in_scene` starts counting at 1 for a scene's own first repeat,
+    one behind this function's `k`, which also counts the occurrence that
+    isn't a repeat of anything yet) — so two repeats in one restored body are
+    never assigned the same id."""
+    k = registry.occurrence_count.get(unit.unit_id, 0) + 1
+    registry.occurrence_count[unit.unit_id] = k
+    scene_anchor = derive_anchor_id(scene_id, unit.unit_id, k)
+    scene_set = derive_set_id(f"{scene_id}:{unit.unit_id}" if k <= 1 else f"{scene_id}:{unit.unit_id}:{k}")
+    first_anchor, first_set = unit.unit_id, derive_set_id(unit.unit_id)
+    if set_exists(scene_set):
+        anchor_id, set_id = scene_anchor, scene_set
+    elif set_exists(first_set):
+        anchor_id, set_id = first_anchor, first_set
+    else:
+        if k >= 2:
+            repeat = k - 1
+            anchor_id = derive_anchor_id(scene_id, unit.unit_id, repeat)
+            set_id = derive_set_id(
+                f"{scene_id}:{unit.unit_id}" if repeat <= 1 else f"{scene_id}:{unit.unit_id}:{repeat}"
+            )
+        else:
+            anchor_id, set_id = first_anchor, first_set
+        registry.sets_to_create.append(
+            ConvertedSet(
+                set_id=set_id,
+                anchor_id=anchor_id,
+                scene_id=scene_id,
+                entity_id=unit.entity_id,
+                title=unit.title,
+                target_entry_type=entity_type(unit.entity_id) or "",
+                rows=unit.rows,
+                unit_id=unit.unit_id,
+            )
+        )
+    registry.unit_occurrences.setdefault(unit.unit_id, []).append((unit.span[0], anchor_id))
+    if unit.group_id:
+        registry.group_members.setdefault(unit.group_id, []).append((unit.span[0], anchor_id))
+    if len(unit.rows) > 1:
+        for row in unit.rows:
+            registry.row_to_unit[row.id] = unit.unit_id
+    registry.replacements.append((*unit.span, render_anchor(set_id, anchor_id)))
+
+
+def _restored_close_replacements(body: str, registry: _RestoreRegistry) -> list[tuple[int, int, str]]:
+    """The replacement text for every legacy close in `body`, resolved against
+    what the unit pass just registered — the single-body twin of
+    `_scan_closes_pass`/`_emit_closes`."""
+    close_replacements: list[tuple[int, int, str]] = []
+    for match in _LEGACY_CLOSE_PATTERN.finditer(body):
+        ref = match.group("ref")
+        row = ""
+        if ref in registry.unit_occurrences:
+            occurrences = registry.unit_occurrences[ref]
+        elif ref in registry.group_members:
+            occurrences = registry.group_members[ref]
+        elif ref in registry.row_to_unit:
+            occurrences = registry.unit_occurrences.get(registry.row_to_unit[ref], [])
+            row = ref
+        else:
+            continue
+        due = [anchor_id for offset, anchor_id in occurrences if offset <= match.start()]
+        if not due:
+            continue
+        close_id = match.group("id")
+        rendered = [
+            render_close(anchor_id, close_id if n == 1 else f"{close_id}_{n}", row=row)
+            for n, anchor_id in enumerate(due, start=1)
+        ]
+        close_replacements.append((match.start(), match.end(), "\n".join(rendered)))
+    return close_replacements
+
+
+def convert_restored_scene(
+    scene_id: str,
+    body: str,
+    entity_type: Callable[[str], str | None],
+    set_exists: Callable[[str], bool],
+) -> tuple[str, list[ConvertedSet]]:
+    """Convert one restored scene's legacy markers to anchors/sets (§11), for a
+    snapshot older than the anchors-and-sets schema. Pure aside from the two
+    callables; no filesystem, no `ProjectService`.
+
+    Unlike `convert_legacy_mutations` (which sees every scene and derives ids
+    from manuscript order), a restore sees only this one body in isolation, so
+    it cannot tell whether the migration would have treated a unit id as a
+    first occurrence or a repeat. Instead, for each occurrence (`k`, counting
+    repeats of the same unit id within THIS body, from 1) it tries the ids the
+    migration COULD have given it, in the order the migration would have
+    preferred them: the per-scene repeat ids first (`derive_anchor_id`/
+    `derive_set_id` keyed on this scene + unit id [+ occurrence]), then the
+    first-occurrence ids (the bare unit id, `derive_set_id(unit_id)`) —
+    the first pair whose SET ALREADY EXISTS (`set_exists`) wins, so a marker
+    whose set the migration (or an earlier restore) already created resolves
+    to that same set again. When neither exists, the first occurrence (`k ==
+    1`) falls back to the first-occurrence ids; a later occurrence (`k >= 2`)
+    falls back to the per-scene id for the scene's own `(k - 1)`-th repeat
+    instead — see `_register_restored_unit`'s docstring — so two repeats of
+    one unit id in a single restored body are never assigned the same id.
+    Either way the set is returned for the caller to create, built from the
+    marker exactly as the migration would build it.
+
+    Closes are rewritten with the same rules as `convert_legacy_mutations`,
+    scoped to this one body (a restored close can only end an anchor this same
+    restore just placed)."""
+    registry = _RestoreRegistry({}, {}, {}, {}, [], [])
+    for unit in _scan_units(body):
+        _register_restored_unit(registry, scene_id, unit, entity_type, set_exists)
+    close_replacements = _restored_close_replacements(body, registry)
+
+    new_body = body
+    for start, end, text in sorted([*registry.replacements, *close_replacements], key=lambda e: e[0], reverse=True):
+        new_body = new_body[:start] + text + new_body[end:]
+    return new_body, registry.sets_to_create

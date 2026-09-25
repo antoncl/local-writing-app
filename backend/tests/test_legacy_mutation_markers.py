@@ -6,7 +6,10 @@ from __future__ import annotations
 
 import unittest
 
-from app.services.project.legacy_mutation_markers import convert_legacy_mutations
+from app.services.project.legacy_mutation_markers import (
+    convert_legacy_mutations,
+    convert_restored_scene,
+)
 from app.services.project.mutation_anchors import (
     MUTATION_ANCHOR_CLOSE_PATTERN,
     MUTATION_ANCHOR_PATTERN,
@@ -328,6 +331,123 @@ class OffsetPreservationTests(unittest.TestCase):
         self.assertEqual([a for _, a in anchors], ["m1", "m2"])
         # m1's anchor appears before m2's in the resulting text.
         self.assertLess(new_body.index("id=m1"), new_body.index("id=m2"))
+
+
+class ConvertRestoredSceneTests(unittest.TestCase):
+    """`convert_restored_scene` (ADR-0095 §11) — a single restored body, no
+    manuscript order to lean on, so it must probe the ids `convert_legacy_mutations`
+    could have derived rather than deriving them itself."""
+
+    def test_no_existing_set_creates_one_at_the_first_occurrence_ids(self):
+        body = "<!-- mutate:entity=honor;field=rank;value=Captain;name=Promotion;id=m1 -->"
+        new_body, to_create = convert_restored_scene("s1", body, entity_type, lambda _sid: False)
+
+        self.assertEqual(anchors_in(new_body), [(derive_set_id("m1"), "m1")])
+        self.assertEqual(len(to_create), 1)
+        created = to_create[0]
+        self.assertEqual(created.set_id, derive_set_id("m1"))
+        self.assertEqual(created.anchor_id, "m1")
+        self.assertEqual(created.title, "Promotion")
+        self.assertEqual(created.target_entry_type, "character")
+        self.assertEqual((created.rows[0].field, created.rows[0].value), ("rank", "Captain"))
+
+    def test_the_first_occurrence_set_already_existing_resolves_to_it_no_create(self):
+        body = "<!-- mutate:entity=honor;field=rank;value=Captain;id=m1 -->"
+        existing = {derive_set_id("m1")}
+        new_body, to_create = convert_restored_scene("s1", body, entity_type, lambda sid: sid in existing)
+
+        self.assertEqual(anchors_in(new_body), [(derive_set_id("m1"), "m1")])
+        self.assertEqual(to_create, [])
+
+    def test_the_per_scene_set_already_existing_is_preferred_over_the_first_occurrence_one(self):
+        body = "<!-- mutate:entity=honor;field=rank;value=Captain;id=m1 -->"
+        per_scene_id = derive_set_id("s1:m1")
+        existing = {per_scene_id, derive_set_id("m1")}  # both exist; per-scene wins
+        new_body, to_create = convert_restored_scene("s1", body, entity_type, lambda sid: sid in existing)
+
+        self.assertEqual(anchors_in(new_body), [(per_scene_id, derive_anchor_id("s1", "m1"))])
+        self.assertEqual(to_create, [])
+
+    def test_neither_exists_falls_back_to_first_occurrence_and_creates_it(self):
+        body = "<!-- mutate:entity=honor;field=rank;value=Captain;id=m1 -->"
+        new_body, to_create = convert_restored_scene("s1", body, entity_type, lambda _sid: False)
+
+        self.assertEqual(anchors_in(new_body), [(derive_set_id("m1"), "m1")])
+        self.assertEqual([c.set_id for c in to_create], [derive_set_id("m1")])
+
+    def test_a_unit_id_repeated_within_the_body_resolves_each_occurrence_against_its_own_per_scene_set(self):
+        # The realistic case: this scene already went through the real
+        # migration once (or an earlier restore), so both repeats' per-scene
+        # sets already exist on disk — each occurrence's own candidate wins,
+        # and the two resolve to distinct sets.
+        marker = "<!-- mutate:entity=honor;field=rank;value=Captain;id=dup -->"
+        body = f"{marker} between {marker}"
+        first_repeat_set = derive_set_id("s1:dup")
+        second_repeat_set = derive_set_id("s1:dup:2")
+        existing = {first_repeat_set, second_repeat_set}
+        new_body, to_create = convert_restored_scene("s1", body, entity_type, lambda sid: sid in existing)
+
+        anchors = anchors_in(new_body)
+        self.assertEqual(anchors[0], (first_repeat_set, derive_anchor_id("s1", "dup", 1)))
+        self.assertEqual(anchors[1], (second_repeat_set, derive_anchor_id("s1", "dup", 2)))
+        self.assertNotEqual(anchors[0][1], anchors[1][1])
+        self.assertEqual(to_create, [])
+
+    def test_a_unit_id_repeated_within_the_body_with_nothing_on_disk_falls_back_per_occurrence(self):
+        # Neither candidate exists for any occurrence (this exact body never
+        # reached a real migration): the first occurrence falls back to the
+        # bare first-occurrence id; each later occurrence falls back to the
+        # per-scene id for THIS scene's own (k - 1)-th repeat — never the
+        # bare id again — so repeats in one restored body never collide.
+        marker = "<!-- mutate:entity=honor;field=rank;value=Captain;id=dup -->"
+        body = f"{marker} between {marker} and {marker}"
+        new_body, to_create = convert_restored_scene("s1", body, entity_type, lambda _sid: False)
+
+        anchors = anchors_in(new_body)
+        self.assertEqual(anchors[0], (derive_set_id("dup"), "dup"))
+        self.assertEqual(anchors[1], (derive_set_id("s1:dup"), derive_anchor_id("s1", "dup", 1)))
+        self.assertEqual(anchors[2], (derive_set_id("s1:dup:2"), derive_anchor_id("s1", "dup", 2)))
+        anchor_ids = [a for _set_id, a in anchors]
+        set_ids = [s for s, _a in anchors]
+        self.assertEqual(len(set(anchor_ids)), 3, "all three anchor ids must be distinct")
+        self.assertEqual(len(set(set_ids)), 3, "all three set ids must be distinct")
+        self.assertEqual([c.set_id for c in to_create], set_ids)
+
+    def test_closes_are_rewritten_with_the_same_rules_as_the_converter(self):
+        marker = "<!-- mutate:entity=honor;field=rank;value=Captain;id=m1 -->"
+        close = "<!-- mutate:close;ref=m1;id=c1 -->"
+        body = f"{marker}{close}"
+        new_body, _to_create = convert_restored_scene("s1", body, entity_type, lambda _sid: False)
+
+        closes = closes_in(new_body)
+        self.assertEqual(closes, [("m1", "", "c1")])
+
+    def test_a_carrier_row_close_becomes_ref_and_row(self):
+        carrier = (
+            "<!-- mutate:entity=honor;id=u1\n"
+            "field=rank;value=Captain;id=r1\n"
+            "field=posting;value=Bridge;id=r2\n"
+            "-->"
+        )
+        body = f"{carrier}<!-- mutate:close;ref=r2;id=c1 -->"
+        new_body, _to_create = convert_restored_scene("s1", body, entity_type, lambda _sid: False)
+
+        closes = closes_in(new_body)
+        self.assertEqual(closes, [("u1", "r2", "c1")])
+
+    def test_dead_entity_keeps_the_pin_and_empty_target_type(self):
+        body = "<!-- mutate:entity=ghost;field=rank;value=Captain;id=m1 -->"
+        _new_body, to_create = convert_restored_scene("s1", body, entity_type, lambda _sid: False)
+
+        self.assertEqual(to_create[0].entity_id, "ghost")
+        self.assertEqual(to_create[0].target_entry_type, "")
+
+    def test_pure_no_filesystem_deterministic(self):
+        body = "<!-- mutate:entity=honor;field=rank;value=Captain;id=m1 -->"
+        first = convert_restored_scene("s1", body, entity_type, lambda _sid: False)
+        second = convert_restored_scene("s1", body, entity_type, lambda _sid: False)
+        self.assertEqual(first[0], second[0])
+        self.assertEqual([c.set_id for c in first[1]], [c.set_id for c in second[1]])
 
 
 if __name__ == "__main__":

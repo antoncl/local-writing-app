@@ -238,6 +238,26 @@ class MutationSetEntriesMixin:
             return "template"
         return "active" if anchors else "staged"
 
+    def _copy_mutation_set_unvalidated(self, set_id: str) -> str:
+        """Copy `set_id` into a brand new set, keeping EVERY row untouched and
+        unvalidated (ADR-0095 §11) — used only to give a re-minted restored
+        anchor (`scene_snapshots.restore_snapshot`) its own set. Deliberately
+        NOT `copy_mutation_set_entry`, which drops rows that fail validation;
+        restore must not change what a scene resolves to (§4)."""
+        root = self._require_project()
+        source = self.read_mutation_set_entry(set_id)
+        new_id = self._new_id("mutation_set")
+        self._write_mutation_set_file(
+            root / "mutation-sets" / f"{new_id}.md",
+            new_id,
+            source.title,
+            source.entry_type,
+            source.target_entry_type,
+            source.target_entity,
+            source.rows,
+        )
+        return new_id
+
     def _write_converted_mutation_set(self, converted: Any) -> None:
         """Write one `ConvertedSet` (`legacy_mutation_markers.py`) straight to
         `mutation-sets/<set-id>.md`, WITHOUT validation (ADR-0095 §4/§12): the

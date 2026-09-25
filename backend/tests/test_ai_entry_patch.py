@@ -222,6 +222,19 @@ class DiagnoseGarbledReplyTests(unittest.TestCase):
         self.assertEqual(diagnose_garbled_reply(""), "The reply was empty.")
         self.assertEqual(diagnose_garbled_reply("   \n  "), "The reply was empty.")
 
+    def test_a_leading_object_with_trailing_prose_is_judged_by_its_shape(self) -> None:
+        # The parser scans embedded objects here, so the reason must too — not
+        # json.loads' "Extra data" on the whole reply.
+        self.assertIsNone(parse_entry_patch_json('{"title": "Seren"} Hope this helps!'))
+        self.assertIn(
+            "not an entry",
+            diagnose_garbled_reply('{"title": "Seren"} Hope this helps!'),
+        )
+        self.assertIn(
+            "several entry-shaped",
+            diagnose_garbled_reply('{"body": "a"} or maybe {"body": "b"}'),
+        )
+
     def test_cut_off_inside_a_string(self) -> None:
         self.assertEqual(
             diagnose_garbled_reply('{"body": "Hi, the Ledger-Mo'),

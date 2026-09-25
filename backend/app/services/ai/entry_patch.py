@@ -226,6 +226,11 @@ def _diagnose_starts_with_brace(candidate: str) -> str:
         # patch-shaped/empty result would have made `parse_entry_patch_json`
         # succeed rather than call this diagnostic at all.
         return _wrong_shape_reason(whole)
+    # A leading object that closes before the reply ends (`{…} Hope this
+    # helps`) is judged by the parser's embedded scan, not as broken JSON.
+    end = _object_end(candidate, 0)
+    if end is not None and candidate[end:].strip():
+        return _diagnose_embedded(candidate)
     _, ends_in_string = _brackets_outside_strings(candidate)
     if ends_in_string:
         return "The reply is cut off inside a text value."

@@ -1,3 +1,9 @@
+// C2: ADR-0095 §8 replaces this whole module — a stop edit saves the
+// mutation SET (never the scene), so `rewriteMutationUnit` below has no live
+// backend route any more (kept only as a type-compiling seam; its one caller,
+// EditorBodyHost.svelte, now stubs it to a no-op). Left otherwise unchanged
+// pending the S2 rebuild.
+//
 // Editing the lore card at a scrub stop edits THAT STOP'S UNIT (ADR-0042 §5,
 // ADR-0089 S5) — a pure rewrite of one reference-keyed list field's edited
 // items into a `PUT .../mutations/units/{unit_id}` call. The scrub controller
@@ -9,9 +15,21 @@
 // module is testable with plain fakes — no store/api import here.
 import { asItemList, keyedListRowsFromEdit, splitMemberPath, type CollectionRecord, type KeyedListShape } from "./mutationListEdit";
 import type { MutationUnitGroup } from "./mutationUnits";
-import type { EffectiveStateResponse, MetadataValue, MutationUnitRow, Scene } from "@/lib/types";
+import type { EffectiveStateResponse, MetadataValue, Scene } from "@/lib/types";
 
 type ItemRecord = Record<string, MetadataValue>;
+
+// C2: the wholesale unit-rewrite wire shape the retired `PUT
+// .../mutations/units/{unit_id}` route took (ADR-0095 §8 saves the SET
+// instead — this module is rebuilt in S2). Kept as a local shape only so this
+// file's signatures still type-check; `MutationStopEditDeps.rewriteMutationUnit`
+// below is stubbed at its one call site (EditorBodyHost.svelte).
+export type MutationUnitRow = {
+  field: string;
+  op: string;
+  value: string;
+  id: string;
+};
 
 /** One draft row before it's serialized to the wire shape — `id`/`op` still
  *  optional the way `keyedListRowsFromEdit` emits them. */

@@ -112,7 +112,9 @@ const promotedMutationSet: MutationSetEntry = {
   target_entry_type: "lore:character",
   target_entity: "alice",
   rows: [],
-  placed: false,
+  anchors: [],
+  state: "staged",
+  pin_missing: false,
   source_layer_id: "series",
   source_layer_label: "Series",
 };
@@ -172,7 +174,9 @@ const stagedMutationSet: MutationSetEntry = {
   target_entry_type: "lore:character",
   target_entity: "alice",
   rows: [],
-  placed: false,
+  anchors: [],
+  state: "staged",
+  pin_missing: false,
   source_layer_id: "book",
   source_layer_label: "Book",
 };

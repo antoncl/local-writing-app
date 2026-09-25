@@ -248,10 +248,15 @@ describe.each(["prose", "code"] as const)("EditorBodyHost — the body diff over
   });
 });
 
+// C2: ADR-0095 §8 moves the scrub-stop list edit to a mutation-SET save
+// (rebuilt in S2); until then EditorBodyHost's injected `rewriteMutationUnit`
+// dep is a stub that always rejects, so a stop-editable list click is
+// routed away from `metadataChange` but performs no write. This test now
+// only asserts that no-write behaviour, not the removed rewrite call.
 describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5)", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("a scrubbed model with a stopUnit targeting the node routes a list-tab change through the injected rewrite, not metadataChange", async () => {
+  it("a scrubbed model with a stopUnit targeting the node routes a list-tab change away from metadataChange (ADR-0095 S2 stub)", async () => {
     const stopUnit = {
       unitId: "mut_head",
       name: "",
@@ -266,6 +271,9 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5)", () => 
           group: "",
           unit_id: "mut_head",
           unit_name: "",
+          anchor_id: "mut_head",
+          set_id: "mutset_1",
+          row_id: "mut_head",
           scene_id: "s1",
           offset: 5,
           line: 1,
@@ -274,13 +282,11 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5)", () => 
       ],
     };
     const reload = vi.fn().mockResolvedValue(undefined);
-    const scene = { id: "s1" };
     const getEffective = vi
       .spyOn(api, "getEntityEffectiveState")
       .mockResolvedValue({ entity_id: "char_tomas", scene_id: "s1", position: 5, values: {} });
-    const rewrite = vi.spyOn(api, "rewriteMutationUnit").mockResolvedValue(scene as never);
     const flush = vi.spyOn(editorPanes, "flushSceneIfDirty").mockResolvedValue(undefined);
-    const reconcile = vi.spyOn(editorPanes, "reconcileSceneFromServer").mockResolvedValue(undefined);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const metadataChange = vi.fn();
     const noop = () => {};
     const { container } = render(EditorBodyHost, {
@@ -307,12 +313,10 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5)", () => 
     expect(removeButton).not.toBeNull();
     await fireEvent.click(removeButton!);
 
-    await vi.waitFor(() => expect(rewrite).toHaveBeenCalled());
-    expect(getEffective).toHaveBeenCalledWith("char_tomas", "s1", 5, ["mut_head"]);
+    await vi.waitFor(() => expect(getEffective).toHaveBeenCalled());
+    await vi.waitFor(() => expect(consoleError).toHaveBeenCalled());
     expect(flush).toHaveBeenCalledWith("s1");
-    expect(rewrite).toHaveBeenCalledWith("s1", "mut_head", { rows: [] });
-    expect(reconcile).toHaveBeenCalledWith(scene, "reconcile");
-    expect(reload).toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
     expect(metadataChange).not.toHaveBeenCalled();
   });
 });

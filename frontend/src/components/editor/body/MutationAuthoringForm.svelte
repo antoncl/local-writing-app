@@ -21,7 +21,7 @@
   } from "@/components/editor/body/MutationFieldRows.svelte";
   import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
   import { api } from "@/lib/api";
-  import { refreshMutationSetEntries } from "@/lib/stores/mutationSets";
+  import { refreshMutationSetEntries, upsertMutationSet } from "@/lib/stores/mutationSets";
   import {
     asItemList,
     asMembershipList,
@@ -245,14 +245,18 @@
   // entity — never for a different character of the same type — so applying it
   // pre-fills the pinned entity rather than mis-targeting; reusable (un-pinned)
   // sets stay offered for every matching entity, unchanged.
+  // C2: ADR-0095 §6 rebuilds this whole apply flow (a template/staged apply
+  // creates + anchors a set through the backend; an active set offers
+  // Copy/Link). Until then, keep the same "not already active" filter the
+  // old `!placed` guard drew, so this dialog still compiles and shows a
+  // plausible list; it does not yet call `insertAnchor` or `copyMutationSet`.
   const applicableSets = $derived(
     entity
       ? allSets.filter(
           (s) =>
             s.target_entry_type === entity.entry_type &&
             (!s.target_entity || s.target_entity === entity.id) &&
-            // ADR-0055 §5: a placed one-off is consumed — never re-offer it.
-            !s.placed,
+            s.state !== "active",
         )
       : [],
   );
@@ -289,18 +293,17 @@
       value: row.value,
     }));
     if (unitRows.length === 0) return;
+    // C2: `applyMutationUnitDraft` no longer has a `rows` attr to write these
+    // into (ADR-0095 §1 pill attrs are `{ setId, anchorId }` only) — this
+    // in-flow "apply a saved set" is rebuilt in ADR-0095 §6 to anchor `full`
+    // itself (via `insertAnchor`) rather than stamping its rows into a fresh
+    // unit. Left calling the legacy path so the form still compiles.
     onSubmit({ entity: entity.id, name: full.title, rows: unitRows });
-    // ADR-0055 §5: a PINNED one-off is *consumed* by placement — mark it placed
-    // so it drops from the card's pending list (via the roster refresh) and is
-    // never re-offered. A reusable (un-pinned) set is untouched — apply stays a
-    // pure read for it. Fire-and-forget: a failed flip just leaves the set
-    // pending (recoverable), so it must never block the marker that already went in.
-    if (full.target_entity) {
-      void api
-        .placeMutationSet(setId)
-        .then(() => refreshMutationSetEntries())
-        .catch(() => {});
-    }
+    // Placement (the stored `placed` flag) is retired (ADR-0095 §2) — a
+    // set's state is now DERIVED from its anchors, so there is nothing left
+    // to flip here; the roster refresh once the anchor lands is what the
+    // rebuilt §6 flow will do instead.
+    void refreshMutationSetEntries();
   }
 
   // Fields scope to the entity's resolved entry type (edit mode included — the
@@ -451,11 +454,13 @@
           title: named || "Untitled set",
           target_entry_type: entity.entry_type,
           rows: unitRows.map((row) => ({
+            id: row.id ?? "",
             field: row.field,
             op: row.op || "replace",
             value: row.value,
           })),
         })
+        .then((created) => upsertMutationSet(created))
         .catch(() => {});
     }
     onSubmit({

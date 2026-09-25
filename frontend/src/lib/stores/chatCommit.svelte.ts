@@ -37,6 +37,7 @@ import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
 import { extractHandler, type ExtractHost } from "@/lib/editor-core/outputHandlers";
 import { formatTokens } from "@/lib/utils/money";
+import { upsertMutationSet } from "@/lib/stores/mutationSets";
 
 /** The live chat state + status/cost sinks the controller reaches into. Stable
  *  for the controller's life (wired once at construction) — the reactive inputs
@@ -124,11 +125,11 @@ function emptyPatchReason(dropped: string[]): string {
 // `_split_collection_value`) — so a staged row and a hand-authored one match.
 export function patchToRows(patch: EntryPatch): MutationSetRow[] {
   const rows: MutationSetRow[] = [];
-  if (patch.body != null) rows.push({ field: "body", op: "replace", value: patch.body });
+  if (patch.body != null) rows.push({ id: "", field: "body", op: "replace", value: patch.body });
   for (const [field, value] of Object.entries(patch.fields)) {
     const str =
       value == null ? "" : Array.isArray(value) ? value.map(String).join(",") : String(value);
-    rows.push({ field, op: "replace", value: str });
+    rows.push({ id: "", field, op: "replace", value: str });
   }
   return rows;
 }
@@ -419,12 +420,13 @@ export class ChatCommitController {
     }
     let updated = false;
     if (existing) {
-      await api.saveMutationSetEntry({
+      const saved = await api.saveMutationSetEntry({
         ...existing,
         target_entry_type: entryType,
         target_entity: entryId,
         rows,
       });
+      upsertMutationSet(saved);
       updated = true;
     } else {
       const set = await api.createMutationSetEntry({
@@ -433,6 +435,7 @@ export class ChatCommitController {
         target_entity: entryId,
         rows,
       });
+      upsertMutationSet(set);
       await this.deps.onStaged(set.id);
     }
     const count = `${rows.length} change${rows.length > 1 ? "s" : ""}`;

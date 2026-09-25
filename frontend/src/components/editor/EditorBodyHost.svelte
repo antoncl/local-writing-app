@@ -234,7 +234,13 @@
           editedItems: asItemList(items),
           deps: {
             getEntityEffectiveState: api.getEntityEffectiveState,
-            rewriteMutationUnit: api.rewriteMutationUnit,
+            // C2: `rewriteMutationUnit`'s route retired (ADR-0095 §8 saves
+            // the mutation SET instead, rebuilt in S2) — stop-edit list
+            // changes are a no-op for now; handleListChange's catch leaves
+            // the tab as it was.
+            rewriteMutationUnit: async () => {
+              throw new Error("Editing at a stop is being rebuilt (ADR-0095 S2) and is temporarily unavailable.");
+            },
             flushSceneIfDirty: (sceneId) => editorPanes.flushSceneIfDirty(sceneId),
             reconcileSceneFromServer: (scene, mode) => editorPanes.reconcileSceneFromServer(scene, mode),
           },

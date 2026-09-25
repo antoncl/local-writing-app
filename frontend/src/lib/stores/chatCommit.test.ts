@@ -61,7 +61,9 @@ const madeSet = (id: string): MutationSetEntry => ({
   target_entry_type: "lore:character",
   target_entity: "lore-1",
   rows: [],
-  placed: false,
+  anchors: [],
+  state: "staged",
+  pin_missing: false,
   source_layer_id: "",
   source_layer_label: "",
 });
@@ -615,15 +617,15 @@ describe("ChatCommitController — #986 chat switch during an in-flight commit",
 describe("patchToRows", () => {
   it("maps body + scalar fields to replace rows (body first)", () => {
     expect(patchToRows({ body: "new prose", fields: { bio: "a soldier", rank: "captain" } })).toEqual([
-      { field: "body", op: "replace", value: "new prose" },
-      { field: "bio", op: "replace", value: "a soldier" },
-      { field: "rank", op: "replace", value: "captain" },
+      { id: "", field: "body", op: "replace", value: "new prose" },
+      { id: "", field: "bio", op: "replace", value: "a soldier" },
+      { id: "", field: "rank", op: "replace", value: "captain" },
     ]);
   });
 
   it("omits the body row when the patch has no body", () => {
     expect(patchToRows({ body: null, fields: { bio: "x" } })).toEqual([
-      { field: "bio", op: "replace", value: "x" },
+      { id: "", field: "bio", op: "replace", value: "x" },
     ]);
   });
 
@@ -631,13 +633,13 @@ describe("patchToRows", () => {
     // A collection replace carries the comma-joined value the backend splits with
     // `_split_collection_value` — matching the set editor's `String(array)`.
     expect(patchToRows({ body: null, fields: { aliases: ["Vale", "The Captain"] } })).toEqual([
-      { field: "aliases", op: "replace", value: "Vale,The Captain" },
+      { id: "", field: "aliases", op: "replace", value: "Vale,The Captain" },
     ]);
   });
 
   it("serializes a null field value as \"\" (matches toMarkerString, not \"null\")", () => {
     expect(patchToRows({ body: null, fields: { epithet: null } })).toEqual([
-      { field: "epithet", op: "replace", value: "" },
+      { id: "", field: "epithet", op: "replace", value: "" },
     ]);
   });
 
@@ -692,8 +694,8 @@ describe("ChatCommitController — stageToPendingSet", () => {
       target_entry_type: "lore:character",
       target_entity: "lore-1",
       rows: [
-        { field: "body", op: "replace", value: "transformation notes" },
-        { field: "condition", op: "replace", value: "werewolf" },
+        { id: "", field: "body", op: "replace", value: "transformation notes" },
+        { id: "", field: "condition", op: "replace", value: "werewolf" },
       ],
     });
     // The chat owns it now (its staged_set edge). No update path — the chat
@@ -739,6 +741,7 @@ describe("ChatCommitController — stageToPendingSet", () => {
     const { c, deps } = stageController({ entryTitle: () => "Mira", getStagedSetId: () => "set-9" });
     extractPatch.mockResolvedValue(okResult({ fields: { condition: "alpha werewolf" } }));
     getSet.mockResolvedValue(madeSet("set-9"));
+    saveSet.mockResolvedValue(madeSet("set-9"));
 
     await c.stageToPendingSet();
 
@@ -750,7 +753,7 @@ describe("ChatCommitController — stageToPendingSet", () => {
         id: "set-9",
         target_entry_type: "lore:character",
         target_entity: "lore-1",
-        rows: [{ field: "condition", op: "replace", value: "alpha werewolf" }],
+        rows: [{ id: "", field: "condition", op: "replace", value: "alpha werewolf" }],
       }),
     );
     expect(createSet).not.toHaveBeenCalled();

@@ -1,84 +1,63 @@
-// Editor-side operations on `mutation` prose nodes (the `/mutate` pills, #33),
-// extracted from ProseBodyView so the component keeps only the thin dialog-state
-// wrappers. Every function takes the live `Editor`; re-entrancy guarding (the
-// reconciler dispatch re-fires onUpdate) stays with the caller, which owns the
-// flag. Mirrors the stateless editor-helper modules (slashParsing, proseMarks).
-//
-// Since #69 (ADR-0016) a pill is a mutation UNIT: one entity, one optional name,
-// N field rows — each row keeping its own id (and so its own closeable
-// lifetime). A one-row unit serializes to the single-line marker (its id IS the
-// row's id); ≥2 rows serialize to the multi-line carrier comment with a
-// distinct head id.
+// Editor-side operations on `mutation` prose nodes (the ⤳ anchor pills,
+// ADR-0095 §1). A pill is now a pure ANCHOR — attrs `{ setId, anchorId }`,
+// nothing else — that names a mutation-SET node kept elsewhere; its label
+// renders from the mutation-sets STORE via a NodeView (proseMarks.ts), not
+// from these attrs, so editing the set relabels every pill with no document
+// change. This module keeps the doc-mechanical pieces: minting ids,
+// finding/removing a pill, and reconciling paste/cut/copy/drag (ADR-0095
+// §7). The heavier per-pill AUTHORING (create/edit-through-the-pill, ADR-0095
+// §6) lives behind the `/mutate` dialogs (MutationAuthoringForm et al) —
+// those are rebuilt in C2; `applyMutationUnitDraft` below is a deliberate
+// no-op until then (see its own comment).
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
-
-/** One field change inside a mutation unit. `id` is the row's marker id —
- *  independently addressable by `close;ref=` (ADR-0002 lifetimes hold). */
-export interface MutationRowDraft {
-  id?: string | null;
-  field: string;
-  /** Collection operator (#58): "replace" (default) | "add" | "remove". */
-  op?: string;
-  value: string;
-}
-
-/** An authored change from MutationAuthoringForm: one entity, N rows, one pill
- *  (#69). `markerId` is the unit id when editing an existing pill. `group` is
- *  the legacy #65 tie, preserved round-trip but never minted anew. */
-export interface MutationUnitDraft {
-  markerId?: string | null;
-  entity: string;
-  name?: string;
-  group?: string;
-  rows: MutationRowDraft[];
-}
-
-interface UnitRow {
-  id: string;
-  field: string;
-  op: string;
-  value: string;
-}
+import type { CopyMutationSetResult, MutationMarkerRecord } from "@/lib/types";
 
 export function createMutationId(): string {
   const randomId = globalThis.crypto?.randomUUID?.().replace(/-/g, "") ?? Math.random().toString(16).slice(2);
   return `mut_${randomId.slice(0, 12)}`;
 }
 
-/** Coerce a mutation node's `rows` attr (or any draft rows) into a normalized
- *  array — tolerant of missing/foreign attrs from pasted HTML. */
-export function unitRows(attrs: { rows?: unknown }): UnitRow[] {
-  if (!Array.isArray(attrs.rows)) return [];
-  return attrs.rows.map((row) => ({
-    id: String((row as UnitRow)?.id ?? ""),
-    field: String((row as UnitRow)?.field ?? ""),
-    op: String((row as UnitRow)?.op || "replace"),
-    value: String((row as UnitRow)?.value ?? ""),
-  }));
-}
-
-export function findMutationNodePos(editor: Editor, markerId: string): number | null {
+export function findMutationNodePos(editor: Editor, anchorId: string): number | null {
   let hit: number | null = null;
   editor.state.doc.descendants((node, pos) => {
     if (hit !== null) return false;
-    if (node.type.name === "mutation" && node.attrs.markerId === markerId) hit = pos;
+    if (node.type.name === "mutation" && node.attrs.anchorId === anchorId) hit = pos;
     return hit === null;
   });
   return hit;
 }
 
-// Copy-pasting a mutation pill in prose duplicates its unit AND row ids
-// verbatim. Left alone that trips Svelte's keyed-each duplicate-key guard in
-// the timeline, and a single-record rewrite would touch every copy. Mint fresh
-// ids for each duplicate and dispatch, keeping the canonical identity rule: a
-// one-row unit's markerId IS its row's id; a multi-row unit's head id is its
-// own claimed id, distinct from every row. Returns whether the doc changed;
-// the caller guards re-entrancy.
-/** True when a transaction inserts any `mutation`/`mutationClose` node — the only
- *  way a duplicate id can enter the doc (paste, drop, redo, programmatic insert).
- *  Pills are atomic and dialog/paste-only: plain typing produces text steps and
- *  never trips this, so the per-keystroke path can skip the full-document
- *  `dedupeMutationIds` walk. Cost is O(inserted slice), not O(doc). */
+export function removeMutationNode(editor: Editor, anchorId: string): void {
+  const pos = findMutationNodePos(editor, anchorId);
+  if (pos === null) return;
+  const node = editor.state.doc.nodeAt(pos);
+  if (node) editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
+}
+
+/** Insert a fresh anchor pill for `setId` at the cursor (ADR-0095 §6) — mints
+ *  its own client anchor id and returns it. C2 wires this from the apply
+ *  picker / `/mutate` create flow. */
+export function insertAnchor(editor: Editor, setId: string): string {
+  const anchorId = createMutationId();
+  editor.chain().focus().insertContent({ type: "mutation", attrs: { setId, anchorId } }).run();
+  return anchorId;
+}
+
+/** Insert a close pill ending `ref` (an anchor id), optionally scoped to one
+ *  `row` within its set (ADR-0095 §1: "a row close names its anchor too"). */
+export function insertMutationClose(editor: Editor, ref: string, row = ""): void {
+  editor
+    .chain()
+    .focus()
+    .insertContent({ type: "mutationClose", attrs: { ref, row, closeId: createMutationId() } })
+    .run();
+}
+
+/** True when a transaction inserts any `mutation`/`mutationClose` node — the
+ *  only way a pasted/dropped/redone pill enters the doc. Pills are atomic
+ *  and dialog/paste-only: plain typing produces text steps and never trips
+ *  this, so the per-keystroke path can skip the reconciliation walk below. */
 export function transactionInsertsMutation(transaction: Transaction): boolean {
   return transaction.steps.some((step) => {
     const slice = (step as { slice?: { content: { descendants: (f: (node: { type: { name: string } }) => boolean | void) => void } } }).slice;
@@ -95,130 +74,220 @@ export function transactionInsertsMutation(transaction: Transaction): boolean {
   });
 }
 
-export function dedupeMutationIds(editor: Editor): boolean {
-  const seen = new Set<string>();
-  // Old→new for every start id we reassign, so a `close;ref=` pill pasted with
-  // its start (whose ids just got remapped) is re-pointed at the fresh id
-  // instead of orphaning to the original. A close sits after its start in doc
-  // order, so the remap is recorded by the time we reach the close.
-  const remap = new Map<string, string>();
-  let transaction = editor.state.tr;
-  let changed = false;
-  const claim = (id: string): string | null => {
-    if (id && !seen.has(id)) {
-      seen.add(id);
-      return null; // kept as-is
-    }
-    const fresh = createMutationId();
-    seen.add(fresh);
-    return fresh;
-  };
-  editor.state.doc.descendants((node, pos) => {
-    if (node.type.name === "mutationClose") {
-      const attrs = { ...node.attrs };
-      let touched = false;
-      const fresh = claim(String(node.attrs.markerId ?? ""));
-      if (fresh) {
-        attrs.markerId = fresh;
-        touched = true;
-      }
-      const ref = String(node.attrs.ref ?? "");
-      const remappedRef = remap.get(ref);
-      if (remappedRef && remappedRef !== ref) {
-        attrs.ref = remappedRef;
-        touched = true;
-      }
-      if (touched) {
-        transaction = transaction.setNodeMarkup(pos, undefined, attrs);
-        changed = true;
-      }
-      return true;
-    }
-    if (node.type.name !== "mutation") return true;
-    const rows = unitRows(node.attrs);
-    let touched = false;
-    const nextRows = rows.map((row) => {
-      const fresh = claim(row.id);
-      if (!fresh) return row;
-      touched = true;
-      if (row.id) remap.set(row.id, fresh);
-      return { ...row, id: fresh };
-    });
-    let markerId = String(node.attrs.markerId ?? "");
-    if (nextRows.length === 1) {
-      // Degenerate form: the unit id mirrors the sole row's id (its remap, if
-      // any, was already recorded against the row id above).
-      if (markerId !== nextRows[0].id) {
-        markerId = nextRows[0].id;
-        touched = true;
-      }
-    } else {
-      const fresh = claim(markerId);
-      if (fresh) {
-        if (markerId) remap.set(markerId, fresh);
-        markerId = fresh;
-        touched = true;
-      }
-    }
-    if (touched) {
-      transaction = transaction.setNodeMarkup(pos, undefined, { ...node.attrs, rows: nextRows, markerId });
-      changed = true;
+// ---------- Paste / cut / copy (ADR-0095 §7) ----------
+
+type ClipboardKind = "cut" | "copy";
+interface ClipboardLedgerEntry {
+  kind: ClipboardKind;
+  anchorIds: Set<string>;
+  consumed: boolean;
+}
+
+// Module-level: the app's own cut/copy just put these anchor ids on the
+// clipboard (ADR-0095 §7). Read back on the very next paste; a `copy` entry
+// always means "copy" (never consumed to "kept" status), a `cut` entry is
+// consumed on its first matching paste — every later paste of the same
+// clipboard payload is then a copy, same as content from outside the app.
+let clipboardLedger: ClipboardLedgerEntry | null = null;
+
+export function recordMutationClipboard(kind: ClipboardKind, anchorIds: string[]): void {
+  clipboardLedger = anchorIds.length > 0 ? { kind, anchorIds: new Set(anchorIds), consumed: false } : null;
+}
+
+/** Test-only: reset the module-level ledger between cases. */
+export function resetMutationClipboardForTest(): void {
+  clipboardLedger = null;
+}
+
+export interface MutationPasteDeps {
+  /** Manuscript scene bodies are the only place an anchor may live (ADR-0095
+   *  §1) — anything else drops a newly-arrived anchor/close on paste. */
+  isManuscript: () => boolean;
+  /** Anchor ids the PROJECT already knows about outside this doc (the loaded
+   *  roster's `anchors`, ADR-0095 §7's "already exists in the project"
+   *  test) — a duplicate found only within this doc is caught separately. */
+  knownProjectAnchorIds: () => ReadonlySet<string>;
+  copySet: (setId: string) => Promise<CopyMutationSetResult>;
+  /** Surfaced through the app's usual error/notice mechanism — a failed copy,
+   *  or a copy that left rows out. */
+  onNotice?: (message: string) => void;
+}
+
+function collectMutationIds(editor: Editor): Set<string> {
+  const ids = new Set<string>();
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === "mutation") {
+      const id = String(node.attrs.anchorId ?? "");
+      if (id) ids.add(id);
+    } else if (node.type.name === "mutationClose") {
+      const id = String(node.attrs.closeId ?? "");
+      if (id) ids.add(id);
     }
     return true;
   });
-  if (!changed) return false;
-  editor.view.dispatch(transaction);
-  return true;
+  return ids;
 }
 
-/** Normalize a dialog draft into canonical node attrs: rows get ids, a one-row
- *  unit's markerId collapses onto its row's id (the single-line form), and a
- *  multi-row unit claims a head id distinct from every row id (a formerly
- *  one-row unit shares its id with its sole row — promotion mints fresh so
- *  `close;ref=` stays unambiguous). */
-function unitAttrsFromDraft(draft: MutationUnitDraft): Record<string, unknown> {
-  const rows = draft.rows.map((row) => ({
-    id: row.id || createMutationId(),
-    field: row.field,
-    op: row.op || "replace",
-    value: row.value,
-  }));
-  let markerId = draft.markerId || createMutationId();
-  if (rows.length === 1) markerId = rows[0].id;
-  else if (rows.some((row) => row.id === markerId)) markerId = createMutationId();
-  return {
-    entity: draft.entity,
-    name: draft.name ?? "",
-    group: draft.group ?? "",
-    rows,
-    markerId,
-  };
-}
+/** Reconciles anchor/close pills after any transaction that might have just
+ *  pasted, dropped or redone one (ADR-0095 §7) — one instance per open prose
+ *  body, seeded from each freshly loaded document so its own on-disk content
+ *  is never mistaken for a paste.
+ *
+ *  A plain in-editor DRAG needs no special case here: ProseMirror moves a
+ *  dragged range as delete+insert of the SAME node (no duplicate ever
+ *  appears), so the id stays "already known" throughout and is left alone —
+ *  exactly the "a move keeps its anchor" rule, for free. */
+export class MutationPasteReconciler {
+  #known = new Set<string>();
 
-/** Apply the authoring dialog's unit draft: edit an existing pill in place (the
- *  draft carries its unit markerId) or insert a new one at the cursor. One
- *  draft → one pill, however many rows (#69). */
-export function applyMutationUnitDraft(editor: Editor, draft: MutationUnitDraft): void {
-  const attrs = unitAttrsFromDraft(draft);
-  if (draft.markerId) {
-    const pos = findMutationNodePos(editor, draft.markerId);
-    if (pos === null) return;
-    editor
-      .chain()
-      .focus()
-      .command(({ tr }) => {
-        tr.setNodeMarkup(pos, undefined, attrs);
-        return true;
+  /** Re-baseline against the doc as it stands right now (call after loading
+   *  a scene) — everything already on disk counts as pre-existing. */
+  seed(editor: Editor): void {
+    this.#known = collectMutationIds(editor);
+  }
+
+  /** Drop ids from the baseline right when they're cut (ADR-0095 §7) — a cut
+   *  deletes with no insert, so `reconcile` never runs to notice on its own,
+   *  and without this the SAME pane pasting them straight back would see
+   *  them as "already known" and skip the cut-ledger check entirely. */
+  forget(ids: readonly string[]): void {
+    for (const id of ids) this.#known.delete(id);
+  }
+
+  /** Synchronous half: manuscript gating, cut-keep, copy id/setId reset,
+   *  in-doc duplicates, and close repointing — then kicks off `copySet` for
+   *  every anchor that needs one (fire-and-forget from the caller's side;
+   *  each job dispatches its own follow-up transaction once it resolves).
+   *  Returns whether the synchronous half changed the doc. */
+  reconcile(editor: Editor, deps: MutationPasteDeps): boolean {
+    const isManuscript = deps.isManuscript();
+    const anchors: { pos: number; anchorId: string; setId: string }[] = [];
+    const closes: { pos: number; closeId: string }[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "mutation") {
+        anchors.push({ pos, anchorId: String(node.attrs.anchorId ?? ""), setId: String(node.attrs.setId ?? "") });
+      } else if (node.type.name === "mutationClose") {
+        closes.push({ pos, closeId: String(node.attrs.closeId ?? "") });
+      }
+      return true;
+    });
+
+    const seenThisWalk = new Set<string>();
+    const remap = new Map<string, string>(); // old anchor id (as pasted) -> new id
+    const dropPositions: number[] = [];
+    const copyJobs: { newAnchorId: string; originalSetId: string }[] = [];
+    let tr = editor.state.tr;
+    let changed = false;
+
+    // A cut's ledger is consumed once per PASTE OPERATION, not per anchor —
+    // several anchors cut together and pasted together all stay kept.
+    const cutLedger =
+      clipboardLedger && clipboardLedger.kind === "cut" && !clipboardLedger.consumed ? clipboardLedger : null;
+    let cutLedgerUsed = false;
+
+    for (const { pos, anchorId, setId } of anchors) {
+      const isDup = anchorId !== "" && seenThisWalk.has(anchorId);
+      if (anchorId) seenThisWalk.add(anchorId);
+      const isNew = anchorId !== "" && !this.#known.has(anchorId);
+      if (!isManuscript) {
+        if (isNew || isDup) dropPositions.push(pos);
+        continue;
+      }
+      if (!isNew && !isDup) continue; // an untouched, already-known anchor
+
+      const isFirstCutPaste = !isDup && Boolean(cutLedger?.anchorIds.has(anchorId));
+      if (isFirstCutPaste) {
+        cutLedgerUsed = true;
+        continue; // kept exactly as pasted — same anchor, same set
+      }
+
+      const isCopy = isDup || deps.knownProjectAnchorIds().has(anchorId) || Boolean(clipboardLedger?.anchorIds.has(anchorId));
+      if (!isCopy) continue; // brand-new content with no known collision — kept as pasted
+
+      const freshId = createMutationId();
+      remap.set(anchorId, freshId);
+      seenThisWalk.add(freshId);
+      tr = tr.setNodeMarkup(tr.mapping.map(pos), undefined, { setId: "", anchorId: freshId });
+      changed = true;
+      if (setId) copyJobs.push({ newAnchorId: freshId, originalSetId: setId });
+    }
+    if (cutLedgerUsed && cutLedger) cutLedger.consumed = true;
+
+    // Non-manuscript: drop every anchor that just arrived, highest position
+    // first so earlier positions stay valid as we delete.
+    for (const pos of dropPositions.sort((a, b) => b - a)) {
+      const mapped = tr.mapping.map(pos);
+      const node = tr.doc.nodeAt(mapped);
+      if (node) {
+        tr = tr.delete(mapped, mapped + node.nodeSize);
+        changed = true;
+      }
+    }
+
+    // Closes: repoint any `ref` that a remap above just gave a new id (a
+    // close pasted together with its anchor, ADR-0095 §7) — a close is
+    // otherwise left untouched (its own id collisions are cosmetic; nothing
+    // addresses a close by id).
+    if (remap.size > 0) {
+      for (const { pos } of closes) {
+        const mapped = tr.mapping.map(pos);
+        const node = tr.doc.nodeAt(mapped);
+        if (!node) continue;
+        const ref = String(node.attrs.ref ?? "");
+        const next = remap.get(ref);
+        if (next && next !== ref) {
+          tr = tr.setNodeMarkup(mapped, undefined, { ...node.attrs, ref: next });
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) editor.view.dispatch(tr);
+    this.#known = collectMutationIds(editor);
+
+    for (const job of copyJobs) this.#runCopyJob(editor, job, deps);
+
+    return changed;
+  }
+
+  #runCopyJob(editor: Editor, job: { newAnchorId: string; originalSetId: string }, deps: MutationPasteDeps): void {
+    deps
+      .copySet(job.originalSetId)
+      .then((result) => {
+        const pos = findMutationNodePos(editor, job.newAnchorId);
+        if (pos === null) return; // the pill was deleted meanwhile — nothing to fill in
+        const node = editor.state.doc.nodeAt(pos);
+        if (!node) return;
+        editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, setId: result.entry.id }));
+        this.#known.add(job.newAnchorId);
+        if (result.dropped_rows.length > 0) {
+          deps.onNotice?.(
+            `Copied the mutation set, but left out: ${result.dropped_rows.map((r) => r.field).join(", ")} (no longer valid for this entity).`,
+          );
+        }
       })
-      .run();
-  } else {
-    editor.chain().focus().insertContent({ type: "mutation", attrs }).run();
+      .catch(() => {
+        deps.onNotice?.("Couldn't copy the mutation set for a pasted change — the pill is missing its set.");
+      });
   }
 }
 
-/** Auto-label for one mutation record/row (#58/#65): the user name if set, else
- *  `field → value` (add/remove show +/−). Shared by the close pill and any list
- *  surface that renders a record without its schema. */
+// ---------- Labels ----------
+
+/** A set's pill label (ADR-0095 §1): its title, or — for an untitled set — a
+ *  count fallback in the shape the old per-row unit label used ("N
+ *  changes"). The roster only carries `row_count`, not the rows themselves,
+ *  so (unlike the pre-ADR-0095 label) a single-row untitled set can't show
+ *  "field → value" here without a per-pill fetch. */
+export function mutationSetLabel(entry: { title: string; row_count: number } | undefined): string {
+  if (!entry) return "";
+  if (entry.title) return entry.title;
+  return entry.row_count === 1 ? "1 change" : `${entry.row_count} changes`;
+}
+
+/** Auto-label for one resolved record/row (#58/#65): the set's name if set,
+ *  else `field → value` (add/remove show +/−). Used by the close picker's
+ *  per-row list, which has real records (with field/value) to show. */
 export function mutationRecordLabel(attrs: {
   name?: unknown;
   op?: unknown;
@@ -235,54 +304,7 @@ export function mutationRecordLabel(attrs: {
   return `${field} → ${value}`;
 }
 
-/** Label for a whole unit (#69): its name if set, else the sole row's
- *  auto-label, else "N changes". */
-export function mutationUnitLabel(attrs: { name?: unknown; rows?: unknown }): string {
-  const name = String(attrs.name ?? "");
-  if (name) return name;
-  const rows = unitRows(attrs);
-  if (rows.length === 1) return mutationRecordLabel(rows[0]);
-  return `${rows.length} changes`;
-}
-
-/** Label for a close pill (#59): the referenced record's name / auto-label,
- *  found live in the open doc so it tracks edits to that marker. `ref` may
- *  address a unit (its head id) or one row inside it (ADR-0016). */
-export function closeLabelFromDoc(editor: Editor, ref: string): string {
-  if (!ref) return "";
-  let label = "";
-  editor.state.doc.descendants((node) => {
-    if (label) return false;
-    if (node.type.name !== "mutation") return true;
-    if (String(node.attrs.markerId ?? "") === ref) {
-      label = mutationUnitLabel(node.attrs);
-      return false;
-    }
-    const row = unitRows(node.attrs).find((r) => r.id === ref);
-    if (row) {
-      label = mutationRecordLabel(row);
-      return false;
-    }
-    return true;
-  });
-  return label;
-}
-
-/** Insert an interval-close node at the cursor, ending the record `ref` (#59). */
-export function insertMutationClose(editor: Editor, ref: string): void {
-  editor
-    .chain()
-    .focus()
-    .insertContent({ type: "mutationClose", attrs: { ref, markerId: createMutationId() } })
-    .run();
-}
-
-export function removeMutationNode(editor: Editor, markerId: string): void {
-  const pos = findMutationNodePos(editor, markerId);
-  if (pos === null) return;
-  const node = editor.state.doc.nodeAt(pos);
-  if (node) editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
-}
+// ---------- Reveal ----------
 
 /** A temporary ring on a pill (#2124's review-item reveal) — mirrors the
  *  embedded-TODO highlight's timer, styled beside `.mutation-pill` in
@@ -290,15 +312,81 @@ export function removeMutationNode(editor: Editor, markerId: string): void {
 export const MUTATION_PILL_REVEALED_CLASS = "mutation-pill-revealed";
 const MUTATION_PILL_REVEAL_MS = 2400;
 
-/** Scroll a marker's pill into view and flash it — the reveal side of a
- *  review item whose reason is `mutates_source`. False (a no-op for the
- *  caller) when the pill isn't in the DOM: a deleted marker, or the doc not
- *  loaded into `editorElement` yet (the caller queues in that case). */
-export function revealMutationPill(editorElement: HTMLElement, markerId: string): boolean {
-  const target = editorElement.querySelector<HTMLElement>(`[data-mutation-id="${CSS.escape(markerId)}"]`);
+/** A composite record id `<anchor>.<row>` (ADR-0095 §3) names its anchor
+ *  directly — anchor/row ids never contain a `.`, so splitting on the first
+ *  one is exact. A bare id (an anchor id, or a legacy row id pre-migration)
+ *  is returned as-is; `resolveMutationRevealAnchor` below handles the bare
+ *  row-id case that needs a lookup. */
+export function anchorIdFromRevealTarget(id: string): string {
+  const dot = id.indexOf(".");
+  return dot === -1 ? id : id.slice(0, dot);
+}
+
+/** Scroll a pill (keyed by ANCHOR id, ADR-0095 §4) into view and flash it.
+ *  False (a no-op for the caller) when the pill isn't in the DOM: a deleted
+ *  anchor, or the doc not loaded into `editorElement` yet (the caller queues
+ *  in that case). */
+export function revealMutationPill(editorElement: HTMLElement, id: string): boolean {
+  const anchorId = anchorIdFromRevealTarget(id);
+  const target = editorElement.querySelector<HTMLElement>(`[data-mutation-id="${CSS.escape(anchorId)}"]`);
   if (!target) return false;
   target.classList.add(MUTATION_PILL_REVEALED_CLASS);
   target.scrollIntoView({ block: "center", behavior: "smooth" });
   window.setTimeout(() => target.classList.remove(MUTATION_PILL_REVEALED_CLASS), MUTATION_PILL_REVEAL_MS);
   return true;
 }
+
+/** Resolve a reveal target that might be a BARE ROW id (ADR-0095 §3: "a row
+ *  id finds the anchor whose set holds that row... the reveal uses the
+ *  anchor in the open scene, else the first in manuscript order") to its
+ *  anchor id. A composite id resolves locally with no fetch. */
+export async function resolveMutationRevealAnchor(
+  getEntityMutations: (entityId: string) => Promise<{ items: MutationMarkerRecord[] }>,
+  entityId: string,
+  id: string,
+  sceneId: string,
+): Promise<string> {
+  if (id.includes(".")) return anchorIdFromRevealTarget(id);
+  try {
+    const records = (await getEntityMutations(entityId)).items;
+    const matches = records.filter((r) => r.row_id === id || r.marker_id === id || r.anchor_id === id);
+    if (matches.length === 0) return id;
+    const inScene = matches.find((r) => r.scene_id === sceneId);
+    const hit = inScene ?? matches[0];
+    return hit.anchor_id || hit.unit_id || id;
+  } catch {
+    return id;
+  }
+}
+
+// ---------- C2: the `/mutate` authoring dialogs' draft shape ----------
+
+/** One field change inside a mutation unit — the authoring dialog's row
+ *  shape, unchanged since #69. */
+export interface MutationRowDraft {
+  id?: string | null;
+  field: string;
+  op?: string;
+  value: string;
+}
+
+/** An authored change from MutationAuthoringForm: one entity, N rows. C2
+ *  rebuilds what this becomes (a mutation-SET create/save + `insertAnchor`,
+ *  ADR-0095 §6) — kept only as the dialog's own draft shape so it still
+ *  compiles. */
+export interface MutationUnitDraft {
+  markerId?: string | null;
+  entity: string;
+  name?: string;
+  group?: string;
+  rows: MutationRowDraft[];
+}
+
+// C2: ADR-0095 §6 rebuilds `/mutate` authoring end-to-end — creating a set
+// (`api.createMutationSetEntry`/`saveMutationSetEntry`) and anchoring it
+// (`insertAnchor` above) rather than writing entity/rows/name straight into
+// the pill, which no longer has attrs for any of them (§1: `{ setId,
+// anchorId }` only). Until that lands this is a deliberate no-op —
+// MutationDialogs/MutationAuthoringForm still compile and close normally,
+// they just don't write a pill.
+export function applyMutationUnitDraft(_editor: Editor, _draft: MutationUnitDraft): void {}

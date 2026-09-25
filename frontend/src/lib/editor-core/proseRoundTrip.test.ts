@@ -39,8 +39,8 @@ function proseExtensions(): Extensions {
     proseStarterKit(),
     AISuggestion,
     createCharacterMark({ colorForId: () => "", titleForId: () => "Character" }),
-    createMutationMark({ labelForMarker: () => "label" }),
-    createMutationCloseMark({ labelForClose: () => "Closes" }),
+    createMutationMark(),
+    createMutationCloseMark(),
     TodoAnchor,
     ...tableExtensions,
   ];
@@ -65,12 +65,9 @@ describe("scene round-trip through a real editor (#1866)", () => {
   it.each([
     ["a character mark in prose", "The lighthouse kept <!-- character:id=lore_1 -->Mira<!-- /character --> awake."],
     ["an embedded todo", "<!-- embedded-todo:id=todo1;status=open;note= -->fix this line<!-- /embedded-todo -->"],
-    ["a single-row mutation pill", "<!-- mutate:entity=lore_1;field=status;value=dead;id=mut1 -->"],
-    [
-      "a multi-row mutation carrier (the data-mutation-rows JSON)",
-      "<!-- mutate:entity=lore_1;id=unit1\nfield=status;value=dead;id=row1\nfield=mood;value=grim;id=row2\n-->",
-    ],
-    ["a mutation close pill", "<!-- mutate:close;ref=mut1;id=close1 -->"],
+    ["a mutation anchor pill (ADR-0095 §1)", "<!-- mutate:set=mutset_1;id=mut1 -->"],
+    ["a mutation close pill with no row", "<!-- mutate:close;ref=mut1;id=close1 -->"],
+    ["a mutation close pill scoped to one row", "<!-- mutate:close;ref=mut1;row=row1;id=close1 -->"],
     ["a heading and a paragraph", "# Title\n\nA paragraph of prose."],
   ])("preserves %s byte-for-byte", async (_label, markdown) => {
     expect(await roundTrip(markdown)).toBe(markdown);

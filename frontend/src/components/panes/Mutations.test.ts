@@ -36,7 +36,9 @@ const getMutationSetEntry = vi.fn(async (id: string): Promise<MutationSetEntry> 
   target_entry_type: "lore:character",
   target_entity: "",
   rows: [],
-  placed: false,
+  anchors: [],
+  state: "template",
+  pin_missing: false,
   source_layer_id: "",
   source_layer_label: "",
 }));
@@ -61,7 +63,9 @@ function summary(over: Partial<MutationSetEntrySummary> = {}): MutationSetEntryS
     target_entry_type: "lore:character",
     target_entity: "",
     row_count: 2,
-    placed: false,
+    anchors: [],
+    state: "template",
+    pin_missing: false,
     source_layer_id: "",
     source_layer_label: "",
     ...over,
@@ -119,9 +123,9 @@ describe("Mutations pane", () => {
     expect(screen.getByText("No ancestor projects to promote into.")).toBeInTheDocument();
   });
 
-  it("hides Promote for a placed one-off (anchored in a scene, out of ADR-0078 Scope)", () => {
+  it("hides Promote for an active set (anchored in a scene, out of ADR-0078 Scope)", () => {
     metadataSchemaStore.set(SCHEMA);
-    mutationSetEntriesStore.set([summary({ title: "Full Moon", placed: true })]);
+    mutationSetEntriesStore.set([summary({ title: "Full Moon", state: "active" })]);
     render(Mutations);
 
     expect(screen.queryByRole("button", { name: "Promote Full Moon" })).toBeNull();

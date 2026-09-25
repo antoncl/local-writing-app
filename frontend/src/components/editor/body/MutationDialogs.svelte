@@ -94,10 +94,10 @@
     if (editor) removeMutationNode(editor, markerId);
   }
 
-  function handleClosePick(ref: string) {
+  function handleClosePick(ref: string, row?: string) {
     closeOpen = false;
     const editor = getEditor();
-    if (editor) insertMutationClose(editor, ref);
+    if (editor) insertMutationClose(editor, ref, row);
   }
 </script>
 

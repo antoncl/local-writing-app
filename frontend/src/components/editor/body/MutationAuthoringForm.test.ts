@@ -17,9 +17,12 @@ import type {
   MutationSetEntryList,
 } from "@/lib/types";
 
-// The place write-back refreshes this store; stub it so the component test does
-// not touch the real roster fetch.
-vi.mock("@/lib/stores/mutationSets", () => ({ refreshMutationSetEntries: vi.fn() }));
+// The apply/capture write-backs refresh or fold into this store; stub it so
+// the component test does not touch the real roster.
+vi.mock("@/lib/stores/mutationSets", () => ({
+  refreshMutationSetEntries: vi.fn(),
+  upsertMutationSet: vi.fn(),
+}));
 
 const SCHEMA = {
   version: 1,
@@ -31,7 +34,7 @@ function lore(id: string, title: string): LoreEntrySummary {
   return { id, title, entry_type: "lore:character", metadata: {} } as unknown as LoreEntrySummary;
 }
 
-function setSummary(id: string, title: string, target_entity: string, placed = false) {
+function setSummary(id: string, title: string, target_entity: string, active = false) {
   return {
     id,
     title,
@@ -39,7 +42,9 @@ function setSummary(id: string, title: string, target_entity: string, placed = f
     target_entry_type: "lore:character",
     target_entity,
     row_count: 1,
-    placed,
+    anchors: active ? [{ anchor_id: "a1", scene_id: "s1", scene_title: "Ch 1" }] : [],
+    state: active ? "active" : target_entity ? "staged" : "template",
+    pin_missing: false,
     source_layer_id: "",
     source_layer_label: "",
   };
@@ -54,8 +59,10 @@ function fullSet(id: string, target_entity: string): MutationSetEntry {
     entry_type: "mutation_set:mutation_set",
     target_entry_type: "lore:character",
     target_entity,
-    rows: [{ field: "title", op: "replace", value: "The Wolf" }],
-    placed: false,
+    rows: [{ id: "row1", field: "title", op: "replace", value: "The Wolf" }],
+    anchors: [],
+    state: target_entity ? "staged" : "template",
+    pin_missing: false,
     source_layer_id: "",
     source_layer_label: "",
   };
@@ -105,7 +112,13 @@ describe("MutationAuthoringForm — pinned-set apply filter (ADR-0055 §3)", () 
   });
 });
 
-describe("MutationAuthoringForm — place-on-apply (ADR-0055 §5)", () => {
+// C2: ADR-0095 §2 retires the stored `placed` flag and its `/place` route —
+// a set's state is now DERIVED from its anchors, and applying a saved set is
+// rebuilt in §6 to anchor the set itself (`insertAnchor`) rather than
+// stamping its rows into a fresh unit + flipping a flag. Until that lands,
+// `applySet` (MutationAuthoringForm.svelte) only filters out already-active
+// sets and refreshes the roster — these tests pin that reduced contract.
+describe("MutationAuthoringForm — apply picker excludes active sets (ADR-0095 §2, C2 stub)", () => {
   async function renderWithApplyList(entries: ReturnType<typeof setSummary>[]) {
     vi.spyOn(api, "listMutationSetEntries").mockResolvedValue({
       entries,
@@ -132,21 +145,20 @@ describe("MutationAuthoringForm — place-on-apply (ADR-0055 §5)", () => {
     return onSubmit;
   }
 
-  it("does not offer a placed pinned set", async () => {
+  it("does not offer an already-active pinned set", async () => {
     await renderWithApplyList([
       setSummary("wolf", "Mira's werewolf turn", "mira"),
-      setSummary("done", "Mira's old scar (placed)", "mira", true),
+      setSummary("done", "Mira's old scar (active)", "mira", true),
     ]);
     await fireEvent.click(screen.getByRole("button", { name: "Apply a saved set" }));
     await tick();
     expect(screen.getByText("Mira's werewolf turn")).toBeInTheDocument();
-    expect(screen.queryByText("Mira's old scar (placed)")).toBeNull();
+    expect(screen.queryByText("Mira's old scar (active)")).toBeNull();
   });
 
-  it("marks a PINNED set placed after it is applied", async () => {
+  it("refreshes the roster after applying a set, without a place call", async () => {
     const onSubmit = await renderWithApplyList([setSummary("wolf", "Mira's werewolf turn", "mira")]);
     vi.spyOn(api, "getMutationSetEntry").mockResolvedValue(fullSet("wolf", "mira"));
-    const place = vi.spyOn(api, "placeMutationSet").mockResolvedValue(fullSet("wolf", "mira"));
 
     await fireEvent.click(screen.getByRole("button", { name: "Apply a saved set" }));
     await tick();
@@ -155,22 +167,6 @@ describe("MutationAuthoringForm — place-on-apply (ADR-0055 §5)", () => {
     await tick();
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(place).toHaveBeenCalledWith("wolf"); // the one-off is consumed
-  });
-
-  it("does NOT mark a reusable set placed on apply", async () => {
-    const onSubmit = await renderWithApplyList([setSummary("promo", "Any promotion", "")]);
-    vi.spyOn(api, "getMutationSetEntry").mockResolvedValue(fullSet("promo", "")); // no pin
-    const place = vi.spyOn(api, "placeMutationSet").mockResolvedValue(fullSet("promo", ""));
-
-    await fireEvent.click(screen.getByRole("button", { name: "Apply a saved set" }));
-    await tick();
-    await fireEvent.click(screen.getByRole("button", { name: /Any promotion/ }));
-    await tick();
-    await tick();
-
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(place).not.toHaveBeenCalled(); // a reusable set stays a pure read
   });
 });
 

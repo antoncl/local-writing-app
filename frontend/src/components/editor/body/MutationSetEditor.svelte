@@ -18,6 +18,7 @@
     type MutationRow,
   } from "@/components/editor/body/MutationFieldRows.svelte";
   import { api } from "@/lib/api";
+  import { upsertMutationSet } from "@/lib/stores/mutationSets";
   import type {
     LoreEntrySummary,
     MetadataSchema,
@@ -58,8 +59,14 @@
   const targetEntity = untrack(() => initial?.target_entity ?? preset?.target_entity ?? "");
   const pinned = targetEntity.length > 0;
   const pinnedEntity = $derived(loreEntries.find((e) => e.id === targetEntity) ?? null);
-  let rows = $state<MutationRow[]>(
-    untrack(() => (initial?.rows ?? []).map((r) => ({ field: r.field, op: r.op || "replace", value: r.value }))),
+  // Row ids (ADR-0095 §3) are carried through the edit round-trip so an
+  // unchanged row keeps its id on re-save — and with it, anything a close
+  // targets by `(anchor, row)`.
+  type SetRow = MutationRow & { id?: string };
+  let rows = $state<SetRow[]>(
+    untrack(() =>
+      (initial?.rows ?? []).map((r) => ({ id: r.id, field: r.field, op: r.op || "replace", value: r.value })),
+    ),
   );
 
   function typeLabel(id: string): string {
@@ -92,24 +99,26 @@
   async function save() {
     if (!canSave || saving) return;
     saving = true;
-    const payloadRows = rows.map((r) => ({ field: r.field, op: r.op, value: toMarkerString(r.value) }));
+    const payloadRows = rows.map((r) => ({ id: r.id ?? "", field: r.field, op: r.op, value: toMarkerString(r.value) }));
     try {
-      if (initial) {
-        await api.saveMutationSetEntry({
-          ...initial,
-          title: title.trim(),
-          target_entry_type: targetType,
-          target_entity: targetEntity,
-          rows: payloadRows,
-        });
-      } else {
-        await api.createMutationSetEntry({
-          title: title.trim(),
-          target_entry_type: targetType,
-          target_entity: targetEntity,
-          rows: payloadRows,
-        });
-      }
+      const saved = initial
+        ? await api.saveMutationSetEntry({
+            ...initial,
+            title: title.trim(),
+            target_entry_type: targetType,
+            target_entity: targetEntity,
+            rows: payloadRows,
+          })
+        : await api.createMutationSetEntry({
+            title: title.trim(),
+            target_entry_type: targetType,
+            target_entity: targetEntity,
+            rows: payloadRows,
+          });
+      // Fold the saved/created set into the roster at once (ADR-0095 §2) —
+      // any pill anchoring it relabels immediately, and every reader keyed on
+      // `mutationsVersion` refreshes.
+      upsertMutationSet(saved);
       onSaved();
     } finally {
       saving = false;

@@ -224,12 +224,13 @@ describe("`both` puts two copies of a marker in the DOM at once", () => {
   // so nothing is corrupted — but anything looking a marker up by id *within
   // the overlay* would find two. Pinned so it is a known property, not a bug.
   it("is true, and is a property of the compare view rather than damage", async () => {
-    const marker = (value: string) =>
-      `<!-- mutate:entity=char-maren;field=mood;value=${value};id=m1 -->`;
+    // ADR-0095 §1: the anchor names a set, not a field/value — reuse the same
+    // anchor id in both runs to pin the property under the new grammar.
+    const marker = (setId: string) => `<!-- mutate:set=${setId};id=m1 -->`;
     const runs: DiffRun[] = [
       { kind: "equal", text: "Maren did not run. " },
-      { kind: "was", text: marker("stricken") },
-      { kind: "now", text: marker("numb") },
+      { kind: "was", text: marker("mutset_stricken") },
+      { kind: "now", text: marker("mutset_numb") },
       { kind: "equal", text: " She stood where she was." },
     ];
     const html = await renderDiffRuns(runs, "both");

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  ADR-0095 (proposed): a mutation is a node, and the scene holds its anchor.
+
+  Four views, one per tab:
+  1. Prose and files: the pill in the editor, the one anchor line in the scene file, the set file.
+  2. Apply a saved set: templates copy; staged sets place; active sets offer Link or Copy
+     (Copy only until slice S4).
+  3. Editing at a stop: every field is editable; the write is a set save; a linked stop names its
+     places before the first keystroke; the body stays a read-only overlay.
+  4. Where sets live: the Mutations pane by state; the card's staged sets with Delete (placing is in the prose);
+     a missing pill.
+
+  Anti-goals shown: no values in the anchor; no position in the set; no silent link (Copy is
+  a separate choice); prose never deletes a set (a removed pill leaves it staged).
+
+  Tokens are COPIES of frontend/src/styles.css (dark); they drift. Do not import.
+-->
+<title>Mutation sets and anchors</title>
+<style>
+*{box-sizing:border-box}
+:root{--surface:#1f2522;--inset:#242a28;--border:#3a4541;--border-strong:#4a5651;--divider:#2a322f;
+  --text:#e8edeb;--text-2:#a9b6b0;--text-3:#7e8a84;--accent:#6cc4a6;--accent-emphasis:#7cc0a1;
+  --accent-soft:#1f3a32;--mutation-color:#7c5cbf;--mutation-text:#b9a3e6;--mutation-soft:#2e2640;
+  --danger:#a8423f;--warn:#c9a14a;
+  --sans:"Segoe UI",system-ui,sans-serif;--serif:Georgia,"Times New Roman",serif;--mono:Consolas,monospace}
+body{background:#161b19;font-family:var(--sans);color:var(--text);font-size:13px;padding:24px;margin:0}
+.tabs{display:flex;gap:6px;max-width:900px;margin:0 auto 12px;flex-wrap:wrap}
+.tab{border:1px solid var(--border);border-radius:8px;padding:5px 12px;color:var(--text-2);cursor:pointer;background:none;font:inherit}
+.tab[aria-selected=true]{background:var(--accent-soft);color:var(--accent-emphasis);border-color:var(--accent)}
+.view{display:none;max-width:900px;margin:0 auto}.view.on{display:block}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.w{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+.cap{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:600;margin-bottom:8px}
+.prose{font-family:var(--serif);font-size:15px;line-height:1.7;color:var(--text)}
+.mpill{display:inline-flex;align-items:center;gap:4px;background:var(--mutation-soft);color:var(--mutation-text);border:1px solid var(--mutation-color);border-radius:6px;padding:0 6px;font-family:var(--sans);font-size:12px;cursor:pointer;vertical-align:1px}
+.mpill .n{color:var(--text-3)}
+.mpill.missing{background:none;border-style:dashed;color:var(--text-3)}
+pre{font-family:var(--mono);font-size:12px;background:var(--inset);border:1px solid var(--divider);border-radius:8px;padding:10px;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-2)}
+.w{min-width:0}
+pre b{color:var(--mutation-text);font-weight:normal}
+.path{font-family:var(--mono);font-size:11px;color:var(--text-3);margin:8px 0 4px}
+.note{font-size:12px;color:var(--text-2);margin:10px 0 0}
+.opt{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:8px}
+.opt:hover{background:var(--inset)}
+.opt .t{flex:1}.opt .sub{color:var(--text-3);font-size:12px}
+.grp{color:var(--text-3);font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin:10px 0 2px;padding-bottom:3px;border-bottom:1px solid var(--divider)}
+.btn{border:1px solid var(--border);border-radius:7px;padding:3px 9px;color:var(--text-2);background:none;font:inherit;font-size:12px;cursor:pointer}
+.btn:hover{border-color:var(--accent);color:var(--accent-emphasis)}
+.btn.primary{border-color:var(--accent);color:var(--accent-emphasis)}
+.btn.danger:hover{border-color:var(--danger);color:#e08a87}
+.badge{font-size:11px;border-radius:4px;padding:0 6px;border:1px solid var(--border);color:var(--text-3)}
+.badge.active{border-color:var(--mutation-color);color:var(--mutation-text)}
+.badge.staged{border-color:var(--warn);color:var(--warn)}
+.scrub{display:flex;align-items:center;gap:8px;background:var(--inset);border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-bottom:10px}
+.bead{width:10px;height:10px;border-radius:50%;border:1px solid var(--border-strong)}
+.bead.on{background:var(--mutation-color);border-color:var(--mutation-color)}
+.line{flex:1;height:1px;background:var(--border)}
+.caption{font-size:12px;color:var(--mutation-text);background:var(--mutation-soft);border-radius:8px;padding:6px 9px;margin-bottom:10px}
+.field{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--divider)}
+.field .k{color:var(--text-3)}
+.field input,.field select{background:var(--inset);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:3px 6px;width:100%}
+.field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
+.field.mut .k::after{content:" ⤳";color:var(--mutation-text)}
+.field.mut input,.field.mut select{border-color:var(--mutation-color)}
+.overlay{font-family:var(--serif);color:var(--text-2);border:1px dashed var(--border);border-radius:8px;padding:8px;margin-top:10px;font-size:13px}
+.saved{font-size:12px;color:var(--accent-emphasis);min-height:18px;margin-top:8px}
+.row{display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid var(--divider)}
+.row .t{flex:1;min-width:0}.row .sub{color:var(--text-3);font-size:12px}
+.pop{background:var(--inset);border:1px solid var(--border);border-radius:10px;padding:10px;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" aria-selected="true" data-v="v1">1 · Prose and files</button>
+  <button class="tab" role="tab" aria-selected="false" data-v="v2">2 · Apply a saved set</button>
+  <button class="tab" role="tab" aria-selected="false" data-v="v3">3 · Editing at a stop</button>
+  <button class="tab" role="tab" aria-selected="false" data-v="v4">4 · Where sets live</button>
+</div>
+
+<!-- 1 -->
+<section class="view on" id="v1">
+  <div class="grid">
+    <div class="w">
+      <div class="cap">Chapter 5 · in the editor</div>
+      <div class="prose">The Admiralty's letter was brief. Honor read it twice, then set it face down.
+        <span class="mpill" title="Honor Harrington · rank → Captain">⤳ Promotion</span>
+        She did not smile until the door had closed.</div>
+      <p class="note">One pill per anchor. Its label is the set's title; hovering shows the rows. Clicking it opens the set.</p>
+    </div>
+    <div class="w">
+      <div class="cap">What is on disk</div>
+      <div class="path">scenes/chapter-5.md</div>
+<pre>The Admiralty's letter was brief. Honor read it
+twice, then set it face down.
+<b>&lt;!-- mutate:set=mutation_set_4f1c0a9e2b;id=mut_8d21c3a0f7e1 --&gt;</b>
+She did not smile until the door had closed.</pre>
+      <div class="path">mutation-sets/mutation_set_4f1c0a9e2b.md</div>
+<pre>---
+id: mutation_set_4f1c0a9e2b
+title: Promotion
+entry_type: mutation_set:mutation_set
+target_entry_type: lore:character
+metadata:
+  target_entity: lore_honor
+rows:
+- id: row_5b0e
+  field: rank
+  op: replace
+  value: Captain
+---</pre>
+      <p class="note">The scene says <em>where</em>; the set says <em>what</em>. No values in the anchor, no position in the set.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section class="view" id="v2">
+  <div class="w" style="max-width:520px;margin:0 auto">
+    <div class="cap">/mutate · Mira Voss · Apply a saved set</div>
+    <div class="grp">Templates for Character</div>
+    <div class="opt"><span class="t">Full moon<div class="sub">eyes, form, temperament · copied for Mira</div></span><button class="btn" data-act="Copied the template into a new set for Mira and placed it here.">Use</button></div>
+    <div class="grp">Mira's staged sets</div>
+    <div class="opt"><span class="t">Mutation set — Mira Voss<div class="sub">from “Mira turns” conversation · 2 rows</div></span><button class="btn primary" data-act="Placed the staged set here. It is now active.">Place</button></div>
+    <div class="grp">Mira's active sets</div>
+    <div class="opt"><span class="t">Mira's first change<div class="sub">active in Chapter 3</div></span>
+      <button class="btn" data-act="Linked: the same set is now in Chapter 3 and here. Editing it changes both.">Link</button>
+      <button class="btn" data-act="Copied: a new set with the same rows, placed here. Chapter 3 is unaffected.">Copy</button></div>
+    <div class="saved" id="applyMsg"></div>
+    <p class="note">Nothing links unless you choose Link. Pasting copied prose behaves like Copy; cutting and pasting moves the pill.</p>
+  </div>
+</section>
+
+<!-- 3 -->
+<section class="view" id="v3">
+  <div class="grid">
+    <div class="w">
+      <div class="cap">Mira Voss · scrubbed</div>
+      <div class="scrub"><span class="bead"></span><span class="line"></span><span class="bead on"></span><span class="line"></span><span class="bead"></span>
+        <span style="font-size:12px;color:var(--text-2)">As of Chapter 7 · Full moon</span></div>
+      <div class="caption">Linked · this change is also in Chapter 3. Edits here apply to both.</div>
+      <div class="field mut"><span class="k">eye colour</span><input id="eye" value="amber"></div>
+      <div class="field mut"><span class="k">form</span><select><option>wolf</option><option>human</option></select></div>
+      <div class="field"><span class="k">temperament</span><input id="temp" placeholder="unchanged here; typing adds a row" value="guarded"></div>
+      <div class="field"><span class="k">title</span><input value="Mira Voss"></div>
+      <div class="overlay">Body at this stop is read-only. <span class="mpill" title="open the set">⤳ Edit body rows in the set</span></div>
+      <div class="saved" id="stopMsg"></div>
+    </div>
+    <div class="w">
+      <div class="cap">Meanwhile · Chapter 7, unsaved</div>
+      <div class="prose" contenteditable="true" style="outline:none;border:1px dashed var(--border);border-radius:8px;padding:8px">The moon cleared the ridge and Mira stopped walking.<span class="mpill">⤳ Full moon <span class="n">· 2 places</span></span> Type here while editing the stop…</div>
+      <p class="note">A stop edit saves the set file only. The scene is never rewritten, so typing here is never overwritten.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="view" id="v4">
+  <div class="grid">
+    <div class="w">
+      <div class="cap">Mutations pane</div>
+      <div class="grp">Templates</div>
+      <div class="row"><span class="t">Full moon<div class="sub">for Character · 3 rows</div></span><span class="badge">template</span></div>
+      <div class="grp">Staged</div>
+      <div class="row"><span class="t">Promotion<div class="sub">Honor Harrington · not placed</div></span><span class="badge staged">staged</span></div>
+      <div class="grp">Active</div>
+      <div class="row"><span class="t">Full moon<div class="sub">Mira Voss · Chapter 3, Chapter 7</div></span><span class="badge active">active · 2</span></div>
+      <div class="row"><span class="t">Exile<div class="sub">Kyria Isolde · Chapter 11</div></span><span class="badge active">active</span></div>
+    </div>
+    <div class="w">
+      <div class="cap">Honor Harrington · Mutation sets</div>
+      <div class="row"><span class="t">Promotion<div class="sub">staged · its pill was removed from Chapter 5</div></span>
+        <button class="btn danger" data-card="Delete “Promotion”? It is not placed anywhere.">Delete</button></div>
+      <div class="saved" id="cardMsg"></div>
+      <p class="note">The card has no prose position, so it does not place. A staged set is offered in <code>/mutate</code> → Apply in the scene where it belongs.</p>
+      <div class="cap" style="margin-top:14px">A pill whose set was deleted</div>
+      <div class="prose">…and the ship left orbit. <span class="mpill missing" title="This mutation set no longer exists. Delete the pill, or restore the set.">⤳ missing set</span></div>
+      <p class="note">Verify lists missing pills. Deleting one is an ordinary text delete.</p>
+    </div>
+  </div>
+</section>
+
+<script>
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected',x===t));document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id===t.dataset.v))});
+document.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>{document.getElementById('applyMsg').textContent=b.dataset.act});
+document.querySelectorAll('[data-card]').forEach(b=>b.onclick=()=>{document.getElementById('cardMsg').textContent=b.dataset.card});
+const stopMsg=document.getElementById('stopMsg');
+document.querySelectorAll('#v3 .w:first-child input, #v3 .w:first-child select').forEach(el=>el.onchange=()=>{
+  const f=el.closest('.field');const wasMut=f.classList.contains('mut');f.classList.add('mut');
+  stopMsg.textContent=(wasMut?'Saved the row':'Added a row')+' to “Full moon” — Chapter 3 and Chapter 7 now read it. The scene file was not written.'});
+</script>
+</body>
+</html>

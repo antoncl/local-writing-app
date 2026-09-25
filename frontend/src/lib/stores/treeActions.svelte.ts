@@ -60,7 +60,9 @@ class TreeActions {
   // ---- Node creation ----
   async newLoreEntry(entryType: string): Promise<void> {
     await this.run(async () => {
-      const entry = await api.createLoreEntry("New Entry", entryType);
+      // #2209: a placeholder that reads as prose ("New Entry") matches prompt
+      // text like "create a new entry" and gets pulled in as implicit lore.
+      const entry = await api.createLoreEntry("Untitled entry", entryType);
       await refreshLoreEntries();
       await editorPanes.openLore(entry.id);
     });
@@ -154,8 +156,17 @@ class TreeActions {
       const proposedTitle =
         typeof fields.title === "string" && fields.title.trim() ? fields.title.trim() : "";
       delete fields.title;
-      const finalTitle =
-        proposedTitle || `New ${entryTypeName(entryType, get(metadataSchemaStore))}`;
+      // #2209: never invent a title. A placeholder like "New Main character" is
+      // the create prompt's own wording, so implicit detection pulled the
+      // untitled entry into every later chat of that prompt. Refuse instead —
+      // run() surfaces this and returns null, so the draft survives for a retry.
+      if (!proposedTitle) {
+        throw new Error(
+          `The draft has no name, so no ${entryTypeName(entryType, get(metadataSchemaStore))} ` +
+            `was created. Ask the model to name it and finalize again.`,
+        );
+      }
+      const finalTitle = proposedTitle;
       // ADR-0082 §2 / #1797 / #1821: the validator never mints (title-preserving
       // by design), so a draft's tag-vocabulary field may still carry bare
       // proposed titles the vocabulary doesn't hold. This is the create path's

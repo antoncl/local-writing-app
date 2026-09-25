@@ -15,6 +15,7 @@ from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
 from layer_fixtures import declare_full_chain
+from mutation_helpers import save_scenes_with_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -24,7 +25,6 @@ from app.models import (
     MetadataFieldDefinition,
     PropagateRequest,
     SaveLoreEntryRequest,
-    SaveSceneRequest,
     UpsertMetadataFieldRequest,
 )
 from app.scope import WorkScope
@@ -133,9 +133,11 @@ class ChangeCandidatesTests(unittest.TestCase):
         return entry.id
 
     def _new_scene(self, title: str, body: str) -> str:
+        """Create a scene and move its (legacy-grammar) body into a set +
+        anchor (ADR-0095) — a body with no `mutate:` marker passes through
+        the converter as a no-op, so this doubles as the plain-prose path."""
         scene_id = self.client.post("/api/scenes", json={"title": title}).json()["id"]
-        saved = self.client.put(f"/api/scenes/{scene_id}", json={"title": title, "body": body})
-        self.assertEqual(saved.status_code, 200, saved.text)
+        save_scenes_with_mutations(self.service, {scene_id: body})
         return scene_id
 
     def _ids(self, result) -> set[str]:
@@ -304,16 +306,23 @@ class ChangeCandidatesTests(unittest.TestCase):
     def test_two_markers_on_one_field_in_one_scene_are_two_reasons(self) -> None:
         """The marker id is part of a reason's identity: a scene that mutates
         the same field twice lists both markers, in prose order."""
-        scene = self._new_scene(
-            "Chapter Twelve",
-            f"<!-- mutate:entity={self.marek};field=rank;value=Captain;id=m_a --> "
-            f"Later. <!-- mutate:entity={self.marek};field=rank;value=Sergeant;id=m_b -->",
+        scene_id = self.client.post("/api/scenes", json={"title": "Chapter Twelve"}).json()["id"]
+        ids = save_scenes_with_mutations(
+            self.service,
+            {
+                scene_id: (
+                    f"<!-- mutate:entity={self.marek};field=rank;value=Captain;id=m_a --> "
+                    f"Later. <!-- mutate:entity={self.marek};field=rank;value=Sergeant;id=m_b -->"
+                )
+            },
         )
         result = self.service.change_candidates(self.marek)
-        item = next(item for item in result.items if item.id == scene)
+        item = next(item for item in result.items if item.id == scene_id)
+        marker_id_a = f"{ids['m_a'][1]}.m_a"
+        marker_id_b = f"{ids['m_b'][1]}.m_b"
         self.assertEqual(
             [(r.route, r.field_id, r.marker_id) for r in item.reasons],
-            [("mutates_source", "rank", "m_a"), ("mutates_source", "rank", "m_b")],
+            [("mutates_source", "rank", marker_id_a), ("mutates_source", "rank", marker_id_b)],
         )
 
     def test_mention_inside_a_long_text_field_counts(self) -> None:
@@ -608,9 +617,10 @@ class LayeredBaselineTests(unittest.TestCase):
     def _new_scene(self, title: str, body: str) -> str:
         """A book-scoped scene, created directly through the book-level
         service — scenes are never inherited (ADR-0039/0040), so this always
-        writes at `self.root`."""
+        writes at `self.root`. `body` is legacy-grammar markers moved into a
+        set + anchor (ADR-0095); a plain-prose body passes through as a no-op."""
         scene = self.service.create_scene(CreateSceneRequest(title=title))
-        self.service.save_scene(scene.id, SaveSceneRequest(title=title, body=body))
+        save_scenes_with_mutations(self.service, {scene.id: body})
         return scene.id
 
     def test_book_override_is_not_a_change_of_the_series_file(self) -> None:

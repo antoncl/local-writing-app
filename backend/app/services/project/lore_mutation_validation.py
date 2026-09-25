@@ -24,6 +24,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.models import MutationMarker, MutationSetRow
+from app.services.project.legacy_mutation_markers import (
+    MUTATION_CARRIER_PATTERN,
+    MUTATION_MARKER_PATTERN,
+)
 from app.services.project.lore_mutation_items import (
     KeyedList,
     item_key,
@@ -36,7 +40,12 @@ from app.services.project.lore_mutations import (
     INTRINSIC_MUTABLE_FIELDS,
     TEXT_APPEND_FIELD_TYPES,
     MutationsIndex,
+    _SetView,
     _split_collection_value,
+)
+from app.services.project.mutation_anchors import (
+    MUTATION_ANCHOR_CLOSE_PATTERN,
+    MUTATION_ANCHOR_PATTERN,
 )
 
 
@@ -82,14 +91,17 @@ class LoreMutationValidationMixin:
         body: str,
         schema: object,
         node_index: object,
+        sets: dict[str, _SetView],
         *,
         mutations: MutationsIndex | None = None,
     ) -> list[str]:
-        """Validate every mutation value in a scene body against its target
-        field's constraints — a mutation value IS a field value (ADR-0007), so it
-        reuses `_validate_metadata_field_value`, the same validator base values
-        run through. Called from validate_project (save_scene never blocks on
-        mutation validity — the editor supplies typed values).
+        """Validate every RESOLVED mutation record in a scene body against its
+        target field's constraints (ADR-0095 §Verify) — a mutation value IS a
+        field value (ADR-0007), so it reuses `_validate_metadata_field_value`,
+        the same validator base values run through. Called from
+        validate_project (save_scene never blocks on mutation validity — the
+        editor supplies typed values). `sets` is the whole-project set lookup
+        (`_mutation_set_views`), built once per validation pass.
 
         A record addressing a reference-keyed list (ADR-0089 §2) is also checked
         against the list its entry holds just before the marker — an `add` must
@@ -98,7 +110,7 @@ class LoreMutationValidationMixin:
         `mutations` index so that read is not a rebuild per scene."""
         checks = _MarkerChecks(schema, node_index, mutations, keyed_lists_from(schema))
         errors: list[str] = []
-        for marker in self._iter_body_mutations(body, scene_id):
+        for marker in self._iter_body_mutations(body, scene_id, sets):
             errors.extend(self._validate_marker(checks, scene_id, marker))
         return errors
 
@@ -317,4 +329,120 @@ class LoreMutationValidationMixin:
             for item in (items if isinstance(items, list) else [])
             if (key := item_key(item, keyed.key_member)) is not None
         }
+
+    # ----- ADR-0095 §Verify: anchor / close / set problems -----------------
+
+    def _validate_mutation_anchors_and_sets(
+        self, node_index: object, sets: dict[str, _SetView]
+    ) -> list[str]:
+        """One warning per offending anchor, close or set — problems the
+        per-record validator above can't see, since it only walks records
+        that already resolved (a dangling anchor or a duplicate never
+        produces one). Scans every manuscript scene's raw body a second time
+        (cheap: front-matter-only reads); `sets` is the whole-project lookup
+        (`_mutation_set_views`), built once per validation pass."""
+        scene_entries = sorted(
+            (e for e in getattr(node_index, "by_id", {}).values() if e.kind == "manuscript"),
+            key=lambda e: e.id,
+        )
+        bodies: dict[str, str] = {}
+        for entry in scene_entries:
+            try:
+                _, body = self._read_markdown_with_front_matter(entry.path)
+            except OSError:
+                continue
+            bodies[entry.id] = body
+        warnings, anchor_set = self._validate_anchors(bodies, node_index, sets)
+        warnings.extend(self._validate_closes(bodies, anchor_set, sets))
+        warnings.extend(self._validate_set_rows_project_wide(node_index, sets))
+        return warnings
+
+    def _validate_anchors(
+        self, bodies: dict[str, str], node_index: object, sets: dict[str, _SetView]
+    ) -> tuple[list[str], dict[str, str]]:
+        """Duplicate anchor ids, missing/other-layer/unpinned/dead-pinned
+        anchors, and remaining legacy markers — one pass over every scene
+        body. Returns the warnings and `anchor_id -> set_id` for the first
+        occurrence of each anchor, which the close pass resolves against."""
+        warnings: list[str] = []
+        first_scene_of: dict[str, str] = {}
+        anchor_set: dict[str, str] = {}
+        for scene_id, body in bodies.items():
+            for match in MUTATION_ANCHOR_PATTERN.finditer(body):
+                anchor_id = match.group("id")
+                set_id = match.group("set_id")
+                if anchor_id in first_scene_of:
+                    warnings.append(
+                        f"Scene {scene_id} mutation anchor {anchor_id} duplicates the anchor "
+                        f"in scene {first_scene_of[anchor_id]}; only the first resolves."
+                    )
+                    continue
+                first_scene_of[anchor_id] = scene_id
+                anchor_set[anchor_id] = set_id
+                warnings.extend(self._validate_anchor_set(scene_id, anchor_id, set_id, node_index, sets))
+            if MUTATION_MARKER_PATTERN.search(body) or MUTATION_CARRIER_PATTERN.search(body):
+                warnings.append(f"Scene {scene_id} still contains legacy mutation markers; not migrated yet.")
+        return warnings, anchor_set
+
+    def _validate_closes(
+        self, bodies: dict[str, str], anchor_set: dict[str, str], sets: dict[str, _SetView]
+    ) -> list[str]:
+        warnings: list[str] = []
+        for scene_id, body in bodies.items():
+            for match in MUTATION_ANCHOR_CLOSE_PATTERN.finditer(body):
+                warnings.extend(
+                    self._validate_anchor_close(
+                        scene_id, match.group("ref"), match.group("row") or "", anchor_set, sets
+                    )
+                )
+        return warnings
+
+    def _validate_set_rows_project_wide(self, node_index: object, sets: dict[str, _SetView]) -> list[str]:
+        warnings: list[str] = []
+        for view in sets.values():
+            entry_type = self._set_validation_entry_type(node_index, view.entity_id, view.target_entry_type)
+            if not entry_type:
+                continue
+            for message in self.validate_set_rows(entry_type, view.rows):
+                warnings.append(f"Mutation set {view.set_id}: {message}")
+        return warnings
+
+    @staticmethod
+    def _validate_anchor_set(
+        scene_id: str, anchor_id: str, set_id: str, node_index: object, sets: dict[str, _SetView]
+    ) -> list[str]:
+        view = sets.get(set_id)
+        if view is not None:
+            if not view.entity_id:
+                return [f"Scene {scene_id} mutation anchor {anchor_id}'s set {set_id} has no entity."]
+            if view.pin_missing:
+                return [
+                    f"Scene {scene_id} mutation anchor {anchor_id}'s set {set_id}'s "
+                    f"entity no longer exists."
+                ]
+            return []
+        other_layer = getattr(node_index, "by_id", {}).get(set_id)
+        if other_layer is not None and getattr(other_layer, "kind", None) == "mutation_set":
+            return [
+                f"Scene {scene_id} mutation anchor {anchor_id} names set {set_id}, "
+                f"which is only defined in another layer."
+            ]
+        return [f"Scene {scene_id} mutation anchor {anchor_id} names set {set_id}, which does not exist."]
+
+    @staticmethod
+    def _validate_anchor_close(
+        scene_id: str, ref: str, row: str, anchor_set: dict[str, str], sets: dict[str, _SetView]
+    ) -> list[str]:
+        set_id = anchor_set.get(ref)
+        if set_id is None:
+            return [f"Scene {scene_id} mutation close names {ref}, which is no anchor."]
+        if not row:
+            return []
+        view = sets.get(set_id)
+        if view is not None and any(r.id == row for r in view.rows):
+            return []
+        return [
+            f"Scene {scene_id} mutation close on anchor {ref} names row {row}, "
+            f"which is not in that anchor's set."
+        ]
 

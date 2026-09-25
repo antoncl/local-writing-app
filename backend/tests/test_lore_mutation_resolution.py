@@ -17,6 +17,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from mutation_helpers import save_scenes_with_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -57,8 +58,9 @@ class MutationResolutionTests(unittest.TestCase):
 
         # s1 precedes the change; s2 promotes Honor (title + rank), mid-scene.
         self.s1 = self._new_scene("Scene One", "Honor commands the fleet.")
-        self.s2 = self._new_scene(
-            "Scene Two",
+        self.s2 = self._new_scene("Scene Two")
+        self.ids = self._convert(
+            self.s2,
             "She took the ship. "
             f"<!-- mutate:entity={self.honor};field=title;value=Captain%20Honor;id=t1 -->"
             f"<!-- mutate:entity={self.honor};field=rank;value=Captain;id=r1 -->",
@@ -67,7 +69,10 @@ class MutationResolutionTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def _new_scene(self, title: str, body: str) -> str:
+    def _convert(self, scene_id: str, body: str) -> dict[str, tuple[str, str]]:
+        return save_scenes_with_mutations(self.service, {scene_id: body})
+
+    def _new_scene(self, title: str, body: str = "") -> str:
         created = self.client.post("/api/scenes", json={"title": title})
         self.assertEqual(created.status_code, 200, created.text)
         scene_id = created.json()["id"]
@@ -126,10 +131,8 @@ class MutationResolutionTests(unittest.TestCase):
                 entry_type="lore:character",
             )
         )
-        scene = self._new_scene(
-            "Scene Three",
-            f"Grew stronger. <!-- mutate:entity={self.honor};field=strength;value=600;id=s1 -->",
-        )
+        scene = self._new_scene("Scene Three")
+        self._convert(scene, f"Grew stronger. <!-- mutate:entity={self.honor};field=strength;value=600;id=s1 -->")
         # `entry()` is a pass_context global (needs a render context); exercise the
         # same coercion through the function it delegates to, then read the field
         # off the returned EntryRef — value must be a native int.
@@ -145,12 +148,10 @@ class MutationResolutionTests(unittest.TestCase):
         # yet live, so the same scene resolves differently on either side of it.
         # s2 already promoted rank→Captain earlier; Scene Four re-promotes it to a
         # DISTINCT value mid-scene, so the cursor discriminates which value stands.
-        scene = self._new_scene(
-            "Scene Four",
-            f"Prologue. <!-- mutate:entity={self.honor};field=rank;value=Admiral;id=p1 -->",
-        )
+        scene = self._new_scene("Scene Four")
+        self._convert(scene, f"Prologue. <!-- mutate:entity={self.honor};field=rank;value=Admiral;id=p1 -->")
         idx = self.service.build_mutations_index()
-        offset = next(m.offset for m in idx.by_entity[self.honor] if m.marker_id == "p1")
+        offset = next(m.offset for m in idx.by_entity[self.honor] if m.row_id == "p1")
         schema = self.service.read_metadata_schema()
         # Cursor strictly before this scene's marker: its re-promotion is not live,
         # so rank is still Captain (s2's earlier, already-passed mutation).

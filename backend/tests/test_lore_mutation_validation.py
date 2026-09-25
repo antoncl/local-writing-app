@@ -13,6 +13,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from mutation_helpers import save_scenes_with_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -56,9 +57,13 @@ class MutationAdvisoryValidationTests(unittest.TestCase):
             f"<!-- mutate:entity={entity or self.char};field={field};value={value};id=m1 -->"
         )
 
-    def _save(self, body: str):
-        return self.client.put(
-            f"/api/scenes/{self.scene_id}", json={"title": "Chapter One", "body": body}
+    def _authored(self, field: str, value: str, entity: str | None = None) -> None:
+        """Author one legacy marker and move it into a set + anchor
+        (ADR-0095), the way an existing project's scene would after
+        migration — the position-free set save never blocks (§4), matching
+        what the retired scene-marker save never blocked on either."""
+        save_scenes_with_mutations(
+            self.service, {self.scene_id: self._marker(field, value, entity)}
         )
 
     def _warnings(self) -> list[str]:
@@ -67,35 +72,37 @@ class MutationAdvisoryValidationTests(unittest.TestCase):
     # --- saves never block ------------------------------------------------
 
     def test_bad_select_value_still_saves(self) -> None:
-        self.assertEqual(self._save(self._marker("context_policy", "bogus")).status_code, 200)
+        self._authored("context_policy", "bogus")  # raises on failure
 
     def test_non_numeric_number_still_saves(self) -> None:
-        self.assertEqual(self._save(self._marker("rank", "abc")).status_code, 200)
+        self._authored("rank", "abc")
 
     def test_unknown_entity_still_saves(self) -> None:
-        self.assertEqual(self._save(self._marker("rank", "5", entity="lore_ghost")).status_code, 200)
+        self._authored("rank", "5", entity="lore_ghost")
 
     def test_valid_marker_saves_with_no_warnings(self) -> None:
-        self.assertEqual(self._save(self._marker("rank", "5")).status_code, 200)
-        self.assertFalse([w for w in self._warnings() if "mutation" in w])
+        self._authored("rank", "5")
+        self.assertFalse([w for w in self._warnings() if "mutation" in w.lower()])
 
     # --- validate_project reports strays as warnings ---------------------
 
     def test_bad_select_value_is_a_warning(self) -> None:
-        self._save(self._marker("context_policy", "bogus"))
+        self._authored("context_policy", "bogus")
         self.assertTrue(any("context_policy" in w and "one of" in w for w in self._warnings()))
 
     def test_field_from_another_entry_type_is_a_warning(self) -> None:
         # `status` is a scene field, not a character field.
-        self._save(self._marker("status", "draft"))
+        self._authored("status", "draft")
         self.assertTrue(any("not defined for entry_type" in w for w in self._warnings()))
 
     def test_unknown_entity_is_a_warning(self) -> None:
-        self._save(self._marker("rank", "5", entity="lore_ghost"))
-        self.assertTrue(any("unknown lore entity" in w for w in self._warnings()))
+        # A dead pin (ADR-0095 §2/§Verify): the entity no longer exists, so
+        # the anchor's set contributes nothing and Verify names it.
+        self._authored("rank", "5", entity="lore_ghost")
+        self.assertTrue(any("entity no longer exists" in w for w in self._warnings()))
 
     def test_warnings_do_not_appear_in_errors(self) -> None:
-        self._save(self._marker("context_policy", "bogus"))
+        self._authored("context_policy", "bogus")
         report = self.service.validate_project()
         self.assertFalse(any("context_policy" in e for e in report.errors), report.errors)
 

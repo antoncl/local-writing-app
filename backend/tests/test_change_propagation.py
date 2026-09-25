@@ -18,6 +18,7 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 from layer_fixtures import declare_full_chain
+from mutation_helpers import save_scenes_with_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -88,9 +89,10 @@ class ChangePropagationTests(unittest.TestCase):
             body="Her father the captain taught her to sail.",
             metadata={"father": self.marek},
         )
-        self.ch5 = self._new_scene(
-            "Chapter Five",
-            f"<!-- mutate:entity={self.marek};field=rank;value=Sergeant;id=m_rank -->",
+        self.ch5 = self._new_scene("Chapter Five", "")
+        self.mutation_ids = save_scenes_with_mutations(
+            self.service,
+            {self.ch5: f"<!-- mutate:entity={self.marek};field=rank;value=Sergeant;id=m_rank -->"},
         )
         self.ch9 = self._new_scene("Chapter Nine", "She saved the Captain's usual table.")
         self.ch2 = self._new_scene("Chapter Two", "A quiet morning, unrelated to anyone.")
@@ -192,7 +194,8 @@ class ChangePropagationTests(unittest.TestCase):
         self.assertEqual(ch5_item.scene_id, self.ch5)
         self.assertIsNone(ch5_item.anchor_id)
         self.assertEqual(ch5_item.source.reason, "mutates_source")
-        self.assertEqual(ch5_item.source.marker_id, "m_rank")
+        _set_id, anchor_id = self.mutation_ids["m_rank"]
+        self.assertEqual(ch5_item.source.marker_id, f"{anchor_id}.m_rank")
 
         ch9_item = by_target[self.ch9]
         self.assertEqual(ch9_item.scope, "scene")
@@ -552,9 +555,10 @@ class LayeredPropagationTests(unittest.TestCase):
         layers = self.service.collect_layers(self.root)
         self.series_id = next(layer.id for layer in layers if layer.folder == self.series)
         self.book_id = next(layer.id for layer in layers if layer.folder == self.root)
-        self.ch5 = self._new_scene(
-            "Chapter Five",
-            f"<!-- mutate:entity={self.marek};field=rank;value=Captain;id=m_rank -->",
+        self.ch5 = self._new_scene("Chapter Five", "")
+        save_scenes_with_mutations(
+            self.service,
+            {self.ch5: f"<!-- mutate:entity={self.marek};field=rank;value=Captain;id=m_rank -->"},
         )
 
     def tearDown(self) -> None:

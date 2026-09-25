@@ -238,6 +238,27 @@ class MutationSetEntriesMixin:
             return "template"
         return "active" if anchors else "staged"
 
+    def _write_converted_mutation_set(self, converted: Any) -> None:
+        """Write one `ConvertedSet` (`legacy_mutation_markers.py`) straight to
+        `mutation-sets/<set-id>.md`, WITHOUT validation (ADR-0095 §4/§12): the
+        migration's own output, and the fixtures a test converts through
+        `convert_legacy_mutations`, must be writable even when a row no
+        longer validates — Verify reports it, the writer fixes it later."""
+        root = self._require_project()
+        rows = [
+            MutationSetRow(id=row.id, field=row.field, op=row.op, value=row.value)
+            for row in converted.rows
+        ]
+        self._write_mutation_set_file(
+            root / "mutation-sets" / f"{converted.set_id}.md",
+            converted.set_id,
+            converted.title,
+            "mutation_set:mutation_set",
+            converted.target_entry_type,
+            converted.entity_id,
+            rows,
+        )
+
     def _write_mutation_set_file(
         self,
         path: Any,

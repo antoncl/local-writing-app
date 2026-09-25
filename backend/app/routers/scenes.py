@@ -6,7 +6,6 @@ from fastapi import APIRouter
 from app.models import (
     CreateSceneRequest,
     FinalizeSceneRequest,
-    RewriteMutationUnitRequest,
     SaveSceneRequest,
     Scene,
     StructureDocument,
@@ -77,17 +76,5 @@ def delete_embedded_todo(project: CurrentProject, scene_id: str, todo_id: str) -
     """Remove a single in-prose embedded-todo marker, keeping its wrapped text."""
     with translate_errors():
         return project.delete_embedded_todo(scene_id, todo_id)
-
-
-# The one route the in-app editor DOES call outside the prose editor: the lore
-# card scrubbed to a stop edits that stop's unit (ADR-0042 §5, ADR-0089 S5),
-# and the scene may not be open in any pane.
-@router.put("/api/scenes/{scene_id}/mutations/units/{unit_id}", response_model=Scene)
-def rewrite_mutation_unit(
-    project: CurrentProject, scene_id: str, unit_id: str, request: RewriteMutationUnitRequest
-) -> Scene:
-    """Replace a mutation unit's rows wholesale (ADR-0089 S5)."""
-    with translate_errors():
-        return project.rewrite_mutation_unit(scene_id, unit_id, request)
 
 

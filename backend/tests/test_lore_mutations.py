@@ -14,12 +14,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from mutation_helpers import save_scenes_with_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
+    SaveMutationSetEntryRequest,
     UpsertMetadataFieldRequest,
 )
 from app.services.project_service import ProjectService
@@ -54,9 +56,14 @@ class LoreMutationScanTests(unittest.TestCase):
         self.scene_id = scene.json()["id"]
         # Two co-authored markers (a promotion sets rank + title) plus a value
         # needing url-decoding, to prove the encode/decode round-trip.
-        self._save_body(
-            f"Honor took the ship. <!-- mutate:entity={self.honor};field=rank;value=Captain;id=m1 -->"
-            f"The crew saluted. <!-- mutate:entity={self.honor};field=title;value=Lady%20Dame;id=m2 -->"
+        self.ids = save_scenes_with_mutations(
+            self.service,
+            {
+                self.scene_id: (
+                    f"Honor took the ship. <!-- mutate:entity={self.honor};field=rank;value=Captain;id=m1 -->"
+                    f"The crew saluted. <!-- mutate:entity={self.honor};field=title;value=Lady%20Dame;id=m2 -->"
+                )
+            },
         )
 
     def tearDown(self) -> None:
@@ -64,16 +71,9 @@ class LoreMutationScanTests(unittest.TestCase):
 
     # --- helpers ----------------------------------------------------------
 
-    def _save_body(self, body: str) -> None:
-        response = self.client.put(
-            f"/api/scenes/{self.scene_id}",
-            json={"title": "Chapter One", "body": body},
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-
     def _scan(self) -> dict[str, object]:
         scene = self.service.read_scene(self.scene_id)
-        return {m.marker_id: m for m in self.service._scan_scene_mutations(scene)}
+        return {m.row_id: m for m in self.service._scan_scene_mutations(scene)}
 
     def _body(self) -> str:
         return self.service.read_scene(self.scene_id).body
@@ -112,13 +112,14 @@ class LoreMutationResolverTests(unittest.TestCase):
         # Three scenes in manuscript order: s1 (before), s2 (rank->Captain),
         # s3 (rank->Commodore).
         self.s1 = self._new_scene("Scene One", "Honor commands the fleet.")
-        self.s2 = self._new_scene(
-            "Scene Two",
-            f"Before. <!-- mutate:entity={self.honor};field=rank;value=Captain;id=m1 --> After.",
-        )
-        self.s3 = self._new_scene(
-            "Scene Three",
-            f"Later still. <!-- mutate:entity={self.honor};field=rank;value=Commodore;id=m2 -->",
+        self.s2 = self._new_scene("Scene Two", "")
+        self.s3 = self._new_scene("Scene Three", "")
+        self.ids = save_scenes_with_mutations(
+            self.service,
+            {
+                self.s2: f"Before. <!-- mutate:entity={self.honor};field=rank;value=Captain;id=m1 --> After.",
+                self.s3: f"Later still. <!-- mutate:entity={self.honor};field=rank;value=Commodore;id=m2 -->",
+            },
         )
 
     def tearDown(self) -> None:
@@ -139,22 +140,26 @@ class LoreMutationResolverTests(unittest.TestCase):
     def test_index_orders_records_by_manuscript_position(self) -> None:
         index = self.service.build_mutations_index()
         records = index.by_entity[self.honor]
-        self.assertEqual([m.marker_id for m in records], ["m1", "m2"])
+        self.assertEqual([m.row_id for m in records], ["m1", "m2"])
         # Manuscript order reflects scene-creation order here.
         self.assertLess(index.scene_order[self.s1], index.scene_order[self.s2])
         self.assertLess(index.scene_order[self.s2], index.scene_order[self.s3])
 
     def test_index_version_changes_when_a_marker_changes(self) -> None:
         before = self.service.build_mutations_index().version
-        self.client.put(
-            f"/api/scenes/{self.s2}",
-            json={
-                "title": "Scene Two",
-                "body": (
-                    f"Before. <!-- mutate:entity={self.honor};field=rank;"
-                    "value=Commander;id=m1 --> After."
-                ),
-            },
+        # Editing at a stop edits the set, never the scene (ADR-0095 §8) — a
+        # row value save is what a marker "change" now is.
+        set_id, _anchor_id = self.ids["m1"]
+        entry = self.service.read_mutation_set_entry(set_id)
+        self.service.save_mutation_set_entry(
+            set_id,
+            SaveMutationSetEntryRequest(
+                title=entry.title,
+                entry_type=entry.entry_type,
+                target_entry_type=entry.target_entry_type,
+                target_entity=entry.target_entity,
+                rows=[row.model_copy(update={"value": "Commander"}) for row in entry.rows],
+            ),
         )
         self.assertNotEqual(before, self.service.build_mutations_index().version)
 

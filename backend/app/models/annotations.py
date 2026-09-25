@@ -91,70 +91,54 @@ class UpdateEmbeddedTodoRequest(BaseModel):
 
 
 class MutationMarker(BaseModel):
-    """A mid-scene lore mutation (#33). A self-contained HTML-comment marker in a
-    scene body that sets one field of one lore entry to a new value *at the
-    marker's prose position*:
+    """One resolved mutation record — a mutation-set row joined at the scene
+    anchor that places it (ADR-0095 §1/§3/§5):
 
-        <!-- mutate:entity=ID;field=KEY;value=ENCODED;id=MARKER_ID -->
+        <!-- mutate:set=SET_ID;id=ANCHOR_ID -->
 
     Unlike a base metadata value, its effect is scoped to (scene, position) and
     later manuscript positions — it is the record the resolver (#51) slices. Like
     embedded todos these are a rebuildable index over scenes, never owned by a
-    live editor pane; the marker id is minted client-side at insertion (ADR-0001)."""
+    live editor pane.
+
+    A record is one set row at one anchor (ADR-0095 §3): `marker_id =
+    f"{anchor_id}.{row_id}"` is the `(anchor, row)` identity everything that
+    keys on a record — closes, `exclude`, the change-candidate dedupe, review
+    items, the scrubber's stops — keys on. `unit_id` is the anchor id (the
+    authoring/presentation granularity the pill, timeline and scrubber group
+    by); `unit_name` and `name` are the set's title (may be "")."""
 
     marker_id: str
     entity_id: str
     field: str
-    # Collection operator (#58). `replace` (v1.0 default, absent from the marker)
-    # sets the whole field; `add`/`remove` accumulate/drop one collection element
-    # (gated to multi_select / tags / entity_ref_list at validation time).
+    # Collection operator (#58). `replace` (v1.0 default) sets the whole field;
+    # `add`/`remove` accumulate/drop one collection element (gated to
+    # multi_select / tags / entity_ref_list at validation time).
     op: str = "replace"
     value: str = ""
-    # Optional human label for the change (#65), shared across a co-authored set
-    # via `group`. Both are display/close-together conveniences, not lifetime
-    # frames — each record's interval stays independent (ADR-0015).
+    # The set's title (may be ""), echoed onto `unit_name` too (ADR-0095 §1).
     name: str = ""
     group: str = ""
-    # Mutation-unit tie (#69, ADR-0016): the authored change this record belongs
-    # to — the record's own id for a standalone single-line marker, the legacy
-    # `group=` for old co-authored sets, the carrier head's id for multi-row
-    # units. Authoring/presentation granularity only (pill, timeline, scrubber,
-    # close picker group by it); each record's lifetime stays its own
-    # (ADR-0002). `unit_name` is the unit's human label from the head.
+    # Mutation-unit tie (#69, ADR-0016; ADR-0095 §1): the anchor id — the
+    # authoring/presentation granularity (pill, timeline, scrubber, close
+    # picker group by it); each record's lifetime stays its own (ADR-0002).
     unit_id: str = ""
     unit_name: str = ""
+    # ADR-0095 §3: the record's identity components. `anchor_id` is the scene
+    # anchor's own id (same value as `unit_id`); `set_id` names the
+    # `mutation_set` node the row came from; `row_id` is the row's own stable
+    # id within that set.
+    anchor_id: str = ""
+    set_id: str = ""
+    row_id: str = ""
     scene_id: str
-    offset: int = 0  # char offset of the marker in the scene body (position-granular)
+    offset: int = 0  # char offset of the anchor in the scene body (position-granular)
     line: int = 1
     scene_path: str = ""
 
 
 class MutationMarkerList(BaseModel):
     items: list[MutationMarker] = Field(default_factory=list)
-
-
-class MutationUnitRow(BaseModel):
-    """One row of a rewritten mutation unit (ADR-0042 §5, ADR-0089 S5): the
-    record as the dialog and the resolver spell it, with the url-decoded
-    value. A blank `id` mints a fresh record id; a given id is kept, which is
-    how a re-edited unit keeps the record a later close points at."""
-
-    # Constrained to what the carrier row grammar parses, so a row the file
-    # could not read back is refused before the unit is rewritten.
-    field: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    op: Literal["add", "remove", "replace"] = "replace"
-    value: str = ""
-    id: str = Field(default="", pattern=r"^[A-Za-z0-9_-]*$")
-
-
-class RewriteMutationUnitRequest(BaseModel):
-    """Replace a unit's rows wholesale — the write behind editing the lore
-    card at a scrub stop, where the stop IS the unit and the card has no
-    cursor (ADR-0042 §5). `name` None keeps the carrier head's name; an empty
-    `rows` removes the unit."""
-
-    rows: list[MutationUnitRow] = Field(default_factory=list)
-    name: str | None = None
 
 
 ChangeCandidateTier = Literal["declared", "marker_untouched", "mention"]

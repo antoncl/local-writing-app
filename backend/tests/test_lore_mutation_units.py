@@ -1,10 +1,21 @@
-"""Mutation-unit carrier markers (#69, ADR-0016).
+"""Mutation-unit carrier markers (#69, ADR-0016) — now read only through the
+ADR-0095 conversion: a carrier's rows become one `mutation_set` with one row
+each, its head (entity, optional name, unit id) becomes the anchor and the
+set's title. `save_scenes_with_mutations` (`mutation_helpers.py`) moves each
+fixture's legacy body into a set + anchor before every assertion here — these
+tests are exactly the semantics ADR-0095's migration must preserve: a unit
+close ends every row, a row close ends only that row, the standalone
+unit-id/row-id equivalence, a legacy `group=` close ending every member (now
+several independent sets), `live_mutations` after a unit close, `exclude`,
+the effective route's `exclude` param, and the index version tracking the
+unit's name (now the set's title).
 
-One authored change touching N fields is ONE multi-line carrier comment — a
-head (entity, optional name, unit id) plus one `field=` row per line. Rows stay
-independent records with their own ids and lifetimes; `unit_id`/`unit_name` tie
-them for presentation. `close;ref=<unit-id>` expands at index time into per-row
-closes. The single-line marker is the degenerate one-row form.
+The retired scene-rewriting route (`PUT
+/api/scenes/{sid}/mutations/units/{uid}`) and its `rewrite_mutation_unit`
+service method are gone (ADR-0095 §8: editing a change saves the set, never
+the scene) — `UnitRewriteTests` went with them. The raw carrier grammar
+itself (parsing, malformed rows) is `legacy_mutation_markers.py`'s concern now
+and is covered by `test_legacy_mutation_markers.py`.
 """
 
 from __future__ import annotations
@@ -14,14 +25,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from mutation_helpers import save_scenes_with_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
-    MutationUnitRow,
-    RewriteMutationUnitRequest,
     UpsertMetadataFieldRequest,
 )
 from app.services.project_service import ProjectService
@@ -68,12 +78,12 @@ class MutationUnitTestBase(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def _save_body(self, body: str, scene_id: str | None = None) -> None:
+    def _save_body(self, body: str, scene_id: str | None = None) -> dict[str, tuple[str, str]]:
+        """Move `body` (legacy carrier/single-line grammar) into a set +
+        anchor (ADR-0095) and save it. Returns `legacy id -> (set_id,
+        anchor_id)` for tests that need to name a specific converted record."""
         sid = scene_id or self.scene_id
-        response = self.client.put(
-            f"/api/scenes/{sid}", json={"title": "Scene", "body": body}
-        )
-        self.assertEqual(response.status_code, 200, response.text)
+        return save_scenes_with_mutations(self.service, {sid: body})
 
     def _carrier(self, name: str = "Promotion") -> str:
         return (
@@ -84,8 +94,11 @@ class MutationUnitTestBase(unittest.TestCase):
         )
 
     def _scan(self) -> dict[str, object]:
+        # Keyed by row_id (ADR-0095 §3): the converter keeps a first-occurrence
+        # legacy id as both the anchor id and the row id, so every existing
+        # `markers["r1"]`-style lookup below still resolves.
         scene = self.service.read_scene(self.scene_id)
-        return {m.marker_id: m for m in self.service._scan_scene_mutations(scene)}
+        return {m.row_id: m for m in self.service._scan_scene_mutations(scene)}
 
     def _body(self) -> str:
         return self.service.read_scene(self.scene_id).body
@@ -105,29 +118,38 @@ class CarrierScanTests(MutationUnitTestBase):
         self._save_body(f"Honor rose. {self._carrier()}")
         markers = self._scan()
         for row_id in ("r1", "r2"):
-            self.assertEqual(markers[row_id].unit_id, "u1")
             self.assertEqual(markers[row_id].unit_name, "Promotion")
             self.assertEqual(markers[row_id].entity_id, self.honor)
+        self.assertEqual(markers["r1"].unit_id, markers["r2"].unit_id)
+        # The carrier collapses into ONE anchor line (ADR-0095 §1): every row
+        # now shares not just the offset but the line too — the multi-line
+        # carrier's per-row line order is gone with the retired grammar.
         self.assertEqual(markers["r1"].offset, markers["r2"].offset)
-        self.assertLess(markers["r1"].line, markers["r2"].line)
+        self.assertEqual(markers["r1"].line, markers["r2"].line)
 
     def test_standalone_marker_is_its_own_unit(self) -> None:
         self._save_body(
             f"<!-- mutate:entity={self.honor};field=rank;value=Ensign;id=m1 -->"
         )
         marker = self._scan()["m1"]
-        self.assertEqual(marker.unit_id, "m1")
+        # A standalone marker's unit id IS its own row id (ADR-0095 §3).
+        self.assertEqual(marker.unit_id, marker.row_id)
         self.assertEqual(marker.unit_name, "")
 
-    def test_legacy_group_maps_to_unit(self) -> None:
-        self._save_body(
+    def test_legacy_group_becomes_separate_sets(self) -> None:
+        # ADR-0095 §12 step 4: merging `group=` members into one set would
+        # move rows to a single position and change resolution — each member
+        # keeps its own anchor and set, tied only by close-expansion (proved
+        # in CarrierResolutionTests.test_close_by_legacy_group_ends_all_members).
+        ids = self._save_body(
             f"<!-- mutate:entity={self.honor};field=rank;value=Captain;name=Promo;group=g1;id=m1 -->"
             f"<!-- mutate:entity={self.honor};field=title;value=Dame;name=Promo;group=g1;id=m2 -->"
         )
         markers = self._scan()
-        self.assertEqual(markers["m1"].unit_id, "g1")
-        self.assertEqual(markers["m2"].unit_id, "g1")
+        self.assertNotEqual(markers["m1"].anchor_id, markers["m2"].anchor_id)
+        self.assertNotEqual(ids["m1"][0], ids["m2"][0])  # different sets too
         self.assertEqual(markers["m1"].unit_name, "Promo")
+        self.assertEqual(markers["m2"].unit_name, "Promo")
 
     def test_carrier_and_single_line_merge_in_prose_order(self) -> None:
         self._save_body(
@@ -135,17 +157,8 @@ class CarrierScanTests(MutationUnitTestBase):
             f"Later. {self._carrier()}"
         )
         scene = self.service.read_scene(self.scene_id)
-        ids = [m.marker_id for m in self.service._scan_scene_mutations(scene)]
+        ids = [m.row_id for m in self.service._scan_scene_mutations(scene)]
         self.assertEqual(ids, ["m0", "r1", "r2"])
-
-    def test_carrier_with_malformed_row_is_ignored_entirely(self) -> None:
-        self._save_body(
-            f"<!-- mutate:entity={self.honor};name=Promo;id=u1\n"
-            "field=rank;value=Captain;id=r1\n"
-            "field=broken row without ids\n"
-            "-->"
-        )
-        self.assertEqual(self._scan(), {})
 
     def test_carrier_row_with_op_parses(self) -> None:
         self._save_body(
@@ -158,6 +171,13 @@ class CarrierScanTests(MutationUnitTestBase):
         self.assertEqual(markers["r1"].op, "add")
         self.assertEqual(markers["r2"].op, "remove")
         self.assertEqual(markers["r1"].unit_name, "")
+
+    # DROPPED: test_carrier_with_malformed_row_is_ignored_entirely. That
+    # proved the raw carrier regex leaves a malformed carrier untouched —
+    # a grammar/parse claim about `legacy_mutation_markers.py`
+    # (`_parse_carrier_rows`), which `test_legacy_mutation_markers.py` now
+    # owns. The anchor+set index never reads carrier text at all, converted
+    # or not, so it has nothing distinctive to prove about a malformed one.
 
 
 class CarrierResolutionTests(MutationUnitTestBase):
@@ -204,7 +224,7 @@ class CarrierResolutionTests(MutationUnitTestBase):
         self.assertEqual(state, {"title": "Lady Dame"})
 
     def test_close_by_unit_id_matches_row_id_for_standalone(self) -> None:
-        # A standalone marker's unit id IS its marker id — both spellings work.
+        # A standalone marker's unit id IS its row id — both spellings work.
         self._save_body(
             f"<!-- mutate:entity={self.honor};field=rank;value=Captain;id=m1 --> "
             "Mid. <!-- mutate:close;ref=m1;id=c1 --> End."
@@ -220,46 +240,59 @@ class CarrierResolutionTests(MutationUnitTestBase):
         self.assertEqual(self.service.effective_state(self.honor, self.scene_id), {})
 
     def test_live_mutations_reflect_unit_close(self) -> None:
-        self._save_body(
+        ids = self._save_body(
             f"{self._carrier()} Mid. <!-- mutate:close;ref=u1;id=c1 --> End."
         )
+        anchor_id = ids["u1"][1]
         close_offset = self._body().index("<!-- mutate:close")
         live = self.service.live_mutations(self.honor, self.scene_id, position=close_offset - 1)
-        self.assertEqual({m.marker_id for m in live.items}, {"r1", "r2"})
+        self.assertEqual(
+            {m.marker_id for m in live.items}, {f"{anchor_id}.r1", f"{anchor_id}.r2"}
+        )
         live_after = self.service.live_mutations(self.honor, self.scene_id)
         self.assertEqual(live_after.items, [])
 
     def test_effective_state_exclude_skips_records(self) -> None:
-        # The list-edit baseline (#71, ADR-0017): re-editing a unit resolves the
-        # effective value WITHOUT the unit's own rows.
-        self._save_body(f"Honor rose. {self._carrier()}")
-        state = self.service.effective_state(
-            self.honor, self.scene_id, exclude={"r1", "r2"}
-        )
+        # The list-edit baseline (#71, ADR-0017): re-editing a unit resolves
+        # the effective value WITHOUT the unit's own rows. `exclude` now takes
+        # an anchor id (every row of the anchor) or a composite `anchor.row`
+        # id (one row) — ADR-0095 §3.
+        ids = self._save_body(f"Honor rose. {self._carrier()}")
+        anchor_id = ids["u1"][1]
+        state = self.service.effective_state(self.honor, self.scene_id, exclude={anchor_id})
         self.assertEqual(state, {})
-        partial = self.service.effective_state(self.honor, self.scene_id, exclude={"r1"})
+        partial = self.service.effective_state(
+            self.honor, self.scene_id, exclude={f"{anchor_id}.r1"}
+        )
         self.assertEqual(partial, {"title": "Lady Dame"})
 
     def test_effective_route_accepts_exclude_param(self) -> None:
-        self._save_body(f"Honor rose. {self._carrier()}")
+        ids = self._save_body(f"Honor rose. {self._carrier()}")
+        anchor_id = ids["u1"][1]
         response = self.client.get(
             f"/api/lore/{self.honor}/effective",
-            params={"scene": self.scene_id, "exclude": "r1,r2"},
+            params={"scene": self.scene_id, "exclude": f"{anchor_id}.r1,{anchor_id}.r2"},
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["values"], {})
 
     def test_index_version_tracks_unit_name(self) -> None:
+        # Re-authoring the same unit id is the migration's own idempotent-rerun
+        # shape (ADR-0095 §12): the derived set id is the same, so this
+        # overwrites that set's title — the scene's anchor line is unchanged,
+        # but the version still moves, because the set's title changed.
         self._save_body(f"Honor rose. {self._carrier('Promotion')}")
         before = self.service.build_mutations_index().version
+        body_before = self._body()
         self._save_body(f"Honor rose. {self._carrier('Coronation')}")
+        self.assertEqual(self._body(), body_before)
         self.assertNotEqual(before, self.service.build_mutations_index().version)
 
 
 class CarrierValidationTests(MutationUnitTestBase):
     def test_carrier_rows_validate_like_markers(self) -> None:
         # `remove` on a text field is invalid — the per-row validator must see
-        # carrier rows exactly as it sees single-line markers.
+        # a converted carrier's rows exactly as it sees a single-line marker's.
         self._save_body(
             f"<!-- mutate:entity={self.honor};id=u1\n"
             "field=rank;op=remove;value=Captain;id=r1\n"
@@ -270,105 +303,6 @@ class CarrierValidationTests(MutationUnitTestBase):
         joined = " ".join(report.warnings)
         self.assertIn("op remove is only valid on collection fields", joined)
         self.assertNotIn("r2", joined)
-
-
-class UnitRewriteTests(MutationUnitTestBase):
-    """ADR-0089 S5 / ADR-0042 §5: the lore card scrubbed to a stop edits that
-    stop's unit — the whole unit's rows are replaced through one call, ids kept
-    when the unit held them, minted otherwise; the head and its name survive."""
-
-    def setUp(self) -> None:
-        super().setUp()
-        self._save_body(f"Honor rose. {self._carrier()} The fleet cheered.")
-
-    def _row(self, field: str, value: str, row_id: str = "", op: str = "replace") -> MutationUnitRow:
-        return MutationUnitRow(field=field, op=op, value=value, id=row_id)
-
-    def test_rows_are_replaced_wholesale_keeping_the_head_and_known_ids(self) -> None:
-        self.service.rewrite_mutation_unit(
-            self.scene_id, "u1",
-            RewriteMutationUnitRequest(rows=[self._row("rank", "Commodore", "r1"), self._row("rank.x.y", "z")]),
-        )
-        markers = self._scan()
-        self.assertEqual(markers["r1"].value, "Commodore")
-        self.assertNotIn("r2", markers)  # the dropped row is gone
-        added = next(m for m in markers.values() if m.field == "rank.x.y")
-        self.assertTrue(added.marker_id.startswith("mut_"))  # a blank id is minted
-        self.assertEqual({m.unit_id for m in markers.values()}, {"u1"})
-        self.assertEqual({m.unit_name for m in markers.values()}, {"Promotion"})
-        self.assertIn(f"<!-- mutate:entity={self.honor};name=Promotion;id=u1\n", self._body())
-        self.assertIn("The fleet cheered.", self._body())
-
-    def test_a_foreign_id_is_not_adopted(self) -> None:
-        # A row id the unit never held is minted fresh, so a rewrite can never
-        # collide with a record elsewhere in the manuscript.
-        self.service.rewrite_mutation_unit(
-            self.scene_id, "u1", RewriteMutationUnitRequest(rows=[self._row("rank", "Admiral", "stolen")])
-        )
-        self.assertNotIn("stolen", self._scan())
-
-    def test_one_row_degenerates_to_a_single_line_marker_with_the_row_id(self) -> None:
-        self.service.rewrite_mutation_unit(
-            self.scene_id, "u1", RewriteMutationUnitRequest(rows=[self._row("rank", "Admiral", "r1")])
-        )
-        markers = self._scan()
-        self.assertEqual(list(markers), ["r1"])
-        self.assertEqual(markers["r1"].unit_id, "r1")
-        self.assertIn(f"<!-- mutate:entity={self.honor};field=rank;value=Admiral;name=Promotion;id=r1 -->", self._body())
-
-    def test_no_rows_removes_the_unit(self) -> None:
-        self.service.rewrite_mutation_unit(self.scene_id, "u1", RewriteMutationUnitRequest(rows=[]))
-        self.assertEqual(self._scan(), {})
-        self.assertIn("Honor rose.  The fleet cheered.", self._body())
-
-    def test_a_single_line_unit_grows_into_a_carrier_keeping_its_id_on_the_head(self) -> None:
-        self._save_body(f"Alone. <!-- mutate:entity={self.honor};field=rank;value=Captain;id=s1 --> After.")
-        self.service.rewrite_mutation_unit(
-            self.scene_id, "s1",
-            RewriteMutationUnitRequest(rows=[self._row("rank", "Captain", "s1"), self._row("title", "Dame")]),
-        )
-        markers = self._scan()
-        self.assertEqual({m.unit_id for m in markers.values()}, {"s1"})
-        self.assertNotIn("s1", markers)  # the original row was re-minted: no two markers share an id
-        self.assertEqual({m.field for m in markers.values()}, {"rank", "title"})
-        self.assertIn(f"<!-- mutate:entity={self.honor};id=s1\n", self._body())
-
-    def test_a_single_line_unit_edited_in_place_keeps_its_id(self) -> None:
-        self._save_body(f"Alone. <!-- mutate:entity={self.honor};field=rank;value=Captain;id=s1 --> After.")
-        self.service.rewrite_mutation_unit(
-            self.scene_id, "s1", RewriteMutationUnitRequest(rows=[self._row("rank", "Admiral", "s1")])
-        )
-        self.assertEqual(list(self._scan()), ["s1"])
-        self.assertEqual(self._scan()["s1"].value, "Admiral")
-
-    def test_a_name_on_the_request_renames_the_head(self) -> None:
-        self.service.rewrite_mutation_unit(
-            self.scene_id, "u1",
-            RewriteMutationUnitRequest(rows=[self._row("rank", "Captain", "r1"), self._row("title", "Lady Dame", "r2")], name="Coronation"),
-        )
-        self.assertEqual({m.unit_name for m in self._scan().values()}, {"Coronation"})
-
-    def test_unknown_unit_is_404(self) -> None:
-        with self.assertRaises(Exception) as ctx:
-            self.service.rewrite_mutation_unit(self.scene_id, "nope", RewriteMutationUnitRequest(rows=[]))
-        self.assertEqual(getattr(ctx.exception, "status_code", None), 404)
-
-    def test_a_row_the_grammar_cannot_parse_is_refused_before_the_rewrite(self) -> None:
-        before = self._body()
-        for bad in ({"field": "rank", "op": "append", "value": "x", "id": "r1"}, {"field": "ra nk", "value": "x"}):
-            response = self.client.put(f"/api/scenes/{self.scene_id}/mutations/units/u1", json={"rows": [bad]})
-            self.assertEqual(response.status_code, 422, response.text)
-        self.assertEqual(self._body(), before)
-
-    def test_the_route_rewrites_and_returns_the_scene(self) -> None:
-        response = self.client.put(
-            f"/api/scenes/{self.scene_id}/mutations/units/u1",
-            json={"rows": [{"field": "rank", "op": "replace", "value": "Admiral", "id": "r1"}]},
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertIn("value=Admiral", response.json()["body"])
-        missing = self.client.put(f"/api/scenes/{self.scene_id}/mutations/units/nope", json={"rows": []})
-        self.assertEqual(missing.status_code, 404)
 
 
 if __name__ == "__main__":

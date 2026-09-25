@@ -16,6 +16,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from mutation_helpers import save_scenes_with_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -82,10 +83,9 @@ class MutationIndexReadTests(unittest.TestCase):
         unreadable by `read_scene`. Their markers must keep resolving — the
         alternative is the whole downstream manuscript quietly changing meaning
         because one scene's front matter went stale."""
-        opener = self._new_scene(
-            "Opener",
-            f"<!-- mutate:entity={self.honor};field=title;value=Captain;id=m1 -->",
-            status="revised",
+        opener = self._new_scene("Opener", status="revised")
+        save_scenes_with_mutations(
+            self.service, {opener: f"<!-- mutate:entity={self.honor};field=title;value=Captain;id=m1 -->"}
         )
         later = self._new_scene("Later", "Nothing happens here.")
         self.assertEqual(
@@ -106,12 +106,14 @@ class MutationIndexReadTests(unittest.TestCase):
     def test_a_scene_failing_validation_still_closes_its_intervals(self) -> None:
         """The sharper half: a dropped scene takes its *close* markers with it,
         so an interval that ended stays open for the rest of the manuscript."""
-        self._new_scene(
-            "Opener",
-            f"<!-- mutate:entity={self.honor};field=title;value=Captain;id=m1 -->",
-        )
-        closer = self._new_scene(
-            "Closer", "<!-- mutate:close;ref=m1;id=c1 -->", status="revised"
+        opener = self._new_scene("Opener")
+        closer = self._new_scene("Closer", status="revised")
+        save_scenes_with_mutations(
+            self.service,
+            {
+                opener: f"<!-- mutate:entity={self.honor};field=title;value=Captain;id=m1 -->",
+                closer: "<!-- mutate:close;ref=m1;id=c1 -->",
+            },
         )
         after = self._new_scene("After", "Long afterwards.")
         self.assertEqual(self.service.effective_state(self.honor, after), {})
@@ -141,22 +143,19 @@ class MutationIndexReadTests(unittest.TestCase):
                 honor = service.create_lore_entry(
                     CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
                 ).id
+                bodies: dict[str, str] = {}
                 for n in range(scene_count):
                     created = client.post("/api/scenes", json={"title": f"Scene {n}"})
                     scene_id = created.json()["id"]
                     client.put(
                         f"/api/scenes/{scene_id}",
-                        json={
-                            "title": f"Scene {n}",
-                            # No space in the value — marker values are
-                            # percent-encoded, so `Rank 0` simply does not match
-                            # the pattern and scans to nothing.
-                            "body": (
-                                f"<!-- mutate:entity={honor};field=title;"
-                                f"value=Rank-{n};id=m{n} -->"
-                            ),
-                        },
+                        json={"title": f"Scene {n}", "body": ""},
                     )
+                    # No space in the value — marker values are percent-encoded,
+                    # so `Rank 0` simply does not match the pattern and scans to
+                    # nothing.
+                    bodies[scene_id] = f"<!-- mutate:entity={honor};field=title;value=Rank-{n};id=m{n} -->"
+                save_scenes_with_mutations(service, bodies)
 
                 calls = 0
                 original = ProjectService._read_structure

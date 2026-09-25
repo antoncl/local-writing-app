@@ -11,6 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from mutation_helpers import save_scenes_with_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -29,21 +30,22 @@ class EffectiveNamesTests(unittest.TestCase):
         self.client = TestClient(app)
         self.s1 = self._new_scene("One", "The village is quiet.")
         # s2 renames Remus mid-scene.
-        self.s2 = self._new_scene(
-            "Two",
-            f"He changed. <!-- mutate:entity={self.remus};field=title;value=The%20Wolf;id=t1 -->",
-        )
+        self.s2 = self._new_scene("Two")
+        self._convert(self.s2, f"He changed. <!-- mutate:entity={self.remus};field=title;value=The%20Wolf;id=t1 -->")
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def _new_scene(self, title: str, body: str) -> str:
+    def _new_scene(self, title: str, body: str = "") -> str:
         scene_id = self.client.post("/api/scenes", json={"title": title}).json()["id"]
         saved = self.client.put(
             f"/api/scenes/{scene_id}", json={"title": title, "body": body}
         )
         self.assertEqual(saved.status_code, 200, saved.text)
         return scene_id
+
+    def _convert(self, scene_id: str, body: str) -> dict[str, tuple[str, str]]:
+        return save_scenes_with_mutations(self.service, {scene_id: body})
 
     # --- effective_names --------------------------------------------------
 
@@ -88,10 +90,8 @@ class EffectiveNamesTests(unittest.TestCase):
                 metadata={"aliases": ["Grey"]},
             ),
         )
-        scene = self._new_scene(
-            "Blank",
-            f"<!-- mutate:entity={self.remus};field=title;value=;id=b1 -->",
-        )
+        scene = self._new_scene("Blank")
+        self._convert(scene, f"<!-- mutate:entity={self.remus};field=title;value=;id=b1 -->")
         self.assertEqual(self.service.effective_names(scene), {self.remus: ["Grey"]})
 
     # --- matcher uses effective names -------------------------------------

@@ -12,6 +12,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from mutation_helpers import save_scenes_with_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -41,10 +42,15 @@ class MutationRouteTests(unittest.TestCase):
             CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
         ).id
         self.s1 = self._new_scene("Scene One", "Honor commands.")
-        self.s2 = self._new_scene(
-            "Scene Two",
-            "She was promoted. "
-            f"<!-- mutate:entity={self.honor};field=rank;value=Captain;id=m1 -->",
+        self.s2 = self._new_scene("Scene Two", "")
+        self.ids = save_scenes_with_mutations(
+            self.service,
+            {
+                self.s2: (
+                    "She was promoted. "
+                    f"<!-- mutate:entity={self.honor};field=rank;value=Captain;id=m1 -->"
+                )
+            },
         )
 
     def tearDown(self) -> None:
@@ -65,7 +71,9 @@ class MutationRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         items = response.json()["items"]
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["marker_id"], "m1")
+        _set_id, anchor_id = self.ids["m1"]
+        self.assertEqual(items[0]["marker_id"], f"{anchor_id}.m1")
+        self.assertEqual(items[0]["row_id"], "m1")
         self.assertEqual(items[0]["field"], "rank")
         self.assertEqual(items[0]["value"], "Captain")
         self.assertEqual(items[0]["scene_id"], self.s2)

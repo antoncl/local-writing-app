@@ -16,6 +16,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from mutation_helpers import save_scenes_with_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -27,6 +28,7 @@ from app.models import (
     SelectOption,
     UpsertMetadataFieldRequest,
 )
+from app.services.project.mutation_anchors import render_anchor
 from app.services.project.snapshot_witness import (
     MAX_WITNESS_ENTITIES,
     SOURCE_DYNAMIC,
@@ -139,6 +141,23 @@ class WitnessTestCase(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def _save_scene_with_mutations(self, body: str, cast: list[str] | None = None) -> None:
+        """Like `_save_scene`, but `body` is legacy-grammar markers moved into
+        a set + anchor (ADR-0095) before this scene is saved with them."""
+        self._save_scene("", cast=cast)
+        save_scenes_with_mutations(self.service, {self.scene_id: body})
+
+    def _mutation_anchor_text(self, entity_id: str, field: str, value: str, anchor_id: str = "buf1") -> str:
+        """A new-format anchor comment naming a set already written to disk
+        (via a throwaway scene) — for simulating an unsaved-buffer marker
+        without the target scene's OWN disk body carrying one."""
+        throwaway = self.client.post("/api/scenes", json={"title": "Throwaway"}).json()["id"]
+        ids = save_scenes_with_mutations(
+            self.service, {throwaway: f"<!-- mutate:entity={entity_id};field={field};value={value};id=m1 -->"}
+        )
+        set_id, _anchor_id = ids["m1"]
+        return render_anchor(set_id, anchor_id)
+
     def _witness_for(self, entity_id: str, dynamic: list[str] | None = None):
         witness = self.service.build_witness(self.scene_id, dynamic)
         for entity in witness.entities:
@@ -165,7 +184,7 @@ class WitnessSourcesTests(WitnessTestCase):
         self.assertEqual(entity.sources, [SOURCE_DYNAMIC])
 
     def test_a_mutation_in_this_scene_puts_the_entity_in_the_witness(self) -> None:
-        self._save_scene(
+        self._save_scene_with_mutations(
             f"Tom blinked. <!-- mutate:entity={self.tom};field=eye_colour;value=blue;id=m1 -->"
         )
         entity = self._witness_for(self.tom)
@@ -190,10 +209,13 @@ class WitnessSourcesTests(WitnessTestCase):
             opener,
             SaveSceneRequest(
                 title="Before",
-                body=f"<!-- mutate:entity={self.tom};field=eye_colour;value=blue;id=m1 -->",
+                body="",
                 status="draft",
                 entry_type="manuscript:scene",
             ),
+        )
+        save_scenes_with_mutations(
+            self.service, {opener: f"<!-- mutate:entity={self.tom};field=eye_colour;value=blue;id=m1 -->"}
         )
         self._save_scene("Tom said nothing at all.")
 
@@ -235,14 +257,14 @@ class WitnessBufferOverridesTests(WitnessTestCase):
 
     def test_a_buffer_body_marker_witnesses_over_disk(self) -> None:
         # Nothing on disk mutates Tom; the unsaved buffer just typed a marker.
+        # The SET is already a real node on disk (ADR-0095 always writes the
+        # set on /mutate confirm, §6) — only the anchor is unsaved.
         self._save_scene("Tom said nothing at all.")
+        anchor = self._mutation_anchor_text(self.tom, "eye_colour", "blue")
         witness = self.service.build_witness(
             self.scene_id,
             None,
-            buffer_body=(
-                f"Tom blinked. <!-- mutate:entity={self.tom};"
-                "field=eye_colour;value=blue;id=m1 -->"
-            ),
+            buffer_body=f"Tom blinked. {anchor}",
         )
         tom = next((e for e in witness.entities if e.id == self.tom), None)
         self.assertIsNotNone(tom)
@@ -252,7 +274,7 @@ class WitnessBufferOverridesTests(WitnessTestCase):
 
     def test_a_marker_the_buffer_deleted_is_not_witnessed(self) -> None:
         # Disk still carries the marker the author just deleted in the buffer.
-        self._save_scene(
+        self._save_scene_with_mutations(
             f"<!-- mutate:entity={self.tom};field=eye_colour;value=blue;id=m1 -->"
         )
         witness = self.service.build_witness(
@@ -279,7 +301,7 @@ class WitnessContentTests(WitnessTestCase):
         """Base values with the live overrides applied. A report naming only the
         stored value would be wrong inside an interval; one naming only the
         override would be empty outside."""
-        self._save_scene(
+        self._save_scene_with_mutations(
             f"Tom blinked. <!-- mutate:entity={self.tom};field=eye_colour;value=blue;id=m1 -->",
             cast=[self.tom],
         )

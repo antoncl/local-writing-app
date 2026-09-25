@@ -6,8 +6,8 @@
 
 A close without `row=` ends every row of the anchor's set; with `row=`, it ends
 just that row (§1). Note the legacy close grammar
-(`<!-- mutate:close;ref=X;id=Y -->`, `lore_mutations.MUTATION_CLOSE_PATTERN`) is
-byte-identical to a new no-row close — one pattern (`MUTATION_ANCHOR_CLOSE_PATTERN`)
+(`<!-- mutate:close;ref=X;id=Y -->`, `legacy_mutation_markers._LEGACY_CLOSE_PATTERN`)
+is byte-identical to a new no-row close — one pattern (`MUTATION_ANCHOR_CLOSE_PATTERN`)
 covers both, which is what makes a legacy close and a converted close the same
 text (ADR-0095 §12 step 5, the idempotence note on the converter in
 `legacy_mutation_markers.py`).

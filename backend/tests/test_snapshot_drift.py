@@ -430,13 +430,8 @@ class DriftOverTheDriftRouteTests(WitnessTestCase):
         # now-witness must see it, matching the field flip, not lag on disk.
         self._save_scene(cast=[self.tom])
         snapshot_id = self._capture()
-        drift = self._diff(
-            snapshot_id,
-            buffer_body=(
-                f"Tom blinked. <!-- mutate:entity={self.tom};"
-                "field=eye_colour;value=blue;id=m1 -->"
-            ),
-        )["drift"]
+        anchor = self._mutation_anchor_text(self.tom, "eye_colour", "blue")
+        drift = self._diff(snapshot_id, buffer_body=f"Tom blinked. {anchor}")["drift"]
         self.assertTrue(drift["available"])
         drifted = next(e for e in drift["entities"] if e["title"] == "Tom")
         self.assertEqual(
@@ -462,13 +457,11 @@ class DriftOverTheDriftRouteTests(WitnessTestCase):
         # honour both — Tom leaves, Chicago joins — off the buffer, not disk.
         self._save_scene(cast=[self.tom])
         snapshot_id = self._capture()
+        anchor = self._mutation_anchor_text(self.chicago, "eye_colour", "blue")
         drift = self._diff(
             snapshot_id,
             buffer_metadata={"cast": []},
-            buffer_body=(
-                f"<!-- mutate:entity={self.chicago};"
-                "field=eye_colour;value=blue;id=m1 -->"
-            ),
+            buffer_body=anchor,
         )["drift"]
         self.assertTrue(drift["available"])
         by_title = {e["title"]: e["membership"] for e in drift["entities"]}

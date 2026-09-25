@@ -46,6 +46,7 @@ from app.services.ai.extraction import (
     render_extraction_envelope,
 )
 from app.services.ai.helpers import _fields, create_environment_for_project
+from app.services.ai.patch_schema import patch_response_schema
 from app.services.project.errors import ProjectServiceError
 
 
@@ -553,6 +554,30 @@ class ExtractEndpointTests(unittest.TestCase):
         body = resp.json()
         self.assertEqual(body["cost_usd"], 0.03)
         self.assertEqual(body["cost_usd_total"], 0.45)
+
+    def test_extract_turn_carries_the_response_schema_for_the_provider(self) -> None:
+        # #2199: the same `patch_response_schema(stored, creating=...)` rides
+        # onto BOTH the first turn and the garbled retry — a provider that
+        # supports constrained decoding (Ollama) can't be asked to hold a
+        # different shape across the two calls.
+        stored = self._stored_full_proposable_set()
+        chat_id = self._make_chat(stored=stored)
+        first = _chat_reply("Sure! Here you go, no JSON though.", cost_usd=0.02)
+        second = _chat_reply('{"fields": {"bio": "New bio."}}', cost_usd=0.03)
+        expected = patch_response_schema(stored, creating=False)
+        with self._mock_chat_sequence(first, second) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={
+                    "messages": [{"role": "user", "content": "make it grand"}],
+                    "assistant_id": None,
+                    "chat_id": chat_id,
+                },
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(len(mock_chat.call_args_list), 2)
+        for call in mock_chat.call_args_list:
+            self.assertEqual(call.kwargs.get("response_schema"), expected)
 
     def test_garbled_retry_reports_the_total_after_its_own_row(self) -> None:
         # #1877: the retry is a second billed call with its own row; the total

@@ -321,6 +321,10 @@ class ChatCall:
     # it (Anthropic). Ignored by `chat` and by providers without a thinking
     # mode.
     thinking_enabled: bool = False
+    # JSON schema the reply must conform to; a profile that supports
+    # constrained decoding (Ollama `format`) enforces it, others ignore it
+    # (#2199).
+    response_schema: dict[str, Any] | None = None
 
 
 @dataclass

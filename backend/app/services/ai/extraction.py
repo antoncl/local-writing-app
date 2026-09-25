@@ -36,6 +36,7 @@ from app.models import (
 )
 from app.services.ai.chat import run_chat_turn
 from app.services.ai.field_contract import FieldContract
+from app.services.ai.patch_schema import patch_response_schema
 from app.services.project.errors import ProjectServiceError
 
 if TYPE_CHECKING:
@@ -322,6 +323,10 @@ async def run_entry_patch_extraction(
         stored=chat.field_contract_stored,
     )
     turn_messages = _messages_with_cue(request.messages, envelope)
+    # #2199: built once from the same `stored` set the envelope/ceiling use, so
+    # a provider with constrained decoding (Ollama) can't be asked to hold a
+    # different shape on the retry than the first turn.
+    schema = patch_response_schema(chat.field_contract_stored, creating=creating)
 
     chat_reply = await run_chat_turn(
         project,
@@ -332,6 +337,7 @@ async def run_entry_patch_extraction(
             chat_id=request.chat_id,
         ),
         lore_mode="used",
+        response_schema=schema,
     )
     if not chat_reply.ok or not (chat_reply.content or "").strip():
         return EntryPatchExtraction(
@@ -372,6 +378,7 @@ async def run_entry_patch_extraction(
                 chat_id=request.chat_id,
             ),
             lore_mode="used",
+            response_schema=schema,
         )
         cost = _sum_costs(cost, retry.cost_usd)
         usage = _sum_usage(usage, retry.usage)

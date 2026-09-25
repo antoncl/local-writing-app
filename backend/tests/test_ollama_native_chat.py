@@ -199,6 +199,23 @@ def test_chat_targets_native_endpoint_and_carries_temperature(route) -> None:
     assert router.bodies[0]["options"]["temperature"] == 0.7
 
 
+def test_chat_carries_response_schema_as_native_format(route) -> None:
+    # #2199: a `response_schema` on the call rides onto Ollama's native
+    # `format` key (constrained decoding) — never sent when absent.
+    router = route(_Router(show=_SHOW_128K, chat_json={"message": {"content": "ok"}}))
+    schema = {"type": "object", "properties": {"fields": {"type": "object"}}}
+    OllamaProfile("http://box:11434").chat(_call(response_schema=schema))
+
+    assert router.bodies[0]["format"] == schema
+
+
+def test_chat_omits_format_when_no_response_schema(route) -> None:
+    router = route(_Router(show=_SHOW_128K, chat_json={"message": {"content": "ok"}}))
+    OllamaProfile("http://box:11434").chat(_call())
+
+    assert "format" not in router.bodies[0]
+
+
 # -- non-streaming response ----------------------------------------------------
 
 

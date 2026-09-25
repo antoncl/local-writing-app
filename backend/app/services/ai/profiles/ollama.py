@@ -215,12 +215,18 @@ class OllamaProfile(OpenAICompatibleProfile):
             options["num_ctx"] = num_ctx
         if call.temperature is not None and self.supports_temperature(call.model):
             options["temperature"] = call.temperature
-        return {
+        body: dict[str, Any] = {
             "model": call.model,
             "messages": messages,
             "stream": stream,
             "options": options,
         }
+        if call.response_schema is not None:
+            # Ollama's native constrained decoding (#2199): `format` accepts a
+            # JSON schema and the daemon holds generation to it, rather than
+            # relying on prose instructions a local model can still break.
+            body["format"] = call.response_schema
+        return body
 
     def _resolve_num_ctx(self, call: ChatCall, messages: list[dict]) -> int | None:
         """The context window to allocate for this turn, or None to leave it to

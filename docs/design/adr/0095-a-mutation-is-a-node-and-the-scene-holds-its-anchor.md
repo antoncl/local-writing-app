@@ -1,9 +1,10 @@
 # ADR-0095: A mutation is a node, and the scene holds its anchor
 
-- **Status:** Proposed — 2026-09-25. Text by Claude from a design conversation with Anton on
-  2026-09-25 (#2229), which started from an audit of the whole mutation feature. Revised against
-  two cold implementing threads (backend with migration; frontend with editing at a stop) before
-  review.
+- **Status:** Accepted — 2026-09-25, Anton Lauridsen (PR #2230). Text by Claude from a design
+  conversation with Anton on 2026-09-25 (#2229), which started from an audit of the whole mutation
+  feature. Revised against two cold implementing threads (backend with migration; frontend with
+  editing at a stop) before review. Anton gave the go for the slices at acceptance, one lane, in
+  order.
 - **Feature:** what a mid-scene change says moves out of the scene's prose into a mutation set
   node. The prose keeps a one-line anchor at the point where the change happens. Placing a set,
   editing a change at a scrubbed stop, renaming a field, deleting an entry and linking one change

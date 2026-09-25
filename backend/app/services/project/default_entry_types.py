@@ -480,22 +480,17 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "abstract": True,
         "fields": ["color", "merged_into"],
         "has_body": False,
-        "description": (
-            "A label. Tags are nodes: a vocabulary is a tag type, a tag is "
-            "an entry of it, and a field that holds tags is a reference "
-            "list into the vocabulary (ADR-0082)."
-        ),
     },
     "tag:tag": {
         # The general-purpose vocabulary (0082 slice 1). Concrete so tags
         # are created directly from the picker; body-less like a view.
+        # General tags for grouping and filtering. Never shown to the reader.
         "name": "Tag",
         "icon": "tag",
         "kind": "tag",
         "parent": "tag:base",
         "fields": [],
         "has_body": False,
-        "description": "General tags for grouping and filtering. Never shown to the reader.",
         # A tag is minted from a picker, not authored through the
         # Conversations panel — kept out of the Offer-on picker's "editor"
         # host set the same way mutation_set is (review fix).
@@ -504,14 +499,14 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
     "tag:assistant_tag": {
         # The assistant vocabulary (ADR-0082 slice 1): matches prompts to
         # assistants. Lives at the machine layer, alongside assistants
-        # themselves (MACHINE_LAYER_FAMILIES, references.py).
+        # themselves (MACHINE_LAYER_FAMILIES, references.py). Matches
+        # prompts to assistants.
         "name": "Assistant tag",
         "icon": "tag",
         "kind": "tag",
         "parent": "tag:base",
         "fields": [],
         "has_body": False,
-        "description": "Tags that match prompts to assistants.",
         "opens_in": "dialog",
     },
 }

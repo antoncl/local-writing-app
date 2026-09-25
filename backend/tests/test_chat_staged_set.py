@@ -15,8 +15,10 @@ from project_fixtures import open_test_project
 from app.models import (
     CreateChatSessionRequest,
     CreateMutationSetEntryRequest,
+    MetadataFieldDefinition,
     MutationSetRow,
     SaveChatSessionRequest,
+    UpsertMetadataFieldRequest,
 )
 from app.services.ai.chat import _staged_set_block, expand_and_prepare_chat_blocks
 from app.services.ai.lore_block import _format_staged_set_block
@@ -66,6 +68,17 @@ class ChatStagedSetTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = open_test_project(self.root, "Chat Staged Set Tests")
+        # ADR-0095 §4: a set save validates its rows against the schema, so
+        # the "condition" field these fixtures target must be declared.
+        layers = self.service.read_metadata_schema_layers()
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layers.layers[-1].id,
+                field_id="condition",
+                field=MetadataFieldDefinition(name="Condition", type="text"),
+                entry_type="lore:character",
+            )
+        )
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

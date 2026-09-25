@@ -167,82 +167,57 @@ describe("markdown round-trip — content-bearing markers stay byte-stable", () 
   });
 });
 
-// The mutation markers are empty-atom point comments: on load they become an
-// empty <span> the editor's node view fills with a pill (so it's non-blank on
-// save), but turndown treats a *bare* empty span as blank and drops it — so the
-// pure serializer can't md→html→md them in isolation. The real path is
-// md → editor → md; here each direction is locked separately.
-describe("markdown load — mutation markers parse into editor spans", () => {
-  it("parses a single-line mutation marker into a mutation span", async () => {
-    const html = await sceneMarkdownToHtml("<!-- mutate:entity=lore_1;field=status;value=dead;id=mut1 -->");
-    expect(html).toContain('data-mutation-entity="lore_1"');
+// The mutation markers are empty-atom point comments (ADR-0095 §1): on load
+// they become an empty <span> the editor's node view fills with a pill (so
+// it's non-blank on save), but turndown treats a *bare* empty span as blank
+// and drops it — so the pure serializer can't md→html→md them in isolation.
+// The real path is md → editor → md; here each direction is locked
+// separately (the full round-trip through a real editor is
+// editor-core/proseRoundTrip.test.ts).
+describe("markdown load — mutation anchors parse into editor spans (ADR-0095 §1)", () => {
+  it("parses an anchor into a mutation span", async () => {
+    const html = await sceneMarkdownToHtml("<!-- mutate:set=mutset_1;id=mut1 -->");
+    expect(html).toContain('data-mutation-set="mutset_1"');
     expect(html).toContain('data-mutation-id="mut1"');
-    expect(html).toContain("status");
-    expect(html).toContain("dead");
   });
 
-  it("parses a multi-line carrier into one span carrying every field row", async () => {
-    const html = await sceneMarkdownToHtml(
-      [
-        "<!-- mutate:entity=lore_1;id=unit1",
-        "field=status;value=dead;id=row1",
-        "field=mood;op=replace;value=grim;id=row2",
-        "-->",
-      ].join("\n"),
-    );
-    expect(html).toContain('data-mutation-id="unit1"');
-    expect(html).toContain("row1");
-    expect(html).toContain("row2");
-    expect(html).toContain("grim");
-  });
-
-  it("parses a close marker into a close span", async () => {
+  it("parses a close with no row into a close span", async () => {
     const html = await sceneMarkdownToHtml("<!-- mutate:close;ref=mut1;id=close1 -->");
     expect(html).toContain('data-mutation-close-ref="mut1"');
     expect(html).toContain('data-mutation-id="close1"');
+    expect(html).not.toContain("data-mutation-close-row");
   });
 
-  it("leaves a malformed carrier untouched — never drops a hand-authored line", async () => {
-    const bad = "<!-- mutate:entity=lore_1;id=unit1\nfield=status;BROKEN_ROW\n-->";
-    const html = await sceneMarkdownToHtml(bad);
-    expect(html).not.toContain("data-mutation-entity");
+  it("parses a close with a row into a close span carrying the row", async () => {
+    const html = await sceneMarkdownToHtml("<!-- mutate:close;ref=mut1;row=row1;id=close1 -->");
+    expect(html).toContain('data-mutation-close-ref="mut1"');
+    expect(html).toContain('data-mutation-close-row="row1"');
+    expect(html).toContain('data-mutation-id="close1"');
   });
 });
 
-describe("markdown save — editor mutation pills serialize back to markers", () => {
+describe("markdown save — editor mutation pills serialize back to anchors (ADR-0095 §1)", () => {
   // The spans as the MutationMark / MutationClose node views render them (a
   // non-blank pill), which is what editor.getHTML() hands turndown on save.
-  it("serializes a single-row pill to a single-line marker (op=replace omitted)", () => {
-    const rows = JSON.stringify([{ id: "mut1", field: "status", op: "replace", value: "dead" }]);
-    const html = `<p><span class="mutation-pill" data-mutation-entity="lore_1" data-mutation-rows='${rows}' data-mutation-id="mut1">⤳ dead</span></p>`;
-    expect(editorHtmlToSceneMarkdown(html)).toBe("<!-- mutate:entity=lore_1;field=status;value=dead;id=mut1 -->");
+  it("serializes an anchor pill to `mutate:set=...;id=...`", () => {
+    const html = '<p><span class="mutation-pill" data-mutation-set="mutset_1" data-mutation-id="mut1">⤳ Promotion</span></p>';
+    expect(editorHtmlToSceneMarkdown(html)).toBe("<!-- mutate:set=mutset_1;id=mut1 -->");
   });
 
-  it("keeps a non-default op in the single-line marker", () => {
-    const rows = JSON.stringify([{ id: "mut2", field: "aliases", op: "add", value: "Red" }]);
-    const html = `<p><span class="mutation-pill" data-mutation-entity="lore_1" data-mutation-rows='${rows}' data-mutation-id="mut2">⤳ +Red</span></p>`;
-    expect(editorHtmlToSceneMarkdown(html)).toBe("<!-- mutate:entity=lore_1;field=aliases;op=add;value=Red;id=mut2 -->");
+  it("serializes a missing (no-set) anchor pill with an empty set=", () => {
+    const html = '<p><span class="mutation-pill" data-mutation-id="mut1">⤳</span></p>';
+    expect(editorHtmlToSceneMarkdown(html)).toBe("<!-- mutate:set=;id=mut1 -->");
   });
 
-  it("serializes a multi-row pill to the multi-line carrier", () => {
-    const rows = JSON.stringify([
-      { id: "row1", field: "status", op: "replace", value: "dead" },
-      { id: "row2", field: "mood", op: "replace", value: "grim" },
-    ]);
-    const html = `<p><span class="mutation-pill" data-mutation-entity="lore_1" data-mutation-rows='${rows}' data-mutation-id="unit1">⤳ 2 changes</span></p>`;
-    expect(editorHtmlToSceneMarkdown(html)).toBe(
-      [
-        "<!-- mutate:entity=lore_1;id=unit1",
-        "field=status;value=dead;id=row1",
-        "field=mood;value=grim;id=row2",
-        "-->",
-      ].join("\n"),
-    );
-  });
-
-  it("serializes a close pill to a close marker", () => {
+  it("serializes a close pill with no row", () => {
     const html =
       '<p><span class="mutation-pill mutation-pill-close" data-mutation-close-ref="mut1" data-mutation-id="close1">Closes Honor</span></p>';
     expect(editorHtmlToSceneMarkdown(html)).toBe("<!-- mutate:close;ref=mut1;id=close1 -->");
+  });
+
+  it("serializes a close pill scoped to one row", () => {
+    const html =
+      '<p><span class="mutation-pill mutation-pill-close" data-mutation-close-ref="mut1" data-mutation-close-row="row1" data-mutation-id="close1">Closes Honor</span></p>';
+    expect(editorHtmlToSceneMarkdown(html)).toBe("<!-- mutate:close;ref=mut1;row=row1;id=close1 -->");
   });
 });

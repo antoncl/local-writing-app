@@ -440,7 +440,7 @@ class PromotionMixin:
             and src_entry.kind == "mutation_set"
         ]
         staged_ids = [
-            set_id for set_id in pinned_ids if not self.read_mutation_set_entry(set_id).placed
+            set_id for set_id in pinned_ids if self.read_mutation_set_entry(set_id).state != "active"
         ]
         return [index.by_id[set_id].title for set_id in staged_ids]
 
@@ -789,9 +789,11 @@ class PromotionMixin:
         _entry, dest, index, root = self._promotion_guard(entry_id, target_layer_id, "mutation_set", "Mutation set")
 
         full = self.read_mutation_set_entry(entry_id)
-        if full.placed:
+        if full.state == "active":
             raise ProjectServiceError(
-                "A placed mutation set is anchored in the manuscript; unplace it before promoting.", 422
+                "This mutation set is placed in the manuscript. Remove its pills from the scenes "
+                "that anchor it, then promote.",
+                422,
             )
 
         to_promote: list[str] = []

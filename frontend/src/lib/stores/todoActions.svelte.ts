@@ -20,6 +20,7 @@ import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { loreEntriesStore } from "@/lib/stores/lore";
 import { reviewProposals } from "@/lib/stores/reviewProposals.svelte";
 import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
+import { resolveMutationRevealAnchor } from "@/lib/editor-core/mutationNodes";
 import {
   embeddedTodosStore,
   refreshEmbeddedTodos,
@@ -201,7 +202,19 @@ class TodoActions {
         if (item.source) {
           const source = item.source;
           if (source.reason === "mutates_source" && source.marker_id) {
-            editorPanes.revealMutationMarkerInOpenPane(sceneId, source.marker_id);
+            // ADR-0095 §3/§4: `marker_id` is normally already the composite
+            // `<anchor>.<row>` id, resolved locally — but a bare row id (an
+            // older review item, or a defensive fallback) needs the entity's
+            // mutations fetched to find which anchor holds that row,
+            // preferring one in THIS scene, else the first in manuscript
+            // order.
+            const anchorId = await resolveMutationRevealAnchor(
+              (entityId) => api.getEntityMutations(entityId),
+              source.node_id,
+              source.marker_id,
+              sceneId,
+            );
+            editorPanes.revealMutationMarkerInOpenPane(sceneId, anchorId);
           } else {
             let names: string[] = [];
             try {

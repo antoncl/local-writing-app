@@ -1,4 +1,10 @@
-import type { MutationSetEntry, MutationSetEntryList, MutationSetRow, PromotionPlan } from "@/lib/types";
+import type {
+  CopyMutationSetResult,
+  MutationSetEntry,
+  MutationSetEntryList,
+  MutationSetRow,
+  PromotionPlan,
+} from "@/lib/types";
 import { request } from "./core";
 
 export const mutationSetsApi = {
@@ -7,7 +13,8 @@ export const mutationSetsApi = {
     return request<MutationSetEntryList>("/mutation-sets");
   },
   createMutationSetEntry(payload: {
-    title: string;
+    // ADR-0095 §2: optional — an untitled set's label is derived from its rows.
+    title?: string;
     target_entry_type: string;
     // ADR-0055 §3: optional entity pin (omit/"" ⇒ reusable template).
     target_entity?: string;
@@ -20,12 +27,6 @@ export const mutationSetsApi = {
   },
   getMutationSetEntry(entryId: string) {
     return request<MutationSetEntry>(`/mutation-sets/${entryId}`);
-  },
-  // ADR-0055 §5: mark a pinned set placed — the single write-back apply gains
-  // when the writer stamps a one-off into a scene. Rejected (400) for a reusable
-  // set, which apply leaves untouched.
-  placeMutationSet(entryId: string) {
-    return request<MutationSetEntry>(`/mutation-sets/${entryId}/place`, { method: "POST" });
   },
   saveMutationSetEntry(entry: MutationSetEntry) {
     return request<MutationSetEntry>(`/mutation-sets/${entry.id}`, {
@@ -43,6 +44,17 @@ export const mutationSetsApi = {
   deleteMutationSetEntry(entryId: string) {
     return request<MutationSetEntryList>(`/mutation-sets/${entryId}`, {
       method: "DELETE",
+    });
+  },
+  // ADR-0095 §6/§7: copy a set into the open project, re-pinned. `undefined`/
+  // omitted keeps the source's own pin (including none, for a template); an
+  // empty string is a deliberate un-pin. Row ids are kept; rows that no
+  // longer validate against the (re-)pinned entity's type are dropped and
+  // reported back.
+  copyMutationSet(entryId: string, targetEntity?: string | null) {
+    return request<CopyMutationSetResult>(`/mutation-sets/${entryId}/copy`, {
+      method: "POST",
+      body: JSON.stringify({ target_entity: targetEntity ?? null }),
     });
   },
   // §2/§9 slice 4: mutation-set promote — staged + owned only; cascades a pin (§6/§7).

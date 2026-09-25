@@ -35,14 +35,29 @@ describe("todoActions.openFileTodo (#2124)", () => {
     loreEntriesStore.set([]);
   });
 
-  it("reveals the mutation marker for a mutates_source item", async () => {
+  it("reveals the mutation marker for a mutates_source item (composite <anchor>.<row> id, resolved with no fetch)", async () => {
     const item = sceneItem({
-      source: { node_id: "lore_marek", snapshot_id: "snap_1", reason: "mutates_source", marker_id: "m_rank" },
+      source: { node_id: "lore_marek", snapshot_id: "snap_1", reason: "mutates_source", marker_id: "m_rank.row1" },
     });
     await todoActions.openFileTodo(item);
     expect(editorPanes.openScene).toHaveBeenCalledWith("scene_1");
     expect(editorPanes.revealMutationMarkerInOpenPane).toHaveBeenCalledWith("scene_1", "m_rank");
     expect(editorPanes.revealFirstMentionInOpenPane).not.toHaveBeenCalled();
+  });
+
+  it("resolves a BARE row id's anchor via the entity's mutations (ADR-0095 §3/§4)", async () => {
+    vi.spyOn(api, "getEntityMutations").mockResolvedValue({
+      items: [
+        { marker_id: "a_other.row1", entity_id: "lore_marek", field: "rank", op: "replace", value: "captain", name: "", group: "", unit_id: "a_other", unit_name: "", anchor_id: "a_other", set_id: "s1", row_id: "row1", scene_id: "scene_9", offset: 0, line: 1, scene_path: "" },
+        { marker_id: "a_here.row1", entity_id: "lore_marek", field: "rank", op: "replace", value: "captain", name: "", group: "", unit_id: "a_here", unit_name: "", anchor_id: "a_here", set_id: "s1", row_id: "row1", scene_id: "scene_1", offset: 0, line: 1, scene_path: "" },
+      ],
+    });
+    const item = sceneItem({
+      source: { node_id: "lore_marek", snapshot_id: "snap_1", reason: "mutates_source", marker_id: "row1" },
+    });
+    await todoActions.openFileTodo(item);
+    // Prefers the anchor in the OPEN scene.
+    expect(editorPanes.revealMutationMarkerInOpenPane).toHaveBeenCalledWith("scene_1", "a_here");
   });
 
   it("resolves the source's effective names and reveals the first mention for any other reason", async () => {

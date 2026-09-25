@@ -75,44 +75,21 @@ turndown.addRule("characterMark", {
 turndown.addRule("mutationMark", {
   filter: (node: Node) => {
     if (!(node instanceof HTMLElement)) return false;
-    return node.tagName === "SPAN" && Boolean(node.dataset.mutationEntity);
+    // A close pill also carries `data-mutation-id` (its own close id) but is
+    // told apart by `data-mutation-close-ref`; check for THAT absence, not
+    // presence of `data-mutation-set` — a copy-in-flight pill (ADR-0095 §7)
+    // clears its `setId` and would otherwise serialize as nothing.
+    return node.tagName === "SPAN" && Boolean(node.dataset.mutationId) && !node.dataset.mutationCloseRef;
   },
   replacement: (_content: string, node: Node) => {
     const element = node as HTMLElement;
-    const entity = element.dataset.mutationEntity;
-    const markerId = element.dataset.mutationId;
-    if (!entity || !markerId) return "";
-    // A pill is a mutation unit (#69, ADR-0016): its rows serialize to the
-    // single-line marker when there is one (head folded into the sole row —
-    // v1.0/v1.1 markers stay byte-stable) and to the multi-line carrier
-    // comment when there are more. Values/names are url-encoded so they
-    // survive the markdown round-trip; optional op/name/group are emitted only
-    // when non-default, in canonical order (mirrors lore_mutations).
-    const rows = mutationRowsFromElement(element);
-    if (rows.length === 0) return "";
-    const name = element.dataset.mutationName ?? "";
-    if (rows.length === 1) {
-      const row = rows[0];
-      const group = element.dataset.mutationGroup ?? "";
-      const parts = [`entity=${entity}`, `field=${row.field}`];
-      if (row.op && row.op !== "replace") parts.push(`op=${row.op}`);
-      parts.push(`value=${encodeURIComponent(row.value)}`);
-      if (name) parts.push(`name=${encodeURIComponent(name)}`);
-      if (group) parts.push(`group=${group}`);
-      parts.push(`id=${row.id || markerId}`);
-      return `<!-- mutate:${parts.join(";")} -->`;
-    }
-    const head = [`entity=${entity}`];
-    if (name) head.push(`name=${encodeURIComponent(name)}`);
-    head.push(`id=${markerId}`);
-    const lines = rows.map((row) => {
-      const parts = [`field=${row.field}`];
-      if (row.op && row.op !== "replace") parts.push(`op=${row.op}`);
-      parts.push(`value=${encodeURIComponent(row.value)}`);
-      parts.push(`id=${row.id}`);
-      return parts.join(";");
-    });
-    return `<!-- mutate:${head.join(";")}\n${lines.join("\n")}\n-->`;
+    const anchorId = element.dataset.mutationId;
+    const setId = element.dataset.mutationSet ?? "";
+    if (!anchorId) return "";
+    // ADR-0095 §1: the anchor names its SET and nothing else — no entity,
+    // rows or name in the prose (the anti-goal against a second copy of the
+    // set's values going stale).
+    return `<!-- mutate:set=${setId};id=${anchorId} -->`;
   },
 });
 turndown.addRule("mutationCloseMark", {
@@ -123,9 +100,11 @@ turndown.addRule("mutationCloseMark", {
   replacement: (_content: string, node: Node) => {
     const element = node as HTMLElement;
     const ref = element.dataset.mutationCloseRef;
-    const markerId = element.dataset.mutationId;
-    if (!ref || !markerId) return "";
-    return `<!-- mutate:close;ref=${ref};id=${markerId} -->`;
+    const closeId = element.dataset.mutationId;
+    if (!ref || !closeId) return "";
+    const row = element.dataset.mutationCloseRow ?? "";
+    const rowPart = row ? `;row=${row}` : "";
+    return `<!-- mutate:close;ref=${ref}${rowPart};id=${closeId} -->`;
   },
 });
 turndown.addRule("simpleMarkdownTable", {
@@ -220,121 +199,36 @@ function markEmbeddedCharacters(markdown: string): string {
   );
 }
 
-interface MutationRowShape {
-  id: string;
-  field: string;
-  op: string;
-  value: string;
+function mutationSpan(setId: string, anchorId: string): string {
+  const setAttr = setId ? ` data-mutation-set="${escapeAttribute(setId)}"` : "";
+  return `<span${setAttr} data-mutation-id="${escapeAttribute(anchorId)}"></span>`;
 }
-
-/** Read a mutation pill span's rows: the JSON `data-mutation-rows` attr (#69),
- *  falling back to the pre-#69 one-field-per-span shape for pasted HTML. */
-function mutationRowsFromElement(element: HTMLElement): MutationRowShape[] {
-  const raw = element.dataset.mutationRows;
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed.map((row) => ({
-          id: String(row?.id ?? ""),
-          field: String(row?.field ?? ""),
-          op: String(row?.op || "replace"),
-          value: String(row?.value ?? ""),
-        }));
-      }
-    } catch {
-      // fall through to the legacy shape
-    }
-  }
-  const field = element.dataset.mutationField;
-  if (!field) return [];
-  return [
-    {
-      id: element.dataset.mutationId ?? "",
-      field,
-      op: element.dataset.mutationOp || "replace",
-      value: element.dataset.mutationValue ?? "",
-    },
-  ];
-}
-
-function mutationSpan(
-  entity: string,
-  name: string,
-  group: string,
-  unitId: string,
-  rows: MutationRowShape[],
-): string {
-  const nameAttr = name ? ` data-mutation-name="${escapeAttribute(name)}"` : "";
-  const groupAttr = group ? ` data-mutation-group="${escapeAttribute(group)}"` : "";
-  return (
-    `<span data-mutation-entity="${escapeAttribute(entity)}"` +
-    nameAttr +
-    groupAttr +
-    ` data-mutation-rows="${escapeAttribute(JSON.stringify(rows))}"` +
-    ` data-mutation-id="${escapeAttribute(unitId)}"></span>`
-  );
-}
-
-// One field row of a carrier comment (#69) — mirrors the backend's
-// MUTATION_CARRIER_ROW_PATTERN; keep in lockstep with lore_mutations.py.
-const CARRIER_ROW_PATTERN =
-  /^field=([A-Za-z0-9_.-]+);(?:op=(add|remove|replace);)?value=([^;\s]*);id=([A-Za-z0-9_-]+)$/;
 
 function markEmbeddedMutations(markdown: string): string {
-  // A mutation marker is a self-contained point comment (no wrapped prose) →
-  // an empty atom span the MutationMark node parses. Values/names are
-  // url-decoded into the data attributes for display; turndown re-encodes them
-  // on save. Two grammars (#69, ADR-0016): the multi-line carrier (one unit,
-  // N field rows) runs first — its head can never match the single-line form —
-  // then the single-line marker, loaded as a one-row unit whose unit id IS the
-  // marker id. A carrier with any malformed row is left as an inert comment
-  // (mirrors the backend: rewrites must never drop a hand-authored line).
-  const withCarriers = markdown.replace(
-    /<!--[ \t]*mutate:entity=([A-Za-z0-9_-]+)(?:;name=([^;\s]*))?;id=([A-Za-z0-9_-]+)[ \t]*\r?\n((?:[ \t]*field=[^\r\n]*\r?\n)+)[ \t]*-->/g,
-    (match, entity: string, name: string | undefined, unitId: string, rowsBlock: string) => {
-      const rows: MutationRowShape[] = [];
-      for (const line of rowsBlock.split(/\r?\n/)) {
-        const text = line.trim();
-        if (!text) continue;
-        const row = CARRIER_ROW_PATTERN.exec(text);
-        if (!row) return match;
-        rows.push({ id: row[4], field: row[1], op: row[2] || "replace", value: decodeNote(row[3]) });
-      }
-      if (rows.length === 0) return match;
-      return mutationSpan(entity, decodeNote(name ?? ""), "", unitId, rows);
-    },
-  );
-  return withCarriers.replace(
-    /<!--\s*mutate:entity=([A-Za-z0-9_-]+);field=([A-Za-z0-9_.-]+);(?:op=(add|remove|replace);)?value=([^;\s]*)(?:;name=([^;\s]*))?(?:;group=([A-Za-z0-9_-]+))?;id=([A-Za-z0-9_-]+)\s*-->/g,
-    (
-      _match,
-      entity: string,
-      field: string,
-      op: string | undefined,
-      value: string,
-      name: string | undefined,
-      group: string | undefined,
-      markerId: string,
-    ) => {
-      const rows: MutationRowShape[] = [
-        { id: markerId, field, op: op || "replace", value: decodeNote(value) },
-      ];
-      return mutationSpan(entity, decodeNote(name ?? ""), group ?? "", markerId, rows);
-    },
+  // A mutation anchor is a self-contained point comment (no wrapped prose,
+  // ADR-0095 §1) → an empty atom span the MutationMark node parses. The
+  // anchor names its set and nothing else — no entity/rows/name in the
+  // prose (the set node is the readable record now).
+  return markdown.replace(
+    /<!--\s*mutate:set=([A-Za-z0-9_-]*);id=([A-Za-z0-9_-]+)\s*-->/g,
+    (_match, setId: string, anchorId: string) => mutationSpan(setId, anchorId),
   );
 }
 
 function markEmbeddedMutationCloses(markdown: string): string {
-  // Interval-close marker (#59): a self-contained point comment → empty atom span
-  // the MutationClose node parses. Distinct grammar (close;ref=) from a start
-  // marker, so this runs after markEmbeddedMutations without overlap.
+  // Interval-close marker (#59, ADR-0095 §1): a self-contained point comment
+  // → empty atom span the MutationClose node parses. `row=` is optional (a
+  // close on the whole anchor's set vs. one row of it); distinct grammar
+  // (`close;ref=`) from a start anchor, so this runs after
+  // markEmbeddedMutations without overlap.
   return markdown.replace(
-    /<!--\s*mutate:close;ref=([A-Za-z0-9_-]+);id=([A-Za-z0-9_-]+)\s*-->/g,
-    (_match, ref: string, markerId: string) => {
+    /<!--\s*mutate:close;ref=([A-Za-z0-9_-]+)(?:;row=([A-Za-z0-9_-]+))?;id=([A-Za-z0-9_-]+)\s*-->/g,
+    (_match, ref: string, row: string | undefined, closeId: string) => {
+      const rowAttr = row ? ` data-mutation-close-row="${escapeAttribute(row)}"` : "";
       return (
         `<span data-mutation-close-ref="${escapeAttribute(ref)}"` +
-        ` data-mutation-id="${escapeAttribute(markerId)}"></span>`
+        rowAttr +
+        ` data-mutation-id="${escapeAttribute(closeId)}"></span>`
       );
     },
   );

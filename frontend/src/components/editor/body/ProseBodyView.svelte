@@ -34,6 +34,7 @@
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { markdownOffsetAt as markdownOffsetAtDoc } from "@/lib/editor-core/markdownOffset";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
+  import { AppClipboardMarker } from "@/lib/editor-core/appClipboard";
   import {
     ImplicitContextHighlight,
     REBUILD_META,
@@ -58,15 +59,11 @@
     createMutationMark,
     createMutationCloseMark,
   } from "@/lib/editor-core/proseMarks";
-  import {
-    closeLabelFromDoc,
-    dedupeMutationIds,
-    transactionInsertsMutation,
-    unitRows,
-  } from "@/lib/editor-core/mutationNodes";
+  import { MutationEditorBridge } from "@/lib/editor-core/mutationEditorBridge";
   import MutationDialogs from "./MutationDialogs.svelte";
   import {
     parseSlashBody,
+    slashParagraphText,
     parseTableDims,
     tokenizeSlashArgs,
     matchesSlashFilter,
@@ -252,20 +249,23 @@
     titleForId: characterTitleFromId,
   });
 
-  // Mutation pill label ("Honor · rank → Captain"), read live at render time
-  // from the reactive lore lookup (mirrors CharacterMark's resolvers).
-  function mutationLabelFromMarker(entityId: string, field: string, value: string): string {
-    const entry = loreEntries.find((e) => e.id === entityId);
-    const name = entry?.title || entityId || "entity";
-    return `${name} · ${field} → ${value}`;
-  }
+  // ADR-0095 §1: the pill's label now reads the mutation-sets STORE live (a
+  // NodeView inside proseMarks.ts), not a resolver threaded in here — so
+  // both factories are called bare.
+  const MutationMark = createMutationMark();
+  const MutationCloseMark = createMutationCloseMark();
 
-  const MutationMark = createMutationMark({ labelForMarker: mutationLabelFromMarker });
-
-  // Close-pill label (#59): the referenced start record's name / auto-label,
-  // found live in the open doc so it tracks edits to that marker.
-  const MutationCloseMark = createMutationCloseMark({
-    labelForClose: (ref) => (editor ? closeLabelFromDoc(editor, ref) : ""),
+  // The mutation-anchor bridge (ADR-0095 §1/§6/§7): paste/cut/copy
+  // reconciliation and the pill-click → edit-dialog open, extracted to keep
+  // this file under the size cap (`lib/editor-core/mutationEditorBridge.ts`).
+  // One instance per open prose body, seeded from each freshly loaded
+  // document. `mutationDialogs`/`markdownOffsetAt` are declared further down
+  // this script — safe to close over here, since neither is called until
+  // after the component has finished setting up.
+  const mutationBridge = new MutationEditorBridge({
+    isManuscript: () => documentKind === "manuscript",
+    openEditDialog: (set, anchorId, position) => void mutationDialogs?.openEdit(set, anchorId, position),
+    markdownOffsetAt: (pos) => markdownOffsetAt(pos),
   });
 
   // ---------- State ----------
@@ -284,7 +284,6 @@
   let selectionToolbarActions: ToolbarAction[] = $state([]);
   let slashMenu: SlashMenuState = $state({ visible: false, x: 0, y: 0, selectedIndex: 0, mode: "commands", gridRows: 1, gridCols: 1 });
   let openToolbarMenuId: string | null = $state(null);
-  let reconcilingMutationIds = false;
 
   // V2: per-scene continuation cost rollup. Resets when you switch
   // scenes or reload the page. Frontend-only. Bound out as props above.
@@ -400,6 +399,9 @@
       editor.commands.setContent(html || "<p></p>", { emitUpdate: false });
     }
     loadedSceneId = sceneId;
+    // Re-baseline the paste/cut/copy reconciler (ADR-0095 §7) against the
+    // just-loaded document — its own on-disk anchors are never "just pasted".
+    mutationBridge.seed(editor);
     todoAnchors.enforceUnique();
     todoAnchors.syncDomState();
     if (!reconcile) {
@@ -555,14 +557,14 @@
     const { selection } = editor.state;
     if (!selection.empty) return false;
     if (selection.$from.parent.type.name !== "paragraph") return false;
-    const text = selection.$from.parent.textContent;
+    const text = slashParagraphText(selection.$from.parent);
     if (!text.startsWith("/")) return false;
     return parseSlashBody(text.slice(1)) !== null;
   }
 
   function readSlashFilterText(): string {
     if (!editor) return "";
-    const text = editor.state.selection.$from.parent.textContent;
+    const text = slashParagraphText(editor.state.selection.$from.parent);
     if (!text.startsWith("/")) return "";
     return text.slice(1);
   }
@@ -625,7 +627,7 @@
     if (!editor) return;
     const { selection } = editor.state;
     const paragraphStart = selection.$from.start();
-    const paragraphText = selection.$from.parent.textContent;
+    const paragraphText = slashParagraphText(selection.$from.parent);
     if (paragraphText.startsWith("/") && parseSlashBody(paragraphText.slice(1)) !== null) {
       editor.chain().focus().deleteRange({ from: paragraphStart, to: paragraphStart + paragraphText.length }).run();
     }
@@ -648,7 +650,7 @@
     if (!editor) return;
     const { selection } = editor.state;
     const paragraphStart = selection.$from.start();
-    const paragraphText = selection.$from.parent.textContent;
+    const paragraphText = slashParagraphText(selection.$from.parent);
     if (!paragraphText.startsWith("/") || parseSlashBody(paragraphText.slice(1)) === null) return;
     const target = (cmd.autocompleteTo ?? cmd.label).trim();
     if (!target) return;
@@ -902,24 +904,10 @@
   // reached through the bound instance's open* methods.
   let mutationDialogs = $state<MutationDialogs | null>(null);
 
-  // Re-entrancy guard lives here (the dispatch re-fires onUpdate); the doc work
-  // is in `dedupeMutationIds`.
-  function enforceUniqueMutationIds(transaction?: Transaction) {
-    if (!editor || reconcilingMutationIds) return false;
-    // Duplicate ids only enter via inserted pills (paste/drop/redo); plain
-    // typing can't, so skip the full-doc dedup walk on the keystroke hot path.
-    // Undefined transaction (non-onUpdate callers) falls through and dedups.
-    if (transaction && !transactionInsertsMutation(transaction)) return false;
-    reconcilingMutationIds = true;
-    const changed = dedupeMutationIds(editor);
-    reconcilingMutationIds = false;
-    return changed;
-  }
-
   // ---------- Editor lifecycle ----------
   function isEmptyTextblock(view: EditorView) {
     const { selection } = view.state;
-    return selection.empty && selection.$from.parent.type.name === "paragraph" && selection.$from.parent.textContent.length === 0;
+    return selection.empty && selection.$from.parent.type.name === "paragraph" && selection.$from.parent.content.size === 0;
   }
 
   function handleEditorKeydown(view: EditorView, event: KeyboardEvent) {
@@ -1064,7 +1052,7 @@
   // emit one `body-change` event to the parent (NodeEditor) so it can
   // compose its full save payload (title + body + status + ...).
   function handleEditorUpdate(transaction?: Transaction) {
-    if (!enforceUniqueMutationIds(transaction) && !todoAnchors.enforceUnique()) {
+    if (!mutationBridge.enforceUnique(editor, transaction) && !todoAnchors.enforceUnique()) {
       // Skip the body-change emit when a unique-id reconciler made a doc
       // change — its own transaction re-fires onUpdate, so the non-reconciler
       // edits below run on that second pass.
@@ -1096,6 +1084,7 @@
       element: editorElement,
       extensions: [
         proseStarterKit(),
+        AppClipboardMarker,
         AISuggestion,
         CharacterMark,
         MutationMark,
@@ -1114,21 +1103,10 @@
         },
         handleKeyDown: handleEditorKeydown,
         handleClickOn: (_view, pos, node) => {
-          // Click a mutation pill → edit the whole unit (#69) in place. The
-          // baseline resolves at the pill's OWN position (ADR-0089 §4), not
-          // the end of the scene.
+          // Click a mutation pill → open its own editing surface, the
+          // `/mutate` dialog in edit mode (ADR-0095 §6), via the bridge.
           if (node.type.name === "mutation") {
-            void mutationDialogs?.openEdit(
-              {
-                markerId: String(node.attrs.markerId ?? ""),
-                entity: String(node.attrs.entity ?? ""),
-                name: String(node.attrs.name ?? ""),
-                group: String(node.attrs.group ?? ""),
-                rows: unitRows(node.attrs),
-              },
-              markdownOffsetAt(pos),
-            );
-            return true;
+            return mutationBridge.handlePillClick(String(node.attrs.setId ?? ""), String(node.attrs.anchorId ?? ""), pos);
           }
           // Click a close pill → delete it (reopens the interval). It carries no
           // editable fields of its own beyond the record it references.
@@ -1141,6 +1119,14 @@
         handleDOMEvents: {
           focus: () => {
             onFocus?.();
+            return false;
+          },
+          cut: () => {
+            mutationBridge.onCut(editor);
+            return false;
+          },
+          copy: () => {
+            mutationBridge.onCopy(editor);
             return false;
           },
         },

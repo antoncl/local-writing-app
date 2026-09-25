@@ -1047,6 +1047,19 @@ button.row-action-add.active {
   font-weight: 500;
   gap: 3px; /* icon + label are separate flex items; whitespace between them collapses */
 }
+/* A pill whose set isn't in the loaded roster (ADR-0095 §1/§5: deleted, in
+   another layer, unpinned, or dead-pinned) — muted + dashed, distinct from
+   the close pill's dashed-but-still-violet look, so "broken" reads at a
+   glance. Delete the pill or restore the set (the tooltip says so). */
+.editor-body .mutation-pill.mutation-pill-missing {
+  color: var(--text-3);
+  background: var(--inset);
+  border-style: dashed;
+  border-color: var(--divider);
+}
+.editor-body .mutation-pill.mutation-pill-missing:hover {
+  background: var(--inset);
+}
 .editor-body .mutation-pill-close:hover {
   background: color-mix(in oklab, var(--mutation-color) 14%, transparent);
 }

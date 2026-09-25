@@ -65,6 +65,13 @@ if TYPE_CHECKING:
 
 SNAPSHOTS_DIRNAME = "snapshots"
 
+# ADR-0095 §12: the schema version at which legacy inline mutation markers
+# became mutation_set nodes + anchors. Pinned to 14 forever, unlike
+# `migrations.CURRENT_VERSION` (which keeps growing) — a snapshot at v14 or
+# later already holds the new grammar and needs no marker conversion, however
+# high CURRENT_VERSION climbs after this.
+_MUTATION_ANCHORS_SCHEMA_VERSION = 14
+
 # How long a pause makes the next save a new sitting. On a save, if the last
 # save to this scene was longer ago than this, the **pre-save** bytes are
 # captured first — "what did this look like when I sat down" (ADR-0043
@@ -814,6 +821,7 @@ class SceneSnapshotsMixin:
         # `thinned` and runs `_thin`, which can evict this very snapshot when it is
         # one of the oldest automatic ones — reading after would raise on a restore
         # of an old thinned snapshot and lose it.
+        frozen_bytes = b""
         if record.schema_version == migrations.CURRENT_VERSION:
             # ADR-0043: prose is restored byte-exact when the snapshot is already
             # at the current schema (the common case).
@@ -829,6 +837,11 @@ class SceneSnapshotsMixin:
             migrated = migrations.migrate_document(
                 migrations.MigratableDocument(front_matter, body), record.schema_version
             )
+
+        if kind == "manuscript" and migrated is not None and record.schema_version < _MUTATION_ANCHORS_SCHEMA_VERSION:
+            migrated = self._convert_restored_scene_markers(node_id, migrated)
+        if kind == "manuscript":
+            migrated, frozen_bytes = self._dedupe_restored_scene_anchors(node_id, migrated, frozen_bytes)
 
         # Placement is not content (ADR-0094 §6): the snapshot's text goes back,
         # the node stays where it is now. Read before the capture and the write,

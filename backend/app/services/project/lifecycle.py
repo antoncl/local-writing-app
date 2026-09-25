@@ -1002,6 +1002,12 @@ class ProjectLifecycleMixin:
         errors.extend(scene_errors)
         warnings.extend(scene_warnings)
 
+        # ADR-0095 §Verify: anchor/close/set problems the per-record scan above
+        # can't see (a dangling anchor or a duplicate never produces a record).
+        warnings.extend(
+            self._validate_mutation_anchors_and_sets(node_index, self._mutation_set_views(node_index))
+        )
+
         lore_errors, lore_warnings, code_fenced_bodies = self._validate_lore_entries(node_index, metadata_schema)
         errors.extend(lore_errors)
         warnings.extend(lore_warnings)
@@ -1116,6 +1122,7 @@ class ProjectLifecycleMixin:
                 mutations = self.build_mutations_index()
             except ProjectServiceError:
                 mutations = None
+        sets = self._mutation_set_views(node_index)
         for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "manuscript"), key=lambda item: item.id):
             scene_id = entry.id
             path = entry.path
@@ -1131,7 +1138,7 @@ class ProjectLifecycleMixin:
                     errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "manuscript:scene"), status, metadata, metadata_schema, node_index))
                     warnings.extend(
                         self._validate_scene_mutations(
-                            scene_id, body, metadata_schema, node_index, mutations=mutations
+                            scene_id, body, metadata_schema, node_index, sets, mutations=mutations
                         )
                     )
             except ProjectServiceError as exc:

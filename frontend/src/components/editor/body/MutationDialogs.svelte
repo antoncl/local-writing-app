@@ -1,24 +1,20 @@
 <script lang="ts">
-  // The two `/mutate` dialogs (#33, #56, #59, #69) + their open/submit state,
-  // extracted from ProseBodyView (which keeps only the pill-click and slash
-  // wiring via the exported open* methods, bound through `bind:this`).
+  // The two `/mutate` dialogs (#33, #56, #59, #69, ADR-0095 §6) + their
+  // open/submit state, extracted from ProseBodyView (which keeps only the
+  // pill-click and slash wiring via the exported open* methods, bound through
+  // `bind:this`).
   //
-  // Authoring: create mode inserts ONE unit pill (client-minted ids) carrying
-  // every selected field row at the cursor; edit mode rewrites/removes the
-  // whole unit node in place. Close picker: inserts an interval-close pill.
-  // Units round-trip to scene-body comments (single-line or multi-line
-  // carrier) via the turndown rule on save.
+  // Authoring: create mode creates the SET first (via the API), then inserts
+  // its anchor at the cursor — a failed create inserts nothing. Edit mode
+  // (opened on a pill click) saves the SET; the scene document is never
+  // touched, and Delete removes only the anchor. Close picker: inserts an
+  // interval-close pill.
   import MutationAuthoringForm from "./MutationAuthoringForm.svelte";
   import MutationCloseForm from "./MutationCloseForm.svelte";
-  import {
-    applyMutationUnitDraft,
-    insertMutationClose,
-    removeMutationNode,
-    type MutationUnitDraft,
-  } from "@/lib/editor-core/mutationNodes";
+  import { insertAnchor, insertMutationClose, removeMutationNode } from "@/lib/editor-core/mutationNodes";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import type { Editor } from "@tiptap/core";
-  import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
+  import type { LoreEntrySummary, MetadataSchema, MutationSetEntry } from "@/lib/types";
 
   let {
     getEditor,
@@ -40,7 +36,11 @@
 
   let authoringOpen = $state(false);
   let presetEntityId = $state("");
-  let editInitial = $state<MutationUnitDraft | null>(null);
+  // Edit mode (ADR-0095 §6): the full set fetched from the store/API, and the
+  // anchor id of the pill that opened it (baseline exclude + Delete target).
+  // `null` ⇒ create mode.
+  let editInitial = $state<MutationSetEntry | null>(null);
+  let editAnchorId = $state("");
   // The dialog's own insertion position (ADR-0089 §4): the scene-markdown
   // char offset the baseline resolves at. `null`/undefined = end of scene,
   // unchanged from before the reversal.
@@ -64,15 +64,20 @@
   export async function openAuthoring(preset = "", position?: number | null) {
     await flushFirst();
     editInitial = null;
+    editAnchorId = "";
     presetEntityId = preset;
     authoringPosition = position;
     authoringOpen = true;
   }
 
-  export async function openEdit(initial: MutationUnitDraft, position?: number | null) {
+  /** Opened from a pill click (ADR-0095 §6): `set` is the anchored set,
+   *  `anchorId` this pill's own anchor, `position` the pill's own char
+   *  offset — the baseline excludes THIS anchor, not the end of scene. */
+  export async function openEdit(set: MutationSetEntry, anchorId: string, position?: number | null) {
     await flushFirst();
     presetEntityId = "";
-    editInitial = initial;
+    editInitial = set;
+    editAnchorId = anchorId;
     authoringPosition = position;
     authoringOpen = true;
   }
@@ -82,22 +87,30 @@
     closeOpen = true;
   }
 
-  function handleSubmit(draft: MutationUnitDraft) {
+  // Create mode: the set now exists — insert its anchor at the cursor.
+  function handleCreated(setId: string) {
     authoringOpen = false;
     const editor = getEditor();
-    if (editor) applyMutationUnitDraft(editor, draft);
+    if (editor) insertAnchor(editor, setId);
   }
 
-  function handleDelete(markerId: string) {
+  // Edit mode: the set is already saved — the document never changes.
+  function handleSaved() {
+    authoringOpen = false;
+  }
+
+  // Edit mode Delete (ADR-0095 §7): removes the ANCHOR only — the set stays,
+  // staged if this was its last anchor.
+  function handleRemoveAnchor() {
     authoringOpen = false;
     const editor = getEditor();
-    if (editor) removeMutationNode(editor, markerId);
+    if (editor && editAnchorId) removeMutationNode(editor, editAnchorId);
   }
 
-  function handleClosePick(ref: string) {
+  function handleClosePick(ref: string, row?: string) {
     closeOpen = false;
     const editor = getEditor();
-    if (editor) insertMutationClose(editor, ref);
+    if (editor) insertMutationClose(editor, ref, row);
   }
 </script>
 
@@ -107,11 +120,13 @@
     {schema}
     {implicitContextMatcher}
     initial={editInitial}
+    anchorId={editAnchorId}
     {presetEntityId}
     {sceneId}
     position={authoringPosition}
-    onSubmit={handleSubmit}
-    onDelete={handleDelete}
+    onCreated={handleCreated}
+    onSaved={handleSaved}
+    onRemoveAnchor={handleRemoveAnchor}
     onCancel={() => (authoringOpen = false)}
   />
 {/if}

@@ -38,7 +38,10 @@
     researchStructure?: StructureDocument | null;
     sceneId: string;
     presetEntityId?: string;
-    onPick: (ref: string) => void;
+    // ADR-0095 §1: a whole-unit close names only its anchor; a per-row close
+    // (the multi-row expansion below) also names the row within that anchor's
+    // set.
+    onPick: (ref: string, row?: string) => void;
     onCancel: () => void;
   } = $props();
 
@@ -161,7 +164,11 @@
                 <ul class="close-rows">
                   {#each unit.records as m (m.marker_id)}
                     <li>
-                      <button type="button" class="close-row close-row-sub" onclick={() => onPick(m.marker_id)}>
+                      <button
+                        type="button"
+                        class="close-row close-row-sub"
+                        onclick={() => onPick(m.anchor_id || unit.unitId, m.row_id)}
+                      >
                         <span class="close-name">{mutationRecordLabel({ ...m, name: "" })}</span>
                       </button>
                     </li>

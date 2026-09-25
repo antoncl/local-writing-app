@@ -26,7 +26,8 @@ export function pinnedSetsFor(
   if (!entityId) return [];
   const referrers = projectReferences([entityId], referenceIndex);
   if (referrers.size === 0) return [];
-  // ADR-0055 §5: a placed set drops out of the card's *pending* list (it is real
-  // in the manuscript now, kept only as the chat's provenance).
-  return roster.filter((set) => referrers.has(set.id) && !set.placed);
+  // ADR-0095 §2/§9: the card lists STAGED sets only — a template has no pin
+  // (never reaches this entity's referrers) and an active set is real in the
+  // manuscript now, shown at its anchors instead.
+  return roster.filter((set) => referrers.has(set.id) && set.state === "staged");
 }

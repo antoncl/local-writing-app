@@ -1,13 +1,10 @@
-import type { EffectiveStateResponse, MutationMarkerList, MutationUnitRow, Scene } from "@/lib/types";
+import type { EffectiveStateResponse, MutationMarkerList } from "@/lib/types";
 import { request } from "./core";
 
 export const mutationsApi = {
   // Mid-scene lore mutations (#33). The timeline is the manuscript-ordered list
   // for a lore entity; effective state resolves its overrides at a (scene,
-  // position) for the time-slider. NOTE: the editor rewrites/removes pills
-  // directly in the ProseMirror doc + body save, so updateMutation/deleteMutation
-  // below are currently unused by the app — they mirror the backend PATCH/DELETE
-  // routes (exercised by backend tests) and are kept for parity / future callers.
+  // position) for the time-slider.
   getEntityMutations(entityId: string) {
     return request<MutationMarkerList>(`/lore/${entityId}/mutations`);
   },
@@ -25,8 +22,8 @@ export const mutationsApi = {
     );
   },
   getEntityEffectiveState(entityId: string, sceneId: string, pos?: number, exclude?: string[]) {
-    // `exclude` skips record ids — the list-edit authoring baseline when
-    // re-editing a unit (#71, ADR-0017).
+    // `exclude` skips anchor ids (ADR-0095 §3) — the list-edit authoring
+    // baseline when re-editing a unit (#71, ADR-0017).
     const posQuery = pos === undefined ? "" : `&pos=${pos}`;
     const excludeQuery =
       exclude && exclude.length > 0 ? `&exclude=${encodeURIComponent(exclude.join(","))}` : "";
@@ -34,29 +31,7 @@ export const mutationsApi = {
       `/lore/${entityId}/effective?scene=${encodeURIComponent(sceneId)}${posQuery}${excludeQuery}`,
     );
   },
-  updateMutation(
-    sceneId: string,
-    markerId: string,
-    updates: { entity_id?: string; field?: string; op?: string; value?: string; name?: string; group?: string },
-  ) {
-    return request<Scene>(`/scenes/${sceneId}/mutations/${markerId}`, {
-      method: "PATCH",
-      body: JSON.stringify(updates),
-    });
-  },
-  deleteMutation(sceneId: string, markerId: string) {
-    return request<Scene>(`/scenes/${sceneId}/mutations/${markerId}`, {
-      method: "DELETE",
-    });
-  },
-  // Replace a unit's rows wholesale (ADR-0042 §5, ADR-0089 S5) — the write
-  // behind editing the lore card at a scrub stop, where the stop IS the unit
-  // and the card has no cursor. `name` null keeps the carrier head's name; an
-  // empty `rows` removes the unit.
-  rewriteMutationUnit(sceneId: string, unitId: string, body: { rows: MutationUnitRow[]; name?: string | null }) {
-    return request<Scene>(`/scenes/${sceneId}/mutations/units/${unitId}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
-  },
+  // ADR-0095: updateMutation/deleteMutation/rewriteMutationUnit retired with
+  // their backend routes — editing now saves the mutation SET (mutationSetsApi),
+  // never the scene. See mutationSetsApi.copyMutationSet for the one new route.
 };

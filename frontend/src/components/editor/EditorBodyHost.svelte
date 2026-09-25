@@ -35,7 +35,7 @@
   import { keyedListKeyMember, keyedShapeFor } from "@/lib/editor-core/keyedList";
   import { proseRendersAfterSections } from "@/lib/editor-core/bodySections";
   import { asItemList } from "@/lib/editor-core/mutationListEdit";
-  import { rewriteUnitFromItems } from "@/lib/editor-core/mutationStopEdit";
+  import { rewriteSetFieldFromItems } from "@/lib/editor-core/mutationStopEdit";
   import type { MutationUnitGroup } from "@/lib/editor-core/mutationUnits";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
@@ -43,6 +43,7 @@
   import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
   import { tagTitleById } from "@/lib/stores/tagNodes";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import { upsertMutationSet } from "@/lib/stores/mutationSets";
   import { api } from "@/lib/api";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import { fieldsInTab } from "@/lib/editor-core/bodyTabs";
@@ -219,13 +220,15 @@
   }
 
   // Route a list-tab change through the scrub-stop rewrite when the field is
-  // editable there; otherwise the ordinary whole-field metadataChange. On
-  // failure, log and leave the tab as it was — the reload isn't called, so the
+  // editable there; otherwise the ordinary whole-field metadataChange. The
+  // rewrite saves the mutation SET (ADR-0095 §8), never the scene, so it
+  // cannot collide with prose being typed. On failure, surface it to the
+  // writer and leave the tab as it was — the reload isn't called, so the
   // displayed effective items stay whatever they were before the edit.
   async function handleListChange(fieldId: string, items: MetadataValue[]): Promise<void> {
     if (stopEditableFor(fieldId) && model.stopUnit && model.metadataSchema) {
       try {
-        await rewriteUnitFromItems({
+        await rewriteSetFieldFromItems({
           unit: model.stopUnit,
           entityId: model.scene?.id ?? "",
           field: fieldId,
@@ -234,14 +237,15 @@
           editedItems: asItemList(items),
           deps: {
             getEntityEffectiveState: api.getEntityEffectiveState,
-            rewriteMutationUnit: api.rewriteMutationUnit,
+            getMutationSetEntry: (setId) => api.getMutationSetEntry(setId),
+            saveMutationSetEntry: (entry) => api.saveMutationSetEntry(entry),
+            upsertMutationSet,
             flushSceneIfDirty: (sceneId) => editorPanes.flushSceneIfDirty(sceneId),
-            reconcileSceneFromServer: (scene, mode) => editorPanes.reconcileSceneFromServer(scene, mode),
           },
         });
         await model.scrub.reload();
       } catch (err) {
-        console.error(err);
+        editorPanes.setError(err instanceof Error ? err.message : String(err));
       }
       return;
     }

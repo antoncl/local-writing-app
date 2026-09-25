@@ -979,14 +979,29 @@ class SavePromptEntryRequest(BaseModel):
 
 
 class MutationSetRow(BaseModel):
-    """One field-change row of a reusable mutation set (#62): a
-    `(field, op, value)` triple applied to a chosen entity at apply time. The
-    entity is NOT stored — the set is a template bound to an entity on use. Op is
-    the collection operator (replace / add / remove) shared with #58 markers."""
+    """One field-change row of a mutation set (ADR-0095 §3): a `(field, op,
+    value)` triple applied to the set's pinned entity, or — for a template —
+    the entity chosen at apply time. `id` is the row's stable identity, unique
+    within its set: a copied set keeps its rows' ids (the anchor id tells the
+    copies apart), and everything that keys on a resolved record keys on
+    `(anchor id, row id)`. An OVERRIDE row (`overrides.py` reuses this model)
+    never persists `id` — nothing addresses one, and a lore save regenerates
+    them."""
 
     field: str
     op: str = "replace"
     value: str = ""
+    id: str = ""
+
+
+class MutationSetAnchor(BaseModel):
+    """One place a set is anchored (ADR-0095 §1/§2): the `<!-- mutate:set=...
+    -->` comment's own id, the scene it lives in, and that scene's title (for
+    display — the anchor names only the scene id)."""
+
+    anchor_id: str
+    scene_id: str
+    scene_title: str = ""
 
 
 class MutationSetEntrySummary(BaseModel):
@@ -1002,11 +1017,20 @@ class MutationSetEntrySummary(BaseModel):
     # kind-neutral edge machinery (§3), unlike top-level `target_entry_type`.
     target_entity: str = ""
     row_count: int = 0
-    # ADR-0055 §5: a PINNED set is a one-off — once the writer places it in a
-    # scene it is marked `placed` and drops from the card's *pending* list (kept,
-    # not deleted, so the chat→set edge is never stranded). Always False for a
-    # reusable (un-pinned) set, which apply never marks.
-    placed: bool = False
+    # The set's own rows (ADR-0095 §1's untitled-pill label: "the way an
+    # unnamed unit is labelled today" needs the rows themselves, not just
+    # their count) — carried on the roster summary so the pill, the apply
+    # picker and PinnedSetsPanel can all label an untitled set without a
+    # per-set fetch.
+    rows: list[MutationSetRow] = Field(default_factory=list)
+    # ADR-0095 §2: computed from the pin and the anchor scan, never stored.
+    # Template = no pin; staged = pin, no anchors; active = pin, ≥1 anchor.
+    anchors: list[MutationSetAnchor] = Field(default_factory=list)
+    state: Literal["template", "staged", "active"] = "template"
+    # A pin that names a lore entry no longer in the node index (ADR-0095 §2):
+    # a dead pin, unlike a missing one, keeps the set out of the template list
+    # — it is not a template, it is a set Verify should report.
+    pin_missing: bool = False
     source_layer_id: str = ""
     source_layer_label: str = ""
 
@@ -1020,8 +1044,10 @@ class MutationSetEntry(BaseModel):
     # ADR-0055 §3 entity pin — see MutationSetEntrySummary.target_entity.
     target_entity: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
-    # ADR-0055 §5 placement state — see MutationSetEntrySummary.placed.
-    placed: bool = False
+    # ADR-0095 §2 — see MutationSetEntrySummary.
+    anchors: list[MutationSetAnchor] = Field(default_factory=list)
+    state: Literal["template", "staged", "active"] = "template"
+    pin_missing: bool = False
     source_layer_id: str = ""
     source_layer_label: str = ""
 
@@ -1031,7 +1057,8 @@ class MutationSetEntryList(BaseModel):
 
 
 class CreateMutationSetEntryRequest(BaseModel):
-    title: str = Field(min_length=1)
+    # ADR-0095 §2: optional — an untitled set's label is derived from its rows.
+    title: str = ""
     entry_type: str = "mutation_set:mutation_set"
     target_entry_type: str = ""
     # ADR-0055 §3: optional entity pin ("" = reusable template).
@@ -1040,13 +1067,29 @@ class CreateMutationSetEntryRequest(BaseModel):
 
 
 class SaveMutationSetEntryRequest(BaseModel):
-    title: str = Field(min_length=1)
+    title: str = ""
     base_revision: str | None = None
     entry_type: str = "mutation_set:mutation_set"
     target_entry_type: str = ""
     # ADR-0055 §3: optional entity pin ("" = reusable template).
     target_entity: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
+
+
+class CopyMutationSetRequest(BaseModel):
+    """Copy a set into the open project (ADR-0095 §6), optionally re-pinning
+    it. `None` keeps the source's own pin (including none, for a template);
+    an empty string is a deliberate un-pin, distinct from "not given"."""
+
+    target_entity: str | None = None
+
+
+class CopyMutationSetResult(BaseModel):
+    entry: MutationSetEntry
+    # Rows dropped because they no longer validate against the (re-)pinned
+    # entity's type (ADR-0095 §6) — the copy is written even when every row
+    # is dropped, so the caller always has something to open.
+    dropped_rows: list[MutationSetRow] = Field(default_factory=list)
 
 
 class AssistantEntrySummary(BaseModel):

@@ -16,6 +16,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from mutation_helpers import save_scenes_with_mutations, scan_scene_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -23,7 +24,6 @@ from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
     SaveLoreEntryRequest,
-    UpdateMutationRequest,
     UpsertMetadataFieldRequest,
 )
 from app.services.project_service import ProjectService
@@ -65,7 +65,7 @@ class CollectionMutationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def _new_scene(self, title: str, body: str) -> str:
+    def _new_scene(self, title: str, body: str = "") -> str:
         created = self.client.post("/api/scenes", json={"title": title})
         self.assertEqual(created.status_code, 200, created.text)
         scene_id = created.json()["id"]
@@ -81,59 +81,64 @@ class CollectionMutationTests(unittest.TestCase):
             attrs += f";{key}={val}"
         return f"<!-- mutate:{attrs};id={mid} -->"
 
-    # --- grammar round-trip ----------------------------------------------
+    def _convert(self, scene_id: str, body: str) -> dict[str, tuple[str, str]]:
+        return save_scenes_with_mutations(self.service, {scene_id: body})
+
+    # --- grammar round-trip -------------------------------------------
+    # (the encoded op=/name=/group= grammar itself is retired — its
+    # round-trip is covered by test_legacy_mutation_markers.py; these prove
+    # the resolved RECORD after conversion carries the same op/value/name.)
 
     def test_scan_parses_op_name_group(self) -> None:
-        scene = self._new_scene(
-            "Scene Two",
-            self._marker("clues", "add", "torn%20glove", "c1", name="The%20Glove", group="g1"),
-        )
-        marker = next(m for m in self.service._scan_scene_mutations(self.service.read_scene(scene)))
+        scene = self._new_scene("Scene Two")
+        self._convert(scene, self._marker("clues", "add", "torn%20glove", "c1", name="The%20Glove", group="g1"))
+        marker = next(m for m in scan_scene_mutations(self.service, self.service.read_scene(scene)))
         self.assertEqual(marker.op, "add")
         self.assertEqual(marker.value, "torn glove")
         self.assertEqual(marker.name, "The Glove")
-        self.assertEqual(marker.group, "g1")
+        # `group=` is a legacy co-authoring tie only; a resolved record never
+        # carries one (ADR-0095 §1/§3).
+        self.assertEqual(marker.group, "")
 
     def test_v1_marker_defaults_to_replace(self) -> None:
-        scene = self._new_scene(
-            "Scene Two",
-            f"<!-- mutate:entity={self.honor};field=rank;value=Captain;id=r1 -->",
-        )
-        marker = next(m for m in self.service._scan_scene_mutations(self.service.read_scene(scene)))
+        scene = self._new_scene("Scene Two")
+        self._convert(scene, f"<!-- mutate:entity={self.honor};field=rank;value=Captain;id=r1 -->")
+        marker = next(m for m in scan_scene_mutations(self.service, self.service.read_scene(scene)))
         self.assertEqual(marker.op, "replace")
         self.assertEqual(marker.name, "")
         self.assertEqual(marker.group, "")
 
-    def test_update_preserves_op_and_name(self) -> None:
-        scene = self._new_scene(
-            "Scene Two",
-            self._marker("clues", "add", "torn%20glove", "c1", name="The%20Glove"),
-        )
-        self.service.update_mutation(scene, "c1", UpdateMutationRequest(value="bloody knife"))
+    def test_anchor_survives_a_scene_save(self) -> None:
+        # Editing a value is now a set-row save (ADR-0095 §8), never a scene
+        # rewrite — proves an ordinary scene save leaves the anchor untouched.
+        scene = self._new_scene("Scene Two")
+        self._convert(scene, self._marker("clues", "add", "torn%20glove", "c1", name="The%20Glove"))
         body = self.service.read_scene(scene).body
-        self.assertIn("op=add", body)
-        self.assertIn("name=The%20Glove", body)
-        self.assertIn("value=bloody%20knife", body)
-        marker = next(m for m in self.service._scan_scene_mutations(self.service.read_scene(scene)))
+        self.client.put(f"/api/scenes/{scene}", json={"title": "Scene Two", "body": body})
+        marker = next(m for m in scan_scene_mutations(self.service, self.service.read_scene(scene)))
         self.assertEqual(marker.op, "add")
-        self.assertEqual(marker.value, "bloody knife")
+        self.assertEqual(marker.value, "torn glove")
+        self.assertEqual(marker.name, "The Glove")
 
     # --- resolution -------------------------------------------------------
 
     def test_add_accumulates_onto_base(self) -> None:
-        scene = self._new_scene("Scene Two", self._marker("clues", "add", "torn%20glove", "c1"))
+        scene = self._new_scene("Scene Two")
+        self._convert(scene, self._marker("clues", "add", "torn%20glove", "c1"))
         self.assertEqual(
             self.service.effective_state(self.honor, scene),
             {"clues": ["footprint", "torn glove"]},
         )
 
     def test_remove_drops_a_base_value(self) -> None:
-        scene = self._new_scene("Scene Two", self._marker("clues", "remove", "footprint", "c1"))
+        scene = self._new_scene("Scene Two")
+        self._convert(scene, self._marker("clues", "remove", "footprint", "c1"))
         self.assertEqual(self.service.effective_state(self.honor, scene), {"clues": []})
 
     def test_remove_wins_over_concurrent_add(self) -> None:
-        scene = self._new_scene(
-            "Scene Two",
+        scene = self._new_scene("Scene Two")
+        self._convert(
+            scene,
             self._marker("clues", "add", "torn%20glove", "c1")
             + self._marker("clues", "remove", "torn%20glove", "c2"),
         )
@@ -145,10 +150,8 @@ class CollectionMutationTests(unittest.TestCase):
         # leaves it a string (it can't classify a pure-replace field without the
         # schema), and the field-type-aware coercion boundary splits it back to a
         # list (ADR-0009).
-        scene = self._new_scene(
-            "Scene Two",
-            f"<!-- mutate:entity={self.honor};field=clues;value=knife%2Crope;id=c1 -->",
-        )
+        scene = self._new_scene("Scene Two")
+        self._convert(scene, f"<!-- mutate:entity={self.honor};field=clues;value=knife%2Crope;id=c1 -->")
         self.assertEqual(self.service.effective_state(self.honor, scene), {"clues": "knife,rope"})
         self.assertEqual(self.service._coerce_mutation_value("knife,rope", "multi_select"), ["knife", "rope"])
 
@@ -156,8 +159,9 @@ class CollectionMutationTests(unittest.TestCase):
         # Prose order: a remove and an add, then a later whole-replace. The
         # replace resets the base, so the earlier ops are moot — only records
         # after the winning replace apply (#2 ordering regression).
-        scene = self._new_scene(
-            "Scene Two",
+        scene = self._new_scene("Scene Two")
+        self._convert(
+            scene,
             self._marker("clues", "remove", "knife", "c1")
             + self._marker("clues", "add", "stray", "c2")
             + f"<!-- mutate:entity={self.honor};field=clues;value=knife%2Crope;id=c3 -->",
@@ -167,15 +171,17 @@ class CollectionMutationTests(unittest.TestCase):
     def test_add_after_replace_still_applies(self) -> None:
         # An append authored after the replace survives it (guards against
         # over-filtering the post-replace tail).
-        scene = self._new_scene(
-            "Scene Two",
+        scene = self._new_scene("Scene Two")
+        self._convert(
+            scene,
             f"<!-- mutate:entity={self.honor};field=clues;value=knife;id=c1 -->"
             + self._marker("clues", "add", "rope", "c2"),
         )
         self.assertEqual(self.service.effective_state(self.honor, scene), {"clues": ["knife", "rope"]})
 
     def test_earlier_scene_sees_no_collection_override(self) -> None:
-        self._new_scene("Scene Two", self._marker("clues", "add", "torn%20glove", "c1"))
+        scene = self._new_scene("Scene Two")
+        self._convert(scene, self._marker("clues", "add", "torn%20glove", "c1"))
         self.assertEqual(self.service.effective_state(self.honor, self.s1), {})
 
     # --- validation -------------------------------------------------------
@@ -185,19 +191,22 @@ class CollectionMutationTests(unittest.TestCase):
         # text/long_text accept add as append (ADR-0009 amendment), so the
         # gate is exercised on a select field.
         _define_field(self.service, "mood", "select", "Mood")
-        self._new_scene("Scene Two", self._marker("mood", "add", "grim", "m1"))
+        scene = self._new_scene("Scene Two")
+        self._convert(scene, self._marker("mood", "add", "grim", "m1"))
         warnings = self.service.validate_project().warnings
         self.assertTrue(any("only valid on collection or text fields" in w for w in warnings))
 
     def test_remove_on_text_field_is_a_warning(self) -> None:
         # Append is additive-only: remove stays gated to collection fields.
-        self._new_scene("Scene Two", self._marker("rank", "remove", "Captain", "r1"))
+        scene = self._new_scene("Scene Two")
+        self._convert(scene, self._marker("rank", "remove", "Captain", "r1"))
         warnings = self.service.validate_project().warnings
         self.assertTrue(any("op remove is only valid on collection fields" in w for w in warnings))
 
     def test_add_element_is_item_validated(self) -> None:
         _define_field(self.service, "friends", "entity_ref_list", "Friends")
-        self._new_scene("Scene Two", self._marker("friends", "add", "ghost-id", "f1"))
+        scene = self._new_scene("Scene Two")
+        self._convert(scene, self._marker("friends", "add", "ghost-id", "f1"))
         warnings = self.service.validate_project().warnings
         self.assertTrue(any("friends" in w for w in warnings))
 

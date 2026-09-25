@@ -22,13 +22,20 @@ however many fields it touches (a promotion = rank + title + uniform → one pil
 count). You can **name** a change ("Honor's promotion") — purely a memory aid to recognise it
 later; leave it blank and it labels itself ("rank → Captain", or "3 changes").
 
-Click a pill to edit the **whole unit**: add or remove field changes, change values, rename it, or
-delete it. Each field change inside a unit keeps its own identity — you can still end one of them
-on its own later (see closing, below).
+Each change is kept as a **mutation set**: a small file of its own (under `mutation-sets/`) that says
+*what* changes. The scene holds only a one-line anchor that says *where*. So:
 
-The marker lives in the scene, so moving or deleting the scene moves or deletes its changes — there
-is nothing separate to keep in sync. In the Markdown file a unit is a single readable comment,
-whether it changes one field or five.
+- **Click a pill to edit the change**: add or remove field changes, change values, rename it. This
+  saves the mutation set; the scene itself is not touched. Each field change keeps its own identity,
+  so you can still end one of them on its own later (see closing, below).
+- **Moving prose moves the change.** Cut a paragraph and paste it elsewhere, and its pill moves
+  with it. **Copying** prose copies the change: the pasted pill gets its own mutation set, so editing
+  one never alters the other.
+- **Deleting a pill removes the change from this scene**, not the change itself: the mutation set
+  stays on the entry's card as *staged*, ready to be placed again (or deleted there). Undo brings the
+  pill back. The pill dialog's **Remove from this scene** does the same.
+- In the scene's Markdown file a change is one short comment naming its mutation set; the set's own
+  file lists the field changes in plain YAML.
 
 ## Seeing the timeline
 
@@ -36,8 +43,10 @@ Open the lore entry. When it has changes, a **scrubber** appears along the botto
 **one stop per unit** (one authored change), not one per field, so the stops stay meaningful; the
 tooltip lists what changes there. Pick a stop and the whole card shows the entry **as of that
 point** — title, body, and every field reflect their effective values there, with changed fields
-marked in the mutation violet and a small **⤳**. Slide back to the start to edit the base
-(book-start) values again. This is your trust surface: you can *see* "Honor as of Scene 5" and
+marked in the mutation violet and a small **⤳**. At the start of the scrubber you edit the base
+(book-start) values. At a later stop, a relationship list (a list keyed by its reference, such as
+Connections) is editable too: the edit changes that stop's mutation set, never the scene. This is
+your trust surface: you can *see* "Honor as of Scene 5" and
 confirm nothing from the future has leaked backward. The rail's Mutations list mirrors the same
 stops, one row per unit.
 
@@ -78,9 +87,9 @@ add/remove records. Ending (closing) a unit later reverts those records like any
 
 Collections are always authored (and stored in mutation sets) as **per-item add/remove** — there is
 no whole-list "replace" in the UI. That is deliberate: a whole-list value packs several members into
-one comma-joined marker value, which cannot round-trip a member that itself contains a comma. If you
-**hand-write** a `op=replace` marker on a collection field, url-encode any comma inside a member
-(`%2C`); each add/remove marker carries a single member and needs no such care.
+one comma-joined value, which cannot round-trip a member that itself contains a comma. If you
+**hand-edit** a mutation set file and write an `op: replace` row on a collection field, keep the
+comma-joined form in mind; each add/remove row carries a single member and needs no such care.
 
 There is one contract to write by: **every appended fragment must stand alone.** Each change is an
 independent interval — it can be *closed* (ended) on its own, at any later point in the story.
@@ -103,14 +112,22 @@ still leaves a coherent set. The stand-alone rule matters mainly for appended pr
 ## Reusing a set of changes
 
 A recurring transformation (a werewolf's dusk change: appearance + abilities + name) can be saved as
-a **mutation set** and re-applied to any character in one step, instead of retyping it. The short
-version: mark a change "reusable" when you author it, or manage sets in the Mutations list, then
-`/mutate` → pick a character → **apply a set**.
+a **template**: a mutation set with no character of its own, re-applied to any character in one
+step instead of retyping it. Tick "Save as a reusable set" when you author a change, or manage sets
+in the Mutations list, then `/mutate` → pick a character → **Apply a saved set**. Applying a template
+copies it for that character; the template itself never changes.
 
-A mutation set has two states. It is **staged** while it sits on a card unplaced — authored, but not
-yet part of any scene — and becomes **active** once you **place** it into a scene, where it goes live
-in the story from that point forward. (A brainstorm chat can *stage* a set onto its subject's card
-for you; you *place* it when you're ready.) These two words are the whole vocabulary: the thing is
-always a **mutation set**, never a "change", "staged change", or "pending change"; and "active" here
-means *this set is placed* — distinct from the timeline scrubber's "Changed by here", which is about
-a single value's effect at a point in the prose, not about the set.
+A mutation set for a character is in one of two states, and the app works the state out from the
+prose (there is nothing to toggle):
+
+- **staged** — it is not in any scene yet. A brainstorm chat can *stage* a set onto its subject's
+  card for you, and a pill you delete leaves its set staged.
+- **active** — a scene holds its pill; it goes live in the story from that point forward. You
+  **place** a staged set with `/mutate` → pick the character → **Apply a saved set**; the card itself
+  cannot place a set, because only the prose knows *where*. Applying an active set again places a
+  copy.
+
+These two words are the whole vocabulary: the thing is always a **mutation set**, never a "change",
+"staged change", or "pending change"; and "active" here means *this set is placed* — distinct from
+the timeline scrubber's "Changed by here", which is about a single value's effect at a point in the
+prose, not about the set.

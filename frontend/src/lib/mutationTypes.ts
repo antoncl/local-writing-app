@@ -4,18 +4,29 @@
 
 import type { MetadataValue } from "./metadataTypes";
 
-// Mid-scene lore mutation records (#33). A marker sets one field of one lore
-// entry to a new value at a prose position; the timeline is manuscript-ordered.
+// Mid-scene lore mutation records (#33, ADR-0095 §1/§3/§5). A resolved record
+// is one mutation-SET ROW joined at the scene ANCHOR that places it; the
+// timeline is manuscript-ordered. `marker_id = "<anchor_id>.<row_id>"` is the
+// `(anchor, row)` identity everything that keys on a record — closes,
+// `exclude`, the change-candidate dedupe, review items, the scrubber's stops
+// — keys on. `unit_id` is the anchor id (the pill/timeline/scrubber grouping
+// granularity); `unit_name`/`name` are the set's title (may be "").
 export type MutationMarkerRecord = {
   marker_id: string;
   entity_id: string;
   field: string;
   op: string; // "replace" (default) | "add" | "remove" (#58)
   value: string;
-  name: string; // optional human label (#65)
-  group: string; // co-authored-set tie (#65, legacy)
-  unit_id: string; // the authored unit this record belongs to (#69, ADR-0016)
-  unit_name: string; // the unit's human label from the carrier head
+  name: string; // the set's title (may be "")
+  group: string; // co-authored-set tie (#65, legacy — read-only survivor)
+  unit_id: string; // the anchor id this record belongs to (ADR-0095 §1)
+  unit_name: string; // the set's title, echoed
+  // ADR-0095 §3: the record's identity components. Optional here (default
+  // "", mirrors the backend model) so existing fixtures that predate this
+  // slice keep type-checking without every literal naming them.
+  anchor_id?: string;
+  set_id?: string;
+  row_id?: string;
   scene_id: string;
   offset: number;
   line: number;
@@ -26,25 +37,25 @@ export type MutationMarkerList = {
   items: MutationMarkerRecord[];
 };
 
-// One row of a wholesale mutation-unit rewrite (ADR-0042 §5, ADR-0089 S5) —
-// the wire shape `PUT /scenes/{scene_id}/mutations/units/{unit_id}` takes.
-// Mirrors the backend's `MutationUnitRow`: a blank `id` mints a fresh record
-// id, a given id is kept.
-export type MutationUnitRow = {
+// One field-change row of a mutation set (ADR-0095 §3): a `(field, op,
+// value)` triple, `id` its stable identity within the set — a copied set
+// keeps its rows' ids (the anchor id tells the copies apart).
+export type MutationSetRow = {
   field: string;
   op: string; // "replace" | "add" | "remove"
   value: string;
   id: string;
 };
 
-// Reusable mutation set (#62): a body-less Node kind — an ordered list of
-// (field, op, value) rows + a target lore entry-type. The entity is bound at
-// apply time (a template), and applying expands to independent inline markers.
-export type MutationSetRow = {
-  field: string;
-  op: string; // "replace" | "add" | "remove"
-  value: string;
+// One place a set is anchored (ADR-0095 §1/§2): the anchor comment's own id,
+// the scene it lives in, and that scene's title for display.
+export type MutationSetAnchor = {
+  anchor_id: string;
+  scene_id: string;
+  scene_title: string;
 };
+
+export type MutationSetState = "template" | "staged" | "active";
 
 export type MutationSetEntrySummary = {
   id: string;
@@ -52,14 +63,21 @@ export type MutationSetEntrySummary = {
   entry_type: string;
   target_entry_type: string;
   // ADR-0055 §3: optional entity pin. "" = a reusable template (entity bound at
-  // apply time); set = an entity-pinned one-off (offered only for its own
-  // entity, stamped on apply). Stored as the `target_entity` metadata entity_ref.
+  // apply time); set = an entity-pinned one-off. Stored as the `target_entity`
+  // metadata entity_ref.
   target_entity: string;
   row_count: number;
-  // ADR-0055 §5: a pinned set is a one-off — once placed in a scene it drops
-  // from the card's pending list (kept as the chat's provenance). Always false
-  // for a reusable set; apply never marks it.
-  placed: boolean;
+  // The set's own rows (ADR-0095 §1): carried on the roster summary so an
+  // untitled set's pill/apply-picker/PinnedSetsPanel label can be built the
+  // way an unnamed unit was labelled pre-ADR-0095 — "field → value" for one
+  // row, "N changes" for several — without a per-set fetch.
+  rows: MutationSetRow[];
+  // ADR-0095 §2: computed from the pin and the anchor scan, never stored.
+  anchors: MutationSetAnchor[];
+  state: MutationSetState;
+  // A pin that names a lore entry no longer in the node index: a dead pin,
+  // unlike a missing one, keeps the set out of the template list.
+  pin_missing: boolean;
   source_layer_id: string;
   source_layer_label: string;
 };
@@ -73,14 +91,24 @@ export type MutationSetEntry = {
   // ADR-0055 §3 entity pin — see MutationSetEntrySummary.target_entity.
   target_entity: string;
   rows: MutationSetRow[];
-  // ADR-0055 §5 placement state — see MutationSetEntrySummary.placed.
-  placed: boolean;
+  // ADR-0095 §2 — see MutationSetEntrySummary.
+  anchors: MutationSetAnchor[];
+  state: MutationSetState;
+  pin_missing: boolean;
   source_layer_id: string;
   source_layer_label: string;
 };
 
 export type MutationSetEntryList = {
   entries: MutationSetEntrySummary[];
+};
+
+// ADR-0095 §6: `POST /api/mutation-sets/{id}/copy` result — the copy, plus
+// any rows dropped because they no longer validate against the (re-)pinned
+// entity's type.
+export type CopyMutationSetResult = {
+  entry: MutationSetEntry;
+  dropped_rows: MutationSetRow[];
 };
 
 // One field's effective value (ADR-0089 §3): scalar → string; flat

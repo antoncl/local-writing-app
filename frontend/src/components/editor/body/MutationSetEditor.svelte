@@ -18,6 +18,7 @@
     type MutationRow,
   } from "@/components/editor/body/MutationFieldRows.svelte";
   import { api } from "@/lib/api";
+  import { upsertMutationSet } from "@/lib/stores/mutationSets";
   import type {
     LoreEntrySummary,
     MetadataSchema,
@@ -58,8 +59,14 @@
   const targetEntity = untrack(() => initial?.target_entity ?? preset?.target_entity ?? "");
   const pinned = targetEntity.length > 0;
   const pinnedEntity = $derived(loreEntries.find((e) => e.id === targetEntity) ?? null);
-  let rows = $state<MutationRow[]>(
-    untrack(() => (initial?.rows ?? []).map((r) => ({ field: r.field, op: r.op || "replace", value: r.value }))),
+  // Row ids (ADR-0095 §3) are carried through the edit round-trip so an
+  // unchanged row keeps its id on re-save — and with it, anything a close
+  // targets by `(anchor, row)`.
+  type SetRow = MutationRow & { id?: string };
+  let rows = $state<SetRow[]>(
+    untrack(() =>
+      (initial?.rows ?? []).map((r) => ({ id: r.id, field: r.field, op: r.op || "replace", value: r.value })),
+    ),
   );
 
   function typeLabel(id: string): string {
@@ -86,31 +93,41 @@
     rows = rows.map((r, i) => (i === index ? { ...r, ...patch } : r));
   }
 
-  const canSave = $derived(title.trim().length > 0 && targetType.length > 0 && rows.length > 0);
+  // ADR-0095 §2: title is optional — an untitled set labels from its rows.
+  const canSave = $derived(targetType.length > 0 && rows.length > 0);
   let saving = $state(false);
+  let saveError = $state("");
 
   async function save() {
     if (!canSave || saving) return;
     saving = true;
-    const payloadRows = rows.map((r) => ({ field: r.field, op: r.op, value: toMarkerString(r.value) }));
+    saveError = "";
+    // Row ids (ADR-0095 §3) are preserved as-is — never stripped — so an
+    // unchanged row keeps the id anything addressing it by `(anchor, row)`
+    // relies on; only a genuinely new row (no `r.id`) sends "".
+    const payloadRows = rows.map((r) => ({ id: r.id ?? "", field: r.field, op: r.op, value: toMarkerString(r.value) }));
     try {
-      if (initial) {
-        await api.saveMutationSetEntry({
-          ...initial,
-          title: title.trim(),
-          target_entry_type: targetType,
-          target_entity: targetEntity,
-          rows: payloadRows,
-        });
-      } else {
-        await api.createMutationSetEntry({
-          title: title.trim(),
-          target_entry_type: targetType,
-          target_entity: targetEntity,
-          rows: payloadRows,
-        });
-      }
+      const saved = initial
+        ? await api.saveMutationSetEntry({
+            ...initial,
+            title: title.trim(),
+            target_entry_type: targetType,
+            target_entity: targetEntity,
+            rows: payloadRows,
+          })
+        : await api.createMutationSetEntry({
+            title: title.trim(),
+            target_entry_type: targetType,
+            target_entity: targetEntity,
+            rows: payloadRows,
+          });
+      // Fold the saved/created set into the roster at once (ADR-0095 §2) —
+      // any pill anchoring it relabels immediately, and every reader keyed on
+      // `mutationsVersion` refreshes.
+      upsertMutationSet(saved);
       onSaved();
+    } catch (e) {
+      saveError = e instanceof Error ? e.message : String(e);
     } finally {
       saving = false;
     }
@@ -125,9 +142,12 @@
   ariaLabel="Edit mutation set"
   onCancel={onCancel}
 >
+  {#if saveError}
+    <p class="tset-error" role="alert">{saveError}</p>
+  {/if}
   <label class="tset-field">
-    <span>Name</span>
-    <input value={title} placeholder="e.g. Full Moon transformation" oninput={(e) => (title = e.currentTarget.value)} />
+    <span>Name (optional)</span>
+    <input value={title} placeholder="e.g. Full moon" oninput={(e) => (title = e.currentTarget.value)} />
   </label>
 
   {#if pinned}
@@ -202,5 +222,13 @@
     background: var(--inset);
     color: var(--text);
     font-size: var(--fs-md);
+  }
+  .tset-error {
+    margin: 0 0 12px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: color-mix(in oklab, var(--danger) 12%, transparent);
+    color: var(--danger);
+    font-size: var(--fs-sm);
   }
 </style>

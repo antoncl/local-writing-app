@@ -7,8 +7,8 @@ the origin by keep-id.
 Part B (§7): promoting the SET itself. A set has no §4 metadata to partition —
 its rows travel atomically — so its only hard dependency is the optional
 entity pin, which either already resolves at the destination, cascades with
-the set (the pinned entity moves FIRST), or blocks the promotion. A PLACED
-set refuses outright: it is anchored in the manuscript.
+the set (the pinned entity moves FIRST), or blocks the promotion. An ACTIVE
+set (ADR-0095 §2 — anchored in a scene) refuses outright.
 
 The chain mirrors `test_promote_lore.py`:
 `writing (base) -> honorverse (universe) -> honor-harrington (series) -> book01 (root)`.
@@ -23,8 +23,14 @@ from unittest.mock import patch
 
 from layer_fixtures import declare_full_chain
 
-from app.models import CreateMutationSetEntryRequest, MutationSetRow
+from app.models import (
+    CreateMutationSetEntryRequest,
+    CreateSceneRequest,
+    MutationSetRow,
+    SaveSceneRequest,
+)
 from app.services.project.errors import ProjectServiceError
+from app.services.project.mutation_anchors import render_anchor
 from app.services.project_service import ProjectService
 
 
@@ -74,15 +80,12 @@ class PromoteMutationSetTests(unittest.TestCase):
         target_entry_type: str,
         rows: list[dict],
         target_entity: str = "",
-        placed: bool = False,
     ) -> None:
         # Mirrors `_write_mutation_set_file` (mutation_sets.py) exactly, for
         # fixtures that need a set owned somewhere other than book01.
         (folder / "mutation-sets").mkdir(parents=True, exist_ok=True)
         metadata = {"target_entity": target_entity} if target_entity else {}
         extra: dict = {"target_entry_type": target_entry_type, "rows": rows}
-        if placed:
-            extra["placed"] = True
         self.service._write_node_entry_file(
             folder / "mutation-sets" / f"{node_id}.md",
             node_id,
@@ -107,6 +110,16 @@ class PromoteMutationSetTests(unittest.TestCase):
         )
         return created.id
 
+    def _anchor_set(self, set_id: str) -> None:
+        """Make `set_id` active (ADR-0095 §2) by writing its anchor comment
+        into a real scene body of the OPEN project (book01) — state is read
+        from the scenes that anchor a set, never a stored flag."""
+        scene = self.service.create_scene(CreateSceneRequest(title="Chapter One"))
+        self.service.save_scene(
+            scene.id,
+            SaveSceneRequest(title="Chapter One", body=render_anchor(set_id, "anchor1")),
+        )
+
     def _snapshot_files(self, folder: Path) -> set[str]:
         return {
             str(p.relative_to(folder))
@@ -115,8 +128,9 @@ class PromoteMutationSetTests(unittest.TestCase):
         }
 
     def _find_set_path_by_id(self, folder: Path, node_id: str) -> Path | None:
-        # Located by front-matter id, not `{id}.md` — the file is named from
-        # the title (`_filepath_for_new_node`), same trap as lore (#1494).
+        # Located by front-matter id, not `{id}.md`: a NEW set's own file is
+        # named after its id (ADR-0095 §12), but a promoted one is written by
+        # `_write_promoted_mutation_set` at its title, same as lore (#1494).
         mutation_sets_folder = folder / "mutation-sets"
         if not mutation_sets_folder.exists():
             return None
@@ -161,14 +175,15 @@ class PromoteMutationSetTests(unittest.TestCase):
             self.service.promote_mutation_set_entry(set_id, "not-a-real-layer")
         self.assertEqual(ctx2.exception.status_code, 400)
 
-    def test_promote_refuses_placed_set(self) -> None:
+    def test_promote_refuses_active_set(self) -> None:
         self._write_ancestor_lore(self.root, "alice", "Alice")
         set_id = self._create_set("Becomes a werewolf", target_entity="alice")
-        self.service.place_mutation_set_entry(set_id)
+        self._anchor_set(set_id)
 
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.promote_mutation_set_entry(set_id, self.series_layer_id)
         self.assertEqual(ctx.exception.status_code, 422)
+        self.assertIn("Remove its pills", ctx.exception.message)
 
     # --- 2 (★): the pin cascades with the set --------------------------------
 
@@ -236,12 +251,12 @@ class PromoteMutationSetTests(unittest.TestCase):
         self.assertEqual(self._snapshot_files(self.root), before_root)
         self.assertEqual(self._snapshot_files(self.series), before_series)
 
-    # --- 6: a placed pinned set is not surfaced as related -------------------
+    # --- 6: an active pinned set is not surfaced as related -------------------
 
-    def test_placed_set_not_in_related(self) -> None:
+    def test_active_set_not_in_related(self) -> None:
         self._write_ancestor_lore(self.root, "alice", "Alice")
         set_id = self._create_set("Becomes a werewolf", target_entity="alice")
-        self.service.place_mutation_set_entry(set_id)
+        self._anchor_set(set_id)
 
         plan = self.service.preview_lore_promotion("alice", self.series_layer_id)
 

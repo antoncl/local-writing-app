@@ -50,6 +50,7 @@ from app.services.project.lore_mutations import LoreMutationsMixin
 from app.services.project.manuscript import ManuscriptMixin
 from app.services.project.metadata_values import MetadataValuesMixin
 from app.services.project.migration_runner import MigrationRunnerMixin
+from app.services.project.mutation_set_anchors import MutationSetAnchorsMixin
 from app.services.project.mutation_sets import MutationSetEntriesMixin
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project.node_index_patch import NodeIndexPatchMixin
@@ -67,6 +68,7 @@ from app.services.project.promotion import PromotionMixin
 from app.services.project.prompts import PromptEntriesMixin
 from app.services.project.references import ReferencesMixin
 from app.services.project.research import ResearchNotesMixin
+from app.services.project.scene_snapshot_mutations import SceneSnapshotMutationsMixin
 from app.services.project.scene_snapshots import SceneSnapshotsMixin
 from app.services.project.scene_todos import SceneTodoAnchorsMixin
 from app.services.project.schema import MetadataSchemaMixin
@@ -129,6 +131,7 @@ class ProjectService(
     ReferencesMixin,
     ResearchNotesMixin,
     SceneSnapshotsMixin,
+    SceneSnapshotMutationsMixin,
     SceneTodoAnchorsMixin,
     SnapshotDiffMixin,
     SnapshotWitnessMixin,
@@ -138,6 +141,7 @@ class ProjectService(
     TagNodesMixin,
     TodosMixin,
     TreeNodesMixin,
+    MutationSetAnchorsMixin,
     MutationSetEntriesMixin,
     ViewsMixin,
 ):

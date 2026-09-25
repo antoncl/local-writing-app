@@ -6,12 +6,10 @@ from fastapi import APIRouter
 from app.models import (
     CreateSceneRequest,
     FinalizeSceneRequest,
-    RewriteMutationUnitRequest,
     SaveSceneRequest,
     Scene,
     StructureDocument,
     UpdateEmbeddedTodoRequest,
-    UpdateMutationRequest,
 )
 from app.runtime import CurrentProject, translate_errors
 
@@ -78,38 +76,5 @@ def delete_embedded_todo(project: CurrentProject, scene_id: str, todo_id: str) -
     """Remove a single in-prose embedded-todo marker, keeping its wrapped text."""
     with translate_errors():
         return project.delete_embedded_todo(scene_id, todo_id)
-
-
-# The two single-marker mutation routes below are the intentful API mirror of the
-# embedded-todo update/delete routes (#54), exercised by the backend tests
-# (test_lore_mutation_routes / test_lore_mutations). The in-app editor does NOT
-# call them — it rewrites/removes mutation pills directly in the ProseMirror doc
-# and saves the whole body — so they're currently only a programmatic/test surface.
-# Kept for parity and future non-editor callers; they return the re-read Scene so
-# any open pane could reconcile if one ever did use them.
-@router.patch("/api/scenes/{scene_id}/mutations/{marker_id}", response_model=Scene)
-def update_mutation(project: CurrentProject, scene_id: str, marker_id: str, request: UpdateMutationRequest) -> Scene:
-    """Rewrite a single in-prose lore-mutation marker without a full body save (#33)."""
-    with translate_errors():
-        return project.update_mutation(scene_id, marker_id, request)
-
-
-@router.delete("/api/scenes/{scene_id}/mutations/{marker_id}", response_model=Scene)
-def delete_mutation(project: CurrentProject, scene_id: str, marker_id: str) -> Scene:
-    """Remove a single in-prose lore-mutation marker (#33)."""
-    with translate_errors():
-        return project.delete_mutation(scene_id, marker_id)
-
-
-# The one route the in-app editor DOES call outside the prose editor: the lore
-# card scrubbed to a stop edits that stop's unit (ADR-0042 §5, ADR-0089 S5),
-# and the scene may not be open in any pane.
-@router.put("/api/scenes/{scene_id}/mutations/units/{unit_id}", response_model=Scene)
-def rewrite_mutation_unit(
-    project: CurrentProject, scene_id: str, unit_id: str, request: RewriteMutationUnitRequest
-) -> Scene:
-    """Replace a mutation unit's rows wholesale (ADR-0089 S5)."""
-    with translate_errors():
-        return project.rewrite_mutation_unit(scene_id, unit_id, request)
 
 

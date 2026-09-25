@@ -9,6 +9,7 @@
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
   import { SearchMatchHighlight } from "@/lib/editor-core/searchMatchHighlight";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
+  import { AppClipboardMarker } from "@/lib/editor-core/appClipboard";
   import { tableExtensions } from "@/lib/editor-core/alignedTable";
   import { placeSelectionToolbar, type FloatingMenuState, type ToolbarAction } from "@/lib/editor-core/selectionToolbar";
   import { visibleSelectionRect, selectionEndpointRect } from "@/lib/editor-core/selectionRects";
@@ -168,6 +169,7 @@
       element: editorElement,
       extensions: [
         proseStarterKit(),
+        AppClipboardMarker,
         ...tableExtensions,
         ImplicitContextHighlight.configure({ matcher }),
         SearchMatchHighlight,

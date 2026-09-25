@@ -27,6 +27,26 @@ export function slashCommandToken(title: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/** The minimal slice of a ProseMirror node `slashParagraphText` reads. */
+interface InlineContainer {
+  content: { size: number };
+  textBetween(from: number, to: number, blockSeparator?: string, leafText?: string): string;
+}
+
+/**
+ * A paragraph's text for the slash menu, with every inline atom (a mutation
+ * pill, a hard break) counted as one U+FFFC character.
+ *
+ * `textContent` drops atoms, so a paragraph holding a pill then "/mutate" read
+ * as starting with "/", and clearing the query deleted `textContent.length`
+ * positions from the paragraph start, the pill first (#2234). Counting atoms
+ * keeps string offsets equal to doc positions from the paragraph start, and a
+ * paragraph that begins with an atom never reads as a slash context.
+ */
+export function slashParagraphText(paragraph: InlineContainer): string {
+  return paragraph.textBetween(0, paragraph.content.size, undefined, "￼");
+}
+
 /** Split a "/command args" body (the "/" already stripped) into command + raw args. */
 export function parseSlashBody(text: string): { command: string; args: string } | null {
   if (SLASH_COMMAND_PATTERN.test(text)) return { command: text, args: "" };

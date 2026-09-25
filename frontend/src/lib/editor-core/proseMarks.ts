@@ -6,8 +6,14 @@
 //   component keeps ownership of the reactive lore/schema lookups and passes
 //   them in (same pattern as ImplicitContextHighlight's matcher option).
 import { Mark, mergeAttributes, Node } from "@tiptap/core";
+import type { Node as PMNode } from "@tiptap/pm/model";
 
-import { unitRows } from "./mutationNodes";
+import { mutationSetLabel } from "./mutationNodes";
+import {
+  mutationSetByAnchorIdStore,
+  mutationSetRosterLoadedStore,
+  mutationSetsByIdStore,
+} from "@/lib/stores/mutationSets";
 
 export const AISuggestion = Mark.create({
   name: "aiSuggestion",
@@ -86,30 +92,49 @@ export function createCharacterMark({ colorForId, titleForId }: CharacterMarkRes
   });
 }
 
-export interface MutationMarkResolvers {
-  /** Human label for the pill, e.g. "Honor → Captain". Read at render time so
-   *  the pill stays live against the reactive lore/schema stores. */
-  labelForMarker: (entityId: string, field: string, value: string, op?: string) => string;
+// ADR-0095 §1: a pill is a pure ANCHOR — `{ setId, anchorId }` — and its
+// label reads the mutation-sets STORE live, via a ProseMirror NodeView
+// rather than TipTap's plain `renderHTML` (which only re-runs when a node's
+// OWN attrs change). A NodeView subscribes once at mount and updates its own
+// text/title whenever the store changes, so editing a set relabels every
+// pill that anchors it with no document transaction. `data-mutation-id`
+// keeps carrying the id `revealMutationPill`/todo reveals key on — now the
+// ANCHOR id (it used to be the marker id; same attribute, new meaning).
+
+function renderAnchorPill(dom: HTMLElement, setId: string, anchorId: string, rosterLoaded: boolean): void {
+  const entry = setId ? mutationSetsByIdStoreSnapshot?.get(setId) : undefined;
+  const missing = rosterLoaded && setId !== "" && !entry;
+  dom.classList.toggle("mutation-pill-missing", missing);
+  if (missing) {
+    dom.textContent = "⤳";
+    dom.title = "This mutation set no longer exists. Delete the pill, or restore the set.";
+    return;
+  }
+  const label = mutationSetLabel(entry);
+  dom.textContent = label ? `⤳ ${label}` : "⤳";
+  dom.title = label;
 }
 
-// Compact pill glyph for a collection op (#58): add prefixes +, remove −.
-function opGlyph(op: string): string {
-  if (op === "add") return "+";
-  if (op === "remove") return "−";
-  return "";
-}
+// A plain module-level snapshot (kept current by one subscription shared by
+// every pill instance) — cheaper than each NodeView re-deriving the Map from
+// the store on every render, and avoids importing `get()` per node.
+let mutationSetsByIdStoreSnapshot: ReadonlyMap<string, { title: string; rows: { field: string; op: string; value: string }[] }> | undefined;
+mutationSetsByIdStore.subscribe((byId) => {
+  mutationSetsByIdStoreSnapshot = byId;
+});
+let rosterLoadedSnapshot = false;
+mutationSetRosterLoadedStore.subscribe((loaded) => {
+  rosterLoadedSnapshot = loaded;
+});
 
 /**
- * Build the mid-scene lore-mutation pill (#33). Unlike CharacterMark it wraps no
- * prose — a mutation is a *point* ("the change happens here"), so it's an inline
- * atom Node, not a Mark. Since #69 (ADR-0016) one pill is one mutation UNIT:
- * entity + optional name + N field rows carried in the `rows` attr (JSON in the
- * DOM), each row keeping its own id/lifetime. It round-trips to the single-line
- * comment for one row, the multi-line carrier for more (see lib/utils/markdown).
- * The label resolver is read at renderHTML time (mirrors CharacterMark).
+ * Build the mid-scene mutation-anchor pill (#33, ADR-0095 §1). Unlike
+ * CharacterMark it wraps no prose — a mutation is a *point* ("the change
+ * takes effect here") — so it's an inline atom Node, not a Mark. It
+ * round-trips to `<!-- mutate:set=SET;id=ANCHOR -->` (lib/utils/markdown).
  */
-export function createMutationMark({ labelForMarker }: MutationMarkResolvers) {
-  return Node.create({
+export const createMutationMark = () =>
+  Node.create({
     name: "mutation",
     inline: true,
     group: "inline",
@@ -117,103 +142,74 @@ export function createMutationMark({ labelForMarker }: MutationMarkResolvers) {
     selectable: true,
     addAttributes() {
       return {
-        entity: {
-          default: null,
-          parseHTML: (element) => element.getAttribute("data-mutation-entity"),
-          renderHTML: (attributes) =>
-            attributes.entity ? { "data-mutation-entity": String(attributes.entity) } : {},
-        },
-        name: {
+        setId: {
           default: "",
-          parseHTML: (element) => element.getAttribute("data-mutation-name") ?? "",
+          parseHTML: (element) => element.getAttribute("data-mutation-set") ?? "",
           renderHTML: (attributes) =>
-            attributes.name ? { "data-mutation-name": String(attributes.name) } : {},
+            attributes.setId ? { "data-mutation-set": String(attributes.setId) } : {},
         },
-        group: {
-          default: "",
-          parseHTML: (element) => element.getAttribute("data-mutation-group") ?? "",
-          renderHTML: (attributes) =>
-            attributes.group ? { "data-mutation-group": String(attributes.group) } : {},
-        },
-        rows: {
-          default: [],
-          parseHTML: (element) => {
-            const raw = element.getAttribute("data-mutation-rows");
-            if (raw) {
-              try {
-                const parsed = JSON.parse(raw);
-                if (Array.isArray(parsed)) return parsed;
-              } catch {
-                // fall through to the legacy single-field shape
-              }
-            }
-            // Pasted HTML from a pre-#69 session carries one field per span.
-            const field = element.getAttribute("data-mutation-field");
-            if (!field) return [];
-            return [
-              {
-                id: element.getAttribute("data-mutation-id") ?? "",
-                field,
-                op: element.getAttribute("data-mutation-op") || "replace",
-                value: element.getAttribute("data-mutation-value") ?? "",
-              },
-            ];
-          },
-          renderHTML: (attributes) => ({
-            "data-mutation-rows": JSON.stringify(
-              Array.isArray(attributes.rows) ? attributes.rows : [],
-            ),
-          }),
-        },
-        markerId: {
+        anchorId: {
           default: null,
           parseHTML: (element) => element.getAttribute("data-mutation-id"),
           renderHTML: (attributes) =>
-            attributes.markerId ? { "data-mutation-id": String(attributes.markerId) } : {},
+            attributes.anchorId ? { "data-mutation-id": String(attributes.anchorId) } : {},
         },
       };
     },
     parseHTML() {
-      return [{ tag: "span[data-mutation-entity]" }];
+      return [{ tag: "span[data-mutation-id]:not([data-mutation-close-ref])" }];
     },
     renderHTML({ node, HTMLAttributes }) {
-      const entity = String(node.attrs.entity ?? "");
-      const name = String(node.attrs.name ?? "");
-      const rows = unitRows(node.attrs);
-      // Full per-row labels go in the tooltip; the inline pill stays compact so
-      // prose reads cleanly. One row shows its +/−glyph+value (or the name); a
-      // multi-row unit shows its name with a ·N count, else "N changes" — the
-      // pill IS the unit's frame (#70).
-      const full = rows
-        .map((row) => labelForMarker(entity, row.field, row.value, row.op))
-        .join("\n");
-      let body: string;
-      if (rows.length > 1) {
-        body = name ? `${name} ·${rows.length}` : `${rows.length} changes`;
-      } else {
-        const row = rows[0];
-        const glyph = row ? opGlyph(row.op) : "";
-        body = name || (row ? (glyph ? `${glyph}${row.value}` : row.value) : "");
-      }
-      const compact = body ? `⤳ ${body}` : "⤳";
-      return ["span", mergeAttributes(HTMLAttributes, { class: "mutation-pill", title: full }), compact];
+      // Static fallback (SSR-less here, but TipTap calls this once before a
+      // NodeView takes over, and it's what `editor.getHTML()` serializes
+      // from for the markdown round-trip) — matches the NodeView's own text.
+      const setId = String(node.attrs.setId ?? "");
+      const entry = setId ? mutationSetsByIdStoreSnapshot?.get(setId) : undefined;
+      const label = mutationSetLabel(entry);
+      return ["span", mergeAttributes(HTMLAttributes, { class: "mutation-pill" }), label ? `⤳ ${label}` : "⤳"];
+    },
+    addNodeView() {
+      return ({ node }: { node: PMNode }) => {
+        const dom = document.createElement("span");
+        dom.className = "mutation-pill";
+        let currentNode = node;
+        const render = (n: PMNode) =>
+          renderAnchorPill(dom, String(n.attrs.setId ?? ""), String(n.attrs.anchorId ?? ""), rosterLoadedSnapshot);
+        if (node.attrs.anchorId) dom.setAttribute("data-mutation-id", String(node.attrs.anchorId));
+        if (node.attrs.setId) dom.setAttribute("data-mutation-set", String(node.attrs.setId));
+        // Subscribing calls back synchronously with the current value (svelte
+        // store contract), so `currentNode` must already be initialized above.
+        const unsubscribeSets = mutationSetsByIdStore.subscribe(() => render(currentNode));
+        const unsubscribeLoaded = mutationSetRosterLoadedStore.subscribe(() => render(currentNode));
+        return {
+          dom,
+          update: (updated: PMNode) => {
+            if (updated.type.name !== "mutation") return false;
+            currentNode = updated;
+            if (updated.attrs.anchorId) dom.setAttribute("data-mutation-id", String(updated.attrs.anchorId));
+            if (updated.attrs.setId) dom.setAttribute("data-mutation-set", String(updated.attrs.setId));
+            else dom.removeAttribute("data-mutation-set");
+            render(updated);
+            return true;
+          },
+          destroy: () => {
+            unsubscribeSets();
+            unsubscribeLoaded();
+          },
+        };
+      };
     },
   });
-}
-
-export interface MutationCloseResolvers {
-  /** Human label for the record a close ends (its name / auto-label), resolved
-   *  live so the pill tracks edits to the referenced start marker. */
-  labelForClose: (ref: string) => string;
-}
 
 /**
- * Build the interval-close pill (#59). A point node that round-trips to
- * `<!-- mutate:close;ref=..;id=.. -->` — it ends the record `ref` at this prose
- * position (live iff start ≤ pos < close). Rendered as a distinct "closes X" pill.
+ * Build the interval-close pill (#59, ADR-0095 §1). A point node that
+ * round-trips to `<!-- mutate:close;ref=..[;row=..];id=.. -->` — it ends the
+ * anchor `ref` (optionally just one row of its set) at this prose position.
+ * Its label resolves `ref` through the mutation-sets store's anchor index,
+ * live, the same as the start pill — not by searching the open doc.
  */
-export function createMutationCloseMark({ labelForClose }: MutationCloseResolvers) {
-  return Node.create({
+export const createMutationCloseMark = () =>
+  Node.create({
     name: "mutationClose",
     inline: true,
     group: "inline",
@@ -227,11 +223,17 @@ export function createMutationCloseMark({ labelForClose }: MutationCloseResolver
           renderHTML: (attributes) =>
             attributes.ref ? { "data-mutation-close-ref": String(attributes.ref) } : {},
         },
-        markerId: {
+        row: {
+          default: "",
+          parseHTML: (element) => element.getAttribute("data-mutation-close-row") ?? "",
+          renderHTML: (attributes) =>
+            attributes.row ? { "data-mutation-close-row": String(attributes.row) } : {},
+        },
+        closeId: {
           default: null,
           parseHTML: (element) => element.getAttribute("data-mutation-id"),
           renderHTML: (attributes) =>
-            attributes.markerId ? { "data-mutation-id": String(attributes.markerId) } : {},
+            attributes.closeId ? { "data-mutation-id": String(attributes.closeId) } : {},
         },
       };
     },
@@ -239,20 +241,33 @@ export function createMutationCloseMark({ labelForClose }: MutationCloseResolver
       return [{ tag: "span[data-mutation-close-ref]" }];
     },
     renderHTML({ node, HTMLAttributes }) {
-      const label = labelForClose(String(node.attrs.ref ?? ""));
+      const label = closeLabelFromStore(String(node.attrs.ref ?? ""));
       const full = label ? `Closes ${label}` : "Closes a mutation";
       // "mutation ends here": ti-arrow-bar-to-right (a single lexicon-sanctioned
       // annotation glyph) rather than the banned `⤳✕` compound (#304). The mark
       // round-trips to an HTML comment, so this string is display-only.
       const icon = ["i", { class: "ti ti-arrow-bar-to-right", "aria-hidden": "true" }];
+      // Turndown treats an element with no TEXT content as blank and drops it
+      // outright — before any custom rule runs (the icon alone doesn't count,
+      // it's a font glyph, not text) — so the pill always carries at least a
+      // fallback glyph as real text, never just the icon.
       return [
         "span",
         mergeAttributes(HTMLAttributes, { class: "mutation-pill mutation-pill-close", title: full }),
         icon,
-        ...(label ? [label] : []),
+        label || "⤳",
       ];
     },
   });
+
+let mutationSetByAnchorIdSnapshot: ReadonlyMap<string, { title: string; rows: { field: string; op: string; value: string }[] }> | undefined;
+mutationSetByAnchorIdStore.subscribe((byAnchor) => {
+  mutationSetByAnchorIdSnapshot = byAnchor;
+});
+
+function closeLabelFromStore(ref: string): string {
+  if (!ref) return "";
+  return mutationSetLabel(mutationSetByAnchorIdSnapshot?.get(ref));
 }
 
 export const TodoAnchor = Mark.create({

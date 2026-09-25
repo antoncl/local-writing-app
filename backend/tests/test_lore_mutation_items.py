@@ -18,6 +18,7 @@ from tempfile import TemporaryDirectory
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
+from mutation_helpers import save_scenes_with_mutations
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -108,11 +109,14 @@ class _RelationshipFixture(unittest.TestCase):
         )
 
     def _new_scene(self, title: str, body: str) -> str:
+        """Create a scene and move its (legacy-grammar) body into a set +
+        anchor (ADR-0095) — a body with no `mutate:` marker passes through
+        the converter as a no-op, so this doubles as the plain-prose path
+        too."""
         created = self.client.post("/api/scenes", json={"title": title})
         self.assertEqual(created.status_code, 200, created.text)
         scene_id = created.json()["id"]
-        saved = self.client.put(f"/api/scenes/{scene_id}", json={"title": title, "body": body})
-        self.assertEqual(saved.status_code, 200, saved.text)
+        save_scenes_with_mutations(self.service, {scene_id: body})
         return scene_id
 
     def _marker(self, field: str, op: str, value: str, mid: str) -> str:

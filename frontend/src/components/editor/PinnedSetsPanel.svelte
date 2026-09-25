@@ -19,6 +19,7 @@
   import { referenceIndexStore } from "@/lib/stores/references";
   import { mutationSetEntriesStore, openNewMutationSet, openEditMutationSet } from "@/lib/stores/mutationSets";
   import { pinnedSetsFor } from "@/lib/views/pinnedSets";
+  import { mutationSetLabel } from "@/lib/editor-core/mutationNodes";
   import { resolveColor } from "@/lib/utils/colors";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -109,7 +110,7 @@
 
 {#snippet pinnedRow(set: MutationSetEntrySummary, rowCtx: RowCtx<MutationSetEntrySummary>)}
   <NodeRow
-    title={set.title || "Untitled change"}
+    title={mutationSetLabel(set)}
     depth={rowCtx.depth}
     stripeColor={resolveColor(null, set.entry_type, "mutation_set", schema)?.hex ?? null}
     typeIcon={entryTypeIconClass(set.entry_type, schema)}

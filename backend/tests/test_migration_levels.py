@@ -16,7 +16,7 @@ from typing import Any
 import yaml
 
 from app.services.migration_levels import migrate_layer_levels
-from app.services.migrations import ChainContext, read_project_version
+from app.services.migrations import CURRENT_VERSION, ChainContext, read_project_version
 from app.services.project_service import ProjectService
 
 
@@ -235,7 +235,10 @@ class LevelsMigrationOpenTests(unittest.TestCase):
 
     def test_the_tree_is_named_by_its_levels(self) -> None:
         service = ProjectService.opened_at(self.root)
-        self.assertEqual(read_project_version(self.root), 13)
+        # The ladder runs to its end on open, not just through this test's own
+        # step (v13) — v14+ steps are no-ops on a v13 fixture with no legacy
+        # mutation markers, but they still stamp the version forward.
+        self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
 
         document = service.read_structure()
         act = document.root.children[0]

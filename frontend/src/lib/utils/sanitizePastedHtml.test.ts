@@ -1,6 +1,41 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
+import { Schema } from "@tiptap/pm/model";
 import { sanitizePastedHtml } from "./sanitizePastedHtml";
+import { appClipboardSerializer } from "@/lib/editor-core/appClipboard";
+
+describe("sanitizePastedHtml — the app's own clipboard (#2235)", () => {
+  const pill = '<span data-mutation-set="mutation_set_1" data-mutation-id="mut_a" class="mutation-pill">⤳ Jar turn</span>';
+
+  it("keeps the app's own inline nodes when the HTML was copied by the app's editor", () => {
+    const schema = new Schema({
+      nodes: {
+        doc: { content: "block+" },
+        paragraph: { content: "inline*", group: "block", toDOM: () => ["p", 0] },
+        text: { group: "inline" },
+        pill: {
+          group: "inline",
+          inline: true,
+          atom: true,
+          toDOM: () => ["span", { "data-mutation-set": "mutation_set_1", "data-mutation-id": "mut_a", class: "mutation-pill" }, "⤳ Jar turn"],
+        },
+      },
+    });
+    const content = schema.node("paragraph", null, [schema.text("Before "), schema.node("pill"), schema.text(" after")]);
+    const wrap = document.createElement("div");
+    wrap.appendChild(appClipboardSerializer(schema).serializeFragment(schema.node("doc", null, [content]).content, { document }));
+    const out = sanitizePastedHtml(wrap.innerHTML);
+    expect(out).toContain('data-mutation-id="mut_a"');
+    expect(out).toContain('data-mutation-set="mutation_set_1"');
+    expect(out).not.toContain("data-lwa-clipboard");
+  });
+
+  it("still flattens the same HTML when it comes from outside the app", () => {
+    const out = sanitizePastedHtml(`<p>Before ${pill} after</p>`);
+    expect(out).not.toContain("data-mutation-id");
+    expect(out).toContain("⤳ Jar turn");
+  });
+});
 
 describe("sanitizePastedHtml — whole-document markdown source (#1622)", () => {
   it("re-parses a whole-document markdown code block as prose", () => {

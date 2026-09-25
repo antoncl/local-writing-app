@@ -38,10 +38,10 @@
   let promoteModalEntry = $state<MutationSetEntry | null>(null);
 
   // Owned-here (same isInherited/projectLayerIdStore read PromoteAction uses)
-  // AND staged — a placed one-off is anchored in a scene and out of scope
-  // (ADR-0078 Scope; the backend also refuses it).
+  // AND not active — an active set is anchored in a scene and out of scope
+  // (ADR-0095 §10 Promotion; the backend also refuses it).
   function isPromotable(entry: MutationSetEntrySummary): boolean {
-    return !entry.placed && !isInherited({ source_layer_id: entry.source_layer_id }, $projectLayerIdStore);
+    return entry.state !== "active" && !isInherited({ source_layer_id: entry.source_layer_id }, $projectLayerIdStore);
   }
 
   async function openPromote(id: string) {

@@ -355,6 +355,46 @@ describe("ReferenceListTab — reference-keyed lists (ADR-0089 #2072)", () => {
     ]);
   });
 
+  // #2218: the detail line is the only opener for an item's editor, so an item
+  // holding just its key must still show one — it used to collapse to nothing.
+  it("a key-only item shows 'Add details…', which opens its editor", async () => {
+    const model = relModel({ items: [{ to: "char_mara" }] });
+    const { container } = render(ReferenceListTab, { props: { model, deps: relDeps(), on: baseOn() } });
+    const opener = screen.getByRole("button", { name: "Edit Mara" });
+    expect(opener).toHaveTextContent("Add details…");
+    expect(container.querySelector(".ref-item-editor")).toBeNull();
+    await fireEvent.click(opener);
+    await tick();
+    expect(container.querySelector(".ref-item-editor")).not.toBeNull();
+  });
+
+  it("adding a target opens the new item's editor so its members can be typed at once", async () => {
+    const on = baseOn();
+    const { container, rerender } = render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add Relationships" }));
+    await tick();
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    await fireEvent.click(within(menu).getByRole("button", { name: "Expand Character" }));
+    await tick();
+    await fireEvent.click(within(menu).getByText("Mara").closest("button")!);
+    await tick();
+    // The host writes the change back; the tab re-renders with the new item.
+    await rerender({
+      model: relModel({
+        items: [
+          { to: "char_tomas", kind: "kinship", state: "estranged" },
+          { to: "char_elena", kind: "rivalry", state: "" },
+          { to: "char_mara" },
+        ],
+      }),
+      deps: relDeps(),
+      on,
+    });
+    await tick();
+    expect(screen.getByRole("button", { name: "Collapse Mara" })).toBeInTheDocument();
+    expect(container.querySelector(".ref-item-editor")).not.toBeNull();
+  });
+
   it("picking an already-picked target through the add menu removes it, never duplicates the key", async () => {
     // NodePicker's own toggle (`isPicked` against the `value` it's fed) turns
     // a re-pick of an already-selected candidate into a REMOVE, so a

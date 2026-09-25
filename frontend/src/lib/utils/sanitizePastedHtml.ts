@@ -13,6 +13,10 @@
 
 import { marked } from "marked";
 
+/** Marks HTML this app's editors put on the clipboard (#2235); see
+ *  `AppClipboardMarker` in `lib/editor-core/appClipboard.ts`. */
+export const APP_CLIPBOARD_MARKER = "data-lwa-clipboard";
+
 const ATTRS_TO_STRIP = new Set([
   "style",
   "class",
@@ -82,6 +86,14 @@ function wholeDocumentMarkdownSource(body: HTMLElement): string | null {
 export function sanitizePastedHtml(html: string): string {
   if (!html) return "";
   const doc = new DOMParser().parseFromString(html, "text/html");
+  // The app's own clipboard HTML is already clean, and its inline nodes (a
+  // mutation pill, a character mention) are spans identified by data-*
+  // attributes the sanitizing below would strip (#2235). Pass it through.
+  const markers = doc.body.querySelectorAll(`[${APP_CLIPBOARD_MARKER}]`);
+  if (markers.length > 0) {
+    for (const marker of Array.from(markers)) marker.remove();
+    return doc.body.innerHTML;
+  }
   // Before any attribute stripping (which removes the `language-markdown` class
   // the check keys on): a whole-document markdown code block is prose shown as
   // source — re-parse it to HTML so it lands as prose, not a monospaced fence.

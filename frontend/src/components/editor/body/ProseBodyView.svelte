@@ -34,6 +34,7 @@
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { markdownOffsetAt as markdownOffsetAtDoc } from "@/lib/editor-core/markdownOffset";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
+  import { AppClipboardMarker } from "@/lib/editor-core/appClipboard";
   import {
     ImplicitContextHighlight,
     REBUILD_META,
@@ -62,6 +63,7 @@
   import MutationDialogs from "./MutationDialogs.svelte";
   import {
     parseSlashBody,
+    slashParagraphText,
     parseTableDims,
     tokenizeSlashArgs,
     matchesSlashFilter,
@@ -555,14 +557,14 @@
     const { selection } = editor.state;
     if (!selection.empty) return false;
     if (selection.$from.parent.type.name !== "paragraph") return false;
-    const text = selection.$from.parent.textContent;
+    const text = slashParagraphText(selection.$from.parent);
     if (!text.startsWith("/")) return false;
     return parseSlashBody(text.slice(1)) !== null;
   }
 
   function readSlashFilterText(): string {
     if (!editor) return "";
-    const text = editor.state.selection.$from.parent.textContent;
+    const text = slashParagraphText(editor.state.selection.$from.parent);
     if (!text.startsWith("/")) return "";
     return text.slice(1);
   }
@@ -625,7 +627,7 @@
     if (!editor) return;
     const { selection } = editor.state;
     const paragraphStart = selection.$from.start();
-    const paragraphText = selection.$from.parent.textContent;
+    const paragraphText = slashParagraphText(selection.$from.parent);
     if (paragraphText.startsWith("/") && parseSlashBody(paragraphText.slice(1)) !== null) {
       editor.chain().focus().deleteRange({ from: paragraphStart, to: paragraphStart + paragraphText.length }).run();
     }
@@ -648,7 +650,7 @@
     if (!editor) return;
     const { selection } = editor.state;
     const paragraphStart = selection.$from.start();
-    const paragraphText = selection.$from.parent.textContent;
+    const paragraphText = slashParagraphText(selection.$from.parent);
     if (!paragraphText.startsWith("/") || parseSlashBody(paragraphText.slice(1)) === null) return;
     const target = (cmd.autocompleteTo ?? cmd.label).trim();
     if (!target) return;
@@ -905,7 +907,7 @@
   // ---------- Editor lifecycle ----------
   function isEmptyTextblock(view: EditorView) {
     const { selection } = view.state;
-    return selection.empty && selection.$from.parent.type.name === "paragraph" && selection.$from.parent.textContent.length === 0;
+    return selection.empty && selection.$from.parent.type.name === "paragraph" && selection.$from.parent.content.size === 0;
   }
 
   function handleEditorKeydown(view: EditorView, event: KeyboardEvent) {
@@ -1082,6 +1084,7 @@
       element: editorElement,
       extensions: [
         proseStarterKit(),
+        AppClipboardMarker,
         AISuggestion,
         CharacterMark,
         MutationMark,

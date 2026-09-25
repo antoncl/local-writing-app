@@ -1,5 +1,30 @@
 import { describe, it, expect } from "vitest";
-import { slashCommandToken, parseSlashBody, filterSlashCommands } from "./slashParsing";
+import { Schema } from "@tiptap/pm/model";
+import { slashCommandToken, parseSlashBody, filterSlashCommands, slashParagraphText } from "./slashParsing";
+
+describe("slashParagraphText (#2234)", () => {
+  // A paragraph with an inline atom, like the mutation pill.
+  const schema = new Schema({
+    nodes: {
+      doc: { content: "paragraph+" },
+      paragraph: { content: "inline*", group: "block" },
+      text: { group: "inline" },
+      pill: { group: "inline", inline: true, atom: true },
+    },
+  });
+
+  it("does not read a paragraph that starts with an atom as a slash context", () => {
+    const paragraph = schema.node("paragraph", null, [schema.node("pill"), schema.text("/mutate")]);
+    expect(paragraph.textContent.startsWith("/")).toBe(true); // the old reading, which deleted the pill
+    expect(slashParagraphText(paragraph).startsWith("/")).toBe(false);
+  });
+
+  it("keeps string length equal to the paragraph's doc size, atoms included", () => {
+    const paragraph = schema.node("paragraph", null, [schema.text("/mutate "), schema.node("pill")]);
+    expect(slashParagraphText(paragraph)).toHaveLength(paragraph.content.size);
+    expect(slashParagraphText(paragraph).startsWith("/mutate")).toBe(true);
+  });
+});
 
 describe("slashCommandToken", () => {
   it("lowercases a single-word title so it round-trips its own label", () => {

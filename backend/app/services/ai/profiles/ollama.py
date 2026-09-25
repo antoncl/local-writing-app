@@ -246,7 +246,32 @@ class OllamaProfile(OpenAICompatibleProfile):
             for m in messages
         )
         needed = prompt_tokens + max(int(call.max_tokens or 0), 0)
-        return min(model_max, _ceil_bucket(needed))
+        wanted = min(model_max, _ceil_bucket(needed))
+        # #2203: grow, never shrink. A different num_ctx makes the daemon unload
+        # and reload the model, so a smaller turn (an AI commit after a long
+        # chat) reuses the window already loaded when it fits, rather than
+        # reloading twice (into the commit, and back at the next chat turn).
+        return max(wanted, self._loaded_context_window(call.model))
+
+    def _loaded_context_window(self, model: str) -> int:
+        """The context window `model` is currently loaded with, via `/api/ps`, or
+        0 when it isn't loaded or the daemon can't be asked — the caller then
+        sizes the window from the turn alone, as a fresh load always is."""
+        try:
+            with httpx.Client(timeout=4.0) as client:
+                response = client.get(f"{self._base}/api/ps")
+                response.raise_for_status()
+                payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            log.debug("Ollama /api/ps (num_ctx sizing) failed for %s: %s", model, exc)
+            return 0
+        rows = payload.get("models") if isinstance(payload, dict) else None
+        names = {model, f"{model}:latest"}
+        for row in rows or []:
+            if isinstance(row, dict) and (row.get("name") in names or row.get("model") in names):
+                loaded = row.get("context_length")
+                return loaded if isinstance(loaded, int) and loaded > 0 else 0
+        return 0
 
     def _model_context_window(self, model: str) -> int:
         """Best-effort trained context length for `model`, via a sync `/api/show`.

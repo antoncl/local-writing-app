@@ -63,8 +63,10 @@ class _Router:
         chat_json: dict | None = None,
         chat_frames: list[dict] | None = None,
         chat_status: int = 200,
+        ps: dict | None = None,
     ) -> None:
         self.show = show
+        self.ps = ps
         self.chat_json = chat_json
         self.chat_frames = chat_frames
         self.chat_status = chat_status
@@ -78,6 +80,8 @@ class _Router:
             if self.show is None:
                 return httpx.Response(500)
             return httpx.Response(200, json=self.show)
+        if path == "/api/ps" and self.ps is not None:
+            return httpx.Response(200, json=self.ps)
         if path == "/api/chat":
             self.bodies.append(json.loads(request.content))
             if self.chat_status != 200:
@@ -140,6 +144,61 @@ def test_chat_sizes_num_ctx_to_the_turn_not_the_model_max(route) -> None:
     # the 131072 the /v1 shim would have forced.
     assert body["options"]["num_ctx"] == 2048
     assert body["options"]["num_predict"] == 256
+
+
+def _ps(name: str, context_length: int) -> dict:
+    return {"models": [{"name": name, "model": name, "context_length": context_length}]}
+
+
+def test_chat_reuses_a_larger_loaded_window_instead_of_shrinking(route) -> None:
+    # #2203: the model is loaded at 32768 by a long chat; this 2048-sized turn (an
+    # AI commit) must not ask for less — a different num_ctx reloads the model.
+    router = route(
+        _Router(
+            show=_SHOW_128K,
+            chat_json={"message": {"content": "hi"}},
+            ps=_ps("llama3.2:latest", 32768),
+        )
+    )
+    OllamaProfile("http://box:11434").chat(_call())
+    assert router.bodies[0]["options"]["num_ctx"] == 32768
+
+
+def test_chat_grows_past_a_smaller_loaded_window(route) -> None:
+    router = route(
+        _Router(
+            show=_SHOW_128K,
+            chat_json={"message": {"content": "hi"}},
+            ps=_ps("llama3.2:latest", 2048),
+        )
+    )
+    OllamaProfile("http://box:11434").chat(_call(max_tokens=8192))
+    assert router.bodies[0]["options"]["num_ctx"] == 16384
+
+
+def test_chat_ignores_another_models_loaded_window(route) -> None:
+    router = route(
+        _Router(
+            show=_SHOW_128K,
+            chat_json={"message": {"content": "hi"}},
+            ps=_ps("qwen3:8b", 32768),
+        )
+    )
+    OllamaProfile("http://box:11434").chat(_call())
+    assert router.bodies[0]["options"]["num_ctx"] == 2048
+
+
+def test_chat_matches_a_loaded_model_named_without_its_tag(route) -> None:
+    # `/api/ps` reports "name:latest"; an assistant may name the model bare.
+    router = route(
+        _Router(
+            show=_SHOW_128K,
+            chat_json={"message": {"content": "hi"}},
+            ps=_ps("llama3.2:latest", 32768),
+        )
+    )
+    OllamaProfile("http://box:11434").chat(_call(model="llama3.2"))
+    assert router.bodies[0]["options"]["num_ctx"] == 32768
 
 
 def test_chat_reserves_reply_headroom_in_num_ctx(route) -> None:

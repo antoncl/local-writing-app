@@ -329,13 +329,99 @@ describe("ReferenceListTab — reference-keyed lists (ADR-0089 #2072)", () => {
 
   beforeEach(() => metadataSchemaStore.set(REL_SCHEMA));
 
-  it("rows render the targets' titles with the member detail", () => {
+  it("rows render each non-key member as its own segment", () => {
     render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on: baseOn() } });
     expect(screen.getByText("Tomas")).toBeInTheDocument();
-    expect(screen.getByText("kinship · estranged")).toBeInTheDocument();
+    expect(screen.getByText("kinship")).toBeInTheDocument();
+    expect(screen.getByText("estranged")).toBeInTheDocument();
     expect(screen.getByText("Elena")).toBeInTheDocument();
-    // Elena's blank `state` member drops out of the detail join (#698).
     expect(screen.getByText("rivalry")).toBeInTheDocument();
+    // Elena's blank `state` member shows the member's own name, muted —
+    // ADR-0089 Amendment 2 (replaces #2218's "Add details…").
+    const elenaRow = screen.getByText("Elena").closest(".node-row") as HTMLElement;
+    const placeholder = within(elenaRow).getByText("State");
+    expect(placeholder.className).toContain("idl-empty");
+    // The key member ("to") never renders as a segment.
+    expect(screen.queryByText("char_tomas")).toBeNull();
+  });
+
+  it("a key-only item's segments all show their member name as a placeholder", () => {
+    const model = relModel({ items: [{ to: "char_mara" }] });
+    const { container } = render(ReferenceListTab, { props: { model, deps: relDeps(), on: baseOn() } });
+    const maraRow = screen.getByText("Mara").closest(".node-row") as HTMLElement;
+    expect(within(maraRow).getByText("Kind")).toBeInTheDocument();
+    expect(within(maraRow).getByText("State")).toBeInTheDocument();
+    expect(container.querySelector(".ref-item-add-details")).toBeNull(); // #2218's opener is gone
+  });
+
+  it("clicking a text segment turns it into an input; Enter commits and leaves other items untouched", async () => {
+    const on = baseOn();
+    render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on } });
+    const tomasRow = screen.getByText("Tomas").closest(".node-row") as HTMLElement;
+    await fireEvent.click(within(tomasRow).getByText("kinship"));
+    const input = within(tomasRow).getByDisplayValue("kinship") as HTMLInputElement;
+    await fireEvent.input(input, { target: { value: "kin" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    expect(on.change).toHaveBeenCalledWith([
+      { to: "char_tomas", kind: "kin", state: "estranged" },
+      { to: "char_elena", kind: "rivalry", state: "" },
+    ]);
+  });
+
+  it("Esc on a segment's input reverts without saving", async () => {
+    const on = baseOn();
+    render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on } });
+    const tomasRow = screen.getByText("Tomas").closest(".node-row") as HTMLElement;
+    await fireEvent.click(within(tomasRow).getByText("kinship"));
+    const input = within(tomasRow).getByDisplayValue("kinship") as HTMLInputElement;
+    await fireEvent.input(input, { target: { value: "kin" } });
+    await fireEvent.keyDown(input, { key: "Escape" });
+    expect(on.change).not.toHaveBeenCalled();
+    expect(within(tomasRow).getByText("kinship")).toBeInTheDocument();
+  });
+
+  it("Tab commits the current segment and opens the next one for edit", async () => {
+    const on = baseOn();
+    render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on } });
+    const tomasRow = screen.getByText("Tomas").closest(".node-row") as HTMLElement;
+    await fireEvent.click(within(tomasRow).getByText("kinship"));
+    const input = within(tomasRow).getByDisplayValue("kinship") as HTMLInputElement;
+    await fireEvent.input(input, { target: { value: "kin" } });
+    await fireEvent.keyDown(input, { key: "Tab" });
+    expect(on.change).toHaveBeenCalledWith([
+      { to: "char_tomas", kind: "kin", state: "estranged" },
+      { to: "char_elena", kind: "rivalry", state: "" },
+    ]);
+    await tick();
+    expect(within(tomasRow).getByDisplayValue("estranged")).toBeInTheDocument();
+  });
+
+  it("a select member's options open in ONE click, anchored on the segment; choosing one commits", async () => {
+    const selectField = {
+      ...REL_FIELD,
+      item_members: [
+        REL_FIELD.item_members![0],
+        { key: "kind", name: "Kind", type: "select", options: [{ value: "ally", label: "Ally" }, { value: "rival", label: "Rival" }] },
+        REL_FIELD.item_members![2],
+      ],
+    } as MetadataFieldDefinition;
+    const on = baseOn();
+    render(ReferenceListTab, { props: { model: relModel({ field: selectField }), deps: relDeps(), on } });
+    const tomasRow = screen.getByText("Tomas").closest(".node-row") as HTMLElement;
+    // ONE click on the segment — no wrapper popover, no second click on a
+    // nested trigger (the approved design's fix for the two-click deviation).
+    await fireEvent.click(within(tomasRow).getByText("kinship"));
+    // The list opens on the next task, after this click has bubbled (#2221).
+    await new Promise((resolve) => setTimeout(resolve));
+    await tick();
+    expect(document.querySelector(".idl-popover")).toBeNull();
+    const optionsPopover = document.querySelector(".colored-select-popover") as HTMLElement;
+    expect(optionsPopover).not.toBeNull();
+    await fireEvent.click(within(optionsPopover).getByText("Rival"));
+    expect(on.change).toHaveBeenCalledWith([
+      { to: "char_tomas", kind: "rival", state: "estranged" },
+      { to: "char_elena", kind: "rivalry", state: "" },
+    ]);
   });
 
   it("picking a new target appends an item with only the key set and keeps other items' members intact", async () => {
@@ -355,20 +441,7 @@ describe("ReferenceListTab — reference-keyed lists (ADR-0089 #2072)", () => {
     ]);
   });
 
-  // #2218: the detail line is the only opener for an item's editor, so an item
-  // holding just its key must still show one — it used to collapse to nothing.
-  it("a key-only item shows 'Add details…', which opens its editor", async () => {
-    const model = relModel({ items: [{ to: "char_mara" }] });
-    const { container } = render(ReferenceListTab, { props: { model, deps: relDeps(), on: baseOn() } });
-    const opener = screen.getByRole("button", { name: "Edit Mara" });
-    expect(opener).toHaveTextContent("Add details…");
-    expect(container.querySelector(".ref-item-editor")).toBeNull();
-    await fireEvent.click(opener);
-    await tick();
-    expect(container.querySelector(".ref-item-editor")).not.toBeNull();
-  });
-
-  it("adding a target opens the new item's editor so its members can be typed at once", async () => {
+  it("adding a target puts the cursor in the new item's first segment", async () => {
     const on = baseOn();
     const { container, rerender } = render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on } });
     await fireEvent.click(screen.getByRole("button", { name: "Add Relationships" }));
@@ -391,8 +464,9 @@ describe("ReferenceListTab — reference-keyed lists (ADR-0089 #2072)", () => {
       on,
     });
     await tick();
-    expect(screen.getByRole("button", { name: "Collapse Mara" })).toBeInTheDocument();
-    expect(container.querySelector(".ref-item-editor")).not.toBeNull();
+    const list = container.querySelector(".ref-list-body") as HTMLElement;
+    const maraRow = within(list).getByText("Mara").closest(".node-row") as HTMLElement;
+    expect(within(maraRow).getByRole("textbox")).toBeInTheDocument();
   });
 
   it("picking an already-picked target through the add menu removes it, never duplicates the key", async () => {
@@ -457,9 +531,10 @@ describe("ReferenceListTab — reference-keyed lists (ADR-0089 #2072)", () => {
     });
     const tomasRow = screen.getByText("Tomas").closest(".node-row") as HTMLElement;
     expect(within(tomasRow).getByTitle("Changed by here")).toBeInTheDocument();
-    expect(within(tomasRow).getByText("kinship · reconciled")).toBeInTheDocument();
-    // Read-only (scrubbed): no click-to-edit affordance on the detail.
-    expect(tomasRow.querySelector(".ref-item-detail-toggle")).toBeNull();
+    expect(within(tomasRow).getByText("kinship")).toBeInTheDocument();
+    expect(within(tomasRow).getByText("reconciled")).toBeInTheDocument();
+    // Read-only (scrubbed): the segments are plain text, not buttons.
+    expect(tomasRow.querySelectorAll(".idl-seg-btn").length).toBe(0);
     const elenaRow = screen.getByText("Elena").closest(".node-row") as HTMLElement;
     expect(within(elenaRow).queryByTitle("Changed by here")).toBeNull();
   });

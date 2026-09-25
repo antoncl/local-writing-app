@@ -232,3 +232,65 @@ describe("ColoredSelect head abilities (#1904)", () => {
     expect(document.querySelector(".colored-select-popover")).toBeNull();
   });
 });
+
+describe("ColoredSelect — openOnMount / onClose (#2221)", () => {
+  // openOnMount opens on the NEXT task (after the mounting click has bubbled).
+  const nextTask = async () => {
+    await new Promise((resolve) => setTimeout(resolve));
+    await tick();
+  };
+  it("openOnMount opens the list as soon as the trigger mounts, no click needed", async () => {
+    render(ColoredSelect, {
+      props: {
+        value: "a",
+        options: [{ value: "a", label: "A" }, { value: "b", label: "B" }],
+        openOnMount: true,
+      },
+    });
+    await nextTask();
+    expect(document.querySelector(".colored-select-popover")).not.toBeNull();
+  });
+
+  it("stays open when the click that mounted it bubbles to the window afterwards", async () => {
+    // The browser bug: a host mounts this inside a click handler; that click
+    // then reaches the window's outside-click listener with a target (the
+    // host's replaced element) that is not inside the trigger.
+    render(ColoredSelect, {
+      props: { value: "a", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }], openOnMount: true },
+    });
+    const detached = document.createElement("button");
+    detached.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    window.dispatchEvent(new MouseEvent("click"));
+    await nextTask();
+    expect(document.querySelector(".colored-select-popover")).not.toBeNull();
+  });
+
+  it("defaults to closed (openOnMount off) — every existing caller is unchanged", () => {
+    render(ColoredSelect, { props: { value: "a", options: [{ value: "a", label: "A" }] } });
+    expect(document.querySelector(".colored-select-popover")).toBeNull();
+  });
+
+  it("onClose fires on Esc, a pick, and an outside click", async () => {
+    const onCloseEsc = vi.fn();
+    const { unmount: unmountEsc } = render(ColoredSelect, {
+      props: { value: "a", options: [{ value: "a", label: "A" }], openOnMount: true, onClose: onCloseEsc },
+    });
+    await nextTask();
+    await fireEvent.keyDown(window, { key: "Escape" });
+    expect(onCloseEsc).toHaveBeenCalledTimes(1);
+    unmountEsc();
+
+    const onClosePick = vi.fn();
+    render(ColoredSelect, {
+      props: {
+        value: "a",
+        options: [{ value: "a", label: "A" }, { value: "b", label: "B" }],
+        openOnMount: true,
+        onClose: onClosePick,
+      },
+    });
+    await nextTask();
+    await fireEvent.click(screen.getByText("B"));
+    expect(onClosePick).toHaveBeenCalledTimes(1);
+  });
+});

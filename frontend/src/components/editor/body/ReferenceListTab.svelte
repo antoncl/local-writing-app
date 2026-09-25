@@ -12,7 +12,8 @@
   // ids. `model.keyMember` tells the two shapes apart: null is today's plain
   // `entity_ref_list` (each item IS the id string, byte-identical to before);
   // a real key resolves each item to its target's row, the item's other
-  // members as the row's detail line, editable in place (BodyItemRows).
+  // members as the row's detail line — which IS the item's editor, one
+  // clickable segment per member (Amendment 2, `ItemDetailSegments.svelte`).
   //
   // NO view switcher in this slice (out of scope, #2010): ViewSwitcher is
   // pane-scoped by kind; a tab-scoped view key is a follow-up.
@@ -21,14 +22,13 @@
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import PeekCard, { type PeekCardDeps } from "@/components/widgets/PeekCard.svelte";
-  import BodyItemRows from "@/components/editor/body/BodyItemRows.svelte";
+  import ItemDetailSegments from "@/components/editor/body/ItemDetailSegments.svelte";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
-  import { resolveColor } from "@/lib/utils/colors";
   import { isMetadataValuePresent } from "@/lib/utils/schemaTypeHelpers";
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { buildPeekTarget } from "@/lib/utils/peekTarget";
   import { peekAnchor } from "@/lib/actions/peekAnchor";
-  import { itemMemberDetail, listItemKey } from "@/lib/editor-core/keyedList";
+  import { listItemKey } from "@/lib/editor-core/keyedList";
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   import { liveTags } from "@/lib/stores/tagNodes";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -39,7 +39,6 @@
   import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
   import type {
     AssistantEntrySummary,
-    DocumentKind,
     EntryMetadata,
     LoreEntrySummary,
     MetadataFieldDefinition,
@@ -130,8 +129,9 @@
     // never reaches this tab in the first place, #2010's own field is never a
     // tags field; this only covers a stray tag id inside another list).
     tagTitleById?: ReadonlyMap<string, string>;
-    // Threaded through to a keyed item's inline editor (BodyItemRows) — the
-    // same collaborators BodySections/BodyListSection pass it (#2043).
+    // Threaded through to a keyed item's segment popover (ItemDetailSegments,
+    // its long_text member's editor) — the same collaborators
+    // BodySections/BodyListSection pass a keyed item's editor (#2043).
     implicitContextMatcher?: CompiledMatcher | null;
     excludeId?: string | null;
     createLayerId?: string | null;
@@ -263,6 +263,16 @@
       .map((n): NodePickerRef => ({ id: n.id, kind: n.kind as NodePickerRef["kind"], title: n.title, entry_type: n.entry_type })),
   );
 
+  // ADR-0089 Amendment 2, decision 6: the group header already names the
+  // type when the active view groups by it, so the row itself stays quiet.
+  const groupedByType = $derived(!!viewSpec.group_by?.some((level) => level.field === "entry_type"));
+
+  // ADR-0089 Amendment 2: the item's non-key members, in order — the
+  // segments a keyed row's detail line renders and edits.
+  const otherMembers = $derived(
+    model.keyMember ? (model.field.item_members ?? []).filter((m) => m.key !== model.keyMember) : [],
+  );
+
   // ADR-0089 §1/§3: add appends `{ [keyMember]: id }`, remove drops the item
   // by key — every other item's object is untouched (a plain re-derivation
   // from ids would lose their members). An id already keying an item is
@@ -284,10 +294,11 @@
     const added = [...new Set(newIds.filter((id) => !currentKeys.has(id)))];
     const appended = added.map((id) => ({ [keyMember]: id }) as MetadataValue);
     on.change([...kept, ...appended]);
-    // #2218: a freshly added item holds only its key, so open its editor at
-    // once — the other members are typed as part of adding (ADR-0089 journey
-    // step 2: "Tomas, kinship, 'estranged'").
-    if (added.length > 0 && hasOtherMembers) openItemId = added[added.length - 1];
+    // ADR-0089 Amendment 2, journey step 4: a freshly added item's cursor
+    // lands on its first segment at once — "pick, type, Tab, type".
+    if (added.length > 0 && otherMembers.length > 0) {
+      editingSegment = { id: added[added.length - 1], key: otherMembers[0].key };
+    }
   }
 
   function removeId(id: string) {
@@ -319,15 +330,6 @@
     replaceItemByKey(entry.key, (record) => ({ ...record, [memberKey]: value }));
   }
 
-  function clearItemMember(entry: RowEntry, memberKey: string) {
-    if (!entry.key) return;
-    replaceItemByKey(entry.key, (record) => {
-      const next = { ...record };
-      delete next[memberKey];
-      return next;
-    });
-  }
-
   function entryTypeName(entryType: string, kind: string): string {
     if (entryType && model.schema?.entry_types[entryType]?.name) return model.schema.entry_types[entryType].name;
     return entryType || kind;
@@ -341,18 +343,6 @@
   const nodeSearch = $derived(makeNodeSearchFilter(deps.tagTitleById ?? new Map()));
   function filterNode(node: RefTabNode, query: string): boolean {
     return nodeSearch(node, query) || entryTypeName(node.entry_type, node.kind).toLowerCase().includes(query);
-  }
-
-  function instanceColorFor(node: RefTabNode): string | null {
-    if (node.kind === "lore") {
-      const entry = deps.loreEntries.find((e) => e.id === node.id);
-      return typeof entry?.metadata?.color === "string" ? entry.metadata.color : null;
-    }
-    return null;
-  }
-
-  function pillHexFor(node: RefTabNode): string | null {
-    return resolveColor(instanceColorFor(node), node.entry_type, node.kind, model.schema)?.hex ?? null;
   }
 
   // --- Peek card (#2011): hover/focus a row for a preview -----------------
@@ -416,17 +406,20 @@
     closePeek();
   }
 
-  // --- Item editor (ADR-0089 §6 stop 0): expand a keyed row in place -------
-  let openItemId = $state<string | null>(null);
-  function toggleItemEditor(id: string) {
-    openItemId = openItemId === id ? null : id;
+  // --- Item editor (ADR-0089 Amendment 2): the detail line IS the item's
+  // editor — one segment open at a time across the WHOLE tab, so the state
+  // lives here rather than per-row (ItemDetailSegments's sibling instances
+  // can't otherwise see each other). `id` is a row's node id, `key` the
+  // open member.
+  let editingSegment = $state<{ id: string; key: string } | null>(null);
+  function beginSegmentEdit(id: string, key: string) {
+    editingSegment = { id, key };
   }
-  // Whether an item has anything to edit beyond its key (#2218) — only then
-  // does an empty detail read "Add details…" and does adding open the editor.
-  const hasOtherMembers = $derived(
-    !!model.keyMember && (model.field.item_members ?? []).some((m) => m.key !== model.keyMember),
-  );
-  const itemDocumentKind = $derived((model.schema?.entry_types[model.entryType]?.kind ?? "lore") as DocumentKind);
+  function endSegmentEdit(id: string, key: string) {
+    // Guards against a stale close racing a fresh open (clicking straight
+    // from one segment to another): only clear if this is still the open one.
+    if (editingSegment?.id === id && editingSegment.key === key) editingSegment = null;
+  }
 
   // --- Scroll-position memory (#2013) --------------------------------------
   // Surface key mirrors ProseBodyView's "body": "list:<fieldId>" per field, so
@@ -528,45 +521,11 @@
 {#snippet refRow(node: RefTabNode, ctx: RowCtx<RefTabNode>)}
   {@const entry = entryByNodeId.get(node.id)}
   {@const unresolved = !!(node.missing || node.orphaned)}
-  {@const hex = unresolved ? null : pillHexFor(node)}
-  {@const detail = model.keyMember && entry && !entry.orphaned ? itemMemberDetail(model.field, entry.item) : ""}
   {@const editable = !!model.keyMember && !unresolved && !model.readOnly}
-  {#snippet itemEditor()}
-    {#if entry}
-      <div class="ref-item-editor">
-        <BodyItemRows
-          model={{
-            members: model.field.item_members ?? [],
-            record: (typeof entry.item === "object" && entry.item !== null && !Array.isArray(entry.item) ? entry.item : {}) as Record<
-              string,
-              MetadataValue
-            >,
-            readOnly: model.readOnly,
-            schema: model.schema!,
-            entryType: model.entryType,
-            documentKind: itemDocumentKind,
-            itemKey: `${model.fieldId}:${node.id}`,
-          }}
-          deps={{
-            loreEntries: deps.loreEntries,
-            promptEntries: deps.promptEntries,
-            structure: deps.structure,
-            researchStructure: deps.researchStructure,
-            implicitContextMatcher: deps.implicitContextMatcher ?? null,
-            excludeId: deps.excludeId ?? null,
-            createLayerId: deps.createLayerId ?? null,
-            tagTitleById: deps.tagTitleById ?? new Map(),
-          }}
-          on={{
-            write: (key, value) => writeItemMember(entry, key, value),
-            clear: (key) => clearItemMember(entry, key),
-            navigate: (payload) => on.navigate(payload),
-          }}
-          disabledKeys={model.keyMember ? [model.keyMember] : []}
-        />
-      </div>
-    {/if}
-  {/snippet}
+  {@const record =
+    entry && !entry.orphaned && typeof entry.item === "object" && entry.item !== null && !Array.isArray(entry.item)
+      ? (entry.item as Record<string, MetadataValue>)
+      : {}}
   <div class="ref-row-anchor" use:peekAnchor={{ onOpen: (anchor) => openPeek(node, anchor), onClose: closePeek }}>
     <NodeRow
       title={node.missing ? "Missing" : node.orphaned ? "(no target)" : node.title}
@@ -574,29 +533,41 @@
       stripeColor={null}
       typeIcon={unresolved ? null : entryTypeIconClass(node.entry_type, model.schema)}
       onDblClick={ctx.onDblClick}
-      nested={editable && openItemId === node.id ? itemEditor : undefined}
     >
       {#snippet detailSlot()}
-        {#if editable}
-          <button
-            type="button"
-            class="ref-item-detail-toggle"
-            aria-expanded={openItemId === node.id}
-            aria-label={`${openItemId === node.id ? "Collapse" : "Edit"} ${node.title}`}
-            onclick={() => toggleItemEditor(node.id)}
-          >{#if detail}<small>{detail}</small>{:else if hasOtherMembers}<small class="ref-item-add-details">Add details…</small>{/if}{#if entry?.mutated}<span class="ref-item-mutated" title="Changed by here">⤳</span>{/if}</button>
-        {:else if detail}
-          <small>{detail}{#if entry?.mutated}<span class="ref-item-mutated" title="Changed by here">⤳</span>{/if}</small>
+        {#if model.keyMember && entry && !entry.orphaned}
+          <span class="ref-item-detail">
+            <ItemDetailSegments
+              members={otherMembers}
+              {record}
+              {editable}
+              editingKey={editingSegment?.id === node.id ? editingSegment.key : null}
+              deps={{
+                loreEntries: deps.loreEntries,
+                promptEntries: deps.promptEntries,
+                structure: deps.structure,
+                researchStructure: deps.researchStructure,
+                excludeId: deps.excludeId ?? null,
+                createLayerId: deps.createLayerId ?? null,
+                implicitContextMatcher: deps.implicitContextMatcher ?? null,
+              }}
+              onEditStart={(key) => beginSegmentEdit(node.id, key)}
+              onEditEnd={(key) => endSegmentEdit(node.id, key)}
+              onCommit={(key, value) => writeItemMember(entry, key, value)}
+              onNavigate={(payload) => on.navigate(payload)}
+            />
+            {#if entry.mutated}<span class="ref-item-mutated" title="Changed by here">⤳</span>{/if}
+          </span>
         {/if}
       {/snippet}
       {#snippet trailing()}
-        <span
-          class="ref-type-pill"
-          class:has-color={!!hex}
-          class:missing={node.missing}
-          class:orphaned={node.orphaned}
-          style={hex ? `--chip-base: ${hex}` : ""}
-        >{node.missing ? "Missing" : node.orphaned ? "Orphaned" : entryTypeName(node.entry_type, node.kind)}</span>
+        {#if node.missing || node.orphaned}
+          <span class="ref-type-pill" class:missing={node.missing} class:orphaned={node.orphaned}
+            >{node.missing ? "Missing" : "Orphaned"}</span
+          >
+        {:else if !groupedByType}
+          <span class="ref-item-type">{entryTypeName(node.entry_type, node.kind)}</span>
+        {/if}
         {#if !model.readOnly}
           <button
             type="button"
@@ -688,9 +659,8 @@
     overflow: auto;
   }
 
-  /* Matches the backlinks-pill / ReferencePicker recipe so every ref-type
-     chip in the app shares one vocabulary. `--chip-base` set inline;
-     color-mix derives the tinted background + border + text. */
+  /* Status pill — Missing/Orphaned only (ADR-0089 Amendment 2, decision 6:
+     the entry TYPE is no longer a colored chip, just quiet text below). */
   .ref-type-pill {
     display: inline-flex;
     align-items: center;
@@ -704,15 +674,6 @@
     line-height: 1.5;
     white-space: nowrap;
   }
-  .ref-type-pill.has-color {
-    background: color-mix(in srgb, var(--chip-base) 14%, white 86%);
-    border-color: color-mix(in srgb, var(--chip-base) 45%, var(--divider) 55%);
-    color: color-mix(in srgb, var(--chip-base) 65%, var(--text) 35%);
-  }
-  :global([data-theme="dark"]) .ref-type-pill.has-color {
-    background: color-mix(in srgb, var(--chip-base) 22%, black 78%);
-    color: color-mix(in srgb, var(--chip-base) 70%, var(--text) 30%);
-  }
   .ref-type-pill.missing,
   .ref-type-pill.orphaned {
     background: var(--danger-soft);
@@ -720,33 +681,19 @@
     color: var(--danger);
   }
 
-  /* The detail line doubles as the item-editor toggle for a keyed list
-     (ADR-0089 §6) — a plain text button, no button chrome of its own, so it
-     reads exactly like the static `<small>` it replaces. */
-  .ref-item-detail-toggle {
-    display: block;
-    width: 100%;
-    padding: 0;
-    border: 0;
-    background: none;
-    text-align: left;
-    font: inherit;
-    color: inherit;
-    cursor: pointer;
-  }
-  .ref-item-detail-toggle:hover :global(small) {
-    color: var(--text-2);
-  }
-  /* #2218: the opener for an item whose members are all empty — without it
-     the toggle has no content and collapses to nothing. */
-  .ref-item-add-details {
+  /* Amendment 2, decision 6: quiet muted text, not a chip — the group
+     header already names the type when the view groups by it. */
+  .ref-item-type {
     color: var(--text-3);
-    font-style: italic;
+    font-size: var(--fs-xs);
+    white-space: nowrap;
   }
-  .ref-item-detail-toggle:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-    border-radius: var(--r-sm);
+
+  /* The segments editor sits where the static detail text used to. */
+  .ref-item-detail {
+    display: block;
+    font-size: var(--fs-sm);
+    color: var(--text-3);
   }
 
   /* Mutation mark (#64/ADR-0089 §6) — the in-prose pill's vocabulary. */
@@ -754,10 +701,6 @@
     margin-left: 4px;
     color: var(--mutation-color);
     font-weight: 700;
-  }
-
-  .ref-item-editor {
-    padding-block: 2px 4px;
   }
 
   .muted {

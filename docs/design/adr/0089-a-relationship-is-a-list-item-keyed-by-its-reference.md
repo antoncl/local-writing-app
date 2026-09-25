@@ -217,6 +217,10 @@ records.
 > *which* tab a collection field occupies is now the field's level-1 Section (blank → the Body tab),
 > not one-tab-per-field; body and the derived collections (References/Conversations/Mutation sets)
 > become fields. The item/detail contract this section describes is unchanged.
+>
+> **Amended by [Amendment 2](#amendment-2--the-detail-line-is-the-items-editor-2026-09-25):**
+> the detail line *is* the item's editor, one clickable segment per non-key member; the expanding
+> item form and the key member's repeat in it are gone.
 
 A list whose items point at nodes renders as a list of those nodes' rows: the reference-list tab
 (`frontend/src/components/editor/body/ReferenceListTab.svelte`, a `ViewNodeList` over NodeRows)
@@ -559,3 +563,70 @@ Each slice gets its own issue and an explicit go; acceptance of this amendment s
 7. After upgrade a colleague opens the same project on the shipped build: Characters, Related
    Entries, References, Conversations and Mutation sets are where they were, because the built-in
    Sections were seeded.
+
+## Amendment 2 — The detail line is the item's editor (2026-09-25)
+
+**Status: accepted (2026-09-25, Anton Lauridsen).** Raised by Anton after dogfooding a `{text, entity_ref}`
+"Connections" list. Verified against `ed71943e` (2026-09-25). Design record:
+`docs/design/mockups/0089-detail-line-editor.html` (approved in session, clickable).
+
+### The problem
+§6 says the item's members are "edited in place in the tab" and mentions "the item's editor", but the
+design record ("Qualified References") never drew either. The build filled the gap with a disclosure:
+the detail line is a toggle that expands an inset form (`BodyItemRows`) under the row.
+
+- **It is a mode switch away from where the item is read.** The writer reads "kinship · estranged" on
+  the detail line, then edits it in a separate form below.
+- **It repeats the target.** The form lists the key member as a disabled field, restating the row's own
+  title directly above it.
+- **An empty item had no opener.** The toggle's only content was the detail text, so an item holding
+  just its key collapsed the toggle to nothing (#2218, patched with an "Add details…" placeholder).
+- **The row reads as the target, not the relationship.** A per-row type chip, on top of a group header
+  that already names the type, is louder than the data the writer came to edit.
+
+### The decision
+**The detail line is the item's editor.** What the writer reads is what they edit, where they read it.
+
+1. **One segment per non-key member**, in member order, joined with " · ". Hovering a segment shows the
+   member's name.
+2. **An empty member shows its own name** as a muted, italic placeholder (`kind · state`). An item is
+   never blank, and there is always something to click. This replaces #2218's "Add details…".
+3. **Clicking a segment turns it into that member's control, in place.** Text and number members become
+   an inline input: Enter or blur saves, Esc reverts. Every other member type (select, multi-select,
+   long_text, boolean, color, date, a non-key reference) opens a popover anchored on the segment,
+   holding the same value editor the rail uses (`FieldValueEditor`). A `long_text` member's segment
+   shows its first line; its full text is in the popover.
+4. **Tab moves to the next segment**, Shift+Tab to the previous. Adding with `+` picks the target, then
+   puts the cursor on the first segment: pick, type, Tab, type.
+5. **The key member is never a segment.** It is the row's title. Changing the target is remove and add,
+   since an item is keyed by its target (§1).
+6. **The type stays quiet.** When the tab is grouped by type the row shows no type at all (the group
+   header names it). Otherwise it is muted text after the title, not a chip.
+7. **The ⤳ mark stays at the end of the detail line** when a member's effective value is not the base.
+
+### Anti-goals
+- **No new widget.** The segments render inside NodeRow's existing detail slot; the popover reuses the
+  rail's `FieldValueEditor`; the inline input is a plain input styled to the segment.
+- **No form, no expander.** `BodyItemRows` stops being the tab's item editor.
+- **No write-contract change.** Edits still save the whole item list as base (§6), keyed by target.
+- **Not scrub-time editing.** While the tab is scrubbed to a later stop the segments are read-only, as
+  editing is today; a stop is still edited where §4 says. Editing a stop's value through the same
+  segments is a separate decision, filed on its own.
+
+### Not in scope / unaffected
+The row's peek, double-click-to-open-the-target, `×` remove, the add picker, grouping, filtering, and
+the rail's index row for the field are unchanged. Plain (unkeyed) reference lists are unaffected: they
+have no members to edit.
+
+### The journey that defines done
+1. The writer opens Elias's Connections tab. Serafina's row reads "Boss · state · note" — "state" and
+   "note" muted: the item's empty members, by name.
+2. The writer clicks "state", types "owes him", presses Tab, types "met at the Toll", presses Enter. The
+   detail line reads "Boss · owes him · met at the Toll", saved.
+3. The writer clicks "Boss"; the kind options open at the segment; they pick "Rival". Nothing else on
+   the page moved.
+4. The writer presses `+`, picks Tomas; Tomas's row appears with the cursor already in its first
+   segment. They type "Kin", Tab, "estranged".
+5. The writer presses Esc mid-edit on a segment; the old value is back and nothing was saved.
+6. The writer scrubs the tab to Chapter 12; Kyria's detail line shows her Chapter 12 values with ⤳, and
+   the segments do not open.

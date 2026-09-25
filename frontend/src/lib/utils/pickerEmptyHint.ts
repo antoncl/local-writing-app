@@ -7,6 +7,7 @@
 // group (when known) or falls back to "its group's definition".
 
 import type { NodePickerEmptyHint } from "@/lib/pickerTypes";
+import type { MetadataFieldDefinition, MetadataSchema } from "@/lib/types";
 
 const TITLE = "This field can't point at anything yet";
 
@@ -25,4 +26,16 @@ export function groupMemberEmptyHint(groupName: string | null | undefined, membe
     title: TITLE,
     detail: `Its targets aren't set. Choose what it can reference in ${where}.`,
   };
+}
+
+// A rail row's hint. A field generated from an applied reusable group
+// (`group_origin`, never persisted) has no definition of its own to fix — its
+// targets live on the group member — so it names the group; any other field
+// points at its own definition.
+export function railFieldEmptyHint(
+  field: Pick<MetadataFieldDefinition, "name" | "group_origin">,
+  schema: MetadataSchema | null,
+): NodePickerEmptyHint {
+  if (!field.group_origin) return fieldEmptyHint();
+  return groupMemberEmptyHint(schema?.groups?.[field.group_origin]?.name ?? null, field.name);
 }

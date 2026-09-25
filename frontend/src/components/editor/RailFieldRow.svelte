@@ -56,7 +56,8 @@
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import OverrideMark from "@/components/editor/OverrideMark.svelte";
-  import { fieldEmptyHint } from "@/lib/utils/pickerEmptyHint";
+  import { railFieldEmptyHint } from "@/lib/utils/pickerEmptyHint";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
   import type { RailRowModel } from "@/lib/rail/fieldRowModel";
 
   interface Props {
@@ -68,8 +69,10 @@
   let { model, deps, on }: Props = $props();
 
   // #2215: field-worded by default (see RailRowDeps.emptyHint); a
-  // group-member host (BodyItemRows) overrides it.
-  const emptyHint = $derived(deps.emptyHint ?? fieldEmptyHint());
+  // group-member host (BodyItemRows) overrides it. A field generated from an
+  // applied reusable group has no definition of its own to fix — its targets
+  // live on the group member — so it names the group instead.
+  const emptyHint = $derived(deps.emptyHint ?? railFieldEmptyHint(model.field, $metadataSchemaStore));
 </script>
 
 <!-- Intrinsic identity fields (id/title/entry_type, #116) are surfaced

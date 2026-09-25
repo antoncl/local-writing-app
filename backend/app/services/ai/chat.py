@@ -490,7 +490,11 @@ def record_stream_turn(
 
 
 async def run_chat_turn(
-    project: ProjectService, request: AIChatRequest, *, lore_mode: LoreMode = "implicit"
+    project: ProjectService,
+    request: AIChatRequest,
+    *,
+    lore_mode: LoreMode = "implicit",
+    response_schema: dict[str, Any] | None = None,
 ) -> AIChatResponse:
     """Run one chat-completion turn: resolve provider/model, prepare the bound
     chat's context blocks, call the provider, and shape the response with usage +
@@ -498,7 +502,9 @@ async def run_chat_turn(
     commit (`services/ai/extraction`) runs its turn through it too — rather than
     reaching back into the HTTP layer for the chat orchestration. `lore_mode` is
     passed straight to `expand_and_prepare_chat_blocks`; the commit turn narrows
-    it to `"used"` (#1874).
+    it to `"used"` (#1874). `response_schema` (#2199) rides straight through to
+    the provider `ChatCall` — only a profile that supports constrained decoding
+    (Ollama) acts on it.
     """
     settings = machine_settings_service.load_settings()
     resolved = resolve_call_params(
@@ -536,6 +542,7 @@ async def run_chat_turn(
             messages=sent_messages,
             system_blocks=prepared.system_blocks,
             session_id=prepared.session_id,
+            response_schema=response_schema,
         ),
         provider_name=resolved.provider,
         settings=settings,

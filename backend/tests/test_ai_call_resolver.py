@@ -370,11 +370,13 @@ class ResolvedCallToCallTests(unittest.TestCase):
         )
         messages = [{"role": "user", "content": "hi"}]
         blocks = [{"text": "sys", "tier": "stable"}]
+        schema = {"type": "object"}
         call = resolved.to_call(
             system_prompt="You are X.",
             messages=messages,
             system_blocks=blocks,
             session_id="sess-1",
+            response_schema=schema,
         )
         # Provider params come from the ResolvedCall...
         self.assertEqual(call.model, "claude-sonnet-5")
@@ -386,6 +388,7 @@ class ResolvedCallToCallTests(unittest.TestCase):
         self.assertIs(call.messages, messages)
         self.assertEqual(call.system_blocks, blocks)
         self.assertEqual(call.session_id, "sess-1")
+        self.assertEqual(call.response_schema, schema)
 
     def test_optional_content_defaults_to_none(self) -> None:
         resolved = ResolvedCall(
@@ -396,6 +399,7 @@ class ResolvedCallToCallTests(unittest.TestCase):
         self.assertIsNone(call.session_id)
         self.assertFalse(call.thinking_enabled)
         self.assertIsNone(call.temperature)
+        self.assertIsNone(call.response_schema)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from app.services.ai.assistant_validation import coerce_optional_temperature
 from app.services.ai.lore_budget import (
@@ -180,6 +180,7 @@ class ResolvedCall:
         messages: list[dict[str, str]],
         system_blocks: list[dict] | None = None,
         session_id: str | None = None,
+        response_schema: dict[str, Any] | None = None,
     ) -> ChatCall:
         """Merge the resolved provider params (model, token cap, temperature,
         thinking) with this turn's prompt + messages into one provider-agnostic
@@ -196,6 +197,7 @@ class ResolvedCall:
             system_blocks=system_blocks,
             session_id=session_id,
             thinking_enabled=self.thinking_enabled,
+            response_schema=response_schema,
         )
 
 

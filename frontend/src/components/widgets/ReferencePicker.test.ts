@@ -549,3 +549,43 @@ describe("ReferencePicker — peek card (#2011)", () => {
     expect(within(card).queryByText(/remove/i)).toBeNull();
   });
 });
+
+// #2215: the picker's "nothing configured" empty state reads differently for
+// a field/group-member host than for a prompt input — plumbed down via
+// ReferencePicker's `emptyHint` prop (undefined = the original prompt copy).
+describe("ReferencePicker — picker empty-state wording (#2215)", () => {
+  const unconfiguredField = {
+    name: "Met at",
+    type: "entity_ref",
+    options: [],
+    picker_config: { sources: [] },
+  } as unknown as MetadataFieldDefinition;
+
+  it("with no emptyHint, keeps the original prompt-author copy", async () => {
+    render(ReferencePicker, { props: { field: unconfiguredField, value: "", ariaLabel: "Met at" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add Met at" }));
+    expect(document.querySelector(".ctx-empty-title")?.textContent).toBe("No content sources configured");
+    expect(document.querySelector(".ctx-empty-hint")?.textContent).toContain(
+      "This prompt's author didn't enable",
+    );
+  });
+
+  it("with a field-worded emptyHint, shows the field's own copy", async () => {
+    render(ReferencePicker, {
+      props: {
+        field: unconfiguredField,
+        value: "",
+        ariaLabel: "Met at",
+        emptyHint: {
+          title: "This field can't point at anything yet",
+          detail: "Its targets aren't set. Choose what it can reference in the field's definition.",
+        },
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Add Met at" }));
+    expect(document.querySelector(".ctx-empty-title")?.textContent).toBe(
+      "This field can't point at anything yet",
+    );
+    expect(document.querySelector(".ctx-empty-hint")?.textContent).toContain("the field's definition");
+  });
+});

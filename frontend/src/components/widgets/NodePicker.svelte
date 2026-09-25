@@ -76,6 +76,7 @@
     type NodePickerPopoverModel,
     type PickAxis,
   } from "@/components/widgets/NodePickerPopover.svelte";
+  import type { NodePickerEmptyHint } from "@/lib/pickerTypes";
 
   let {
     config = {},
@@ -140,6 +141,10 @@
     // create row renders `aria-disabled` and ignores clicks meanwhile, so a
     // double-click can't fire a second create.
     creating = false,
+    // #2215: overrides the popover's "nothing configured" empty-state copy
+    // for a field/group-member host — undefined (the default, every
+    // context_pick caller) keeps the original prompt-author wording.
+    emptyHint = null,
   }: {
     config?: NodePickerConfig;
     value?: NodePickerRef[];
@@ -159,6 +164,7 @@
     onChange?: (detail: { value: NodePickerRef[] }) => void;
     onCreate?: (title: string, entryType: string) => void;
     creating?: boolean;
+    emptyHint?: NodePickerEmptyHint | null;
   } = $props();
 
   const affordanceVerb = $derived(affordance === "change" ? "Change" : "Add");
@@ -1116,6 +1122,7 @@
     hasAnyResults,
     totalVisibleItems,
     createRow: showCreateRow ? { title: search.trim(), onCreate: handleCreate, disabled: creating } : null,
+    emptyHint,
   });
 </script>
 

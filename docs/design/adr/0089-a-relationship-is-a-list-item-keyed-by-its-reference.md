@@ -86,7 +86,7 @@ member and any scalar members. The author writes it through the public schema su
 groups:
   - id: relationship
     members:
-      - { key: to,    name: Who,   type: entity_ref, picker_config: { kinds: [lore] } }
+      - { key: to,    name: Who,   type: entity_ref, picker_config: { sources: [{ kind: lore }] } }
       - { key: kind,  name: Kind,  type: select, options: [kinship, rivalry, debt, witness] }
       - { key: state, name: State, type: text }
 types:

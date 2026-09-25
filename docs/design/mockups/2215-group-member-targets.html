@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  #2215 / #2214 — Reusable groups: a member says what it points at.
+
+  Intent: a group member of type Reference / Reference list can set its reference
+  targets, and a Select / Multi-select member its options, right in the Reusable
+  groups dialog — so a relationship list (ADR-0089: one entity_ref member + scalars,
+  e.g. Connections {Name, Who, Kind}) is authorable without hand-editing YAML.
+
+  Decisions (approved by Anton 2026-09-25):
+    · each Reference / Select member row gets a DISCLOSURE under it;
+    · expanded, it shows the SAME editors the schema field editor uses —
+      NodePickerConfigEditor ("Pickable content" tree + "Create when missing") for
+      references, SelectOptionsEditor for selects. No new widgets;
+    · collapsed, a one-line summary: "Points at Character (+ subtypes)",
+      "Options ally · rival · kin";
+    · a reference with no targets summarises as "Points at nothing yet" in the
+      --star (warning) tint — a warning, not a save blocker;
+    · default: OPEN when a reference has no targets (new or unconfigured), CLOSED
+      once configured;
+    · generic placeholders ("Group name", "group_id", "Member name") replace the
+      GMO / Goal development example (#2214);
+    · the picker's empty state, opened for a FIELD, is field-worded and names where
+      to fix it, instead of the prompt-author copy.
+
+  Anti-goals: no new target model (GroupMember.picker_config already exists); no
+  save blocking; no change to how values are picked or stored.
+
+  Tokens are COPIES of frontend/src/styles.css (dark); they drift. Do not import.
+-->
+<title>Group member targets</title>
+<style>
+*{box-sizing:border-box}
+:root{--surface:#1f2522;--inset:#242a28;--border:#3a4541;--border-strong:#4a5651;--divider:#2a322f;
+  --text:#e8edeb;--text-2:#a9b6b0;--text-3:#7e8a84;--accent:#6cc4a6;--accent-emphasis:#7cc0a1;
+  --accent-soft:#1f3a32;--accent-soft2:#2a4a3f;--star:#d4b94e;
+  --sans:"Segoe UI",system-ui,sans-serif;--mono:Consolas,ui-monospace,monospace}
+body{background:#161b19;font-family:var(--sans);color:var(--text);font-size:13px;padding:24px}
+.cap{color:var(--text-2);max-width:640px;margin:18px auto 6px}
+.m{background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:640px;margin:0 auto}
+.hd{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--divider);font-weight:600;font-size:15px}
+.btn{border:1px solid var(--border-strong);border-radius:8px;padding:5px 12px;font-size:12px}
+.bd{padding:14px 16px}
+.fl{font-size:11px;color:var(--text-2);text-align:center;margin-bottom:4px}
+.in{border:1px solid var(--border);border-radius:7px;padding:7px 10px;background:var(--inset)}
+.ph{color:var(--text-3)}
+.lbl{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:600;margin:14px 0 6px}
+.row{display:flex;align-items:center;gap:8px;padding:5px 0}
+.grip{color:var(--border-strong);width:12px}
+.tile{width:26px;height:26px;border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text-2)}
+.nm{flex:1}.ty{width:130px;border:1px solid var(--border);border-radius:7px;padding:6px 8px;background:var(--inset);font-size:12px}
+.key{font-family:var(--mono);font-size:11px;color:var(--text-3);width:52px}.x{color:var(--text-3)}
+details{margin:0 0 6px 46px;border:1px solid var(--divider);border-radius:9px;background:var(--inset);padding:6px 10px}
+summary{cursor:pointer;color:var(--text-2);font-size:12px;list-style:none}
+summary b{color:var(--text);font-weight:600;margin-right:6px}
+.warn,.warn b{color:var(--star)}
+.sec{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin:10px 0 4px}
+.kind{display:flex;justify-content:space-between;font-size:11px;color:var(--text-2);border-bottom:1px solid var(--divider);padding:3px 0}
+.it{display:flex;align-items:center;gap:6px;padding:3px 0 3px 12px;font-size:12px}
+.ck{width:13px;height:13px;border:1px solid var(--border-strong);border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:10px}
+.ck.on{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.tag{font-size:10px;color:var(--accent-emphasis);background:var(--accent-soft);border-radius:4px;padding:0 5px}
+.muted{color:var(--text-3);font-size:11px}
+.add{width:32px;height:28px;border:1px dashed var(--border-strong);border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--accent)}
+.ft{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.pri{background:var(--accent-soft2);border-color:var(--accent-soft2);color:var(--accent-emphasis)}
+.pick{max-width:340px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px}
+</style>
+</head>
+<body>
+<p class="cap">1 · Editing a group — Reference / Select members get a disclosure reusing the field editor's own editors</p>
+<div class="m"><div class="hd"><span>Reusable groups</span><span class="btn">Close</span></div><div class="bd">
+<div style="display:flex;gap:12px"><div style="flex:1"><div class="fl">Name</div><div class="in">Connections</div></div><div style="width:190px"><div class="fl">Id</div><div class="in">connections</div></div></div>
+<div class="lbl">Members</div>
+<div class="row"><span class="grip">⋮</span><span class="tile">Aa</span><div class="in nm">Name</div><div class="ty">Text ▾</div><span class="key">name</span><span class="x">✕</span></div>
+<div class="row"><span class="grip">⋮</span><span class="tile">⇢</span><div class="in nm">Who</div><div class="ty">Reference ▾</div><span class="key">who</span><span class="x">✕</span></div>
+<details open><summary><b>Points at</b>Character (+ subtypes)</summary>
+<div class="sec">Pickable content</div>
+<div class="kind"><span>Lore</span><span>1 picked</span></div>
+<div class="it"><span class="ck on">✓</span>Character <span class="tag">+ subtypes</span></div>
+<div class="it"><span class="ck"></span>Location</div><div class="it"><span class="ck"></span>Item</div>
+<div class="kind"><span>Plot</span><span>none</span></div><div class="it"><span class="ck"></span>Card</div>
+<div class="sec">Create when missing</div>
+<div class="it" style="padding-left:0"><span class="ck"></span><span class="muted">Offer to create a new entry when the typed name matches nothing</span></div>
+</details>
+<div class="row"><span class="grip">⋮</span><span class="tile">☰</span><div class="in nm">Kind</div><div class="ty">Select ▾</div><span class="key">kind</span><span class="x">✕</span></div>
+<details><summary><b>Options</b>ally · rival · kin</summary><p class="muted">(SelectOptionsEditor)</p></details>
+<div class="row"><span class="grip">⋮</span><span class="tile">⇢</span><div class="in nm">Met at</div><div class="ty">Reference ▾</div><span class="key">met_at</span><span class="x">✕</span></div>
+<details open class="warn"><summary><b>Points at nothing yet</b>— choose what this can reference</summary><p class="muted">(NodePickerConfigEditor, empty — opens by default while unconfigured)</p></details>
+<div class="add">+</div>
+<div class="ft"><span class="btn">Cancel</span><span class="btn pri">Save group</span></div>
+</div></div>
+
+<p class="cap">2 · New group — generic placeholders instead of GMO / Goal</p>
+<div class="m"><div class="bd">
+<div style="display:flex;gap:12px"><div style="flex:1"><div class="fl">Name</div><div class="in ph">Group name</div></div><div style="width:190px"><div class="fl">Id</div><div class="in ph">group_id</div></div></div>
+<div class="row" style="margin-top:10px"><span class="grip">⋮</span><span class="tile">Aa</span><div class="in nm ph">Member name</div><div class="ty">Text ▾</div><span class="key"></span><span class="x">✕</span></div>
+<p class="muted">Empty list: "No reusable groups yet. A group is a set of fields defined once and reused as a whole on several types."</p>
+</div></div>
+
+<p class="cap">3 · The picker for a field member with no targets — field wording, not prompt wording</p>
+<div class="pick"><b>This field can't point at anything yet</b><p class="muted" style="font-size:12px">Its targets aren't set. Choose what it can reference in the group's definition: Reusable groups → Connections → Met at.</p></div>
+</body>
+</html>

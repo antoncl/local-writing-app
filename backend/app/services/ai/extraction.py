@@ -249,6 +249,7 @@ def _constrain_to_registered_fields(patch: AIEntryPatch, allowed_ids: set[str]) 
         fields={k: v for k, v in patch.fields.items() if k in allowed_ids},
         dropped=[*patch.dropped, *off_contract],
         garbled=patch.garbled,
+        garbled_reason=patch.garbled_reason,
     )
 
 
@@ -390,8 +391,23 @@ async def run_entry_patch_extraction(
             patch_reply = retry
     _record_if_unusable(project, patch, patch_reply)
     return EntryPatchExtraction(
-        patch=patch, cost_usd=cost, usage=usage, cost_usd_total=cost_usd_total, ok=True
+        patch=patch,
+        cost_usd=cost,
+        usage=usage,
+        cost_usd_total=cost_usd_total,
+        ok=True,
+        # #2201: only carried when the patch it came from is unusable — a
+        # usable patch has no need to show its raw reply back to the author.
+        raw_reply=patch_reply.content if _is_unusable(patch) else None,
     )
+
+
+def _is_unusable(patch: AIEntryPatch) -> bool:
+    """Whether `patch` is unusable to the author — garbled, or well-formed but
+    empty (no body, no fields). Shared by `_record_if_unusable`'s errors.log
+    diagnostic (#2195) and `run_entry_patch_extraction`'s `raw_reply` (#2201),
+    so the two never disagree on what counts as "nothing to commit"."""
+    return patch.garbled or (patch.body is None and not patch.fields)
 
 
 def _record_if_unusable(
@@ -405,7 +421,7 @@ def _record_if_unusable(
     (already bounded by the call's max_tokens): a JSON defect is as likely at
     its end as anywhere, and a truncated log hid exactly that (#2197). A usable
     patch records nothing."""
-    if not (patch.garbled or (patch.body is None and not patch.fields)):
+    if not _is_unusable(patch):
         return
     reason = "garbled" if patch.garbled else "empty"
     detail = patch_reply.content or ""

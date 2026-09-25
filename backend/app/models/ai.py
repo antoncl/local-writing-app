@@ -1026,6 +1026,9 @@ class AIEntryPatch(BaseModel):
     fields: dict[str, Any] = Field(default_factory=dict)
     dropped: list[str] = Field(default_factory=list)
     garbled: bool = False
+    # #2200: a plain-English reason `garbled` is true, from
+    # `diagnose_garbled_reply` — None when the patch isn't garbled.
+    garbled_reason: str | None = None
 
 
 class ExtractEntryPatchRequest(BaseModel):
@@ -1070,6 +1073,9 @@ class EntryPatchExtraction(BaseModel):
     cost_usd_total: float | None = None
     ok: bool = True
     error: str | None = None
+    # #2201: the raw reply `patch` came from, carried only when that patch is
+    # unusable (garbled, or well-formed but empty) — None when usable.
+    raw_reply: str | None = None
 
 
 class CreateAIInvocationRequest(BaseModel):

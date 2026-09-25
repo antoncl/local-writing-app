@@ -21,6 +21,7 @@ from app.services.project.schema_definition_validation import single_concrete_ta
 __all__ = [
     "NON_PROPOSABLE_FIELD_IDS",
     "NON_PROPOSABLE_FIELD_TYPES",
+    "diagnose_garbled_reply",
     "is_proposable_field",
     "parse_entry_patch_json",
     "tag_vocabulary_target",
@@ -197,6 +198,89 @@ def parse_entry_patch_json(raw: str) -> dict[str, Any] | None:
     # longer honored (#2195) — multiple objects, or one wrong-shaped one, are
     # both garbled.
     return _patch_shaped_or_empty(embedded[0]) if len(embedded) == 1 else None
+
+
+def _wrong_shape_reason(obj: dict[str, Any]) -> str:
+    """The "parses, but not an entry" reason for a non-empty object carrying
+    neither "body" nor "fields" (#2195/#2200) — names up to 5 of its keys so
+    the author can see what the model actually sent."""
+    keys = ", ".join(list(obj.keys())[:5])
+    return (
+        'The reply is JSON but not an entry: it has neither "body" nor '
+        f'"fields" (it has: {keys}).'
+    )
+
+
+def _diagnose_starts_with_brace(candidate: str) -> str:
+    """`diagnose_garbled_reply` for a candidate whose fence-stripped text
+    opens with ``{`` — mirrors `parse_entry_patch_json`'s "whole reply is one
+    object" path, including its `_close_unbalanced` repair, so the reason
+    matches what the parser actually tried."""
+    whole = _as_json_dict(candidate)
+    if whole is None:
+        repaired = _close_unbalanced(candidate)
+        whole = _as_json_dict(repaired) if repaired else None
+    if whole is not None:
+        # Parsed (possibly after repair) but wasn't patch-shaped — the only
+        # way this path is reached with a non-None `whole`, since a
+        # patch-shaped/empty result would have made `parse_entry_patch_json`
+        # succeed rather than call this diagnostic at all.
+        return _wrong_shape_reason(whole)
+    # A leading object that closes before the reply ends (`{…} Hope this
+    # helps`) is judged by the parser's embedded scan, not as broken JSON.
+    end = _object_end(candidate, 0)
+    if end is not None and candidate[end:].strip():
+        return _diagnose_embedded(candidate)
+    _, ends_in_string = _brackets_outside_strings(candidate)
+    if ends_in_string:
+        return "The reply is cut off inside a text value."
+    try:
+        json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        return (
+            f"The reply isn't valid JSON: {exc.msg} at character "
+            f"{exc.pos + 1} of {len(candidate)}."
+        )
+    # Unreachable in practice — `_as_json_dict` above already failed to parse
+    # `candidate`, so `json.loads` failing too is the expected path.
+    return "The reply isn't valid JSON."
+
+
+def _diagnose_embedded(candidate: str) -> str:
+    """`diagnose_garbled_reply` for a candidate that isn't a single top-level
+    object — mirrors `parse_entry_patch_json`'s embedded-object scan."""
+    embedded = [
+        obj
+        for span in _balanced_object_spans(candidate)
+        if (obj := _as_json_dict(span)) is not None
+    ]
+    patch_shaped = [obj for obj in embedded if "body" in obj or "fields" in obj]
+    if len(patch_shaped) >= 2:
+        return (
+            "The reply holds several entry-shaped JSON objects, so it isn't "
+            "clear which one is the answer."
+        )
+    non_patch = [obj for obj in embedded if obj not in patch_shaped]
+    if len(non_patch) == 1 and non_patch[0]:
+        return _wrong_shape_reason(non_patch[0])
+    if len(non_patch) >= 2:
+        return "The reply holds several JSON objects, none shaped like an entry."
+    return "The reply contains no JSON object."
+
+
+def diagnose_garbled_reply(raw: str) -> str:
+    """A plain-English reason `parse_entry_patch_json(raw)` returned `None`
+    (#2200) — shown alongside the raw reply itself (#2201) so an author sees
+    both WHAT the model said and WHY it didn't land, instead of just a bare
+    "nothing to commit" notice. Deliberately re-treads `parse_entry_patch_json`
+    rather than have it return a reason directly, so the happy path (by far
+    the common case) stays a plain `dict | None`."""
+    if not raw or not raw.strip():
+        return "The reply was empty."
+    candidate = _strip_code_fence(raw)
+    if candidate.startswith("{"):
+        return _diagnose_starts_with_brace(candidate)
+    return _diagnose_embedded(candidate)
 
 
 _CLOSER = {"{": "}", "[": "]"}

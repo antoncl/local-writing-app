@@ -32,7 +32,11 @@ from app.models import (
 from app.models.schema import MetadataFieldDefinition
 from app.services import machine_settings as ms
 from app.services.ai import tokens as token_service
-from app.services.ai.entry_patch import is_proposable_field, parse_entry_patch_json
+from app.services.ai.entry_patch import (
+    diagnose_garbled_reply,
+    is_proposable_field,
+    parse_entry_patch_json,
+)
 from app.services.ai.field_contract import FieldContract
 from app.services.ai.helpers import (
     _fields,
@@ -210,6 +214,71 @@ class ParseEntryPatchJsonTests(unittest.TestCase):
         self.assertIsNone(parse_entry_patch_json(raw))
 
 
+class DiagnoseGarbledReplyTests(unittest.TestCase):
+    """#2200 — a plain-English reason `parse_entry_patch_json` returned
+    `None`, one test per condition it distinguishes."""
+
+    def test_empty_reply(self) -> None:
+        self.assertEqual(diagnose_garbled_reply(""), "The reply was empty.")
+        self.assertEqual(diagnose_garbled_reply("   \n  "), "The reply was empty.")
+
+    def test_a_leading_object_with_trailing_prose_is_judged_by_its_shape(self) -> None:
+        # The parser scans embedded objects here, so the reason must too — not
+        # json.loads' "Extra data" on the whole reply.
+        self.assertIsNone(parse_entry_patch_json('{"title": "Seren"} Hope this helps!'))
+        self.assertIn(
+            "not an entry",
+            diagnose_garbled_reply('{"title": "Seren"} Hope this helps!'),
+        )
+        self.assertIn(
+            "several entry-shaped",
+            diagnose_garbled_reply('{"body": "a"} or maybe {"body": "b"}'),
+        )
+
+    def test_cut_off_inside_a_string(self) -> None:
+        self.assertEqual(
+            diagnose_garbled_reply('{"body": "Hi, the Ledger-Mo'),
+            "The reply is cut off inside a text value.",
+        )
+
+    def test_invalid_json_reports_the_decode_error_and_position(self) -> None:
+        self.assertEqual(
+            diagnose_garbled_reply('{"fields": {"tags": ["a"}'),
+            "The reply isn't valid JSON: Expecting ',' delimiter at character 25 of 25.",
+        )
+
+    def test_not_an_entry_names_its_keys(self) -> None:
+        raw = '{"title": "Seren", "aliases": ["The Grey"]}'
+        self.assertEqual(
+            diagnose_garbled_reply(raw),
+            'The reply is JSON but not an entry: it has neither "body" nor '
+            '"fields" (it has: title, aliases).',
+        )
+
+    def test_several_entry_shaped_objects_is_ambiguous(self) -> None:
+        raw = (
+            'The format is {"body": "example", "fields": {"t": "x"}}. '
+            'Applying it: {"body": "Seren is braver.", "fields": {"bravery": "high"}}'
+        )
+        self.assertEqual(
+            diagnose_garbled_reply(raw),
+            "The reply holds several entry-shaped JSON objects, so it isn't "
+            "clear which one is the answer.",
+        )
+
+    def test_several_non_patch_objects(self) -> None:
+        self.assertEqual(
+            diagnose_garbled_reply('first {"a": 1} then {"b": 2}'),
+            "The reply holds several JSON objects, none shaped like an entry.",
+        )
+
+    def test_no_json_object(self) -> None:
+        self.assertEqual(
+            diagnose_garbled_reply("I'm not sure what you mean."),
+            "The reply contains no JSON object.",
+        )
+
+
 class ValidateAiEntryPatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -304,6 +373,7 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         self.assertTrue(patch.garbled)
         self.assertIsNone(patch.body)
         self.assertEqual(patch.fields, {})
+        self.assertEqual(patch.garbled_reason, "The reply contains no JSON object.")
 
     def test_empty_but_valid_patch_is_not_garbled(self) -> None:
         # A parseable object proposing nothing is "no changes", not garble.

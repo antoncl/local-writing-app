@@ -32,6 +32,7 @@ from app.models import (
     Swatch,
 )
 from app.services.ai.entry_patch import (
+    diagnose_garbled_reply,
     is_proposable_field,
     parse_entry_patch_json,
     tag_vocabulary_target,
@@ -531,7 +532,7 @@ class MetadataValuesMixin:
 
         parsed = parse_entry_patch_json(raw)
         if parsed is None:
-            return AIEntryPatch(garbled=True)
+            return AIEntryPatch(garbled=True, garbled_reason=diagnose_garbled_reply(raw))
 
         definition = schema.entry_types.get(entry_type)
         # Keep the body for an UNKNOWN type (no definition) — the create-draft

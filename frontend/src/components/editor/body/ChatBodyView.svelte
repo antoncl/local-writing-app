@@ -37,6 +37,7 @@
   import ChatMetaLine from "@/components/editor/body/chat/ChatMetaLine.svelte";
   import ChatComposerBar from "@/components/editor/body/chat/ChatComposerBar.svelte";
   import EntryDraftCard from "@/components/editor/body/chat/EntryDraftCard.svelte";
+  import ChatRawReply from "@/components/editor/body/chat/ChatRawReply.svelte";
   import type {
     AssistantEntrySummary,
     ChangedPick,
@@ -139,6 +140,8 @@
   // A non-error status from a commit — "no changes proposed", "ignored N
   // fields" — surfaced so a hidden out-of-band commit is never a silent no-op.
   let chatNotice: string | null = $state(null);
+  // The raw reply the last unusable commit patch came from (#2201).
+  let chatRawReply: string | null = $state(null);
   let chatInput = $state("");
   // True when the last send failed (error or empty output) and we restored
   // the typed text to the composer so the user can retry. Without this cue
@@ -278,6 +281,7 @@
     },
     setError: (message) => (chatError = message),
     setNotice: (message) => (chatNotice = message),
+    setRawReply: (text) => (chatRawReply = text),
     entryTitle: (entryId) => loreTitle(entryId),
     // The commit publishes its review onto the entry's pane; bring that pane into
     // view (open or front) so the author sees the proposed-vs-current diff without
@@ -398,6 +402,7 @@
     pinnedToBottom = true;
     chatError = null;
     chatNotice = null;
+    chatRawReply = null;
     chatInput = "";
     chatRewound = false;
     chatSystemPrompt = "";
@@ -824,6 +829,7 @@
     if (!text && !isFirstTurnFromPrompt) return;
     chatError = null;
     chatNotice = null;
+    chatRawReply = null;
     chatRewound = false;
     // First-send template render: render + lock whenever the chat is bound to a
     // prompt that hasn't been rendered yet (#1436 — no longer gated on declared
@@ -1163,6 +1169,9 @@
     {/if}
     {#if chatNotice}
       <p class="cbv-notice">{chatNotice}</p>
+    {/if}
+    {#if chatRawReply}
+      <ChatRawReply text={chatRawReply} />
     {/if}
     {#if chatRewound}
       <p class="cbv-notice cbv-rewound">Message not sent — restored below. Edit it or press Send to retry.</p>

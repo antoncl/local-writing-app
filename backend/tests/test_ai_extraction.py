@@ -891,6 +891,59 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertTrue(resp.json()["ok"])
         self.assertFalse((self.root / "errors.log").exists())
 
+    def test_raw_reply_carries_the_whole_reply_when_extraction_ends_garbled(self) -> None:
+        # #2201: the reply the final (unusable) patch was validated from rides
+        # back on the response, same as the errors.log entry (#2195).
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        first = _chat_reply("nope, not json", cost_usd=0.01)
+        second = _chat_reply("still not json", cost_usd=0.02)
+        with self._mock_chat_sequence(first, second):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        body = resp.json()
+        self.assertTrue(body["patch"]["garbled"])
+        self.assertEqual(body["raw_reply"], "still not json")
+
+    def test_raw_reply_carries_the_reply_when_extraction_ends_empty(self) -> None:
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        reply = _chat_reply('{"fields": {}}', cost_usd=0.01)
+        with self._mock_chat(reply):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        body = resp.json()
+        self.assertIsNone(body["patch"]["body"])
+        self.assertEqual(body["patch"]["fields"], {})
+        self.assertEqual(body["raw_reply"], '{"fields": {}}')
+
+    def test_raw_reply_is_absent_on_a_successful_extraction(self) -> None:
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        reply = _chat_reply('{"fields": {"bio": "New bio."}}', cost_usd=0.01)
+        with self._mock_chat(reply):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertIsNone(resp.json()["raw_reply"])
+
+    def test_garbled_reason_survives_to_the_response_patch(self) -> None:
+        # #2200: `_constrain_to_registered_fields` must not drop `garbled_reason`
+        # when it rebuilds an off-contract patch.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        with self._mock_chat(_chat_reply("not json at all", cost_usd=0.01)):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        body = resp.json()
+        self.assertTrue(body["patch"]["garbled"])
+        self.assertEqual(
+            body["patch"]["garbled_reason"], "The reply contains no JSON object."
+        )
+
 
 class EntryTypeForNodeTests(unittest.TestCase):
     def setUp(self) -> None:

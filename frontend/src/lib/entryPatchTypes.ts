@@ -32,6 +32,8 @@ export type EntryPatch = {
 export type AIEntryPatch = EntryPatch & {
   dropped: string[];
   garbled: boolean;
+  // #2200: a plain-English reason `garbled` is true; absent/null when it isn't.
+  garbled_reason?: string | null;
 };
 
 // The result of a fresh-extraction commit (ADR-0051 S4): the server rebuilt the
@@ -50,4 +52,7 @@ export type EntryPatchExtraction = {
   cost_usd_total?: number | null;
   ok: boolean;
   error: string | null;
+  // #2201: the raw reply `patch` came from, carried only when that patch is
+  // unusable (garbled, or well-formed but empty) — absent/null when usable.
+  raw_reply?: string | null;
 };

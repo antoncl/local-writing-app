@@ -113,3 +113,27 @@ class FieldContract:
         when nothing was stored — the template supplies its own "(none)" copy,
         which is context-dependent (whether a body/title still applies)."""
         return "\n".join(_describe_field(f) for f in self._fields)
+
+
+def without_field_contract(rendered: str, stored: list[dict[str, Any]]) -> str:
+    """Strip the field-contract descriptor block from a rendered prompt before
+    it's used as a mention-detection surface (#2211).
+
+    Prose the author wrote — bodies, `long_text` fields, the prompt's own
+    wording, chat messages — is a legitimate mention signal. Metadata the app
+    *prints* — field ids/labels, types, select options, descriptions, and the
+    "Existing tags: …" vocabulary list `{{ field_contract.render }}` emits —
+    is not: a tag or alias that happens to equal a lore entry's title
+    shouldn't false-positive just because the app listed it as an option.
+
+    Rebuilds the SAME descriptor block the render produced (by replaying
+    `stored` through a fresh `FieldContract`) and removes it from `rendered`
+    if present; returns `rendered` unchanged when there's nothing to strip
+    (no stored fields, or the block isn't actually in the text)."""
+    contract = FieldContract()
+    for field in stored:
+        contract.store(field)
+    block = contract.render
+    if not block or block not in rendered:
+        return rendered
+    return rendered.replace(block, "\n")

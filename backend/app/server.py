@@ -182,6 +182,7 @@ def _preview_import_probe() -> None:
     here. `noqa: F401` — imported for the load side effect, never referenced.
     """
     import app.services.ai.context_expander  # noqa: F401
+    import app.services.ai.field_contract  # noqa: F401
     import app.services.ai.lore_block  # noqa: F401
     import app.services.ai.lore_selection  # noqa: F401
 

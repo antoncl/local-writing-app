@@ -515,6 +515,12 @@ class LoreFitEntry(BaseModel):
     tokens: int
 
 
+# Mirrors `services/ai/lore_budget.LoreExpansion` — kept as its own Literal
+# here (not imported) because models can't import services (layering guard).
+# Keep the two lists of values in sync.
+LoreFitExpansion = Literal["one_hop", "named"]
+
+
 class LoreFit(BaseModel):
     """What the per-turn lore budget did on one send — or on the turn-0 preview
     (ADR-0086 §4/§5). Sizes are the budget's own per-entry sums under the one
@@ -528,6 +534,10 @@ class LoreFit(BaseModel):
     declared_tokens: int
     kept: int
     left_out: list[LoreFitEntry] = Field(default_factory=list)
+    # The Lore reach (ADR-0086) this send used — "named" vs "one_hop" — so a
+    # left-out-only UI can tell an auto-added hop entry from one the budget
+    # dropped (#2212).
+    expansion: LoreFitExpansion | None = None
 
 
 class HistoryFit(BaseModel):

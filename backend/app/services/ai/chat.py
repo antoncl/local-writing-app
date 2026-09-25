@@ -25,6 +25,7 @@ from app.models import (
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai.call_resolver import resolve_call_params
+from app.services.ai.field_contract import without_field_contract
 from app.services.ai.history_budget import apply_history_window
 from app.services.ai.lore_budget import DEFAULT_LORE_LIMITS, LoreLimits, LorePicks
 from app.services.ai.usage import translate_usage_to_cost
@@ -149,7 +150,11 @@ def _detect_and_persist_journal(
 
     `system_prompt` is the fully-rendered, locked system prompt the caller
     already has — passed through to `expand_context`'s `rendered_text` as a
-    third scan surface in the SAME pass. The journal's rank rule (ADR-0086
+    third scan surface in the SAME pass, with the field-contract descriptor
+    block (ids/labels/types/options/the "Existing tags" vocabulary — app-
+    printed metadata, not authored prose) stripped first so a tag or alias
+    equal to a note title can't false-positive (#2211). The journal's rank
+    rule (ADR-0086
     Amendment 1: a mention adds an entry only from a source ranked better
     than any the journal holds for that id) makes this a first-turn-only
     detection in practice: whatever the frozen prompt names is journaled as
@@ -180,7 +185,7 @@ def _detect_and_persist_journal(
         source="user_message",
         turn=turn,
         scene=scene,
-        rendered_text=system_prompt,
+        rendered_text=without_field_contract(system_prompt, chat.field_contract_stored),
     )
     if new_entries:
         # `seen_revisions` omitted → preserved; `lore_enabled` etc. are None-

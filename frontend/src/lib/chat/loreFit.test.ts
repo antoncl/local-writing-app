@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { LoreFit } from "@/lib/types";
+import type { ChatSessionJournalEntry, LoreFit } from "@/lib/types";
 import {
   declaredOverBudget,
   declaredOverLine,
   lastReportedTurn,
   leftOutSegment,
   loreSourceLabel,
+  notSentReason,
 } from "./loreFit";
 
 const FIT: LoreFit = { budget_tokens: 16000, used_tokens: 15800, declared_tokens: 2100, kept: 21, left_out: [] };
@@ -39,5 +40,31 @@ describe("loreFit", () => {
     ];
     expect(lastReportedTurn(history)).toBe(history[1]);
     expect(lastReportedTurn([{ role: "user", content: "a" }])).toBeNull();
+  });
+
+  it("gives a not-sent reason for a budget-dropped entry", () => {
+    const entry: ChatSessionJournalEntry = { entry_id: "x", source: "depth1_expansion" };
+    const fit: LoreFit = {
+      ...FIT,
+      left_out: [{ id: "x", title: "Nimitz", source: "depth1_expansion", tokens: 500 }],
+    };
+    expect(notSentReason(fit, entry)).toMatch(/over the lore budget/);
+  });
+
+  it("gives a not-sent reason for a hop entry under Named-only reach", () => {
+    const entry: ChatSessionJournalEntry = { entry_id: "x", source: "depth1_expansion" };
+    expect(notSentReason({ ...FIT, expansion: "named" }, entry))
+      .toBe("Noticed, but not sent: this assistant's Lore reach is Named only.");
+  });
+
+  it("stays null for Named-only reach on a non-hop source", () => {
+    const entry: ChatSessionJournalEntry = { entry_id: "x", source: "user_message" };
+    expect(notSentReason({ ...FIT, expansion: "named" }, entry)).toBeNull();
+  });
+
+  it("stays null for a hop source when reach isn't Named-only", () => {
+    const entry: ChatSessionJournalEntry = { entry_id: "x", source: "depth1_expansion" };
+    expect(notSentReason({ ...FIT, expansion: "one_hop" }, entry)).toBeNull();
+    expect(notSentReason(FIT, entry)).toBeNull();
   });
 });

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.services.ai.field_contract import FieldContract
+from app.services.ai.field_contract import FieldContract, without_field_contract
 
 
 def _scalar(**over):
@@ -98,6 +98,33 @@ class FieldContractTests(unittest.TestCase):
         snapshot = fc.stored
         snapshot.clear()
         self.assertEqual(len(fc.stored), 1)  # mutating the snapshot doesn't touch the contract
+
+
+class WithoutFieldContractTests(unittest.TestCase):
+    """#2211: the field-contract descriptor block (app-printed metadata) must
+    be stripped from a rendered prompt before it's used as a mention-
+    detection surface — a tag/alias equal to a note title shouldn't
+    false-match just because the app listed it as an option."""
+
+    def test_block_is_removed_when_present(self) -> None:
+        stored = [_scalar(id="allegiance", label="Allegiance", type="select", options=["order", "chaos"])]
+        fc = FieldContract()
+        fc.store(stored[0])
+        block = fc.render
+        rendered = f"Some prose.\n\n{block}\n\nMore prose."
+        result = without_field_contract(rendered, stored)
+        self.assertNotIn(block, result)
+        self.assertIn("Some prose.", result)
+        self.assertIn("More prose.", result)
+
+    def test_absent_block_leaves_text_unchanged(self) -> None:
+        stored = [_scalar(id="allegiance", label="Allegiance", type="select", options=["order", "chaos"])]
+        rendered = "Just plain prose that never rendered the contract."
+        self.assertEqual(without_field_contract(rendered, stored), rendered)
+
+    def test_empty_stored_leaves_text_unchanged(self) -> None:
+        rendered = "Some prose naming Nimitz."
+        self.assertEqual(without_field_contract(rendered, []), rendered)
 
 
 if __name__ == "__main__":

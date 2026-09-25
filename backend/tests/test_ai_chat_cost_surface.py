@@ -367,6 +367,7 @@ class StreamingChatCostTests(unittest.TestCase):
                 "declared_tokens": 0,
                 "kept": 0,
                 "left_out": [],
+                "expansion": "one_hop",
             },
         )
 

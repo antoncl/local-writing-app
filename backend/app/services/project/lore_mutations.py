@@ -45,8 +45,10 @@ effective-state resolver that read these markers live in a separate slice (#51).
 `ProjectService` composes it; shared helpers (`read_scene`, `_path_for_node_id`,
 `_write_scene_file`) resolve via MRO.
 
-`MUTATION_MARKER_PATTERN` lives here (its single home, alongside the code that
-rewrites markers with it), mirroring `EMBEDDED_TODO_PATTERN`.
+`MUTATION_MARKER_PATTERN` and the carrier grammar now live in
+`legacy_mutation_markers.py` (ADR-0095 §12), imported here so this mixin's
+behaviour (reading legacy markers) is unchanged; that module is also where the
+migration's legacy→sets-and-anchors converter lives.
 """
 
 from __future__ import annotations
@@ -67,6 +69,12 @@ from app.models import (
     UpdateMutationRequest,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.legacy_mutation_markers import (
+    MUTATION_CARRIER_PATTERN,
+    MUTATION_MARKER_PATTERN,
+    CarrierRow,
+    _parse_carrier_rows,
+)
 from app.services.project.lore_mutation_items import (
     ItemRecord,
     KeyedList,
@@ -79,35 +87,6 @@ from app.services.project.lore_mutation_items import (
 from app.services.project.markers import MarkerMixin
 from app.services.project.node_index import NodeIndex
 from app.services.tree_structure import TreeStructureService
-
-MUTATION_MARKER_PATTERN = re.compile(
-    r"<!--\s*mutate:entity=(?P<entity>[A-Za-z0-9_-]+);field=(?P<field>[A-Za-z0-9_.-]+);"
-    r"(?:op=(?P<op>add|remove|replace);)?"
-    r"value=(?P<value>[^;\s]*)"
-    r"(?:;name=(?P<name>[^;\s]*))?"
-    r"(?:;group=(?P<group>[A-Za-z0-9_-]+))?"
-    r";id=(?P<id>[A-Za-z0-9_-]+)\s*-->",
-)
-
-# Carrier marker (#69, ADR-0016): head line + one field row per line. The rows
-# capture is deliberately loose (whole lines) — each line is re-matched against
-# MUTATION_CARRIER_ROW_PATTERN, and a carrier with ANY malformed row does not
-# parse as a unit at all (stays an inert comment), so a rewrite can never
-# silently drop a hand-authored line it failed to understand.
-MUTATION_CARRIER_PATTERN = re.compile(
-    r"<!--[ \t]*mutate:entity=(?P<entity>[A-Za-z0-9_-]+)"
-    r"(?:;name=(?P<name>[^;\s]*))?"
-    r";id=(?P<id>[A-Za-z0-9_-]+)[ \t]*\r?\n"
-    r"(?P<rows>(?:[ \t]*field=[^\r\n]*\r?\n)+)"
-    r"[ \t]*-->",
-)
-
-MUTATION_CARRIER_ROW_PATTERN = re.compile(
-    r"field=(?P<field>[A-Za-z0-9_.-]+);"
-    r"(?:op=(?P<op>add|remove|replace);)?"
-    r"value=(?P<value>[^;\s]*)"
-    r";id=(?P<id>[A-Za-z0-9_-]+)",
-)
 
 # Field types whose values are collections; these accept add/remove ops (#58).
 COLLECTION_FIELD_TYPES = frozenset({"multi_select", "entity_ref_list"})
@@ -179,39 +158,6 @@ def _render_mutation_marker(
         parts.append(f"group={group}")
     parts.append(f"id={marker_id}")
     return f"<!-- mutate:{';'.join(parts)} -->"
-
-
-@dataclass
-class CarrierRow:
-    """One `field=` row of a carrier marker (#69), value kept url-encoded
-    verbatim so untouched rows round-trip byte-stable through a rewrite."""
-
-    field: str
-    op: str  # "replace" when the marker omits op=
-    raw_value: str
-    row_id: str
-
-
-def _parse_carrier_rows(match: re.Match[str]) -> list[CarrierRow] | None:
-    """Parse a carrier match's row block. `None` when any row is malformed —
-    the whole comment then stays an inert (never-rewritten) comment."""
-    rows: list[CarrierRow] = []
-    for line in match.group("rows").splitlines():
-        text = line.strip()
-        if not text:
-            continue
-        row = MUTATION_CARRIER_ROW_PATTERN.fullmatch(text)
-        if row is None:
-            return None
-        rows.append(
-            CarrierRow(
-                field=row.group("field"),
-                op=row.group("op") or "replace",
-                raw_value=row.group("value"),
-                row_id=row.group("id"),
-            )
-        )
-    return rows or None
 
 
 def _render_carrier_row(row: CarrierRow) -> str:

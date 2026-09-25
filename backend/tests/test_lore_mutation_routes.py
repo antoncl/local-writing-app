@@ -1,9 +1,9 @@
 """HTTP tests for the mutation API routes (#54, #33).
 
-Thin routes over the mixin: the per-entity timeline, effective-state at a
-(scene, position), and the intentful PATCH/DELETE marker mutators. Insertion has
-no route — the client mints the id and an ordinary scene save carries it.
-"""
+Thin routes over the mixin: the per-entity timeline and effective-state at a
+(scene, position). Insertion has no route — the client mints the id and an
+ordinary scene save carries it. The single-marker PATCH/DELETE routes retired
+with ADR-0095 (a set is edited by saving the set, never the scene)."""
 
 from __future__ import annotations
 
@@ -90,36 +90,6 @@ class MutationRouteTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["values"], {"rank": "Captain"})
-
-    # --- PATCH / DELETE marker -------------------------------------------
-
-    def test_patch_updates_marker_value(self) -> None:
-        response = self.client.patch(
-            f"/api/scenes/{self.s2}/mutations/m1", json={"value": "Commodore"}
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        effective = self.client.get(
-            f"/api/lore/{self.honor}/effective", params={"scene": self.s2}
-        ).json()["values"]
-        self.assertEqual(effective, {"rank": "Commodore"})
-
-    def test_delete_removes_marker(self) -> None:
-        response = self.client.delete(f"/api/scenes/{self.s2}/mutations/m1")
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertNotIn("id=m1", response.json()["body"])
-        timeline = self.client.get(f"/api/lore/{self.honor}/mutations").json()["items"]
-        self.assertEqual(timeline, [])
-
-    def test_patch_missing_marker_is_404(self) -> None:
-        response = self.client.patch(
-            f"/api/scenes/{self.s2}/mutations/nope", json={"value": "x"}
-        )
-        self.assertEqual(response.status_code, 404, response.text)
-
-    def test_delete_missing_marker_is_404(self) -> None:
-        response = self.client.delete(f"/api/scenes/{self.s2}/mutations/nope")
-        self.assertEqual(response.status_code, 404, response.text)
-
 
 if __name__ == "__main__":
     unittest.main()

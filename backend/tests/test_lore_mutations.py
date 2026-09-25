@@ -20,7 +20,6 @@ from app.main import app
 from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
-    UpdateMutationRequest,
     UpsertMetadataFieldRequest,
 )
 from app.services.project_service import ProjectService
@@ -97,48 +96,6 @@ class LoreMutationScanTests(unittest.TestCase):
         # m1 comes before m2 in the prose, so its offset is smaller.
         self.assertLess(markers["m1"].offset, markers["m2"].offset)
 
-    # --- update (atomic rewrite) -----------------------------------------
-
-    def test_update_value_rewrites_single_marker(self) -> None:
-        self.service.update_mutation(
-            self.scene_id, "m1", UpdateMutationRequest(value="Commodore")
-        )
-        markers = self._scan()
-        self.assertEqual(markers["m1"].value, "Commodore")
-        self.assertEqual(markers["m2"].value, "Lady Dame")  # untouched
-
-    def test_update_value_is_url_encoded(self) -> None:
-        self.service.update_mutation(
-            self.scene_id, "m1", UpdateMutationRequest(value="Rear Admiral")
-        )
-        self.assertIn("value=Rear%20Admiral", self._body())
-        self.assertEqual(self._scan()["m1"].value, "Rear Admiral")
-
-    def test_update_field_only_preserves_value_encoding(self) -> None:
-        self.service.update_mutation(self.scene_id, "m2", UpdateMutationRequest(field="rank"))
-        # Field changed but the pre-encoded value must survive verbatim.
-        self.assertIn("field=rank;value=Lady%20Dame", self._body())
-        self.assertEqual(self._scan()["m2"].value, "Lady Dame")
-
-    def test_update_missing_marker_is_404(self) -> None:
-        with self.assertRaises(Exception) as ctx:
-            self.service.update_mutation(self.scene_id, "nope", UpdateMutationRequest(value="x"))
-        self.assertEqual(getattr(ctx.exception, "status_code", None), 404)
-
-    # --- delete -----------------------------------------------------------
-
-    def test_delete_removes_only_the_marker(self) -> None:
-        self.service.delete_mutation(self.scene_id, "m2")
-        body = self._body()
-        self.assertNotIn("id=m2", body)
-        self.assertIn("The crew saluted.", body)  # surrounding prose survives
-        self.assertEqual(set(self._scan()), {"m1"})
-
-    def test_delete_missing_marker_is_404(self) -> None:
-        with self.assertRaises(Exception) as ctx:
-            self.service.delete_mutation(self.scene_id, "nope")
-        self.assertEqual(getattr(ctx.exception, "status_code", None), 404)
-
 
 class LoreMutationResolverTests(unittest.TestCase):
     """The mutations index + effective_state resolver (#51). Proves the #33
@@ -189,8 +146,15 @@ class LoreMutationResolverTests(unittest.TestCase):
 
     def test_index_version_changes_when_a_marker_changes(self) -> None:
         before = self.service.build_mutations_index().version
-        self.service.update_mutation(
-            self.s2, "m1", UpdateMutationRequest(value="Commander")
+        self.client.put(
+            f"/api/scenes/{self.s2}",
+            json={
+                "title": "Scene Two",
+                "body": (
+                    f"Before. <!-- mutate:entity={self.honor};field=rank;"
+                    "value=Commander;id=m1 --> After."
+                ),
+            },
         )
         self.assertNotEqual(before, self.service.build_mutations_index().version)
 

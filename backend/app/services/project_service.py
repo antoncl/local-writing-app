@@ -50,6 +50,7 @@ from app.services.project.lore_mutations import LoreMutationsMixin
 from app.services.project.manuscript import ManuscriptMixin
 from app.services.project.metadata_values import MetadataValuesMixin
 from app.services.project.migration_runner import MigrationRunnerMixin
+from app.services.project.mutation_set_anchors import MutationSetAnchorsMixin
 from app.services.project.mutation_sets import MutationSetEntriesMixin
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project.node_index_patch import NodeIndexPatchMixin
@@ -138,6 +139,7 @@ class ProjectService(
     TagNodesMixin,
     TodosMixin,
     TreeNodesMixin,
+    MutationSetAnchorsMixin,
     MutationSetEntriesMixin,
     ViewsMixin,
 ):

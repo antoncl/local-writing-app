@@ -133,15 +133,6 @@ class MutationMarkerList(BaseModel):
     items: list[MutationMarker] = Field(default_factory=list)
 
 
-class UpdateMutationRequest(BaseModel):
-    entity_id: str | None = None
-    field: str | None = None
-    op: str | None = None
-    value: str | None = None
-    name: str | None = None
-    group: str | None = None
-
-
 class MutationUnitRow(BaseModel):
     """One row of a rewritten mutation unit (ADR-0042 §5, ADR-0089 S5): the
     record as the dialog and the resolver spell it, with the url-decoded

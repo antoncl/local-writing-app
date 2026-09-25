@@ -22,7 +22,6 @@ from app.models import (
     MetadataFieldDefinition,
     MutationUnitRow,
     RewriteMutationUnitRequest,
-    UpdateMutationRequest,
     UpsertMetadataFieldRequest,
 )
 from app.services.project_service import ProjectService
@@ -255,73 +254,6 @@ class CarrierResolutionTests(MutationUnitTestBase):
         before = self.service.build_mutations_index().version
         self._save_body(f"Honor rose. {self._carrier('Coronation')}")
         self.assertNotEqual(before, self.service.build_mutations_index().version)
-
-
-class CarrierRewriteTests(MutationUnitTestBase):
-    def setUp(self) -> None:
-        super().setUp()
-        self._save_body(f"Honor rose. {self._carrier()} The fleet cheered.")
-
-    def test_update_row_rewrites_only_that_row(self) -> None:
-        self.service.update_mutation(self.scene_id, "r1", UpdateMutationRequest(value="Commodore"))
-        markers = self._scan()
-        self.assertEqual(markers["r1"].value, "Commodore")
-        self.assertEqual(markers["r2"].value, "Lady Dame")
-        # Untouched row keeps its encoded value verbatim; carrier stays multi-line.
-        body = self._body()
-        self.assertIn("field=title;value=Lady%20Dame;id=r2", body)
-        self.assertIn(f"<!-- mutate:entity={self.honor};name=Promotion;id=u1\n", body)
-
-    def test_update_row_name_renames_the_unit_head(self) -> None:
-        self.service.update_mutation(self.scene_id, "r1", UpdateMutationRequest(name="Coronation"))
-        markers = self._scan()
-        self.assertEqual(markers["r1"].unit_name, "Coronation")
-        self.assertEqual(markers["r2"].unit_name, "Coronation")
-        self.assertIn(";name=Coronation;", self._body())
-
-    def test_update_missing_row_is_404(self) -> None:
-        with self.assertRaises(Exception) as ctx:
-            self.service.update_mutation(self.scene_id, "nope", UpdateMutationRequest(value="x"))
-        self.assertEqual(getattr(ctx.exception, "status_code", None), 404)
-
-    def test_delete_row_keeps_carrier_when_rows_remain(self) -> None:
-        self._save_body(
-            f"<!-- mutate:entity={self.honor};id=u1\n"
-            "field=rank;value=Captain;id=r1\n"
-            "field=title;value=Dame;id=r2\n"
-            "field=titles;op=add;value=Steadholder;id=r3\n"
-            "-->"
-        )
-        self.service.delete_mutation(self.scene_id, "r2")
-        markers = self._scan()
-        self.assertEqual(set(markers), {"r1", "r3"})
-        self.assertIn("id=u1\n", self._body())  # still a carrier
-
-    def test_delete_row_degenerates_two_row_carrier_to_single_line(self) -> None:
-        self.service.delete_mutation(self.scene_id, "r2")
-        body = self._body()
-        self.assertNotIn("\n", body[body.index("<!-- mutate:") : body.index("-->")])
-        marker = self._scan()["r1"]
-        self.assertEqual(marker.value, "Captain")
-        # Head folds into the sole row: unit id drops, name travels as name=.
-        self.assertEqual(marker.unit_id, "r1")
-        self.assertEqual(marker.unit_name, "Promotion")
-        self.assertIn("The fleet cheered.", body)
-
-    def test_delete_by_unit_head_id_drops_whole_carrier(self) -> None:
-        self.service.delete_mutation(self.scene_id, "u1")
-        self.assertEqual(self._scan(), {})
-        body = self._body()
-        self.assertIn("Honor rose.", body)
-        self.assertIn("The fleet cheered.", body)
-        self.assertNotIn("mutate:", body)
-
-    def test_single_line_markers_still_update(self) -> None:
-        self._save_body(
-            f"<!-- mutate:entity={self.honor};field=rank;value=Ensign;id=m1 -->"
-        )
-        self.service.update_mutation(self.scene_id, "m1", UpdateMutationRequest(value="Admiral"))
-        self.assertEqual(self._scan()["m1"].value, "Admiral")
 
 
 class CarrierValidationTests(MutationUnitTestBase):

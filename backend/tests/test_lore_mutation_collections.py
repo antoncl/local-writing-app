@@ -23,7 +23,6 @@ from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
     SaveLoreEntryRequest,
-    UpdateMutationRequest,
     UpsertMetadataFieldRequest,
 )
 from app.services.project_service import ProjectService
@@ -104,12 +103,13 @@ class CollectionMutationTests(unittest.TestCase):
         self.assertEqual(marker.name, "")
         self.assertEqual(marker.group, "")
 
-    def test_update_preserves_op_and_name(self) -> None:
+    def test_op_and_name_survive_a_scene_save(self) -> None:
         scene = self._new_scene(
             "Scene Two",
             self._marker("clues", "add", "torn%20glove", "c1", name="The%20Glove"),
         )
-        self.service.update_mutation(scene, "c1", UpdateMutationRequest(value="bloody knife"))
+        new_body = self._marker("clues", "add", "bloody%20knife", "c1", name="The%20Glove")
+        self.client.put(f"/api/scenes/{scene}", json={"title": "Scene Two", "body": new_body})
         body = self.service.read_scene(scene).body
         self.assertIn("op=add", body)
         self.assertIn("name=The%20Glove", body)

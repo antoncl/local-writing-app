@@ -6,6 +6,8 @@ from fastapi import APIRouter
 from app.models import (
     ChangeCandidateSet,
     ChangeMessage,
+    CopyMutationSetRequest,
+    CopyMutationSetResult,
     CreateLoreEntryRequest,
     CreateMutationSetEntryRequest,
     CreatePromptEntryRequest,
@@ -300,12 +302,16 @@ def save_mutation_set_entry(project: CurrentProject, entry_id: str, request: Sav
         return project.save_mutation_set_entry(entry_id, request)
 
 
-@router.post("/api/mutation-sets/{entry_id}/place", response_model=MutationSetEntry)
-def place_mutation_set_entry(project: CurrentProject, entry_id: str) -> MutationSetEntry:
-    """ADR-0055 §5: mark a pinned set placed — the write-back apply gains when the
-    writer stamps a one-off into a scene (rejected for a reusable set)."""
+@router.post("/api/mutation-sets/{entry_id}/copy", response_model=CopyMutationSetResult)
+def copy_mutation_set_entry(
+    project: CurrentProject, entry_id: str, request: CopyMutationSetRequest
+) -> CopyMutationSetResult:
+    """Copy a set into the open project (ADR-0095 §6) — the source may be an
+    ancestor-layer set. Optionally re-pins the copy; a row that no longer
+    validates against the (re-)pinned entity's type is dropped and reported,
+    never raised."""
     with translate_errors():
-        return project.place_mutation_set_entry(entry_id)
+        return project.copy_mutation_set_entry(entry_id, request)
 
 
 @router.delete("/api/mutation-sets/{entry_id}", response_model=MutationSetEntryList)
@@ -332,7 +338,7 @@ def promote_mutation_set_entry(
     """Lift an owned, staged mutation set into a declared ancestor project,
     keeping its id (ADR-0078 §1/§2/§7), cascading its pinned entity first if
     needed. Runs the same partition `preview` returned; raises if the plan is
-    blocked or the set is placed."""
+    blocked or the set is active (anchored in the manuscript)."""
     with translate_errors():
         return project.promote_mutation_set_entry(entry_id, request.target_layer_id)
 

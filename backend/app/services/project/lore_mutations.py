@@ -66,7 +66,6 @@ from app.models import (
     MutationMarkerList,
     RewriteMutationUnitRequest,
     Scene,
-    UpdateMutationRequest,
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.legacy_mutation_markers import (
@@ -860,38 +859,6 @@ class LoreMutationsMixin(MarkerMixin):
 
     # ----- intentful single-marker mutators (#50) ------------------------
 
-    def update_mutation(
-        self, scene_id: str, marker_id: str, request: UpdateMutationRequest
-    ) -> Scene:
-        """Rewrite a single mutation record's entity/field/value in place, without
-        a full body save — a standalone marker, or one row inside a carrier
-        (ADR-0016: PATCH keeps addressing rows; the whole carrier is rewritten
-        around the edited row, untouched rows byte-stable). A `name` on the
-        request lands where the grammar keeps it: the marker itself when
-        single-line, the carrier head when the row lives in one. Returns the
-        updated scene so an open editor pane can reconcile. Like save_scene, a
-        marker edit never blocks on value validity — the editor supplies typed
-        values; validate_project reports strays."""
-        return self._apply_scene_marker_edit(
-            scene_id,
-            "Mutation",
-            marker_id,
-            lambda body: self._rewrite_mutation_record(body, marker_id, request),
-        )
-
-    def delete_mutation(self, scene_id: str, marker_id: str) -> Scene:
-        """Remove a mutation record: a standalone marker, one carrier row (a
-        carrier left with one row canonicalizes back to single-line; left with
-        none it drops entirely), or — when `marker_id` is a carrier's head id —
-        the whole unit and all its rows (ADR-0016). Markers wrap no prose, so
-        removal just drops comment text. Returns the updated scene."""
-        return self._apply_scene_marker_edit(
-            scene_id,
-            "Mutation",
-            marker_id,
-            lambda body: self._rewrite_mutation_record(body, marker_id, None),
-        )
-
     def rewrite_mutation_unit(
         self, scene_id: str, unit_id: str, request: RewriteMutationUnitRequest
     ) -> Scene:
@@ -952,91 +919,3 @@ class LoreMutationsMixin(MarkerMixin):
             return new_body, True
         return MUTATION_MARKER_PATTERN.sub(replace_single, body), found
 
-    def _rewrite_mutation_record(
-        self, body: str, marker_id: str, request: UpdateMutationRequest | None
-    ) -> tuple[str, bool]:
-        """The single-record rewrite behind update/delete (`request=None` ⇒
-        delete): try the single-line grammar first, then the carrier rows."""
-        new_body, found = self._rewrite_single_marker(
-            body,
-            MUTATION_MARKER_PATTERN,
-            "id",
-            marker_id,
-            lambda match: (
-                self._render_mutation(match, marker_id, request) if request else ""
-            ),
-        )
-        if found:
-            return new_body, found
-        return self._rewrite_carrier_record(body, marker_id, request)
-
-    def _rewrite_carrier_record(
-        self, body: str, marker_id: str, request: UpdateMutationRequest | None
-    ) -> tuple[str, bool]:
-        """Rewrite/delete one row inside a carrier marker (#69), or delete a
-        whole carrier by its head id. Rows other than the target keep their
-        url-encoded values verbatim; the result renders in canonical form, so
-        a one-row survivor degenerates to a single-line marker."""
-        found = False
-
-        def replace(match: re.Match[str]) -> str:
-            nonlocal found
-            if found:
-                return match.group(0)
-            rows = _parse_carrier_rows(match)
-            if rows is None:
-                return match.group(0)
-            if request is None and marker_id == match.group("id"):
-                found = True  # deleting the unit drops the carrier wholesale
-                return ""
-            index = next(
-                (i for i, row in enumerate(rows) if row.row_id == marker_id), None
-            )
-            if index is None:
-                return match.group(0)
-            found = True
-            if request is None:
-                del rows[index]
-                if not rows:
-                    return ""
-            else:
-                row = rows[index]
-                rows[index] = CarrierRow(
-                    field=request.field or row.field,
-                    op=request.op or row.op,
-                    raw_value=(
-                        quote(request.value, safe="")
-                        if request.value is not None
-                        else row.raw_value
-                    ),
-                    row_id=marker_id,
-                )
-            entity = (request.entity_id if request else None) or match.group("entity")
-            raw_name = (
-                quote(request.name, safe="")
-                if request is not None and request.name is not None
-                else (match.group("name") or "")
-            )
-            return _render_mutation_unit(entity, raw_name, match.group("id"), rows)
-
-        return MUTATION_CARRIER_PATTERN.sub(replace, body), found
-
-    def _render_mutation(
-        self, match: re.Match[str], marker_id: str, request: UpdateMutationRequest
-    ) -> str:
-        """Rebuild a mutation marker from a match, applying `request`. Preserves
-        the optional op/name/group attributes (only re-emitted when non-default),
-        so an edit that doesn't touch them keeps the marker byte-stable."""
-        entity = request.entity_id or match.group("entity")
-        field = request.field or match.group("field")
-        op = request.op or match.group("op") or "replace"
-        # Re-encode only when a new value is supplied; otherwise keep the existing
-        # encoded value verbatim to avoid gratuitous diffs.
-        value = quote(request.value, safe="") if request.value is not None else match.group("value")
-        name = (
-            quote(request.name, safe="")
-            if request.name is not None
-            else (match.group("name") or "")
-        )
-        group = request.group if request.group is not None else (match.group("group") or "")
-        return _render_mutation_marker(entity, field, op, value, name, group, marker_id)

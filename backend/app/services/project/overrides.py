@@ -395,8 +395,12 @@ class LayerOverridesMixin:
     def _override_row_dump(row: MutationSetRow) -> dict[str, Any]:
         """`row.model_dump()`, with a multi-line `body` value wrapped so it
         dumps as a YAML literal block (§1) instead of a quoted one-liner —
-        every other row's value is untouched."""
-        dumped = row.model_dump()
+        every other row's value is untouched. `id` is NEVER persisted here
+        (ADR-0095 §3): an override row has no stable identity, nothing
+        addresses one, and a lore save regenerates the whole set from a fresh
+        diff — a stray `id` on disk would be meaningless the moment the diff
+        that wrote it is superseded."""
+        dumped = row.model_dump(exclude={"id"})
         if row.field == "body" and "\n" in dumped.get("value", ""):
             dumped["value"] = _LiteralBlockStr(dumped["value"])
         return dumped

@@ -801,6 +801,7 @@ def _preview_lore_tiers(
     composer-accrued journal entries are rendered by the Context door's own
     journal section, frontend-side."""
     from app.services.ai.context_expander import expand_context
+    from app.services.ai.field_contract import without_field_contract
     from app.services.ai.lore_block import _wrap_lore_block
     from app.services.ai.lore_selection import _budgeted_lore_tiers
     from app.services.ai.sessions import AISession
@@ -824,7 +825,7 @@ def _preview_lore_tiers(
             source="user_message",
             turn=0,
             scene=scene,
-            rendered_text=rendered_system_text,
+            rendered_text=without_field_contract(rendered_system_text, rendered.field_contract_stored),
         )
     else:
         # ADR-0092 §7.1: a pick-only mirror runs no detection at all.

@@ -980,7 +980,14 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertTrue(body["lore_enabled"])
         self.assertEqual(
             body["lore_fit"],
-            {"budget_tokens": 16_000, "used_tokens": 0, "declared_tokens": 0, "kept": 0, "left_out": []},
+            {
+                "budget_tokens": 16_000,
+                "used_tokens": 0,
+                "declared_tokens": 0,
+                "kept": 0,
+                "left_out": [],
+                "expansion": "one_hop",
+            },
         )
         self.assertEqual(body["lore_left_out_xml"], {})
         off = self.client.post(
@@ -1085,6 +1092,46 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(list(body["lore_left_out_xml"]), [nimitz.id])
         self.assertIn("A treecat", body["lore_left_out_xml"][nimitz.id])
         self.assertLess(body["estimated_tokens"], unbudgeted["estimated_tokens"])
+
+    def test_lore_fit_expansion_reflects_the_bound_assistants_lore_reach(self) -> None:
+        # #2212: `lore_fit.expansion` names the Lore reach (`ai_lore_expansion`)
+        # the bound assistant actually used for this preview — "one_hop" by
+        # default, "named" when the assistant sets it.
+        from app.models import CreateAssistantEntryRequest, SaveAssistantEntryRequest
+
+        created = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Named Only", entry_type="assistant:assistant")
+        )
+        self.service.save_assistant_entry(
+            created.id,
+            SaveAssistantEntryRequest(
+                title="Named Only",
+                base_revision=created.revision,
+                entry_type="assistant:assistant",
+                metadata={
+                    "ai_provider": "anthropic",
+                    "ai_model": "claude-haiku-4-5-20251001",
+                    "ai_lore_expansion": "named",
+                },
+            ),
+        )
+        template = '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}'
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": template,
+                "target_scene_id": self.scene_id,
+                "assistant_id": created.id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["lore_fit"]["expansion"], "named")
+
+        default_response = self.client.post(
+            "/api/ai/preview",
+            json={"template_source": template, "target_scene_id": self.scene_id},
+        )
+        self.assertEqual(default_response.json()["lore_fit"]["expansion"], "one_hop")
 
     def test_marked_target_in_context_pick_overrides_target_scene_id(self) -> None:
         # NC-style ★ target: a scene flagged target=true in a context_pick

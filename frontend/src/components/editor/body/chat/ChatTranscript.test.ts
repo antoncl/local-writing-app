@@ -258,4 +258,32 @@ describe("ChatTranscript", () => {
     expect(dropped.getAttribute("title")).toContain("left out of this send");
     expect(screen.getByTestId("journal-chip")).toHaveTextContent("The Regent");
   });
+
+  // #2212: under a Named-only Lore reach, a hop entry was noticed but never
+  // actually sent — marked the same "not sent" way, with its own tooltip.
+  it("marks a hop chip as not sent under Named-only reach, leaving a named chip alone", () => {
+    const history = [
+      {
+        role: "assistant",
+        content: "The Regent does.",
+        journal_added: [
+          { entry_id: "lore_named", title: "The Regent", source: "user_message" },
+          { entry_id: "lore_hop", title: "The Vale", source: "depth1_expansion" },
+        ],
+        lore_fit: {
+          budget_tokens: 16000,
+          used_tokens: 900,
+          declared_tokens: 0,
+          kept: 1,
+          left_out: [],
+          expansion: "named",
+        },
+      },
+    ] as ChatMessage[];
+    render(ChatTranscript, { chatHistory: history, chatRunning: false });
+    const hop = screen.getByTestId("journal-chip-left-out");
+    expect(hop).toHaveTextContent("The Vale");
+    expect(hop.getAttribute("title")).toContain("Lore reach is Named only");
+    expect(screen.getByTestId("journal-chip")).toHaveTextContent("The Regent");
+  });
 });

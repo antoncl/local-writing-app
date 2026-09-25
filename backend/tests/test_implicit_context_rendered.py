@@ -17,6 +17,7 @@ from test_implicit_context_surface import _SurfaceFixtureBase
 
 from app.models import CreateChatSessionRequest, SaveChatSessionRequest
 from app.services.ai.chat import expand_and_prepare_chat_blocks
+from app.services.ai.field_contract import FieldContract
 
 
 class RenderedPromptSurfaceTests(_SurfaceFixtureBase):
@@ -120,3 +121,60 @@ class RenderedPromptSurfaceTests(_SurfaceFixtureBase):
         # the same frozen system_prompt adds nothing new (dedup via
         # `in_scope`), and the journal stays append-only.
         self.assertEqual(len(turn2_rendered), 1)
+
+
+class FieldContractSurfaceTests(_SurfaceFixtureBase):
+    """#2211: the field-contract descriptor block the app prints (ids/labels/
+    types/options/the "Existing tags" vocabulary) is not a mention-detection
+    surface — only the prompt's own authored wording is."""
+
+    def _make_lore_chat_with_contract(self, scene_id: str, field_contract_stored: list) -> str:
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="RP", prompt_entry_id="p", subject=scene_id)
+        )
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="RP",
+                prompt_entry_id="p",
+                lore_enabled=True,
+                field_contract_stored=field_contract_stored,
+            ),
+        )
+        return chat.id
+
+    def test_title_only_in_tag_vocabulary_is_not_journaled_but_prompt_wording_is(self) -> None:
+        # "Nimitz" only ever appears inside the field-contract's printed tag
+        # vocabulary — never in prose the author wrote — so it must NOT be
+        # journaled. "Honor Harrington" appears in the prompt's own wording,
+        # so it still must be.
+        nimitz = self._make_lore("Nimitz", body="A treecat.")
+        honor = self._make_lore("Honor Harrington", body="Captain of a ship.")
+        scene_id = self._make_scene(body="The bridge was quiet.")
+
+        tag_field = {
+            "id": "tags", "label": "Tags", "type": "list", "options": [], "description": None,
+            "tag_vocabulary": ["Nimitz"],
+        }
+        contract = FieldContract()
+        contract.store(tag_field)
+        block = contract.render
+        system_prompt = (
+            "You are roleplaying as Honor Harrington.\n\n"
+            f"{block}\n\n"
+            "Respond in character."
+        )
+        chat_id = self._make_lore_chat_with_contract(scene_id, [tag_field])
+
+        expand_and_prepare_chat_blocks(
+            self.service,
+            chat_id,
+            system_prompt,
+            [{"role": "user", "content": "Let's begin."}],
+        )
+
+        journal = self.service.read_chat_session(chat_id).journal
+        by_id = {e.entry_id: e for e in journal}
+        self.assertNotIn(nimitz, by_id)
+        self.assertIn(honor, by_id)
+        self.assertEqual(by_id[honor].source, "rendered_prompt")

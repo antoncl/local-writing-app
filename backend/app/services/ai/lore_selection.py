@@ -233,6 +233,11 @@ def _budgeted_lore_tiers(
         _render_lore_entries(project, selection.ids, scene=scene, index=index, titles=titles)
     )
     fitted = fit_lore_budget(selection, rendered, limits.budget_tokens, titles=titles)
+    # #2212: stamp the reach this send used onto the report, so a left-out-only
+    # UI can tell an auto-added hop entry (kept, not left out) from one the
+    # budget actually dropped. Set here, where `limits.expansion` is already
+    # in scope, rather than widening `fit_lore_budget`'s signature.
+    fitted.report.expansion = limits.expansion
     stable_ids, volatile_ids = _tier_lore_ids(project, fitted.kept_ids, session, picks.hints)
     stable_snapshots, volatile_snapshots, warnings = _place_before_elements(
         project, picks.snapshots, session, never=selection.never

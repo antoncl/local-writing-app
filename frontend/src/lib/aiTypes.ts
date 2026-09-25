@@ -317,12 +317,18 @@ export type LoreFitEntry = {
 // ADR-0086 §5: what a send's (or the turn-0 preview's) lore budget did.
 // `declared_tokens` is reported, never bounded — a declared set alone larger
 // than the budget is the author's to shrink, so the meta line says so.
+// Mirrors the backend's `LoreFitExpansion` (`app/models/ai.py`).
+export type LoreExpansion = "one_hop" | "named";
+
 export type LoreFit = {
   budget_tokens: number;
   used_tokens: number;
   declared_tokens: number;
   kept: number;
   left_out: LoreFitEntry[];
+  // #2212: the Lore reach this send used — lets a left-out-only UI tell an
+  // auto-added hop entry from one the budget actually dropped.
+  expansion?: LoreExpansion | null;
 };
 
 // #1958: what a send's conversation-history window dropped — the tokens sent and

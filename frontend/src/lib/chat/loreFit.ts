@@ -1,7 +1,7 @@
 // ADR-0086 §5: the one place the lore-budget report is worded and judged, so
 // the transcript's meta line and the Context door's "Left out" section cannot
 // disagree about the same turn.
-import type { LoreFit, LoreFitEntry, LoreSource } from "@/lib/types";
+import type { ChatSessionJournalEntry, LoreFit, LoreFitEntry, LoreSource } from "@/lib/types";
 import { formatTokensPrecise } from "@/lib/utils/money";
 
 // ADR-0086 §1 sources in the reader's words. The two hops are what the
@@ -49,6 +49,19 @@ export function leftOutEntry(fit: LoreFit | null, entryId: string): LoreFitEntry
 // The chip's tooltip for a left-out entry — why the model didn't receive it.
 export function leftOutChipTitle(entry: LoreFitEntry): string {
   return `Detected, but left out of this send: over the lore budget (${formatTokensPrecise(entry.tokens)} tok).`;
+}
+
+// #2212: why a journal chip should render as "not sent" — the budget dropped
+// it, or the assistant's Lore reach is "named" (so a one-hop entry was
+// noticed but never actually placed in the send). Null when the entry was
+// sent, so the chip stays in its ordinary (sent) style.
+export function notSentReason(fit: LoreFit | null, entry: ChatSessionJournalEntry): string | null {
+  const leftOut = leftOutEntry(fit, entry.entry_id);
+  if (leftOut) return leftOutChipTitle(leftOut);
+  if (fit?.expansion === "named" && entry.source === "depth1_expansion") {
+    return "Noticed, but not sent: this assistant's Lore reach is Named only.";
+  }
+  return null;
 }
 
 export const LEFT_OUT_HINT =

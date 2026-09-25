@@ -15,9 +15,8 @@
     LEFT_OUT_HINT,
     declaredOverBudget,
     declaredOverLine,
-    leftOutChipTitle,
-    leftOutEntry,
     leftOutSegment,
+    notSentReason,
   } from "@/lib/chat/loreFit";
   import { HISTORY_FIT_HINT, droppedRoundsSegment } from "@/lib/chat/historyFit";
   import { journalEntryKey } from "@/lib/chat/journal";
@@ -129,14 +128,16 @@
         <div class="cbv-journal-added" title="Lore auto-detected from this turn.">
           <span class="cbv-journal-label">Auto-added context:</span>
           {#each message.journal_added as entry (journalEntryKey(entry))}
-            <!-- #2206: detected but left out by the budget — "not sent", in the
-                 quiet register (ADR-0086 §5: a routine fact, not a failure). -->
-            {@const leftOut = leftOutEntry(fit, entry.entry_id)}
+            <!-- #2206/#2212: detected but not actually sent — either the budget
+                 left it out, or this assistant's Lore reach is Named only, so
+                 the hop that found it was never taken. Quiet register (ADR-0086
+                 §5: a routine fact, not a failure). -->
+            {@const reason = notSentReason(fit, entry)}
             <span
               class="cbv-journal-chip"
-              class:cbv-journal-chip--left-out={leftOut != null}
-              title={leftOut ? leftOutChipTitle(leftOut) : undefined}
-              data-testid={leftOut ? "journal-chip-left-out" : "journal-chip"}
+              class:cbv-journal-chip--left-out={reason != null}
+              title={reason ?? undefined}
+              data-testid={reason ? "journal-chip-left-out" : "journal-chip"}
             >{entry.title || entry.entry_id}</span>
           {/each}
         </div>

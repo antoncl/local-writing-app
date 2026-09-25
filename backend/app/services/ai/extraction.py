@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.models import (
     AIChatRequest,
+    AIChatResponse,
     AIEntryPatch,
     ChatMessage,
     ChatUsage,
@@ -347,6 +348,9 @@ async def run_entry_patch_extraction(
     # #1877: `run_chat_turn` recorded this call's row and reports the chat's
     # total after it; a retry below supersedes it with its own.
     cost_usd_total = chat_reply.cost_usd_total
+    # The reply `patch` was validated from — what an unusable-patch diagnostic
+    # logs. The retry supersedes it only when its reply is the one adopted.
+    patch_reply = chat_reply
 
     # One firm retry on a garbled reply (#1036): re-run with the model's own
     # failed reply plus a stricter cue, so a chatty / cheap model that buried or
@@ -376,8 +380,33 @@ async def run_entry_patch_extraction(
         if retry.ok and (retry.content or "").strip():
             patch = project.validate_ai_entry_patch_for_type(entry_type, retry.content)
             patch = _constrain_to_registered_fields(patch, allowed_ids)
+            patch_reply = retry
+    _record_if_unusable(project, patch, patch_reply)
     return EntryPatchExtraction(
         patch=patch, cost_usd=cost, usage=usage, cost_usd_total=cost_usd_total, ok=True
+    )
+
+
+def _record_if_unusable(
+    project: ProjectService, patch: AIEntryPatch, patch_reply: AIChatResponse
+) -> None:
+    """Log an errors.log diagnostic when the final patch is unusable — garbled,
+    or well-formed but empty (no body, no fields) — so an author staring at a
+    "nothing to commit" notice can see the model's actual raw reply (#2195).
+    `patch_reply` is the call `patch` was validated from; its
+    `provider`/`model`/`content` are what gets recorded. A usable patch records
+    nothing."""
+    if not (patch.garbled or (patch.body is None and not patch.fields)):
+        return
+    reason = "garbled" if patch.garbled else "empty"
+    detail = (patch_reply.content or "")[:4000]
+    if patch.dropped:
+        detail += f"\n\ndropped: {patch.dropped}"
+    project.record_ai_error(
+        message=f"AI commit produced no usable patch ({reason})",
+        provider=patch_reply.provider,
+        model=patch_reply.model,
+        detail=detail,
     )
 
 

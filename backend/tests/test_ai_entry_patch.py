@@ -173,6 +173,22 @@ class ParseEntryPatchJsonTests(unittest.TestCase):
         # A bare "{}" wrapped in prose still means "nothing changed", not garble.
         self.assertEqual(parse_entry_patch_json("No changes needed. {}"), {})
 
+    def test_flat_object_without_body_or_fields_is_garbled(self) -> None:
+        # #2195: a non-empty object carrying neither "body" nor "fields" is
+        # wrong-shaped — a flat reply like this parsed as JSON but produced an
+        # empty patch with no reported reason. It must be garbled, not honored,
+        # so the caller's one firm retry runs.
+        raw = '{"title": "Seren", "aliases": ["The Grey"]}'
+        self.assertIsNone(parse_entry_patch_json(raw))
+
+    def test_prose_wrapped_flat_object_without_body_or_fields_is_garbled(self) -> None:
+        # Same wrong-shape rule on the lone-embedded-object fallback: a single
+        # object found amid prose that carries neither key is no longer
+        # honored (#2195) — previously "one slightly-misshapen object" was
+        # let through here.
+        raw = 'Sure, here you go: {"title": "Seren", "aliases": ["The Grey"]}'
+        self.assertIsNone(parse_entry_patch_json(raw))
+
 
 class ValidateAiEntryPatchTests(unittest.TestCase):
     def setUp(self) -> None:

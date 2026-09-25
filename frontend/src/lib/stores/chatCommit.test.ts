@@ -285,7 +285,21 @@ describe("ChatCommitController — commitToEntry", () => {
 
     await c.commitToEntry();
 
-    expect(deps.setNotice).toHaveBeenCalledWith("The model proposed no changes to commit.");
+    expect(deps.setNotice).toHaveBeenCalledWith(
+      "The model proposed no changes to commit. See errors.log in your project folder for the model's reply.",
+    );
+    expect(entryBrainstorm.proposalFor("lore-1")).toBeNull();
+  });
+
+  it("appends dropped fields to the empty-patch notice instead of the errors.log pointer", async () => {
+    const { c, deps } = reviseController();
+    extractPatch.mockResolvedValue(okResult({ body: null, fields: {}, dropped: ["id"] }));
+
+    await c.commitToEntry();
+
+    expect(deps.setNotice).toHaveBeenCalledWith(
+      "The model proposed no changes to commit. Ignored 1 field(s) the model couldn't set legally: id.",
+    );
     expect(entryBrainstorm.proposalFor("lore-1")).toBeNull();
   });
 
@@ -426,7 +440,21 @@ describe("ChatCommitController — create mode", () => {
 
     await c.commitDraft();
 
-    expect(deps.setNotice).toHaveBeenCalledWith("The model proposed no entry to create.");
+    expect(deps.setNotice).toHaveBeenCalledWith(
+      "The model proposed no entry to create. See errors.log in your project folder for the model's reply.",
+    );
+    expect(c.draftProposal).toBeNull();
+  });
+
+  it("appends dropped fields to the empty-draft notice instead of the errors.log pointer", async () => {
+    const { c, deps } = createController();
+    extractDraft.mockResolvedValue(okResult({ body: null, fields: {}, dropped: ["id"] }));
+
+    await c.commitDraft();
+
+    expect(deps.setNotice).toHaveBeenCalledWith(
+      "The model proposed no entry to create. Ignored 1 field(s) the model couldn't set legally: id.",
+    );
     expect(c.draftProposal).toBeNull();
   });
 
@@ -714,7 +742,22 @@ describe("ChatCommitController — stageToPendingSet", () => {
 
     expect(createSet).not.toHaveBeenCalled();
     expect(deps.onStaged).not.toHaveBeenCalled();
-    expect(deps.setNotice).toHaveBeenCalledWith("The model proposed no changes to stage.");
+    expect(deps.setNotice).toHaveBeenCalledWith(
+      "The model proposed no changes to stage. See errors.log in your project folder for the model's reply.",
+    );
+  });
+
+  it("appends dropped fields to the empty-stage notice instead of the errors.log pointer", async () => {
+    const { c, deps } = stageController();
+    extractPatch.mockResolvedValue(okResult({ body: null, fields: {}, dropped: ["id"] }));
+
+    await c.stageToPendingSet();
+
+    expect(createSet).not.toHaveBeenCalled();
+    expect(deps.onStaged).not.toHaveBeenCalled();
+    expect(deps.setNotice).toHaveBeenCalledWith(
+      "The model proposed no changes to stage. Ignored 1 field(s) the model couldn't set legally: id.",
+    );
   });
 
   it("no-ops when the subject is not a lore entity (canStage false)", async () => {

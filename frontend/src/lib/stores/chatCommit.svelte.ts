@@ -90,6 +90,21 @@ export interface ChatCommitDeps {
   revealEntry: (entryId: string) => void;
 }
 
+// The " Ignored N field(s) the model couldn't set legally: a, b." suffix every
+// commit notice uses to report a patch's `dropped` fields — one wording, so the
+// revise/stage/create paths can't drift on it. "" when nothing was dropped.
+function droppedSuffix(dropped: string[]): string {
+  return dropped.length > 0
+    ? ` Ignored ${dropped.length} field(s) the model couldn't set legally: ${dropped.join(", ")}.`
+    : "";
+}
+
+// Why a patch proposed nothing (#2195): the fields the validator dropped, or —
+// when none were — where the model's raw reply was logged by the extraction.
+function emptyPatchReason(dropped: string[]): string {
+  return droppedSuffix(dropped) || " See errors.log in your project folder for the model's reply.";
+}
+
 // ADR-0055 §2/§4a: a staged mutation set carries the same content as an entry
 // commit, re-expressed as rows. The extracted patch's field values are already
 // validated against the subject's type (the commit endpoint runs
@@ -312,7 +327,7 @@ export class ChatCommitController {
     const hasBody = body != null;
     const hasFields = Object.keys(patch.fields).length > 0;
     if (!hasBody && !hasFields) {
-      this.deps.setNotice("The model proposed no changes to commit.");
+      this.deps.setNotice(`The model proposed no changes to commit.${emptyPatchReason(patch.dropped)}`);
       return;
     }
     entryBrainstorm.propose(entryId, { body, fields: patch.fields, reviewMode });
@@ -321,12 +336,8 @@ export class ChatCommitController {
     // review renders on the entry pane. Name where it went so the author knows to
     // flip over. A scene subject isn't in the caller's roster → "the scene".
     const reviewOn = this.deps.entryTitle(entryId) ?? "the scene";
-    const dropped =
-      patch.dropped.length > 0
-        ? ` Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`
-        : "";
     this.deps.setNotice(
-      `Committed — review it on ${reviewOn}.${dropped}${this.outputTokensSuffix()}`,
+      `Committed — review it on ${reviewOn}.${droppedSuffix(patch.dropped)}${this.outputTokensSuffix()}`,
     );
   }
 
@@ -377,7 +388,7 @@ export class ChatCommitController {
     if (!this.chatUnchanged()) return;
     const rows = patchToRows(patch);
     if (rows.length === 0) {
-      this.deps.setNotice("The model proposed no changes to stage.");
+      this.deps.setNotice(`The model proposed no changes to stage.${emptyPatchReason(patch.dropped)}`);
       return;
     }
     const subject = this.deps.entryTitle(entryId) ?? "the entry";
@@ -415,14 +426,10 @@ export class ChatCommitController {
       });
       await this.deps.onStaged(set.id);
     }
-    const dropped =
-      patch.dropped.length > 0
-        ? ` Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`
-        : "";
     const count = `${rows.length} change${rows.length > 1 ? "s" : ""}`;
     this.deps.setNotice(
       `${updated ? "Updated the mutation set" : "Staged a mutation set"} for ${subject} (${count}) — ` +
-        `review it under Mutation sets on the card, then place it in a scene to make it active.${dropped}` +
+        `review it under Mutation sets on the card, then place it in a scene to make it active.${droppedSuffix(patch.dropped)}` +
         `${this.outputTokensSuffix()}`,
     );
   }
@@ -463,7 +470,7 @@ export class ChatCommitController {
     const hasBody = patch.body != null;
     const hasFields = Object.keys(patch.fields).length > 0;
     if (!hasBody && !hasFields) {
-      this.deps.setNotice("The model proposed no entry to create.");
+      this.deps.setNotice(`The model proposed no entry to create.${emptyPatchReason(patch.dropped)}`);
       return;
     }
     this.draftDropped = patch.dropped;

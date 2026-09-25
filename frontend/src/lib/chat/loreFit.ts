@@ -1,7 +1,7 @@
 // ADR-0086 §5: the one place the lore-budget report is worded and judged, so
 // the transcript's meta line and the Context door's "Left out" section cannot
 // disagree about the same turn.
-import type { LoreFit, LoreSource } from "@/lib/types";
+import type { LoreFit, LoreFitEntry, LoreSource } from "@/lib/types";
 import { formatTokensPrecise } from "@/lib/utils/money";
 
 // ADR-0086 §1 sources in the reader's words. The two hops are what the
@@ -38,6 +38,17 @@ export function leftOutSegment(fit: LoreFit): string {
 
 export function declaredOverLine(fit: LoreFit): string {
   return `declared lore ${formatTokensPrecise(fit.declared_tokens)}, over the ${formatTokensPrecise(fit.budget_tokens)} budget`;
+}
+
+// #2206: the left-out record for one auto-added entry on this turn, if the
+// budget dropped it — detection's chip names it, but the model never saw it.
+export function leftOutEntry(fit: LoreFit | null, entryId: string): LoreFitEntry | undefined {
+  return fit?.left_out.find((e) => e.id === entryId);
+}
+
+// The chip's tooltip for a left-out entry — why the model didn't receive it.
+export function leftOutChipTitle(entry: LoreFitEntry): string {
+  return `Detected, but left out of this send: over the lore budget (${formatTokensPrecise(entry.tokens)} tok).`;
 }
 
 export const LEFT_OUT_HINT =

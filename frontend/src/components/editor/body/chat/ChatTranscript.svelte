@@ -15,6 +15,8 @@
     LEFT_OUT_HINT,
     declaredOverBudget,
     declaredOverLine,
+    leftOutChipTitle,
+    leftOutEntry,
     leftOutSegment,
   } from "@/lib/chat/loreFit";
   import { HISTORY_FIT_HINT, droppedRoundsSegment } from "@/lib/chat/historyFit";
@@ -127,7 +129,15 @@
         <div class="cbv-journal-added" title="Lore auto-detected from this turn.">
           <span class="cbv-journal-label">Auto-added context:</span>
           {#each message.journal_added as entry (journalEntryKey(entry))}
-            <span class="cbv-journal-chip">{entry.title || entry.entry_id}</span>
+            <!-- #2206: detected but left out by the budget — "not sent", in the
+                 quiet register (ADR-0086 §5: a routine fact, not a failure). -->
+            {@const leftOut = leftOutEntry(fit, entry.entry_id)}
+            <span
+              class="cbv-journal-chip"
+              class:cbv-journal-chip--left-out={leftOut != null}
+              title={leftOut ? leftOutChipTitle(leftOut) : undefined}
+              data-testid={leftOut ? "journal-chip-left-out" : "journal-chip"}
+            >{entry.title || entry.entry_id}</span>
           {/each}
         </div>
       {/if}
@@ -243,6 +253,12 @@
     color: var(--accent-emphasis); font-weight: 600;
   }
   .cbv-journal-chip::before { content: "✚"; font-size: var(--fs-xs); }
+  /* #2206: hollow and muted — present in the record, absent from the send. */
+  .cbv-journal-chip--left-out {
+    background: transparent; border-style: dashed; border-color: var(--border-strong);
+    color: var(--text-3); font-weight: 500;
+  }
+  .cbv-journal-chip--left-out::before { content: "○"; }
 
   /* 4c · per-turn usage meta. */
   .cbv-turn-meta {

@@ -231,4 +231,31 @@ describe("ChatTranscript", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
     expect(clicked).toBe(true);
   });
+
+  // #2206: an auto-added chip the lore budget left out of the send renders
+  // "not sent" — detection noticed it, the model never received it.
+  it("marks an auto-added chip the budget left out, and only that one", () => {
+    const history = [
+      {
+        role: "assistant",
+        content: "The Regent does.",
+        journal_added: [
+          { entry_id: "lore_sent", title: "The Regent", source: "user_message" },
+          { entry_id: "lore_dropped", title: "The Vale", source: "depth1_expansion" },
+        ],
+        lore_fit: {
+          budget_tokens: 1000,
+          used_tokens: 900,
+          declared_tokens: 0,
+          kept: 1,
+          left_out: [{ id: "lore_dropped", title: "The Vale", source: "depth1_expansion", tokens: 1200 }],
+        },
+      },
+    ] as ChatMessage[];
+    render(ChatTranscript, { chatHistory: history, chatRunning: false });
+    const dropped = screen.getByTestId("journal-chip-left-out");
+    expect(dropped).toHaveTextContent("The Vale");
+    expect(dropped.getAttribute("title")).toContain("left out of this send");
+    expect(screen.getByTestId("journal-chip")).toHaveTextContent("The Regent");
+  });
 });

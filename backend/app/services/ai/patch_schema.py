@@ -69,6 +69,10 @@ def patch_response_schema(stored: list[dict[str, Any]], *, creating: bool) -> di
         f["id"]: _value_schema(f) for f in stored if isinstance(f, dict) and f.get("id") != "body"
     }
     fields_required = ["title"] if creating and "title" in field_properties else []
+    if fields_required:
+        # #2209: required but `""` would still satisfy it, and a nameless draft
+        # used to be minted under a placeholder title that prompts contain.
+        field_properties["title"] = {**field_properties["title"], "minLength": 1}
     properties["fields"] = {
         "type": "object",
         "properties": field_properties,

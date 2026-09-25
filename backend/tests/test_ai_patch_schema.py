@@ -50,7 +50,7 @@ class PatchResponseSchemaTests(unittest.TestCase):
                     "fields": {
                         "type": "object",
                         "properties": {
-                            "title": {"type": "string"},
+                            "title": {"type": "string", "minLength": 1},
                             "aliases": {"type": "array", "items": {"type": "string"}},
                             "age": {"type": "number"},
                             "beats": {
@@ -79,6 +79,8 @@ class PatchResponseSchemaTests(unittest.TestCase):
         self.assertEqual(schema["properties"]["fields"]["required"], [])
         # body is still an offered property in revise mode, just not required.
         self.assertIn("body", schema["properties"])
+        # #2209: a revise may leave the title alone, so no minLength there.
+        self.assertEqual(schema["properties"]["fields"]["properties"]["title"], {"type": "string"})
 
     def test_body_not_registered_has_no_body_property(self) -> None:
         stored = [f for f in _STORED if f["id"] != "body"]

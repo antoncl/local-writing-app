@@ -167,24 +167,28 @@ describe("treeActions.createNodeFromDraft (ADR-0046 §6.4 / ADR-0048 §5)", () =
     expect(createdId).toEqual({ id: "lore_new", title: "Seren" });
   });
 
-  it("falls back to a typed default title when the draft names none", async () => {
+  it("a null body is saved as empty", async () => {
     await treeActions.createNodeFromDraft("lore:character", {
       body: null,
-      fields: { allegiance: "chaos" },
+      fields: { title: "Seren", allegiance: "chaos" },
     });
 
-    expect(api.createLoreEntry).toHaveBeenCalledWith("New Character", "lore:character");
     const [savedEntry, savedBody] = vi.mocked(api.saveLoreEntry).mock.calls[0];
     expect(savedEntry.metadata).toEqual({ allegiance: "chaos" });
-    expect(savedBody).toBe(""); // null body defaults to empty
+    expect(savedBody).toBe("");
   });
 
-  it("ignores a blank proposed title and uses the default", async () => {
-    await treeActions.createNodeFromDraft("lore:character", {
-      body: "b",
-      fields: { title: "   " },
-    });
-    expect(api.createLoreEntry).toHaveBeenCalledWith("New Character", "lore:character");
+  // #2209: an invented placeholder ("New Main character") is the create
+  // prompt's own wording, so implicit detection pulled the untitled entry into
+  // every later chat of that prompt. A nameless draft mints nothing.
+  it.each([
+    ["no title", { allegiance: "chaos" }],
+    ["a blank title", { title: "   " }],
+  ])("refuses a draft with %s and mints nothing", async (_label, fields) => {
+    const createdId = await treeActions.createNodeFromDraft("lore:character", { body: "b", fields });
+    expect(createdId).toBeNull();
+    expect(api.createLoreEntry).not.toHaveBeenCalled();
+    expect(api.saveLoreEntry).not.toHaveBeenCalled();
   });
 });
 

@@ -823,6 +823,22 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertIn("AI commit produced no usable patch", log)
         self.assertIn("still not json", log)
 
+    def test_the_errors_log_entry_carries_the_whole_reply(self) -> None:
+        # #2197: the defect that made a reply unreadable sat at its very END (a
+        # dropped closing brace), past a 4000-char cap — the log must keep all
+        # of it, tail included.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        long_reply = "x" * 5000 + " TAIL-MARKER"
+        first = _chat_reply(long_reply, cost_usd=0.01)
+        second = _chat_reply(long_reply, cost_usd=0.02)
+        with self._mock_chat_sequence(first, second):
+            self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        log = (self.root / "errors.log").read_text(encoding="utf-8")
+        self.assertIn("TAIL-MARKER", log)
+
     def test_extraction_ending_empty_writes_an_errors_log_entry(self) -> None:
         # A well-formed but empty patch (no body, no fields) is unusable too —
         # same diagnostic, so the author isn't left staring at a silent notice

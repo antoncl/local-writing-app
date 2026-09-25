@@ -173,6 +173,26 @@ class ParseEntryPatchJsonTests(unittest.TestCase):
         # A bare "{}" wrapped in prose still means "nothing changed", not garble.
         self.assertEqual(parse_entry_patch_json("No changes needed. {}"), {})
 
+    def test_a_reply_missing_its_final_closers_is_repaired(self) -> None:
+        # #2197: a local model closed `fields` but dropped the outer `}` —
+        # deterministically, so the retry reproduced it. Complete otherwise.
+        self.assertEqual(
+            parse_entry_patch_json('{"body": "Hi", "fields": {"bio": "x"}'),
+            {"body": "Hi", "fields": {"bio": "x"}},
+        )
+        # Closers are appended in nesting order, lists included.
+        self.assertEqual(
+            parse_entry_patch_json('{"fields": {"tags": ["a", "b"]'),
+            {"fields": {"tags": ["a", "b"]}},
+        )
+
+    def test_a_reply_cut_off_inside_a_string_stays_garbled(self) -> None:
+        # Repairing this would adopt half a value — never.
+        self.assertIsNone(parse_entry_patch_json('{"body": "Hi, the Ledger-Mo'))
+
+    def test_a_reply_with_a_mismatched_closer_stays_garbled(self) -> None:
+        self.assertIsNone(parse_entry_patch_json('{"fields": {"tags": ["a"}'))
+
     def test_flat_object_without_body_or_fields_is_garbled(self) -> None:
         # #2195: a non-empty object carrying neither "body" nor "fields" is
         # wrong-shaped — a flat reply like this parsed as JSON but produced an

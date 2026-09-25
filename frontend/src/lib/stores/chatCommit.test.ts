@@ -97,6 +97,7 @@ function makeDeps(over: Partial<ChatCommitDeps> = {}): ChatCommitDeps {
     setCostTotal: vi.fn(async () => {}),
     setError: vi.fn(),
     setNotice: vi.fn(),
+    setRawReply: vi.fn(),
     entryTitle: vi.fn(() => null),
     getStagedSetId: vi.fn(() => ""),
     onStaged: vi.fn(async () => {}),
@@ -286,9 +287,47 @@ describe("ChatCommitController — commitToEntry", () => {
     await c.commitToEntry();
 
     expect(deps.setNotice).toHaveBeenCalledWith(
-      "The model proposed no changes to commit. See errors.log in your project folder for the model's reply.",
+      "The model proposed no changes to commit. The model's reply is shown below.",
     );
     expect(entryBrainstorm.proposalFor("lore-1")).toBeNull();
+  });
+
+  it("appends the garbled_reason to the garbled error when the server sends one", async () => {
+    const { c, deps } = reviseController();
+    extractPatch.mockResolvedValue(
+      okResult({ garbled: true, garbled_reason: "The reply contains no JSON object." }),
+    );
+
+    await c.commitToEntry();
+
+    expect(deps.setError).toHaveBeenCalledWith(
+      "Couldn't read the model's response as a patch — ask it to finalize again. " +
+        "The reply contains no JSON object.",
+    );
+  });
+
+  it("passes the extraction's raw_reply to setRawReply", async () => {
+    const { c, deps } = reviseController();
+    extractPatch.mockResolvedValue({
+      ...okResult({ garbled: true }),
+      raw_reply: "not json at all",
+    });
+
+    await c.commitToEntry();
+
+    expect(deps.setRawReply).toHaveBeenCalledWith("not json at all");
+  });
+
+  it("clears the raw reply at the start of a commit", async () => {
+    const { c, deps } = reviseController();
+    extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }));
+
+    await c.commitToEntry();
+
+    expect(deps.setRawReply).toHaveBeenCalledWith(null);
+    // The clear (from runExtractCommit) happens before the result-driven set.
+    const calls = vi.mocked(deps.setRawReply).mock.invocationCallOrder;
+    expect(calls[0]).toBeLessThan(calls[1]);
   });
 
   it("appends dropped fields to the empty-patch notice instead of the errors.log pointer", async () => {
@@ -441,7 +480,7 @@ describe("ChatCommitController — create mode", () => {
     await c.commitDraft();
 
     expect(deps.setNotice).toHaveBeenCalledWith(
-      "The model proposed no entry to create. See errors.log in your project folder for the model's reply.",
+      "The model proposed no entry to create. The model's reply is shown below.",
     );
     expect(c.draftProposal).toBeNull();
   });
@@ -515,6 +554,21 @@ describe("ChatCommitController — #986 chat switch during an in-flight commit",
     expect(createSet).not.toHaveBeenCalled();
     expect(deps.onStaged).not.toHaveBeenCalled();
     expect(deps.setCostTotal).not.toHaveBeenCalled();
+  });
+
+  it("a chat switch mid-extraction doesn't hand the new chat this chat's raw reply", async () => {
+    let activeChatId = "chat_1";
+    const { c, deps } = makeController({ getChatId: () => activeChatId });
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
+    c.inputDrafts = { entry: "lore-1" };
+    extractPatch.mockImplementation(async () => {
+      activeChatId = "chat_2";
+      return { ...okResult({ garbled: true }), raw_reply: "not json" };
+    });
+
+    await c.commitToEntry();
+
+    expect(deps.setRawReply).not.toHaveBeenCalledWith("not json");
   });
 
   it("commitToEntry: a chat switch mid-extraction skips the cost attribution", async () => {
@@ -743,7 +797,7 @@ describe("ChatCommitController — stageToPendingSet", () => {
     expect(createSet).not.toHaveBeenCalled();
     expect(deps.onStaged).not.toHaveBeenCalled();
     expect(deps.setNotice).toHaveBeenCalledWith(
-      "The model proposed no changes to stage. See errors.log in your project folder for the model's reply.",
+      "The model proposed no changes to stage. The model's reply is shown below.",
     );
   });
 

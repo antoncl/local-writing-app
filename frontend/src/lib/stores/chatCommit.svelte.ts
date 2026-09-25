@@ -60,6 +60,10 @@ export interface ChatCommitDeps {
   setError: (message: string | null) => void;
   /** Set / clear the non-error commit notice (component-owned). */
   setNotice: (message: string | null) => void;
+  /** Set / clear the raw model reply the disclosure shows below the notice
+   *  (#2201) — set from the extraction result, cleared at the start of every
+   *  commit (component-owned, like `setError`/`setNotice`). */
+  setRawReply: (text: string | null) => void;
   /** Title of the entry a patch was committed to, for the hand-off cue — null
    *  when it isn't in the caller's roster (e.g. a scene subject). */
   entryTitle: (entryId: string) => string | null;
@@ -100,9 +104,10 @@ function droppedSuffix(dropped: string[]): string {
 }
 
 // Why a patch proposed nothing (#2195): the fields the validator dropped, or —
-// when none were — where the model's raw reply was logged by the extraction.
+// when none were — that the model's raw reply is shown below (#2201; still
+// logged to errors.log too, but the in-app disclosure is what the author sees).
 function emptyPatchReason(dropped: string[]): string {
-  return droppedSuffix(dropped) || " See errors.log in your project folder for the model's reply.";
+  return droppedSuffix(dropped) || " The model's reply is shown below.";
 }
 
 // ADR-0055 §2/§4a: a staged mutation set carries the same content as an entry
@@ -233,12 +238,15 @@ export class ChatCommitController {
     // chat switched during the extraction — don't touch the now-active chat.
     if (result.ok && this.chatUnchanged()) this.deps.setCostTotal(result.cost_usd_total ?? null);
     if (result.ok) this.lastExtractionOutputTokens = result.usage?.output_tokens ?? null;
+    // A chat switched mid-extraction must not inherit this chat's reply.
+    if (this.chatUnchanged()) this.deps.setRawReply(result.raw_reply ?? null);
     if (!result.ok || !result.patch) {
       this.deps.setError(result.error || "The model returned nothing to commit.");
       return null;
     }
     if (result.patch.garbled) {
-      this.deps.setError(garbledMessage);
+      const reason = result.patch.garbled_reason;
+      this.deps.setError(reason ? `${garbledMessage} ${reason}` : garbledMessage);
       return null;
     }
     return result.patch;
@@ -268,6 +276,7 @@ export class ChatCommitController {
   private async runExtractCommit(host: ExtractHost): Promise<void> {
     this.deps.setError(null);
     this.deps.setNotice(null);
+    this.deps.setRawReply(null);
     this.lastExtractionOutputTokens = null;
     this.committing = true;
     try {

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  ADR-0089 Amendment 2 — the detail line is the item's editor (approved by Anton 2026-09-25).
+
+  A relationship-list row reads "<target title>" with the item's non-key members as its detail line.
+  That line IS the editor: one segment per non-key member; an empty member shows its name as a muted
+  italic placeholder; clicking a segment turns it into its control in place (text/number → inline
+  input, Enter/blur saves, Esc reverts, Tab/Shift+Tab move; every other type → a popover anchored on
+  the segment holding the rail's FieldValueEditor — here a select stands in). The key member is never
+  a segment (it is the title). Grouped by type → no per-row type. ⤳ stays at the end of the line.
+
+  Anti-goals: no expander form, no new widget, no write-contract change, no scrub-time editing (the
+  segments are read-only while scrubbed; a stop is edited where ADR-0089 §4 says).
+
+  The row icon is the target entry type's icon (a person outline for a character type).
+  Tokens are COPIES of frontend/src/styles.css (dark); they drift. Do not import.
+-->
+<title>Detail line editor</title>
+<style>
+*{box-sizing:border-box}
+:root{--surface:#1f2522;--inset:#242a28;--border:#3a4541;--border-strong:#4a5651;--divider:#2a322f;
+  --text:#e8edeb;--text-2:#a9b6b0;--text-3:#7e8a84;--accent:#6cc4a6;--accent-emphasis:#7cc0a1;
+  --accent-soft:#1f3a32;--mutation-color:#7c5cbf;--danger:#a8423f;
+  --sans:"Segoe UI",system-ui,sans-serif;--serif:Georgia,"Times New Roman",serif}
+body{background:#161b19;font-family:var(--sans);color:var(--text);font-size:13px;padding:24px}
+.w{background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:560px;margin:0 auto;padding:14px 16px}
+.hd{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.cap{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:600;flex:1}
+.pill{border:1px solid var(--border);border-radius:7px;padding:3px 8px;color:var(--text-2);font-size:12px}
+.flt{border:1px solid var(--border);border-radius:8px;padding:6px 10px;color:var(--text-3);margin-bottom:10px;font-size:12px}
+.grp{display:flex;justify-content:space-between;color:var(--text-2);font-size:13px;padding:4px 2px;border-bottom:1px solid var(--divider);font-family:var(--serif)}
+.row{display:flex;gap:10px;padding:8px 6px;border-radius:8px}
+.row:hover{background:var(--inset)}
+.ic{color:var(--text-3);width:16px;padding-top:2px}
+.main{flex:1;min-width:0}.t{font-weight:600}
+.det{margin-top:2px;font-size:12px;color:var(--text-2);display:flex;flex-wrap:wrap;align-items:center}
+.seg{cursor:text;border-radius:4px;padding:1px 3px;border:1px solid transparent}
+.seg:hover{border-color:var(--border);background:var(--inset)}
+.seg.empty{color:var(--text-3);font-style:italic}
+.sep{color:var(--border-strong);padding:0 2px}
+.seg input{background:var(--inset);border:1px solid var(--accent);border-radius:4px;color:var(--text);font-size:12px;padding:1px 4px;width:120px;outline:none}
+.pop{position:relative}
+.menu{position:absolute;top:20px;left:0;background:var(--inset);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:2;min-width:120px}
+.menu div{padding:4px 8px;border-radius:5px;cursor:pointer}.menu div:hover{background:var(--accent-soft);color:var(--accent-emphasis)}
+.mut{margin-left:6px;font-size:11px;color:#b9a3e6;background:#2e2640;border-radius:4px;padding:0 5px}
+.x{color:var(--danger);cursor:pointer;padding-top:2px}
+.note{font-size:12px;color:var(--text-2);max-width:560px;margin:10px auto 0}
+</style>
+</head>
+<body>
+<div class="w">
+<div class="hd"><span class="cap">Connections 3</span><span class="pill">▤</span><span class="pill">+</span></div>
+<div class="flt">⌕ Filter</div>
+<div class="grp"><span>Main character</span><span>3</span></div>
+<div id="rows"></div>
+</div>
+<p class="note">Click any segment. Text: Enter/blur saves, Esc cancels, Tab moves on. "kind" is a select (popover). Empty members show their name in italics. Grouped by type, so no per-row type. ⤳ marks a value that changes later in the story.</p>
+<script>
+const PERSON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="4"/><path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/></svg>';
+const members=[{k:'kind',n:'kind',t:'select',o:['Boss','Ally','Rival','Kin']},{k:'state',n:'state',t:'text'},{k:'note',n:'note',t:'text'}];
+const items=[{name:'Serafina Rossi / Kyrra Vana',v:{kind:'Boss',state:'',note:''}},{name:'Kyria Isolde',v:{kind:'Ally',state:'owes him',note:''},mut:'Ch. 12'},{name:'Tomas Vell',v:{kind:'',state:'',note:''}}];
+let editing=null;
+function render(){const r=document.getElementById('rows');r.innerHTML='';items.forEach((it,i)=>{const row=document.createElement('div');row.className='row';row.innerHTML='<span class="ic">'+PERSON+'</span>';const main=document.createElement('div');main.className='main';main.innerHTML='<div class="t">'+it.name+'</div>';const det=document.createElement('div');det.className='det';members.forEach((m,j)=>{if(j)det.insertAdjacentHTML('beforeend','<span class="sep">·</span>');const s=document.createElement('span');const val=it.v[m.k];const isEd=editing&&editing.i===i&&editing.j===j;s.className='seg'+(val?'':' empty');s.title=m.n;if(isEd&&m.t==='text'){const inp=document.createElement('input');inp.value=val;inp.placeholder=m.n;s.appendChild(inp);setTimeout(()=>inp.focus(),0);inp.onkeydown=e=>{if(e.key==='Enter'){it.v[m.k]=inp.value.trim();editing=null;render()}else if(e.key==='Escape'){editing=null;render()}else if(e.key==='Tab'){e.preventDefault();it.v[m.k]=inp.value.trim();editing={i,j:(j+(e.shiftKey?members.length-1:1))%members.length};render()}};inp.onblur=()=>{if(editing&&editing.i===i&&editing.j===j){it.v[m.k]=inp.value.trim();editing=null;render()}}}else if(isEd&&m.t==='select'){s.className+=' pop';s.textContent=val||m.n;const menu=document.createElement('div');menu.className='menu';m.o.concat(['(clear)']).forEach(o=>{const d=document.createElement('div');d.textContent=o;d.onmousedown=e=>{e.preventDefault();it.v[m.k]=o==='(clear)'?'':o;editing=null;render()};menu.appendChild(d)});s.appendChild(menu)}else{s.textContent=val||m.n;s.onclick=()=>{editing={i,j};render()}}det.appendChild(s)});if(it.mut)det.insertAdjacentHTML('beforeend','<span class="mut">⤳ '+it.mut+'</span>');main.appendChild(det);row.appendChild(main);row.insertAdjacentHTML('beforeend','<span class="x" title="Remove">×</span>');r.appendChild(row)})}
+render();
+</script>
+</body>
+</html>

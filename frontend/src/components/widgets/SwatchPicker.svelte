@@ -23,9 +23,24 @@
      * Null → the old empty hatched dot (no inherited colour to show).
      */
     placeholderHex?: string | null;
+    // #2221: open the popover the instant the trigger mounts — a caller that
+    // renders this component ONLY once the writer has already asked to edit
+    // (ItemDetailSegments's color segment) skips the redundant first click.
+    openOnMount?: boolean;
+    // #2221: fires whenever the popover closes, however it closes (a pick,
+    // Esc, or an outside click) — mirrors ColoredSelect's `onClose`.
+    onClose?: () => void;
   }
 
-  let { value = $bindable(null), allowNone = true, onChange, readOnly = false, placeholderHex = null }: Props = $props();
+  let {
+    value = $bindable(null),
+    allowNone = true,
+    onChange,
+    readOnly = false,
+    placeholderHex = null,
+    openOnMount = false,
+    onClose = undefined,
+  }: Props = $props();
 
   let open = $state(false);
   let anchor: HTMLButtonElement | undefined = $state();
@@ -35,13 +50,26 @@
   const palette = $derived($paletteStore);
   const current = $derived(getSwatch(value));
 
+  // Opens exactly once, the first time the trigger is bound — deferred to the
+  // next task so the host's opening click, still bubbling to the window's
+  // outside-click listener, cannot close it at once (see ColoredSelect).
+  let openedOnMount = false;
+  $effect(() => {
+    if (openOnMount && anchor && !openedOnMount) {
+      openedOnMount = true;
+      setTimeout(() => (open = true));
+    }
+  });
+
   function toggle() {
     if (readOnly) return;
     open = !open;
+    if (!open) onClose?.();
   }
 
   function close() {
     open = false;
+    onClose?.();
   }
 
   function select(id: string | null) {

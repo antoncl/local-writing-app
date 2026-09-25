@@ -86,6 +86,18 @@
     // undefined (the default) keeps the picker's original prompt-author
     // empty-state copy.
     emptyHint?: NodePickerEmptyHint | null;
+    // #2221: opens the popover-based widget's list the instant it mounts —
+    // forwarded to a `select` field's ColoredSelect and a `color` field's
+    // SwatchPicker (their own `openOnMount`). Lets a caller that renders this
+    // component ONLY once the writer has already asked to edit (a reference-
+    // list segment) skip the redundant first click. Undefined/false for every
+    // other caller — unchanged default behaviour.
+    autoOpen?: boolean;
+    // #2221: forwarded to the same two widgets' `onClose` — fires whenever
+    // their popover closes (pick, Esc, outside click), so a segment-style
+    // caller can end its own "this member is editing" state without a
+    // dedicated close affordance.
+    onPopoverClose?: () => void;
   }
 
   let {
@@ -111,6 +123,8 @@
     lockedKeys = undefined,
     uniqueMember = undefined,
     emptyHint = null,
+    autoOpen = false,
+    onPopoverClose = undefined,
   }: Props = $props();
 
   const label = $derived(ariaLabel ?? field.name);
@@ -295,6 +309,8 @@
     allowBlank={!selectRequired}
     ariaLabel={label}
     onChange={(v) => emit(v)}
+    openOnMount={autoOpen}
+    onClose={onPopoverClose}
   />
 {:else if field.type === "boolean"}
   <!-- Tri-state (#522), rail-only via `allowUnset`: an absent boolean reads
@@ -335,7 +351,12 @@
        each entity_ref member's own group-scoped hint from `field.item_group`
        rather than inheriting the host's (a top-level field's) wording. -->
 {:else if field.type === "color"}
-  <SwatchPicker value={currentValue || null} onChange={(id) => emit(id ?? "")} />
+  <SwatchPicker
+    value={currentValue || null}
+    onChange={(id) => emit(id ?? "")}
+    openOnMount={autoOpen}
+    onClose={onPopoverClose}
+  />
 {:else}
   <input aria-label={label} value={textDraft} oninput={(event) => editText(event.currentTarget.value)} />
 {/if}

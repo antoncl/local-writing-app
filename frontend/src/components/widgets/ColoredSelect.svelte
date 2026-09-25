@@ -44,6 +44,16 @@
     // Trigger reads as rest text: no border/surface until hover (#1904).
     quiet = false,
     footer = undefined,
+    // #2221: open the list the instant the trigger mounts — a caller that
+    // renders this component ONLY once the writer has already asked to edit
+    // (ItemDetailSegments's select/color segment) skips the redundant first
+    // click that would otherwise just reveal the trigger.
+    openOnMount = false,
+    // #2221: fires whenever the list closes, however it closes (a pick, Esc,
+    // an outside click, or the trigger toggling it shut) — lets a caller like
+    // ItemDetailSegments end its own "this segment is editing" state without
+    // reaching into this component's internals.
+    onClose = undefined,
   }: {
     value?: string;
     options?: SelectOption[];
@@ -56,6 +66,8 @@
     icon?: string | null;
     quiet?: boolean;
     footer?: Snippet<[{ close: () => void }]>;
+    openOnMount?: boolean;
+    onClose?: () => void;
   } = $props();
 
   let open = $state(false);
@@ -63,6 +75,20 @@
   // and a plain `let` bound with `bind:this` isn't tracked under Svelte 5
   // runes, so the param would still be stale/undefined at first open.
   let anchor: HTMLButtonElement | undefined = $state();
+
+  // Opens exactly once, the first time the trigger is bound — a plain `let`
+  // guard (not `$state`) since flipping it back never needs to re-render.
+  // Deferred to the next task: a host mounts this INSIDE a click handler, and
+  // that same click still bubbles to the window's outside-click listener —
+  // opening synchronously let it close the list at once (its target, the
+  // host's now-detached element, is not inside `anchor`).
+  let openedOnMount = false;
+  $effect(() => {
+    if (openOnMount && anchor && !openedOnMount) {
+      openedOnMount = true;
+      setTimeout(() => (open = true));
+    }
+  });
 
   const current = $derived(options.find((o) => o.value === value) ?? null);
   // Resolve the swatch hex when the selected option carries a color id.
@@ -82,12 +108,14 @@
   function toggle() {
     if (readOnly && !footer) return;
     open = !open;
+    if (!open) onClose?.();
   }
   function close() {
     const active = document.activeElement;
     const inside = !!popEl && (popEl.contains(active) || active === document.body);
     open = false;
     if (inside) anchor?.focus();
+    onClose?.();
   }
 
   $effect(() => {
@@ -139,6 +167,7 @@
     const to = event.relatedTarget as Node | null;
     if (to && ((popEl && popEl.contains(to)) || (anchor && anchor.contains(to)))) return;
     open = false;
+    onClose?.();
   }
 
   function onDocClick(event: MouseEvent) {

@@ -394,12 +394,14 @@ def _record_if_unusable(
     or well-formed but empty (no body, no fields) — so an author staring at a
     "nothing to commit" notice can see the model's actual raw reply (#2195).
     `patch_reply` is the call `patch` was validated from; its
-    `provider`/`model`/`content` are what gets recorded. A usable patch records
-    nothing."""
+    `provider`/`model`/`content` are what gets recorded — the WHOLE reply
+    (already bounded by the call's max_tokens): a JSON defect is as likely at
+    its end as anywhere, and a truncated log hid exactly that (#2197). A usable
+    patch records nothing."""
     if not (patch.garbled or (patch.body is None and not patch.fields)):
         return
     reason = "garbled" if patch.garbled else "empty"
-    detail = (patch_reply.content or "")[:4000]
+    detail = patch_reply.content or ""
     if patch.dropped:
         detail += f"\n\ndropped: {patch.dropped}"
     project.record_ai_error(

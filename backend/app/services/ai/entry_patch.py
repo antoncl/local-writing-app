@@ -167,6 +167,11 @@ def parse_entry_patch_json(raw: str) -> dict[str, Any] | None:
     # (any braces are inside it), so honor it if patch-shaped (or empty); this
     # also covers a bare "{}" ("nothing changed", per the contract).
     whole = _as_json_dict(candidate)
+    if whole is None:
+        # #2197: a model that ends the reply one closer short (`…"}` where `…"}}`
+        # was due) — deterministically, so the firm retry reproduces it. Repair
+        # only a reply that IS one object and ended outside a string.
+        whole = _as_json_dict(_close_unbalanced(candidate))
     if whole is not None:
         return _patch_shaped_or_empty(whole)
 
@@ -192,6 +197,51 @@ def parse_entry_patch_json(raw: str) -> dict[str, Any] | None:
     # longer honored (#2195) — multiple objects, or one wrong-shaped one, are
     # both garbled.
     return _patch_shaped_or_empty(embedded[0]) if len(embedded) == 1 else None
+
+
+_CLOSER = {"{": "}", "[": "]"}
+
+
+def _close_unbalanced(text: str) -> str:
+    """``text`` with its unclosed ``{``/``[`` closed in nesting order, or ``""``
+    when it isn't repairable that way: it must open with ``{``, every closer it
+    does carry must match, and it must end outside a string — a reply cut off
+    mid-value stays garbled rather than adopting half a value. String-aware the
+    same way `_object_end` is."""
+    if not text.startswith("{"):
+        return ""
+    brackets, ends_in_string = _brackets_outside_strings(text)
+    if ends_in_string:
+        return ""
+    stack: list[str] = []
+    for c in brackets:
+        if c in _CLOSER:
+            stack.append(_CLOSER[c])
+        elif not stack or stack.pop() != c:
+            return ""
+    return text + "".join(reversed(stack)) if stack else ""
+
+
+def _brackets_outside_strings(text: str) -> tuple[list[str], bool]:
+    """The ``{}[]`` characters of ``text`` that sit outside JSON string
+    literals, in order, and whether ``text`` ends inside an unterminated
+    string. ``\\`` escapes the next char inside a string."""
+    brackets: list[str] = []
+    in_str = False
+    escaped = False
+    for c in text:
+        if in_str:
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c in "{}[]":
+            brackets.append(c)
+    return brackets, in_str
 
 
 def _as_json_dict(text: str) -> dict[str, Any] | None:

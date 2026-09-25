@@ -27,6 +27,7 @@
   import { buildPeekTarget } from "@/lib/utils/peekTarget";
   import type {
     NodePickerConfig,
+    NodePickerEmptyHint,
     NodePickerRef,
     LoreEntrySummary,
     MetadataFieldDefinition,
@@ -98,6 +99,10 @@
     // MutationFieldRows/MutationAuthoringForm, EntryInputsEditor,
     // ViewFlowNode, PlotArcNode) passes nothing.
     createLayerId = undefined,
+    // #2215: forwarded to NodePicker/NodePickerPopover verbatim — undefined
+    // (the default, every host but the field/group-member ones below) keeps
+    // the picker's original prompt-author empty-state copy.
+    emptyHint = null,
   }: {
     field: MetadataFieldDefinition;
     value?: string | string[] | null;
@@ -115,6 +120,7 @@
     onChange?: (value: string | string[]) => void;
     onNavigate?: (target: NavigateTarget) => void;
     createLayerId?: string | null | undefined;
+    emptyHint?: NodePickerEmptyHint | null;
   } = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
@@ -460,6 +466,7 @@
         onChange={handlePickerChange}
         onCreate={createEnabled ? handleCreate : undefined}
         creating={creating}
+        {emptyHint}
       />
       {#if createError}<p class="reference-picker-create-error">{createError}</p>{/if}
     </span>

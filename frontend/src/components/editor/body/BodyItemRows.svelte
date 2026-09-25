@@ -13,6 +13,7 @@
   import { leavesRow } from "@/components/editor/RailScalarCell.svelte";
   import { buildRailRowModel, isRowEmpty, type RailRowContext } from "@/lib/rail/fieldRowModel";
   import { buildRefResolver } from "@/lib/utils/refResolve";
+  import { groupMemberEmptyHint } from "@/lib/utils/pickerEmptyHint";
   import { assistantEntriesStore } from "@/lib/stores/assistants";
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   import { tagById } from "@/lib/stores/tagNodes";
@@ -198,6 +199,12 @@
     researchStructure: deps.researchStructure,
     implicitContextMatcher: deps.implicitContextMatcher,
     excludeId: deps.excludeId,
+    // #2215: a list item's members are a group shape (ADR-0089/#698) — the
+    // picker's empty state reads as a group member's, not a top-level
+    // field's. The item's own group id isn't threaded this deep (only its
+    // resolved members are), so this is the "group name unknown" fallback,
+    // not the named "Reusable groups → <group> → <member>" form.
+    emptyHint: groupMemberEmptyHint(null, ""),
   });
   const callbacks: RailRowCallbacks = {
     open: openField,

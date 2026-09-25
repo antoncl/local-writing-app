@@ -17,6 +17,8 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import { dropPositionFromEvent, reorderByPosition } from "@/lib/utils/listOrder";
   import { metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
+  import { groupMemberEmptyHint } from "@/lib/utils/pickerEmptyHint";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
   import type {
     GroupMember,
     LoreEntrySummary,
@@ -99,6 +101,17 @@
       options: member.options ?? [],
       picker_config: member.picker_config ?? null,
     };
+  }
+
+  // #2215: a member's picker empty state names the reusable group it belongs
+  // to, when the field's `item_group` resolves one — the same "Reusable
+  // groups → <group> → <member>" the GroupsManagerDialog disclosure warns
+  // with, so the two surfaces read as one vocabulary.
+  const groupName = $derived(
+    field.item_group ? ($metadataSchemaStore?.groups?.[field.item_group]?.name ?? null) : null,
+  );
+  function memberEmptyHint(member: GroupMember) {
+    return groupMemberEmptyHint(groupName, member.name || member.key);
   }
 
   function isRecord(item: MetadataValue): item is { [key: string]: MetadataValue } {
@@ -282,6 +295,7 @@
                     {researchStructure}
                     {excludeId}
                     {createLayerId}
+                    emptyHint={memberEmptyHint(member)}
                   />
                 </div>
               </div>
@@ -304,6 +318,7 @@
               {researchStructure}
               {excludeId}
               {createLayerId}
+              emptyHint={memberEmptyHint(members[0])}
             />
           </div>
           {@render removeButton(index)}

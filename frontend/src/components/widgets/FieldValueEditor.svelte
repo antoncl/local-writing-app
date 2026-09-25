@@ -26,6 +26,7 @@
     MetadataFieldDefinition,
     MetadataValue,
     NavigateTarget,
+    NodePickerEmptyHint,
     PromptEntrySummary,
     StructureDocument,
   } from "@/lib/types";
@@ -80,6 +81,11 @@
     // leaves every other `list` field untouched.
     lockedKeys?: { member: string; keys: string[] } | undefined;
     uniqueMember?: string | undefined;
+    // #2215: forwarded to ReferencePicker (and, for a `list` field, to each
+    // entity_ref/entity_ref_list member via ListValueEditor) verbatim —
+    // undefined (the default) keeps the picker's original prompt-author
+    // empty-state copy.
+    emptyHint?: NodePickerEmptyHint | null;
   }
 
   let {
@@ -104,6 +110,7 @@
     createLayerId = undefined,
     lockedKeys = undefined,
     uniqueMember = undefined,
+    emptyHint = null,
   }: Props = $props();
 
   const label = $derived(ariaLabel ?? field.name);
@@ -262,6 +269,7 @@
     onChange={(value) => emit(value)}
     onNavigate={(detail) => onNavigate?.(detail)}
     {createLayerId}
+    {emptyHint}
   />
 {:else if field.type === "multi_select" && field.options.length > 0}
   <div class="multi-select-chips" aria-label={label}>
@@ -323,6 +331,9 @@
     {lockedKeys}
     {uniqueMember}
   />
+  <!-- emptyHint is deliberately not forwarded here: ListValueEditor derives
+       each entity_ref member's own group-scoped hint from `field.item_group`
+       rather than inheriting the host's (a top-level field's) wording. -->
 {:else if field.type === "color"}
   <SwatchPicker value={currentValue || null} onChange={(id) => emit(id ?? "")} />
 {:else}

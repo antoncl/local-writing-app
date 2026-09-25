@@ -6,7 +6,7 @@
   // from a fully-resolved `RailRowModel` (`fieldRowModel.ts`) plus the widget
   // pass-throughs (`RailRowDeps`) and the panel's write-back callbacks
   // (`RailRowCallbacks`).
-  import type { LoreEntrySummary, MetadataValue, NavigateTarget, PromptEntrySummary, StructureDocument } from "@/lib/types";
+  import type { LoreEntrySummary, MetadataValue, NavigateTarget, NodePickerEmptyHint, PromptEntrySummary, StructureDocument } from "@/lib/types";
 
   import type { PeekableRef } from "@/lib/utils/peekTarget";
   export type RailRowDeps = {
@@ -22,6 +22,11 @@
     researchStructure?: StructureDocument | null;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     excludeId?: string | null;
+    // #2215: a reference row's picker empty-state copy — every RailFieldRow
+    // host is a field surface (never a prompt input), so this defaults to
+    // the field wording (below) when the host passes nothing; a group-member
+    // host (BodyItemRows) overrides it with its own group-scoped wording.
+    emptyHint?: NodePickerEmptyHint | null;
   };
 
   export type RailRowCallbacks = {
@@ -51,6 +56,8 @@
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import OverrideMark from "@/components/editor/OverrideMark.svelte";
+  import { railFieldEmptyHint } from "@/lib/utils/pickerEmptyHint";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
   import type { RailRowModel } from "@/lib/rail/fieldRowModel";
 
   interface Props {
@@ -60,6 +67,12 @@
   }
 
   let { model, deps, on }: Props = $props();
+
+  // #2215: field-worded by default (see RailRowDeps.emptyHint); a
+  // group-member host (BodyItemRows) overrides it. A field generated from an
+  // applied reusable group has no definition of its own to fix — its targets
+  // live on the group member — so it names the group instead.
+  const emptyHint = $derived(deps.emptyHint ?? railFieldEmptyHint(model.field, $metadataSchemaStore));
 </script>
 
 <!-- Intrinsic identity fields (id/title/entry_type, #116) are surfaced
@@ -287,6 +300,7 @@
         createLayerId={deps.createLayerId}
         onChange={(v) => on.write(model.fieldId, v)}
         onNavigate={(payload) => on.navigate(payload)}
+        {emptyHint}
       />
     {:else}
       <RailScalarCell
@@ -300,6 +314,7 @@
         onOpen={on.open}
         onClose={on.close}
         onChange={(v) => on.write(model.fieldId, v)}
+        {emptyHint}
         resolveRef={deps.resolveRef}
         refDeps={deps}
         onNavigate={(target) => on.navigate(target)}

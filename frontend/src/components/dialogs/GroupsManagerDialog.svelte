@@ -1,9 +1,10 @@
 <script lang="ts">
   import { api } from "@/lib/api";
   import IconPicker from "@/components/widgets/IconPicker.svelte";
+  import GroupMemberTargets from "@/components/schema/GroupMemberTargets.svelte";
   import { fieldIconClass, DEFAULT_FIELD_GLYPH } from "@/lib/utils/fieldIcons";
   import { dropPositionFromEvent, reorderByPosition } from "@/lib/utils/listOrder";
-  import type { GroupMember, MetadataGroupDefinition, MetadataSchema } from "@/lib/types";
+  import type { GroupMember, MetadataGroupDefinition, MetadataSchema, NodePickerConfig, SelectOption } from "@/lib/types";
 
   let {
     // Reusable L2 group definitions (keyed by id) + the layer to save into.
@@ -97,6 +98,16 @@
   function removeMember(index: number) {
     draftMembers = draftMembers.filter((_, i) => i !== index);
   }
+  // #2215: a member's reference targets / select options, authored in the
+  // disclosure under its row (GroupMemberTargets.svelte).
+  function updateMemberPickerConfig(index: number, config: NodePickerConfig) {
+    draftMembers[index] = { ...draftMembers[index], picker_config: config };
+    draftMembers = draftMembers;
+  }
+  function updateMemberOptions(index: number, options: SelectOption[]) {
+    draftMembers[index] = { ...draftMembers[index], options };
+    draftMembers = draftMembers;
+  }
   // Per-member icon picker (the tile is the trigger). null = none open.
   let iconPickerFor = $state<number | null>(null);
   function updateMemberIcon(index: number, icon: string | null) {
@@ -148,11 +159,23 @@
     // select member also disabled its allowed-values check.
     const members = draftMembers
       .filter((member) => member.name.trim())
-      .map((member) => ({
-        ...member,
-        key: member.key || slug(member.name),
-        name: member.name.trim(),
-      }));
+      .map((member) => {
+        const next: GroupMember = {
+          ...member,
+          key: member.key || slug(member.name),
+          name: member.name.trim(),
+        };
+        // #2215 item 3: a type change away from reference/select must not
+        // leave the now-irrelevant setting riding along — cleared here, on
+        // save, not the moment the type changes (a mid-edit type switch back
+        // and forth keeps the draft's own settings until then).
+        if (next.type !== "entity_ref" && next.type !== "entity_ref_list") delete next.picker_config;
+        if (next.type !== "select" && next.type !== "multi_select") delete next.options;
+        // A blank option row (GroupMemberTargets keeps one live while the
+        // author is mid-edit, #2215) never reaches the saved definition.
+        else if (next.options) next.options = next.options.filter((o) => o.value.trim());
+        return next;
+      });
     // The group's own icon is deliberately NOT written here: this dialog has
     // no icon editor, so it never round-trips through the draft. Reading it
     // back off the merged `groups` map and re-persisting would copy an
@@ -208,7 +231,7 @@
     {#if editingId === null}
       <div class="gm-body">
         {#if groupList.length === 0}
-          <p class="muted">No reusable groups yet. A group (e.g. GMO = Goal / Motivation / Obstacle) can be applied to several types.</p>
+          <p class="muted">No reusable groups yet. A group is a set of fields defined once and reused as a whole on several types.</p>
         {/if}
         {#each groupList as [id, group]}
           <button class="gm-row" type="button" onclick={() => openEdit(id)}>
@@ -226,11 +249,11 @@
       <div class="gm-body">
         <div class="gm-editor-head">
           <label class="sfi-field gm-grow">Name
-            <input value={draftName} placeholder="GMO" oninput={(event) => onNameInput(event.currentTarget.value)} />
+            <input value={draftName} placeholder="Group name" oninput={(event) => onNameInput(event.currentTarget.value)} />
           </label>
           {#if draftIsNew}
             <label class="sfi-field">Id
-              <input value={draftId} placeholder="gmo" oninput={(event) => { draftId = slug(event.currentTarget.value); draftIdTouched = true; }} />
+              <input value={draftId} placeholder="group_id" oninput={(event) => { draftId = slug(event.currentTarget.value); draftIdTouched = true; }} />
             </label>
           {:else}
             <span class="gm-id-static">id <code>{draftId}</code></span>
@@ -282,7 +305,7 @@
                   </div>
                 {/if}
               </div>
-              <input class="gm-member-name" value={member.name} placeholder="Goal" oninput={(event) => updateMemberName(index, event.currentTarget.value)} />
+              <input class="gm-member-name" value={member.name} placeholder="Member name" oninput={(event) => updateMemberName(index, event.currentTarget.value)} />
               <select class="gm-member-type" value={member.type} onchange={(event) => updateMemberType(index, event.currentTarget.value as GroupMember["type"])}>
                 {#each MEMBER_TYPES as option}
                   <option value={option.value}>{option.label}</option>
@@ -291,6 +314,11 @@
               <code class="gm-member-key" title={member.key || slug(member.name)}>{member.key || slug(member.name)}</code>
               <button class="link-danger" type="button" onclick={() => removeMember(index)} aria-label="Remove member">✕</button>
             </div>
+            <GroupMemberTargets
+              member={member}
+              onPickerConfigChange={(config) => updateMemberPickerConfig(index, config)}
+              onOptionsChange={(options) => updateMemberOptions(index, options)}
+            />
           {/each}
           <button class="gm-add-member" type="button" title="Add member" aria-label="Add member" onclick={addMember}>+</button>
         </div>

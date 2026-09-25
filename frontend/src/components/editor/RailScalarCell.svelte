@@ -44,6 +44,7 @@
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataValue,
+    NodePickerEmptyHint,
     PromptEntrySummary,
     StructureDocument,
   } from "@/lib/types";
@@ -74,11 +75,15 @@
       createLayerId?: string | null;
     };
     onNavigate?: (target: NavigateTarget) => void;
+    // #2215: the picker's field-worded empty state (RailFieldRow is always a
+    // metadata-field host, never a prompt input) — undefined keeps the
+    // picker's original copy.
+    emptyHint?: NodePickerEmptyHint | null;
   }
 
   let {
     field, fieldId, fieldLabel, value, empty, editing, closesOnPick, onOpen, onClose, onChange,
-    resolveRef = undefined, refDeps = {}, onNavigate = undefined,
+    resolveRef = undefined, refDeps = {}, onNavigate = undefined, emptyHint = null,
   }: Props = $props();
 
   // --- A single reference (#2058): one line at rest, the picker when open ---
@@ -172,6 +177,7 @@
         createLayerId={refDeps.createLayerId}
         onChange={pick}
         onNavigate={(target) => onNavigate?.(target)}
+        {emptyHint}
       />
     {:else}
       <FieldValueEditor {field} allowUnset={true} embedded={true} {value} ariaLabel={fieldLabel} onChange={pick} />

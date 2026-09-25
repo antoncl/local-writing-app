@@ -1,5 +1,6 @@
 <script module lang="ts">
   import type { PickTreeRow } from "@/components/widgets/PickTree.svelte";
+  import type { NodePickerEmptyHint } from "@/lib/pickerTypes";
 
   // A source rendered in the popover: the root shows one axis row per axis
   // (name · count · ▸); drilling in renders that axis's tri-state `rows`.
@@ -25,6 +26,10 @@
     // `disabled` (P2): the caller's create is in flight — the row still
     // shows (so the click target doesn't jump) but ignores clicks.
     createRow: { title: string; onCreate: () => void; disabled?: boolean } | null;
+    // #2215: field/group-member hosts override the "nothing configured"
+    // empty state's copy (prompt-input wording stays the default — see
+    // NodePickerEmptyHint).
+    emptyHint: NodePickerEmptyHint | null;
   };
 </script>
 
@@ -135,9 +140,10 @@
     {#if !model.hasAnyConfigured}
       <div class="ctx-empty">
         <span class="ctx-empty-icon" aria-hidden="true">∅</span>
-        <span class="ctx-empty-title">No content sources configured</span>
+        <span class="ctx-empty-title">{model.emptyHint?.title ?? "No content sources configured"}</span>
         <span class="ctx-empty-hint">
-          This prompt's author didn't enable any pickable types or presets for this input.
+          {model.emptyHint?.detail ??
+            "This prompt's author didn't enable any pickable types or presets for this input."}
         </span>
       </div>
     {:else if isSearchActive(search)}

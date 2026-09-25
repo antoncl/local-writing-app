@@ -24,6 +24,14 @@ export type NodePickerConfig = {
   create_missing?: boolean;
 };
 
+// The picker's empty state is worded per host (#2215): a prompt-input's
+// author-facing copy ("this prompt's author didn't enable…") reads wrong for
+// a metadata field or a reusable-group member, which has no "author" beyond
+// the schema itself. A field/group host passes one of these down through
+// ReferencePicker → NodePicker → NodePickerPopover; a prompt-input host
+// passes nothing and keeps the original copy.
+export type NodePickerEmptyHint = { title: string; detail: string };
+
 // What ends up in inputs.<name> for a context_pick input — a list of
 // these light refs. Bodies are NOT carried; they're materialized
 // server-side at template render time. `target: true` on a scene

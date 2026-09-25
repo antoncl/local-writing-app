@@ -190,8 +190,11 @@ its pin and its anchors, not from a stored flag:
 - **An anchor whose set resolves only in another layer is missing** (§10).
 - **Anchor ids are unique in the project.**
   - The editor keeps them unique on paste (§7) and restore keeps them unique (§11).
-  - A duplicate that arrives any other way (a hand edit, a sync conflict) is reported by Verify.
-    Until it is fixed, both anchors resolve.
+  - A duplicate can still arrive another way: a scene file copied outside the app, a hand edit,
+    or a sync conflict.
+  - Then the first anchor in manuscript order resolves. Each later one contributes nothing and
+    shows as a duplicate pill, because records keyed by the pair would otherwise collide.
+  - Verify reports it. Deleting the pill, or copying its set from the pill, fixes it.
 
 ### 4 — Validation
 
@@ -229,7 +232,9 @@ From there nothing changes:
 - `entry()` and `original()` in templates;
 - the lore block sent to the AI.
 
-An anchor contributes nothing, shows as a missing pill and is reported by Verify when its set:
+An anchor that repeats an earlier anchor's id contributes nothing and shows as a duplicate (§3).
+
+An anchor also contributes nothing, shows as a missing pill and is reported by Verify when its set:
 - is missing;
 - is in another layer;
 - has no pin;
@@ -372,8 +377,10 @@ deleted since then shows as missing. ADR-0043 already says a restore brings back
 state.
 
 **A restored anchor whose id now exists in another scene** is re-minted and given a copy of its
-set, as a paste from a copy would be (§7). This is the case where the anchor was cut from this
-scene into another after the snapshot.
+set. This is the case where the anchor was cut from this scene into another after the snapshot.
+- The copy keeps every row. Restore writes without validation (§4), so what the restored scene
+  resolves to is not changed by the restore.
+- Verify reports any row that fails.
 
 **A snapshot taken before §12's migration holds inline markers.**
 - The migration does not reach snapshots. They upgrade through the document-only sub-ladder
@@ -381,8 +388,14 @@ scene into another after the snapshot.
 - So `restore_snapshot`'s branch for an older schema version converts the body with §12's rules
   before writing it, and writes any set it needs through the same index-write path every node
   save uses, so the new pills resolve at once.
-- Set ids derive from unit ids (§12), so a marker whose set the migration already created becomes
-  an anchor to that set. A marker whose set no longer exists recreates it from the marker.
+- The conversion derives ids exactly as §12 does, including step 3's per-scene ids for a unit id
+  repeated across scenes.
+  - It tries the set derived from this scene and the unit id first, then the one derived from the
+    unit id alone.
+  - A marker whose set the migration already created therefore becomes that set's anchor again,
+    under the same anchor id.
+  - A marker whose set no longer exists recreates it from the marker.
+  - The re-mint rule above applies only after this lookup.
 - A restore to a book-override layer does not touch scene bodies and is not affected.
 
 A set is an authored node, so it has its own version history (ADR-0087).

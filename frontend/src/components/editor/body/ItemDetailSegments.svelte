@@ -116,8 +116,16 @@
     return draft;
   }
 
+  // Only a real change writes: focusing a segment and leaving it (or tabbing
+  // through untouched segments) must not dirty the entry or store an empty
+  // `""` where the member was absent. Empty and absent are the same value.
   function commitInline(member: GroupMember) {
-    onCommit(member.key, inlineValue(member));
+    const next = inlineValue(member);
+    const current = record[member.key] ?? null;
+    const unchanged = isMetadataValuePresent(next)
+      ? JSON.stringify(next) === JSON.stringify(current)
+      : !isMetadataValuePresent(current);
+    if (!unchanged) onCommit(member.key, next);
   }
 
   function nextMemberKey(fromKey: string, dir: 1 | -1): string | null {

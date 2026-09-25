@@ -368,6 +368,17 @@ describe("ReferenceListTab — reference-keyed lists (ADR-0089 #2072)", () => {
     ]);
   });
 
+  it("leaving a segment untouched writes nothing — no empty value stored, entry not dirtied", async () => {
+    const on = baseOn();
+    render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on } });
+    const elenaRow = screen.getByText("Elena").closest(".node-row") as HTMLElement;
+    // Elena's `state` is "" — the empty member shows its name as a placeholder.
+    await fireEvent.click(within(elenaRow).getByText("State"));
+    const input = within(elenaRow).getByRole("textbox") as HTMLInputElement;
+    await fireEvent.keyDown(input, { key: "Enter" });
+    expect(on.change).not.toHaveBeenCalled();
+  });
+
   it("Esc on a segment's input reverts without saving", async () => {
     const on = baseOn();
     render(ReferenceListTab, { props: { model: relModel(), deps: relDeps(), on } });

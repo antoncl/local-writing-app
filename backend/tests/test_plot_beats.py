@@ -515,3 +515,120 @@ class BeatIdentityTests(PlotTestCase):
         self.assertEqual(len(got), 8)
         self.assertEqual(got[0]["id"], "setup_pressure")  # copied id untouched
         self.assertTrue(got[-1]["id"].startswith("beat_"))  # added beat minted
+
+
+class PlotBeatsSavedTraceTests(PlotTestCase):
+    """#2260: `_save_plot_folder_node` writes a `plot_beats_saved` trace
+    record for a save that actually changed a beat-list field — the diff so
+    a wrong/missing roster can be attributed to this specific save."""
+
+    def _trace_records(self) -> list[dict]:
+        import json
+
+        path = self.root / "ai_trace.jsonl"
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+    def test_changing_and_adding_a_beat_writes_changed_and_minted(self) -> None:
+        plotline = self.client.post(
+            "/api/plot/plotlines",
+            json={"title": "Custom"},
+        ).json()
+        first = self.client.put(
+            f"/api/plot/plotlines/{plotline['id']}",
+            json={
+                "title": "Custom",
+                "body": "",
+                "metadata": {"instance_beats": [{"title": "Spark", "specifics": "old"}]},
+                "base_revision": plotline["revision"],
+            },
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        current = self.client.get(f"/api/plot/plotlines/{plotline['id']}").json()
+        beat = current["metadata"]["instance_beats"][0]
+        saved = self.client.put(
+            f"/api/plot/plotlines/{plotline['id']}",
+            json={
+                "title": "Custom",
+                "body": "",
+                "metadata": {
+                    "instance_beats": [
+                        {**beat, "specifics": "new"},
+                        {"title": "A fresh beat"},
+                    ]
+                },
+                "base_revision": current["revision"],
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        records = self._trace_records()
+        beat_records = [r for r in records if r.get("event") == "plot_beats_saved"]
+        # The FIRST save (blank -> one beat) also writes its own record; the
+        # second save's is the one under test, so take the last.
+        fields = beat_records[-1]["fields"]["instance_beats"]
+        self.assertIn(beat["id"], fields["changed"])
+        self.assertIn("specifics", fields["changed"][beat["id"]])
+        self.assertEqual(len(fields["added"]), 1)
+        self.assertEqual(len(fields["minted"]), 1)
+
+    def test_a_save_with_no_beat_change_writes_no_record(self) -> None:
+        plotline = self.client.post(
+            "/api/plot/plotlines",
+            json={"title": "Custom"},
+        ).json()
+        first = self.client.put(
+            f"/api/plot/plotlines/{plotline['id']}",
+            json={
+                "title": "Custom",
+                "body": "",
+                "metadata": {"instance_beats": [{"title": "Spark"}]},
+                "base_revision": plotline["revision"],
+            },
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        current = self.client.get(f"/api/plot/plotlines/{plotline['id']}").json()
+        before_count = len([r for r in self._trace_records() if r.get("event") == "plot_beats_saved"])
+        # Re-save the exact same beats — no structural change at all.
+        second = self.client.put(
+            f"/api/plot/plotlines/{plotline['id']}",
+            json={
+                "title": "Custom",
+                "body": "",
+                "metadata": {"instance_beats": current["metadata"]["instance_beats"]},
+                "base_revision": current["revision"],
+            },
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        after_count = len([r for r in self._trace_records() if r.get("event") == "plot_beats_saved"])
+        self.assertEqual(after_count, before_count)
+
+    def test_a_409_writes_no_record(self) -> None:
+        plotline = self.client.post(
+            "/api/plot/plotlines",
+            json={"title": "Custom"},
+        ).json()
+        first = self.client.put(
+            f"/api/plot/plotlines/{plotline['id']}",
+            json={
+                "title": "Custom",
+                "body": "",
+                "metadata": {"instance_beats": [{"title": "Spark"}]},
+                "base_revision": plotline["revision"],
+            },
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        before_count = len([r for r in self._trace_records() if r.get("event") == "plot_beats_saved"])
+        # A stale base_revision (the original, pre-save one) 409s.
+        conflicting = self.client.put(
+            f"/api/plot/plotlines/{plotline['id']}",
+            json={
+                "title": "Custom",
+                "body": "",
+                "metadata": {"instance_beats": [{"title": "Changed"}]},
+                "base_revision": plotline["revision"],
+            },
+        )
+        self.assertEqual(conflicting.status_code, 409, conflicting.text)
+        after_count = len([r for r in self._trace_records() if r.get("event") == "plot_beats_saved"])
+        self.assertEqual(after_count, before_count)

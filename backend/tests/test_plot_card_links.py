@@ -175,6 +175,57 @@ class CardBeatLinkTests(_CardLinkTestCase):
         self._save_card(card, {"beat_links": [link, dict(link)]})
         self.assertEqual(self._read_card(card)["metadata"]["beat_links"], [link])
 
+    def test_healing_a_dangling_link_writes_a_beat_links_healed_trace(self) -> None:
+        # #2260: `_heal_beat_links` drops the ghost link (test_save_drops_a_
+        # dangling_link_without_422) AND records why, so a card's vanished
+        # link can be attributed to the beat/plotline it pointed at instead
+        # of looking like silent data loss.
+        import json
+
+        plotline = self._plotline()
+        beat_id = plotline["metadata"]["instance_beats"][0]["id"]
+        card = self._new_card()
+        self._save_card(
+            card,
+            {
+                "beat_links": [
+                    {"plotline": "plot_ghost", "beat_id": "beat_deadbeef"},
+                    {"plotline": plotline["id"], "beat_id": beat_id},
+                ]
+            },
+        )
+        trace_path = self.root / "ai_trace.jsonl"
+        records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+        heal_records = [r for r in records if r.get("event") == "beat_links_healed"]
+        self.assertEqual(len(heal_records), 1)
+        self.assertEqual(heal_records[0]["node_id"], card)
+        self.assertEqual(
+            heal_records[0]["removed"], [{"plotline": "plot_ghost", "beat_id": "beat_deadbeef"}]
+        )
+
+    def test_reading_a_card_with_a_dangling_link_writes_no_trace(self) -> None:
+        # #2260: a read heals in memory and never persists it, so tracing there
+        # would log the same stale link on every board load — only saves trace.
+        import json
+
+        card = self._new_card()
+        self._save_card(card, {"beat_links": [{"plotline": "plot_ghost", "beat_id": "beat_deadbeef"}]})
+        trace_path = self.root / "ai_trace.jsonl"
+        before = trace_path.read_text(encoding="utf-8") if trace_path.exists() else ""
+        # Put the dangling link back on disk behind the save path's back, as a
+        # beat later removed from its roster leaves it.
+        card_path = next(self.root.rglob(f"*{card}*.md"), None) or next(
+            p for p in self.root.rglob("*.md") if f"id: {card}" in p.read_text(encoding="utf-8")
+        )
+        text = card_path.read_text(encoding="utf-8")
+        text = text.replace("metadata:", "metadata:\n  beat_links:\n  - plotline: plot_ghost\n    beat_id: beat_deadbeef", 1)
+        card_path.write_text(text, encoding="utf-8")
+        self._read_card(card)
+        self._read_card(card)
+        after = trace_path.read_text(encoding="utf-8") if trace_path.exists() else ""
+        new_records = [json.loads(line) for line in after[len(before):].splitlines() if line]
+        self.assertEqual([r for r in new_records if r.get("event") == "beat_links_healed"], [])
+
 
 class CardPageStatusTests(_CardLinkTestCase):
     def test_a_scene_link_derives_on_page(self) -> None:

@@ -330,6 +330,29 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         self.assertEqual(patch.fields, {"bio": "kept"})
         self.assertIn("allegiance", patch.dropped)
 
+    def test_illegal_value_reason_names_the_validation_error(self) -> None:
+        # #2260: the reason is the actual validation error text (stripped of
+        # its "AI patch metadata field " label), so the author can act on it.
+        raw = '{"fields": {"allegiance": "moon"}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertIn("allegiance", patch.dropped_reasons)
+        self.assertIn("allegiance", patch.dropped_reasons["allegiance"])
+
+    def test_unknown_field_reason(self) -> None:
+        raw = '{"fields": {"nonesuch": "x"}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertEqual(patch.dropped_reasons["nonesuch"], "not a field in this schema")
+
+    def test_field_not_on_type_reason(self) -> None:
+        raw = '{"fields": {"status": "married"}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertEqual(patch.dropped_reasons["status"], "not a field of lore:character")
+
+    def test_hidden_field_reason(self) -> None:
+        raw = '{"fields": {"secret_note": "leaked"}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertEqual(patch.dropped_reasons["secret_note"], "not settable by AI")
+
     def test_reference_field_excluded_even_if_valid(self) -> None:
         # entity_ref is never proposed (§4) — dropped by type, not value.
         raw = f'{{"fields": {{"patron": "{self.hero.id}"}}}}'

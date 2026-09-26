@@ -31,6 +31,10 @@ export type EntryPatch = {
 // proposable); `garbled` is true when the reply wasn't a JSON object at all.
 export type AIEntryPatch = EntryPatch & {
   dropped: string[];
+  // #2260: field id -> plain-English reason it was dropped (unknown, off-type,
+  // non-proposable, the actual validation error, an off-contract field, or an
+  // unresolved tag vocabulary). Absent entries fall back to just naming the field.
+  dropped_reasons?: Record<string, string>;
   garbled: boolean;
   // #2200: a plain-English reason `garbled` is true; absent/null when it isn't.
   garbled_reason?: string | null;

@@ -1029,12 +1029,18 @@ class AIEntryPatch(BaseModel):
     computed excluded, §4); `dropped` names field ids that were present in the
     reply but rejected — unknown, illegal for the type, non-proposable, or an
     invalid value — so the review can note what the model tried and missed.
-    `garbled` is true when the reply could not be read as a JSON object at all,
-    the condition surfaced to the author instead of a silent no-op."""
+    `dropped_reasons` (#2260) pairs each of those ids with a plain-English
+    reason (an unknown field, off-type, non-proposable, the actual validation
+    error text, or an unresolved tag vocabulary), so a wrong/missing AI change
+    can be attributed instead of just noticed. `garbled` is true when the
+    reply could not be read as a JSON object at all, the condition surfaced to
+    the author instead of a silent no-op."""
 
     body: str | None = None
     fields: dict[str, Any] = Field(default_factory=dict)
     dropped: list[str] = Field(default_factory=list)
+    # #2260: field id -> plain-English reason it was dropped.
+    dropped_reasons: dict[str, str] = Field(default_factory=dict)
     garbled: bool = False
     # #2200: a plain-English reason `garbled` is true, from
     # `diagnose_garbled_reply` — None when the patch isn't garbled.

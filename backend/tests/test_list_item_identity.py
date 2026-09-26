@@ -486,13 +486,13 @@ class OverrideSaveMintsNothingTests(unittest.TestCase):
 
 class AIExtractionReconcileTests(ListItemIdentityTestCase):
     def test_id_bearing_list_field_ids_selects_a_declared_group(self) -> None:
-        self.assertIn("sightings", _id_bearing_list_field_ids(self.service, "lore:location"))
+        self.assertIn("sightings", _id_bearing_list_field_ids(self.service.read_metadata_schema(), "lore:location"))
 
     def test_id_bearing_list_field_ids_ignores_an_undeclared_id_member(self) -> None:
         # A user's own group with an `id` member it never declared as
         # identity is an ordinary text member, not reconciled.
         self._define_group_and_list(identity=None)
-        self.assertNotIn("sightings", _id_bearing_list_field_ids(self.service, "lore:location"))
+        self.assertNotIn("sightings", _id_bearing_list_field_ids(self.service.read_metadata_schema(), "lore:location"))
 
     def test_reconciles_a_declared_group_against_the_stored_list(self) -> None:
         entry_id = self._create_location()

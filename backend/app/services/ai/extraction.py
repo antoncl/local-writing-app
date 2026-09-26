@@ -34,6 +34,7 @@ from app.models import (
     EntryPatchExtraction,
     ExtractEntryPatchRequest,
 )
+from app.models.schema import MetadataSchema
 from app.services.ai.chat import run_chat_turn
 from app.services.ai.field_contract import FieldContract
 from app.services.ai.list_identity import reconcile_list_identity_report
@@ -262,7 +263,7 @@ def _constrain_to_registered_fields(patch: AIEntryPatch, allowed_ids: set[str]) 
     )
 
 
-def _id_bearing_list_field_ids(project: ProjectService, entry_type: str) -> list[str]:
+def _id_bearing_list_field_ids(schema: MetadataSchema, entry_type: str) -> list[str]:
     """The ids of `entry_type`'s own list fields whose resolved item shape
     carries a DECLARED identity member (ADR-0096 §1, amending #2243) — never
     a member merely happening to be keyed `id`: only a field whose group
@@ -270,7 +271,6 @@ def _id_bearing_list_field_ids(project: ProjectService, entry_type: str) -> list
     the effective schema, so a custom group that declares identity gets the
     same machine-owned-identity treatment as the built-in beat roster; a
     user's own group with an `id` member it never declared does not."""
-    schema = project.read_metadata_schema()
     definition = schema.entry_types.get(entry_type)
     if definition is None:
         return []
@@ -301,7 +301,7 @@ def _reconcile_id_bearing_lists(
     literal keys `id`/`title`."""
     schema = project.read_metadata_schema()
     id_bearing = [
-        field_id for field_id in _id_bearing_list_field_ids(project, entry_type) if field_id in patch.fields
+        field_id for field_id in _id_bearing_list_field_ids(schema, entry_type) if field_id in patch.fields
     ]
     if not id_bearing:
         return patch, {}
@@ -310,11 +310,14 @@ def _reconcile_id_bearing_lists(
     fields = dict(patch.fields)
     reports: dict[str, Any] = {}
     for field_id in id_bearing:
-        field = schema.fields.get(field_id)
-        id_key = field.item_identity if field is not None else "id"
-        title_key = (title_member(field) if field is not None else None) or "title"
+        # Every id here came from `schema` and declares identity, so both reads
+        # are present; a group with no title member matches by id alone.
+        field = schema.fields[field_id]
         fields[field_id], reports[field_id] = reconcile_list_identity_report(
-            fields[field_id], stored_metadata.get(field_id), id_key=id_key, title_key=title_key
+            fields[field_id],
+            stored_metadata.get(field_id),
+            id_key=field.item_identity,
+            title_key=title_member(field) or "title",
         )
     return patch.model_copy(update={"fields": fields}), reports
 

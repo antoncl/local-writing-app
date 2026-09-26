@@ -12,6 +12,7 @@ import PinnedSetsPanel from "./PinnedSetsPanel.svelte";
 import { referenceIndexStore } from "@/lib/stores/references";
 import { mutationSetEntriesStore, mutationSetEditorStore, closeMutationSetEditor } from "@/lib/stores/mutationSets";
 import { api } from "@/lib/api";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
 import type { MutationSetEntry, MutationSetEntrySummary } from "@/lib/types";
 
 function set(over: Partial<MutationSetEntrySummary>): MutationSetEntrySummary {
@@ -51,14 +52,15 @@ afterEach(() => {
 describe("PinnedSetsPanel (ADR-0055 §3)", () => {
   it("renders the sets pinned to this entity and excludes reusable ones", () => {
     render(PinnedSetsPanel, { props: { entityId: "mira", entityEntryType: "lore:character" } });
-    expect(screen.getByRole("button", { name: /Becomes a werewolf/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Gains a scar/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Any promotion/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Becomes a werewolf" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gains a scar" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Any promotion" })).toBeNull();
   });
 
-  it("excludes an active (anchored) set from the pending list (ADR-0095 §2/§9)", () => {
+  it("excludes an active (anchored) set from the staged/placeable list (ADR-0095 §2/§9), listing it read-only instead", () => {
     // "scar" is anchored in a scene — it drops out of the card's staged-only
-    // pending list (shown at its anchors instead).
+    // placeable list (a Delete there would be wrong, nothing anchors it there)
+    // and shows up read-only below instead (ADR-0095 S5, #2233).
     mutationSetEntriesStore.set([
       set({ id: "wolf", title: "Becomes a werewolf", target_entity: "mira" }),
       set({
@@ -70,8 +72,61 @@ describe("PinnedSetsPanel (ADR-0055 §3)", () => {
       }),
     ]);
     render(PinnedSetsPanel, { props: { entityId: "mira", entityEntryType: "lore:character" } });
-    expect(screen.getByRole("button", { name: /Becomes a werewolf/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Gains a scar/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Becomes a werewolf" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Gains a scar" })).toBeNull();
+    expect(screen.getByText("Gains a scar")).toBeInTheDocument();
+    expect(screen.getByText("Ch 1")).toBeInTheDocument();
+    // Read-only: no Delete action for an active set on the card (deleting one
+    // is a pane action, with its own confirm).
+    expect(screen.queryByLabelText("Delete Gains a scar")).toBeNull();
+    // Both lists are labelled when both exist.
+    expect(screen.getByText("Staged")).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
+  });
+
+  it("with only active sets, says there are no staged sets (not 'no mutation sets yet')", () => {
+    mutationSetEntriesStore.set([
+      set({
+        id: "scar",
+        title: "Gains a scar",
+        target_entity: "mira",
+        state: "active",
+        anchors: [{ anchor_id: "a1", scene_id: "s1", scene_title: "Ch 1" }],
+      }),
+    ]);
+    render(PinnedSetsPanel, { props: { entityId: "mira", entityEntryType: "lore:character" } });
+    expect(screen.getByText("No staged sets.")).toBeInTheDocument();
+    expect(screen.queryByText(/No mutation sets yet/)).toBeNull();
+  });
+
+  it("offers Delete on a staged set; it confirms first, then deletes and refreshes the roster", async () => {
+    const deleteSpy = vi.spyOn(api, "deleteMutationSetEntry").mockResolvedValue({
+      entries: [set({ id: "reusable", title: "Any promotion", target_entity: "" })],
+    });
+    const confirmSpy = vi.spyOn(confirmService, "request");
+    render(PinnedSetsPanel, { props: { entityId: "mira", entityEntryType: "lore:character" } });
+
+    await fireEvent.click(screen.getByLabelText("Delete Becomes a werewolf"));
+
+    // A staged set is often a conversation's work product: nothing is deleted
+    // until the writer confirms.
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(confirmSpy).toHaveBeenCalledOnce();
+    expect(confirmSpy.mock.calls[0][0].message).toContain("a conversation that staged it will lose it");
+    await confirmSpy.mock.calls[0][0].onConfirm();
+    await tick();
+
+    expect(deleteSpy).toHaveBeenCalledWith("wolf");
+    // The roster the delete call returned replaces the store — the werewolf
+    // set (and its row) is gone.
+    expect(screen.queryByRole("button", { name: "Becomes a werewolf" })).toBeNull();
+  });
+
+  it("shows the placing hint naming the entity, under the list", () => {
+    render(PinnedSetsPanel, { props: { entityId: "mira", entityEntryType: "lore:character", entityTitle: "Mira" } });
+    expect(
+      screen.getByText("Place a staged set from a scene: type /mutate, pick Mira, then Apply a saved set."),
+    ).toBeInTheDocument();
   });
 
   it("＋New opens the editor pinned to this entity + its type", async () => {
@@ -88,7 +143,7 @@ describe("PinnedSetsPanel (ADR-0055 §3)", () => {
     const getFull = vi.spyOn(api, "getMutationSetEntry").mockResolvedValue(full);
     render(PinnedSetsPanel, { props: { entityId: "mira", entityEntryType: "lore:character" } });
 
-    await fireEvent.click(screen.getByRole("button", { name: /Becomes a werewolf/ }));
+    await fireEvent.click(screen.getByRole("button", { name: "Becomes a werewolf" }));
     await tick();
     expect(getFull).toHaveBeenCalledWith("wolf");
     expect(get(mutationSetEditorStore)).toEqual({ editing: full });

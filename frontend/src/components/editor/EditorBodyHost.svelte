@@ -607,7 +607,7 @@
              in EditorRailContent's `trailing` snippet. Lore-scoped (the field
              is only seeded onto lore:base), same as before. -->
         {#key model.scene?.id ?? ""}
-          <PinnedSetsPanel entityId={model.scene?.id ?? ""} entityEntryType={model.entryType} />
+          <PinnedSetsPanel entityId={model.scene?.id ?? ""} entityEntryType={model.entryType} entityTitle={model.title} />
         {/key}
       {:else if model.metadataSchema.fields[fieldId]?.type === "computed" && model.metadataSchema.fields[fieldId]?.computed?.function === "review_items"}
         <!-- ADR-0090 Amendment 2 §1: review items promoted straight to a

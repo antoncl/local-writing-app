@@ -16,6 +16,7 @@ import { get } from "svelte/store";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import Mutations from "./Mutations.svelte";
 import { metadataSchemaStore, metadataSchemaLayersStore } from "@/lib/stores/schema";
+import { loreEntriesStore } from "@/lib/stores/lore";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import {
   mutationSetEditorStore,
@@ -81,6 +82,7 @@ afterEach(() => {
   metadataSchemaStore.set(null);
   mutationSetEntriesStore.set([]);
   metadataSchemaLayersStore.set([]);
+  loreEntriesStore.set([]);
   getMutationSetEntry.mockClear();
   deleteMutationSetEntry.mockClear();
   vi.restoreAllMocks();
@@ -147,6 +149,88 @@ describe("Mutations pane", () => {
     render(Mutations);
 
     expect(screen.queryByRole("button", { name: "Promote Full Moon" })).toBeNull();
+  });
+});
+
+describe("Mutations pane: grouped by state (ADR-0095 S5, #2233)", () => {
+  it("renders three groups in order — Templates, Staged, Active — with the right members and counts", () => {
+    metadataSchemaStore.set(SCHEMA);
+    mutationSetEntriesStore.set([
+      summary({ id: "t1", title: "Werewolf dusk", state: "template" }),
+      summary({ id: "s1", title: "Becomes a werewolf", state: "staged", target_entity: "mira" }),
+      summary({ id: "s2", title: "Gains a scar", state: "staged", target_entity: "mira" }),
+      summary({
+        id: "a1",
+        title: "Loses an eye",
+        state: "active",
+        target_entity: "mira",
+        anchors: [{ anchor_id: "anc1", scene_id: "sc1", scene_title: "Chapter 3" }],
+      }),
+    ]);
+    const { container } = render(Mutations);
+
+    const headings = Array.from(container.querySelectorAll(".node-row.group-header .node-row-text")).map((el) =>
+      el.textContent?.trim(),
+    );
+    expect(headings).toEqual(["Templates", "Staged", "Active"]);
+
+    const counts = Array.from(container.querySelectorAll(".node-row.group-header .pill")).map((el) => el.textContent);
+    expect(counts).toEqual(["1", "2", "1"]);
+
+    expect(screen.getByText("Werewolf dusk")).toBeInTheDocument();
+    expect(screen.getByText("Becomes a werewolf")).toBeInTheDocument();
+    expect(screen.getByText("Gains a scar")).toBeInTheDocument();
+    expect(screen.getByText("Loses an eye")).toBeInTheDocument();
+  });
+
+  it("leaves out a state with no sets (no empty group body)", () => {
+    metadataSchemaStore.set(SCHEMA);
+    mutationSetEntriesStore.set([
+      summary({ id: "s1", title: "Becomes a werewolf", state: "staged", target_entity: "mira" }),
+    ]);
+    const { container } = render(Mutations);
+    const headings = Array.from(container.querySelectorAll(".node-row.group-header .node-row-text")).map((el) =>
+      el.textContent?.trim(),
+    );
+    expect(headings).toEqual(["Staged"]);
+  });
+
+  it("an active linked set shows its places and the 'N places' badge", () => {
+    metadataSchemaStore.set(SCHEMA);
+    // loreEntriesStore feeds the entity title for a staged/active row's sub-line.
+    loreEntriesStore.set([{ id: "mira", title: "Mira", body: "", entry_type: "lore:character", metadata: {} }]);
+    mutationSetEntriesStore.set([
+      summary({
+        id: "a1",
+        title: "Loses an eye",
+        state: "active",
+        target_entity: "mira",
+        anchors: [
+          { anchor_id: "anc1", scene_id: "sc1", scene_title: "Chapter 3" },
+          { anchor_id: "anc2", scene_id: "sc2", scene_title: "Chapter 7" },
+        ],
+      }),
+    ]);
+    render(Mutations);
+
+    expect(screen.getByText("Mira — Chapter 3, Chapter 7")).toBeInTheDocument();
+    expect(screen.getByText("2 places")).toBeInTheDocument();
+    loreEntriesStore.set([]);
+  });
+
+  it("labels an untitled set via mutationSetLabel", () => {
+    metadataSchemaStore.set(SCHEMA);
+    mutationSetEntriesStore.set([
+      summary({
+        id: "u1",
+        title: "",
+        state: "template",
+        rows: [{ id: "r1", field: "rank", op: "replace", value: "Captain" }],
+      }),
+    ]);
+    render(Mutations);
+
+    expect(screen.getByText("rank → Captain")).toBeInTheDocument();
   });
 });
 

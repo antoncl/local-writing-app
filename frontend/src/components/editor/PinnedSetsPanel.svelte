@@ -17,9 +17,16 @@
   import { nodeSet } from "@/lib/views/viewResult";
   import { api } from "@/lib/api";
   import { referenceIndexStore } from "@/lib/stores/references";
-  import { mutationSetEntriesStore, openNewMutationSet, openEditMutationSet } from "@/lib/stores/mutationSets";
-  import { pinnedSetsFor } from "@/lib/views/pinnedSets";
-  import { mutationSetLabel } from "@/lib/editor-core/mutationNodes";
+  import {
+    mutationSetEntriesStore,
+    openNewMutationSet,
+    openEditMutationSet,
+    refreshMutationSetEntries,
+    setMutationSetEntries,
+  } from "@/lib/stores/mutationSets";
+  import { activeSetsFor, pinnedSetsFor } from "@/lib/views/pinnedSets";
+  import { formatAnchorPlaces, mutationSetLabel } from "@/lib/editor-core/mutationNodes";
+  import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { resolveColor } from "@/lib/utils/colors";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -29,21 +36,37 @@
   let {
     entityId,
     entityEntryType = "",
+    entityTitle = "",
   }: {
     entityId: string;
     // The entity's schema entry_type (e.g. lore:character): a New set is pinned
     // to this entity and type-locked to it (ADR-0055 §3). Empty ⇒ ＋New hidden.
     entityEntryType?: string;
+    // The entity's own title, for the placement hint's "pick ‹entity›" (ADR-0095
+    // S5, #2233) — mirrors ConversationsPanel's `subjectTitle`. Empty ⇒ the hint
+    // falls back to a generic "this entry".
+    entityTitle?: string;
   } = $props();
 
-  // The sets pinned to this entity, in roster order (title-sorted). A
+  // The STAGED sets pinned to this entity, in roster order (title-sorted) — the
+  // ones the card can still delete (nothing anchors them yet). A
   // MutationSetEntrySummary carries its `entry_type`, so it satisfies EvalNode —
   // a flat resume-first list via nodeSet (no grouping).
   let pinned = $derived(
     pinnedSetsFor(entityId, $referenceIndexStore, $mutationSetEntriesStore),
   );
 
+  // The ACTIVE sets pinned to this entity (ADR-0095 S5, #2233): listed below the
+  // staged ones, read-only — the card answers "what changes this entity and
+  // where" without offering to delete (that's a pane action, with its confirm).
+  let active = $derived(
+    activeSetsFor(entityId, $referenceIndexStore, $mutationSetEntriesStore),
+  );
+
   const schema = $derived($metadataSchemaStore);
+  const placementHint = $derived(
+    `Place a staged set from a scene: type /mutate, pick ${entityTitle || "this entry"}, then Apply a saved set.`,
+  );
 
   // Open/closed persists (#1444) — survives node switches ({#key} remount
   // re-reads the store) and reload. The Mutation-sets section defaults expanded.
@@ -68,6 +91,29 @@
       error = `Could not open the set: ${err instanceof Error ? err.message : err}`;
     }
   }
+
+  // A staged set anchors nothing yet (ADR-0095 §9), but it is often a
+  // conversation's work product (its `staged_set`), which the delete purges —
+  // so confirm first, one click on × must not silently discard it.
+  function requestRemoveStaged(set: MutationSetEntrySummary): void {
+    confirmService.request({
+      title: "Delete Mutation Set",
+      message: `Delete "${mutationSetLabel(set)}"? It isn't placed in any scene; a conversation that staged it will lose it.`,
+      confirmLabel: "Delete",
+      destructive: true,
+      onConfirm: () => removeStaged(set.id),
+    });
+  }
+
+  async function removeStaged(id: string): Promise<void> {
+    error = "";
+    try {
+      setMutationSetEntries((await api.deleteMutationSetEntry(id)).entries);
+    } catch (err) {
+      error = `Could not delete the set: ${err instanceof Error ? err.message : err}`;
+      await refreshMutationSetEntries().catch(() => {});
+    }
+  }
 </script>
 
 {#if entityEntryType}
@@ -75,7 +121,7 @@
     <RailSectionHeader
       title="Mutation sets"
       glyph="ti-stack-2"
-      count={pinned.length}
+      count={pinned.length + active.length}
       {expanded}
       onToggle={() => railSectionCollapse.toggle(COLLAPSE_KEY, COLLAPSE_DEFAULT)}
     >
@@ -93,6 +139,9 @@
     {/if}
     {#if expanded}
       <div class="ps-list">
+        {#if active.length > 0}
+          <div class="ps-active-label">Staged</div>
+        {/if}
         <ViewNodeList
           result={nodeSet(pinned)}
           mode="tree"
@@ -100,9 +149,22 @@
           row={pinnedRow}
         >
           {#snippet whenEmpty()}
-            <p class="muted">No mutation sets yet — stage one with ＋New, then place it in a scene to make it active.</p>
+            {#if active.length > 0}
+              <p class="muted">No staged sets.</p>
+            {:else}
+              <p class="muted">No mutation sets yet — stage one with ＋New, then place it in a scene to make it active.</p>
+            {/if}
           {/snippet}
         </ViewNodeList>
+        <!-- The card never places a set (ADR-0042 §5: no prose position here) —
+             it can only point at where placement happens. -->
+        {#if pinned.length > 0}
+          <p class="ps-hint">{placementHint}</p>
+        {/if}
+        {#if active.length > 0}
+          <div class="ps-active-label">Active</div>
+          <ViewNodeList result={nodeSet(active)} mode="tree" row={activeRow} />
+        {/if}
       </div>
     {/if}
   </section>
@@ -118,8 +180,29 @@
   >
     {#snippet trailing()}
       <CountPill count={set.row_count} />
+      <button
+        type="button"
+        class="ps-delete"
+        aria-label="Delete {mutationSetLabel(set)}"
+        title="Delete"
+        onclick={(e) => {
+          e.stopPropagation();
+          requestRemoveStaged(set);
+        }}
+      >×</button>
     {/snippet}
   </NodeRow>
+{/snippet}
+
+{#snippet activeRow(set: MutationSetEntrySummary, rowCtx: RowCtx<MutationSetEntrySummary>)}
+  <NodeRow
+    title={mutationSetLabel(set)}
+    detail={formatAnchorPlaces(set.anchors.map((a) => a.scene_title))}
+    depth={rowCtx.depth}
+    clickable={false}
+    stripeColor={resolveColor(null, set.entry_type, "mutation_set", schema)?.hex ?? null}
+    typeIcon={entryTypeIconClass(set.entry_type, schema)}
+  />
 {/snippet}
 
 <style>
@@ -163,5 +246,35 @@
     padding: 2px 4px;
     color: var(--text-3);
     font-size: var(--fs-sm);
+  }
+
+  .ps-hint {
+    margin: 6px 0 0;
+    padding: 2px 4px;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+  }
+
+  .ps-active-label {
+    margin: 8px 0 2px;
+    padding: 0 4px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .ps-delete {
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+    font-size: var(--fs-lg);
+    line-height: 1;
+    padding: 0 4px;
+  }
+  .ps-delete:hover {
+    color: var(--danger);
   }
 </style>

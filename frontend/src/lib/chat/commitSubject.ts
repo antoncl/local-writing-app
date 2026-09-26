@@ -41,14 +41,17 @@ export function resolveCommitSubject(
   rosters: CommitSubjectRosters,
   openers: CommitSubjectOpeners,
 ): CommitSubject | null {
-  const byRoster: [Titled[], (id: string) => Promise<void>][] = [
-    [rosters.lore, openers.openLore],
-    [rosters.plotlines, openers.openPlotline],
-    [rosters.cards, openers.openPlotCard],
+  // Method NAMES, called on `openers` — the host is the `editorPanes`
+  // controller, whose openers use `this`; a detached reference loses it and
+  // the swallowed TypeError opened nothing (#2251).
+  const byRoster: [Titled[], keyof CommitSubjectOpeners][] = [
+    [rosters.lore, "openLore"],
+    [rosters.plotlines, "openPlotline"],
+    [rosters.cards, "openPlotCard"],
   ];
-  for (const [roster, open] of byRoster) {
+  for (const [roster, opener] of byRoster) {
     const entry = roster.find((e) => e.id === id);
-    if (entry) return { title: entry.title, open: () => open(id) };
+    if (entry) return { title: entry.title, open: () => openers[opener](id) };
   }
   // A scene's front-matter `id` IS its structure node's `scene_id` (#201).
   const sceneNode = rosters.structure ? findNodeBySceneId(rosters.structure.root, id) : null;

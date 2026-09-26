@@ -342,7 +342,10 @@ function isRefFieldType(field: MetadataFieldDefinition): boolean {
 // compact types keep their control inline on the right. See MetadataPanel's
 // prior comment history (#1810, #1949) for the full reasoning per type.
 function isWide(ctx: RailRowContext, field: MetadataFieldDefinition, fieldId: string): boolean {
-  if (isListIndex(ctx, field) || isSectionIndex(ctx, field)) return false;
+  // An index row is one short line — unless it carries a proposal, when it
+  // renders the whole candidate value (a beat roster) and must span like any
+  // list, or the front matter's half-column squeezes it unreadable (#2242).
+  if ((isListIndex(ctx, field) || isSectionIndex(ctx, field)) && !isFlipResolve(ctx, fieldId)) return false;
   // A tags field (#2007) is one mono line under its name, at rest and while
   // editing alike (#2059): wide always, so the row has ONE shape — it used to
   // sit inline while short and wrap once long, and its edit state jumped

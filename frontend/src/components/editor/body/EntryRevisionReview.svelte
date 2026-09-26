@@ -33,6 +33,7 @@
     onAcceptAll,
     onDone,
     onDiscard,
+    frontMatter = undefined,
   }: {
     /** The entry's body as the author currently sees it (the live buffer). */
     currentBody: string;
@@ -63,6 +64,11 @@
     /** Reject the whole candidate: discard the proposal without writing (the
      *  entry was frozen). The mirror of Accept all. */
     onDiscard: () => void;
+    /** The rail's rows as front matter while the rail is collapsed (#2054) —
+     *  under the review lens, so a structured flip (a proposed beat roster) is
+     *  adoptable here too. Without it a collapsed rail left those flips in the
+     *  hidden live body, unreachable (#2242). */
+    frontMatter?: import("svelte").Snippet;
   } = $props();
 
   // The judge axis, worded for a proposal (the snapshot's Active·Snapshot·Both):
@@ -121,7 +127,9 @@
       class="review-hint"
       title={hasProse
         ? "Read a whole version with Current / Proposed / Both (A / S / B), or click the dotted wording to adopt one part."
-        : "Adopt the proposed field changes in the details panel."}
+        : frontMatter
+          ? "Adopt the proposed field changes above the body."
+          : "Adopt the proposed field changes in the details panel."}
       >Proposed revision</span>
     {#if hasProse}
       <!-- The judge axis: read the current entry or the AI's version whole,
@@ -140,6 +148,9 @@
     </div>
   </div>
   <div class="review-flips">
+    {#if frontMatter}
+      <div class="review-front-matter prose-column" data-testid="review-front-matter">{@render frontMatter()}</div>
+    {/if}
     {#if proposedBody !== null}
       <RevisionFlip
         currentText={currentBody}

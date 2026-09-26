@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from "vitest";
+import { createRawSnippet } from "svelte";
 import { render, screen, fireEvent } from "@/lib/test/component";
 
 import EntryRevisionReview from "@/components/editor/body/EntryRevisionReview.svelte";
@@ -102,5 +103,22 @@ describe("EntryRevisionReview — #710 whole-version gestures", () => {
     unmount();
     render(EntryRevisionReview, { props: baseProps({ hasChanges: true }) });
     expect(button("Done")).toBeInTheDocument();
+  });
+});
+
+describe("EntryRevisionReview — front matter (#2242)", () => {
+  const block = createRawSnippet(() => ({ render: () => `<p class="fm-test">facts</p>` }));
+
+  it("renders the collapsed rail's front matter ahead of the flips, so a structured flip stays reachable", () => {
+    render(EntryRevisionReview, { props: baseProps({ frontMatter: block }) });
+    const fm = document.querySelector('[data-testid="review-front-matter"]');
+    expect(fm?.textContent).toBe("facts");
+    expect(fm?.classList.contains("prose-column")).toBe(true);
+    expect(fm?.parentElement?.firstElementChild).toBe(fm);
+  });
+
+  it("renders no front-matter block when the rail is open (none passed)", () => {
+    render(EntryRevisionReview, { props: baseProps() });
+    expect(document.querySelector('[data-testid="review-front-matter"]')).toBeNull();
   });
 });

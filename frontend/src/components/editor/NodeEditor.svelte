@@ -507,6 +507,24 @@
     // as unset. Adoption routes them back out (onAdoptFields below).
     entryReview.metadata = { ...metadata, title, status };
   });
+  // ADR-0096 §8: the strip's schema (to tell a `list`-typed field apart from
+  // an ordinary one when a park captures `listReviews`) and whether this
+  // pane's write routes to an override layer, where a list cannot be
+  // overridden at all (§6) — mirrors `entryReview.listsWritable` below. Kept
+  // OUT of the snapshot load effect above: neither needs to reset the parked
+  // notch when it changes, and that effect's `snapshots.load()` would
+  // otherwise re-run on every schema edit.
+  $effect.pre(() => {
+    snapshots.schema = metadataSchema;
+    snapshots.listsWritable = snapshotLayer === null;
+  });
+  // ADR-0096 §8 "Adopting": write a settled list unit into the pane's
+  // metadata exactly as any field edit, then save through the pane's normal
+  // autosave (mirrors `onAdoptFields` just below).
+  snapshots.onAdoptListField = (fieldId, list) => {
+    metadata = { ...metadata, [fieldId]: list };
+    emitChange();
+  };
   entryReview.onAdoptFields = async (fields) => {
     // `title`/`status` are proposable but stored off `metadata` (saved via the
     // top-level payload fields, and the backend applies a rename on post), so

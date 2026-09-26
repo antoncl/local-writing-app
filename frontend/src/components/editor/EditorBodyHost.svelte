@@ -18,6 +18,7 @@
   // handles (unchanged names/signatures, see NodeEditor's own seam forwards).
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import EntryReviewOverlay from "@/components/editor/body/EntryReviewOverlay.svelte";
+  import ListReviewSection from "@/components/editor/body/ListReviewSection.svelte";
   import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
   import CodeBodyView from "@/components/editor/body/CodeBodyView.svelte";
   import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
@@ -473,6 +474,30 @@
       frontMatter={model.frontMatter}
       appendix={model.appendix}
     />
+    {#if Object.keys(model.snapshots.listReviews).length > 0}
+      <!-- ADR-0096 §8: a section per differing `list` field, a SIBLING of the
+           overlay above rather than nested in its `appendix` — that overlay
+           delegates a click on any `[data-region]` under its content to
+           `model.snapshots.adopt` (the BODY's runs), and a section's own
+           regions must settle through `adoptListUnit` instead. -->
+      <div class="snapshot-list-reviews prose-column" data-testid="snapshot-list-reviews">
+        {#each Object.entries(model.snapshots.listReviews) as [fieldId, review] (fieldId)}
+          <ListReviewSection
+            adoptable={model.snapshots.listsWritable}
+            field={review.field}
+            label={effectiveFieldLabel(model.metadataSchema, model.entryType, fieldId)}
+            pairing={review.pairing}
+            units={review.units}
+            L={review.L}
+            O={review.O}
+            resolution={model.snapshots.listResolutions[fieldId] ?? {}}
+            view={model.snapshots.view}
+            resolveTitle={model.resolveListMemberTitle}
+            onSettleUnit={(unitKey, value) => model.snapshots.adoptListUnit(fieldId, unitKey, value)}
+          />
+        {/each}
+      </div>
+    {/if}
   {:else if model.entryReview.hasReview && model.entryReview.proposal}
     <EntryReviewOverlay review={model.entryReview} resolveListMemberTitle={model.resolveListMemberTitle} frontMatter={model.frontMatter} />
   {/if}
@@ -687,6 +712,13 @@
     overflow: auto;
     overscroll-behavior: contain;
     padding: 18px 0;
+  }
+
+  /* ADR-0096 §8: the snapshot compare's list sections, a sibling of the
+     read-only overlay above (never nested in its appendix — see the markup
+     comment), given the same column measure as the body it follows. */
+  .snapshot-list-reviews {
+    padding-bottom: 24px;
   }
 
   /* ---- Time-travel overlay chrome (#64) ---------------------------------- */

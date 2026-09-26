@@ -21,6 +21,9 @@ import type {
   DiffView,
   FieldDiff,
   LoreEntry,
+  MetadataFieldDefinition,
+  MetadataSchema,
+  MetadataValue,
   Scene,
   Snapshot,
   SnapshotDetail,
@@ -28,8 +31,22 @@ import type {
   SnapshotList,
 } from "@/lib/types";
 import { adoptRegion, renderDiffRuns } from "@/lib/utils/diffRuns";
+import { composeList, listUnits, pairListItems, type ListPairing, type ListUnit } from "@/lib/utils/listCompare";
 import { diffRuns, fieldDiffs } from "@/lib/utils/snapshotDiff";
 import { inNotchOrder, notchWhen } from "@/lib/utils/snapshotTime";
+
+/** One `list` field's captured comparison (ADR-0096 §3/§8) — the same shape
+ *  `EntryProposalController.listReviews` holds for the proposal review
+ *  (`entryProposal.svelte.ts`'s `ListReviewEntry`), captured here at park
+ *  time instead of at a proposal's commit. Everything `ListReviewSection`
+ *  renders and `composeList` needs, fixed for the life of one park. */
+export type ListReviewEntry = {
+  field: MetadataFieldDefinition;
+  L: MetadataValue[];
+  O: MetadataValue[];
+  pairing: ListPairing;
+  units: ListUnit[];
+};
 
 /** What the diff compares the snapshot against: the buffer, not the file.
  *  Autosave lags by up to six seconds and parking must not write. */
@@ -185,12 +202,36 @@ export class SnapshotStripController {
   /** Provenance-tagged runs from the last park. One payload serves all three
    *  view states, so a flip re-renders and never refetches. */
   runs = $state<DiffRun[]>([]);
-  /** Only the fields whose value differs, both sides carried. */
+  /** Only the fields whose value differs, both sides carried. A differing
+   *  `list`-typed field is pulled out into `listReviews` instead (ADR-0096
+   *  §8), so this never carries one. */
   fields = $state<Record<string, FieldDiff>>({});
   /** The title on each side. It flips like any other field — the colour means
    *  temporal provenance everywhere, and location carries the subject (§F). */
   titleWas = $state("");
   titleNow = $state("");
+
+  // ---- list reviews (ADR-0096 §8): one entry per differing `list` field ----
+
+  /** The schema, needed to tell a `list`-typed field apart from an ordinary
+   *  one when a park captures `listReviews` below — the host's other input,
+   *  set the same way `readLive`/`onAdopt` are. */
+  schema = $state<MetadataSchema | null>(null);
+  /** False when this pane's write routes to an override layer, where a list
+   *  cannot be overridden at all (§6) — the host's input, mirroring
+   *  `EntryProposalController.listsWritable`. The sections still show;
+   *  `adoptListUnit` becomes a no-op. */
+  listsWritable = $state(true);
+  /** Per differing `list` field with ≥1 unit, captured at park time — see
+   *  `park()`. Empty at Live. */
+  listReviews = $state<Record<string, ListReviewEntry>>({});
+  /** How each list's units have settled (`adoptListUnit`'s target) — the same
+   *  shape `EntryProposalController.listResolutions` holds. */
+  listResolutions = $state<Record<string, Record<string, true | string | false>>>({});
+  /** Hand a composed list to the host after an adopted settlement (ADR-0096
+   *  §8 "Adopting") — the host writes it into the pane's metadata exactly as
+   *  any field edit, and saves through the pane's normal autosave. */
+  onAdoptListField: ((fieldId: string, list: MetadataValue[]) => void | Promise<void>) | null = null;
 
   // ---- the drift report (ADR-0043, #439) ------------------------------------
   //
@@ -398,7 +439,14 @@ export class SnapshotStripController {
       if (!fresh()) return;
       this.#render++;
       this.runs = runs;
-      this.fields = fieldDiffs(snapshot.metadata, snapshot.status, live.metadata, live.status);
+      const { fields, listReviews } = this.#captureLists(
+        fieldDiffs(snapshot.metadata, snapshot.status, live.metadata, live.status),
+        live.metadata,
+        snapshot.metadata,
+      );
+      this.fields = fields;
+      this.listReviews = listReviews;
+      this.listResolutions = {};
       this.titleWas = snapshot.title;
       this.titleNow = live.title;
       this.drift = drift ?? NO_DRIFT;
@@ -410,6 +458,35 @@ export class SnapshotStripController {
     } finally {
       if (fresh()) this.#endPending();
     }
+  }
+
+  /** ADR-0096 §8: pull every differing `list`-typed field with ≥1 unit out of
+   *  the atomic field flip `fieldDiffs` built, so the rail's `compare.fields`
+   *  no longer flips it — into its own captured pairing/units, keyed the same
+   *  way `EntryProposalController.captureListReviews` builds `listReviews`.
+   *  A field the schema doesn't know, or without `schema` loaded, stays an
+   *  ordinary atomic flip. */
+  #captureLists(
+    fields: Record<string, FieldDiff>,
+    liveMetadata: Record<string, unknown>,
+    snapshotMetadata: Record<string, unknown>,
+  ): { fields: Record<string, FieldDiff>; listReviews: Record<string, ListReviewEntry> } {
+    const schema = this.schema;
+    if (!schema) return { fields, listReviews: {} };
+    const rest: Record<string, FieldDiff> = { ...fields };
+    const listReviews: Record<string, ListReviewEntry> = {};
+    for (const fieldId of Object.keys(fields)) {
+      const field = schema.fields[fieldId];
+      if (!field || field.type !== "list") continue;
+      const L = Array.isArray(liveMetadata[fieldId]) ? (liveMetadata[fieldId] as MetadataValue[]) : [];
+      const O = Array.isArray(snapshotMetadata[fieldId]) ? (snapshotMetadata[fieldId] as MetadataValue[]) : [];
+      const pairing = pairListItems(field, L, O);
+      const units = listUnits(field, pairing);
+      if (units.length === 0) continue; // #2265 for lists: nothing to show
+      listReviews[fieldId] = { field, L, O, pairing, units };
+      delete rest[fieldId];
+    }
+    return { fields: rest, listReviews };
   }
 
   /**
@@ -481,6 +558,36 @@ export class SnapshotStripController {
   }
 
   /**
+   * Settle one list unit while parked (ADR-0096 §8) — the list twin of
+   * `adopt()`, under the same `busy` gate so a click cannot race a restore/
+   * capture/pin. Recording the settlement never writes; only a settlement
+   * that ADOPTS something (`true`, or a region-resolved string for a prose
+   * member) composes the §5 sequence and hands it to `onAdoptListField` — the
+   * host writes it into the pane's metadata as any field edit and saves
+   * through the pane's normal autosave. A declined settlement (`false`) only
+   * records the click. A no-op where the list cannot be written (`!listsWritable`,
+   * an override layer, §6): nothing is recorded and nothing composed.
+   */
+  async adoptListUnit(fieldId: string, unitKey: string, value: true | string | false): Promise<void> {
+    if (this.parked === null || this.busy || !this.listsWritable) return;
+    const review = this.listReviews[fieldId];
+    if (!review) return;
+    this.busy = true;
+    try {
+      const forField = { ...(this.listResolutions[fieldId] ?? {}), [unitKey]: value };
+      this.listResolutions = { ...this.listResolutions, [fieldId]: forField };
+      if (value === true || typeof value === "string") {
+        const composed = composeList(review.field, review.L, review.O, review.pairing, forField);
+        await this.onAdoptListField?.(fieldId, composed);
+      }
+    } catch {
+      // Leave the strip as it was; a failed adopt must not move the author.
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /**
    * Drop the compare payload and cancel anything still on its way to replace it.
    *
    * **Bumping both tokens is the point**, not housekeeping. Clearing the fields
@@ -497,6 +604,8 @@ export class SnapshotStripController {
     this.bodyHtml = "";
     this.runs = [];
     this.fields = {};
+    this.listReviews = {};
+    this.listResolutions = {};
     this.titleWas = "";
     this.titleNow = "";
     this.drift = NO_DRIFT;

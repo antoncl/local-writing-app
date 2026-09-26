@@ -357,6 +357,24 @@ describe("ChatCommitController — commitToEntry", () => {
     );
   });
 
+  it("annotates a dropped field with its reason when the patch carries one (#2260)", async () => {
+    const { c, deps } = reviseController({ entryTitle: () => "Vale" });
+    extractPatch.mockResolvedValue(
+      okResult({
+        fields: { bio: "x" },
+        dropped: ["instance_beats"],
+        dropped_reasons: { instance_beats: "instance_beats[2].required must be true or false" },
+      }),
+    );
+
+    await c.commitToEntry();
+
+    expect(deps.setNotice).toHaveBeenLastCalledWith(
+      "Committed — review it on Vale. Ignored 1 field(s) the model couldn't set legally: " +
+        "instance_beats (instance_beats[2].required must be true or false).",
+    );
+  });
+
   it("appends the extraction's output-token count to the commit success notice", async () => {
     // #1899: observability, not control — the notice names the extraction's
     // output volume where the commit lands.

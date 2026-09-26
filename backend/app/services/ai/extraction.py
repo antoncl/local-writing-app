@@ -36,7 +36,7 @@ from app.models import (
 )
 from app.services.ai.chat import run_chat_turn
 from app.services.ai.field_contract import FieldContract
-from app.services.ai.list_identity import reconcile_list_identity
+from app.services.ai.list_identity import reconcile_list_identity_report
 from app.services.ai.patch_schema import patch_response_schema
 from app.services.project.errors import ProjectServiceError
 
@@ -245,12 +245,19 @@ def _constrain_to_registered_fields(patch: AIEntryPatch, allowed_ids: set[str]) 
         off_contract = [*off_contract, "body"]
     if not off_contract:
         return patch
-    return AIEntryPatch(
-        body=patch.body if "body" in allowed_ids else None,
-        fields={k: v for k, v in patch.fields.items() if k in allowed_ids},
-        dropped=[*patch.dropped, *off_contract],
-        garbled=patch.garbled,
-        garbled_reason=patch.garbled_reason,
+    # #2260: `model_copy` so any reason already on `dropped_reasons` (and any
+    # future AIEntryPatch field) rides along unchanged — only the fields this
+    # call actually touches are re-stated.
+    return patch.model_copy(
+        update={
+            "body": patch.body if "body" in allowed_ids else None,
+            "fields": {k: v for k, v in patch.fields.items() if k in allowed_ids},
+            "dropped": [*patch.dropped, *off_contract],
+            "dropped_reasons": {
+                **patch.dropped_reasons,
+                **dict.fromkeys(off_contract, "not in this prompt's field contract"),
+            },
+        }
     )
 
 
@@ -276,30 +283,31 @@ def _id_bearing_list_field_ids(project: ProjectService, entry_type: str) -> list
 
 def _reconcile_id_bearing_lists(
     project: ProjectService, *, entry_type: str, node_id: str, patch: AIEntryPatch
-) -> AIEntryPatch:
+) -> tuple[AIEntryPatch, dict[str, Any]]:
     """Reconcile every proposed id-bearing list field on `patch` against the
     node's CURRENTLY STORED value of that same field (#2243) — beat identity
     is machine-owned, never model-authored. Only runs on the revise (existing
     node) path; a create-mode draft has no stored value to reconcile against,
     so its lists simply keep whatever ids the model proposed (stripped or not,
-    `_ensure_beat_identity` re-mints on save either way)."""
+    `_ensure_beat_identity` re-mints on save either way).
+
+    Returns the reconciled patch plus `{field_id: report}` (#2260) — one
+    `reconcile_list_identity_report` result per id-bearing field touched, for
+    the extraction trace record."""
     id_bearing = [
         field_id for field_id in _id_bearing_list_field_ids(project, entry_type) if field_id in patch.fields
     ]
     if not id_bearing:
-        return patch
+        return patch, {}
     node = project.read_node(node_id)
     stored_metadata = getattr(node, "metadata", None) or {}
     fields = dict(patch.fields)
+    reports: dict[str, Any] = {}
     for field_id in id_bearing:
-        fields[field_id] = reconcile_list_identity(fields[field_id], stored_metadata.get(field_id))
-    return AIEntryPatch(
-        body=patch.body,
-        fields=fields,
-        dropped=patch.dropped,
-        garbled=patch.garbled,
-        garbled_reason=patch.garbled_reason,
-    )
+        fields[field_id], reports[field_id] = reconcile_list_identity_report(
+            fields[field_id], stored_metadata.get(field_id)
+        )
+    return patch.model_copy(update={"fields": fields}), reports
 
 
 async def run_entry_patch_extraction(
@@ -338,20 +346,33 @@ async def run_entry_patch_extraction(
     `node_id` is the revise route's target node (None on the create route,
     which has none yet) — used ONLY to reconcile any id-bearing list field
     the model proposed against what's actually stored (#2243,
-    `_reconcile_id_bearing_lists`), after the patch is otherwise final."""
+    `_reconcile_id_bearing_lists`).
+
+    #2260: exactly ONE `ai_commit_extraction` trace record is written per
+    call, on every exit path — via `project.record_ai_trace` — so a wrong or
+    missing AI change can be attributed to the model's reply, validation, id
+    reconciliation, truncation, or the eventual save (`services/project/
+    plot.py`'s own `plot_beats_saved`/`beat_links_healed` records complete
+    the picture on the save side)."""
+
+    trace: dict[str, Any] = {
+        "event": "ai_commit_extraction",
+        "chat_id": request.chat_id,
+        "node_id": node_id,
+        "entry_type": entry_type,
+        "creating": creating,
+    }
 
     try:
         chat = project.read_chat_session(request.chat_id)
     except ProjectServiceError as exc:
         # A stale / deleted chat — surface it as a clean failure the pane
         # shows, not an unhandled 500 (mirrors how the old contract-render
-        # failure was handled before it retired).
-        return EntryPatchExtraction(
-            patch=None,
-            cost_usd=None,
-            ok=False,
-            error=f"Couldn't read the chat to commit: {exc.message}",
-        )
+        # failure was handled before it retired). Cheap exit: no reply to
+        # report yet.
+        error = f"Couldn't read the chat to commit: {exc.message}"
+        project.record_ai_trace({**trace, "ok": False, "error": error})
+        return EntryPatchExtraction(patch=None, cost_usd=None, ok=False, error=error)
 
     # The write ceiling both the envelope's ASK and the post-validate ENFORCE
     # read from — the same `stored` set, so they can't drift (ADR-0067 §4).
@@ -362,16 +383,13 @@ async def run_entry_patch_extraction(
         # author-fixable message instead of silently committing nothing — and
         # before rendering an envelope or spending a model call that cannot
         # yield anything usable.
-        return EntryPatchExtraction(
-            patch=None,
-            cost_usd=None,
-            ok=False,
-            error=(
-                "This prompt commits to a node but registered no fields, so it can "
-                "only produce an empty change. Add a field_contract loop "
-                "(e.g. {% do field_contract.store(f) %}) to declare what it may write."
-            ),
+        error = (
+            "This prompt commits to a node but registered no fields, so it can "
+            "only produce an empty change. Add a field_contract loop "
+            "(e.g. {% do field_contract.store(f) %}) to declare what it may write."
         )
+        project.record_ai_trace({**trace, "ok": False, "error": error})
+        return EntryPatchExtraction(patch=None, cost_usd=None, ok=False, error=error)
     envelope = render_extraction_envelope(
         project,
         entry_type=entry_type,
@@ -396,12 +414,26 @@ async def run_entry_patch_extraction(
         response_schema=schema,
     )
     if not chat_reply.ok or not (chat_reply.content or "").strip():
+        error = chat_reply.error or "The model returned nothing to commit."
+        project.record_ai_trace(
+            {**trace, **_reply_trace_fields(chat_reply), "ok": False, "error": error}
+        )
         return EntryPatchExtraction(
-            patch=None,
+            patch=None, cost_usd=chat_reply.cost_usd, usage=chat_reply.usage, ok=False, error=error
+        )
+
+    # #2260: `entry_patch.py::_close_unbalanced` repairs a reply that stopped
+    # mid-value into valid JSON, so a truncated roster used to be silently
+    # accepted as a shortened list — reject it outright instead; a cut-off
+    # reply is never "the model's real answer, just shorter."
+    if chat_reply.truncated:
+        return _reject_truncated(
+            project,
+            trace,
+            chat_reply,
             cost_usd=chat_reply.cost_usd,
             usage=chat_reply.usage,
-            ok=False,
-            error=chat_reply.error or "The model returned nothing to commit.",
+            cost_usd_total=chat_reply.cost_usd_total,
         )
     patch = project.validate_ai_entry_patch_for_type(entry_type, chat_reply.content)
     patch = _constrain_to_registered_fields(patch, allowed_ids)
@@ -413,12 +445,15 @@ async def run_entry_patch_extraction(
     # The reply `patch` was validated from — what an unusable-patch diagnostic
     # logs. The retry supersedes it only when its reply is the one adopted.
     patch_reply = chat_reply
+    first_reply = chat_reply
+    retried = False
 
     # One firm retry on a garbled reply (#1036): re-run with the model's own
     # failed reply plus a stricter cue, so a chatty / cheap model that buried or
     # omitted the JSON gets a chance to correct itself. Costs one extra call, and
     # only on failure. A second garble is terminal — the caller reports it.
     if patch.garbled:
+        retried = True
         retry = await run_chat_turn(
             project,
             AIChatRequest(
@@ -440,17 +475,37 @@ async def run_entry_patch_extraction(
         usage = _sum_usage(usage, retry.usage)
         if retry.ok:
             cost_usd_total = retry.cost_usd_total
+        if retry.ok and retry.truncated:
+            # The retry is held to the same rule as the first reply (#2260).
+            return _reject_truncated(
+                project, trace, retry, cost_usd=cost, usage=usage, cost_usd_total=cost_usd_total
+            )
         if retry.ok and (retry.content or "").strip():
             patch = project.validate_ai_entry_patch_for_type(entry_type, retry.content)
             patch = _constrain_to_registered_fields(patch, allowed_ids)
             patch_reply = retry
+    reconciliation: dict[str, Any] = {}
     if not creating and node_id is not None:
         # #2243: beat identity is machine-owned, never model-authored — the
         # model never saw the roster's real ids, so any it proposed are
         # reconciled against what's actually stored before the patch is
         # handed back for review.
-        patch = _reconcile_id_bearing_lists(project, entry_type=entry_type, node_id=node_id, patch=patch)
+        patch, reconciliation = _reconcile_id_bearing_lists(
+            project, entry_type=entry_type, node_id=node_id, patch=patch
+        )
     _record_if_unusable(project, patch, patch_reply)
+    project.record_ai_trace(
+        {
+            **trace,
+            **_reply_trace_fields(patch_reply),
+            "ok": True,
+            "error": None,
+            "retried": retried,
+            "first_raw_reply": first_reply.content if retried else None,
+            "patch": patch.model_dump(),
+            "reconciliation": reconciliation,
+        }
+    )
     return EntryPatchExtraction(
         patch=patch,
         cost_usd=cost,
@@ -461,6 +516,56 @@ async def run_entry_patch_extraction(
         # usable patch has no need to show its raw reply back to the author.
         raw_reply=patch_reply.content if _is_unusable(patch) else None,
     )
+
+
+def _reject_truncated(
+    project: ProjectService,
+    trace: dict[str, Any],
+    reply: AIChatResponse,
+    *,
+    cost_usd: float | None,
+    usage: ChatUsage | None,
+    cost_usd_total: float | None,
+) -> EntryPatchExtraction:
+    """Fail the commit on a reply that hit the output limit (#2260), logging the
+    raw reply to errors.log and the trace. Shared by the first reply and the
+    garbled retry so neither can slip a cut-off roster through."""
+    output_tokens = reply.usage.output_tokens if reply.usage else None
+    detail = f" ({output_tokens} tokens)" if output_tokens else ""
+    error = (
+        f"The model's reply was cut off at its output limit{detail}, so the "
+        "proposal is incomplete and wasn't used. Raise the assistant's max "
+        "output tokens, or ask for a shorter revision, then commit again."
+    )
+    project.record_ai_error(
+        message="AI commit reply was cut off at the output limit",
+        provider=reply.provider,
+        model=reply.model,
+        detail=reply.content,
+    )
+    project.record_ai_trace({**trace, **_reply_trace_fields(reply), "ok": False, "error": error})
+    return EntryPatchExtraction(
+        patch=None,
+        cost_usd=cost_usd,
+        usage=usage,
+        cost_usd_total=cost_usd_total,
+        ok=False,
+        error=error,
+    )
+
+
+def _reply_trace_fields(reply: AIChatResponse) -> dict[str, Any]:
+    """The reply-derived slice of an `ai_commit_extraction` trace record
+    (#2260) — shared by every exit path that has a reply to report, so they
+    can't drift on the shape."""
+    return {
+        "provider": reply.provider,
+        "model": reply.model,
+        "truncated": reply.truncated,
+        "stop_reason": reply.stop_reason,
+        "usage": reply.usage.model_dump() if reply.usage else None,
+        "raw_reply": reply.content,
+    }
 
 
 def _is_unusable(patch: AIEntryPatch) -> bool:

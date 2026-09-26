@@ -79,37 +79,47 @@ def _reconcile_item(
     *,
     id_key: str,
     title_key: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """One proposed item, matched (id then title) and either adopted +
-    back-filled from its match, or stripped of its (unearned) id."""
+    back-filled from its match, or stripped of its (unearned) id. Returns the
+    reconciled item alongside its report row (#2260) — the outcome, which
+    stored id (if any) it matched, and which member keys were backfilled."""
     item = dict(proposed_item)
+    proposed_id = item.get(id_key) if isinstance(item.get(id_key), str) else None
     matched = _find_match(item, stored_by_id, claimed, id_key=id_key, title_key=title_key)
     if matched is None:
         item.pop(id_key, None)
-        return item
+        return item, {"outcome": "stripped", "matched_id": None, "backfilled": []}
     matched_id = matched[id_key]
     item[id_key] = matched_id
     claimed.add(matched_id)
+    backfilled: list[str] = []
     for key, value in matched.items():
         if key not in item:
             item[key] = value
-    return item
+            backfilled.append(key)
+    outcome = "kept" if proposed_id == matched_id else "matched_by_title"
+    return item, {"outcome": outcome, "matched_id": matched_id, "backfilled": backfilled}
 
 
-def reconcile_list_identity(
+def reconcile_list_identity_report(
     proposed: Any,
     stored: Any,
     *,
     id_key: str = "id",
     title_key: str = "title",
-) -> Any:
-    """Reconcile a proposed ordered-list field against its stored value.
+) -> tuple[Any, dict[str, Any]]:
+    """Reconcile a proposed ordered-list field against its stored value, and
+    report exactly what happened (#2260) — the extraction trace's record of
+    which beats the model kept, renamed onto by title, invented (stripped),
+    or silently dropped (`unclaimed_stored`, the beats a commit would DELETE).
 
-    Returns a NEW list (or `proposed` unchanged if it isn't a list at all —
-    a schema-invalid shape is somebody else's problem to reject). Each dict
-    item in `proposed` is matched, in order, against an as-yet-unclaimed dict
-    item of `stored` (a non-list `stored`, e.g. a brand new field with
-    nothing on disk yet, behaves as an empty roster):
+    Returns `(reconciled, report)`. `reconciled` is a NEW list (or `proposed`
+    unchanged if it isn't a list at all — a schema-invalid shape is somebody
+    else's problem to reject). Each dict item in `proposed` is matched, in
+    order, against an as-yet-unclaimed dict item of `stored` (a non-list
+    `stored`, e.g. a brand new field with nothing on disk yet, behaves as an
+    empty roster):
 
     1. its own `id_key` names an unclaimed stored item -> kept, claimed.
     2. else an unclaimed stored item shares its (stripped, casefolded)
@@ -119,17 +129,64 @@ def reconcile_list_identity(
     A matched item is also back-filled: any member key the stored item has
     but the proposed item lacks (an ABSENT key, not an explicit "") is
     copied over, so an omitted member survives a partial revise. Non-dict
-    items pass through untouched (a schema-invalid item 422s downstream,
-    not here)."""
+    items pass through untouched (a schema-invalid item 422s downstream, not
+    here) and are reported as `"outcome": "stripped"` with no match."""
 
     if not isinstance(proposed, list):
-        return proposed
+        return proposed, {"skipped": "not a list"}
 
     stored_by_id = _index_stored_by_id(stored, id_key)
     claimed: set[str] = set()
-    return [
-        _reconcile_item(item, stored_by_id, claimed, id_key=id_key, title_key=title_key)
-        if isinstance(item, dict)
-        else item
-        for item in proposed
+    reconciled: list[Any] = []
+    items_report: list[dict[str, Any]] = []
+    for index, item in enumerate(proposed):
+        if not isinstance(item, dict):
+            reconciled.append(item)
+            items_report.append(
+                {
+                    "index": index,
+                    "proposed_id": None,
+                    "title": None,
+                    "outcome": "stripped",
+                    "matched_id": None,
+                    "backfilled": [],
+                }
+            )
+            continue
+        new_item, row = _reconcile_item(item, stored_by_id, claimed, id_key=id_key, title_key=title_key)
+        reconciled.append(new_item)
+        items_report.append(
+            {
+                "index": index,
+                "proposed_id": item.get(id_key),
+                "title": item.get(title_key),
+                **row,
+            }
+        )
+    unclaimed_stored = [
+        {"id": sid, "title": item.get(title_key)}
+        for sid, item in stored_by_id.items()
+        if sid not in claimed
     ]
+    report = {
+        "proposed_count": len(proposed),
+        "stored_count": len(stored) if isinstance(stored, list) else 0,
+        "items": items_report,
+        "unclaimed_stored": unclaimed_stored,
+    }
+    return reconciled, report
+
+
+def reconcile_list_identity(
+    proposed: Any,
+    stored: Any,
+    *,
+    id_key: str = "id",
+    title_key: str = "title",
+) -> Any:
+    """Reconcile a proposed ordered-list field against its stored value — the
+    plain repair, for callers that don't need the report. See
+    `reconcile_list_identity_report` (#2260) for the full behaviour; this is
+    just its first element."""
+
+    return reconcile_list_identity_report(proposed, stored, id_key=id_key, title_key=title_key)[0]

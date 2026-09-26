@@ -944,6 +944,92 @@ class ExtractEndpointTests(unittest.TestCase):
             body["patch"]["garbled_reason"], "The reply contains no JSON object."
         )
 
+    def _trace_lines(self) -> list[dict]:
+        import json
+
+        path = self.root / "ai_trace.jsonl"
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+    def test_truncated_reply_is_rejected_not_repaired(self) -> None:
+        # #2260: `_close_unbalanced` used to repair a cut-off reply into valid
+        # JSON, silently accepting a truncated roster as a shortened list.
+        # `stop_reason: "max_tokens"` must reject the extraction outright.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        reply = AIChatResponse(
+            role="assistant",
+            content='{"fields": {"bio": "cut off mid',
+            provider="anthropic",
+            model="claude-test",
+            latency_ms=1,
+            policy="cloud-allowed",
+            ok=True,
+            error=None,
+            stop_reason="max_tokens",
+            truncated=True,
+            usage=ChatUsage(input_tokens=5, cached_input_tokens=0, cache_write_tokens=0, output_tokens=64),
+            cost_usd=0.02,
+        )
+        with self._mock_chat(reply):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertFalse(body["ok"])
+        self.assertIsNone(body["patch"])
+        self.assertIn("cut off", body["error"])
+        self.assertIn("64", body["error"])
+        log = (self.root / "errors.log").read_text(encoding="utf-8")
+        self.assertIn("AI commit reply was cut off at the output limit", log)
+        traces = self._trace_lines()
+        self.assertEqual(len(traces), 1)
+        self.assertTrue(traces[0]["truncated"])
+        self.assertFalse(traces[0]["ok"])
+
+    def test_a_truncated_garbled_retry_is_rejected_too(self) -> None:
+        # #2260: the retry is held to the same rule — a garbled first reply whose
+        # retry hits the output limit must not adopt the retry's repaired JSON.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        first = _chat_reply("nope, not json", cost_usd=0.01)
+        retry = _chat_reply('{"fields": {"bio": "cut off mid', cost_usd=0.02).model_copy(
+            update={"truncated": True, "stop_reason": "max_tokens"}
+        )
+        with self._mock_chat_sequence(first, retry) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        body = resp.json()
+        self.assertEqual(mock_chat.call_count, 2)
+        self.assertFalse(body["ok"])
+        self.assertIsNone(body["patch"])
+        self.assertIn("cut off", body["error"])
+        self.assertAlmostEqual(body["cost_usd"], 0.03)
+        traces = self._trace_lines()
+        self.assertEqual(len(traces), 1)
+        self.assertTrue(traces[0]["truncated"])
+
+    def test_a_successful_extraction_traces_the_reply_and_patch(self) -> None:
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        reply = _chat_reply('{"fields": {"bio": "New bio."}}', cost_usd=0.01)
+        with self._mock_chat(reply):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertTrue(resp.json()["ok"])
+        traces = self._trace_lines()
+        self.assertEqual(len(traces), 1)
+        record = traces[0]
+        self.assertEqual(record["event"], "ai_commit_extraction")
+        self.assertTrue(record["ok"])
+        self.assertEqual(record["raw_reply"], '{"fields": {"bio": "New bio."}}')
+        self.assertEqual(record["patch"]["fields"], {"bio": "New bio."})
+        self.assertIn("ts", record)
+
 
 class BeatIdentityReconciliationTests(unittest.TestCase):
     """#2243: a revise-plotline extraction never lets the model author beat
@@ -1023,6 +1109,70 @@ class BeatIdentityReconciliationTests(unittest.TestCase):
         # The member the model silently omitted survives the reconciliation.
         self.assertEqual(roster[0]["specifics"], "The old specifics.")
         self.assertEqual(roster[0]["function"], "raise stakes")
+
+    def test_reconciliation_report_traces_matched_by_title_and_unclaimed(self) -> None:
+        # #2260: the trace's `reconciliation` report names the outcome per
+        # proposed item and lists any stored beat the proposal omitted
+        # (`unclaimed_stored`) — the beats a naive commit would have deleted.
+        import json
+
+        chat_id = self._make_chat()
+        reply = _chat_reply(
+            '{"fields": {"instance_beats": '
+            '[{"id": "setup_pressure", "title": "Setup pressure"}]}}'
+        )
+        with patch("app.services.ai.extraction.run_chat_turn", new=AsyncMock(return_value=reply)):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.plotline.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        trace_path = self.root / "ai_trace.jsonl"
+        records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+        ext = next(r for r in records if r["event"] == "ai_commit_extraction")
+        report = ext["reconciliation"]["instance_beats"]
+        self.assertEqual(report["items"][0]["outcome"], "matched_by_title")
+        self.assertEqual(report["items"][0]["matched_id"], self.stored_beat_id)
+        self.assertIn("specifics", report["items"][0]["backfilled"])
+        self.assertEqual(report["unclaimed_stored"], [])
+
+    def test_unclaimed_stored_lists_the_beat_the_proposal_omitted(self) -> None:
+        import json
+
+        from app.models import SavePlotlineRequest
+
+        self.plotline = self.service.save_plotline(
+            self.plotline.id,
+            SavePlotlineRequest(
+                title="Heist",
+                body="",
+                base_revision=self.plotline.revision,
+                metadata={
+                    "instance_beats": [
+                        self.plotline.metadata["instance_beats"][0],
+                        {"title": "The betrayal", "function": "twist"},
+                    ]
+                },
+            ),
+        )
+        second_beat_id = self.plotline.metadata["instance_beats"][1]["id"]
+        chat_id = self._make_chat()
+        # The model only returns the first beat — omitting "The betrayal".
+        reply = _chat_reply(
+            '{"fields": {"instance_beats": '
+            f'[{{"id": "{self.stored_beat_id}", "title": "Setup pressure"}}]}}}}'
+        )
+        with patch("app.services.ai.extraction.run_chat_turn", new=AsyncMock(return_value=reply)):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.plotline.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        trace_path = self.root / "ai_trace.jsonl"
+        records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+        ext = next(r for r in records if r["event"] == "ai_commit_extraction")
+        report = ext["reconciliation"]["instance_beats"]
+        self.assertEqual([b["id"] for b in report["unclaimed_stored"]], [second_beat_id])
 
     def test_an_unmatched_beat_gets_no_id_and_is_minted_fresh_on_save(self) -> None:
         # A wholesale replacement (no title match either) must not adopt the

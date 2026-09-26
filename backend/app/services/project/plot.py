@@ -64,6 +64,7 @@ from app.models import (
     SavePlotTemplateRequest,
 )
 from app.services.markdown_validation import validate_scene_markdown
+from app.services.project.beat_roster_diff import diff_beat_list
 from app.services.project.errors import ProjectServiceError
 from app.services.tree_structure import TreeStructureService
 
@@ -228,7 +229,7 @@ class PlotMixin:
         # rather than reaching disk.
         if seed_metadata:
             initial_metadata = self._normalise_metadata({**initial_metadata, **seed_metadata}, root / "plot")
-            initial_metadata = self._ensure_beat_identity(initial_metadata)
+            initial_metadata, _minted = self._ensure_beat_identity(initial_metadata)
         metadata_errors = self._validate_entry_metadata(
             label=f"{noun.capitalize()} new",
             entry_type=entry_type,
@@ -353,13 +354,18 @@ class PlotMixin:
         if markdown_errors:
             raise ProjectServiceError(" ".join(markdown_errors), 422)
         metadata = self._normalise_metadata(request.metadata, path)
-        metadata = self._ensure_beat_identity(metadata)
+        # #2260: snapshot each beat-list field's STORED value before minting —
+        # the diff this save's `plot_beats_saved` trace record reports is
+        # against what was on disk, not the just-normalised proposal.
+        stored_metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+        beat_snapshots = {field: stored_metadata.get(field) for field in _BEAT_LIST_FIELDS}
+        metadata, minted = self._ensure_beat_identity(metadata)
         # Gate on the concrete type being written (like the read path's
         # `raw_entry_type`), not the endpoint constant `expected_entry_type` — so
         # save and read agree in every case. plot:card is a leaf here (the module
         # lists cards by exact type), so both consistently skip any subtype.
         if request.entry_type == PLOT_CARD_ENTRY_TYPE:
-            metadata = self._normalise_card_metadata(metadata, index, node_id)
+            metadata = self._normalise_card_metadata(metadata, index, node_id, trace=True)
         metadata_errors = self._validate_entry_metadata(
             label=f"{noun.capitalize()} {node_id}",
             entry_type=request.entry_type,
@@ -376,9 +382,28 @@ class PlotMixin:
         self.maybe_capture_session_boundary(node_id, kind="plot")
         self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, request.body)
         self._maybe_rename_node_file(path, request.title)
+        # #2260: only after the write actually lands (never on a 409/422 above)
+        # — a compact structural diff per changed beat-list field, so a wrong
+        # roster can be attributed to this specific save.
+        fields_diff = {}
+        for field in _BEAT_LIST_FIELDS:
+            diff = diff_beat_list(beat_snapshots.get(field), metadata.get(field), minted=minted.get(field))
+            if diff is not None:
+                fields_diff[field] = diff
+        if fields_diff:
+            self.record_ai_trace(
+                {
+                    "event": "plot_beats_saved",
+                    "node_id": node_id,
+                    "entry_type": request.entry_type,
+                    "fields": fields_diff,
+                }
+            )
         return node_id
 
-    def _ensure_beat_identity(self, metadata: dict[str, Any]) -> dict[str, Any]:
+    def _ensure_beat_identity(
+        self, metadata: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, set[str]]]:
         """Give every beat a stable, list-unique `id` (ADR-0048 S7 Slice 3a, #779).
 
         A card→beat link (Slice 3b) is the composite *(instance node id, beat id)*,
@@ -395,12 +420,19 @@ class PlotMixin:
         Auto-fill only — nothing here rejects. A blank beat still saves and simply
         gains an id, matching the sparse-spec principle: an incomplete beat must
         never block a write.
-        """
+
+        Returns `(metadata, minted)` — `minted` is `{field: {ids minted THIS
+        call}}` (#2260), so a save-side trace can report which beats got a
+        fresh id vs. kept an existing one. Callers that don't trace (template
+        saves, a brand-new node's seed metadata) simply ignore the second
+        element."""
+        minted: dict[str, set[str]] = {}
         for field in _BEAT_LIST_FIELDS:
             beats = metadata.get(field)
             if not isinstance(beats, list):
                 continue
             seen: set[str] = set()
+            field_minted: set[str] = set()
             for beat in beats:
                 if not isinstance(beat, dict):
                     continue  # a non-dict item 422s in validation; leave it be
@@ -410,7 +442,10 @@ class PlotMixin:
                     continue
                 beat["id"] = self._mint_beat_id(beat.get("title"), seen)
                 seen.add(beat["id"])
-        return metadata
+                field_minted.add(beat["id"])
+            if field_minted:
+                minted[field] = field_minted
+        return metadata, minted
 
     @staticmethod
     def _mint_beat_id(title: object, taken: set[str]) -> str:
@@ -426,7 +461,7 @@ class PlotMixin:
                 return candidate
 
     def _normalise_card_metadata(
-        self, metadata: dict[str, Any], index: Any, card_id: str
+        self, metadata: dict[str, Any], index: Any, card_id: str, *, trace: bool = False
     ) -> dict[str, Any]:
         """Card-only metadata normalization (ADR-0048 S7 Slice 3b/6b).
 
@@ -438,8 +473,11 @@ class PlotMixin:
         (`_canonicalise_metadata_selects`, #1911) like any field's. `plot:card` is the only
         plot node carrying these fields, so the save/read callers gate this to cards;
         `card_id` is the healing card's own node id, needed to drop a self-link.
+        `trace` (#2260) is set by the SAVE path only: a read heals in memory and
+        never persists it, so tracing there would log the same stale link on
+        every board load.
         """
-        self._heal_beat_links(metadata, index)
+        self._heal_beat_links(metadata, index, card_id=card_id if trace else None)
         self._heal_causal_links(metadata, index, card_id)
         return metadata
 
@@ -467,7 +505,7 @@ class PlotMixin:
             seen.add(key)
             yield key
 
-    def _heal_beat_links(self, metadata: dict[str, Any], index: Any) -> None:
+    def _heal_beat_links(self, metadata: dict[str, Any], index: Any, *, card_id: str | None = None) -> None:
         """Keep only card→beat links that still resolve (ADR-0048 S7 Slice 3b; ADR-0053;
         ADR-0080 §3).
 
@@ -483,23 +521,35 @@ class PlotMixin:
         nothing survives the key is removed, so an all-dangling list heals to sparse
         rather than `[]`. NOTE: the stored member key stays `plotline` (ADR-0080: "card
         fields unchanged", zero-migration) even when it holds a character arc's id.
-        """
+
+        #2260: `card_id` is passed only by a save (never a read, which heals in
+        memory and would re-log the same stale link on every load). When it is
+        given and this actually drops any link, a `beat_links_healed` record is
+        written so a silently vanished card→beat
+        link can be attributed to the beat leaving the roster rather than
+        looking like data loss."""
         links = metadata.get(_BEAT_LINK_FIELD)
         if not isinstance(links, list):
             return
         rosters: dict[str, set[str] | None] = {}
         healed: list[Any] = []
+        removed: list[dict[str, str]] = []
         for plotline_id, beat_id in self._iter_valid_beat_link_pairs(links):
             if plotline_id not in rosters:
                 rosters[plotline_id] = self._thread_beat_ids(plotline_id, index)
             roster = rosters[plotline_id]
             if roster is None or beat_id not in roster:
+                removed.append({"plotline": plotline_id, "beat_id": beat_id})
                 continue  # holder gone / not a plot:thread / beat left the roster
             healed.append({"plotline": plotline_id, "beat_id": beat_id})
         if healed:
             metadata[_BEAT_LINK_FIELD] = healed
         else:
             metadata.pop(_BEAT_LINK_FIELD, None)
+        if removed and card_id is not None:
+            self.record_ai_trace(
+                {"event": "beat_links_healed", "node_id": card_id, "removed": removed}
+            )
 
     def _thread_beat_ids(self, thread_id: str, index: Any) -> set[str] | None:
         """The beat ids in a `plot:thread` holder's roster — a plotline's event-beats
@@ -1023,7 +1073,7 @@ class PlotMixin:
         # path must carry it rather than silently dropping author-added fields.
         schema = self.read_metadata_schema()
         metadata = self._normalise_metadata(request.metadata, path)
-        metadata = self._ensure_beat_identity(metadata)
+        metadata, _minted = self._ensure_beat_identity(metadata)
         metadata_errors = self._validate_entry_metadata(
             label=f"Plot template {node_id}",
             entry_type=PLOT_TEMPLATE_ENTRY_TYPE,

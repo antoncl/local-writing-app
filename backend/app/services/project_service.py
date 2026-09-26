@@ -24,6 +24,7 @@ from app.scope import WorkScope
 from app.services.atomic_io import atomic_write_text
 from app.services.machine_settings import touch_recent_project
 from app.services.project.ai_invocations import AiInvocationsMixin
+from app.services.project.ai_trace import AITraceMixin
 from app.services.project.assistants import AssistantEntriesMixin
 from app.services.project.change_candidates import ChangeCandidatesMixin
 from app.services.project.change_propagation import ChangePropagationMixin
@@ -97,6 +98,7 @@ NODE_INDEX_SNAPSHOT_FILENAME = _SNAPSHOT_RELATIVE_PATH.name
 
 class ProjectService(
     AiInvocationsMixin,
+    AITraceMixin,
     AssistantEntriesMixin,
     ChangeCandidatesMixin,
     ChangePropagationMixin,

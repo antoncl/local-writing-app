@@ -62,6 +62,16 @@ log = logging.getLogger(__name__)
 _AI_FIELD_DROPPED = object()
 
 
+def _strip_label(error: str, label: str) -> str:
+    """`_validate_metadata_field_value` prefixes every error with `"{label}
+    metadata field "` — fine for a standalone validation error, redundant
+    once it's folded into `dropped_reasons[field_id]` (#2260), which already
+    names the field. Strip that fixed prefix; fall back to the raw error
+    text if the shape ever changes so nothing is lost."""
+    prefix = f"{label} metadata field "
+    return error[len(prefix) :] if error.startswith(prefix) else error
+
+
 def derived_select_value(field: MetadataFieldDefinition, metadata: Mapping[str, Any]) -> str | None:
     """The state `field` DERIVES on a node with this metadata (#1911): its
     declared `derived.value` while the reference field `derived.when_set` is
@@ -558,34 +568,48 @@ class MetadataValuesMixin:
 
         fields: dict[str, Any] = {}
         dropped: list[str] = []
+        # #2260: a plain-English reason per dropped field id, so an author (and
+        # the ai_trace record) can see WHY a field never made it into the
+        # patch instead of just that it didn't.
+        dropped_reasons: dict[str, str] = {}
         proposed_fields = parsed.get("fields")
         if isinstance(proposed_fields, dict):
             for field_id, value in proposed_fields.items():
                 field = schema.fields.get(field_id)
-                if (
-                    field is None
-                    or field_id not in allowed_field_ids
-                    or not is_proposable_field(field_id, field, schema)
-                ):
+                if field is None:
                     dropped.append(field_id)
+                    dropped_reasons[field_id] = "not a field in this schema"
                     continue
-                resolved = self._resolve_ai_field_value(field_id, value, field, schema)
+                if field_id not in allowed_field_ids:
+                    dropped.append(field_id)
+                    dropped_reasons[field_id] = f"not a field of {entry_type}"
+                    continue
+                if not is_proposable_field(field_id, field, schema):
+                    dropped.append(field_id)
+                    dropped_reasons[field_id] = "not settable by AI"
+                    continue
+                resolved, reason = self._resolve_ai_field_value(field_id, value, field, schema)
                 if resolved is _AI_FIELD_DROPPED:
                     dropped.append(field_id)
+                    dropped_reasons[field_id] = reason or "invalid value"
                     continue
                 fields[field_id] = resolved
 
-        return AIEntryPatch(body=body_value, fields=fields, dropped=dropped)
+        return AIEntryPatch(
+            body=body_value, fields=fields, dropped=dropped, dropped_reasons=dropped_reasons
+        )
 
     def _resolve_ai_field_value(
         self, field_id: str, value: Any, field: MetadataFieldDefinition, schema: MetadataSchema
-    ) -> Any:
+    ) -> tuple[Any, str | None]:
         """The value `validate_ai_entry_patch_for_type` adopts for one already-
-        proposable field, or the `_AI_FIELD_DROPPED` sentinel (never `None` —
-        a proposed `None`/`""` is itself a legal "clear this field" value, so
-        it can't double as "drop"). Split out of the main loop to keep it under
-        the complexity gate (#76); each branch is a self-contained per-type
-        adoption rule, in the same order the inline version used to run them.
+        proposable field (paired with `None`), or the `_AI_FIELD_DROPPED`
+        sentinel paired with a plain-English reason (never `None` for the
+        value — a proposed `None`/`""` is itself a legal "clear this field"
+        value, so it can't double as "drop"). Split out of the main loop to
+        keep it under the complexity gate (#76); each branch is a
+        self-contained per-type adoption rule, in the same order the inline
+        version used to run them.
 
         ADR-0082 §2 / #1797: a tag-vocabulary `entity_ref_list` proposes
         TITLES, never ids — resolved here (case-insensitive match in the
@@ -597,7 +621,9 @@ class MetadataValuesMixin:
         tag_target = tag_vocabulary_target(field, schema) if field.type == "entity_ref_list" else None
         if tag_target is not None:
             resolved = self._resolve_ai_tag_titles(value, tag_target)
-            return _AI_FIELD_DROPPED if resolved is None else resolved
+            if resolved is None:
+                return _AI_FIELD_DROPPED, "tag titles couldn't be resolved"
+            return resolved, None
         # References are excluded above, so no node index is needed.
         errors = self._validate_metadata_field_value(
             "AI patch", field_id, value, field, node_index=None, schema=schema
@@ -610,8 +636,11 @@ class MetadataValuesMixin:
             # entry's other items while the UI reports the field as merely
             # "ignored". Dropping whole leaves the current value untouched;
             # per-item validation still names the offending item in the error
-            # the author can act on (`field[2].status must be one of …`).
-            return _AI_FIELD_DROPPED
+            # the author can act on (#2260: `dropped_reasons` now carries the
+            # actual `field[2].status must be one of …` text, stripped of its
+            # "AI patch metadata field " label so it reads like the wire error).
+            reason = "; ".join(_strip_label(err, "AI patch") for err in errors)
+            return _AI_FIELD_DROPPED, reason
         if field.type == "color":
             # A colour field's value space IS the palette (#696). The AI can
             # emit a raw hex or an unknown name, which would surface as a
@@ -619,8 +648,10 @@ class MetadataValuesMixin:
             # adopted (the colour silently lost). Snap it back into the
             # palette; drop the field if it can't be mapped at all.
             snapped = nearest_swatch_id(value, self._palette()) if isinstance(value, str) else None
-            return _AI_FIELD_DROPPED if snapped is None else snapped
-        return value
+            if snapped is None:
+                return _AI_FIELD_DROPPED, "not a recognizable color"
+            return snapped, None
+        return value, None
 
     def _resolve_ai_tag_titles(self, value: Any, target_entry_type: str) -> list[str] | None:
         """Resolve a proposed tag-vocabulary value — a list of TITLES, exactly

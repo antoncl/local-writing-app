@@ -95,20 +95,25 @@ export interface ChatCommitDeps {
   revealEntry: (entryId: string) => void;
 }
 
-// The " Ignored N field(s) the model couldn't set legally: a, b." suffix every
-// commit notice uses to report a patch's `dropped` fields — one wording, so the
-// revise/stage/create paths can't drift on it. "" when nothing was dropped.
-function droppedSuffix(dropped: string[]): string {
-  return dropped.length > 0
-    ? ` Ignored ${dropped.length} field(s) the model couldn't set legally: ${dropped.join(", ")}.`
-    : "";
+// The " Ignored N field(s) the model couldn't set legally: a (reason), b." suffix
+// every commit notice uses to report a patch's `dropped` fields — one wording, so
+// the revise/stage/create paths can't drift on it. "" when nothing was dropped.
+// #2260: each field is annotated with its `dropped_reasons` entry when the patch
+// carries one (a bare id when it doesn't — an older/degraded response).
+function droppedSuffix(dropped: string[], reasons?: Record<string, string>): string {
+  if (dropped.length === 0) return "";
+  const named = dropped.map((field) => {
+    const reason = reasons?.[field];
+    return reason ? `${field} (${reason})` : field;
+  });
+  return ` Ignored ${dropped.length} field(s) the model couldn't set legally: ${named.join(", ")}.`;
 }
 
 // Why a patch proposed nothing (#2195): the fields the validator dropped, or —
 // when none were — that the model's raw reply is shown below (#2201; still
 // logged to errors.log too, but the in-app disclosure is what the author sees).
-function emptyPatchReason(dropped: string[]): string {
-  return droppedSuffix(dropped) || " The model's reply is shown below.";
+function emptyPatchReason(dropped: string[], reasons?: Record<string, string>): string {
+  return droppedSuffix(dropped, reasons) || " The model's reply is shown below.";
 }
 
 // ADR-0055 §2/§4a: a staged mutation set carries the same content as an entry
@@ -337,7 +342,7 @@ export class ChatCommitController {
     const hasBody = body != null;
     const hasFields = Object.keys(patch.fields).length > 0;
     if (!hasBody && !hasFields) {
-      this.deps.setNotice(`The model proposed no changes to commit.${emptyPatchReason(patch.dropped)}`);
+      this.deps.setNotice(`The model proposed no changes to commit.${emptyPatchReason(patch.dropped, patch.dropped_reasons)}`);
       return;
     }
     entryBrainstorm.propose(entryId, { body, fields: patch.fields, reviewMode });
@@ -348,7 +353,7 @@ export class ChatCommitController {
     // which has no document pane) gets the kind-neutral "the entry".
     const reviewOn = this.deps.entryTitle(entryId) ?? "the entry";
     this.deps.setNotice(
-      `Committed — review it on ${reviewOn}.${droppedSuffix(patch.dropped)}${this.outputTokensSuffix()}`,
+      `Committed — review it on ${reviewOn}.${droppedSuffix(patch.dropped, patch.dropped_reasons)}${this.outputTokensSuffix()}`,
     );
   }
 
@@ -399,7 +404,7 @@ export class ChatCommitController {
     if (!this.chatUnchanged()) return;
     const rows = patchToRows(patch);
     if (rows.length === 0) {
-      this.deps.setNotice(`The model proposed no changes to stage.${emptyPatchReason(patch.dropped)}`);
+      this.deps.setNotice(`The model proposed no changes to stage.${emptyPatchReason(patch.dropped, patch.dropped_reasons)}`);
       return;
     }
     const subject = this.deps.entryTitle(entryId) ?? "the entry";
@@ -442,7 +447,7 @@ export class ChatCommitController {
     const count = `${rows.length} change${rows.length > 1 ? "s" : ""}`;
     this.deps.setNotice(
       `${updated ? "Updated the mutation set" : "Staged a mutation set"} for ${subject} (${count}) — ` +
-        `review it under Mutation sets on the card, then place it in a scene to make it active.${droppedSuffix(patch.dropped)}` +
+        `review it under Mutation sets on the card, then place it in a scene to make it active.${droppedSuffix(patch.dropped, patch.dropped_reasons)}` +
         `${this.outputTokensSuffix()}`,
     );
   }
@@ -483,7 +488,7 @@ export class ChatCommitController {
     const hasBody = patch.body != null;
     const hasFields = Object.keys(patch.fields).length > 0;
     if (!hasBody && !hasFields) {
-      this.deps.setNotice(`The model proposed no entry to create.${emptyPatchReason(patch.dropped)}`);
+      this.deps.setNotice(`The model proposed no entry to create.${emptyPatchReason(patch.dropped, patch.dropped_reasons)}`);
       return;
     }
     this.draftDropped = patch.dropped;

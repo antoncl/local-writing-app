@@ -1,6 +1,7 @@
 # ADR-0096: A list is compared item by item, and its group declares what identifies an item
 
-- **Status:** Proposed — 2026-09-26. Text by Claude from a conversation with Anton on 2026-09-26,
+- **Status:** Accepted — 2026-09-26, Anton Lauridsen (PR #2271), with the go for the slices in
+  order, one lane. Text by Claude from a conversation with Anton on 2026-09-26,
   which started from screenshots of a plotline review ("The Girl in the Ghost") where the
   proposed beats could not be read and the current beats were one flattened string (#2266).
   Anton's review of the first draft asked for three things this version is built on: one engine

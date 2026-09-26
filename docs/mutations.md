@@ -44,11 +44,19 @@ Open the lore entry. When it has changes, a **scrubber** appears along the botto
 tooltip lists what changes there. Pick a stop and the whole card shows the entry **as of that
 point** — title, body, and every field reflect their effective values there, with changed fields
 marked in the mutation violet and a small **⤳**. At the start of the scrubber you edit the base
-(book-start) values. At a later stop, a relationship list (a list keyed by its reference, such as
-Connections) is editable too: the edit changes that stop's mutation set, never the scene. This is
-your trust surface: you can *see* "Honor as of Scene 5" and
-confirm nothing from the future has leaked backward. The rail's Mutations list mirrors the same
-stops, one row per unit.
+(book-start) values.
+
+At a later stop, **every field is editable in place, except the body and long-text fields** — the
+header title, the rail, and the list tabs (including a relationship item's own detail line) all
+edit in place. The body and any long-text field stay a read-only overlay there: each shows its
+value **as of that point**, and their rows (a replace or an appended fragment) are edited through
+the change's dialog instead — the pill dialog, or the mutation set editor. A short text field is
+different: it edits like any other scalar, and a save there **replaces** its value at that stop
+(removed when it matches the value without the set) — there's no append at a stop. Editing any
+field at a stop changes **that stop's mutation set**, never the scene — so it's safe even while a
+different scene has unsaved typing in it. This is your trust surface: you can *see* "Honor as of
+Scene 5" and confirm nothing from the future has leaked backward. The rail's Mutations list
+mirrors the same stops, one row per unit.
 
 ## How resolution works — and its one limit
 

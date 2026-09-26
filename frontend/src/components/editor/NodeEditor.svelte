@@ -20,7 +20,6 @@
   import EditorHeader from "@/components/editor/EditorHeader.svelte";
   import EditorRailContent from "@/components/editor/EditorRailContent.svelte";
   import { createSectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
-  import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
   import { characterCostRows, rollupCostFor } from "@/lib/editor-core/characterCost";
@@ -35,9 +34,11 @@
   import { backlinksFor } from "@/lib/views/backlinks";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
+  import { stopEditingEngaged } from "@/lib/editor-core/stopFieldEditable";
+  import { scrubRefreshAction } from "@/lib/editor-core/scrubRefreshAction";
   import { deriveBodyShape, documentLabelFor } from "@/lib/editor-core/documentPresentation";
   import { wireReviewFreeze } from "@/lib/editor-core/reviewFreeze.svelte";
-  import { buildBodyTabs, fieldsInTab, tabIdForField } from "@/lib/editor-core/bodyTabs";
+  import { buildBodyTabs, tabIdForField } from "@/lib/editor-core/bodyTabs";
   import { restoredBodyTab } from "@/lib/editor-core/bodyTabRestore";
   import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
 
@@ -188,10 +189,31 @@
   const scrub = new LoreScrubController();
   let scrubbed = $derived(documentKind === "lore" && scrub.index > 0);
 
+  // ADR-0095 §8: the scrubber STAYS ON ITS STOP across a mutations-index
+  // refresh (a stop edit, a scene autosave, a set change elsewhere) — it keys
+  // on the anchor/unit id and falls back to base only when that anchor is
+  // gone (`LoreScrubController.reload`). This settles the S1 race a whole-card
+  // `load()` on every `mutationsVersion` bump had: a set save bumps the
+  // version, this effect re-ran, `load()` reset the card to base, and a
+  // `handleListChange` in flight then called `reload()` on top, which could
+  // miss the freshly-narrowed unit. An ENTITY change (a genuinely different
+  // node opened) resets to base via `load()`; a version bump for the SAME
+  // entity re-anchors in place via `reload()` instead — never both for one
+  // trigger — the decision itself is `scrubRefreshAction` (pure, unit-tested
+  // standalone). `lastScrubEntityId` is a plain (non-reactive) tracking var,
+  // like `LoreScrubController`'s own `#entityId`/`#seq` — nothing reads it
+  // back. #2237 review: this effect is now the ONLY `scrub.reload()` call on
+  // a stop edit — EditorBodyHost's `handleListChange`/`commitStopFieldEdit`
+  // used to also call it directly, double-reloading every stop edit; they now
+  // just save the set (bumping `mutationsVersion`) and let this effect react.
+  let lastScrubEntityId: string | null = null;
   $effect(() => {
     const id = documentKind === "lore" ? sceneId : null;
     void mutationsVersion.value;
-    return scrub.load(id);
+    const action = scrubRefreshAction(lastScrubEntityId, id);
+    lastScrubEntityId = id;
+    if (action === "load") return scrub.load(id);
+    if (action === "reload") void scrub.reload();
   });
 
   // ---- Snapshot strip (#401, ADR-0044; lore surface ADR-0088 S1) ------------
@@ -296,6 +318,19 @@
   let titleMutated = $derived(scrubbed && scrub.overrides != null && "title" in scrub.overrides);
   let effectiveTitle = $derived(titleMutated ? String(scrub.overrides?.title ?? "") : title);
   let bodyMutated = $derived(scrubbed && scrub.overrides != null && "body" in scrub.overrides);
+
+  // ADR-0095 §8 decision 7: the title input's own edit draft while scrubbed —
+  // re-seeded from `effectiveTitle` on every stop change (a scrub step, or the
+  // refresh after this stop's own save lands), never touched by a keystroke
+  // elsewhere. `commitTitleStopEdit` is the blur/Enter gesture in the snippet.
+  let titleStopDraft = $state("");
+  $effect(() => {
+    if (scrubbed) titleStopDraft = effectiveTitle;
+  });
+  function commitTitleStopEdit() {
+    if (!scrubbed || titleStopDraft === effectiveTitle) return;
+    void bodyHost?.commitStopFieldEdit("title", titleStopDraft);
+  }
 
   // The read-only body overlay (§4.4, buffer-safe): rendered-markdown of the
   // effective body. The TipTap buffer underneath is never touched — unsaved
@@ -905,8 +940,15 @@
     scene?.id && structure ? (findNodeBySceneId(structure.root, scene.id)?.resolved_cascade ?? null) : null,
   );
   let hasBody = $derived(bodyShape !== "none");
-  // Shared by the rail and Body Sections (#2009) — one node, one read-only verdict.
-  let editorReadOnly = $derived(scrubbed || snapshotParked || reviewing || (inheritedReadOnly && documentKind !== "prompt"));
+  // Shared by the rail and Body Sections (#2009) — one node, one read-only
+  // verdict. ADR-0095 §8: no longer folds `scrubbed` in — a scrub stop is
+  // per-field now (`stopFieldEditable`, asked wherever a field a mutation can
+  // target needs to win over this whole-card lock: the rail via MetadataPanel,
+  // list tabs via EditorBodyHost). This flag alone still fully locks the body
+  // (BodySections/the read-only overlay), the entry-type selector and the
+  // override-reset affordances, which stay whole-card-locked at a stop too
+  // (added back explicitly at each of those call sites as `|| scrubbed`).
+  let editorReadOnly = $derived(snapshotParked || reviewing || (inheritedReadOnly && documentKind !== "prompt"));
   // Title/body have no rail row, so their override tell renders beside the
   // thing it marks instead (#2184 slice 3, ADR-0039 Amendment 4 §9): after the
   // title input, and on the Body tab label. Lore only (§5) — a prompt's title
@@ -924,7 +966,10 @@
   let contentOverrideSourceLabel = $derived(scene?.source_layer_label ?? "inherited");
   // Same gate the rail's reset marks use (`MetadataPanel`'s `canResetOverride`):
   // a reset handler is wired AND the pane is not read-only.
-  let canResetContentOverride = $derived(onResetField != null && !editorReadOnly);
+  // ADR-0095 §8: hidden at a stop too (`!scrubbed`) — a title/body override
+  // reset edits base/override state, never a mutation set (title's own stop
+  // edit is the input in `chatTitleField` below, a different gesture).
+  let canResetContentOverride = $derived(onResetField != null && !editorReadOnly && !scrubbed);
   let titleOverrideMark = $derived(
     canResetContentOverride && overriddenContentForPanel.includes("title")
       ? {
@@ -967,21 +1012,16 @@
   }
   // #2074 (ADR-0042 §5): the scrub stop's own unit — the stop IS the unit, so
   // editing the lore card at a stop edits this. Threaded into EditorBodyHost's
-  // model; `null` off the lore axis or at base (stop 0, editable already).
+  // and MetadataPanel's models; `null` off the lore axis or at base (stop 0,
+  // editable already).
   let stopUnit = $derived(scrubbed ? (scrub.units[scrub.index - 1] ?? null) : null);
-  // The foot dock's caption reads "editing this stop" when the OPEN list tab
-  // holds a reference-keyed list field AND this stop's unit touches the open
-  // node — the same predicate EditorBodyHost's list-tab block applies to its
-  // own readOnly/change routing (no shared model between the two renderers).
-  // #2100: a tab id no longer always decodes straight to a field id (a merged
-  // Section tab is `list:group:<group>`), so this resolves the OPEN tab's
-  // member fields the same way EditorBodyHost/the rail jump do, via
-  // `tabIdForField`, rather than slicing the tab id.
-  let stopListFieldIds = $derived(fieldsInTab(metadataSchema, entryType, activeBodyTab));
+  // ADR-0095 §8 (generalised from #2074's keyed-list-only check, which fed
+  // ONLY the foot dock's caption): the dock's "editing this stop"/"read-only"
+  // caption now reads the same shared engaged-gate every stop-edit surface
+  // asks — true whenever scrubbed and none of the other read-only axes
+  // (parked/reviewing/inherited) is active, regardless of which field is open.
   let stopEditable = $derived(
-    scrubbed &&
-      stopListFieldIds.some((id) => keyedListKeyMember(metadataSchema?.fields[id]) !== null) &&
-      (stopUnit?.records.some((r) => r.entity_id === scene?.id) ?? false),
+    stopEditingEngaged({ scrubbed, snapshotParked, reviewing, inheritedReadOnly, documentKind }),
   );
   $effect.pre(() => {
     if (titleReload && titleReload.token !== lastTitleReloadToken) {
@@ -1015,7 +1055,7 @@
     model={{
       metadataSchema, entryType, status, metadata, documentKind, documentLabel,
       documentEntryTypes, metadataFieldIds, scene, createLayerId, overriddenFieldsForPanel,
-      scrubbed, scrub, compare: snapshotCompare ?? entryCompare, editorReadOnly, bodyShape,
+      scrubbed, scrub, stopUnit, compare: snapshotCompare ?? entryCompare, editorReadOnly, bodyShape,
       resolvedCascade, backlinks, title, hostPaneId,
     }}
     deps={{ loreEntries, promptEntries, structure, researchStructure, implicitContextMatcher, sectionRegistry, computedFieldString }}
@@ -1026,6 +1066,11 @@
       customData: () => onCustomData?.({ entryType, kind: documentKind }),
       navigate: (payload) => onNavigate?.(payload),
       resetField: (fieldId) => onResetField?.(fieldId),
+      // ADR-0095 §8 decision 6: a rail write/clear/status-change at a stop
+      // saves THIS STOP'S mutation set — routed to EditorBodyHost, which owns
+      // the api/store collaborators the orchestrator needs (same reasoning as
+      // `commitStopFieldEdit` below).
+      stopFieldEdit: (fieldId, value) => { void bodyHost?.commitStopFieldEdit(fieldId, value); },
       goToSection: (fieldId) => sectionRegistry.focus(fieldId),
       // #2100: the rail's jump target for a list-index row — computed via the
       // SAME `tabIdForField` the strip itself buckets fields with, so a
@@ -1075,9 +1120,34 @@
      needs no label wrapper. State/persistence stay entirely in NodeEditor. -->
 {#snippet chatTitleField()}
   {#if scrubbed}
-    <!-- Effective title as of the scrub point — read-only; the draft
-         title stays untouched underneath (stop 0 restores it). -->
-    <input class="title-input" class:mutated={titleMutated} readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (effective, read-only)`} value={effectiveTitle} />
+    {#if stopEditable}
+      <!-- ADR-0095 §8 decision 7: a title edit AT A STOP saves this stop's
+           mutation set (a `replace` row, removed when it lands back on the
+           base title) — never `emitChange`/`handleTitleInput`, which write
+           the base. Commits on blur/Enter, Esc reverts, the same gesture the
+           rail's inline scalar inputs use (RailScalarCell's `.fr-edit`
+           Escape/focusout handling) — this is a bespoke input (the shell's
+           own title header/chat-row field, not a rail row), so the gesture is
+           reimplemented here rather than shared. -->
+      <input
+        class="title-input"
+        class:mutated={titleMutated}
+        aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (editing this stop)`}
+        bind:value={titleStopDraft}
+        onkeydown={(e) => {
+          if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+          else if (e.key === "Escape") {
+            titleStopDraft = effectiveTitle;
+            (e.currentTarget as HTMLInputElement).blur();
+          }
+        }}
+        onblur={commitTitleStopEdit}
+      />
+    {:else}
+      <!-- Effective title as of the scrub point — read-only (parked/
+           reviewing/inherited wins over the scrub axis). -->
+      <input class="title-input" class:mutated={titleMutated} readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (effective, read-only)`} value={effectiveTitle} />
+    {/if}
   {:else if snapshotParked}
     <!-- Parked: the title flips with the body and the rail, and is
          read-only like them. Leaving it editable let an author type

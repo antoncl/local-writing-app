@@ -74,6 +74,13 @@ export type RailRowContext = {
   tagTitleById: ReadonlyMap<string, string>;
   openFieldId: string | null;
   fieldExpanded: (fieldId: string) => boolean;
+  // ADR-0095 §8: at a scrub stop, every field a mutation can target is
+  // editable in place — `editorReadOnly` no longer folds `scrubbed` in
+  // (NodeEditor), so each row asks this per-field predicate instead.
+  // `scrubbed` false outside the lore axis, so `stopEditable` is never
+  // consulted then.
+  scrubbed: boolean;
+  stopEditable: (fieldId: string) => boolean;
 };
 
 export type RailRowModel = {
@@ -161,7 +168,13 @@ function holdsDerivedState(ctx: RailRowContext, fieldId: string): boolean {
 }
 
 function fieldReadOnly(ctx: RailRowContext, fieldId: string): boolean {
-  return ctx.readOnly || (fieldId === "ai_temperature" && ctx.temperatureUnsupported) || holdsDerivedState(ctx, fieldId);
+  if (ctx.readOnly) return true;
+  if ((fieldId === "ai_temperature" && ctx.temperatureUnsupported) || holdsDerivedState(ctx, fieldId)) return true;
+  // ADR-0095 §8: `editorReadOnly` (`ctx.readOnly`) no longer folds `scrubbed`
+  // in — a scrub stop is per-field now, so a row that ISN'T one a mutation
+  // can target stays read-only exactly the way the whole card used to.
+  if (ctx.scrubbed) return !ctx.stopEditable(fieldId);
+  return false;
 }
 
 // Inheritance: a field present on the type but not in its own_fields is

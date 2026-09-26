@@ -35,7 +35,9 @@
   import { keyedListKeyMember, keyedShapeFor } from "@/lib/editor-core/keyedList";
   import { proseRendersAfterSections } from "@/lib/editor-core/bodySections";
   import { asItemList } from "@/lib/editor-core/mutationListEdit";
-  import { rewriteSetFieldFromItems } from "@/lib/editor-core/mutationStopEdit";
+  import { applyStopFieldEdit } from "@/lib/editor-core/mutationStopEdit";
+  import { stopFieldEditable } from "@/lib/editor-core/stopFieldEditable";
+  import { commitStopFieldEdit as commitStopFieldEditImpl } from "@/lib/editor-core/stopFieldOrchestrator";
   import type { MutationUnitGroup } from "@/lib/editor-core/mutationUnits";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
@@ -59,6 +61,7 @@
     LoreEntrySummary,
     MetadataSchema,
     MetadataValue,
+    MutationSetEntry,
     NavigateTarget,
     PromptContextStrategy,
     PromptEntrySummary,
@@ -205,51 +208,93 @@
     return [];
   }
 
-  // #2074 (ADR-0042 §5): a list field is editable AT THIS SCRUB STOP when it's
-  // a reference-keyed list AND the stop's own unit touches the open node — the
-  // unit's own rows are exactly what the rewrite below replaces. Per-field
-  // (#2100): a merged tab's fields aren't necessarily all keyed alike, so this
-  // is a function of the field rather than a single tab-wide flag.
+  // #2074/ADR-0095 §8: a list field is editable AT THIS SCRUB STOP when it's
+  // one a mutation can target (the generalised predicate — a plain
+  // `entity_ref_list`/`multi_select` collection now qualifies too, not just a
+  // reference-keyed list, §8's collection branch) AND the stop's own unit
+  // touches the open node — the unit's own rows are exactly what the
+  // orchestrator below replaces. Per-field (#2100): a merged tab's fields
+  // aren't necessarily all keyed alike, so this is a function of the field
+  // rather than a single tab-wide flag.
   function stopEditableFor(fieldId: string): boolean {
     return (
-      model.scrubbed &&
-      model.metadataSchema != null &&
-      keyedListKeyMember(model.metadataSchema.fields[fieldId]) !== null &&
-      (model.stopUnit?.records.some((r) => r.entity_id === (model.scene?.id ?? "")) ?? false)
+      stopFieldEditable(fieldId, {
+        scrubbed: model.scrubbed,
+        snapshotParked: model.snapshotParked,
+        reviewing: model.reviewing,
+        inheritedReadOnly: model.inheritedReadOnly,
+        documentKind: model.documentKind,
+        schema: model.metadataSchema,
+        entryType: model.entryType,
+      }) && (model.stopUnit?.records.some((r) => r.entity_id === (model.scene?.id ?? "")) ?? false)
     );
   }
 
-  // Route a list-tab change through the scrub-stop rewrite when the field is
-  // editable there; otherwise the ordinary whole-field metadataChange. The
-  // rewrite saves the mutation SET (ADR-0095 §8), never the scene, so it
-  // cannot collide with prose being typed. On failure, surface it to the
-  // writer and leave the tab as it was — the reload isn't called, so the
-  // displayed effective items stay whatever they were before the edit.
+  const stopEditDeps = {
+    getEntityEffectiveState: api.getEntityEffectiveState,
+    getMutationSetEntry: (setId: string) => api.getMutationSetEntry(setId),
+    saveMutationSetEntry: (entry: MutationSetEntry) => api.saveMutationSetEntry(entry),
+    upsertMutationSet,
+    flushSceneIfDirty: (sceneId: string) => editorPanes.flushSceneIfDirty(sceneId),
+  };
+
+  // Route a list-tab change through the scrub-stop orchestrator when the
+  // field is editable there; otherwise the ordinary whole-field
+  // metadataChange. The orchestrator saves the mutation SET (ADR-0095 §8),
+  // never the scene, so it cannot collide with prose being typed. On failure,
+  // surface it to the writer and leave the tab as it was — nothing here
+  // reloads, so the displayed effective items stay whatever they were before
+  // the edit. #2237 review: the save's `upsertMutationSet` bumps
+  // `mutationsVersion`, which NodeEditor's own scrub-refresh effect reacts to
+  // (`scrubRefreshAction` → `reload()`) — this seam used to ALSO call
+  // `model.scrub.reload()` itself, double-reloading every stop edit (the very
+  // S1 race ADR-0095 §8 decision 1 was written to avoid). One trigger, one
+  // reload, and it lives where the effect already is.
   async function handleListChange(fieldId: string, items: MetadataValue[]): Promise<void> {
     if (stopEditableFor(fieldId) && model.stopUnit && model.metadataSchema) {
+      const field = model.metadataSchema.fields[fieldId];
+      const keyed = keyedListKeyMember(field) !== null ? keyedShapeFor(field) : undefined;
       try {
-        await rewriteSetFieldFromItems({
+        await applyStopFieldEdit({
           unit: model.stopUnit,
           entityId: model.scene?.id ?? "",
           field: fieldId,
-          keyed: keyedShapeFor(model.metadataSchema.fields[fieldId]),
-          baseItems: asItemList(model.metadata[fieldId]),
-          editedItems: asItemList(items),
-          deps: {
-            getEntityEffectiveState: api.getEntityEffectiveState,
-            getMutationSetEntry: (setId) => api.getMutationSetEntry(setId),
-            saveMutationSetEntry: (entry) => api.saveMutationSetEntry(entry),
-            upsertMutationSet,
-            flushSceneIfDirty: (sceneId) => editorPanes.flushSceneIfDirty(sceneId),
-          },
+          fieldType: keyed ? "keyed" : "collection",
+          keyed,
+          baseValue: keyed ? asItemList(model.metadata[fieldId]) : model.metadata[fieldId],
+          editedValue: keyed ? asItemList(items) : items,
+          deps: stopEditDeps,
         });
-        await model.scrub.reload();
       } catch (err) {
         editorPanes.setError(err instanceof Error ? err.message : String(err));
       }
       return;
     }
     on.metadataChange({ ...model.metadata, [fieldId]: items });
+  }
+
+  // Commit ONE metadata/title field's stop edit (ADR-0095 §8) — routed from
+  // NodeEditor's `onStopFieldEdit` (a rail row's write/clear via
+  // MetadataPanel) and its title input's commit gesture. Exported (bind:this)
+  // rather than lifted into NodeEditor: the api/store collaborators the
+  // orchestrator needs already live here (`stopEditDeps`, same as
+  // `handleListChange` above), and NodeEditor is already at the file-size cap.
+  export async function commitStopFieldEdit(fieldId: string, value: MetadataValue | null): Promise<void> {
+    if (!model.stopUnit) return;
+    try {
+      await commitStopFieldEditImpl(fieldId, value, {
+        stopUnit: model.stopUnit,
+        entityId: model.scene?.id ?? "",
+        schema: model.metadataSchema,
+        metadata: model.metadata,
+        title: model.title,
+        deps: stopEditDeps,
+      });
+      // See handleListChange's comment: NodeEditor's own effect reloads on the
+      // save's `mutationsVersion` bump — no reload call here.
+    } catch (err) {
+      editorPanes.setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   let proseBodyView: ProseBodyView | null = $state(null);
@@ -460,13 +505,19 @@
     >
       <!-- The long_text sections (#2009) render inside the prose view's own
            scroll frame, never as siblings: the panel grid places direct
-           children by position (#2030). -->
+           children by position (#2030). ADR-0095 §8: `|| model.scrubbed` —
+           `editorReadOnly` no longer folds the scrub axis in (NodeEditor), but
+           a body section stays part of the read-only body overlay at a stop
+           regardless (§8: "the body stays a read-only overlay"; a section
+           field the rail's per-field predicate WOULD allow still has no
+           editable surface here — the rail shows it as an index row, as
+           before, jumping to this same read-only section). -->
       {#snippet sections()}
         <BodySections
           schema={model.metadataSchema}
           entryType={model.entryType}
           metadata={model.metadata}
-          readOnly={model.editorReadOnly}
+          readOnly={model.editorReadOnly || model.scrubbed}
           onMetadataChange={(next) => on.metadataChange(next)}
           implicitContextMatcher={deps.implicitContextMatcher}
           register={deps.sectionRegistry}
@@ -595,7 +646,11 @@
             items: toItemList(model.metadata[fieldId]),
             keyMember: keyedListKeyMember(model.metadataSchema.fields[fieldId]),
             effectiveItems: model.scrubbed ? ((model.scrub.overrides?.[fieldId] as MetadataValue[] | undefined) ?? null) : null,
-            readOnly: model.editorReadOnly && !stopEditableFor(fieldId),
+            // ADR-0095 §8: `editorReadOnly` no longer folds `scrubbed` in
+            // (NodeEditor) — a stop-editable field must still win over the
+            // scrub axis here, so it's added back explicitly alongside the
+            // hard lock before asking the per-field predicate.
+            readOnly: (model.editorReadOnly || model.scrubbed) && !stopEditableFor(fieldId),
             schema: model.metadataSchema,
             nodeId: model.scene?.id ?? "",
           }}

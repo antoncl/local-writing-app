@@ -321,7 +321,8 @@ This replaces ADR-0013's and ADR-0088's whole-card read-only stop.
     everywhere.
 - **A text field with an `add` row** edits that row's appended text, not the effective whole.
   Without one, editing the field adds an `add` row rather than replacing the text, so earlier
-  fragments are never overwritten.
+  fragments are never overwritten. *(Replaced by Amendment 1: a short `text` field edits as a
+  scalar; a `long_text` field is read-only at a stop.)*
 - **An edit that equals the value without this set removes the row.** A set may have no rows; it
   then contributes nothing.
 - **The body stays a read-only overlay at a stop.** The overlay shows base text plus appended
@@ -653,3 +654,33 @@ The frontend thread found:
 - four drifted citations.
 
 Each is decided above.
+
+## Amendment 1 — Text fields at a stop (2026-09-26)
+
+Accepted by Anton on 2026-09-26, during S2 (PR #2237). It replaces §8's text-field rule.
+
+### The problem
+Building S2 showed that the append rule fails both kinds of text field.
+- **Short text.** At a stop, a short text field's control opened empty, because the set had no row
+  for it, and whatever the writer typed was appended. Changing Erik's pronouns from "He/Him" to
+  "She/Her" at a stop produced "He/Him She/Her". That is right for accumulating prose, and wrong
+  for a pronoun, a rank or a label.
+- **Long text.** The rail's `long_text` editor is always live and has no separate display state.
+  At a stop it could show only the fragment this set appends, or nothing. The card then said a
+  field was blank at that point in the story when it was not, which breaks the scrubber's promise
+  of showing what is true there.
+
+### The decision
+- **A short `text` field edits at a stop like any other scalar.** Its control shows the effective
+  value. Saving writes one `replace` row, which is removed when it equals the value without the
+  set.
+- **A `long_text` field is not editable at a stop.** It shows the full effective value, read-only,
+  the way the body does. Its rows, `replace` or `add`, are edited in the change's dialog.
+
+Appending stays available where it belongs, for long prose, and is authored where the fragment
+has a place to be seen: the `/mutate` and pill dialog. The card never has to show a fragment in
+place of a value.
+
+### Not in scope
+Resolution is unchanged: `add` rows on text fields still append exactly as §5 and ADR-0009 say. No
+migration, and no backend change.

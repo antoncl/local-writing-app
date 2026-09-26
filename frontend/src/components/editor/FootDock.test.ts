@@ -153,6 +153,27 @@ describe("FootDock — unified keyboard + mode switch (ADR-0088 S2)", () => {
     expect(container.querySelector(".snapshot-strip")).toBeNull();
   });
 
+  it("requires focus in the dock for the mutations track even at a stop (ADR-0095 §8: a stop is now editable)", () => {
+    // The old "engaged frees the whole keyboard" bypass (ADR-0088 §4) is gone
+    // for the mutations track: a stop's fields are live now, so a key typed on
+    // a focused rail field/button must not scrub the card out from under it.
+    const scrub = scrubWithMutations();
+    scrub.index = 1; // at a stop
+    const { spies } = mount(scrub);
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(spies.scrubStep).not.toHaveBeenCalled();
+    expect(spies.scrubTo).not.toHaveBeenCalled();
+  });
+
+  it("still answers the keys with focus inside the dock at a stop", () => {
+    const scrub = scrubWithMutations();
+    scrub.index = 1;
+    const { container, spies } = mount(scrub);
+    press(container, "ArrowLeft");
+    expect(spies.scrubStep).toHaveBeenCalledWith(-1);
+  });
+
   it("refocuses the mode control after a cycle so the keyboard stays alive", () => {
     // Cycling unmounts the focused track (a clicked notch/bead) and would drop
     // focus to <body>, stranding the keys behind the editable-end gate. The

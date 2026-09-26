@@ -96,6 +96,8 @@ function baseCtx(overrides: Partial<RailRowContext> = {}): RailRowContext {
     fieldExpanded: () => false,
     sectionsInBody: false,
     listsInBody: false,
+    scrubbed: false,
+    stopEditable: () => false,
     ...overrides,
   };
 }
@@ -323,6 +325,51 @@ describe("buildRailRowModel", () => {
       const model = buildRailRowModel(baseCtx({ metadata: { relationships: [{ who: "lore_a", role: "squire" }] } }), "relationships");
       expect(model.listIndex).toBe(false);
       expect(model.wide).toBe(true);
+    });
+  });
+
+  // ADR-0095 §8: `editorReadOnly` no longer folds `scrubbed` in — a row's
+  // `fieldReadOnly` asks the per-field predicate instead. Amendment 1 (Anton,
+  // 2026-09-26): a `long_text` field is never stop-targetable, so it stays
+  // read-only at a stop; a `text` field edits like any other scalar.
+  describe("ADR-0095 §8 / Amendment 1 stop editing", () => {
+    it("a field the predicate accepts is NOT read-only while scrubbed", () => {
+      const model = buildRailRowModel(baseCtx({ scrubbed: true, stopEditable: (id) => id === "alias" }), "alias");
+      expect(model.fieldReadOnly).toBe(false);
+    });
+
+    it("a field the predicate rejects stays read-only while scrubbed", () => {
+      const model = buildRailRowModel(baseCtx({ scrubbed: true, stopEditable: () => false }), "alias");
+      expect(model.fieldReadOnly).toBe(true);
+    });
+
+    it("readOnly (another axis: parked/reviewing/inherited) wins over the predicate", () => {
+      const model = buildRailRowModel(baseCtx({ readOnly: true, scrubbed: true, stopEditable: () => true }), "alias");
+      expect(model.fieldReadOnly).toBe(true);
+    });
+
+    it("off the scrub axis, fieldReadOnly never consults the predicate", () => {
+      const model = buildRailRowModel(baseCtx({ scrubbed: false, stopEditable: () => false }), "alias");
+      expect(model.fieldReadOnly).toBe(false);
+    });
+
+    it("at a stop a long_text row is read-only and shows the effective value", () => {
+      const model = buildRailRowModel(
+        baseCtx({ scrubbed: true, stopEditable: () => false, metadata: { bio: "Effective bio." } }),
+        "bio",
+      );
+      expect(model.fieldReadOnly).toBe(true);
+      expect(model.value).toBe("Effective bio.");
+    });
+
+    it("at a stop a text row is editable and its control opens on the effective value", () => {
+      const model = buildRailRowModel(
+        baseCtx({ scrubbed: true, stopEditable: (id) => id === "alias", metadata: { alias: "Effective alias" } }),
+        "alias",
+      );
+      expect(model.fieldReadOnly).toBe(false);
+      expect(model.scalar).toBe(true);
+      expect(model.value).toBe("Effective alias");
     });
   });
 });

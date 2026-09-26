@@ -6,10 +6,12 @@
 // here would silently capture an empty body for those kinds. The none shape
 // is the one branch that mounts without TipTap, so it is the one under test.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { get } from "svelte/store";
 import { fireEvent, render } from "@/lib/test/component";
 import EditorBodyHost from "./EditorBodyHost.svelte";
 import { api } from "@/lib/api";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+import { mutationSetsByIdStore } from "@/lib/stores/mutationSets";
 import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import type { LoreEntrySummary, MetadataSchema, MutationSetEntry } from "@/lib/types";
@@ -282,7 +284,6 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
   }
 
   function renderStopEditable(on: { metadataChange: (v: unknown) => void }) {
-    const reload = vi.fn().mockResolvedValue(undefined);
     const noop = () => {};
     const { container } = render(EditorBodyHost, {
       props: {
@@ -295,13 +296,13 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
           scrubbed: true,
           editorReadOnly: true,
           stopUnit: stopUnit(),
-          scrub: { reload, overrides: { relationships: [{ to: "char_elena" }] } },
+          scrub: { overrides: { relationships: [{ to: "char_elena" }] } },
         }),
         deps: baseDeps({ loreEntries: REL_ENTRIES }),
         on: { change: noop, focus: noop, openChat: noop, requestInputsDialog: noop, viewSaveState: noop, navigate: noop, ...on },
       } as never,
     });
-    return { container, reload };
+    return { container };
   }
 
   it("diffs against the baseline excluding every anchor of the set, replaces only that field's rows and upserts the saved set", async () => {
@@ -335,7 +336,7 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
     const saveSpy = vi.spyOn(api, "saveMutationSetEntry").mockResolvedValue(savedSet);
     const metadataChange = vi.fn();
 
-    const { container, reload } = renderStopEditable({ metadataChange });
+    const { container } = renderStopEditable({ metadataChange });
 
     // stopEditable: the effective item renders with a delete affordance (not
     // the plain read-only detail the base scrub overlay would show).
@@ -347,7 +348,124 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
     expect(flush).toHaveBeenCalledWith("s1");
     // The baseline excludes BOTH of the set's anchors, not just this one.
     expect(getEffective).toHaveBeenCalledWith("char_tomas", "s1", 5, ["mut_head", "mut_other"]);
-    await vi.waitFor(() => expect(reload).toHaveBeenCalled());
+    // #2237 review: the reload is NodeEditor's own effect's job now (it reacts
+    // to the `mutationsVersion` bump `upsertMutationSet` does below) — this
+    // seam only owns the save; assert the saved set actually landed in the
+    // store (empty rows, per `savedSet` above) instead of a `scrub.reload()`
+    // call. `mutationSetsByIdStore` holds the roster SUMMARY shape, which has
+    // no `revision` — `row_count` is what distinguishes the saved result.
+    await vi.waitFor(() => expect(get(mutationSetsByIdStore).get("mutset_1")?.row_count).toBe(0));
+    expect(metadataChange).not.toHaveBeenCalled();
+  });
+
+  // ADR-0095 §8 (decision 8): a PLAIN (unkeyed) entity_ref_list — not just a
+  // reference-keyed list — is now stop-editable, and routes through the same
+  // orchestrator via the collection branch (`collectionRowsFromEdit`).
+  const PLAIN_LIST_SCHEMA = {
+    version: 1,
+    entry_types: {
+      "lore:character": { name: "Character", kind: "lore", fields: ["allies"] },
+    },
+    fields: {
+      allies: { name: "Allies", type: "entity_ref_list", options: [], picker_config: { sources: [{ kind: "lore" }] } },
+    },
+  } as unknown as MetadataSchema;
+
+  function plainListStopUnit() {
+    return {
+      unitId: "mut_head",
+      name: "",
+      records: [
+        {
+          marker_id: "mut_head.mut_head",
+          entity_id: "char_tomas",
+          field: "allies",
+          op: "add",
+          value: "char_elena",
+          name: "",
+          group: "",
+          unit_id: "mut_head",
+          unit_name: "",
+          anchor_id: "mut_head",
+          set_id: "mutset_1",
+          row_id: "mut_head",
+          scene_id: "s1",
+          offset: 5,
+          line: 1,
+          scene_path: "",
+        },
+      ],
+    };
+  }
+
+  it("a plain entity_ref_list at a stop routes to the orchestrator's collection branch", async () => {
+    const getEffective = vi
+      .spyOn(api, "getEntityEffectiveState")
+      .mockResolvedValue({ entity_id: "char_tomas", scene_id: "s1", position: 5, values: {} });
+    vi.spyOn(editorPanes, "flushSceneIfDirty").mockResolvedValue(undefined);
+    vi.spyOn(api, "getMutationSetEntry").mockResolvedValue({
+      id: "mutset_1",
+      title: "",
+      revision: "r1",
+      entry_type: "mutation_set:mutation_set",
+      target_entry_type: "lore:character",
+      target_entity: "char_tomas",
+      rows: [{ id: "row_add", field: "allies", op: "add", value: "char_elena" }],
+      anchors: [{ anchor_id: "mut_head", scene_id: "s1", scene_title: "" }],
+      state: "active",
+      pin_missing: false,
+      source_layer_id: "",
+      source_layer_label: "",
+    });
+    const saved: MutationSetEntry = {
+      id: "mutset_1",
+      title: "",
+      revision: "r2",
+      entry_type: "mutation_set:mutation_set",
+      target_entry_type: "lore:character",
+      target_entity: "char_tomas",
+      rows: [{ id: "row_add", field: "allies", op: "add", value: "char_elena" }],
+      anchors: [{ anchor_id: "mut_head", scene_id: "s1", scene_title: "" }],
+      state: "active",
+      pin_missing: false,
+      source_layer_id: "",
+      source_layer_label: "",
+    };
+    const saveSpy = vi.spyOn(api, "saveMutationSetEntry").mockResolvedValue(saved);
+    const metadataChange = vi.fn();
+    const noop = () => {};
+
+    const { container } = render(EditorBodyHost, {
+      props: {
+        model: baseModel({
+          scene: { id: "char_tomas", title: "Tomas" },
+          entryType: "lore:character",
+          metadata: { allies: ["char_elena"] },
+          metadataSchema: PLAIN_LIST_SCHEMA,
+          activeBodyTab: "list:allies",
+          scrubbed: true,
+          editorReadOnly: true,
+          stopUnit: plainListStopUnit(),
+          scrub: { overrides: { allies: ["char_elena"] } },
+        }),
+        deps: baseDeps({ loreEntries: [{ id: "char_elena", title: "Elena", entry_type: "lore:character", metadata: {} }] }),
+        on: { change: noop, focus: noop, openChat: noop, requestInputsDialog: noop, metadataChange, viewSaveState: noop, navigate: noop },
+      } as never,
+    });
+
+    const removeButton = container.querySelector<HTMLButtonElement>(".row-action-delete");
+    expect(removeButton).not.toBeNull();
+    await fireEvent.click(removeButton!);
+
+    await vi.waitFor(() => expect(saveSpy).toHaveBeenCalled());
+    // The collection branch (not "keyed") diffed a plain remove — no `keyed`
+    // shape/member-path token involved.
+    expect(saveSpy).toHaveBeenCalledWith(expect.objectContaining({ rows: [{ id: "", field: "allies", op: "remove", value: "char_elena" }] }));
+    expect(getEffective).toHaveBeenCalledWith("char_tomas", "s1", 5, ["mut_head"]);
+    // See the previous test's comment: the reload lives in NodeEditor's own
+    // effect now — this seam's contract is that the saved set (one row, per
+    // `saved` above) landed.
+    await vi.waitFor(() => expect(get(mutationSetsByIdStore).get("mutset_1")?.row_count).toBe(1));
     expect(metadataChange).not.toHaveBeenCalled();
   });
 
@@ -360,15 +478,17 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
     });
     vi.spyOn(editorPanes, "flushSceneIfDirty").mockResolvedValue(undefined);
     vi.spyOn(api, "getMutationSetEntry").mockRejectedValue(new Error("boom"));
+    const saveSpy = vi.spyOn(api, "saveMutationSetEntry");
     const setError = vi.spyOn(editorPanes, "setError").mockImplementation(() => {});
     const metadataChange = vi.fn();
 
-    const { container, reload } = renderStopEditable({ metadataChange });
+    const { container } = renderStopEditable({ metadataChange });
     const removeButton = container.querySelector<HTMLButtonElement>(".row-action-delete");
     await fireEvent.click(removeButton!);
 
     await vi.waitFor(() => expect(setError).toHaveBeenCalledWith("boom"));
-    expect(reload).not.toHaveBeenCalled();
+    // A rejected fetch never reaches a save, so nothing is upserted.
+    expect(saveSpy).not.toHaveBeenCalled();
     expect(metadataChange).not.toHaveBeenCalled();
   });
 });

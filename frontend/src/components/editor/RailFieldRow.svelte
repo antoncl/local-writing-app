@@ -197,7 +197,7 @@
           options={model.field.options}
           ariaLabel={model.fieldLabel}
           placeholder="(no status)"
-          readOnly={deps.readOnly}
+          readOnly={model.fieldReadOnly}
           onChange={(value) => on.statusChange(value)}
         />
       {:else}
@@ -232,7 +232,7 @@
       <SwatchPicker
         value={model.colorValue}
         placeholderHex={model.colorPlaceholderHex}
-        readOnly={deps.readOnly}
+        readOnly={model.fieldReadOnly}
         onChange={(id) => (id ? on.write(model.fieldId, id) : on.clear(model.fieldId))}
       />
       {#if model.colorUnset}

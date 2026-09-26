@@ -162,3 +162,24 @@ describe("normalizeReviewMarkdown — emphasis delimiters (#2250)", () => {
     expect(reviewBodyProposal(current, proposed).regions).toEqual([]);
   });
 });
+
+describe("normalizeReviewMarkdown — clipboard NBSPs around emphasis (#2267)", () => {
+  const NBSP = "\u00A0";
+  it("reads an NBSP hugging an emphasis run as a plain space", () => {
+    expect(normalizeReviewMarkdown(`act of${NBSP}_becoming_${NBSP}the`)).toBe("act of _becoming_ the");
+    expect(normalizeReviewMarkdown(`a${NBSP}**bold**${NBSP}word`)).toBe("a **bold** word");
+  });
+  it.each([
+    ["between plain words", `Mr.${NBSP}Smith`],
+    ["before punctuation", `wait${NBSP}!`],
+    ["around a spaced star", `2${NBSP}*${NBSP}3`],
+    ["inside a code span", `\`a${NBSP}_b_\``],
+  ])("leaves an NBSP %s alone", (_label, text) => {
+    expect(normalizeReviewMarkdown(text)).toBe(text);
+  });
+  it("the reported plotline: NBSPs + `_x_` on disk vs the AI's spaces + `*x*` yields no regions", () => {
+    const current = `The Climax will be the definitive act of${NBSP}_becoming_${NBSP}the 12-year-old girl.`;
+    const proposed = "The Climax will be the definitive act of *becoming* the 12-year-old girl.";
+    expect(reviewBodyProposal(current, proposed).regions).toEqual([]);
+  });
+});

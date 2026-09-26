@@ -14,7 +14,7 @@
  * makes of them, rather than injecting canned runs.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { SnapshotDetail, SnapshotDrift } from "@/lib/types";
+import type { MetadataSchema, SnapshotDetail, SnapshotDrift } from "@/lib/types";
 
 const readSnapshot = vi.fn();
 const snapshotDrift = vi.fn();
@@ -781,5 +781,139 @@ describe("adopting a region", () => {
     await strip.adopt(0, "was");
 
     expect(adopted).toEqual([]);
+  });
+});
+
+/**
+ * ADR-0096 §8: a differing `list`-typed field is compared item by item in the
+ * snapshot compare too — captured out of the atomic field flip at park time,
+ * and adopted one unit at a time through `adoptListUnit`, under the strip's
+ * existing `busy` gate.
+ */
+describe("list reviews (ADR-0096 §8)", () => {
+  const listSchema = {
+    entry_types: {},
+    fields: {
+      beats: {
+        name: "Beats",
+        type: "list",
+        options: [],
+        item_identity: "id",
+        item_members: [
+          { key: "id", name: "Id", type: "text" },
+          { key: "title", name: "Title", type: "text" },
+        ],
+      },
+    },
+  } as unknown as MetadataSchema;
+
+  const beat = (id: string, title: string) => ({ id, title });
+
+  /** A parked strip whose schema is fed and whose live/snapshot metadata
+   *  carry `beats` as given — L is the live side, O the snapshot's. */
+  async function parkedWithBeats(liveBeats: unknown[], snapshotBeats: unknown[]) {
+    listSnapshots.mockResolvedValue({ snapshots: [SNAPSHOT] });
+    readSnapshot.mockImplementation(async () => ({ ...detail(), metadata: { beats: snapshotBeats } }));
+    snapshotDrift.mockResolvedValue(NO_CHANGE);
+    const strip = new SnapshotStripController();
+    strip.schema = listSchema;
+    strip.readLive = () => ({ ...LIVE, metadata: { beats: liveBeats } });
+    strip.load("scene_1");
+    await vi.waitFor(() => expect(strip.snapshots.length).toBe(1));
+    await strip.park("snap_1");
+    return strip;
+  }
+
+  it("parking captures a list review for a differing list field and removes it from fields", async () => {
+    const strip = await parkedWithBeats([beat("beat_1", "Setup, rewritten")], [beat("beat_1", "Setup")]);
+
+    expect(Object.keys(strip.listReviews)).toEqual(["beats"]);
+    expect(strip.listReviews.beats.L).toEqual([beat("beat_1", "Setup, rewritten")]);
+    expect(strip.listReviews.beats.O).toEqual([beat("beat_1", "Setup")]);
+    expect(strip.fields.beats).toBeUndefined();
+    // A non-list differing field (status: "draft" vs "revised", from
+    // detail()/LIVE) stays in the atomic flip.
+    expect(strip.fields.status).toEqual({ was: "draft", now: "revised" });
+  });
+
+  it("a non-list differing field is unaffected when there is no list difference", async () => {
+    const strip = await parkedWithBeats([beat("beat_1", "Setup")], [beat("beat_1", "Setup")]);
+    expect(strip.listReviews).toEqual({});
+    expect(strip.fields.status).toEqual({ was: "draft", now: "revised" });
+  });
+
+  it("adoptListUnit writes the composed list: a removed-since item comes back when its addition unit adopts", async () => {
+    const strip = await parkedWithBeats(
+      [beat("beat_1", "Setup")],
+      [beat("beat_1", "Setup"), beat("beat_2", "Aftermath")],
+    );
+    const unitKey = strip.listReviews.beats.units.find((u) => u.kind === "add")!.key;
+    const written: [string, unknown][] = [];
+    strip.onAdoptListField = (fieldId, list) => {
+      written.push([fieldId, list]);
+    };
+
+    await strip.adoptListUnit("beats", unitKey, true);
+
+    expect(written).toEqual([["beats", [beat("beat_1", "Setup"), beat("beat_2", "Aftermath")]]]);
+    expect(strip.listResolutions.beats[unitKey]).toBe(true);
+  });
+
+  it("a declined settlement records the click but writes nothing", async () => {
+    const strip = await parkedWithBeats(
+      [beat("beat_1", "Setup")],
+      [beat("beat_1", "Setup"), beat("beat_2", "Aftermath")],
+    );
+    const unitKey = strip.listReviews.beats.units.find((u) => u.kind === "add")!.key;
+    const onAdoptListField = vi.fn();
+    strip.onAdoptListField = onAdoptListField;
+
+    await strip.adoptListUnit("beats", unitKey, false);
+
+    expect(onAdoptListField).not.toHaveBeenCalled();
+    expect(strip.listResolutions.beats[unitKey]).toBe(false);
+  });
+
+  it("waits for the busy gate — a click mid-restore/adopt is a no-op", async () => {
+    const strip = await parkedWithBeats(
+      [beat("beat_1", "Setup")],
+      [beat("beat_1", "Setup"), beat("beat_2", "Aftermath")],
+    );
+    const unitKey = strip.listReviews.beats.units.find((u) => u.kind === "add")!.key;
+    strip.busy = true;
+    const onAdoptListField = vi.fn();
+    strip.onAdoptListField = onAdoptListField;
+
+    await strip.adoptListUnit("beats", unitKey, true);
+
+    expect(onAdoptListField).not.toHaveBeenCalled();
+    expect(strip.listResolutions).toEqual({});
+  });
+
+  it("is a no-op at an override layer (listsWritable false)", async () => {
+    const strip = await parkedWithBeats(
+      [beat("beat_1", "Setup")],
+      [beat("beat_1", "Setup"), beat("beat_2", "Aftermath")],
+    );
+    strip.listsWritable = false;
+    const unitKey = strip.listReviews.beats.units.find((u) => u.kind === "add")!.key;
+    const onAdoptListField = vi.fn();
+    strip.onAdoptListField = onAdoptListField;
+
+    await strip.adoptListUnit("beats", unitKey, true);
+
+    expect(onAdoptListField).not.toHaveBeenCalled();
+    expect(strip.listResolutions).toEqual({});
+  });
+
+  it("unpark clears the captured list reviews and their resolutions", async () => {
+    const strip = await parkedWithBeats([beat("beat_1", "Setup, rewritten")], [beat("beat_1", "Setup")]);
+    const unitKey = strip.listReviews.beats.units[0].key;
+    strip.listResolutions = { beats: { [unitKey]: true } };
+
+    await strip.park(null);
+
+    expect(strip.listReviews).toEqual({});
+    expect(strip.listResolutions).toEqual({});
   });
 });

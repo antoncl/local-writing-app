@@ -14,6 +14,7 @@ import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
+import { refreshMutationSetEntries } from "@/lib/stores/mutationSets";
 import { HttpError, setKeepaliveSaves, api } from "@/lib/api";
 import { conflictDiffService } from "@/lib/stores/conflictDiffService.svelte";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
@@ -85,6 +86,17 @@ export type SaveRefreshArgs = {
   draftMarkdown: string;
 };
 
+const ANCHOR_ID_PATTERN = /<!--\s*mutate:set=[A-Za-z0-9_-]*;id=([A-Za-z0-9_-]+)\s*-->/g;
+
+/** Whether two scene bodies hold the same mutation anchors (ADR-0095 §1),
+ *  compared by anchor id and the set each names — a save that only edits prose
+ *  around a pill leaves them equal, so the set roster needs no refresh. */
+export function sameAnchorIds(before: string, after: string): boolean {
+  const ids = (body: string) =>
+    [...body.matchAll(ANCHOR_ID_PATTERN)].map((match) => match[0]).sort().join("\n");
+  return ids(before) === ids(after);
+}
+
 export async function refreshAfterSave(host: SaveRefreshHost, args: SaveRefreshArgs): Promise<void> {
   const { documentKind } = args;
   if (documentKind === "lore") {
@@ -128,6 +140,18 @@ export async function refreshAfterSave(host: SaveRefreshHost, args: SaveRefreshA
       // every open mutations reader.
       if (bodyHasMutationMarkers(args.baselineBody) || bodyHasMutationMarkers(args.draftMarkdown)) {
         mutationsVersion.bump();
+        // ADR-0095 §6/§8: the save may have added/removed an anchor (typed,
+        // pasted, or a Link/Copy insert whose scene autosaved) — the roster's
+        // `anchors` per set is what the pill's "N places" tell, the pill
+        // dialog's "Linked" line and the linked stop caption all read, and it
+        // is a SET-write-refresh only otherwise. Refresh it only when this
+        // save changed WHICH anchors the scene holds (an ordinary keystroke
+        // in a scene with a pill must not re-list every set), and with
+        // `{ bump: false }`: the version bump above already covers every
+        // other reader — never bump twice for one save.
+        if (!sameAnchorIds(args.baselineBody, args.draftMarkdown)) {
+          await refreshMutationSetEntries({ bump: false }).catch(() => {});
+        }
       }
     }
   }

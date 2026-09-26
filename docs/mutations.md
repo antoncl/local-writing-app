@@ -132,8 +132,11 @@ prose (there is nothing to toggle):
   card for you, and a pill you delete leaves its set staged.
 - **active** — a scene holds its pill; it goes live in the story from that point forward. You
   **place** a staged set with `/mutate` → pick the character → **Apply a saved set**; the card itself
-  cannot place a set, because only the prose knows *where*. Applying an active set again places a
-  copy.
+  cannot place a set, because only the prose knows *where*. Applying an active set again offers a
+  choice: **Link** anchors the *same* set in this place too — edit it once, and the change applies
+  everywhere it's linked; the pill then shows how many places (`⤳ Name · N places`), and both the
+  pill dialog and the scrubber name the others. **Copy** places an independent copy instead, the way
+  applying a template does.
 
 These two words are the whole vocabulary: the thing is always a **mutation set**, never a "change",
 "staged change", or "pending change"; and "active" here means *this set is placed* — distinct from

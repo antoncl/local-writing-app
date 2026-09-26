@@ -65,9 +65,18 @@ export function closeMutationSetEditor(): void {
   mutationSetEditorStore.set(null);
 }
 
-export async function refreshMutationSetEntries(): Promise<void> {
+// `bump` defaults false — this never bumped `mutationsVersion` itself; every
+// caller either doesn't need to (a plain roster reload) or bumps separately
+// through a write-through (`upsertMutationSet`/`setMutationSetEntries`). A
+// scene save that changed a set's ANCHOR count (add/remove/paste an anchor,
+// ADR-0095 §6/§8) already bumps `mutationsVersion` itself when it saves
+// (`bodyHasMutationMarkers`, editorPaneSave.ts) — that caller passes
+// `{ bump: false }` (the default) explicitly, to refresh the roster's
+// `anchors` (so the pill/dialog/caption tells go live) without a second bump.
+export async function refreshMutationSetEntries(options?: { bump?: boolean }): Promise<void> {
   mutationSetEntriesStore.set((await api.listMutationSetEntries()).entries);
   mutationSetRosterLoadedStore.set(true);
+  if (options?.bump) mutationsVersion.bump();
 }
 
 // Write-through from a mutation that already returns the canonical roster

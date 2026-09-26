@@ -7,11 +7,12 @@
   // 0) means the card is editable, any stop ≥ 1 flips it to a read-only
   // effective overlay. Scrub state lives in NodeEditor (the card shell); this
   // strip only renders the stops and emits the chosen one.
-  import { mutationRecordLabel } from "@/lib/editor-core/mutationNodes";
+  import { formatAnchorPlaces, mutationRecordLabel } from "@/lib/editor-core/mutationNodes";
   import {
     mutationUnitGroupLabel,
     type MutationUnitGroup,
   } from "@/lib/editor-core/mutationUnits";
+  import { mutationSetsByIdStore } from "@/lib/stores/mutationSets";
 
   let {
     units,
@@ -45,6 +46,22 @@
       seen.set(path, nth);
       return (totals.get(path) ?? 1) > 1 ? `${path || "scene"} · #${nth}` : path || "scene";
     });
+  });
+
+  // ADR-0095 §8: a linked stop names the other places the edit will apply,
+  // before the first keystroke. `unitId` IS the anchor id (the pill/timeline/
+  // scrubber grouping granularity, mutationTypes.ts); the set comes off the
+  // stop's first record's `set_id` via the roster store, live.
+  const currentStopLinkedPlaces = $derived.by(() => {
+    if (index === 0) return "";
+    const unit = units[index - 1];
+    const setId = unit?.records[0]?.set_id;
+    if (!setId) return "";
+    const anchors = $mutationSetsByIdStore.get(setId)?.anchors ?? [];
+    if (anchors.length <= 1) return "";
+    return formatAnchorPlaces(
+      anchors.filter((a) => a.anchor_id !== unit.unitId).map((a) => a.scene_title),
+    );
   });
 
   function stopTooltip(i: number): string {
@@ -86,7 +103,9 @@
     {#if index === 0}
       Base — book start
     {:else if stopEditable}
-      As of {stopLabels[index - 1]} · editing this stop
+      As of {stopLabels[index - 1]} · editing this stop{currentStopLinkedPlaces
+        ? ` · linked — also in ${currentStopLinkedPlaces}`
+        : ""}
     {:else}
       As of {stopLabels[index - 1]} · read-only
     {/if}

@@ -426,6 +426,31 @@ describe("EntryProposalController — structured field flips (slice 3b)", () => 
     expect(c.fields.map((f) => f.fieldId)).toEqual(["bio"]);
   });
 
+  it("an echoed, unchanged field is not a flip (#2265)", () => {
+    const c = entryController("e1");
+    c.metadata = { title: "The Girl in the Ghost", allegiance: "Rebels", aliases: ["A", "B"], bio: "a _quiet_ man" };
+    entryBrainstorm.propose(
+      "e1",
+      patch(null, {
+        title: "The Girl in the Ghost",
+        allegiance: "Rebels",
+        aliases: ["A", "B"],
+        // Same prose, the AI's emphasis spelling — cosmetic, not a change.
+        bio: "a *quiet* man",
+        active: true,
+      }),
+    );
+    expect(c.structuredFlips).toEqual([{ fieldId: "active", was: true, now: null }]);
+    expect(c.fields).toEqual([]);
+  });
+
+  it("an all-echo patch leaves nothing to review", () => {
+    const c = entryController("e1");
+    c.metadata = { title: "Same", allegiance: "Rebels" };
+    entryBrainstorm.propose("e1", patch(null, { title: "Same", allegiance: "Rebels" }));
+    expect(c.hasReview).toBe(false);
+  });
+
   it("flips an AI-proposed title rename (intrinsic but adoptable), now=current", () => {
     const c = entryController("e1");
     // The host folds title/status into the metadata view, so the flip's `now`

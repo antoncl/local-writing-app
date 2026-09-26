@@ -257,6 +257,16 @@
   .bs-item-rows :global(.field-row) {
     padding-top: 3px;
     padding-bottom: 3px;
+    flex-wrap: wrap;
+  }
+  /* The rail row lets the value shrink to nothing (`min-width: 0`) — fine in
+     the rail, but an item row can be far narrower (a board node, ~240px), and
+     the value collapsed to a sliver with its text stacked a letter per line.
+     Here the value keeps its content width and drops to its own line when it
+     doesn't fit beside the name. */
+  .bs-item-rows :global(.fr-val) {
+    min-width: auto;
+    max-width: 100%;
   }
   .bs-item-fold {
     background: none;

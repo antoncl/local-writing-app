@@ -48,6 +48,11 @@ from app.services.project.default_schema import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import SCHEMA_FILENAME
+from app.services.project.mutation_row_rewrite import (
+    apply_row_rewrite_to_files,
+    rewrite_field_across_set_and_override_rows,
+    rewrite_option_values_in_rows,
+)
 from app.services.project.node_families import NODE_KINDS
 from app.services.project.node_index import IndexLayer
 from app.services.project.placement import PLACEMENT_KEYS, TREE_KINDS
@@ -894,6 +899,17 @@ class MetadataSchemaMixin:
         self._validate_candidate_schema(root, source_path, layer_data)
         self._write_yaml(source_path, layer_data)
         self._rename_entry_metadata_key(root, old_field_id, new_field_id)
+        # ADR-0095 §9: a mutation-set/override row naming the field, plain or
+        # as a keyed-list member path, renames with it — `schema` (read above,
+        # before the rename) is still keyed by `old_field_id`.
+        rewrite_field_across_set_and_override_rows(
+            root,
+            old_field_id,
+            new_field_id,
+            schema,
+            lambda path: self._read_markdown_with_front_matter(path, strict=True),
+            self._write_markdown_with_front_matter,
+        )
         return self.read_metadata_schema()
 
     def delete_metadata_field(self, request: DeleteMetadataFieldRequest) -> MetadataSchema:
@@ -911,6 +927,16 @@ class MetadataSchemaMixin:
         self._validate_candidate_schema(root, source_path, layer_data)
         self._write_yaml(source_path, layer_data)
         self._remove_entry_metadata_key(root, field_id)
+        # ADR-0095 §9: a mutation-set/override row naming the field, plain or
+        # as a keyed-list member path, is dropped with it.
+        rewrite_field_across_set_and_override_rows(
+            root,
+            field_id,
+            None,
+            schema,
+            lambda path: self._read_markdown_with_front_matter(path, strict=True),
+            self._write_markdown_with_front_matter,
+        )
         return self.read_metadata_schema()
 
     def _add_metadata_field_to_layer(
@@ -1074,6 +1100,16 @@ class MetadataSchemaMixin:
             metadata[field_id] = next_value
             front_matter["metadata"] = metadata
             self._write_markdown_with_front_matter(path, front_matter, body)
+        # ADR-0095 §9: the same rename/removal reaches mutation-set and
+        # override rows for this field — a `replace` row's value (select) or
+        # each add/remove/comma-joined member (multi_select), mirroring what
+        # the loop above just did to stored metadata values.
+        apply_row_rewrite_to_files(
+            root,
+            lambda rows: rewrite_option_values_in_rows(rows, field_id, old_field.type, rename, valid),
+            lambda path: self._read_markdown_with_front_matter(path, strict=True),
+            self._write_markdown_with_front_matter,
+        )
 
     def _clean_option_value(
         self, value: Any, rename: dict[str, str], valid: set[str], *, ordered: bool = False

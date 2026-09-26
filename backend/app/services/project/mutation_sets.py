@@ -176,8 +176,15 @@ class MutationSetEntriesMixin:
         )
 
     def delete_mutation_set_entry(self, entry_id: str) -> MutationSetEntryList:
+        # Captured before the unlink (#381) — same reasoning as
+        # `delete_lore_entry`.
+        root = self._require_project()
         path = self._path_for_node_id(entry_id, "mutation_set")
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
+        # ADR-0095 §9: deleting a set purges references to it — a chat's
+        # `staged_set` included — the same way any other node delete does.
+        # Today the file was deleted and the chat's reference left dangling.
+        self._purge_references_to({entry_id}, root)
         return self.list_mutation_set_entries()
 
     # ----- helpers --------------------------------------------------------

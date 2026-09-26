@@ -13,8 +13,9 @@ import { createEmptyEditorPane, type EditorPaneState, type DocumentRef } from "@
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { keyedReferrerIndexStore } from "@/lib/stores/references";
 import { setResearchStructure } from "@/lib/stores/structure";
+import { mutationSetEntriesStore } from "@/lib/stores/mutationSets";
 import { api } from "@/lib/api";
-import type { EditableDocument, StructureDocument, PlotBoardProjection } from "@/lib/types";
+import type { EditableDocument, StructureDocument, PlotBoardProjection, MutationSetEntrySummary } from "@/lib/types";
 
 const NODE_ID = "node_doomed";
 
@@ -59,6 +60,8 @@ describe("editorPaneDelete: per-kind delete routing", () => {
     vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {} });
     // Post-delete chat-roster refresh (#1087, all branches) — same treatment.
     vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] });
+    // Post-delete mutation-set roster refresh (ADR-0095 §9, the lore branch).
+    vi.spyOn(api, "listMutationSetEntries").mockResolvedValue({ entries: [] });
   });
 
   afterEach(() => {
@@ -248,5 +251,82 @@ describe("editorPaneDelete: the delete-orphan warning", () => {
 
     expect(requested.message).not.toContain("orphaned");
     expect(requested.onDontShowAgain).toBeUndefined();
+  });
+});
+
+function pinnedSet(over: Partial<MutationSetEntrySummary> = {}): MutationSetEntrySummary {
+  return {
+    id: "mutation_set_1",
+    title: "Becomes a werewolf",
+    entry_type: "mutation_set:mutation_set",
+    target_entry_type: "lore:character",
+    target_entity: NODE_ID,
+    row_count: 1,
+    rows: [],
+    anchors: [],
+    state: "active",
+    pin_missing: false,
+    source_layer_id: "",
+    source_layer_label: "",
+    ...over,
+  };
+}
+
+describe("editorPaneDelete: an entry delete names its pinned mutation sets (ADR-0095 §9, #2232)", () => {
+  let requested: { message: string; onConfirm: () => Promise<void> };
+
+  beforeEach(() => {
+    editorPanes.reset();
+    vi.restoreAllMocks();
+    vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {}, edges: [] });
+    vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] });
+    vi.spyOn(api, "listMutationSetEntries").mockResolvedValue({ entries: [] });
+    vi.spyOn(api, "deleteLoreEntry").mockResolvedValue({ entries: [] });
+    vi.spyOn(confirmService, "request").mockImplementation((req: typeof requested) => {
+      requested = req;
+    });
+    editorPanes.panes = [paneFor("lore", "lore:character")];
+  });
+
+  afterEach(() => {
+    editorPanes.reset();
+    mutationSetEntriesStore.set([]);
+  });
+
+  it("names the sets and the distinct scene count when the entry pins one or more sets", async () => {
+    mutationSetEntriesStore.set([
+      pinnedSet({
+        title: "Becomes a werewolf",
+        anchors: [
+          { anchor_id: "a1", scene_id: "scene_1", scene_title: "Chapter One" },
+          { anchor_id: "a2", scene_id: "scene_2", scene_title: "Chapter Two" },
+        ],
+      }),
+    ]);
+
+    await editorPanes.requestDeleteScene("pane_1");
+
+    expect(requested.message).toContain("This also deletes 1 mutation set(s)");
+    expect(requested.message).toContain("Becomes a werewolf");
+    expect(requested.message).toContain("2 scene(s)");
+    expect(requested.message).toContain("their pills will show as missing");
+  });
+
+  it("says nothing extra when the entry pins no sets", async () => {
+    mutationSetEntriesStore.set([pinnedSet({ target_entity: "someone_else" })]);
+
+    await editorPanes.requestDeleteScene("pane_1");
+
+    expect(requested.message).not.toContain("mutation set");
+  });
+
+  it("refreshes the mutation-set roster after the delete", async () => {
+    mutationSetEntriesStore.set([pinnedSet()]);
+    const listMutationSetEntries = vi.spyOn(api, "listMutationSetEntries").mockResolvedValue({ entries: [] });
+
+    await editorPanes.requestDeleteScene("pane_1");
+    await requested.onConfirm();
+
+    expect(listMutationSetEntries).toHaveBeenCalled();
   });
 });

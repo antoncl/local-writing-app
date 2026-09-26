@@ -122,8 +122,14 @@ still leaves a coherent set. The stand-alone rule matters mainly for appended pr
 A recurring transformation (a werewolf's dusk change: appearance + abilities + name) can be saved as
 a **template**: a mutation set with no character of its own, re-applied to any character in one
 step instead of retyping it. Tick "Save as a reusable set" when you author a change, or manage sets
-in the Mutations list, then `/mutate` → pick a character → **Apply a saved set**. Applying a template
-copies it for that character; the template itself never changes.
+in the **Mutation sets** pane, then `/mutate` → pick a character → **Apply a saved set**. Applying a
+template copies it for that character; the template itself never changes.
+
+The **Mutation sets** pane is the one home for every set, grouped by state — **Templates**,
+**Staged**, **Active** — with an active set also showing where it's anchored. A character's own
+card lists its **staged** sets (each with **Delete**, since nothing anchors a staged set yet) and,
+below them, its **active** sets read-only — the card never places a set itself; place one from a
+scene with `/mutate`.
 
 A mutation set for a character is in one of two states, and the app works the state out from the
 prose (there is nothing to toggle):

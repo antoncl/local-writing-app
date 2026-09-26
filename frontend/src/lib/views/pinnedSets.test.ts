@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MutationSetEntrySummary } from "@/lib/types";
-import { pinnedSetsFor } from "./pinnedSets";
+import { activeSetsFor, pinnedSetsFor } from "./pinnedSets";
 
 // A mutation-set roster summary. Array order IS the backend list order
 // (title-sorted); the tests assert the filter preserves it.
@@ -76,5 +76,27 @@ describe("pinnedSetsFor (ADR-0055 §3)", () => {
 
   it("returns [] when the reverse index is unloaded", () => {
     expect(pinnedSetsFor("mira", null, [set({ id: "set-1", target_entity: "mira" })])).toEqual([]);
+  });
+});
+
+describe("activeSetsFor (ADR-0095 S5, #2233)", () => {
+  it("returns the ACTIVE sets pinned to the entity, in roster order", () => {
+    const roster = [
+      set({ id: "a", title: "Aardvark", target_entity: "mira", state: "staged" }),
+      set({
+        id: "b",
+        title: "Zebra",
+        target_entity: "mira",
+        state: "active",
+        anchors: [{ anchor_id: "a1", scene_id: "s1", scene_title: "Ch 1" }],
+      }),
+    ];
+    const index = reverse({ mira: ["a", "b"] });
+    expect(activeSetsFor("mira", index, roster).map((s) => s.id)).toEqual(["b"]);
+  });
+
+  it("returns [] for an entity nothing is pinned to", () => {
+    const roster = [set({ id: "set-1", target_entity: "bob", state: "active" })];
+    expect(activeSetsFor("mira", reverse({ bob: ["set-1"] }), roster)).toEqual([]);
   });
 });

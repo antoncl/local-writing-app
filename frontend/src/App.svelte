@@ -842,7 +842,7 @@
       // would leave a stale candidate set for the next open. propagate.close()
       // itself calls removePanel, so this is the whole teardown in one call.
       propagate: { title: "Propagate", body: propagateBody, closable: true, onClose: () => propagate.close() },
-      mutations: { title: "Reusable mutations", body: mutationsBody, actions: mutationsActions, closable: true, onClose: closeRegion("mutations") },
+      mutations: { title: "Mutation sets", body: mutationsBody, actions: mutationsActions, closable: true, onClose: closeRegion("mutations") },
       assistants: { title: "Assistants", body: assistantsBody, actions: assistantsActions, view: { kind: "assistant", switcher: true }, closable: true, onClose: closeRegion("assistants") },
       chats: { title: "Chats", body: chatsBody, actions: chatsActions, view: { kind: "chat", switcher: true }, closable: true, onClose: closeRegion("chats") },
       tags: { title: "Tags", body: tagsBody, closable: true, onClose: closeRegion("tags") },

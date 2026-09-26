@@ -1,17 +1,24 @@
 <script lang="ts">
-  // Mutations pane (#62): the browse/curate home for reusable mutation
-  // sets. A flat NodeList grouped by target entry-type; the editor dialog handles
+  // Mutation sets pane (#62, ADR-0095 S5, #2233): the ONE home for every
+  // mutation set, browsed/curated in one place under one name. Grouped by
+  // STATE — Templates / Staged / Active (not by target entry-type, which is
+  // what an earlier version of this comment claimed) — via three synthetic
+  // ViewGroup buckets built by hand from the flat roster (there is no view to
+  // evaluate here, so `ViewNodeList`'s own grouping mechanism is driven
+  // directly rather than through a spec). The editor dialog handles
   // create/edit. Sets are also created in-flow via the /mutate "save as reusable
   // set" checkbox — this pane is the full management surface.
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
-  import { nodeSet } from "@/lib/views/viewResult";
+  import type { ViewGroup, ViewResult } from "@/lib/views/evaluateView";
+  import { leafGroup, nodeSet } from "@/lib/views/viewResult";
   import { api } from "@/lib/api";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { isInherited } from "@/lib/utils/provenance";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
-  import { mutationSetLabel } from "@/lib/editor-core/mutationNodes";
+  import { formatAnchorPlaces, mutationSetLabel } from "@/lib/editor-core/mutationNodes";
+  import { loreEntriesStore } from "@/lib/stores/lore";
   import {
     refreshMutationSetEntries,
     setMutationSetEntries,
@@ -21,7 +28,17 @@
     applyPromotedMutationSet,
   } from "@/lib/stores/mutationSets";
   import PromoteModal from "@/components/dialogs/PromoteModal.svelte";
-  import type { MutationSetEntry, MutationSetEntrySummary } from "@/lib/types";
+  import type { MutationSetEntry, MutationSetEntrySummary, MutationSetState } from "@/lib/types";
+
+  // State-bucket order + label (ADR-0095 §10 Consequences "Frontend": the pane
+  // groups by state). A synthetic ViewGroup per state, in this fixed order,
+  // each holding that state's members as leaf groups — ViewNodeTree's default
+  // chrome (caret + CountPill) renders the header, so no hand-rolled header UI.
+  const STATE_GROUPS: { state: MutationSetState; label: string }[] = [
+    { state: "template", label: "Templates" },
+    { state: "staged", label: "Staged" },
+    { state: "active", label: "Active" },
+  ];
 
   // Browse/curate only: the create/edit dialog is hoisted to App root (ADR-0055
   // §3) so it also opens from a lore card, and drives through
@@ -30,6 +47,47 @@
 
   const entries = $derived($mutationSetEntriesStore);
   let error = $state("");
+
+  // Grouped-by-state ViewResult (ADR-0035 §3's degenerate lift, extended by
+  // hand): no view to evaluate, so this builds the `ViewGroup[]` directly —
+  // one synthetic bucket per STATE_GROUPS entry, its children the state's
+  // members as leaf groups. Membership (`nodes`) stays the flat roster so a
+  // pane-wide count/lookup off `entries` is unaffected. An empty roster keeps
+  // `groups: null` so ViewNodeList's `whenEmpty` fires (three empty buckets
+  // would otherwise read as "non-empty" and hide that message).
+  const groupedResult = $derived.by((): ViewResult<MutationSetEntrySummary> => {
+    if (entries.length === 0) return nodeSet(entries);
+    const groups: ViewGroup<MutationSetEntrySummary>[] = STATE_GROUPS.map(({ state, label }) => ({
+      key: `mutation-state:${state}`,
+      label,
+      color: null,
+      nodeId: null,
+      node: null,
+      children: entries.filter((entry) => entry.state === state).map((entry) => leafGroup(entry)),
+    }));
+    return { nodes: entries, annotations: new Map(), groups };
+  });
+
+  // Entity title for a staged/active row's sub-line (the pane spans every
+  // entity, unlike PinnedSetsPanel which is already scoped to one) — resolved
+  // off the lore roster store, the same one MutationAuthoringForm reads by id.
+  function entityTitle(id: string): string {
+    if (!id) return "";
+    return $loreEntriesStore.find((e) => e.id === id)?.title ?? "";
+  }
+
+  // Row sub-line (ADR-0095 §10 Consequences "Frontend"): a template names its
+  // target type; a staged/active row names its pinned entity, and an active
+  // row also names its places (deduped via formatAnchorPlaces).
+  function rowDetail(entry: MutationSetEntrySummary): string {
+    if (entry.state === "template") return `for ${typeLabel(entry.target_entry_type)}`;
+    const entity = entityTitle(entry.target_entity);
+    if (entry.state === "active" && entry.anchors.length > 0) {
+      const places = formatAnchorPlaces(entry.anchors.map((anchor) => anchor.scene_title));
+      return `${entity} — ${places}`;
+    }
+    return entity;
+  }
 
   // Promote (ADR-0078 §2/§9 slice 4). A set has no editor pane (unlike lore /
   // prompt), so PromoteAction's doc-action toolbar can't reach it — this flat
@@ -103,12 +161,13 @@
   {#if error}
     <p class="pane-error" role="alert">{error}</p>
   {/if}
-  <!-- A non-view pane: a pre-computed roster with no view to evaluate, so it lifts
-       its array to the degenerate ViewResult via `nodeSet()` (ADR-0035 §3, #253) and
-       renders through the same ViewNodeList wrapper as the view panes. No parameter
-       strip (nothing to parameterize); the entry_type on the summary is unused for
-       grouping (nodeSet ⇒ flat). -->
-  <ViewNodeList result={nodeSet(entries)} onClick={(entry) => void openEdit(entry.id)} row={mutationRow}>
+  <!-- A non-view pane: a pre-computed roster with no view to evaluate, so it builds
+       its own grouped ViewResult by hand (`groupedResult` above) rather than a spec,
+       and renders through the same ViewNodeList wrapper as the view panes — its
+       default synthetic-bucket chrome (caret + CountPill) draws the Templates/
+       Staged/Active headers, so no bespoke header UI lives here. No parameter strip
+       (nothing to parameterize). -->
+  <ViewNodeList result={groupedResult} onClick={(entry) => void openEdit(entry.id)} row={mutationRow}>
     {#snippet whenEmpty()}
       <p class="muted">No mutation sets yet. Create one here, or tick “Save as a reusable set” in /mutate.</p>
     {/snippet}
@@ -128,19 +187,23 @@
 />
 
 {#snippet mutationRow(entry: MutationSetEntrySummary, ctx: RowCtx<MutationSetEntrySummary>)}
+  {@const label = mutationSetLabel(entry)}
   <NodeRow
-    title={entry.title}
-    detail={`for ${typeLabel(entry.target_entry_type)}`}
+    title={label}
+    detail={rowDetail(entry)}
     depth={ctx.depth}
     onClick={ctx.onClick}
   >
     {#snippet trailing()}
       <CountPill count={entry.row_count} />
+      {#if entry.state === "active" && entry.anchors.length > 1}
+        <span class="row-places-badge" title={formatAnchorPlaces(entry.anchors.map((a) => a.scene_title))}>{entry.anchors.length} places</span>
+      {/if}
       {#if isPromotable(entry)}
         <button
           type="button"
           class="row-action-promote"
-          aria-label="Promote {entry.title}"
+          aria-label="Promote {label}"
           title="Lift this staged set into a shared ancestor project"
           onclick={(e) => {
             e.stopPropagation();
@@ -151,7 +214,7 @@
       <button
         type="button"
         class="row-action-delete"
-        aria-label="Delete {entry.title}"
+        aria-label="Delete {label}"
         title="Delete"
         onclick={(e) => {
           e.stopPropagation();
@@ -200,5 +263,10 @@
   .row-action-promote:hover {
     color: var(--text-1);
     border-color: var(--accent);
+  }
+  .row-places-badge {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
   }
 </style>

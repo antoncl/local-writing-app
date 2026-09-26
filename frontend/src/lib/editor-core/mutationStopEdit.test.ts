@@ -1,9 +1,9 @@
-// Pure unit tests for rewriteSetFieldFromItems / applyStopFieldEdit (ADR-0095
-// §8) — every collaborator is a plain fake, no store/api import.
+// Pure unit tests for applyStopFieldEdit (ADR-0095 §8) — every collaborator is
+// a plain fake, no store/api import.
 import { describe, expect, it, vi } from "vitest";
 import { encodeItem, type KeyedListShape } from "./mutationListEdit";
 import type { MutationUnitGroup } from "./mutationUnits";
-import { applyStopFieldEdit, rewriteSetFieldFromItems, type MutationStopEditDeps } from "./mutationStopEdit";
+import { applyStopFieldEdit, type MutationStopEditDeps } from "./mutationStopEdit";
 import type { EffectiveStateResponse, MetadataValue, MutationMarkerRecord, MutationSetEntry } from "@/lib/types";
 
 function rec(over: Partial<MutationMarkerRecord>): MutationMarkerRecord {
@@ -62,7 +62,11 @@ function fakeDeps(over: Partial<MutationStopEditDeps> = {}): MutationStopEditDep
   };
 }
 
-describe("rewriteSetFieldFromItems", () => {
+// Ported from the removed `rewriteSetFieldFromItems` back-compat wrapper
+// (#2237 review: it had no production caller, only these tests) — same
+// assertions, called through `applyStopFieldEdit` directly with
+// `fieldType: "keyed"` (what the wrapper always passed under the hood).
+describe("applyStopFieldEdit — keyed field type (reference-keyed list)", () => {
   it("fetches the baseline at the unit's (scene, last offset) EXCLUDING EVERY ANCHOR of the set", async () => {
     const unit: MutationUnitGroup = {
       unitId: "mut_head",
@@ -77,13 +81,14 @@ describe("rewriteSetFieldFromItems", () => {
         fakeSet({ anchors: [{ anchor_id: "mut_head", scene_id: "s1", scene_title: "" }, { anchor_id: "mut_other", scene_id: "s2", scene_title: "" }] }),
       ),
     });
-    await rewriteSetFieldFromItems({
+    await applyStopFieldEdit({
       unit,
       entityId: "ent1",
       field: "kin",
+      fieldType: "keyed",
       keyed: RELATIONSHIP,
-      baseItems: [],
-      editedItems: [{ to: "lore_a" }],
+      baseValue: [],
+      editedValue: [{ to: "lore_a" }],
       deps,
     });
     expect(deps.getEntityEffectiveState).toHaveBeenCalledWith("ent1", "s1", 9, ["mut_head", "mut_other"]);
@@ -111,13 +116,14 @@ describe("rewriteSetFieldFromItems", () => {
         }),
       ),
     });
-    const saved = await rewriteSetFieldFromItems({
+    const saved = await applyStopFieldEdit({
       unit,
       entityId: "ent1",
       field: "kin",
+      fieldType: "keyed",
       keyed: RELATIONSHIP,
-      baseItems: [{ to: "lore_a", state: "old" }],
-      editedItems: [{ to: "lore_a", state: "new" }],
+      baseValue: [{ to: "lore_a", state: "old" }],
+      editedValue: [{ to: "lore_a", state: "new" }],
       deps,
     });
     expect(deps.saveMutationSetEntry).toHaveBeenCalledWith(
@@ -142,13 +148,14 @@ describe("rewriteSetFieldFromItems", () => {
         fakeSet({ rows: [{ id: "row_title", field: "title", op: "replace", value: "New Title" }] }),
       ),
     });
-    await rewriteSetFieldFromItems({
+    await applyStopFieldEdit({
       unit,
       entityId: "ent1",
       field: "kin",
+      fieldType: "keyed",
       keyed: RELATIONSHIP,
-      baseItems: [],
-      editedItems: [{ to: "lore_new" }],
+      baseValue: [],
+      editedValue: [{ to: "lore_new" }],
       deps,
     });
     expect(deps.saveMutationSetEntry).toHaveBeenCalledWith(
@@ -186,13 +193,14 @@ describe("rewriteSetFieldFromItems", () => {
         order.push("upsert");
       }),
     };
-    const result = await rewriteSetFieldFromItems({
+    const result = await applyStopFieldEdit({
       unit,
       entityId: "ent1",
       field: "kin",
+      fieldType: "keyed",
       keyed: RELATIONSHIP,
-      baseItems: [],
-      editedItems: [{ to: "lore_a" }],
+      baseValue: [],
+      editedValue: [{ to: "lore_a" }],
       deps,
     });
     expect(order).toEqual(["flush", "get", "save", "upsert"]);
@@ -207,7 +215,7 @@ describe("rewriteSetFieldFromItems", () => {
     };
     const deps = fakeDeps();
     await expect(
-      rewriteSetFieldFromItems({ unit, entityId: "ent1", field: "kin", keyed: RELATIONSHIP, baseItems: [], editedItems: [], deps }),
+      applyStopFieldEdit({ unit, entityId: "ent1", field: "kin", fieldType: "keyed", keyed: RELATIONSHIP, baseValue: [], editedValue: [], deps }),
     ).rejects.toThrow();
   });
 });

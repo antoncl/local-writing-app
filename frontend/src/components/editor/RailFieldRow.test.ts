@@ -32,6 +32,14 @@ const SCHEMA = {
       options: [],
       picker_config: { sources: [{ kind: "tag", expr: { type: "tag:theme" } }] },
     },
+    status: {
+      name: "Status",
+      type: "select",
+      options: [
+        { value: "draft", label: "Draft" },
+        { value: "complete", label: "Complete" },
+      ],
+    },
   },
 } as unknown as MetadataSchema;
 
@@ -231,6 +239,58 @@ describe("RailFieldRow", () => {
     expect(hit.textContent).toBe("1 Character");
     await fireEvent.click(hit);
     expect(on.goToList).toHaveBeenCalledWith("kin");
+  });
+
+  // #2237 review: at a stop, `editorReadOnly` (`deps.readOnly`) no longer folds
+  // `scrubbed` in — a status/color row must lock on the PER-FIELD gate
+  // (`model.fieldReadOnly`, which folds `scrubbed` + `stopEditable` back in),
+  // never on `deps.readOnly` alone, or a field no mutation can target would
+  // stay live at a stop.
+  it("a status field the stop gate does NOT offer renders the locked ColoredSelect, ignoring deps.readOnly", () => {
+    const model = buildRailRowModel(baseCtx({ status: "draft", scrubbed: true, stopEditable: () => false }), "status");
+    expect(model.fieldReadOnly).toBe(true);
+    const { container } = render(RailFieldRow, { props: { model, deps: baseDeps({ readOnly: false }), on: baseCallbacks() } });
+    const trigger = container.querySelector<HTMLButtonElement>(".colored-select-trigger");
+    expect(trigger).not.toBeNull();
+    expect(trigger!.disabled).toBe(true);
+  });
+
+  it("a status field the stop gate DOES offer stays editable — the rest/open scalar cell, never the locked select", async () => {
+    const model = buildRailRowModel(baseCtx({ status: "draft", scrubbed: true, stopEditable: () => true }), "status");
+    expect(model.fieldReadOnly).toBe(false);
+    // `isScalarRow` only routes status through the rest/open scalar cell
+    // (RailScalarCell) when it is NOT locked — the locked branch above renders
+    // the bare `ColoredSelect` directly instead (with `model.fieldReadOnly`,
+    // #2237's fix). RailScalarCell's OWN at-rest display also renders an inert
+    // `ColoredSelect` (unconditionally, as a static preview) behind the real
+    // `.fr-rest-hit` affordance, so the meaningful assertion here is that the
+    // hit target is live, not that no ColoredSelect exists at all.
+    expect(model.scalar).toBe(true);
+    const on = baseCallbacks();
+    const { container } = render(RailFieldRow, { props: { model, deps: baseDeps({ readOnly: false }), on } });
+    const hit = container.querySelector<HTMLButtonElement>(".fr-rest-hit");
+    expect(hit).not.toBeNull();
+    expect(hit!.disabled).toBeFalsy();
+    await fireEvent.click(hit!);
+    expect(on.open).toHaveBeenCalledWith("status", expect.any(HTMLElement));
+  });
+
+  it("a color field the stop gate does NOT offer renders the locked swatch, ignoring deps.readOnly", () => {
+    const model = buildRailRowModel(baseCtx({ scrubbed: true, stopEditable: () => false }), "hue");
+    expect(model.fieldReadOnly).toBe(true);
+    const { container } = render(RailFieldRow, { props: { model, deps: baseDeps({ readOnly: false }), on: baseCallbacks() } });
+    const trigger = container.querySelector<HTMLButtonElement>(".swatch-trigger");
+    expect(trigger).not.toBeNull();
+    expect(trigger!.disabled).toBe(true);
+  });
+
+  it("a color field the stop gate DOES offer stays interactive", () => {
+    const model = buildRailRowModel(baseCtx({ scrubbed: true, stopEditable: () => true }), "hue");
+    expect(model.fieldReadOnly).toBe(false);
+    const { container } = render(RailFieldRow, { props: { model, deps: baseDeps({ readOnly: false }), on: baseCallbacks() } });
+    const trigger = container.querySelector<HTMLButtonElement>(".swatch-trigger");
+    expect(trigger).not.toBeNull();
+    expect(trigger!.disabled).toBe(false);
   });
 
   it("clicking the name fires on.open with the row element", async () => {

@@ -6,10 +6,12 @@
 // here would silently capture an empty body for those kinds. The none shape
 // is the one branch that mounts without TipTap, so it is the one under test.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { get } from "svelte/store";
 import { fireEvent, render } from "@/lib/test/component";
 import EditorBodyHost from "./EditorBodyHost.svelte";
 import { api } from "@/lib/api";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+import { mutationSetsByIdStore } from "@/lib/stores/mutationSets";
 import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import type { LoreEntrySummary, MetadataSchema, MutationSetEntry } from "@/lib/types";
@@ -282,7 +284,6 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
   }
 
   function renderStopEditable(on: { metadataChange: (v: unknown) => void }) {
-    const reload = vi.fn().mockResolvedValue(undefined);
     const noop = () => {};
     const { container } = render(EditorBodyHost, {
       props: {
@@ -295,13 +296,13 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
           scrubbed: true,
           editorReadOnly: true,
           stopUnit: stopUnit(),
-          scrub: { reload, overrides: { relationships: [{ to: "char_elena" }] } },
+          scrub: { overrides: { relationships: [{ to: "char_elena" }] } },
         }),
         deps: baseDeps({ loreEntries: REL_ENTRIES }),
         on: { change: noop, focus: noop, openChat: noop, requestInputsDialog: noop, viewSaveState: noop, navigate: noop, ...on },
       } as never,
     });
-    return { container, reload };
+    return { container };
   }
 
   it("diffs against the baseline excluding every anchor of the set, replaces only that field's rows and upserts the saved set", async () => {
@@ -335,7 +336,7 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
     const saveSpy = vi.spyOn(api, "saveMutationSetEntry").mockResolvedValue(savedSet);
     const metadataChange = vi.fn();
 
-    const { container, reload } = renderStopEditable({ metadataChange });
+    const { container } = renderStopEditable({ metadataChange });
 
     // stopEditable: the effective item renders with a delete affordance (not
     // the plain read-only detail the base scrub overlay would show).
@@ -347,7 +348,13 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
     expect(flush).toHaveBeenCalledWith("s1");
     // The baseline excludes BOTH of the set's anchors, not just this one.
     expect(getEffective).toHaveBeenCalledWith("char_tomas", "s1", 5, ["mut_head", "mut_other"]);
-    await vi.waitFor(() => expect(reload).toHaveBeenCalled());
+    // #2237 review: the reload is NodeEditor's own effect's job now (it reacts
+    // to the `mutationsVersion` bump `upsertMutationSet` does below) — this
+    // seam only owns the save; assert the saved set actually landed in the
+    // store (empty rows, per `savedSet` above) instead of a `scrub.reload()`
+    // call. `mutationSetsByIdStore` holds the roster SUMMARY shape, which has
+    // no `revision` — `row_count` is what distinguishes the saved result.
+    await vi.waitFor(() => expect(get(mutationSetsByIdStore).get("mutset_1")?.row_count).toBe(0));
     expect(metadataChange).not.toHaveBeenCalled();
   });
 
@@ -425,7 +432,6 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
       source_layer_label: "",
     };
     const saveSpy = vi.spyOn(api, "saveMutationSetEntry").mockResolvedValue(saved);
-    const reload = vi.fn().mockResolvedValue(undefined);
     const metadataChange = vi.fn();
     const noop = () => {};
 
@@ -440,7 +446,7 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
           scrubbed: true,
           editorReadOnly: true,
           stopUnit: plainListStopUnit(),
-          scrub: { reload, overrides: { allies: ["char_elena"] } },
+          scrub: { overrides: { allies: ["char_elena"] } },
         }),
         deps: baseDeps({ loreEntries: [{ id: "char_elena", title: "Elena", entry_type: "lore:character", metadata: {} }] }),
         on: { change: noop, focus: noop, openChat: noop, requestInputsDialog: noop, metadataChange, viewSaveState: noop, navigate: noop },
@@ -456,7 +462,10 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
     // shape/member-path token involved.
     expect(saveSpy).toHaveBeenCalledWith(expect.objectContaining({ rows: [{ id: "", field: "allies", op: "remove", value: "char_elena" }] }));
     expect(getEffective).toHaveBeenCalledWith("char_tomas", "s1", 5, ["mut_head"]);
-    await vi.waitFor(() => expect(reload).toHaveBeenCalled());
+    // See the previous test's comment: the reload lives in NodeEditor's own
+    // effect now — this seam's contract is that the saved set (one row, per
+    // `saved` above) landed.
+    await vi.waitFor(() => expect(get(mutationSetsByIdStore).get("mutset_1")?.row_count).toBe(1));
     expect(metadataChange).not.toHaveBeenCalled();
   });
 
@@ -469,15 +478,17 @@ describe("EditorBodyHost — scrub-stop list edit (#2074, ADR-0042 §5, ADR-0095
     });
     vi.spyOn(editorPanes, "flushSceneIfDirty").mockResolvedValue(undefined);
     vi.spyOn(api, "getMutationSetEntry").mockRejectedValue(new Error("boom"));
+    const saveSpy = vi.spyOn(api, "saveMutationSetEntry");
     const setError = vi.spyOn(editorPanes, "setError").mockImplementation(() => {});
     const metadataChange = vi.fn();
 
-    const { container, reload } = renderStopEditable({ metadataChange });
+    const { container } = renderStopEditable({ metadataChange });
     const removeButton = container.querySelector<HTMLButtonElement>(".row-action-delete");
     await fireEvent.click(removeButton!);
 
     await vi.waitFor(() => expect(setError).toHaveBeenCalledWith("boom"));
-    expect(reload).not.toHaveBeenCalled();
+    // A rejected fetch never reaches a save, so nothing is upserted.
+    expect(saveSpy).not.toHaveBeenCalled();
     expect(metadataChange).not.toHaveBeenCalled();
   });
 });

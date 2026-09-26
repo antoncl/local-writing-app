@@ -35,6 +35,7 @@
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
   import { stopEditingEngaged } from "@/lib/editor-core/stopFieldEditable";
+  import { scrubRefreshAction } from "@/lib/editor-core/scrubRefreshAction";
   import { deriveBodyShape, documentLabelFor } from "@/lib/editor-core/documentPresentation";
   import { wireReviewFreeze } from "@/lib/editor-core/reviewFreeze.svelte";
   import { buildBodyTabs, tabIdForField } from "@/lib/editor-core/bodyTabs";
@@ -198,17 +199,21 @@
   // miss the freshly-narrowed unit. An ENTITY change (a genuinely different
   // node opened) resets to base via `load()`; a version bump for the SAME
   // entity re-anchors in place via `reload()` instead — never both for one
-  // trigger. `lastScrubEntityId` is a plain (non-reactive) tracking var, like
-  // `LoreScrubController`'s own `#entityId`/`#seq` — nothing reads it back.
+  // trigger — the decision itself is `scrubRefreshAction` (pure, unit-tested
+  // standalone). `lastScrubEntityId` is a plain (non-reactive) tracking var,
+  // like `LoreScrubController`'s own `#entityId`/`#seq` — nothing reads it
+  // back. #2237 review: this effect is now the ONLY `scrub.reload()` call on
+  // a stop edit — EditorBodyHost's `handleListChange`/`commitStopFieldEdit`
+  // used to also call it directly, double-reloading every stop edit; they now
+  // just save the set (bumping `mutationsVersion`) and let this effect react.
   let lastScrubEntityId: string | null = null;
   $effect(() => {
     const id = documentKind === "lore" ? sceneId : null;
     void mutationsVersion.value;
-    if (id !== lastScrubEntityId) {
-      lastScrubEntityId = id;
-      return scrub.load(id);
-    }
-    if (id) void scrub.reload();
+    const action = scrubRefreshAction(lastScrubEntityId, id);
+    lastScrubEntityId = id;
+    if (action === "load") return scrub.load(id);
+    if (action === "reload") void scrub.reload();
   });
 
   // ---- Snapshot strip (#401, ADR-0044; lore surface ADR-0088 S1) ------------

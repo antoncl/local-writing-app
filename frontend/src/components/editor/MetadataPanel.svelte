@@ -32,7 +32,7 @@
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { buildRailRowModel, isFlipped, isFlipResolve, isListIndex, isMutated, isRowEmpty, isSectionIndex, type RailRowContext } from "@/lib/rail/fieldRowModel";
-  import { stopFieldTargetable } from "@/lib/editor-core/stopFieldEditable";
+  import { stopTargetableFieldIds } from "@/lib/editor-core/stopFieldEditable";
   import { stopEditRowValueFor } from "@/lib/editor-core/stopEditRows";
 
   interface Props {
@@ -518,6 +518,13 @@
     return () => document.removeEventListener("pointerdown", onPointerDown, { capture: true });
   });
 
+  // ADR-0095 §8: the set of fields a mutation can target, at THIS schema +
+  // entry type — derived ONCE per render (not per row: `stopFieldTargetable`
+  // used to walk the whole `buildFieldOptions` roster on every row's call, so
+  // a panel with N rows rebuilt it N times). `ctx.stopEditable` below just
+  // asks the Set.
+  const targetableFieldIds = $derived(stopTargetableFieldIds(metadataSchema, entryType));
+
   // The per-node context every row's model is built from (#2022 split) — one
   // `$derived` shared by every field, rebuilt whenever any input it reads
   // changes. `buildRailRowModel` (fieldRowModel.ts) is pure; this is the only
@@ -554,7 +561,7 @@
     // inheritedReadOnly (NodeEditor's redefined `editorReadOnly`), so the
     // field-membership half is all this needs to ask.
     scrubbed,
-    stopEditable: (fieldId) => stopFieldTargetable(fieldId, metadataSchema, entryType),
+    stopEditable: (fieldId) => targetableFieldIds.has(fieldId),
     stopEditValueFor: (fieldId) => stopEditRowValueFor(fieldId, stopUnit?.records ?? []),
   });
   function rowModel(fieldId: string) {

@@ -7,12 +7,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import MetadataPanel from "./MetadataPanel.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
-import type { EntryMetadata, MetadataSchema } from "@/lib/types";
+import { clearTagNodes } from "@/lib/stores/tagNodes";
+import { api } from "@/lib/api";
+import type { EntryMetadata, MetadataSchema, TagEntry } from "@/lib/types";
 
 const SCHEMA = {
   version: 1,
   entry_types: {
-    "lore:character": { name: "Character", kind: "lore", fields: ["status", "eye_color", "bio", "cost"] },
+    "lore:character": { name: "Character", kind: "lore", fields: ["status", "eye_color", "bio", "cost", "tags"] },
+    "tag:theme": { name: "Theme", kind: "tag" },
   },
   fields: {
     eye_color: { name: "Eye colour", type: "text" },
@@ -25,6 +28,12 @@ const SCHEMA = {
         { value: "draft", label: "Draft" },
         { value: "complete", label: "Complete" },
       ],
+    },
+    tags: {
+      name: "Tags",
+      type: "entity_ref_list",
+      options: [],
+      picker_config: { sources: [{ kind: "tag", expr: { type: "tag:theme" } }], create_missing: true },
     },
   },
 } as unknown as MetadataSchema;
@@ -96,4 +105,33 @@ describe("MetadataPanel — stop editing (ADR-0095 §8)", () => {
   // tested directly on `buildRailRowModel` in `fieldRowModel.test.ts`
   // ("ADR-0095 §8 decision 5") — this only pins that a stop-editable text row
   // renders (mounts) at all, which the two assertions above already imply.
+
+  // #2237 review: a `create_missing` tags field typed at a stop must never
+  // write the raw typed title into the set row — RailTagLine already mints
+  // the tag via `resolveOrCreateTag`/`api.createTagEntry` and calls back with
+  // the real id BEFORE `on.write` ever reaches `onStopFieldEdit`, so this pins
+  // that the id (never the title) is what a stop edit sees.
+  it("a new tag typed at a stop mints via the API and writes the resolved id, never the raw title", async () => {
+    vi.spyOn(api, "createTagEntry").mockResolvedValue({
+      id: "tag_new",
+      title: "Mystery",
+      entry_type: "tag:theme",
+      metadata: {},
+    } as TagEntry);
+    const { onStopFieldEdit } = mount(
+      { eye_color: "brown", bio: "Born on the river.", tags: [] },
+      { scrubbed: true, readOnly: false, metadataFieldIds: ["status", "eye_color", "bio", "cost", "tags"] },
+    );
+    // `tags` is the only empty field, so it folds behind the "N more fields"
+    // toggle (#2006) — open it before reaching for the row.
+    await fireEvent.click(screen.getByTestId("rail-fold-toggle"));
+    await fireEvent.click(screen.getByRole("button", { name: "Set Tags" }));
+    const input = screen.getByLabelText("Add Tags");
+    await fireEvent.input(input, { target: { value: "Mystery" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+
+    await vi.waitFor(() => expect(onStopFieldEdit).toHaveBeenCalledWith("tags", ["tag_new"]));
+    expect(api.createTagEntry).toHaveBeenCalledWith("Mystery", "tag:theme", null, null);
+    clearTagNodes();
+  });
 });

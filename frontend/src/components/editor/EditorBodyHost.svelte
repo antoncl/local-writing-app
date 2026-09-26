@@ -242,9 +242,14 @@
   // field is editable there; otherwise the ordinary whole-field
   // metadataChange. The orchestrator saves the mutation SET (ADR-0095 §8),
   // never the scene, so it cannot collide with prose being typed. On failure,
-  // surface it to the writer and leave the tab as it was — the reload isn't
-  // called, so the displayed effective items stay whatever they were before
-  // the edit.
+  // surface it to the writer and leave the tab as it was — nothing here
+  // reloads, so the displayed effective items stay whatever they were before
+  // the edit. #2237 review: the save's `upsertMutationSet` bumps
+  // `mutationsVersion`, which NodeEditor's own scrub-refresh effect reacts to
+  // (`scrubRefreshAction` → `reload()`) — this seam used to ALSO call
+  // `model.scrub.reload()` itself, double-reloading every stop edit (the very
+  // S1 race ADR-0095 §8 decision 1 was written to avoid). One trigger, one
+  // reload, and it lives where the effect already is.
   async function handleListChange(fieldId: string, items: MetadataValue[]): Promise<void> {
     if (stopEditableFor(fieldId) && model.stopUnit && model.metadataSchema) {
       const field = model.metadataSchema.fields[fieldId];
@@ -260,13 +265,6 @@
           editedValue: keyed ? asItemList(items) : items,
           deps: stopEditDeps,
         });
-        // A single explicit `reload()` (never `load()`+`reload()` — the S1
-        // race ADR-0095 §8 decision 1 fixes): NodeEditor's own effect on the
-        // save's `mutationsVersion` bump ALSO re-anchors the same controller
-        // instance for a live card, but that's a second `reload()`, not a
-        // `load()` — harmless, and this seam is unit-tested standalone
-        // (no NodeEditor in the harness), so it keeps its own reload call.
-        await model.scrub.reload();
       } catch (err) {
         editorPanes.setError(err instanceof Error ? err.message : String(err));
       }
@@ -292,7 +290,8 @@
         title: model.title,
         deps: stopEditDeps,
       });
-      await model.scrub.reload(); // see handleListChange's comment
+      // See handleListChange's comment: NodeEditor's own effect reloads on the
+      // save's `mutationsVersion` bump — no reload call here.
     } catch (err) {
       editorPanes.setError(err instanceof Error ? err.message : String(err));
     }

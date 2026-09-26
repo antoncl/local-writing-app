@@ -1,6 +1,6 @@
 // Pure unit tests for the ADR-0095 §8 stop-edit gate.
 import { describe, expect, it } from "vitest";
-import { stopEditingEngaged, stopFieldEditable, stopFieldTargetable, type StopFieldEditContext } from "./stopFieldEditable";
+import { stopEditingEngaged, stopFieldEditable, stopTargetableFieldIds, type StopFieldEditContext } from "./stopFieldEditable";
 import type { MetadataSchema } from "@/lib/types";
 
 const SCHEMA = {
@@ -49,31 +49,31 @@ describe("stopEditingEngaged", () => {
   });
 });
 
-describe("stopFieldTargetable / stopFieldEditable", () => {
+describe("stopTargetableFieldIds / stopFieldEditable", () => {
   it("a plain text field is targetable", () => {
-    expect(stopFieldTargetable("eye_color", SCHEMA, "lore:character")).toBe(true);
+    expect(stopTargetableFieldIds(SCHEMA, "lore:character").has("eye_color")).toBe(true);
     expect(stopFieldEditable("eye_color", baseCtx())).toBe(true);
   });
 
   it("the intrinsic title is always targetable", () => {
-    expect(stopFieldTargetable("title", SCHEMA, "lore:character")).toBe(true);
+    expect(stopTargetableFieldIds(SCHEMA, "lore:character").has("title")).toBe(true);
   });
 
   it("the body is NEVER targetable, even though a mutation can append to it", () => {
-    expect(stopFieldTargetable("body", SCHEMA, "lore:character")).toBe(false);
+    expect(stopTargetableFieldIds(SCHEMA, "lore:character").has("body")).toBe(false);
     expect(stopFieldEditable("body", baseCtx())).toBe(false);
   });
 
   it("a computed field is not targetable", () => {
-    expect(stopFieldTargetable("cost", SCHEMA, "lore:character")).toBe(false);
+    expect(stopTargetableFieldIds(SCHEMA, "lore:character").has("cost")).toBe(false);
   });
 
   it("a reference-keyed list IS targetable (§8's collection/keyed branches)", () => {
-    expect(stopFieldTargetable("kin", SCHEMA, "lore:character")).toBe(true);
+    expect(stopTargetableFieldIds(SCHEMA, "lore:character").has("kin")).toBe(true);
   });
 
   it("a plain entity_ref_list collection is targetable too", () => {
-    expect(stopFieldTargetable("allies", SCHEMA, "lore:character")).toBe(true);
+    expect(stopTargetableFieldIds(SCHEMA, "lore:character").has("allies")).toBe(true);
   });
 
   it("stopFieldEditable is false when the gate isn't engaged, regardless of the field", () => {

@@ -35,10 +35,20 @@ export function stopEditingEngaged(ctx: StopEditGateContext): boolean {
  *  offers for `/mutate` (so: not computed, not a non-keyed `list`, plus the
  *  intrinsic `title`) — EXCEPT the body, which stays a read-only overlay at a
  *  stop even though a mutation can append to it (body rows are edited in the
- *  pill dialog, never here). */
-export function stopFieldTargetable(fieldId: string, schema: MetadataSchema | null, entryType: string): boolean {
-  if (fieldId === "body") return false;
-  return buildFieldOptions(schema, entryType, true).some((option) => option.id === fieldId);
+ *  pill dialog, never here).
+ *
+ *  Returns the whole Set rather than testing one field: `buildFieldOptions`
+ *  walks every field on the entry type, so a caller asking per-row (the rail,
+ *  one row per field per render) would otherwise rebuild that whole roster
+ *  once per row. Callers that only ever need ONE field's answer (a single
+ *  event handler, not a render loop — `stopFieldEditable` below) still just
+ *  build the Set and `.has()` it; it's the render-loop callers (MetadataPanel)
+ *  that must build it ONCE per render instead. */
+export function stopTargetableFieldIds(schema: MetadataSchema | null, entryType: string): Set<string> {
+  const ids = buildFieldOptions(schema, entryType, true)
+    .map((option) => option.id)
+    .filter((id) => id !== "body");
+  return new Set(ids);
 }
 
 export interface StopFieldEditContext extends StopEditGateContext {
@@ -47,12 +57,14 @@ export interface StopFieldEditContext extends StopEditGateContext {
 }
 
 /** Whether `fieldId` is editable AT THE OPEN SCRUB STOP (ADR-0095 §8): the
- *  card must be engaged (see `stopEditingEngaged`) and the field must be
- *  `stopFieldTargetable`. A field the rail already locks for another reason
+ *  card must be engaged (see `stopEditingEngaged`) and the field must be in
+ *  `stopTargetableFieldIds`. A field the rail already locks for another reason
  *  (`ai_temperature` unsupported by the model, a derived-state select) stays
  *  locked too — those never co-occur with a lore card's scrub axis today, but
  *  `fieldRowModel.ts`'s `fieldReadOnly` still checks them ahead of this
- *  predicate, so a future co-occurrence fails closed. */
+ *  predicate, so a future co-occurrence fails closed. A single-call form (one
+ *  field, not a render loop) — EditorBodyHost asks this per event, not per
+ *  row, so rebuilding the Set here is fine. */
 export function stopFieldEditable(fieldId: string, ctx: StopFieldEditContext): boolean {
-  return stopEditingEngaged(ctx) && stopFieldTargetable(fieldId, ctx.schema, ctx.entryType);
+  return stopEditingEngaged(ctx) && stopTargetableFieldIds(ctx.schema, ctx.entryType).has(fieldId);
 }

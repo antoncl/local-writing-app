@@ -387,7 +387,9 @@
     if (!field) return false;
     if (field.intrinsic && !isFlipResolve(ctx, fieldId)) return false;
     if (effectiveFieldHidden(metadataSchema, entryType, fieldId)) return false;
-    if (layout === "front-matter" && (isSectionIndex(ctx, field) || isListIndex(ctx, field))) return false;
+    // #2242: an index row with an active flip is a proposal to adopt, not an
+    // index — it renders in either layout, or a collapsed rail hides it.
+    if (layout === "front-matter" && (isSectionIndex(ctx, field) || isListIndex(ctx, field)) && !isFlipResolve(ctx, fieldId)) return false;
     if (field.type === "computed" && field.computed?.value_type === "node_set") return false;
     return field.type !== "computed" || computedFieldString(fieldId) !== "";
   }

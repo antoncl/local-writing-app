@@ -36,6 +36,7 @@ from app.models import (
 )
 from app.services.ai.chat import run_chat_turn
 from app.services.ai.field_contract import FieldContract
+from app.services.ai.list_identity import reconcile_list_identity
 from app.services.ai.patch_schema import patch_response_schema
 from app.services.project.errors import ProjectServiceError
 
@@ -253,11 +254,60 @@ def _constrain_to_registered_fields(patch: AIEntryPatch, allowed_ids: set[str]) 
     )
 
 
+def _id_bearing_list_field_ids(project: ProjectService, entry_type: str) -> list[str]:
+    """The ids of `entry_type`'s own list fields whose resolved item shape
+    carries an `id` member (#2243) — e.g. `instance_beats`, but never
+    hardcoded: any item_group with an `id` member qualifies. Derived from the
+    effective schema, so a custom id-bearing list field gets the same
+    machine-owned-identity treatment as the built-in beat roster."""
+    schema = project.read_metadata_schema()
+    definition = schema.entry_types.get(entry_type)
+    if definition is None:
+        return []
+    result = []
+    for field_id in definition.fields:
+        field = schema.fields.get(field_id)
+        if field is None or field.type != "list" or not field.item_members:
+            continue
+        if any(member.key == "id" for member in field.item_members):
+            result.append(field_id)
+    return result
+
+
+def _reconcile_id_bearing_lists(
+    project: ProjectService, *, entry_type: str, node_id: str, patch: AIEntryPatch
+) -> AIEntryPatch:
+    """Reconcile every proposed id-bearing list field on `patch` against the
+    node's CURRENTLY STORED value of that same field (#2243) — beat identity
+    is machine-owned, never model-authored. Only runs on the revise (existing
+    node) path; a create-mode draft has no stored value to reconcile against,
+    so its lists simply keep whatever ids the model proposed (stripped or not,
+    `_ensure_beat_identity` re-mints on save either way)."""
+    id_bearing = [
+        field_id for field_id in _id_bearing_list_field_ids(project, entry_type) if field_id in patch.fields
+    ]
+    if not id_bearing:
+        return patch
+    node = project.read_node(node_id)
+    stored_metadata = getattr(node, "metadata", None) or {}
+    fields = dict(patch.fields)
+    for field_id in id_bearing:
+        fields[field_id] = reconcile_list_identity(fields[field_id], stored_metadata.get(field_id))
+    return AIEntryPatch(
+        body=patch.body,
+        fields=fields,
+        dropped=patch.dropped,
+        garbled=patch.garbled,
+        garbled_reason=patch.garbled_reason,
+    )
+
+
 async def run_entry_patch_extraction(
     project: ProjectService,
     *,
     entry_type: str,
     creating: bool,
+    node_id: str | None = None,
     request: ExtractEntryPatchRequest,
 ) -> EntryPatchExtraction:
     """Read the chat's registered field set back, run the commit as a cached
@@ -283,7 +333,12 @@ async def run_entry_patch_extraction(
     `ai_invocations` row with ITS usage and provenance (#1872, #1877) and
     reports the chat's total after it; the last call's total rides back as
     `cost_usd_total`, so the client assigns its snapshot from the response
-    instead of round-tripping a cost or refreshing."""
+    instead of round-tripping a cost or refreshing.
+
+    `node_id` is the revise route's target node (None on the create route,
+    which has none yet) — used ONLY to reconcile any id-bearing list field
+    the model proposed against what's actually stored (#2243,
+    `_reconcile_id_bearing_lists`), after the patch is otherwise final."""
 
     try:
         chat = project.read_chat_session(request.chat_id)
@@ -389,6 +444,12 @@ async def run_entry_patch_extraction(
             patch = project.validate_ai_entry_patch_for_type(entry_type, retry.content)
             patch = _constrain_to_registered_fields(patch, allowed_ids)
             patch_reply = retry
+    if not creating and node_id is not None:
+        # #2243: beat identity is machine-owned, never model-authored — the
+        # model never saw the roster's real ids, so any it proposed are
+        # reconciled against what's actually stored before the patch is
+        # handed back for review.
+        patch = _reconcile_id_bearing_lists(project, entry_type=entry_type, node_id=node_id, patch=patch)
     _record_if_unusable(project, patch, patch_reply)
     return EntryPatchExtraction(
         patch=patch,

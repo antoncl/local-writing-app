@@ -501,12 +501,21 @@ class PlotContextBeat(BaseModel):
     """A beat in a plotline's roster as the AI reads it (ADR-0048 S8a): the
     requirement a card is measured against — its title, the story `function` it
     serves, and the writer's `guidance`. Carried for EVERY beat in the roster,
-    including beats no card fulfils yet, so the AI can name the gaps."""
+    including beats no card fulfils yet, so the AI can name the gaps.
+
+    `beat_id` rides in the rendered context too (#2243): a revise-plotline
+    commit proposes the WHOLE roster back, and a model that never sees the
+    real ids invents its own (`_ensure_beat_identity` then heals them away,
+    silently breaking a card's `beat_links`). `specifics` is the book-local
+    specialization of the generic requirement (empty on a template's own
+    `plot_beat` roster, which has no such member) — shown so a revise sees
+    what's already been said before proposing a replacement."""
 
     beat_id: str
     title: str
     function: str = ""
     guidance: str = ""
+    specifics: str = ""
 
 
 class PlotContextPlotline(BaseModel):

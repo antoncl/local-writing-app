@@ -163,6 +163,7 @@ class PlotContextMixin:
                     title=title,
                     function=str(beat.get("function") or ""),
                     guidance=str(beat.get("guidance") or ""),
+                    specifics=str(beat.get("specifics") or ""),
                 )
             )
             titles[beat["id"]] = title

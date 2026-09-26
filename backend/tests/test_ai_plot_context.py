@@ -128,6 +128,32 @@ class PlotContextHelperTests(_PlotAiContextBase):
         # still present so the AI sees the thread even before it is beaten out.
         self.assertIn('<plotline title="Romance" />', out)
 
+    def test_a_beat_renders_its_real_id_and_specifics(self) -> None:
+        # #2243: a revise-plotline commit proposes the whole roster back, so the
+        # model needs its real, stable id to say which beat it means — and its
+        # already-authored specifics, so a partial revise doesn't overwrite them
+        # from nothing.
+        from app.models import CreatePlotlineRequest, SavePlotlineRequest
+
+        line = self.service.create_plotline(CreatePlotlineRequest(title="Specialized"))
+        self.service.save_plotline(
+            line.id,
+            SavePlotlineRequest(
+                title="Specialized",
+                body="",
+                metadata={
+                    "instance_beats": [
+                        {"title": "Spark", "function": "ignite", "specifics": "SPECIFICS_TEXT"}
+                    ]
+                },
+            ),
+        )
+        line = self.service.read_plotline(line.id)
+        beat_id = line.metadata["instance_beats"][0]["id"]
+        out = self._render('{% role "system" %}{{ plot_context() }}{% endrole %}')
+        self.assertIn(f'id="{beat_id}"', out)
+        self.assertIn("<specifics>SPECIFICS_TEXT</specifics>", out)
+
     def test_the_block_carries_a_plotlines_structure_guidance(self) -> None:
         # S2: an instantiated plotline renders the template's structural guidance —
         # how to use the lens (`<use_guidance>`) and the questions to ask

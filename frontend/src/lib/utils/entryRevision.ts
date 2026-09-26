@@ -70,7 +70,8 @@ export type FieldFlip = {
  *    which — like fenced code — must pass through untouched.
  *  - spell emphasis the way the editor does (#2250): turndown writes italics as
  *    `_x_` and bold as `**x**`, the AI as `*x*` / `__x__`. See
- *    `canonicalizeEmphasis` for when that rewrite is safe.
+ *    `canonicalizeEmphasis` for when that rewrite is safe. A no-break space
+ *    touching an emphasis run reads as a plain space (#2267, a paste artifact).
  * Idempotent.
  */
 export function normalizeReviewMarkdown(text: string): string {
@@ -109,15 +110,28 @@ const UNDERSCORE_STRONG = /(^|[^\p{L}\p{N}\\*_])__(?=[^\s_])([^_\n]*?[^\s_\\])__
 // opener followed by space (`* * *`, `* item`, `2 * 3`). Content with `_` or
 // `*` is left alone rather than risk changing what nests.
 const STAR_EMPHASIS = /(^|[^\p{L}\p{N}_\\*])\*(?=[^\s*_])([^*_\n]*?[^\s*_\\])\*(?![\p{L}\p{N}_*])/gu;
+// A no-break space hugging an emphasis run — before an opener, after a closer.
+// That's the clipboard's signature (Chrome copies the spaces around an inline
+// element as `&nbsp;`, and the editor keeps them), not a space the writer
+// chose; an NBSP anywhere else is left alone (#2267).
+const NBSP_BEFORE_OPENER = / (?=[*_]+[^\s*_])/gu;
+const NBSP_AFTER_CLOSER = /(?<=[^\s*_][*_]+) /gu;
 
 /** Rewrite AI-style emphasis delimiters to the editor's (turndown's) spelling
  *  wherever the rewrite provably renders the same, so `*tool*` vs `_tool_` is
- *  not a reviewable change (#2250). One line, outside fences. */
+ *  not a reviewable change (#2250), and the clipboard's NBSPs around them to
+ *  plain spaces (#2267). One line, outside fences. */
 function canonicalizeEmphasis(line: string): string {
   return line
     .split(CODE_SPAN)
     .map((part, i) =>
-      i % 2 === 1 ? part : part.replace(UNDERSCORE_STRONG, "$1**$2**").replace(STAR_EMPHASIS, "$1_$2_"),
+      i % 2 === 1
+        ? part
+        : part
+            .replace(NBSP_BEFORE_OPENER, " ")
+            .replace(NBSP_AFTER_CLOSER, " ")
+            .replace(UNDERSCORE_STRONG, "$1**$2**")
+            .replace(STAR_EMPHASIS, "$1_$2_"),
     )
     .join("");
 }

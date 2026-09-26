@@ -57,6 +57,8 @@
   // would otherwise read as "non-empty" and hide that message).
   const groupedResult = $derived.by((): ViewResult<MutationSetEntrySummary> => {
     if (entries.length === 0) return nodeSet(entries);
+    // An empty state bucket is left out: its header over an empty body reads as
+    // a broken row (seen in the browser check).
     const groups: ViewGroup<MutationSetEntrySummary>[] = STATE_GROUPS.map(({ state, label }) => ({
       key: `mutation-state:${state}`,
       label,
@@ -64,7 +66,7 @@
       nodeId: null,
       node: null,
       children: entries.filter((entry) => entry.state === state).map((entry) => leafGroup(entry)),
-    }));
+    })).filter((group) => group.children.length > 0);
     return { nodes: entries, annotations: new Map(), groups };
   });
 

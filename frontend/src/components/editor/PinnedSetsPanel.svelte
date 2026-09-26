@@ -26,6 +26,7 @@
   } from "@/lib/stores/mutationSets";
   import { activeSetsFor, pinnedSetsFor } from "@/lib/views/pinnedSets";
   import { formatAnchorPlaces, mutationSetLabel } from "@/lib/editor-core/mutationNodes";
+  import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { resolveColor } from "@/lib/utils/colors";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -91,9 +92,19 @@
     }
   }
 
-  // A staged set anchors nothing yet (ADR-0095 §9), so its Delete needs no
-  // confirm — unlike the pane's own delete of an ACTIVE set. Refresh the
-  // roster after so the card's list (and every other reader of it) settles.
+  // A staged set anchors nothing yet (ADR-0095 §9), but it is often a
+  // conversation's work product (its `staged_set`), which the delete purges —
+  // so confirm first, one click on × must not silently discard it.
+  function requestRemoveStaged(set: MutationSetEntrySummary): void {
+    confirmService.request({
+      title: "Delete Mutation Set",
+      message: `Delete "${mutationSetLabel(set)}"? It isn't placed in any scene; a conversation that staged it will lose it.`,
+      confirmLabel: "Delete",
+      destructive: true,
+      onConfirm: () => removeStaged(set.id),
+    });
+  }
+
   async function removeStaged(id: string): Promise<void> {
     error = "";
     try {
@@ -128,6 +139,9 @@
     {/if}
     {#if expanded}
       <div class="ps-list">
+        {#if active.length > 0}
+          <div class="ps-active-label">Staged</div>
+        {/if}
         <ViewNodeList
           result={nodeSet(pinned)}
           mode="tree"
@@ -135,12 +149,18 @@
           row={pinnedRow}
         >
           {#snippet whenEmpty()}
-            <p class="muted">No mutation sets yet — stage one with ＋New, then place it in a scene to make it active.</p>
+            {#if active.length > 0}
+              <p class="muted">No staged sets.</p>
+            {:else}
+              <p class="muted">No mutation sets yet — stage one with ＋New, then place it in a scene to make it active.</p>
+            {/if}
           {/snippet}
         </ViewNodeList>
         <!-- The card never places a set (ADR-0042 §5: no prose position here) —
              it can only point at where placement happens. -->
-        <p class="ps-hint">{placementHint}</p>
+        {#if pinned.length > 0}
+          <p class="ps-hint">{placementHint}</p>
+        {/if}
         {#if active.length > 0}
           <div class="ps-active-label">Active</div>
           <ViewNodeList result={nodeSet(active)} mode="tree" row={activeRow} />
@@ -167,7 +187,7 @@
         title="Delete"
         onclick={(e) => {
           e.stopPropagation();
-          void removeStaged(set.id);
+          requestRemoveStaged(set);
         }}
       >×</button>
     {/snippet}

@@ -12,6 +12,7 @@ import PinnedSetsPanel from "./PinnedSetsPanel.svelte";
 import { referenceIndexStore } from "@/lib/stores/references";
 import { mutationSetEntriesStore, mutationSetEditorStore, closeMutationSetEditor } from "@/lib/stores/mutationSets";
 import { api } from "@/lib/api";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
 import type { MutationSetEntry, MutationSetEntrySummary } from "@/lib/types";
 
 function set(over: Partial<MutationSetEntrySummary>): MutationSetEntrySummary {
@@ -78,15 +79,42 @@ describe("PinnedSetsPanel (ADR-0055 §3)", () => {
     // Read-only: no Delete action for an active set on the card (deleting one
     // is a pane action, with its own confirm).
     expect(screen.queryByLabelText("Delete Gains a scar")).toBeNull();
+    // Both lists are labelled when both exist.
+    expect(screen.getByText("Staged")).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
   });
 
-  it("offers Delete on a staged set; deleting it refreshes the roster", async () => {
+  it("with only active sets, says there are no staged sets (not 'no mutation sets yet')", () => {
+    mutationSetEntriesStore.set([
+      set({
+        id: "scar",
+        title: "Gains a scar",
+        target_entity: "mira",
+        state: "active",
+        anchors: [{ anchor_id: "a1", scene_id: "s1", scene_title: "Ch 1" }],
+      }),
+    ]);
+    render(PinnedSetsPanel, { props: { entityId: "mira", entityEntryType: "lore:character" } });
+    expect(screen.getByText("No staged sets.")).toBeInTheDocument();
+    expect(screen.queryByText(/No mutation sets yet/)).toBeNull();
+  });
+
+  it("offers Delete on a staged set; it confirms first, then deletes and refreshes the roster", async () => {
     const deleteSpy = vi.spyOn(api, "deleteMutationSetEntry").mockResolvedValue({
       entries: [set({ id: "reusable", title: "Any promotion", target_entity: "" })],
     });
+    const confirmSpy = vi.spyOn(confirmService, "request");
     render(PinnedSetsPanel, { props: { entityId: "mira", entityEntryType: "lore:character" } });
 
     await fireEvent.click(screen.getByLabelText("Delete Becomes a werewolf"));
+
+    // A staged set is often a conversation's work product: nothing is deleted
+    // until the writer confirms.
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(confirmSpy).toHaveBeenCalledOnce();
+    expect(confirmSpy.mock.calls[0][0].message).toContain("a conversation that staged it will lose it");
+    await confirmSpy.mock.calls[0][0].onConfirm();
+    await tick();
 
     expect(deleteSpy).toHaveBeenCalledWith("wolf");
     // The roster the delete call returned replaces the store — the werewolf

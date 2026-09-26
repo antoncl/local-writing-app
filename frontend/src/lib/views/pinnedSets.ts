@@ -23,13 +23,10 @@ export function pinnedSetsFor(
   referenceIndex: ReadonlyMap<string, ReadonlySet<string>> | null | undefined,
   roster: readonly MutationSetEntrySummary[],
 ): MutationSetEntrySummary[] {
-  if (!entityId) return [];
-  const referrers = projectReferences([entityId], referenceIndex);
-  if (referrers.size === 0) return [];
   // ADR-0095 §2/§9: the card's placeable list is STAGED sets only — a template
   // has no pin (never reaches this entity's referrers) and an active set is
   // real in the manuscript now (see `activeSetsFor` below, listed read-only).
-  return roster.filter((set) => referrers.has(set.id) && set.state === "staged");
+  return setsPinnedTo(entityId, referenceIndex, roster, "staged");
 }
 
 // The mutation sets pinned to `entityId` that are ACTIVE (ADR-0095 S5, #2233):
@@ -42,8 +39,19 @@ export function activeSetsFor(
   referenceIndex: ReadonlyMap<string, ReadonlySet<string>> | null | undefined,
   roster: readonly MutationSetEntrySummary[],
 ): MutationSetEntrySummary[] {
+  return setsPinnedTo(entityId, referenceIndex, roster, "active");
+}
+
+// The one lookup both lists share: the sets whose pin names `entityId`, in the
+// given state, in roster order.
+function setsPinnedTo(
+  entityId: string | null | undefined,
+  referenceIndex: ReadonlyMap<string, ReadonlySet<string>> | null | undefined,
+  roster: readonly MutationSetEntrySummary[],
+  state: MutationSetEntrySummary["state"],
+): MutationSetEntrySummary[] {
   if (!entityId) return [];
   const referrers = projectReferences([entityId], referenceIndex);
   if (referrers.size === 0) return [];
-  return roster.filter((set) => referrers.has(set.id) && set.state === "active");
+  return roster.filter((set) => referrers.has(set.id) && set.state === state);
 }

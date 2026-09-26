@@ -183,6 +183,18 @@ describe("Mutations pane: grouped by state (ADR-0095 S5, #2233)", () => {
     expect(screen.getByText("Loses an eye")).toBeInTheDocument();
   });
 
+  it("leaves out a state with no sets (no empty group body)", () => {
+    metadataSchemaStore.set(SCHEMA);
+    mutationSetEntriesStore.set([
+      summary({ id: "s1", title: "Becomes a werewolf", state: "staged", target_entity: "mira" }),
+    ]);
+    const { container } = render(Mutations);
+    const headings = Array.from(container.querySelectorAll(".node-row.group-header .node-row-text")).map((el) =>
+      el.textContent?.trim(),
+    );
+    expect(headings).toEqual(["Staged"]);
+  });
+
   it("an active linked set shows its places and the 'N places' badge", () => {
     metadataSchemaStore.set(SCHEMA);
     // loreEntriesStore feeds the entity title for a staged/active row's sub-line.

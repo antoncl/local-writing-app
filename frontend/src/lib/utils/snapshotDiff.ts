@@ -34,185 +34,13 @@
  * the #573 spike.
  */
 import type { DiffRun, FieldDiff } from "@/lib/types";
+import { SequenceMatcher } from "@/lib/utils/sequenceMatcher";
+import { alignSequences, isWhitespaceToken, tokenize, MAX_WORD_DIFF_TOKENS } from "@/lib/utils/sequenceAlign";
 
 type Interval = [number, number];
 type Region = [number, number, number, number]; // was_start, was_end, now_start, now_end
 
 const run = (kind: DiffRun["kind"], text: string, stacked = false): DiffRun => ({ kind, text, stacked });
-
-// ===========================================================================
-// difflib.SequenceMatcher  (isjunk supported; autojunk=False everywhere here)
-// ===========================================================================
-type IsJunk = ((s: string) => boolean) | null;
-
-class SequenceMatcher {
-  private a: string[];
-  private b: string[];
-  private isjunk: IsJunk;
-  private b2j = new Map<string, number[]>();
-  private bjunk = new Set<string>();
-  private matchingBlocks: [number, number, number][] | null = null;
-  private fullbcount: Map<string, number> | null = null;
-
-  constructor(isjunk: IsJunk, a: string[], b: string[]) {
-    this.isjunk = isjunk;
-    this.a = a;
-    this.b = b;
-    this.chainB();
-  }
-
-  private chainB(): void {
-    const b2j = new Map<string, number[]>();
-    for (let i = 0; i < this.b.length; i++) {
-      const elt = this.b[i];
-      const arr = b2j.get(elt);
-      if (arr) arr.push(i);
-      else b2j.set(elt, [i]);
-    }
-    const bjunk = new Set<string>();
-    if (this.isjunk) {
-      for (const elt of b2j.keys()) if (this.isjunk(elt)) bjunk.add(elt);
-      for (const elt of bjunk) b2j.delete(elt);
-    }
-    // autojunk = False: no popular-element pruning.
-    this.b2j = b2j;
-    this.bjunk = bjunk;
-  }
-
-  private isbjunk(elt: string): boolean {
-    return this.bjunk.has(elt);
-  }
-
-  findLongestMatch(alo: number, ahi: number, blo: number, bhi: number): [number, number, number] {
-    const { a, b, b2j } = this;
-    let besti = alo;
-    let bestj = blo;
-    let bestsize = 0;
-    let j2len = new Map<number, number>();
-    for (let i = alo; i < ahi; i++) {
-      const newj2len = new Map<number, number>();
-      const js = b2j.get(a[i]);
-      if (js) {
-        for (const j of js) {
-          if (j < blo) continue;
-          if (j >= bhi) break;
-          const k = (j2len.get(j - 1) ?? 0) + 1;
-          newj2len.set(j, k);
-          if (k > bestsize) {
-            besti = i - k + 1;
-            bestj = j - k + 1;
-            bestsize = k;
-          }
-        }
-      }
-      j2len = newj2len;
-    }
-    while (besti > alo && bestj > blo && !this.isbjunk(b[bestj - 1]) && a[besti - 1] === b[bestj - 1]) {
-      besti--;
-      bestj--;
-      bestsize++;
-    }
-    while (
-      besti + bestsize < ahi &&
-      bestj + bestsize < bhi &&
-      !this.isbjunk(b[bestj + bestsize]) &&
-      a[besti + bestsize] === b[bestj + bestsize]
-    ) {
-      bestsize++;
-    }
-    while (besti > alo && bestj > blo && this.isbjunk(b[bestj - 1]) && a[besti - 1] === b[bestj - 1]) {
-      besti--;
-      bestj--;
-      bestsize++;
-    }
-    while (
-      besti + bestsize < ahi &&
-      bestj + bestsize < bhi &&
-      this.isbjunk(b[bestj + bestsize]) &&
-      a[besti + bestsize] === b[bestj + bestsize]
-    ) {
-      bestsize++;
-    }
-    return [besti, bestj, bestsize];
-  }
-
-  getMatchingBlocks(): [number, number, number][] {
-    if (this.matchingBlocks) return this.matchingBlocks;
-    const la = this.a.length;
-    const lb = this.b.length;
-    const queue: [number, number, number, number][] = [[0, la, 0, lb]];
-    const matching: [number, number, number][] = [];
-    while (queue.length) {
-      const [alo, ahi, blo, bhi] = queue.pop()!;
-      const [i, j, k] = this.findLongestMatch(alo, ahi, blo, bhi);
-      if (k) {
-        matching.push([i, j, k]);
-        if (alo < i && blo < j) queue.push([alo, i, blo, j]);
-        if (i + k < ahi && j + k < bhi) queue.push([i + k, ahi, j + k, bhi]);
-      }
-    }
-    matching.sort((x, y) => x[0] - y[0] || x[1] - y[1] || x[2] - y[2]);
-    const nonAdjacent: [number, number, number][] = [];
-    let i1 = 0;
-    let j1 = 0;
-    let k1 = 0;
-    for (const [i2, j2, k2] of matching) {
-      if (i1 + k1 === i2 && j1 + k1 === j2) {
-        k1 += k2;
-      } else {
-        if (k1) nonAdjacent.push([i1, j1, k1]);
-        i1 = i2;
-        j1 = j2;
-        k1 = k2;
-      }
-    }
-    if (k1) nonAdjacent.push([i1, j1, k1]);
-    nonAdjacent.push([la, lb, 0]);
-    this.matchingBlocks = nonAdjacent;
-    return nonAdjacent;
-  }
-
-  getOpcodes(): [string, number, number, number, number][] {
-    const answer: [string, number, number, number, number][] = [];
-    let i = 0;
-    let j = 0;
-    for (const [ai, bj, size] of this.getMatchingBlocks()) {
-      let tag = "";
-      if (i < ai && j < bj) tag = "replace";
-      else if (i < ai) tag = "delete";
-      else if (j < bj) tag = "insert";
-      if (tag) answer.push([tag, i, ai, j, bj]);
-      i = ai + size;
-      j = bj + size;
-      if (size) answer.push(["equal", ai, i, bj, j]);
-    }
-    return answer;
-  }
-
-  ratio(): number {
-    let matches = 0;
-    for (const mb of this.getMatchingBlocks()) matches += mb[2];
-    const T = this.a.length + this.b.length;
-    return T ? (2.0 * matches) / T : 1.0;
-  }
-
-  quickRatio(): number {
-    if (!this.fullbcount) {
-      const c = new Map<string, number>();
-      for (const elt of this.b) c.set(elt, (c.get(elt) ?? 0) + 1);
-      this.fullbcount = c;
-    }
-    const avail = new Map<string, number>();
-    let matches = 0;
-    for (const elt of this.a) {
-      const numb = avail.has(elt) ? avail.get(elt)! : (this.fullbcount.get(elt) ?? 0);
-      avail.set(elt, numb - 1);
-      if (numb > 0) matches++;
-    }
-    const T = this.a.length + this.b.length;
-    return T ? (2.0 * matches) / T : 1.0;
-  }
-}
 
 // ===========================================================================
 // markdown_scan.py
@@ -452,79 +280,29 @@ function mergeIntervals(spans: Interval[]): Interval[] {
 // snapshot_diff.py
 // ===========================================================================
 const BLOCK_SPLIT = /(\r?\n(?:[ \t]*\r?\n)+)/;
-const TOKEN_RE = /\S+|\s+/g;
-const MAX_WORD_DIFF_TOKENS = 2000;
-const SAME_BLOCK_RATIO = 0.5;
-const ALIGN_LOOKAHEAD = 4;
 const SETTLE_PASSES = 12;
 
-const isWhitespaceToken = (t: string): boolean => t.length > 0 && !/\S/.test(t);
-const tokenize = (s: string): string[] => s.match(TOKEN_RE) ?? [];
-
-/** Provenance-tagged runs over two markdown bodies, oldest state first. */
+/** Provenance-tagged runs over two markdown bodies, oldest state first. Built
+ *  on `alignSequences` (ADR-0096 §3, S2): phase 1's equal/insert/delete ops
+ *  become runs directly; a `replace` span's `rewrite` pairs go through
+ *  `blockRuns` (the body's own scalar-region diff) and its `unpaired` pairs
+ *  stack, exactly as `alignBlocks` did before the extraction. */
 export function diffRuns(was: string, now: string): DiffRun[] {
   const wasBlocks = was.split(BLOCK_SPLIT);
   const nowBlocks = now.split(BLOCK_SPLIT);
   const runs: DiffRun[] = [];
-  const matcher = new SequenceMatcher(null, wasBlocks, nowBlocks);
-  for (const [op, i1, i2, j1, j2] of matcher.getOpcodes()) {
-    if (op === "equal") runs.push(run("equal", wasBlocks.slice(i1, i2).join("")));
-    else if (op === "insert") runs.push(run("now", nowBlocks.slice(j1, j2).join(""), true));
-    else if (op === "delete") runs.push(run("was", wasBlocks.slice(i1, i2).join(""), true));
-    else runs.push(...alignBlocks(wasBlocks.slice(i1, i2), nowBlocks.slice(j1, j2)));
+  for (const op of alignSequences(wasBlocks, nowBlocks)) {
+    if (op.op === "equal") runs.push(run("equal", wasBlocks.slice(op.wasStart, op.wasEnd).join("")));
+    else if (op.op === "insert") runs.push(run("now", nowBlocks.slice(op.nowStart, op.nowEnd).join(""), true));
+    else if (op.op === "delete") runs.push(run("was", wasBlocks.slice(op.wasStart, op.wasEnd).join(""), true));
+    else if (op.op === "rewrite") runs.push(...blockRuns(wasBlocks[op.was], nowBlocks[op.now]));
+    else runs.push(...stackedPair(wasBlocks[op.was], nowBlocks[op.now]));
   }
   return coalesce(runs);
 }
 
-function alignBlocks(wasBlocks: string[], nowBlocks: string[]): DiffRun[] {
-  const runs: DiffRun[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < wasBlocks.length && j < nowBlocks.length) {
-    if (isARewriteOf(wasBlocks[i], nowBlocks[j])) {
-      runs.push(...blockRuns(wasBlocks[i], nowBlocks[j]));
-      i++;
-      j++;
-      continue;
-    }
-    const aheadNow = firstMatch(wasBlocks[i], nowBlocks, j + 1, j + 1 + ALIGN_LOOKAHEAD);
-    const aheadWas = firstMatch(nowBlocks[j], wasBlocks, i + 1, i + 1 + ALIGN_LOOKAHEAD);
-    if (aheadNow !== null && (aheadWas === null || aheadNow - j <= aheadWas - i)) {
-      runs.push(run("now", nowBlocks.slice(j, aheadNow).join(""), true));
-      j = aheadNow;
-    } else if (aheadWas !== null) {
-      runs.push(run("was", wasBlocks.slice(i, aheadWas).join(""), true));
-      i = aheadWas;
-    } else {
-      runs.push(...stackedPair(wasBlocks[i], nowBlocks[j]));
-      i++;
-      j++;
-    }
-  }
-  if (i < wasBlocks.length) runs.push(run("was", wasBlocks.slice(i).join(""), true));
-  if (j < nowBlocks.length) runs.push(run("now", nowBlocks.slice(j).join(""), true));
-  return runs;
-}
-
-function firstMatch(block: string, candidates: string[], start: number, stop: number): number | null {
-  for (let index = start; index < Math.min(stop, candidates.length); index++) {
-    if (isARewriteOf(block, candidates[index])) return index;
-  }
-  return null;
-}
-
 function tooLargeToDiff(...blocks: string[]): boolean {
   return blocks.some((b) => tokenize(b).length > MAX_WORD_DIFF_TOKENS);
-}
-
-function isARewriteOf(was: string, now: string): boolean {
-  const wasTokens = tokenize(was);
-  const nowTokens = tokenize(now);
-  if (wasTokens.length === 0 || nowTokens.length === 0) return false;
-  if (Math.max(wasTokens.length, nowTokens.length) > MAX_WORD_DIFF_TOKENS) return false;
-  const matcher = new SequenceMatcher(isWhitespaceToken, wasTokens, nowTokens);
-  if (matcher.quickRatio() < SAME_BLOCK_RATIO) return false;
-  return matcher.ratio() >= SAME_BLOCK_RATIO;
 }
 
 function blockRuns(was: string, now: string): DiffRun[] {

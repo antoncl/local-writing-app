@@ -29,7 +29,8 @@
 // write, never how. The host merges the fields into its own metadata state,
 // adopts the body through its prose buffer, and issues the explicit flush.
 import type { DiffView, EntryMetadata, MetadataFieldDefinition, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
-import type { FieldFlip } from "@/lib/utils/entryRevision";
+import { normalizeReviewMarkdown, type FieldFlip } from "@/lib/utils/entryRevision";
+import { sameRenderedValue } from "@/lib/utils/snapshotDiff";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { reviewProposals } from "@/lib/stores/reviewProposals.svelte";
 import { createTargetFor } from "@/lib/utils/pickerCreate";
@@ -157,12 +158,12 @@ export class EntryProposalController {
       const field = schema.fields[fieldId];
       if (!field || field.type !== "long_text") continue;
       const current = this.metadata[fieldId];
-      flips.push({
-        fieldId,
-        label: field.name ?? fieldId,
-        currentValue: typeof current === "string" ? current : "",
-        proposedValue: typeof proposedValue === "string" ? proposedValue : "",
-      });
+      const currentValue = typeof current === "string" ? current : "";
+      const proposed = typeof proposedValue === "string" ? proposedValue : "";
+      // An echoed, unchanged field is not a proposal (#2265) — models routinely
+      // return fields they left alone. Cosmetic markdown doesn't count either.
+      if (normalizeReviewMarkdown(proposed) === normalizeReviewMarkdown(currentValue)) continue;
+      flips.push({ fieldId, label: field.name ?? fieldId, currentValue, proposedValue: proposed });
     }
     return flips;
   });
@@ -188,7 +189,11 @@ export class EntryProposalController {
       const field = schema.fields[fieldId];
       if (!field || field.hidden || NON_FLIPPABLE_FIELD_IDS.has(fieldId)) continue;
       if (NON_STRUCTURED_TYPES.has(field.type) && !isTagVocabularyField(field, schema)) continue;
-      flips.push({ fieldId, was: proposedValue, now: this.metadata[fieldId] ?? null });
+      const now = this.metadata[fieldId] ?? null;
+      // Same as the rail would render it → nothing to review (#2265): the
+      // snapshot compare's equality (blanks alike, key order ignored).
+      if (sameRenderedValue(proposedValue, now)) continue;
+      flips.push({ fieldId, was: proposedValue, now });
     }
     return flips;
   });

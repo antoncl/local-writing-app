@@ -140,6 +140,11 @@ export type RailRowModel = {
   cascadeOverrideSourceLabel: string;
   sourceLayerLabel: string | null;
   flipCurrentHint: string;
+  // ADR-0096 §7 (#2266 fallback): the raw current value, for a body-less
+  // entry type's atomic `list` flip — `RailFlipCandidate` draws it with the
+  // same read-only `FieldValueEditor` the proposed side uses, instead of the
+  // `flipCurrentHint` line. Every other field type keeps the hint.
+  flipCurrentValue: MetadataValue;
   tagFlipItems: TagFlipItem[] | null;
   colorValue: string | null;
   colorPlaceholderHex: string | null;
@@ -549,6 +554,7 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
     cascadeOverrideSourceLabel: cascadeOverrideSourceLabel(ctx, fieldId),
     sourceLayerLabel: ctx.sourceLayerLabel,
     flipCurrentHint: flipCurrentHint(ctx, fieldId),
+    flipCurrentValue: (ctx.compare?.fields[fieldId]?.now as MetadataValue) ?? null,
     tagFlipItems: isTagFlipField(field, ctx.schema) ? tagFlipItemsFor(value, ctx.tagTitleById) : null,
     colorValue: colorRow ? colorValueRaw || null : null,
     colorPlaceholderHex: colorRow ? resolveColor(null, ctx.entryType, ctx.documentKind, ctx.schema)?.hex ?? null : null,

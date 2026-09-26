@@ -324,8 +324,9 @@ When the saved list renders the same as L, the field is not written.
 
 A section per list field that has units, headed with the field's name, in the comparison's flip
 stack after the body (and, in a proposal, after the `long_text` flips). In *Both* it shows the §5
-sequence; adopting the order unit moves the rows once, to O's order. The field has no flip row in
-the rail or the front matter. Where the rail shows its index row (lists as body sections), that
+sequence; adopting the order unit moves the rows once, to O's order. A field shown as a section
+has no flip row in the rail or the front matter (the one fallback is §7's body-less entry types,
+where no section can show). Where the rail shows its index row (lists as body sections), that
 row's click does nothing during the comparison, since the body sections it would focus are hidden.
 
 - **Unchanged item:** one quiet line, its title.

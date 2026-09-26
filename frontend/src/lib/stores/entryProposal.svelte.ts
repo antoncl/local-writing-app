@@ -91,6 +91,23 @@ function isTagVocabularyField(field: MetadataFieldDefinition, schema: MetadataSc
 // rename on save, so `title` flips and routes through the host's title state.
 const NON_FLIPPABLE_FIELD_IDS: ReadonlySet<string> = new Set(["id", "entry_type"]);
 
+/** The host's `onAdoptBody`: route an adopted body to the ACTIVE body view — the
+ *  raw editor for a code body (#711), the prose view otherwise. The promise it
+ *  returns resolves only once the prose view has actually taken the body: its
+ *  adopt is async (markdown → HTML), and `commit()` awaits this before
+ *  `onEmitChange` reads the body back. Dropping the promise made the one review
+ *  write carry the pre-adopt body (#2254). */
+export function bodyAdopter(host: {
+  rawBodyMode: () => boolean;
+  setRawBody: (body: string) => void;
+  proseView: () => { adoptBody(body: string): Promise<void> } | null | undefined;
+}): (body: string) => Promise<void> {
+  return async (body) => {
+    if (host.rawBodyMode()) host.setRawBody(body);
+    else await host.proseView()?.adoptBody(body);
+  };
+}
+
 export class EntryProposalController {
   // Fed by the host each render — the derivations below track these. `nodeId` is
   // the open node's id (any kind); the review is keyed on it, never on the kind.

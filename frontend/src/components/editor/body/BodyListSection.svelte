@@ -425,7 +425,10 @@
     padding-top: 0;
     padding-bottom: 0;
   }
-  .bs-item-title {
+  /* Qualified by the head so it outranks the global
+     `input:not([type=checkbox]):not([type=radio])` box (0,2,1), which a bare
+     `.bs-item-title` (0,2,0) loses to — the title rendered as a boxed input. */
+  .bs-item-head input.bs-item-title {
     flex: 1 1 auto;
     min-width: 0;
     background: none;
@@ -435,7 +438,7 @@
     color: inherit;
     padding: 0;
   }
-  .bs-item-title:focus {
+  .bs-item-head input.bs-item-title:focus {
     outline: none;
     border-bottom-color: var(--accent-emphasis);
   }
@@ -520,6 +523,19 @@
   }
   .bs-block.compact .bs-item::before {
     left: 0;
+  }
+  /* A node is ~240px wide: the rail row's side padding and 10px gaps leave the
+     value almost nothing beside the name's 78px column. Reclaim them — all
+     but 4px on the right, which the value's click target (`.fr-rest-hit`,
+     inset -4px) overhangs; without it the node grows a horizontal scrollbar. */
+  .bs-block.compact :global(.bs-item-rows .field-row) {
+    padding-inline: 0 4px;
+    gap: 6px;
+  }
+  /* The name's 78px floor lines values up in the rail; values here are
+     right-aligned anyway, so a short name ("ID") gives its slack to the value. */
+  .bs-block.compact :global(.bs-item-rows .fr-name) {
+    min-width: 0;
   }
   .bs-block.compact .bs-ord {
     position: static;

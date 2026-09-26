@@ -12,7 +12,13 @@
   import ReplaceReviewCard from "@/components/editor/body/ReplaceReviewCard.svelte";
   import type { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
 
-  let { review }: { review: EntryProposalController } = $props();
+  // `frontMatter` (#2242): the collapsed rail's rows, rendered in the review
+  // like the read-only overlays do (#2054), so a structured flip stays
+  // adoptable. `replace` never takes it — that card adopts long_text only.
+  let {
+    review,
+    frontMatter = undefined,
+  }: { review: EntryProposalController; frontMatter?: import("svelte").Snippet } = $props();
 </script>
 
 {#if review.commitError}
@@ -58,6 +64,7 @@
       }}
       onDone={() => review.commit()}
       onDiscard={() => review.abandon()}
+      {frontMatter}
     />
   {/if}
 {/key}

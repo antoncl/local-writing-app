@@ -288,10 +288,13 @@
     // The commit publishes its review onto the subject's pane; bring that pane
     // into view (open or front) so the author sees the proposed-vs-current diff
     // without hunting for the review-dot (#2246: lore, plotline, card, scene).
-    // Best-effort, so a navigation failure never breaks a successful commit
-    // (the notice still names where the review went).
+    // Fire-and-forget, so a navigation failure never breaks a successful commit
+    // (the notice still names where the review went) — but NOT swallowed: a
+    // rejection reaches the global unhandledrejection logger (errorLog.ts), so
+    // a broken reveal lands in errors.log instead of silently opening nothing
+    // (#2251).
     revealEntry: (entryId) => {
-      void commitSubject(entryId)?.open().catch(() => {});
+      void commitSubject(entryId)?.open();
     },
     // The set this chat already owns, read at stage time so a re-stage refines it
     // in place (singular edge, §4) instead of minting an orphan.

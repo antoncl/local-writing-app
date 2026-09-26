@@ -232,6 +232,23 @@ describe("buildRailRowModel", () => {
       expect(model.wordCount).toBe(0);
     });
 
+    it("a proposed flip on the index row spans wide — it shows the whole candidate roster (#2242)", () => {
+      const model = buildRailRowModel(
+        baseCtx({
+          sectionsInBody: true,
+          metadata: { beats: [{ title: "One" }] },
+          compare: {
+            fields: { beats: { was: [{ title: "New" }], now: [{ title: "One" }] } },
+            side: "was",
+            resolve: { adopted: () => false, onToggle: () => {} },
+          },
+        }),
+        "beats",
+      );
+      expect(model.flipResolve).toBe(true);
+      expect(model.wide).toBe(true);
+    });
+
     it("one item reads singular; an empty list reads empty through the same branch", () => {
       expect(buildRailRowModel(baseCtx({ sectionsInBody: true, metadata: { beats: [{}] } }), "beats").sectionSummary).toBe("1 item");
       const empty = buildRailRowModel(baseCtx({ sectionsInBody: true, metadata: {} }), "beats");

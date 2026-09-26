@@ -52,6 +52,11 @@ function pillText(editor: Editor, anchorId: string): string | null {
   return el ? el.textContent : null;
 }
 
+function pillTitle(editor: Editor, anchorId: string): string | null {
+  const el = editor.view.dom.querySelector(`.mutation-pill[data-mutation-id="${anchorId}"]`);
+  return el ? el.getAttribute("title") : null;
+}
+
 describe("the pill's label follows the store (ADR-0095 §1)", () => {
   it("relabels an existing pill when the set's title changes in the store — no doc transaction", () => {
     mutationSetEntriesStore.set([summary({ id: "s1", title: "Promotion" })]);
@@ -92,6 +97,42 @@ describe("the pill's label follows the store (ADR-0095 §1)", () => {
     editor.chain().insertContent({ type: "mutation", attrs: { setId: "s1", anchorId: "a1" } }).run();
 
     expect(pillText(editor, "a1")).toBe("⤳ 3 changes");
+  });
+
+  it("with 1 anchor shows the plain label and no place count (ADR-0095 §6/§8)", () => {
+    mutationSetEntriesStore.set([
+      summary({
+        id: "s1",
+        title: "Promotion",
+        anchors: [{ anchor_id: "a1", scene_id: "scene1", scene_title: "Ch 1" }],
+      }),
+    ]);
+    mutationSetRosterLoadedStore.set(true);
+    const editor = makeEditor();
+    editor.chain().insertContent({ type: "mutation", attrs: { setId: "s1", anchorId: "a1" } }).run();
+
+    expect(pillText(editor, "a1")).toBe("⤳ Promotion");
+    expect(pillTitle(editor, "a1")).toBe("Promotion");
+  });
+
+  it("with 3 anchors shows the place count and the OTHER places in the tooltip (ADR-0095 §6/§8)", () => {
+    mutationSetEntriesStore.set([
+      summary({
+        id: "s1",
+        title: "Promotion",
+        anchors: [
+          { anchor_id: "a1", scene_id: "scene1", scene_title: "Ch 1" },
+          { anchor_id: "a2", scene_id: "scene2", scene_title: "Ch 2" },
+          { anchor_id: "a3", scene_id: "scene3", scene_title: "Ch 3" },
+        ],
+      }),
+    ]);
+    mutationSetRosterLoadedStore.set(true);
+    const editor = makeEditor();
+    editor.chain().insertContent({ type: "mutation", attrs: { setId: "s1", anchorId: "a1" } }).run();
+
+    expect(pillText(editor, "a1")).toBe("⤳ Promotion · 3 places");
+    expect(pillTitle(editor, "a1")).toBe("Promotion — also in Ch 2, Ch 3");
   });
 
   it("shows a missing pill once the roster has loaded and the set isn't in it", () => {

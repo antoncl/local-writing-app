@@ -295,6 +295,19 @@ export function mutationSetLabel(
   return `${entry.rows.length} changes`;
 }
 
+/** Format a set of scene titles for a "linked" tell (ADR-0095 §6/§8: the pill
+ *  tooltip, the pill dialog's "Linked — also in …" line, and the linked
+ *  stop's caption) — one mention per scene, with a "(N×)" suffix when the
+ *  same scene appears more than once (e.g. two anchors of the same set in
+ *  one scene). */
+export function formatAnchorPlaces(titles: readonly string[]): string {
+  const counts = new Map<string, number>();
+  for (const title of titles) counts.set(title, (counts.get(title) ?? 0) + 1);
+  return Array.from(counts.entries())
+    .map(([title, count]) => (count > 1 ? `${title} (${count}×)` : title))
+    .join(", ");
+}
+
 /** Auto-label for one resolved record/row (#58/#65): the set's name if set,
  *  else `field → value` (add/remove show +/−). Used by the close picker's
  *  per-row list, which has real records (with field/value) to show. */

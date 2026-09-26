@@ -7,7 +7,7 @@
 // offers templates/staged/active sets with the right verb per ADR-0095 §6.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
-import { render, screen, fireEvent } from "@/lib/test/component";
+import { render, screen, fireEvent, within } from "@/lib/test/component";
 import MutationAuthoringForm from "./MutationAuthoringForm.svelte";
 import { api } from "@/lib/api";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -223,6 +223,95 @@ describe("MutationAuthoringForm — pill edit (ADR-0095 §6)", () => {
     expect(effective).toHaveBeenCalledWith("mira", "scene1", 12, ["a1"]);
   });
 
+  it("a linked set's baseline excludes EVERY anchor, and the dialog names the other places (ADR-0095 §6/§8)", async () => {
+    const effective = vi.spyOn(api, "getEntityEffectiveState").mockResolvedValue({
+      entity_id: "mira",
+      scene_id: "scene1",
+      position: 12,
+      values: {},
+    });
+    render(MutationAuthoringForm, {
+      props: {
+        loreEntries: [lore("mira", "Mira")],
+        schema: SCHEMA,
+        initial: fullSet({
+          anchors: [
+            { anchor_id: "a1", scene_id: "scene1", scene_title: "Ch 1" },
+            { anchor_id: "a2", scene_id: "scene2", scene_title: "Ch 2" },
+            { anchor_id: "a3", scene_id: "scene3", scene_title: "Ch 3" },
+          ],
+        }),
+        anchorId: "a1",
+        sceneId: "scene1",
+        position: 12,
+        onCancel: NOOP,
+      },
+    });
+    await tick();
+    await tick();
+
+    expect(effective).toHaveBeenCalledWith("mira", "scene1", 12, ["a1", "a2", "a3"]);
+    expect(
+      screen.getByText("Linked — this change is also in Ch 2, Ch 3. Edits apply to every place."),
+    ).toBeInTheDocument();
+  });
+
+  it("lists a repeated scene once with a count (ADR-0095 §6)", async () => {
+    vi.spyOn(api, "getEntityEffectiveState").mockResolvedValue({
+      entity_id: "mira",
+      scene_id: "scene1",
+      position: 12,
+      values: {},
+    });
+    render(MutationAuthoringForm, {
+      props: {
+        loreEntries: [lore("mira", "Mira")],
+        schema: SCHEMA,
+        initial: fullSet({
+          anchors: [
+            { anchor_id: "a1", scene_id: "scene1", scene_title: "Ch 1" },
+            { anchor_id: "a2", scene_id: "scene2", scene_title: "Ch 2" },
+            { anchor_id: "a3", scene_id: "scene2", scene_title: "Ch 2" },
+          ],
+        }),
+        anchorId: "a1",
+        sceneId: "scene1",
+        position: 12,
+        onCancel: NOOP,
+      },
+    });
+    await tick();
+    await tick();
+
+    expect(
+      screen.getByText("Linked — this change is also in Ch 2 (2×). Edits apply to every place."),
+    ).toBeInTheDocument();
+  });
+
+  it("no linked tell for a single-anchor set", async () => {
+    vi.spyOn(api, "getEntityEffectiveState").mockResolvedValue({
+      entity_id: "mira",
+      scene_id: "scene1",
+      position: 12,
+      values: {},
+    });
+    render(MutationAuthoringForm, {
+      props: {
+        loreEntries: [lore("mira", "Mira")],
+        schema: SCHEMA,
+        initial: fullSet({ anchors: [{ anchor_id: "a1", scene_id: "scene1", scene_title: "Ch 1" }] }),
+        anchorId: "a1",
+        sceneId: "scene1",
+        position: 12,
+        onCancel: NOOP,
+      },
+    });
+    await tick();
+    await tick();
+
+    expect(screen.queryByText(/Linked —/)).toBeNull();
+  });
+
   it("Remove from this scene calls onRemoveAnchor, not onSaved", async () => {
     const onRemoveAnchor = vi.fn();
     vi.spyOn(api, "getEntityEffectiveState").mockResolvedValue({
@@ -349,22 +438,83 @@ describe("MutationAuthoringForm — apply a saved set (ADR-0095 §6)", () => {
     expect(onCreated).toHaveBeenCalledWith("staged1");
   });
 
-  it("an active set is offered as Copy only, and copying anchors the copy", async () => {
+  it("an own-project active set shows both Link and Copy", async () => {
+    await openApplyTab();
+
+    const row = screen.getByText("Mira's tattoo").closest("li") as HTMLElement;
+    expect(within(row).getByRole("button", { name: "Link" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Copy" })).toBeInTheDocument();
+  });
+
+  it("Link anchors the SAME set again — no copy call, onCreated gets the same id", async () => {
+    const copySpy = vi.spyOn(api, "copyMutationSet");
+    const { onCreated } = await openApplyTab();
+
+    const row = screen.getByText("Mira's tattoo").closest("li") as HTMLElement;
+    await fireEvent.click(within(row).getByRole("button", { name: "Link" }));
+
+    expect(copySpy).not.toHaveBeenCalled();
+    expect(onCreated).toHaveBeenCalledWith("active1");
+  });
+
+  it("Copy places an independent copy of an active set", async () => {
     const copySpy = vi.spyOn(api, "copyMutationSet").mockResolvedValue({
       entry: fullSet({ id: "active-copy" }),
       dropped_rows: [],
     });
     const { onCreated } = await openApplyTab();
 
-    const row = screen.getByRole("button", { name: /Mira's tattoo/ });
-    expect(row.textContent).toContain("Copy");
-    await fireEvent.click(row);
+    const row = screen.getByText("Mira's tattoo").closest("li") as HTMLElement;
+    await fireEvent.click(within(row).getByRole("button", { name: "Copy" }));
     await tick();
     await tick();
 
     // No entity re-pin argument — a plain copy of an already-pinned set.
     expect(copySpy).toHaveBeenCalledWith("active1");
     expect(onCreated).toHaveBeenCalledWith("active-copy");
+  });
+
+  it("an active set from another layer shows Copy only (no Link)", async () => {
+    metadataSchemaLayersStore.set([
+      { id: "book", label: "Book", folder_path: "", schema_path: "", exists: true },
+    ] satisfies MetadataSchemaLayer[]);
+    vi.spyOn(api, "getEntityEffectiveState").mockResolvedValue({
+      entity_id: "mira",
+      scene_id: "scene1",
+      position: null,
+      values: {},
+    });
+    vi.spyOn(api, "listMutationSetEntries").mockResolvedValue({
+      entries: [
+        setSummary({
+          id: "active-foreign",
+          title: "Foreign tattoo",
+          state: "active",
+          target_entity: "mira",
+          source_layer_id: "root",
+        }),
+      ],
+    } as MutationSetEntryList);
+    vi.spyOn(editorPanes, "flushDirtyPanes").mockResolvedValue(true);
+    render(MutationAuthoringForm, {
+      props: {
+        loreEntries: [lore("mira", "Mira")],
+        schema: SCHEMA,
+        presetEntityId: "mira",
+        sceneId: "scene1",
+        onCreated: NOOP,
+        onCancel: NOOP,
+      },
+    });
+    await tick();
+    await tick();
+    await fireEvent.click(screen.getByRole("button", { name: "Apply a saved set" }));
+    await tick();
+    await tick();
+
+    const row = screen.getByText("Foreign tattoo").closest("li") as HTMLElement;
+    expect(within(row).queryByRole("button", { name: "Link" })).toBeNull();
+    expect(within(row).getByRole("button", { name: "Copy" })).toBeInTheDocument();
   });
 
   it("a set from another layer is always copied, never anchored directly", async () => {

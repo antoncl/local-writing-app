@@ -27,7 +27,7 @@
   } from "@/components/editor/body/MutationFieldRows.svelte";
   import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
   import { api, HttpError } from "@/lib/api";
-  import { mutationSetLabel } from "@/lib/editor-core/mutationNodes";
+  import { formatAnchorPlaces, mutationSetLabel } from "@/lib/editor-core/mutationNodes";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { upsertMutationSet } from "@/lib/stores/mutationSets";
   import { projectLayerIdStore } from "@/lib/stores/schema";
@@ -149,7 +149,19 @@
     }
     let cancelled = false;
     effectiveValues = null;
-    const exclude = editing && anchorId ? [anchorId] : [];
+    // ADR-0095 §6 (linking, ADR §6 clarified for §8): a linked set's baseline
+    // must exclude EVERY anchor of the set, not just this pill's own — the
+    // same rule the stop editor applies — else an item this set adds at
+    // another anchor would already be present from that anchor and the diff
+    // would drop it everywhere. Falls back to just this anchor when the
+    // roster hasn't loaded the set's anchors yet.
+    const exclude = editing
+      ? initial && initial.anchors.length > 0
+        ? initial.anchors.map((a) => a.anchor_id)
+        : anchorId
+          ? [anchorId]
+          : []
+      : [];
     api
       .getEntityEffectiveState(id, sceneId, position ?? undefined, exclude)
       .then((res) => {
@@ -164,6 +176,16 @@
   });
 
   const baselineReady = $derived(!entity || effectiveValues !== null);
+
+  // Pill dialog tell (ADR-0095 §6/§8): when this set is anchored elsewhere
+  // too, the OTHER places' scene titles — this pill's own anchor excluded —
+  // formatted for "Linked — this change is also in …". Empty when the set
+  // has no other anchor (not linked, or the roster hasn't loaded anchors).
+  const linkedOtherPlaces = $derived(
+    editing && initial
+      ? formatAnchorPlaces(initial.anchors.filter((a) => a.anchor_id !== anchorId).map((a) => a.scene_title))
+      : "",
+  );
 
   // Effective membership for one collection field: the live override if any,
   // else the entry's base value.
@@ -317,10 +339,10 @@
 
   // Apply a saved set (ADR-0095 §6): a template's rows are copied into a
   // fresh set pinned to the entity, then anchored; a staged set is anchored
-  // directly (it becomes active); an active set is offered as Copy only in
-  // this slice (Link is a later slice); a set from another layer is always
-  // copied. Every branch flushes open scenes and refreshes the roster first
-  // (below, on tab-open) so every set's state is current.
+  // directly (it becomes active); an own-project active set offers Link (the
+  // same set anchored again, ADR-0095 §8) alongside Copy; a set from another
+  // layer is always copied. Every branch flushes open scenes and refreshes
+  // the roster first (below, on tab-open) so every set's state is current.
   async function applyTemplate(set: MutationSetEntrySummary): Promise<void> {
     if (!entity || applyBusy) return;
     applyBusy = true;
@@ -345,6 +367,15 @@
     if (applyBusy) return;
     // Anchoring the set itself is what makes it active (ADR-0095 §6) —
     // nothing to write beyond the anchor the caller inserts.
+    onCreated?.(set.id);
+  }
+
+  // Link an ACTIVE set already anchored elsewhere (ADR-0095 §6/§8): anchor
+  // the SAME set again — no copy, no write. The set becomes linked, and every
+  // place it's anchored then shows the pill · N-places tell, the pill
+  // dialog's "Linked" line, and (for a linked stop) the scrubber caption.
+  function linkActive(set: MutationSetEntrySummary): void {
+    if (applyBusy) return;
     onCreated?.(set.id);
   }
 
@@ -627,6 +658,11 @@
   ariaLabel="Record lore mutation"
   onCancel={onCancel}
 >
+  {#if linkedOtherPlaces}
+    <p class="mutation-linked-tell">
+      Linked — this change is also in {linkedOtherPlaces}. Edits apply to every place.
+    </p>
+  {/if}
   <div class="mutation-row">
     <span class="mutation-label">Entity</span>
     <ReferencePicker
@@ -683,11 +719,26 @@
       <p class="set-group-heading">{entity.title}'s active sets</p>
       <ul class="set-list">
         {#each applicableActive as set (set.id)}
-          <li>
-            <button type="button" class="set-row" disabled={applyBusy} onclick={() => pickApplicable(set)}>
-              <span class="set-name">{mutationSetLabel(set)}</span>
-              <span class="set-count">Copy</span>
-            </button>
+          <li class="set-row set-row-active">
+            <span class="set-name">{mutationSetLabel(set)}</span>
+            <span class="set-actions">
+              {#if !fromAnotherLayer(set)}
+                <button
+                  type="button"
+                  class="set-action"
+                  disabled={applyBusy}
+                  title="Use the same change here too — editing it changes every place"
+                  onclick={() => linkActive(set)}
+                >Link</button>
+              {/if}
+              <button
+                type="button"
+                class="set-action"
+                disabled={applyBusy}
+                title="Place an independent copy"
+                onclick={() => copyActive(set)}
+              >Copy</button>
+            </span>
           </li>
         {/each}
       </ul>
@@ -842,6 +893,40 @@
     font-size: var(--fs-sm);
     color: var(--text-3);
     flex: 0 0 auto;
+  }
+  .set-row-active {
+    align-items: center;
+    cursor: default;
+  }
+  .set-row-active:hover {
+    background: transparent;
+  }
+  .set-actions {
+    display: flex;
+    gap: 6px;
+    flex: 0 0 auto;
+  }
+  .set-action {
+    padding: 4px 10px;
+    font-size: var(--fs-sm);
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font: inherit;
+    cursor: pointer;
+  }
+  .set-action:hover {
+    background: var(--inset);
+  }
+  .set-action:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .mutation-linked-tell {
+    margin: 0 0 12px;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
   }
   .mutation-capture {
     display: flex;

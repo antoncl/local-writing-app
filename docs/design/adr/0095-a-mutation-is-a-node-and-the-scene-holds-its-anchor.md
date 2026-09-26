@@ -248,7 +248,9 @@ An anchor also contributes nothing, shows as a missing pill and is reported by V
   cursor. If the insert is undone, or the scene is discarded, the set stays and is staged.
 - **Editing through the pill saves the set.**
   - The scene is not written.
-  - The dialog's baseline is the state at the pill without this anchor.
+  - The dialog's baseline is the state at the pill without this set: for a linked set, without
+    every anchor of the set, the same rule as §8 (otherwise an item the set adds would already be
+    present from its other anchor, and the diff would drop it everywhere).
   - The pill dialog cannot change a set's entity. A change to someone else is a new pill.
 - **Applying a saved set** first saves any open scene with unsaved changes, so every set's state is
   current. It then offers what fits the chosen entity:

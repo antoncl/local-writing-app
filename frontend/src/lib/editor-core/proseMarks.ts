@@ -8,7 +8,7 @@
 import { Mark, mergeAttributes, Node } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
-import { mutationSetLabel } from "./mutationNodes";
+import { formatAnchorPlaces, mutationSetLabel } from "./mutationNodes";
 import {
   mutationSetByAnchorIdStore,
   mutationSetRosterLoadedStore,
@@ -111,6 +111,18 @@ function renderAnchorPill(dom: HTMLElement, setId: string, anchorId: string, ros
     return;
   }
   const label = mutationSetLabel(entry);
+  // ADR-0095 §6/§8: a linked set (more than one anchor) tells its place
+  // count in the pill text, and the OTHER places (this anchor's own
+  // excluded) in the tooltip.
+  const anchors = entry?.anchors ?? [];
+  if (anchors.length > 1) {
+    dom.textContent = `⤳ ${label} · ${anchors.length} places`;
+    const otherPlaces = formatAnchorPlaces(
+      anchors.filter((a) => a.anchor_id !== anchorId).map((a) => a.scene_title),
+    );
+    dom.title = otherPlaces ? `${label} — also in ${otherPlaces}` : label;
+    return;
+  }
   dom.textContent = label ? `⤳ ${label}` : "⤳";
   dom.title = label;
 }
@@ -118,7 +130,16 @@ function renderAnchorPill(dom: HTMLElement, setId: string, anchorId: string, ros
 // A plain module-level snapshot (kept current by one subscription shared by
 // every pill instance) — cheaper than each NodeView re-deriving the Map from
 // the store on every render, and avoids importing `get()` per node.
-let mutationSetsByIdStoreSnapshot: ReadonlyMap<string, { title: string; rows: { field: string; op: string; value: string }[] }> | undefined;
+let mutationSetsByIdStoreSnapshot:
+  | ReadonlyMap<
+      string,
+      {
+        title: string;
+        rows: { field: string; op: string; value: string }[];
+        anchors: { anchor_id: string; scene_id: string; scene_title: string }[];
+      }
+    >
+  | undefined;
 mutationSetsByIdStore.subscribe((byId) => {
   mutationSetsByIdStoreSnapshot = byId;
 });

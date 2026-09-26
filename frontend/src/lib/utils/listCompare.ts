@@ -26,14 +26,18 @@ type ItemRecord = Record<string, MetadataValue>;
 /** An item as a record: a scalar list's item wraps its bare value under the
  *  one synthetic member `value` (ADR "Words used here"); a malformed item
  *  (not an object, e.g. a stray string on a group-shaped field) reads as
- *  empty rather than throwing. */
-function itemRecord(field: MetadataFieldDefinition, item: MetadataValue): ItemRecord {
+ *  empty rather than throwing. Exported for `listReviewText.ts` (S3), which
+ *  reads the same record shape to build a title/body for an item — never
+ *  re-derive it. */
+export function itemRecord(field: MetadataFieldDefinition, item: MetadataValue): ItemRecord {
   if (field.item_scalar) return { value: item ?? null };
   if (item !== null && typeof item === "object" && !Array.isArray(item)) return item as ItemRecord;
   return {};
 }
 
-function isBlankMemberValue(value: MetadataValue | undefined): boolean {
+/** Exported for `listReviewText.ts` (S3): a non-empty visible member is the
+ *  only kind `itemMarkdown` renders a line for. */
+export function isBlankMemberValue(value: MetadataValue | undefined): boolean {
   if (value === null || value === undefined || value === "") return true;
   if (Array.isArray(value)) return value.length === 0;
   if (typeof value === "object") return Object.keys(value).length === 0;
@@ -229,8 +233,12 @@ export function listUnits(field: MetadataFieldDefinition, pairing: ListPairing):
 
 /** How each unit has settled: absent (never clicked) is declined. `true` is
  *  adopted; a prose member unit's adopted state is instead the region-
- *  resolved text (§4's "long_text member … settles one by one"). */
-export type ListResolution = Record<string, true | string>;
+ *  resolved text (§4's "long_text member … settles one by one"). `false` is
+ *  a unit settled but declined (the author clicked the current side) — it is
+ *  never treated as adopted here (every check below is `=== true` or
+ *  `typeof … === "string"`), so it behaves exactly like an absent key; S3's
+ *  controller keeps it distinct only to know a unit is settled at all. */
+export type ListResolution = Record<string, true | string | false>;
 
 export type SeqEntry = { kind: "paired"; l: number; o: number } | { kind: "add"; o: number } | { kind: "remove"; l: number };
 

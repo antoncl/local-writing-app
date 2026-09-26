@@ -24,6 +24,7 @@ function baseProps(over: Record<string, unknown> = {}) {
     onToggleView: vi.fn(),
     onBodyResolved: vi.fn(),
     onFieldResolved: vi.fn(),
+    onSettleListUnit: vi.fn(),
     onAcceptAll: vi.fn(),
     onDone: vi.fn(),
     onDiscard: vi.fn(),

@@ -17,8 +17,15 @@
   // adoptable. `replace` never takes it — that card adopts long_text only.
   let {
     review,
+    resolveListMemberTitle = undefined,
     frontMatter = undefined,
-  }: { review: EntryProposalController; frontMatter?: import("svelte").Snippet } = $props();
+  }: {
+    review: EntryProposalController;
+    /** ADR-0096 §6: resolves an `entity_ref`/`entity_ref_list` member's id to
+     *  its title, for a list section's run text. */
+    resolveListMemberTitle?: (id: string) => string | null;
+    frontMatter?: import("svelte").Snippet;
+  } = $props();
 </script>
 
 {#if review.commitError}
@@ -52,12 +59,17 @@
       currentBody={review.currentBody()}
       proposedBody={review.proposal?.body ?? null}
       fields={review.fields}
+      listReviews={review.listReviews}
+      listsAdoptable={review.listsWritable}
+      listResolutions={review.listResolutions}
       hasChanges={review.hasPendingChanges}
       view={review.view}
       onView={(v) => review.setView(v)}
       onToggleView={(v) => review.toggleView(v)}
       onBodyResolved={(v) => review.setBodyResolution(v)}
       onFieldResolved={(id, v) => review.setFieldResolution(id, v)}
+      onSettleListUnit={(fieldId, unitKey, v) => review.settleListUnit(fieldId, unitKey, v)}
+      {resolveListMemberTitle}
       onAcceptAll={() => {
         review.acceptAll();
         void review.commit();

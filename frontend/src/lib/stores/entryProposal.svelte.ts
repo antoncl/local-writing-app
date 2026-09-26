@@ -28,12 +28,25 @@
 // callbacks are: the controller decides only WHAT the patch touches and WHEN to
 // write, never how. The host merges the fields into its own metadata state,
 // adopts the body through its prose buffer, and issues the explicit flush.
-import type { DiffView, EntryMetadata, MetadataFieldDefinition, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
+import type { DiffView, EntryMetadata, EntryPatch, MetadataFieldDefinition, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
 import { normalizeReviewMarkdown, type FieldFlip } from "@/lib/utils/entryRevision";
 import { sameRenderedValue } from "@/lib/utils/snapshotDiff";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { reviewProposals } from "@/lib/stores/reviewProposals.svelte";
 import { createTargetFor } from "@/lib/utils/pickerCreate";
+import { composeList, listRendersSame, listUnits, pairListItems, type ListPairing, type ListResolution, type ListUnit } from "@/lib/utils/listCompare";
+
+/** One `list` field's captured comparison (ADR-0096 §3 "Captured once"): the
+ *  field definition, L (the live value at capture time) and O (the proposed
+ *  value), the pairing and its units — everything `ListReviewSection` renders
+ *  and `composeList` needs, fixed for the life of the review. */
+export type ListReviewEntry = {
+  field: MetadataFieldDefinition;
+  L: MetadataValue[];
+  O: MetadataValue[];
+  pairing: ListPairing;
+  units: ListUnit[];
+};
 
 /** One structured (non-prose) field the patch proposes, reviewed as an atomic
  *  `{was, now}` flip in the frozen rail (ADR-0046 §2 / slice 3b): the value is
@@ -115,6 +128,21 @@ export class EntryProposalController {
   nodeId = $state<string | null>(null);
   schema = $state<MetadataSchema | null>(null);
   metadata = $state<EntryMetadata>({});
+  // ADR-0096 §7: true when the host's body shape mounts the review overlay
+  // (prose or code — `EditorBodyHost.svelte`); false for a body-less shape,
+  // which keeps its lists in `structuredFlips` (the #2266 fallback, §7).
+  hostsListSections = $state(false);
+  // The node id NodeEditor's OWN node-sync has caught up to — its
+  // `loadedSceneId`, NEVER the raw node id prop (ADR-0096 §3 "Captured
+  // once"): before the sync effect runs, the controller already has the new
+  // node's `nodeId` but still the PREVIOUS node's `metadata`, and capturing
+  // then would pair the wrong list.
+  metadataNodeId = $state<string | null>(null);
+  // ADR-0096 §6 "Where the list cannot be written, nothing is adopted": false
+  // when this pane's save routes to an override layer, where a list cannot be
+  // overridden at all (the save would 422). The sections still show; no unit
+  // settles, Accept all leaves lists alone, and commit never writes one.
+  listsWritable = $state(true);
 
   // Wired by the host — the write side of a commit (see the module note).
   // May return a promise (#1797): a tag-vocabulary flip's adopted value can
@@ -188,6 +216,12 @@ export class EntryProposalController {
     for (const [fieldId, proposedValue] of Object.entries(proposal.fields)) {
       const field = schema.fields[fieldId];
       if (!field || field.hidden || NON_FLIPPABLE_FIELD_IDS.has(fieldId)) continue;
+      // ADR-0096 §7: a `list` field leaves the atomic rail flip for the
+      // per-item review section — whether or not it has units (a unit-less
+      // list shows nothing there and is not written either way). The one
+      // fallback is a body-less entry type, which mounts no review overlay
+      // at all (`hostsListSections` false) and keeps today's atomic flip.
+      if (field.type === "list" && this.hostsListSections) continue;
       if (NON_STRUCTURED_TYPES.has(field.type) && !isTagVocabularyField(field, schema)) continue;
       const now = this.metadata[fieldId] ?? null;
       // Same as the rail would render it → nothing to review (#2265): the
@@ -225,12 +259,82 @@ export class EntryProposalController {
     return out;
   });
 
+  // ---- list reviews (ADR-0096 §3–§6): one entry per proposed `list` field --
+
+  // The private, non-reactive memo of which proposal object `listReviews` was
+  // last built for — `captureListReviews` compares against it so the pairing
+  // runs exactly once per proposal, never re-derived from a later metadata
+  // edit (§3 "Captured once"). Plain (not `$state`): the guard itself must
+  // never be a reactive trigger, only `listReviews`/`listResolutions` are.
+  #capturedListProposal: EntryPatch | null = null;
+
+  /** Per proposed `list` field with ≥1 unit: its pairing and units, captured
+   *  once (see `captureListReviews`). Empty until the host calls that. */
+  listReviews = $state<Record<string, ListReviewEntry>>({});
+
+  /** How each list's units have settled — `settleListUnit`'s target. Absent
+   *  key = undecided (declined); `false` = settled-kept (clicked the current
+   *  side); `true`/a string = adopted (§4). */
+  listResolutions = $state<Record<string, Record<string, true | string | false>>>({});
+
+  /** Build `listReviews` from the open proposal against the LIVE metadata at
+   *  this moment — but only the FIRST time this runs for a given proposal
+   *  object (the guard above). Idempotent, so the host can call it as often
+   *  as convenient (from the same effect that feeds `nodeId`/`schema`/
+   *  `metadata`); calling it again for the same proposal is a no-op, which is
+   *  exactly what keeps a later metadata edit (an adopted field merging in
+   *  before Done) from re-pairing and double-counting an adoption.
+   *  `live` is the host's metadata AT THIS MOMENT, passed in rather than read
+   *  from `this.metadata`: in a freshly mounted editor the effect that feeds
+   *  `this.metadata` runs before the node sync fills it, so in the same flush
+   *  `this.metadata` can still be empty while `metadataNodeId` already matches.
+   *  Requires `hostsListSections` and `metadataNodeId === nodeId` (§3 "The capture
+   *  happens only once NodeEditor's node sync has run for that node"). */
+  captureListReviews(live: EntryMetadata = this.metadata): void {
+    const proposal = this.proposal;
+    if (!proposal) {
+      if (this.#capturedListProposal !== null) {
+        this.#capturedListProposal = null;
+        this.listReviews = {};
+      }
+      return;
+    }
+    if (proposal === this.#capturedListProposal) return;
+    const schema = this.schema;
+    if (!this.hostsListSections || !schema || this.metadataNodeId !== this.nodeId) return;
+    this.#capturedListProposal = proposal;
+    const next: Record<string, ListReviewEntry> = {};
+    for (const [fieldId, proposedValue] of Object.entries(proposal.fields)) {
+      const field = schema.fields[fieldId];
+      if (!field || field.type !== "list") continue;
+      const L = Array.isArray(live[fieldId]) ? (live[fieldId] as MetadataValue[]) : [];
+      const O = Array.isArray(proposedValue) ? (proposedValue as MetadataValue[]) : [];
+      const pairing = pairListItems(field, L, O);
+      const units = listUnits(field, pairing);
+      if (units.length === 0) continue; // #2265 for lists: nothing to show, nothing to write
+      next[fieldId] = { field, L, O, pairing, units };
+    }
+    this.listReviews = next;
+    this.listResolutions = {};
+  }
+
+  /** A list unit's running resolution (§4's table) — pushed by
+   *  `ListReviewSection`'s click gesture, never a write. */
+  settleListUnit(fieldId: string, unitKey: string, value: true | string | false): void {
+    if (!this.listsWritable) return;
+    const forField = this.listResolutions[fieldId] ?? {};
+    this.listResolutions = { ...this.listResolutions, [fieldId]: { ...forField, [unitKey]: value } };
+  }
+
   /** Something to review only when the patch touches the body, a `long_text`
-   *  field, or a structured field. (A patch that proposes only non-proposable
-   *  fields reaches here empty; ChatBodyView already told the author so.) */
+   *  field, a structured field, or a `list` field with at least one unit
+   *  (ADR-0096 §7 — a proposal touching only beats still opens the review). */
   hasReview = $derived(
     !!this.proposal &&
-      (this.proposal.body != null || this.fields.length > 0 || this.structuredFlips.length > 0),
+      (this.proposal.body != null ||
+        this.fields.length > 0 ||
+        this.structuredFlips.length > 0 ||
+        Object.keys(this.listReviews).length > 0),
   );
 
   // ---- review-local resolution (the accumulation, never a write) -------------
@@ -328,6 +432,17 @@ export class EntryProposalController {
     const structured: Record<string, boolean> = {};
     for (const flip of this.structuredFlips) structured[flip.fieldId] = true;
     this.adoptedStructured = structured;
+    // ADR-0096 §7: every unit of every list adopted — `true` for a prose
+    // member unit too (composeItem reads O's value for ANY member resolved
+    // `true`; the region-resolved-text case is only for a hand-picked partial
+    // adopt). Saves the same list as clicking through every change (§5).
+    const listRes: Record<string, Record<string, true | string | false>> = {};
+    for (const [fieldId, review] of Object.entries(this.listsWritable ? this.listReviews : {})) {
+      const unitRes: Record<string, true> = {};
+      for (const unit of review.units) unitRes[unit.key] = true;
+      listRes[fieldId] = unitRes;
+    }
+    this.listResolutions = listRes;
   }
 
   /** Adopt ONLY the long_text field flips (`fields`) — never the body, never the
@@ -344,6 +459,7 @@ export class EntryProposalController {
     this.resolvedText = text;
     this.resolvedBody = null;
     this.adoptedStructured = {};
+    this.listResolutions = {};
   }
 
   /** Whether the author has adopted anything — the "you have changes" signal the
@@ -351,7 +467,10 @@ export class EntryProposalController {
   hasPendingChanges = $derived(
     this.resolvedBody !== null ||
       Object.values(this.resolvedText).some((v) => v !== null) ||
-      Object.values(this.adoptedStructured).some((v) => v),
+      Object.values(this.adoptedStructured).some((v) => v) ||
+      Object.values(this.listResolutions).some((forField) =>
+        Object.values(forField).some((v) => v === true || typeof v === "string"),
+      ),
   );
 
   /** Drop the accumulated resolution. Called on commit/abandon and by the host
@@ -361,6 +480,7 @@ export class EntryProposalController {
     this.resolvedBody = null;
     this.resolvedText = {};
     this.adoptedStructured = {};
+    this.listResolutions = {};
     this.commitError = null;
     // A fresh review opens on the interleaved diff — the judge toggle is a
     // per-review reading choice, not carried across proposals (#710).
@@ -392,6 +512,17 @@ export class EntryProposalController {
     const proposedById = this.structuredCompareFields;
     for (const [fieldId, adopted] of Object.entries(this.adoptedStructured)) {
       if (adopted && fieldId in proposedById) fields[fieldId] = proposedById[fieldId].was;
+    }
+    // ADR-0096 §5/§7: a list with ≥1 adopted unit composes the §5 sequence —
+    // every unit declined gives L exactly, every unit adopted gives a list
+    // that renders as O with L's identity kept. Not written when the compose
+    // renders the same as L (#2265 for lists, `listRendersSame`).
+    for (const [fieldId, review] of Object.entries(this.listsWritable ? this.listReviews : {})) {
+      const resolution: ListResolution = this.listResolutions[fieldId] ?? {};
+      const hasAdopted = Object.values(resolution).some((v) => v === true || typeof v === "string");
+      if (!hasAdopted) continue;
+      const composed = composeList(review.field, review.L, review.O, review.pairing, resolution);
+      if (!listRendersSame(review.field, composed, review.L)) fields[fieldId] = composed;
     }
     const body = this.resolvedBody;
     const hasFields = Object.keys(fields).length > 0;

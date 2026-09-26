@@ -22,6 +22,7 @@
     proposedText,
     label,
     view = "both",
+    adoptable = true,
     onResolved,
   }: {
     /** The value as the author currently sees it (the warm `now` side). */
@@ -34,6 +35,9 @@
      *  shows the current text whole, `was` the proposed text whole. The runs
      *  carry both versions, so a change is a re-render, never a re-diff. */
     view?: DiffView;
+    /** False where the value cannot be written (ADR-0096 §6, a list at an
+     *  override layer): the comparison shows, but no region is clickable. */
+    adoptable?: boolean;
     /** Report the running resolution: null while unchanged from the original. */
     onResolved: (value: string | null) => void;
   } = $props();
@@ -69,7 +73,7 @@
 
 <div class="revision-flip">
   <div class="flip-label">{label}</div>
-  <ReadOnlyBodyOverlay {html} {label} tone="snapshot" onRunClick={handleRunClick} />
+  <ReadOnlyBodyOverlay {html} {label} tone="snapshot" onRunClick={adoptable ? handleRunClick : undefined} />
 </div>
 
 <style>

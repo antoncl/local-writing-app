@@ -181,6 +181,7 @@
         adopted={model.flipAdopted}
         onToggle={() => on.toggleFlip(model.fieldId)}
         currentHint={model.flipCurrentHint}
+        currentValue={model.flipCurrentValue}
         tagItems={model.tagFlipItems}
         loreEntries={deps.loreEntries}
         promptEntries={deps.promptEntries}

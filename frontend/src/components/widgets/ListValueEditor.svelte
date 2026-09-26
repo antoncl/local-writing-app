@@ -274,7 +274,6 @@
           <button
             type="button"
             class="lv-title"
-            disabled={readOnly}
             onclick={() => (openIndex = openIndex === index ? -1 : index)}
           >
             {#if rowTitle(item)}{rowTitle(item)}{:else}<span class="lv-untitled">untitled</span>{/if}
@@ -282,7 +281,10 @@
           </button>
           {@render removeButton(index)}
         </div>
-        {#if openIndex === index && !readOnly}
+        {#if openIndex === index}
+          <!-- #2266 (ADR-0096 §7): expanding is reading, not editing — a
+               read-only row still lets a member's row expand, so the item's
+               full shape is reachable even where nothing can be typed. -->
           <div class="lv-edit">
             {#each members as member (member.key)}
               <div class="lv-member">
@@ -292,7 +294,7 @@
                     field={memberField(member)}
                     value={itemMemberValue(item, member)}
                     onChange={(next) => setMemberValue(index, member, next)}
-                    readOnly={isMemberLocked(item, member)}
+                    readOnly={readOnly || isMemberLocked(item, member)}
                     {implicitContextMatcher}
                     {loreEntries}
                     {promptEntries}

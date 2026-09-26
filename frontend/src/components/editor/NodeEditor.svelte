@@ -11,7 +11,9 @@
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { EntryProposalController, bodyAdopter } from "@/lib/stores/entryProposal.svelte";
-  import { refreshTagNodes, resolveAdoptedTagFields } from "@/lib/stores/tagNodes";
+  import { refreshTagNodes, resolveAdoptedTagFields, tagById } from "@/lib/stores/tagNodes";
+  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
+  import { buildRefResolver } from "@/lib/utils/refResolve";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
   import { notchWhen } from "@/lib/utils/snapshotTime";
@@ -746,6 +748,45 @@
   let rawBodyMode = $derived(bodyShape === "code");
   let rawBodyLanguage = $derived((entryTypeDef?.body_language ?? "markdown") satisfies EntryBodyLanguage);
 
+  // ADR-0096 §3/§7: the review overlay mounts for a prose OR code body only
+  // (`EditorBodyHost.svelte`); a body-less shape keeps its lists in the
+  // atomic rail flip (the #2266 fallback). `metadataNodeId` is the node-sync
+  // marker (`loadedSceneId`, set below), never the raw node id — see §3
+  // "Captured once". Calling `captureListReviews()` here is safe to repeat
+  // (idempotent per proposal): this effect also runs on every metadata edit,
+  // which is exactly why the capture itself must not be a `$derived` over it.
+  $effect.pre(() => {
+    entryReview.hostsListSections = bodyShape === "prose" || bodyShape === "code";
+    entryReview.metadataNodeId = loadedSceneId;
+    // §6: a lore/prompt save routed to an override layer cannot write a list.
+    entryReview.listsWritable = !(
+      (documentKind === "lore" || documentKind === "prompt") &&
+      scene != null &&
+      snapshotLayerId(authoringLayerId, scene.source_layer_id) !== null
+    );
+    // Hand it the live metadata: `entryReview.metadata` is fed by an earlier
+    // effect that, on a fresh mount, ran before the node sync filled `metadata`.
+    entryReview.captureListReviews(metadata);
+  });
+
+  // ADR-0096 §6: an `entity_ref`/`entity_ref_list` list-review member's id
+  // resolved to its title — the same walk MetadataPanel's list-index summary
+  // uses (`buildRefResolver`, #2010), rebuilt from the sources this pane
+  // already holds.
+  const listMemberResolver = $derived(
+    buildRefResolver({
+      structure,
+      loreEntries,
+      promptEntries,
+      assistantEntries,
+      plotEntries: $plotlineEntriesStore,
+      tagById: $tagById,
+    }),
+  );
+  function resolveListMemberTitle(id: string): string | null {
+    return listMemberResolver(id)?.title ?? null;
+  }
+
   // ---- Body tab strip (#2010, reopen memory #2013) -----------------------
   // One "Body"/"Details" tab plus one per `entity_ref_list` field; empty when
   // the entry type declares no list fields (no strip). The active tab is
@@ -1072,7 +1113,11 @@
       // the api/store collaborators the orchestrator needs (same reasoning as
       // `commitStopFieldEdit` below).
       stopFieldEdit: (fieldId, value) => { void bodyHost?.commitStopFieldEdit(fieldId, value); },
-      goToSection: (fieldId) => sectionRegistry.focus(fieldId),
+      // ADR-0096 §6: inert while reviewing — the body section it would
+      // focus is hidden behind the review overlay, and a list-as-body-
+      // section field renders its comparison in the review's own flip
+      // stack now, not the (hidden) body section.
+      goToSection: (fieldId) => { if (!reviewing) sectionRegistry.focus(fieldId); },
       // #2100: the rail's jump target for a list-index row — computed via the
       // SAME `tabIdForField` the strip itself buckets fields with, so a
       // grouped Section's row jumps into the merged tab, never a stale
@@ -1202,7 +1247,7 @@
     model={{
       scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, title, metadata,
       metadataSchema, editorReadOnly, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
-      overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, detailsDetached, chatTitleField, metaContent,
+      overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, resolveListMemberTitle, detailsDetached, chatTitleField, metaContent,
       stopUnit, backlinks,
       frontMatter: frontMatterMode ? frontMatter : undefined, appendix: frontMatterMode ? appendix : undefined,
       activeBodyTab, createLayerId,

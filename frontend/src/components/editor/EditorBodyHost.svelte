@@ -101,6 +101,10 @@
     stopUnit: MutationUnitGroup | null;
     snapshots: SnapshotStripController;
     entryReview: EntryProposalController;
+    // ADR-0096 §6: resolves an entity_ref(_list) list-review member's id to
+    // its title (undefined = no resolver threaded — the run falls back to
+    // the raw id).
+    resolveListMemberTitle?: (id: string) => string | null;
     detailsDetached: boolean;
     // Defined in NodeEditor (owns title/handleTitleInput state + the
     // `.title-*` CSS) and rendered here bare on ChatBodyView's title row and
@@ -413,7 +417,7 @@
     <!-- A commit brainstorm reviewed on a code-bodied node (a prompt template —
          #711). Same overlay as prose; the raw body stays mounted and hidden
          beneath (frozen diff base), thawing to the adopted text on commit. -->
-    <EntryReviewOverlay review={model.entryReview} />
+    <EntryReviewOverlay review={model.entryReview} resolveListMemberTitle={model.resolveListMemberTitle} />
   {/if}
   <div class="code-body-host" class:hidden={model.reviewing || listFieldId !== null}>
     <CodeBodyView
@@ -470,7 +474,7 @@
       appendix={model.appendix}
     />
   {:else if model.entryReview.hasReview && model.entryReview.proposal}
-    <EntryReviewOverlay review={model.entryReview} frontMatter={model.frontMatter} />
+    <EntryReviewOverlay review={model.entryReview} resolveListMemberTitle={model.resolveListMemberTitle} frontMatter={model.frontMatter} />
   {/if}
   {/if}
   <div

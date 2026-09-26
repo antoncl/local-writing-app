@@ -27,6 +27,10 @@
     onToggle: () => void;
     /** The "Current: …" line (already formatted by the caller; "" → "unset"). */
     currentHint: string;
+    /** The raw current value — ADR-0096 §7 (#2266): a `list` field draws THIS
+     *  with the same read-only `FieldValueEditor` the proposed side uses,
+     *  instead of the "Current: …" line (a flattened list is unreadable). */
+    currentValue?: MetadataValue;
     /** Tag flips render their own chip strip (#1797); the caller decides via isTagFlipField. */
     tagItems: TagFlipItem[] | null;
     // The rest are FieldValueEditor pass-through for the non-tag read-only
@@ -48,6 +52,7 @@
     adopted,
     onToggle,
     currentHint,
+    currentValue = null,
     tagItems,
     loreEntries = [],
     promptEntries = [],
@@ -100,7 +105,32 @@
       onclick={onToggle}
     ></button>
   </div>
-  <small class="fr-flip-from">Current: {currentHint || "unset"}</small>
+  {#if field.type === "list"}
+    <!-- #2266 (ADR-0096 §7): draw the current side as rows too — a beat
+         roster flattened to a "Current: true, beat_1, …" line was
+         unreadable. Read-only; ListValueEditor's rows can still expand
+         (reading, not editing). -->
+    <div class="fr-flip-current-list">
+      <small class="fr-flip-current-label">Current</small>
+      <FieldValueEditor
+        {field}
+        readOnly={true}
+        allowUnset={true}
+        embedded={true}
+        value={currentValue}
+        ariaLabel={`Current ${fieldLabel}`}
+        {loreEntries}
+        {promptEntries}
+        {structure}
+        {researchStructure}
+        {implicitContextMatcher}
+        {excludeId}
+        onChange={() => {}}
+      />
+    </div>
+  {:else}
+    <small class="fr-flip-from">Current: {currentHint || "unset"}</small>
+  {/if}
 </div>
 
 <style>
@@ -139,6 +169,15 @@
     outline-offset: 1px;
   }
   .fr-flip-from {
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+  }
+  .fr-flip-current-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .fr-flip-current-label {
     font-size: var(--fs-sm);
     color: var(--text-3);
   }

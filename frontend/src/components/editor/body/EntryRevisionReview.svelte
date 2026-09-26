@@ -15,24 +15,31 @@
   // can commit the same pending changes. Nothing is written during review.
 
   import RevisionFlip from "@/components/editor/body/RevisionFlip.svelte";
+  import ListReviewSection from "@/components/editor/body/ListReviewSection.svelte";
   import SegmentedControl from "@/components/widgets/SegmentedControl.svelte";
   import { paneOwnsKey } from "@/lib/utils/paneScope";
   import type { FieldFlip } from "@/lib/utils/entryRevision";
+  import type { ListReviewEntry } from "@/lib/stores/entryProposal.svelte";
   import type { DiffView } from "@/lib/types";
 
   let {
     currentBody,
     proposedBody,
     fields,
+    listReviews = {},
+    listsAdoptable = true,
+    listResolutions = {},
     hasChanges,
     view,
     onView,
     onToggleView,
     onBodyResolved,
     onFieldResolved,
+    onSettleListUnit,
     onAcceptAll,
     onDone,
     onDiscard,
+    resolveListMemberTitle = undefined,
     frontMatter = undefined,
   }: {
     /** The entry's body as the author currently sees it (the live buffer). */
@@ -41,6 +48,12 @@
     proposedBody: string | null;
     /** The long_text fields the patch proposes, each reviewed as its own flip. */
     fields: FieldFlip[];
+    /** Every proposed `list` field with ≥1 unit (ADR-0096 §7), keyed by field id. */
+    listReviews?: Record<string, ListReviewEntry>;
+    /** ADR-0096 §6: false at an override layer — the list sections show, nothing adopts. */
+    listsAdoptable?: boolean;
+    /** Each list field's running unit resolution. */
+    listResolutions?: Record<string, Record<string, true | string | false>>;
     /** Whether the author has adopted anything yet — drives the Done/Close label.
      *  Owned by the controller (the close guard reads the same signal). */
     hasChanges: boolean;
@@ -56,6 +69,8 @@
     onBodyResolved: (value: string | null) => void;
     /** Push a long_text field flip's running resolution to the controller. */
     onFieldResolved: (fieldId: string, value: string | null) => void;
+    /** Push a list unit's running resolution (ADR-0096 §4) to the controller. */
+    onSettleListUnit: (fieldId: string, unitKey: string, value: true | string | false) => void;
     /** Take the whole candidate and commit it in one gesture (#710) — the
      *  affirmative half of the whole-version pair; `onDiscard` is the other. */
     onAcceptAll: () => void;
@@ -64,6 +79,9 @@
     /** Reject the whole candidate: discard the proposal without writing (the
      *  entry was frozen). The mirror of Accept all. */
     onDiscard: () => void;
+    /** Resolves an `entity_ref`/`entity_ref_list` member's id to its title, for
+     *  a list section's run text (ADR-0096 §6). */
+    resolveListMemberTitle?: (id: string) => string | null;
     /** The rail's rows as front matter while the rail is collapsed (#2054) —
      *  under the review lens, so a structured flip (a proposed beat roster) is
      *  adoptable here too. Without it a collapsed rail left those flips in the
@@ -81,7 +99,10 @@
     { id: "was", label: "Proposed", hint: "the AI's version", key: "S", tone: "cool" },
     { id: "both", label: "Both", hint: "both versions, adjacent", key: "B" },
   ] as const;
-  const hasProse = $derived(proposedBody !== null || fields.length > 0);
+  // ADR-0096 §7: a list section is also "something to read whole" — the
+  // Current/Proposed/Both control and its A/S/B keys apply to it exactly as
+  // to prose, so a beats-only proposal still gets the judge axis.
+  const hasProse = $derived(proposedBody !== null || fields.length > 0 || Object.keys(listReviews).length > 0);
 
   // A/S/B keys, mirrored from the snapshot strip (SnapshotStrip.onKeydown). The
   // review is a read-only frozen surface, so the letters are free — but only for
@@ -167,6 +188,21 @@
         label={field.label}
         {view}
         onResolved={(v) => onFieldResolved(field.fieldId, v)}
+      />
+    {/each}
+    {#each Object.entries(listReviews) as [fieldId, review] (fieldId)}
+      <ListReviewSection
+        adoptable={listsAdoptable}
+        field={review.field}
+        label={review.field.name ?? fieldId}
+        pairing={review.pairing}
+        units={review.units}
+        L={review.L}
+        O={review.O}
+        resolution={listResolutions[fieldId] ?? {}}
+        {view}
+        resolveTitle={resolveListMemberTitle}
+        onSettleUnit={(unitKey, value) => onSettleListUnit(fieldId, unitKey, value)}
       />
     {/each}
   </div>

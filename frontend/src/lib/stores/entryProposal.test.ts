@@ -856,3 +856,205 @@ describe("EntryProposalController — judge axis + whole-version decide (#710)",
     expect(c.hasPendingChanges).toBe(false);
   });
 });
+
+describe("EntryProposalController — list review capture and commit (ADR-0096 §3–§7)", () => {
+  const listSchema = {
+    entry_types: {},
+    fields: {
+      beats: {
+        name: "Beats",
+        type: "list",
+        options: [],
+        item_identity: "id",
+        item_members: [
+          { key: "id", name: "Id", type: "text" },
+          { key: "title", name: "Title", type: "text" },
+          { key: "guidance", name: "Guidance", type: "long_text" },
+        ],
+      },
+    },
+  } as unknown as MetadataSchema;
+
+  const beat = (id: string, title: string, guidance = "") => ({ id, title, guidance });
+
+  beforeEach(() => {
+    for (const id of ["e1", "e2"]) entryBrainstorm.clear(id);
+  });
+
+  function listController(nodeId: string, over: { hostsListSections?: boolean } = {}): EntryProposalController {
+    const c = new EntryProposalController();
+    c.nodeId = nodeId;
+    c.schema = listSchema;
+    c.hostsListSections = over.hostsListSections ?? true;
+    c.metadataNodeId = nodeId;
+    return c;
+  }
+
+  it("captures only once metadataNodeId matches nodeId, and a later metadata edit doesn't re-pair", () => {
+    const c = new EntryProposalController();
+    c.nodeId = "e1";
+    c.schema = listSchema;
+    c.hostsListSections = true;
+    c.metadata = { beats: [beat("beat_1", "Setup")] };
+    entryBrainstorm.propose("e1", patch(null, { beats: [beat("beat_1", "Setup, rewritten")] }));
+
+    // metadataNodeId hasn't caught up yet (a fresh node-sync mid-flight) —
+    // the previous node's metadata is still loaded, so capturing now would
+    // pair against the wrong list.
+    c.captureListReviews();
+    expect(c.listReviews).toEqual({});
+
+    c.metadataNodeId = "e1";
+    c.captureListReviews();
+    expect(Object.keys(c.listReviews)).toEqual(["beats"]);
+
+    // A later metadata edit (an adopted field merging in) must not re-pair.
+    c.metadata = { beats: [] };
+    c.captureListReviews();
+    expect(c.listReviews.beats.L).toEqual([beat("beat_1", "Setup")]);
+  });
+
+  it("hasReview is true for a beats-only proposal (no body, no long_text, no structured field)", () => {
+    const c = listController("e1");
+    c.metadata = { beats: [beat("beat_1", "Setup")] };
+    entryBrainstorm.propose("e1", patch(null, { beats: [beat("beat_1", "Setup, sharpened")] }));
+    c.captureListReviews();
+    expect(c.structuredFlips).toEqual([]);
+    expect(c.hasReview).toBe(true);
+  });
+
+  it("structuredFlips excludes a list field when hostsListSections, keeping it when not", () => {
+    const hosted = listController("e1", { hostsListSections: true });
+    hosted.metadata = { beats: [beat("beat_1", "Setup")] };
+    entryBrainstorm.propose("e1", patch(null, { beats: [beat("beat_1", "Setup, sharpened")] }));
+    expect(hosted.structuredFlips).toEqual([]);
+
+    entryBrainstorm.clear("e2");
+    const bare = listController("e2", { hostsListSections: false });
+    bare.metadata = { beats: [beat("beat_1", "Setup")] };
+    entryBrainstorm.propose("e2", patch(null, { beats: [beat("beat_1", "Setup, sharpened")] }));
+    expect(bare.structuredFlips.map((f) => f.fieldId)).toEqual(["beats"]);
+  });
+
+  it("a list with no units shows no review and is not written", async () => {
+    const c = listController("e1");
+    c.metadata = { beats: [beat("beat_1", "Setup")] };
+    entryBrainstorm.propose("e1", patch(null, { beats: [beat("beat_1", "Setup")] }));
+    c.captureListReviews();
+    expect(c.listReviews).toEqual({});
+    expect(c.hasReview).toBe(false);
+
+    const onAdoptFields = vi.fn();
+    c.onAdoptFields = onAdoptFields;
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    await c.commit();
+    expect(onAdoptFields).not.toHaveBeenCalled();
+  });
+
+  it("acceptAll adopts every unit; commit writes the composed list (O's content, L's identity kept)", async () => {
+    const c = listController("e1");
+    c.metadata = { beats: [beat("beat_1", "Setup"), beat("beat_2", "Midpoint")] };
+    entryBrainstorm.propose(
+      "e1",
+      patch(null, { beats: [beat("beat_1", "Setup"), beat("beat_2", "Midpoint, sharpened"), beat("beat_3", "Aftermath")] }),
+    );
+    c.captureListReviews();
+    expect(c.hasReview).toBe(true);
+
+    c.acceptAll();
+    const onAdoptFields = vi.fn();
+    c.onAdoptFields = onAdoptFields;
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    await c.commit();
+
+    expect(onAdoptFields).toHaveBeenCalledWith({
+      beats: [beat("beat_1", "Setup"), beat("beat_2", "Midpoint, sharpened"), beat("beat_3", "Aftermath")],
+    });
+  });
+
+  it("captures against the live metadata it is handed, not a stale controller copy (fresh mount)", () => {
+    // A freshly mounted editor feeds `metadata` before its node sync fills it,
+    // so in the capture's flush the controller may still hold `{}`.
+    const c = listController("e1");
+    c.metadata = {};
+    entryBrainstorm.propose("e1", patch(null, { beats: [beat("beat_1", "Setup"), beat("", "Aftermath")] }));
+    c.captureListReviews({ beats: [beat("beat_1", "Setup")] });
+    const review = c.listReviews.beats;
+    expect(review.pairing.pairs.map((p) => [p.l, p.o])).toEqual([[0, 0]]);
+    expect(review.pairing.additions).toEqual([1]);
+    expect(review.pairing.removals).toEqual([]);
+  });
+
+  it("at an override layer the list shows but nothing is adopted or written (ADR-0096 §6)", async () => {
+    const c = listController("e1");
+    c.listsWritable = false;
+    c.metadata = { beats: [beat("beat_1", "Setup")] };
+    entryBrainstorm.propose("e1", patch(null, { beats: [beat("beat_1", "Setup, rewritten")] }));
+    c.captureListReviews();
+    expect(Object.keys(c.listReviews)).toEqual(["beats"]);
+
+    c.settleListUnit("beats", "m|0|title", true);
+    expect(c.listResolutions).toEqual({});
+    c.acceptAll();
+    const onAdoptFields = vi.fn();
+    c.onAdoptFields = onAdoptFields;
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    await c.commit();
+
+    for (const [fields] of onAdoptFields.mock.calls) expect(fields).not.toHaveProperty("beats");
+  });
+
+  it("an unchanged list (declined) is not written", async () => {
+    const c = listController("e1");
+    c.metadata = { beats: [beat("beat_1", "Setup"), beat("beat_2", "Midpoint")] };
+    entryBrainstorm.propose(
+      "e1",
+      patch(null, { beats: [beat("beat_1", "Setup"), beat("beat_2", "Midpoint, sharpened")] }),
+    );
+    c.captureListReviews();
+
+    const onAdoptFields = vi.fn();
+    c.onAdoptFields = onAdoptFields;
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    await c.commit(); // nothing resolved — a plain dismiss
+    expect(onAdoptFields).not.toHaveBeenCalled();
+  });
+
+  it("reject (abandon) writes nothing", () => {
+    const c = listController("e1");
+    c.metadata = { beats: [beat("beat_1", "Setup")] };
+    entryBrainstorm.propose("e1", patch(null, { beats: [beat("beat_1", "Setup, sharpened")] }));
+    c.captureListReviews();
+
+    const onFlush = vi.fn();
+    c.onFlush = onFlush;
+    c.settleListUnit("beats", Object.keys(c.listReviews.beats.units.reduce((acc, u) => ({ ...acc, [u.key]: 1 }), {}))[0], true);
+    c.abandon();
+    expect(onFlush).not.toHaveBeenCalled();
+    expect(c.proposal).toBeNull();
+  });
+
+  it("switching the pane between two nodes captures each node's own list", () => {
+    entryBrainstorm.propose("e1", patch(null, { beats: [beat("beat_1", "E1 sharpened")] }));
+    entryBrainstorm.propose("e2", patch(null, { beats: [beat("beat_2", "E2 sharpened")] }));
+    const c = new EntryProposalController();
+    c.schema = listSchema;
+    c.hostsListSections = true;
+
+    c.nodeId = "e1";
+    c.metadataNodeId = "e1";
+    c.metadata = { beats: [beat("beat_1", "E1")] };
+    c.captureListReviews();
+    expect(c.listReviews.beats.L).toEqual([beat("beat_1", "E1")]);
+
+    c.nodeId = "e2";
+    c.metadataNodeId = "e2";
+    c.metadata = { beats: [beat("beat_2", "E2")] };
+    c.captureListReviews();
+    expect(c.listReviews.beats.L).toEqual([beat("beat_2", "E2")]);
+  });
+});

@@ -114,8 +114,8 @@ const STAR_EMPHASIS = /(^|[^\p{L}\p{N}_\\*])\*(?=[^\s*_])([^*_\n]*?[^\s*_\\])\*(
 // That's the clipboard's signature (Chrome copies the spaces around an inline
 // element as `&nbsp;`, and the editor keeps them), not a space the writer
 // chose; an NBSP anywhere else is left alone (#2267).
-const NBSP_BEFORE_OPENER = / (?=[*_]+[^\s*_])/gu;
-const NBSP_AFTER_CLOSER = /(?<=[^\s*_][*_]+) /gu;
+const NBSP_BEFORE_OPENER = /\u00A0(?=[*_]+[^\s*_])/gu;
+const NBSP_AFTER_CLOSER = /(?<=[^\s*_][*_]+)\u00A0/gu;
 
 /** Rewrite AI-style emphasis delimiters to the editor's (turndown's) spelling
  *  wherever the rewrite provably renders the same, so `*tool*` vs `_tool_` is

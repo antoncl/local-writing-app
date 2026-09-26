@@ -164,7 +164,7 @@ describe("normalizeReviewMarkdown — emphasis delimiters (#2250)", () => {
 });
 
 describe("normalizeReviewMarkdown — clipboard NBSPs around emphasis (#2267)", () => {
-  const NBSP = " ";
+  const NBSP = "\u00A0";
   it("reads an NBSP hugging an emphasis run as a plain space", () => {
     expect(normalizeReviewMarkdown(`act of${NBSP}_becoming_${NBSP}the`)).toBe("act of _becoming_ the");
     expect(normalizeReviewMarkdown(`a${NBSP}**bold**${NBSP}word`)).toBe("a **bold** word");

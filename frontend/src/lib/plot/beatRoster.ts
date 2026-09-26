@@ -28,3 +28,36 @@ export function withStampedBeatIds(current: MetadataValue, saved: MetadataValue)
   });
   return changed ? next : null;
 }
+
+const BEAT_LIST_FIELDS = ["beats", "instance_beats"] as const;
+
+/** The document-pane counterpart of {@link withStampedBeatIds} (#2255): after a pane
+ *  save, adopt the ids the backend minted (or re-salted for a duplicate) into the
+ *  draft, so the pane isn't left dirty against its own save and re-minting a fresh id
+ *  every autosave. Only a beat list the author left untouched while the save was in
+ *  flight (`draft[field]` still equals what was `sent`) is stamped — then the saved
+ *  roster lines up with it position for position, and taking the saved id wholesale
+ *  is exact. Returns the new metadata, or null when nothing changed. */
+export function adoptSavedBeatIds(
+  draft: Record<string, MetadataValue>,
+  sent: Record<string, MetadataValue>,
+  saved: Record<string, MetadataValue>,
+): Record<string, MetadataValue> | null {
+  let next: Record<string, MetadataValue> | null = null;
+  for (const field of BEAT_LIST_FIELDS) {
+    const current = draft[field];
+    const returned = saved[field];
+    if (!Array.isArray(current) || !Array.isArray(returned) || current.length !== returned.length) continue;
+    if (JSON.stringify(current) !== JSON.stringify(sent[field])) continue;
+    let changed = false;
+    const stamped = current.map((item, index) => {
+      const record = recordOf(item);
+      const savedId = recordOf(returned[index])?.id;
+      if (!record || typeof savedId !== "string" || !savedId || record.id === savedId) return item;
+      changed = true;
+      return { ...record, id: savedId };
+    });
+    if (changed) next = { ...(next ?? draft), [field]: stamped };
+  }
+  return next;
+}

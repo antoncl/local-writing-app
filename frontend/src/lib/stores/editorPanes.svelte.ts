@@ -74,6 +74,7 @@ import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { structureStore } from "@/lib/stores/structure";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
+import { adoptSavedBeatIds } from "@/lib/plot/beatRoster";
 import {
   refreshAfterSave,
   autosaveOnce,
@@ -721,15 +722,20 @@ class EditorPanesController {
       // Recompute `dirty` against savedDocument so the next debounce picks
       // up the interim edits.
       let paneStillDirty = false;
+      let stampedMetadata: EntryMetadata | null = null;
       this.panes = this.panes.map((candidate) => {
         if (candidate.id !== id) return candidate;
+        // The one server-side fill a draft must take back: beat ids the save
+        // minted, or it stays dirty and re-mints on every autosave (#2255).
+        stampedMetadata = adoptSavedBeatIds(candidate.draftMetadata, draftDocument.metadata, savedDocument.metadata ?? {});
+        const draftMetadata = stampedMetadata ?? candidate.draftMetadata;
         paneStillDirty = isEditorPaneDirty(
           savedDocument,
           candidate.draftTitle,
           candidate.draftMarkdown,
           candidate.draftStatus,
           candidate.draftEntryType,
-          candidate.draftMetadata,
+          draftMetadata,
           candidate.draftInputs,
           candidate.draftOfferOn,
           candidate.draftContextStrategy,
@@ -738,6 +744,7 @@ class EditorPanesController {
           ...candidate,
           document: { type: documentKind, id: savedDocument.id },
           scene: savedDocument,
+          draftMetadata,
           dirty: paneStillDirty,
           saving: false,
           // A successful save clears the sticky "Save failed" badge a prior
@@ -748,6 +755,20 @@ class EditorPanesController {
           recentlySaved: !paneStillDirty,
         };
       });
+      // NodeEditor keeps its own `metadata` copy; without the reload signal its
+      // next keystroke would emit the id-less roster again.
+      const stampedPane = stampedMetadata ? this.panes.find((candidate) => candidate.id === id) : undefined;
+      if (stampedPane) {
+        this.metadataReloadsByPane = {
+          ...this.metadataReloadsByPane,
+          [id]: {
+            token: this.nextMetadataReloadToken++,
+            metadata: cloneMetadata(stampedPane.draftMetadata),
+            status: stampedPane.draftStatus,
+            entryType: stampedPane.draftEntryType,
+          },
+        };
+      }
       if (paneStillDirty) this.#autosave.schedule(id);
       else this.#autosave.flashSaved(id);
       // A save can have changed this node's entity_ref fields (#184 Phase 2),

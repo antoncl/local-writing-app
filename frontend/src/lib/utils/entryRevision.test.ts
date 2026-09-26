@@ -138,6 +138,9 @@ describe("normalizeReviewMarkdown — emphasis delimiters (#2250)", () => {
     ["escaped stars", "a \\*literal\\* star"],
     ["code spans", "run `*x*` and `__y__`"],
     ["intraword underscores", "call my__init__ now"],
+    ["intraword stars after a non-ASCII letter", "på*virkelig*"],
+    ["intraword stars before a non-ASCII letter", "*virkelig*æ"],
+    ["intraword underscores after a non-ASCII letter", "café__x__"],
     ["bold stars", "**strong** stays"],
   ])("leaves %s alone", (_label, text) => {
     expect(normalizeReviewMarkdown(text)).toBe(text);

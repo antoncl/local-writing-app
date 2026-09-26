@@ -100,13 +100,15 @@ export function normalizeReviewMarkdown(text: string): string {
 
 // Backtick code spans are split out and passed through untouched.
 const CODE_SPAN = /(`+[^`]*`+)/;
+// Intraword is judged on Unicode letters/digits (CommonMark's flanking rules),
+// not ASCII `\w` — `på*virkelig*` must stay intraword.
 // `__x__` → `**x**`. Not intraword or escaped, so it IS strong emphasis.
-const UNDERSCORE_STRONG = /(^|[^\w\\*_])__(?=[^\s_])([^_\n]*?[^\s_\\])__(?![\w_])/g;
+const UNDERSCORE_STRONG = /(^|[^\p{L}\p{N}\\*_])__(?=[^\s_])([^_\n]*?[^\s_\\])__(?![\p{L}\p{N}_])/gu;
 // `*x*` → `_x_`, only where `_` is also emphasis: not intraword (`un*real*ly`
 // is valid with `*` but not `_`), not part of `**`, not escaped, and never an
 // opener followed by space (`* * *`, `* item`, `2 * 3`). Content with `_` or
 // `*` is left alone rather than risk changing what nests.
-const STAR_EMPHASIS = /(^|[^\w\\*])\*(?=[^\s*_])([^*_\n]*?[^\s*_\\])\*(?![\w*])/g;
+const STAR_EMPHASIS = /(^|[^\p{L}\p{N}_\\*])\*(?=[^\s*_])([^*_\n]*?[^\s*_\\])\*(?![\p{L}\p{N}_*])/gu;
 
 /** Rewrite AI-style emphasis delimiters to the editor's (turndown's) spelling
  *  wherever the rewrite provably renders the same, so `*tool*` vs `_tool_` is

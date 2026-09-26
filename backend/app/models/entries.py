@@ -505,7 +505,7 @@ class PlotContextBeat(BaseModel):
 
     `beat_id` rides in the rendered context too (#2243): a revise-plotline
     commit proposes the WHOLE roster back, and a model that never sees the
-    real ids invents its own (`_ensure_beat_identity` then heals them away,
+    real ids invents its own (`ensure_list_item_identity` then heals them away,
     silently breaking a card's `beat_links`). `specifics` is the book-local
     specialization of the generic requirement (empty on a template's own
     `plot_beat` roster, which has no such member) — shown so a revise sees

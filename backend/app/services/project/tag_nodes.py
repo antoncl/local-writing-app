@@ -35,6 +35,7 @@ from app.models import (
 )
 from app.services import machine_settings as ms_service
 from app.services.project.errors import ProjectServiceError
+from app.services.project.list_item_identity import ensure_list_item_identity
 from app.services.project.node_index import NodeIndex, NodeIndexEntry
 
 
@@ -120,8 +121,10 @@ class TagNodesMixin:
         current_revision = self._revision(path)
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Tag changed on disk after it was opened.", 409)
-        self._check_entry_type_kind(request.entry_type, "tag", schema=self._tag_write_schema())
+        write_schema = self._tag_write_schema()
+        self._check_entry_type_kind(request.entry_type, "tag", schema=write_schema)
         metadata = self._normalise_metadata(request.metadata, path)
+        ensure_list_item_identity(metadata, request.entry_type, write_schema)
         self._write_node_entry_file(path, index_entry.id, request.title, request.entry_type, metadata, "")
         self._maybe_rename_node_file(path, request.title)
         return self.read_tag_entry(index_entry.id)

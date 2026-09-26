@@ -2,18 +2,19 @@
 
 A revise-mode extraction (`run_entry_patch_extraction`) proposes whole
 ordered-list fields wholesale (ADR-0048 S7 Slice 1's `beats`/`instance_beats`
-being the first, but any id-bearing item_group list is the same shape). The
-model is never shown the schema's `id` member as something IT should
-invent — but nothing stopped it from doing so anyway (observed:
-`setup_pressure` -> "Setup pressure"), and `_ensure_beat_identity`
-(`services/project/plot.py`) accepts any unique non-empty id, so a card's
-`beat_links` pointing at the OLD id silently heal away instead of erroring.
+being the first, but any list whose group DECLARES identity, ADR-0096 §1, is
+the same shape). The model DOES see the roster's real ids in its context
+(since #2243, `plot_prompt_context.py`) — but nothing stops it inventing its
+own anyway (observed: `setup_pressure` -> "Setup pressure"), and
+`ensure_list_item_identity` (`services/project/list_item_identity.py`)
+accepts any unique non-empty id, so a card's `beat_links` pointing at the OLD
+id silently heal away instead of erroring.
 
 `reconcile_list_identity` is the pure repair: given a proposed list and the
 node's CURRENTLY STORED value of that same field, it re-derives which
 proposed item IS which stored item — by id first, then by a case/whitespace
 -insensitive title match — and strips the id from anything that matches
-neither (letting the save path's own `_ensure_beat_identity` mint a fresh
+neither (letting the save path's own `ensure_list_item_identity` mint a fresh
 one, exactly as it does for a brand new beat). A matched item also has any
 member the model silently omitted (an absent key, never an explicit empty
 value — that's a deliberate clear) filled back in from the stored item, so a

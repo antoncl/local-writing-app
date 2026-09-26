@@ -107,6 +107,12 @@ export type MetadataGroupDefinition = {
   // authoring UI hides them from the reusable-group pickers (#1003). Absent /
   // false on every user-defined group.
   system?: boolean;
+  // ADR-0096 §1: the group's identity member — the `key` of one of its own
+  // `text` members, or null/absent for a group that declares none. Resolved
+  // onto every list field using this group as `item_identity` (metadataTypes.ts).
+  // Kept in step with the members: renaming the identity member renames this,
+  // removing it clears it.
+  identity?: string | null;
 };
 
 // An entry type's use of a reusable group, with a display label + key prefix

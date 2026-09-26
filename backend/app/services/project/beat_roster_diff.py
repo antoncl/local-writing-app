@@ -1,12 +1,12 @@
 """Pure diff of one beat-list field's before/after save (#2260).
 
 `_save_plot_folder_node` (`services/project/plot.py`) snapshots a
-`_BEAT_LIST_FIELDS` field's stored value before `_ensure_beat_identity` mints
+`_TRACE_BEAT_FIELDS` field's stored value before `ensure_list_item_identity` mints
 ids for any id-less beat, then diffs it against what's about to be written —
 so a `plot_beats_saved` trace record can say exactly what changed: which
 beats were added/removed, whether the surviving ones were reordered, which
 member keys on a surviving beat changed value (never the value itself — this
-is a structural diff, not a content log), and which ids `_ensure_beat_identity`
+is a structural diff, not a content log), and which ids `ensure_list_item_identity`
 minted fresh.
 """
 
@@ -32,7 +32,7 @@ def diff_beat_list(
     caller's cue to skip the field entirely — a `plot_beats_saved` record is
     only written when at least one field has a diff).
 
-    `minted` is the set of ids `_ensure_beat_identity` assigned during THIS
+    `minted` is the set of ids `ensure_list_item_identity` assigned during THIS
     save (id-less beats it filled in) — reported verbatim as `minted`,
     intersected with the after-list's own ids so a mint on a sibling field
     never bleeds into this one's report.

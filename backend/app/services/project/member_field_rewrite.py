@@ -78,7 +78,12 @@ def rewrite_group_member_key_in_layer(
 ) -> bool:
     """The group's OWN declaration in one layer's raw YAML dict: rename
     (`new_member` set) or drop (`new_member=None`) the member entry keyed
-    `old_member`. Returns whether anything changed."""
+    `old_member`. Returns whether anything changed.
+
+    Carries the group's `identity` (ADR-0096 §1) along with its member: when
+    `old_member` was the declared identity, a rename renames `identity` with
+    it and a drop clears it — the same reach a rename/delete already gives
+    every other member key."""
     groups = layer_data.get("groups")
     if not isinstance(groups, dict):
         return False
@@ -99,6 +104,11 @@ def rewrite_group_member_key_in_layer(
         new_members.append(member)
     if changed:
         group_data["members"] = new_members
+        if group_data.get("identity") == old_member:
+            if new_member is None:
+                group_data.pop("identity", None)
+            else:
+                group_data["identity"] = new_member
         groups[group_id] = group_data
         layer_data["groups"] = groups
     return changed

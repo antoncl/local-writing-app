@@ -152,6 +152,15 @@ describe("listHasProseItems / buildBodyListSections (#2043)", () => {
     expect(section.factMembers.map((m) => m.key)).toEqual(["required", "id"]);
   });
 
+  it("ADR-0096 §1: excludes the declared identity member from the title and the fact rows", () => {
+    const beatsWithIdentity = field({ ...BEATS, item_identity: "id" });
+    const s = schema({ beats: beatsWithIdentity }, ["beats"]);
+    const [section] = buildBodyListSections(s, "character");
+    expect(section.titleKey).toBe("title");
+    expect(section.proseMembers.map((m) => m.key)).toEqual(["function", "guidance"]);
+    expect(section.factMembers.map((m) => m.key)).toEqual(["required"]);
+  });
+
   it("a shape with no text member has no title key (the ordinal heads the item)", () => {
     const notes = field({
       name: "Notes",

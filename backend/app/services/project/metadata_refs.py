@@ -107,14 +107,40 @@ def keyed_list_key(field: MetadataFieldDefinition | None) -> str | None:
     ``list`` whose item group has exactly one ``entity_ref`` member. ``None``
     for every other field, including a group with two reference members (no
     member is *the* key) or with only an ``entity_ref_list`` member (a list
-    cannot key an item)."""
+    cannot key an item).
+
+    Declared identity (ADR-0096 §1) wins over this inference: a group that
+    declares ``identity`` is never reference-keyed, whatever its members — a
+    beat that gains a point-of-view character is still one beat per id, not
+    one beat per character. Every other place that infers keyed-ness must
+    route through here rather than re-deriving it, so this is the one place
+    that amendment lives."""
     if field is None:
+        return None
+    if field.item_identity:
         return None
     members = ref_members(field)
     if members is None:
         return None
     keys = [key for key, member in members.items() if member.type == "entity_ref"]
     return keys[0] if len(keys) == 1 else None
+
+
+def title_member(field: MetadataFieldDefinition | None) -> str | None:
+    """A ``list`` field's item title member (ADR-0096 §1's vocabulary): the
+    item group's first ``text`` member other than the identity member, or
+    ``None`` for the ``item_type`` sugar or a group with no such member —
+    those items are named by position ("Item 3") instead. The one place the
+    save's minting (`list_item_identity.py`) and the AI reconcile
+    (`extraction.py`) both read, so they salt/match on the same member."""
+    if field is None or field.item_scalar:
+        return None
+    members = field.item_members or []
+    identity = field.item_identity
+    for member in members:
+        if member.type == "text" and member.key != identity:
+            return member.key
+    return None
 
 
 def duplicate_item_keys(items: Any, key_member: str) -> list[str]:

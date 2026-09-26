@@ -124,6 +124,46 @@ describe("ListValueEditor — record shape (group items)", () => {
   });
 });
 
+const identityField: MetadataFieldDefinition = {
+  name: "Beats",
+  type: "list",
+  options: [],
+  item_group: "plot_beat",
+  item_scalar: false,
+  item_identity: "id",
+  item_members: [
+    { key: "title", name: "Title", type: "text" },
+    { key: "status", name: "Status", type: "select", options: [{ value: "open" }, { value: "answered" }] },
+    { key: "id", name: "Id", type: "text" },
+  ],
+};
+
+const identityItems: MetadataValue = [
+  { title: "Setup", status: "open", id: "beat_a" },
+  { title: "Climax", status: "answered", id: "beat_b" },
+];
+
+describe("ListValueEditor — declared identity member (ADR-0096 §1)", () => {
+  it("never shows or opens the identity member as a row/member", () => {
+    render(ListValueEditor, { field: identityField, value: identityItems, onChange: () => {} });
+    expect(screen.getByText("Setup")).toBeInTheDocument();
+    expect(screen.queryByText("beat_a")).toBeNull();
+    expect(screen.queryByLabelText("Id")).toBeNull();
+  });
+
+  it("preserves the hidden identity value when a visible member is edited", async () => {
+    const onChange = vi.fn();
+    render(ListValueEditor, { field: identityField, value: identityItems, onChange });
+    await fireEvent.click(screen.getByText("Setup"));
+    const input = screen.getByDisplayValue("Setup");
+    await fireEvent.input(input, { target: { value: "Setup, revised" } });
+    expect(onChange).toHaveBeenCalledWith([
+      { title: "Setup, revised", status: "open", id: "beat_a" },
+      { title: "Climax", status: "answered", id: "beat_b" },
+    ]);
+  });
+});
+
 describe("ListValueEditor — scalar sugar (item_type)", () => {
   it("edits directly in the row (inline density, no expand step)", async () => {
     const onChange = vi.fn();

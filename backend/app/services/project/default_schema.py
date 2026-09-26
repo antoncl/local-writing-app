@@ -103,6 +103,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # links of Slice 3 point at (preserved verbatim from the roster so
             # that slice needs no re-migration).
             "name": "Plot beat",
+            # ADR-0096 §1: `id` is this group's declared identity, not merely a
+            # member happening to be named `id` — the save mints it and a
+            # comparison pairs on it BECAUSE this is declared, not by name.
+            "identity": "id",
             "members": [
                 {"key": "title", "name": "Title", "type": "text"},
                 {"key": "function", "name": "Function", "type": "long_text"},
@@ -124,6 +128,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Plot instance beat",
             # Instantiation machinery, not an author-facing shape (#1003).
             "system": True,
+            # ADR-0096 §1: declared identity, same reasoning as `plot_beat`.
+            "identity": "id",
             "members": [
                 {"key": "title", "name": "Title", "type": "text"},
                 {"key": "function", "name": "Function", "type": "long_text"},

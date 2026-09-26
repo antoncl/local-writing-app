@@ -10,6 +10,7 @@
 // section model, which only heads a block once there is more than one.
 import { effectiveFieldHidden, effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
 import { keyedListKeyMember } from "@/lib/editor-core/keyedList";
+import { visibleItemMembers } from "@/lib/editor-core/listItemIdentity";
 import type { MetadataFieldDefinition, MetadataSchema, MetadataValue } from "@/lib/types";
 import type { GroupMember } from "@/lib/schemaTypes";
 
@@ -125,7 +126,9 @@ export function buildBodyListSections(
     const field = schema.fields[id];
     if (!listHasProseItems(field) || field!.intrinsic) continue;
     if (effectiveFieldHidden(schema, entryType, id)) continue;
-    const members = field!.item_members ?? [];
+    // ADR-0096 §1: the identity member is machine-owned — excluded here so it
+    // is never the title, never a fact row, and never shown at all.
+    const members = visibleItemMembers(field);
     const title = members.find((m) => m.type === "text") ?? null;
     sections.push({
       id,

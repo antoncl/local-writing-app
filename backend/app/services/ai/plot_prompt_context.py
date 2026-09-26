@@ -74,7 +74,7 @@ def _thread_guidance_and_beats(thread) -> list[str]:
 
     `id` rides right after `title` in the attrs (#2243): a revise-plotline commit
     proposes the whole roster back, and showing the model its real, stable beat
-    ids is what stops it from inventing its own (which `_ensure_beat_identity`
+    ids is what stops it from inventing its own (which `ensure_list_item_identity`
     then can't tell from a genuine rename, silently breaking a card's
     `beat_links`). `guidance` stays the element text as before; `specifics` (the
     book-local specialization, empty on a template's own roster) is added as a

@@ -6,15 +6,20 @@
 // widget-routing gates (bodySections/bodyTabs/fieldRowModel, #2043/#2010's
 // gates widened by ADR-0089 §6) and ReferenceListTab (the tab itself).
 import { metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
+import { itemIdentityKey } from "@/lib/editor-core/listItemIdentity";
 import type { KeyedListShape } from "@/lib/editor-core/mutationListEdit";
 import type { MetadataFieldDefinition, MetadataValue } from "@/lib/types";
 
 /** The key member of a reference-keyed list, or null for every other field —
  *  a scalar list (`item_scalar`), a group with zero or two+ `entity_ref`
- *  members (no member is *the* key), or anything that isn't a group-shaped
- *  `list` at all (an `entity_ref_list` has no item shape to key). */
+ *  members (no member is *the* key), a group that DECLARES identity (ADR-0096
+ *  §1 amends this: declared identity always wins over the inference, whatever
+ *  the group's members — a beat that gains a point-of-view character is still
+ *  one beat per id, not one beat per character), or anything that isn't a
+ *  group-shaped `list` at all (an `entity_ref_list` has no item shape to key). */
 export function keyedListKeyMember(field: MetadataFieldDefinition | undefined | null): string | null {
   if (!field || field.type !== "list" || field.item_scalar) return null;
+  if (itemIdentityKey(field)) return null;
   const refKeys = (field.item_members ?? []).filter((member) => member.type === "entity_ref").map((member) => member.key);
   return refKeys.length === 1 ? refKeys[0] : null;
 }

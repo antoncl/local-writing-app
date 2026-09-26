@@ -26,7 +26,9 @@ from app.services.project.default_schema import INTRINSIC_FIELD_KEYS
 # The field keys the resolver stamps on read (`_stamp_field_categories` and
 # `_expand_group_applications`) — derived, never authored, never persisted into
 # a layer. The layer writers exclude them; a new stamped key joins here.
-RESOLVER_STAMPED_FIELD_KEYS = frozenset({"category", "group_origin", "item_members", "item_scalar"})
+RESOLVER_STAMPED_FIELD_KEYS = frozenset(
+    {"category", "group_origin", "item_members", "item_scalar", "item_identity"}
+)
 # The entry-type keys the resolver stamps on read (`_resolve_one_entry_type`,
 # `_merge_entry_type_field_overrides`): the pre-inheritance `own_*` twins.
 # Never persisted into a layer — a request that echoes a resolved type carries
@@ -320,8 +322,9 @@ class MetadataSchemaInheritanceMixin:
         field def as the single source of truth so no surface re-derives it from
         scattered booleans. Derived, never stored — `intrinsic` iff the key is in
         the canonical set, `computed` iff `type == "computed"`, else `stored`.
-        Also (re)derives the list item shape (`item_members`/`item_scalar`).
-        INTRINSIC_FIELD_KEYS stays canonical here."""
+        Also (re)derives the list item shape (`item_members`/`item_scalar`) and,
+        when the shape is a group that declares identity (ADR-0096 §1),
+        `item_identity`. INTRINSIC_FIELD_KEYS stays canonical here."""
         schema_fields = resolved_data.get("fields")
         if not isinstance(schema_fields, dict):
             return
@@ -337,13 +340,15 @@ class MetadataSchemaInheritanceMixin:
                 field_def["category"] = "computed"
             else:
                 field_def["category"] = "stored"
-            # item_members / item_scalar are DERIVED: purge any persisted or
-            # authored copy unconditionally, then re-stamp for list fields. A
-            # stale copy would otherwise survive group deletion/rename
-            # (validating values against a shape that no longer exists), and a
-            # hand-authored one would bypass the member-type ban.
+            # item_members / item_scalar / item_identity are DERIVED: purge any
+            # persisted or authored copy unconditionally, then re-stamp for
+            # list fields. A stale copy would otherwise survive group
+            # deletion/rename (validating values against a shape that no
+            # longer exists), and a hand-authored one would bypass the
+            # member-type ban.
             field_def.pop("item_members", None)
             field_def.pop("item_scalar", None)
+            field_def.pop("item_identity", None)
             if field_def.get("type") == "list":
                 self._stamp_list_item_members(field_key, field_def, state.groups)
 
@@ -362,7 +367,12 @@ class MetadataSchemaInheritanceMixin:
         item_group wins; an unknown group falls back to the sugar so the
         field stays serviceable (integrity reports the conflict either way).
         A field with neither (or an unknown group and no sugar) stays
-        unstamped; integrity reports it."""
+        unstamped; integrity reports it.
+
+        Also stamps `item_identity` (ADR-0096 §1) when the resolved shape is a
+        group that declares `identity` naming an existing member of type
+        `text` — never for the `item_type` sugar, which never declares
+        identity."""
 
         group_id = field_def.get("item_group")
         group = groups.get(group_id) if isinstance(group_id, str) and group_id else None
@@ -370,6 +380,14 @@ class MetadataSchemaInheritanceMixin:
         if isinstance(members, list):
             field_def["item_members"] = deepcopy(members)
             field_def["item_scalar"] = False
+            identity = group.get("identity") if isinstance(group, dict) else None
+            if isinstance(identity, str) and identity:
+                named_member = next(
+                    (m for m in members if isinstance(m, dict) and m.get("key") == identity),
+                    None,
+                )
+                if isinstance(named_member, dict) and named_member.get("type") == "text":
+                    field_def["item_identity"] = identity
             return
         item_type = field_def.get("item_type")
         if isinstance(item_type, str) and item_type:

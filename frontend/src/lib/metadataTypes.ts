@@ -164,4 +164,12 @@ export type MetadataFieldDefinition = {
   // item_type, which a cross-layer conflict can leave set while the group
   // won the tie.
   item_scalar?: boolean | null;
+  // DERIVED (resolver-stamped, like `item_members`, ADR-0096 §1): the item
+  // shape's declared identity member's key, or null for a group that
+  // declares none (and always null for the scalar sugar — nothing to
+  // identify beyond the one synthetic member). The one signal every path
+  // reads for "what identifies an item" — never re-derive it from a member
+  // named `id`. Read via `itemIdentityKey`/`visibleItemMembers`
+  // (lib/editor-core/listItemIdentity.ts), never off this key directly.
+  item_identity?: string | null;
 };

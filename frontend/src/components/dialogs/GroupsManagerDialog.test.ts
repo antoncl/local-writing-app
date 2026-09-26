@@ -304,3 +304,78 @@ describe("GroupsManagerDialog — member key stability (#2239)", () => {
     expect(upsertMetadataGroup).toHaveBeenCalledOnce();
   });
 });
+
+// ADR-0096 §1: the identity choice — none, or one of the group's own `text`
+// members — saved as `identity` alongside `name`/`members`.
+describe("GroupsManagerDialog — identity choice (ADR-0096 §1)", () => {
+  const BEATS: Record<string, MetadataGroupDefinition> = {
+    plot_beat: {
+      name: "Beat",
+      identity: "id",
+      members: [
+        { key: "title", name: "Title", type: "text" },
+        { key: "id", name: "Id", type: "text" },
+      ],
+    },
+  };
+
+  it("saves null identity by default for a new group", async () => {
+    mount();
+    await fireEvent.click(screen.getByLabelText("New group"));
+    await fireEvent.input(screen.getByLabelText("Id"), { target: { value: "stakes" } });
+    await fireEvent.click(screen.getByText("Save group"));
+    const saved = upsertMetadataGroup.mock.calls[0][2] as MetadataGroupDefinition;
+    expect(saved.identity).toBeNull();
+  });
+
+  it("loads and re-saves an existing group's declared identity", async () => {
+    render(GroupsManagerDialog, {
+      props: { groups: BEATS, layerId: "proj", onChanged: vi.fn(), onClose: vi.fn() },
+    });
+    await fireEvent.click(screen.getByText("Beat"));
+    expect((screen.getByLabelText("Identity") as HTMLSelectElement).value).toBe("id");
+    await fireEvent.click(screen.getByText("Save group"));
+    const saved = upsertMetadataGroup.mock.calls[0][2] as MetadataGroupDefinition;
+    expect(saved.identity).toBe("id");
+  });
+
+  it("picking a text member as identity saves its key", async () => {
+    mount();
+    await fireEvent.click(screen.getByLabelText("New group"));
+    await fireEvent.input(screen.getByLabelText("Id"), { target: { value: "stakes" } });
+    await fireEvent.click(screen.getByLabelText("Add member"));
+    const nameInputs = screen.getAllByPlaceholderText("Member name") as HTMLInputElement[];
+    await fireEvent.input(nameInputs[0], { target: { value: "Stakes" } });
+    await fireEvent.change(screen.getByLabelText("Identity"), { target: { value: "stakes" } });
+    await fireEvent.click(screen.getByText("Save group"));
+    const saved = upsertMetadataGroup.mock.calls[0][2] as MetadataGroupDefinition;
+    expect(saved.identity).toBe("stakes");
+  });
+
+  it("resets to None when the identity member is removed", async () => {
+    render(GroupsManagerDialog, {
+      props: { groups: BEATS, layerId: "proj", onChanged: vi.fn(), onClose: vi.fn() },
+    });
+    await fireEvent.click(screen.getByText("Beat"));
+    const removeButtons = screen.getAllByLabelText("Remove member");
+    await fireEvent.click(removeButtons[1]); // removes "Id"
+    // Data-loss confirm fires (the identity member disappears entirely) — confirm it.
+    await fireEvent.click(screen.getByText("Save group"));
+    await confirmRequest.mock.calls[0][0].onConfirm();
+    const saved = upsertMetadataGroup.mock.calls[0][2] as MetadataGroupDefinition;
+    expect(saved.identity).toBeNull();
+  });
+
+  it("resets to None when the identity member is retyped away from text", async () => {
+    render(GroupsManagerDialog, {
+      props: { groups: BEATS, layerId: "proj", onChanged: vi.fn(), onClose: vi.fn() },
+    });
+    await fireEvent.click(screen.getByText("Beat"));
+    const typeSelects = screen.getAllByDisplayValue("Text") as HTMLSelectElement[];
+    // The second Text member is "Id" (index 1: Title, Id).
+    await fireEvent.change(typeSelects[1], { target: { value: "number" } });
+    await fireEvent.click(screen.getByText("Save group"));
+    const saved = upsertMetadataGroup.mock.calls[0][2] as MetadataGroupDefinition;
+    expect(saved.identity).toBeNull();
+  });
+});

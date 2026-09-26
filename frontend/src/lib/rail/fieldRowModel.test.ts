@@ -329,9 +329,10 @@ describe("buildRailRowModel", () => {
   });
 
   // ADR-0095 §8: `editorReadOnly` no longer folds `scrubbed` in — a row's
-  // `fieldReadOnly` asks the per-field predicate instead, and a stop-editable
-  // text/long_text row's edit control seeds from the SET's own row value.
-  describe("ADR-0095 §8 stop editing", () => {
+  // `fieldReadOnly` asks the per-field predicate instead. Amendment 1 (Anton,
+  // 2026-09-26): a `long_text` field is never stop-targetable, so it stays
+  // read-only at a stop; a `text` field edits like any other scalar.
+  describe("ADR-0095 §8 / Amendment 1 stop editing", () => {
     it("a field the predicate accepts is NOT read-only while scrubbed", () => {
       const model = buildRailRowModel(baseCtx({ scrubbed: true, stopEditable: (id) => id === "alias" }), "alias");
       expect(model.fieldReadOnly).toBe(false);
@@ -352,27 +353,23 @@ describe("buildRailRowModel", () => {
       expect(model.fieldReadOnly).toBe(false);
     });
 
-    it("decision 5: a stop-editable text/long_text row's stopEditValue is the set's replace-row value", () => {
+    it("at a stop a long_text row is read-only and shows the effective value", () => {
       const model = buildRailRowModel(
-        baseCtx({ scrubbed: true, stopEditable: () => true, stopEditValueFor: (id) => (id === "bio" ? "Whole new bio." : null) }),
+        baseCtx({ scrubbed: true, stopEditable: () => false, metadata: { bio: "Effective bio." } }),
         "bio",
       );
-      expect(model.stopEditValue).toBe("Whole new bio.");
+      expect(model.fieldReadOnly).toBe(true);
+      expect(model.value).toBe("Effective bio.");
     });
 
-    it("decision 5: falls back to the add-row fragment, else empty", () => {
+    it("at a stop a text row is editable and its control opens on the effective value", () => {
       const model = buildRailRowModel(
-        baseCtx({ scrubbed: true, stopEditable: () => true, stopEditValueFor: () => null }),
-        "bio",
+        baseCtx({ scrubbed: true, stopEditable: (id) => id === "alias", metadata: { alias: "Effective alias" } }),
+        "alias",
       );
-      expect(model.stopEditValue).toBe("");
-    });
-
-    it("stopEditValue is undefined for a non-text field, and for a text field not stop-editable", () => {
-      const notTextType = buildRailRowModel(baseCtx({ scrubbed: true, stopEditable: () => true }), "allies");
-      expect(notTextType.stopEditValue).toBeUndefined();
-      const notEditable = buildRailRowModel(baseCtx({ scrubbed: true, stopEditable: () => false, stopEditValueFor: () => "x" }), "bio");
-      expect(notEditable.stopEditValue).toBeUndefined();
+      expect(model.fieldReadOnly).toBe(false);
+      expect(model.scalar).toBe(true);
+      expect(model.value).toBe("Effective alias");
     });
   });
 });

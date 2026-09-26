@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-// ADR-0095 §8 (decisions 2/5/6) — at a scrub stop, a field a mutation can
-// target writes via `onStopFieldEdit` instead of `onMetadataChange`/
-// `onStatusChange`; a computed field stays locked; a text field's edit
-// control opens on the set's own row value, not the effective display.
+// ADR-0095 §8 (decisions 2/6), Amendment 1 (Anton, 2026-09-26) — at a scrub
+// stop, a field a mutation can target writes via `onStopFieldEdit` instead of
+// `onMetadataChange`/`onStatusChange`; a computed field stays locked; a
+// `long_text` field is never stop-targetable, so it stays a read-only
+// overlay showing the effective value even at a stop.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import MetadataPanel from "./MetadataPanel.svelte";
@@ -98,13 +99,12 @@ describe("MetadataPanel — stop editing (ADR-0095 §8)", () => {
     expect(row.querySelector(".ti-lock")).not.toBeNull();
   });
 
-  // `bio` (long_text) renders through MetadataLongTextEditor — a TipTap
-  // (contenteditable) widget, not a plain `<textarea>`, so its bound value
-  // can't be read back off the DOM under happy-dom. Decision 5's seed logic
-  // itself (replace-row-wins, else the add-row fragment, else "") is unit-
-  // tested directly on `buildRailRowModel` in `fieldRowModel.test.ts`
-  // ("ADR-0095 §8 decision 5") — this only pins that a stop-editable text row
-  // renders (mounts) at all, which the two assertions above already imply.
+  it("a long_text row stays read-only at a stop and shows the effective value — no edit hit", () => {
+    mount({ bio: "Born on the river." }, { scrubbed: true, readOnly: false });
+    const row = rowFor("Bio");
+    expect(row.querySelector(".fr-rest-hit")).toBeNull();
+    expect(row.textContent).toContain("Born on the river.");
+  });
 
   // #2237 review: a `create_missing` tags field typed at a stop must never
   // write the raw typed title into the set row — RailTagLine already mints

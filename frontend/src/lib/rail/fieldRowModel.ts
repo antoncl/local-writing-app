@@ -81,11 +81,6 @@ export type RailRowContext = {
   // consulted then.
   scrubbed: boolean;
   stopEditable: (fieldId: string) => boolean;
-  // §8's text-field seam (decision 5): the set's own row value for a
-  // text/long_text field at a stop — the replace row's value, else the add
-  // row's fragment, else `null` (no row yet). Only consulted for a
-  // stop-editable text/long_text row.
-  stopEditValueFor?: (fieldId: string) => string | null;
 };
 
 export type RailRowModel = {
@@ -157,11 +152,6 @@ export type RailRowModel = {
   ownClearable: boolean;
   canResetOverride: boolean;
   canResetCascade: boolean;
-
-  // ADR-0095 §8 decision 5: a stop-editable text/long_text row's edit control
-  // opens on the SET's own row value, not the effective display — `undefined`
-  // for every other row (its control just reads `value` as always).
-  stopEditValue: string | undefined;
 };
 
 // The shared record-aware rule (#698): the flip's "Current:" hint and the
@@ -510,13 +500,6 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
 
   const colorValueRaw = colorRow ? metadataValueString(value) : "";
 
-  // ADR-0095 §8 decision 5: only for a stop-editable text/long_text row —
-  // every other row's control reads `value` (the effective display) as always.
-  const stopEditValue =
-    ctx.scrubbed && ctx.stopEditable(fieldId) && (field.type === "text" || field.type === "long_text")
-      ? (ctx.stopEditValueFor?.(fieldId) ?? "")
-      : undefined;
-
   return {
     field,
     fieldId,
@@ -574,7 +557,6 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
     ownClearable: ctx.canClearOwn && isOwnClearable(ctx, fieldId) && !cascadeOverridden,
     canResetOverride: ctx.canResetOverride,
     canResetCascade: ctx.canClearOwn,
-    stopEditValue,
   };
 }
 

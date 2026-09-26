@@ -4,8 +4,8 @@
 // zero rows.
 import { describe, expect, it } from "vitest";
 import { encodeItem, type KeyedListShape } from "./mutationListEdit";
-import { rowsForStopEdit, stopEditRowValueFor } from "./stopEditRows";
-import type { MutationMarkerRecord, MutationSetRow } from "@/lib/types";
+import { rowsForStopEdit } from "./stopEditRows";
+import type { MutationSetRow } from "@/lib/types";
 
 const RELATIONSHIP: KeyedListShape = {
   keyMember: "to",
@@ -89,70 +89,16 @@ describe("rowsForStopEdit — keyed (reference-keyed list)", () => {
   });
 });
 
-describe("rowsForStopEdit — text/long_text", () => {
-  it("with an existing replace row, the edit REPLACES the whole text", () => {
-    const existing: MutationSetRow = { id: "row_bio", field: "bio", op: "replace", value: "Born in the north." };
-    const rows = rowsForStopEdit({ rows: [existing], field: "bio", fieldType: "text", baseline: "Born in the south.", edited: "Born in the east." });
-    expect(rows).toEqual([{ id: "row_bio", field: "bio", op: "replace", value: "Born in the east." }]);
+describe("rowsForStopEdit — text (Anton, 2026-09-26: a short text field edits as a scalar)", () => {
+  it("a text field edits as a scalar replace, keeping the existing row's id", () => {
+    const existing: MutationSetRow = { id: "row_eye", field: "eye_color", op: "replace", value: "brown" };
+    const rows = rowsForStopEdit({ rows: [existing], field: "eye_color", fieldType: "scalar", baseline: "hazel", edited: "silver" });
+    expect(rows).toEqual([{ id: "row_eye", field: "eye_color", op: "replace", value: "silver" }]);
   });
 
-  it("without a replace row, the edit is the set's APPENDED FRAGMENT — an add row, not a replace", () => {
-    const rows = rowsForStopEdit({ rows: [], field: "bio", fieldType: "text", baseline: "Born in the south.", edited: "Also loves the sea." });
-    expect(rows).toEqual([{ id: "", field: "bio", op: "add", value: "Also loves the sea." }]);
-  });
-
-  it("keeps the existing add row's id", () => {
-    const existing: MutationSetRow = { id: "row_add", field: "bio", op: "add", value: "old fragment" };
-    const rows = rowsForStopEdit({ rows: [existing], field: "bio", fieldType: "text", baseline: "base", edited: "new fragment" });
-    expect(rows).toEqual([{ id: "row_add", field: "bio", op: "add", value: "new fragment" }]);
-  });
-
-  it("an empty fragment removes the add row", () => {
-    const existing: MutationSetRow = { id: "row_add", field: "bio", op: "add", value: "old fragment" };
-    const rows = rowsForStopEdit({ rows: [existing], field: "bio", fieldType: "text", baseline: "base", edited: "" });
+  it("an edit equal to the baseline removes the row", () => {
+    const existing: MutationSetRow = { id: "row_eye", field: "eye_color", op: "replace", value: "brown" };
+    const rows = rowsForStopEdit({ rows: [existing], field: "eye_color", fieldType: "scalar", baseline: "hazel", edited: "hazel" });
     expect(rows).toEqual([]);
-  });
-
-  it("a replace row equal to the baseline removes it", () => {
-    const existing: MutationSetRow = { id: "row_bio", field: "bio", op: "replace", value: "Born in the north." };
-    const rows = rowsForStopEdit({ rows: [existing], field: "bio", fieldType: "text", baseline: "Born in the south.", edited: "Born in the south." });
-    expect(rows).toEqual([]);
-  });
-});
-
-describe("stopEditRowValueFor (decision 5's text-field seed)", () => {
-  function rec(over: Partial<MutationMarkerRecord>): MutationMarkerRecord {
-    return {
-      marker_id: "m",
-      entity_id: "e",
-      field: "bio",
-      op: "replace",
-      value: "v",
-      name: "",
-      group: "",
-      unit_id: "",
-      unit_name: "",
-      scene_id: "s",
-      offset: 0,
-      line: 0,
-      scene_path: "",
-      ...over,
-    };
-  }
-
-  it("returns the replace row's value when the set has one", () => {
-    expect(stopEditRowValueFor("bio", [rec({ field: "bio", op: "replace", value: "Full text." })])).toBe("Full text.");
-  });
-
-  it("falls back to the add row's fragment", () => {
-    expect(stopEditRowValueFor("bio", [rec({ field: "bio", op: "add", value: "Fragment." })])).toBe("Fragment.");
-  });
-
-  it("returns null with no row for the field", () => {
-    expect(stopEditRowValueFor("bio", [rec({ field: "eye_color", op: "replace", value: "brown" })])).toBeNull();
-  });
-
-  it("never matches a keyed-list member's path token", () => {
-    expect(stopEditRowValueFor("kin", [rec({ field: "kin.lore_a.state", op: "replace", value: "old" })])).toBeNull();
   });
 });

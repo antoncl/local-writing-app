@@ -33,7 +33,6 @@
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { buildRailRowModel, isFlipped, isFlipResolve, isListIndex, isMutated, isRowEmpty, isSectionIndex, type RailRowContext } from "@/lib/rail/fieldRowModel";
   import { stopTargetableFieldIds } from "@/lib/editor-core/stopFieldEditable";
-  import { stopEditRowValueFor } from "@/lib/editor-core/stopEditRows";
 
   interface Props {
     entryType: string;
@@ -562,7 +561,6 @@
     // field-membership half is all this needs to ask.
     scrubbed,
     stopEditable: (fieldId) => targetableFieldIds.has(fieldId),
-    stopEditValueFor: (fieldId) => stopEditRowValueFor(fieldId, stopUnit?.records ?? []),
   });
   function rowModel(fieldId: string) {
     return buildRailRowModel(ctx, fieldId);

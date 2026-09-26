@@ -33,9 +33,11 @@ export function stopEditingEngaged(ctx: StopEditGateContext): boolean {
  *  `editorReadOnly`) can ask just this half instead of re-deriving the merge
  *  to call the full predicate below. The same roster `buildFieldOptions`
  *  offers for `/mutate` (so: not computed, not a non-keyed `list`, plus the
- *  intrinsic `title`) — EXCEPT the body, which stays a read-only overlay at a
- *  stop even though a mutation can append to it (body rows are edited in the
- *  pill dialog, never here).
+ *  intrinsic `title`) — EXCEPT the body, and except every `long_text` field
+ *  (Anton, 2026-09-26, replacing §8's text rule): both stay a read-only
+ *  overlay at a stop even though a mutation can append to them — their rows
+ *  (replace or add) are edited in the change's dialog, never on the card. A
+ *  short `text` field is NOT excluded — it edits like any other scalar.
  *
  *  Returns the whole Set rather than testing one field: `buildFieldOptions`
  *  walks every field on the entry type, so a caller asking per-row (the rail,
@@ -46,8 +48,8 @@ export function stopEditingEngaged(ctx: StopEditGateContext): boolean {
  *  that must build it ONCE per render instead. */
 export function stopTargetableFieldIds(schema: MetadataSchema | null, entryType: string): Set<string> {
   const ids = buildFieldOptions(schema, entryType, true)
-    .map((option) => option.id)
-    .filter((id) => id !== "body");
+    .filter((option) => option.id !== "body" && option.def.type !== "long_text")
+    .map((option) => option.id);
   return new Set(ids);
 }
 

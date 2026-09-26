@@ -29,7 +29,10 @@ function classifyStopField(
   if (def && isCollectionType(def.type)) return { kind: "collection", baseValue: metadata[fieldId] };
   const keyMember = def ? keyedListKeyMember(def) : null;
   if (def && keyMember) return { kind: "keyed", keyed: keyedShapeFor(def), baseValue: metadata[fieldId] };
-  if (def && (def.type === "text" || def.type === "long_text")) return { kind: "text", baseValue: metadata[fieldId] };
+  // long_text is never stop-targetable (Anton, 2026-09-26, replacing §8's text
+  // rule) — `stopTargetableFieldIds` excludes it, so a caller reaching here
+  // with one is a bug in that gate, not a shape this function should classify.
+  if (def && def.type === "long_text") throw new Error(`classifyStopField: '${fieldId}' is a long_text field and is not stop-editable.`);
   return { kind: "scalar", baseValue: metadata[fieldId] };
 }
 

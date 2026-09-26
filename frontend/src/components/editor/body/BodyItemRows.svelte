@@ -156,6 +156,12 @@
     tagTitleById: deps.tagTitleById,
     openFieldId,
     fieldExpanded: (id) => expanded.has(id),
+    // ADR-0095 §8: a member row's stop-editability is already folded into
+    // `model.readOnly` above (ReferenceListTab passes the SAME generalised
+    // `stopEditableFor` its own read-only gate uses) — this ctx never needs a
+    // second, per-member answer.
+    scrubbed: false,
+    stopEditable: () => false,
   });
 
   // Fold per item: an empty member folds behind the disclosure unless it's the

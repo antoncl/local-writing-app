@@ -289,7 +289,7 @@
         controlled={model.isRef}
         expanded={model.fieldExpanded}
         onToggleExpanded={() => on.toggleExpanded(model.fieldId)}
-        value={model.value}
+        value={model.stopEditValue ?? model.value}
         ariaLabel={model.fieldLabel}
         loreEntries={deps.loreEntries}
         promptEntries={deps.promptEntries}
@@ -308,6 +308,7 @@
         fieldId={model.fieldId}
         fieldLabel={model.fieldLabel}
         value={model.value}
+        editValue={model.stopEditValue}
         empty={model.empty}
         editing={model.editing}
         closesOnPick={model.closesOnPick}

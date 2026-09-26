@@ -55,6 +55,13 @@
     fieldLabel: string;
     /** The value the row displays/edits (MetadataPanel's displayValue, or the status string for `status`). */
     value: MetadataValue;
+    /** ADR-0095 §8 decision 5: at a scrub stop, a text field's edit control
+     *  opens on a DIFFERENT value than its rest display — the set's own row
+     *  value, not the effective one (§8: "the DISPLAY stays the effective
+     *  value, but its EDIT control opens on the set's own row value"). Defaults
+     *  to `value` so every other row's rest/edit stay the one value they've
+     *  always been. */
+    editValue?: MetadataValue;
     empty: boolean;
     editing: boolean;
     /** Single-pick controls return to rest right after the pick. */
@@ -82,9 +89,11 @@
   }
 
   let {
-    field, fieldId, fieldLabel, value, empty, editing, closesOnPick, onOpen, onClose, onChange,
+    field, fieldId, fieldLabel, value, editValue = undefined, empty, editing, closesOnPick, onOpen, onClose, onChange,
     resolveRef = undefined, refDeps = {}, onNavigate = undefined, emptyHint = null,
   }: Props = $props();
+
+  const liveEditValue = $derived(editValue ?? value);
 
   // --- A single reference (#2058): one line at rest, the picker when open ---
   // The rest face is the target's resolved title (the stored id when the host
@@ -180,7 +189,7 @@
         {emptyHint}
       />
     {:else}
-      <FieldValueEditor {field} allowUnset={true} embedded={true} {value} ariaLabel={fieldLabel} onChange={pick} />
+      <FieldValueEditor {field} allowUnset={true} embedded={true} value={liveEditValue} ariaLabel={fieldLabel} onChange={pick} />
     {/if}
   </div>
 {:else}

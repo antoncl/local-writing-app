@@ -74,6 +74,18 @@ export type RailRowContext = {
   tagTitleById: ReadonlyMap<string, string>;
   openFieldId: string | null;
   fieldExpanded: (fieldId: string) => boolean;
+  // ADR-0095 §8: at a scrub stop, every field a mutation can target is
+  // editable in place — `editorReadOnly` no longer folds `scrubbed` in
+  // (NodeEditor), so each row asks this per-field predicate instead.
+  // `scrubbed` false outside the lore axis, so `stopEditable` is never
+  // consulted then.
+  scrubbed: boolean;
+  stopEditable: (fieldId: string) => boolean;
+  // §8's text-field seam (decision 5): the set's own row value for a
+  // text/long_text field at a stop — the replace row's value, else the add
+  // row's fragment, else `null` (no row yet). Only consulted for a
+  // stop-editable text/long_text row.
+  stopEditValueFor?: (fieldId: string) => string | null;
 };
 
 export type RailRowModel = {
@@ -145,6 +157,11 @@ export type RailRowModel = {
   ownClearable: boolean;
   canResetOverride: boolean;
   canResetCascade: boolean;
+
+  // ADR-0095 §8 decision 5: a stop-editable text/long_text row's edit control
+  // opens on the SET's own row value, not the effective display — `undefined`
+  // for every other row (its control just reads `value` as always).
+  stopEditValue: string | undefined;
 };
 
 // The shared record-aware rule (#698): the flip's "Current:" hint and the
@@ -161,7 +178,13 @@ function holdsDerivedState(ctx: RailRowContext, fieldId: string): boolean {
 }
 
 function fieldReadOnly(ctx: RailRowContext, fieldId: string): boolean {
-  return ctx.readOnly || (fieldId === "ai_temperature" && ctx.temperatureUnsupported) || holdsDerivedState(ctx, fieldId);
+  if (ctx.readOnly) return true;
+  if ((fieldId === "ai_temperature" && ctx.temperatureUnsupported) || holdsDerivedState(ctx, fieldId)) return true;
+  // ADR-0095 §8: `editorReadOnly` (`ctx.readOnly`) no longer folds `scrubbed`
+  // in — a scrub stop is per-field now, so a row that ISN'T one a mutation
+  // can target stays read-only exactly the way the whole card used to.
+  if (ctx.scrubbed) return !ctx.stopEditable(fieldId);
+  return false;
 }
 
 // Inheritance: a field present on the type but not in its own_fields is
@@ -487,6 +510,13 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
 
   const colorValueRaw = colorRow ? metadataValueString(value) : "";
 
+  // ADR-0095 §8 decision 5: only for a stop-editable text/long_text row —
+  // every other row's control reads `value` (the effective display) as always.
+  const stopEditValue =
+    ctx.scrubbed && ctx.stopEditable(fieldId) && (field.type === "text" || field.type === "long_text")
+      ? (ctx.stopEditValueFor?.(fieldId) ?? "")
+      : undefined;
+
   return {
     field,
     fieldId,
@@ -544,6 +574,7 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
     ownClearable: ctx.canClearOwn && isOwnClearable(ctx, fieldId) && !cascadeOverridden,
     canResetOverride: ctx.canResetOverride,
     canResetCascade: ctx.canClearOwn,
+    stopEditValue,
   };
 }
 

@@ -89,6 +89,7 @@ describe("EditorRailContent", () => {
         overriddenFieldsForPanel: [],
         scrubbed: false,
         scrub: new LoreScrubController(),
+        stopUnit: null,
         compare: null,
         editorReadOnly: false,
         bodyShape: "none",

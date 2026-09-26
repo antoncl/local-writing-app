@@ -68,6 +68,8 @@ function baseCtx(overrides: Partial<RailRowContext> = {}): RailRowContext {
     fieldExpanded: () => false,
     sectionsInBody: false,
     listsInBody: false,
+    scrubbed: false,
+    stopEditable: () => false,
     ...overrides,
   };
 }

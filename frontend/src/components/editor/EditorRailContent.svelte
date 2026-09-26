@@ -13,6 +13,7 @@
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
   import type { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
+  import type { MutationUnitGroup } from "@/lib/editor-core/mutationUnits";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ResolvedCascadeField } from "@/lib/manuscriptTypes";
   import type {
@@ -43,6 +44,9 @@
     overriddenFieldsForPanel: string[];
     scrubbed: boolean;
     scrub: LoreScrubController;
+    // ADR-0095 §8: the open scrub stop's own unit — decision 5's text-field
+    // seed reads its rows directly. `null` off the lore axis or at base.
+    stopUnit: MutationUnitGroup | null;
     compare: {
       fields: Record<string, { was: unknown; now: unknown }>;
       side: "now" | "was";
@@ -73,6 +77,10 @@
     customData: () => void;
     navigate: (target: NavigateTarget) => void;
     resetField: (fieldId: string) => void;
+    // ADR-0095 §8 decision 6: a rail write/clear/status-change at a stop —
+    // present only while `model.scrubbed`, else omitted so MetadataPanel keeps
+    // routing to `metadataChange`/`statusChange`.
+    stopFieldEdit?: (fieldId: string, value: import("@/lib/types").MetadataValue | null) => void;
     goToSection: (fieldId: string) => void;
     // #2010: a list-index row's hit — switch the body tab strip to this
     // field's list tab. Owned by NodeEditor (which owns `activeBodyTab`).
@@ -160,6 +168,9 @@
     onNavigate={(payload) => on.navigate(payload)}
     onResetField={model.documentKind === "lore" || model.documentKind === "prompt" ? on.resetField : undefined}
     resolvedCascade={model.resolvedCascade}
+    scrubbed={model.scrubbed}
+    stopUnit={model.stopUnit}
+    onStopFieldEdit={model.scrubbed ? on.stopFieldEdit : undefined}
     trailing={part === "rail" ? trailing : undefined}
   />
   <!-- #2037: in the rail the trailing sections render INSIDE MetadataPanel,

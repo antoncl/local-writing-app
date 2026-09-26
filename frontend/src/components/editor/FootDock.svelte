@@ -88,11 +88,19 @@
     const target = event.target as HTMLElement | null;
     if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "")) return;
 
-    // While parked/scrubbed the read-only overlay frees the whole keyboard; at
-    // the editable end only a press with focus inside the dock is ours (else a
-    // plain letter typed elsewhere in the pane would move the track).
-    const engaged = shownTrack === "snapshots" ? snapshots.parked !== null : scrub.index > 0;
-    if (!engaged && !(target && footEl?.contains(target))) return;
+    // Snapshots: while parked the read-only overlay frees the whole keyboard;
+    // at the editable end only a press with focus inside the dock is ours
+    // (else a plain letter typed elsewhere in the pane would move the track).
+    // Mutations: ADR-0095 §8 — a stop is now editable, so the dock's keys need
+    // focus IN THE DOCK at every stop, base included; the old "engaged frees
+    // the keyboard" bypass would scrub the card away from under a field the
+    // writer is mid-edit in.
+    const inDock = !!(target && footEl?.contains(target));
+    if (shownTrack === "mutations") {
+      if (!inDock) return;
+    } else if (snapshots.parked === null && !inDock) {
+      return;
+    }
     if (!paneOwnsKey(footEl, target)) return;
 
     // One unmodified key cycles the mode — only when both timelines exist.

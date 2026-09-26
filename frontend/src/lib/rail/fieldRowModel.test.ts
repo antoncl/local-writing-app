@@ -96,6 +96,8 @@ function baseCtx(overrides: Partial<RailRowContext> = {}): RailRowContext {
     fieldExpanded: () => false,
     sectionsInBody: false,
     listsInBody: false,
+    scrubbed: false,
+    stopEditable: () => false,
     ...overrides,
   };
 }
@@ -323,6 +325,54 @@ describe("buildRailRowModel", () => {
       const model = buildRailRowModel(baseCtx({ metadata: { relationships: [{ who: "lore_a", role: "squire" }] } }), "relationships");
       expect(model.listIndex).toBe(false);
       expect(model.wide).toBe(true);
+    });
+  });
+
+  // ADR-0095 §8: `editorReadOnly` no longer folds `scrubbed` in — a row's
+  // `fieldReadOnly` asks the per-field predicate instead, and a stop-editable
+  // text/long_text row's edit control seeds from the SET's own row value.
+  describe("ADR-0095 §8 stop editing", () => {
+    it("a field the predicate accepts is NOT read-only while scrubbed", () => {
+      const model = buildRailRowModel(baseCtx({ scrubbed: true, stopEditable: (id) => id === "alias" }), "alias");
+      expect(model.fieldReadOnly).toBe(false);
+    });
+
+    it("a field the predicate rejects stays read-only while scrubbed", () => {
+      const model = buildRailRowModel(baseCtx({ scrubbed: true, stopEditable: () => false }), "alias");
+      expect(model.fieldReadOnly).toBe(true);
+    });
+
+    it("readOnly (another axis: parked/reviewing/inherited) wins over the predicate", () => {
+      const model = buildRailRowModel(baseCtx({ readOnly: true, scrubbed: true, stopEditable: () => true }), "alias");
+      expect(model.fieldReadOnly).toBe(true);
+    });
+
+    it("off the scrub axis, fieldReadOnly never consults the predicate", () => {
+      const model = buildRailRowModel(baseCtx({ scrubbed: false, stopEditable: () => false }), "alias");
+      expect(model.fieldReadOnly).toBe(false);
+    });
+
+    it("decision 5: a stop-editable text/long_text row's stopEditValue is the set's replace-row value", () => {
+      const model = buildRailRowModel(
+        baseCtx({ scrubbed: true, stopEditable: () => true, stopEditValueFor: (id) => (id === "bio" ? "Whole new bio." : null) }),
+        "bio",
+      );
+      expect(model.stopEditValue).toBe("Whole new bio.");
+    });
+
+    it("decision 5: falls back to the add-row fragment, else empty", () => {
+      const model = buildRailRowModel(
+        baseCtx({ scrubbed: true, stopEditable: () => true, stopEditValueFor: () => null }),
+        "bio",
+      );
+      expect(model.stopEditValue).toBe("");
+    });
+
+    it("stopEditValue is undefined for a non-text field, and for a text field not stop-editable", () => {
+      const notTextType = buildRailRowModel(baseCtx({ scrubbed: true, stopEditable: () => true }), "allies");
+      expect(notTextType.stopEditValue).toBeUndefined();
+      const notEditable = buildRailRowModel(baseCtx({ scrubbed: true, stopEditable: () => false, stopEditValueFor: () => "x" }), "bio");
+      expect(notEditable.stopEditValue).toBeUndefined();
     });
   });
 });

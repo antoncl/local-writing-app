@@ -32,6 +32,8 @@
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { buildRailRowModel, isFlipped, isFlipResolve, isListIndex, isMutated, isRowEmpty, isSectionIndex, type RailRowContext } from "@/lib/rail/fieldRowModel";
+  import { stopFieldTargetable } from "@/lib/editor-core/stopFieldEditable";
+  import { stopEditRowValueFor } from "@/lib/editor-core/stopEditRows";
 
   interface Props {
     entryType: string;
@@ -100,6 +102,24 @@
       resolve?: { adopted: (fieldId: string) => boolean; onToggle: (fieldId: string) => void };
     } | null;
     readOnly?: boolean;
+    // ADR-0095 §8: true while the card is scrubbed to a mutation stop.
+    // `readOnly` above already excludes the scrub axis (a parked snapshot / an
+    // AI review / an inherited-prompt lock stay whole-card read-only) — this
+    // is the per-field axis: a field a mutation can target is editable here
+    // even though the card is "scrubbed"; every other field stays read-only.
+    scrubbed?: boolean;
+    // The open scrub stop's own unit (ADR-0095 §8, decision 5's text seam):
+    // its resolved records already carry the anchor's set's rows (field/op/
+    // value) directly, so a text/long_text row's edit control can seed from
+    // its own row value with no extra fetch. `null` off the lore axis or at
+    // base (stop 0).
+    stopUnit?: import("@/lib/editor-core/mutationUnits").MutationUnitGroup | null;
+    // ADR-0095 §8 decision 6: when scrubbed, a row's write/clear/status-change
+    // routes HERE instead of `onMetadataChange`/`onStatusChange` — the edit
+    // saves the stop's mutation SET, never the scene or the entry's base
+    // metadata. `value === null` is a clear (edit to empty). Rows the
+    // stop-edit predicate rejects stay read-only, so they never reach this.
+    onStopFieldEdit?: (fieldId: string, value: MetadataValue | null) => void;
     // #2009: the open entry's body renders a headed section per long_text
     // field (BodySections) — NodeEditor passes `bodyShape === "prose"`. When
     // true, a long_text row becomes an index row instead of hosting the
@@ -160,6 +180,9 @@
     effectiveOverrides = null,
     compare = null,
     readOnly = false,
+    scrubbed = false,
+    stopUnit = null,
+    onStopFieldEdit,
     sectionsInBody = false,
     onGoToSection,
     listsInBody = false,
@@ -377,7 +400,9 @@
 
   // The reset gesture is live only when a handler is wired and the rail is
   // editable — a scrubbed / snapshot-parked pane shows the mark inertly.
-  const canResetOverride = $derived(onResetField != null && !readOnly);
+  // ADR-0095 §8: hidden at a stop too — a reset edits base/override state,
+  // never a mutation set.
+  const canResetOverride = $derived(onResetField != null && !readOnly && !scrubbed);
 
   // Clear-to-default (#522): the intra-project twin of #517's layer reset. On a
   // locally-owned entry, a field carrying its own stored value can be reverted to
@@ -387,9 +412,18 @@
   // reset instead, so this is gated to non-inherited entries and never collides
   // with it. Same gesture as #517 — the `ti-versions` mark + "Reset to …" chip,
   // just a different target — so a user never wonders why one field reverts and
-  // another doesn't. Editable-rail-only, like the override reset.
-  const canClearOwn = $derived(onMetadataChange != null && !readOnly);
+  // another doesn't. Editable-rail-only, like the override reset. ADR-0095 §8:
+  // hidden at a stop too — a stop edit writes the mutation set, never the base
+  // metadata this reset targets.
+  const canClearOwn = $derived(onMetadataChange != null && !readOnly && !scrubbed);
   function clearField(fieldId: string) {
+    // ADR-0095 §8 decision 6: a clear at a stop is an edit TO EMPTY, routed the
+    // same as any other stop write (a `replace` with "" unless the baseline is
+    // already empty, in which case `rowsForStopEdit` drops the row on its own).
+    if (onStopFieldEdit) {
+      onStopFieldEdit(fieldId, null);
+      return;
+    }
     const next = { ...metadata };
     delete next[fieldId];
     onMetadataChange?.(next);
@@ -398,8 +432,14 @@
   // Persist a single field edit. A required select (one that declares a default,
   // #1421) that lands back on its default pops the key instead of writing it, so
   // front matter stays sparse — the value resolves to the same default at
-  // evaluation. Every other edit writes through unchanged.
+  // evaluation. Every other edit writes through unchanged. ADR-0095 §8 decision
+  // 6: at a stop, every write routes to `onStopFieldEdit` instead — it saves
+  // THIS STOP'S mutation set, never the entry's base metadata.
   function writeField(fieldId: string, v: MetadataValue) {
+    if (onStopFieldEdit) {
+      onStopFieldEdit(fieldId, v);
+      return;
+    }
     const field = metadataSchema.fields[fieldId];
     if (isRequiredSelect(field) && String(v) === field.default) {
       clearField(fieldId);
@@ -510,6 +550,12 @@
     listsInBody,
     resolveListMemberType: (id) => listMemberResolver(id)?.entry_type ?? null,
     resolveListMemberTitle: (id) => listMemberResolver(id)?.title ?? null,
+    // ADR-0095 §8: `readOnly` above already folds snapshotParked/reviewing/
+    // inheritedReadOnly (NodeEditor's redefined `editorReadOnly`), so the
+    // field-membership half is all this needs to ask.
+    scrubbed,
+    stopEditable: (fieldId) => stopFieldTargetable(fieldId, metadataSchema, entryType),
+    stopEditValueFor: (fieldId) => stopEditRowValueFor(fieldId, stopUnit?.records ?? []),
   });
   function rowModel(fieldId: string) {
     return buildRailRowModel(ctx, fieldId);
@@ -538,7 +584,9 @@
     clear: clearField,
     write: writeField,
     toggleExpanded: (fieldId) => railSectionCollapse.toggle(`field:${fieldId}`, FOLD_DEFAULT),
-    statusChange: (value) => onStatusChange?.(value),
+    // ADR-0095 §8 decision 6: `status` routes through `onStopFieldEdit` at a
+    // stop, same as every other rail write.
+    statusChange: (value) => (onStopFieldEdit ? onStopFieldEdit("status", value) : onStatusChange?.(value)),
     resetField: (fieldId) => onResetField?.(fieldId),
     navigate: (payload) => onNavigate?.(payload),
     toggleFlip: (fieldId) => compare?.resolve?.onToggle(fieldId),
@@ -560,7 +608,9 @@
   <!-- The head is one fact — the entry's type — and reads as one (#1904, #1884):
        glyph + name + caret, the rail's own ColoredSelect in its quiet face. The
        type list opens on click; "Edit type…" lives behind it as the trailing
-       action. readOnly locks the pick; the jump stays reachable. -->
+       action. readOnly locks the pick; the jump stays reachable. ADR-0095 §8:
+       the type selector stays locked at a stop too — a mutation can't
+       reclassify an entry. -->
   <div class="rail-type">
     <ColoredSelect
       value={entryType}
@@ -568,7 +618,7 @@
       allowBlank={false}
       icon={railTypeIcon}
       quiet
-      {readOnly}
+      readOnly={readOnly || scrubbed}
       ariaLabel={`${documentLabel} type: ${typeOptions.find((o) => o.value === entryType)?.label ?? entryType}`}
       onChange={(next) => onEntryTypeChange?.(next)}
       footer={editTypeAction}

@@ -2,6 +2,7 @@
   import { api } from "@/lib/api";
   import IconPicker from "@/components/widgets/IconPicker.svelte";
   import GroupMemberTargets from "@/components/schema/GroupMemberTargets.svelte";
+  import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { fieldIconClass, DEFAULT_FIELD_GLYPH } from "@/lib/utils/fieldIcons";
   import { dropPositionFromEvent, reorderByPosition } from "@/lib/utils/listOrder";
   import type { GroupMember, MetadataGroupDefinition, MetadataSchema, NodePickerConfig, SelectOption } from "@/lib/types";
@@ -38,9 +39,17 @@
   let draftId = $state("");
   let draftIdTouched = $state(false);
   let draftName = $state("");
-  let draftMembers = $state<GroupMember[]>([]);
+  // A draft member carries `isNew` while it has never been saved (#2239): only
+  // such a member derives its key from its name. Tracked on the member itself,
+  // not inferred from its key — a new member typing "Notes" passes through an
+  // existing member's key `note` on the way, and must not freeze there.
+  type DraftMember = GroupMember & { isNew?: boolean };
+  let draftMembers = $state<DraftMember[]>([]);
   let error = $state("");
   let busy = $state(false);
+  // The group as it stood when the editor opened (null for a new group) — the
+  // baseline for detecting a save that would delete data (#2239).
+  let originalGroup = $state<MetadataGroupDefinition | null>(null);
 
   function slug(value: string): string {
     return value
@@ -49,6 +58,38 @@
       .replace(/[^a-z0-9]+/g, "_")
       .replace(/^_+|_+$/g, "")
       .replace(/^[0-9]/, "g_$&");
+  }
+
+  // A confirm message naming what a save would delete — a member key gone
+  // entirely, or a select/multi_select option value gone from a member that
+  // stays — or null when nothing would be lost. Matches what the backend
+  // actually detects (`_reconcile_group_member_data`, read BEFORE the write):
+  // a disappearance, never a rename, since both keys and option values are
+  // stable once saved.
+  function describeGroupDataLoss(original: MetadataGroupDefinition | null, nextMembers: GroupMember[]): string | null {
+    if (!original) return null;
+    const nextByKey = new Map(nextMembers.map((member) => [member.key, member]));
+    const removedMembers = original.members.filter((member) => !nextByKey.has(member.key));
+    const optionLosses: string[] = [];
+    for (const member of original.members) {
+      const next = nextByKey.get(member.key);
+      if (!next || (next.type !== "select" && next.type !== "multi_select")) continue;
+      const nextValues = new Set((next.options ?? []).map((o) => o.value));
+      const removedValues = (member.options ?? []).map((o) => o.value).filter((v) => !nextValues.has(v));
+      if (removedValues.length > 0) optionLosses.push(`${member.name} (${removedValues.join(", ")})`);
+    }
+    if (removedMembers.length === 0 && optionLosses.length === 0) return null;
+    const parts: string[] = [];
+    if (removedMembers.length > 0) {
+      const names = removedMembers.map((m) => m.name).join(", ");
+      parts.push(
+        `Removing ${names} deletes ${removedMembers.length > 1 ? "their" : "its"} values from every item and change that uses ${removedMembers.length > 1 ? "them" : "it"}.`,
+      );
+    }
+    if (optionLosses.length > 0) {
+      parts.push(`Removing ${optionLosses.join("; ")} clears that value everywhere it's used.`);
+    }
+    return parts.join(" ");
   }
 
   // System groups (built-in plot-board machinery) are not author-editable and
@@ -63,6 +104,7 @@
     draftIdTouched = false;
     draftName = "";
     draftMembers = [];
+    originalGroup = null;
     error = "";
   }
 
@@ -75,6 +117,7 @@
     draftIdTouched = true;
     draftName = group.name;
     draftMembers = group.members.map((member) => ({ ...member }));
+    originalGroup = group;
     error = "";
   }
 
@@ -84,11 +127,16 @@
   }
 
   function addMember() {
-    draftMembers = [...draftMembers, { key: "", name: "", type: "text" }];
+    draftMembers = [...draftMembers, { key: "", name: "", type: "text", isNew: true }];
   }
   function updateMemberName(index: number, value: string) {
     const member = draftMembers[index];
-    draftMembers[index] = { ...member, name: value, key: slug(value) };
+    // A member never saved yet still derives its key from the name (the
+    // authoring convenience); one already on disk keeps its key — the name
+    // is the human handle, the key is identity (same rule as a node id).
+    draftMembers[index] = member.isNew
+      ? { ...member, name: value, key: slug(value) }
+      : { ...member, name: value };
     draftMembers = draftMembers;
   }
   function updateMemberType(index: number, value: GroupMember["type"]) {
@@ -159,7 +207,7 @@
     // select member also disabled its allowed-values check.
     const members = draftMembers
       .filter((member) => member.name.trim())
-      .map((member) => {
+      .map(({ isNew: _isNew, ...member }) => {
         const next: GroupMember = {
           ...member,
           key: member.key || slug(member.name),
@@ -188,17 +236,38 @@
       name: draftName.trim() || id,
       members,
     };
-    busy = true;
-    error = "";
-    try {
-      const schema = await api.upsertMetadataGroup(layerId, id, group);
-      onChanged?.({ schema });
-      editingId = null;
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    } finally {
-      busy = false;
+
+    const doSave = async () => {
+      busy = true;
+      error = "";
+      try {
+        const schema = await api.upsertMetadataGroup(layerId, id, group);
+        onChanged?.({ schema });
+        editingId = null;
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e);
+      } finally {
+        busy = false;
+      }
+    };
+
+    // A member key or a select/multi_select option value that disappears
+    // orphans every stored item/row that used it (the backend detects this
+    // and cleans it up — #2239 follow-up) — confirm before that happens,
+    // rather than silently losing data on a routine "delete a row" edit.
+    const removal = describeGroupDataLoss(originalGroup, members);
+    if (removal) {
+      confirmService.request({
+        title: "This will remove stored data",
+        message: removal,
+        confirmLabel: "Remove & save",
+        destructive: true,
+        cannotBeUndone: true,
+        onConfirm: doSave,
+      });
+      return;
     }
+    await doSave();
   }
 
   async function deleteGroup(id: string) {

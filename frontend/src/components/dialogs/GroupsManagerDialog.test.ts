@@ -17,6 +17,11 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+const confirmRequest = vi.fn();
+vi.mock("@/lib/stores/confirmService.svelte", () => ({
+  confirmService: { request: (...args: unknown[]) => confirmRequest(...args) },
+}));
+
 const GROUPS: Record<string, MetadataGroupDefinition> = {
   gmo: { name: "GMO", members: [{ key: "goal", name: "Goal", type: "text" }] },
   plot_beat_link: {
@@ -32,7 +37,10 @@ function mount() {
   });
 }
 
-beforeEach(() => upsertMetadataGroup.mockReset());
+beforeEach(() => {
+  upsertMetadataGroup.mockReset();
+  confirmRequest.mockReset();
+});
 
 describe("GroupsManagerDialog (#1003)", () => {
   it("hides built-in system groups from the list", () => {
@@ -191,5 +199,108 @@ describe("GroupsManagerDialog — member targets disclosure (#2215)", () => {
     const saved = upsertMetadataGroup.mock.calls[0][2];
     expect(saved.members[0].picker_config.sources).toEqual([{ kind: "lore", expr: { type: "lore:character" } }]);
     metadataSchemaStore.set(null as unknown as MetadataSchema);
+  });
+});
+
+// #2239 follow-up: a member's key is stable once saved (same rule as a node
+// id) — retyping its NAME must never silently re-key stored items/rows. An
+// option value follows the same rule. Removing a member/option that carries
+// data is confirmed, not silent.
+describe("GroupsManagerDialog — member key stability (#2239)", () => {
+  const CONNECTIONS: Record<string, MetadataGroupDefinition> = {
+    connections: {
+      name: "Connections",
+      members: [
+        { key: "who", name: "Who", type: "entity_ref" },
+        { key: "state", name: "State", type: "select", options: [{ value: "trusted" }, { value: "wary" }] },
+      ],
+    },
+  };
+
+  function mountConnections() {
+    render(GroupsManagerDialog, {
+      props: { groups: CONNECTIONS, layerId: "proj", onChanged: vi.fn(), onClose: vi.fn() },
+    });
+  }
+
+  it("keeps an existing member's key when its name is retyped", async () => {
+    mountConnections();
+    await fireEvent.click(screen.getByText("Connections"));
+    const nameInputs = screen.getAllByPlaceholderText("Member name") as HTMLInputElement[];
+    await fireEvent.input(nameInputs[1], { target: { value: "Standing" } });
+    await fireEvent.click(screen.getByText("Save group"));
+    expect(upsertMetadataGroup).toHaveBeenCalledOnce();
+    const saved = upsertMetadataGroup.mock.calls[0][2] as MetadataGroupDefinition;
+    const renamed = saved.members.find((m) => m.name === "Standing");
+    expect(renamed?.key).toBe("state");
+  });
+
+  it("still derives a key from the name for a brand-new member", async () => {
+    mountConnections();
+    await fireEvent.click(screen.getByText("Connections"));
+    await fireEvent.click(screen.getByLabelText("Add member"));
+    const nameInputs = screen.getAllByPlaceholderText("Member name") as HTMLInputElement[];
+    await fireEvent.input(nameInputs[nameInputs.length - 1], { target: { value: "Notes" } });
+    await fireEvent.click(screen.getByText("Save group"));
+    const saved = upsertMetadataGroup.mock.calls[0][2] as MetadataGroupDefinition;
+    const added = saved.members.find((m) => m.name === "Notes");
+    expect(added?.key).toBe("notes");
+  });
+
+  it("a new member's key keeps following its name even when it passes an existing key", async () => {
+    mountConnections();
+    await fireEvent.click(screen.getByText("Connections"));
+    await fireEvent.click(screen.getByLabelText("Add member"));
+    const nameInputs = screen.getAllByPlaceholderText("Member name") as HTMLInputElement[];
+    const input = nameInputs[nameInputs.length - 1];
+    // Typed one keystroke at a time: "State" slugs to the existing key "state"
+    // on the way to "Statement".
+    for (const value of ["S", "St", "Sta", "Stat", "State", "Statem", "Stateme", "Statemen", "Statement"]) {
+      await fireEvent.input(input, { target: { value } });
+    }
+    await fireEvent.click(screen.getByText("Save group"));
+    const saved = upsertMetadataGroup.mock.calls[0][2] as MetadataGroupDefinition;
+    const added = saved.members.find((m) => m.name === "Statement");
+    expect(added?.key).toBe("statement");
+    // The existing member keeps its own key, so no two members share one.
+    expect(saved.members.filter((m) => m.key === "state")).toHaveLength(1);
+  });
+
+  it("confirms before a save that removes a member", async () => {
+    mountConnections();
+    await fireEvent.click(screen.getByText("Connections"));
+    const removeButtons = screen.getAllByLabelText("Remove member");
+    await fireEvent.click(removeButtons[0]);
+    await fireEvent.click(screen.getByText("Save group"));
+    expect(confirmRequest).toHaveBeenCalledOnce();
+    expect(confirmRequest.mock.calls[0][0].message).toMatch(/Removing Who deletes/);
+    expect(upsertMetadataGroup).not.toHaveBeenCalled();
+
+    await confirmRequest.mock.calls[0][0].onConfirm();
+    expect(upsertMetadataGroup).toHaveBeenCalledOnce();
+  });
+
+  it("confirms before a save that removes an option value", async () => {
+    mountConnections();
+    await fireEvent.click(screen.getByText("Connections"));
+    await fireEvent.click(screen.getByText(/Options/));
+    const valueInputs = screen.getAllByLabelText("Option value") as HTMLInputElement[];
+    // Remove the second option ("wary") via its row's remove button.
+    const removeButtons = screen.getAllByLabelText("Remove option");
+    await fireEvent.click(removeButtons[removeButtons.length - 1]);
+    await fireEvent.click(screen.getByText("Save group"));
+    expect(confirmRequest).toHaveBeenCalledOnce();
+    expect(confirmRequest.mock.calls[0][0].message).toMatch(/State \(wary\)/);
+    expect(valueInputs.length).toBeGreaterThan(0); // sanity: options rendered before removal
+  });
+
+  it("saves without confirming when nothing is removed (a pure relabel)", async () => {
+    mountConnections();
+    await fireEvent.click(screen.getByText("Connections"));
+    const nameInputs = screen.getAllByPlaceholderText("Member name") as HTMLInputElement[];
+    await fireEvent.input(nameInputs[0], { target: { value: "Contact" } });
+    await fireEvent.click(screen.getByText("Save group"));
+    expect(confirmRequest).not.toHaveBeenCalled();
+    expect(upsertMetadataGroup).toHaveBeenCalledOnce();
   });
 });

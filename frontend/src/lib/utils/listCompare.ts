@@ -46,8 +46,9 @@ function asText(value: MetadataValue | undefined): string {
 }
 
 /** Whether two versions of one declared member are the same value (§3
- *  "Member comparison"). An absent (`undefined`) reading falls back to the
- *  member's default, if it has one. A `long_text` member compares after
+ *  "Member comparison"). An absent reading — `undefined`, or the `null` an
+ *  empty YAML key stores — falls back to the member's default, if it has one,
+ *  exactly as `composeItem` reads it. A `long_text` member compares after
  *  `normalizeReviewMarkdown` (cosmetic markdown reformatting is not a
  *  change); any other member compares by `sameRenderedValue`. */
 export function memberValuesEqual(
@@ -55,8 +56,8 @@ export function memberValuesEqual(
   a: MetadataValue | undefined,
   b: MetadataValue | undefined,
 ): boolean {
-  const ra = a === undefined ? (member.default ?? undefined) : a;
-  const rb = b === undefined ? (member.default ?? undefined) : b;
+  const ra = a === undefined || a === null ? (member.default ?? a) : a;
+  const rb = b === undefined || b === null ? (member.default ?? b) : b;
   if (member.type === "long_text") return normalizeReviewMarkdown(asText(ra)) === normalizeReviewMarkdown(asText(rb));
   return sameRenderedValue(ra, rb);
 }

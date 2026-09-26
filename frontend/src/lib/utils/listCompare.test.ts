@@ -68,6 +68,11 @@ describe("memberValuesEqual", () => {
     expect(memberValuesEqual(required, undefined, false)).toBe(false);
   });
 
+  it("a null (an empty YAML key) reads as the default too, as composition reads it", () => {
+    expect(memberValuesEqual(required, null, true)).toBe(true);
+    expect(memberValuesEqual(required, null, false)).toBe(false);
+  });
+
   it("cosmetic markdown is unchanged (long_text, normalizeReviewMarkdown)", () => {
     expect(memberValuesEqual(guidance, "-   Reversal at the party", "- Reversal at the party")).toBe(true);
   });

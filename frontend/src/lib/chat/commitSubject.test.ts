@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { resolveCommitSubject, type CommitSubjectRosters } from "./commitSubject";
 import type { StructureDocument } from "@/lib/types";
 
@@ -14,13 +14,18 @@ const ROSTERS: CommitSubjectRosters = {
   schema: null,
 };
 
+// A class like the real host (`editorPanes`): each opener reads `this`, so a
+// detached call throws instead of passing (#2251 — the bare vi.fn fakes this
+// replaced never noticed the resolver dropping the receiver).
+class Openers {
+  calls: Record<string, string[]> = { openLore: [], openPlotline: [], openPlotCard: [], openScene: [] };
+  async openLore(id: string) { this.calls.openLore.push(id); }
+  async openPlotline(id: string) { this.calls.openPlotline.push(id); }
+  async openPlotCard(id: string) { this.calls.openPlotCard.push(id); }
+  async openScene(id: string) { this.calls.openScene.push(id); }
+}
 function openers() {
-  return {
-    openLore: vi.fn(async () => {}),
-    openPlotline: vi.fn(async () => {}),
-    openPlotCard: vi.fn(async () => {}),
-    openScene: vi.fn(async () => {}),
-  };
+  return new Openers();
 }
 
 describe("resolveCommitSubject (#2246)", () => {
@@ -34,8 +39,7 @@ describe("resolveCommitSubject (#2246)", () => {
     const subject = resolveCommitSubject(id, ROSTERS, o);
     expect(subject?.title).toBe(title);
     await subject!.open();
-    expect(o[opener]).toHaveBeenCalledWith(id);
-    for (const [name, fn] of Object.entries(o)) if (name !== opener) expect(fn).not.toHaveBeenCalled();
+    for (const [name, ids] of Object.entries(o.calls)) expect(ids).toEqual(name === opener ? [id] : []);
   });
 
   it("an id in no roster (e.g. a character arc) resolves to null", () => {

@@ -470,7 +470,7 @@
       appendix={model.appendix}
     />
   {:else if model.entryReview.hasReview && model.entryReview.proposal}
-    <EntryReviewOverlay review={model.entryReview} />
+    <EntryReviewOverlay review={model.entryReview} frontMatter={model.frontMatter} />
   {/if}
   {/if}
   <div

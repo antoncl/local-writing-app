@@ -76,7 +76,10 @@
   .revision-flip {
     display: flex;
     flex-direction: column;
-    min-height: 0;
+    /* A flip takes its content height, never shrinks: the review's flips stack
+       in one scroller (`.review-flips`). Shrinking to fit made each flip's
+       overlay its own scroller — one scrollbar per section (#2248). */
+    flex: none;
   }
   .flip-label {
     font-size: var(--fs-sm);

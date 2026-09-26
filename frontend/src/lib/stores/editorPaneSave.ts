@@ -86,6 +86,17 @@ export type SaveRefreshArgs = {
   draftMarkdown: string;
 };
 
+const ANCHOR_ID_PATTERN = /<!--\s*mutate:set=[A-Za-z0-9_-]*;id=([A-Za-z0-9_-]+)\s*-->/g;
+
+/** Whether two scene bodies hold the same mutation anchors (ADR-0095 §1),
+ *  compared by anchor id and the set each names — a save that only edits prose
+ *  around a pill leaves them equal, so the set roster needs no refresh. */
+export function sameAnchorIds(before: string, after: string): boolean {
+  const ids = (body: string) =>
+    [...body.matchAll(ANCHOR_ID_PATTERN)].map((match) => match[0]).sort().join("\n");
+  return ids(before) === ids(after);
+}
+
 export async function refreshAfterSave(host: SaveRefreshHost, args: SaveRefreshArgs): Promise<void> {
   const { documentKind } = args;
   if (documentKind === "lore") {
@@ -133,14 +144,14 @@ export async function refreshAfterSave(host: SaveRefreshHost, args: SaveRefreshA
         // pasted, or a Link/Copy insert whose scene autosaved) — the roster's
         // `anchors` per set is what the pill's "N places" tell, the pill
         // dialog's "Linked" line and the linked stop caption all read, and it
-        // is a SET-write-refresh only otherwise, so a scene save never
-        // refreshes it on its own. `{ bump: false }`: the version bump above
-        // already covers "something changed" for every other reader; a
-        // second bump here would just re-trigger everything that already
-        // keys on `mutationsVersion.value`, including this refresh's own
-        // caller in a future version-driven refetch — never bump twice for
-        // one save.
-        await refreshMutationSetEntries({ bump: false }).catch(() => {});
+        // is a SET-write-refresh only otherwise. Refresh it only when this
+        // save changed WHICH anchors the scene holds (an ordinary keystroke
+        // in a scene with a pill must not re-list every set), and with
+        // `{ bump: false }`: the version bump above already covers every
+        // other reader — never bump twice for one save.
+        if (!sameAnchorIds(args.baselineBody, args.draftMarkdown)) {
+          await refreshMutationSetEntries({ bump: false }).catch(() => {});
+        }
       }
     }
   }

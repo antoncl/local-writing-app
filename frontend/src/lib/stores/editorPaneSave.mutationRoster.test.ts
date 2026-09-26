@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { Editor } from "@tiptap/core";
 import { api } from "@/lib/api";
-import { refreshAfterSave, type SaveRefreshHost } from "./editorPaneSave";
+import { refreshAfterSave, sameAnchorIds, type SaveRefreshHost } from "./editorPaneSave";
 import { mutationSetEntriesStore, mutationSetRosterLoadedStore, mutationSetsByIdStore } from "./mutationSets";
 import { mutationsVersion } from "./mutationsVersion.svelte";
 import { createMutationMark } from "@/lib/editor-core/proseMarks";
@@ -110,5 +110,36 @@ describe("refreshAfterSave — mutation-set roster refresh on a marker-bearing s
     });
 
     expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not refresh the roster when a save only edits prose around an unchanged pill", async () => {
+    stubSceneRefreshes();
+    const listSpy = vi.spyOn(api, "listMutationSetEntries");
+    const anchor = "<!-- mutate:set=mutation_set_a;id=mut_1 -->";
+    const before = mutationsVersion.value;
+
+    await refreshAfterSave(host, {
+      documentKind: "manuscript",
+      savedTitle: "Ch 1",
+      baselineBody: `She read the letter. ${anchor}`,
+      draftMarkdown: `She read the letter twice. ${anchor}`,
+    });
+
+    expect(listSpy).not.toHaveBeenCalled();
+    // The version still bumps: offsets moved, so resolution must re-read.
+    expect(mutationsVersion.value).toBe(before + 1);
+  });
+});
+
+describe("sameAnchorIds", () => {
+  const a = "<!-- mutate:set=mutation_set_a;id=mut_1 -->";
+  const b = "<!-- mutate:set=mutation_set_a;id=mut_2 -->";
+  it("is true when only the prose around the anchors changed", () => {
+    expect(sameAnchorIds(`x ${a} y`, `xx ${a} yy`)).toBe(true);
+  });
+  it("is false when an anchor was added, removed or repointed", () => {
+    expect(sameAnchorIds(`${a}`, `${a} ${b}`)).toBe(false);
+    expect(sameAnchorIds(`${a} ${b}`, `${a}`)).toBe(false);
+    expect(sameAnchorIds(a, "<!-- mutate:set=mutation_set_z;id=mut_1 -->")).toBe(false);
   });
 });

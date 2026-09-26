@@ -908,12 +908,12 @@
   }
   .set-action {
     padding: 4px 10px;
+    font: inherit;
     font-size: var(--fs-sm);
     background: transparent;
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 6px;
-    font: inherit;
     cursor: pointer;
   }
   .set-action:hover {

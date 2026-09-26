@@ -843,7 +843,7 @@ async def extract_entry_patch(
     with translate_errors():
         entry_type = project.entry_type_for_node(node_id)
         return await run_entry_patch_extraction(
-            project, entry_type=entry_type, creating=False, request=request
+            project, entry_type=entry_type, creating=False, node_id=node_id, request=request
         )
 
 

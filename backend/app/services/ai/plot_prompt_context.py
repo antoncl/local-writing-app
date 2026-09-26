@@ -17,7 +17,12 @@ commit shape as `revise-entry`), never by emitting this block.
 
 The shape is an XML-ish envelope, matching how the app already hands the model
 lore/context (`_format_lore_block`); titles are used over ids wherever one exists
-so the model reasons in the writer's own vocabulary.
+so the model reasons in the writer's own vocabulary — EXCEPT a roster beat,
+which also carries its real `id` attr (#2243): a revise-plotline commit
+proposes the whole roster back, and beat identity is machine-owned, never
+model-authored — the model has to be able to SAY which beat it means. A
+beat's `specifics` (its book-local specialization) rides as a `<specifics>`
+child when non-empty, alongside `guidance` as the element text.
 """
 
 from __future__ import annotations
@@ -65,7 +70,16 @@ def _plotline_premise_block(plotline) -> list[str]:
 
 def _thread_guidance_and_beats(thread) -> list[str]:
     """The shared body a plotline and a character arc both emit: use-guidance, the
-    diagnostic questions, the weak spots, then one `<beat>` per roster beat."""
+    diagnostic questions, the weak spots, then one `<beat>` per roster beat.
+
+    `id` rides right after `title` in the attrs (#2243): a revise-plotline commit
+    proposes the whole roster back, and showing the model its real, stable beat
+    ids is what stops it from inventing its own (which `_ensure_beat_identity`
+    then can't tell from a genuine rename, silently breaking a card's
+    `beat_links`). `guidance` stays the element text as before; `specifics` (the
+    book-local specialization, empty on a template's own roster) is added as a
+    `<specifics>` child ONLY when non-empty, so a beat with neither still
+    self-closes."""
     body: list[str] = []
     if thread.ai_guidance.strip():
         body.append(f"      <use_guidance>{escape(thread.ai_guidance.strip())}</use_guidance>")
@@ -74,13 +88,20 @@ def _thread_guidance_and_beats(thread) -> list[str]:
     if thread.weak_spots:
         body.extend(_list_block("weak_spots", "spot", thread.weak_spots))
     for beat in thread.beats:
-        battrs = f"title={quoteattr(beat.title)}"
+        battrs = f"title={quoteattr(beat.title)} id={quoteattr(beat.beat_id)}"
         if beat.function:
             battrs += f" function={quoteattr(beat.function)}"
-        if beat.guidance.strip():
-            body.append(f"      <beat {battrs}>{escape(beat.guidance.strip())}</beat>")
-        else:
+        guidance = beat.guidance.strip()
+        specifics = beat.specifics.strip()
+        if not guidance and not specifics:
             body.append(f"      <beat {battrs} />")
+            continue
+        body.append(f"      <beat {battrs}>")
+        if guidance:
+            body.append(f"        {escape(guidance)}")
+        if specifics:
+            body.append(f"        <specifics>{escape(specifics)}</specifics>")
+        body.append("      </beat>")
     return body
 
 

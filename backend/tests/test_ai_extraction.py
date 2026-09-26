@@ -945,6 +945,100 @@ class ExtractEndpointTests(unittest.TestCase):
         )
 
 
+class BeatIdentityReconciliationTests(unittest.TestCase):
+    """#2243: a revise-plotline extraction never lets the model author beat
+    identity — a proposed `instance_beats` roster is reconciled against the
+    stored roster before the patch is handed back for review."""
+
+    def setUp(self) -> None:
+        from app.models import CreatePlotlineRequest, SavePlotlineRequest
+
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Beat identity reconciliation")
+        self.plotline = self.service.create_plotline(CreatePlotlineRequest(title="Heist"))
+        self.plotline = self.service.save_plotline(
+            self.plotline.id,
+            SavePlotlineRequest(
+                title="Heist",
+                body="",
+                metadata={
+                    "instance_beats": [
+                        {"title": "Setup pressure", "function": "raise stakes", "specifics": "The old specifics."}
+                    ]
+                },
+            ),
+        )
+        self.stored_beat_id = self.plotline.metadata["instance_beats"][0]["id"]
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _stored_full_proposable_set(self) -> list[dict]:
+        schema = self.service.read_metadata_schema()
+        roster = _fields(self.service, schema, "plot:plotline")
+        return [f for f in roster if f["proposable"]]
+
+    def _make_chat(self) -> str:
+        from app.models import CreateChatSessionRequest, SaveChatSessionRequest
+
+        session = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Brainstorm", system_prompt="SEED")
+        )
+        self.service.save_chat_session(
+            session.id,
+            SaveChatSessionRequest(
+                title=session.title,
+                system_prompt="SEED",
+                pinned=False,
+                context_items=[],
+                messages=[],
+                field_contract_stored=self._stored_full_proposable_set(),
+            ),
+        )
+        return session.id
+
+    def test_extraction_reconciles_invented_ids_back_to_the_stored_ones(self) -> None:
+        # The model never sees `beat_<hex>` — it invents its own slug from the
+        # title (the observed real-world failure), plus DROPS `specifics` and
+        # `function` on the beat it's "revising" (a partial reply).
+        chat_id = self._make_chat()
+        reply = _chat_reply(
+            '{"fields": {"instance_beats": '
+            '[{"id": "setup_pressure", "title": "Setup pressure"}]}}'
+        )
+        with patch("app.services.ai.extraction.run_chat_turn", new=AsyncMock(return_value=reply)):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.plotline.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        roster = body["patch"]["fields"]["instance_beats"]
+        self.assertEqual(len(roster), 1)
+        # The real stored id survived, not the model's invented slug.
+        self.assertEqual(roster[0]["id"], self.stored_beat_id)
+        self.assertEqual(roster[0]["title"], "Setup pressure")
+        # The member the model silently omitted survives the reconciliation.
+        self.assertEqual(roster[0]["specifics"], "The old specifics.")
+        self.assertEqual(roster[0]["function"], "raise stakes")
+
+    def test_an_unmatched_beat_gets_no_id_and_is_minted_fresh_on_save(self) -> None:
+        # A wholesale replacement (no title match either) must not adopt the
+        # old beat's id — the save path mints a fresh one instead.
+        chat_id = self._make_chat()
+        reply = _chat_reply('{"fields": {"instance_beats": [{"id": "brand_new", "title": "A whole new beat"}]}}')
+        with patch("app.services.ai.extraction.run_chat_turn", new=AsyncMock(return_value=reply)):
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.plotline.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        body = resp.json()
+        roster = body["patch"]["fields"]["instance_beats"]
+        self.assertNotIn("id", roster[0])
+
+
 class EntryTypeForNodeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()

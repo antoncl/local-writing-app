@@ -50,7 +50,7 @@ const METADATA: EntryMetadata = {
   aliases: ["Evening Star"],
 };
 
-function mount(layout: "rail" | "front-matter") {
+function mount(layout: "rail" | "front-matter", compare: unknown = null) {
   return render(MetadataPanel, {
     props: {
       entryType: "lore:character",
@@ -66,6 +66,7 @@ function mount(layout: "rail" | "front-matter") {
       onGoToList: vi.fn(),
       onMetadataChange: vi.fn(),
       layout,
+      compare,
     } as never,
   });
 }
@@ -96,6 +97,24 @@ describe("MetadataPanel — front matter layout (#2054)", () => {
     // #2061: no group heads anywhere (known rows or fold) → the rows' disclosure
     // gutter is dropped so icons, labels and wide values share one edge.
     expect(document.querySelector(".scene-metadata.front-matter.no-disc")).not.toBeNull();
+  });
+
+  it("front matter still renders a proposed flip on an index field, adoptable (#2242)", () => {
+    const onToggle = vi.fn();
+    mount("front-matter", {
+      fields: { beats: { was: [{ function: "proposed" }], now: METADATA.beats } },
+      side: "was",
+      resolve: { adopted: () => false, onToggle },
+    });
+    // The proposed beats row is there as a click-to-adopt candidate, while the
+    // unproposed index rows (Bio, Kin) stay out of the front matter.
+    expect(screen.getByText("Beats")).toBeInTheDocument();
+    expect(screen.queryByText("Bio")).toBeNull();
+    expect(screen.queryByText("Kin")).toBeNull();
+    const hit = document.querySelector<HTMLButtonElement>(".fr-flip-hit");
+    expect(hit).not.toBeNull();
+    hit!.click();
+    expect(onToggle).toHaveBeenCalledWith("beats");
   });
 
   it("front matter keeps the disclosure gutter when the type has a group, even one that is folded (#2061)", () => {

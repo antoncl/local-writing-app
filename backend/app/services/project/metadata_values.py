@@ -1053,6 +1053,24 @@ class MetadataValuesMixin:
                     chats.add(edge.src)
         return chats
 
+    def _mutation_sets_pinned_to(self, pin_ids: set[str], index: NodeIndex) -> set[str]:
+        """Mutation-set ids whose `target_entity` edge points at one of
+        `pin_ids`, read from the reverse edge index — the ADR-0095 §9 sibling
+        of `_chats_with_subject_in` (#1078): deleting a pinned entity deletes
+        the sets pinned to it, the way deleting a chat's subject deletes the
+        chat, and replaces ADR-0055 §3's purge of the pin (which would have
+        turned an active set into an unpinned template). Only `target_entity`
+        edges FROM a `mutation_set` count."""
+        sets: set[str] = set()
+        for pin_id in pin_ids:
+            for edge in index.edges_by_dst.get(pin_id, []):
+                if edge.field_id != "target_entity":
+                    continue
+                src = index.by_id.get(edge.src)
+                if src is not None and src.kind == "mutation_set":
+                    sets.add(edge.src)
+        return sets
+
     def _purge_references_to(self, purge_ids: set[str], root: Path) -> None:
         """Walk every reference-bearing entry, strip any reference value matching
         one of ``purge_ids``, and write back the ones that changed. Called after
@@ -1106,6 +1124,19 @@ class MetadataValuesMixin:
         purge_ids = self._ids_safe_to_purge(purge_ids, index, root)
         if not purge_ids:
             return
+        # ADR-0095 §9: a set pinned (`target_entity`) to one of the truly-deleted
+        # ids is deleted with it — the mutation-set sibling of the chat cascade
+        # below, and the reason this runs FIRST: deleting the set's file before
+        # the strip pass, and folding its id into `purge_ids`, means a chat's
+        # `staged_set` (or any other reference) naming the set is purged in the
+        # very same pass below, never left dangling. This replaces ADR-0055 §3's
+        # purge of the pin, which would have turned an active set into an
+        # unpinned template instead of deleting it.
+        pinned_set_ids = self._mutation_sets_pinned_to(purge_ids, index)
+        for set_id in pinned_set_ids:
+            self._delete_node_file(index.by_id[set_id].path)
+            index.by_id.pop(set_id, None)
+        purge_ids = purge_ids | pinned_set_ids
         # Cascade (#1078): a brainstorm chat attaches to a metadata-rail node via
         # its `subject` entity_ref, so a truly-deleted subject takes its chats
         # with it. `purge_ids` is already the safe set — an id that merely

@@ -16,6 +16,7 @@ import { get } from "svelte/store";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import Mutations from "./Mutations.svelte";
 import { metadataSchemaStore, metadataSchemaLayersStore } from "@/lib/stores/schema";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
 import {
   mutationSetEditorStore,
   mutationSetEntriesStore,
@@ -42,10 +43,12 @@ const getMutationSetEntry = vi.fn(async (id: string): Promise<MutationSetEntry> 
   source_layer_id: "",
   source_layer_label: "",
 }));
+const deleteMutationSetEntry = vi.fn(async (_id: string) => ({ entries: [] as MutationSetEntrySummary[] }));
 vi.mock("@/lib/api", () => ({
   api: {
     getMutationSetEntry: (...args: unknown[]) => getMutationSetEntry(...(args as [string])),
     promotionTargets: vi.fn(async () => []),
+    deleteMutationSetEntry: (...args: unknown[]) => deleteMutationSetEntry(...(args as [string])),
   },
 }));
 
@@ -79,6 +82,8 @@ afterEach(() => {
   mutationSetEntriesStore.set([]);
   metadataSchemaLayersStore.set([]);
   getMutationSetEntry.mockClear();
+  deleteMutationSetEntry.mockClear();
+  vi.restoreAllMocks();
 });
 
 describe("Mutations pane", () => {
@@ -142,5 +147,58 @@ describe("Mutations pane", () => {
     render(Mutations);
 
     expect(screen.queryByRole("button", { name: "Promote Full Moon" })).toBeNull();
+  });
+});
+
+describe("Mutations pane: deleting an active set warns (ADR-0095 §9)", () => {
+  it("asks for confirmation, naming the label and the scene count, before deleting an active set", async () => {
+    const requestSpy = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+    metadataSchemaStore.set(SCHEMA);
+    mutationSetEntriesStore.set([
+      summary({
+        title: "Full Moon",
+        state: "active",
+        anchors: [
+          { anchor_id: "a1", scene_id: "scene_1", scene_title: "Chapter One" },
+          { anchor_id: "a2", scene_id: "scene_2", scene_title: "Chapter Two" },
+        ],
+      }),
+    ]);
+    render(Mutations);
+
+    await fireEvent.click(screen.getByLabelText("Delete Full Moon"));
+
+    expect(deleteMutationSetEntry).not.toHaveBeenCalled();
+    expect(requestSpy).toHaveBeenCalledTimes(1);
+    const request = requestSpy.mock.calls[0][0];
+    expect(request.message).toContain("Full Moon");
+    expect(request.message).toContain("2 scene(s)");
+
+    await request.onConfirm();
+    expect(deleteMutationSetEntry).toHaveBeenCalledWith("mutation_set_1");
+  });
+
+  it("deletes a staged set without asking", async () => {
+    const requestSpy = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+    metadataSchemaStore.set(SCHEMA);
+    mutationSetEntriesStore.set([summary({ title: "Full Moon", state: "staged" })]);
+    render(Mutations);
+
+    await fireEvent.click(screen.getByLabelText("Delete Full Moon"));
+
+    expect(requestSpy).not.toHaveBeenCalled();
+    expect(deleteMutationSetEntry).toHaveBeenCalledWith("mutation_set_1");
+  });
+
+  it("deletes a template without asking", async () => {
+    const requestSpy = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+    metadataSchemaStore.set(SCHEMA);
+    mutationSetEntriesStore.set([summary({ title: "Full Moon", state: "template" })]);
+    render(Mutations);
+
+    await fireEvent.click(screen.getByLabelText("Delete Full Moon"));
+
+    expect(requestSpy).not.toHaveBeenCalled();
+    expect(deleteMutationSetEntry).toHaveBeenCalledWith("mutation_set_1");
   });
 });

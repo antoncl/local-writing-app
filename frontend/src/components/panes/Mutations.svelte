@@ -10,6 +10,8 @@
   import { api } from "@/lib/api";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { isInherited } from "@/lib/utils/provenance";
+  import { confirmService } from "@/lib/stores/confirmService.svelte";
+  import { mutationSetLabel } from "@/lib/editor-core/mutationNodes";
   import {
     refreshMutationSetEntries,
     setMutationSetEntries,
@@ -68,7 +70,7 @@
       error = `Could not open the set: ${err instanceof Error ? err.message : err}`;
     }
   }
-  async function remove(id: string) {
+  async function doRemove(id: string) {
     error = "";
     try {
       setMutationSetEntries((await api.deleteMutationSetEntry(id)).entries);
@@ -76,6 +78,24 @@
       error = `Could not delete the set: ${err instanceof Error ? err.message : err}`;
       await refreshMutationSetEntries().catch(() => {});
     }
+  }
+
+  // ADR-0095 §9: deleting an ACTIVE set warns first (it is anchored, so a
+  // pill would go missing) — a staged set or a template deletes as today,
+  // with nothing anchoring it to lose.
+  function remove(entry: MutationSetEntrySummary) {
+    if (entry.state !== "active") {
+      void doRemove(entry.id);
+      return;
+    }
+    const sceneCount = new Set(entry.anchors.map((anchor) => anchor.scene_id)).size;
+    confirmService.request({
+      title: "Delete Mutation Set",
+      message: `"${mutationSetLabel(entry)}" is used in ${sceneCount} scene(s); deleting it leaves those pills missing.`,
+      confirmLabel: "Delete",
+      destructive: true,
+      onConfirm: () => doRemove(entry.id),
+    });
   }
 </script>
 
@@ -135,7 +155,7 @@
         title="Delete"
         onclick={(e) => {
           e.stopPropagation();
-          void remove(entry.id);
+          remove(entry);
         }}
       >×</button>
     {/snippet}

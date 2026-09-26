@@ -18,6 +18,8 @@ import {
   refreshReferenceIndexInBackground,
 } from "@/lib/stores/references";
 import { loreEntriesStore, setLoreEntries } from "@/lib/stores/lore";
+import { mutationSetEntriesStore, setMutationSetEntries } from "@/lib/stores/mutationSets";
+import { mutationSetLabel } from "@/lib/editor-core/mutationNodes";
 import { setPromptEntries } from "@/lib/stores/prompts";
 import { setPlotTemplates } from "@/lib/stores/plotTemplates";
 import { deletePlotline } from "@/lib/stores/plotlines";
@@ -117,6 +119,18 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
     onDontShowAgain = () => host.orphanWarning!.suppress();
   }
 
+  // ADR-0095 §9: deleting a lore entry deletes the mutation sets pinned to
+  // it (backend cascade). Warn first and name them — always shown, unlike
+  // the orphan-warning sentence above, which has an opt-out (#2232).
+  if (documentKind === "lore") {
+    const pinnedSets = get(mutationSetEntriesStore).filter((set) => set.target_entity === sceneId);
+    if (pinnedSets.length > 0) {
+      const labels = pinnedSets.map((set) => mutationSetLabel(set)).join(", ");
+      const sceneCount = new Set(pinnedSets.flatMap((set) => set.anchors.map((anchor) => anchor.scene_id))).size;
+      message = `${message}\n\nThis also deletes ${pinnedSets.length} mutation set(s) (${labels}), used in ${sceneCount} scene(s); their pills will show as missing.`;
+    }
+  }
+
   confirmService.request({
     title: titleLabel,
     message,
@@ -135,6 +149,16 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
   const sceneTitle = pane.scene.title;
   if (documentKind === "lore") {
     setLoreEntries((await api.deleteLoreEntry(pane.scene.id)).entries);
+    // ADR-0095 §9: the delete may have cascade-deleted mutation sets pinned
+    // to this entry — refresh the roster and bump mutationsVersion so the
+    // pane, the card and every pill relabel as missing. Best-effort: the
+    // entry itself is already gone, so a roster-refresh failure here must
+    // not surface as a failed delete.
+    try {
+      setMutationSetEntries((await api.listMutationSetEntries()).entries);
+    } catch (error) {
+      console.warn("Failed to refresh the mutation-set roster after a delete", error);
+    }
   } else if (documentKind === "research") {
     // Delete the tree node that points at this note; the backend
     // unlinks the markdown file as part of the cascade.

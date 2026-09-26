@@ -398,7 +398,7 @@ class MutationSetEntityPinTests(unittest.TestCase):
         self.assertIn(created.id, [edge.src for edge in reverse])
         self.assertIn("target_entity", [edge.field_id for edge in reverse])
 
-    def test_deleting_the_pinned_entity_purges_the_pin(self) -> None:
+    def test_deleting_the_pinned_entity_deletes_the_set(self) -> None:
         self._write_character("mira")
         created = self.service.create_mutation_set_entry(
             CreateMutationSetEntryRequest(
@@ -413,12 +413,12 @@ class MutationSetEntityPinTests(unittest.TestCase):
 
         self.service.delete_lore_entry("mira")
 
-        # Reference-integrity (ADR-0055 §3): the pin is purged like any other
-        # metadata entity_ref, not left silently dangling. Rows survive.
-        purged = self.service.read_mutation_set_entry(created.id)
-        self.assertEqual(purged.target_entity, "")
-        self.assertEqual([row.field for row in purged.rows], ["title"])
-        self.assertNotIn("mira", set_path.read_text(encoding="utf-8"))
+        # ADR-0095 §9: the set is DELETED with its pin — this replaces
+        # ADR-0055 §3's purge of the pin, which would have turned an active
+        # set into an unpinned template instead.
+        with self.assertRaises(ProjectServiceError):
+            self.service.read_mutation_set_entry(created.id)
+        self.assertFalse(set_path.exists())
 
 
 class MutationSetStateTests(unittest.TestCase):

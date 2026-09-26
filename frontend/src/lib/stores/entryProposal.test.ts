@@ -10,7 +10,7 @@ const { listTagEntries, createTagEntry } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api", () => ({ api: { listTagEntries, createTagEntry } }));
 
-import { EntryProposalController } from "./entryProposal.svelte";
+import { EntryProposalController, bodyAdopter } from "./entryProposal.svelte";
 import { entryBrainstorm } from "./entryBrainstorm.svelte";
 import { reviewProposals } from "./reviewProposals.svelte";
 import { clearTagNodes, resolveAdoptedTagFieldValue, tagNodesStore } from "./tagNodes";
@@ -177,6 +177,39 @@ describe("EntryProposalController", () => {
     // Committing ends the review and clears the accumulation.
     expect(c.proposal).toBeNull();
     expect(c.hasPendingChanges).toBe(false);
+  });
+
+  it("the ONE write carries the adopted body even though the prose adopt is async (#2254)", async () => {
+    const c = entryController("e1");
+    // A prose view like TipTap's: the body lands only after an async markdown→HTML step.
+    let editorBody = "";
+    const proseView = {
+      adoptBody: async (body: string) => {
+        await Promise.resolve();
+        await Promise.resolve();
+        editorBody = body;
+      },
+    };
+    let emittedBody: string | null = null;
+    c.onAdoptBody = bodyAdopter({ rawBodyMode: () => false, setRawBody: vi.fn(), proseView: () => proseView });
+    c.onEmitChange = () => {
+      emittedBody = editorBody;
+    };
+    c.onFlush = vi.fn();
+    entryBrainstorm.propose("e1", patch("new body", {}));
+
+    c.setBodyResolution("new body");
+    await c.commit();
+
+    expect(emittedBody).toBe("new body");
+  });
+
+  it("bodyAdopter routes a code body to the raw editor, not the prose view", async () => {
+    const setRawBody = vi.fn();
+    const adoptBody = vi.fn(async () => {});
+    await bodyAdopter({ rawBodyMode: () => true, setRawBody, proseView: () => ({ adoptBody }) })("code");
+    expect(setRawBody).toHaveBeenCalledWith("code");
+    expect(adoptBody).not.toHaveBeenCalled();
   });
 
   it("keeps the review open when the post fails — no dropped patch", async () => {

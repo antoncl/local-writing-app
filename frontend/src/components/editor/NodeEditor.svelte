@@ -10,7 +10,7 @@
   import { editorRailLayout } from "@/lib/stores/editorRailLayout.svelte";
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
-  import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
+  import { EntryProposalController, bodyAdopter } from "@/lib/stores/entryProposal.svelte";
   import { refreshTagNodes, resolveAdoptedTagFields } from "@/lib/stores/tagNodes";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
@@ -538,10 +538,11 @@
   // (a prompt template — #711), TipTap otherwise. Both sides are plain strings, so
   // the run-diff review reads a template exactly as it reads prose. `rawBody` feeds
   // the save the same way a keystroke does (the rawBodyMode effect → emitChange).
-  entryReview.onAdoptBody = (body) => {
-    if (rawBodyMode) rawBody = body;
-    else bodyHost?.adoptBody(body);
-  };
+  entryReview.onAdoptBody = bodyAdopter({
+    rawBodyMode: () => rawBodyMode,
+    setRawBody: (body) => (rawBody = body),
+    proseView: () => bodyHost,
+  });
   entryReview.onEmitChange = emitChange;
   entryReview.readCurrentBody = () =>
     rawBodyMode ? rawBody : (bodyHost?.getBody() ?? scene?.body ?? "");

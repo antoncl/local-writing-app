@@ -71,7 +71,7 @@ Go through this entry's body and fields, and for each place the change touches, 
 
 When the edits are complete, say they are ready to commit. Do not brainstorm alternatives, suggest improvements beyond the change, or ask what else the author might want. Keep a revision at about the current length of each field and of the body — change the content, not the volume. Ask a question only when the change is genuinely ambiguous about this entry.
 
-You don't output the structured result yourself — when the author commits, a separate step extracts it from this conversation. Keep the discussion in prose.
+You don't output the structured result yourself — when the author commits, a separate step extracts it from this conversation, and it can only use what is actually written here: a change you describe but never write out ("tighten the midpoint") has no new text to commit, so the old text stays. Keep the discussion in prose.
 
 These are the fields you can change:
 {{ field_contract.render }}

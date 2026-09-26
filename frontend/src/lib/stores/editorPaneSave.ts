@@ -14,6 +14,7 @@ import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
+import { refreshMutationSetEntries } from "@/lib/stores/mutationSets";
 import { HttpError, setKeepaliveSaves, api } from "@/lib/api";
 import { conflictDiffService } from "@/lib/stores/conflictDiffService.svelte";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
@@ -128,6 +129,18 @@ export async function refreshAfterSave(host: SaveRefreshHost, args: SaveRefreshA
       // every open mutations reader.
       if (bodyHasMutationMarkers(args.baselineBody) || bodyHasMutationMarkers(args.draftMarkdown)) {
         mutationsVersion.bump();
+        // ADR-0095 §6/§8: the save may have added/removed an anchor (typed,
+        // pasted, or a Link/Copy insert whose scene autosaved) — the roster's
+        // `anchors` per set is what the pill's "N places" tell, the pill
+        // dialog's "Linked" line and the linked stop caption all read, and it
+        // is a SET-write-refresh only otherwise, so a scene save never
+        // refreshes it on its own. `{ bump: false }`: the version bump above
+        // already covers "something changed" for every other reader; a
+        // second bump here would just re-trigger everything that already
+        // keys on `mutationsVersion.value`, including this refresh's own
+        // caller in a future version-driven refetch — never bump twice for
+        // one save.
+        await refreshMutationSetEntries({ bump: false }).catch(() => {});
       }
     }
   }

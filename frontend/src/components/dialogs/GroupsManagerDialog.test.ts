@@ -247,6 +247,25 @@ describe("GroupsManagerDialog — member key stability (#2239)", () => {
     expect(added?.key).toBe("notes");
   });
 
+  it("a new member's key keeps following its name even when it passes an existing key", async () => {
+    mountConnections();
+    await fireEvent.click(screen.getByText("Connections"));
+    await fireEvent.click(screen.getByLabelText("Add member"));
+    const nameInputs = screen.getAllByPlaceholderText("Member name") as HTMLInputElement[];
+    const input = nameInputs[nameInputs.length - 1];
+    // Typed one keystroke at a time: "State" slugs to the existing key "state"
+    // on the way to "Statement".
+    for (const value of ["S", "St", "Sta", "Stat", "State", "Statem", "Stateme", "Statemen", "Statement"]) {
+      await fireEvent.input(input, { target: { value } });
+    }
+    await fireEvent.click(screen.getByText("Save group"));
+    const saved = upsertMetadataGroup.mock.calls[0][2] as MetadataGroupDefinition;
+    const added = saved.members.find((m) => m.name === "Statement");
+    expect(added?.key).toBe("statement");
+    // The existing member keeps its own key, so no two members share one.
+    expect(saved.members.filter((m) => m.key === "state")).toHaveLength(1);
+  });
+
   it("confirms before a save that removes a member", async () => {
     mountConnections();
     await fireEvent.click(screen.getByText("Connections"));

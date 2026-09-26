@@ -39,18 +39,17 @@
   let draftId = $state("");
   let draftIdTouched = $state(false);
   let draftName = $state("");
-  let draftMembers = $state<GroupMember[]>([]);
+  // A draft member carries `isNew` while it has never been saved (#2239): only
+  // such a member derives its key from its name. Tracked on the member itself,
+  // not inferred from its key — a new member typing "Notes" passes through an
+  // existing member's key `note` on the way, and must not freeze there.
+  type DraftMember = GroupMember & { isNew?: boolean };
+  let draftMembers = $state<DraftMember[]>([]);
   let error = $state("");
   let busy = $state(false);
-  // The group as it stood when the editor opened (null for a new group) —
-  // the source of truth for "existing" vs. "new" member keys/option values
-  // (#2239 follow-up) and for detecting a save that would delete data.
+  // The group as it stood when the editor opened (null for a new group) — the
+  // baseline for detecting a save that would delete data (#2239).
   let originalGroup = $state<MetadataGroupDefinition | null>(null);
-  // Member keys already on disk when the editor opened. A key derives from
-  // the name (below) ONLY while it has never been saved — like a node id,
-  // once saved a member's key is its stable identity; retyping the NAME must
-  // never silently orphan every stored item/row keyed by the old id.
-  let existingMemberKeys = $state<Set<string>>(new Set());
 
   function slug(value: string): string {
     return value
@@ -106,7 +105,6 @@
     draftName = "";
     draftMembers = [];
     originalGroup = null;
-    existingMemberKeys = new Set();
     error = "";
   }
 
@@ -120,7 +118,6 @@
     draftName = group.name;
     draftMembers = group.members.map((member) => ({ ...member }));
     originalGroup = group;
-    existingMemberKeys = new Set(group.members.map((member) => member.key));
     error = "";
   }
 
@@ -130,16 +127,16 @@
   }
 
   function addMember() {
-    draftMembers = [...draftMembers, { key: "", name: "", type: "text" }];
+    draftMembers = [...draftMembers, { key: "", name: "", type: "text", isNew: true }];
   }
   function updateMemberName(index: number, value: string) {
     const member = draftMembers[index];
     // A member never saved yet still derives its key from the name (the
     // authoring convenience); one already on disk keeps its key — the name
     // is the human handle, the key is identity (same rule as a node id).
-    draftMembers[index] = existingMemberKeys.has(member.key)
-      ? { ...member, name: value }
-      : { ...member, name: value, key: slug(value) };
+    draftMembers[index] = member.isNew
+      ? { ...member, name: value, key: slug(value) }
+      : { ...member, name: value };
     draftMembers = draftMembers;
   }
   function updateMemberType(index: number, value: GroupMember["type"]) {
@@ -210,7 +207,7 @@
     // select member also disabled its allowed-values check.
     const members = draftMembers
       .filter((member) => member.name.trim())
-      .map((member) => {
+      .map(({ isNew: _isNew, ...member }) => {
         const next: GroupMember = {
           ...member,
           key: member.key || slug(member.name),

@@ -35,6 +35,7 @@ from app.models import (
 )
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.errors import ProjectServiceError
+from app.services.project.list_item_identity import ensure_list_item_identity
 from app.services.project.tree_configs import MANUSCRIPT_TREE
 from app.services.tree_structure import TreeStructureService
 
@@ -358,6 +359,7 @@ class ManuscriptMixin:
         # nodes (lore); here L is always the resolution scope.
         schema = self.read_metadata_schema()
         metadata = self._normalise_metadata(request.metadata, path)
+        ensure_list_item_identity(metadata, request.entry_type, schema)
         if schema.cascade_fields and not prior_body.strip() and request.body.strip():
             self._freeze_cascade_on_first_prose(root, node_id, metadata, schema.cascade_fields)
 

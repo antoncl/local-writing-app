@@ -47,6 +47,7 @@ from app.services.ai.providers import policy_permits
 from app.services.project.computed_metadata import strip_computed_fields
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import LayerVisitor
+from app.services.project.list_item_identity import ensure_list_item_identity
 from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntry
 
 log = logging.getLogger(__name__)
@@ -511,6 +512,7 @@ class AssistantEntriesMixin:
         # an assistant, and a field project A relies on is gone from disk for
         # both. That is the regression this narrower form exists to avoid.
         metadata = strip_computed_fields(metadata, write_schema)
+        ensure_list_item_identity(metadata, request.entry_type, write_schema)
         self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, "")
         self._maybe_rename_node_file(path, request.title)
         # ADR-0082 §2: `assistant_tags` is now an `entity_ref_list` of tag-node

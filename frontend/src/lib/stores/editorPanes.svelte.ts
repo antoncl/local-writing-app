@@ -74,7 +74,8 @@ import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { structureStore } from "@/lib/stores/structure";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
-import { adoptSavedBeatIds } from "@/lib/plot/beatRoster";
+import { adoptSavedItemIds } from "@/lib/plot/beatRoster";
+import { itemIdentityKey } from "@/lib/editor-core/listItemIdentity";
 import {
   refreshAfterSave,
   autosaveOnce,
@@ -95,6 +96,7 @@ import type {
   EditableDocument,
   EntryMetadata,
   LoreEntry,
+  MetadataSchema,
   PlotlineEntry,
   PlotTemplate,
   PromptContextStrategy,
@@ -110,6 +112,22 @@ import type {
 // server baseline (token forces the reactive re-read even when the value is
 // structurally equal).
 export type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
+
+// ADR-0096 §1/§2 (#2255's generalisation): every list field of `entryType`
+// that declares an identity member, mapped to that member's key — the map
+// `adoptSavedItemIds` needs to take back whatever id(s) the save minted.
+// Reads the resolved schema it's already given; absent/no-schema is empty,
+// not a crash (a save can land before the schema has loaded).
+function identityKeysFor(schema: MetadataSchema | null, entryType: string | undefined): Record<string, string> {
+  if (!schema || !entryType) return {};
+  const fieldIds = schema.entry_types[entryType]?.fields ?? [];
+  const keys: Record<string, string> = {};
+  for (const fieldId of fieldIds) {
+    const key = itemIdentityKey(schema.fields[fieldId]);
+    if (key) keys[fieldId] = key;
+  }
+  return keys;
+}
 
 // A handle to a mounted NodeEditor so the controller can drive its scene-reload
 // (re-seed the TipTap doc from a server scene) and scroll-to-todo highlight (the
@@ -725,9 +743,11 @@ class EditorPanesController {
       let stampedMetadata: EntryMetadata | null = null;
       this.panes = this.panes.map((candidate) => {
         if (candidate.id !== id) return candidate;
-        // The one server-side fill a draft must take back: beat ids the save
-        // minted, or it stays dirty and re-mints on every autosave (#2255).
-        stampedMetadata = adoptSavedBeatIds(candidate.draftMetadata, draftDocument.metadata, savedDocument.metadata ?? {});
+        // The one server-side fill a draft must take back: item ids the save
+        // minted, or it stays dirty and re-mints on every autosave (#2255,
+        // generalised by ADR-0096 §1/§2 from a hardcoded beat-field list).
+        const identityKeys = identityKeysFor(get(metadataSchemaStore), candidate.draftEntryType);
+        stampedMetadata = adoptSavedItemIds(candidate.draftMetadata, draftDocument.metadata, savedDocument.metadata ?? {}, identityKeys);
         const draftMetadata = stampedMetadata ?? candidate.draftMetadata;
         paneStillDirty = isEditorPaneDirty(
           savedDocument,

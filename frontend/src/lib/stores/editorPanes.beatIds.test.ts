@@ -7,12 +7,24 @@ vi.mock("@/lib/stores/references", () => ({ refreshReferenceIndexInBackground: v
 import { editorPanes } from "./editorPanes.svelte";
 import { createEmptyEditorPane } from "@/lib/editor-core/editorPaneModel";
 import type { DocumentRef } from "@/lib/editor-core/editorPaneModel";
-import type { EditableDocument, PlotlineEntry } from "@/lib/types";
+import type { EditableDocument, MetadataSchema, PlotlineEntry } from "@/lib/types";
 import { api } from "@/lib/api";
+import { setMetadataSchema } from "@/lib/stores/schema";
 
 // #2255: a beat added in the plotline DOCUMENT pane has no id; the backend
 // mints one on save. Unless the pane takes it back, the draft stays dirty
 // against its own save and every autosave re-mints a fresh id — forever.
+// ADR-0096 §1/§2: the pane reads which field is a beat list off the schema's
+// declared identity, not a hardcoded field-name list — seed one here.
+const SCHEMA: MetadataSchema = {
+  version: 1,
+  entry_types: {
+    "plot:plotline": { name: "Plotline", kind: "plot", fields: ["instance_beats"] },
+  },
+  fields: {
+    instance_beats: { name: "Beats", type: "list", options: [], item_group: "plot_instance_beat", item_identity: "id" },
+  },
+} as unknown as MetadataSchema;
 
 const HOOK = { title: "Hook", id: "hook" };
 
@@ -49,6 +61,7 @@ function savedWith(beats: Record<string, unknown>[]): PlotlineEntry {
 describe("plotline pane save adopts minted beat ids (#2255)", () => {
   beforeEach(() => {
     editorPanes.reset();
+    setMetadataSchema(SCHEMA);
   });
   afterEach(() => {
     vi.restoreAllMocks();

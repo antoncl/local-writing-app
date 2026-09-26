@@ -17,6 +17,7 @@ import yaml
 
 from app.models import ProjectNode, SaveProjectNodeRequest
 from app.services.project.errors import ProjectServiceError
+from app.services.project.list_item_identity import ensure_list_item_identity
 
 
 class ProjectNodeMixin:
@@ -75,6 +76,7 @@ class ProjectNodeMixin:
         # id it hands back is the one on disk.
         node_id = (self._front_matter_id(path) if exists else None) or self._new_id("project")
         metadata = self._normalise_metadata(request.metadata, path)
+        ensure_list_item_identity(metadata, request.entry_type, self.read_metadata_schema())
         node = ProjectNode(
             id=node_id,
             title=request.title,

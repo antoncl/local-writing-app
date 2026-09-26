@@ -101,6 +101,13 @@ class MetadataFieldDefinition(BaseModel):
     # both-keys conflict the resolver's tie-break decides, and a consumer
     # keying on the raw declaration would take the losing side.
     item_scalar: bool | None = None
+    # DERIVED like `item_members` (ADR-0096 §1): the group's declared `identity`
+    # member, stamped onto the field when its group resolves and names an
+    # existing member of type `text`. None when the group declares no identity,
+    # or when the shape is the item_type sugar (which never carries identity).
+    # Never persisted; the save's minting and a comparison's pairing read this,
+    # never a member happening to be named `id`.
+    item_identity: str | None = None
     # Optional Tabler icon name (without the `ti-` prefix), e.g. "shield-half".
     # Empty/None falls back to the default glyph for the field's type
     # (see the metadata revision design). Display-only; the macro contract
@@ -352,6 +359,13 @@ class MetadataGroupDefinition(BaseModel):
     # consumed by feature code by id, never meant for a user to apply or edit.
     # User-defined groups leave it False.
     system: bool = False
+    # Names the group's own `text` member that identifies an item (ADR-0096
+    # §1) — what makes two versions of an item "the same item", for the save's
+    # minting and for a comparison's pairing. None means the group declares no
+    # identity (a list of it aligns by content instead). Kept in step with the
+    # members: renaming the named member renames this, removing it clears this
+    # (`upsert_metadata_group` / `_reconcile_group_member_data`).
+    identity: str | None = None
 
 
 class GroupApplication(BaseModel):

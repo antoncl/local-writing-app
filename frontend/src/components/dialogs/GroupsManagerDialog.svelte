@@ -45,6 +45,11 @@
   // existing member's key `note` on the way, and must not freeze there.
   type DraftMember = GroupMember & { isNew?: boolean };
   let draftMembers = $state<DraftMember[]>([]);
+  // ADR-0096 §1: the group's identity choice — null (none) or one of the
+  // group's own `text` members' keys. Tracked by key, kept in step with the
+  // members below (a member never saved yet derives its key from its name,
+  // so its key can still change under this reference until it's saved).
+  let draftIdentity = $state<string | null>(null);
   let error = $state("");
   let busy = $state(false);
   // The group as it stood when the editor opened (null for a new group) — the
@@ -104,6 +109,7 @@
     draftIdTouched = false;
     draftName = "";
     draftMembers = [];
+    draftIdentity = null;
     originalGroup = null;
     error = "";
   }
@@ -117,8 +123,18 @@
     draftIdTouched = true;
     draftName = group.name;
     draftMembers = group.members.map((member) => ({ ...member }));
+    draftIdentity = group.identity ?? null;
     originalGroup = group;
     error = "";
+  }
+
+  // The identity choice's candidates: the draft's own `text` members — never
+  // the identity member itself once chosen (it's still a text member, so it
+  // stays its own candidate; nothing excludes it from the list it's IN).
+  const identityCandidates = $derived(draftMembers.filter((member) => member.type === "text"));
+
+  function onIdentityChange(value: string) {
+    draftIdentity = value === "" ? null : value;
   }
 
   function onNameInput(value: string) {
@@ -134,16 +150,29 @@
     // A member never saved yet still derives its key from the name (the
     // authoring convenience); one already on disk keeps its key — the name
     // is the human handle, the key is identity (same rule as a node id).
-    draftMembers[index] = member.isNew
-      ? { ...member, name: value, key: slug(value) }
-      : { ...member, name: value };
+    // ADR-0096 §1: the identity choice tracks a member by key, so a new
+    // member's rename — which moves its key — must follow (`upsert_metadata_group`
+    // does the same for a member already on disk, keyed by its stable key).
+    if (member.isNew) {
+      const nextKey = slug(value);
+      if (draftIdentity === member.key) draftIdentity = nextKey;
+      draftMembers[index] = { ...member, name: value, key: nextKey };
+    } else {
+      draftMembers[index] = { ...member, name: value };
+    }
     draftMembers = draftMembers;
   }
   function updateMemberType(index: number, value: GroupMember["type"]) {
-    draftMembers[index] = { ...draftMembers[index], type: value };
+    const member = draftMembers[index];
+    // A member retyped away from `text` can no longer be the identity — reset
+    // to None rather than leave a stale reference (ADR-0096 §1).
+    if (draftIdentity === member.key && value !== "text") draftIdentity = null;
+    draftMembers[index] = { ...member, type: value };
     draftMembers = draftMembers;
   }
   function removeMember(index: number) {
+    const member = draftMembers[index];
+    if (draftIdentity === member.key) draftIdentity = null;
     draftMembers = draftMembers.filter((_, i) => i !== index);
   }
   // #2215: a member's reference targets / select options, authored in the
@@ -232,9 +261,16 @@
     // model_dump excludes enforce). Omitting it leaves an ancestor's icon
     // intact in the merged view; a same-layer icon is the same "no editor"
     // limitation member options had before this PR — tracked, not regressed.
+    // The identity choice only counts when it still names a `text` member of
+    // the members actually being saved (a blank-name row was just dropped
+    // above, which could orphan it) — null for anything else, never a stale key.
+    const identity = members.some((member) => member.key === draftIdentity && member.type === "text")
+      ? draftIdentity
+      : null;
     const group: MetadataGroupDefinition = {
       name: draftName.trim() || id,
       members,
+      identity,
     };
 
     const doSave = async () => {
@@ -391,6 +427,19 @@
           {/each}
           <button class="gm-add-member" type="button" title="Add member" aria-label="Add member" onclick={addMember}>+</button>
         </div>
+
+        <label class="sfi-field">Identity
+          <select
+            class="gm-identity"
+            value={draftIdentity ?? ""}
+            onchange={(event) => onIdentityChange(event.currentTarget.value)}
+          >
+            <option value="">None</option>
+            {#each identityCandidates as member (member.key)}
+              <option value={member.key}>{member.name || member.key}</option>
+            {/each}
+          </select>
+        </label>
 
         <div class="gm-editor-foot">
           {#if !draftIsNew}
@@ -618,6 +667,14 @@
     font-family: var(--mono);
     font-size: var(--fs-xs);
     color: var(--text-3);
+  }
+  .gm-identity {
+    padding: 6px 9px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    font-size: var(--fs-md);
+    align-self: flex-start;
   }
   .gm-add-member {
     align-self: flex-start;

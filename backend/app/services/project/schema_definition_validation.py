@@ -112,6 +112,24 @@ def placement_key_message(entry_type_id: str, entry_type, field_id: str) -> str:
     )
 
 
+def _group_identity_errors(group_id: str, group) -> list[str]:
+    """A group's `identity` (ADR-0096 §1) must name one of its OWN members, of
+    type `text`. Soft, in the style of the neighbouring shape errors: a
+    hand-edited layer stays readable and the resolver simply never stamps
+    `item_identity` for the offending group."""
+    if not group.identity:
+        return []
+    member = next((m for m in group.members if m.key == group.identity), None)
+    if member is None:
+        return [f"Group {group_id} declares identity {group.identity}, which names no member of the group."]
+    if member.type != "text":
+        return [
+            f"Group {group_id} declares identity {group.identity}, "
+            f"which is of type {member.type}; identity must name a text member."
+        ]
+    return []
+
+
 def _entry_type_group_application_errors(entry_type_id: str, entry_type, schema: MetadataSchema) -> list[str]:
     """Every group a type applies must exist in the schema's group registry."""
     return [
@@ -311,6 +329,8 @@ class MetadataSchemaValidationMixin:
             errors.extend(_entry_type_summary_field_errors(entry_type_id, entry_type, schema))
         for entry_type_id, entry_type in schema.entry_types.items():
             errors.extend(_entry_type_group_application_errors(entry_type_id, entry_type, schema))
+        for group_id, group in schema.groups.items():
+            errors.extend(_group_identity_errors(group_id, group))
         for field_id, field in schema.fields.items():
             errors.extend(_field_shape_errors(field_id, field, schema))
         return errors

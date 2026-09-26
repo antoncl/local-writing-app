@@ -33,6 +33,7 @@ from app.models import (
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.code_fence import unwrap_whole_body_code_fence
 from app.services.project.errors import ProjectServiceError
+from app.services.project.list_item_identity import ensure_list_item_identity
 from app.services.project.overrides import (
     LayerOverride,
     OverrideShapes,
@@ -89,6 +90,7 @@ class LoreEntriesMixin:
         entry_type = request.entry_type or "lore:note"
         schema = self.read_metadata_schema()
         initial_metadata = self._initial_metadata_from_defaults(entry_type, schema)
+        ensure_list_item_identity(initial_metadata, entry_type, schema)
         metadata_errors = self._validate_lore_entry_metadata(
             "new",
             entry_type,
@@ -364,6 +366,7 @@ class LoreEntriesMixin:
         # entry L is the open project, so this is the full-chain schema, unchanged.
         schema = self._schema_as_authored(authoring_layer=authoring_layer)
         metadata = self._normalise_metadata(request.metadata, path)
+        ensure_list_item_identity(metadata, request.entry_type, schema)
         entry = LoreEntry(
             id=node_id,
             title=request.title,
@@ -578,6 +581,7 @@ class LoreEntriesMixin:
         # as-of-L schema is the full-chain schema — no authoring-layer plumbing
         # needed here (that is #314's, for writes *below* the owning layer).
         schema = self._schema_as_authored()
+        ensure_list_item_identity(entry.metadata, entry.entry_type, schema)
         metadata_errors = self._validate_lore_entry_metadata(
             entry_id, entry.entry_type, entry.metadata, schema, index
         )

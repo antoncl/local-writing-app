@@ -18,6 +18,7 @@
   import { dropPositionFromEvent, reorderByPosition } from "@/lib/utils/listOrder";
   import { metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
   import { groupMemberEmptyHint } from "@/lib/utils/pickerEmptyHint";
+  import { visibleItemMembers } from "@/lib/editor-core/listItemIdentity";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import type {
     GroupMember,
@@ -75,7 +76,11 @@
     uniqueMember = undefined,
   }: Props = $props();
 
-  const members = $derived(field.item_members ?? []);
+  // ADR-0096 §1: the identity member is machine-owned — excluded from every
+  // member-facing surface below (layout density, collapsed title/summary, the
+  // expanded item editor). Writes still preserve it: `setMemberValue` spreads
+  // the existing record and only ever touches a visible member's key.
+  const members = $derived(visibleItemMembers(field));
   /** Scalar sugar → items are bare scalars (flat storage); group shape →
    *  items are records keyed by member key. Reads the resolver's stamped
    *  verdict, never `item_type`: a cross-layer both-keys conflict can leave

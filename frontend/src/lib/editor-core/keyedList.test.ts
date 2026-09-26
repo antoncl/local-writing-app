@@ -55,6 +55,19 @@ describe("keyedListKeyMember", () => {
     expect(keyedListKeyMember(undefined)).toBeNull();
     expect(keyedListKeyMember(null)).toBeNull();
   });
+
+  it("ADR-0096 §1: a group that DECLARES identity is never reference-keyed, even with one entity_ref member", () => {
+    const declared = field({
+      type: "list",
+      item_scalar: false,
+      item_identity: "id",
+      item_members: [
+        { key: "id", name: "Id", type: "text" },
+        { key: "pov", name: "POV", type: "entity_ref" },
+      ],
+    });
+    expect(keyedListKeyMember(declared)).toBeNull();
+  });
 });
 
 describe("listItemKey", () => {

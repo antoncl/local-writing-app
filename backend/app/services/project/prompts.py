@@ -35,6 +35,7 @@ from app.models.schema import PromptContextStrategy
 from app.services.ai.effective_inputs import SnippetSource
 from app.services.project.computed_metadata import strip_computed_fields
 from app.services.project.errors import ProjectServiceError
+from app.services.project.list_item_identity import ensure_list_item_identity
 from app.services.project.overrides import OverrideShapes
 from app.services.project.prompt_disposition import prompt_disposition, prompt_runnable
 
@@ -559,9 +560,11 @@ class PromptEntriesMixin:
             raise ProjectServiceError("Prompt changed on disk after it was opened.", 409)
         self._check_entry_type_kind(request.entry_type, "prompt")
         metadata = self._normalise_metadata(request.metadata, path)
+        schema = self.read_metadata_schema()
         # Never persist `disposition`/`runnable` (#1684) — resolver-stamped at
         # read; see strip_computed_fields for why the strip stays narrow.
-        metadata = strip_computed_fields(metadata, self.read_metadata_schema())
+        metadata = strip_computed_fields(metadata, schema)
+        ensure_list_item_identity(metadata, request.entry_type, schema)
         # Before the write: photograph the pre-save bytes at the node's owning
         # layer (ADR-0043 Am. 2), the same session-boundary rule scenes use.
         self.maybe_capture_session_boundary(node_id, kind="prompt")

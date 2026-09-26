@@ -38,6 +38,7 @@ from app.models import (
     StructureNodeDeletePreview,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.list_item_identity import ensure_list_item_identity
 from app.services.project.placement import file_lock
 from app.services.project.tree_configs import RESEARCH_TREE
 from app.services.tree_structure import TreeStructureService
@@ -246,6 +247,7 @@ class ResearchNotesMixin:
             request.metadata, entry_type, schema
         )
         clean_metadata = self._canonicalise_metadata_selects(clean_metadata, entry_type, schema)
+        ensure_list_item_identity(clean_metadata, entry_type, schema)
         note = ResearchNote(
             id=node_id,
             title=request.title,

@@ -119,6 +119,27 @@ class MetadataSchemaGroupsMixin:
         # hand-authored `icon: null` at this layer — survives a member edit.
         inherited = self._schema_above_layer(root, layer_path).groups.get(group_id)
         spell_clears(payload, explicit_nulls(request.group), groups.get(group_id), inherited, CLEARABLE_GROUP_KEYS)
+        # ADR-0096 §1: a whole-group replace has no rename tracking (a member
+        # rename is represented as delete-old/add-new, per the dialog's own
+        # discipline — see `_reconcile_group_member_data` below). Clear a
+        # SURVIVING `identity` this replace's own member removal just orphaned
+        # — the echoed value the dialog didn't (couldn't) update — in the same
+        # write, rather than leave that for the soft validator to merely
+        # report. A payload that names an identity that never resolved (a
+        # hand-authored typo, not a removal) is left alone: that is a mistake
+        # for the validator to report, not this write to quietly paper over.
+        new_member_keys = {
+            member.get("key")
+            for member in payload.get("members", [])
+            if isinstance(member, dict)
+        }
+        old_identity = existing.identity if existing is not None else None
+        if (
+            isinstance(payload.get("identity"), str)
+            and payload["identity"] == old_identity
+            and payload["identity"] not in new_member_keys
+        ):
+            payload["identity"] = None
         groups[group_id] = payload
         layer_data["groups"] = groups
         self._validate_candidate_schema(root, layer_path, layer_data)

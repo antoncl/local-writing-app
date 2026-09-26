@@ -13,7 +13,7 @@
 
   import { untrack } from "svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
-  import { reviewBodyProposal, normalizeReviewWhitespace } from "@/lib/utils/entryRevision";
+  import { reviewBodyProposal, normalizeReviewMarkdown } from "@/lib/utils/entryRevision";
   import { adoptRegion, renderDiffRuns } from "@/lib/utils/diffRuns";
   import type { DiffRun, DiffView } from "@/lib/types";
 
@@ -41,7 +41,7 @@
   // Normalized to match the runs' current-side, which reviewBodyProposal now
   // normalizes (#1617) — the "unchanged" comparison below must use the same
   // baseline, or declining a purely-cosmetic diff would write a normalized body.
-  const originalText = untrack(() => normalizeReviewWhitespace(currentText));
+  const originalText = untrack(() => normalizeReviewMarkdown(currentText));
 
   let runs = $state<DiffRun[]>(untrack(() => reviewBodyProposal(currentText, proposedText).runs));
 

@@ -54,23 +54,26 @@ export type FieldFlip = {
 };
 
 /**
- * Normalize cosmetic markdown whitespace that the app's own editor and the AI
+ * Normalize cosmetic markdown that the app's own editor and the AI
  * emit differently, so a purely cosmetic reformat produces no diff (#1617). The
  * editor's serializer (turndown) writes bullets as `-   item` (three spaces)
  * with whitespace-only loose-list padding lines; the AI writes `- item`. Neither
  * changes what the prose renders, but on raw markdown it makes every list block
  * differ, which the block diff can only show as a whole-block stack.
  *
- * Two careful, meaning-preserving moves (never a blanket trailing-strip):
+ * Three careful, meaning-preserving moves (never a blanket trailing-strip):
  *  - blank a WHITESPACE-ONLY line (turndown's loose-list padding). Trailing
  *    whitespace AFTER content is left alone — two trailing spaces are a markdown
  *    hard line break, which the diff and the accept-write must not silently drop.
  *  - collapse the run of spaces after a SHALLOW (<=3 leading spaces) list marker
  *    to one. Capping the indent at 3 keeps it off 4-space indented code blocks,
  *    which — like fenced code — must pass through untouched.
+ *  - spell emphasis the way the editor does (#2250): turndown writes italics as
+ *    `_x_` and bold as `**x**`, the AI as `*x*` / `__x__`. See
+ *    `canonicalizeEmphasis` for when that rewrite is safe.
  * Idempotent.
  */
-export function normalizeReviewWhitespace(text: string): string {
+export function normalizeReviewMarkdown(text: string): string {
   let inFence = false;
   let fence = "";
   return text
@@ -90,9 +93,33 @@ export function normalizeReviewWhitespace(text: string): string {
       }
       if (inFence) return line; // inside code: leave exactly as-is
       if (/^[ \t]+$/.test(line)) return ""; // whitespace-only line (loose-list padding)
-      return line.replace(/^(\s{0,3}(?:[-*+]|\d{1,9}[.)]))\s+/, "$1 ");
+      return canonicalizeEmphasis(line.replace(/^(\s{0,3}(?:[-*+]|\d{1,9}[.)]))\s+/, "$1 "));
     })
     .join("\n");
+}
+
+// Backtick code spans are split out and passed through untouched.
+const CODE_SPAN = /(`+[^`]*`+)/;
+// Intraword is judged on Unicode letters/digits (CommonMark's flanking rules),
+// not ASCII `\w` — `på*virkelig*` must stay intraword.
+// `__x__` → `**x**`. Not intraword or escaped, so it IS strong emphasis.
+const UNDERSCORE_STRONG = /(^|[^\p{L}\p{N}\\*_])__(?=[^\s_])([^_\n]*?[^\s_\\])__(?![\p{L}\p{N}_])/gu;
+// `*x*` → `_x_`, only where `_` is also emphasis: not intraword (`un*real*ly`
+// is valid with `*` but not `_`), not part of `**`, not escaped, and never an
+// opener followed by space (`* * *`, `* item`, `2 * 3`). Content with `_` or
+// `*` is left alone rather than risk changing what nests.
+const STAR_EMPHASIS = /(^|[^\p{L}\p{N}_\\*])\*(?=[^\s*_])([^*_\n]*?[^\s*_\\])\*(?![\p{L}\p{N}_*])/gu;
+
+/** Rewrite AI-style emphasis delimiters to the editor's (turndown's) spelling
+ *  wherever the rewrite provably renders the same, so `*tool*` vs `_tool_` is
+ *  not a reviewable change (#2250). One line, outside fences. */
+function canonicalizeEmphasis(line: string): string {
+  return line
+    .split(CODE_SPAN)
+    .map((part, i) =>
+      i % 2 === 1 ? part : part.replace(UNDERSCORE_STRONG, "$1**$2**").replace(STAR_EMPHASIS, "$1_$2_"),
+    )
+    .join("");
 }
 
 /**
@@ -104,6 +131,6 @@ export function normalizeReviewWhitespace(text: string): string {
  * consumer of these runs relies on.
  */
 export function reviewBodyProposal(currentBody: string, proposedBody: string): BodyRevision {
-  const runs = diffRuns(normalizeReviewWhitespace(proposedBody), normalizeReviewWhitespace(currentBody));
+  const runs = diffRuns(normalizeReviewMarkdown(proposedBody), normalizeReviewMarkdown(currentBody));
   return { runs, regions: groupRuns(runs).regions };
 }

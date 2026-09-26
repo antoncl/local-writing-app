@@ -10,7 +10,7 @@
  * rides on `reviewBodyProposal` has real coverage.
  */
 import { describe, expect, it } from "vitest";
-import { reviewBodyProposal, normalizeReviewWhitespace } from "./entryRevision";
+import { reviewBodyProposal, normalizeReviewMarkdown } from "./entryRevision";
 import { renderDiffRuns } from "./diffRuns";
 import type { DiffRegion } from "./diffRuns";
 import type { DiffRun, DiffView } from "@/lib/types";
@@ -86,37 +86,79 @@ describe("reviewBodyProposal — the proposal feeds the snapshot flip unchanged"
   });
 });
 
-describe("normalizeReviewWhitespace", () => {
+describe("normalizeReviewMarkdown", () => {
   it("collapses turndown's `-   ` bullets and loose-list padding to clean markdown", () => {
     const dirty = "-   **Real**, a thing.\n    \n-   **Game**, another.";
-    expect(normalizeReviewWhitespace(dirty)).toBe("- **Real**, a thing.\n\n- **Game**, another.");
+    expect(normalizeReviewMarkdown(dirty)).toBe("- **Real**, a thing.\n\n- **Game**, another.");
   });
   it("collapses ordered-list marker padding too", () => {
-    expect(normalizeReviewWhitespace("1.   first\n2.   second")).toBe("1. first\n2. second");
+    expect(normalizeReviewMarkdown("1.   first\n2.   second")).toBe("1. first\n2. second");
   });
   it("blanks a whitespace-only line but keeps trailing spaces after content (a markdown hard break)", () => {
     // Two trailing spaces are a `<br>` (Shift+Enter → turndown); stripping them
     // would hide a real break and flatten it on accept. Only the padding line goes.
-    expect(normalizeReviewWhitespace("a line  \n    \nnext")).toBe("a line  \n\nnext");
+    expect(normalizeReviewMarkdown("a line  \n    \nnext")).toBe("a line  \n\nnext");
   });
   it("leaves fenced code untouched", () => {
     const code = "```\n-   not a list, code\n```";
-    expect(normalizeReviewWhitespace(code)).toBe(code);
+    expect(normalizeReviewMarkdown(code)).toBe(code);
   });
   it("leaves a 4-space indented code line untouched (marker collapse caps at 3 spaces)", () => {
-    expect(normalizeReviewWhitespace("    -   indented code, not a list")).toBe(
+    expect(normalizeReviewMarkdown("    -   indented code, not a list")).toBe(
       "    -   indented code, not a list",
     );
   });
   it("is idempotent", () => {
     const dirty = "-   **Real**, a thing.\n    \n-   **Game**.";
-    const once = normalizeReviewWhitespace(dirty);
-    expect(normalizeReviewWhitespace(once)).toBe(once);
+    const once = normalizeReviewMarkdown(dirty);
+    expect(normalizeReviewMarkdown(once)).toBe(once);
   });
   it("a purely cosmetic reformat yields no reviewable regions", () => {
     // The exact class from #1617: same prose, editor `-   ` vs AI `- `.
     const current = "Intro.\n\n-   **Real**, a thing.\n    \n-   **Game**, another.";
     const proposed = "Intro.\n\n- **Real**, a thing.\n\n- **Game**, another.";
+    expect(reviewBodyProposal(current, proposed).regions).toEqual([]);
+  });
+});
+
+describe("normalizeReviewMarkdown — emphasis delimiters (#2250)", () => {
+  it("spells AI emphasis the editor's way", () => {
+    expect(normalizeReviewMarkdown("a useful *tool* and __bold__ here")).toBe("a useful _tool_ and **bold** here");
+  });
+  it("converts a single-letter and a line-edge emphasis", () => {
+    expect(normalizeReviewMarkdown("*I* was *there*")).toBe("_I_ was _there_");
+  });
+  it("converts emphasis inside a star bullet but not the marker", () => {
+    expect(normalizeReviewMarkdown("* item with *real* emphasis")).toBe("* item with _real_ emphasis");
+  });
+  it.each([
+    ["intraword star emphasis (invalid with `_`)", "un*frigging*believable"],
+    ["a scene-break dinkus", "* * *"],
+    ["arithmetic", "2 * 3 * 4"],
+    ["escaped stars", "a \\*literal\\* star"],
+    ["code spans", "run `*x*` and `__y__`"],
+    ["intraword underscores", "call my__init__ now"],
+    ["intraword stars after a non-ASCII letter", "på*virkelig*"],
+    ["intraword stars before a non-ASCII letter", "*virkelig*æ"],
+    ["intraword underscores after a non-ASCII letter", "café__x__"],
+    ["bold stars", "**strong** stays"],
+  ])("leaves %s alone", (_label, text) => {
+    expect(normalizeReviewMarkdown(text)).toBe(text);
+  });
+  it("leaves emphasis inside fenced code untouched", () => {
+    const code = "```\n*x* and __y__\n```";
+    expect(normalizeReviewMarkdown(code)).toBe(code);
+  });
+  it("is idempotent", () => {
+    const once = normalizeReviewMarkdown("a *b* c __d__ e _f_ **g**");
+    expect(normalizeReviewMarkdown(once)).toBe(once);
+  });
+  it("the reported plotline: `_x_` on disk vs the AI's `*x*` yields no regions", () => {
+    const current =
+      "pivot from viewing the identity as a useful _tool_ to realizing it is the _absolute requirement_ " +
+      "for the mission, achieved _directly because_ Elias accepts it.";
+    const proposed = current.replace(/_([^_]+)_/g, "*$1*");
+    expect(proposed).toContain("*tool*");
     expect(reviewBodyProposal(current, proposed).regions).toEqual([]);
   });
 });

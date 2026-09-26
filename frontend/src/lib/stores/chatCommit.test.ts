@@ -383,13 +383,13 @@ describe("ChatCommitController — commitToEntry", () => {
     expect(deps.setNotice).toHaveBeenLastCalledWith("Committed — review it on Vale.");
   });
 
-  it("falls back to \"the scene\" when the target isn't in the roster", async () => {
-    const { c, deps } = reviseController(); // entryTitle → null (a scene subject)
+  it("falls back to \"the entry\" when the host can't resolve the target", async () => {
+    const { c, deps } = reviseController(); // entryTitle → null (e.g. a character arc)
     extractPatch.mockResolvedValue(okResult({ fields: { summary: "s" } }));
 
     await c.commitToEntry();
 
-    expect(deps.setNotice).toHaveBeenLastCalledWith("Committed — review it on the scene.");
+    expect(deps.setNotice).toHaveBeenLastCalledWith("Committed — review it on the entry.");
   });
 
   it("assigns the cost total the server reported after a successful extraction, and skips it when the call failed", async () => {

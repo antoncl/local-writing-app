@@ -54,6 +54,8 @@
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { cardEntriesStore } from "@/lib/stores/plotCards";
+  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
+  import { resolveCommitSubject } from "@/lib/chat/commitSubject";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { ChatCommitController } from "@/lib/stores/chatCommit.svelte";
@@ -282,17 +284,14 @@
     setError: (message) => (chatError = message),
     setNotice: (message) => (chatNotice = message),
     setRawReply: (text) => (chatRawReply = text),
-    entryTitle: (entryId) => loreTitle(entryId),
-    // The commit publishes its review onto the entry's pane; bring that pane into
-    // view (open or front) so the author sees the proposed-vs-current diff without
-    // hunting for the review-dot. Only a lore subject is resolvable to an opener
-    // from this pane's roster — a scene / plot-card subject keeps the notice-only
-    // hand-off (its kind isn't known here). openLore focuses an already-open pane
-    // or loads a fresh one; best-effort, so a navigation failure never breaks a
-    // successful commit (the notice still names where the review went).
+    entryTitle: (entryId) => commitSubject(entryId)?.title ?? null,
+    // The commit publishes its review onto the subject's pane; bring that pane
+    // into view (open or front) so the author sees the proposed-vs-current diff
+    // without hunting for the review-dot (#2246: lore, plotline, card, scene).
+    // Best-effort, so a navigation failure never breaks a successful commit
+    // (the notice still names where the review went).
     revealEntry: (entryId) => {
-      if (loreEntries.some((entry) => entry.id === entryId))
-        void editorPanes.openLore(entryId).catch(() => {});
+      void commitSubject(entryId)?.open().catch(() => {});
     },
     // The set this chat already owns, read at stage time so a re-stage refines it
     // in place (singular edge, §4) instead of minting an orphan.
@@ -1046,9 +1045,14 @@
   let strippedInputs = $derived(
     commit.isCreateBrainstorm ? declaredInputs.filter((i) => i.name !== "entry") : declaredInputs,
   );
-  // The one lore-title lookup — shared by titleFor and the commit
-  // controller's entryTitle (whose null result is a KIND discriminator for
-  // its "the scene"/"the entry" phrasing, so it stays lore-only).
+  // A revise commit's subject → its document pane + title (#2246).
+  function commitSubject(id: string) {
+    return resolveCommitSubject(
+      id,
+      { lore: loreEntries, plotlines: $plotlineEntriesStore, cards: $cardEntriesStore, structure, schema: metadataSchema },
+      editorPanes,
+    );
+  }
   function loreTitle(id: string): string | null {
     return loreEntries.find((entry) => entry.id === id)?.title ?? null;
   }

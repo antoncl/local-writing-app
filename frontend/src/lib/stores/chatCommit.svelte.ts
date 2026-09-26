@@ -344,8 +344,9 @@ export class ChatCommitController {
     this.deps.revealEntry(entryId);
     // Hand-off cue (#710 slice 3): the commit lands here in the chat pane but the
     // review renders on the entry pane. Name where it went so the author knows to
-    // flip over. A scene subject isn't in the caller's roster → "the scene".
-    const reviewOn = this.deps.entryTitle(entryId) ?? "the scene";
+    // flip over. A subject the host can't resolve (#2246: e.g. a character arc,
+    // which has no document pane) gets the kind-neutral "the entry".
+    const reviewOn = this.deps.entryTitle(entryId) ?? "the entry";
     this.deps.setNotice(
       `Committed — review it on ${reviewOn}.${droppedSuffix(patch.dropped)}${this.outputTokensSuffix()}`,
     );

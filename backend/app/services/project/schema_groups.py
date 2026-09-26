@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 from app.models import (
     AttachMetadataFieldRequest,
@@ -22,6 +23,12 @@ from app.models import (
 )
 from app.services.project.default_schema import AUTHORABLE_COMPUTED_FUNCTIONS
 from app.services.project.errors import ProjectServiceError
+from app.services.project.member_field_rewrite import (
+    MemberOptionChange,
+    apply_member_option_migration,
+    apply_member_rename_or_delete,
+    rewrite_group_member_key_in_layer,
+)
 from app.services.project.schema_layer_write import (
     CLEARABLE_GROUP_KEYS,
     explicit_nulls,
@@ -94,7 +101,12 @@ class MetadataSchemaGroupsMixin:
         group_id = request.group_id.strip()
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", group_id):
             raise ProjectServiceError("Group ID must start with a letter and contain only letters, numbers, and underscores.", 422)
-        existing = self.read_metadata_schema().groups.get(group_id)
+        # #2239: read the WHOLE schema before writing, not just this group — the
+        # reconciliation below needs the group as it stood on disk to diff
+        # against what got saved (the dialog sends a whole-group replace with
+        # no old->new bookkeeping of its own).
+        schema_before = self.read_metadata_schema()
+        existing = schema_before.groups.get(group_id)
         if existing is not None and not request.allow_existing:
             raise ProjectServiceError(f"Group {group_id} already exists.", 422)
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
@@ -111,7 +123,113 @@ class MetadataSchemaGroupsMixin:
         layer_data["groups"] = groups
         self._validate_candidate_schema(root, layer_path, layer_data)
         self._write_yaml(layer_path, layer_data)
+        if existing is not None:
+            self._reconcile_group_member_data(root, group_id, schema_before, request.member_option_migration)
         return self.read_metadata_schema()
+
+    def _reconcile_group_member_data(
+        self,
+        root: Path,
+        group_id: str,
+        schema_before: MetadataSchema,
+        migration: dict[str, dict[str, str]] | None,
+    ) -> None:
+        """#2239: after `upsert_metadata_group` writes a whole-group replace,
+        detect what the save actually removed relative to `schema_before`
+        (read BEFORE the write) and clean stored data the same reach
+        `rename_metadata_field` / `delete_metadata_field` give an explicit
+        member rename/delete:
+
+        - a member key present before, absent now -> the member-DELETE reach
+          (items, member-path rows, encoded `add`-item values);
+        - on a member that stays, a select/multi_select option value present
+          before, absent now -> the option-removal reach for that member.
+
+        This is AUTO-DETECTED from the diff, because a member's key and an
+        option's value are stable once saved (the dialog never retypes one
+        out from under existing data) — a disappearance is always a deletion,
+        never a silent rename. `migration` (member_key -> {old: new}) is still
+        honoured when a caller explicitly supplies one, mapping an old value
+        forward instead of clearing it."""
+        old_group = schema_before.groups.get(group_id)
+        if old_group is None:
+            return
+        new_group = self.read_metadata_schema().groups.get(group_id)
+        new_members = {member.key: member for member in (new_group.members if new_group else [])}
+        entry_paths = self._entry_markdown_paths(root)
+        read = lambda path: self._read_markdown_with_front_matter(path, strict=True)  # noqa: E731
+        write = self._write_markdown_with_front_matter
+
+        for old_member in old_group.members:
+            if old_member.key not in new_members:
+                apply_member_rename_or_delete(
+                    root, schema_before, old_member.key, None, [group_id], entry_paths, read, write
+                )
+
+        for old_member in old_group.members:
+            new_member = new_members.get(old_member.key)
+            if new_member is None or new_member.type not in ("select", "multi_select"):
+                continue
+            explicit = (migration or {}).get(old_member.key) or {}
+            rename = {k: v for k, v in explicit.items() if k != v}
+            valid = {option.value for option in new_member.options}
+            old_values = {option.value for option in old_member.options}
+            if not rename and old_values <= valid:
+                continue  # nothing removed, nothing to migrate — a pure relabel
+            change = MemberOptionChange(rename=rename, valid=valid, is_collection=new_member.type == "multi_select")
+            apply_member_option_migration(root, schema_before, group_id, old_member.key, change, entry_paths, read, write)
+
+    def _rewrite_group_member_field(
+        self,
+        root: Path,
+        schema: MetadataSchema,
+        member_groups: dict[str, Any],
+        old_member: str,
+        new_member: str | None,
+    ) -> None:
+        """#2239: rewrite a group's OWN member declaration (`groups.<id>.members`,
+        at the layer that defines it) plus every list field the group shapes —
+        stored items and the matching mutation-set/override rows — the same
+        ADR-0095 §9 reach `rename_metadata_field` / `delete_metadata_field` give
+        a field's own id, extended to a field that is a group MEMBER. `schema`
+        must be read before the change (`member_groups` is keyed by the OLD id)."""
+        substitutions: dict[Path, dict[str, Any]] = {}
+        for candidate_group_id in member_groups:
+            layer_path = self._group_definition_layer_path(root, candidate_group_id)
+            if layer_path is None:
+                continue
+            layer_data = substitutions.get(layer_path)
+            if layer_data is None:
+                layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+            rewrite_group_member_key_in_layer(layer_data, candidate_group_id, old_member, new_member)
+            substitutions[layer_path] = layer_data
+        if not substitutions:
+            return
+        self._validate_candidate_schema_layers(root, substitutions)
+        for layer_path, layer_data in substitutions.items():
+            self._write_yaml(layer_path, layer_data)
+        apply_member_rename_or_delete(
+            root,
+            schema,
+            old_member,
+            new_member,
+            member_groups.keys(),
+            self._entry_markdown_paths(root),
+            lambda path: self._read_markdown_with_front_matter(path, strict=True),
+            self._write_markdown_with_front_matter,
+        )
+
+    def _group_definition_layer_path(self, root: Path, group_id: str) -> Path | None:
+        """The nearest layer defining `group_id` — the writable source for a
+        member rename/delete/option-migration reach, mirroring
+        `_field_source_layer_path` for groups. There is no per-group
+        `field_sources`-style overview, so this repeats the same nearest-wins
+        walk `_layers_defining_group` uses (nearer layers assigned last win)."""
+        owner: Path | None = None
+        for path in self._metadata_schema_layer_paths(root):
+            if path.exists() and group_id in (self._read_yaml(path).get("groups") or {}):
+                owner = path
+        return owner
 
     def delete_metadata_group(self, request: DeleteMetadataGroupRequest) -> MetadataSchema:
         root = self._require_project()

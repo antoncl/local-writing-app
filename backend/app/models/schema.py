@@ -574,6 +574,11 @@ class UpsertMetadataGroupRequest(BaseModel):
     group_id: str = Field(min_length=1)
     group: MetadataGroupDefinition
     allow_existing: bool = True
+    # Explicit old-value -> new-value option-rename map per member key, computed
+    # client-side (mirrors UpsertMetadataFieldRequest.option_migration). Reaches
+    # a select/multi_select member's stored item values and rows (#2239);
+    # values no longer present in that member's options are cleared.
+    member_option_migration: dict[str, dict[str, str]] | None = None
 
 
 class DeleteMetadataGroupRequest(BaseModel):

@@ -48,6 +48,7 @@ from app.services.project.default_schema import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import SCHEMA_FILENAME
+from app.services.project.member_field_rewrite import groups_with_member
 from app.services.project.mutation_row_rewrite import (
     apply_row_rewrite_to_files,
     rewrite_field_across_set_and_override_rows,
@@ -882,61 +883,81 @@ class MetadataSchemaMixin:
             raise ProjectServiceError("Metadata field ID must start with a letter and contain only letters, numbers, and underscores.", 422)
 
         schema = self.read_metadata_schema()
-        if old_field_id not in schema.fields:
+        field_exists = old_field_id in schema.fields
+        # #2239: `old_field_id` may ALSO (or only) be a MEMBER of a group some
+        # list field uses as its item shape — read before the rename, so this
+        # is still keyed by the pre-change id.
+        member_groups = groups_with_member(schema, old_field_id)
+        if not field_exists and not member_groups:
             raise ProjectServiceError(f"Unknown metadata field {old_field_id}.", 404)
         if new_field_id in schema.fields:
             raise ProjectServiceError(f"Metadata field {new_field_id} already exists.", 422)
+        for group_id in member_groups:
+            if any(m.key == new_field_id for m in schema.groups[group_id].members):
+                raise ProjectServiceError(f"Group {group_id} already has a member {new_field_id}.", 422)
 
-        source_path = self._field_source_layer_path(root, old_field_id, "renamed")
+        if field_exists:
+            source_path = self._field_source_layer_path(root, old_field_id, "renamed")
 
-        layer_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
-        fields = layer_data.get("fields")
-        if not isinstance(fields, dict) or old_field_id not in fields:
-            raise ProjectServiceError(f"Metadata field {old_field_id} is not defined in its source layer.", 422)
-        fields[new_field_id] = fields.pop(old_field_id)
-        self._replace_metadata_field_reference_in_layer(layer_data, old_field_id, new_field_id, request.entry_type)
+            layer_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
+            fields = layer_data.get("fields")
+            if not isinstance(fields, dict) or old_field_id not in fields:
+                raise ProjectServiceError(f"Metadata field {old_field_id} is not defined in its source layer.", 422)
+            fields[new_field_id] = fields.pop(old_field_id)
+            self._replace_metadata_field_reference_in_layer(layer_data, old_field_id, new_field_id, request.entry_type)
 
-        self._validate_candidate_schema(root, source_path, layer_data)
-        self._write_yaml(source_path, layer_data)
-        self._rename_entry_metadata_key(root, old_field_id, new_field_id)
-        # ADR-0095 §9: a mutation-set/override row naming the field, plain or
-        # as a keyed-list member path, renames with it — `schema` (read above,
-        # before the rename) is still keyed by `old_field_id`.
-        rewrite_field_across_set_and_override_rows(
-            root,
-            old_field_id,
-            new_field_id,
-            schema,
-            lambda path: self._read_markdown_with_front_matter(path, strict=True),
-            self._write_markdown_with_front_matter,
-        )
+            self._validate_candidate_schema(root, source_path, layer_data)
+            self._write_yaml(source_path, layer_data)
+            self._rename_entry_metadata_key(root, old_field_id, new_field_id)
+            # ADR-0095 §9: a mutation-set/override row naming the field, plain or
+            # as a keyed-list member path, renames with it — `schema` (read above,
+            # before the rename) is still keyed by `old_field_id`.
+            rewrite_field_across_set_and_override_rows(
+                root,
+                old_field_id,
+                new_field_id,
+                schema,
+                lambda path: self._read_markdown_with_front_matter(path, strict=True),
+                self._write_markdown_with_front_matter,
+            )
+
+        if member_groups:
+            self._rewrite_group_member_field(root, schema, member_groups, old_field_id, new_field_id)
         return self.read_metadata_schema()
 
     def delete_metadata_field(self, request: DeleteMetadataFieldRequest) -> MetadataSchema:
         root = self._require_project()
         field_id = request.field_id.strip()
         schema = self.read_metadata_schema()
-        if field_id not in schema.fields:
+        field_exists = field_id in schema.fields
+        # #2239: `field_id` may ALSO (or only) be a MEMBER of a group some list
+        # field uses as its item shape — read before the delete.
+        member_groups = groups_with_member(schema, field_id)
+        if not field_exists and not member_groups:
             raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
 
-        source_path = self._field_source_layer_path(root, field_id, "deleted")
+        if field_exists:
+            source_path = self._field_source_layer_path(root, field_id, "deleted")
 
-        layer_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
-        self._remove_metadata_field_from_layer(layer_data, field_id, request.entry_type)
+            layer_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
+            self._remove_metadata_field_from_layer(layer_data, field_id, request.entry_type)
 
-        self._validate_candidate_schema(root, source_path, layer_data)
-        self._write_yaml(source_path, layer_data)
-        self._remove_entry_metadata_key(root, field_id)
-        # ADR-0095 §9: a mutation-set/override row naming the field, plain or
-        # as a keyed-list member path, is dropped with it.
-        rewrite_field_across_set_and_override_rows(
-            root,
-            field_id,
-            None,
-            schema,
-            lambda path: self._read_markdown_with_front_matter(path, strict=True),
-            self._write_markdown_with_front_matter,
-        )
+            self._validate_candidate_schema(root, source_path, layer_data)
+            self._write_yaml(source_path, layer_data)
+            self._remove_entry_metadata_key(root, field_id)
+            # ADR-0095 §9: a mutation-set/override row naming the field, plain or
+            # as a keyed-list member path, is dropped with it.
+            rewrite_field_across_set_and_override_rows(
+                root,
+                field_id,
+                None,
+                schema,
+                lambda path: self._read_markdown_with_front_matter(path, strict=True),
+                self._write_markdown_with_front_matter,
+            )
+
+        if member_groups:
+            self._rewrite_group_member_field(root, schema, member_groups, field_id, None)
         return self.read_metadata_schema()
 
     def _add_metadata_field_to_layer(

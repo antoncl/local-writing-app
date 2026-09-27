@@ -203,6 +203,61 @@
     border-radius: 4px;
     color: var(--text);
   }
+  /* The find/replace panel (#2291) has the same light-only default as the
+     tooltip above (`&light .cm-panels` #f5f5f5, gradient `.cm-button`s), so it
+     gets the same token theming and specificity lift. It is also built from
+     plain <label>/<input>/<button> elements, which the global form rules in
+     styles.css restyle for the app's forms: `label` is a grid (checkbox stacked
+     over its text) and text inputs are width:100%. Undo those inside the panel
+     so it lays out as CodeMirror intends — one find row, one replace row. */
+  .code-editor :global(.cm-editor .cm-panels) {
+    background: var(--panel);
+    color: var(--text);
+  }
+  .code-editor :global(.cm-editor .cm-panels-bottom) {
+    border-top: 1px solid var(--border);
+  }
+  .code-editor :global(.cm-editor .cm-search) {
+    font-size: var(--fs-sm);
+  }
+  .code-editor :global(.cm-editor .cm-search label) {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+  /* CodeMirror sets its panel fields and buttons to `font-size: 70%` — 8.4px
+     inside this panel, too small to read. Size them with the panel. */
+  .code-editor :global(.cm-editor .cm-search .cm-textfield),
+  .code-editor :global(.cm-editor .cm-search .cm-button) {
+    font-size: inherit;
+  }
+  .code-editor :global(.cm-editor .cm-search .cm-textfield) {
+    width: auto;
+    min-width: 14em;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .code-editor :global(.cm-editor .cm-search .cm-button) {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 2px 8px;
+  }
+  .code-editor :global(.cm-editor .cm-search .cm-button:hover) {
+    background: var(--accent-soft);
+  }
+  .code-editor :global(.cm-editor .cm-search button[name="close"]) {
+    background: none;
+    border: none;
+    color: var(--text-2);
+    padding: 0 4px;
+  }
   .code-editor :global(.cm-diagnostic-error) {
     border-left-color: var(--danger);
   }

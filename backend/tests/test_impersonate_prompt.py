@@ -35,6 +35,9 @@ class ImpersonateFieldsTests(_HelperFixtureBase):
         }
         self.service._write_yaml(schema_path, data)
 
+        self.california = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="California", entry_type="lore:location")
+        )
         created = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Zorro", entry_type="lore:character:duelist")
         )
@@ -46,7 +49,9 @@ class ImpersonateFieldsTests(_HelperFixtureBase):
                 base_revision=created.revision,
                 entry_type="lore:character:duelist",
                 metadata={
-                    "aliases": [],
+                    "aliases": ["Don Diego", "El Zorro"],
+                    "context_policy": "always",
+                    "home_place": self.california.id,
                     "role": "protagonist",
                     "signature_move": "A carved Z",
                 },
@@ -78,6 +83,19 @@ class ImpersonateFieldsTests(_HelperFixtureBase):
         self.assertIn("## Details", text)
         self.assertIn("Role: protagonist", text)
         self.assertIn("Signature move: A carved Z", text)
+
+    def test_reference_and_multi_value_fields_render_readably(self) -> None:
+        # An entity_ref renders its target's title (not an id); a multi-value
+        # field joins its items (not a Python list repr).
+        text, _ = self._render(entry_id=self.zorro.id)
+        self.assertIn("Home Place: California", text)
+        self.assertIn("Aliases: Don Diego, El Zorro", text)
+
+    def test_author_only_knobs_are_not_details(self) -> None:
+        # `context_policy` is an author-only cost/visibility knob (not
+        # ai_proposable) — the lore block skips it, and so does Details.
+        text, _ = self._render(entry_id=self.zorro.id)
+        self.assertNotIn("always", text.split("## Details", 1)[1])
 
     def test_title_and_body_are_not_duplicated_under_details(self) -> None:
         text, _ = self._render(entry_id=self.zorro.id)

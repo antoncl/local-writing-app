@@ -53,29 +53,32 @@ Use {{ project.metadata.spelling }} spelling.
   `use(inputs.entry)`: the lore path places an entry at book-start (it has no
   scene to anchor to), which would drop the as-of overlay this prompt just
   resolved. Rendering here keeps every detail consistent with the body above.
-#}
-{% set ns = namespace(any=false) %}
-{% for f in fields(char) if f.id not in ("title", "body") %}
-{% if field_value(char, f) %}
-{% set ns.any = true %}
-{% endif %}
-{% endfor %}
-{% if ns.any %}
 
-## Details
-{% for f in fields(char) if f.id not in ("title", "body") %}
+  Which fields: story content, not bookkeeping. `proposable` is false for
+  computed, hidden and author-only fields (e.g. the context policy) — but also
+  for references, which ARE content (relationships), so those are let back in.
+  The same rule the lore block uses.
+#}
+{% set details = [] %}
+{% for f in fields(char) if f.id not in ("title", "body") and (f.proposable or f.type in ("entity_ref", "entity_ref_list")) %}
 {% set v = field_value(char, f) %}
 {% if v %}
 {% if f.type == "entity_ref" %}
-- {{ f.label }}: {{ v.title }}
+{% do details.append(f.label ~ ": " ~ v.title) %}
 {% elif f.type == "entity_ref_list" %}
-- {{ f.label }}: {{ v | map(attribute="title") | join(", ") }}
-{% elif f.type == "list" %}
-- {{ f.label }}: {{ v | map("string") | join(", ") }}
+{% do details.append(f.label ~ ": " ~ (v | map(attribute="title") | join(", "))) %}
+{% elif v is sequence and v is not string %}
+{% do details.append(f.label ~ ": " ~ (v | map("string") | join(", "))) %}
 {% else %}
-- {{ f.label }}: {{ v }}
+{% do details.append(f.label ~ ": " ~ v) %}
 {% endif %}
 {% endif %}
+{% endfor %}
+{% if details %}
+
+## Details
+{% for line in details %}
+- {{ line }}
 {% endfor %}
 {% endif %}
 {% endif %}

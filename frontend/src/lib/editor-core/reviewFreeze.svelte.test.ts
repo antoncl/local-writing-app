@@ -58,6 +58,40 @@ describe("wireReviewFreeze (#1965)", () => {
     stop();
   });
 
+  it("ignores a replaced scene object that keeps the same id (the Accept-all 409 loop)", () => {
+    // NodeEditor reads the id as `scene?.id`, and the pane store replaces the
+    // scene-bearing pane object on EVERY `panes` reassignment — including each
+    // failed save's `saving` flip. Tracking the object (not the id's value)
+    // re-ran the effect per reassignment: thaw → re-freeze → `firstLock` flush on
+    // the dirty pane → 409 → `saving` flip → re-run: ~8k PUTs in two minutes.
+    const host = $state({ scene: { id: "lore_1" } as { id: string } | null });
+    const signals: Array<ReviewCommitter | null> = [];
+
+    const stop = $effect.root(() => {
+      wireReviewFreeze({
+        entryId: () => host.scene?.id ?? null,
+        reviewing: () => true,
+        committer: () => committer,
+        signal: () => (_id, c) => signals.push(c),
+      });
+    });
+
+    flushSync();
+    expect(signals).toEqual([committer]); // frozen once at entry
+
+    for (let i = 0; i < 5; i++) {
+      host.scene = { id: "lore_1" }; // same node, new object
+      flushSync();
+    }
+    expect(signals).toEqual([committer]); // no thaw/re-freeze churn
+
+    host.scene = { id: "lore_2" }; // a genuine switch still re-freezes
+    flushSync();
+    expect(signals).toEqual([committer, null, committer]);
+
+    stop();
+  });
+
   it("thaws (null) when the review ends", () => {
     let reviewing = $state(true);
     const signals: Array<ReviewCommitter | null> = [];

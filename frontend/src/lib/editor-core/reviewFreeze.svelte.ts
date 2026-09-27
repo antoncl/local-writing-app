@@ -22,6 +22,13 @@
 // entry id or `reviewing` changing — never on the host callback's identity churn.
 // So `signal` (and the committer it is handed) are read through `untrack`; only
 // `entryId()` and `reviewing()` are tracked dependencies.
+//
+// The Accept-all 409 loop — the same engine, a second fuel line. `entryId()` is
+// `scene?.id`, and reading it tracks the SCENE OBJECT, which the pane store
+// replaces on every `panes` reassignment (a failed save's `saving` flip among
+// them). An unchanged id still re-ran the effect, so a dirty review pane whose
+// save kept 409ing looped exactly as above (~8k PUTs in two minutes). Both inputs
+// now pass through `$derived`, which notifies only when the VALUE changes.
 import { untrack } from "svelte";
 import type { ReviewCommitter } from "@/lib/stores/editorPanes.svelte";
 
@@ -40,11 +47,13 @@ export function wireReviewFreeze(deps: {
   committer: () => ReviewCommitter;
   signal: () => ReviewFreezeSignal | undefined;
 }): void {
+  const trackedEntryId = $derived(deps.entryId());
+  const trackedReviewing = $derived(deps.reviewing());
   $effect(() => {
-    const entryId = deps.entryId();
+    const entryId = trackedEntryId;
     if (!entryId) return;
     // Tracked: the true transition signal. The rest is read out-of-band below.
-    const active = deps.reviewing();
+    const active = trackedReviewing;
     untrack(() => deps.signal()?.(entryId, active ? deps.committer() : null));
     return () => deps.signal()?.(entryId, null);
   });

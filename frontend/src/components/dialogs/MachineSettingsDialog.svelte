@@ -337,6 +337,13 @@
           </section>
 
           <p class="muted">Your providers. A cloud key is masked on read and stays configured until you remove it; Ollama is a local host you can edit and test. Edit a provider from its chip.</p>
+          <!-- #2287: keys normally live in the OS secret store; say so plainly
+               when this machine has none and they fall back to config.yaml. -->
+          {#if settings && !settings.keys_in_os_store}
+            <p class="key-store-warning" data-testid="key-store-warning">
+              No system keychain was found on this machine, so API keys are stored in plain text in {settings.config_path}.
+            </p>
+          {/if}
 
           <!--
             One provider chooser for every provider (#1417). Ollama is just another
@@ -683,6 +690,16 @@
   .health-check p.muted,
   .price-refresh p.muted {
     margin: 0;
+    font-size: var(--fs-sm);
+  }
+
+  .key-store-warning {
+    margin: 0;
+    padding: 7px 12px;
+    border: 1px solid var(--star-border);
+    border-radius: 9px;
+    background: var(--star-soft);
+    color: var(--star);
     font-size: var(--fs-sm);
   }
 

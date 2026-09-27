@@ -24,8 +24,11 @@ datas += copy_metadata("local-writing-service")
 datas += [(_frontend_dist, "frontend_dist")]
 
 # Packages that pull implementations dynamically (add more here as the verify
-# run surfaces ModuleNotFoundError at runtime).
-for _pkg in ("uvicorn", "tiktoken"):
+# run surfaces ModuleNotFoundError at runtime). `keyring` (#2287) finds its OS
+# backends (Windows/macOS/SecretService) through package entry points, so it
+# needs its submodules AND its metadata, or a frozen build silently resolves
+# the no-store `fail` backend and falls back to plaintext keys.
+for _pkg in ("uvicorn", "tiktoken", "keyring"):
     _d, _b, _h = collect_all(_pkg)
     datas += _d
     binaries += _b

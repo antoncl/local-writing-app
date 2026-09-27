@@ -46,6 +46,7 @@ function view(ai_policy: MachineSettingsView["ai_policy"]): MachineSettingsView 
     warn_on_orphaning_delete: true,
     config_path: "C:/config.yaml",
     config_dir: "C:/",
+    keys_in_os_store: true,
   };
 }
 
@@ -83,6 +84,32 @@ function mount(ai_policy: MachineSettingsView["ai_policy"], onApplyPolicy = vi.f
 }
 
 beforeEach(() => vi.clearAllMocks());
+
+describe("MachineSettingsDialog — where API keys are kept (#2287)", () => {
+  function mountWithStore(keysInOsStore: boolean) {
+    render(MachineSettingsDialog, {
+      props: {
+        open: true,
+        settings: { ...view("off"), keys_in_os_store: keysInOsStore },
+        draft: reactive(draft()),
+        onCancel: () => {},
+        onSave: vi.fn(),
+        onApplyPolicy: vi.fn().mockResolvedValue(true),
+        health: null,
+      },
+    });
+  }
+
+  it("says plainly when keys fall back to plaintext config.yaml", () => {
+    mountWithStore(false);
+    expect(screen.getByTestId("key-store-warning").textContent).toContain("C:/config.yaml");
+  });
+
+  it("says nothing when the system keychain holds them", () => {
+    mountWithStore(true);
+    expect(screen.queryByTestId("key-store-warning")).toBeNull();
+  });
+});
 
 describe("MachineSettingsDialog — app-wide AI policy (#746)", () => {
   it("seeds the control from the persisted policy", () => {

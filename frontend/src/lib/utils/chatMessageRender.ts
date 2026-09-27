@@ -95,6 +95,42 @@ marked.use({
   ],
 });
 
+const FENCE_LINE = /^\s*(```|~~~)/;
+const LIST_MARKER_LINE = /^( *)(?:[*+-]|\d{1,9}[.)])[ \t]/;
+
+// #2283: some models (seen with a Gemma build on Ollama) indent EVERY list by
+// four spaces, groups separated by blank lines. CommonMark reads a block
+// indented ≥4 after a blank line as an indented code block, so the bullets
+// render as a <pre> that never wraps. Models fence real code, so when every
+// list-marker line (outside fences) sits at ≥4 spaces, shift those lines left
+// by the shallowest list indent — nesting keeps its relative depth (4/8 → 0/4).
+// Fenced code, and any line indented less than that, is untouched.
+export function outdentIndentedLists(text: string): string {
+  const lines = text.split("\n");
+  let inFence = false;
+  let shallowest = Infinity;
+  for (const line of lines) {
+    if (FENCE_LINE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    const marker = inFence ? null : LIST_MARKER_LINE.exec(line);
+    if (marker) shallowest = Math.min(shallowest, marker[1].length);
+  }
+  if (!Number.isFinite(shallowest) || shallowest < 4) return text;
+  const pad = " ".repeat(shallowest);
+  inFence = false;
+  return lines
+    .map((line) => {
+      if (FENCE_LINE.test(line)) {
+        inFence = !inFence;
+        return line;
+      }
+      return !inFence && line.startsWith(pad) ? line.slice(shallowest) : line;
+    })
+    .join("\n");
+}
+
 export function renderChatContent(text: string): string {
   if (!text) return "";
   // Streaming safety: marked's tokenizers only match math when delimiters close,
@@ -102,7 +138,7 @@ export function renderChatContent(text: string): string {
   // delta. No pre-pass needed.
   let html: string;
   try {
-    html = marked.parse(text) as string;
+    html = marked.parse(outdentIndentedLists(text)) as string;
   } catch {
     const safe = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     return `<p>${safe}</p>`;

@@ -61,6 +61,10 @@ from app.services.project.schema_definition_validation import (
     placement_key_fields,
     placement_key_message,
 )
+from app.services.project.schema_field_membership import (
+    rename_field_membership,
+    strip_field_membership,
+)
 from app.services.project.schema_inheritance import (
     RESOLVER_STAMPED_ENTRY_TYPE_KEYS,
     RESOLVER_STAMPED_FIELD_KEYS,
@@ -756,10 +760,19 @@ class MetadataSchemaMixin:
         inherited = self._schema_above_layer(root, layer_path).fields.get(field_id)
         fields[field_id] = self._layer_field_payload(request.field, inherited, fields.get(field_id))
         layer_data["fields"] = fields
-        self._attach_field_to_entry_type(root, layer_path, layer_data, request.entry_type, field_id)
+        # #2277: a field defined above the layer that declares its entry type is
+        # listed on that type where the type lives, never on a stand-in minted here.
+        layers = {layer_path: layer_data}
+        membership_path = self._membership_layer_for(root, layer_path, request.entry_type)
+        if membership_path != layer_path:
+            layers[membership_path] = (
+                self._read_yaml(membership_path) if membership_path.exists() else self._empty_metadata_schema()
+            )
+        self._attach_field_to_entry_type(root, membership_path, layers[membership_path], request.entry_type, field_id)
 
-        self._validate_candidate_schema(root, layer_path, layer_data)
-        self._write_yaml(layer_path, layer_data)
+        self._validate_candidate_schema_layers(root, layers)
+        for path, data in layers.items():
+            self._write_yaml(path, data)
         if existing_field is not None:
             self._apply_option_value_changes(
                 root, field_id, existing_field, request.field, request.option_migration
@@ -858,15 +871,25 @@ class MetadataSchemaMixin:
 
         source_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
         target_data = self._read_yaml(target_path) if target_path.exists() else self._empty_metadata_schema()
-        self._remove_metadata_field_from_layer(source_data, field_id, request.entry_type)
+        # #2277: the membership travels with the definition only when the target
+        # layer can see the entry type — moving a field up past the layer that
+        # declares its type must not mint a stand-in type up there.
+        carry_membership = request.entry_type in self._read_metadata_schema_through_path(root, target_path).entry_types
+        if carry_membership:
+            self._remove_metadata_field_from_layer(source_data, field_id, request.entry_type)
+        elif isinstance(source_data.get("fields"), dict):
+            source_data["fields"].pop(field_id, None)
         # What the target inherits is resolved with the source layer's entry
         # already gone — a clear the source held (`derived: null`, #1916) must
         # travel with the field, not read as "nothing above declares it".
         inherited = self._schema_above_layer(root, target_path, {source_path: source_data}).fields.get(field_id)
-        existing = target_data.get("fields", {}).get(field_id) if isinstance(target_data.get("fields"), dict) else None
-        self._add_metadata_field_to_layer(
-            root, target_path, target_data, field_id, self._layer_field_payload(field, inherited, existing), request.entry_type
-        )
+        target_fields = target_data.get("fields")
+        if not isinstance(target_fields, dict):
+            target_fields = {}
+        target_fields[field_id] = self._layer_field_payload(field, inherited, target_fields.get(field_id))
+        target_data["fields"] = target_fields
+        if carry_membership:
+            self._attach_field_to_entry_type(root, target_path, target_data, request.entry_type, field_id)
 
         self._validate_candidate_schema_layers(root, {source_path: source_data, target_path: target_data})
         self._write_yaml(source_path, source_data)
@@ -897,17 +920,7 @@ class MetadataSchemaMixin:
                 raise ProjectServiceError(f"Group {group_id} already has a member {new_field_id}.", 422)
 
         if field_exists:
-            source_path = self._field_source_layer_path(root, old_field_id, "renamed")
-
-            layer_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
-            fields = layer_data.get("fields")
-            if not isinstance(fields, dict) or old_field_id not in fields:
-                raise ProjectServiceError(f"Metadata field {old_field_id} is not defined in its source layer.", 422)
-            fields[new_field_id] = fields.pop(old_field_id)
-            self._replace_metadata_field_reference_in_layer(layer_data, old_field_id, new_field_id, request.entry_type)
-
-            self._validate_candidate_schema(root, source_path, layer_data)
-            self._write_yaml(source_path, layer_data)
+            self._rename_field_in_schema_layers(root, old_field_id, new_field_id)
             self._rename_entry_metadata_key(root, old_field_id, new_field_id)
             # ADR-0095 §9: a mutation-set/override row naming the field, plain or
             # as a keyed-list member path, renames with it — `schema` (read above,
@@ -937,13 +950,7 @@ class MetadataSchemaMixin:
             raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
 
         if field_exists:
-            source_path = self._field_source_layer_path(root, field_id, "deleted")
-
-            layer_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
-            self._remove_metadata_field_from_layer(layer_data, field_id, request.entry_type)
-
-            self._validate_candidate_schema(root, source_path, layer_data)
-            self._write_yaml(source_path, layer_data)
+            self._delete_field_from_schema_layers(root, field_id)
             self._remove_entry_metadata_key(root, field_id)
             # ADR-0095 §9: a mutation-set/override row naming the field, plain or
             # as a keyed-list member path, is dropped with it.
@@ -960,40 +967,59 @@ class MetadataSchemaMixin:
             self._rewrite_group_member_field(root, schema, member_groups, field_id, None)
         return self.read_metadata_schema()
 
-    def _add_metadata_field_to_layer(
-        self,
-        root: Path,
-        layer_path: Path,
-        layer_data: dict[str, Any],
-        field_id: str,
-        field_payload: dict[str, Any],
-        entry_type: str,
-    ) -> None:
-        fields = layer_data.get("fields")
-        if not isinstance(fields, dict):
-            fields = {}
-        fields[field_id] = field_payload
-        layer_data["fields"] = fields
+    def _delete_field_from_schema_layers(self, root: Path, field_id: str) -> None:
+        """#2276: the definition goes from the layer that owns it, and every
+        entry type listing the field — in that layer or any below it — drops it."""
+        source_path = self._field_source_layer_path(root, field_id, "deleted")
+        before = self._chain_layers_from(root, source_path)
+        layers = deepcopy(before)
+        source_fields = layers[source_path].get("fields")
+        if isinstance(source_fields, dict):
+            source_fields.pop(field_id, None)
+        for layer_data in layers.values():
+            strip_field_membership(layer_data, field_id)
+        self._validate_candidate_schema_layers(root, layers)
+        self._write_changed_layers(before, layers)
 
-        entry_types = layer_data.get("entry_types")
-        if not isinstance(entry_types, dict):
-            entry_types = {}
-        entry_type_data = entry_types.get(entry_type)
-        if not isinstance(entry_type_data, dict):
-            effective_entry_type = self._read_metadata_schema_through_path(root, layer_path).entry_types.get(entry_type)
-            entry_type_data = {
-                "name": effective_entry_type.name if effective_entry_type else entry_type,
-                "kind": effective_entry_type.kind if effective_entry_type else "manuscript",
-                "fields": [],
-            }
-        fields_list = entry_type_data.get("fields")
-        if not isinstance(fields_list, list):
-            fields_list = []
-        if field_id not in fields_list:
-            fields_list.append(field_id)
-        entry_type_data["fields"] = fields_list
-        entry_types[entry_type] = entry_type_data
-        layer_data["entry_types"] = entry_types
+    def _rename_field_in_schema_layers(self, root: Path, old_field_id: str, new_field_id: str) -> None:
+        """#2276: the definition is renamed in the layer that owns it, and so is
+        every entry type's listing of it in that layer or any below it."""
+        source_path = self._field_source_layer_path(root, old_field_id, "renamed")
+        before = self._chain_layers_from(root, source_path)
+        layers = deepcopy(before)
+        fields = layers[source_path].get("fields")
+        if not isinstance(fields, dict) or old_field_id not in fields:
+            raise ProjectServiceError(f"Metadata field {old_field_id} is not defined in its source layer.", 422)
+        fields[new_field_id] = fields.pop(old_field_id)
+        for layer_data in layers.values():
+            rename_field_membership(layer_data, old_field_id, new_field_id)
+        self._validate_candidate_schema_layers(root, layers)
+        self._write_changed_layers(before, layers)
+
+    def _chain_layers_from(self, root: Path, top: Path) -> dict[Path, dict[str, Any]]:
+        """`top` and every layer below it on `root`'s chain (base → root), as
+        raw data: the layers that can list a field `top` defines (#2276)."""
+        paths = self._metadata_schema_layer_paths(root)
+        return {
+            path: self._read_yaml(path) if path.exists() else self._empty_metadata_schema()
+            for path in paths[paths.index(top) :]
+        }
+
+    def _write_changed_layers(self, before: dict[Path, dict[str, Any]], after: dict[Path, dict[str, Any]]) -> None:
+        for path, layer_data in after.items():
+            if layer_data != before.get(path):
+                self._write_yaml(path, layer_data)
+
+    def _membership_layer_for(self, root: Path, layer_path: Path, entry_type_id: str) -> Path:
+        """Where `entry_type_id` lists a field defined at `layer_path` (#2277):
+        the first layer at or below it that can see the type — `layer_path`
+        itself unless the type is declared lower. A type unknown to the whole
+        chain stays at `layer_path` (a brand-new `manuscript` type)."""
+        paths = self._metadata_schema_layer_paths(root)
+        for path in paths[paths.index(layer_path) :]:
+            if entry_type_id in self._read_metadata_schema_through_path(root, path).entry_types:
+                return path
+        return layer_path
 
     def _remove_metadata_field_from_layer(self, layer_data: dict[str, Any], field_id: str, entry_type: str) -> None:
         fields = layer_data.get("fields")
@@ -1012,31 +1038,6 @@ class MetadataSchemaMixin:
             fields_list = entry_type_data.get("fields")
             if isinstance(fields_list, list):
                 entry_type_data["fields"] = [candidate for candidate in fields_list if candidate != field_id]
-
-    def _replace_metadata_field_reference_in_layer(
-        self,
-        layer_data: dict[str, Any],
-        old_field_id: str,
-        new_field_id: str,
-        entry_type: str,
-    ) -> None:
-        entry_types = layer_data.get("entry_types")
-        if not isinstance(entry_types, dict):
-            return
-        candidate_entry_types = [entry_type] if entry_type in entry_types else list(entry_types)
-        for entry_type_id in candidate_entry_types:
-            entry_type_data = entry_types.get(entry_type_id)
-            if not isinstance(entry_type_data, dict):
-                continue
-            fields_list = entry_type_data.get("fields")
-            if not isinstance(fields_list, list):
-                continue
-            replaced: list[Any] = []
-            for candidate in fields_list:
-                next_field_id = new_field_id if candidate == old_field_id else candidate
-                if next_field_id not in replaced:
-                    replaced.append(next_field_id)
-            entry_type_data["fields"] = replaced
 
     def _entry_type_in_use(self, root: Path, entry_type_id: str) -> bool:
         for path in self._entry_markdown_paths(root):

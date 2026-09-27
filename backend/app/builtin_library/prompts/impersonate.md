@@ -47,4 +47,40 @@ Use {{ project.metadata.spelling }} spelling.
 ## Who you are
 {{ char.body }}
 {% endif %}
+{% if char %}
+{#
+  Fields render inline from `char` — the as-of read above — rather than via
+  `use(inputs.entry)`: the lore path places an entry at book-start (it has no
+  scene to anchor to), which would drop the as-of overlay this prompt just
+  resolved. Rendering here keeps every detail consistent with the body above.
+
+  Which fields: story content, not bookkeeping. `proposable` is false for
+  computed, hidden and author-only fields (e.g. the context policy) — but also
+  for references, which ARE content (relationships), so those are let back in.
+  The same rule the lore block uses.
+#}
+{% set details = [] %}
+{% for f in fields(char) if f.id not in ("title", "body") and (f.proposable or f.type in ("entity_ref", "entity_ref_list")) %}
+{% set v = field_value(char, f) %}
+{% if v %}
+{% if f.type == "entity_ref" %}
+{% do details.append(f.label ~ ": " ~ v.title) %}
+{% elif f.type == "entity_ref_list" %}
+{% do details.append(f.label ~ ": " ~ (v | map(attribute="title") | join(", "))) %}
+{% elif v is sequence and v is not string %}
+{% do details.append(f.label ~ ": " ~ (v | map("string") | join(", "))) %}
+{% else %}
+{% do details.append(f.label ~ ": " ~ v) %}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% if details %}
+
+## Details
+{% for line in details %}
+- {{ line }}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% include "Relevant lore" %}
 {% endrole %}

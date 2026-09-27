@@ -36,6 +36,12 @@
   } from "@/lib/types";
 
   interface Props {
+    // #2300: once the chat is locked (has messages), `chatSystemPrompt` is
+    // the text actually sent — the live preview render (`systemBlock`) can
+    // have since drifted (the subject entry edited, the time-travel anchor
+    // moved) and would mislead. Unlocked, there's nothing sent yet, so the live render is the
+    // only useful preview.
+    isLocked: boolean;
     previewCacheBlocks: PreviewCacheBlock[];
     // ADR-0086 S2: the lore-budget report the "Left out" section reads — the
     // LAST SENT turn's (`ChatSessionMessage.lore_fit`), or, before the first
@@ -68,6 +74,7 @@
   }
 
   let {
+    isLocked,
     previewCacheBlocks,
     loreFit = null,
     loreLeftOutXml = {},
@@ -268,7 +275,9 @@
         title="The template invoked auto_lore() — automatic lore is on: the send path detects and places lore, and the tiers below are where it lands. Picks placed by use() alone show as tier rows without this line."
       ><strong>lore-enabled</strong> · by this prompt</div>
     {/if}
-    {#if systemBlock}
+    {#if isLocked && chatSystemPrompt && chatSystemPrompt.trim()}
+      <pre class="ctx-pre">{chatSystemPrompt}</pre>
+    {:else if systemBlock}
       <pre class="ctx-pre">{systemBlock.text}</pre>
     {:else if chatSystemPrompt && chatSystemPrompt.trim()}
       <pre class="ctx-pre">{chatSystemPrompt}</pre>

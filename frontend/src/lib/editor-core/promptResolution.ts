@@ -375,6 +375,22 @@ export function findPromptEntry(
 // The title of the built-in Propose opens by default (ADR-0091 §4).
 export const FOLLOW_A_CHANGE_TITLE = "Follow a change";
 
+// Case-insensitive title match, preferring the project's own over the
+// Library's (the same shadowing rule includes-by-title already use). Shared by
+// `proposeDefaultPrompt` (match within an already-offered roster) and
+// `visiblePromptFor` (#2299, match within the non-hidden roster) so the two
+// don't drift. Null when no entry in `roster` carries `title`.
+function bestTitleMatch(
+  roster: readonly PromptEntrySummary[],
+  title: string,
+): PromptEntrySummary | null {
+  const matches = roster.filter(
+    (entry) => entry.title.localeCompare(title, undefined, { sensitivity: "base" }) === 0,
+  );
+  if (matches.length === 0) return null;
+  return matches.find((entry) => !entry.is_library) ?? matches[0];
+}
+
 // Propose's default prompt (ADR-0091 §4): among an ALREADY-OFFERED roster
 // (hidden dropped, `offer_on` applied — e.g. `promptEntriesOfferedOn`'s
 // result), find the one titled `title` with the roster's own case-insensitive
@@ -386,11 +402,29 @@ export function proposeDefaultPrompt(
   offered: readonly PromptEntrySummary[],
   title: string = FOLLOW_A_CHANGE_TITLE,
 ): PromptEntrySummary | null {
-  const matches = offered.filter(
-    (entry) => entry.title.localeCompare(title, undefined, { sensitivity: "base" }) === 0,
+  return bestTitleMatch(offered, title);
+}
+
+// The doorway's launch target for `entry` (#2299): if `entry` isn't hidden,
+// launch it unchanged. Otherwise — a writer cloned a built-in into the
+// project (same title, new id) and hid the built-in — redirect to the
+// non-hidden prompt with the same title AND the same discovery surface,
+// preferring the project's own over the Library's. Falls back to `entry`
+// itself when nothing matches, so a hidden prompt with no successor still
+// launches (better than refusing). `hidePromptEntries`/`is hidden` is a
+// PRESENTATION filter (it drops a prompt from discovery lists only); a
+// NEW-chat launch should honour the writer's current roster like every other
+// launch menu, not resurrect a roster entry they hid.
+export function visiblePromptFor(
+  ctx: PromptResolutionContext,
+  entry: PromptEntrySummary,
+): PromptEntrySummary {
+  if (!ctx.hiddenPromptIds?.has(entry.id)) return entry;
+  const visible = hidePromptEntries(ctx.promptEntries, ctx.hiddenPromptIds);
+  const sameSurface = visible.filter(
+    (candidate) => promptSurfaceFor(ctx, candidate) === promptSurfaceFor(ctx, entry),
   );
-  if (matches.length === 0) return null;
-  return matches.find((entry) => !entry.is_library) ?? matches[0];
+  return bestTitleMatch(sameSurface, entry.title) ?? entry;
 }
 
 export function defaultPromptForSurface(

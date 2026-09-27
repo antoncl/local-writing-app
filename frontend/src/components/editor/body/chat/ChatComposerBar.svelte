@@ -398,6 +398,7 @@
         bind:this={chatPreviewPopoverEl}
       >
         <ContextDoor
+          {isLocked}
           {previewCacheBlocks}
           {loreFit}
           {loreLeftOutXml}

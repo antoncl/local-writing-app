@@ -234,31 +234,76 @@ def _messages_with_cue(transcript: list[ChatMessage], cue: str) -> list[ChatMess
     return _coalesce_turns([*transcript, ChatMessage(role="user", content=cue)])
 
 
-def _flag_smuggled_fields(patch: AIEntryPatch, allowed_ids: set[str]) -> AIEntryPatch:
-    """Garble a patch whose text value carries ANOTHER contract field as JSON.
+def _flag_smuggled_fields(
+    patch: AIEntryPatch, stored: list[dict[str, Any]], allowed_ids: set[str]
+) -> AIEntryPatch:
+    """Garble a patch whose text value carries ANOTHER key as JSON.
 
     #2296: under constrained decoding a model that could no longer open the
     key it wanted kept writing inside the current string instead — the whole
     beat roster landed in `genre` as `…\\n\\ninstance_beats\\": [{\\"title\\"…`.
     That parses as valid JSON, so without this it reached the author as an
     ordinary-looking diff. Garbled triggers the one firm retry and, failing
-    that, shows the raw reply with this reason. Matches a contract id followed
-    by a (possibly escaped) closing quote, a colon, and a value opener — JSON
-    syntax, not prose that merely mentions a field's name."""
-    texts = [(k, v) for k, v in patch.fields.items() if isinstance(v, str)]
+    that, shows the raw reply with this reason.
+
+    Every string is checked, however deep: a top-level value against the other
+    contract ids; a string inside a list field's items also against that
+    list's member keys, since an item object's keys are order-locked by the
+    grammar the same way (a beat's `specifics` swallowing its `function`). A
+    hit is a key followed by a (possibly escaped) closing quote, a colon, and
+    a JSON value opener — syntax, not prose that merely mentions a name. The
+    patch's drop record is kept so the trace still says what else was cut."""
+    members: dict[str, set[str]] = {
+        f["id"]: {m["key"] for m in f.get("items") or [] if isinstance(m, dict) and m.get("key")}
+        for f in stored
+        if isinstance(f, dict) and f.get("id")
+    }
+    values: list[tuple[str, Any]] = list(patch.fields.items())
     if patch.body is not None:
-        texts.append(("body", patch.body))
-    for holder, text in texts:
-        for other in allowed_ids - {holder}:
-            if re.search(rf'(?<![\w-]){re.escape(other)}\\?"\s*:\s*[\[{{"]', text):
-                return AIEntryPatch(
-                    garbled=True,
-                    garbled_reason=(
-                        f'The "{holder}" value contains the "{other}" field written '
-                        "as JSON, so the reply mixed several fields into one."
-                    ),
+        values.append(("body", patch.body))
+    for holder, value in values:
+        top_level = allowed_ids - {holder}
+        for text, nested in _strings_in(value):
+            keys = top_level | members.get(holder, set()) if nested else top_level
+            other = next((k for k in keys if _json_key_in(k, text)), None)
+            if other is not None:
+                return patch.model_copy(
+                    update={
+                        "body": None,
+                        "fields": {},
+                        "garbled": True,
+                        "garbled_reason": (
+                            f'The "{holder}" value contains "{other}" written as '
+                            "JSON, so the reply mixed several values into one."
+                        ),
+                    }
                 )
     return patch
+
+
+def _strings_in(value: Any, nested: bool = False) -> list[tuple[str, bool]]:
+    """Every string in ``value`` (walking lists and dicts), each flagged with
+    whether it sat inside a container."""
+    if isinstance(value, str):
+        return [(value, nested)]
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, list):
+        return [s for v in value for s in _strings_in(v, True)]
+    return []
+
+
+def _json_key_in(key: str, text: str) -> bool:
+    return re.search(rf'(?<![\w-]){re.escape(key)}\\?"\s*:\s*[\[{{"\d\-tfn]', text) is not None
+
+
+def _checked_patch(
+    patch: AIEntryPatch, stored: list[dict[str, Any]], allowed_ids: set[str]
+) -> AIEntryPatch:
+    """The post-validate choke point both the first reply and the retry pass
+    through, so the two can't diverge: the write ceiling, then the smuggled-key
+    check."""
+    return _flag_smuggled_fields(_constrain_to_registered_fields(patch, allowed_ids), stored, allowed_ids)
 
 
 def _constrain_to_registered_fields(patch: AIEntryPatch, allowed_ids: set[str]) -> AIEntryPatch:
@@ -481,7 +526,7 @@ async def run_entry_patch_extraction(
             cost_usd_total=chat_reply.cost_usd_total,
         )
     patch = project.validate_ai_entry_patch_for_type(entry_type, chat_reply.content)
-    patch = _flag_smuggled_fields(_constrain_to_registered_fields(patch, allowed_ids), allowed_ids)
+    patch = _checked_patch(patch, chat.field_contract_stored, allowed_ids)
     cost = chat_reply.cost_usd
     usage = chat_reply.usage
     # #1877: `run_chat_turn` recorded this call's row and reports the chat's
@@ -527,9 +572,7 @@ async def run_entry_patch_extraction(
             )
         if retry.ok and (retry.content or "").strip():
             patch = project.validate_ai_entry_patch_for_type(entry_type, retry.content)
-            patch = _flag_smuggled_fields(
-                _constrain_to_registered_fields(patch, allowed_ids), allowed_ids
-            )
+            patch = _checked_patch(patch, chat.field_contract_stored, allowed_ids)
             patch_reply = retry
     reconciliation: dict[str, Any] = {}
     if not creating and node_id is not None:

@@ -28,6 +28,7 @@
     effectivePromptInputs,
     entryIdFromPickValue,
     inputValuesFromDrafts,
+    visiblePromptFor,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import { isInputMissing } from "@/lib/utils/promptInputs";
@@ -537,8 +538,12 @@
     // canDoorway); guard anyway so the action is a no-op without a setup to
     // carry.
     if (!activePromptEntry) return;
+    // #2299: honour the CURRENT roster, not the one the chat launched from — a
+    // hidden built-in the writer cloned into the project redirects to its
+    // visible clone (same title, same surface, project-owned preferred).
+    const launchPrompt = visiblePromptFor(promptDiscoveryCtx, activePromptEntry);
     void chatSessions.openChatFromPromptEntry(
-      activePromptEntry,
+      launchPrompt,
       encodeChatInputDrafts(chatInputDrafts),
       chatSubject || null,
       { assistantId: chatAssistantId },

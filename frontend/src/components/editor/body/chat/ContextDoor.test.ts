@@ -27,6 +27,7 @@ const tierBlock: PreviewCacheBlock = {
 const titleFor = (id: string) => ({ lore_a: "A", lore_b: "B" })[id] ?? null;
 
 const baseProps = {
+  isLocked: false,
   previewCacheBlocks: [] as PreviewCacheBlock[],
   chatPromptEntryId: "",
   chatSystemPrompt: BASE,
@@ -93,6 +94,34 @@ describe("ContextDoor", () => {
     await fireEvent.click(screen.getByText("System"));
     expect(screen.getByText(BASE)).toBeInTheDocument();
     expect(screen.queryByText("lore-enabled")).not.toBeInTheDocument();
+  });
+
+  it("#2300: once locked, shows the locked system text, not a differing live preview render", async () => {
+    const LIVE = "LIVE-PREVIEW-DRIFTED";
+    const liveBlock: PreviewCacheBlock = { label: "system", role: "system", tokens: 10, text: LIVE };
+    render(ContextDoor, {
+      ...baseProps,
+      isLocked: true,
+      previewCacheBlocks: [liveBlock],
+      chatSystemPrompt: BASE,
+    });
+    await fireEvent.click(screen.getByText("System"));
+    expect(screen.getByText(BASE)).toBeInTheDocument();
+    expect(screen.queryByText(LIVE)).not.toBeInTheDocument();
+  });
+
+  it("#2300: before the first send (unlocked), the live preview render still shows", async () => {
+    const LIVE = "LIVE-PREVIEW-UNLOCKED";
+    const liveBlock: PreviewCacheBlock = { label: "system", role: "system", tokens: 10, text: LIVE };
+    render(ContextDoor, {
+      ...baseProps,
+      isLocked: false,
+      previewCacheBlocks: [liveBlock],
+      chatSystemPrompt: BASE,
+    });
+    await fireEvent.click(screen.getByText("System"));
+    expect(screen.getByText(LIVE)).toBeInTheDocument();
+    expect(screen.queryByText(BASE)).not.toBeInTheDocument();
   });
 
   it("Inputs row drills to the locked kv pairs", async () => {

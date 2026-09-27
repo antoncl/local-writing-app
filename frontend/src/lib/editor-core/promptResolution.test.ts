@@ -20,6 +20,7 @@ import {
   isSnippetType,
   promptSurfaceFor,
   resolvePromptPositionalArgs,
+  visiblePromptFor,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
 import { buildSelectorRoster } from "@/lib/views/pickerSelectors";
@@ -710,6 +711,33 @@ describe("proposeDefaultPrompt (ADR-0091 §4)", () => {
   it("accepts a caller-supplied title, for a caller that wants a different default", () => {
     const roster = [prompt("p-x", "prompt:general"), { ...prompt("p-y", "prompt:general"), title: "Custom" }];
     expect(proposeDefaultPrompt(roster, "Custom")?.id).toBe("p-y");
+  });
+});
+
+describe("visiblePromptFor — the lock doorway's launch target (#2299)", () => {
+  const builtin = { ...prompt("p-builtin", "prompt:general", { output: { handler: "inline" } }), title: "Roleplay", is_library: true };
+  const clone = { ...prompt("p-clone", "prompt:general", { output: { handler: "inline" } }), title: "Roleplay", is_library: false };
+  const otherSurface = { ...prompt("p-other-surface", "prompt:general"), title: "Roleplay", is_library: false };
+
+  it("returns the entry unchanged when it isn't hidden", () => {
+    const c = ctx({ promptEntries: [builtin, clone], hiddenPromptIds: new Set() });
+    expect(visiblePromptFor(c, builtin).id).toBe("p-builtin");
+  });
+
+  it("redirects a hidden built-in to the visible same-title, same-surface clone (prefers project-owned)", () => {
+    const c = ctx({ promptEntries: [builtin, clone], hiddenPromptIds: new Set(["p-builtin"]) });
+    expect(visiblePromptFor(c, builtin).id).toBe("p-clone");
+  });
+
+  it("falls back to the original when hidden with no visible match", () => {
+    const c = ctx({ promptEntries: [builtin], hiddenPromptIds: new Set(["p-builtin"]) });
+    expect(visiblePromptFor(c, builtin).id).toBe("p-builtin");
+  });
+
+  it("does not match a same-title prompt on a different surface", () => {
+    // otherSurface has no context_strategy → "conversation", while builtin is "cursor" (inline).
+    const c = ctx({ promptEntries: [builtin, otherSurface], hiddenPromptIds: new Set(["p-builtin"]) });
+    expect(visiblePromptFor(c, builtin).id).toBe("p-builtin");
   });
 });
 

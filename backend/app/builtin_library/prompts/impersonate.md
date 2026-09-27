@@ -47,4 +47,37 @@ Use {{ project.metadata.spelling }} spelling.
 ## Who you are
 {{ char.body }}
 {% endif %}
+{% if char %}
+{#
+  Fields render inline from `char` — the as-of read above — rather than via
+  `use(inputs.entry)`: the lore path places an entry at book-start (it has no
+  scene to anchor to), which would drop the as-of overlay this prompt just
+  resolved. Rendering here keeps every detail consistent with the body above.
+#}
+{% set ns = namespace(any=false) %}
+{% for f in fields(char) if f.id not in ("title", "body") %}
+{% if field_value(char, f) %}
+{% set ns.any = true %}
+{% endif %}
+{% endfor %}
+{% if ns.any %}
+
+## Details
+{% for f in fields(char) if f.id not in ("title", "body") %}
+{% set v = field_value(char, f) %}
+{% if v %}
+{% if f.type == "entity_ref" %}
+- {{ f.label }}: {{ v.title }}
+{% elif f.type == "entity_ref_list" %}
+- {{ f.label }}: {{ v | map(attribute="title") | join(", ") }}
+{% elif f.type == "list" %}
+- {{ f.label }}: {{ v | map("string") | join(", ") }}
+{% else %}
+- {{ f.label }}: {{ v }}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% include "Relevant lore" %}
 {% endrole %}

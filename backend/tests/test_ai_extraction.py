@@ -33,6 +33,7 @@ from test_ai_entry_patch import add_character_patch_fields
 from app.main import app
 from app.models import (
     AIChatResponse,
+    AIEntryPatch,
     ChatMessage,
     ChatUsage,
     CreateChatSessionRequest,
@@ -42,6 +43,7 @@ from app.models import (
     SaveChatSessionRequest,
 )
 from app.services.ai.extraction import (
+    _flag_smuggled_fields,
     _messages_with_cue,
     render_extraction_envelope,
 )
@@ -163,7 +165,7 @@ class ExtractionEnvelopeTests(unittest.TestCase):
             creating=False,
             stored=self._stored("lore:character"),
         )
-        self.assertIn('OMIT the "body" key', envelope)
+        self.assertIn('OMIT the "body" item', envelope)
         self.assertIn("ONLY if the conversation actually revised the body", envelope)
 
     def test_revise_envelope_anchors_length_to_the_current_entry(self) -> None:
@@ -422,6 +424,64 @@ class ShippedPromptFieldContractTests(unittest.TestCase):
         )
         self.assertIn('"body"', envelope)
         self.assertIn("You may also propose a new", envelope)
+
+
+_BEAT_STORED = [
+    {"id": "genre", "type": "long_text"},
+    {
+        "id": "beats",
+        "type": "list",
+        "items": [
+            {"key": "title", "type": "text"},
+            {"key": "function", "type": "long_text"},
+            {"key": "specifics", "type": "long_text"},
+        ],
+    },
+]
+_BEAT_IDS = {"genre", "beats"}
+
+
+class SmuggledFieldTests(unittest.TestCase):
+    """#2296: a string that swallowed a key the grammar locked out."""
+
+    def test_a_member_key_smuggled_into_a_list_items_text_is_garbled(self) -> None:
+        # An item object's keys are order-locked too: writing `specifics`
+        # first leaves `function` only reachable inside that string.
+        patch = AIEntryPatch(
+            fields={"beats": [{"title": "Crisis", "specifics": 'Cornered.\n\nfunction": "Forces the choice.'}]}
+        )
+        out = _flag_smuggled_fields(patch, _BEAT_STORED, _BEAT_IDS)
+        self.assertTrue(out.garbled)
+        self.assertIn('"beats" value contains "function"', out.garbled_reason)
+        self.assertEqual(out.fields, {})
+
+    def test_a_smuggled_key_with_a_bare_value_is_caught_too(self) -> None:
+        # A number / boolean value has no opening quote or bracket.
+        patch = AIEntryPatch(fields={"beats": [{"title": 'Crisis\n\ngenre": 42'}]})
+        self.assertTrue(_flag_smuggled_fields(patch, _BEAT_STORED, _BEAT_IDS).garbled)
+
+    def test_member_keys_are_not_watched_in_top_level_text(self) -> None:
+        # `function` is only a key inside a beat; a top-level genre quoting it
+        # is not a smuggled sibling.
+        patch = AIEntryPatch(fields={"genre": 'Thriller where "function": "form" is the motto.'})
+        self.assertFalse(_flag_smuggled_fields(patch, _BEAT_STORED, _BEAT_IDS).garbled)
+
+    def test_prose_mentioning_a_member_name_inside_an_item_passes(self) -> None:
+        patch = AIEntryPatch(fields={"beats": [{"title": "Crisis", "specifics": "Its function: force the choice."}]})
+        out = _flag_smuggled_fields(patch, _BEAT_STORED, _BEAT_IDS)
+        self.assertFalse(out.garbled)
+        self.assertIs(out, patch)
+
+    def test_garbling_keeps_the_drop_record(self) -> None:
+        patch = AIEntryPatch(
+            fields={"genre": 'Noir.\n\nbeats": [{"title": "x"}]'},
+            dropped=["role"],
+            dropped_reasons={"role": "not in this prompt's field contract"},
+        )
+        out = _flag_smuggled_fields(patch, _BEAT_STORED, _BEAT_IDS)
+        self.assertTrue(out.garbled)
+        self.assertEqual(out.dropped, ["role"])
+        self.assertEqual(out.dropped_reasons, {"role": "not in this prompt's field contract"})
 
 
 class ExtractEndpointTests(unittest.TestCase):
@@ -773,6 +833,62 @@ class ExtractEndpointTests(unittest.TestCase):
                 json={"messages": [], "assistant_id": None, "chat_id": chat_id},
             )
         self.assertTrue(resp.json()["ok"])
+        self.assertEqual(mock_chat.call_count, 1)
+
+    def test_list_form_reply_in_any_order_is_adopted(self) -> None:
+        # #2296: the envelope asks for {"fields": [{field, value}, ...]} so a
+        # grammar-constrained model can write fields in any order; body comes
+        # as an item, and here it comes LAST, after a field.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        reply = _chat_reply(
+            '{"fields": [{"field": "bio", "value": "New bio."},'
+            ' {"field": "body", "value": "A knight of renown."}]}'
+        )
+        with self._mock_chat_sequence(reply) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        body = resp.json()
+        self.assertTrue(body["ok"])
+        self.assertFalse(body["patch"]["garbled"])
+        self.assertEqual(body["patch"]["body"], "A knight of renown.")
+        self.assertEqual(body["patch"]["fields"], {"bio": "New bio."})
+        self.assertEqual(mock_chat.call_count, 1)
+
+    def test_a_field_smuggled_into_another_fields_text_is_garbled_and_retried(self) -> None:
+        # #2296, the reported reply's shape: after `bio` the model could only
+        # stay inside the string, so `aliases` arrived as escaped JSON within
+        # it. Valid JSON — but it must reach the author as garbled with a
+        # reason (after the one retry), not as a normal-looking diff.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        smuggled = _chat_reply(
+            '{"fields": {"bio": "A knight. \\n\\naliases\\": [\\"The Bold\\"]}, "}}'
+        )
+        with self._mock_chat_sequence(smuggled, smuggled) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        patch_out = resp.json()["patch"]
+        self.assertEqual(mock_chat.call_count, 2)
+        self.assertTrue(patch_out["garbled"])
+        self.assertIn('"bio" value contains "aliases"', patch_out["garbled_reason"])
+        self.assertEqual(patch_out["fields"], {})
+
+    def test_prose_naming_a_field_is_not_mistaken_for_smuggled_json(self) -> None:
+        # The detector keys on JSON syntax (quote, colon, value opener), not on
+        # a field's name appearing in the text.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        reply = _chat_reply(
+            '{"fields": [{"field": "bio", "value": "Known by many aliases: the Bold, the Red."}]}'
+        )
+        with self._mock_chat_sequence(reply) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertFalse(resp.json()["patch"]["garbled"])
         self.assertEqual(mock_chat.call_count, 1)
 
     def test_model_returning_nothing_is_ok_false_no_patch(self) -> None:

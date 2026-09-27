@@ -1,7 +1,8 @@
 """Parse an AI-committed entry patch out of a model's finalize reply.
 
 ADR-0046 §4/§6.3: the brainstorm's commit turn returns a JSON object of the
-shape ``{"body": <str>, "fields": {<field_id>: <value>}}``. The safety
+shape ``{"body": <str>, "fields": {<field_id>: <value>}}`` (asked for as a
+``{"field", "value"}`` item list since #2296, folded back here). The safety
 guarantee is *validate-on-return* (done against the schema by the project
 service, `validate_ai_entry_patch`), not constrained decoding — so this module
 only has to turn a possibly-messy model reply into a Python dict, tolerantly.
@@ -144,7 +145,41 @@ def _patch_shaped_or_empty(obj: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _fields_from_items(obj: dict[str, Any]) -> dict[str, Any]:
+    """``obj`` with a list-form ``"fields"`` folded back into the patch shape.
+
+    #2296: the extraction envelope (and the constrained-decoding schema) ask
+    for ``{"fields": [{"field": <id>, "value": ...}, ...]}`` — an array, so a
+    grammar-constrained model can write fields in any order. Everything
+    downstream reads ``{"body": <str>, "fields": {<id>: <value>}}``, so the
+    ``body`` item lifts to the top-level key and the rest key by id. The
+    object form still passes through unchanged. A malformed item (not an
+    object, no string ``"field"``, or no ``"value"``) is skipped; a repeated
+    id keeps its last value."""
+    items = obj.get("fields")
+    if not isinstance(items, list):
+        return obj
+    out = {k: v for k, v in obj.items() if k != "fields"}
+    fields: dict[str, Any] = {}
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("field"), str) or "value" not in item:
+            continue
+        if item["field"] == "body":
+            out["body"] = item["value"]
+        else:
+            fields[item["field"]] = item["value"]
+    out["fields"] = fields
+    return out
+
+
 def parse_entry_patch_json(raw: str) -> dict[str, Any] | None:
+    """Return the patch object parsed from ``raw``, or ``None`` if garbled —
+    always in the object form (list-form ``"fields"`` folded, #2296)."""
+    parsed = _parse_patch_object(raw)
+    return _fields_from_items(parsed) if parsed is not None else None
+
+
+def _parse_patch_object(raw: str) -> dict[str, Any] | None:
     """Return the patch object parsed from ``raw``, or ``None`` if garbled.
 
     Tolerant of the ways a chatty / cheap model wraps the object: a code fence,

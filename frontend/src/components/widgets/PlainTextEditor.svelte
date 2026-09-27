@@ -21,6 +21,10 @@
     placeholder = "",
     ariaLabel = "",
     minHeight = 60,
+    // #2289: a minimum height in LINES rather than px — wins over `minHeight`
+    // when set. Sized as `<n>lh` + the body's vertical padding, so it tracks
+    // the line height at any --ui-scale (a px value drifts as the font scales).
+    minLines = null,
     maxHeight = null,
     autofocus = false,
     // Read-only while a send/commit is in flight — the editor stays mounted
@@ -46,6 +50,7 @@
     placeholder?: string;
     ariaLabel?: string;
     minHeight?: number;
+    minLines?: number | null;
     maxHeight?: number | null;
     autofocus?: boolean;
     disabled?: boolean;
@@ -241,7 +246,7 @@
   class="plain-text-editor {className}"
   class:is-disabled={disabled}
   aria-disabled={disabled}
-  style:--plain-text-min-height={`${minHeight}px`}
+  style:--plain-text-min-height={minLines ? `calc(${minLines}lh + 16px)` : `${minHeight}px`}
   style:--plain-text-max-height={maxHeight ? `${maxHeight}px` : "none"}
   onfocusin={() => onFocus()}
 >
@@ -288,6 +293,7 @@
   :global(.plain-text-editor-body) {
     min-height: var(--plain-text-min-height, 60px);
     max-height: var(--plain-text-max-height, none);
+    /* The 16px vertical total is baked into `minLines`' calc above — keep them in step. */
     padding: 8px 10px;
     overflow: auto;
     outline: none;

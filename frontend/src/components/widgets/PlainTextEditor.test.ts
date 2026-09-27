@@ -10,6 +10,24 @@ import PlainTextEditorRefHarness from "@/components/widgets/PlainTextEditorRefHa
 // present as locked (dimmed + non-editable), not silently swallow keystrokes.
 // The `disabled` prop drives both the visible affordance here and the
 // editor.setEditable(false) call that actually rejects input.
+// #2289: the chat composer opened two lines tall (minHeight 60px under
+// border-box). `minLines` sizes in line-height units so one line stays one
+// line at any --ui-scale.
+describe("PlainTextEditor minimum height", () => {
+  const minHeightVar = (container: HTMLElement) =>
+    (container.querySelector(".plain-text-editor") as HTMLElement).style.getPropertyValue("--plain-text-min-height");
+
+  it("sizes by lines when minLines is set", () => {
+    const { container } = render(PlainTextEditor, { props: { value: "", minLines: 1 } });
+    expect(minHeightVar(container)).toBe("calc(1lh + 16px)");
+  });
+
+  it("keeps the px minHeight when minLines is not set", () => {
+    const { container } = render(PlainTextEditor, { props: { value: "" } });
+    expect(minHeightVar(container)).toBe("60px");
+  });
+});
+
 describe("PlainTextEditor disabled affordance", () => {
   it("is editable by default", () => {
     const { container } = render(PlainTextEditor, { props: { value: "hi" } });

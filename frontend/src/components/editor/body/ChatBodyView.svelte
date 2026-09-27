@@ -1198,7 +1198,7 @@
       onFocus={() => onFocus?.()}
       placeholder="Message… (Ctrl/⌘+Enter to send)"
       ariaLabel="Chat message"
-      minHeight={60}
+      minLines={1}
       maxHeight={240}
       matcher={implicitContextMatcher}
     />

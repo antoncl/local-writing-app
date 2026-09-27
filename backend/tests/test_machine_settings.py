@@ -682,6 +682,31 @@ class TestConfigDirIsolationGuard:
         assert result.returncode != 0, "dev backend resolved the real config dir unguarded"
         assert "1998" in result.stderr
 
+    def test_test_support_code_outside_a_runner_is_refused(self, tmp_path: Path) -> None:
+        # #2279: a plain-`python` script that reuses a test fixture wrote the real
+        # config.yaml — no test runner was loaded, so the #1862 branch never fired.
+        # Same clean-subprocess shape, with backend/tests importable: calling
+        # `set_projects_root` must be refused, and must write nothing (the
+        # platform config-home vars point at tmp_path so a regression lands there).
+        import subprocess
+        import sys as _sys
+
+        tests_dir = Path(__file__).resolve().parent
+        env = {k: v for k, v in os.environ.items() if k != ms.CONFIG_DIR_ENV}
+        env.update(APPDATA=str(tmp_path), XDG_CONFIG_HOME=str(tmp_path), HOME=str(tmp_path))
+        code = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(tests_dir)!r})\n"
+            "import layer_fixtures\n"
+            "assert 'pytest' not in sys.modules and 'unittest' not in sys.modules, "
+            "'a runner branch would fire first; this test would prove nothing'\n"
+            f"layer_fixtures.set_projects_root(__import__('pathlib').Path({str(tmp_path / 'root')!r}))\n"
+        )
+        result = subprocess.run([_sys.executable, "-c", code], env=env, capture_output=True, text=True)
+        assert result.returncode != 0, "test-support code resolved the real config dir unguarded"
+        assert "2279" in result.stderr, result.stderr
+        assert not any(tmp_path.rglob(ms.CONFIG_FILENAME)), "the refused write still reached a config file"
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,6 +28,10 @@ CONFIG_FILENAME = "config.yaml"
 # webServer, or a script keeps its hands off the developer's real machine
 # settings. Checked first in config_dir(), so it wins on every platform.
 CONFIG_DIR_ENV = "LWA_CONFIG_DIR"
+# The backend's test tree: a module loaded from here means test-support code is
+# running, whatever process imported it (#2279). A normcased string prefix, so
+# the guard's scan of sys.modules costs no filesystem calls.
+_TESTS_DIR_PREFIX = os.path.normcase(str(Path(__file__).resolve().parents[2] / "tests")) + os.sep
 MASK = "********"
 RECENT_PROJECTS_MAX = 10
 
@@ -145,6 +149,16 @@ class MachineSettings(BaseModel):
     warn_on_orphaning_delete: bool = True
 
 
+def _loaded_test_support_module() -> str | None:
+    """The name of a loaded module that lives under `backend/tests/`, if any —
+    e.g. `layer_fixtures`, imported by an ad-hoc script run with plain `python`."""
+    for name, module in list(sys.modules.items()):
+        file = getattr(module, "__file__", None)
+        if file and os.path.normcase(os.path.abspath(file)).startswith(_TESTS_DIR_PREFIX):
+            return name
+    return None
+
+
 def _guard_against_unisolated_test_config() -> None:
     """Refuse to resolve the developer's REAL machine config dir from a process
     that should have isolated itself but did not — a test runner (#1862, the
@@ -160,6 +174,9 @@ def _guard_against_unisolated_test_config() -> None:
     reached only when no `CONFIG_DIR_ENV` override is set, it fails LOUD rather
     than hand back the real dir when either
     - a test runner is loaded (`pytest`/`unittest` imported), or
+    - test-support code is loaded (a module from `backend/tests/`, #2279) — a
+      plain-`python` script reusing a fixture such as `set_projects_root`, which
+      no runner signal catches, or
     - `DEV_BACKEND_CHECKOUT` is set: the worktree dev server (#1998), which runs
       the real app against the real config unless `dev_backend.py` set the
       override — its intended isolation, so its absence here is a regression.
@@ -177,6 +194,13 @@ def _guard_against_unisolated_test_config() -> None:
             f"without isolation. Set ${CONFIG_DIR_ENV} to a throwaway folder "
             "(conftest.pytest_configure does this for pytest; a unittest.TestCase "
             "run outside pytest must set it in setUp/setUpModule). See #1862."
+        )
+    test_support = _loaded_test_support_module()
+    if test_support is not None:
+        raise RuntimeError(
+            f"Refusing to resolve the real machine config dir: test-support module "
+            f"{test_support!r} is loaded outside a test runner. Run it under pytest, "
+            f"or set ${CONFIG_DIR_ENV} to a throwaway folder first. See #2279."
         )
     if os.environ.get("DEV_BACKEND_CHECKOUT"):
         raise RuntimeError(

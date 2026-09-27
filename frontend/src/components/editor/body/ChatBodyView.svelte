@@ -22,6 +22,7 @@
   import { api } from "@/lib/api";
   import { lastReportedTurn } from "@/lib/chat/loreFit";
   import { journalEntryKey } from "@/lib/chat/journal";
+  import { createDeltaCoalescer } from "@/lib/chat/deltaCoalescer";
   import {
     chatPromptPickList,
     effectivePromptInputs,
@@ -720,6 +721,16 @@
     // ADR-0076 S3: one abort handle per stream, so Stop can cancel the fetch
     // mid-flight. Cleared in `finally` regardless of how the stream ends.
     chatAbort = new AbortController();
+    // #2294: deltas land once per frame, not once per token — each write
+    // re-renders the whole message, so per-token writes were O(n²) per reply.
+    // Flushed before anything reads the message; cancelled when it's discarded.
+    const deltas = createDeltaCoalescer(({ content, thinking }) => {
+      const message = chatHistory[idx];
+      if (!message) return;
+      if (content) message.content += content;
+      if (thinking) message.thinking = (message.thinking ?? "") + thinking;
+      chatHistory = chatHistory;
+    });
     try {
       for await (const ev of api.aiChatStream(
         {
@@ -731,12 +742,11 @@
         chatAbort.signal,
       )) {
         if (ev.type === "delta") {
-          chatHistory[idx].content += ev.text;
-          chatHistory = chatHistory;
+          deltas.content(ev.text);
         } else if (ev.type === "thinking") {
-          chatHistory[idx].thinking = (chatHistory[idx].thinking ?? "") + ev.text;
-          chatHistory = chatHistory;
+          deltas.thinking(ev.text);
         } else if (ev.type === "done") {
+          deltas.flush();
           chatHistory[idx].truncated = ev.truncated;
           if (Array.isArray(ev.journal_added) && ev.journal_added.length > 0) {
             chatHistory[idx].journal_added = ev.journal_added;
@@ -771,6 +781,7 @@
           if (ev.history_fit) chatHistory[idx].history_fit = ev.history_fit;
           chatHistory = chatHistory;
         } else if (ev.type === "error") {
+          deltas.cancel();
           errored = true;
           chatError = ev.error || "Unknown error";
           chatHistory = chatHistory.slice(0, idx);
@@ -778,6 +789,7 @@
         }
       }
     } catch (err) {
+      deltas.flush(); // keep the partial the user already saw arriving
       if (err instanceof DOMException && err.name === "AbortError") {
         // ADR-0076 S3: a deliberate Stop, not a network error — keep the
         // partial (if any), never rewind, never route through chatError.
@@ -793,6 +805,7 @@
       }
       throw err;
     } finally {
+      deltas.flush(); // a stream that ends without `done` still lands its tail
       chatAbort = null;
     }
     if (!errored && !chatHistory[idx]?.content && !chatHistory[idx]?.thinking) {

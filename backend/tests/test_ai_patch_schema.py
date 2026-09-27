@@ -38,55 +38,81 @@ _STORED = [
 ]
 
 
+def _item(field_id: str, value: dict) -> dict:
+    return {
+        "type": "object",
+        "properties": {"field": {"const": field_id}, "value": value},
+        "required": ["field", "value"],
+        "additionalProperties": False,
+    }
+
+
+def _value_schemas(schema: dict) -> dict[str, dict]:
+    """field id -> its item's value schema."""
+    return {
+        branch["properties"]["field"]["const"]: branch["properties"]["value"]
+        for branch in schema["properties"]["fields"]["items"]["anyOf"]
+    }
+
+
 class PatchResponseSchemaTests(unittest.TestCase):
     def test_create_mode_exact_shape(self) -> None:
+        # #2296: fields are an order-free ARRAY of {field, value} items, one
+        # anyOf branch per registered field — body included — never an object
+        # whose keys a grammar would pin to declaration order.
         schema = patch_response_schema(_STORED, creating=True)
         self.assertEqual(
             schema,
             {
                 "type": "object",
                 "properties": {
-                    "body": {"type": "string"},
                     "fields": {
-                        "type": "object",
-                        "properties": {
-                            "title": {"type": "string", "minLength": 1},
-                            "aliases": {"type": "array", "items": {"type": "string"}},
-                            "age": {"type": "number"},
-                            "beats": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "who": {"type": "string"},
-                                        "what": {"type": "string"},
+                        "type": "array",
+                        "items": {
+                            "anyOf": [
+                                _item("title", {"type": "string", "minLength": 1}),
+                                _item("body", {"type": "string"}),
+                                _item("aliases", {"type": "array", "items": {"type": "string"}}),
+                                _item("age", {"type": "number"}),
+                                _item(
+                                    "beats",
+                                    {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "who": {"type": "string"},
+                                                "what": {"type": "string"},
+                                            },
+                                        },
                                     },
-                                },
-                            },
+                                ),
+                            ]
                         },
-                        "additionalProperties": False,
-                        "required": ["title"],
                     },
                 },
-                "required": ["body", "fields"],
+                "required": ["fields"],
                 "additionalProperties": False,
             },
         )
 
-    def test_revise_mode_body_not_required_and_fields_not_required(self) -> None:
+    def test_revise_mode_title_has_no_min_length(self) -> None:
         schema = patch_response_schema(_STORED, creating=False)
-        self.assertEqual(schema["required"], ["fields"])
-        self.assertEqual(schema["properties"]["fields"]["required"], [])
-        # body is still an offered property in revise mode, just not required.
-        self.assertIn("body", schema["properties"])
         # #2209: a revise may leave the title alone, so no minLength there.
-        self.assertEqual(schema["properties"]["fields"]["properties"]["title"], {"type": "string"})
+        self.assertEqual(_value_schemas(schema)["title"], {"type": "string"})
+        self.assertEqual(_value_schemas(schema)["body"], {"type": "string"})
 
-    def test_body_not_registered_has_no_body_property(self) -> None:
+    def test_no_object_keyed_by_field_id_anywhere_at_the_top(self) -> None:
+        # #2296: the only top-level key is "fields", so no sibling can be
+        # locked out by having been declared earlier.
+        schema = patch_response_schema(_STORED, creating=False)
+        self.assertEqual(list(schema["properties"]), ["fields"])
+        self.assertEqual(schema["properties"]["fields"]["type"], "array")
+
+    def test_body_not_registered_has_no_body_item(self) -> None:
         stored = [f for f in _STORED if f["id"] != "body"]
         schema = patch_response_schema(stored, creating=True)
-        self.assertNotIn("body", schema["properties"])
-        self.assertNotIn("body", schema["required"])
+        self.assertNotIn("body", _value_schemas(schema))
 
     def test_item_scalar_list_uses_flat_array(self) -> None:
         stored = [
@@ -104,7 +130,7 @@ class PatchResponseSchemaTests(unittest.TestCase):
         ]
         schema = patch_response_schema(stored, creating=False)
         self.assertEqual(
-            schema["properties"]["fields"]["properties"]["tags"],
+            _value_schemas(schema)["tags"],
             {"type": "array", "items": {"type": "string"}},
         )
 
@@ -121,7 +147,7 @@ class PatchResponseSchemaTests(unittest.TestCase):
             }
         ]
         schema = patch_response_schema(stored, creating=False)
-        self.assertEqual(schema["properties"]["fields"]["properties"]["mystery"], {})
+        self.assertEqual(_value_schemas(schema)["mystery"], {})
 
 
 if __name__ == "__main__":

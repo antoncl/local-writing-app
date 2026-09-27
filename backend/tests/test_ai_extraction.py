@@ -163,7 +163,7 @@ class ExtractionEnvelopeTests(unittest.TestCase):
             creating=False,
             stored=self._stored("lore:character"),
         )
-        self.assertIn('OMIT the "body" key', envelope)
+        self.assertIn('OMIT the "body" item', envelope)
         self.assertIn("ONLY if the conversation actually revised the body", envelope)
 
     def test_revise_envelope_anchors_length_to_the_current_entry(self) -> None:
@@ -773,6 +773,62 @@ class ExtractEndpointTests(unittest.TestCase):
                 json={"messages": [], "assistant_id": None, "chat_id": chat_id},
             )
         self.assertTrue(resp.json()["ok"])
+        self.assertEqual(mock_chat.call_count, 1)
+
+    def test_list_form_reply_in_any_order_is_adopted(self) -> None:
+        # #2296: the envelope asks for {"fields": [{field, value}, ...]} so a
+        # grammar-constrained model can write fields in any order; body comes
+        # as an item, and here it comes LAST, after a field.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        reply = _chat_reply(
+            '{"fields": [{"field": "bio", "value": "New bio."},'
+            ' {"field": "body", "value": "A knight of renown."}]}'
+        )
+        with self._mock_chat_sequence(reply) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        body = resp.json()
+        self.assertTrue(body["ok"])
+        self.assertFalse(body["patch"]["garbled"])
+        self.assertEqual(body["patch"]["body"], "A knight of renown.")
+        self.assertEqual(body["patch"]["fields"], {"bio": "New bio."})
+        self.assertEqual(mock_chat.call_count, 1)
+
+    def test_a_field_smuggled_into_another_fields_text_is_garbled_and_retried(self) -> None:
+        # #2296, the reported reply's shape: after `bio` the model could only
+        # stay inside the string, so `aliases` arrived as escaped JSON within
+        # it. Valid JSON — but it must reach the author as garbled with a
+        # reason (after the one retry), not as a normal-looking diff.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        smuggled = _chat_reply(
+            '{"fields": {"bio": "A knight. \\n\\naliases\\": [\\"The Bold\\"]}, "}}'
+        )
+        with self._mock_chat_sequence(smuggled, smuggled) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        patch_out = resp.json()["patch"]
+        self.assertEqual(mock_chat.call_count, 2)
+        self.assertTrue(patch_out["garbled"])
+        self.assertIn('"bio" value contains the "aliases" field', patch_out["garbled_reason"])
+        self.assertEqual(patch_out["fields"], {})
+
+    def test_prose_naming_a_field_is_not_mistaken_for_smuggled_json(self) -> None:
+        # The detector keys on JSON syntax (quote, colon, value opener), not on
+        # a field's name appearing in the text.
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
+        reply = _chat_reply(
+            '{"fields": [{"field": "bio", "value": "Known by many aliases: the Bold, the Red."}]}'
+        )
+        with self._mock_chat_sequence(reply) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertFalse(resp.json()["patch"]["garbled"])
         self.assertEqual(mock_chat.call_count, 1)
 
     def test_model_returning_nothing_is_ok_false_no_patch(self) -> None:

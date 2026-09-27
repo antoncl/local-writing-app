@@ -101,6 +101,28 @@ class ParseEntryPatchJsonTests(unittest.TestCase):
             {"body": "Hi", "fields": {}},
         )
 
+    def test_folds_list_form_fields_into_the_patch_shape(self) -> None:
+        # #2296: the item list the envelope asks for comes back in the object
+        # form everything downstream reads; the body item lifts to "body".
+        raw = (
+            '{"fields": [{"field": "bio", "value": "x"}, {"field": "body", "value": "Hi"},'
+            ' {"field": "aliases", "value": ["a"]}]}'
+        )
+        self.assertEqual(
+            parse_entry_patch_json(raw),
+            {"body": "Hi", "fields": {"bio": "x", "aliases": ["a"]}},
+        )
+
+    def test_list_form_skips_malformed_items_and_keeps_the_last_repeat(self) -> None:
+        raw = (
+            '{"fields": [{"field": "bio", "value": "first"}, "stray", {"value": "no id"},'
+            ' {"field": "age"}, {"field": "bio", "value": "second"}]}'
+        )
+        self.assertEqual(parse_entry_patch_json(raw), {"fields": {"bio": "second"}})
+
+    def test_empty_item_list_is_no_changes(self) -> None:
+        self.assertEqual(parse_entry_patch_json('{"fields": []}'), {"fields": {}})
+
     def test_peels_a_json_code_fence(self) -> None:
         raw = '```json\n{"body": "Hi", "fields": {"bio": "x"}}\n```'
         self.assertEqual(

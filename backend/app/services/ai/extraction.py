@@ -23,6 +23,7 @@
 # it reliable (ADR-0067 §"The list must not drift").
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 from app.models import (
@@ -93,8 +94,8 @@ def render_extraction_envelope(
     prompt's `f.id == "summary"` loop) gets no body clause and no title clause
     at all — the registered set narrows EVERYTHING, including those two.
     `body` and `title` are both excluded from the per-field "fields you may set"
-    descriptor list even when registered: `body` commits as the envelope's own
-    top-level `"body"` key (mirrors the pre-S2 contract's `f.id != "body"`
+    descriptor list even when registered: `body` commits via its own clause as
+    a `"body"` item (mirrors the pre-S2 contract's `f.id != "body"`
     filter), and `title` is named once by its own clause — carrying its per-type
     label (#1009) — rather than a second time as a descriptor row (#1058). The
     remaining fields reuse `FieldContract` (`store`/`render`) for the descriptor
@@ -115,8 +116,8 @@ def render_extraction_envelope(
     for f in stored:
         # title and body each commit via their own dedicated clause below, never
         # also as a "fields you may set" descriptor — listing them there too would
-        # name the field to the model twice (#1058). body commits as the top-level
-        # "body" key; title via the ALWAYS-include / may-propose clause, which now
+        # name the field to the model twice (#1058). body commits via its own
+        # "body" clause; title via the ALWAYS-include / may-propose clause, which now
         # carries title's per-type label (#1009), so dropping its descriptor row
         # loses nothing.
         if isinstance(f, dict) and f.get("id") == "title":
@@ -130,10 +131,13 @@ def render_extraction_envelope(
     # generic "Title", the parenthetical would just echo the key, so omit it.
     title_hint = f' (the {title_label})' if title_label and title_label != "Title" else ""
 
+    # #2296: a list of items, not an object keyed by id — see `patch_schema.py`.
+    # `body` is an item too, so it can come at any point in the list.
     shape = (
-        '{"body": "<the markdown body>", "fields": {"<field id>": <value>}}'
+        '{"fields": [{"field": "body", "value": "<the markdown body>"}, '
+        '{"field": "<field id>", "value": <value>}]}'
         if body_allowed
-        else '{"fields": {"<field id>": <value>}}'
+        else '{"fields": [{"field": "<field id>", "value": <value>}]}'
     )
     lines = [
         "Extract the final result of the conversation above now, exactly as the "
@@ -142,6 +146,8 @@ def render_extraction_envelope(
         "",
         shape,
         "",
+        'Each item names one field by its field id in "field" and gives its value '
+        'in "value"; the items can come in any order.',
     ]
     if body_allowed:
         clause = f'- "body": {body_description + " " if body_description else ""}'
@@ -150,24 +156,24 @@ def render_extraction_envelope(
             "description calls for."
             if creating
             else (
-                'Include the "body" key ONLY if the conversation actually revised '
+                'Include a "body" item ONLY if the conversation actually revised '
                 "the body; then give its complete revised text at about the length "
                 "the body has now — a revision changes the content, not the volume, "
-                "unless the author asked for more or less. OMIT the \"body\" key "
+                "unless the author asked for more or less. OMIT the \"body\" item "
                 "entirely if the body was not discussed or changed — never "
                 "reconstruct it from nothing."
             )
         )
         lines.append(clause)
-    fields_clause = '- "fields": '
+    fields_clause = "- Other fields: "
     if creating:
         if title_allowed:
-            fields_clause += f'ALWAYS include "title"{title_hint}. '
-        fields_clause += "Add any other field the conversation set, "
+            fields_clause += f'ALWAYS include "title"{title_hint} as an item. '
+        fields_clause += "Add an item for any other field the conversation set. "
     else:
-        fields_clause += "include a field ONLY when the conversation changed it, "
+        fields_clause += "include an item ONLY for a field the conversation changed. "
     fields_clause += (
-        "keyed by its field id. For tags / multi_select give a JSON array of "
+        "For tags / multi_select give a JSON array of "
         "strings; for a select field use one of its listed options exactly; for "
         "an ordered-list field give the complete new list in its stated item "
         "shape (the whole list, in order); otherwise give the field's complete "
@@ -177,13 +183,13 @@ def render_extraction_envelope(
         fields_clause += " Keep each field to the length its description calls for."
     else:
         if title_allowed:
-            fields_clause += f' You may also propose a new "title"{title_hint}.'
+            fields_clause += f' You may also propose a new "title"{title_hint} as an item.'
         fields_clause += (
             " Hold each field to about its current length — a revision changes "
             "the content, not the volume, unless the author asked for more or "
             "less; an empty field takes its length from its description."
         )
-        fields_clause += " Use {} if nothing changed."
+        fields_clause += ' Use {"fields": []} if nothing changed.'
     lines.append(fields_clause)
     lines.append("")
     lines.append("The fields you may set:")
@@ -226,6 +232,33 @@ def _messages_with_cue(transcript: list[ChatMessage], cue: str) -> list[ChatMess
     """The transcript plus a trailing user cue, sanitized for the provider —
     shared by the "commit now" envelope turn and the garbled-retry turn."""
     return _coalesce_turns([*transcript, ChatMessage(role="user", content=cue)])
+
+
+def _flag_smuggled_fields(patch: AIEntryPatch, allowed_ids: set[str]) -> AIEntryPatch:
+    """Garble a patch whose text value carries ANOTHER contract field as JSON.
+
+    #2296: under constrained decoding a model that could no longer open the
+    key it wanted kept writing inside the current string instead — the whole
+    beat roster landed in `genre` as `…\\n\\ninstance_beats\\": [{\\"title\\"…`.
+    That parses as valid JSON, so without this it reached the author as an
+    ordinary-looking diff. Garbled triggers the one firm retry and, failing
+    that, shows the raw reply with this reason. Matches a contract id followed
+    by a (possibly escaped) closing quote, a colon, and a value opener — JSON
+    syntax, not prose that merely mentions a field's name."""
+    texts = [(k, v) for k, v in patch.fields.items() if isinstance(v, str)]
+    if patch.body is not None:
+        texts.append(("body", patch.body))
+    for holder, text in texts:
+        for other in allowed_ids - {holder}:
+            if re.search(rf'(?<![\w-]){re.escape(other)}\\?"\s*:\s*[\[{{"]', text):
+                return AIEntryPatch(
+                    garbled=True,
+                    garbled_reason=(
+                        f'The "{holder}" value contains the "{other}" field written '
+                        "as JSON, so the reply mixed several fields into one."
+                    ),
+                )
+    return patch
 
 
 def _constrain_to_registered_fields(patch: AIEntryPatch, allowed_ids: set[str]) -> AIEntryPatch:
@@ -448,7 +481,7 @@ async def run_entry_patch_extraction(
             cost_usd_total=chat_reply.cost_usd_total,
         )
     patch = project.validate_ai_entry_patch_for_type(entry_type, chat_reply.content)
-    patch = _constrain_to_registered_fields(patch, allowed_ids)
+    patch = _flag_smuggled_fields(_constrain_to_registered_fields(patch, allowed_ids), allowed_ids)
     cost = chat_reply.cost_usd
     usage = chat_reply.usage
     # #1877: `run_chat_turn` recorded this call's row and reports the chat's
@@ -494,7 +527,9 @@ async def run_entry_patch_extraction(
             )
         if retry.ok and (retry.content or "").strip():
             patch = project.validate_ai_entry_patch_for_type(entry_type, retry.content)
-            patch = _constrain_to_registered_fields(patch, allowed_ids)
+            patch = _flag_smuggled_fields(
+                _constrain_to_registered_fields(patch, allowed_ids), allowed_ids
+            )
             patch_reply = retry
     reconciliation: dict[str, Any] = {}
     if not creating and node_id is not None:

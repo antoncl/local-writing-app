@@ -1254,7 +1254,7 @@
   <ConfirmModal
     state={confirmService.active}
     onCancel={() => confirmService.dismiss()}
-    onConfirm={(dontShowAgain) => confirmService.resolve(dontShowAgain)}
+    onConfirm={(dontShowAgain, optionChecked) => confirmService.resolve(dontShowAgain, optionChecked)}
     onSecondary={() => confirmService.resolveSecondary()}
   />
 

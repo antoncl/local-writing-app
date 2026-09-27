@@ -32,6 +32,26 @@ describe("confirmService resolution", () => {
     expect(confirmService.active).toBe(null);
   });
 
+  it("hands the option checkbox's state to onConfirm (#2280)", async () => {
+    const seen: boolean[] = [];
+    const request = () =>
+      confirmService.request({
+        title: "T",
+        message: "M",
+        confirmLabel: "Remove",
+        destructive: true,
+        option: { label: "Delete everywhere", confirmLabel: "Delete" },
+        onConfirm: async (choice) => {
+          seen.push(choice?.optionChecked ?? false);
+        },
+      });
+    request();
+    await confirmService.resolve(false, true);
+    request();
+    await confirmService.resolve();
+    expect(seen).toEqual([true, false]);
+  });
+
   it("fires onCancel (not onConfirm) on dismiss() — the definitive 'declined'", () => {
     let confirmed = false;
     let cancelled = false;

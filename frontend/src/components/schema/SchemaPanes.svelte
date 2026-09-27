@@ -40,6 +40,7 @@
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { isDownwardLayerMove } from "@/lib/utils/fieldLayerMove";
+  import { fieldRemovalDialog } from "@/lib/utils/fieldRemovalDialog";
   import type {
     DocumentKind,
     EntryMetadata,
@@ -810,18 +811,46 @@
     setStatus(`Deleted ${typeId}`);
   }
 
-  function requestDeleteSchemaField() {
+  // "Remove" on a type's field (#2280): takes the field off THIS type only; the
+  // dialog's checkbox widens it to deleting the field everywhere. The backend
+  // preview says what the removal reaches, or why the type can't drop the
+  // field alone (then only delete-everywhere is offered). No "don't show
+  // again": the dialog carries a choice, so suppressing it would silently
+  // pick one.
+  async function requestDeleteSchemaField() {
     if (!selectedSchemaFieldId || selectedSchemaFieldId.startsWith("system:") || schemaFieldReadonly) return;
-    const fieldName = metadataSchema?.fields[selectedSchemaFieldId]?.name || selectedSchemaFieldId;
-    confirmService.request({
-      title: "Delete Field",
-      message: `Delete "${fieldName}"? This removes the field definition and removes that metadata value from every document using it.`,
-      confirmLabel: "Delete Field",
-      destructive: true,
-      cannotBeUndone: true,
-      dontShowAgainKey: "deleteField",
-      onConfirm: () => deleteSchemaField(selectedSchemaFieldId!),
+    const fieldId = selectedSchemaFieldId;
+    const entryTypeId = schemaFieldEntryType;
+    const fieldName = metadataSchema?.fields[fieldId]?.name || fieldId;
+    const typeName = (id: string) => metadataSchema?.entry_types[id]?.name || id;
+    await run(async () => {
+      const dialog = fieldRemovalDialog(await api.previewFieldRemoval(entryTypeId, fieldId), fieldName, typeName);
+      confirmService.request({
+        title: dialog.title,
+        message: dialog.message,
+        details: dialog.details,
+        confirmLabel: dialog.confirmLabel,
+        option: dialog.option,
+        destructive: true,
+        cannotBeUndone: true,
+        onConfirm: (choice) =>
+          dialog.deleteOnly || choice?.optionChecked
+            ? deleteSchemaField(fieldId)
+            : detachSchemaField(fieldId, entryTypeId),
+      });
     });
+  }
+
+  async function detachSchemaField(fieldId: string, entryTypeId: string) {
+    setMetadataSchema(await api.detachMetadataField(fieldId, entryTypeId));
+    await refreshMetadataSchema();
+    // Values were cleared only for the types that lost the field, so re-baseline
+    // from the server rather than stripping the key from every open pane.
+    await refreshOpenEditorPaneBaselines();
+    setValidation(await api.validateProject());
+    selectedSchemaFieldId = null;
+    expandedSchemaFieldId = null;
+    setStatus(`Removed ${fieldId} from ${entryTypeId}`);
   }
 
   async function deleteSchemaField(fieldId: string) {

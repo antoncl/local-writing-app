@@ -12,6 +12,8 @@ from app.models import (
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DeleteMetadataGroupRequest,
+    DetachMetadataFieldRequest,
+    FieldRemovalPreview,
     MetadataSchema,
     MetadataSchemaLayers,
     MetadataSchemaOverview,
@@ -69,6 +71,18 @@ def upsert_metadata_field(project: CurrentProject, request: UpsertMetadataFieldR
 def attach_metadata_field(project: CurrentProject, request: AttachMetadataFieldRequest) -> MetadataSchema:
     with translate_errors():
         return project.attach_metadata_field(request)
+
+
+@router.get("/api/metadata/schema/entry-types/fields/removal", response_model=FieldRemovalPreview)
+def preview_field_removal(project: CurrentProject, entry_type_id: str, field_id: str) -> FieldRemovalPreview:
+    with translate_errors():
+        return project.preview_field_removal(entry_type_id, field_id)
+
+
+@router.delete("/api/metadata/schema/entry-types/fields", response_model=MetadataSchema)
+def detach_metadata_field(project: CurrentProject, request: DetachMetadataFieldRequest) -> MetadataSchema:
+    with translate_errors():
+        return project.detach_metadata_field(request)
 
 
 @router.post("/api/metadata/schema/fields/move", response_model=MetadataSchema)

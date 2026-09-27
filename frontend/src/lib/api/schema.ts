@@ -1,5 +1,6 @@
 import type {
   EntryTypeDefinition,
+  FieldRemovalPreview,
   GroupApplication,
   MetadataFieldDefinition,
   MetadataGroupDefinition,
@@ -43,6 +44,19 @@ export const schemaApi = {
     return request<MetadataSchema>("/metadata/schema/entry-types/fields", {
       method: "POST",
       body: JSON.stringify({ layer_id: layerId, field_id: fieldId, entry_type_id: entryTypeId }),
+    });
+  },
+  // Its inverse (#2280): take a field off ONE type, wherever the type lists
+  // it; the definition and every other type stay. Preview first — the Remove
+  // dialog says what the removal reaches, or why the type can't drop it alone.
+  previewFieldRemoval(entryTypeId: string, fieldId: string) {
+    const query = new URLSearchParams({ entry_type_id: entryTypeId, field_id: fieldId });
+    return request<FieldRemovalPreview>(`/metadata/schema/entry-types/fields/removal?${query}`);
+  },
+  detachMetadataField(fieldId: string, entryTypeId: string) {
+    return request<MetadataSchema>("/metadata/schema/entry-types/fields", {
+      method: "DELETE",
+      body: JSON.stringify({ field_id: fieldId, entry_type_id: entryTypeId }),
     });
   },
   moveMetadataField(fieldId: string, targetLayerId: string, entryType = "manuscript:scene") {

@@ -153,6 +153,18 @@ export type MetadataDefinitionSource = {
   built_in: boolean;
 };
 
+// What removing a field from one type would do (#2280) — mirrors the
+// backend's `FieldRemovalPreview`.
+export type FieldRemovalPreview = {
+  entry_type_id: string;
+  field_id: string;
+  blocked_by: "parent" | "group" | "built_in" | null;
+  inherited_from: string | null;
+  listings: { layer_id: string; layer_label: string; shared: boolean }[];
+  subtypes_losing: string[];
+  other_types: string[];
+};
+
 export type MetadataSchemaOverview = {
   effective_schema: MetadataSchema;
   layers: MetadataSchemaLayer[];

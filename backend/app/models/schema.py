@@ -555,6 +555,46 @@ class AttachMetadataFieldRequest(BaseModel):
     entry_type_id: str = Field(min_length=1)
 
 
+class DetachMetadataFieldRequest(BaseModel):
+    """Inverse of `AttachMetadataFieldRequest` (#2280): take a field off ONE
+    type's membership, wherever on the chain the type lists it. The field
+    definition and every other type are untouched."""
+
+    field_id: str = Field(min_length=1)
+    entry_type_id: str = Field(min_length=1)
+
+
+class FieldListingLayer(BaseModel):
+    """A layer whose `metadata.schema.yaml` lists the field on the type."""
+
+    layer_id: str
+    layer_label: str
+    # A layer above the open project: removing the listing there changes
+    # every project that inherits that layer, not just this one.
+    shared: bool
+
+
+class FieldRemovalPreview(BaseModel):
+    """What removing `field_id` from `entry_type_id` would do (#2280) — read
+    by the Remove dialog before it asks.
+
+    `blocked_by` says why the type can't drop the field on its own:
+    `"parent"` — a parent type lists it (`inherited_from` names the nearest
+    one that does), and a type's membership only adds to its parent's;
+    `"group"` — a group application generates it; `"built_in"` — the app's
+    built-in schema lists it, which no layer can edit. `None` means removable."""
+
+    entry_type_id: str
+    field_id: str
+    blocked_by: Literal["parent", "group", "built_in"] | None = None
+    inherited_from: str | None = None
+    listings: list[FieldListingLayer] = Field(default_factory=list)
+    # Subtypes that carry the field only through this type and lose it too.
+    subtypes_losing: list[str] = Field(default_factory=list)
+    # Every OTHER type that carries the field — what "delete everywhere" hits.
+    other_types: list[str] = Field(default_factory=list)
+
+
 class UpsertMetadataEntryTypeRequest(BaseModel):
     layer_id: str = Field(min_length=1)
     entry_type_id: str = Field(min_length=1)

@@ -78,6 +78,7 @@ from app.services.project.schema_definition_validation import (
 )
 from app.services.project.schema_groups import MetadataSchemaGroupsMixin
 from app.services.project.schema_inheritance import MetadataSchemaInheritanceMixin
+from app.services.project.schema_type_membership import MetadataTypeMembershipMixin
 from app.services.project.search import SearchMixin
 from app.services.project.search_corpus_build import SearchCorpusMixin
 from app.services.project.search_replace import SearchReplaceMixin
@@ -115,6 +116,7 @@ class ProjectService(
     ManuscriptMixin,
     MetadataSchemaMixin,
     MetadataSchemaGroupsMixin,
+    MetadataTypeMembershipMixin,
     MetadataSchemaInheritanceMixin,
     MetadataSchemaValidationMixin,
     MetadataValuesMixin,

@@ -26,7 +26,13 @@ export type ConfirmationRequest = {
   // checkbox shows. Mutually exclusive with `dontShowAgainKey` in practice —
   // a request sets one or the other, never both.
   onDontShowAgain?: () => Promise<void>;
-  onConfirm: () => Promise<void>;
+  // Receives the state of `option`'s checkbox (false when there is none, and
+  // on the suppressed path, which never shows the modal). Optional so the many
+  // callers that ignore it — and invoke it bare — stay valid.
+  onConfirm: (choice?: { optionChecked: boolean }) => Promise<void>;
+  // An optional checkbox choice made alongside confirming (#2280) — see
+  // ConfirmModal's `ConfirmOption`.
+  option?: { label: string; confirmLabel?: string };
   // Optional second resolution (e.g. "Discard changes and close" next to
   // "Overwrite and close"). Cancel/backdrop still means "do neither".
   secondaryLabel?: string;
@@ -73,7 +79,7 @@ class ConfirmService {
   // immediately; otherwise opens the modal.
   request(options: ConfirmationRequest) {
     if (options.dontShowAgainKey && this.#isSuppressed(options.dontShowAgainKey)) {
-      void this.onRun(options.onConfirm);
+      void this.onRun(() => options.onConfirm({ optionChecked: false }));
       return;
     }
     this.active = options;
@@ -81,7 +87,7 @@ class ConfirmService {
 
   // Confirm handler for the modal's primary button. Closes the modal, records
   // the suppression if requested, then runs the action.
-  async resolve(dontShowAgain = false) {
+  async resolve(dontShowAgain = false, optionChecked = false) {
     const current = this.active;
     if (!current) return;
     this.active = null;
@@ -92,7 +98,7 @@ class ConfirmService {
         this.#suppress(current.dontShowAgainKey);
       }
     }
-    await this.onRun(current.onConfirm);
+    await this.onRun(() => current.onConfirm({ optionChecked }));
   }
 
   // Run the secondary resolution (when the request carries one).

@@ -4,6 +4,8 @@
   // chosen action; onCancel dismisses without doing anything.
   // Lives in <script module> because Svelte 5 disallows type exports from
   // instance scripts.
+  export type ConfirmOption = { label: string; confirmLabel?: string };
+
   export type ConfirmationState = {
     title: string;
     message: string;
@@ -20,6 +22,10 @@
     // shows the checkbox; the parent's onConfirm still receives the value.
     onDontShowAgain?: () => Promise<void>;
     onConfirm: () => Promise<void> | void;
+    // An optional choice the user makes alongside confirming (#2280, e.g.
+    // "Delete the field everywhere"): a checkbox whose value reaches onConfirm.
+    // `confirmLabel` replaces the primary button's label while it is ticked.
+    option?: ConfirmOption;
     // Optional second resolution rendered next to the primary (e.g.
     // "Discard changes and close"); Cancel still means "do neither".
     secondaryLabel?: string;
@@ -43,16 +49,18 @@
   }: {
     state?: ConfirmationState | null;
     onCancel?: () => void;
-    onConfirm?: (dontShowAgain: boolean) => void | Promise<void>;
+    onConfirm?: (dontShowAgain: boolean, optionChecked: boolean) => void | Promise<void>;
     onSecondary?: () => void | Promise<void>;
   } = $props();
 
   // Reset the checkbox whenever a new confirmation opens (depends only on
   // `confirmState`, so ticking the box itself doesn't re-trigger the reset).
   let dontShowAgain = $state(false);
+  let optionChecked = $state(false);
   $effect(() => {
     confirmState;
     dontShowAgain = false;
+    optionChecked = false;
   });
 </script>
 
@@ -69,6 +77,12 @@
     {#if confirmState.cannotBeUndone}
       <p class="confirm-modal-undo"><i class="ti ti-alert-triangle" aria-hidden="true"></i> This cannot be undone.</p>
     {/if}
+    {#if confirmState.option}
+      <label class="confirm-modal-dsa confirm-modal-option">
+        <input type="checkbox" bind:checked={optionChecked} data-testid="confirm-modal-option" />
+        {confirmState.option.label}
+      </label>
+    {/if}
     {#if confirmState.dontShowAgainKey || confirmState.onDontShowAgain}
       <label class="confirm-modal-dsa">
         <input type="checkbox" bind:checked={dontShowAgain} />
@@ -84,9 +98,9 @@
         class:danger-primary={confirmState.destructive}
         class:primary={!confirmState.destructive}
         type="button"
-        onclick={() => onConfirm(dontShowAgain)}
+        onclick={() => onConfirm(dontShowAgain, optionChecked)}
       >
-        {confirmState.confirmLabel}
+        {(optionChecked && confirmState.option?.confirmLabel) || confirmState.confirmLabel}
       </button>
     {/snippet}
   </Modal>
@@ -126,5 +140,9 @@
 
   .confirm-modal-dsa input {
     margin: 0;
+  }
+
+  .confirm-modal-option {
+    color: var(--text-1);
   }
 </style>

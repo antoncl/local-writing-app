@@ -208,6 +208,10 @@ def _parse_patch_object(raw: str) -> dict[str, Any] | None:
         # was due) — deterministically, so the firm retry reproduces it. Repair
         # only a reply that IS one object and ended outside a string.
         whole = _as_json_dict(_close_unbalanced(candidate))
+    if whole is None:
+        # #2302: `"the "Girl" identity"` — quotes inside a text value the model
+        # didn't escape.
+        whole = _as_json_dict(_escape_stray_quotes(candidate))
     if whole is not None:
         return _patch_shaped_or_empty(whole)
 
@@ -255,6 +259,8 @@ def _diagnose_starts_with_brace(candidate: str) -> str:
     if whole is None:
         repaired = _close_unbalanced(candidate)
         whole = _as_json_dict(repaired) if repaired else None
+    if whole is None:
+        whole = _as_json_dict(_escape_stray_quotes(candidate))
     if whole is not None:
         # Parsed (possibly after repair) but wasn't patch-shaped — the only
         # way this path is reached with a non-None `whole`, since a
@@ -316,6 +322,46 @@ def diagnose_garbled_reply(raw: str) -> str:
     if candidate.startswith("{"):
         return _diagnose_starts_with_brace(candidate)
     return _diagnose_embedded(candidate)
+
+
+# A reply with more stray quotes than this is too broken to trust a repair of.
+_MAX_QUOTE_REPAIRS = 50
+# What may follow a string's real closing quote: a separator, a closer, a key's
+# colon — or, never followed by text, another quote (a missing comma between
+# two values, which is a structure problem this repair must not paper over).
+_AFTER_CLOSING_QUOTE = frozenset(',}]:"')
+
+
+def _escape_stray_quotes(text: str) -> str:
+    """``text`` with unescaped quotes inside string values escaped, or ``""``
+    when that doesn't make it parse (#2302).
+
+    A model sometimes writes `"the "Girl" identity"`: JSON reads the second
+    quote as the end of the value and then fails on `G`, because a real
+    closing quote can only be followed by one of `_AFTER_CLOSING_QUOTE`. So
+    on each decode error, the quote just before the error position is escaped
+    — but only when the error sits on the first non-space character after it
+    and that character is plain text — and the parse is retried. Each repair
+    must move the error forward, so it always terminates; a reply that isn't
+    one object, or whose error is anything else, is left alone."""
+    if not text.startswith("{"):
+        return ""
+    last_pos = -1
+    for _ in range(_MAX_QUOTE_REPAIRS):
+        try:
+            json.loads(text)
+        except json.JSONDecodeError as exc:
+            pos = exc.pos
+        else:
+            return text if last_pos >= 0 else ""
+        if pos <= last_pos or pos >= len(text) or text[pos] in _AFTER_CLOSING_QUOTE:
+            return ""
+        quote = len(text[:pos].rstrip()) - 1
+        if quote < 1 or text[quote] != '"' or text[quote - 1] == "\\":
+            return ""
+        text = f"{text[:quote]}\\{text[quote:]}"
+        last_pos = pos
+    return ""
 
 
 _CLOSER = {"{": "}", "[": "]"}

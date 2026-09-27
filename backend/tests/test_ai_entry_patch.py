@@ -120,6 +120,41 @@ class ParseEntryPatchJsonTests(unittest.TestCase):
         )
         self.assertEqual(parse_entry_patch_json(raw), {"fields": {"bio": "second"}})
 
+    def test_repairs_unescaped_quotes_inside_a_value(self) -> None:
+        # #2302, the replayed Gemma reply's shape.
+        raw = (
+            '{"fields": [{"field": "body", "value": "Elias treats the "Girl" identity as an '
+            'experiment."}, {"field": "genre", "value": "Noir"}]}'
+        )
+        self.assertEqual(
+            parse_entry_patch_json(raw),
+            {
+                "body": 'Elias treats the "Girl" identity as an experiment.',
+                "fields": {"genre": "Noir"},
+            },
+        )
+
+    def test_repairs_a_stray_quote_before_punctuation_and_in_nested_items(self) -> None:
+        raw = (
+            '{"fields": [{"field": "beats", "value": [{"title": "Crisis", '
+            '"specifics": "She says "accept it". He does "not"!"}]}]}'
+        )
+        self.assertEqual(
+            parse_entry_patch_json(raw)["fields"]["beats"][0]["specifics"],
+            'She says "accept it". He does "not"!',
+        )
+
+    def test_a_missing_comma_is_not_papered_over_as_a_stray_quote(self) -> None:
+        # The quote before the error is followed by another quote — a
+        # structure problem, so the reply stays garbled rather than merging
+        # two values into one.
+        raw = '{"fields": [{"field": "genre", "value": "Noir" "Thriller"}]}'
+        self.assertIsNone(parse_entry_patch_json(raw))
+
+    def test_a_reply_that_is_not_a_single_object_is_not_quote_repaired(self) -> None:
+        raw = 'Here you go: {"fields": [{"field": "genre", "value": "the "Girl" thing"}]}'
+        self.assertIsNone(parse_entry_patch_json(raw))
+
     def test_empty_item_list_is_no_changes(self) -> None:
         self.assertEqual(parse_entry_patch_json('{"fields": []}'), {"fields": {}})
 

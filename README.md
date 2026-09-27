@@ -97,7 +97,7 @@ scenes/ lore/ prompts/ research/ chats/ views/
 
 Scenes and lore entries are Markdown with YAML front matter. You can read, grep,
 diff, and version-control the whole thing without this app. API credentials are
-*not* stored in the project — they live in per-machine config, so a project
+*not* stored in the project — they live in your system keychain, so a project
 folder is safe to commit or share.
 
 ## Status

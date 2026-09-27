@@ -17,6 +17,7 @@ from app.models import (
     Swatch,
     UpdateChannel,
 )
+from app.services import secret_store
 from app.services.project.errors import ProjectServiceError
 from app.services.yaml_io import load_yaml
 
@@ -630,8 +631,25 @@ def load_settings() -> MachineSettings:
                     settings = MachineSettings.model_validate(data)
                 except Exception:
                     settings = MachineSettings()
+    _resolve_provider_keys(settings)
     _top_up_palette(settings)
     return settings
+
+
+def _resolve_provider_keys(settings: MachineSettings) -> None:
+    """Fill the provider keys from the OS secret store (#2287). A plaintext key
+    still in config.yaml — a config from before the store, or a hand edit —
+    wins, and the save below moves it into the store and scrubs it from the
+    file. With no usable store, the file's keys are simply what is read."""
+    if not secret_store.available():
+        return
+    providers = settings.providers
+    in_file = [field for field in secret_store.KEY_FIELDS if getattr(providers, field)]
+    for field in secret_store.KEY_FIELDS:
+        if field not in in_file:
+            setattr(providers, field, secret_store.get(config_path().parent, field))
+    if in_file:
+        save_settings(settings)
 
 
 def _top_up_palette(settings: MachineSettings) -> None:
@@ -654,13 +672,26 @@ def save_settings(settings: MachineSettings) -> None:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = settings.model_dump(mode="json")
+    # #2287: keys go to the OS secret store and are blanked in the file. A key
+    # the store refuses stays in the file rather than be lost.
+    if secret_store.available():
+        providers = payload["providers"]
+        for field in secret_store.KEY_FIELDS:
+            if secret_store.put(path.parent, field, providers.get(field) or ""):
+                providers[field] = ""
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def keys_in_os_store() -> bool:
+    """Whether provider keys are kept in the OS secret store — False means they
+    fall back to plaintext in config.yaml (no store on this machine)."""
+    return secret_store.available()
 
 
 def mask_credentials(settings: MachineSettings) -> dict[str, Any]:
     payload = settings.model_dump(mode="json")
     providers = payload.get("providers", {})
-    for key in ("anthropic_api_key", "openai_api_key", "openrouter_api_key"):
+    for key in secret_store.KEY_FIELDS:
         if providers.get(key):
             providers[key] = MASK
     payload["providers"] = providers

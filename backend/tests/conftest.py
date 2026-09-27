@@ -24,7 +24,10 @@ from __future__ import annotations
 import os
 import tempfile
 
+import keyring
 import pytest
+from keyring.backend import KeyringBackend
+from keyring.errors import PasswordDeleteError
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -36,12 +39,48 @@ def pytest_configure(config: pytest.Config) -> None:
     never trips under pytest; and (c) subprocesses a test spawns inherit an
     isolated config dir. Set unconditionally (not `setdefault`) so a stray real
     value already in the environment can't defeat the floor. The per-test
-    `_isolate_machine_settings` fixture narrows it to a fresh dir per test."""
+    `_isolate_machine_settings` fixture narrows it to a fresh dir per test.
+
+    Keyring floor (#2287): a subprocess a test spawns resolves keyring's inert
+    `null` backend, never the developer's OS store; in-process tests get a fresh
+    in-memory store per test (`_isolate_keyring`)."""
     os.environ["LWA_CONFIG_DIR"] = tempfile.mkdtemp(prefix="lwa-test-cfg-")
+    os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
+
+
+class MemoryKeyring(KeyringBackend):
+    """A usable (priority > 0) secret store that lives only in this process."""
+
+    priority = 1
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entries: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self.entries.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.entries[(service, username)] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        if self.entries.pop((service, username), None) is None:
+            raise PasswordDeleteError(username)
 
 
 @pytest.fixture(autouse=True)
-def _isolate_machine_settings(tmp_path, monkeypatch):
+def _isolate_keyring():
+    """A fresh in-memory keyring per test (#2287): provider keys never reach the
+    developer's real OS secret store, and never leak between tests."""
+    previous = keyring.get_keyring()
+    store = MemoryKeyring()
+    keyring.set_keyring(store)
+    yield store
+    keyring.set_keyring(previous)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_machine_settings(tmp_path, monkeypatch, _isolate_keyring):
     from app.services import machine_settings as ms
 
     fake = tmp_path / "machine" / "config.yaml"

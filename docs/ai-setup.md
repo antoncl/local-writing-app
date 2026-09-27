@@ -42,8 +42,11 @@ Open **≡ menu → Settings… → AI**.
 **Cloud providers** — under the provider list, click **+ Add provider**, choose
 **Anthropic**, **OpenAI**, or **OpenRouter**, paste its **API key**, and **Save**.
 Configured providers show as chips; you can rotate a key or remove one later. Keys
-are stored in per-machine config, never in your project files — so a project folder
-is safe to share.
+are stored in your system keychain (Windows Credential Manager, macOS Keychain, or
+the Linux Secret Service), never in your project files or in the app's
+`config.yaml` — so a project folder is safe to share, and so is the config file.
+On a machine with no keychain (e.g. a headless Linux server) keys fall back to
+`config.yaml`, and Settings says so.
 
 > The app never asks you to type a key anywhere but here, and keys are masked on
 > read. If you'd rather not use the cloud at all, skip straight to Ollama.

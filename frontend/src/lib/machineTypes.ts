@@ -92,6 +92,9 @@ export type MachineSettingsView = {
   // The app-data folder (parent of config_path) holding the durable logs
   // (app.log, errors.log) — surfaced so a user can find them (#1750).
   config_dir: string;
+  // Where provider keys are kept (#2287): true = the OS secret store; false =
+  // plaintext in config.yaml because this machine has no store.
+  keys_in_os_store: boolean;
 };
 
 export type MachineSettingsUpdate = {

@@ -43,6 +43,7 @@ def _build_settings_view(masked: dict[str, Any]) -> MachineSettingsView:
         warn_on_orphaning_delete=masked.get("warn_on_orphaning_delete", True),
         config_path=str(machine_settings_service.config_path()),
         config_dir=str(machine_settings_service.config_dir()),
+        keys_in_os_store=machine_settings_service.keys_in_os_store(),
     )
 
 

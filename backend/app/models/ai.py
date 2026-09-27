@@ -97,6 +97,10 @@ class MachineSettingsView(BaseModel):
     # the durable logs live: app.log (#1745) and errors.log (#386/#741). Surfaced
     # so a user can find the logs a bug report asks for (#1750).
     config_dir: str
+    # Where provider keys are kept (#2287): True = the OS secret store; False =
+    # plaintext in config.yaml, because this machine has no store. The Settings
+    # dialog says so when False.
+    keys_in_os_store: bool = True
 
 
 class ProviderCredentialsPatch(BaseModel):

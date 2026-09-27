@@ -541,7 +541,7 @@ async def run_chat_turn(
     else:
         sent_messages, history_fit = messages_list, None
 
-    result = ai_providers.chat(
+    result = await ai_providers.achat(
         resolved.to_call(
             system_prompt=request.system_prompt,
             messages=sent_messages,

@@ -3,7 +3,10 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
+
+import anyio.to_thread
 
 from app.models import AIHealthResponse, AIPolicy, OllamaHostHealth
 from app.services.ai.profiles import UsageMetrics
@@ -255,6 +258,26 @@ def chat(
         ok=True,
         stop_reason=outcome.stop_reason,
         usage=usage,
+    )
+
+
+async def achat(
+    call: ChatCall,
+    *,
+    provider_name: str,
+    settings: MachineSettings,
+    policy: AIPolicy,
+) -> ChatResult:
+    """`chat` for async callers: the blocking wire call runs on a worker thread.
+
+    `chat` is synchronous (every profile uses a sync HTTP client) and a
+    generation can take minutes on a local model. Awaited on the event loop it
+    froze the whole single-process server — every other request stalled until
+    the model finished (#2293). Every `async def` caller goes through here; the
+    stream path already drives its sync generator on the threadpool.
+    """
+    return await anyio.to_thread.run_sync(
+        partial(chat, call, provider_name=provider_name, settings=settings, policy=policy)
     )
 
 

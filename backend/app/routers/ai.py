@@ -480,7 +480,7 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
     # system-prompt cache wrap so the two never drift on caching.
     system_blocks = system_prompt_cache_blocks(system_prompt)
 
-    result = ai_providers.chat(
+    result = await ai_providers.achat(
         resolved.to_call(
             system_prompt=system_prompt,
             messages=chat_messages,

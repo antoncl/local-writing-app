@@ -647,7 +647,7 @@ def _resolve_provider_keys(settings: MachineSettings) -> None:
     in_file = [field for field in secret_store.KEY_FIELDS if getattr(providers, field)]
     for field in secret_store.KEY_FIELDS:
         if field not in in_file:
-            setattr(providers, field, secret_store.get(field))
+            setattr(providers, field, secret_store.get(config_path().parent, field))
     if in_file:
         save_settings(settings)
 
@@ -677,7 +677,7 @@ def save_settings(settings: MachineSettings) -> None:
     if secret_store.available():
         providers = payload["providers"]
         for field in secret_store.KEY_FIELDS:
-            if secret_store.put(field, providers.get(field) or ""):
+            if secret_store.put(path.parent, field, providers.get(field) or ""):
                 providers[field] = ""
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 

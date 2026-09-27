@@ -9,10 +9,11 @@ here on load and writes them here (blanking the file) on save.
 
 Two properties keep this safe beside the rest of the app:
 
-- **Namespaced per config dir.** The entries live under `local-writing-app`
-  for the real machine config, and under a suffixed name when
-  `LWA_CONFIG_DIR` points elsewhere — a worktree dev backend, an E2E run — so an
-  isolated config can never read, or overwrite, the author's real keys.
+- **Namespaced per config dir.** Every entry's service name carries a digest
+  of the config dir in use (`local-writing-app/<digest>`), however that dir was
+  chosen — the real one, `LWA_CONFIG_DIR` (a worktree dev backend), or an
+  overridden `APPDATA`/`HOME`/`XDG_CONFIG_HOME` (the Playwright E2E backend) —
+  so an isolated config can never read, or overwrite, the author's real keys.
 - **Never the real keyring from a test process.** A test run installs an
   in-memory backend (conftest); reaching a real OS backend from a process with
   a test runner loaded fails loud, the same stance as the config-dir guard
@@ -30,6 +31,7 @@ import hashlib
 import logging
 import os
 import sys
+from pathlib import Path
 
 import keyring
 from keyring.backend import KeyringBackend
@@ -37,8 +39,6 @@ from keyring.errors import KeyringError, PasswordDeleteError
 
 KEY_FIELDS = ("anthropic_api_key", "openai_api_key", "openrouter_api_key")
 _SERVICE = "local-writing-app"
-# Duplicated from machine_settings.CONFIG_DIR_ENV (which imports this module).
-_CONFIG_DIR_ENV = "LWA_CONFIG_DIR"
 # Backends that store nothing — the ones a test process may use besides its own
 # in-memory one. Anything else under `keyring.backends.` is a real OS store.
 _INERT_BACKEND_MODULES = ("keyring.backends.null", "keyring.backends.fail")
@@ -46,14 +46,11 @@ _INERT_BACKEND_MODULES = ("keyring.backends.null", "keyring.backends.fail")
 logger = logging.getLogger(__name__)
 
 
-def service_name() -> str:
-    """The keyring service the keys live under: the plain app name for the real
-    machine config, a per-directory name for an isolated one."""
-    override = os.environ.get(_CONFIG_DIR_ENV)
-    if not override:
-        return _SERVICE
-    digest = hashlib.sha256(os.path.normcase(os.path.abspath(override)).encode("utf-8")).hexdigest()[:12]
-    return f"{_SERVICE}-{digest}"
+def service_name(config_dir: Path) -> str:
+    """The keyring service for the config in `config_dir` — one per directory,
+    so two configs never share keys."""
+    digest = hashlib.sha256(os.path.normcase(os.path.abspath(config_dir)).encode("utf-8")).hexdigest()[:12]
+    return f"{_SERVICE}/{digest}"
 
 
 def _backend() -> KeyringBackend:
@@ -80,21 +77,21 @@ def available() -> bool:
     return getattr(_backend(), "priority", 0) > 0
 
 
-def get(field: str) -> str:
+def get(config_dir: Path, field: str) -> str:
     """The stored key for `field`, or "" when there is none or the store errs."""
     try:
-        return _backend().get_password(service_name(), field) or ""
+        return _backend().get_password(service_name(config_dir), field) or ""
     except KeyringError:
         logger.warning("Could not read %s from the OS secret store.", field, exc_info=True)
         return ""
 
 
-def put(field: str, value: str) -> bool:
+def put(config_dir: Path, field: str, value: str) -> bool:
     """Store `value` for `field` — an empty value deletes the entry. Returns
     whether the store now holds exactly `value`; on False the caller keeps the
     key where it was rather than lose it."""
     backend = _backend()
-    service = service_name()
+    service = service_name(config_dir)
     try:
         if value:
             if backend.get_password(service, field) != value:

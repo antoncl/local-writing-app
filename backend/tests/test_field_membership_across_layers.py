@@ -127,6 +127,20 @@ class FieldMembershipAcrossLayersTests(unittest.TestCase):
         self.assertIn("lesson", self._layer(self.series)["fields"])
         self.assertEqual(self._layer(self.root)["entry_types"][_TYPE]["fields"], ["lesson"])
 
+    def test_a_summary_nomination_follows_a_delete_and_a_rename(self) -> None:
+        self._series_defines_truth_and_book_lists_it()
+        book = self._layer(self.root)
+        book["entry_types"][_TYPE]["summary_fields"] = ["truth"]
+        self.service._write_yaml(self.root / "metadata.schema.yaml", book)
+
+        self.service.rename_metadata_field(
+            RenameMetadataFieldRequest(old_field_id="truth", new_field_id="lesson", entry_type=_TYPE)
+        )
+        self.assertEqual(self._layer(self.root)["entry_types"][_TYPE]["summary_fields"], ["lesson"])
+
+        self.service.delete_metadata_field(DeleteMetadataFieldRequest(field_id="lesson", entry_type=_TYPE))
+        self.assertEqual(self._layer(self.root)["entry_types"][_TYPE]["summary_fields"], [])
+
     def test_deleting_strips_every_type_that_lists_the_field_not_just_the_named_one(self) -> None:
         self._create(self.root, "truth")
         book = self._layer(self.root)

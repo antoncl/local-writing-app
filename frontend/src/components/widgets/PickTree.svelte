@@ -11,8 +11,9 @@
   // treatment), rather than floating orphaned at the panel's far-left edge.
   //
   // Three row shapes: a pickable container (act/chapter/tag/view/plotline — caret
-  // + check), a group header (a Lore entry-type — caret + serif title, NO check,
-  // clicking it collapses), and a leaf (scene/member/entry — check, no caret).
+  // + check), a group header (a Lore entry-type — caret + serif title, clicking
+  // it collapses; a `section` row may also carry a group check, #2305), and a
+  // leaf (scene/member/entry — check, no caret).
   // Purely presentational: the caller normalizes rows and binds toggle/collapse.
   export type PickTreeState = "on" | "implied" | "indeterminate" | "off";
 
@@ -31,6 +32,10 @@
     /** Whether the row carries a tri-state pick control. A Lore entry-type header
      * is a pure collapsible section (no check) — set false. Defaults to true. */
     pickable?: boolean;
+    /** A section header that ALSO picks (#2305, a Lore entry-type in a multi-pick
+     * input): keeps the serif header look and title-click-collapses, so a click
+     * meant to open the group never mass-picks; only its check picks the group. */
+    section?: boolean;
     /** Whether the row shows a collapse caret. Defaults to `hasChildren`; set
      * false for a container that stays open (the manuscript root). */
     collapsible?: boolean;
@@ -83,9 +88,10 @@
   // Show a caret only for a collapsible container; leaves and the always-open
   // root get a same-width spacer so every checkbox lines up in one column.
   const showsCaret = (row: PickTreeRow) => row.hasChildren && row.collapsible !== false;
-  // A group header (a container with no check) collapses on a title click; a
+  // A section header (with or without a check) collapses on a title click; a
   // pickable row toggles its pick.
-  const titleAction = (row: PickTreeRow) => (isPickable(row) ? row.onToggle : row.onCollapse);
+  const isHeader = (row: PickTreeRow) => row.isContainer && (!isPickable(row) || row.section === true);
+  const titleAction = (row: PickTreeRow) => (isHeader(row) ? row.onCollapse : row.onToggle);
 </script>
 
 <div class="ctx-mtree" role="group" aria-label={ariaLabel}>
@@ -107,8 +113,8 @@
           title={row.title}
           detail={row.detail ?? null}
           stripeColor={row.stripeColor ?? null}
-          selected={isPickable(row) ? rowSelected(row.state) : undefined}
-          groupHeader={row.isContainer && !isPickable(row)}
+          selected={isPickable(row) && !isHeader(row) ? rowSelected(row.state) : undefined}
+          groupHeader={isHeader(row)}
           onClick={titleAction(row)}
         >
           {#snippet leading()}
@@ -117,14 +123,25 @@
                    the box picks, matching the mockup's whole-row target. The title
                    button (NodeRow's own, with aria-pressed) is the accessible
                    control, so this one is out of the tab order and hidden from AT
-                   to avoid a duplicate. -->
-              <button
-                type="button"
-                class="ctx-row-check"
-                tabindex="-1"
-                aria-hidden="true"
-                onclick={row.onToggle}
-              ><PickCheck state={row.state} /></button>
+                   to avoid a duplicate. A section header's title collapses
+                   instead, so there the check IS the accessible pick control. -->
+              {#if isHeader(row)}
+                <button
+                  type="button"
+                  class="ctx-row-check"
+                  aria-label={`Pick all in ${row.title}`}
+                  aria-pressed={rowSelected(row.state)}
+                  onclick={row.onToggle}
+                ><PickCheck state={row.state} /></button>
+              {:else}
+                <button
+                  type="button"
+                  class="ctx-row-check"
+                  tabindex="-1"
+                  aria-hidden="true"
+                  onclick={row.onToggle}
+                ><PickCheck state={row.state} /></button>
+              {/if}
             {/if}
           {/snippet}
           {#snippet trailing()}

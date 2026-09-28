@@ -194,8 +194,9 @@
     return `${ref.kind}:${ref.id}`;
   }
 
+  const pickedKeys = $derived(new Set(value.map(refKey)));
   function isPicked(ref: NodePickerRef): boolean {
-    return value.some((existing) => refKey(existing) === refKey(ref));
+    return pickedKeys.has(refKey(ref));
   }
 
   // A candidate row toggles (ADR-0074 #1464): picking an already-picked
@@ -211,6 +212,29 @@
     const next = allowMultiple ? [...value, ref] : [ref];
     onChange?.({ value: next });
     if (!allowMultiple) close();
+  }
+
+  // A group header's tri-state reading of its members (#2305): "on" only when
+  // every member is picked, so a partial group reads "indeterminate".
+  function groupPickState(members: NodePickerRef[]): PickTreeState {
+    const picked = members.filter(isPicked).length;
+    if (picked === 0) return "off";
+    return picked === members.length ? "on" : "indeterminate";
+  }
+
+  // Toggling a group header: a fully picked group unpicks every member;
+  // otherwise the unpicked members are added — one onChange, not one per row.
+  function toggleGroupPick(members: NodePickerRef[]) {
+    if (groupPickState(members) === "on") {
+      const drop = new Set(members.map(refKey));
+      onChange?.({ value: value.filter((ref) => !drop.has(refKey(ref))) });
+      return;
+    }
+    onChange?.({ value: [...value, ...members.filter((ref) => !isPicked(ref))] });
+  }
+
+  function loreEntryRef(entry: LoreEntrySummary): NodePickerRef {
+    return { id: entry.id, kind: "lore", title: entry.title, entry_type: entry.entry_type };
   }
 
   function remove(key: string) {
@@ -818,8 +842,9 @@
   const excludeIdSet = $derived(new Set(excludeIds));
 
   // Lore panel: grouped by entry type under collapsible section headers (#1520),
-  // matching the Lore pane and the mockup — not one flat list. A type header is a
-  // pure collapsible section (no tri-state check); its members are binary picks.
+  // matching the Lore pane and the mockup — not one flat list. In a multi-pick
+  // input a type header carries a tri-state check that picks its whole visible
+  // group (#2305); its caret still collapses it. Members are binary picks.
   // Collapsed by default; a search expands every surviving group.
   let expandedLoreTypeIds = $state<Set<string>>(new Set());
   function toggleLoreTypeCollapse(id: string) {
@@ -852,31 +877,33 @@
       // still works both directions — the sole group isn't force-locked open.
       const toggled = expandedLoreTypeIds.has(group.typeId);
       const collapsed = !searching && (soleLoreGroup ? toggled : !toggled);
+      const memberRefs = group.entries
+        .filter((entry) => !excludeIdSet.has(entry.id))
+        .map(loreEntryRef);
       rows.push({
         key: `lore-type:${group.typeId}`,
         depth: 0,
         hasChildren: group.entries.length > 0,
         collapsed,
         isContainer: true,
-        pickable: false, // an entry type is a section, not a selectable container
-        state: "off",
+        // #2305: in a multi-pick input the header picks its whole (visible)
+        // group; single-select keeps it a pure collapsible section.
+        pickable: allowMultiple && memberRefs.length > 0,
+        section: true, // title click still collapses; only the check picks
+
+        state: groupPickState(memberRefs),
         title: group.typeName,
         stripeColor: null,
         count: group.entries.length,
         countNoun: "entry",
         countNounPlural: "entries",
-        onToggle: () => {},
+        onToggle: () => toggleGroupPick(memberRefs),
         onCollapse: () => toggleLoreTypeCollapse(group.typeId),
       });
       if (collapsed) continue;
       for (const entry of group.entries) {
         if (excludeIdSet.has(entry.id)) continue;
-        const ref: NodePickerRef = {
-          id: entry.id,
-          kind: "lore",
-          title: entry.title,
-          entry_type: entry.entry_type,
-        };
+        const ref = loreEntryRef(entry);
         // Honour the entry's own metadata.color (instance override) ahead of the
         // type/kind default (#1520 follow-up).
         const instanceColor =

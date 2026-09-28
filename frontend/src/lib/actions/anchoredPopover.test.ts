@@ -83,6 +83,47 @@ describe("anchoredPopover", () => {
     handle.destroy();
   });
 
+  // #2304: a host list growing under a tracked popover pushes the anchor below
+  // the fold; the flipped popover must stay inside the viewport, not hang off it.
+  describe("vertical placement (#2304)", () => {
+    const origInnerHeight = window.innerHeight;
+
+    afterEach(() => {
+      Object.defineProperty(window, "innerHeight", { value: origInnerHeight, configurable: true });
+    });
+
+    function mount(top: number) {
+      Object.defineProperty(window, "innerHeight", { value: 1000, configurable: true });
+      const anchor = document.createElement("button");
+      const pop = document.createElement("div");
+      document.body.append(anchor, pop);
+      anchor.getBoundingClientRect = () =>
+        ({ left: 40, right: 140, top, bottom: top + 20, width: 100, height: 20, x: 40, y: top, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(pop, "offsetHeight", { value: 400, configurable: true });
+      const handle = anchoredPopover(pop, { anchor, gap: 6 });
+      const placed = pop.style.top;
+      handle.destroy();
+      return placed;
+    }
+
+    it("opens below when there is room", () => {
+      expect(mount(100)).toBe("126px");
+    });
+
+    it("flips above an anchor near the bottom edge", () => {
+      expect(mount(800)).toBe("394px"); // 800 - 400 - 6
+    });
+
+    it("pins to the bottom margin when the anchor has left the viewport", () => {
+      // Flipped top would be 1300 - 406 = 894 — off-screen below 1000.
+      expect(mount(1300)).toBe("592px"); // 1000 - 400 - 8
+    });
+
+    it("still follows an anchor scrolled above the viewport (no top pin)", () => {
+      expect(mount(-100)).toBe("-74px"); // -100 + 20 + 6
+    });
+  });
+
   // #1586/#1587: the two options SwatchPicker/ColoredSelect/the schema
   // type-grid needed to retire their own inline rect-anchoring copies.
   // happy-dom reports zero rects and zero offsetWidth, so both are stubbed.

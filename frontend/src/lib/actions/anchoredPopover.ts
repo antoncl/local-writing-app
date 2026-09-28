@@ -116,7 +116,10 @@ export function anchoredPopover(node: HTMLElement, params: AnchoredPopoverParams
     // always fully visible instead of hanging a few px past the bottom edge.
     let top = r.bottom + gap;
     if (top + h + 8 > window.innerHeight) {
-      top = Math.max(8, r.top - h - gap);
+      // Clamp the flip at the bottom too: an anchor pushed below the fold (a
+      // host list growing under a `track`ed popover as the user picks, #2304)
+      // makes even the flipped `top` land off-screen, so pin to the margin.
+      top = Math.max(8, Math.min(r.top - h - gap, window.innerHeight - h - 8));
     }
     if (left === lastLeft && top === lastTop) return;
     lastLeft = left;

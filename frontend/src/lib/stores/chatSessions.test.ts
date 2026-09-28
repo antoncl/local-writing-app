@@ -48,6 +48,22 @@ describe("openChatFromPromptEntry — reverse-index refresh (ADR-0051 S3)", () =
   });
 });
 
+// #2309 review: a chat deleted by id (Chats pane ×, Conversations row ×) drops
+// its outgoing refs, so the reverse index must rebuild — as the header Delete does.
+describe("deleteChatSessionFromPane — reverse-index refresh (#2309)", () => {
+  it("refreshes the reverse index after a successful delete", async () => {
+    vi.spyOn(api, "deleteChatSession").mockResolvedValue({ sessions: [] } as never);
+    await chatSessions.deleteChatSessionFromPane("chat-1");
+    expect(refreshReferenceIndexInBackground).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not refresh when the delete fails", async () => {
+    vi.spyOn(api, "deleteChatSession").mockRejectedValue(new Error("boom"));
+    await chatSessions.deleteChatSessionFromPane("chat-1");
+    expect(refreshReferenceIndexInBackground).not.toHaveBeenCalled();
+  });
+});
+
 describe("openChatFromPromptEntry — chat title (#695)", () => {
   it("titleOverride names the chat wholesale, replacing the dual-mode prompt title", async () => {
     // A create-mode brainstorm names itself "Draft <Type>" rather than inheriting

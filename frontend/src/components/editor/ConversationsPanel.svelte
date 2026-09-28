@@ -147,8 +147,10 @@
   // #2309: delete a conversation from its row — confirmed like the chat header's
   // Delete (it removes the chat file), then the same id-based path the Chats
   // pane's × uses, which also tears down any open pane of this chat.
+  const chatTitle = (session: ChatSessionSummary) => session.title || "Untitled chat";
+
   function requestDelete(session: ChatSessionSummary): void {
-    const title = session.title || "Untitled chat";
+    const title = chatTitle(session);
     confirmService.request({
       title: "Delete Chat",
       message: `Delete "${title}"? This removes the chat file from the project.`,
@@ -217,7 +219,7 @@
 
 {#snippet conversationRow(session: ChatSessionSummary, rowCtx: RowCtx<ChatSessionSummary>)}
   <NodeRow
-    title={session.title || "Untitled chat"}
+    title={chatTitle(session)}
     depth={rowCtx.depth}
     stripeColor={resolveColor(null, session.entry_type, "chat", metadataSchema)?.hex ?? null}
     onClick={rowCtx.onClick}
@@ -229,7 +231,7 @@
       <button
         class="row-action-delete"
         type="button"
-        aria-label={`Delete ${session.title || "Untitled chat"}`}
+        aria-label={`Delete ${chatTitle(session)}`}
         title="Delete chat"
         onclick={(event) => { event.stopPropagation(); requestDelete(session); }}
       >×</button>

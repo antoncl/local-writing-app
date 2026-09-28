@@ -139,6 +139,9 @@ class ChatSessions {
     try {
       const listing = await api.deleteChatSession(chatId);
       setChatSessions(listing.sessions);
+      // The deleted chat's outgoing refs must leave the reverse index, as on the
+      // header Delete path (editorPaneDelete) — #2309 review.
+      refreshReferenceIndexInBackground();
       if (editorPanes.activeChatId === chatId) {
         editorPanes.activeChatId = null;
       }

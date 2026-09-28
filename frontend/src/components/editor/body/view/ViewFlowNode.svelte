@@ -16,6 +16,8 @@
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { defaultFilterKind, inputArity, isInactiveParamNode, outputPayload, promotableSlot, valueSlotPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
+  import { tagTitleById } from "@/lib/stores/tagNodes";
+  import { findStructureNodeById } from "@/lib/utils/treeHelpers";
   import { toMultiValued } from "@/lib/views/viewParams";
   import { effectiveFieldType, isSortableField } from "@/lib/views/fieldAccess";
   import { setLevelField, toggleLevelOrder } from "@/lib/views/groupLevelEdits";
@@ -91,6 +93,16 @@
       // `layer` filter shows the layer name, not its id — from the field def
       // already in hand; a non-option field has no match and keeps the raw value.
       optionLabel: (key, value) => ctx.fieldByKey(key)?.options?.find((o) => o.value === value)?.label ?? value,
+      // A reference value's node title (#2321): tags from the live tag roster
+      // (the one grouping labels use), everything else from the designer's
+      // rosters. An unknown id resolves to undefined and stays raw.
+      refTitle: (refId) =>
+        $tagTitleById.get(refId) ??
+        ctx.loreEntries.find((e) => e.id === refId)?.title ??
+        ctx.promptEntries.find((e) => e.id === refId)?.title ??
+        ctx.assistantEntries.find((e) => e.id === refId)?.title ??
+        findStructureNodeById(ctx.structure?.root, refId)?.title ??
+        findStructureNodeById(ctx.researchStructure?.root, refId)?.title,
     }),
   );
 

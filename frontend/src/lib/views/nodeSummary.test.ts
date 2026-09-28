@@ -66,6 +66,44 @@ describe("nodeSummary — compact node one-liners (#220)", () => {
     ).toBe("keep · Rank any of 3");
   });
 
+  // #2321: a reference field stores node ids (tags are nodes since ADR-0082), so
+  // the compact line resolves them to titles instead of `tag_0980ba5721`.
+  describe("reference values resolve to node titles (#2321)", () => {
+    const withRefs: SummaryResolvers = {
+      ...R,
+      fieldName: (key) => (key === "tags" ? "Tags" : R.fieldName(key)),
+      optionLabel: (key, value) => (key === "status" ? ({ draft: "Draft" }[value] ?? value) : value),
+      refTitle: (id) => ({ tag_0980ba5721: "Villain", tag_2: "Hero", lore_1: "Lysandra" })[id],
+    };
+    const filter = (key: string, value: unknown) =>
+      nodeSummary("filter", { filter_kind: "field", field: { key, op: "overlap", value } } as ViewNodeData, withRefs);
+
+    it("names a referenced tag, singly and in a list", () => {
+      expect(filter("tags", "tag_0980ba5721")).toBe("keep · Tags any of Villain");
+      expect(filter("tags", ["tag_0980ba5721", "tag_2"])).toBe("keep · Tags any of Villain, Hero");
+    });
+
+    it("keeps an unknown id raw", () => {
+      expect(filter("tags", ["tag_0980ba5721", "tag_gone"])).toBe("keep · Tags any of Villain, tag_gone");
+    });
+
+    it("prefers a select option's label over a node title", () => {
+      expect(filter("status", "draft")).toBe("keep · Status any of Draft");
+    });
+
+    it("names the tag in a tagged predicate", () => {
+      expect(nodeSummary("filter", { filter_kind: "tagged", tagged: "tag_2" } as ViewNodeData, withRefs)).toBe(
+        "keep · #Hero",
+      );
+    });
+
+    it("leaves values raw without a resolver (unchanged behaviour)", () => {
+      expect(summary("filter", { filter_kind: "field", field: { key: "ref", op: "overlap", value: "lore_1" } })).toBe(
+        "keep · Ref any of lore_1",
+      );
+    });
+  });
+
   it("shows the parameter label for a promoted value slot", () => {
     const cfg: ViewNodeData = {
       filter_kind: "field",

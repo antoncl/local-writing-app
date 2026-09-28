@@ -22,6 +22,19 @@ import {
 } from "@/lib/stores/chats";
 import type { ChatSession, PromptEntrySummary } from "@/lib/types";
 
+// A subject node's display title, or "" when it can't be resolved — naming is
+// cosmetic, so a failed lookup falls back to the bare prompt title rather than
+// failing the launch.
+async function resolveSubjectTitle(subjectId: string): Promise<string> {
+  try {
+    const { candidates } = await api.resolveReferences([subjectId]);
+    const hit = candidates.find((candidate) => candidate.id === subjectId && candidate.found);
+    return hit?.title ?? "";
+  } catch {
+    return "";
+  }
+}
+
 class ChatSessions {
   // ---- Injected host hooks (set in App.onMount) ----
   run: (action: () => Promise<void>) => Promise<boolean> = async (action) => {
@@ -86,8 +99,13 @@ class ChatSessions {
       // longer needs a separate stored field here.
       const subject = opts.subject || (sceneId ?? "");
       // Name the chat after its subject so brainstorming two entries with the
-      // same prompt no longer yields two identically-titled chats.
-      const title = opts.titleOverride?.trim() || (subjectTitle ? `${subjectTitle} — ${entry.title}` : entry.title);
+      // same prompt no longer yields two identically-titled chats. A caller
+      // that knows the subject passes its title; any other subject-anchored
+      // launch (the lock doorway, a scene's prompt invocation) resolves it
+      // here, so every such chat is named alike (#2314).
+      const override = opts.titleOverride?.trim() ?? "";
+      const aboutTitle = subjectTitle || (subject && !override ? await resolveSubjectTitle(subject) : "");
+      const title = override || (aboutTitle ? `${aboutTitle} — ${entry.title}` : entry.title);
       const session = await api.createChatSession({
         prompt_entry_id: entry.id,
         assistant_id: assistantId,

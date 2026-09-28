@@ -25,6 +25,12 @@ beforeEach(() => {
   vi.spyOn(api, "createChatSession").mockResolvedValue({ id: "chat-1", title: "T" } as never);
   vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] } as never);
   vi.spyOn(editorPanes, "openChat").mockResolvedValue(undefined);
+  vi.spyOn(api, "resolveReferences").mockResolvedValue({
+    candidates: [
+      { id: "lysandra", title: "Lysandra", kind: "lore", entry_type: "lore:character", summary: "", found: true },
+      { id: "scene-7", title: "The Hook", kind: "manuscript", entry_type: "manuscript:scene", summary: "", found: true },
+    ],
+  } as never);
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -80,5 +86,42 @@ describe("openChatFromPromptEntry — chat title (#695)", () => {
   it("falls back to the bare prompt title when neither override nor subject is given", async () => {
     await chatSessions.openChatFromPromptEntry(PROMPT, {}, null, {});
     expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ title: "Revise entry" }));
+    expect(api.resolveReferences).not.toHaveBeenCalled();
+  });
+
+  // #2314: a subject-anchored launch that doesn't know its subject's title (the
+  // lock doorway, a scene's prompt invocation) resolves it, so the chat reads
+  // "<subject> — <prompt>" like every other subject-anchored chat.
+  it("resolves the subject's title when the caller passes only a subject id (lock doorway)", async () => {
+    await chatSessions.openChatFromPromptEntry(PROMPT, {}, "lysandra", {});
+    expect(api.resolveReferences).toHaveBeenCalledWith(["lysandra"]);
+    expect(api.createChatSession).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Lysandra — Revise entry", subject: "lysandra" }),
+    );
+  });
+
+  it("resolves an explicit subject too, when no title comes with it", async () => {
+    await chatSessions.openChatFromPromptEntry(PROMPT, {}, null, { subject: "scene-7" });
+    expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ title: "The Hook — Revise entry" }));
+  });
+
+  it("keeps the bare prompt title when the subject can't be found", async () => {
+    vi.mocked(api.resolveReferences).mockResolvedValueOnce({
+      candidates: [{ id: "gone", title: "gone", kind: "", entry_type: "", summary: "", found: false }],
+    } as never);
+    await chatSessions.openChatFromPromptEntry(PROMPT, {}, "gone", {});
+    expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ title: "Revise entry" }));
+  });
+
+  it("keeps the bare prompt title when the lookup fails", async () => {
+    vi.mocked(api.resolveReferences).mockRejectedValueOnce(new Error("offline"));
+    await chatSessions.openChatFromPromptEntry(PROMPT, {}, "lysandra", {});
+    expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ title: "Revise entry" }));
+  });
+
+  it("does not look the subject up when the caller already named it", async () => {
+    await chatSessions.openChatFromPromptEntry(PROMPT, {}, null, { subject: "lysandra", subjectTitle: "Lys" });
+    expect(api.resolveReferences).not.toHaveBeenCalled();
+    expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ title: "Lys — Revise entry" }));
   });
 });

@@ -138,6 +138,18 @@ describe("WorkspaceTabStrip (#2313)", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("the menu's × leads each row, before the tab name (#2324)", async () => {
+    stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
+    renderStrip();
+    await tick();
+    await fireEvent.click(screen.getByRole("button", { name: "All open tabs (3)" }));
+    await tick();
+    const close = screen.getByRole("button", { name: "Close The Hook" });
+    const item = screen.getByRole("menuitem", { name: "The Hook" });
+    expect(close.parentElement).toBe(item.parentElement);
+    expect(close.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("the menu's × closes that tab", async () => {
     stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
     const { onClose, onActivate } = renderStrip();

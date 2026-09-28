@@ -43,6 +43,32 @@ describe("buildRefResolver", () => {
     expect(resolve("scene_1")?.metadata).toEqual({ pov: "Elien" });
   });
 
+  // #2323: research notes were missing from the shared walk, so every reference
+  // surface showed a research-note reference as missing / its raw id.
+  it("resolves a research note id off the research tree, typed by the node", () => {
+    const researchStructure = {
+      root: {
+        id: "research_root",
+        type: "research:root",
+        title: "Research",
+        children: [
+          {
+            id: "topic_1",
+            type: "research:topic",
+            title: "Harbour towns",
+            children: [{ id: "rn_1", type: "research:source", title: "Port ledgers", scene_id: "note_1", children: [] }],
+          },
+        ],
+      },
+    } as unknown as StructureDocument;
+    const resolve = buildRefResolver({ structure, researchStructure });
+    expect(resolve("note_1")).toEqual({ id: "note_1", kind: "research", title: "Port ledgers", entry_type: "research:source" });
+    // A topic is a container, not a referenceable note.
+    expect(resolve("topic_1")).toBeNull();
+    // Scenes still resolve alongside.
+    expect(resolve("scene_1")?.kind).toBe("manuscript");
+  });
+
   it("resolves a lore id", () => {
     const resolve = buildRefResolver({
       loreEntries: [{ id: "lore_1", title: "Elien", body: "", entry_type: "lore:character", metadata: {} }],

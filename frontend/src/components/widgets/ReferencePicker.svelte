@@ -173,6 +173,7 @@
   const refResolver = $derived(
     buildRefResolver({
       structure,
+      researchStructure,
       loreEntries,
       promptEntries,
       assistantEntries: $assistantEntriesStore,

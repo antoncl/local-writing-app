@@ -26,7 +26,7 @@ export type ResolvedRef = {
   // A strict subset of NodePickerRef["kind"] — every kind this module can
   // actually resolve to. Callers that need the full NodePickerRef union (a
   // picker's own "missing" fallback) widen it themselves.
-  kind: "manuscript" | "lore" | "snippet" | "assistant" | "plot" | "tag";
+  kind: "manuscript" | "lore" | "snippet" | "assistant" | "research" | "plot" | "tag";
   title: string;
   entry_type?: string;
   // Full instance metadata, when the source roster carries it (lore/prompt/
@@ -38,6 +38,9 @@ export type ResolvedRef = {
 
 export type RefResolveDeps = {
   structure?: StructureDocument | null;
+  // The research tree (#2323): its notes are leaves shaped like scenes (the
+  // model field is `scene_id` for both trees), resolving to kind "research".
+  researchStructure?: StructureDocument | null;
   loreEntries?: LoreEntrySummary[];
   promptEntries?: PromptEntrySummary[];
   assistantEntries?: AssistantEntrySummary[];
@@ -51,13 +54,18 @@ export type RefResolveDeps = {
   tagTitleById?: ReadonlyMap<string, string>;
 };
 
-function flattenScenesAll(
+// Leaf documents of a structure tree (manuscript scenes or research notes),
+// keyed by their document id. `typeOf` reads a leaf's entry type: scenes keep
+// their established reading; research notes use the node's own `type`, as the
+// picker's research roster does.
+function flattenLeavesAll(
   node: StructureNode | null | undefined,
+  typeOf: (n: StructureNode) => string,
 ): Map<string, { id: string; title: string; entry_type: string; metadata?: EntryMetadata }> {
   const out = new Map<string, { id: string; title: string; entry_type: string; metadata?: EntryMetadata }>();
   const walk = (n: StructureNode) => {
     if (isLeafNode(n) && n.scene_id) {
-      const entryType = (n as unknown as { entry_type?: string }).entry_type ?? "manuscript:scene";
+      const entryType = typeOf(n);
       out.set(n.scene_id, { id: n.scene_id, title: n.title, entry_type: entryType, metadata: n.metadata ?? undefined });
     }
     for (const child of n.children ?? []) walk(child);
@@ -70,7 +78,11 @@ function flattenScenesAll(
  *  Rebuild it (a `$derived`) whenever those sources change — this module has
  *  no state of its own, so nothing here is reactive on its own. */
 export function buildRefResolver(deps: RefResolveDeps): (id: string) => ResolvedRef | null {
-  const sceneIndex = flattenScenesAll(deps.structure?.root);
+  const sceneIndex = flattenLeavesAll(
+    deps.structure?.root,
+    (n) => (n as unknown as { entry_type?: string }).entry_type ?? "manuscript:scene",
+  );
+  const noteIndex = flattenLeavesAll(deps.researchStructure?.root, (n) => n.type || "research:note");
   const loreIndex = new Map((deps.loreEntries ?? []).map((e) => [e.id, e] as const));
   const promptIndex = new Map((deps.promptEntries ?? []).map((e) => [e.id, e] as const));
   const assistantIndex = new Map((deps.assistantEntries ?? []).map((e) => [e.id, e] as const));
@@ -85,6 +97,8 @@ export function buildRefResolver(deps: RefResolveDeps): (id: string) => Resolved
     if (snippet) return { id, kind: "snippet", title: snippet.title, entry_type: snippet.entry_type, metadata: snippet.metadata };
     const assistant = assistantIndex.get(id);
     if (assistant) return { id, kind: "assistant", title: assistant.title, entry_type: assistant.entry_type, metadata: assistant.metadata };
+    const note = noteIndex.get(id);
+    if (note) return { id, kind: "research", title: note.title, entry_type: note.entry_type, metadata: note.metadata };
     const plotline = plotIndex.get(id);
     if (plotline) return { id, kind: "plot", title: plotline.title, entry_type: plotline.entry_type };
     if (deps.tagById) {

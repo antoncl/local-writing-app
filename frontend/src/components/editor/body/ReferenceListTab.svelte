@@ -157,6 +157,7 @@
   const resolver = $derived(
     buildRefResolver({
       structure: deps.structure,
+      researchStructure: deps.researchStructure,
       loreEntries: deps.loreEntries,
       promptEntries: deps.promptEntries,
       assistantEntries: deps.assistantEntries,

@@ -13,7 +13,7 @@
   import { ruleLine as ruleLineFor, nothingChanged as nothingChangedFor } from "@/lib/utils/candidateGroups";
   import { fieldValueLabel, listItemLabel } from "@/lib/utils/fieldValueTitles";
   import { buildRefResolver } from "@/lib/utils/refResolve";
-  import { structureStore } from "@/lib/stores/structure";
+  import { researchStructureStore, structureStore } from "@/lib/stores/structure";
   import { loreEntriesStore } from "@/lib/stores/lore";
   import { promptEntriesStore } from "@/lib/stores/prompts";
   import { assistantEntriesStore } from "@/lib/stores/assistants";
@@ -39,6 +39,7 @@
   let resolver = $derived(
     buildRefResolver({
       structure: $structureStore,
+      researchStructure: $researchStructureStore,
       loreEntries: $loreEntriesStore,
       promptEntries: $promptEntriesStore,
       assistantEntries: $assistantEntriesStore,

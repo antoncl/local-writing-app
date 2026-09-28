@@ -49,9 +49,29 @@
   // The menu lives behind `{#if overflowing}`: closing tabs from it until the
   // row fits unmounts it mid-open, so drop the open flag too — otherwise it
   // would pop open by itself the next time the row overflows.
+  //
+  // #2331: when that happens right after a Delete from the menu, the focused row
+  // goes with it and keyboard focus would drop to <body> — hand it to the active
+  // tab instead. The flag is one-shot and cleared whenever the menu closes any
+  // other way, so a later fit (a mouse close, a resize) never steals focus.
+  let refocusAfterFit = false;
   $effect(() => {
-    if (!overflowing) menuOpen = false;
+    if (overflowing) return;
+    menuOpen = false;
+    if (!refocusAfterFit) return;
+    refocusAfterFit = false;
+    void tick().then(() => {
+      if (!document.activeElement || document.activeElement === document.body) focusActiveTab();
+    });
   });
+  $effect(() => {
+    if (!menuOpen && overflowing) refocusAfterFit = false;
+  });
+
+  function focusActiveTab(): void {
+    const slot = active ? scroller?.querySelector(`[data-tab-id="${CSS.escape(active)}"]`) : null;
+    (slot ?? scroller)?.querySelector<HTMLElement>('[role="tab"]')?.focus();
+  }
 
   // Sub-pixel slack: fractional layout widths (Windows display scaling) would
   // otherwise leave an arrow flickering at a row that fits exactly.
@@ -155,6 +175,7 @@
     const index = items.indexOf(item);
     const neighbour = items[index + 1] ?? items[index - 1];
     (neighbour ?? menuButton)?.focus();
+    refocusAfterFit = true;
     onClose(id);
   }
 

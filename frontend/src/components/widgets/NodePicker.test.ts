@@ -934,13 +934,58 @@ describe("NodePicker drill-in navigation (ADR-0074 slice 7b)", () => {
     const menu = await openMenu();
     await expandGroup(menu, "Character");
     // The checkbox is its own click target (mouse convenience), not an inert glyph.
-    // The type header carries no check, so the first .ctx-row-check is the entry's.
-    const check = menu.querySelector(".ctx-row-check") as HTMLButtonElement;
+    // The type header carries its own group check (#2305) — take the entry's.
+    const check = within(menu)
+      .getByText("Mara Voss")
+      .closest(".ctx-tline")!
+      .querySelector(".ctx-row-check") as HTMLButtonElement;
     expect(check).not.toBeNull();
     await fireEvent.click(check);
     await tick();
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange.mock.calls[0][0].value[0]).toMatchObject({ id: "l1", kind: "lore" });
+  });
+
+  // #2305: a Lore type header picks its whole visible group in one change.
+  describe("group pick (#2305)", () => {
+    const entries = () => [loreEntry("l1", "Mara Voss", []), loreEntry("l2", "Quill", [])];
+    const mara = { id: "l1", kind: "lore" as const, title: "Mara Voss", entry_type: "lore:character" };
+    const quill = { id: "l2", kind: "lore" as const, title: "Quill", entry_type: "lore:character" };
+    const headerLine = (menu: HTMLElement) => within(menu).getByText("Character").closest(".ctx-tline")!;
+    const ids = (onChange: ReturnType<typeof vi.fn>) =>
+      onChange.mock.calls[0][0].value.map((r: { id: string }) => r.id);
+
+    function renderGroup(value: import("@/lib/pickerTypes").NodePickerRef[], multiple = true) {
+      const onChange = vi.fn();
+      render(NodePicker, {
+        props: { config: { sources: [{ kind: "lore" }], multiple }, loreEntries: entries(), value, affordance: "add", onChange },
+      });
+      return onChange;
+    }
+
+    it("reads mixed when partly picked, and adds only the missing members", async () => {
+      const onChange = renderGroup([mara]);
+      const menu = await openMenu();
+      expect(headerLine(menu).querySelector("[aria-pressed]")!.getAttribute("aria-pressed")).toBe("mixed");
+      await fireEvent.click(headerLine(menu).querySelector(".ctx-row-check")!);
+      await tick();
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(ids(onChange)).toEqual(["l1", "l2"]);
+    });
+
+    it("unpicks every member of a fully picked group, keeping other picks", async () => {
+      const onChange = renderGroup([{ id: "s1", kind: "snippet" as const, title: "Other" }, mara, quill]);
+      const menu = await openMenu();
+      await fireEvent.click(headerLine(menu).querySelector(".ctx-row-check")!);
+      await tick();
+      expect(ids(onChange)).toEqual(["s1"]);
+    });
+
+    it("single-select keeps the header a plain section", async () => {
+      renderGroup([], false);
+      const menu = await openMenu();
+      expect(headerLine(menu).querySelector(".ctx-row-check")).toBeNull();
+    });
   });
 });
 

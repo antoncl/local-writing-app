@@ -224,6 +224,71 @@ describe("WorkspaceTabStrip (#2313)", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  // #2331: a Delete that makes the row fit unmounts the menu with its focused
+  // row; focus goes to the active tab, not <body>.
+  describe("focus after the row fits (#2331)", () => {
+    const geometry = { scrollWidth: 900, clientWidth: 300, scrollLeft: 0 };
+    function liveGeometry() {
+      geometry.scrollWidth = 900;
+      vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(() => geometry.scrollWidth);
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => geometry.clientWidth);
+      vi.spyOn(HTMLElement.prototype, "scrollLeft", "get").mockImplementation(() => geometry.scrollLeft);
+    }
+    function renderFocusable(onClose: (id: PanelId) => void) {
+      const tab = createRawSnippet((id: () => PanelId) => ({
+        render: () => `<div role="tab" tabindex="0">${TITLES[id()]}</div>`,
+      }));
+      return render(WorkspaceTabStrip, {
+        props: {
+          tabs: TABS,
+          active: TABS[0],
+          titleOf: (id: PanelId) => TITLES[id],
+          closableOf: () => true,
+          onActivate: vi.fn(),
+          onClose,
+          tab,
+        },
+      });
+    }
+    async function settle() {
+      for (let i = 0; i < 4; i++) await tick();
+    }
+
+    it("hands focus to the active tab when a menu Delete makes the row fit", async () => {
+      liveGeometry();
+      let rerender: (p: Record<string, unknown>) => Promise<void> = async () => {};
+      const onClose = vi.fn((id: PanelId) => {
+        geometry.scrollWidth = 300; // now everything fits
+        void rerender({ tabs: TABS.filter((t) => t !== id) });
+      });
+      ({ rerender } = renderFocusable(onClose) as unknown as { rerender: typeof rerender });
+      await tick();
+      await fireEvent.click(screen.getByRole("button", { name: "All open tabs (3)" }));
+      await tick();
+      const item = screen.getByRole("menuitem", { name: "The Hook" });
+      item.focus();
+      await fireEvent.keyDown(item, { key: "Delete" });
+      await fireEvent.scroll(document.querySelector(".ws-tabs") as HTMLElement);
+      await settle();
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Lysandra" }));
+    });
+
+    it("does not move focus when the row fits for any other reason", async () => {
+      liveGeometry();
+      renderFocusable(vi.fn());
+      await tick();
+      const outside = document.createElement("button");
+      document.body.appendChild(outside);
+      outside.focus();
+      geometry.scrollWidth = 300; // e.g. a mouse close elsewhere / a wider pane
+      await fireEvent.scroll(document.querySelector(".ws-tabs") as HTMLElement);
+      await settle();
+      expect(document.activeElement).toBe(outside);
+      outside.remove();
+    });
+  });
+
   it("the menu's × closes that tab", async () => {
     stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
     const { onClose, onActivate } = renderStrip();

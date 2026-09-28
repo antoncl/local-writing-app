@@ -194,8 +194,9 @@
     return `${ref.kind}:${ref.id}`;
   }
 
+  const pickedKeys = $derived(new Set(value.map(refKey)));
   function isPicked(ref: NodePickerRef): boolean {
-    return value.some((existing) => refKey(existing) === refKey(ref));
+    return pickedKeys.has(refKey(ref));
   }
 
   // A candidate row toggles (ADR-0074 #1464): picking an already-picked
@@ -888,6 +889,8 @@
         // #2305: in a multi-pick input the header picks its whole (visible)
         // group; single-select keeps it a pure collapsible section.
         pickable: allowMultiple && memberRefs.length > 0,
+        section: true, // title click still collapses; only the check picks
+
         state: groupPickState(memberRefs),
         title: group.typeName,
         stripeColor: null,

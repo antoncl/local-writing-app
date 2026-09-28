@@ -981,6 +981,15 @@ describe("NodePicker drill-in navigation (ADR-0074 slice 7b)", () => {
       expect(ids(onChange)).toEqual(["s1"]);
     });
 
+    it("a title click still expands the group and never picks it", async () => {
+      const onChange = renderGroup([]);
+      const menu = await openMenu();
+      await fireEvent.click(within(menu).getByText("Character"));
+      await tick();
+      expect(onChange).not.toHaveBeenCalled();
+      expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
+    });
+
     it("single-select keeps the header a plain section", async () => {
       renderGroup([], false);
       const menu = await openMenu();

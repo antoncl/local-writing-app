@@ -118,6 +118,10 @@ describe("anchoredPopover", () => {
       // Flipped top would be 1300 - 406 = 894 — off-screen below 1000.
       expect(mount(1300)).toBe("592px"); // 1000 - 400 - 8
     });
+
+    it("still follows an anchor scrolled above the viewport (no top pin)", () => {
+      expect(mount(-100)).toBe("-74px"); // -100 + 20 + 6
+    });
   });
 
   // #1586/#1587: the two options SwatchPicker/ColoredSelect/the schema

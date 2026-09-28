@@ -254,6 +254,71 @@ describe("NodePicker saved-view selectors — app-wide axis (#1487, #1939)", () 
     const [detail] = onChange.mock.calls[0];
     expect(detail.value[0].selector).toEqual(groupedView.spec);
   });
+
+  // #2329: a grouped view's members list under the view's own handles, not flat;
+  // a handle header's check picks its members as explicit refs.
+  describe("follows the view's own grouping (#2329)", () => {
+    const castView: ViewNodeSummary = {
+      id: "g2",
+      title: "Cast by allegiance",
+      entry_type: "view:view",
+      view_kind: "lore",
+      spec: {
+        kind: "lore",
+        groups: [
+          { name: "Good", expr: { tagged: "hero" } },
+          { name: "Bad", expr: { tagged: "villain" } },
+        ],
+      },
+    };
+    const headerLine = (panel: HTMLElement, title: string) =>
+      within(panel).getByText(title).closest(".ctx-tline") as HTMLElement;
+    const indent = (line: HTMLElement) => parseInt(line.style.marginLeft || "0", 10);
+
+    it("lists members under the view's handles, one level deeper", async () => {
+      paneViews.views = { lore: [castView] };
+      renderLoreInput();
+      const views = await openViewsAxis(await openMenu());
+      await expandGroup(views, "Cast by allegiance");
+      const good = headerLine(views, "Good");
+      const mara = headerLine(views, "Mara");
+      expect(indent(mara)).toBeGreaterThan(indent(good));
+      expect(good.compareDocumentPosition(mara) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(headerLine(views, "Bad")).toBeTruthy();
+      // Both villains sit under "Bad".
+      const bad = headerLine(views, "Bad");
+      for (const name of ["Vex", "Nok"]) {
+        expect(bad.compareDocumentPosition(headerLine(views, name)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      }
+    });
+
+    it("searching a group's name surfaces that group's members", async () => {
+      paneViews.views = { lore: [castView] };
+      renderLoreInput();
+      const menu = await openMenu();
+      const views = await openViewsAxis(menu);
+      const box = menu.querySelector(".ctx-search") as HTMLInputElement;
+      await fireEvent.input(box, { target: { value: "bad" } });
+      await tick();
+      const panel = (await within(menu).findAllByRole("group", { name: "Saved views" }))[0] ?? views;
+      expect(within(panel).getByText("Vex")).toBeInTheDocument();
+      expect(within(panel).getByText("Nok")).toBeInTheDocument();
+      expect(within(panel).queryByText("Mara")).toBeNull();
+    });
+
+    it("a handle header's check picks its members as explicit refs", async () => {
+      paneViews.views = { lore: [castView] };
+      const onChange = vi.fn();
+      renderLoreInput({ onChange });
+      const views = await openViewsAxis(await openMenu());
+      await expandGroup(views, "Cast by allegiance");
+      await fireEvent.click(within(views).getByRole("button", { name: "Pick all in Bad" }));
+      await tick();
+      const picked = onChange.mock.calls[0][0].value as { id: string; kind: string; selector?: unknown }[];
+      expect(picked.map((r) => r.id).sort()).toEqual(["lore_a", "lore_c"]);
+      expect(picked.every((r) => r.kind === "lore" && r.selector === undefined)).toBe(true);
+    });
+  });
 });
 
 // ADR-0074 slice 5 pt.2 (#1491) / ADR-0082 slice 2b: the general tag-node

@@ -3,9 +3,11 @@ import type { NodePickerRef, ViewSpec } from "@/lib/types";
 import {
   flattenSelectors,
   memberCountForRef,
+  toggleSelectorBucket,
   toggleSelectorGroup,
   toggleSelectorMember,
   type SelectorGroup,
+  type SelectorTreeNode,
 } from "./selectorPickTree";
 
 const spec: ViewSpec = { kind: "lore", expr: { tagged: "villain" } };
@@ -122,5 +124,81 @@ describe("plotline selector — container and members share kind \"plot\"", () =
     expect(memberCountForRef([PL_GROUP], plRef)).toBe(2);
     // A concrete card ref shares kind "plot" but carries no selector → not a selector.
     expect(memberCountForRef([PL_GROUP], cardM("c1", "Break-in"))).toBeNull();
+  });
+});
+
+// #2329: a grouped / nesting saved view lists its members the way the view
+// arranges them — buckets as pickable section headers, nest parents as members
+// with their children indented.
+describe("a view's own grouping (#2329)", () => {
+  const vex = m("lore_a", "Vex");
+  const nok = m("lore_b", "Nok");
+  const mor = m("lore_c", "Mor");
+  const leaf = (r: NodePickerRef): SelectorTreeNode => ({ key: `node:${r.id}`, label: r.title, member: r, children: [] });
+  const bucket = (name: string, children: SelectorTreeNode[]): SelectorTreeNode => ({
+    key: `group:${name}`,
+    label: name,
+    member: null,
+    children,
+  });
+  // Vex is in BOTH buckets (a multi-valued group_by); Mor is a nest parent of Nok.
+  const TREE: SelectorTreeNode[] = [
+    bucket("Heroes", [leaf(vex), { ...leaf(mor), children: [leaf(nok)] }]),
+    bucket("Villains", [leaf(vex)]),
+  ];
+  const G: SelectorGroup = { ref: selRef, members: [vex, nok, mor], tree: TREE };
+  const bucketRow = (rows: ReturnType<typeof flattenSelectors>, title: string) =>
+    rows.find((r) => r.bucketMembers && r.title === title)!;
+
+  it("renders buckets over their members, nest children one level deeper", () => {
+    const rows = flattenSelectors([G], [], new Set());
+    expect(rows.map((r) => [r.depth, r.title])).toEqual([
+      [0, "Villains"], // the view row (selRef's title)
+      [1, "Heroes"],
+      [2, "Vex"],
+      [2, "Mor"],
+      [3, "Nok"],
+      [1, "Villains"],
+      [2, "Vex"],
+    ]);
+    expect(bucketRow(rows, "Heroes").count).toBe(3);
+    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length); // Vex twice, keys distinct
+  });
+
+  it("a member under two buckets shares one check state", () => {
+    const rows = flattenSelectors([G], [vex], new Set());
+    expect(rows.filter((r) => r.id === "lore_a").map((r) => r.state)).toEqual(["on", "on"]);
+    expect(bucketRow(rows, "Villains").state).toBe("on");
+    expect(bucketRow(rows, "Heroes").state).toBe("indeterminate");
+  });
+
+  it("a bucket reads implied while the whole view is picked", () => {
+    const rows = flattenSelectors([G], [selRef], new Set());
+    expect(bucketRow(rows, "Heroes").state).toBe("implied");
+  });
+
+  it("toggling a bucket picks its missing members, then unpicks them all", () => {
+    const heroes = bucketRow(flattenSelectors([G], [vex], new Set()), "Heroes").bucketMembers!;
+    const picked = toggleSelectorBucket([vex], G, heroes);
+    expect(picked.map((r) => r.id).sort()).toEqual(["lore_a", "lore_b", "lore_c"]);
+    expect(toggleSelectorBucket(picked, G, heroes)).toEqual([]);
+  });
+
+  it("unpicking a bucket while the view is picked splits the view into the rest", () => {
+    const villains = bucketRow(flattenSelectors([G], [selRef], new Set()), "Villains").bucketMembers!;
+    expect(toggleSelectorBucket([selRef], G, villains).map((r) => r.id).sort()).toEqual(["lore_b", "lore_c"]);
+  });
+
+  it("a folded bucket hides its members; search expands and prunes to matches", () => {
+    const rows = flattenSelectors([G], [], new Set([`tree:${selRef.id}:/group:Heroes`]));
+    expect(rows.map((r) => r.title)).toEqual(["Villains", "Heroes", "Villains", "Vex"]);
+    const searched = flattenSelectors([{ ...G, members: [nok] }], [], new Set(), { expandAll: true });
+    // Only Nok matched: its nest parent Mor stays as the path to it; Villains is pruned.
+    expect(searched.map((r) => r.title)).toEqual(["Villains", "Heroes", "Mor", "Nok"]);
+  });
+
+  it("a view without a tree still lists its members flat", () => {
+    const rows = flattenSelectors([{ ...G, tree: null }], [], new Set());
+    expect(rows.map((r) => r.depth)).toEqual([0, 1, 1, 1]);
   });
 });

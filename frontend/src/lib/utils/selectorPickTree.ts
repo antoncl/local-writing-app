@@ -1,6 +1,8 @@
 // ADR-0074 slice 5 — the tri-state pick tree for context-picker SELECTORS
-// (saved views now; tags next). Parallels manuscriptPickTree.ts, but a selector
-// is flat: a container row (the view/tag) over its live members, one level deep.
+// (saved views, tags, plotlines). Parallels manuscriptPickTree.ts: a container
+// row (the view/tag) over its live members. A tag or plotline is one level deep;
+// a grouped or nesting saved view carries its own group `tree` (#2329), so its
+// members render under the view's buckets / parents, as the view shows them.
 //
 // Selection model, identical in spirit to the manuscript tree: checking the
 // selector stores ONE live ref (absorb, dropping any explicit members it now
@@ -12,15 +14,32 @@ import type { NodePickerRef } from "@/lib/types";
 
 export type PickState = "on" | "implied" | "indeterminate" | "off";
 
-/** A selector and its current live members (evaluated by the caller). */
+/** One node of a selector's display tree (#2329), mirroring the view's
+ * `ViewGroup` tree: a real-node group that IS a member (`member` set — a leaf, or
+ * a nest parent with its children), or a synthetic bucket (`member` null — a named
+ * handle / `group_by` value) that only organizes. `key` is unique among siblings. */
+export interface SelectorTreeNode {
+  key: string;
+  label: string;
+  member: NodePickerRef | null;
+  children: SelectorTreeNode[];
+}
+
+/** A selector and its current live members (evaluated by the caller). `tree`,
+ * when present, is how those members are arranged for display (a grouped or
+ * nesting saved view); absent/null ⇒ a flat list. Picking semantics never read
+ * the tree — `members` stays the selector's flat membership. */
 export interface SelectorGroup {
   ref: NodePickerRef; // a selector ref (tag / saved view / plotline) — carries `selector`
   members: NodePickerRef[];
+  tree?: SelectorTreeNode[] | null;
 }
 
-/** A flattened row for rendering — a selector container (depth 0) or one of its
- * members (depth 1). `key` is unique across groups (a member id may recur); `id`
- * is the ref id the toggle acts on; `memberOf` names the owning selector. */
+/** A flattened row for rendering — a selector container (depth 0), one of its
+ * members (depth 1 for a flat selector; any depth inside a view's tree), or a
+ * view's bucket header (`bucketMembers` set; its `id` is its row key, not a ref).
+ * `key` is unique across groups (a member id may recur, even within one view);
+ * `id` is the ref id the toggle acts on; `memberOf` names the owning selector. */
 export interface SelectorRow {
   key: string;
   id: string;
@@ -33,6 +52,9 @@ export interface SelectorRow {
   state: PickState;
   collapsed: boolean;
   count: number | null;
+  /** A view bucket header (#2329): its check picks/unpicks these members as
+   * explicit refs; its title collapses. Absent on every other row. */
+  bucketMembers?: NodePickerRef[];
 }
 
 // A selector ref carries an inline `selector` spec (tag / saved view / plotline);
@@ -90,6 +112,38 @@ function split(value: NodePickerRef[], g: SelectorGroup, except: NodePickerRef):
   return [...base, ...adds];
 }
 
+// A bucket over a subset of the selector's members (#2329): "on" when every one
+// is explicitly picked, "implied" when the whole selector is, "indeterminate" when
+// some are, else "off" — the member states, aggregated.
+function bucketState(value: NodePickerRef[], g: SelectorGroup, members: NodePickerRef[]): PickState {
+  if (members.length > 0 && members.every((m) => memberExplicit(value, m))) return "on";
+  if (selectorPicked(value, g)) return "implied";
+  return members.some((m) => memberExplicit(value, m)) ? "indeterminate" : "off";
+}
+
+/** Toggle a bucket header: with the whole selector picked, unpicking the bucket
+ * SPLITS the selector into explicit refs for every member outside it; otherwise
+ * a fully picked bucket unpicks its members and anything else picks the missing
+ * ones — one change either way. */
+export function toggleSelectorBucket(
+  value: NodePickerRef[],
+  g: SelectorGroup,
+  members: NodePickerRef[],
+): NodePickerRef[] {
+  const inBucket = new Set(members.map(memberKey));
+  if (selectorPicked(value, g)) {
+    const base = withoutRef(value, g.ref.kind, g.ref.id);
+    const present = new Set(base.map(memberKey));
+    const adds = g.members.filter((m) => !inBucket.has(memberKey(m)) && !present.has(memberKey(m)));
+    return [...base, ...adds];
+  }
+  if (members.length > 0 && members.every((m) => memberExplicit(value, m))) {
+    return value.filter((r) => isSel(r) || !inBucket.has(memberKey(r)));
+  }
+  const present = new Set(value.map(memberKey));
+  return [...value, ...members.filter((m) => !present.has(memberKey(m)))];
+}
+
 /** Toggle a selector container: on → remove it; off/indeterminate → absorb. */
 export function toggleSelectorGroup(value: NodePickerRef[], g: SelectorGroup): NodePickerRef[] {
   if (selectorState(value, g) === "on") return withoutRef(value, g.ref.kind, g.ref.id);
@@ -141,6 +195,10 @@ export function flattenSelectors(
       count: g.members.length,
     });
     if (collapsed) continue;
+    if (g.tree) {
+      rows.push(...flattenTree(g, value, collapsedIds, expandAll, memberVisible));
+      continue;
+    }
     for (const m of g.members) {
       if (memberVisible && !memberVisible(m)) continue;
       rows.push({
@@ -158,6 +216,100 @@ export function flattenSelectors(
       });
     }
   }
+  return rows;
+}
+
+/** The members under every bucket header whose label `matches` (#2329) — so a
+ * search for a view's group name ("Draft", a handle) surfaces that group. */
+export function membersUnderMatchingBuckets(
+  tree: SelectorTreeNode[],
+  matches: (label: string) => boolean,
+): NodePickerRef[] {
+  const out: NodePickerRef[] = [];
+  const walk = (nodes: SelectorTreeNode[]) => {
+    for (const n of nodes) {
+      if (!n.member && matches(n.label)) out.push(...subtreeMembers(n.children));
+      else walk(n.children);
+    }
+  };
+  walk(tree);
+  return out;
+}
+
+// The distinct members in a subtree, in first-seen order — a bucket's pick set
+// and its count (a node under two nested parents is still one member).
+function subtreeMembers(nodes: SelectorTreeNode[]): NodePickerRef[] {
+  const seen = new Map<string, NodePickerRef>();
+  const walk = (list: SelectorTreeNode[]) => {
+    for (const n of list) {
+      if (n.member && !seen.has(memberKey(n.member))) seen.set(memberKey(n.member), n.member);
+      walk(n.children);
+    }
+  };
+  walk(nodes);
+  return [...seen.values()];
+}
+
+// A grouped/nesting view's members as the view arranges them (#2329). A tree
+// node shows when its member is in `g.members` (the search-filtered set when a
+// search is active) and passes `memberVisible`, or when a descendant does; a
+// bucket with nothing left to show is pruned. Row keys carry the node's PATH,
+// so a member appearing under two buckets gets two distinct rows — same ref,
+// same shared check state.
+function flattenTree(
+  g: SelectorGroup,
+  value: NodePickerRef[],
+  collapsedIds: Set<string>,
+  expandAll: boolean,
+  memberVisible: ((m: NodePickerRef) => boolean) | undefined,
+): SelectorRow[] {
+  const inGroup = new Set(g.members.map(memberKey));
+  const shows = (m: NodePickerRef) => inGroup.has(memberKey(m)) && (!memberVisible || memberVisible(m));
+  const keep = (n: SelectorTreeNode): SelectorTreeNode | null => {
+    const children = n.children.map(keep).filter((c): c is SelectorTreeNode => c !== null);
+    if (n.member ? shows(n.member) || children.length > 0 : children.length > 0) return { ...n, children };
+    return null;
+  };
+  const rows: SelectorRow[] = [];
+  const walk = (nodes: SelectorTreeNode[], depth: number, parentPath: string) => {
+    for (const n of nodes) {
+      const path = `${parentPath}/${n.key}`;
+      const key = `tree:${g.ref.id}:${path}`;
+      const collapsed = !expandAll && n.children.length > 0 && collapsedIds.has(key);
+      if (n.member) {
+        rows.push({
+          key,
+          id: n.member.id,
+          memberOf: g.ref.id,
+          title: n.member.title,
+          entryType: n.member.entry_type,
+          depth,
+          isSelector: false,
+          hasChildren: n.children.length > 0,
+          state: memberState(value, g, n.member),
+          collapsed,
+          count: null,
+        });
+      } else {
+        const members = subtreeMembers(n.children);
+        rows.push({
+          key,
+          id: key,
+          memberOf: g.ref.id,
+          title: n.label,
+          depth,
+          isSelector: false,
+          hasChildren: true,
+          state: bucketState(value, g, members),
+          collapsed,
+          count: members.length,
+          bucketMembers: members,
+        });
+      }
+      if (!collapsed) walk(n.children, depth + 1, path);
+    }
+  };
+  walk((g.tree ?? []).map(keep).filter((n): n is SelectorTreeNode => n !== null), 1, "");
   return rows;
 }
 

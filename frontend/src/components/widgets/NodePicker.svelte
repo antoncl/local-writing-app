@@ -44,11 +44,13 @@
   import { descendantTypeFqns, entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
   import { findStructureNodeById, isLeafNode } from "@/lib/utils/treeHelpers";
   import { createTargetFor, hasTitleMatch } from "@/lib/utils/pickerCreate";
-  import { buildSelectorRoster, isSelectorRef, membersForSelector } from "@/lib/views/pickerSelectors";
+  import { buildSelectorRoster, isSelectorRef, membersForSelector, resolveSelector } from "@/lib/views/pickerSelectors";
   import { walkViewExpr } from "@/lib/views/walkViewExpr";
   import {
     flattenSelectors,
     memberCountForRef,
+    membersUnderMatchingBuckets,
+    toggleSelectorBucket,
     toggleSelectorGroup,
     toggleSelectorMember,
     type SelectorGroup,
@@ -437,10 +439,12 @@
           title: summary.title,
           selector: viewSelectorSpec(kind, summary.spec),
         };
-        const members = membersForSelector(ref, selectorRoster);
+        // #2329: keep the view's own arrangement (buckets / nest parents) too, so
+        // its members list the way the view shows them; picking reads `members`.
+        const { members, tree } = resolveSelector(ref, selectorRoster);
         // Skip a view that resolves to nothing — an empty, pickable row is noise.
         // Mirrors tagGroups (and drops a null-`expr` view: the empty set).
-        if (members.length > 0) groups.push({ ref, members });
+        if (members.length > 0) groups.push({ ref, members, tree });
       }
     }
     return groups;
@@ -554,7 +558,17 @@
   function togglePlotlineCollapse(id: string) {
     expandedPlotlineIds = toggleInSet(expandedPlotlineIds, id);
   }
-  const collapsedViewIds = $derived(collapsedFrom(viewGroups, expandedViewIds));
+  // A view's buckets / nest parents (#2329) open by default once the view is
+  // expanded — the view row is the collapsed-by-default level; this set records
+  // the tree rows the user folded.
+  let collapsedViewTreeKeys = $state<Set<string>>(new Set());
+  function toggleViewRowCollapse(row: SelectorRow) {
+    if (row.isSelector) toggleViewCollapse(row.id);
+    else collapsedViewTreeKeys = toggleInSet(collapsedViewTreeKeys, row.key);
+  }
+  const collapsedViewIds = $derived(
+    new Set([...collapsedFrom(viewGroups, expandedViewIds), ...collapsedViewTreeKeys]),
+  );
   const collapsedTagIds = $derived(collapsedFrom(tagGroups, expandedTagIds));
   const collapsedPlotlineIds = $derived(collapsedFrom(plotlineGroups, expandedPlotlineIds));
 
@@ -571,8 +585,17 @@
         searched.push(g);
         continue;
       }
-      const members = g.members.filter((m) => matchesEntry({ title: m.title }, parsedSearch));
-      if (members.length > 0) searched.push({ ref: g.ref, members });
+      // A member matches by its title — or by the name of a view group it sits
+      // in (#2329), so searching "Draft" surfaces a status view's Draft group.
+      const underGroup = new Set(
+        membersUnderMatchingBuckets(g.tree ?? [], (label) => matchesEntry({ title: label }, parsedSearch)).map(
+          (m) => `${m.kind}:${m.id}`,
+        ),
+      );
+      const members = g.members.filter(
+        (m) => underGroup.has(`${m.kind}:${m.id}`) || matchesEntry({ title: m.title }, parsedSearch),
+      );
+      if (members.length > 0) searched.push({ ref: g.ref, members, tree: g.tree });
     }
     return flattenSelectors(searched, value, collapsedIds, { expandAll: true });
   }
@@ -586,6 +609,8 @@
     if (!g) return;
     if (row.isSelector) {
       onChange?.({ value: toggleSelectorGroup(value, g) });
+    } else if (row.bucketMembers) {
+      onChange?.({ value: toggleSelectorBucket(value, g, row.bucketMembers) });
     } else {
       const m = g.members.find((x) => x.id === row.id);
       if (m) onChange?.({ value: toggleSelectorMember(value, g, m) });
@@ -616,7 +641,7 @@
   function selectorTreeRows(
     rows: SelectorRow[],
     groups: SelectorGroup[],
-    onCollapse: (id: string) => void,
+    onCollapse: (row: SelectorRow) => void,
     countNoun: string,
     countNounPlural?: string,
   ): PickTreeRow[] {
@@ -625,24 +650,35 @@
       depth: row.depth,
       hasChildren: row.hasChildren,
       collapsed: row.collapsed,
-      isContainer: row.isSelector,
+      // A view's bucket or nest parent (#2329) is a container too.
+      isContainer: row.isSelector || row.hasChildren,
+      // A bucket header is a section: its title folds it, its check picks its
+      // members (like the Lore entry-type header, #2305).
+      section: row.bucketMembers !== undefined,
       state: row.state,
       title: row.title,
       // A member honours its node's own metadata.color (#1528, so a custom entry
-      // stands out in a tag's list too); a selector container keeps its type stripe.
-      stripeColor: row.isSelector
-        ? stripeForType(row.entryType, metadataSchema)
-        : stripeForNode(instanceColorFor(row.entryType?.split(":")[0], row.id), row.entryType, metadataSchema),
-      count: row.isSelector ? row.count : null,
+      // stands out in a tag's list too); a selector container keeps its type
+      // stripe; a bucket is not a node and carries none.
+      stripeColor: row.bucketMembers
+        ? null
+        : row.isSelector
+          ? stripeForType(row.entryType, metadataSchema)
+          : stripeForNode(instanceColorFor(row.entryType?.split(":")[0], row.id), row.entryType, metadataSchema),
+      count: row.isSelector || row.bucketMembers ? row.count : null,
       countNoun,
       countNounPlural,
       onToggle: () => toggleSelectorRow(row, groups),
-      onCollapse: () => onCollapse(row.id),
+      onCollapse: () => onCollapse(row),
     }));
   }
-  const viewTreeRows = $derived(selectorTreeRows(viewRows, viewGroups, toggleViewCollapse, "item"));
-  const tagTreeRows = $derived(selectorTreeRows(tagRows, tagGroups, toggleTagCollapse, "match", "matches"));
-  const plotlineTreeRows = $derived(selectorTreeRows(plotlineRows, plotlineGroups, togglePlotlineCollapse, "card"));
+  const viewTreeRows = $derived(selectorTreeRows(viewRows, viewGroups, toggleViewRowCollapse, "item"));
+  const tagTreeRows = $derived(
+    selectorTreeRows(tagRows, tagGroups, (row) => toggleTagCollapse(row.id), "match", "matches"),
+  );
+  const plotlineTreeRows = $derived(
+    selectorTreeRows(plotlineRows, plotlineGroups, (row) => togglePlotlineCollapse(row.id), "card"),
+  );
 
   // Flatten the research tree's notes (leaves) into a searchable list.
   // Topics are organizational containers with no body — only notes are

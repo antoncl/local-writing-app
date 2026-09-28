@@ -235,21 +235,9 @@
         maxHeight="60vh"
       >
         {#each tabs as id (id)}
-          <!-- The × leads the row (#2324), so every close sits in one column
-               where the eye starts; an unclosable tab keeps the slot empty so
-               the titles still line up. -->
+          <!-- The × trails the name, right-aligned in one column like the tabs'
+               own × (#2333 — back from the leading position #2324 tried). -->
           <div class="ws-tabs-menu-row" class:current={id === active}>
-            {#if closableOf(id)}
-              <button
-                type="button"
-                class="ws-tabs-menu-close"
-                title="Close {titleOf(id)} (Delete)"
-                aria-label="Close {titleOf(id)}"
-                onclick={() => onClose(id)}
-              >×</button>
-            {:else}
-              <span class="ws-tabs-menu-close-slot" aria-hidden="true"></span>
-            {/if}
             <button
               type="button"
               role="menuitem"
@@ -260,6 +248,15 @@
               onclick={() => pick(id)}
               onkeydown={(event) => onMenuItemKeydown(event, id)}
             >{titleOf(id)}</button>
+            {#if closableOf(id)}
+              <button
+                type="button"
+                class="ws-tabs-menu-close"
+                title="Close {titleOf(id)} (Delete)"
+                aria-label="Close {titleOf(id)}"
+                onclick={() => onClose(id)}
+              >×</button>
+            {/if}
           </div>
         {/each}
       </Popover>
@@ -367,7 +364,7 @@
     display: flex;
     align-items: center;
     gap: var(--sp-1);
-    padding-left: var(--sp-1);
+    padding-right: var(--sp-1);
     border-left: 2px solid transparent;
     border-radius: var(--r-sm);
   }
@@ -390,17 +387,12 @@
     cursor: pointer;
   }
   /* The current tab carries the tab strip's own active mark (accent + full-
-     strength text), turned on its side — on the row's leading edge, ahead of
-     the leading × (#2324). */
+     strength text), turned on its side — on the row's leading edge. */
   .ws-tabs-menu-row.current {
     border-left-color: var(--accent-emphasis);
   }
   .ws-tabs-menu-row.current .ws-tabs-menu-item {
     color: var(--text);
-  }
-  .ws-tabs-menu-close-slot {
-    flex: none;
-    width: var(--sp-4);
   }
   .ws-tabs-menu-close {
     flex: none;

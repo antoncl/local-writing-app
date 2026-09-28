@@ -14,7 +14,8 @@ vi.mock("@/lib/stores/references", async (importOriginal) => ({
 }));
 
 import { api } from "@/lib/api";
-import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+import { chatSessions, uniqueChatTitle } from "@/lib/stores/chatSessions.svelte";
+import { chatSessionsStore } from "@/lib/stores/chats";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
 import type { PromptEntrySummary } from "@/lib/types";
@@ -123,5 +124,37 @@ describe("openChatFromPromptEntry — chat title (#695)", () => {
     await chatSessions.openChatFromPromptEntry(PROMPT, {}, null, { subject: "lysandra", subjectTitle: "Lys" });
     expect(api.resolveReferences).not.toHaveBeenCalled();
     expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ title: "Lys — Revise entry" }));
+  });
+});
+
+// #2327: two chats about the same subject with the same prompt both read
+// "Lysandra — Impersonate" — a new one whose name is taken gets a number.
+describe("uniqueChatTitle (#2327)", () => {
+  it("keeps a free name as is", () => {
+    expect(uniqueChatTitle("Lysandra — Impersonate", ["Other"])).toBe("Lysandra — Impersonate");
+  });
+
+  it("numbers a taken name from 2, using the lowest free number", () => {
+    expect(uniqueChatTitle("A", ["A"])).toBe("A (2)");
+    expect(uniqueChatTitle("A", ["A", "A (2)"])).toBe("A (3)");
+    expect(uniqueChatTitle("A", ["A", "A (3)"])).toBe("A (2)");
+  });
+});
+
+describe("openChatFromPromptEntry — numbering a repeated name (#2327)", () => {
+  afterEach(() => chatSessionsStore.set([]));
+
+  it("numbers a new chat whose name the roster already holds", async () => {
+    chatSessionsStore.set([{ id: "c1", title: "Lysandra — Revise entry" }] as never);
+    await chatSessions.openChatFromPromptEntry(PROMPT, {}, "lysandra", {});
+    expect(api.createChatSession).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Lysandra — Revise entry (2)" }),
+    );
+  });
+
+  it("leaves a first chat's name bare", async () => {
+    chatSessionsStore.set([{ id: "c1", title: "Hero — Revise entry" }] as never);
+    await chatSessions.openChatFromPromptEntry(PROMPT, {}, "lysandra", {});
+    expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ title: "Lysandra — Revise entry" }));
   });
 });

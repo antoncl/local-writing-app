@@ -150,6 +150,50 @@ describe("WorkspaceTabStrip (#2313)", () => {
     expect(close.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  // #2326: the roving menu moves between titles only, so Delete on a focused
+  // title is the keyboard's close; focus lands on the row that took its place.
+  it("Delete on a focused title closes that tab and focuses the next row", async () => {
+    stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
+    const { onClose, rerender } = renderStrip();
+    onClose.mockImplementation((id: PanelId) => void rerender({ tabs: TABS.filter((t) => t !== id) }));
+    await tick();
+    await fireEvent.click(screen.getByRole("button", { name: "All open tabs (3)" }));
+    await tick();
+    const item = screen.getByRole("menuitem", { name: "Three Roads" });
+    expect(item).toHaveAttribute("aria-keyshortcuts", "Delete");
+    item.focus();
+    await fireEvent.keyDown(item, { key: "Delete" });
+    await tick();
+    await tick();
+    expect(onClose).toHaveBeenCalledWith("editor_2");
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "The Hook" }));
+  });
+
+  it("Delete ignores an unclosable tab, and other keys don't close", async () => {
+    stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
+    const onClose = vi.fn();
+    const tab = createRawSnippet((id: () => PanelId) => ({ render: () => `<div role="tab">${TITLES[id()]}</div>` }));
+    render(WorkspaceTabStrip, {
+      props: {
+        tabs: TABS,
+        active: TABS[0],
+        titleOf: (id: PanelId) => TITLES[id],
+        closableOf: (id: PanelId) => id !== "editor_1",
+        onActivate: vi.fn(),
+        onClose,
+        tab,
+      },
+    });
+    await tick();
+    await fireEvent.click(screen.getByRole("button", { name: "All open tabs (3)" }));
+    await tick();
+    const pinned = screen.getByRole("menuitem", { name: "Lysandra" });
+    expect(pinned).not.toHaveAttribute("aria-keyshortcuts");
+    await fireEvent.keyDown(pinned, { key: "Delete" });
+    await fireEvent.keyDown(screen.getByRole("menuitem", { name: "The Hook" }), { key: "Backspace" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("the menu's × closes that tab", async () => {
     stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
     const { onClose, onActivate } = renderStrip();

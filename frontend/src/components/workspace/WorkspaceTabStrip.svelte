@@ -138,6 +138,23 @@
     menuOpen = false;
     onActivate(id);
   }
+
+  // Delete on a focused title closes that tab (#2326): the menu's roving focus
+  // moves between titles only, so without this a keyboard user could switch
+  // tabs from the menu but never close one. Focus then lands on the row that
+  // took its place (or the new last row), so repeated Deletes keep working. A
+  // close the host defers (e.g. an unsaved-changes confirm) leaves the row in
+  // place and focus on it.
+  async function onMenuItemKeydown(event: KeyboardEvent, id: PanelId): Promise<void> {
+    if (event.key !== "Delete" || !closableOf(id)) return;
+    event.preventDefault();
+    const index = tabs.indexOf(id);
+    const menu = (event.currentTarget as HTMLElement).closest<HTMLElement>('[role="menu"]');
+    onClose(id);
+    await tick();
+    const items = menu ? [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')] : [];
+    items[Math.min(index, items.length - 1)]?.focus();
+  }
 </script>
 
 <div class="ws-tabstrip">
@@ -202,7 +219,7 @@
               <button
                 type="button"
                 class="ws-tabs-menu-close"
-                title="Close {titleOf(id)}"
+                title="Close {titleOf(id)} (Delete)"
                 aria-label="Close {titleOf(id)}"
                 onclick={() => onClose(id)}
               >×</button>
@@ -214,8 +231,10 @@
               role="menuitem"
               class="ws-tabs-menu-item"
               aria-current={id === active ? "page" : undefined}
+              aria-keyshortcuts={closableOf(id) ? "Delete" : undefined}
               title={titleOf(id)}
               onclick={() => pick(id)}
+              onkeydown={(event) => void onMenuItemKeydown(event, id)}
             >{titleOf(id)}</button>
           </div>
         {/each}

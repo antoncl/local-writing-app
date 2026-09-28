@@ -35,6 +35,20 @@ async function resolveSubjectTitle(subjectId: string): Promise<string> {
   }
 }
 
+// A new chat's name, numbered when the roster already holds it (#2327): two
+// chats about the same subject with the same prompt otherwise read identically
+// in their tabs. The first keeps the bare name; later ones get " (2)", " (3)", …
+// — the lowest free number, so a deleted "(2)" is reused. Existing chats are
+// never renamed.
+export function uniqueChatTitle(title: string, taken: readonly string[]): string {
+  const used = new Set(taken);
+  if (!used.has(title)) return title;
+  for (let n = 2; ; n++) {
+    const candidate = `${title} (${n})`;
+    if (!used.has(candidate)) return candidate;
+  }
+}
+
 class ChatSessions {
   // ---- Injected host hooks (set in App.onMount) ----
   run: (action: () => Promise<void>) => Promise<boolean> = async (action) => {
@@ -105,7 +119,10 @@ class ChatSessions {
       // here, so every such chat is named alike (#2314).
       const override = opts.titleOverride?.trim() ?? "";
       const aboutTitle = subjectTitle || (subject && !override ? await resolveSubjectTitle(subject) : "");
-      const title = override || (aboutTitle ? `${aboutTitle} — ${entry.title}` : entry.title);
+      const title = uniqueChatTitle(
+        override || (aboutTitle ? `${aboutTitle} — ${entry.title}` : entry.title),
+        get(chatSessionsStore).map((session) => session.title),
+      );
       const session = await api.createChatSession({
         prompt_entry_id: entry.id,
         assistant_id: assistantId,

@@ -17,6 +17,11 @@ export type SummaryResolvers = {
   // compact line reads `Layer any of unbecoming-someone`, not a raw id. Optional:
   // absent (or a non-option field) leaves values stringified as before.
   optionLabel?: (fieldKey: string, value: string) => string;
+  // A referenced node's id → its title, or undefined when it isn't known. A
+  // reference field stores ids (tags are nodes since ADR-0082), so without this
+  // the compact line reads `Tags any of tag_0980ba5721` (#2321). Optional: absent
+  // (or an unknown id) leaves the value raw.
+  refTitle?: (id: string) => string | undefined;
 };
 
 // Empty-slot placeholders — a compact node shows what it still needs, never a
@@ -40,9 +45,8 @@ const OP_LABEL: Record<ViewFieldPredicate["op"], string> = {
 };
 
 // A predicate value slot → short text. `{var}` (a promoted formal) shows the
-// parameter's label; arrays join; everything else stringifies. Reference ids
-// stay raw here (resolving them needs the full rosters) — the expanded editor
-// renders the real widget; the compact line is a glance aid.
+// parameter's label; arrays join; everything else stringifies through `labelFor`
+// (option labels, then referenced nodes' titles — see `valueLabel`).
 function valueText(value: unknown, paramLabel?: string, labelFor?: (v: string) => string): string {
   if (value == null || value === "") return "";
   const label = (v: string): string => (labelFor ? labelFor(v) : v);
@@ -61,9 +65,17 @@ function fieldSummary(cfg: ViewNodeData, r: SummaryResolvers): string {
   if (!pred?.key) return PLACEHOLDER.field!;
   const name = r.fieldName(pred.key);
   if (pred.op === "set" || pred.op === "unset") return `${name} ${OP_LABEL[pred.op]}`;
-  const labelFor = r.optionLabel ? (v: string) => r.optionLabel!(pred.key, v) : undefined;
-  const val = valueText(pred.value, cfg.param?.label, labelFor);
+  const val = valueText(pred.value, cfg.param?.label, (v) => valueLabel(pred.key, v, r));
   return val ? `${name} ${OP_LABEL[pred.op]} ${val}` : `${name} ${OP_LABEL[pred.op]}`;
+}
+
+// One stored value → display text: a select option's label first, else a
+// referenced node's title, else the raw value. An option value that isn't a
+// node id misses the title lookup harmlessly (and vice versa).
+function valueLabel(fieldKey: string, value: string, r: SummaryResolvers): string {
+  const option = r.optionLabel?.(fieldKey, value);
+  if (option !== undefined && option !== value) return option;
+  return r.refTitle?.(value) ?? value;
 }
 
 // A leaf slot value → glance text. A promoted `{var}` shows ⟨param label⟩ (via
@@ -88,7 +100,7 @@ function filterInner(cfg: ViewNodeData, r: SummaryResolvers): string {
     case "descendants_of":
       return leafText(cfg.descendants_of, cfg.param?.label, (s) => `${r.entryTypeName(s)} +sub`, PLACEHOLDER.type!);
     case "tagged":
-      return leafText(cfg.tagged, cfg.param?.label, (s) => `#${s}`, PLACEHOLDER.tagged!);
+      return leafText(cfg.tagged, cfg.param?.label, (s) => `#${r.refTitle?.(s) ?? s}`, PLACEHOLDER.tagged!);
     case "field":
     default:
       return fieldSummary(cfg, r);

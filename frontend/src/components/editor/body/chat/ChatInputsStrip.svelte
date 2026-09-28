@@ -89,6 +89,10 @@
     border-radius: 10px; border: 1px solid var(--divider); background: var(--inset);
   }
   .cbv-inputs-fields { display: flex; flex-direction: column; gap: 8px; }
+  /* A context-pick input's picked list scrolls on its own, so the picker's
+     + Add trigger under it stays in view however many refs are picked (#2311)
+     — otherwise the list shoves it down the strip's own scroll. */
+  .cbv-input-field :global(.ctx-chips) { max-height: 14rem; overflow-y: auto; }
   .cbv-input-field { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-sm); }
   .cbv-input-label {
     font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);

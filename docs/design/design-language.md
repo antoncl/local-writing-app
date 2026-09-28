@@ -190,6 +190,8 @@ lexicon grows by PR, never ad hoc:
 | `◐ / ☀ / ☾` | theme cycle (system / light / dark — stateful) |
 | `▤` | view — a rendered arrangement of the node set (Views switcher) |
 | `⤢` | zoom — maximize a workspace tile to fill the shell / restore it (toggle; accent-tinted while active — a shell affordance, see below) |
+| `ti-chevron-left` / `ti-chevron-right` | scroll an overflowing strip that way — shown only at an edge with items hidden past it (workspace tab row, #2313). Horizontal and never rotating, so it can't be read as the collapse chevron |
+| count (e.g. `14`) | all items of an overflowing strip, as a menu — the number *is* the glyph (how many are open), shown only while the strip overflows (workspace tab row, #2313) |
 | eye (stroked, inline SVG) | interiority — a character's private inner state on a roleplay beat (ADR-0070). Used identically as a per-beat reveal handle and as a shell toggle (accent-tinted while active). Kept clear of `▤` view. |
 
 Two entries are **inline SVG** rather than font glyphs. The collapse/expand

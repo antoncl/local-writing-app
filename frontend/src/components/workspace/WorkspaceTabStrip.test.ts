@@ -138,7 +138,7 @@ describe("WorkspaceTabStrip (#2313)", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("the menu's × leads each row, before the tab name (#2324)", async () => {
+  it("the menu's × trails each row, after the tab name (#2333)", async () => {
     stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
     renderStrip();
     await tick();
@@ -147,7 +147,7 @@ describe("WorkspaceTabStrip (#2313)", () => {
     const close = screen.getByRole("button", { name: "Close The Hook" });
     const item = screen.getByRole("menuitem", { name: "The Hook" });
     expect(close.parentElement).toBe(item.parentElement);
-    expect(close.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(item.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   // #2326: the roving menu moves between titles only, so Delete on a focused

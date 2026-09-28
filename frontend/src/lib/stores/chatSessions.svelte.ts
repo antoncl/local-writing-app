@@ -40,6 +40,9 @@ async function resolveSubjectTitle(subjectId: string): Promise<string> {
 // in their tabs. The first keeps the bare name; later ones get " (2)", " (3)", …
 // — the lowest free number, so a deleted "(2)" is reused. Existing chats are
 // never renamed.
+// Names of chats being created right now — see openChatFromPromptEntry.
+const pendingChatTitles = new Set<string>();
+
 export function uniqueChatTitle(title: string, taken: readonly string[]): string {
   const used = new Set(taken);
   if (!used.has(title)) return title;
@@ -119,34 +122,44 @@ class ChatSessions {
       // here, so every such chat is named alike (#2314).
       const override = opts.titleOverride?.trim() ?? "";
       const aboutTitle = subjectTitle || (subject && !override ? await resolveSubjectTitle(subject) : "");
+      // Names still being created count as taken too, so two launches fired
+      // back-to-back (a double click) don't both pick the same number before
+      // the roster refresh from the first lands.
       const title = uniqueChatTitle(
         override || (aboutTitle ? `${aboutTitle} — ${entry.title}` : entry.title),
-        get(chatSessionsStore).map((session) => session.title),
+        [...get(chatSessionsStore).map((session) => session.title), ...pendingChatTitles],
       );
-      const session = await api.createChatSession({
-        prompt_entry_id: entry.id,
-        assistant_id: assistantId,
-        title,
-        subject,
-      });
-      createdSessionId = session.id;
-      if (Object.keys(inputs).length > 0) {
-        // Persist resolved inputs via the unified node path so ChatBodyView
-        // restores them as drafts on load. Echo subject so it's never dropped
-        // (backend also falls back to the persisted value).
-        await api.saveNode<ChatSession>(session.id, {
-          title: session.title,
-          prompt_entry_id: session.prompt_entry_id,
-          assistant_id: session.assistant_id,
-          system_prompt: session.system_prompt,
-          subject: session.subject ?? subject,
-          pinned: session.pinned,
-          context_items: [],
-          messages: [],
-          inputs,
+      pendingChatTitles.add(title);
+      let session: ChatSession;
+      try {
+        session = await api.createChatSession({
+          prompt_entry_id: entry.id,
+          assistant_id: assistantId,
+          title,
+          subject,
         });
+        createdSessionId = session.id;
+        if (Object.keys(inputs).length > 0) {
+          // Persist resolved inputs via the unified node path so ChatBodyView
+          // restores them as drafts on load. Echo subject so it's never dropped
+          // (backend also falls back to the persisted value).
+          await api.saveNode<ChatSession>(session.id, {
+            title: session.title,
+            prompt_entry_id: session.prompt_entry_id,
+            assistant_id: session.assistant_id,
+            system_prompt: session.system_prompt,
+            subject: session.subject ?? subject,
+            pinned: session.pinned,
+            context_items: [],
+            messages: [],
+            inputs,
+          });
+        }
+        await this.refresh();
+      } finally {
+        // Held until the roster refresh has the real row (or the create failed).
+        pendingChatTitles.delete(title);
       }
-      await this.refresh();
       // A chat created with a `subject` mints a chat→subject edge (ADR-0051 S2);
       // the creation path bypasses saveEditorPane's change-gated index refresh
       // (#200), so refresh the reverse index here — otherwise the subject's

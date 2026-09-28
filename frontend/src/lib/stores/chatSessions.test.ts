@@ -152,6 +152,16 @@ describe("openChatFromPromptEntry — numbering a repeated name (#2327)", () => 
     );
   });
 
+  it("numbers two launches fired back-to-back apart, before the roster refreshes", async () => {
+    chatSessionsStore.set([{ id: "c1", title: "Lysandra — Revise entry" }] as never);
+    await Promise.all([
+      chatSessions.openChatFromPromptEntry(PROMPT, {}, "lysandra", {}),
+      chatSessions.openChatFromPromptEntry(PROMPT, {}, "lysandra", {}),
+    ]);
+    const titles = vi.mocked(api.createChatSession).mock.calls.map((call) => (call[0] as { title: string }).title);
+    expect(titles.sort()).toEqual(["Lysandra — Revise entry (2)", "Lysandra — Revise entry (3)"]);
+  });
+
   it("leaves a first chat's name bare", async () => {
     chatSessionsStore.set([{ id: "c1", title: "Hero — Revise entry" }] as never);
     await chatSessions.openChatFromPromptEntry(PROMPT, {}, "lysandra", {});

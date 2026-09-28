@@ -141,20 +141,23 @@
 
   // Delete on a focused title closes that tab (#2326): the menu's roving focus
   // moves between titles only, so without this a keyboard user could switch
-  // tabs from the menu but never close one. Focus then lands on the row that
-  // took its place (or the new last row), so repeated Deletes keep working. A
-  // close the host defers (e.g. an unsaved-changes confirm) leaves the row in
-  // place and focus on it.
-  async function onMenuItemKeydown(event: KeyboardEvent, id: PanelId): Promise<void> {
+  // tabs from the menu but never close one. Focus moves to the neighbouring row
+  // BEFORE the close is requested — an editor's close can be async (a dirty
+  // pane saves first; a review-locked pane asks via a dialog), so refocusing
+  // afterwards would race it, landing on the closing row or pulling focus out
+  // of that dialog. The last remaining row keeps focus on the menu button.
+  function onMenuItemKeydown(event: KeyboardEvent, id: PanelId): void {
     if (event.key !== "Delete" || !closableOf(id)) return;
     event.preventDefault();
-    const index = tabs.indexOf(id);
-    const menu = (event.currentTarget as HTMLElement).closest<HTMLElement>('[role="menu"]');
-    onClose(id);
-    await tick();
+    const item = event.currentTarget as HTMLElement;
+    const menu = item.closest<HTMLElement>('[role="menu"]');
     const items = menu ? [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')] : [];
-    items[Math.min(index, items.length - 1)]?.focus();
+    const index = items.indexOf(item);
+    const neighbour = items[index + 1] ?? items[index - 1];
+    (neighbour ?? menuButton)?.focus();
+    onClose(id);
   }
+
 </script>
 
 <div class="ws-tabstrip">
@@ -234,7 +237,7 @@
               aria-keyshortcuts={closableOf(id) ? "Delete" : undefined}
               title={titleOf(id)}
               onclick={() => pick(id)}
-              onkeydown={(event) => void onMenuItemKeydown(event, id)}
+              onkeydown={(event) => onMenuItemKeydown(event, id)}
             >{titleOf(id)}</button>
           </div>
         {/each}

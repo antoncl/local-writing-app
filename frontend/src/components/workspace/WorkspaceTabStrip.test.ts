@@ -169,6 +169,36 @@ describe("WorkspaceTabStrip (#2313)", () => {
     expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "The Hook" }));
   });
 
+  // Review of #2326: an editor's close can be async (a dirty pane saves first,
+  // a review-locked one asks in a dialog), so focus moves to the neighbour
+  // BEFORE the close is requested rather than racing it afterwards.
+  it("moves focus to the next row before requesting the close", async () => {
+    stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
+    const { onClose } = renderStrip();
+    let focusedAtClose = "";
+    onClose.mockImplementation(() => (focusedAtClose = document.activeElement?.textContent ?? ""));
+    await tick();
+    await fireEvent.click(screen.getByRole("button", { name: "All open tabs (3)" }));
+    await tick();
+    const item = screen.getByRole("menuitem", { name: "Lysandra" });
+    item.focus();
+    await fireEvent.keyDown(item, { key: "Delete" });
+    expect(onClose).toHaveBeenCalledWith("editor_1");
+    expect(focusedAtClose).toBe("Three Roads");
+  });
+
+  it("Delete on the last row focuses the row above it", async () => {
+    stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
+    renderStrip();
+    await tick();
+    await fireEvent.click(screen.getByRole("button", { name: "All open tabs (3)" }));
+    await tick();
+    const last = screen.getByRole("menuitem", { name: "The Hook" });
+    last.focus();
+    await fireEvent.keyDown(last, { key: "Delete" });
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Three Roads" }));
+  });
+
   it("Delete ignores an unclosable tab, and other keys don't close", async () => {
     stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
     const onClose = vi.fn();

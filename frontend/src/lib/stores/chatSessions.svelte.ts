@@ -103,8 +103,9 @@ class ChatSessions {
       // that knows the subject passes its title; any other subject-anchored
       // launch (the lock doorway, a scene's prompt invocation) resolves it
       // here, so every such chat is named alike (#2314).
-      const aboutTitle = subjectTitle || (subject && !opts.titleOverride ? await resolveSubjectTitle(subject) : "");
-      const title = opts.titleOverride?.trim() || (aboutTitle ? `${aboutTitle} — ${entry.title}` : entry.title);
+      const override = opts.titleOverride?.trim() ?? "";
+      const aboutTitle = subjectTitle || (subject && !override ? await resolveSubjectTitle(subject) : "");
+      const title = override || (aboutTitle ? `${aboutTitle} — ${entry.title}` : entry.title);
       const session = await api.createChatSession({
         prompt_entry_id: entry.id,
         assistant_id: assistantId,

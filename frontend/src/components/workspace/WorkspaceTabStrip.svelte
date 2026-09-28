@@ -260,7 +260,9 @@
     flex-shrink: 0;
   }
   /* The arrows float over the row's edges (no layout shift as they come and
-     go), on the tabbar's own surface so a clipped tab reads as "more this way". */
+     go), painted in the tab group's own `--panel` so they sit IN the bar, with a
+     crisp hairline where they cut the row. No glow: a soft shadow smeared the
+     clipped tab text, and a --surface fill read as a lighter patch (#2316). */
   .ws-tabs-arrow {
     position: absolute;
     top: 0;
@@ -271,7 +273,7 @@
     width: var(--sp-5);
     padding: 0;
     border: none;
-    background: var(--surface);
+    background: var(--panel);
     color: var(--text-3);
     font-size: var(--fs-md);
     cursor: pointer;
@@ -279,14 +281,15 @@
   }
   .ws-tabs-arrow.left {
     left: 0;
-    box-shadow: var(--sp-1) 0 var(--sp-2) var(--surface);
+    border-right: 1px solid var(--border);
   }
   .ws-tabs-arrow.right {
     right: 0;
-    box-shadow: calc(-1 * var(--sp-1)) 0 var(--sp-2) var(--surface);
+    border-left: 1px solid var(--border);
   }
   .ws-tabs-arrow:hover {
     color: var(--text);
+    background: var(--inset);
   }
   .ws-tabs-menu-wrap {
     position: relative;

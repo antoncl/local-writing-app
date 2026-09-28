@@ -289,6 +289,7 @@
   }
   .ws-tabs-arrow:hover {
     color: var(--text);
+    background: var(--inset);
   }
   .ws-tabs-menu-wrap {
     position: relative;

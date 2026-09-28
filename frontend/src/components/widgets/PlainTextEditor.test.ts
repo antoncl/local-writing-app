@@ -28,6 +28,36 @@ describe("PlainTextEditor minimum height", () => {
   });
 });
 
+// #2319: a parent that preventDefault()s a key in `onKeydown` has claimed it —
+// ProseMirror must not also run its keymap. The chat composer sends on
+// Ctrl+Enter, and TipTap's HardBreak binds Mod-Enter to insert a line break, so
+// the break landed in the just-cleared composer: two lines tall, placeholder
+// hidden, a stray "\n" draft.
+describe("PlainTextEditor onKeydown claiming a key", () => {
+  function keydown(container: HTMLElement, init: KeyboardEventInit) {
+    const surface = container.querySelector(".ProseMirror") as HTMLElement;
+    surface.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+  }
+
+  it("a preventDefault()ed Ctrl+Enter inserts no line break", () => {
+    const onChange = vi.fn();
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Enter" && event.ctrlKey) event.preventDefault();
+    };
+    const { container } = render(PlainTextEditor, { props: { value: "hi", onChange, onKeydown } });
+    keydown(container, { key: "Enter", ctrlKey: true });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(container.querySelector(".ProseMirror br")).toBeNull();
+  });
+
+  it("an unclaimed Ctrl+Enter still reaches the editor's own keymap", () => {
+    const onChange = vi.fn();
+    const { container } = render(PlainTextEditor, { props: { value: "hi", onChange, onKeydown: () => {} } });
+    keydown(container, { key: "Enter", ctrlKey: true });
+    expect(onChange).toHaveBeenCalled();
+  });
+});
+
 describe("PlainTextEditor disabled affordance", () => {
   it("is editable by default", () => {
     const { container } = render(PlainTextEditor, { props: { value: "hi" } });

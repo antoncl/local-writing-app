@@ -159,11 +159,14 @@
         },
         handleKeyDown: (_view, event) => {
           // Forward to parent so callers can intercept (e.g. Ctrl+Enter
-          // to send a chat). Returning false lets ProseMirror handle the
-          // event normally afterward; parents that want to preventDefault
-          // must call event.preventDefault() themselves.
+          // to send a chat). A parent claims a key by calling
+          // event.preventDefault(); that must also stop ProseMirror, which
+          // ignores defaultPrevented and would otherwise run its keymap too —
+          // HardBreak's Mod-Enter put a line break into the just-cleared chat
+          // composer (#2319). An unclaimed key returns false and is handled
+          // normally.
           onKeydown(event);
-          return false;
+          return event.defaultPrevented;
         },
       },
       autofocus: autofocus ? "end" : false,

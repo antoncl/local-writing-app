@@ -13,6 +13,7 @@ import { chatSessionsStore } from "@/lib/stores/chats";
 import { referenceIndexStore } from "@/lib/stores/references";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
 import type { ChatSessionSummary, MetadataSchema, PromptContextStrategy, PromptEntrySummary } from "@/lib/types";
 
 // ADR-0065 S3: a prompt's disposition is its own INSTANCE `context_strategy`, not
@@ -99,9 +100,26 @@ afterEach(() => {
 describe("ConversationsPanel (ADR-0051 S3)", () => {
   it("renders the chats about this node and excludes unrelated ones", () => {
     renderPanel();
-    expect(screen.getByRole("button", { name: /Recent brainstorm/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Older brainstorm/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Recent brainstorm/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Older brainstorm/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /About someone else/ })).toBeNull();
+  });
+
+  // #2309: a row's × deletes that chat — confirmed first, never on the click alone,
+  // and without also opening the chat (the × must not bubble to the row click).
+  it("deletes a conversation from its row after a confirm, without opening it", async () => {
+    const openChat = vi.spyOn(editorPanes, "openChat").mockResolvedValue(undefined);
+    const del = vi.spyOn(chatSessions, "deleteChatSessionFromPane").mockResolvedValue(undefined);
+    const request = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+    renderPanel();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Delete Recent brainstorm" }));
+    expect(openChat).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ destructive: true }));
+
+    await request.mock.calls[0][0].onConfirm();
+    expect(del).toHaveBeenCalledWith("recent");
   });
 
   it("resumes an existing thread on row click instead of spawning", async () => {
@@ -109,7 +127,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue("chat-new");
     renderPanel();
 
-    await fireEvent.click(screen.getByRole("button", { name: /Recent brainstorm/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /^Recent brainstorm/ }));
     expect(openChat).toHaveBeenCalledWith("recent");
     expect(spawn).not.toHaveBeenCalled();
   });

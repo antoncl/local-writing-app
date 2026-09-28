@@ -29,6 +29,7 @@
   import { resolveColor } from "@/lib/utils/colors";
   import { formatChatRosterDetail } from "@/lib/utils/chatRoster";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+  import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { chatSessionsStore } from "@/lib/stores/chats";
   import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -142,6 +143,20 @@
       subjectTitle,
     });
   }
+
+  // #2309: delete a conversation from its row — confirmed like the chat header's
+  // Delete (it removes the chat file), then the same id-based path the Chats
+  // pane's × uses, which also tears down any open pane of this chat.
+  function requestDelete(session: ChatSessionSummary): void {
+    const title = session.title || "Untitled chat";
+    confirmService.request({
+      title: "Delete Chat",
+      message: `Delete "${title}"? This removes the chat file from the project.`,
+      confirmLabel: "Delete",
+      destructive: true,
+      onConfirm: () => chatSessions.deleteChatSessionFromPane(session.id),
+    });
+  }
 </script>
 
 {#if conversations.length > 0 || newPrompts.length > 0}
@@ -209,6 +224,15 @@
   >
     {#snippet detailSlot()}
       <small>{formatChatRosterDetail(session.message_count, session.updated_at)}</small>
+    {/snippet}
+    {#snippet trailing()}
+      <button
+        class="row-action-delete"
+        type="button"
+        aria-label={`Delete ${session.title || "Untitled chat"}`}
+        title="Delete chat"
+        onclick={(event) => { event.stopPropagation(); requestDelete(session); }}
+      >×</button>
     {/snippet}
   </NodeRow>
 {/snippet}

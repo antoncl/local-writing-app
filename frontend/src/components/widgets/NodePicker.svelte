@@ -49,6 +49,7 @@
   import {
     flattenSelectors,
     memberCountForRef,
+    membersUnderMatchingBuckets,
     toggleSelectorBucket,
     toggleSelectorGroup,
     toggleSelectorMember,
@@ -584,7 +585,16 @@
         searched.push(g);
         continue;
       }
-      const members = g.members.filter((m) => matchesEntry({ title: m.title }, parsedSearch));
+      // A member matches by its title — or by the name of a view group it sits
+      // in (#2329), so searching "Draft" surfaces a status view's Draft group.
+      const underGroup = new Set(
+        membersUnderMatchingBuckets(g.tree ?? [], (label) => matchesEntry({ title: label }, parsedSearch)).map(
+          (m) => `${m.kind}:${m.id}`,
+        ),
+      );
+      const members = g.members.filter(
+        (m) => underGroup.has(`${m.kind}:${m.id}`) || matchesEntry({ title: m.title }, parsedSearch),
+      );
       if (members.length > 0) searched.push({ ref: g.ref, members, tree: g.tree });
     }
     return flattenSelectors(searched, value, collapsedIds, { expandAll: true });

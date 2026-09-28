@@ -35,9 +35,11 @@ export interface SelectorGroup {
   tree?: SelectorTreeNode[] | null;
 }
 
-/** A flattened row for rendering — a selector container (depth 0) or one of its
- * members (depth 1). `key` is unique across groups (a member id may recur); `id`
- * is the ref id the toggle acts on; `memberOf` names the owning selector. */
+/** A flattened row for rendering — a selector container (depth 0), one of its
+ * members (depth 1 for a flat selector; any depth inside a view's tree), or a
+ * view's bucket header (`bucketMembers` set; its `id` is its row key, not a ref).
+ * `key` is unique across groups (a member id may recur, even within one view);
+ * `id` is the ref id the toggle acts on; `memberOf` names the owning selector. */
 export interface SelectorRow {
   key: string;
   id: string;
@@ -215,6 +217,23 @@ export function flattenSelectors(
     }
   }
   return rows;
+}
+
+/** The members under every bucket header whose label `matches` (#2329) — so a
+ * search for a view's group name ("Draft", a handle) surfaces that group. */
+export function membersUnderMatchingBuckets(
+  tree: SelectorTreeNode[],
+  matches: (label: string) => boolean,
+): NodePickerRef[] {
+  const out: NodePickerRef[] = [];
+  const walk = (nodes: SelectorTreeNode[]) => {
+    for (const n of nodes) {
+      if (!n.member && matches(n.label)) out.push(...subtreeMembers(n.children));
+      else walk(n.children);
+    }
+  };
+  walk(tree);
+  return out;
 }
 
 // The distinct members in a subtree, in first-seen order — a bucket's pick set

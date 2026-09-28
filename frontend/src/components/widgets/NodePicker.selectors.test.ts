@@ -292,6 +292,20 @@ describe("NodePicker saved-view selectors — app-wide axis (#1487, #1939)", () 
       }
     });
 
+    it("searching a group's name surfaces that group's members", async () => {
+      paneViews.views = { lore: [castView] };
+      renderLoreInput();
+      const menu = await openMenu();
+      const views = await openViewsAxis(menu);
+      const box = menu.querySelector(".ctx-search") as HTMLInputElement;
+      await fireEvent.input(box, { target: { value: "bad" } });
+      await tick();
+      const panel = (await within(menu).findAllByRole("group", { name: "Saved views" }))[0] ?? views;
+      expect(within(panel).getByText("Vex")).toBeInTheDocument();
+      expect(within(panel).getByText("Nok")).toBeInTheDocument();
+      expect(within(panel).queryByText("Mara")).toBeNull();
+    });
+
     it("a handle header's check picks its members as explicit refs", async () => {
       paneViews.views = { lore: [castView] };
       const onChange = vi.fn();

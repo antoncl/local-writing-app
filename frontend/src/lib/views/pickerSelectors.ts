@@ -83,7 +83,7 @@ function memberRef(node: EvalNode, kind: string): NodePickerRef {
  * node list mapped to member refs. Empty when the spec can't be resolved or the
  * kind has no roster. */
 export function membersForSelector(ref: NodePickerRef, roster: SelectorRoster): NodePickerRef[] {
-  return resolveSelector(ref, roster).members;
+  return resolveSelector(ref, roster, { tree: false }).members;
 }
 
 /** A selector's live members AND how its view arranges them (#2329): `tree` is
@@ -92,6 +92,9 @@ export function membersForSelector(ref: NodePickerRef, roster: SelectorRoster): 
 export function resolveSelector(
   ref: NodePickerRef,
   roster: SelectorRoster,
+  // Send-time expansion and the flat selector axes need only `members`; skip
+  // building a display tree nobody reads.
+  { tree: wantTree = true }: { tree?: boolean } = {},
 ): { members: NodePickerRef[]; tree: SelectorTreeNode[] | null } {
   const resolved = specForSelector(ref);
   if (resolved === null) return { members: [], tree: null };
@@ -128,7 +131,7 @@ export function resolveSelector(
     canonicalId: (id) => canonicalIdIn(byId, id),
   });
   const members = result.nodes.map((n) => memberRef(n, resolved.kind));
-  return { members, tree: result.groups ? toSelectorTree(result.groups, members, resolved.kind) : null };
+  return { members, tree: wantTree && result.groups ? toSelectorTree(result.groups, members, resolved.kind) : null };
 }
 
 // The evaluator's ViewGroup tree → the picker's display tree. A real-node group

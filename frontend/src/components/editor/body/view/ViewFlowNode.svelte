@@ -16,8 +16,9 @@
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { defaultFilterKind, inputArity, isInactiveParamNode, outputPayload, promotableSlot, valueSlotPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
-  import { tagTitleById } from "@/lib/stores/tagNodes";
-  import { findStructureNodeById } from "@/lib/utils/treeHelpers";
+  import { tagById } from "@/lib/stores/tagNodes";
+  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
+  import { buildRefResolver } from "@/lib/utils/refResolve";
   import { toMultiValued } from "@/lib/views/viewParams";
   import { effectiveFieldType, isSortableField } from "@/lib/views/fieldAccess";
   import { setLevelField, toggleLevelOrder } from "@/lib/views/groupLevelEdits";
@@ -85,6 +86,20 @@
   // One-line config summary shown on the COMPACT (unselected) node body (§A):
   // the resting canvas stays small; selecting a node expands it to the editor
   // below. Structural nodes (set ops / output / highlight) return "".
+  // The shared id → node walk every reference surface uses (#2010), over the
+  // designer's rosters plus the live tag/plotline stores — so a reference value
+  // in the compact summary reads as its node's title (#2321).
+  const refResolver = $derived(
+    buildRefResolver({
+      structure: ctx.structure,
+      loreEntries: ctx.loreEntries,
+      promptEntries: ctx.promptEntries,
+      assistantEntries: ctx.assistantEntries,
+      plotEntries: $plotlineEntriesStore,
+      tagById: $tagById,
+    }),
+  );
+
   let summaryText = $derived(
     nodeSummary(kind, cfg, {
       fieldName: (key) => ctx.fieldByKey(key)?.name ?? key,
@@ -93,16 +108,8 @@
       // `layer` filter shows the layer name, not its id — from the field def
       // already in hand; a non-option field has no match and keeps the raw value.
       optionLabel: (key, value) => ctx.fieldByKey(key)?.options?.find((o) => o.value === value)?.label ?? value,
-      // A reference value's node title (#2321): tags from the live tag roster
-      // (the one grouping labels use), everything else from the designer's
-      // rosters. An unknown id resolves to undefined and stays raw.
-      refTitle: (refId) =>
-        $tagTitleById.get(refId) ??
-        ctx.loreEntries.find((e) => e.id === refId)?.title ??
-        ctx.promptEntries.find((e) => e.id === refId)?.title ??
-        ctx.assistantEntries.find((e) => e.id === refId)?.title ??
-        findStructureNodeById(ctx.structure?.root, refId)?.title ??
-        findStructureNodeById(ctx.researchStructure?.root, refId)?.title,
+      // An unknown id resolves to undefined and stays raw.
+      refTitle: (refId) => refResolver(refId)?.title,
     }),
   );
 

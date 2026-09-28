@@ -23,6 +23,7 @@
   import RegionBody from "./RegionBody.svelte";
   import { WORKSPACE_KEY, type WorkspaceEditor } from "./workspaceContext";
   import ReviewDot from "@/components/widgets/ReviewDot.svelte";
+  import WorkspaceTabStrip from "./WorkspaceTabStrip.svelte";
 
   let { node }: { node: LayoutNode } = $props();
   const editor = getContext<WorkspaceEditor>(WORKSPACE_KEY);
@@ -210,8 +211,15 @@
     class:zoomed={droppable && workspaceLayout.zoomedGroupId === groupId}
   >
     <div class="ws-tabbar" role="tablist">
-      <div class="ws-tabs">
-        {#each tabs as tab (tab)}
+      <WorkspaceTabStrip
+        {tabs}
+        {active}
+        {titleOf}
+        {closableOf}
+        onActivate={(id) => workspaceLayout.activate(id)}
+        onClose={closeTab}
+      >
+        {#snippet tab(tab: PanelId)}
           {@const b = badgeOf(tab)}
           <div
             class="tab-strip-tab ws-tab"
@@ -219,6 +227,7 @@
             role="tab"
             tabindex="0"
             aria-selected={tab === active}
+            title={titleOf(tab)}
             draggable="true"
             onclick={() => workspaceLayout.activate(tab)}
             onkeydown={(event) => {
@@ -249,8 +258,8 @@
               >×</button>
             {/if}
           </div>
-        {/each}
-      </div>
+        {/snippet}
+      </WorkspaceTabStrip>
       <!-- Actions rail: per-region/editor actions plus the shell-level zoom
            toggle (#219, ADR-0038 §F). Real groups only — a collapsed split's
            synthetic id has no group to maximize. -->
@@ -457,26 +466,9 @@
     padding-right: var(--sp-2);
     border-bottom: 1px solid var(--border);
   }
-  /* Tabs take the first row and scroll within it when there are many; the
-     actions keep their natural width, pinned right (or wrapped to row two). */
-  .ws-tabs {
-    flex: 1 1 auto;
-    display: flex;
-    align-items: stretch;
-    min-width: 0;
-    overflow-x: auto;
-    /* `overflow-x: auto` promotes overflow-y from visible to auto (CSS spec), so
-       when the tabs overflow horizontally the classic horizontal scrollbar steals
-       ~12px of the strip's height and pushes the full-height pills into a 1px
-       vertical overflow — spawning a SECOND, vertical scrollbar whose up/down
-       arrow buttons sit inertly in the tab header (worse: clipping at large font
-       sizes). Hiding this strip's own scrollbar removes the height theft entirely;
-       the tabs still scroll horizontally via wheel/drag (#732). */
-    scrollbar-width: none;
-  }
-  .ws-tabs::-webkit-scrollbar {
-    display: none;
-  }
+  /* The tab row itself (scrolling, arrows, open-tabs menu) is
+     WorkspaceTabStrip's (#2313); it takes the first line, the actions keep
+     their natural width, pinned right (or wrapped to row two). */
   /* Layout/chrome only — the pill visual (padding, colour, underline, cursor)
      comes from the shared .tab-strip-tab. This carries the flex row that lines
      up the label, badge and close, plus the no-wrap/no-select behaviour. */

@@ -6,6 +6,7 @@ import {
   expandSelectorsInEncodedValue,
   isSelectorRef,
   membersForSelector,
+  resolveSelector,
   selectorExpansionAnomaly,
 } from "./pickerSelectors";
 import { coerceInputValue, encodePickerValue } from "@/lib/utils/promptInputs";
@@ -99,6 +100,33 @@ describe("plotline selector over cards", () => {
     // No selector survives — the backend only ever sees concrete card refs.
     expect(out.some((r) => r.selector)).toBe(false);
     expect(out.map((r) => r.id).sort()).toEqual(["card_a", "card_b"]);
+  });
+});
+
+// #2329: a view's members also come back arranged as the view arranges them, so
+// the picker can list them under the view's own groups.
+describe("resolveSelector — the view's own grouping (#2329)", () => {
+  it("a flat selector has no tree", () => {
+    const { members, tree } = resolveSelector(tagSelector, ROSTER);
+    expect(members.map((m) => m.id).sort()).toEqual(["lore_a", "lore_c"]);
+    expect(tree).toBeNull();
+  });
+
+  it("a group_by view buckets its members by the field's values", () => {
+    const byTag: NodePickerRef = {
+      id: "view:by_tag",
+      kind: "view",
+      title: "By tag",
+      selector: { kind: "lore", expr: { type: "lore:character" }, group_by: [{ field: "tags" }] } as ViewSpec,
+    };
+    const { members, tree } = resolveSelector(byTag, ROSTER);
+    expect(members.map((m) => m.id).sort()).toEqual(["lore_a", "lore_b", "lore_c"]);
+    expect(tree).not.toBeNull();
+    const buckets = Object.fromEntries(
+      tree!.map((b) => [b.label, b.children.map((c) => c.member?.id).sort()]),
+    );
+    expect(buckets).toMatchObject({ villain: ["lore_a", "lore_c"], hero: ["lore_b"], undead: ["lore_c"] });
+    expect(tree!.every((b) => b.member === null)).toBe(true);
   });
 });
 

@@ -15,7 +15,8 @@
 
 import { get } from "svelte/store";
 import { decodePickerValue, encodePickerValue } from "@/lib/utils/promptInputs";
-import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
+import { evaluateView, type EvalNode, type ViewGroup } from "@/lib/views/evaluateView";
+import type { SelectorTreeNode } from "@/lib/utils/selectorPickTree";
 import { structureToEvalNodes } from "@/lib/views/structureNodes";
 import { buildBindings } from "@/lib/views/viewParams";
 import { reportClientError } from "@/lib/errorLog";
@@ -82,8 +83,18 @@ function memberRef(node: EvalNode, kind: string): NodePickerRef {
  * node list mapped to member refs. Empty when the spec can't be resolved or the
  * kind has no roster. */
 export function membersForSelector(ref: NodePickerRef, roster: SelectorRoster): NodePickerRef[] {
+  return resolveSelector(ref, roster).members;
+}
+
+/** A selector's live members AND how its view arranges them (#2329): `tree` is
+ * the view's group tree mapped to member refs (see `SelectorTreeNode`), or null
+ * when the view renders flat. Send-time expansion reads `members` only. */
+export function resolveSelector(
+  ref: NodePickerRef,
+  roster: SelectorRoster,
+): { members: NodePickerRef[]; tree: SelectorTreeNode[] | null } {
   const resolved = specForSelector(ref);
-  if (resolved === null) return [];
+  if (resolved === null) return { members: [], tree: null };
   const nodes = roster.rostersByKind[resolved.kind] ?? [];
   // Evaluate with the SAME full EvalContext the view panes/designer thread
   // (ViewNodeList) — the picker shares `evaluateView`, so an under-provisioned
@@ -116,7 +127,30 @@ export function membersForSelector(ref: NodePickerRef, roster: SelectorRoster): 
     resolveTitle: (id) => byId.get(canonicalIdIn(byId, id))?.title,
     canonicalId: (id) => canonicalIdIn(byId, id),
   });
-  return result.nodes.map((n) => memberRef(n, resolved.kind));
+  const members = result.nodes.map((n) => memberRef(n, resolved.kind));
+  return { members, tree: result.groups ? toSelectorTree(result.groups, members, resolved.kind) : null };
+}
+
+// The evaluator's ViewGroup tree → the picker's display tree. A real-node group
+// is a member row when its node is one of the selector's members (a leaf, or a
+// nest parent that is itself a member); any other group — a synthetic bucket, or
+// a `revived` context ancestor that is not a member — is a header over its
+// children. Empty branches (a `show_empty` declared bucket, a header whose
+// children all fell out) are pruned: the picker lists what can be picked.
+function toSelectorTree(
+  groups: ViewGroup<EvalNode>[],
+  members: NodePickerRef[],
+  kind: string,
+): SelectorTreeNode[] {
+  const memberIds = new Set(members.map((m) => m.id));
+  const map = (g: ViewGroup<EvalNode>): SelectorTreeNode | null => {
+    const children = g.children.map(map).filter((c): c is SelectorTreeNode => c !== null);
+    const ref = g.node ? memberRef(g.node, kind) : null;
+    if (ref && memberIds.has(ref.id)) return { key: g.key, label: ref.title, member: ref, children };
+    if (children.length === 0) return null;
+    return { key: g.key, label: g.label ?? g.node?.title ?? "—", member: null, children };
+  };
+  return groups.map(map).filter((n): n is SelectorTreeNode => n !== null);
 }
 
 /** Why a selector CANNOT be materialized against this roster — a should-never-

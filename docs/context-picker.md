@@ -81,7 +81,17 @@ The picker is a **drill-in popover**:
   - Check a container, then **uncheck one member** — the live ref *splits* into
     explicit picks of the rest (a deliberate freeze).
   - The **Lore** panel groups entries under their entry-type headers (Character,
-    Place…) — a header is a collapsible section, not a pickable container.
+    Place…). A header's title folds it; in an input that takes several picks its
+    checkbox picks (or unpicks) every entry it shows, as explicit picks.
+  - A **saved view** lists its members the way the view itself arranges them: a
+    grouped view shows its groups (named handles, or one per value of the field
+    it groups by) as headers, and a nesting view shows children under their
+    parent. A group header works like a Lore header — its title folds it, its
+    checkbox picks every member it shows as explicit picks (while the whole view
+    is checked, unchecking a group splits the view into the rest). A member that
+    sits in two groups appears under both, sharing one checkbox. Checking the
+    view itself still stores one live ref, and what reaches the template is the
+    view's members as a flat list — the grouping is for browsing only.
 - **Search is contextual** — a query at the root cuts across every axis (grouped
   results); a query inside a panel filters just that axis. A plain query matches
   titles, tags, and aliases; a leading `#` narrows to tags.

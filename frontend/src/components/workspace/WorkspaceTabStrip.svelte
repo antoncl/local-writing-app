@@ -46,6 +46,12 @@
 
   let menuOpen = $state(false);
   let menuButton: HTMLButtonElement | null = $state(null);
+  // The menu lives behind `{#if overflowing}`: closing tabs from it until the
+  // row fits unmounts it mid-open, so drop the open flag too — otherwise it
+  // would pop open by itself the next time the row overflows.
+  $effect(() => {
+    if (!overflowing) menuOpen = false;
+  });
 
   // Sub-pixel slack: fractional layout widths (Windows display scaling) would
   // otherwise leave an arrow flickering at a row that fits exactly.
@@ -95,15 +101,30 @@
     void tick().then(() => revealTab(id));
   });
 
+  // The arrows overlay the row's edges, so a tab revealed flush against an
+  // edge with more tabs beyond it would sit under the arrow — its × included.
+  // Keep an arrow's width of clearance on any side that still has tabs past it.
   function revealTab(id: PanelId): void {
     const el = scroller;
     const slot = el?.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(id)}"]`);
     if (!el || !slot) return;
+    const clearance = arrowWidth();
     const left = slot.offsetLeft;
     const right = left + slot.offsetWidth;
-    if (left < el.scrollLeft) el.scrollLeft = left;
-    else if (right > el.scrollLeft + el.clientWidth) el.scrollLeft = right - el.clientWidth;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    let next = el.scrollLeft;
+    if (left - clearance < el.scrollLeft) next = left - clearance;
+    else if (right + clearance > el.scrollLeft + el.clientWidth) next = right + clearance - el.clientWidth;
+    el.scrollLeft = Math.max(0, Math.min(next, maxScroll));
   }
+
+  function arrowWidth(): number {
+    const arrow = scroller?.parentElement?.querySelector<HTMLElement>(".ws-tabs-arrow");
+    return arrow?.offsetWidth || ARROW_FALLBACK;
+  }
+  // Used when no arrow is currently rendered to measure (the row was at an end):
+  // matches `.ws-tabs-arrow`'s width token (--sp-5).
+  const ARROW_FALLBACK = 24;
 
   // One arrow click pages most of the visible width, keeping a sliver of the
   // previous view for orientation.

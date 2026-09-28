@@ -24,7 +24,7 @@ function renderStrip(active: PanelId = TABS[0]) {
   const tab = createRawSnippet((id: () => PanelId) => ({
     render: () => `<div role="tab">${TITLES[id()]}</div>`,
   }));
-  render(WorkspaceTabStrip, {
+  const { rerender } = render(WorkspaceTabStrip, {
     props: {
       tabs: TABS,
       active,
@@ -35,7 +35,7 @@ function renderStrip(active: PanelId = TABS[0]) {
       tab,
     },
   });
-  return { onActivate, onClose };
+  return { onActivate, onClose, rerender };
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -79,6 +79,63 @@ describe("WorkspaceTabStrip (#2313)", () => {
     expect(items[1]).toHaveAttribute("aria-current", "page");
     await fireEvent.click(items[2]);
     expect(onActivate).toHaveBeenCalledWith("editor_3");
+  });
+
+  // Real scroll geometry on the row element itself, with a writable scrollLeft.
+  function rowWithGeometry(g: { scrollWidth: number; clientWidth: number; scrollLeft: number }) {
+    const el = document.querySelector(".ws-tabs") as HTMLElement;
+    let left = g.scrollLeft;
+    Object.defineProperty(el, "scrollWidth", { configurable: true, get: () => g.scrollWidth });
+    Object.defineProperty(el, "clientWidth", { configurable: true, get: () => g.clientWidth });
+    Object.defineProperty(el, "scrollLeft", { configurable: true, get: () => left, set: (v: number) => (left = v) });
+    return el;
+  }
+
+  it("a vertical wheel scrolls the row sideways", async () => {
+    stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
+    renderStrip();
+    await tick();
+    const el = rowWithGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 100 });
+    const event = new WheelEvent("wheel", { deltaY: 120, cancelable: true });
+    el.dispatchEvent(event);
+    expect(el.scrollLeft).toBe(220);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("reveals the active tab clear of the edge arrow, so its × isn't covered", async () => {
+    stubGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
+    const { rerender } = renderStrip(TABS[0]);
+    await tick();
+    const el = rowWithGeometry({ scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
+    const slot = el.querySelector('[data-tab-id="editor_2"]') as HTMLElement;
+    Object.defineProperty(slot, "offsetLeft", { configurable: true, get: () => 400 });
+    Object.defineProperty(slot, "offsetWidth", { configurable: true, get: () => 100 });
+    await rerender({ active: TABS[1] });
+    await tick();
+    await tick();
+    // Right edge 500 + 24px arrow clearance - 300 visible = 224, not the flush 200.
+    expect(el.scrollLeft).toBe(224);
+  });
+
+  it("the menu does not reopen by itself after the row stops overflowing", async () => {
+    const geometry = { scrollWidth: 900, clientWidth: 300, scrollLeft: 0 };
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(() => geometry.scrollWidth);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => geometry.clientWidth);
+    vi.spyOn(HTMLElement.prototype, "scrollLeft", "get").mockImplementation(() => geometry.scrollLeft);
+    renderStrip();
+    await tick();
+    await fireEvent.click(screen.getByRole("button", { name: "All open tabs (3)" }));
+    await tick();
+    const row = document.querySelector(".ws-tabs") as HTMLElement;
+    geometry.scrollWidth = 300; // tabs closed until the row fits
+    await fireEvent.scroll(row);
+    await tick();
+    expect(screen.queryByRole("menu")).toBeNull();
+    geometry.scrollWidth = 900; // overflowing again
+    await fireEvent.scroll(row);
+    await tick();
+    expect(screen.getByRole("button", { name: "All open tabs (3)" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("the menu's × closes that tab", async () => {

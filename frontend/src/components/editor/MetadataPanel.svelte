@@ -461,6 +461,7 @@
   const listMemberResolver = $derived(
     buildRefResolver({
       structure,
+      researchStructure,
       loreEntries,
       promptEntries,
       assistantEntries: $assistantEntriesStore,

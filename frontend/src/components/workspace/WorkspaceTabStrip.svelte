@@ -194,15 +194,10 @@
         maxHeight="60vh"
       >
         {#each tabs as id (id)}
+          <!-- The × leads the row (#2324), so every close sits in one column
+               where the eye starts; an unclosable tab keeps the slot empty so
+               the titles still line up. -->
           <div class="ws-tabs-menu-row" class:current={id === active}>
-            <button
-              type="button"
-              role="menuitem"
-              class="ws-tabs-menu-item"
-              aria-current={id === active ? "page" : undefined}
-              title={titleOf(id)}
-              onclick={() => pick(id)}
-            >{titleOf(id)}</button>
             {#if closableOf(id)}
               <button
                 type="button"
@@ -211,7 +206,17 @@
                 aria-label="Close {titleOf(id)}"
                 onclick={() => onClose(id)}
               >×</button>
+            {:else}
+              <span class="ws-tabs-menu-close-slot" aria-hidden="true"></span>
             {/if}
+            <button
+              type="button"
+              role="menuitem"
+              class="ws-tabs-menu-item"
+              aria-current={id === active ? "page" : undefined}
+              title={titleOf(id)}
+              onclick={() => pick(id)}
+            >{titleOf(id)}</button>
           </div>
         {/each}
       </Popover>
@@ -319,6 +324,8 @@
     display: flex;
     align-items: center;
     gap: var(--sp-1);
+    padding-left: var(--sp-1);
+    border-left: 2px solid transparent;
     border-radius: var(--r-sm);
   }
   .ws-tabs-menu-row:hover {
@@ -329,7 +336,6 @@
     min-width: 0;
     padding: var(--sp-1) var(--sp-2);
     border: none;
-    border-left: 2px solid transparent;
     background: transparent;
     color: var(--text-2);
     font-size: var(--fs-md);
@@ -341,10 +347,17 @@
     cursor: pointer;
   }
   /* The current tab carries the tab strip's own active mark (accent + full-
-     strength text), turned on its side. */
+     strength text), turned on its side — on the row's leading edge, ahead of
+     the leading × (#2324). */
+  .ws-tabs-menu-row.current {
+    border-left-color: var(--accent-emphasis);
+  }
   .ws-tabs-menu-row.current .ws-tabs-menu-item {
     color: var(--text);
-    border-left-color: var(--accent-emphasis);
+  }
+  .ws-tabs-menu-close-slot {
+    flex: none;
+    width: var(--sp-4);
   }
   .ws-tabs-menu-close {
     flex: none;

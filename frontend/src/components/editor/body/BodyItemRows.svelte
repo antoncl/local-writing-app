@@ -188,6 +188,7 @@
   const resolveRef = $derived(
     buildRefResolver({
       structure: deps.structure,
+      researchStructure: deps.researchStructure,
       loreEntries: deps.loreEntries,
       promptEntries: deps.promptEntries,
       assistantEntries: $assistantEntriesStore,

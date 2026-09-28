@@ -92,6 +92,7 @@
   const refResolver = $derived(
     buildRefResolver({
       structure: ctx.structure,
+      researchStructure: ctx.researchStructure,
       loreEntries: ctx.loreEntries,
       promptEntries: ctx.promptEntries,
       assistantEntries: ctx.assistantEntries,

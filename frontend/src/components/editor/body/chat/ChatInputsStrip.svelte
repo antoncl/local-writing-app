@@ -76,11 +76,15 @@
 
 <style>
   /* ---- 5 · inputs strip (inset) ---- */
-  /* flex: 0 0 auto keeps the strip at natural height as a flex child of
-     .chat-body-view (was carried by the shared sibling-group rule in the
-     parent before this block moved out — #99). */
+  /* Natural height as a flex child of .chat-body-view (#99), but shrinkable and
+     scrolling: a long pick list (a whole Lore group, #2305) otherwise grows past
+     the pane and shoves the composer below its overflow:hidden edge (#2307).
+     The cap keeps half the pane for the transcript. */
   .cbv-inputs-strip {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 50%;
+    overflow-y: auto;
     display: flex; flex-direction: column; gap: 8px; padding: 11px 14px;
     border-radius: 10px; border: 1px solid var(--divider); background: var(--inset);
   }

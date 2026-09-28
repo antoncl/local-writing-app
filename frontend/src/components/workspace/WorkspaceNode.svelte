@@ -239,11 +239,8 @@
             ondragstart={(event) => onTabDragStart(event, tab)}
             ondragend={() => workspaceLayout.endDrag()}
           >
-            {#if reviewPendingOf(tab)}<ReviewDot />{/if}
-            <span class="ws-tab-label">{titleOf(tab)}</span>
-            {#if b}
-              <span class="ws-tab-badge" class:saved={b.saved} class:error={b.error}>{b.text}</span>
-            {/if}
+            <!-- The × leads the tab (#2335): "× Plot board", ahead of the review
+                 dot and the name. -->
             {#if closableOf(tab)}
               <button
                 class="ws-tab-close"
@@ -256,6 +253,11 @@
                   closeTab(tab);
                 }}
               >×</button>
+            {/if}
+            {#if reviewPendingOf(tab)}<ReviewDot />{/if}
+            <span class="ws-tab-label">{titleOf(tab)}</span>
+            {#if b}
+              <span class="ws-tab-badge" class:saved={b.saved} class:error={b.error}>{b.text}</span>
             {/if}
           </div>
         {/snippet}

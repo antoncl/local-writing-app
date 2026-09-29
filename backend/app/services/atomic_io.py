@@ -34,11 +34,26 @@ import time
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from app.services.project.errors import ProjectServiceError
+
 # #2350: on Windows `os.replace` fails with "Access denied" while ANOTHER process
 # briefly holds the target open — a sync client (OneDrive/Dropbox), an antivirus
 # scan, the search indexer, an editor. That lock is transient, so the replace is
 # retried with a short backoff (~1 s in all) before the save is given up on.
 _REPLACE_BACKOFF_S = (0.02, 0.05, 0.1, 0.15, 0.2, 0.2, 0.3)
+
+
+class FileLockedError(PermissionError, ProjectServiceError):
+    """A save gave up on a target another program kept locked (#2350). BOTH kinds
+    on purpose: still a `PermissionError`/`OSError`, so every caller that already
+    tolerates a failed write (the rebuildable index snapshot swallows `OSError`)
+    keeps doing so; and a `ProjectServiceError` (423 Locked), so a user save's
+    route turns it into a message the UI shows instead of a bare 500."""
+
+    def __init__(self, message: str) -> None:
+        PermissionError.__init__(self, message)
+        self.message = message
+        self.status_code = 423
 
 
 def _discard(temp_path: Path) -> None:
@@ -50,8 +65,9 @@ def _discard(temp_path: Path) -> None:
 
 def _replace(temp_path: Path, path: Path) -> None:
     """`temp_path.replace(path)`, retrying a transient lock (#2350). If the
-    target stays locked, the temp file is removed and the error names the file
-    and the likely cause instead of a bare `[WinError 5]`."""
+    target stays locked, the temp file is removed and a `FileLockedError` names
+    the file and the likely causes (see the class for why it is both an
+    `OSError` and a domain error)."""
     for delay in (*_REPLACE_BACKOFF_S, None):
         try:
             temp_path.replace(path)
@@ -59,10 +75,11 @@ def _replace(temp_path: Path, path: Path) -> None:
         except PermissionError as exc:
             if delay is None:
                 _discard(temp_path)
-                raise PermissionError(
-                    f"Couldn't save {path.name}: another program is holding it open "
-                    "(a sync client, an antivirus scan, the search indexer or an editor). "
-                    "Try again in a moment."
+                raise FileLockedError(
+                    f"Couldn't save {path.name}: the file is locked. Another program may be "
+                    "holding it open (a sync client, an antivirus scan, the search indexer or "
+                    "an editor) — try again in a moment. If it keeps failing, check that the "
+                    "file isn't read-only."
                 ) from exc
             time.sleep(delay)
         except BaseException:

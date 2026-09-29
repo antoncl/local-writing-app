@@ -14,6 +14,7 @@ import pytest
 
 from app.services import atomic_io
 from app.services.atomic_io import atomic_write_bytes, atomic_write_text
+from app.services.project.errors import ProjectServiceError
 
 
 @pytest.fixture(autouse=True)
@@ -54,8 +55,15 @@ def test_a_lock_that_never_clears_fails_clearly_and_leaves_no_temp_file(tmp_path
     target = tmp_path / "Card 1.md"
     target.write_text("old", encoding="utf-8")
     _locked_for(monkeypatch, failures=10_000)
-    with pytest.raises(PermissionError, match="Couldn't save Card 1.md: another program is holding it open"):
+    # A domain error (423 Locked), so the route returns its message to the UI
+    # instead of a bare 500 the browser shows as "Failed to fetch".
+    with pytest.raises(ProjectServiceError, match="Couldn't save Card 1.md: the file is locked") as err:
         atomic_write_text(target, "new")
+    assert err.value.status_code == 423
+    assert "read-only" in err.value.message
+    # ...and still an OSError, so callers that tolerate a failed write (the
+    # rebuildable index snapshot) keep tolerating it.
+    assert isinstance(err.value, PermissionError)
     assert target.read_text(encoding="utf-8") == "old"  # untouched
     assert _temp_files(tmp_path) == []
 

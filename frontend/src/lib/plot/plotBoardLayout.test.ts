@@ -26,6 +26,12 @@ import {
   freeSpotNear,
   occupiedAfterPin,
   CONTAINER_HEADER,
+  CARD_SYNOPSIS_MAX_LINES,
+  CARD_SYNOPSIS_LINE_H,
+  CARD_SYNOPSIS_CHARS_PER_LINE,
+  CARD_PILL_ROW_H,
+  estCardHeight,
+  pageStatusOf,
   CONTAINER_PAD,
   PLOTLINE_WIDTH,
   type PlotCardData,
@@ -1106,5 +1112,72 @@ describe("card placement (#2348)", () => {
       const at = freeSpotNear(center, size, occupied);
       expect(occupied.some((b) => overlaps(at, b))).toBe(false);
     });
+  });
+});
+
+// #2354: the synopsis is the card — a card's height follows its content, a grid row is
+// as tall as its tallest card, and containers wrap the cards' real rects.
+describe("per-card height (#2354)", () => {
+  const long = "x".repeat(CARD_SYNOPSIS_CHARS_PER_LINE * 6);
+  const posOf = (nodes: ReturnType<typeof buildBoardNodes>, id: string) => nodes.find((n) => n.id === id)!.position;
+
+  it("an empty card measures CARD_HEIGHT; a longer synopsis is taller", () => {
+    expect(estCardHeight("", "", 0)).toBe(CARD_HEIGHT);
+    expect(estCardHeight("t", long, 0)).toBeGreaterThan(estCardHeight("t", "short", 0));
+    expect(estCardHeight("t", "a\nb\nc", 0)).toBe(estCardHeight("t", "a", 0) + 2 * CARD_SYNOPSIS_LINE_H);
+  });
+
+  it("caps the synopsis at CARD_SYNOPSIS_MAX_LINES (the rest scrolls)", () => {
+    const capped = estCardHeight("t", "y".repeat(CARD_SYNOPSIS_CHARS_PER_LINE * 100), 0);
+    const atMax = estCardHeight("t", "y".repeat(CARD_SYNOPSIS_CHARS_PER_LINE * CARD_SYNOPSIS_MAX_LINES), 0);
+    expect(capped).toBe(atMax);
+  });
+
+  it("beats add a foot band, growing with the pill rows", () => {
+    expect(estCardHeight("t", "s", 1)).toBeGreaterThanOrEqual(estCardHeight("t", "s", 0));
+    expect(estCardHeight("t", "s", 6)).toBeGreaterThan(estCardHeight("t", "s", 2));
+    expect(estCardHeight("t", "s", 4) - estCardHeight("t", "s", 2)).toBe(CARD_PILL_ROW_H);
+  });
+
+  it("seeds each card node's size + measured from its own estimate", () => {
+    const nodes = buildBoardNodes(projection({ cards: [card("c1", { synopsis: long })] }));
+    const h = estCardHeight("c1", long, 0);
+    expect(cardNodes(nodes)[0]).toMatchObject({ width: CARD_WIDTH, height: h, measured: { width: CARD_WIDTH, height: h } });
+  });
+
+  it("a grid row is as tall as its tallest card: a tall card pushes the next row down", () => {
+    const cards = Array.from({ length: CARDS_PER_ROW + 1 }, (_, i) =>
+      card(`c${i}`, { synopsis: i === 2 ? long : "" }),
+    );
+    const nodes = buildBoardNodes(projection({ cards }));
+    const tall = estCardHeight("c2", long, 0);
+    const y0 = posOf(nodes, "c0").y;
+    for (let i = 1; i < CARDS_PER_ROW; i++) expect(posOf(nodes, `c${i}`).y).toBe(y0); // one row, one y
+    expect(posOf(nodes, `c${CARDS_PER_ROW}`).y).toBe(y0 + tall + CONTAINER_GAP);
+  });
+
+  it("a container box wraps a tall card's real rect", () => {
+    const nodes = buildBoardNodes(
+      projection({ containers: [container("ch", "Chapter 1")], cards: [card("c1", { container: "ch", synopsis: long })] }),
+    );
+    const box = containerNodes(nodes)[0];
+    expect(box.height).toBe(estCardHeight("c1", long, 0) + 2 * CONTAINER_PAD + CONTAINER_HEADER);
+  });
+});
+
+describe("pageStatusOf default flag (#2354)", () => {
+  const field = {
+    default: "unwritten",
+    options: [{ value: "unwritten", label: "Unwritten", color: "stone" }],
+  } as unknown as Parameters<typeof pageStatusOf>[1];
+
+  it("is default for the field's default value, non-default otherwise", () => {
+    expect(pageStatusOf(null, field).pageStatusIsDefault).toBe(true);
+    expect(pageStatusOf("unwritten", field).pageStatusIsDefault).toBe(true);
+    expect(pageStatusOf("off_page", field).pageStatusIsDefault).toBe(false);
+  });
+
+  it("is default when there is no field", () => {
+    expect(pageStatusOf("off_page", undefined).pageStatusIsDefault).toBe(true);
   });
 });

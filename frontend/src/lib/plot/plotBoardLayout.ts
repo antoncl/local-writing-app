@@ -73,6 +73,9 @@ export type PlotCardData = {
   pageStatus: string;
   pageStatusLabel: string;
   pageStatusSwatch: string | null;
+  // True when the status is the field's default (or there is no field): the card then
+  // shows only the dot, not the label — the label is for the exceptional states.
+  pageStatusIsDefault: boolean;
   // The resolved beats this card fulfils (Slice 5b) — the badges it wears, each
   // carrying its denormalised effective colour (ADR-0080 slice 3b-ii): an
   // event-beat's plotline swatch, or a change-beat's resolved arc colour.
@@ -90,10 +93,16 @@ export type PlotCardData = {
 export function pageStatusOf(
   stored: string | null,
   field: MetadataFieldDefinition | undefined,
-): Pick<PlotCardData, "pageStatus" | "pageStatusLabel" | "pageStatusSwatch"> {
+): Pick<PlotCardData, "pageStatus" | "pageStatusLabel" | "pageStatusSwatch" | "pageStatusIsDefault"> {
   const pageStatus = stored || (typeof field?.default === "string" ? field.default : "");
   const option = field?.options.find((o) => o.value === pageStatus);
-  return { pageStatus, pageStatusLabel: option?.label ?? pageStatus, pageStatusSwatch: option?.color ?? null };
+  const isDefault = !field || pageStatus === (typeof field.default === "string" ? field.default : "");
+  return {
+    pageStatus,
+    pageStatusLabel: option?.label ?? pageStatus,
+    pageStatusSwatch: option?.color ?? null,
+    pageStatusIsDefault: isDefault,
+  };
 }
 
 // A plotline node (ADR-0053 §3): a plotline IS a plot-template instance, drawn as a
@@ -194,14 +203,41 @@ export function reconcileCardUiState(projection: PlotBoardProjection | null, sta
 
 // Geometry (px). Exported so the unit test asserts against the same constants the
 // layout uses rather than hard-coding magic numbers that could silently drift.
-export const CARD_WIDTH = 210;
-// Raised 110 → 150 (ADR-0080 slice 3b-ii): a card can now wear TWO pill segments
-// (event-beats + change-beats), which didn't fit the old height — the second segment
-// scrolled off, undercutting the "read a pivotal card at a glance" journey. Every
-// spacing constant that references CARD_HEIGHT scales with it, so this one knob
-// re-spaces the grid. The beats region still shrink-scrolls (`.beat-segments`) so a
-// pathologically over-beated card is bounded rather than overflowing even at 150.
-export const CARD_HEIGHT = 150;
+export const CARD_WIDTH = 280;
+// A card's height is ESTIMATED from its content (#2354): the synopsis is the card —
+// the board exists to read synopses in sequence — so a card grows to show it. Size is
+// single-sourced here (never DOM-measured), so the estimate is tuned to slightly
+// OVER-estimate: an extra gap is harmless, clipped text is the bug. Beyond
+// CARD_SYNOPSIS_MAX_LINES the synopsis scrolls inside the card instead of growing it.
+export const CARD_PAD_Y = 20; // top + bottom padding of the card
+export const CARD_HEAD_MIN_H = 22; // grip / kebab band, the floor of the head
+export const CARD_TITLE_LINE_H = 17; // one wrapped title line (--fs-sm, ~1.3)
+export const CARD_TITLE_MAX_LINES = 2;
+export const CARD_TITLE_CHARS_PER_LINE = 36;
+export const CARD_SYNOPSIS_LINE_H = 20; // one synopsis line (--fs-md, 1.45)
+export const CARD_SYNOPSIS_CHARS_PER_LINE = 38;
+export const CARD_SYNOPSIS_MAX_LINES = 14;
+export const CARD_SECTION_GAP = 6; // between head / synopsis / foot
+export const CARD_FOOT_MIN_H = 22; // the foot row: status dots, plus at least one pill row
+export const CARD_PILL_ROW_H = 22; // one wrapped row of beat pills
+export const CARD_PILLS_PER_ROW = 2; // a conservative pills-per-row (over-estimates)
+export function estCardHeight(title: string, synopsis: string, beatCount: number): number {
+  const titleLines = Math.min(CARD_TITLE_MAX_LINES, Math.max(1, Math.ceil(title.length / CARD_TITLE_CHARS_PER_LINE)));
+  const head = Math.max(CARD_HEAD_MIN_H, titleLines * CARD_TITLE_LINE_H);
+  const synopsisLines = Math.min(
+    CARD_SYNOPSIS_MAX_LINES,
+    // Trimmed: the projection's synopsis is the raw body, stored with a trailing newline.
+    synopsis
+      .trim()
+      .split("\n")
+      .reduce((n, para) => n + Math.max(1, Math.ceil(para.length / CARD_SYNOPSIS_CHARS_PER_LINE)), 0),
+  );
+  const pillRows = beatCount > 0 ? Math.ceil(beatCount / CARD_PILLS_PER_ROW) : 0;
+  const foot = pillRows > 0 ? pillRows * CARD_PILL_ROW_H : CARD_FOOT_MIN_H;
+  return CARD_PAD_Y + head + CARD_SECTION_GAP + synopsisLines * CARD_SYNOPSIS_LINE_H + CARD_SECTION_GAP + foot;
+}
+// The minimum / default card height: what an empty, beat-less card measures.
+export const CARD_HEIGHT = estCardHeight("", "", 0);
 export const CARD_GAP_X = 24; // between cards in a row
 export const PLOTLINE_WIDTH = 240; // a plotline node is a touch wider than a card
 // A plot holder node (plotline or arc) is variable-height — SvelteFlow sizes it to its
@@ -222,14 +258,20 @@ export const CONTAINER_GAP = 24; // between sibling boxes / rows / acts
 // unwrapped row put the n-th loose card n card-widths away (card 40 ≈ 9400px).
 export const CARDS_PER_ROW = 5;
 const CARD_STEP_X = CARD_WIDTH + CARD_GAP_X;
-const CARD_STEP_Y = CARD_HEIGHT + CONTAINER_GAP;
-// The grid slot of the i-th auto-laid-out card, relative to its grid's top-left.
-const gridOffset = (i: number): BoardXY => ({
-  x: (i % CARDS_PER_ROW) * CARD_STEP_X,
-  y: Math.floor(i / CARDS_PER_ROW) * CARD_STEP_Y,
-});
-// The height a grid of `n` cards occupies, including the trailing gap to what follows.
-const gridHeight = (n: number): number => Math.ceil(n / CARDS_PER_ROW) * CARD_STEP_Y;
+// Auto-laid-out cards wrap into rows of CARDS_PER_ROW; a row is as tall as its tallest
+// card. Given the cards' heights in order, returns each card's slot relative to the
+// grid's top-left plus the grid's total height (including the trailing gap to what
+// follows).
+const layoutGrid = (heights: number[]): { offsets: BoardXY[]; height: number } => {
+  const offsets: BoardXY[] = [];
+  let y = 0;
+  for (let start = 0; start < heights.length; start += CARDS_PER_ROW) {
+    const row = heights.slice(start, start + CARDS_PER_ROW);
+    row.forEach((_, j) => offsets.push({ x: j * CARD_STEP_X, y }));
+    y += Math.max(...row) + CONTAINER_GAP;
+  }
+  return { offsets, height: y };
+};
 
 // Base z-index for the interactive nodes (cards + plotlines), above their container
 // boxes (one z step per level, ADR-0094 §9, capped just below this). A node with an
@@ -260,7 +302,7 @@ const containerNodeId = (id: string) => `container:${id}`;
 type Rect = { minX: number; minY: number; maxX: number; maxY: number };
 export type Box = { x: number; y: number; w: number; h: number };
 
-const cardRect = (p: BoardXY): Rect => ({ minX: p.x, minY: p.y, maxX: p.x + CARD_WIDTH, maxY: p.y + CARD_HEIGHT });
+const cardRect = (p: BoardXY, h: number): Rect => ({ minX: p.x, minY: p.y, maxX: p.x + CARD_WIDTH, maxY: p.y + h });
 
 const unionRects = (rects: Rect[]): Rect =>
   rects.reduce((a, r) => ({
@@ -434,17 +476,20 @@ export function buildBoardNodes(
   // #2348: only UNPINNED cards take a grid slot — a card the author dragged keeps
   // its own spot, so it must not also hold a slot open (a hole in the grid).
   const unpinned = (card: { id: string }) => !(card.id in saved);
+  const heightOf = (card: { title: string; synopsis: string; beats: unknown[] }) =>
+    estCardHeight(card.title, card.synopsis, card.beats.length);
   const derived = new Map<string, BoardXY>();
   const place = (container: Container, left: number, top: number): number => {
     const contentX = left + CONTAINER_PAD;
     let cursorY = top + CONTAINER_HEADER + CONTAINER_PAD;
     for (const child of childrenOf.get(container.id) ?? []) cursorY = place(child, contentX, cursorY);
     const autoCards = (cardsByInner.get(container.id) ?? []).filter(unpinned);
+    const grid = layoutGrid(autoCards.map(heightOf));
     autoCards.forEach((card, i) => {
-      const at = gridOffset(i);
+      const at = grid.offsets[i];
       derived.set(card.id, { x: contentX + at.x, y: cursorY + at.y });
     });
-    cursorY += gridHeight(autoCards.length);
+    cursorY += grid.height;
     // The last child already advanced cursorY by a trailing CONTAINER_GAP, which
     // serves as the gap to the next box; add this box's own bottom padding to it.
     return cursorY + CONTAINER_PAD;
@@ -453,8 +498,9 @@ export function buildBoardNodes(
   for (const top of tops) actY = place(top, 0, actY);
   // Homeless cards: a loose grid below every box, outside any box (they float).
   const homelessAuto = homeless.filter(unpinned);
+  const homelessGrid = layoutGrid(homelessAuto.map(heightOf));
   homelessAuto.forEach((card, i) => {
-    const at = gridOffset(i);
+    const at = homelessGrid.offsets[i];
     derived.set(card.id, { x: at.x, y: actY + CONTAINER_HEADER + at.y });
   });
 
@@ -481,7 +527,7 @@ export function buildBoardNodes(
   const wrap = (container: Container): Box => {
     const rects: Rect[] = [];
     for (const child of childrenOf.get(container.id) ?? []) rects.push(rectOfBox(wrap(child)));
-    for (const card of cardsByInner.get(container.id) ?? []) rects.push(cardRect(positionOf(card.id)));
+    for (const card of cardsByInner.get(container.id) ?? []) rects.push(cardRect(positionOf(card.id), heightOf(card)));
     const box = grow(container.id, boxFromContent(unionRects(rects)));
     boxOf.set(container.id, box);
     return box;
@@ -554,13 +600,13 @@ export function buildBoardNodes(
       type: "plotCard",
       position: positionOf(card.id),
       width: CARD_WIDTH,
-      height: CARD_HEIGHT,
+      height: heightOf(card),
       // Seed `measured` from our own geometry (size is single-sourced here, not
       // DOM-measured): xyflow only draws an edge once BOTH endpoint nodes are
       // measured, and its ResizeObserver may not have run yet (never does in a
       // 0-size / headless pane) — so without this the edge layers render nothing.
       // Only card nodes carry it: the edge layers connect cards, never containers.
-      measured: { width: CARD_WIDTH, height: CARD_HEIGHT },
+      measured: { width: CARD_WIDTH, height: heightOf(card) },
       // Draggable, but ONLY by the leading grip (`dragHandle`, #876) — the card body is
       // full of inline-edit controls, so a whole-body drag surface was near-ungrabbable.
       draggable: true,
@@ -594,7 +640,7 @@ export function buildBoardNodes(
   // Once dragged its position persists like a card's (same saved-override model). The
   // node id IS the plotline id; card + plotline ids are distinct, so one `saved` map
   // (keyed by node id) holds both without collision.
-  const plotlineBandY = actY + CONTAINER_HEADER + gridHeight(homelessAuto.length) + CONTAINER_GAP;
+  const plotlineBandY = actY + CONTAINER_HEADER + homelessGrid.height + CONTAINER_GAP;
   projection.plotlines.forEach((line, i) => {
     nodes.push({
       id: line.id,

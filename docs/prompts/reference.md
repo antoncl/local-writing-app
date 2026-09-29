@@ -51,7 +51,9 @@ If a node's fields are organised into a named group, you can read a member strai
 | `story_so_far(scene)` | `str` — an XML recap of prior scenes' summaries (scenes **1 → n-1**, reading order). A derived, per-scene-deterministic block: it is emitted (not selected) and caches in the stable prefix. |
 | `character_turns(scene, character)` | Reconstructs the scene as **alternating chat turns** for the Roleplay sub-type (focus character → `assistant`, others → `user` prefixed `[Name]:`, narration → plain `user`). Emits its own role boundaries — use it **outside** any `{% role %}` block. |
 | `roleplay_beats(scene)` | `str` — the roleplay scene laid out **beat by beat** for a finalize/cleanup prompt: each beat's speaker, its observable text, and (decoded) its private interiority. POV-agnostic; the finalize prompt decides whose interiority survives via `pov(scene)`. A scene with no beat markers returns its body unchanged. |
-| `plot_context(as_of=node)` | `str` — the spoiler-gated plot-board recap up to `as_of` (a card/scene). Derived and emitted, like `story_so_far`. |
+| `plot_context(as_of=node)` | `str` — the spoiler-gated plot-board recap up to `as_of` (a card/scene). Derived and emitted, like `story_so_far`. To show one scene further, anchor on the next scene: `plot_context(as_of=next_scene(e) or e.id)`. |
+| `previous_scene(x)` | The scene before `x` in reading order (crossing chapter and act boundaries), or `None` at the start. `x` is a scene or a plot card; a card counts as the scene it is attached to, so an unattached card has no neighbours. The result is a node — `previous_scene(scene).summary`. |
+| `next_scene(x)` | The scene after `x` in reading order, or `None` at the end — the mirror of `previous_scene`. `plot_context(as_of=next_scene(e) or e.id)` shows a card's board one scene further. |
 | `last_words(text, n)` | `str` — the trailing `n` words of a string (pure helper). |
 
 ### Field contract

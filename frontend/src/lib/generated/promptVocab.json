@@ -104,6 +104,12 @@
       "summary": "`str` — the trailing `n` words of a string (pure helper)."
     },
     {
+      "name": "next_scene",
+      "kind": "helper",
+      "signature": "next_scene(x)",
+      "summary": "The scene after `x` in reading order, or `None` at the end — the mirror of `previous_scene`. `plot_context(as_of=next_scene(e) or e.id)` shows a card's board one scene further."
+    },
+    {
       "name": "original",
       "kind": "helper",
       "signature": "original(x)",
@@ -113,13 +119,19 @@
       "name": "plot_context",
       "kind": "helper",
       "signature": "plot_context(as_of=node)",
-      "summary": "`str` — the spoiler-gated plot-board recap up to `as_of` (a card/scene). Derived and emitted, like `story_so_far`."
+      "summary": "`str` — the spoiler-gated plot-board recap up to `as_of` (a card/scene). Derived and emitted, like `story_so_far`. To show one scene further, anchor on the next scene: `plot_context(as_of=next_scene(e) or e.id)`."
     },
     {
       "name": "pov",
       "kind": "helper",
       "signature": "pov(scene)",
       "summary": "The scene's POV character (`lore:character`) or `None` — the scene's OWN `pov` field. For the value a scene *inherits*, use `resolved_narration`."
+    },
+    {
+      "name": "previous_scene",
+      "kind": "helper",
+      "signature": "previous_scene(x)",
+      "summary": "The scene before `x` in reading order (crossing chapter and act boundaries), or `None` at the start. `x` is a scene or a plot card; a card counts as the scene it is attached to, so an unattached card has no neighbours. The result is a node — `previous_scene(scene).summary`."
     },
     {
       "name": "resolved_narration",

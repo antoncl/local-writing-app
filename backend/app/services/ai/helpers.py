@@ -29,6 +29,7 @@ from xml.sax.saxutils import quoteattr
 from jinja2 import Undefined, pass_context
 from jinja2.sandbox import SandboxedEnvironment
 
+from app.services.ai.adjacent_scene import adjacent_scene
 from app.services.ai.entry_patch import (
     is_proposable_field,
     tag_vocabulary_target,
@@ -540,14 +541,15 @@ def _type_name(schema: Any, entry_type: Any) -> str:
 def _plot_context(project: ProjectService, as_of: Any) -> str:
     """Render the spoiler-gated plot-board context for a prompt (ADR-0048 S8b).
 
-    `as_of` is a card or scene node id (a plot-card brainstorm passes the card's
-    own id, so the model sees the board up to and including that card's reveal
-    position). A non-id / unknown anchor gates nothing (the whole board). Degrades
+    `as_of` is a card or scene — an id or a node (a plot-card brainstorm passes
+    the card's own id, so the model sees the board up to and including that
+    card's reveal position; `next_scene(e)` reaches one scene further). A
+    non-id / unknown anchor gates nothing (the whole board). Degrades
     to "" rather than raising, so a context helper never breaks the render — but
     the failure is recorded to the project error log (#386) instead of vanishing,
     so a silently-empty plot context is diagnosable rather than a mystery."""
     try:
-        anchor = as_of if isinstance(as_of, str) and as_of else None
+        anchor = _scene_id_of(as_of) if as_of else None
         return render_plot_context(project.read_plot_context(anchor))
     except Exception as exc:
         root = project.root_path  # None when no project is open; append_error_line never raises
@@ -732,6 +734,13 @@ def register_helpers(
     env.globals["pov"] = lambda scene: _pov(project, schema, scene)
     env.globals["resolved_narration"] = lambda scene: _resolved_narration(project, schema, scene)
     env.globals["story_so_far"] = lambda scene: _story_so_far(project, scene)
+    # #2355: the scene beside a scene or a plot card in reading order (or None).
+    env.globals["previous_scene"] = (
+        lambda value: adjacent_scene(project, schema, _coerce_entry_ref(project, schema, value), -1)
+    )
+    env.globals["next_scene"] = (
+        lambda value: adjacent_scene(project, schema, _coerce_entry_ref(project, schema, value), 1)
+    )
 
     _register_lore_gate(env, lore_invoked_slot, deprecation_notices)
     _register_use(env, project, schema)

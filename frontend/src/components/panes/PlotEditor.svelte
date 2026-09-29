@@ -615,6 +615,7 @@
     if (creatingPlotline) return; // shares newPlotline's guard — one mint per gesture
     creatingPlotline = true;
     try {
+      const center = viewCenter?.() ?? null;
       const entry = await instantiateTemplateOnBoard(id);
       if (entry.entry_type === "plot:character_arc") {
         expandedArcId = await undoRecorder.createArc(async () => entry.id);
@@ -623,6 +624,10 @@
         expandedPlotlineId = await undoRecorder.createPlotline(async () => entry.id);
         editorPanes.setStatus("Created plotline from template");
       }
+      // #2348: in view, like "+ plotline" — sized for the beats the template brought.
+      await tick();
+      const holder = [...(projection?.plotlines ?? []), ...(projection?.arcs ?? [])].find((h) => h.id === entry.id);
+      await placeNewNode(entry.id, center, { w: PLOTLINE_WIDTH, h: estPlotNodeHeight(holder?.beats.length ?? 0) });
     } catch (e) {
       editorPanes.setError(e instanceof Error ? e.message : "Could not instantiate the template.");
     } finally {

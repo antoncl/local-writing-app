@@ -23,11 +23,21 @@ export function createSceneEffectiveMatcher(opts: {
   invalidateOn?: () => unknown;
 }): { readonly current: CompiledMatcher | null } {
   let matcher = $state<CompiledMatcher | null>(null);
+  // #2352: read each input through a $derived, so the fetch re-runs only when a
+  // VALUE it depends on changes. The accessors read reactive objects (`scene?.id`
+  // subscribes to the whole scene), and a metadata keystroke (the summary field)
+  // replaces the scene object with the same id — which re-ran this effect and
+  // refetched effective-names on every keystroke. A derived notifies only when
+  // its result changes (by identity), so an unchanged id / roster is inert.
+  const sceneIdValue = $derived(opts.sceneId());
+  const entriesValue = $derived(opts.entries());
+  const schemaValue = $derived(opts.schema());
+  const invalidator = $derived(opts.invalidateOn?.());
   $effect(() => {
-    const sceneId = opts.sceneId();
-    const entries = opts.entries();
-    const schema = opts.schema();
-    opts.invalidateOn?.();
+    const sceneId = sceneIdValue;
+    const entries = entriesValue;
+    const schema = schemaValue;
+    void invalidator;
     void mutationsVersion.value;
     if (!sceneId) {
       matcher = null;

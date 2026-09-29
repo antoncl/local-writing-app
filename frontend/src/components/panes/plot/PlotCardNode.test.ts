@@ -55,6 +55,7 @@ const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
   pageStatus: "unwritten",
   pageStatusLabel: "Unwritten",
   pageStatusSwatch: "stone",
+  pageStatusIsDefault: true,
   beats: [],
   causalLinks: [],
   ...over,
@@ -126,22 +127,34 @@ describe("PlotCardNode", () => {
 
   it("names the plotline on the card, and omits the chip when unassigned (#863)", () => {
     const { unmount } = render(PlotCardNode, { props: { data: data({ plotlineName: "Romance" }) } });
-    expect(screen.getByText("Romance")).toBeInTheDocument();
+    // The plotline is just a dot: the name is the aria-label/tooltip, never visible text.
+    expect(screen.getByLabelText("Romance")).toBeInTheDocument();
+    expect(screen.queryByText("Romance")).toBeNull();
     unmount();
     render(PlotCardNode, { props: { data: data({ plotlineName: null }) } });
-    expect(screen.queryByText("Romance")).toBeNull();
+    expect(screen.queryByLabelText("Romance")).toBeNull();
   });
 
   it("shows the on-page marker for an attached card", () => {
     render(PlotCardNode, {
-      props: { data: data({ attached: true, pageStatus: "on_page", pageStatusLabel: "On the page", pageStatusSwatch: "moss" }) },
+      props: {
+        data: data({
+          attached: true,
+          pageStatus: "on_page",
+          pageStatusLabel: "On the page",
+          pageStatusSwatch: "moss",
+          pageStatusIsDefault: false,
+        }),
+      },
     });
     expect(screen.getByText("On the page")).toBeInTheDocument();
   });
 
   it("shows the unwritten marker for a fresh unattached card", () => {
     render(PlotCardNode, { props: { data: data({ attached: false, pageStatus: "unwritten" }) } });
-    expect(screen.getByText("Unwritten")).toBeInTheDocument();
+    // The default status is dot-only: no visible label, but the name stays reachable.
+    expect(screen.queryByText("Unwritten")).toBeNull();
+    expect(screen.getByLabelText("Unwritten")).toBeInTheDocument();
   });
 
   it("falls back to a placeholder title for an untitled card", () => {
@@ -467,7 +480,14 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
 
   it("renders the page-status label and swatch the layout resolved from the schema (#1907)", () => {
     const { container } = render(PlotCardNode, {
-      props: { data: data({ pageStatus: "on_page", pageStatusLabel: "On the page", pageStatusSwatch: "moss" }) },
+      props: {
+        data: data({
+          pageStatus: "on_page",
+          pageStatusLabel: "On the page",
+          pageStatusSwatch: "moss",
+          pageStatusIsDefault: false,
+        }),
+      },
     });
     expect(screen.getByText("On the page")).toBeInTheDocument();
     const status = container.querySelector(".card-status") as HTMLElement;
@@ -478,7 +498,7 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     const { container } = render(PlotCardNode, {
       props: { data: data({ pageStatus: "unwritten", pageStatusLabel: "Unwritten", pageStatusSwatch: null }) },
     });
-    expect(screen.getByText("Unwritten")).toBeInTheDocument();
+    expect(screen.getByLabelText("Unwritten")).toBeInTheDocument();
     const status = container.querySelector(".card-status") as HTMLElement;
     expect(status.classList.contains("hollow")).toBe(true);
     expect(status.getAttribute("style")).toBeNull();
@@ -591,27 +611,43 @@ describe("PlotCardNode — beat linking by drag (S7 #824)", () => {
   });
 });
 
-describe("PlotCardNode — segmented event/change pills (ADR-0080 slice 3b-ii)", () => {
-  it("renders an Events segment and a Changes segment for a mixed card", () => {
-    render(PlotCardNode, {
-      props: { data: data({ beats: [beat(), changeBeat()] }) },
+describe("PlotCardNode — one foot row of event + change pills (ADR-0080 slice 3b-ii, #2354)", () => {
+  it("renders event pills then change pills in one Beats row, with no section labels", () => {
+    const { container } = render(PlotCardNode, {
+      props: { data: data({ beats: [changeBeat(), beat()] }) },
     });
-    expect(screen.getByText("Events")).toBeInTheDocument();
-    expect(screen.getByText("Changes")).toBeInTheDocument();
-    expect(screen.getByText("Call to Adventure")).toBeInTheDocument();
-    expect(screen.getByText("Learns to trust")).toBeInTheDocument();
-  });
-
-  it("shows only the Events segment for a card with only event-beats", () => {
-    render(PlotCardNode, { props: { data: data({ beats: [beat()] }) } });
-    expect(screen.getByText("Events")).toBeInTheDocument();
-    expect(screen.queryByText("Changes")).toBeNull();
-  });
-
-  it("shows only the Changes segment for a card with only change-beats", () => {
-    render(PlotCardNode, { props: { data: data({ beats: [changeBeat()] }) } });
-    expect(screen.getByText("Changes")).toBeInTheDocument();
     expect(screen.queryByText("Events")).toBeNull();
+    expect(screen.queryByText("Changes")).toBeNull();
+    const rows = container.querySelectorAll(".card-beats");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].getAttribute("aria-label")).toBe("Beats");
+    const labels = [...rows[0].querySelectorAll(".beat-badge-label")].map((el) => el.textContent);
+    expect(labels).toEqual(["Call to Adventure", "Learns to trust"]); // event first, whatever the input order
+  });
+
+  it("renders no beat row for a beat-less card", () => {
+    const { container } = render(PlotCardNode, { props: { data: data() } });
+    expect(container.querySelector(".card-beats")).toBeNull();
+  });
+
+  it("caps the read-only row across the combined list with one +N chip", () => {
+    const many = [
+      ...Array.from({ length: 3 }, (_, i) => beat({ beat_id: `e${i}`, title: `Event ${i}` })),
+      ...Array.from({ length: 3 }, (_, i) => changeBeat({ beat_id: `c${i}`, title: `Change ${i}` })),
+    ];
+    const { container } = render(PlotCardNode, { props: { data: data({ beats: many }) } });
+    expect(container.querySelectorAll(".beat-badge:not(.beat-more)")).toHaveLength(4);
+    expect(screen.getByText("+2")).toBeInTheDocument();
+  });
+
+  it("shows the status label only when it is not the default", () => {
+    const { unmount } = render(PlotCardNode, { props: { data: data() } });
+    expect(screen.queryByText("Unwritten")).toBeNull();
+    unmount();
+    render(PlotCardNode, {
+      props: { data: data({ pageStatus: "off_page", pageStatusLabel: "Off the page", pageStatusIsDefault: false }) },
+    });
+    expect(screen.getByText("Off the page")).toBeInTheDocument();
   });
 
   it("renders the seedling glyph + the character_initial avatar on a change-pill", () => {

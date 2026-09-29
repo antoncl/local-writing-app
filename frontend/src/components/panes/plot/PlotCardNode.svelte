@@ -63,19 +63,20 @@
   let pageStatus = $derived(data.pageStatus);
   let statusColor = $derived(data.pageStatusSwatch ? (getSwatch(data.pageStatusSwatch)?.hex ?? null) : null);
 
-  // Two segmented pill kinds (ADR-0080 slice 3b-ii): an event-pill (a plotline beat)
-  // and a change-pill (a character-arc beat) render in their own labelled row, so a
-  // writer reads "what happens" apart from "who changes" at a glance.
-  let eventBeats = $derived(data.beats.filter((b) => b.holder_kind !== "plot:character_arc"));
-  let changeBeats = $derived(data.beats.filter((b) => b.holder_kind === "plot:character_arc"));
+  // Two pill kinds (ADR-0080 slice 3b-ii) share one foot row: event-pills (plotline
+  // beats) first, then change-pills (character-arc beats, avatar + seedling glyph), so
+  // "who changes" stays distinguishable from "what happens" without section labels.
+  let orderedBeats = $derived([
+    ...data.beats.filter((b) => b.holder_kind !== "plot:character_arc"),
+    ...data.beats.filter((b) => b.holder_kind === "plot:character_arc"),
+  ]);
 
-  // Show the first few pills PER SEGMENT, then a "+N" chip for the rest — so a card
+  // Read-only: show the first few pills, then a "+N" chip for the rest — so a card
   // with many beats never silently hides them (the chip's tooltip names the overflow).
-  // Read-only only; an interactive card shows every beat in both segments.
+  // An interactive card shows every beat.
   const BEAT_BADGE_CAP = 4;
-  function cap(beats: PlotCardBeat[]): { visible: PlotCardBeat[]; hidden: PlotCardBeat[] } {
-    return { visible: beats.slice(0, BEAT_BADGE_CAP), hidden: beats.slice(BEAT_BADGE_CAP) };
-  }
+  let visibleBeats = $derived<PlotCardBeat[]>(actions ? orderedBeats : orderedBeats.slice(0, BEAT_BADGE_CAP));
+  let hiddenBeats = $derived<PlotCardBeat[]>(actions ? [] : orderedBeats.slice(BEAT_BADGE_CAP));
 
   let menuOpen = $state(false);
   // Three pages: the actions, the "Set plotline" lane list, and the "Realize scene"
@@ -281,10 +282,10 @@
         />
       {:else if actions}
         <button class="card-title card-title-btn nodrag nopan" title="Click to rename" onclick={startTitleEdit}>
-          {data.title || "Untitled card"}
+          <span class="card-title-text">{data.title || "Untitled card"}</span>
         </button>
       {:else}
-        <h4 class="card-title" title={data.title}>{data.title || "Untitled card"}</h4>
+        <h4 class="card-title" title={data.title}><span class="card-title-text">{data.title || "Untitled card"}</span></h4>
       {/if}
       {#if actions}
         <button
@@ -313,7 +314,7 @@
       ></textarea>
     {:else if actions}
       <button
-        class="card-synopsis card-synopsis-btn nodrag nopan"
+        class="card-synopsis card-synopsis-btn nodrag nopan nowheel"
         class:empty={!data.synopsis}
         title="Click to edit the synopsis"
         onclick={startEdit}
@@ -324,130 +325,117 @@
       <p class="card-synopsis">{data.synopsis}</p>
     {/if}
 
-    {#if eventBeats.length || changeBeats.length}
-    <!-- Both segments share ONE bounded scroll region so a card carrying event AND
-         change pills never overflows its fixed-height box (the two segments together
-         are taller than the old single beat row). -->
-    <div class="beat-segments" class:nowheel={actions}>
-    {#if eventBeats.length}
-      <!-- Event-pills (ADR-0080 slice 3b-ii): the card's plotline beats, labelled apart
-           from its change-pills below. NO divider above — the label is the only
-           separator from the synopsis (Amendment 1 §4). -->
-      <div class="beat-seg">
-        <div class="beat-seg-label">Events</div>
-        <!-- Interactive: show EVERY beat, each with its × — the row becomes a wheel-safe
-             (`nowheel`, so the canvas doesn't zoom) bounded scroll so even a heavily-
-             beated card can unlink any of them. Read-only keeps the compact cap + "+N". -->
-        <div class="card-beats" class:editable={actions} class:nowheel={actions} aria-label="Events">
-          {#each actions ? eventBeats : cap(eventBeats).visible as beat (beat.plotline_id + ":" + beat.beat_id)}
-            <span
-              class="beat-badge"
-              class:coloured={beat.resolvedColorHex}
-              class:draggable={actions}
-              style={beat.resolvedColorHex ? `--beat-accent: ${beat.resolvedColorHex}` : undefined}
-              title={`${beat.plotline_title} · ${beat.number}. ${beat.title}`}
-              class:nodrag={actions}
-              class:nopan={actions}
-              draggable={!!actions}
-              ondragstart={(e) => onBeatDragStart(e, beat.plotline_id, beat.beat_id, beat.holder_kind)}
-            >
-              {#if actions}
-                <!-- A leading grip signals the badge drags card→card (#941 follow-up), the
-                     same affordance the plotline roster + card grip use. Only interactive. -->
-                <span class="beat-badge-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
-              {/if}
-              <span class="beat-badge-label">{beat.title}</span>
-              <!-- The beat's roster number (#941), POSTFIXED so the title leads, so two
-                   same-titled beats are still tellable apart. -->
-              <span class="beat-badge-num" aria-hidden="true">{beat.number}</span>
-              {#if actions}
-                <button
-                  class="beat-badge-x nodrag nopan"
-                  aria-label={`Unlink beat ${beat.title}`}
-                  onclick={() => unlinkBeat(beat.plotline_id, beat.beat_id)}
-                >
-                  <i class="ti ti-x" aria-hidden="true"></i>
-                </button>
-              {/if}
-            </span>
-          {/each}
-          {#if !actions && cap(eventBeats).hidden.length}
-            <span class="beat-badge beat-more" title={cap(eventBeats).hidden.map((b) => b.title).join(", ")}
-              >+{cap(eventBeats).hidden.length}</span
-            >
-          {/if}
-        </div>
-      </div>
-    {/if}
-
-    {#if changeBeats.length}
-      <!-- Change-pills (ADR-0080 §5 / Amendment 1, slice 3b-ii): the card's character-arc
-           beats — a seedling glyph + the bound character's single-letter avatar in the
-           arc's resolved colour, distinguishing "who changes" from "what happens". -->
-      <div class="beat-seg">
-        <div class="beat-seg-label">Changes</div>
-        <div class="card-beats" class:editable={actions} class:nowheel={actions} aria-label="Changes">
-          {#each actions ? changeBeats : cap(changeBeats).visible as beat (beat.plotline_id + ":" + beat.beat_id)}
-            <span
-              class="beat-badge change"
-              class:coloured={beat.resolvedColorHex}
-              class:draggable={actions}
-              style={beat.resolvedColorHex ? `--beat-accent: ${beat.resolvedColorHex}` : undefined}
-              title={`${beat.character_name ?? "Unbound"} · ${beat.title}`}
-              class:nodrag={actions}
-              class:nopan={actions}
-              draggable={!!actions}
-              ondragstart={(e) => onBeatDragStart(e, beat.plotline_id, beat.beat_id, beat.holder_kind)}
-            >
-              {#if actions}
-                <span class="beat-badge-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
-              {/if}
-              <span class="avatar" aria-hidden="true"
-                >{beat.character_initial || (beat.character_name ? beat.character_name.charAt(0) : "?")}</span
-              >
-              <span class="seed" aria-hidden="true"><i class="ti ti-seedling"></i></span>
-              <span class="beat-badge-label">{beat.title}</span>
-              <span class="beat-badge-num" aria-hidden="true">{beat.number}</span>
-              {#if actions}
-                <button
-                  class="beat-badge-x nodrag nopan"
-                  aria-label={`Unlink beat ${beat.title}`}
-                  onclick={() => unlinkBeat(beat.plotline_id, beat.beat_id)}
-                >
-                  <i class="ti ti-x" aria-hidden="true"></i>
-                </button>
-              {/if}
-            </span>
-          {/each}
-          {#if !actions && cap(changeBeats).hidden.length}
-            <span class="beat-badge beat-more" title={cap(changeBeats).hidden.map((b) => b.title).join(", ")}
-              >+{cap(changeBeats).hidden.length}</span
-            >
-          {/if}
-        </div>
-      </div>
-    {/if}
-    </div>
-    {/if}
-
+    <!-- ONE compact foot row (#2354): the beat pills (event pills, then change pills)
+         wrap on the left, the plotline + page-status dots sit right-aligned. Interactive:
+         show EVERY beat, each with its × — the row is a wheel-safe (`nowheel`, so the
+         canvas doesn't zoom) bounded scroll so even a heavily-beated card can unlink any
+         of them. Read-only keeps the compact cap + "+N". -->
     <div class="card-foot">
-      {#if data.plotlineName}
-        <!-- Names the plotline the tint + band already colour, so it's legible by
-             more than colour (#863). The dot echoes the plotline colour; a colourless
-             plotline shows a hollow dot. -->
-        <span class="card-plotline" class:uncoloured={!accent} title={data.plotlineName}>
-          <span class="plotline-dot" aria-hidden="true"></span>
-          <span class="plotline-name">{data.plotlineName}</span>
-        </span>
+      {#if orderedBeats.length}
+        <div class="card-beats" class:editable={actions} class:nowheel={actions} aria-label="Beats">
+          {#each visibleBeats as beat (beat.plotline_id + ":" + beat.beat_id)}
+            {#if beat.holder_kind === "plot:character_arc"}
+              <!-- Change-pill (ADR-0080 §5 / Amendment 1): a character-arc beat — a seedling
+                   glyph + the bound character's single-letter avatar in the arc's resolved
+                   colour, distinguishing "who changes" from "what happens". -->
+              <span
+                class="beat-badge change"
+                class:coloured={beat.resolvedColorHex}
+                class:draggable={actions}
+                style={beat.resolvedColorHex ? `--beat-accent: ${beat.resolvedColorHex}` : undefined}
+                title={`${beat.character_name ?? "Unbound"} · ${beat.title}`}
+                class:nodrag={actions}
+                class:nopan={actions}
+                draggable={!!actions}
+                ondragstart={(e) => onBeatDragStart(e, beat.plotline_id, beat.beat_id, beat.holder_kind)}
+              >
+                {#if actions}
+                  <span class="beat-badge-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+                {/if}
+                <span class="avatar" aria-hidden="true"
+                  >{beat.character_initial || (beat.character_name ? beat.character_name.charAt(0) : "?")}</span
+                >
+                <span class="seed" aria-hidden="true"><i class="ti ti-seedling"></i></span>
+                <span class="beat-badge-label">{beat.title}</span>
+                <span class="beat-badge-num" aria-hidden="true">{beat.number}</span>
+                {#if actions}
+                  <button
+                    class="beat-badge-x nodrag nopan"
+                    aria-label={`Unlink beat ${beat.title}`}
+                    onclick={() => unlinkBeat(beat.plotline_id, beat.beat_id)}
+                  >
+                    <i class="ti ti-x" aria-hidden="true"></i>
+                  </button>
+                {/if}
+              </span>
+            {:else}
+              <span
+                class="beat-badge"
+                class:coloured={beat.resolvedColorHex}
+                class:draggable={actions}
+                style={beat.resolvedColorHex ? `--beat-accent: ${beat.resolvedColorHex}` : undefined}
+                title={`${beat.plotline_title} · ${beat.number}. ${beat.title}`}
+                class:nodrag={actions}
+                class:nopan={actions}
+                draggable={!!actions}
+                ondragstart={(e) => onBeatDragStart(e, beat.plotline_id, beat.beat_id, beat.holder_kind)}
+              >
+                {#if actions}
+                  <!-- A leading grip signals the badge drags card→card (#941 follow-up), the
+                       same affordance the plotline roster + card grip use. Only interactive. -->
+                  <span class="beat-badge-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+                {/if}
+                <span class="beat-badge-label">{beat.title}</span>
+                <!-- The beat's roster number (#941), POSTFIXED so the title leads, so two
+                     same-titled beats are still tellable apart. -->
+                <span class="beat-badge-num" aria-hidden="true">{beat.number}</span>
+                {#if actions}
+                  <button
+                    class="beat-badge-x nodrag nopan"
+                    aria-label={`Unlink beat ${beat.title}`}
+                    onclick={() => unlinkBeat(beat.plotline_id, beat.beat_id)}
+                  >
+                    <i class="ti ti-x" aria-hidden="true"></i>
+                  </button>
+                {/if}
+              </span>
+            {/if}
+          {/each}
+          {#if hiddenBeats.length}
+            <span class="beat-badge beat-more" title={hiddenBeats.map((b) => b.title).join(", ")}
+              >+{hiddenBeats.length}</span
+            >
+          {/if}
+        </div>
       {/if}
-      <span
-        class="card-status"
-        class:hollow={pageStatus === "unwritten"}
-        style={statusColor ? `--status-color: ${statusColor}` : undefined}
-      >
-        <span class="status-dot" aria-hidden="true"></span>
-        {data.pageStatusLabel}
-      </span>
+      <div class="card-marks">
+        {#if data.plotlineName}
+          <!-- The plotline is just its dot (hollow when uncoloured); the name rides in the
+               tooltip + aria-label, so it stays legible by more than colour (#863) without
+               spending card width. -->
+          <span
+            class="card-plotline"
+            class:uncoloured={!accent}
+            role="img"
+            title={data.plotlineName}
+            aria-label={data.plotlineName}
+          >
+            <span class="plotline-dot" aria-hidden="true"></span>
+          </span>
+        {/if}
+        <!-- The status dot always; its label only when the status is NOT the default —
+             the exceptional states ("On the page", "Off the page") earn the words. -->
+        <span
+          class="card-status"
+          class:hollow={pageStatus === "unwritten"}
+          style={statusColor ? `--status-color: ${statusColor}` : undefined}
+          title={data.pageStatusLabel}
+          aria-label={data.pageStatusLabel}
+        >
+          <span class="status-dot" aria-hidden="true"></span>
+          {#if !data.pageStatusIsDefault}{data.pageStatusLabel}{/if}
+        </span>
+      </div>
     </div>
   </article>
 
@@ -630,13 +618,22 @@
     margin: 0;
     font-size: var(--fs-sm);
     font-weight: 600;
-    white-space: nowrap;
+    line-height: 1.3;
+  }
+  /* The title wraps up to two lines; the clamp sits on this inner block, not on the
+     button (line-clamp doesn't work on a <button>). */
+  .card-title-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
   }
   /* Click-to-rename affordance — the title look, but a real button (size/weight
      come from .card-title; reset button chrome and inherit the font family). */
   .card-title-btn {
+    display: block;
     text-align: left;
     border: none;
     background: transparent;
@@ -680,28 +677,32 @@
     background: var(--surface);
     color: var(--text);
   }
+  /* The synopsis IS the card (#2354): full size, primary colour, no clamp. The
+     estimate in plotBoardLayout sizes the card to it; an under-estimate (or a very
+     long synopsis) scrolls here instead of clipping. */
   .card-synopsis {
     margin: 0;
     flex: 1;
     min-height: 0;
-    font-size: var(--fs-xs);
-    line-height: 1.35;
-    color: var(--text-2);
-    overflow: hidden;
-    /* Clamp to a couple of lines — the card is a glance, not the editor. */
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
-    -webkit-box-orient: vertical;
+    font-size: var(--fs-md);
+    line-height: 1.45;
+    color: var(--text);
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    overflow-y: auto;
   }
-  /* The click-to-edit affordance reuses the synopsis look but is a real button. */
+  /* The click-to-edit affordance reuses the synopsis look but is a real button: reset
+     only the chrome + family/weight (NOT `font`, which would clobber the size above). */
   .card-synopsis-btn {
+    display: block;
+    width: 100%;
     text-align: left;
     border: none;
     background: transparent;
     padding: 0;
     cursor: text;
-    font: inherit;
+    font-family: inherit;
+    font-weight: inherit;
   }
   .card-synopsis-btn.empty {
     color: var(--text-3);
@@ -711,31 +712,14 @@
     flex: 1;
     min-height: 0;
     resize: none;
-    font-size: var(--fs-xs);
-    line-height: 1.35;
+    font-family: inherit;
+    font-size: var(--fs-md);
+    line-height: 1.45;
     color: var(--text);
     background: var(--panel);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-sm);
     padding: 3px 5px;
-  }
-  /* A pill segment (ADR-0080 slice 3b-ii): "Events" and "Changes" each get their own
-     labelled row, so a writer reads a plotline beat apart from a character-arc beat
-     without decoding colour alone. No divider above the FIRST segment — Amendment 1
-     §4 puts nothing between the synopsis and the first beat row; the uppercase label
-     is the only separator, same as it is between the two segments. */
-  .beat-seg {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .beat-seg-label {
-    padding-top: 2px;
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    color: var(--text-3);
   }
   /* Beat badges (Slice 5b): the beats this card fulfils, a wrapping chip row.
      A badge is tinted by its OWNING ARC's colour (usability pass), a colour axis
@@ -744,24 +728,14 @@
      with no colour keeps the neutral chip. The arc name rides in the tooltip; each
      badge carries an × to unlink (#824), revealed on hover. */
   .card-beats {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-wrap: wrap;
     gap: 3px;
-  }
-  /* Both pill segments (Events + Changes) share ONE bounded scroll region (ADR-0080
-     slice 3b-ii) so a card carrying both never overflows its fixed-height box — the two
-     segments together are taller than the old single beat row. `nowheel` (added in
-     markup) keeps the wheel from zooming the canvas; the synopsis above (flex:1,
-     min-height:0) yields the space. */
-  .beat-segments {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    /* Shrink-and-scroll within the fixed-height card (never grow past its content),
-       so both segments always fit inside the box — the synopsis (flex:1) takes the
-       slack, and a crowded beats region scrolls rather than overflowing. */
-    flex: 0 1 auto;
-    min-height: 0;
+    /* An interactive card lists every beat; a heavily-beated one scrolls here
+       (`nowheel` keeps the wheel off the canvas) rather than outgrowing its box. */
+    max-height: 100%;
     overflow-y: auto;
   }
   .beat-badge {
@@ -769,9 +743,9 @@
     align-items: center;
     gap: 2px;
     max-width: 100%;
-    padding: 0 4px 0 6px;
+    padding: 0 3px 0 5px;
     font-size: var(--fs-xs);
-    line-height: 1.5;
+    line-height: 1.4;
     color: var(--text-2);
     background: var(--surface);
     border: 1px solid var(--border);
@@ -904,22 +878,26 @@
     background: transparent;
     border-color: var(--text-3);
   }
-  /* Footer row (#863): the named plotline chip (left, elides) beside the status
-     (right), pinned to the card's bottom edge. */
+  /* Foot row (#2354): the beat pills wrap on the left, the plotline + status marks
+     sit right-aligned, pinned to the card's bottom edge. */
   .card-foot {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 8px;
     margin-top: auto;
+    min-height: 22px;
+  }
+  .card-marks {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    margin-left: auto;
+    min-height: 22px;
   }
   .card-plotline {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    flex: 1;
-    min-width: 0;
-    font-size: var(--fs-xs);
-    color: var(--text-2);
   }
   .plotline-dot {
     width: 7px;
@@ -931,11 +909,6 @@
   .card-plotline.uncoloured .plotline-dot {
     background: transparent;
     border: 1px solid var(--text-3);
-  }
-  .plotline-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   /* Rendered outside .plot-card so the card's overflow:hidden can't clip it. */
   .card-menu {

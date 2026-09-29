@@ -218,6 +218,18 @@ export function estPlotNodeHeight(beatCount: number): number {
 export const CONTAINER_PAD = 20; // inner padding between a box edge and its content
 export const CONTAINER_HEADER = 32; // the title-bar band at the top of a box
 export const CONTAINER_GAP = 24; // between sibling boxes / rows / acts
+// Auto-laid-out cards wrap into a grid this many cards wide (#2348) — a single
+// unwrapped row put the n-th loose card n card-widths away (card 40 ≈ 9400px).
+export const CARDS_PER_ROW = 5;
+const CARD_STEP_X = CARD_WIDTH + CARD_GAP_X;
+const CARD_STEP_Y = CARD_HEIGHT + CONTAINER_GAP;
+// The grid slot of the i-th auto-laid-out card, relative to its grid's top-left.
+const gridOffset = (i: number): BoardXY => ({
+  x: (i % CARDS_PER_ROW) * CARD_STEP_X,
+  y: Math.floor(i / CARDS_PER_ROW) * CARD_STEP_Y,
+});
+// The height a grid of `n` cards occupies, including the trailing gap to what follows.
+const gridHeight = (n: number): number => Math.ceil(n / CARDS_PER_ROW) * CARD_STEP_Y;
 
 // Base z-index for the interactive nodes (cards + plotlines), above their container
 // boxes (one z step per level, ADR-0094 §9, capped just below this). A node with an
@@ -269,6 +281,72 @@ const boxFromContent = (r: Rect): Box => ({
 });
 
 const rectOfBox = (b: Box): Rect => ({ minX: b.x, minY: b.y, maxX: b.x + b.w, maxY: b.y + b.h });
+
+// #2348: the boxes every OTHER node will occupy once `newId` is pinned. While a new
+// card is still unpinned it holds an auto-grid slot, and pinning it lets the other
+// unpinned cards close ranks — so free space must be read from the layout AFTER the
+// pin (the new node parked off-board), or a spot it frees gets refilled by a card
+// sliding back into it. `measured` supplies a rendered node's size where the layout
+// doesn't fix one (a plotline's variable height).
+export function occupiedAfterPin(
+  projection: PlotBoardProjection,
+  saved: Record<string, BoardXY>,
+  savedSizes: Record<string, BoardSize>,
+  newId: string,
+  measured: ReadonlyMap<string, { width?: number; height?: number } | undefined> = new Map(),
+): Box[] {
+  const parked = { ...saved, [newId]: { x: -1e6, y: -1e6 } };
+  return buildBoardNodes(projection, parked, savedSizes)
+    .filter((n) => n.id !== newId)
+    .map((n) => ({
+      x: n.position.x,
+      y: n.position.y,
+      w: n.width ?? measured.get(n.id)?.width ?? CARD_WIDTH,
+      h: n.height ?? measured.get(n.id)?.height ?? CARD_HEIGHT,
+    }));
+}
+
+// #2348: where a NEW node goes — near the centre of what the author is looking
+// at, not at the end of an ever-growing row. Returns the top-left for a node of
+// `size` as close to `center` as possible without overlapping (with a gap) any of
+// `occupied`: the centred spot first, then rings of card-sized steps around it.
+// Pure, so the placement is unit-tested (the SvelteFlow canvas is not headless-
+// testable); the caller supplies the view centre and the nodes on the board.
+export function freeSpotNear(
+  center: BoardXY,
+  size: { w: number; h: number },
+  occupied: readonly Box[],
+  maxRings = 12,
+): BoardXY {
+  const origin = { x: Math.round(center.x - size.w / 2), y: Math.round(center.y - size.h / 2) };
+  const fits = (at: BoardXY) =>
+    occupied.every(
+      (b) =>
+        at.x + size.w + CARD_GAP_X <= b.x ||
+        b.x + b.w + CARD_GAP_X <= at.x ||
+        at.y + size.h + CARD_GAP_X <= b.y ||
+        b.y + b.h + CARD_GAP_X <= at.y,
+    );
+  if (fits(origin)) return origin;
+  const stepX = size.w + CARD_GAP_X;
+  const stepY = size.h + CARD_GAP_X;
+  for (let ring = 1; ring <= maxRings; ring++) {
+    // Nearest candidates first within a ring: sort the ring's cells by distance.
+    const cells: BoardXY[] = [];
+    for (let dy = -ring; dy <= ring; dy++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+        cells.push({ x: origin.x + dx * stepX, y: origin.y + dy * stepY });
+      }
+    }
+    cells.sort((a, b) => Math.hypot(a.x - origin.x, a.y - origin.y) - Math.hypot(b.x - origin.x, b.y - origin.y));
+    const free = cells.find(fits);
+    if (free) return free;
+  }
+  // A board packed solid around the view: fall back to the centred spot (the
+  // author sees the new node on top and can drag it) rather than somewhere far.
+  return origin;
+}
 
 // --- Container lock (#873): the drag extent a card is confined to. Kept pure +
 // exported so it is unit-tested (the SvelteFlow drag that consumes it is not
@@ -351,28 +429,38 @@ export function buildBoardNodes(
 
   // --- Derived (pre-drag) positions: a tidy, non-overlapping default layout that a
   // pinned position then overrides. Top-level boxes stack top-to-bottom; inside a
-  // box, its child boxes stack first, then a row of its own direct cards. `place`
+  // box, its child boxes stack first, then a grid of its own direct cards. `place`
   // returns the y below the box plus the gap to whatever follows it.
+  // #2348: only UNPINNED cards take a grid slot — a card the author dragged keeps
+  // its own spot, so it must not also hold a slot open (a hole in the grid).
+  const unpinned = (card: { id: string }) => !(card.id in saved);
   const derived = new Map<string, BoardXY>();
   const place = (container: Container, left: number, top: number): number => {
     const contentX = left + CONTAINER_PAD;
     let cursorY = top + CONTAINER_HEADER + CONTAINER_PAD;
     for (const child of childrenOf.get(container.id) ?? []) cursorY = place(child, contentX, cursorY);
-    const directCards = cardsByInner.get(container.id) ?? [];
-    directCards.forEach((card, i) => derived.set(card.id, { x: contentX + i * (CARD_WIDTH + CARD_GAP_X), y: cursorY }));
-    if (directCards.length) cursorY += CARD_HEIGHT + CONTAINER_GAP;
+    const autoCards = (cardsByInner.get(container.id) ?? []).filter(unpinned);
+    autoCards.forEach((card, i) => {
+      const at = gridOffset(i);
+      derived.set(card.id, { x: contentX + at.x, y: cursorY + at.y });
+    });
+    cursorY += gridHeight(autoCards.length);
     // The last child already advanced cursorY by a trailing CONTAINER_GAP, which
     // serves as the gap to the next box; add this box's own bottom padding to it.
     return cursorY + CONTAINER_PAD;
   };
   let actY = 0;
   for (const top of tops) actY = place(top, 0, actY);
-  // Homeless cards: a loose row below every box, outside any box (they float).
-  homeless.forEach((card, i) => derived.set(card.id, { x: i * (CARD_WIDTH + CARD_GAP_X), y: actY + CONTAINER_HEADER }));
+  // Homeless cards: a loose grid below every box, outside any box (they float).
+  const homelessAuto = homeless.filter(unpinned);
+  homelessAuto.forEach((card, i) => {
+    const at = gridOffset(i);
+    derived.set(card.id, { x: at.x, y: actY + CONTAINER_HEADER + at.y });
+  });
 
-  // Every projection card is assigned a derived slot above (in its container or
-  // homeless), so `derived.get` is non-null for any real card id — the `!` states that
-  // invariant rather than silently defaulting a missing card to the origin.
+  // Every projection card is either pinned (`saved`) or given a derived slot above
+  // (in its container or homeless), so one of the two is non-null for any real card
+  // id — the `!` states that invariant rather than silently defaulting to the origin.
   const positionOf = (id: string): BoardXY => saved[id] ?? derived.get(id)!;
 
   // --- Box geometry from FINAL positions (pins applied), computed inner-first so a
@@ -506,8 +594,7 @@ export function buildBoardNodes(
   // Once dragged its position persists like a card's (same saved-override model). The
   // node id IS the plotline id; card + plotline ids are distinct, so one `saved` map
   // (keyed by node id) holds both without collision.
-  const plotlineBandY =
-    actY + CONTAINER_HEADER + (homeless.length ? CARD_HEIGHT + CONTAINER_GAP : 0) + CONTAINER_GAP;
+  const plotlineBandY = actY + CONTAINER_HEADER + gridHeight(homelessAuto.length) + CONTAINER_GAP;
   projection.plotlines.forEach((line, i) => {
     nodes.push({
       id: line.id,

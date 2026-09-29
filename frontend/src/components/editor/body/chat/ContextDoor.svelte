@@ -20,10 +20,13 @@
   import {
     DECLARED_OVER_HINT,
     LEFT_OUT_HINT,
+    NOT_SENT_GLYPH,
+    REACH_HINT,
     declaredOverBudget,
     declaredOverLine,
     loreFitSummary,
     loreSourceLabel,
+    reachSkipped,
   } from "@/lib/chat/loreFit";
   import { isPromotedEntry, journalEntityCount, journalEntryKey } from "@/lib/chat/journal";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
@@ -125,7 +128,12 @@
   // (a budget of 0 is "declared only" — never "over"; `declaredOverBudget`).
   const leftOut = $derived(loreFit?.left_out ?? []);
   const declaredOver = $derived(loreFit != null && declaredOverBudget(loreFit));
-  const showLeftOut = $derived(leftOut.length > 0 || declaredOver);
+  // #2341: entries the turn did not follow because the assistant's Lore reach
+  // is Named only — a different reason from the budget, shown as its own group.
+  const notFollowed = $derived(reachSkipped(loreFit, journal));
+  const notFollowedIds = $derived(new Set(notFollowed.map((e) => e.entry_id)));
+  const leftOutIds = $derived(new Set(leftOut.map((e) => e.id)));
+  const showLeftOut = $derived(leftOut.length > 0 || notFollowed.length > 0 || declaredOver);
   const leftOutTokens = $derived(leftOut.reduce((sum, e) => sum + e.tokens, 0));
   // One title rule for the row and the panel head: the roster's live title,
   // else the report's snapshot, else the id (`||`, so an empty title falls through).
@@ -253,12 +261,10 @@
            the send in the door's ordinary register, not a warning. -->
       <button type="button" class="ctx-row" onclick={() => drill({ kind: "section", key: "leftout" })}>
         <span class="ctx-row-label">Left out</span>
-        <span class="ctx-row-sub">
-          {#if leftOut.length > 0}
-            {leftOut.length} {leftOut.length === 1 ? "entry" : "entries"} · {formatTokens(leftOutTokens)} tok
-          {:else}
-            declared over budget
-          {/if}
+        <!-- Separators are explicit strings: Svelte trims whitespace at the
+             start of a block, which would glue them to their neighbours. -->
+        <span class="ctx-row-sub" data-testid="left-out-summary">
+          {#if leftOut.length > 0}<i class="ti {NOT_SENT_GLYPH.budget}" aria-hidden="true"></i>{`${leftOut.length} ${leftOut.length === 1 ? "entry" : "entries"} · ${formatTokens(leftOutTokens)} tok`}{/if}{#if leftOut.length > 0 && notFollowed.length > 0}{" · "}{/if}{#if notFollowed.length > 0}<i class="ti {NOT_SENT_GLYPH.reach}" aria-hidden="true"></i>{`${notFollowed.length} not followed`}{/if}{#if leftOut.length === 0 && notFollowed.length === 0}declared over budget{/if}
         </span>
         <GroupCaret size="xs" collapsed />
       </button>
@@ -346,8 +352,18 @@
          Amendment 1). The line says by which route, except the plain case
          of the author's own first mention. -->
     {#each journal as entry, i (journalEntryKey(entry))}
-      <div class="cbv-ctx-kv-line">
-        {entry.title || entry.entry_id}{#if entry.added_at_turn != null} · turn {entry.added_at_turn}{/if}{#if entry.source && entry.source !== "user_message"} · {loreSourceLabel(entry.source)}{:else if isPromotedEntry(journal, i)} · named{/if}
+      <!-- #2341: an entry the last send did not include carries its reason's
+           mark, so the list stops implying everything went out. -->
+      {@const notSent = leftOutIds.has(entry.entry_id)
+        ? "budget"
+        : notFollowedIds.has(entry.entry_id) && entry.source === "depth1_expansion"
+          ? "reach"
+          : null}
+      <div class="cbv-ctx-kv-line" data-not-sent={notSent ?? undefined}>
+        {#if notSent}<i
+            class="ti {NOT_SENT_GLYPH[notSent]} ctx-not-sent"
+            aria-label={notSent === "budget" ? "not sent: over the lore budget" : "not sent: Lore reach is Named only"}
+          ></i>{/if}{entry.title || entry.entry_id}{#if entry.added_at_turn != null}{" · turn "}{entry.added_at_turn}{/if}{#if entry.source && entry.source !== "user_message"}{" · "}{loreSourceLabel(entry.source)}{:else if isPromotedEntry(journal, i)}{" · named"}{/if}
       </div>
     {/each}
     {#each changedPicks as pick (pick.id)}
@@ -364,14 +380,34 @@
     {#if declaredOver}
       <div class="cbv-ctx-kv-line" title={DECLARED_OVER_HINT}>{declaredOverLine(loreFit)}</div>
     {/if}
-    {#each leftOut as entry (entry.id)}
-      <button type="button" class="ctx-row" onclick={() => drillLeftOut(entry.id)}>
-        <span class="ctx-row-label">{leftOutTitle(entry.id)}</span>
-        <span class="ctx-row-sub">{loreSourceLabel(entry.source)} · {formatTokens(entry.tokens)} tok</span>
-        <GroupCaret size="xs" collapsed />
-      </button>
-    {/each}
-    <p class="cbv-meta ctx-hint">{LEFT_OUT_HINT}</p>
+    <!-- #2341: two groups, one per reason, each under its own mark — the
+         budget's (sized: size is what made it miss) and Named-only reach's. -->
+    {#if leftOut.length > 0}
+      <div class="ctx-group-head" data-testid="left-out-budget">
+        <i class="ti {NOT_SENT_GLYPH.budget}" aria-hidden="true"></i>Over the lore budget
+      </div>
+      {#each leftOut as entry (entry.id)}
+        <button type="button" class="ctx-row" onclick={() => drillLeftOut(entry.id)}>
+          <span class="ctx-row-label">{leftOutTitle(entry.id)}</span>
+          <span class="ctx-row-sub">{loreSourceLabel(entry.source)} · {formatTokens(entry.tokens)} tok</span>
+          <GroupCaret size="xs" collapsed />
+        </button>
+      {/each}
+      <p class="cbv-meta ctx-hint">{LEFT_OUT_HINT}</p>
+    {/if}
+    {#if notFollowed.length > 0}
+      <div class="ctx-group-head" data-testid="left-out-reach">
+        <i class="ti {NOT_SENT_GLYPH.reach}" aria-hidden="true"></i>Not followed (Named-only reach)
+      </div>
+      {#each notFollowed as entry (entry.entry_id)}
+        <button type="button" class="ctx-row" onclick={() => drillLeftOut(entry.entry_id)}>
+          <span class="ctx-row-label">{entry.title || leftOutTitle(entry.entry_id)}</span>
+          <span class="ctx-row-sub">{loreSourceLabel(entry.source ?? "")}{#if entry.added_at_turn != null}{" · turn "}{entry.added_at_turn}{/if}</span>
+          <GroupCaret size="xs" collapsed />
+        </button>
+      {/each}
+      <p class="cbv-meta ctx-hint">{REACH_HINT}</p>
+    {/if}
   {:else if current.kind === "entry"}
     {@const block = tierBlocks.find((b) => b.label === current.tierLabel)}
     {@const xml = block?.entry_xml?.[current.entryId]}
@@ -529,6 +565,21 @@
   .cbv-meta {
     margin: 0;
     font-size: var(--fs-sm);
+    color: var(--text-3);
+  }
+  /* #2341: a Left out group's heading — the reason, under its mark. The door's
+     ordinary register: a routine fact about the send, not a warning. */
+  .ctx-group-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    margin-top: var(--sp-2);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--text-2);
+  }
+  .ctx-not-sent {
+    margin-right: var(--sp-1);
     color: var(--text-3);
   }
   .ctx-hint {

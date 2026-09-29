@@ -51,18 +51,85 @@ export function leftOutChipTitle(entry: LoreFitEntry): string {
   return `Detected, but left out of this send: over the lore budget (${formatTokensPrecise(entry.tokens)} tok).`;
 }
 
-// #2212: why a journal chip should render as "not sent" — the budget dropped
-// it, or the assistant's Lore reach is "named" (so a one-hop entry was
-// noticed but never actually placed in the send). Null when the entry was
-// sent, so the chip stays in its ordinary (sent) style.
-export function notSentReason(fit: LoreFit | null, entry: ChatSessionJournalEntry): string | null {
-  const leftOut = leftOutEntry(fit, entry.entry_id);
-  if (leftOut) return leftOutChipTitle(leftOut);
+// #2212 / #2341: WHY a journal entry was not sent this turn — two different
+// situations that must read differently at a glance:
+//  - "budget": it was offered to the fit but didn't fit the lore budget (it is
+//    in `left_out`, with its size);
+//  - "reach": it was never offered — this assistant's Lore reach is Named only,
+//    so a one-hop mention is noticed but not followed.
+// Null when the entry was sent, so the chip stays in its ordinary (sent) style.
+export type NotSentKind = "budget" | "reach";
+
+// `turnJournal` (the same turn's journal lines): a hop line whose entry the turn
+// ALSO named was sent through that named route, so it is not "not followed" —
+// the same promotion rule `reachSkipped` applies, so chip and door agree.
+export function notSentKind(
+  fit: LoreFit | null,
+  entry: ChatSessionJournalEntry,
+  turnJournal: readonly ChatSessionJournalEntry[] = [],
+): NotSentKind | null {
+  if (leftOutEntry(fit, entry.entry_id)) return "budget";
   if (fit?.expansion === "named" && entry.source === "depth1_expansion") {
-    return "Noticed, but not sent: this assistant's Lore reach is Named only.";
+    const namedToo = turnJournal.some((e) => e.entry_id === entry.entry_id && isNamedSource(e.source));
+    return namedToo ? null : "reach";
   }
   return null;
 }
+
+// The mark each reason carries wherever a not-sent entry shows (transcript chip,
+// the Context door's Left out groups and its Auto-added list) — one glyph per
+// reason, so the two never look alike (design-language.md annotation table).
+export const NOT_SENT_GLYPH: Record<NotSentKind, string> = {
+  budget: "ti-scale",
+  reach: "ti-unlink",
+};
+
+export const REACH_CHIP_TITLE = "Noticed, but not sent: this assistant's Lore reach is Named only.";
+
+// The chip's tooltip — why the model didn't receive it.
+export function notSentReason(
+  fit: LoreFit | null,
+  entry: ChatSessionJournalEntry,
+  turnJournal: readonly ChatSessionJournalEntry[] = [],
+): string | null {
+  const kind = notSentKind(fit, entry, turnJournal);
+  if (kind === "budget") return leftOutChipTitle(leftOutEntry(fit, entry.entry_id)!);
+  if (kind === "reach") return REACH_CHIP_TITLE;
+  return null;
+}
+
+// Sources that NAME an entry (the author's message, the prompt, scene prose) —
+// everything but the two hops. A journal line with no source is the author's
+// own mention. Mirrors the backend's NAMED_SOURCES (lore_budget.py).
+const HOP_SOURCES = new Set<string>(["depth1_expansion", "structural_hop"]);
+function isNamedSource(source: string | undefined | null): boolean {
+  return !source || !HOP_SOURCES.has(source);
+}
+
+/** #2341: the journal entries this turn did NOT follow because the assistant's
+ * Lore reach is Named only — one-hop mentions that were never also named (a
+ * later named mention promotes the entry, and then it is sent) and that the
+ * budget didn't already account for. First occurrence per entry, journal order.
+ * Empty unless the turn's reach is "named". */
+export function reachSkipped(
+  fit: LoreFit | null,
+  journal: readonly ChatSessionJournalEntry[],
+): ChatSessionJournalEntry[] {
+  if (fit?.expansion !== "named") return [];
+  const named = new Set(journal.filter((e) => isNamedSource(e.source)).map((e) => e.entry_id));
+  const seen = new Set<string>();
+  const out: ChatSessionJournalEntry[] = [];
+  for (const entry of journal) {
+    if (entry.source !== "depth1_expansion") continue;
+    if (named.has(entry.entry_id) || seen.has(entry.entry_id) || leftOutEntry(fit, entry.entry_id)) continue;
+    seen.add(entry.entry_id);
+    out.push(entry);
+  }
+  return out;
+}
+
+export const REACH_HINT =
+  "Lore the app noticed through a mention inside another entry but did not follow, because this assistant's Lore reach is Named only. Name the entry in your message or the prompt to send it, or set the assistant's Lore reach to One hop.";
 
 export const LEFT_OUT_HINT =
   "Lore the app added on its own that did not fit this turn's budget. Pick an entry in the prompt's Lore input, set its context policy to Always include, or raise the assistant's lore budget.";

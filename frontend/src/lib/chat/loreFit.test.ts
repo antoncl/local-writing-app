@@ -6,7 +6,9 @@ import {
   lastReportedTurn,
   leftOutSegment,
   loreSourceLabel,
+  notSentKind,
   notSentReason,
+  reachSkipped,
 } from "./loreFit";
 
 const FIT: LoreFit = { budget_tokens: 16000, used_tokens: 15800, declared_tokens: 2100, kept: 21, left_out: [] };
@@ -66,5 +68,44 @@ describe("loreFit", () => {
     const entry: ChatSessionJournalEntry = { entry_id: "x", source: "depth1_expansion" };
     expect(notSentReason({ ...FIT, expansion: "one_hop" }, entry)).toBeNull();
     expect(notSentReason(FIT, entry)).toBeNull();
+  });
+});
+
+// #2341: the reason as a KIND (so the UI can mark each differently), and the
+// entries a Named-only turn did not follow.
+describe("notSentKind / reachSkipped (#2341)", () => {
+  const fit = (over: Partial<LoreFit> = {}): LoreFit => ({
+    budget_tokens: 1000,
+    used_tokens: 900,
+    declared_tokens: 0,
+    kept: 1,
+    left_out: [],
+    ...over,
+  });
+  const j = (entry_id: string, source?: string) =>
+    ({ entry_id, title: entry_id, source }) as ChatSessionJournalEntry;
+
+  it("names the budget when the entry is in left_out, else reach for a Named-only hop", () => {
+    const named = fit({ expansion: "named", left_out: [{ id: "a", title: "a", source: "user_message", tokens: 5 }] });
+    expect(notSentKind(named, j("a", "user_message"))).toBe("budget");
+    expect(notSentKind(named, j("b", "depth1_expansion"))).toBe("reach");
+    expect(notSentKind(named, j("c", "user_message"))).toBeNull();
+    expect(notSentKind(fit({ expansion: "one_hop" }), j("b", "depth1_expansion"))).toBeNull();
+    // The same turn also NAMED it: sent via that route — not "not followed".
+    expect(notSentKind(named, j("b", "depth1_expansion"), [j("b", "depth1_expansion"), j("b", "user_message")])).toBeNull();
+  });
+
+  it("lists Named-only hops not followed: once each, never a promoted or budget-dropped one", () => {
+    const f = fit({ expansion: "named", left_out: [{ id: "dropped", title: "d", source: "depth1_expansion", tokens: 5 }] });
+    const journal = [
+      j("hop", "depth1_expansion"),
+      j("hop", "depth1_expansion"),
+      j("promoted", "depth1_expansion"),
+      j("promoted", "user_message"),
+      j("dropped", "depth1_expansion"),
+      j("named"),
+    ];
+    expect(reachSkipped(f, journal).map((e) => e.entry_id)).toEqual(["hop"]);
+    expect(reachSkipped(fit({ expansion: "one_hop" }), journal)).toEqual([]);
   });
 });

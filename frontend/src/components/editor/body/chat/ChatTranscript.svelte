@@ -9,13 +9,16 @@
 -->
 <script lang="ts">
   import { renderChatContent, containsMath, ensureKatexLoaded } from "@/lib/utils/chatMessageRender";
-  import { formatCostEur } from "@/lib/utils/money";
+  import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import {
     DECLARED_OVER_HINT,
     LEFT_OUT_HINT,
+    NOT_SENT_GLYPH,
     declaredOverBudget,
     declaredOverLine,
+    leftOutEntry,
     leftOutSegment,
+    notSentKind,
     notSentReason,
   } from "@/lib/chat/loreFit";
   import { HISTORY_FIT_HINT, droppedRoundsSegment } from "@/lib/chat/historyFit";
@@ -128,17 +131,20 @@
         <div class="cbv-journal-added" title="Lore auto-detected from this turn.">
           <span class="cbv-journal-label">Auto-added context:</span>
           {#each message.journal_added as entry (journalEntryKey(entry))}
-            <!-- #2206/#2212: detected but not actually sent — either the budget
-                 left it out, or this assistant's Lore reach is Named only, so
-                 the hop that found it was never taken. Quiet register (ADR-0086
-                 §5: a routine fact, not a failure). -->
-            {@const reason = notSentReason(fit, entry)}
+            <!-- #2206/#2212: detected but not actually sent — hollow and muted,
+                 in the quiet register (ADR-0086 §5: a routine fact, not a
+                 failure). #2341: the two reasons read apart at a glance — the
+                 budget's scale mark with the entry's size (what made it miss),
+                 or Named-only reach's unlink mark (a mention not followed). -->
+            {@const kind = notSentKind(fit, entry, message.journal_added)}
+            {@const size = kind === "budget" ? leftOutEntry(fit, entry.entry_id)?.tokens : undefined}
             <span
               class="cbv-journal-chip"
-              class:cbv-journal-chip--left-out={reason != null}
-              title={reason ?? undefined}
-              data-testid={reason ? "journal-chip-left-out" : "journal-chip"}
-            >{entry.title || entry.entry_id}</span>
+              class:cbv-journal-chip--left-out={kind != null}
+              title={notSentReason(fit, entry, message.journal_added) ?? undefined}
+              data-testid={kind ? "journal-chip-left-out" : "journal-chip"}
+              data-not-sent={kind ?? undefined}
+            >{#if kind}<i class="ti {NOT_SENT_GLYPH[kind]}" aria-hidden="true"></i>{/if}{entry.title || entry.entry_id}{#if size != null}<span class="cbv-journal-chip-size">{" · "}{formatTokens(size)}</span>{/if}</span>
           {/each}
         </div>
       {/if}
@@ -259,7 +265,10 @@
     background: transparent; border-style: dashed; border-color: var(--border-strong);
     color: var(--text-3); font-weight: 500;
   }
-  .cbv-journal-chip--left-out::before { content: "○"; }
+  /* #2341: a not-sent chip carries its reason's glyph (rendered inline)
+     instead of the sent chip's ✚. */
+  .cbv-journal-chip--left-out::before { content: none; }
+  .cbv-journal-chip-size { font-variant-numeric: tabular-nums; }
 
   /* 4c · per-turn usage meta. */
   .cbv-turn-meta {

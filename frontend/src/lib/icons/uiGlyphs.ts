@@ -52,6 +52,8 @@ export const UI_GLYPHS: string[] = [
   "plus",
   "power",
   "robot",
+  // #2341: the "over the lore budget" not-sent mark (loreFit.NOT_SENT_GLYPH).
+  "scale",
   "seedling",
   "settings",
   "stack-2",

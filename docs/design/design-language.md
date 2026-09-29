@@ -250,6 +250,8 @@ affordances.
 | `⤳` | **mutated** — changed by a mutation marker at this point in the manuscript (violet, `--mutation-color`) |
 | `ti-arrow-bar-to-right` | **mutation ends here** — the interval closes at this position |
 | `ti-versions` | **overridden** — this value comes from a layer override, not from inherited canon |
+| `ti-scale` | **not sent: over the lore budget** — detected lore that didn't fit the turn's budget; shown with the entry's size, the thing that made it miss (#2341) |
+| `ti-unlink` | **not sent: not followed** — lore noticed through a one-hop mention the assistant doesn't follow, its Lore reach being Named only (#2341) |
 
 Two rules keep annotations legible where several can land on one row:
 

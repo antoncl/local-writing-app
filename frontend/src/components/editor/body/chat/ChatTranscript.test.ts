@@ -286,4 +286,36 @@ describe("ChatTranscript", () => {
     expect(hop.getAttribute("title")).toContain("Lore reach is Named only");
     expect(screen.getByTestId("journal-chip")).toHaveTextContent("The Regent");
   });
+
+  // #2341: the two "not sent" reasons read apart at a glance — the budget's
+  // scale mark with the entry's size, Named-only reach's unlink mark without.
+  it("gives the budget and the Named-only reasons different marks", () => {
+    const history = [
+      {
+        role: "assistant",
+        content: "The Regent does.",
+        journal_added: [
+          { entry_id: "lore_big", title: "The Vale", source: "user_message" },
+          { entry_id: "lore_hop", title: "The Weir", source: "depth1_expansion" },
+        ],
+        lore_fit: {
+          budget_tokens: 1000,
+          used_tokens: 900,
+          declared_tokens: 0,
+          kept: 1,
+          left_out: [{ id: "lore_big", title: "The Vale", source: "user_message", tokens: 1400 }],
+          expansion: "named",
+        },
+      },
+    ] as ChatMessage[];
+    render(ChatTranscript, { chatHistory: history, chatRunning: false });
+    const [budget, reach] = screen.getAllByTestId("journal-chip-left-out");
+    expect(budget.dataset.notSent).toBe("budget");
+    expect(budget.querySelector("i.ti-scale")).not.toBeNull();
+    expect(budget).toHaveTextContent("The Vale · 1.4k");
+    expect(reach.dataset.notSent).toBe("reach");
+    expect(reach.querySelector("i.ti-unlink")).not.toBeNull();
+    expect(reach.querySelector("i.ti-scale")).toBeNull();
+    expect(reach.textContent?.trim()).toBe("The Weir");
+  });
 });

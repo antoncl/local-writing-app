@@ -230,6 +230,64 @@ describe("ContextDoor", () => {
   };
   const XML_C = '<place id="lore_c" name="Keros\'s tolls">…C…</place>';
 
+  // #2341: the budget and Named-only reach are two reasons, shown as two groups
+  // under their own marks — and the Auto-added list marks what wasn't sent.
+  it("separates 'over the lore budget' from 'not followed (Named-only reach)'", async () => {
+    const namedFit: LoreFit = {
+      ...LEFT_OUT_FIT,
+      left_out: [LEFT_OUT_FIT.left_out[0]],
+      expansion: "named",
+    };
+    const journal = [
+      { entry_id: "lore_c", title: "Keros's tolls", source: "depth1_expansion", added_at_turn: 1 },
+      { entry_id: "lore_hop", title: "The Weir", source: "depth1_expansion", added_at_turn: 2 },
+      { entry_id: "lore_sent", title: "The Regent", source: "user_message", added_at_turn: 2 },
+    ] as ChatSessionJournalEntry[];
+    render(ContextDoor, { ...baseProps, loreFit: namedFit, journal });
+
+    // Root: both reasons counted, each under its own mark.
+    const leftOutRow = screen.getByText("Left out").closest("button")!;
+    expect(leftOutRow).toHaveTextContent(/1 entry · 900 tok/);
+    expect(leftOutRow).toHaveTextContent(/1 not followed/);
+    expect(leftOutRow.querySelector("i.ti-scale")).not.toBeNull();
+    expect(leftOutRow.querySelector("i.ti-unlink")).not.toBeNull();
+
+    await fireEvent.click(leftOutRow);
+    const budget = screen.getByTestId("left-out-budget");
+    const reach = screen.getByTestId("left-out-reach");
+    expect(budget).toHaveTextContent("Over the lore budget");
+    expect(budget.querySelector("i.ti-scale")).not.toBeNull();
+    expect(reach).toHaveTextContent("Not followed (Named-only reach)");
+    expect(reach.querySelector("i.ti-unlink")).not.toBeNull();
+    // Keros's tolls sits under the budget; The Weir under reach, after it.
+    const weir = screen.getByText("The Weir");
+    expect(reach.compareDocumentPosition(weir) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText(/one hop · mention · turn 2/)).toBeInTheDocument();
+    expect(screen.getAllByText("Keros's tolls")).toHaveLength(1);
+    expect(screen.getByText(/Lore reach is Named only/)).toBeInTheDocument();
+  });
+
+  it("marks the Auto-added lines that were not sent, by reason", async () => {
+    const namedFit: LoreFit = { ...LEFT_OUT_FIT, left_out: [LEFT_OUT_FIT.left_out[0]], expansion: "named" };
+    const journal = [
+      { entry_id: "lore_c", title: "Keros's tolls", source: "depth1_expansion", added_at_turn: 1 },
+      { entry_id: "lore_hop", title: "The Weir", source: "depth1_expansion", added_at_turn: 2 },
+      { entry_id: "lore_sent", title: "The Regent", source: "user_message", added_at_turn: 2 },
+    ] as ChatSessionJournalEntry[];
+    const { container } = render(ContextDoor, { ...baseProps, loreFit: namedFit, journal });
+    await fireEvent.click(screen.getByText("Auto-added this conversation"));
+    const lines = [...container.querySelectorAll(".cbv-ctx-kv-line")] as HTMLElement[];
+    const lineFor = (title: string) => lines.find((l) => l.textContent?.includes(title))!;
+    expect(lineFor("Keros's tolls").dataset.notSent).toBe("budget");
+    expect(lineFor("Keros's tolls").querySelector("i.ti-scale")).not.toBeNull();
+    expect(lineFor("The Weir").dataset.notSent).toBe("reach");
+    expect(lineFor("The Weir").querySelector("i.ti-unlink")).not.toBeNull();
+    expect(lineFor("The Regent").dataset.notSent).toBeUndefined();
+    // The separators keep their leading space (Svelte trims whitespace at the
+    // start of an {#if} block, which glued "· turn" to the title).
+    expect(lineFor("The Weir").textContent?.trim()).toBe("The Weir · turn 2 · one hop · mention");
+  });
+
   it("shows no Left out row when the fit left nothing out and the declared set fits", () => {
     const fitted: LoreFit = { ...LEFT_OUT_FIT, left_out: [], declared_tokens: 100 };
     render(ContextDoor, { ...baseProps, loreFit: fitted });

@@ -247,8 +247,7 @@ describe("ContextDoor", () => {
 
     // Root: both reasons counted, each under its own mark.
     const leftOutRow = screen.getByText("Left out").closest("button")!;
-    expect(leftOutRow).toHaveTextContent(/1 entry · 900 tok/);
-    expect(leftOutRow).toHaveTextContent(/1 not followed/);
+    expect(screen.getByTestId("left-out-summary").textContent?.trim()).toBe("1 entry · 900 tok · 1 not followed");
     expect(leftOutRow.querySelector("i.ti-scale")).not.toBeNull();
     expect(leftOutRow.querySelector("i.ti-unlink")).not.toBeNull();
 

@@ -91,6 +91,8 @@ describe("notSentKind / reachSkipped (#2341)", () => {
     expect(notSentKind(named, j("b", "depth1_expansion"))).toBe("reach");
     expect(notSentKind(named, j("c", "user_message"))).toBeNull();
     expect(notSentKind(fit({ expansion: "one_hop" }), j("b", "depth1_expansion"))).toBeNull();
+    // The same turn also NAMED it: sent via that route — not "not followed".
+    expect(notSentKind(named, j("b", "depth1_expansion"), [j("b", "depth1_expansion"), j("b", "user_message")])).toBeNull();
   });
 
   it("lists Named-only hops not followed: once each, never a promoted or budget-dropped one", () => {

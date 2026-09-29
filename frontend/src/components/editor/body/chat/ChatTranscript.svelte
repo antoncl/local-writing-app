@@ -136,12 +136,12 @@
                  failure). #2341: the two reasons read apart at a glance — the
                  budget's scale mark with the entry's size (what made it miss),
                  or Named-only reach's unlink mark (a mention not followed). -->
-            {@const kind = notSentKind(fit, entry)}
+            {@const kind = notSentKind(fit, entry, message.journal_added)}
             {@const size = kind === "budget" ? leftOutEntry(fit, entry.entry_id)?.tokens : undefined}
             <span
               class="cbv-journal-chip"
               class:cbv-journal-chip--left-out={kind != null}
-              title={notSentReason(fit, entry) ?? undefined}
+              title={notSentReason(fit, entry, message.journal_added) ?? undefined}
               data-testid={kind ? "journal-chip-left-out" : "journal-chip"}
               data-not-sent={kind ?? undefined}
             >{#if kind}<i class="ti {NOT_SENT_GLYPH[kind]}" aria-hidden="true"></i>{/if}{entry.title || entry.entry_id}{#if size != null}<span class="cbv-journal-chip-size">{" · "}{formatTokens(size)}</span>{/if}</span>

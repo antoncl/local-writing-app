@@ -60,9 +60,19 @@ export function leftOutChipTitle(entry: LoreFitEntry): string {
 // Null when the entry was sent, so the chip stays in its ordinary (sent) style.
 export type NotSentKind = "budget" | "reach";
 
-export function notSentKind(fit: LoreFit | null, entry: ChatSessionJournalEntry): NotSentKind | null {
+// `turnJournal` (the same turn's journal lines): a hop line whose entry the turn
+// ALSO named was sent through that named route, so it is not "not followed" —
+// the same promotion rule `reachSkipped` applies, so chip and door agree.
+export function notSentKind(
+  fit: LoreFit | null,
+  entry: ChatSessionJournalEntry,
+  turnJournal: readonly ChatSessionJournalEntry[] = [],
+): NotSentKind | null {
   if (leftOutEntry(fit, entry.entry_id)) return "budget";
-  if (fit?.expansion === "named" && entry.source === "depth1_expansion") return "reach";
+  if (fit?.expansion === "named" && entry.source === "depth1_expansion") {
+    const namedToo = turnJournal.some((e) => e.entry_id === entry.entry_id && isNamedSource(e.source));
+    return namedToo ? null : "reach";
+  }
   return null;
 }
 
@@ -77,8 +87,12 @@ export const NOT_SENT_GLYPH: Record<NotSentKind, string> = {
 export const REACH_CHIP_TITLE = "Noticed, but not sent: this assistant's Lore reach is Named only.";
 
 // The chip's tooltip — why the model didn't receive it.
-export function notSentReason(fit: LoreFit | null, entry: ChatSessionJournalEntry): string | null {
-  const kind = notSentKind(fit, entry);
+export function notSentReason(
+  fit: LoreFit | null,
+  entry: ChatSessionJournalEntry,
+  turnJournal: readonly ChatSessionJournalEntry[] = [],
+): string | null {
+  const kind = notSentKind(fit, entry, turnJournal);
   if (kind === "budget") return leftOutChipTitle(leftOutEntry(fit, entry.entry_id)!);
   if (kind === "reach") return REACH_CHIP_TITLE;
   return null;

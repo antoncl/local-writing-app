@@ -261,19 +261,10 @@
            the send in the door's ordinary register, not a warning. -->
       <button type="button" class="ctx-row" onclick={() => drill({ kind: "section", key: "leftout" })}>
         <span class="ctx-row-label">Left out</span>
-        <span class="ctx-row-sub">
-          {#if leftOut.length > 0}
-            <i class="ti {NOT_SENT_GLYPH.budget}" aria-hidden="true"></i>
-            {leftOut.length} {leftOut.length === 1 ? "entry" : "entries"} · {formatTokens(leftOutTokens)} tok
-          {/if}
-          {#if notFollowed.length > 0}
-            {#if leftOut.length > 0}·{/if}
-            <i class="ti {NOT_SENT_GLYPH.reach}" aria-hidden="true"></i>
-            {notFollowed.length} not followed
-          {/if}
-          {#if leftOut.length === 0 && notFollowed.length === 0}
-            declared over budget
-          {/if}
+        <!-- Separators are explicit strings: Svelte trims whitespace at the
+             start of a block, which would glue them to their neighbours. -->
+        <span class="ctx-row-sub" data-testid="left-out-summary">
+          {#if leftOut.length > 0}<i class="ti {NOT_SENT_GLYPH.budget}" aria-hidden="true"></i>{`${leftOut.length} ${leftOut.length === 1 ? "entry" : "entries"} · ${formatTokens(leftOutTokens)} tok`}{/if}{#if leftOut.length > 0 && notFollowed.length > 0}{" · "}{/if}{#if notFollowed.length > 0}<i class="ti {NOT_SENT_GLYPH.reach}" aria-hidden="true"></i>{`${notFollowed.length} not followed`}{/if}{#if leftOut.length === 0 && notFollowed.length === 0}declared over budget{/if}
         </span>
         <GroupCaret size="xs" collapsed />
       </button>

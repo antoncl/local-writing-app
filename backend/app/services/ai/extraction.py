@@ -139,6 +139,11 @@ def render_extraction_envelope(
         if body_allowed
         else '{"fields": [{"field": "<field id>", "value": <value>}]}'
     )
+    written_out = (
+        "a field's (or the body's) complete final text"
+        if body_allowed
+        else "a field's complete final text"
+    )
     lines = [
         "Extract the final result of the conversation above now, exactly as the "
         "instructions describe. Reply with ONLY a JSON object, with no preamble, "
@@ -148,6 +153,16 @@ def render_extraction_envelope(
         "",
         'Each item names one field by its field id in "field" and gives its value '
         'in "value"; the items can come in any order.',
+        # #2367: a brainstorm prompt tells the chat model to write the final
+        # value out in full *because* commit can only save what the conversation
+        # holds. The length guidance below then made a small model condense that
+        # written-out text instead of carrying it over, so transcription comes
+        # first and the length anchors only govern a value assembled from edits.
+        f"If the conversation already wrote out {written_out}, copy that text "
+        "into the value verbatim — do not condense, "
+        "re-word, or re-length it. The length guidance below applies only when "
+        "you have to assemble a value from changes discussed across the "
+        "conversation.",
     ]
     if body_allowed:
         clause = f'- "body": {body_description + " " if body_description else ""}'

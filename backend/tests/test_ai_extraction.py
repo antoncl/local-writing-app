@@ -197,6 +197,26 @@ class ExtractionEnvelopeTests(unittest.TestCase):
         self.assertIn("Keep each field to the length its description calls for", envelope)
         self.assertNotIn("Hold each field to about its current length", envelope)
 
+    def test_written_out_value_is_copied_verbatim_before_length_applies(self) -> None:
+        # #2367: a brainstorm chat writes its final value out in full so the
+        # commit can save it; the length anchors made a small model condense
+        # that text instead. Both branches put transcription first and scope
+        # the length guidance to a value assembled from scattered changes.
+        for creating, anchor in (
+            (False, "Hold each field to about its current length"),
+            (True, "Keep each field to the length its description calls for"),
+        ):
+            envelope = render_extraction_envelope(
+                self.service,
+                entry_type="lore:character",
+                creating=creating,
+                stored=self._stored("lore:character"),
+            )
+            rule = "copy that text into the value verbatim"
+            self.assertIn(rule, envelope, creating)
+            self.assertIn("(or the body's) complete final text", envelope, creating)
+            self.assertLess(envelope.index(rule), envelope.index(anchor), creating)
+
     def test_bodiless_envelope_still_anchors_field_length(self) -> None:
         # #1899: the fields-clause anchor sentence is independent of the body
         # clause — a bodiless type (no body clause at all) still gets it.
@@ -216,6 +236,8 @@ class ExtractionEnvelopeTests(unittest.TestCase):
             stored=self._stored("lore:token"),
         )
         self.assertNotIn('"body"', envelope)
+        self.assertNotIn("the body's", envelope)
+        self.assertIn("copy that text into the value verbatim", envelope)
         self.assertIn("Hold each field to about its current length", envelope)
 
     def test_body_clause_renders_the_body_field_description(self) -> None:

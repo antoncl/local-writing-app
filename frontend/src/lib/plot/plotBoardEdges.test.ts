@@ -101,55 +101,6 @@ describe("buildBoardEdges", () => {
     });
   });
 
-  describe("beats layer", () => {
-    it("chains the cards fulfilling one beat, ordered by reading order", () => {
-      const p = projection([
-        card("mid", { sequence: 1, beats: [beat("arc", "b1")] }),
-        card("first", { sequence: 0, beats: [beat("arc", "b1")] }),
-        card("last", { sequence: 2, beats: [beat("arc", "b1")] }),
-      ]);
-      expect(pairs(buildBoardEdges(p, layers("beats")))).toEqual(["first->mid", "mid->last"]);
-    });
-
-    it("keeps beats from different arcs/ids in separate chains", () => {
-      const p = projection([
-        card("a", { sequence: 0, beats: [beat("arc", "b1")] }),
-        card("b", { sequence: 1, beats: [beat("arc", "b1"), beat("arc", "b2")] }),
-        card("c", { sequence: 2, beats: [beat("arc", "b2")] }),
-      ]);
-      // b1: a->b ; b2: b->c — b joins both chains, no cross-beat edge.
-      expect(pairs(buildBoardEdges(p, layers("beats"))).sort()).toEqual(["a->b", "b->c"]);
-    });
-
-    it("does not conflate the same beat id across two arcs", () => {
-      const p = projection([
-        card("x", { sequence: 0, beats: [beat("arcA", "b1")] }),
-        card("y", { sequence: 1, beats: [beat("arcB", "b1")] }),
-      ]);
-      // Same beat_id "b1" but different instances → two singleton groups → no edge.
-      expect(buildBoardEdges(p, layers("beats"))).toEqual([]);
-    });
-
-    it("orders scene-less cards after ranked ones within a beat", () => {
-      const p = projection([
-        card("offpage", { sequence: null, beats: [beat("arc", "b1")] }),
-        card("onpage", { sequence: 0, beats: [beat("arc", "b1")] }),
-      ]);
-      expect(pairs(buildBoardEdges(p, layers("beats")))).toEqual(["onpage->offpage"]);
-    });
-
-    it("gives beat edges a distinct class and id namespace", () => {
-      const p = projection([
-        card("a", { sequence: 0, beats: [beat("arc", "b1")] }),
-        card("b", { sequence: 1, beats: [beat("arc", "b1")] }),
-      ]);
-      const edges = buildBoardEdges(p, layers("beats"));
-      expect(edges).toHaveLength(1);
-      expect(edges[0].class).toBe("beat-edge");
-      expect(edges[0].id.startsWith("beat:")).toBe(true);
-    });
-  });
-
   describe("causal layer", () => {
     it("draws one directed edge per authored target", () => {
       const p = projection([
@@ -176,7 +127,7 @@ describe("buildBoardEdges", () => {
 
     it("is silent unless the causal layer is on", () => {
       const p = projection([card("a", { causal_links: ["b"] }), card("b")]);
-      expect(buildBoardEdges(p, layers("manuscript", "beats"))).toEqual([]);
+      expect(buildBoardEdges(p, layers("manuscript"))).toEqual([]);
     });
   });
 
@@ -260,7 +211,7 @@ describe("buildBoardEdges", () => {
       card("a", { sequence: 0, beats: [beat("arc", "b1")], causal_links: ["b"] }),
       card("b", { sequence: 1, beats: [beat("arc", "b1")] }),
     ]);
-    const edges = buildBoardEdges(p, layers("manuscript", "beats", "causal"));
+    const edges = buildBoardEdges(p, layers("manuscript", "causal"));
     expect(edges.length).toBeGreaterThan(0);
     for (const e of edges) {
       expect(e.sourceHandle).toBe(CARD_SOURCE_HANDLE);
@@ -268,15 +219,15 @@ describe("buildBoardEdges", () => {
     }
   });
 
-  it("emits all three layers together with disjoint ids (Slice 7 needs ≥2 at once)", () => {
+  it("emits both layers together with disjoint ids (Slice 7 needs both at once)", () => {
     const p = projection([
       card("a", { sequence: 0, beats: [beat("arc", "b1")], causal_links: ["b"] }),
       card("b", { sequence: 1, beats: [beat("arc", "b1")] }),
     ]);
-    const edges = buildBoardEdges(p, layers("manuscript", "beats", "causal"));
-    expect(edges).toHaveLength(3);
-    expect(new Set(edges.map((e) => e.id)).size).toBe(3);
-    expect(edges.map((e) => e.class).sort()).toEqual(["beat-edge", "causal-edge", "manuscript-edge"]);
+    const edges = buildBoardEdges(p, layers("manuscript", "causal"));
+    expect(edges).toHaveLength(2);
+    expect(new Set(edges.map((e) => e.id)).size).toBe(2);
+    expect(edges.map((e) => e.class).sort()).toEqual(["causal-edge", "manuscript-edge"]);
   });
 
   describe("per-plotline focus (Slice 5b; #911 — cards outlined, edges recede)", () => {
@@ -291,12 +242,12 @@ describe("buildBoardEdges", () => {
     const cls = (e: { class?: unknown }) => String(e.class ?? "");
 
     it("tags no edge when nothing is focused", () => {
-      const edges = buildBoardEdges(twoThreads(), layers("manuscript", "beats"));
+      const edges = buildBoardEdges(twoThreads(), layers("manuscript"));
       expect(edges.every((e) => !cls(e).includes("edge-dimmed"))).toBe(true);
     });
 
     it("dims EVERY edge when a plotline is focused — the thread is shown by outlining its CARDS", () => {
-      const edges = buildBoardEdges(twoThreads(), layers("manuscript", "beats"), "P");
+      const edges = buildBoardEdges(twoThreads(), layers("manuscript"), "P");
       expect(edges.length).toBeGreaterThan(0);
       // Every edge recedes; none is a special 'lit' focus edge (that lived only where a
       // beat had 2+ cards — the "first beat only" artefact this replaced).

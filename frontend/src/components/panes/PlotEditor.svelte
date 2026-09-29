@@ -710,7 +710,6 @@
   let layersTrigger = $state<HTMLElement | null>(null);
   const LAYER_META: Record<EdgeLayer, { label: string; hint: string }> = {
     manuscript: { label: "Manuscript order", hint: "The reveal-order spine — cards in the order their scenes are read." },
-    beats: { label: "Beat sequence", hint: "Cards that share a beat, in the order they advance through it." },
     causal: { label: "Causal", hint: "The “leads to” edges you draw — one card causing another." },
   };
 
@@ -1416,10 +1415,6 @@
   .plot-board :global(.svelte-flow__edge.manuscript-edge .svelte-flow__edge-path) {
     stroke: var(--text-3);
     stroke-dasharray: 2 4;
-  }
-  .plot-board :global(.svelte-flow__edge.beat-edge .svelte-flow__edge-path) {
-    stroke: var(--text-2);
-    stroke-dasharray: 7 4;
   }
   .plot-board :global(.svelte-flow__edge.causal-edge .svelte-flow__edge-path) {
     stroke: var(--accent);

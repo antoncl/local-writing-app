@@ -22,8 +22,8 @@ describe("edgeLayerPrefs", () => {
 
   it("round-trips saved layers", () => {
     const store = fakeStorage();
-    saveEdgeLayers(new Set<EdgeLayer>(["manuscript", "beats"]), store);
-    expect(loadEdgeLayers(store)).toEqual(new Set(["manuscript", "beats"]));
+    saveEdgeLayers(new Set<EdgeLayer>(["manuscript", "causal"]), store);
+    expect(loadEdgeLayers(store)).toEqual(new Set(["manuscript", "causal"]));
   });
 
   it("drops the key when nothing is active (leaves no trace)", () => {
@@ -38,6 +38,12 @@ describe("edgeLayerPrefs", () => {
     expect(loadEdgeLayers(store)).toEqual(new Set(["manuscript"]));
   });
 
+  it("drops a saved toggle for the removed Beat sequence layer (#2365)", () => {
+    // A browser that had it on still holds "beats"; it must not count toward "Layers (n)".
+    const store = fakeStorage({ [KEY]: JSON.stringify(["beats", "causal"]) });
+    expect(loadEdgeLayers(store)).toEqual(new Set(["causal"]));
+  });
+
   it("degrades to empty on corrupt JSON, never throwing", () => {
     const store = fakeStorage({ [KEY]: "{not json" });
     expect(loadEdgeLayers(store)).toEqual(new Set());
@@ -45,7 +51,7 @@ describe("edgeLayerPrefs", () => {
 
   it("is inert with no storage available", () => {
     expect(loadEdgeLayers(null)).toEqual(new Set());
-    expect(() => saveEdgeLayers(new Set(["beats"]), null)).not.toThrow();
+    expect(() => saveEdgeLayers(new Set(["causal"]), null)).not.toThrow();
   });
 
   it("toggles a layer on and off, returning a fresh set", () => {

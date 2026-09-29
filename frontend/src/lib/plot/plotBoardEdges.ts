@@ -1,30 +1,31 @@
 // Plot-board edge layers (ADR-0048 S7 Slice 6a) — the PURE projection → SvelteFlow
 // edges transform, the sibling of `buildBoardNodes`. The board's dimensions beyond
-// position+colour are drawn as toggleable card→card edge LAYERS; this slice ships
-// the two DERIVED, read-only layers. The canvas is not headless-testable
+// position+colour are drawn as toggleable card→card edge LAYERS: one DERIVED,
+// read-only layer and the AUTHORED causal layer. The canvas is not headless-testable
 // ([[reference_svelteflow_headless_limits]]), so the edge logic lives — and is
 // unit-tested — here, and only the compositing is browser-verified.
 //
 //   - manuscript: the reveal-order spine — cards chained in the order their scenes
 //     are read (`card.sequence`, the backend's manuscript reading-order rank).
-//   - beats: for each beat a card fulfils, the cards fulfilling THAT beat chained
-//     in the order they advance through it.
+//
+// (A "beats" layer — the cards sharing a beat, chained — was removed in #2365: with
+// scenes it duplicated the manuscript spine; without them its order was arbitrary.)
 //
 // Derived edges are deliberately QUIET (thin, dashed, no arrowhead — the layout
 // already carries direction); the authored causal layer (Slice 6b) reads stronger.
-// Both layers can be on at once — holding ≥2 is what the Slice 7 diagnostics need.
+// Both layers can be on at once — the Slice 7 out-of-order check reads the two together.
 
 import { MarkerType, type Edge } from "@xyflow/svelte";
 import type { PlotBoardCard, PlotBoardProjection } from "@/lib/types";
 
-// The edge layers a writer can toggle. Slice 6a shipped the two DERIVED ones;
-// Slice 6b adds the AUTHORED "causal" layer (the "leads to" edges a writer draws).
-export type EdgeLayer = "manuscript" | "beats" | "causal";
+// The edge layers a writer can toggle: the DERIVED manuscript spine (Slice 6a) and the
+// AUTHORED "causal" layer (Slice 6b — the "leads to" edges a writer draws).
+export type EdgeLayer = "manuscript" | "causal";
 
 // The canonical layer list — the toggle UI iterates it, and the pref loader uses
 // it as the whitelist so a stale stored layer name (e.g. a future one, on a
 // downgrade) is dropped rather than trusted.
-export const EDGE_LAYERS: readonly EdgeLayer[] = ["manuscript", "beats", "causal"];
+export const EDGE_LAYERS: readonly EdgeLayer[] = ["manuscript", "causal"];
 
 // The card node's anchor-handle ids. xyflow will not render an edge unless its
 // `sourceHandle`/`targetHandle` resolve to real Handles on the endpoint nodes, so
@@ -108,29 +109,6 @@ function chain(sorted: Ranked[], prefix: string, className: string): Edge[] {
   return edges;
 }
 
-// Beat-sequence chains (the "beats" layer): one chain per (plotline, beat_id) group,
-// over the cards fulfilling that beat, in reading order (scene-less cards after). A card
-// fulfilling several beats joins each chain. The beat key is the composite (plotline,
-// beat_id) a card→beat link is, JSON-encoded so the two ids can never run together into
-// a false match.
-function beatChains(ranked: Ranked[]): Edge[] {
-  const groups = new Map<string, { members: Ranked[]; plotline: string; beat: string }>();
-  for (const r of ranked) {
-    for (const beat of r.card.beats) {
-      const key = JSON.stringify([beat.plotline_id, beat.beat_id]);
-      const group = groups.get(key) ?? { members: [], plotline: beat.plotline_id, beat: beat.beat_id };
-      group.members.push(r);
-      groups.set(key, group);
-    }
-  }
-  const edges: Edge[] = [];
-  for (const { members, plotline, beat } of groups.values()) {
-    members.sort(bySequenceThenOrder);
-    edges.push(...chain(members, `beat:${plotline}:${beat}`, "beat-edge"));
-  }
-  return edges;
-}
-
 // Build the active edge layers for the board. `layers` is the set the writer has
 // toggled on (empty → no edges, the quiet default). Deterministic and total: an
 // unknown layer contributes nothing; a card missing from a layer's basis is simply
@@ -153,10 +131,6 @@ export function buildBoardEdges(
     edges.push(...chain(spine, "ms", "manuscript-edge"));
   }
 
-  // Beat sequence: every plotline's beat chains (see beatChains).
-  if (layers.has("beats")) {
-    edges.push(...beatChains(ranked));
-  }
 
   // Authored causal layer: one DIRECTED edge per "leads to" target. Unlike the
   // derived layers this is not a chain — each link stands alone — and it reads

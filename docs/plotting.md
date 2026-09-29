@@ -91,10 +91,11 @@ Causal links live on their own layer — turn them on with **Layers** (below).
 The **Layers** control toggles which relationships the board draws between cards:
 
 - **Manuscript order** — the reading order of the draft.
-- **Beat sequence** — the order of beats within a plotline.
 - **Causal** — the "leads to" links you draw by hand.
 
-Show one at a time to read the story a particular way, or combine them.
+Show one at a time to read the story a particular way, or combine them. To see
+which cards share a beat, read the beat badges on the cards, or the count beside
+each beat on its plotline.
 
 ## Plot templates
 

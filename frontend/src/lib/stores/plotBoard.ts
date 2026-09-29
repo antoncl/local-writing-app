@@ -9,7 +9,7 @@
 
 import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
-import { setStructure } from "@/lib/stores/structure";
+import { refreshStructure, setStructure } from "@/lib/stores/structure";
 import { refreshCards } from "@/lib/stores/plotCards";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
@@ -95,9 +95,14 @@ export async function savePlotBoardLayout(layout: PlotBoardLayout, baseRevision:
 // Realize: mint a scene from the card and attach it. 409 if already attached.
 // Returns the minted scene's id (from the card's `metadata.scene`) so realize can be
 // recorded as an undoable command (ADR-0053 §7 / S6b) — undo deletes that scene.
+// The minted scene joins the manuscript, and the endpoint returns the card, not the
+// tree — so the structure is refetched too, or the manuscript pane misses the new
+// scene until a reload (#2359). Redo re-realizes through here, so it is covered.
+// A failed tree refetch must not fail a realize that already happened (the undo
+// recorder would then never record it), so it is swallowed like refreshCards.
 export async function realizeCard(cardId: string, parentId: string | null = null): Promise<string> {
   const card = await api.realizeCard(cardId, parentId);
-  await refreshAfterMutation();
+  await Promise.all([refreshAfterMutation(), refreshStructure().catch(() => {})]);
   return typeof card.metadata.scene === "string" ? card.metadata.scene : "";
 }
 

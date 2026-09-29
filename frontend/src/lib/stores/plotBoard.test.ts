@@ -154,9 +154,14 @@ describe("card content ops", () => {
   it("realizeCard mints/attaches, refetches, and returns the minted scene id (S6b)", async () => {
     const realize = vi.spyOn(api, "realizeCard").mockResolvedValue(card({ scene: "sc9" }));
     const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    const doc = { root: { id: "root", title: "Book" } } as unknown as StructureDocument;
+    const structure = vi.spyOn(api, "getStructure").mockResolvedValue(doc);
     const sceneId = await realizeCard("c1", "chap1");
     expect(realize).toHaveBeenCalledWith("c1", "chap1");
     expect(refresh).toHaveBeenCalledTimes(1);
+    // #2359: the minted scene joins the manuscript tree without a reload.
+    expect(structure).toHaveBeenCalledTimes(1);
+    expect(get(structureStore)).toBe(doc);
     expect(sceneId).toBe("sc9"); // the undo command needs this to delete the right scene
   });
 

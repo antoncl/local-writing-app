@@ -41,11 +41,25 @@ log = logging.getLogger(__name__)
 # default bind address.
 _DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 
-# Chat is long-running (large context, slow local models); match the OpenAI-
-# compat path's timeouts so the native transport isn't stricter than the /v1
-# one it replaces.
-_CHAT_TIMEOUT = 180.0
-_STREAM_TIMEOUT = 180.0
+# Timeouts (#2337). A local model has no fair read deadline: before the first
+# streamed byte the daemon may (re)load the model — a `num_ctx` bucket change
+# reloads it, and so does an idle unload — and prefill the whole prompt, which
+# for a large context can take minutes on its own. A flat 180 s read window
+# turned exactly those large-context turns into "timed out". So:
+#  - the STREAM has no read deadline — the user's Stop cancels it (the router
+#    drops the request on client disconnect), so nothing can hang unattended;
+#  - the non-stream call (the commit/extraction turn) has no Stop and must wait
+#    for the WHOLE reply, so it keeps a generous ceiling rather than none, in
+#    case the daemon wedges;
+#  - connecting / sending / pooling stay short: a daemon that isn't there
+#    should fail fast.
+_STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=60.0, pool=10.0)
+_CHAT_TIMEOUT = httpx.Timeout(connect=10.0, read=1800.0, write=60.0, pool=10.0)
+
+# Keep the model resident between turns (#2337). Ollama unloads an idle model
+# after ~5 minutes by default, so the next turn after a short pause paid a full
+# cold load. Sent on every chat request; Ollama resets the timer each call.
+_KEEP_ALIVE = "30m"
 
 # User-facing line for a stream that produced no visible output (mirrors the
 # OpenAI-compat path, #1601). The daemon-side cause, if any, is in the HTTP
@@ -220,6 +234,7 @@ class OllamaProfile(OpenAICompatibleProfile):
             "messages": messages,
             "stream": stream,
             "options": options,
+            "keep_alive": _KEEP_ALIVE,
         }
         if call.response_schema is not None:
             # Ollama's native constrained decoding (#2199): `format` accepts a

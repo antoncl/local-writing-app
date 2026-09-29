@@ -72,6 +72,8 @@ class _Router:
         self.chat_status = chat_status
         self.requests: list[httpx.Request] = []
         self.bodies: list[dict] = []
+        # The `timeout=` each opened client was given, in open order.
+        self.timeouts: list[object] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -102,6 +104,7 @@ def route(monkeypatch):
 
     def install(router: _Router) -> _Router:
         def factory(*args, **kwargs):
+            router.timeouts.append(kwargs.get("timeout"))
             kwargs["transport"] = httpx.MockTransport(router)
             return real_client(*args, **kwargs)
 
@@ -413,3 +416,42 @@ def test_stream_sends_num_ctx_and_stream_flag(route) -> None:
     body = router.bodies[0]
     assert body["stream"] is True
     assert body["options"]["num_ctx"] == 2048
+
+
+# #2337: large-context turns timed out on a flat 180 s read window that had to
+# cover model (re)load + prompt prefill before the first token.
+def _chat_client_timeout(router: _Router) -> httpx.Timeout:
+    """The timeout of the client that posted to /api/chat (the last one opened)."""
+    timeout = router.timeouts[-1]
+    assert isinstance(timeout, httpx.Timeout)
+    return timeout
+
+
+def test_stream_has_no_read_deadline_but_fails_fast_to_connect(route) -> None:
+    router = route(_Router(show=_SHOW_128K, chat_frames=[{"message": {"content": "hi"}, "done": True}]))
+    list(OllamaProfile("http://box:11434").chat_stream(_call()))
+    timeout = _chat_client_timeout(router)
+    assert timeout.read is None
+    assert timeout.connect is not None and timeout.connect <= 30
+
+
+def test_non_stream_keeps_a_generous_but_finite_read_ceiling(route) -> None:
+    router = route(_Router(show=_SHOW_128K, chat_json={"message": {"content": "ok"}, "done": True}))
+    OllamaProfile("http://box:11434").chat(_call())
+    timeout = _chat_client_timeout(router)
+    assert timeout.read is not None and timeout.read >= 600
+    assert timeout.connect is not None and timeout.connect <= 30
+
+
+def test_every_chat_asks_ollama_to_keep_the_model_loaded(route) -> None:
+    router = route(
+        _Router(
+            show=_SHOW_128K,
+            chat_json={"message": {"content": "ok"}, "done": True},
+            chat_frames=[{"message": {"content": "hi"}, "done": True}],
+        )
+    )
+    call = _call()
+    OllamaProfile("http://box:11434").chat(call)
+    list(OllamaProfile("http://box:11434").chat_stream(call))
+    assert [b["keep_alive"] for b in router.bodies] == ["30m", "30m"]

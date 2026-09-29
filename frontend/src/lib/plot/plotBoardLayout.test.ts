@@ -21,6 +21,10 @@ import {
   CARD_GAP_X,
   CARD_HEIGHT,
   CARD_WIDTH,
+  CARDS_PER_ROW,
+  CONTAINER_GAP,
+  freeSpotNear,
+  occupiedAfterPin,
   CONTAINER_HEADER,
   CONTAINER_PAD,
   PLOTLINE_WIDTH,
@@ -1012,5 +1016,95 @@ describe("buildBoardNodes — page status from the schema", () => {
     metadataSchemaStore.set(null);
     const nodes = buildBoardNodes(projection({ cards: [card("c", { page_status: "off_page" })] }));
     expect(dataOf(nodes, "c")).toMatchObject({ pageStatus: "off_page", pageStatusLabel: "off_page", pageStatusSwatch: null });
+  });
+});
+
+// #2348: each new card used to land one card-width further out (one unwrapped row);
+// auto-laid-out cards now wrap into a grid, a pinned card gives up its slot, and a
+// NEW card goes near the view centre instead.
+describe("card placement (#2348)", () => {
+  const STEP_X = CARD_WIDTH + CARD_GAP_X;
+  const STEP_Y = CARD_HEIGHT + CONTAINER_GAP;
+  const loose = (n: number) => Array.from({ length: n }, (_, i) => card(`c${i}`));
+  const posOf = (nodes: ReturnType<typeof buildBoardNodes>, id: string) => nodes.find((n) => n.id === id)!.position;
+
+  it("wraps loose cards into rows of CARDS_PER_ROW instead of one endless row", () => {
+    const nodes = buildBoardNodes(projection({ cards: loose(CARDS_PER_ROW * 2 + 1) }));
+    const first = posOf(nodes, "c0");
+    const lastOfRow = posOf(nodes, `c${CARDS_PER_ROW - 1}`);
+    const nextRow = posOf(nodes, `c${CARDS_PER_ROW}`);
+    expect(lastOfRow).toEqual({ x: first.x + (CARDS_PER_ROW - 1) * STEP_X, y: first.y });
+    expect(nextRow).toEqual({ x: first.x, y: first.y + STEP_Y });
+    const widest = Math.max(...cardNodes(nodes).map((n) => n.position.x));
+    expect(widest).toBe(first.x + (CARDS_PER_ROW - 1) * STEP_X);
+  });
+
+  it("wraps a container's own cards the same way, and the box grows to hold them", () => {
+    const cards = Array.from({ length: CARDS_PER_ROW + 2 }, (_, i) => card(`k${i}`, { container: "ch" }));
+    const nodes = buildBoardNodes(projection({ containers: [container("ch", "Chapter 1")], cards }));
+    const first = posOf(nodes, "k0");
+    expect(posOf(nodes, `k${CARDS_PER_ROW}`)).toEqual({ x: first.x, y: first.y + STEP_Y });
+    const box = containerNodes(nodes)[0];
+    expect(box.position.y + box.height!).toBeGreaterThanOrEqual(first.y + STEP_Y + CARD_HEIGHT);
+  });
+
+  it("a pinned card gives up its slot, so the others close ranks", () => {
+    const saved = { c0: { x: 5000, y: 5000 } };
+    const nodes = buildBoardNodes(projection({ cards: loose(3) }), saved);
+    expect(posOf(nodes, "c0")).toEqual({ x: 5000, y: 5000 });
+    // c1 takes the first slot c0 no longer holds.
+    const unpinnedFirst = buildBoardNodes(projection({ cards: loose(1) }));
+    expect(posOf(nodes, "c1")).toEqual(posOf(unpinnedFirst, "c0"));
+    expect(posOf(nodes, "c2").x).toBe(posOf(nodes, "c1").x + STEP_X);
+  });
+
+  it("puts the plotline band below a multi-row loose grid", () => {
+    const nodes = buildBoardNodes(projection({ cards: loose(CARDS_PER_ROW + 1), plotlines: [line("p1", "Heist")] }));
+    const lowestCard = Math.max(...cardNodes(nodes).map((n) => n.position.y + CARD_HEIGHT));
+    expect(plotlineNodes(nodes)[0].position.y).toBeGreaterThan(lowestCard);
+  });
+
+  // The collision the real app showed: a new card, while unpinned, holds the first
+  // auto slot and pushes an older unpinned card to the second; reading free space
+  // from THAT layout freed slot 0, the new card was pinned there, and the older card
+  // slid straight back onto it. Free space must be read after the pin.
+  it("reads free space from the layout after the pin, so an unpinned card can't slide back under the new one", () => {
+    // Projection order puts the new card first, so unpinned it takes slot 0.
+    const cards = [card("new"), card("old")];
+    const slot0 = posOf(buildBoardNodes(projection({ cards: [card("only")] })), "only");
+    const naive = buildBoardNodes(projection({ cards })).filter((n) => n.id !== "new");
+    expect(naive.find((n) => n.id === "old")!.position).not.toEqual(slot0); // "old" sits in slot 1 here
+    const occupied = occupiedAfterPin(projection({ cards }), {}, {}, "new");
+    expect(occupied).toContainEqual({ x: slot0.x, y: slot0.y, w: CARD_WIDTH, h: CARD_HEIGHT });
+    const center = { x: slot0.x + CARD_WIDTH / 2, y: slot0.y + CARD_HEIGHT / 2 };
+    expect(freeSpotNear(center, { w: CARD_WIDTH, h: CARD_HEIGHT }, occupied)).not.toEqual(slot0);
+  });
+
+  describe("freeSpotNear", () => {
+    const size = { w: CARD_WIDTH, h: CARD_HEIGHT };
+    const overlaps = (at: { x: number; y: number }, b: { x: number; y: number; w: number; h: number }) =>
+      at.x < b.x + b.w && b.x < at.x + size.w && at.y < b.y + b.h && b.y < at.y + size.h;
+
+    it("centres the node on the view centre when that spot is free", () => {
+      expect(freeSpotNear({ x: 1000, y: 800 }, size, [])).toEqual({ x: 1000 - CARD_WIDTH / 2, y: 800 - CARD_HEIGHT / 2 });
+    });
+
+    it("steps to the nearest free spot when the centre is taken", () => {
+      const center = { x: 1000, y: 800 };
+      const taken = { x: center.x - CARD_WIDTH / 2, y: center.y - CARD_HEIGHT / 2, w: CARD_WIDTH, h: CARD_HEIGHT };
+      const at = freeSpotNear(center, size, [taken]);
+      expect(overlaps(at, taken)).toBe(false);
+      // One step away, not somewhere far off.
+      expect(Math.abs(at.x - taken.x) <= STEP_X && Math.abs(at.y - taken.y) <= CARD_HEIGHT + CARD_GAP_X).toBe(true);
+    });
+
+    it("never lands on any card around a crowded centre", () => {
+      const center = { x: 0, y: 0 };
+      const occupied = [-1, 0, 1].flatMap((gx) =>
+        [-1, 0, 1].map((gy) => ({ x: gx * STEP_X - CARD_WIDTH / 2, y: gy * STEP_Y - CARD_HEIGHT / 2, w: CARD_WIDTH, h: CARD_HEIGHT })),
+      );
+      const at = freeSpotNear(center, size, occupied);
+      expect(occupied.some((b) => overlaps(at, b))).toBe(false);
+    });
   });
 });

@@ -15,13 +15,19 @@
   bit lives outside it and the custom nodes carry their own mount tests.
 -->
 <script lang="ts">
-  import { onDestroy, setContext, untrack } from "svelte";
+  import { onDestroy, setContext, tick, untrack } from "svelte";
   import "@xyflow/svelte/dist/style.css";
   import { SvelteFlow, Controls, type ColorMode, type Edge } from "@xyflow/svelte";
   import { themePreference } from "@/lib/utils/theme";
   import {
+    CARD_HEIGHT,
+    CARD_WIDTH,
+    PLOTLINE_WIDTH,
     boardIsEmpty,
     buildBoardNodes,
+    estPlotNodeHeight,
+    freeSpotNear,
+    occupiedAfterPin,
     containerDescendantIds,
     containerMemberCardIds,
     overriddenNodePositions,
@@ -73,6 +79,7 @@
   import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
+  import FlowViewCenter from "./plot/FlowViewCenter.svelte";
   import PlotCardNodeFlow from "./plot/PlotCardNodeFlow.svelte";
   import PlotContainerNodeFlow from "./plot/PlotContainerNodeFlow.svelte";
   import PlotPlotlineNode from "./plot/PlotPlotlineNode.svelte";
@@ -523,12 +530,42 @@
   // single card is cheap and reversible (delete). `creating` guards against a
   // double-click minting two cards, and surfaces a create failure in the app error
   // banner instead of a silent unhandled rejection.
+  // #2348: a new node goes where the author is LOOKING — a free spot near the view
+  // centre — and is pinned there, like a drag. Deriving it from the card count put the
+  // n-th new card n card-widths away, and a hand-arranged board had no spot for it at
+  // all. `viewCenter` is handed up by <FlowViewCenter> (it needs the flow context);
+  // null until the canvas mounts, and then placement falls back to the auto grid.
+  let viewCenter: (() => BoardXY | null) | null = null;
+  let canvasEl = $state<HTMLElement | null>(null);
+  async function placeNewNode(id: string, center: BoardXY | null, size: { w: number; h: number }): Promise<void> {
+    if (!center) return;
+    // The create refreshed the projection; let the rebuild land the new node first.
+    await tick();
+    if (!projection || !flowNodes.some((n) => n.id === id)) return;
+    // Free space on the board AS IT WILL BE once the new node is pinned (the other
+    // unpinned cards close ranks around it) — see occupiedAfterPin.
+    const occupied = occupiedAfterPin(
+      projection,
+      overriddenNodePositions(flowNodes, overriddenIds),
+      containerSizes,
+      id,
+      new Map(flowNodes.map((n) => [n.id, n.measured] as const)),
+    );
+    const at = freeSpotNear(center, size, occupied);
+    overriddenIds.add(id);
+    flowNodes = flowNodes.map((n) => (n.id === id ? { ...n, position: at } : n));
+    // Re-derive boxes + extents around the pinned spot; the layout autosave persists it.
+    rebuildLayoutNodes();
+  }
+
   let creating = $state(false);
   async function newCard(): Promise<void> {
     if (creating) return;
     creating = true;
     try {
-      await undoRecorder.createCard(() => createCard("New card"));
+      const center = viewCenter?.() ?? null;
+      const id = await undoRecorder.createCard(() => createCard("New card"));
+      await placeNewNode(id, center, { w: CARD_WIDTH, h: CARD_HEIGHT });
     } catch (e) {
       editorPanes.setError(e instanceof Error ? e.message : "Could not create the card.");
     } finally {
@@ -544,9 +581,10 @@
     if (creatingPlotline) return;
     creatingPlotline = true;
     try {
+      const center = viewCenter?.() ?? null;
       expandedPlotlineId = await undoRecorder.createPlotline(() => createPlotlineOnBoard());
-      // Confirm the create — the new node may land off-screen (viewport unchanged),
-      // where the expand alone would read as nothing happening.
+      // #2348: in view, like a new card (a fresh plotline has no beats yet).
+      await placeNewNode(expandedPlotlineId, center, { w: PLOTLINE_WIDTH, h: estPlotNodeHeight(0) });
       editorPanes.setStatus("Created plotline");
     } catch (e) {
       editorPanes.setError(e instanceof Error ? e.message : "Could not create the plotline.");
@@ -1011,7 +1049,7 @@
     {#if isEmpty}
       <p class="board-hint muted">Nothing here yet. Seed cards from the manuscript or add one, or open Templates to start a plotline.</p>
     {:else}
-      <div class="board-canvas">
+      <div class="board-canvas" bind:this={canvasEl}>
       <SvelteFlow
         bind:nodes={flowNodes}
         bind:edges={flowEdges}
@@ -1131,6 +1169,7 @@
              writer; the viewport stays where they left it. `minZoom` clamps the initial
              fit so a spread-out board can't shrink to the canvas floor and read as empty. -->
         <ViewportFit trigger={projection?.board_id} options={{ padding: 0.2, maxZoom: 1, minZoom: 0.5 }} />
+        <FlowViewCenter getContainer={() => canvasEl} onReady={(fn) => (viewCenter = fn)} />
         <!-- Centre the viewport on a revealed node (#1920). `revealFit` is a fresh object per
              reveal so the same node re-centres; the options follow the target. maxZoom 1 keeps a
              single card from filling the canvas; the padding leaves its neighbours visible. -->

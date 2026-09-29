@@ -26,7 +26,7 @@ import { deletePlotline } from "@/lib/stores/plotlines";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { setAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTagNodes } from "@/lib/stores/tagNodes";
-import { refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
+import { chatSessionsStore, refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
 import { researchStructureStore, setResearchStructure, setStructure } from "@/lib/stores/structure";
 import { refreshTodos } from "@/lib/stores/todos";
 import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
@@ -51,6 +51,17 @@ export interface DeletePaneHost {
   tearDown(id: string): void;
   setStatus(message: string): void;
   orphanWarning?: { enabled: () => boolean; suppress: () => Promise<void> };
+}
+
+// #2345: the chats a delete takes with it. Deleting a node cascades to every
+// chat whose saved `subject` is that node (#1078, backend `_purge_references_to`)
+// — the same on-disk link the roster's `subject` reflects, so this matches what
+// the backend will remove. A chat's own delete cascades nothing.
+function chatsAbout(nodeId: string, documentKind: string): { id: string; title: string }[] {
+  if (documentKind === "chat") return [];
+  return get(chatSessionsStore)
+    .filter((session) => session.subject === nodeId)
+    .map((session) => ({ id: session.id, title: session.title || "Untitled chat" }));
 }
 
 export async function requestDeleteScene(host: DeletePaneHost, id: string): Promise<void> {
@@ -131,6 +142,16 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
     }
   }
 
+  // #2345: say so when the delete also removes chats about this node — a
+  // brainstorm that just created an entry is exactly such a chat, and losing it
+  // silently is how a stray delete wedged its open tab.
+  const attachedChats = chatsAbout(sceneId, documentKind);
+  if (attachedChats.length > 0) {
+    const names = attachedChats.map((chat) => `"${chat.title}"`).join(", ");
+    const noun = attachedChats.length === 1 ? "chat" : "chats";
+    message = `${message}\n\nThis also deletes ${attachedChats.length} ${noun} about it (${names}) — the conversation is removed with it.`;
+  }
+
   confirmService.request({
     title: titleLabel,
     message,
@@ -147,6 +168,8 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
   if (!pane?.scene) return;
   const documentKind = pane.document?.type ?? "manuscript";
   const sceneTitle = pane.scene.title;
+  // Captured before the delete: afterwards the roster no longer names them.
+  const cascadedChatIds = new Set(chatsAbout(pane.scene.id, documentKind).map((chat) => chat.id));
   if (documentKind === "lore") {
     setLoreEntries((await api.deleteLoreEntry(pane.scene.id)).entries);
     // ADR-0095 §9: the delete may have cascade-deleted mutation sets pinned
@@ -214,6 +237,15 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
   // (#1078); re-fetch the roster so the Chats pane drops them (#1087). Harmless
   // when nothing cascaded — the list just comes back unchanged.
   void refreshChatSessions();
+  // #2345: an open tab of a chat the delete just removed must close, not linger
+  // on a chat that no longer exists (every save / commit would then fail).
+  // tearDown, not close: close flushes, and there is no file left to save to.
+  for (const chatPane of host.panes.filter(
+    (candidate) => candidate.document?.type === "chat" && cascadedChatIds.has(candidate.document.id),
+  )) {
+    host.tearDown(chatPane.id);
+  }
+  if (host.activeChatId && cascadedChatIds.has(host.activeChatId)) host.activeChatId = null;
   host.tearDown(id);
   host.setStatus(`Deleted ${sceneTitle}`);
 }

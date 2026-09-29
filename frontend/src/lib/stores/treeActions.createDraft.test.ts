@@ -5,13 +5,15 @@
 // top-level title and NOT duplicated into metadata; a title-less draft falls back to
 // a typed default; body defaults to ""; the create is dispatched to the right kind
 // (lore vs plot card); and a structural kind is refused, not silently 422'd.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { treeActions } from "./treeActions.svelte";
 import { api } from "@/lib/api";
 import { editorPanes } from "./editorPanes.svelte";
 import { metadataSchemaStore } from "./schema";
 import { clearTagNodes, refreshTagNodes } from "./tagNodes";
+import { loreEntriesStore } from "./lore";
+import { cardEntriesStore } from "./plotCards";
 import type { CardEntry, LoreEntry, LoreEntryList, MetadataSchema, TagEntry } from "@/lib/types";
 
 const SCHEMA = {
@@ -282,5 +284,64 @@ describe("treeActions.createNodeFromDraft — tag-vocabulary fields (#1821, ADR-
     [savedEntry] = vi.mocked(api.saveLoreEntry).mock.calls[0];
     expect(savedEntry.metadata.tags).toEqual(["tag_setting01"]);
     expect(api.createTagEntry).not.toHaveBeenCalled();
+  });
+});
+
+// #2345: a create-mode commit must not mint a second entry under a taken name —
+// the clash tempted a delete, and deleting the new entry cascaded to the very
+// chat that created it, wedging its open tab.
+describe("treeActions.createNodeFromDraft — name clash (#2345)", () => {
+  let errors: string[] = [];
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    metadataSchemaStore.set(SCHEMA);
+    errors = [];
+    treeActions.run = async (action) => {
+      try {
+        await action();
+        return true;
+      } catch (e) {
+        errors.push((e as Error).message);
+        return false;
+      }
+    };
+    vi.spyOn(api, "createLoreEntry").mockImplementation(async (title: string) => mintedEntry(title));
+    vi.spyOn(api, "saveLoreEntry").mockImplementation(async (entry: LoreEntry) => entry);
+    vi.spyOn(api, "listLoreEntries").mockResolvedValue({ entries: [] } as LoreEntryList);
+    vi.spyOn(editorPanes, "openLore").mockResolvedValue(undefined as never);
+    vi.spyOn(api, "createCard").mockImplementation(async (title: string) => mintedCard(title));
+    vi.spyOn(api, "saveCard").mockImplementation(async (entry: CardEntry) => entry);
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue({} as never);
+    vi.spyOn(editorPanes, "openPlotCard").mockResolvedValue(undefined as never);
+  });
+  afterEach(() => {
+    loreEntriesStore.set([]);
+    cardEntriesStore.set([]);
+  });
+
+  it("refuses a lore draft whose name is already taken (ignoring case and spacing), minting nothing", async () => {
+    loreEntriesStore.set([{ id: "lore_old", title: "The Vale", entry_type: "lore:note" } as never]);
+    const created = await treeActions.createNodeFromDraft("lore:character", {
+      body: "b",
+      fields: { title: "  the vale " },
+    });
+    expect(created).toBeNull();
+    expect(api.createLoreEntry).not.toHaveBeenCalled();
+    expect(errors[0]).toContain('An entry named "The Vale" already exists');
+    expect(errors[0]).toContain('revise "The Vale" instead');
+  });
+
+  it("refuses a plot card whose name another card already has", async () => {
+    cardEntriesStore.set([{ id: "plot_old", title: "They Meet", entry_type: "plot:card" } as never]);
+    const created = await treeActions.createNodeFromDraft("plot:card", { body: "b", fields: { title: "They Meet" } });
+    expect(created).toBeNull();
+    expect(api.createCard).not.toHaveBeenCalled();
+  });
+
+  it("still creates when the name is free", async () => {
+    loreEntriesStore.set([{ id: "lore_old", title: "The Vale", entry_type: "lore:note" } as never]);
+    const created = await treeActions.createNodeFromDraft("lore:character", { body: "b", fields: { title: "Seren" } });
+    expect(created).toEqual({ id: "lore_new", title: "Seren" });
+    expect(errors).toEqual([]);
   });
 });

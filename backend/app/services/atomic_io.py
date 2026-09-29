@@ -28,9 +28,46 @@ file — the prose a crash cannot reconstruct — is written `durable=True`.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import time
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+
+# #2350: on Windows `os.replace` fails with "Access denied" while ANOTHER process
+# briefly holds the target open — a sync client (OneDrive/Dropbox), an antivirus
+# scan, the search indexer, an editor. That lock is transient, so the replace is
+# retried with a short backoff (~1 s in all) before the save is given up on.
+_REPLACE_BACKOFF_S = (0.02, 0.05, 0.1, 0.15, 0.2, 0.2, 0.3)
+
+
+def _discard(temp_path: Path) -> None:
+    """Remove a temp file a failed write leaves behind — never litter the
+    project folder with `tmpXXXX` files (#2350)."""
+    with contextlib.suppress(OSError):
+        temp_path.unlink(missing_ok=True)
+
+
+def _replace(temp_path: Path, path: Path) -> None:
+    """`temp_path.replace(path)`, retrying a transient lock (#2350). If the
+    target stays locked, the temp file is removed and the error names the file
+    and the likely cause instead of a bare `[WinError 5]`."""
+    for delay in (*_REPLACE_BACKOFF_S, None):
+        try:
+            temp_path.replace(path)
+            return
+        except PermissionError as exc:
+            if delay is None:
+                _discard(temp_path)
+                raise PermissionError(
+                    f"Couldn't save {path.name}: another program is holding it open "
+                    "(a sync client, an antivirus scan, the search indexer or an editor). "
+                    "Try again in a moment."
+                ) from exc
+            time.sleep(delay)
+        except BaseException:
+            _discard(temp_path)
+            raise
 
 
 def _fsync_dir(directory: Path) -> None:
@@ -50,12 +87,17 @@ def atomic_write_text(path: Path, text: str, *, durable: bool = True) -> None:
     stable storage before the rename and the parent directory after it."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as temp:
-        temp.write(text)
-        temp.flush()
-        if durable:
-            os.fsync(temp.fileno())
         temp_path = Path(temp.name)
-    temp_path.replace(path)
+        try:
+            temp.write(text)
+            temp.flush()
+            if durable:
+                os.fsync(temp.fileno())
+        except BaseException:
+            temp.close()
+            _discard(temp_path)
+            raise
+    _replace(temp_path, path)
     if durable:
         _fsync_dir(path.parent)
 
@@ -66,11 +108,16 @@ def atomic_write_bytes(path: Path, data: bytes, *, durable: bool = True) -> None
     each break byte-for-byte fidelity)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile("wb", dir=path.parent, delete=False) as temp:
-        temp.write(data)
-        temp.flush()
-        if durable:
-            os.fsync(temp.fileno())
         temp_path = Path(temp.name)
-    temp_path.replace(path)
+        try:
+            temp.write(data)
+            temp.flush()
+            if durable:
+                os.fsync(temp.fileno())
+        except BaseException:
+            temp.close()
+            _discard(temp_path)
+            raise
+    _replace(temp_path, path)
     if durable:
         _fsync_dir(path.parent)

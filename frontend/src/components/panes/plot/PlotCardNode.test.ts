@@ -66,6 +66,7 @@ function actions(
   focusedPlotlineId: string | null = null,
   locations: PlotCardActions["locations"] = [],
   highlightedCardIds: ReadonlySet<string> | null = null,
+  raisedCardId: string | null = null,
 ): PlotCardActions {
   return {
     onOpen: vi.fn(),
@@ -83,6 +84,8 @@ function actions(
     focusedPlotlineId,
     locations,
     highlightedCardIds,
+    raisedCardId,
+    onRaise: vi.fn(),
   };
 }
 
@@ -681,5 +684,37 @@ describe("PlotCardNode — one foot row of event + change pills (ADR-0080 slice 
     const pill = container.querySelector(".beat-badge.change") as HTMLElement;
     expect(pill.classList.contains("coloured")).toBe(true);
     expect(pill.style.getPropertyValue("--beat-accent")).toBe("#334455");
+  });
+});
+
+// Bring-to-front (#2363): pressing any part of a card raises it; PlotEditor's
+// `:has(.plot-card.raised)` rule does the lifting, so the card only has to report the
+// press and wear the class.
+describe("PlotCardNode raise on press", () => {
+  it("reports a press anywhere on the card, even on an inner control", async () => {
+    const acts = actions();
+    renderWithActions({}, acts, "card_7");
+    await fireEvent.pointerDown(screen.getByTitle("Click to edit the synopsis"));
+    expect(acts.onRaise).toHaveBeenCalledWith("card_7");
+  });
+
+  it("wears .raised only while it is the raised card", () => {
+    const { container } = renderWithActions({}, actions([], null, [], null, "card_7"), "card_7");
+    expect(container.querySelector(".plot-card")!.classList.contains("raised")).toBe(true);
+    const other = renderWithActions({}, actions([], null, [], null, "card_7"), "card_8");
+    expect(other.container.querySelector(".plot-card")!.classList.contains("raised")).toBe(false);
+  });
+
+  it("does not re-report a press on the card that is already raised", async () => {
+    const acts = actions([], null, [], null, "card_7");
+    renderWithActions({}, acts, "card_7");
+    await fireEvent.pointerDown(screen.getByTitle("Click to edit the synopsis"));
+    expect(acts.onRaise).not.toHaveBeenCalled();
+  });
+
+  it("is inert on a read-only card (no actions context)", async () => {
+    const { container } = render(PlotCardNode, { props: { id: "card_7", data: data({}) } });
+    await fireEvent.pointerDown(container.querySelector(".plot-card")!);
+    expect(container.querySelector(".plot-card")!.classList.contains("raised")).toBe(false);
   });
 });

@@ -41,11 +41,24 @@ log = logging.getLogger(__name__)
 # default bind address.
 _DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 
-# Chat is long-running (large context, slow local models); match the OpenAI-
-# compat path's timeouts so the native transport isn't stricter than the /v1
-# one it replaces.
-_CHAT_TIMEOUT = 180.0
-_STREAM_TIMEOUT = 180.0
+# Timeouts (#2337). Before the first streamed byte the daemon may (re)load the
+# model — a `num_ctx` bucket change reloads it, and so does an idle unload — and
+# prefill the whole prompt, which for a large context can take minutes on its
+# own; the non-stream call (the commit/extraction turn) must wait for the WHOLE
+# reply. A flat 180 s read window turned exactly those large-context turns into
+# "timed out", so the read window is now generous: 30 minutes between chunks.
+# It stays FINITE on purpose: the router notices the user's Stop only between
+# chunks (the read blocks inside a threadpool thread that disconnect can't
+# interrupt), so an unbounded read against a wedged daemon would pin that
+# thread and connection forever. Connecting / sending / pooling stay short so a
+# daemon that isn't there fails fast.
+_CHAT_TIMEOUT = httpx.Timeout(connect=10.0, read=1800.0, write=60.0, pool=10.0)
+_STREAM_TIMEOUT = _CHAT_TIMEOUT
+
+# Keep the model resident between turns (#2337). Ollama unloads an idle model
+# after ~5 minutes by default, so the next turn after a short pause paid a full
+# cold load. Sent on every chat request; Ollama resets the timer each call.
+_KEEP_ALIVE = "30m"
 
 # User-facing line for a stream that produced no visible output (mirrors the
 # OpenAI-compat path, #1601). The daemon-side cause, if any, is in the HTTP
@@ -220,6 +233,7 @@ class OllamaProfile(OpenAICompatibleProfile):
             "messages": messages,
             "stream": stream,
             "options": options,
+            "keep_alive": _KEEP_ALIVE,
         }
         if call.response_schema is not None:
             # Ollama's native constrained decoding (#2199): `format` accepts a

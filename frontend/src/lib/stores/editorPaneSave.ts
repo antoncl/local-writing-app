@@ -195,12 +195,16 @@ export type SaveFailureHost = {
 // funnel (transient toast + durable error log); an autosave does NOT — its
 // failures are HANDLED here (retry / badge / conflict prompt), so they are
 // expected conditions rather than unhandled faults and must not spam errors.log
-// (cf. #973). The blip is still surfaced as a transient status message.
+// (cf. #973). The blip is still surfaced as a transient status message — except
+// a 409, whose outcome the reconcile ladder owns: silent when it adopts or merges,
+// the changed-on-disk dialog when it can't. Flashing the 409's message first
+// reported a conflict the ladder then resolved without the author (#2369).
 export async function autosaveOnce(host: SaveFailureHost, id: string): Promise<void> {
   try {
     await host.saveEditorPane(id);
   } catch (caught) {
     handleSaveFailure(host, id, caught);
+    if (caught instanceof HttpError && caught.status === 409) return;
     host.setError(caught instanceof Error ? caught.message : String(caught));
   }
 }

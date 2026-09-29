@@ -482,6 +482,14 @@ def _row_to_descriptor(row: dict, show: dict | None = None) -> ModelDescriptor:
         context_window=context_window,
         tier=CapabilityTier.LOCAL,
         capabilities=capabilities,
+        # #2343: a model on the author's own machine costs nothing per token —
+        # it is FREE, not "price unknown". A real 0.0 (not None) makes `free`
+        # true, bills a turn at €0.00, and keeps the picker's "no live price"
+        # nudge and AI Spend's "unpriced" count for providers that genuinely
+        # don't publish prices. A manual price on the assistant still wins
+        # (`tokens.apply_manual_fill`).
+        cost_in_per_mtok=0.0,
+        cost_out_per_mtok=0.0,
     )
 
 

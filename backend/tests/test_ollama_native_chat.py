@@ -427,20 +427,24 @@ def _chat_client_timeout(router: _Router) -> httpx.Timeout:
     return timeout
 
 
-def test_stream_has_no_read_deadline_but_fails_fast_to_connect(route) -> None:
-    router = route(_Router(show=_SHOW_128K, chat_frames=[{"message": {"content": "hi"}, "done": True}]))
-    list(OllamaProfile("http://box:11434").chat_stream(_call()))
-    timeout = _chat_client_timeout(router)
-    assert timeout.read is None
-    assert timeout.connect is not None and timeout.connect <= 30
-
-
-def test_non_stream_keeps_a_generous_but_finite_read_ceiling(route) -> None:
-    router = route(_Router(show=_SHOW_128K, chat_json={"message": {"content": "ok"}, "done": True}))
-    OllamaProfile("http://box:11434").chat(_call())
-    timeout = _chat_client_timeout(router)
+# The read window is generous (load + prefill can take minutes) but FINITE: Stop
+# only lands between chunks, so an unbounded read against a wedged daemon would
+# pin a threadpool thread forever. Connecting still fails fast.
+def _assert_generous_finite_read(timeout: httpx.Timeout) -> None:
     assert timeout.read is not None and timeout.read >= 600
     assert timeout.connect is not None and timeout.connect <= 30
+
+
+def test_stream_read_window_is_generous_but_finite(route) -> None:
+    router = route(_Router(show=_SHOW_128K, chat_frames=[{"message": {"content": "hi"}, "done": True}]))
+    list(OllamaProfile("http://box:11434").chat_stream(_call()))
+    _assert_generous_finite_read(_chat_client_timeout(router))
+
+
+def test_non_stream_read_window_is_generous_but_finite(route) -> None:
+    router = route(_Router(show=_SHOW_128K, chat_json={"message": {"content": "ok"}, "done": True}))
+    OllamaProfile("http://box:11434").chat(_call())
+    _assert_generous_finite_read(_chat_client_timeout(router))
 
 
 def test_every_chat_asks_ollama_to_keep_the_model_loaded(route) -> None:

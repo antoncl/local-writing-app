@@ -257,14 +257,16 @@ class RevisePlotCardPromptTests(_PlotAiContextBase):
 
     def test_the_prompt_body_renders_the_gated_context_for_its_card(self) -> None:
         chapter = self._chapter()
-        s0, s1 = self._scene("s0", chapter), self._scene("s1", chapter)
+        s0, s1, s2 = (self._scene(t, chapter) for t in ("s0", "s1", "s2"))
         card = self._card("The turn", body="He decides to leave.", scene=s0)
-        self._card("Aftermath", body="SECRET_FUTURE fallout.", scene=s1)
+        self._card("Aftermath", body="Next fallout.", scene=s1)
+        self._card("Much later", body="SECRET_FUTURE payoff.", scene=s2)
         body = self.service.read_prompt_entry(builtin_prompt_id(self.service, _PROMPT_TITLE)).body
         out = self._render(body, inputs={"entry": card})
         self.assertIn("The turn", out)  # the card under revision
         self.assertIn("<plot_context", out)  # the board block is injected
-        self.assertNotIn("SECRET_FUTURE", out)  # gated at this card's reveal position
+        # Gated one scene past this card's reveal position (#2355 lookahead).
+        self.assertNotIn("SECRET_FUTURE", out)
 
     def test_a_returned_patch_validates_for_a_card(self) -> None:
         card = self._card("Draft", body="Old synopsis.")

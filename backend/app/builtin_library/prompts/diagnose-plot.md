@@ -14,6 +14,7 @@ The character arcs are a different read. Each `<character_arc>` is one character
 {{ plot_context() }}
 
 {% include "Relevant lore" %}
+{% include "Relevant manuscript and plot" %}
 
 ## How to report
 

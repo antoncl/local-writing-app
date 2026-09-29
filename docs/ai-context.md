@@ -147,13 +147,17 @@ the first send and after every turn:
 
 ## In your prompts
 
-Three calls cover it. All three print nothing where you write them.
+These lines cover it. None of them prints anything where you write it.
 
 ```jinja
 {% do use(inputs.lore) %}   {# the entries a Lore picker chose — declared #}
 {{ auto_lore() }}           {# turn the automatic half on #}
 {% include "Relevant lore" %}  {# a ready-made optional Lore picker, picks only #}
+{% include "Relevant manuscript and plot" %}  {# the same for scenes and plot cards #}
 ```
+
+A picked card arrives with its synopsis; a picked scene arrives with its full
+prose, so pick scenes sparingly.
 
 `auto_lore()` was called `use_lore()`; the old name still works until 1.0 but
 adds a warning to every estimate, so rename it when you see one. A prompt that

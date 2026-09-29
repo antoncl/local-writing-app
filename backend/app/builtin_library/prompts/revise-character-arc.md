@@ -39,6 +39,7 @@ Reason from the board below. The character arcs list the change-beats their char
 {{ plot_context() }}
 
 {% include "Relevant lore" %}
+{% include "Relevant manuscript and plot" %}
 
 ## The character arc under revision: {{ e.title }}
 {% if e.body %}

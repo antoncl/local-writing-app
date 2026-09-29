@@ -38,6 +38,7 @@ Reason about the plot from the board below. The plotlines list the beats the sto
 {{ plot_context(as_of=next_scene(e) or e.id) }}
 
 {% include "Relevant lore" %}
+{% include "Relevant manuscript and plot" %}
 
 ## The card under revision: {{ e.title }}
 {% if e.body %}

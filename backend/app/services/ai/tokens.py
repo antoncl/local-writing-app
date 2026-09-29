@@ -128,8 +128,13 @@ def apply_manual_fill(
 
     if manual_in is None or manual_out is None:
         return descriptor
-    already_priced = descriptor is not None and not (
-        descriptor.cost_in_per_mtok is None and descriptor.cost_out_per_mtok is None
+    # A local model's 0 is the "free by default" price (#2343), not a price
+    # anyone published — so an author who prices a local assistant (to count
+    # electricity, say) still sees their figure.
+    already_priced = (
+        descriptor is not None
+        and descriptor.tier != CapabilityTier.LOCAL
+        and not (descriptor.cost_in_per_mtok is None and descriptor.cost_out_per_mtok is None)
     )
     if already_priced:
         return descriptor

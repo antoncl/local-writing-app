@@ -172,8 +172,9 @@ class ModelDescriptor:
     @property
     def free(self) -> bool:
         """A genuinely-free model — input priced at exactly 0 (OpenRouter
-        `:free` routes, kept since #1386). Unknown pricing (`None`, e.g. a
-        provider that doesn't publish it, or local Ollama) is NOT free."""
+        `:free` routes, kept since #1386; every local Ollama model, #2343).
+        Unknown pricing (`None`, e.g. a provider that doesn't publish it) is
+        NOT free."""
 
         return self.cost_in_per_mtok == 0.0
 
@@ -215,8 +216,8 @@ def compute_cost(usage: UsageMetrics, descriptor: ModelDescriptor) -> float | No
     """USD cost for one call, computed from descriptor pricing.
 
     Returns None when the descriptor carries no pricing at all — both
-    input and output rates unknown (a local Ollama model, or a
-    live-discovered model whose provider doesn't publish prices). None
+    input and output rates unknown (a live-discovered model whose provider
+    doesn't publish prices; a local Ollama model is priced 0, #2343). None
     means "cost unknown" and surfaces as "—"; it is deliberately
     distinct from a real 0.0, which a genuinely zero-priced model (one
     with an explicit 0.0 rate) still produces. Fabricating 0.0 for an

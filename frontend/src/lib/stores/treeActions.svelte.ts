@@ -25,12 +25,13 @@ import {
   structureStore,
   researchStructureStore,
 } from "@/lib/stores/structure";
-import { refreshLoreEntries, setLoreEntries } from "@/lib/stores/lore";
+import { loreEntriesStore, refreshLoreEntries, setLoreEntries } from "@/lib/stores/lore";
+import { cardEntriesStore } from "@/lib/stores/plotCards";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
-import { refreshPlotlines } from "@/lib/stores/plotlines";
+import { plotlineEntriesStore, refreshPlotlines } from "@/lib/stores/plotlines";
 import { refreshTodos } from "@/lib/stores/todos";
 import { refreshChatSessions } from "@/lib/stores/chats";
 import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -94,6 +95,7 @@ class TreeActions {
         save: (entry, body) => api.saveLoreEntry(entry, body),
         refresh: () => refreshLoreEntries(),
         open: (id) => editorPanes.openLore(id),
+        existingTitles: () => get(loreEntriesStore).map((e) => e.title),
       });
     }
     // Plot creates match EXACTLY, not by is-a: createCard/createPlotline mint a
@@ -107,6 +109,7 @@ class TreeActions {
         save: (entry, body) => api.saveCard(entry, body),
         refresh: () => refreshPlotBoard(),
         open: (id) => editorPanes.openPlotCard(id),
+        existingTitles: () => get(cardEntriesStore).map((e) => e.title),
       });
     }
     if (entryType === "plot:plotline") {
@@ -117,6 +120,7 @@ class TreeActions {
           await Promise.all([refreshPlotBoard(), refreshPlotlines()]);
         },
         open: (id) => editorPanes.openPlotline(id),
+        existingTitles: () => get(plotlineEntriesStore).map((e) => e.title),
       });
     }
     // A flat brainstorm draft can only create a flat node. Surface the
@@ -148,6 +152,8 @@ class TreeActions {
       save: (entry: T, body: string) => Promise<T>;
       refresh: () => Promise<void>;
       open: (id: string) => Promise<void>;
+      // Titles already taken by this kind's entries — the name-clash check (#2345).
+      existingTitles: () => string[];
     },
   ): Promise<{ id: string; title: string } | null> {
     let minted: { id: string; title: string } | null = null;
@@ -164,6 +170,19 @@ class TreeActions {
         throw new Error(
           `The draft has no name, so no ${entryTypeName(entryType, get(metadataSchemaStore))} ` +
             `was created. Ask the model to name it and finalize again.`,
+        );
+      }
+      // #2345: never mint a second entry under a name that's already taken. A
+      // clashing entry breaks title lookups and tempts a delete — and deleting
+      // it cascades to this very chat (its subject), wedging the open tab. Refuse
+      // before anything is created; run() surfaces it and the draft survives, so
+      // the author can rename it and create again, or revise the existing entry.
+      const wanted = proposedTitle.toLocaleLowerCase();
+      const clash = ops.existingTitles().find((t) => t.trim().toLocaleLowerCase() === wanted);
+      if (clash !== undefined) {
+        throw new Error(
+          `An entry named "${clash}" already exists, so no new one was created. ` +
+            `Ask the model for a different name and finalize again, or revise "${clash}" instead.`,
         );
       }
       const finalTitle = proposedTitle;

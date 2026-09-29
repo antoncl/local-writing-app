@@ -14,6 +14,7 @@ import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { keyedReferrerIndexStore } from "@/lib/stores/references";
 import { setResearchStructure } from "@/lib/stores/structure";
 import { mutationSetEntriesStore } from "@/lib/stores/mutationSets";
+import { chatSessionsStore } from "@/lib/stores/chats";
 import { api } from "@/lib/api";
 import type { EditableDocument, StructureDocument, PlotBoardProjection, MutationSetEntrySummary } from "@/lib/types";
 
@@ -328,5 +329,78 @@ describe("editorPaneDelete: an entry delete names its pinned mutation sets (ADR-
     await requested.onConfirm();
 
     expect(listMutationSetEntries).toHaveBeenCalled();
+  });
+});
+
+// #2345: deleting a node cascades to the chats about it (#1078). The confirm
+// says so, and an open tab of such a chat is torn down — not left wedged on a
+// chat that no longer exists (every save / commit would fail).
+describe("editorPaneDelete: an entry delete names and closes the chats about it (#2345)", () => {
+  let requested: { message: string; onConfirm: () => Promise<void> };
+
+  function chatPane(paneId: string, chatId: string): EditorPaneState {
+    return {
+      ...createEmptyEditorPane(paneId),
+      document: { type: "chat", id: chatId },
+      scene: {
+        id: chatId,
+        title: chatId,
+        body: "",
+        revision: "r1",
+        entry_type: "chat:chat_session",
+        metadata: {},
+        computed_metadata: {},
+      } as unknown as EditableDocument,
+      draftEntryType: "chat:chat_session",
+    };
+  }
+
+  beforeEach(() => {
+    editorPanes.reset();
+    vi.restoreAllMocks();
+    vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {}, edges: [] });
+    vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] });
+    vi.spyOn(api, "listMutationSetEntries").mockResolvedValue({ entries: [] });
+    vi.spyOn(api, "deleteLoreEntry").mockResolvedValue({ entries: [] });
+    vi.spyOn(confirmService, "request").mockImplementation((req: typeof requested) => {
+      requested = req;
+    });
+    chatSessionsStore.set([
+      { id: "chat_about", title: "Revise entry (8)", subject: NODE_ID },
+      { id: "chat_other", title: "Something else", subject: "lore_other" },
+    ] as never);
+    editorPanes.panes = [
+      paneFor("lore", "lore:character"),
+      chatPane("pane_chat_about", "chat_about"),
+      chatPane("pane_chat_other", "chat_other"),
+    ];
+  });
+
+  afterEach(() => {
+    editorPanes.reset();
+    chatSessionsStore.set([]);
+  });
+
+  it("names the chats the delete takes with it", async () => {
+    await editorPanes.requestDeleteScene("pane_1");
+    expect(requested.message).toContain('This also deletes 1 chat about it ("Revise entry (8)")');
+    expect(requested.message).not.toContain("Something else");
+  });
+
+  it("says nothing extra when no chat is about the entry", async () => {
+    chatSessionsStore.set([{ id: "chat_other", title: "Something else", subject: "lore_other" }] as never);
+    await editorPanes.requestDeleteScene("pane_1");
+    expect(requested.message).not.toContain("chat");
+  });
+
+  it("closes the cascaded chat's open tab without saving it, and leaves other chats open", async () => {
+    const saveNode = vi.spyOn(api, "saveNode");
+    await editorPanes.requestDeleteScene("pane_1");
+    await requested.onConfirm();
+    const open = editorPanes.panes.map((p) => p.id);
+    expect(open).not.toContain("pane_1");
+    expect(open).not.toContain("pane_chat_about");
+    expect(open).toContain("pane_chat_other");
+    expect(saveNode).not.toHaveBeenCalled();
   });
 });

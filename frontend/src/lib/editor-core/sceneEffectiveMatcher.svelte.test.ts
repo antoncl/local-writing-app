@@ -41,4 +41,25 @@ describe("createSceneEffectiveMatcher (#2352)", () => {
     expect(fetches).toHaveBeenLastCalledWith("scene_2");
     stop();
   });
+
+  it("still refetches when the invalidator changes (a lore add/edit)", () => {
+    const fetches = vi.spyOn(api, "getSceneEffectiveNames").mockResolvedValue({});
+    let loreVersion = $state(0);
+
+    const stop = $effect.root(() => {
+      createSceneEffectiveMatcher({
+        sceneId: () => "scene_1",
+        entries: () => [],
+        schema: () => null,
+        invalidateOn: () => loreVersion,
+      });
+    });
+    flushSync();
+    expect(fetches).toHaveBeenCalledTimes(1);
+
+    loreVersion += 1;
+    flushSync();
+    expect(fetches).toHaveBeenCalledTimes(2);
+    stop();
+  });
 });

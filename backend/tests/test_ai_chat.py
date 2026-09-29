@@ -541,6 +541,46 @@ class ChatStreamEndpointTests(unittest.TestCase):
         self.assertEqual([t["text"] for t in thinking], ["Let me think… ", "OK."])
         self.assertEqual([d["text"] for d in deltas], ["Hi!"])
 
+    def test_chat_stream_never_replays_a_prior_reply_s_thinking(self) -> None:
+        """#2339: a reply's thinking is saved with the chat but is NEVER sent back
+        to the model in a later turn's history — only role + content reach the
+        provider, even if a client were to send a `thinking` key along."""
+        from app.services.ai import providers as ai_providers
+        self.service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
+        )
+        loaded = _set_machine_keys(anthropic="sk-ant-test")
+        captured: dict = {}
+
+        def capture_and_stream(call):
+            captured["call"] = call
+            yield ai_providers.StreamDelta(text="ok")
+            yield ai_providers.StreamFinal(stop_reason="end_turn")
+
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(_ANTHROPIC_STREAM, side_effect=capture_and_stream):
+            response = self.client.post(
+                "/api/ai/chat/stream",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [
+                        {"role": "user", "content": "first"},
+                        {
+                            "role": "assistant",
+                            "content": "the answer",
+                            "thinking": "SECRET REASONING",
+                        },
+                        {"role": "user", "content": "follow-up"},
+                    ],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        sent = captured["call"].messages
+        self.assertTrue(all(set(m) <= {"role", "content"} for m in sent), sent)
+        self.assertNotIn("SECRET REASONING", repr(sent))
+        self.assertIn({"role": "assistant", "content": "the answer"}, sent)
+
     def test_chat_stream_truncated_when_stop_reason_is_max_tokens(self) -> None:
         from app.services.ai import providers as ai_providers
         self.service.update_project_settings(

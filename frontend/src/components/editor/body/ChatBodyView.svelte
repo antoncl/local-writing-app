@@ -86,6 +86,7 @@
     subjectRefFromEntryType,
     ttlChipsFor,
   } from "@/components/editor/body/chat/chatInputs";
+  import { outgoingHistory } from "@/components/editor/body/chat/outgoingHistory";
   import { lockPromptTemplate } from "@/components/editor/body/chat/promptTemplateLock";
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
   import { structureNodeTitle } from "@/lib/utils/nodeTitle";
@@ -741,7 +742,7 @@
         {
           assistant_id: chatAssistantId || null,
           system_prompt: chatSystemPrompt,
-          messages: chatHistory.slice(0, idx).map(({ role, content }) => ({ role, content })),
+          messages: outgoingHistory(chatHistory.slice(0, idx)),
           chat_id: scene?.id ?? null,
         },
         chatAbort.signal,

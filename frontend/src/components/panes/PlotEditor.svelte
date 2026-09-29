@@ -264,6 +264,10 @@
     }
   }
 
+  // The card last pressed (#2363): lifted above the other cards so an overlapped card
+  // comes to the front when clicked. Ephemeral; one at a time.
+  let raisedCardId = $state<string | null>(null);
+
   // A card/plotline kebab menu is lifted above its sibling nodes while open by a pure-CSS
   // `:has()` rule in this component's styles (#1100), NOT by touching `flowNodes` —
   // reassigning the SvelteFlow-bound array to bump one node's z-index forced a full board
@@ -327,6 +331,12 @@
     get highlightedCardIds() {
       return litCardIds;
     },
+    // The card last pressed is lifted to the front (#2363) — by the `:has(.raised)` CSS
+    // rule below, never by bumping a `zIndex` in `flowNodes` (the #1100 freeze).
+    get raisedCardId() {
+      return raisedCardId;
+    },
+    onRaise: (cardId) => (raisedCardId = cardId),
   });
 
   // On-node plotline editing (ADR-0053 §3). The board owns the ephemeral "which
@@ -1272,6 +1282,16 @@
   .board-canvas {
     width: 100%;
     height: 100%;
+  }
+  /* The card last pressed comes to the front (#2363), so a card partly hidden under
+     another can be pulled on top by clicking what shows of it. Same pure-CSS mechanism
+     as the lifts below (no `flowNodes` write, #1100), one step below them: an expanded
+     plotline/arc editor, an open menu, and SvelteFlow's selection lift all still win.
+     Pressing the kebab raises its card too, so the menu lift must beat this one on the
+     SAME wrapper: `:where()` zeroes this rule's specificity and it comes first, so the
+     later, more specific lifts override it. */
+  .board-canvas :global(.svelte-flow__node:has(:where(.plot-card.raised))) {
+    z-index: 800 !important;
   }
   /* Lift a node above its siblings while its kebab menu is open (#1095/#1100). The menu
      escapes its node's own clip but is trapped in the node's SvelteFlow stacking context,

@@ -59,6 +59,11 @@ export type PlotCardActions = {
   // of a thread. Null (or empty) ⇒ no finding selected. Takes precedence over
   // `focusedPlotlineId` (only one is ever active — selecting a finding clears focus).
   readonly highlightedCardIds: ReadonlySet<string> | null;
+  // The card last pressed (#2363), or null. PlotEditor lifts it above the other cards
+  // with a CSS `:has()` rule, so a card partly hidden under another is brought to the
+  // front by clicking any visible part of it. Ephemeral display state, never saved.
+  readonly raisedCardId: string | null;
+  onRaise: (cardId: string) => void;
 };
 
 // Symbol key so the context can't collide with a string-keyed one.

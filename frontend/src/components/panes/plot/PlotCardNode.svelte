@@ -248,7 +248,13 @@
     class:drag-over={dragOver}
     class:lit={lit}
     class:dimmed={dimmed && !dragOver}
+    class:raised={!!id && actions?.raisedCardId === id}
     style={accent ? `--card-accent: ${accent}` : undefined}
+    onpointerdowncapture={() => {
+      // Any press on the card — its grip, title, synopsis, pills — brings it to the
+      // front (#2363). Capture phase, so a control that stops propagation still raises.
+      if (actions && id && actions.raisedCardId !== id) actions.onRaise(id);
+    }}
     ondragover={onCardDragOver}
     ondragleave={onCardDragLeave}
     ondrop={onCardDrop}

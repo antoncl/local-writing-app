@@ -85,6 +85,27 @@ describe("handleSaveFailure — classification (#457)", () => {
   });
 });
 
+describe("autosaveOnce — what it surfaces", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("flashes the message for a non-409 failure", async () => {
+    const host = fakeHost();
+    host.saveEditorPane.mockRejectedValue(new HttpError("busy", 503, null));
+    await autosaveOnce(host, "p");
+    expect(host.setError).toHaveBeenCalledWith("busy");
+  });
+
+  it("does NOT flash a 409 — the reconcile ladder owns that outcome (#2369)", async () => {
+    // The ladder is silent when it adopts or merges and asks via the dialog when it
+    // can't; a transient "changed on disk" first reported a conflict it then resolved.
+    vi.spyOn(conflictDiffService, "request").mockImplementation(() => {});
+    const host = fakeHost();
+    host.saveEditorPane.mockRejectedValue(new HttpError("Card changed on disk after it was opened.", 409, null));
+    await autosaveOnce(host, "p");
+    expect(host.setError).not.toHaveBeenCalled();
+  });
+});
+
 describe("offerAutosaveConflictRecovery — the two choices (#457)", () => {
   afterEach(() => vi.restoreAllMocks());
 

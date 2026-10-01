@@ -28,6 +28,7 @@ from app.models import (
     PlotBoardProjection,
     PlotlineSummary,
     SavePlotBoardRequest,
+    StructureLevel,
     StructureNode,
 )
 from app.services.project.card_text import displayed_card_text
@@ -35,6 +36,7 @@ from app.services.project.decks import (
     DECK_FIELD,
     PLANNED_AFTER_FIELD,
     PLANNED_IN_FIELD,
+    REALIZED_FIELD,
     deck_board_order,
 )
 from app.services.project.errors import ProjectServiceError
@@ -49,6 +51,7 @@ from app.services.project.plot import (
 )
 from app.services.project.plot_diagnostics import compute_plot_diagnostics
 from app.services.project.story_time import story_time_order
+from app.services.project.tree_nodes import level_at
 from app.services.tree_structure import StructureVisitor, TreeStructureService
 
 
@@ -71,6 +74,8 @@ class _PlotBoardLayout(StructureVisitor):
         # scenes ranked so far when the container is met, so a planned card with no
         # live anchor sorts just before it (ADR-0097 §6).
         self.container_start: dict[str, int] = {}
+        # The tree's level list (ADR-0094 §7), what a deck's realize names its level by.
+        self.levels: list[StructureLevel] = []
 
     def visit_node(
         self, node: StructureNode, ancestors: tuple[StructureNode, ...]
@@ -263,16 +268,7 @@ class PlotBoardMixin:
                 )
             )
         }
-        decks = [
-            PlotBoardDeck(
-                id=deck.id,
-                title=deck.title,
-                synopsis=deck.body,
-                parent=parent,
-                movable=deck.source_layer_id == owned_layer,
-            )
-            for deck, parent in deck_board_order(self.list_decks().entries)
-        ]
+        decks = self._board_decks(layout, owned_layer)
         deck_ids = {deck.id for deck in decks}
         cards: list[PlotBoardCard] = []
         for card in card_entries:
@@ -321,6 +317,41 @@ class PlotBoardMixin:
         projection.diagnostics = compute_plot_diagnostics(projection)
         return projection
 
+    def _board_decks(self, layout: _PlotBoardLayout, owned_layer: str) -> list[PlotBoardDeck]:
+        """The decks the board draws, parents first (ADR-0097 §8). A realized deck
+        (§7) shows its container's title and summary; its `realize_level_name` is the
+        level a realize would create at — under the parent deck's container when that
+        deck is realized, else at the top; None when the level list stops short."""
+        ordered = deck_board_order(self.list_decks().entries)
+        realized = {
+            deck.id: container
+            for deck, _parent in ordered
+            if (container := deck.metadata.get(REALIZED_FIELD)) in layout.containers
+        }
+        container_text = {
+            container: (scene.title, str(scene.metadata.get("summary") or ""))
+            for container in realized.values()
+            for scene in [self.read_scene(container)]
+        }
+        decks = []
+        for deck, parent in ordered:
+            container = realized.get(deck.id)
+            title, synopsis = displayed_card_text(deck.title, deck.body, container, container_text)
+            parent_container = layout.containers.get(realized.get(parent)) if parent else None
+            level = (parent_container.level or 0) + 1 if parent_container is not None else 1
+            decks.append(
+                PlotBoardDeck(
+                    id=deck.id,
+                    title=title,
+                    synopsis=synopsis,
+                    parent=parent,
+                    movable=deck.source_layer_id == owned_layer,
+                    realized_container=container,
+                    realize_level_name=level_at(layout.levels, level).name if level <= len(layout.levels) else None,
+                )
+            )
+        return decks
+
     def _board_container_map(
         self,
     ) -> tuple[dict[str, PlotBoardContainer], dict[str, str], dict[str, int], dict[str, tuple[str, str]]]:
@@ -352,8 +383,10 @@ class PlotBoardMixin:
         """The one structure walk behind `_board_container_map`, whole — the
         projection also reads where each container starts (ADR-0097 §6)."""
         layout = _PlotBoardLayout(self._is_leaf_node)
+        document = self.read_structure()
+        layout.levels = document.levels
         TreeStructureService.walk(
-            self.read_structure().root,
+            document.root,
             layout,
             skip_root=True,
             is_leaf=self._is_leaf_node,

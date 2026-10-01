@@ -5,9 +5,17 @@
 // the plotline / arc — kept as its own store so a deck is never routed through their
 // undo commands (which would recreate it as the wrong kind).
 
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
-import { refreshPlotBoard, refreshAfterMutation } from "@/lib/stores/plotBoard";
+import type { CardTextChoice } from "@/lib/api/plot";
+import {
+  type CardTextOutcome,
+  plotBoardStore,
+  refreshPlotBoard,
+  refreshAfterMutation,
+  withTextChoice,
+} from "@/lib/stores/plotBoard";
+import { refreshStructure } from "@/lib/stores/structure";
 import type { DeckEntry, DeckSummary } from "@/lib/types";
 
 export const deckEntriesStore = writable<DeckSummary[]>([]);
@@ -108,4 +116,72 @@ export async function restoreCardDeck(
     await api.placeCard(cardId, { to: { deck: deckId } });
   }
   if (refresh) await refreshAfterMutation();
+}
+
+// ── Realize as a container (ADR-0097 §7) ────────────────────────────────────
+
+// Edit the displayed title and/or synopsis in one write — the container's while the deck is
+// realized, so the manuscript tree is refetched too (a rename shows there).
+export async function setDeckText(deckId: string, text: { title?: string; synopsis?: string }): Promise<void> {
+  await api.setDeckText(deckId, text);
+  await Promise.all([refreshDecks(), refreshAfterMutation(), refreshStructure().catch(() => {})]);
+}
+
+// Realize a deck as a manuscript container: it joins the tree (so the structure is refetched)
+// and the deck's unwritten cards are planned in it. Returns the container's id and the ids of
+// the cards planned, which the undo command needs.
+export async function realizeDeck(deckId: string): Promise<{ containerId: string; planned: string[] }> {
+  const result = await api.realizeDeck(deckId);
+  await Promise.all([refreshDecks(), refreshAfterMutation(), refreshStructure().catch(() => {})]);
+  return { containerId: result.container_id, planned: result.planned };
+}
+
+// What a container is called in a question to the writer: its level's name ("chapter").
+const containerNoun = (containerId: string | null | undefined): string =>
+  (get(plotBoardStore)?.containers.find((c) => c.id === containerId)?.level_name ?? "Chapter").toLowerCase();
+const capitalised = (word: string): string => word[0].toUpperCase() + word.slice(1);
+
+// Detach a deck from its container (the container stays): `text` says which synopsis the deck
+// keeps when both differ (asked when omitted and needed). Same outcome contract as the card's.
+export async function detachDeckContainer(deckId: string, text?: CardTextChoice): Promise<CardTextOutcome> {
+  const deck = get(plotBoardStore)?.decks.find((d) => d.id === deckId);
+  const noun = containerNoun(deck?.realized_container);
+  const outcome = await withTextChoice(
+    {
+      title: "Which synopsis should the deck keep?",
+      names: { scene: capitalised(noun), card: "Deck" },
+      confirmLabel: "Keep the deck's synopsis",
+      confirmChoice: "card",
+      secondaryLabel: `Take the ${noun}'s summary`,
+      secondaryChoice: "scene",
+    },
+    (choice) => api.detachDeck(deckId, choice),
+    text,
+  );
+  if (outcome !== "cancelled") await refreshDecks();
+  return outcome;
+}
+
+// Attach a deck to an existing container; `text` says which summary the container keeps
+// when both differ (asked when omitted and needed).
+export async function attachDeckContainer(
+  deckId: string,
+  containerId: string,
+  text?: CardTextChoice,
+): Promise<CardTextOutcome> {
+  const noun = containerNoun(containerId);
+  const outcome = await withTextChoice(
+    {
+      title: `Which summary should the ${noun} keep?`,
+      names: { scene: capitalised(noun), card: "Deck" },
+      confirmLabel: `Keep the ${noun}'s summary`,
+      confirmChoice: "scene",
+      secondaryLabel: "Use the deck's synopsis",
+      secondaryChoice: "card",
+    },
+    (choice) => api.attachDeck(deckId, containerId, choice),
+    text,
+  );
+  if (outcome !== "cancelled") await refreshDecks();
+  return outcome;
 }

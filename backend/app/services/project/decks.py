@@ -28,6 +28,9 @@ DECK_FIELD = "plot_deck"
 PLANNED_IN_FIELD = "planned_in"
 PLANNED_AFTER_FIELD = "planned_after"
 _PLANNED_FIELDS = (PLANNED_IN_FIELD, PLANNED_AFTER_FIELD)
+# The manuscript container a deck is realized as (ADR-0097 §7). Endpoint-owned
+# (`deck_realize.py`), like a card's `scene`.
+REALIZED_FIELD = "realized_container"
 
 
 def without_planned(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -122,7 +125,26 @@ class DeckMixin:
         )
 
     def save_deck(self, entry_id: str, request: SaveDeckRequest) -> DeckEntry:
+        """The public deck save. `realized_container` is endpoint-owned — the on-disk
+        value is kept and the client's ignored — and a realized deck's own title and
+        body are frozen: its text is edited in the manuscript (`PUT .../text`)."""
         self._require_deck_not_inside_itself(entry_id, request.metadata.get(DECK_FIELD))
+        current = self.read_deck(entry_id)
+        realized = current.metadata.get(REALIZED_FIELD)
+        if realized and (request.title != current.title or request.body.rstrip() != current.body.rstrip()):
+            raise ProjectServiceError(
+                f"This deck is realized as a {self._container_level_name(str(realized))}; "
+                "edit it in the manuscript.",
+                422,
+            )
+        metadata = {key: value for key, value in request.metadata.items() if key != REALIZED_FIELD}
+        if realized:
+            metadata[REALIZED_FIELD] = realized
+        return self._write_deck(entry_id, request.model_copy(update={"metadata": metadata}))
+
+    def _write_deck(self, entry_id: str, request: SaveDeckRequest) -> DeckEntry:
+        # The one deck write path; internal writers that own `realized_container`
+        # (`deck_realize.py`) come straight here, past `save_deck`'s pin.
         return self.read_deck(
             self._save_plot_folder_node(entry_id, request, expected_entry_type=PLOT_DECK_ENTRY_TYPE, noun="deck")
         )

@@ -26,7 +26,9 @@ import {
   deletePlotlineCommand,
   arcEditCommand,
   plotlineEditCommand,
+  detachDeckCommand,
   realizeCommand,
+  realizeDeckCommand,
   seedCommand,
 } from "./plotCommands";
 import { UndoCancelled } from "@/lib/stores/undoCaretaker.svelte";
@@ -73,6 +75,9 @@ function fakePort() {
     detach: null,
   };
   let sceneCounter = 0;
+  // A deck's realize: the cards it plans, and whether anything sits under its container.
+  let containerCounter = 0;
+  const realizedDeck: { planned: string[]; holds: boolean } = { planned: [], holds: false };
   // The planned cards the next realize re-anchors, and the manuscript tree scene moves read.
   const realized: { reanchored: string[] } = { reanchored: [] };
   const manuscript: { doc: StructureDocument | null } = { doc: null };
@@ -188,8 +193,32 @@ function fakePort() {
       calls.push("confirm");
       return confirm.result;
     },
+    realizeDeck: async (deckId) => {
+      const containerId = `container_${++containerCounter}`;
+      calls.push(`realizeDeck:${deckId}->${containerId}`);
+      return { containerId, planned: realizedDeck.planned };
+    },
+    setDeckText: async (deckId, text) => {
+      calls.push(`deckText:${deckId}:${JSON.stringify(text)}`);
+    },
+    attachDeckContainer: async (deckId, containerId, text) => {
+      calls.push(`attachDeck:${deckId}:${containerId}:${text ?? "-"}`);
+      return outcome.attach === null && text ? text : outcome.attach;
+    },
+    detachDeckContainer: async (deckId, text) => {
+      calls.push(`detachDeck:${deckId}:${text ?? "-"}`);
+      return outcome.detach === null && text ? text : outcome.detach;
+    },
+    containerHoldsNodes: () => realizedDeck.holds,
+    deleteContainer: async (containerId) => {
+      calls.push(`deleteContainer:${containerId}`);
+    },
+    confirmContainerDelete: async () => {
+      calls.push("confirmContainer");
+      return confirm.result;
+    },
   };
-  return { port, cards, plotlines, arcs, decks, scenes, sceneRefs, summaries, outcome, confirm, calls, realized, manuscript };
+  return { port, cards, plotlines, arcs, decks, scenes, sceneRefs, summaries, outcome, confirm, calls, realized, manuscript, realizedDeck };
 }
 
 // A projection with just the fields the finders / recorder read.
@@ -1051,5 +1080,123 @@ describe("planned cards (ADR-0097 §6)", () => {
     await recorderFor(port, recorded, [card("a")]).realize("a", "ch");
     await recorded[0].undo();
     expect(calls).toEqual(["realize:a->scene_1", "deleteScene:scene_1"]);
+  });
+});
+
+describe("a deck realized as a container (ADR-0097 §7)", () => {
+  type Rec = Array<{ undo: () => unknown; redo: () => unknown }>;
+  const shownDeck = (over: Record<string, unknown> = {}) => ({
+    id: "d1",
+    title: "Backstory",
+    synopsis: "Mara's past",
+    parent: null,
+    movable: true,
+    ...over,
+  });
+  const recorderWith = (port: PlotCommandPort, recorded: Rec, decks = [shownDeck()]) =>
+    new PlotUndoRecorder(port, (c) => recorded.push(c), () => ({ ...projection([]), decks }));
+
+  it("realize undo: cards go home, the deck detaches keeping its synopsis, its title returns, the container goes", async () => {
+    const { port, calls, realizedDeck } = fakePort();
+    realizedDeck.planned = ["a", "b"];
+    const recorded: Rec = [];
+    await recorderWith(port, recorded).realizeDeck("d1");
+    expect(recorded).toHaveLength(1);
+    await recorded[0].undo();
+    expect(calls).toEqual([
+      "realizeDeck:d1->container_1",
+      'place:a:{"to":{"deck":"d1"}}',
+      'place:b:{"to":{"deck":"d1"}}',
+      "detachDeck:d1:card",
+      'deckText:d1:{"title":"Backstory","synopsis":"Mara\'s past"}',
+      "deleteContainer:container_1",
+    ]);
+  });
+
+  it("realize redo realizes again and the next undo targets the NEW container", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Rec = [];
+    await recorderWith(port, recorded).realizeDeck("d1");
+    await recorded[0].undo();
+    await recorded[0].redo();
+    await recorded[0].undo();
+    expect(calls).toContain("realizeDeck:d1->container_2");
+    expect(calls.at(-1)).toBe("deleteContainer:container_2");
+  });
+
+  it("realize undo asks before deleting a container that now holds scenes, and backing out changes nothing", async () => {
+    const { port, calls, realizedDeck, confirm } = fakePort();
+    realizedDeck.holds = true;
+    confirm.result = false;
+    const command = realizeDeckCommand(port, "d1", "container_9", ["a"], { title: "Backstory" });
+    await expect(command.undo()).rejects.toBeInstanceOf(UndoCancelled);
+    expect(calls).toEqual(["confirmContainer"]);
+    confirm.result = true;
+    await command.undo();
+    expect(calls.at(-1)).toBe("deleteContainer:container_9");
+  });
+
+  it("realize undo does not ask when the container is empty of scenes", async () => {
+    const { port, calls } = fakePort();
+    await realizeDeckCommand(port, "d1", "container_9", [], { title: "T" }).undo();
+    expect(calls).not.toContain("confirmContainer");
+  });
+
+  it("detach undo restores the deck's own text, then re-attaches keeping the container's summary; redo detaches with the recorded choice", async () => {
+    const { port, calls, decks, outcome } = fakePort();
+    decks.set("d1", deckState("Backstory", {}, "Own synopsis"));
+    outcome.detach = "card";
+    const recorded: Rec = [];
+    await recorderWith(port, recorded, [shownDeck({ realized_container: "ch1", title: "Chapter 1" })]).detachDeck("d1");
+    expect(calls).toEqual(["detachDeck:d1:-"]);
+    await recorded[0].undo();
+    await recorded[0].redo();
+    expect(calls.slice(1)).toEqual([
+      'deckText:d1:{"title":"Backstory","synopsis":"Own synopsis"}',
+      "attachDeck:d1:ch1:scene",
+      "detachDeck:d1:card",
+    ]);
+  });
+
+  it("a detach the writer backs out of records nothing", async () => {
+    const { port, decks, outcome } = fakePort();
+    decks.set("d1", deckState("Backstory"));
+    outcome.detach = "cancelled";
+    const recorded: Rec = [];
+    await recorderWith(port, recorded, [shownDeck({ realized_container: "ch1" })]).detachDeck("d1");
+    expect(recorded).toEqual([]);
+  });
+
+  it("detach undo stays undoable when the writer backs out of the re-attach", async () => {
+    const { port, outcome } = fakePort();
+    outcome.attach = "cancelled";
+    await expect(detachDeckCommand(port, "d1", "ch1", { title: "T" }, null).undo()).rejects.toBeInstanceOf(UndoCancelled);
+  });
+
+  it("a deck text edit undoes to what the board showed, and a no-op edit records nothing", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Rec = [];
+    const recorder = recorderWith(port, recorded);
+    await recorder.deckTextEdit("d1", "rename deck", { title: "Backstory" });
+    expect(recorded).toEqual([]);
+    await recorder.deckTextEdit("d1", "rename deck", { title: "Mara's past" });
+    await recorded[0].undo();
+    await recorded[0].redo();
+    expect(calls.slice(-2)).toEqual(['deckText:d1:{"title":"Backstory"}', 'deckText:d1:{"title":"Mara\'s past"}']);
+  });
+
+  it("deleting a realized deck: undo re-links its container and restores every member by save, not place", async () => {
+    const { port, decks, calls } = fakePort();
+    decks.set("d1", deckState("Backstory"));
+    const proj: PlotBoardProjection = {
+      ...projection([card("p", { deck: "d1", planned_in: "ch1", container: "ch1" })]),
+      decks: [shownDeck({ realized_container: "ch1" })],
+    };
+    const recorded: Rec = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c), () => proj);
+    await recorder.deleteDeck("d1", async () => {});
+    await recorded[0].undo();
+    expect(calls.indexOf("attachDeck:d1:ch1:scene")).toBeGreaterThan(calls.indexOf("recreateDeck:d1"));
+    expect(calls).toContain("cardDeck:p:d1:written");
   });
 });

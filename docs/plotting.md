@@ -128,9 +128,10 @@ manuscript: it's somewhere to keep cards that aren't part of the book yet.
   deck. A card that's **written** shows by its scene, so it can't be dragged into a
   deck — detach it first. Dropping a card onto a chapter is a different thing; see
   **Planning a card in a chapter**, below.
-- **Deck menu (⋯):** **New card**, **New deck inside**, **Rename**, **Open** (the
-  deck in its own editor: name, synopsis and its parent deck) and **Delete**. A
-  deck from an ancestor project can be opened but not changed.
+- **Deck menu (⋯):** **New card**, **New deck inside**, **Rename**, **Realize as
+  Chapter** (see below), **Open** (the deck in its own editor: name, synopsis and
+  its parent deck) and **Delete**. A deck from an ancestor project can be opened
+  but not changed.
 - **Nest decks:** **New deck inside** makes a child deck drawn inside its parent.
   To move an existing deck, **Open** it and set its **Deck** field in the rail.
   A card's own **Deck** field in its rail moves it between decks too.
@@ -138,6 +139,30 @@ manuscript: it's somewhere to keep cards that aren't part of the book yet.
   drop into **Loose cards** and its child decks move to the top level. You're
   asked first when it holds anything, and **Undo** brings the deck back with
   everything in it.
+
+### Turning a deck into a chapter
+
+When a deck is ready to become part of the book, choose **Realize as Chapter** in
+its menu (the name is your project's level at that spot: a top-level deck becomes
+a top-level container, a deck inside a realized deck becomes the next level down).
+The manuscript gets a new chapter with the deck's name, and the deck's synopsis
+becomes the chapter's summary.
+
+- **Its cards become planned there.** Every unwritten card in the deck is planned
+  in the new chapter, in story-time order. None of them is written: no scene is
+  created until you choose **Write as scene** on a card.
+- **The deck now shows as that chapter's box.** The deck's own box goes away; the
+  chapter's box stands for it and carries the deck's menu (**New card**, **New
+  deck inside**, **Rename**, **Open deck**, **Detach from deck**, **Delete
+  deck**). Renaming it renames the chapter, and its title and synopsis are the
+  chapter's. Decks nested in the deck are drawn inside the chapter's box.
+- **Detach keeps the chapter.** **Detach from deck** unlinks the deck; the chapter
+  and its planned cards stay in the manuscript. If the deck's synopsis and the
+  chapter's summary differ, you choose which the deck keeps. Deleting the deck
+  keeps the chapter too.
+- **Undo takes it all back:** the cards return to the deck, the deck is detached
+  and the chapter the realize made is deleted (you're asked first if you've put
+  scenes in it since).
 
 ## Plotlines
 

@@ -35,6 +35,10 @@ export type StoryAnchor = { after_id: string } | { before_id: string };
  *  planned in a manuscript container right after a scene (null = first there). */
 export type PlaceTo = { deck: string } | { loose: true } | { planned_in: string; planned_after: string | null };
 
+/** What a deck's realize returns (ADR-0097 §7): the deck (now realized), the container made
+ *  for it, and the ids of the cards planned in it — what undo needs to take it all back. */
+export type RealizeDeckResult = { deck: DeckEntry; container_id: string; planned: string[] };
+
 /** What `realize` returns: the card, and the ids of the other planned cards the write
  *  re-anchored after the new scene (ADR-0097 §6). */
 export type RealizeCardResult = CardEntry & { reanchored: string[] };
@@ -288,6 +292,35 @@ export const plotApi = {
   // Deleting a deck deletes only the deck: its cards go loose, its child decks top level.
   deleteDeck(entryId: string) {
     return request<DeckList>(`/plot/decks/${entryId}`, { method: "DELETE" });
+  },
+  // Edit the DISPLAYED title/synopsis: the container's while the deck is realized, the
+  // deck's own otherwise (ADR-0097 §3).
+  setDeckText(entryId: string, text: { title?: string; synopsis?: string }) {
+    return request<DeckEntry>(`/plot/decks/${entryId}/text`, {
+      method: "PUT",
+      body: JSON.stringify(text),
+    });
+  },
+  // Realize a deck as a manuscript container (ADR-0097 §7): its unwritten cards become
+  // planned there; no scene is created.
+  realizeDeck(entryId: string) {
+    return request<RealizeDeckResult>(`/plot/decks/${entryId}/realize`, { method: "POST" });
+  },
+  // Re-link a deck to an existing container; 409 `text_choice_required` when the container's
+  // summary and the deck's synopsis differ and `text` is omitted.
+  attachDeck(entryId: string, containerId: string, text?: CardTextChoice) {
+    return request<DeckEntry>(`/plot/decks/${entryId}/attach`, {
+      method: "POST",
+      body: JSON.stringify(text ? { container_id: containerId, text } : { container_id: containerId }),
+    });
+  },
+  // Unlink a deck from its container (the container stays); `text` picks the surviving
+  // synopsis when both differ ("card" = the deck's, "scene" = the container's).
+  detachDeck(entryId: string, text?: CardTextChoice) {
+    return request<DeckEntry>(`/plot/decks/${entryId}/detach`, {
+      method: "POST",
+      body: JSON.stringify(text ? { text } : {}),
+    });
   },
   // Snapshot a Library template's beats into a new owned plot:thread holder (ADR-0048
   // §3; ADR-0053 §1/§2; ADR-0080 §5 — a character-arc-family template yields a

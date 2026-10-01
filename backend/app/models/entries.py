@@ -255,6 +255,44 @@ class SaveDeckRequest(_PlotFolderSaveRequest):
     entry_type: str = "plot:deck"
 
 
+class RealizeDeckResult(BaseModel):
+    """Response of POST /api/plot/decks/{id}/realize (ADR-0097 §7): the deck (now
+    realized), the container created for it, and the ids of the cards planned in it
+    — so the board can undo the whole realize."""
+
+    deck: DeckEntry
+    container_id: str
+    planned: list[str] = Field(default_factory=list)
+
+
+class AttachDeckRequest(BaseModel):
+    """Body for POST /api/plot/decks/{id}/attach (ADR-0097 §3/§7): re-link a deck to
+    an existing container. `text` is sent only when both texts are non-empty and
+    differ and the writer has chosen: keep the `scene`'s (the container's) summary,
+    or use the `card`'s (the deck's) synopsis — the card attach's literals."""
+
+    container_id: str
+    text: Literal["scene", "card"] | None = None
+
+
+class DetachDeckRequest(BaseModel):
+    """Body for POST /api/plot/decks/{id}/detach (ADR-0097 §3/§7). `text` is the
+    writer's choice when the deck's old synopsis and the container's summary both
+    exist and differ: keep the `card`'s (the deck's), or take the `scene`'s (the
+    container's)."""
+
+    text: Literal["card", "scene"] | None = None
+
+
+class DeckTextRequest(BaseModel):
+    """Body for PUT /api/plot/decks/{id}/text (ADR-0097 §3): the displayed title
+    and/or synopsis. Written to the container while the deck is realized, else to
+    the deck. An absent field is left alone."""
+
+    title: str | None = None
+    synopsis: str | None = None
+
+
 class PlotBoard(BaseModel):
     """The plot board (ADR-0048 §3): a per-project layout singleton.
 
@@ -459,6 +497,13 @@ class PlotBoardDeck(BaseModel):
     synopsis: str = ""
     parent: str | None = None
     movable: bool = True
+    # ADR-0097 §7: the manuscript container this deck is realized as (healed; None
+    # when unrealized or the container is gone) — while set, `title` / `synopsis`
+    # are the container's. `realize_level_name` is what a realize would create at
+    # (the level under the parent deck's container, else the top level); None when
+    # the level list allows no container there.
+    realized_container: str | None = None
+    realize_level_name: str | None = None
 
 
 class PlotBoardContainer(BaseModel):

@@ -3,7 +3,7 @@
   cards that has no scene and no place in the manuscript. A dashed border (a deck is not
   structure, so it reads apart from the solid chapter boxes), the title in the serif, the
   first two lines of its synopsis, a card count, and a ⋯ menu — New card, New deck inside,
-  Rename, Open, Delete. An inherited deck (`movable` false) offers Open alone.
+  Rename, Realize as a level (when the level list allows one here), Open, Delete. An inherited deck (`movable` false) offers Open alone.
 
   Like PlotContainerNode it imports nothing from @xyflow/svelte and the box body is
   `pointer-events: none`, so a card drag or board pan passes through the interior; only the
@@ -120,6 +120,11 @@
         </button>
         <button role="menuitem" class="menu-item" onclick={() => run(actions.startRename)}>
           <i class="ti ti-pencil" aria-hidden="true"></i> Rename
+        </button>
+      {/if}
+      {#if editable && data.realizeLevel}
+        <button role="menuitem" class="menu-item" onclick={() => run(actions.onRealize)}>
+          <i class="ti ti-wand" aria-hidden="true"></i> Realize as {data.realizeLevel}
         </button>
       {/if}
       <button role="menuitem" class="menu-item" onclick={() => run(actions.onOpen)}>

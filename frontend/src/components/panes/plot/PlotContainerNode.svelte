@@ -11,8 +11,13 @@
   The whole box is `pointer-events: none` so it never intercepts a card drag/click —
   it is structure, not a control. Structure carries no colour (plotline is the card's
   colour axis), so the box is a quiet neutral tint, an act reading a touch stronger.
+
+  A container a deck is realized as (ADR-0097 §7) stands for that deck: it gets the deck's ⋯ menu
+  in its header, from the same context the deck box uses.
 -->
 <script lang="ts">
+  import { getContext, tick } from "svelte";
+  import { PLOT_DECK_ACTIONS, type PlotDeckActions } from "./plotDeckActions";
   import { CONTAINER_DRAG_HANDLE_CLASS, type PlotContainerData } from "@/lib/plot/plotBoardLayout";
   import { structureStore } from "@/lib/stores/structure";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -39,18 +44,115 @@
     const node = root ? findStructureNodeById(root, data.containerId) : null;
     return node ? structureNodeTitle(node, $metadataSchemaStore) : data.title;
   });
+
+  // A container a deck is realized as (ADR-0097 §7) is that deck's box: it carries the deck's
+  // menu, and its rename edits the displayed text through the deck. The actions come from
+  // context — absent in the mount test, so the box stays a plain backdrop.
+  const actions = getContext<PlotDeckActions | undefined>(PLOT_DECK_ACTIONS);
+  let deckId = $derived(data.deckId ?? null);
+  let editing = $derived(!!actions && !!deckId && actions.editingId === deckId);
+  let titleDraft = $state("");
+  let titleInput = $state<HTMLInputElement | null>(null);
+  $effect(() => {
+    if (!editing) return;
+    titleDraft = data.title;
+    void tick().then(() => {
+      titleInput?.focus();
+      titleInput?.select();
+    });
+  });
+  function commitTitle(): void {
+    if (!editing) return; // Escape already abandoned it
+    const next = titleDraft.trim();
+    actions?.finishRename(deckId ?? "", next && next !== data.title ? next : null);
+  }
+
+  let menuOpen = $state(false);
+  let rootEl = $state<HTMLElement | null>(null);
+  function run(op: ((deckId: string) => void) | undefined): void {
+    menuOpen = false;
+    if (deckId) op?.(deckId);
+  }
+  $effect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (rootEl && !rootEl.contains(e.target as Node)) menuOpen = false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") menuOpen = false;
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  });
 </script>
 
-<div class="plot-container" class:act={isAct} class:deep={isDeep} class:loose={isLoose} data-level={data.level}>
+<div class="plot-container" bind:this={rootEl} class:act={isAct} class:deep={isDeep} class:loose={isLoose} data-level={data.level}>
   <!-- The header is the drag handle (#877): SvelteFlow's `dragHandle` targets this
        class, so the box moves ONLY when grabbed here — a window-titlebar affordance —
        and the transparent interior stays inert (card drags + edges pass through). -->
   <div class="container-head {CONTAINER_DRAG_HANDLE_CLASS}">
-    <span class="container-title" title={displayTitle}>{displayTitle}</span>
+    {#if editing}
+      <input
+        bind:this={titleInput}
+        bind:value={titleDraft}
+        class="container-title-edit nodrag nopan"
+        aria-label="Name"
+        placeholder="Name"
+        onblur={commitTitle}
+        onkeydown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            actions?.finishRename(deckId ?? "", null);
+          }
+        }}
+      />
+    {:else}
+      <span class="container-title" title={displayTitle}>{displayTitle}</span>
+    {/if}
     <span class="container-count">{data.count}</span>
+    {#if deckId && actions}
+      <button
+        class="container-kebab nodrag nopan"
+        class:open={menuOpen}
+        aria-label="Deck actions"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onclick={() => (menuOpen = !menuOpen)}
+      >
+        <i class="ti ti-dots-vertical" aria-hidden="true"></i>
+      </button>
+    {/if}
   </div>
   {#if isLoose && data.count === 0}
     <p class="loose-hint">Drag a card here to take it out of its deck</p>
+  {/if}
+  {#if menuOpen && deckId && actions}
+    <div class="deck-menu nodrag nopan" role="menu" aria-label="Deck actions">
+      <button role="menuitem" class="menu-item" onclick={() => run(actions.onNewCard)}>
+        <i class="ti ti-plus" aria-hidden="true"></i> New card
+      </button>
+      <button role="menuitem" class="menu-item" onclick={() => run(actions.onNewDeckInside)}>
+        <i class="ti ti-stack-2" aria-hidden="true"></i> New deck inside
+      </button>
+      <button role="menuitem" class="menu-item" onclick={() => run(actions.startRename)}>
+        <i class="ti ti-pencil" aria-hidden="true"></i> Rename
+      </button>
+      <button role="menuitem" class="menu-item" onclick={() => run(actions.onOpen)}>
+        <i class="ti ti-eye" aria-hidden="true"></i> Open deck
+      </button>
+      <button role="menuitem" class="menu-item" onclick={() => run(actions.onDetach)}>
+        <i class="ti ti-unlink" aria-hidden="true"></i> Detach from deck
+      </button>
+      <button role="menuitem" class="menu-item menu-danger" onclick={() => run(actions.onDelete)}>
+        <i class="ti ti-trash" aria-hidden="true"></i> Delete deck
+      </button>
+    </div>
   {/if}
 </div>
 
@@ -125,5 +227,80 @@
     font-size: var(--fs-xs);
     color: var(--text-3);
     font-variant-numeric: tabular-nums;
+  }
+  .container-title-edit {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-sm);
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm);
+    padding: 1px 4px;
+  }
+  /* The realized deck's menu — the same look as a deck box's (PlotDeckNode). */
+  .container-kebab {
+    appearance: none;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 4px;
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  .plot-container:hover .container-kebab,
+  .container-kebab:focus-visible,
+  .container-kebab.open {
+    opacity: 1;
+  }
+  .container-kebab:hover {
+    background: var(--surface);
+    color: var(--text);
+  }
+  .deck-menu {
+    position: absolute;
+    top: 30px;
+    right: 8px;
+    z-index: 5;
+    min-width: 160px;
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    box-shadow: var(--elev-2);
+    pointer-events: auto;
+  }
+  .deck-menu .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    text-align: left;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+  }
+  .deck-menu .menu-item:hover {
+    background: var(--surface);
+  }
+  .deck-menu .menu-danger {
+    color: var(--danger);
+  }
+  .deck-menu .menu-danger:hover {
+    background: var(--danger-soft);
+  }
+  .deck-menu .menu-danger i {
+    color: var(--danger);
   }
 </style>

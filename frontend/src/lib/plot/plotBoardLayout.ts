@@ -68,6 +68,9 @@ export type PlotContainerData = PlotBoxData & {
   title: string;
   level: number;
   containerId: string;
+  // The deck realized as this container (ADR-0097 §7), when there is one: the box stands for
+  // it and carries its menu.
+  deckId?: string | null;
 };
 
 // A deck's box (ADR-0097 §2): its title, synopsis (the node shows the first lines), the raw
@@ -78,6 +81,8 @@ export type PlotDeckData = PlotBoxData & {
   synopsis: string;
   deckId: string;
   movable: boolean;
+  // The level a "Realize as …" would create at (null: none allowed here), ADR-0097 §7.
+  realizeLevel?: string | null;
 };
 
 // A card node: its synopsis (the body), whether it is attached to a scene, and the
@@ -365,6 +370,8 @@ export function buildBoardNodes(projection: PlotBoardProjection, saved: Record<s
   const containerById = new Map(projection.containers.map((c) => [c.id, c]));
   const deckById = new Map(projection.decks.map((d) => [d.id, d]));
   const cardById = new Map(projection.cards.map((c) => [c.id, c]));
+  // The deck each container stands in for (ADR-0097 §7).
+  const realizedDeckOf = new Map(projection.decks.flatMap((d) => (d.realized_container ? [[d.realized_container, d.id] as const] : [])));
   const heightOf = (card: { title: string; synopsis: string; beats: unknown[] }) =>
     estCardHeight(card.title, card.synopsis, card.beats.length);
 
@@ -405,7 +412,14 @@ export function buildBoardNodes(projection: PlotBoardProjection, saved: Record<s
       nodes.push({
         ...common,
         type: "plotDeck",
-        data: { ...boxData, title: deck.title, synopsis: deck.synopsis, deckId: deck.id, movable: deck.movable },
+        data: {
+          ...boxData,
+          title: deck.title,
+          synopsis: deck.synopsis,
+          deckId: deck.id,
+          movable: deck.movable,
+          realizeLevel: deck.realize_level_name ?? null,
+        },
       });
     } else if (spec.kind === "container") {
       const container = containerById.get(spec.ref)!;
@@ -413,7 +427,13 @@ export function buildBoardNodes(projection: PlotBoardProjection, saved: Record<s
         ...common,
         type: "plotContainer",
         // The container's level in the tree when the projection carries it, else its depth.
-        data: { ...boxData, title: container.title, level: container.level != null ? container.level - 1 : box.depth, containerId: container.id },
+        data: {
+          ...boxData,
+          title: container.title,
+          level: container.level != null ? container.level - 1 : box.depth,
+          containerId: container.id,
+          deckId: realizedDeckOf.get(container.id) ?? null,
+        },
       });
     } else {
       nodes.push({ ...common, type: "plotContainer", data: looseData(boxData) });
@@ -646,6 +666,6 @@ export function projectionDataKey(p: PlotBoardProjection): string {
     ]),
     p.containers.map((c) => [c.id, c.title, c.parent]),
     // A deck's title, synopsis, parent and ownership all show on its box.
-    p.decks.map((d) => [d.id, d.title, d.synopsis, d.parent, d.movable]),
+    p.decks.map((d) => [d.id, d.title, d.synopsis, d.parent, d.movable, d.realized_container, d.realize_level_name]),
   ]);
 }

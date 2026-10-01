@@ -91,6 +91,65 @@ describe("boardBoxes: the box tree", () => {
     expect(ids(roots[0].children[0])).toEqual(["in-child"]);
   });
 
+  describe("a deck realized as a container (ADR-0097 §7)", () => {
+    const realized = (id: string, container: string, parent: string | null = null) => ({
+      ...deck(id, parent),
+      realized_container: container,
+    });
+
+    it("draws no box of its own: its container's box stands for it", () => {
+      const roots = boardBoxes(projection({ containers: [container("ch")], decks: [realized("d", "ch")] }));
+      expect(roots.map((r) => r.nodeId)).toEqual(["container:ch", LOOSE_NODE_ID]);
+    });
+
+    it("nests its child decks inside the container box, after the container's child containers", () => {
+      const roots = boardBoxes(
+        projection({
+          containers: [container("ch"), container("sub", "ch")],
+          decks: [realized("d", "ch"), deck("child", "d")],
+          cards: [card("in-child", { deck: "child" })],
+        }),
+      );
+      expect(roots.map((r) => r.nodeId)).toEqual(["container:ch", LOOSE_NODE_ID]);
+      expect(roots[0].children.map((c) => c.nodeId)).toEqual(["container:sub", "deck:child"]);
+      expect(ids(roots[0].children[1])).toEqual(["in-child"]);
+    });
+
+    it("keeps its cards in the container, where they are planned", () => {
+      const roots = boardBoxes(
+        projection({
+          containers: [container("ch")],
+          decks: [realized("d", "ch")],
+          cards: [card("planned", { deck: "d", container: "ch", planned_in: "ch", container_order: -0.5 })],
+        }),
+      );
+      expect(ids(roots[0])).toEqual(["planned"]);
+    });
+
+    it("never loses a card still homed in it without a plan: it falls to the loose box", () => {
+      const roots = boardBoxes(
+        projection({ containers: [container("ch")], decks: [realized("d", "ch")], cards: [card("stray", { deck: "d" })] }),
+      );
+      expect(ids(byNode(roots, LOOSE_NODE_ID))).toEqual(["stray"]);
+    });
+
+    it("a realized deck whose container is gone is an ordinary deck box", () => {
+      const roots = boardBoxes(projection({ decks: [realized("d", "gone")] }));
+      expect(roots.map((r) => r.nodeId)).toEqual(["deck:d", LOOSE_NODE_ID]);
+    });
+
+    it("a deck nested in a realized deck of an unrealized parent still lands in the container box", () => {
+      const roots = boardBoxes(
+        projection({
+          containers: [container("ch")],
+          decks: [deck("top"), realized("mid", "ch", "top"), deck("leaf", "mid")],
+        }),
+      );
+      expect(roots.map((r) => r.nodeId)).toEqual(["container:ch", "deck:top", LOOSE_NODE_ID]);
+      expect(roots[0].children.map((c) => c.nodeId)).toEqual(["deck:leaf"]);
+    });
+  });
+
   it("treats a deck whose parent is not projected as top level", () => {
     const roots = boardBoxes(projection({ decks: [deck("orphan", "gone")] }));
     expect(roots.map((r) => r.nodeId)).toEqual(["deck:orphan", LOOSE_NODE_ID]);

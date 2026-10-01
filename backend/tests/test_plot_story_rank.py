@@ -322,6 +322,25 @@ class LayeredStoryTimeTests(unittest.TestCase):
         self.assertEqual(second.story_rank, 2)
         self.assertEqual(self.service.read_card("plot_series_card").story_rank, 1)
 
+    def test_the_projection_orders_own_cards_then_inherited_and_flags_what_moves(self) -> None:
+        second = self.service.create_card(CreateCardRequest(title="Own 2")).id
+        cards = {c.id: c for c in self.service.read_plot_board_projection().cards}
+        self.assertEqual(
+            [(cards[i].story_order, cards[i].story_movable) for i in (self.own, second, "plot_series_card")],
+            [(0, True), (1, True), (2, False)],
+        )
+
+
+class ProjectionStoryOrderTests(_StoryTestCase):
+    def test_story_order_follows_the_rank_and_a_move_re_indexes(self) -> None:
+        a, b, c = self._card("A"), self._card("B"), self._card("C")
+        self.service.place_card(c, _before(a))
+
+        def order() -> dict[str, int]:
+            return {card.id: card.story_order for card in self.service.read_plot_board_projection().cards}
+
+        self.assertEqual(order(), {c: 0, a: 1, b: 2})
+
 
 class SnapshotRestoreTests(_StoryTestCase):
     def _snapshot(self, card_id: str) -> str:

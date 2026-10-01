@@ -1,9 +1,8 @@
 """Cross-dimension plot diagnostics (ADR-0048 S7 — the payoff).
 
-A plot board's value is holding several dimensions at once — reveal order, beat
-sequence, authored causality. A *disagreement between two layers* is a plot problem
-the writer can see nowhere else: a setup→payoff edge that runs backwards against
-reveal order is a scene read out of sequence; an interior beat no card fulfils is a
+A plot board's value is holding several dimensions at once — story time, reveal order,
+beat sequence, authored causality. A *disagreement between two layers* is a plot problem
+the writer can see nowhere else: a cause that happens after its effect in story time; an interior beat no card fulfils is a
 hole. `compute_plot_diagnostics` derives those findings from an already-built
 `PlotBoardProjection` — pure, deterministic, no LLM and no extra I/O (the AI
 diagnostic pass is S7b). It rides along on the projection so the panel is live with
@@ -12,8 +11,8 @@ every board refetch.
 Three detections, each with a strict anti-nag rule (off-page and unwritten cards are
 legitimate — the tool reports, it never prescribes):
 
-- ``causal_inversion`` — a card sets up a card revealed *earlier*. Both must be
-  on-page (an off-page setup told-late has no reveal position to invert — legitimate).
+- ``causal_inversion`` — a card leads to a card that comes *earlier in story time*
+  (shown as "Cause comes later"; the kind is an id, so it keeps its name).
 - ``beat_inversion`` — within one plotline, a later beat is *fully* revealed before an
   earlier beat *begins*. Strict — braided/interleaving beats never flag.
 - ``beat_gap`` — an interior beat no card fulfils, with a fulfilled beat still after it.
@@ -51,35 +50,33 @@ def _title(text: str, fallback: str) -> str:
 def _causal_inversions(
     cards: list[PlotBoardCard], cards_by_id: dict[str, PlotBoardCard]
 ) -> list[PlotDiagnostic]:
-    """A card *leads to* (`causal_links`) a card whose reveal rank is earlier: the
-    payoff is read before its setup. Both endpoints must be on-page — an off-page card
-    holds no reveal position, so there is simply no order to contradict (two cards on
-    the *same* scene share a rank and never invert)."""
+    """A card *leads to* (`causal_links`) a card that comes earlier in story time:
+    the cause happens after its effect (ADR-0097 §8). Story time is the order things
+    happen, not the order they are told, so a flashback revealed late but happening
+    early never flags. Every card holds a story position, so there is no on-page
+    requirement."""
     out: list[PlotDiagnostic] = []
     for setup in cards:
-        if setup.sequence is None:
-            continue
         for target_id in setup.causal_links:
             payoff = cards_by_id.get(target_id)
-            if payoff is None or payoff.sequence is None:
+            if payoff is None or payoff.story_order >= setup.story_order:
                 continue
-            if payoff.sequence < setup.sequence:
-                out.append(
-                    PlotDiagnostic(
-                        id=f"causal:{setup.id}:{payoff.id}",
-                        kind="causal_inversion",
-                        message=(
-                            f"“{_title(setup.title, 'Untitled card')}” sets up "
-                            f"“{_title(payoff.title, 'untitled card')}”, but the payoff "
-                            f"is revealed first — its setup comes later."
-                        ),
-                        cards=[
-                            PlotDiagnosticCard(id=setup.id, title=setup.title),
-                            PlotDiagnosticCard(id=payoff.id, title=payoff.title),
-                        ],
-                        edge=PlotDiagnosticEdge(source=setup.id, target=payoff.id),
-                    )
+            out.append(
+                PlotDiagnostic(
+                    id=f"causal:{setup.id}:{payoff.id}",
+                    kind="causal_inversion",
+                    message=(
+                        f"“{_title(setup.title, 'Untitled card')}” leads to "
+                        f"“{_title(payoff.title, 'untitled card')}”, but happens after it "
+                        f"in story time."
+                    ),
+                    cards=[
+                        PlotDiagnosticCard(id=setup.id, title=setup.title),
+                        PlotDiagnosticCard(id=payoff.id, title=payoff.title),
+                    ],
+                    edge=PlotDiagnosticEdge(source=setup.id, target=payoff.id),
                 )
+            )
     return out
 
 

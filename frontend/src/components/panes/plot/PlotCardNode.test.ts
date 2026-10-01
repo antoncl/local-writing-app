@@ -61,6 +61,10 @@ const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
   pageStatusIsDefault: true,
   beats: [],
   causalLinks: [],
+  storyMovable: true,
+  storyEarlier: null,
+  storyLater: null,
+  lateCauses: [],
   ...over,
 });
 
@@ -84,6 +88,8 @@ function actions(
     onMoveBeat: vi.fn(),
     onSetPageStatus: vi.fn(),
     onDelete: vi.fn(),
+    onStoryMove: vi.fn(),
+    storyAnchors: [],
     plotlines,
     structure: null,
     heldSceneIds: [],
@@ -790,5 +796,53 @@ describe("PlotCardNode Attach scene", () => {
   it("a written card with no summary reads \"No summary yet\"", () => {
     renderWithActions({ attached: true, synopsis: "" }, actions());
     expect(screen.getByText("No summary yet")).toBeInTheDocument();
+  });
+
+  describe("story time (ADR-0097 §8)", () => {
+    it("shows the late-cause pill, titled with the cause card(s), only when a cause is later", () => {
+      const { unmount } = render(PlotCardNode, { props: { data: data({ lateCauses: ["The ledger"] }) } });
+      expect(screen.getByText("Cause is later").getAttribute("title")).toBe(
+        "Caused by “The ledger”, which happens later",
+      );
+      unmount();
+      render(PlotCardNode, { props: { data: data() } });
+      expect(screen.queryByText("Cause is later")).toBeNull();
+    });
+
+    it("Earlier / Later send the swap anchors and hide at an end", async () => {
+      const acts = actions();
+      renderWithActions({ storyEarlier: { before_id: "prev" }, storyLater: null }, acts, "card_a");
+      await fireEvent.click(screen.getByLabelText("Card actions"));
+      expect(screen.queryByRole("menuitem", { name: "Later in story time" })).toBeNull();
+      await fireEvent.click(screen.getByRole("menuitem", { name: "Earlier in story time" }));
+      expect(acts.onStoryMove).toHaveBeenCalledWith("card_a", { before_id: "prev" });
+    });
+
+    it("an inherited card has no story-time items", async () => {
+      const acts = actions();
+      acts.storyAnchors.push({ id: "other", title: "Other" });
+      renderWithActions({ storyMovable: false, storyEarlier: null, storyLater: null }, acts, "card_a");
+      await fireEvent.click(screen.getByLabelText("Card actions"));
+      expect(screen.queryByRole("menuitem", { name: /story time/ })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: /Place after/ })).toBeNull();
+    });
+
+    it("Place after… lists the other cards, filters them, and anchors on the pick", async () => {
+      const acts = actions();
+      acts.storyAnchors.push(
+        { id: "card_a", title: "Self" },
+        { id: "b", title: "The ledger" },
+        { id: "c", title: "A second ledger?" },
+        { id: "d", title: "Mara leaves" },
+      );
+      renderWithActions({}, acts, "card_a");
+      await fireEvent.click(screen.getByLabelText("Card actions"));
+      await fireEvent.click(screen.getByRole("menuitem", { name: /Place after/ }));
+      expect(screen.queryByRole("menuitem", { name: "Self" })).toBeNull();
+      await fireEvent.input(screen.getByLabelText("Filter cards"), { target: { value: "mara" } });
+      expect(screen.queryByRole("menuitem", { name: "The ledger" })).toBeNull();
+      await fireEvent.click(screen.getByRole("menuitem", { name: "Mara leaves" }));
+      expect(acts.onStoryMove).toHaveBeenCalledWith("card_a", { after_id: "d" });
+    });
   });
 });

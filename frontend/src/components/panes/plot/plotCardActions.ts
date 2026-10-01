@@ -9,6 +9,7 @@
 // history.
 import type { PlotBoardPlotline, StructureDocument } from "@/lib/types";
 import type { PlotRealizeLocation } from "@/lib/plot/realizeLocations";
+import type { StoryAnchor } from "@/lib/api/plot";
 
 export type PlotCardActions = {
   // Open the card as a NodeEditor document (full fields: plotline / scene / synopsis).
@@ -45,6 +46,12 @@ export type PlotCardActions = {
   // Delete the card outright (the kebab's "Delete card", #860). Distinct from Detach,
   // which only clears the scene ref. The provider confirms before the backend delete.
   onDelete: (cardId: string) => void;
+  // Move the card in story time (ADR-0097 §4) — the menu's Earlier / Later / Place
+  // after…, and the Story time view's drag. One recorded undo step.
+  onStoryMove: (cardId: string, anchor: StoryAnchor) => void;
+  // The cards a "Place after…" can anchor on: the open layer's own, in story time (the
+  // backend refuses an inherited card as an anchor). A getter, like `plotlines`.
+  readonly storyAnchors: { id: string; title: string }[];
   // The current lanes, for the "Set plotline" submenu. A getter on the provider so
   // the card reads them fresh from the projection.
   readonly plotlines: PlotBoardPlotline[];

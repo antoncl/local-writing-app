@@ -126,6 +126,11 @@ export type PlotBoardCard = {
   beats: PlotBoardBeat[];
   sequence: number | null;
   causal_links: string[];
+  // Story time (ADR-0097 §5): the card's 0-based index in the order things happen,
+  // over every projected card (the open layer's own first, then inherited); and whether
+  // the open layer owns it, i.e. whether a story-time move would be accepted.
+  story_order: number;
+  story_movable: boolean;
 };
 
 // The directed causal edge a `causal_inversion` finding points at — `source` *leads
@@ -147,8 +152,8 @@ export type PlotDiagnosticCard = {
 // One cross-dimension finding (ADR-0048 S7 — the payoff): a place where two plot
 // layers disagree, or a beat the structure leaves unfilled. Deterministic, derived
 // backend-side from reveal order, beat rosters, and causal edges (no LLM — that is
-// S7b). `kind` is `causal_inversion` (a card sets up a card revealed earlier — `edge`
-// + `cards` = [setup, payoff]), `beat_inversion` (within one plotline a later beat is
+// S7b). `kind` is `causal_inversion` (a card leads to a card that comes earlier in
+// story time, "Cause comes later" — `edge` + `cards` = [cause, effect]), `beat_inversion` (within one plotline a later beat is
 // fully revealed before an earlier begins — `plotline_id` + `beat_ids` name the two),
 // or `beat_gap` (an interior beat no card fulfils — `plotline_id` + `beat_ids`, `cards`
 // empty). `id` is a stable key (kind + participant ids) so the panel keeps a selection

@@ -20,6 +20,8 @@
   import { findNodeBySceneId, isLeafNode } from "@/lib/utils/treeHelpers";
   import { CARD_DRAG_HANDLE_CLASS, type PlotCardData } from "@/lib/plot/plotBoardLayout";
   import type { PlotCardBeat } from "@/lib/types";
+  import type { StoryAnchor } from "@/lib/api/plot";
+  import { lateCauseTitle } from "@/lib/plot/storyTime";
   import type { NodePickerConfig, NodePickerRef } from "@/lib/pickerTypes";
   import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
   import { hasPlotBeatDrag, readPlotBeatDrag, setPlotBeatDrag } from "@/lib/plot/plotDnd";
@@ -85,10 +87,10 @@
   const ATTACH_PICKER: NodePickerConfig = { sources: [{ kind: "manuscript", expr: { type: "manuscript:scene" } }] };
 
   let menuOpen = $state(false);
-  // Three pages: the actions, the "Set plotline" lane list, and the "Realize scene"
-  // location list (#879). Beats + causal are no longer menu pages — they're drag
-  // gestures now (#824).
-  let menuView = $state<"main" | "plotline" | "location">("main");
+  // Four pages: the actions, the "Set plotline" lane list, the "Realize scene"
+  // location list (#879), and "Place after…" — the story-time anchor list (ADR-0097 §8).
+  // Beats + causal are no longer menu pages — they're drag gestures now (#824).
+  let menuView = $state<"main" | "plotline" | "location" | "place">("main");
 
   let editing = $state(false);
   let draft = $state("");
@@ -128,6 +130,19 @@
   function closeMenu() {
     menuOpen = false;
     menuView = "main";
+    placeFilter = "";
+  }
+  // Story time (ADR-0097 §8): Earlier / Later swap with a neighbour; "Place after…"
+  // lists the other cards (filterable), the picked one becoming the anchor.
+  let placeFilter = $state("");
+  let placeChoices = $derived(
+    (actions?.storyAnchors ?? []).filter(
+      (c) => c.id !== id && c.title.toLowerCase().includes(placeFilter.trim().toLowerCase()),
+    ),
+  );
+  function storyMove(anchor: StoryAnchor) {
+    closeMenu();
+    if (actions && id) actions.onStoryMove(id, anchor);
   }
   function run(op: ((cardId: string) => void) | undefined) {
     closeMenu();
@@ -437,6 +452,11 @@
         </div>
       {/if}
       <div class="card-marks">
+        {#if data.lateCauses.length}
+          <!-- The late-cause flag (ADR-0097 §8): a cause that happens after this card in
+               story time. The title names the cause card(s); the pill carries the words. -->
+          <span class="late-cause" title={lateCauseTitle(data.lateCauses)}>Cause is later</span>
+        {/if}
         {#if data.plotlineName}
           <!-- The plotline is just its dot (hollow when uncoloured); the name rides in the
                tooltip + aria-label, so it stays legible by more than colour (#863) without
@@ -506,6 +526,26 @@
             />
           </div>
         {/if}
+        {#if data.storyMovable}
+          <!-- Story time (ADR-0097 §8): drag is never the only way to set an order. An
+               item hides at an end of story time, where there is no neighbour to swap with. -->
+          {#if data.storyEarlier}
+            <button role="menuitem" class="menu-item" onclick={() => storyMove(data.storyEarlier!)}>
+              <i class="ti ti-chevron-up" aria-hidden="true"></i> Earlier in story time
+            </button>
+          {/if}
+          {#if data.storyLater}
+            <button role="menuitem" class="menu-item" onclick={() => storyMove(data.storyLater!)}>
+              <i class="ti ti-chevron-down" aria-hidden="true"></i> Later in story time
+            </button>
+          {/if}
+          {#if (actions.storyAnchors ?? []).some((c) => c.id !== id)}
+            <button role="menuitem" class="menu-item" onclick={() => (menuView = "place")}>
+              <i class="ti ti-clock" aria-hidden="true"></i> Place after…
+              <span class="chevron" aria-hidden="true"><GroupCaret size="xs" collapsed /></span>
+            </button>
+          {/if}
+        {/if}
         <button role="menuitem" class="menu-item" onclick={() => (menuView = "plotline")}>
           <i class="ti ti-route" aria-hidden="true"></i> Set plotline
           <span class="chevron" aria-hidden="true"><GroupCaret size="xs" collapsed /></span>
@@ -526,6 +566,25 @@
         <button role="menuitem" class="menu-item menu-danger" onclick={() => run(actions.onDelete)}>
           <i class="ti ti-trash" aria-hidden="true"></i> Delete card
         </button>
+      {:else if menuView === "place"}
+        <button class="menu-item menu-back" onclick={() => (menuView = "main")}>
+          <i class="ti ti-chevron-left" aria-hidden="true"></i> Place after…
+        </button>
+        <input
+          class="menu-filter"
+          placeholder="Filter cards"
+          aria-label="Filter cards"
+          bind:value={placeFilter}
+        />
+        <div class="menu-scroll" role="group" aria-label="Cards in story time">
+          {#each placeChoices as choice (choice.id)}
+            <button role="menuitem" class="menu-item" onclick={() => storyMove({ after_id: choice.id })}>
+              {choice.title || "Untitled card"}
+            </button>
+          {:else}
+            <span class="menu-empty">No matching cards</span>
+          {/each}
+        </div>
       {:else if menuView === "location"}
         <button class="menu-item menu-back" onclick={() => (menuView = "main")}>
           <i class="ti ti-chevron-left" aria-hidden="true"></i> Realize into…
@@ -939,6 +998,17 @@
     margin-left: auto;
     min-height: 22px;
   }
+  /* The late-cause flag (ADR-0097 §8): a warn pill — the --warn tokens are the
+     board's one "layers disagree" colour (the amber causal edge uses it too). */
+  .late-cause {
+    flex: none;
+    padding: 0 7px;
+    font-size: var(--fs-xs);
+    color: var(--warn);
+    background: var(--warn-soft);
+    border: 1px solid var(--warn-border);
+    border-radius: 999px;
+  }
   .card-plotline {
     display: inline-flex;
     align-items: center;
@@ -1033,6 +1103,21 @@
     flex-direction: column;
     max-height: 180px;
     overflow-y: auto;
+  }
+  /* "Place after…" (ADR-0097 §8): a filter above the anchor list. */
+  .menu-filter {
+    margin: 2px 4px 4px;
+    padding: 4px 6px;
+    font-size: var(--fs-sm);
+    color: var(--text);
+    background: var(--inset);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+  }
+  .menu-empty {
+    padding: 6px 8px;
+    font-size: var(--fs-sm);
+    color: var(--text-3);
   }
   .menu-unassigned {
     color: var(--text-2);

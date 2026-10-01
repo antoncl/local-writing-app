@@ -193,7 +193,7 @@ describe("card content ops", () => {
     const withCard: PlotBoardProjection = {
       ...projection(),
       cards: [
-        { id: "c1", title: "New card", synopsis: "", plotline: null, scene: null, container: null, page_status: null, beats: [], sequence: null, causal_links: [] },
+        { id: "c1", title: "New card", synopsis: "", plotline: null, scene: null, container: null, page_status: null, beats: [], sequence: null, causal_links: [], story_order: 0, story_movable: true },
       ],
     };
     const fetchSpy = vi

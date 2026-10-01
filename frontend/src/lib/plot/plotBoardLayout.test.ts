@@ -98,6 +98,8 @@ const card = (
   beats: [],
   sequence: null,
   causal_links: [],
+  story_order: 0,
+  story_movable: true,
   ...over,
 });
 
@@ -241,6 +243,26 @@ describe("buildBoardNodes", () => {
     const nodes = buildBoardNodes(projection({ cards: [card("loose", { container: null })] }));
     expect(containerNodes(nodes)).toEqual([]);
     expect(cardNodes(nodes).map((n) => n.id)).toEqual(["loose"]);
+  });
+
+  it("carries story time onto the card: swap anchors, movability and the late causes (ADR-0097 §8)", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        cards: [
+          card("a", { title: "A", story_order: 0 }),
+          card("b", { title: "B", story_order: 1, causal_links: ["a"] }),
+          card("x", { story_order: 2, story_movable: false }),
+        ],
+      }),
+    );
+    expect(dataOf(nodes, "a")).toMatchObject({
+      storyMovable: true,
+      storyEarlier: null,
+      storyLater: { after_id: "b" },
+      lateCauses: ["B"], // B leads to A yet comes after it
+    });
+    expect(dataOf(nodes, "b")).toMatchObject({ storyEarlier: { before_id: "a" }, storyLater: null, lateCauses: [] });
+    expect(dataOf(nodes, "x")).toMatchObject({ storyMovable: false, storyEarlier: null, storyLater: null });
   });
 
   it("treats a card pointing at an unknown container as homeless (defensive)", () => {

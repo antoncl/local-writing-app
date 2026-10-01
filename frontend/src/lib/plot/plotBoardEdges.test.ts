@@ -46,6 +46,8 @@ const card = (
   beats: [],
   sequence: null,
   causal_links: [],
+  story_order: 0,
+  story_movable: true,
   ...over,
 });
 
@@ -131,14 +133,13 @@ describe("buildBoardEdges", () => {
     });
   });
 
-  describe("out-of-order diagnostic (Slice 7)", () => {
+  describe("late-cause flag (Slice 7, ADR-0097 §8)", () => {
     const dataOf = (e: { data?: unknown }) => e.data as CausalEdgeData;
 
-    it("flags a causal edge whose cause is revealed after its effect", () => {
-      // “Cause” is read 2nd (seq 1) but leads to “Effect”, read 1st (seq 0).
+    it("flags a causal edge whose cause happens after its effect in story time", () => {
       const p = projection([
-        card("a", { sequence: 1, title: "Cause", causal_links: ["b"] }),
-        card("b", { sequence: 0, title: "Effect" }),
+        card("a", { story_order: 1, title: "Cause", causal_links: ["b"] }),
+        card("b", { story_order: 0, title: "Effect" }),
       ]);
       const [edge] = buildBoardEdges(p, layers("causal"));
       expect(edge.class).toContain("causal-warn");
@@ -148,38 +149,36 @@ describe("buildBoardEdges", () => {
       expect(edge.markerEnd).toMatchObject({ color: CAUSAL_WARN_COLOR });
     });
 
-    it("does not flag a causal edge that runs with reveal order", () => {
-      const p = projection([card("a", { sequence: 0, causal_links: ["b"] }), card("b", { sequence: 1 })]);
+    it("does not flag a causal edge that runs with story time", () => {
+      const p = projection([card("a", { story_order: 0, causal_links: ["b"] }), card("b", { story_order: 1 })]);
       const [edge] = buildBoardEdges(p, layers("causal"));
       expect(edge.class).toBe("causal-edge");
       expect(dataOf(edge).outOfOrder).toBe(false);
       expect(edge.markerEnd).toMatchObject({ color: CAUSAL_MARKER_COLOR });
     });
 
-    it("treats equal reveal ranks as in order (only strictly-after warns)", () => {
-      // Two cards on one scene share a rank — the cause is not strictly after the effect.
-      const p = projection([card("a", { sequence: 3, causal_links: ["b"] }), card("b", { sequence: 3 })]);
+    it("ignores manuscript order: a cause told later but happening earlier is clean", () => {
+      // The cause's scene is read LAST (sequence 5) yet it happens first in story time.
+      const p = projection([
+        card("a", { sequence: 5, story_order: 0, causal_links: ["b"] }),
+        card("b", { sequence: 1, story_order: 1 }),
+      ]);
       expect(dataOf(buildBoardEdges(p, layers("causal"))[0]).outOfOrder).toBe(false);
     });
 
-    it("exempts an edge touching a card with no reveal position (null sequence)", () => {
-      // An off-page source or target holds no reveal-order position → can't be out of order.
+    it("flags unwritten cards too (every card has a story position)", () => {
       const p = projection([
-        card("a", { sequence: null, causal_links: ["b"] }),
-        card("b", { sequence: 0, causal_links: ["c"] }),
-        card("c", { sequence: null }),
+        card("a", { sequence: null, story_order: 3, causal_links: ["b"] }),
+        card("b", { sequence: null, story_order: 2 }),
       ]);
-      const edges = buildBoardEdges(p, layers("causal"));
-      expect(edges.every((e) => !dataOf(e).outOfOrder)).toBe(true);
-      expect(edges.every((e) => e.class === "causal-edge")).toBe(true);
+      expect(dataOf(buildBoardEdges(p, layers("causal"))[0]).outOfOrder).toBe(true);
     });
 
     it("fires without the manuscript layer on (not gated on other layers)", () => {
       const p = projection([
-        card("a", { sequence: 1, causal_links: ["b"] }),
-        card("b", { sequence: 0 }),
+        card("a", { story_order: 1, causal_links: ["b"] }),
+        card("b", { story_order: 0 }),
       ]);
-      // Only the causal layer is on; the warning still resolves from the cards' sequences.
       const [edge] = buildBoardEdges(p, layers("causal"));
       expect(dataOf(edge).outOfOrder).toBe(true);
     });
@@ -191,8 +190,8 @@ describe("buildBoardEdges", () => {
       // Both cards, so the warning is concrete, not a generic colour.
       expect(msg).toContain("“Cause”");
       expect(msg).toContain("“Effect”");
-      // WHY (revealed later / cause after effect) + WHAT to do (move the source earlier).
-      expect(msg).toMatch(/read later/);
+      // WHY (happens after its effect in story time) + WHAT to do (move the source earlier).
+      expect(msg).toMatch(/happens after it in story time/);
       expect(msg).toMatch(/Move “Cause” earlier/);
     });
 

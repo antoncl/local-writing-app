@@ -90,12 +90,35 @@ Draw a **causal link** by dragging from one card's **out** handle to another
 card's **in** handle: "this beat causes that one." To remove a link, click the
 **×** at its midpoint (or select it and press **Delete**).
 
-Causal links carry a check for you: if a link's *cause* is revealed **later** in
-reading order than its *effect*, the link shows an amber **⚠** whose tooltip
-explains the problem — a reader would meet the consequence before its cause. It's a
-quiet nudge to reorder, not an error.
+Causal links carry a check for you: if a link's *cause* happens **after** its
+*effect* in **story time** (below) — the order things happen, not the order the
+reader meets them — the link shows an amber **⚠** whose tooltip explains the problem,
+and the effect card wears a **Cause is later** pill naming the cause. Telling a
+cause late is ordinary craft and never flags; a cause that happens after its
+effect is almost always a slip. It's a quiet nudge to reorder, not an error.
 
 Causal links live on their own layer — turn them on with **Layers** (below).
+
+## Story time
+
+Every card has a place in **story time**: the order things *happen*, which is
+separate from the order the reader is *told* them. A flashback can sit late in the
+manuscript and still happen first in story time.
+
+The toolbar's **Board | Story time** switch shows every card in one wrapping
+sequence, earliest to latest. (The board remembers which view you last used.)
+
+- **Drag** a card between two others; a bar shows where it will land. The left half
+  of a card places the dragged card before it, the right half after it. Dragging
+  changes only story time. It never moves a scene in the manuscript.
+- **Earlier in story time** and **Later in story time** in a card's menu swap it
+  with its neighbour, so dragging is never the only way. They hide at either end.
+- **Place after…** opens a short list of your other cards (type to filter) and puts
+  the card right after the one you pick.
+
+Cards that come from an ancestor project read after your own cards and can't be
+moved from here, or used as a place to drop. Moves can be undone with the board's
+**Undo**.
 
 ## Layers
 
@@ -131,7 +154,7 @@ to cards and reshape. The template itself is untouched; the plotline is your cop
 ## Diagnostics and AI review
 
 The toolbar's **Diagnostics** surfaces the board's own checks (like the
-out-of-order warning, gathered up). If you've enabled AI and the plot-review prompt
+**Cause comes later** warning, gathered up). If you've enabled AI and the plot-review prompt
 is present, an **AI review** button offers a model's read of the plot — optional,
 and only there when AI is on.
 

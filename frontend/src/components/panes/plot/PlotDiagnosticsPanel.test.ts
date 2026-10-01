@@ -12,7 +12,7 @@ import type { PlotDiagnostic } from "@/lib/types";
 const causal = (over: Partial<PlotDiagnostic> = {}): PlotDiagnostic => ({
   id: "causal:a:b",
   kind: "causal_inversion",
-  message: "“Setup” sets up “Payoff”, but the payoff is revealed first — its setup comes later.",
+  message: "“Setup” leads to “Payoff”, but happens after it in story time.",
   cards: [
     { id: "a", title: "Setup" },
     { id: "b", title: "Payoff" },
@@ -47,24 +47,24 @@ describe("PlotDiagnosticsPanel", () => {
     mount();
     await tick();
     // The two group headings for the kinds present.
-    expect(screen.getByText("Out of sequence")).toBeTruthy();
+    expect(screen.getByText("Cause comes later")).toBeTruthy();
     expect(screen.getByText("Missing beats")).toBeTruthy();
     // Each finding's message renders in full.
-    expect(screen.getByText(/sets up/)).toBeTruthy();
+    expect(screen.getByText(/leads to/)).toBeTruthy();
     expect(screen.getByText(/has no card, but later beats do/)).toBeTruthy();
   });
 
   it("clicking a finding reports its id", async () => {
     const h = mount();
     await tick();
-    await fireEvent.click(screen.getByText(/sets up/));
+    await fireEvent.click(screen.getByText(/leads to/));
     expect(h.onSelect).toHaveBeenCalledWith("causal:a:b");
   });
 
   it("marks the selected finding pressed", async () => {
     mount({ selectedId: "causal:a:b" });
     await tick();
-    const row = screen.getByText(/sets up/).closest("button");
+    const row = screen.getByText(/leads to/).closest("button");
     expect(row?.getAttribute("aria-pressed")).toBe("true");
   });
 
@@ -82,10 +82,10 @@ describe("PlotDiagnosticsPanel", () => {
   });
 
   it("omits a group whose kind has no findings", async () => {
-    // Only a gap → no "Out of sequence" heading.
+    // Only a gap → no "Cause comes later" heading.
     mount({ diagnostics: [gap()] });
     await tick();
     expect(screen.getByText("Missing beats")).toBeTruthy();
-    expect(screen.queryByText("Out of sequence")).toBeNull();
+    expect(screen.queryByText("Cause comes later")).toBeNull();
   });
 });

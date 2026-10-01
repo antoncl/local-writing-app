@@ -9,7 +9,7 @@
 
 import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
-import { type CardTextChoice, textChoiceConflict } from "@/lib/api/plot";
+import { type CardTextChoice, type StoryAnchor, textChoiceConflict } from "@/lib/api/plot";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { refreshStructure, setStructure } from "@/lib/stores/structure";
 import { refreshCards } from "@/lib/stores/plotCards";
@@ -141,6 +141,13 @@ export async function createCard(title: string, id?: string): Promise<string> {
 export async function deleteCard(cardId: string, refresh = true): Promise<void> {
   await api.deleteCard(cardId);
   if (refresh) await refreshAfterMutation();
+}
+
+// Move a card in story time (ADR-0097 §4): right after / before another card. The
+// rank lives on the backend; the refetch re-indexes every card's `story_order`.
+export async function moveCardInStoryTime(cardId: string, anchor: StoryAnchor): Promise<void> {
+  await api.placeCard(cardId, anchor);
+  await refreshAfterMutation();
 }
 
 // Rename a card in place (#798) — the title is intrinsic, not metadata. Edits the

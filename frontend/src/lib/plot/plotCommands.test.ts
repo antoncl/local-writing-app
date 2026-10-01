@@ -143,6 +143,9 @@ function fakePort() {
       calls.push(`text:${cardId}:${JSON.stringify(text)}`);
     },
     readSceneSummary: async (sceneId) => summaries.get(sceneId) ?? "",
+    moveCardInStoryTime: async (cardId, anchor) => {
+      calls.push(`story:${cardId}:${JSON.stringify(anchor)}`);
+    },
     confirmSceneDelete: async () => {
       calls.push("confirm");
       return confirm.result;
@@ -164,6 +167,8 @@ function card(id: string, extra: Partial<PlotBoardCard> = {}): PlotBoardCard {
     beats: [],
     sequence: null,
     causal_links: [],
+    story_order: 0,
+    story_movable: true,
     ...extra,
   };
 }
@@ -737,5 +742,45 @@ describe("delete undo of a written card", () => {
     await deleteCardCommand(port, "c1", state, []).undo();
     expect(calls).toContain("recreateCard:c1");
     expect(cards.get("c1")?.story_rank).toBe(3);
+  });
+});
+
+describe("story move (ADR-0097 §4)", () => {
+  // Three cards a, b, c in story time.
+  const ordered = () =>
+    projection([card("a", { story_order: 0 }), card("b", { story_order: 1 }), card("c", { story_order: 2 })]);
+  const recorderFor = (port: PlotCommandPort, recorded: Array<{ undo: () => unknown; redo: () => unknown }>) =>
+    new PlotUndoRecorder(port, (c) => recorded.push(c), ordered);
+
+  it("records one step: undo puts the card back after its old predecessor, redo replays the anchor", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Array<{ undo: () => unknown; redo: () => unknown }> = [];
+    await recorderFor(port, recorded).storyMove("c", { before_id: "a" }, "move in story time");
+    expect(recorded).toHaveLength(1);
+    await recorded[0].undo();
+    await recorded[0].redo();
+    expect(calls).toEqual([
+      'story:c:{"before_id":"a"}',
+      'story:c:{"after_id":"b"}',
+      'story:c:{"before_id":"a"}',
+    ]);
+  });
+
+  it("a card that was first is restored before its old successor", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Array<{ undo: () => unknown; redo: () => unknown }> = [];
+    await recorderFor(port, recorded).storyMove("a", { after_id: "c" }, "move in story time");
+    await recorded[0].undo();
+    expect(calls[1]).toBe('story:a:{"before_id":"b"}');
+  });
+
+  it("a move to where the card already is sends and records nothing", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Array<{ undo: () => unknown; redo: () => unknown }> = [];
+    const recorder = recorderFor(port, recorded);
+    await recorder.storyMove("b", { after_id: "a" }, "move in story time");
+    await recorder.storyMove("b", { before_id: "c" }, "move in story time");
+    expect(calls).toEqual([]);
+    expect(recorded).toEqual([]);
   });
 });

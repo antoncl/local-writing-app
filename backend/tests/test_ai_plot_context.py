@@ -97,6 +97,38 @@ class PlotContextHelperTests(_PlotAiContextBase):
         )
         self.assertIn('completeness="whole_board"', out)  # no crash, no gate
 
+    def test_reading_order_counts_from_one(self) -> None:
+        # The board's rank is 0-based over every scene in the manuscript; the model
+        # reads it 1-based, as a writer counts scenes.
+        chapter = self._chapter()
+        card = self._card("First", body="It begins.", scene=self._scene("First", chapter))
+        rank = next(c.sequence for c in self.service.read_plot_context().cards if c.id == card)
+        out = self._render('{% role "system" %}{{ plot_context() }}{% endrole %}')
+        self.assertIn(f'reading_order="{rank + 1}"', out)
+
+    def test_the_focus_card_is_marked_and_its_synopsis_left_out(self) -> None:
+        focal = self._card("Focal", body="FOCAL_SYNOPSIS text.")
+        self._card("Other", body="OTHER_SYNOPSIS text.")
+        out = self._render(
+            '{% role "system" %}{{ plot_context(focus=card) }}{% endrole %}', card=focal
+        )
+        self.assertIn('<card title="Focal" page_status="unwritten" focus="true">', out)
+        self.assertNotIn("FOCAL_SYNOPSIS", out)  # the prompt prints it itself
+        self.assertIn("OTHER_SYNOPSIS", out)
+        self.assertEqual(out.count('focus="true"'), 1)
+
+    def test_a_written_focus_card_keeps_its_scenes_summary(self) -> None:
+        # A written card's board synopsis is its scene's summary, which the prompt
+        # does not print, so focus must not drop it.
+        scene = self._scene("Written", self._chapter())
+        focal = self._card("Written", body="CARD_PLAN before writing.", scene=scene)
+        self.service._set_scene_summary(scene, "SCENE_SUMMARY as written.")  # the scene moved on
+        out = self._render(
+            '{% role "system" %}{{ plot_context(focus=card) }}{% endrole %}', card=focal
+        )
+        self.assertIn('focus="true"', out)
+        self.assertIn("SCENE_SUMMARY as written.", out)
+
     def test_the_block_renders_plotline_causal_and_beat_guidance(self) -> None:
         from app.models import (
             CreatePlotlineRequest,
@@ -267,6 +299,19 @@ class RevisePlotCardPromptTests(_PlotAiContextBase):
         self.assertIn("<plot_context", out)  # the board block is injected
         # Gated one scene past this card's reveal position (#2355 lookahead).
         self.assertNotIn("SECRET_FUTURE", out)
+
+    def test_the_prompt_prints_its_card_once_and_asks_for_an_outline(self) -> None:
+        # The card under revision is marked on the board and printed once, below it
+        # (#2387); the synopsis is defined as a brief outline, so a wordy model is
+        # told to condense rather than to match a bloated current length.
+        card = self._card("Unplaced", body="UNIQUE_SYNOPSIS of the card.")
+        self._card("Elsewhere", body="Another card.")
+        body = self.service.read_prompt_entry(builtin_prompt_id(self.service, _PROMPT_TITLE)).body
+        out = self._render(body, inputs={"entry": card})
+        self.assertEqual(out.count("UNIQUE_SYNOPSIS"), 1)
+        self.assertIn('focus="true"', out)
+        self.assertIn("an outline, not a draft of the scene", out)
+        self.assertIn("condense it", out)
 
     def test_a_returned_patch_validates_for_a_card(self) -> None:
         card = self._card("Draft", body="Old synopsis.")

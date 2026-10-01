@@ -538,19 +538,22 @@ def _type_name(schema: Any, entry_type: Any) -> str:
 # ----- Project-bound helpers ----------------------------------------------
 
 
-def _plot_context(project: ProjectService, as_of: Any) -> str:
+def _plot_context(project: ProjectService, as_of: Any, focus: Any = None) -> str:
     """Render the spoiler-gated plot-board context for a prompt (ADR-0048 S8b).
 
     `as_of` is a card or scene — an id or a node (a plot-card brainstorm passes
     the card's own id, so the model sees the board up to and including that
     card's reveal position; `next_scene(e)` reaches one scene further). A
-    non-id / unknown anchor gates nothing (the whole board). Degrades
+    non-id / unknown anchor gates nothing (the whole board). `focus` is the card
+    the prompt is working on (an id or a node), marked on the board (#2387; see
+    `render_plot_context` for when its synopsis is left out). Degrades
     to "" rather than raising, so a context helper never breaks the render — but
     the failure is recorded to the project error log (#386) instead of vanishing,
     so a silently-empty plot context is diagnosable rather than a mystery."""
     try:
         anchor = _scene_id_of(as_of) if as_of else None
-        return render_plot_context(project.read_plot_context(anchor))
+        focus_id = _scene_id_of(focus) if focus else None
+        return render_plot_context(project.read_plot_context(anchor), focus=focus_id)
     except Exception as exc:
         root = project.root_path  # None when no project is open; append_error_line never raises
         if root is not None:
@@ -778,7 +781,7 @@ def register_helpers(
     # The spoiler-gated plot-board context (ADR-0048 S8b) — a plot-card brainstorm
     # renders `{{ plot_context(as_of=e.id) }}` so the model reasons over the board
     # up to and including the card's reveal position, no future scenes leaked.
-    env.globals["plot_context"] = lambda as_of=None: _plot_context(project, as_of)
+    env.globals["plot_context"] = lambda as_of=None, focus=None: _plot_context(project, as_of, focus)
     # ADR-0060 §7: the one JSON filter for values quoted to the model (#698),
     # `{{ value | json }}`. Jinja's built-in `| tojson` is htmlsafe_json_dumps: it
     # escapes ' & < > to \uXXXX and sorts keys — the model imitates both (escapes

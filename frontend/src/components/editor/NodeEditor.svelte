@@ -497,6 +497,13 @@
   // (owns `metadata` + prose buffer, so both land in one PUT — ADR-0046 §1). The
   // controller is kind-agnostic, and so is participation (#711): a node reviews iff
   // a commit prompt patched it (keyed on the node id), never by a host kind list.
+  // ADR-0097 §3: a WRITTEN card (bound to a scene) shows its scene's title + summary, so
+  // its own title and body are frozen. Deliberately not folded into `editorReadOnly`,
+  // which locks the rail too — the rail (plotline, beats, page status) stays editable.
+  // Declared before the `$effect.pre` below, which runs during init and reads it.
+  const bodyFrozen = $derived(
+    documentKind === "plot_card" && typeof metadata.scene === "string" && metadata.scene !== "",
+  );
   const entryReview = new EntryProposalController();
   $effect.pre(() => {
     entryReview.nodeId = scene?.id ?? null;
@@ -602,12 +609,6 @@
   // model stamps `editable` and no other does. Fails closed. Own clones are
   // editable, and lore (which forks in place) carries no flag, so it is untouched.
   const inheritedReadOnly = $derived(readOnlyInPlace(scene));
-  // ADR-0097 §3: a WRITTEN card (bound to a scene) shows its scene's title + summary, so
-  // its own title and body are frozen. Deliberately not folded into `editorReadOnly`,
-  // which locks the rail too — the rail (plotline, beats, page status) stays editable.
-  const bodyFrozen = $derived(
-    documentKind === "plot_card" && typeof metadata.scene === "string" && metadata.scene !== "",
-  );
   // The interactive flip lens the rail renders during a lore review (slice 3b):
   // the proposed structured fields as click-to-adopt flips, wired to the
   // controller's per-field resolution. Same `compare` shape snapshot compare

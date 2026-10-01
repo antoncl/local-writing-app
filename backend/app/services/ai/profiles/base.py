@@ -5,6 +5,8 @@ for the rationale and the conversation that fed it.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 import re
 from abc import ABC, abstractmethod
@@ -12,6 +14,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from app.services.ai.profiles.cache_strategy import (
@@ -253,18 +256,64 @@ def compute_cost(usage: UsageMetrics, descriptor: ModelDescriptor) -> float | No
 _TIKTOKEN_ENCODER = None
 _TIKTOKEN_TRIED = False
 
+# cl100k_base's vocabulary ships with the app (#2404). tiktoken's package holds
+# only the tokenizer code: `get_encoding` downloads the vocabulary from OpenAI's
+# blob store on first use, so the first token count needed the internet — and,
+# offline, raised once and then fell back to char/4 for the whole process. The
+# hash and pattern below are tiktoken's own (`tiktoken_ext.openai_public`);
+# a test holds them equal.
+_CL100K_PATH = Path(__file__).with_name("cl100k_base.tiktoken")
+_CL100K_SHA256 = "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
+_CL100K_PAT_STR = (
+    r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}++|\p{N}{1,3}+| ?[^\s\p{L}\p{N}]++[\r\n]*+"""
+    r"""|\s++$|\s*[\r\n]|\s+(?!\S)|\s"""
+)
+
+
+def _load_cl100k(tiktoken: Any) -> Any:
+    """Build the cl100k_base encoding from the vocabulary shipped beside this
+    module — never the network, never tiktoken's temp-dir cache."""
+    from tiktoken_ext.openai_public import (
+        ENDOFPROMPT,
+        ENDOFTEXT,
+        FIM_MIDDLE,
+        FIM_PREFIX,
+        FIM_SUFFIX,
+    )
+
+    data = _CL100K_PATH.read_bytes()
+    if hashlib.sha256(data).hexdigest() != _CL100K_SHA256:
+        raise RuntimeError(f"{_CL100K_PATH} does not match its pinned SHA-256")
+    ranks = {
+        base64.b64decode(token): int(rank)
+        for token, rank in (line.split() for line in data.splitlines() if line)
+    }
+    return tiktoken.Encoding(
+        name="cl100k_base",
+        pat_str=_CL100K_PAT_STR,
+        mergeable_ranks=ranks,
+        special_tokens={
+            ENDOFTEXT: 100257,
+            FIM_PREFIX: 100258,
+            FIM_MIDDLE: 100259,
+            FIM_SUFFIX: 100260,
+            ENDOFPROMPT: 100276,
+        },
+    )
+
 
 def _tiktoken_encoder():
     global _TIKTOKEN_ENCODER, _TIKTOKEN_TRIED
     if _TIKTOKEN_TRIED:
         return _TIKTOKEN_ENCODER
-    _TIKTOKEN_TRIED = True
     try:
         import tiktoken
     except ImportError:
+        _TIKTOKEN_TRIED = True
         log.warning("tiktoken unavailable; token counts use char/4 approximation")
         return None
-    _TIKTOKEN_ENCODER = tiktoken.get_encoding("cl100k_base")
+    _TIKTOKEN_ENCODER = _load_cl100k(tiktoken)
+    _TIKTOKEN_TRIED = True
     return _TIKTOKEN_ENCODER
 
 

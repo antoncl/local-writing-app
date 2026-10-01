@@ -449,7 +449,8 @@ describe("movableNodePositions", () => {
     const nodes = buildBoardNodes(
       projection({
         containers: [container("act", "Act I"), container("chap", "Chapter 1", "act")],
-        cards: [card("c1", { container: "chap" })],
+        // A written card: no unwritten card, so no loose box (#2399) to store either.
+        cards: [card("c1", { container: "chap", scene: "s1" })],
       }),
       { "container:act": { x: 12.4, y: 7.6 } },
     );
@@ -463,7 +464,7 @@ describe("movableNodePositions", () => {
 
   it("round-trips through readBoardPositions", () => {
     const nodes = buildBoardNodes(
-      projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
+      projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap", scene: "s1" })] }),
       { "container:chap": { x: 5, y: 6 } },
     );
     const serialized = { positions: movableNodePositions(nodes) };

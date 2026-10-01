@@ -239,6 +239,24 @@ describe("boardBoxes: the box tree", () => {
     expect(boardBoxes(projection({ cards: [card("c", { deck: "gone" })] })).map((r) => r.nodeId)).toEqual([LOOSE_NODE_ID]);
   });
 
+  // #2399: with no deck, a card planned in a chapter still needs somewhere to be dragged out
+  // to — the empty loose box must already be on the board.
+  it("draws the empty loose box for a planned card even when no deck exists", () => {
+    const planned = projection({
+      containers: [container("ch")],
+      cards: [card("p", { container: "ch", planned_in: "ch", container_order: 0.5 })],
+    });
+    const roots = boardBoxes(planned);
+    expect(roots.map((r) => r.nodeId)).toEqual(["container:ch", LOOSE_NODE_ID]);
+    expect(ids(byNode(roots, LOOSE_NODE_ID))).toEqual([]);
+    // Only written cards: nothing can be dropped there, so no box.
+    const written = projection({
+      containers: [container("ch")],
+      cards: [card("w", { container: "ch", scene: "s1", container_order: 0 })],
+    });
+    expect(boardBoxes(written).map((r) => r.nodeId)).toEqual(["container:ch"]);
+  });
+
   it("reserves a header line per synopsis line a deck shows, at most two", () => {
     expect(deckSynopsisLines("one\n\n  two  \nthree")).toEqual(["one", "two"]);
     const [plain, wordy] = boardBoxes(projection({ decks: [deck("a"), deck("b", null, "x\ny\nz")] }));

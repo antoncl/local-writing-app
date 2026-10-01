@@ -59,6 +59,8 @@ function mount(cards: PlotBoardCard[], acts = actions()) {
 }
 
 const cardEl = (id: string) => document.querySelector(`[data-card-id="${id}"]`) as HTMLElement;
+// A card drags by its grip only (as on the board).
+const gripOf = (id: string) => document.querySelector(`[data-grip-for="${id}"]`) as HTMLElement | null;
 
 // happy-dom lays nothing out: give every card a 100px-wide box so the half test is real.
 function stubBox(el: HTMLElement) {
@@ -104,13 +106,13 @@ describe("PlotStoryTimeView", () => {
   it("a drop on the left half of a card places before it, the right half after it", async () => {
     const acts = mount([card("a", 0), card("b", 1), card("c", 2)]);
     stubBox(cardEl("b"));
-    await fireEvent.dragStart(cardEl("c"));
+    await fireEvent.dragStart(gripOf("c")!);
     await dragAt(cardEl("b"), "dragover", 10);
     expect(cardEl("b").classList.contains("ins-before")).toBe(true);
     await dragAt(cardEl("b"), "drop", 10);
     expect(acts.onStoryMove).toHaveBeenLastCalledWith("c", { before_id: "b" });
 
-    await fireEvent.dragStart(cardEl("a"));
+    await fireEvent.dragStart(gripOf("a")!);
     await dragAt(cardEl("b"), "dragover", 90);
     expect(cardEl("b").classList.contains("ins-after")).toBe(true);
     await dragAt(cardEl("b"), "drop", 90);
@@ -119,10 +121,11 @@ describe("PlotStoryTimeView", () => {
 
   it("an inherited card is not draggable and not a drop target", async () => {
     const acts = mount([card("a", 0), card("x", 1, { story_movable: false })]);
-    expect(cardEl("x").getAttribute("draggable")).toBe("false");
-    expect(cardEl("a").getAttribute("draggable")).toBe("true");
+    expect(gripOf("x")).toBeNull();
+    expect(gripOf("a")?.getAttribute("draggable")).toBe("true");
+    expect(cardEl("a").hasAttribute("draggable")).toBe(false); // the title stays a plain click
     stubBox(cardEl("x"));
-    await fireEvent.dragStart(cardEl("a"));
+    await fireEvent.dragStart(gripOf("a")!);
     await dragAt(cardEl("x"), "dragover", 10);
     await dragAt(cardEl("x"), "drop", 10);
     expect(acts.onStoryMove).not.toHaveBeenCalled();
@@ -132,7 +135,7 @@ describe("PlotStoryTimeView", () => {
   it("a card dropped on itself moves nothing", async () => {
     const acts = mount([card("a", 0), card("b", 1)]);
     stubBox(cardEl("a"));
-    await fireEvent.dragStart(cardEl("a"));
+    await fireEvent.dragStart(gripOf("a")!);
     await dragAt(cardEl("a"), "drop", 10);
     expect(acts.onStoryMove).not.toHaveBeenCalled();
   });

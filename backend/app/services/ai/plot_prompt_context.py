@@ -148,9 +148,11 @@ def _render_card(card, card_titles: dict[str, str], focus: str | None) -> list[s
     synopsis, the beats it fulfils, and the cards it leads to (titles over ids).
 
     `reading_order` counts from 1, as a writer counts scenes. The `focus` card — the
-    one a prompt is working on — is marked, and its synopsis is left out: the prompt
-    prints that card in full itself, and printing it twice costs tokens and blurs
-    which copy is the one under work."""
+    one a prompt is working on — is marked. While it is not yet in a scene, its
+    synopsis is the card's own text, which the prompt prints in full itself, so it is
+    left out here rather than shown twice. A card written into a scene shows its
+    scene's summary instead (what was actually written), which the prompt does not
+    print, so that synopsis stays."""
     attrs = f"title={quoteattr(card.title)}"
     if card.plotline_title:
         attrs += f" plotline={quoteattr(card.plotline_title)}"
@@ -162,7 +164,7 @@ def _render_card(card, card_titles: dict[str, str], focus: str | None) -> list[s
     if is_focus:
         attrs += ' focus="true"'
     lines = [f"    <card {attrs}>"]
-    if card.synopsis.strip() and not is_focus:
+    if card.synopsis.strip() and not (is_focus and card.scene_id is None):
         lines.append(f"      <synopsis>{escape(card.synopsis.strip())}</synopsis>")
     for beat in card.beats:
         if beat.holder_kind == _CHARACTER_ARC_HOLDER:

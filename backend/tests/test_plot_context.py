@@ -362,6 +362,17 @@ class StoryOrderTests(PlotContextTestCase):
         self._linked("Late", stray, scene=s1)
         self.assertEqual(self._titles(), ["Early", "Late", "Aa stray"])
 
+    def test_a_second_sibling_does_not_split_the_first_siblings_chain(self) -> None:
+        # A leads to two unplaced cards; the first of them leads on to a third.
+        # The chain stays together and the second sibling comes after it.
+        chapter = self._chapter()
+        s0 = self._scene("Anchor", chapter)
+        follow_up = self._linked("B follow-up")
+        first = self._linked("A first", follow_up)
+        second = self._linked("C second")
+        self._card("Anchor", scene=s0, causal_links=[{"target": first}, {"target": second}])
+        self.assertEqual(self._titles(), ["Anchor", "A first", "B follow-up", "C second"])
+
     def test_an_unlinked_unplaced_card_goes_last(self) -> None:
         chapter = self._chapter()
         s0 = self._scene("Written", chapter)

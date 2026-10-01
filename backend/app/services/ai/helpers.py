@@ -545,8 +545,8 @@ def _plot_context(project: ProjectService, as_of: Any, focus: Any = None) -> str
     the card's own id, so the model sees the board up to and including that
     card's reveal position; `next_scene(e)` reaches one scene further). A
     non-id / unknown anchor gates nothing (the whole board). `focus` is the card
-    the prompt is working on (an id or a node): it is marked on the board and its
-    synopsis left out, for the prompt prints it in full (#2387). Degrades
+    the prompt is working on (an id or a node), marked on the board (#2387; see
+    `render_plot_context` for when its synopsis is left out). Degrades
     to "" rather than raising, so a context helper never breaks the render — but
     the failure is recorded to the project error log (#386) instead of vanishing,
     so a silently-empty plot context is diagnosable rather than a mystery."""

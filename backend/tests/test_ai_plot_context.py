@@ -117,6 +117,18 @@ class PlotContextHelperTests(_PlotAiContextBase):
         self.assertIn("OTHER_SYNOPSIS", out)
         self.assertEqual(out.count('focus="true"'), 1)
 
+    def test_a_written_focus_card_keeps_its_scenes_summary(self) -> None:
+        # A written card's board synopsis is its scene's summary, which the prompt
+        # does not print, so focus must not drop it.
+        scene = self._scene("Written", self._chapter())
+        focal = self._card("Written", body="CARD_PLAN before writing.", scene=scene)
+        self.service._set_scene_summary(scene, "SCENE_SUMMARY as written.")  # the scene moved on
+        out = self._render(
+            '{% role "system" %}{{ plot_context(focus=card) }}{% endrole %}', card=focal
+        )
+        self.assertIn('focus="true"', out)
+        self.assertIn("SCENE_SUMMARY as written.", out)
+
     def test_the_block_renders_plotline_causal_and_beat_guidance(self) -> None:
         from app.models import (
             CreatePlotlineRequest,

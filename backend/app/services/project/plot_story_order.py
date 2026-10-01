@@ -52,10 +52,12 @@ def _place_next(
     for card in pending:
         before = [positions[p] for p in leads_here[card.id] if p in positions]
         if before:
-            anchor = ordered[max(before)].id
             index = max(before) + 1
-            # Siblings that follow the same card keep the order they were placed in.
-            while index < len(ordered) and anchor in leads_here.get(ordered[index].id, ()):
+            # Step over what already follows the same card — an earlier sibling and
+            # the chain that sibling leads on to — so each keeps its run together.
+            following = {ordered[max(before)].id}
+            while index < len(ordered) and following.intersection(leads_here.get(ordered[index].id, ())):
+                following.add(ordered[index].id)
                 index += 1
             ordered.insert(index, card)
             return card

@@ -177,7 +177,14 @@ class EntryRef:
     def __getitem__(self, key: str) -> Any:
         # Subscript mirrors attribute access, so a group / field whose label is
         # not a Python identifier stays reachable: `entry["Antagonist GMO"].Goal`.
-        return self._resolve(str(key))
+        # The node's own properties win first, exactly as they do for a dot:
+        # Jinja's attribute filters (`map(attribute="title")`, `sort`,
+        # `selectattr`) look up by subscript before getattr, so without this
+        # `entry["title"]` would read metadata and come back None (#2384).
+        name = str(key)
+        if not name.startswith("_") and isinstance(getattr(type(self), name, None), property):
+            return getattr(self, name)
+        return self._resolve(name)
 
     def _resolve(self, name: str) -> Any:
         # A set field wins (backward compatible — `e.home_planet`), then a group

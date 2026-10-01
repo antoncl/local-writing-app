@@ -607,6 +607,23 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "manuscript", "expr": {"type": "manuscript:scene"}}]},
         },
+        "planned_in": {
+            # The manuscript container an unwritten card is planned in (ADR-0097 §6):
+            # endpoint-owned (`place`, realize, attach), so hidden from the rail. The
+            # card shows in that container's box; a deleted container heals the ref away.
+            "name": "Planned in",
+            "type": "entity_ref",
+            "hidden": True,
+            "picker_config": {"sources": [{"kind": "manuscript", "expr": {"type": "manuscript:container"}}]},
+        },
+        "planned_after": {
+            # The scene an unwritten card follows inside `planned_in` (ADR-0097 §6);
+            # absent = first in the container. Endpoint-owned and hidden like `planned_in`.
+            "name": "Planned after",
+            "type": "entity_ref",
+            "hidden": True,
+            "picker_config": {"sources": [{"kind": "manuscript", "expr": {"type": "manuscript:scene"}}]},
+        },
         "page_status": {
             # A card's page status (ADR-0048 S7 Slice 3b): whether its story beat is
             # realized in prose. `on_page` is DERIVED — declared below (#1911), so the

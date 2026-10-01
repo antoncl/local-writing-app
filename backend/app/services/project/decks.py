@@ -9,6 +9,8 @@ the pure ordering the board projection reads.
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.models import (
     CreateDeckRequest,
     DeckEntry,
@@ -21,6 +23,16 @@ from app.services.project.errors import ProjectServiceError
 PLOT_DECK_ENTRY_TYPE = "plot:deck"
 # The metadata field a card (its home deck) and a deck (its parent deck) share.
 DECK_FIELD = "plot_deck"
+# An unwritten card's place in a manuscript container (ADR-0097 §6): the container,
+# and the scene it follows there. Endpoint-owned, like `scene`.
+PLANNED_IN_FIELD = "planned_in"
+PLANNED_AFTER_FIELD = "planned_after"
+_PLANNED_FIELDS = (PLANNED_IN_FIELD, PLANNED_AFTER_FIELD)
+
+
+def without_planned(metadata: dict[str, Any]) -> dict[str, Any]:
+    """`metadata` with both planned fields cleared — the card left its container."""
+    return {key: value for key, value in metadata.items() if key not in _PLANNED_FIELDS}
 
 
 def deck_board_order(decks: list[DeckSummary]) -> list[tuple[DeckSummary, str | None]]:

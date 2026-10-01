@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  ADR-0097 (proposed): a card lives in a deck, shows its scene once written, and has a place in
+  story time.
+
+  Two views (Board | Story time). Try:
+  - drag a card between two cards in "Mara's backstory": the bar shows where it lands; it moves in
+    story time.
+  - drag an unwritten card into a chapter: it becomes PLANNED there (no scene). Move it again, then
+    choose "Write as scene" from its menu.
+  - drag a written card onto a deck: refused; it shows by its scene. Detach it first.
+  - Story time: every card in story order; "A second ledger?" carries "Cause is later" until it is
+    moved before "The ledger goes missing".
+
+  Simplified: boxes are stacked (on the board they are placed freely and nest); causal links are
+  fixed; no causal edges drawn.
+
+  Tokens are COPIES of frontend/src/styles.css (dark); they drift. Do not import.
+-->
+<title>Decks and story time</title>
+<style>
+*{box-sizing:border-box}
+:root{--surface:#1f2522;--inset:#242a28;--panel:#20272a;--border:#3a4541;--divider:#2a322f;
+  --text:#e8edeb;--text-2:#a9b6b0;--text-3:#7e8a84;--accent:#6cc4a6;--accent-emphasis:#7cc0a1;
+  --accent-soft:#1f3a32;--warn:#e6c084;--warn-soft:#3a3020;
+  --sans:"Segoe UI",system-ui,sans-serif;--serif:Georgia,"Times New Roman",serif}
+body{background:#161b19;font-family:var(--sans);color:var(--text);font-size:13px;padding:24px;margin:0}
+main{max-width:900px;margin:0 auto}
+button{font:inherit;color:var(--text-2);background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;cursor:pointer}
+.bar{display:flex;align-items:center;gap:8px;margin:0 0 12px;flex-wrap:wrap}
+.seg button.on{background:var(--accent-soft);color:var(--accent-emphasis);border-color:var(--accent)}
+.hint{font-size:12px;color:var(--text-3)}
+.box{border:1px solid var(--border);border-radius:10px;padding:10px 12px 12px;margin:0 0 12px;background:var(--panel)}
+.box.deck{border-style:dashed;background:transparent}
+.bh{display:flex;align-items:baseline;gap:8px;margin:0 0 8px}
+.bn{font-family:var(--serif);font-size:15px}
+.bm{font-size:11px;color:var(--text-3)}
+.flow{display:flex;flex-wrap:wrap;gap:12px;min-height:64px;border-radius:6px}
+.flow.ins-end{outline:1px dashed var(--accent);outline-offset:2px}
+.card{position:relative;width:160px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 10px;cursor:grab}
+.card.planned{border-style:dashed}
+.card.dragging{opacity:.4}
+.card.ins-b::before,.card.ins-a::after{content:"";position:absolute;top:2px;bottom:2px;width:3px;border-radius:2px;background:var(--accent)}
+.card.ins-b::before{left:-8px}.card.ins-a::after{right:-8px}
+.ct{font-family:var(--serif);font-size:14px;line-height:1.3;margin:0 18px 4px 0}
+.cs{font-size:12px;color:var(--text-2);line-height:1.4;margin:0 0 6px}
+.cf{display:flex;flex-wrap:wrap;gap:4px}
+.pill{font-size:11px;padding:1px 7px;border-radius:999px;color:var(--text-2);border:1px solid var(--border)}
+.pill.scene{background:var(--accent-soft);color:var(--accent-emphasis);border-color:var(--accent)}
+.pill.warn{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.kb{position:absolute;top:4px;right:4px;border:none;padding:2px 4px;font-size:14px;line-height:1;color:var(--text-3)}
+.menu{position:absolute;top:24px;right:4px;z-index:5;background:var(--inset);border:1px solid var(--border);border-radius:6px;padding:4px;display:flex;flex-direction:column;min-width:160px}
+.menu button{border:none;text-align:left;font-size:12px;padding:5px 8px}
+.menu button:hover{background:var(--accent-soft)}
+.status{font-size:12px;color:var(--text-2);min-height:18px;margin:4px 0 0}
+.axis{display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin:0 2px 6px}
+.tl{padding:12px;border:1px solid var(--border);border-radius:10px}
+</style>
+</head>
+<body>
+<main>
+  <div class="bar">
+    <div class="seg"><button id="vb" class="on">Board</button><button id="vt">Story time</button></div>
+    <span id="hint" class="hint"></span>
+    <button id="reset" style="margin-left:auto;font-size:12px">Reset</button>
+  </div>
+  <div id="root"></div>
+  <p class="status" id="status"></p>
+</main>
+<script>
+const B0=[
+ {id:"ch1",name:"Chapter 1 · The harbour",real:true},
+ {id:"ch2",name:"Chapter 2 · Ashfall",real:true},
+ {id:"bs",name:"Mara's backstory",real:false},
+ {id:"ideas",name:"Ideas",real:false}];
+// m = manuscript position (written: its scene; planned: just after the scene it follows), t = story time
+const C0=[
+ {id:"c1",title:"Mara arrives at the harbour",syn:"She steps off the ferry with a forged letter.",box:"ch1",m:1,t:5,written:true,home:null},
+ {id:"c2",title:"The ledger goes missing",syn:"The harbourmaster's ledger vanishes overnight.",box:"ch1",m:2,t:6,written:true,home:null},
+ {id:"c3",title:"Flashback: the fire",syn:"Mara remembers the guildhall burning.",box:"ch1",m:3,t:2,written:true,home:"bs"},
+ {id:"c4",title:"Ashfall council",syn:"The council blames the foreigners.",box:"ch2",m:4,t:7,written:true,home:null},
+ {id:"c5",title:"Tomas confesses",syn:"He hid the ledger to protect her.",box:"ch2",m:5,t:8,written:true,home:null},
+ {id:"b1",title:"Mara's apprenticeship",syn:"Seven years under the guild's mapmaker.",box:"bs",m:null,t:1,written:false,home:"bs"},
+ {id:"b2",title:"Mara leaves the guild",syn:"After the fire she takes the maps and runs.",box:"bs",m:null,t:3,written:false,home:"bs"},
+ {id:"b3",title:"First letter from Tomas",syn:"An offer of work, and a warning.",box:"bs",m:null,t:4,written:false,home:"bs"},
+ {id:"i1",title:"Storm cuts the harbour off",syn:"No ships for a week; tempers rise.",box:"ideas",m:null,t:9,written:false,home:"ideas"},
+ {id:"i2",title:"A second ledger?",syn:"Someone kept a copy all along.",box:"ideas",m:null,t:10,written:false,home:"ideas"}];
+const CAUSES=[["b2","c1"],["b3","c1"],["c2","c4"],["i2","c2"]];
+let BX,C,view="board",drag=null,menuFor=null;
+function reset(){BX=JSON.parse(JSON.stringify(B0));C=JSON.parse(JSON.stringify(C0));menuFor=null;say("");render()}
+const byId=id=>C.find(c=>c.id===id), box=id=>BX.find(b=>b.id===id);
+const say=s=>document.getElementById("status").textContent=s;
+function sceneNo(c){const r=C.filter(x=>x.written).sort((a,b)=>a.m-b.m);return r.indexOf(c)+1}
+function inBox(b){const k=b.real?"m":"t";return C.filter(c=>c.box===b.id).sort((a,b2)=>a[k]-b2[k]||a.t-b2.t)}
+function lateCause(c){const w=CAUSES.filter(([a,b])=>b===c.id&&byId(a).t>c.t).map(([a])=>byId(a).title);return w[0]||null}
+function where(c){const b=box(c.box);if(c.written)return `Scene ${sceneNo(c)}`;if(b.real)return `Planned in ${b.name.split(" · ")[0]}`;return b.name}
+function cardHTML(c,ctx){
+ const w=lateCause(c),b=box(c.box);
+ let f=c.written?`<span class="pill scene">Scene ${sceneNo(c)}</span>`:(b.real?`<span class="pill">Planned</span>`:`<span class="pill">Unwritten</span>`);
+ if(ctx==="st")f+=`<span class="pill">${c.written?b.name.split(" · ")[0]:where(c)}</span>`;
+ if(w)f+=`<span class="pill warn" title="Caused by “${w}”, which happens later">Cause is later</span>`;
+ let menu="";
+ if(menuFor===c.id){menu=`<div class="menu"><button data-act="earlier">Earlier in story time</button><button data-act="later">Later in story time</button>${!c.written?`<button data-act="write">Write as scene</button>`:`<button data-act="detach">Detach scene</button>`}</div>`}
+ return `<div class="card ${!c.written&&b.real?"planned":""}" draggable="true" data-id="${c.id}"><button class="kb" data-menu="${c.id}" aria-label="Card menu">⋯</button><p class="ct">${c.title}</p><p class="cs">${c.syn}</p><div class="cf">${f}</div>${menu}</div>`}
+function render(){
+ const r=document.getElementById("root");
+ document.getElementById("vb").classList.toggle("on",view==="board");
+ document.getElementById("vt").classList.toggle("on",view==="st");
+ document.getElementById("hint").textContent=view==="board"?"Chapters read in manuscript order; decks in story time. Drag between cards.":"Every card in story time. Drag to move a card earlier or later.";
+ if(view==="board"){
+  r.innerHTML=BX.map(b=>`<div class="box ${b.real?"":"deck"}"><div class="bh"><span class="bn">${b.name}</span><span class="bm">${b.real?"chapter · manuscript order":"deck · story time"}</span></div><div class="flow" data-b="${b.id}">${inBox(b).map(c=>cardHTML(c,"b")).join("")}</div></div>`).join("");
+ }else{
+  const all=[...C].sort((a,b)=>a.t-b.t);
+  r.innerHTML=`<div class="axis"><span>Earliest</span><span>Latest</span></div><div class="tl flow" data-b="__st">${all.map(c=>cardHTML(c,"st")).join("")}</div>`;
+ }}
+function clearIns(){document.querySelectorAll(".ins-b,.ins-a,.ins-end").forEach(e=>e.classList.remove("ins-b","ins-a","ins-end"))}
+function mid(a,b){if(a==null&&b==null)return 1;if(a==null)return b-1;if(b==null)return a+1;return (a+b)/2}
+function place(id,bid,refId,before){
+ const c=byId(id);
+ if(bid==="__st"){const list=C.filter(x=>x!==c).sort((a,b)=>a.t-b.t);const i=refId?list.indexOf(byId(refId))+(before?0:1):list.length;c.t=mid(list[i-1]?.t,list[i]?.t);say(`Moved “${c.title}” in story time.`);return}
+ const b=box(bid),k=b.real?"m":"t";
+ if(!b.real&&c.written){say(`“${c.title}” is written, so it shows by its scene. Detach it first to move it to a deck.`);return}
+ const list=inBox(b).filter(x=>x!==c);
+ const i=refId?list.indexOf(byId(refId))+(before?0:1):list.length;
+ if(b.real){
+  let lo=list[i-1]?.m,hi=list[i]?.m;
+  if(lo==null&&hi==null){const prior=C.filter(x=>x!==c&&x.m!=null&&BX.indexOf(box(x.box))<BX.indexOf(b)).sort((a,b2)=>a.m-b2.m);lo=prior.length?prior[prior.length-1].m:0}
+  c.m=mid(lo,hi);c.box=bid;
+  say(c.written?`Moved the scene “${c.title}” in the manuscript.`:`Planned “${c.title}” in ${b.name.split(" · ")[0]}. No scene yet; move it again or choose Write as scene.`);
+ }else{c.t=mid(list[i-1]?.t,list[i]?.t);c.box=bid;c.home=bid;c.m=null;say(`“${c.title}” is in ${b.name}, between its neighbours in story time.`)}}
+function shift(c,dir){const all=[...C].sort((a,b)=>a.t-b.t),i=all.indexOf(c),o=all[i+dir];if(!o){say("Already at that end of story time.");return}[c.t,o.t]=[o.t,c.t];say(`“${c.title}” now happens ${dir<0?"before":"after"} “${o.title}”.`)}
+const root=document.getElementById("root");
+root.addEventListener("dragstart",e=>{const el=e.target.closest(".card");if(!el)return;drag=el.dataset.id;menuFor=null;el.classList.add("dragging");e.dataTransfer.effectAllowed="move";e.dataTransfer.setData("text/plain",drag)});
+root.addEventListener("dragend",()=>{drag=null;clearIns();render()});
+root.addEventListener("dragover",e=>{if(!drag)return;const fl=e.target.closest(".flow");if(!fl)return;e.preventDefault();clearIns();const el=e.target.closest(".card");if(el&&el.dataset.id!==drag){const r=el.getBoundingClientRect();el.classList.add(e.clientX<r.left+r.width/2?"ins-b":"ins-a")}else if(!el){fl.classList.add("ins-end")}});
+root.addEventListener("drop",e=>{if(!drag)return;const fl=e.target.closest(".flow");if(!fl)return;e.preventDefault();const el=e.target.closest(".card");let ref=null,before=false;if(el&&el.dataset.id!==drag){const r=el.getBoundingClientRect();ref=el.dataset.id;before=e.clientX<r.left+r.width/2}place(drag,fl.dataset.b,ref,before);drag=null;clearIns();render()});
+root.addEventListener("click",e=>{
+ const m=e.target.closest("[data-menu]");if(m){menuFor=menuFor===m.dataset.menu?null:m.dataset.menu;render();return}
+ const a=e.target.closest("[data-act]");if(!a)return;const c=byId(menuFor),act=a.dataset.act;menuFor=null;
+ if(act==="earlier")shift(c,-1);
+ if(act==="later")shift(c,1);
+ if(act==="write"){const b=box(c.box);if(!b.real){const target=BX.filter(x=>x.real).slice(-1)[0];const last=C.filter(x=>x.m!=null).sort((p,q)=>p.m-q.m).slice(-1)[0];c.m=(last?last.m:0)+1;c.box=target.id;say(`Wrote “${c.title}” as a new scene at the end of ${target.name.split(" · ")[0]}; its synopsis is the scene's summary.`)}else{say(`Wrote “${c.title}” as a scene, right where it was planned; its synopsis is the scene's summary.`)}c.written=true}
+ if(act==="detach"){c.written=false;c.m=null;const h=c.home||"ideas";c.box=h;say(`Detached “${c.title}”. It went back to ${box(h).name}, keeping the scene's summary as its synopsis.`)}
+ render()});
+document.getElementById("vb").onclick=()=>{view="board";menuFor=null;render()};
+document.getElementById("vt").onclick=()=>{view="st";menuFor=null;render()};
+document.getElementById("reset").onclick=reset;
+reset();
+</script>
+</body>
+</html>

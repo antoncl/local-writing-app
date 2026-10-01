@@ -26,6 +26,9 @@
 //   • deck create / delete / edit (ADR-0097 §2) — the deck twins of the plotline commands.
 //     A delete frees its cards and child decks (the backend purges the references), so its
 //     undo recreates the deck under its id, then puts each member and child back.
+//   • deck realize / detach / text edit (ADR-0097 §3, §7) — a realized deck shows its container's
+//     text; undoing a realize plans nothing and writes nothing: the cards go home, the deck is
+//     detached, and the container the realize made is deleted.
 //   • text edit / attach / detach (ADR-0097 §3/§4) — a written card SHOWS its scene's
 //     text, so its title/synopsis move through their own endpoints, never a whole-state
 //     save (the server refuses a written card's own title/body change). The commands
@@ -53,6 +56,8 @@ import {
   attachCardScene,
   readSceneSummary,
   setCardText,
+  containerHoldsNodes,
+  deleteContainerNode,
   moveCardInStoryTime,
   placeCardOnBoard,
   currentStructure,
@@ -82,10 +87,14 @@ import {
   type DeckState,
   deleteDeck,
   getDeckState,
+  attachDeckContainer,
+  detachDeckContainer,
+  realizeDeck,
   recreateDeck,
   refreshDeckRoster,
   restoreCardDeck,
   restoreDeckState,
+  setDeckText,
 } from "@/lib/stores/decks";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 
@@ -145,6 +154,16 @@ export interface PlotCommandPort {
   placeCard(cardId: string, place: PlaceRequest): Promise<void>;
   // Suppressible confirm before deleting a written scene; resolves false on cancel.
   confirmSceneDelete(scene: { title: string; body: string }): Promise<boolean>;
+  // A deck's realize (ADR-0097 §7): the container made for it + the cards planned in it; the
+  // text edit (the container's while realized); attach / detach with the card's text-choice
+  // contract; and the container's removal, behind a suppressible confirm when it holds nodes.
+  realizeDeck(deckId: string): Promise<{ containerId: string; planned: string[] }>;
+  setDeckText(deckId: string, text: CardText): Promise<void>;
+  attachDeckContainer(deckId: string, containerId: string, text?: CardTextChoice): Promise<CardTextOutcome>;
+  detachDeckContainer(deckId: string, text?: CardTextChoice): Promise<CardTextOutcome>;
+  containerHoldsNodes(containerId: string): boolean;
+  deleteContainer(containerId: string): Promise<void>;
+  confirmContainerDelete(title: string): Promise<boolean>;
 }
 
 // The displayed title / synopsis of a card — each key optional so a command replays
@@ -229,6 +248,22 @@ export function cardTextCommand(
     label,
     undo: () => port.setCardText(id, before),
     redo: () => port.setCardText(id, after),
+  };
+}
+
+// A deck's displayed-text edit (rename / synopsis): the same replay as a card's, through the
+// deck text endpoint — the container's text while the deck is realized.
+export function deckTextCommand(
+  port: PlotCommandPort,
+  id: string,
+  before: CardText,
+  after: CardText,
+  label: string,
+): Command {
+  return {
+    label,
+    undo: () => port.setDeckText(id, before),
+    redo: () => port.setDeckText(id, after),
   };
 }
 
@@ -467,6 +502,7 @@ export function deleteDeckCommand(
   state: DeckState,
   members: DeckMember[],
   children: DeckChild[],
+  container: string | null = null,
   label = "delete deck",
 ): Command {
   return {
@@ -478,7 +514,11 @@ export function deleteDeckCommand(
     undo: async () => {
       await port.recreateDeck(id, state, false);
       await Promise.all(children.map((c) => port.restoreDeckState(c.id, c.state, false)));
-      await Promise.all(members.map((m) => port.restoreCardDeck(m.id, id, m.written, false)));
+      // A realized deck is linked back to its container (the container's text was never touched,
+      // so nothing is asked), and every member — each planned there — is restored by a save, not
+      // a `place`, which would clear the plan.
+      if (container) ensureNotCancelled(await port.attachDeckContainer(id, container, "scene"));
+      await Promise.all(members.map((m) => port.restoreCardDeck(m.id, id, m.written || !!container, false)));
       await Promise.all([port.refreshDeckRoster(), port.refreshBoard()]);
     },
     redo: () => port.deleteDeck(id),
@@ -559,6 +599,63 @@ export function realizeCommand(
     },
     redo: async () => {
       scene = (await port.realizeCard(cardId, parentId)).sceneId; // re-mint; track the new scene id
+    },
+  };
+}
+
+// A deck's realize (ADR-0097 §7) made a container and planned the deck's unwritten cards in it —
+// no scene. Undo takes it back in the order that loses nothing: each planned card goes home to
+// the deck (membership; the plan clears), the deck is detached keeping its own synopsis and its
+// own title is put back, then the container the realize made is deleted — behind a suppressible
+// confirm when something has been put under it since. Redo realizes again; the new container's
+// id (and plan) replace the old in the closure, so the next undo targets them.
+export function realizeDeckCommand(
+  port: PlotCommandPort,
+  deckId: string,
+  containerId: string,
+  planned: string[],
+  before: CardText,
+  label = "realize deck",
+): Command {
+  let container = containerId;
+  let cards = planned;
+  return {
+    label,
+    undo: async () => {
+      if (port.containerHoldsNodes(container) && !(await port.confirmContainerDelete(before.title ?? ""))) {
+        throw new UndoCancelled(); // before mutating, so the step stays undoable
+      }
+      for (const id of cards) await port.placeCard(id, { to: { deck: deckId } });
+      ensureNotCancelled(await port.detachDeckContainer(deckId, "card"));
+      await port.setDeckText(deckId, before);
+      await port.deleteContainer(container);
+    },
+    redo: async () => {
+      ({ containerId: container, planned: cards } = await port.realizeDeck(deckId));
+    },
+  };
+}
+
+// Detach a realized deck (ADR-0097 §7): the container stays. `before` is the deck's own title
+// and synopsis, held while it was realized. Undo puts them back on the now-unrealized deck, then
+// re-attaches with "scene" (the container was never touched, so nothing is asked). Redo
+// detaches with the choice recorded at the original op.
+export function detachDeckCommand(
+  port: PlotCommandPort,
+  deckId: string,
+  containerId: string,
+  before: CardText,
+  choice: CardTextChoice | null,
+  label = "detach deck",
+): Command {
+  return {
+    label,
+    undo: async () => {
+      await port.setDeckText(deckId, before);
+      ensureNotCancelled(await port.attachDeckContainer(deckId, containerId, "scene"));
+    },
+    redo: async () => {
+      ensureNotCancelled(await port.detachDeckContainer(deckId, choice ?? undefined));
     },
   };
 }
@@ -781,8 +878,51 @@ export class PlotUndoRecorder {
         .filter((d) => d.parent === id)
         .map(async (d) => ({ id: d.id, state: await this.#port.getDeckState(d.id) })),
     );
+    const container = projection?.decks.find((d) => d.id === id)?.realized_container ?? null;
     await del();
-    this.#record(deleteDeckCommand(this.#port, id, state, members, children));
+    this.#record(deleteDeckCommand(this.#port, id, state, members, children, container));
+  }
+
+  /** A deck's displayed title and/or synopsis edit (ADR-0097 §3) — the container's while the
+   *  deck is realized. Before values come from what the board shows; records only a real change. */
+  async deckTextEdit(id: string, label: string, edit: CardText): Promise<void> {
+    await this.#whenIdle();
+    const shown = this.#getProjection()?.decks.find((d) => d.id === id);
+    await this.#port.setDeckText(id, edit);
+    if (!shown) return;
+    const before: CardText = {};
+    const after: CardText = {};
+    if (edit.title !== undefined && edit.title !== shown.title) {
+      before.title = shown.title;
+      after.title = edit.title;
+    }
+    if (edit.synopsis !== undefined && edit.synopsis !== shown.synopsis) {
+      before.synopsis = shown.synopsis;
+      after.synopsis = edit.synopsis;
+    }
+    if (Object.keys(after).length > 0) this.#record(deckTextCommand(this.#port, id, before, after, label));
+  }
+
+  /** Realize a deck as a manuscript container, recorded (ADR-0097 §7). A refused realize
+   *  (the level list allows none here) throws before anything is recorded. */
+  async realizeDeck(deckId: string): Promise<void> {
+    await this.#whenIdle();
+    const shown = this.#getProjection()?.decks.find((d) => d.id === deckId);
+    const { containerId, planned } = await this.#port.realizeDeck(deckId);
+    const before = { title: shown?.title ?? "", synopsis: shown?.synopsis ?? "" };
+    this.#record(realizeDeckCommand(this.#port, deckId, containerId, planned, before));
+  }
+
+  /** Detach a realized deck from its container, recorded. The store asks which synopsis the
+   *  deck keeps when it must; backing out records nothing. */
+  async detachDeck(deckId: string): Promise<void> {
+    await this.#whenIdle();
+    const container = this.#getProjection()?.decks.find((d) => d.id === deckId)?.realized_container;
+    if (!container) return;
+    const own = await this.#port.getDeckState(deckId);
+    const outcome = await this.#port.detachDeckContainer(deckId);
+    if (outcome === "cancelled") return;
+    this.#record(detachDeckCommand(this.#port, deckId, container, { title: own.title, synopsis: own.body }, outcome));
   }
 
   /** Create a card via the given forward op (returns the new id); record it. */
@@ -927,6 +1067,25 @@ export function defaultPlotCommandPort(): PlotCommandPort {
     readSceneSummary,
     moveCardInStoryTime,
     placeCard: placeCardOnBoard,
+    realizeDeck,
+    setDeckText,
+    attachDeckContainer,
+    detachDeckContainer,
+    containerHoldsNodes,
+    deleteContainer: deleteContainerNode,
+    confirmContainerDelete: (title) =>
+      new Promise<boolean>((resolve) => {
+        confirmService.request({
+          title: "Delete chapter?",
+          message: `Undoing realize will delete the chapter “${title || "Untitled"}” and what has been put in it.`,
+          confirmLabel: "Delete chapter",
+          destructive: true,
+          cannotBeUndone: true,
+          dontShowAgainKey: "plot-realize-deck-undo-delete-container",
+          onConfirm: async () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      }),
     // The suppressible confirm before deleting a written scene, as a Promise<boolean>:
     // confirm → true, cancel/backdrop → false (via the confirmService onCancel added
     // for this), and a suppressed prior "don't show again" resolves true immediately.

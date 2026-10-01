@@ -4,18 +4,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
+import { HttpError } from "@/lib/api/core";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
+import { plotBoardStore } from "@/lib/stores/plotBoard";
 import {
+  attachDeckContainer,
   createDeckOnBoard,
   deckEntriesStore,
   deckStateOf,
   deleteDeck,
+  detachDeckContainer,
   getDeckState,
+  realizeDeck,
   recreateDeck,
   restoreCardDeck,
   restoreDeckState,
   saveDeckEntry,
+  setDeckText,
 } from "./decks";
-import type { CardEntry, DeckEntry, PlotBoardProjection } from "@/lib/types";
+import type { CardEntry, DeckEntry, PlotBoardProjection, StructureDocument } from "@/lib/types";
 
 const deck = (over: Partial<DeckEntry> = {}): DeckEntry => ({
   id: "d1",
@@ -130,5 +137,101 @@ describe("deck undo substrate", () => {
     await restoreCardDeck("c2", "d1", true, false);
     expect(place).not.toHaveBeenCalled();
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ metadata: { scene: "s1", plot_deck: "d1" } }), "");
+  });
+});
+
+describe("realize as a container (ADR-0097 §7)", () => {
+  const differ = () =>
+    new HttpError("differ", 409, {
+      message: "differ",
+      code: "text_choice_required",
+      scene_summary: "Chapter says",
+      card_synopsis: "Deck says",
+    });
+
+  beforeEach(() => {
+    vi.spyOn(api, "getStructure").mockResolvedValue({ root: { id: "root", title: "Book" } } as unknown as StructureDocument);
+  });
+  afterEach(() => confirmService.dismiss());
+
+  it("realizeDeck posts, refetches roster + board + tree, and returns the container and its planned cards", async () => {
+    vi.spyOn(api, "realizeDeck").mockResolvedValue({ deck: deck(), container_id: "ch1", planned: ["a", "b"] });
+    expect(await realizeDeck("d1")).toEqual({ containerId: "ch1", planned: ["a", "b"] });
+    expect(api.listDecks).toHaveBeenCalled();
+    expect(api.getPlotBoardProjection).toHaveBeenCalled();
+    expect(api.getStructure).toHaveBeenCalled();
+  });
+
+  it("setDeckText sends the displayed text and refetches the tree (a realized deck's title is the container's)", async () => {
+    const put = vi.spyOn(api, "setDeckText").mockResolvedValue(deck());
+    await setDeckText("d1", { title: "Mara's past" });
+    expect(put).toHaveBeenCalledWith("d1", { title: "Mara's past" });
+    expect(api.getStructure).toHaveBeenCalled();
+  });
+
+  it("detach needing no choice asks nothing and reports null; a supplied choice is replayed", async () => {
+    const detach = vi.spyOn(api, "detachDeck").mockResolvedValue(deck());
+    expect(await detachDeckContainer("d1")).toBeNull();
+    expect(detach).toHaveBeenLastCalledWith("d1", undefined);
+    expect(confirmService.active).toBeNull();
+    expect(await detachDeckContainer("d1", "card")).toBe("card");
+    expect(detach).toHaveBeenLastCalledWith("d1", "card");
+  });
+
+  it("detach on the 409 asks with the deck wording; confirm keeps the deck's synopsis, secondary takes the chapter's", async () => {
+    const detach = vi.spyOn(api, "detachDeck").mockRejectedValueOnce(differ()).mockResolvedValueOnce(deck());
+    const pending = detachDeckContainer("d1");
+    await vi.waitFor(() => expect(confirmService.active).not.toBeNull());
+    const ask = confirmService.active!;
+    expect(ask.title).toBe("Which synopsis should the deck keep?");
+    expect(ask.confirmLabel).toBe("Keep the deck's synopsis");
+    expect(ask.secondaryLabel).toBe("Take the chapter's summary");
+    expect(ask.details?.join(" ")).toContain("Chapter says");
+    expect(ask.details?.join(" ")).toContain("Deck says");
+    await confirmService.resolve();
+    expect(await pending).toBe("card");
+    expect(detach).toHaveBeenLastCalledWith("d1", "card");
+
+    detach.mockRejectedValueOnce(differ()).mockResolvedValueOnce(deck());
+    const again = detachDeckContainer("d1");
+    await vi.waitFor(() => expect(confirmService.active).not.toBeNull());
+    await confirmService.resolveSecondary();
+    expect(await again).toBe("scene");
+  });
+
+  it("attach asks which summary the chapter keeps; confirm → scene, secondary → card", async () => {
+    const attach = vi.spyOn(api, "attachDeck").mockRejectedValueOnce(differ()).mockResolvedValueOnce(deck());
+    const pending = attachDeckContainer("d1", "ch1");
+    await vi.waitFor(() => expect(confirmService.active).not.toBeNull());
+    const ask = confirmService.active!;
+    expect(ask.title).toBe("Which summary should the chapter keep?");
+    expect(ask.confirmLabel).toBe("Keep the chapter's summary");
+    expect(ask.secondaryLabel).toBe("Use the deck's synopsis");
+    await confirmService.resolve();
+    expect(await pending).toBe("scene");
+    expect(attach).toHaveBeenLastCalledWith("d1", "ch1", "scene");
+  });
+
+  it("names the container by its level when the board knows it", async () => {
+    plotBoardStore.set({
+      ...projection(),
+      containers: [{ id: "act1", title: "Act I", parent: null, level: 1, level_name: "Act" }],
+    });
+    vi.spyOn(api, "attachDeck").mockRejectedValueOnce(differ()).mockResolvedValueOnce(deck());
+    const pending = attachDeckContainer("d1", "act1");
+    await vi.waitFor(() => expect(confirmService.active).not.toBeNull());
+    expect(confirmService.active!.title).toBe("Which summary should the act keep?");
+    await confirmService.resolve();
+    await pending;
+    plotBoardStore.set(null);
+  });
+
+  it("cancelling aborts: 'cancelled', no retry", async () => {
+    const detach = vi.spyOn(api, "detachDeck").mockRejectedValue(differ());
+    const pending = detachDeckContainer("d1");
+    await vi.waitFor(() => expect(confirmService.active).not.toBeNull());
+    confirmService.dismiss();
+    expect(await pending).toBe("cancelled");
+    expect(detach).toHaveBeenCalledTimes(1);
   });
 });

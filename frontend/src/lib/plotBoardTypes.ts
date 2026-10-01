@@ -65,6 +65,11 @@ export type PlotBoardDeck = {
   synopsis: string;
   parent: string | null;
   movable: boolean;
+  // ADR-0097 §7: the manuscript container this deck is realized as (its title and synopsis
+  // are then the container's, and it draws no box of its own), and the level a realize
+  // would create at (null when the level list allows none there).
+  realized_container?: string | null;
+  realize_level_name?: string | null;
 };
 
 // A card→beat link resolved for the board (ADR-0048 S7 Slice 5b; ADR-0053): a beat

@@ -30,6 +30,8 @@ function actions(over: Partial<PlotDeckActions> = {}): PlotDeckActions {
     finishRename: vi.fn(),
     onNewCard: vi.fn(),
     onNewDeckInside: vi.fn(),
+    onRealize: vi.fn(),
+    onDetach: vi.fn(),
     onOpen: vi.fn(),
     onDelete: vi.fn(),
     ...over,
@@ -77,6 +79,32 @@ describe("PlotDeckNode", () => {
       await fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(label) }));
       expect(spy).toHaveBeenCalledWith("plot_d1");
     }
+  });
+
+  it("offers Realize as <level name> only when the level list allows one, and routes it", async () => {
+    const acts = actions();
+    const { unmount } = mount(data({ realizeLevel: "Chapter" }), acts);
+    await fireEvent.click(screen.getByRole("button", { name: "Deck actions" }));
+    expect(screen.getAllByRole("menuitem").map((el) => el.textContent?.trim())).toEqual([
+      "New card",
+      "New deck inside",
+      "Rename",
+      "Realize as Chapter",
+      "Open",
+      "Delete",
+    ]);
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Realize as Chapter" }));
+    expect(acts.onRealize).toHaveBeenCalledWith("plot_d1");
+    unmount();
+    mount(data({ realizeLevel: null }), actions());
+    await fireEvent.click(screen.getByRole("button", { name: "Deck actions" }));
+    expect(screen.queryByRole("menuitem", { name: /Realize/ })).toBeNull();
+  });
+
+  it("never offers Realize on an inherited deck", async () => {
+    mount(data({ movable: false, realizeLevel: "Chapter" }), actions());
+    await fireEvent.click(screen.getByRole("button", { name: "Deck actions" }));
+    expect(screen.queryByRole("menuitem", { name: /Realize/ })).toBeNull();
   });
 
   it("hides every edit on an inherited deck: Open alone", async () => {

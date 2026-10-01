@@ -14,6 +14,7 @@ import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { refreshStructure, setStructure, structureStore } from "@/lib/stores/structure";
 import { refreshCards } from "@/lib/stores/plotCards";
 import { metadataSchemaStore } from "@/lib/stores/schema";
+import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
 import type { CardEntry, PlotBoardLayout, PlotBoardProjection, Scene, StructureDocument } from "@/lib/types";
 
@@ -230,8 +231,11 @@ export function reassignCardPlotline(cardId: string, plotlineId: string): Promis
 // the caller records no undo step).
 export type CardTextOutcome = CardTextChoice | null | "cancelled";
 
-type TextChoiceAsk = {
+export type TextChoiceAsk = {
   title: string;
+  // The two texts' names when they are not the card's and its scene's (a deck and its
+  // container, ADR-0097 §7): `scene` is the manuscript side, `card` the plot side.
+  names?: { scene: string; card: string };
   confirmLabel: string;
   confirmChoice: CardTextChoice;
   secondaryLabel: string;
@@ -245,11 +249,13 @@ function askTextChoice(
   ask: TextChoiceAsk,
   conflict: { sceneSummary: string; cardSynopsis: string },
 ): Promise<CardTextChoice | null> {
+  const scene = ask.names?.scene ?? "Scene";
+  const card = ask.names?.card ?? "Card";
   return new Promise((resolve) => {
     confirmService.request({
       title: ask.title,
-      message: "The scene's summary and the card's synopsis are different.",
-      details: [`Scene summary: ${clip(conflict.sceneSummary)}`, `Card synopsis: ${clip(conflict.cardSynopsis)}`],
+      message: `The ${scene.toLowerCase()}'s summary and the ${card.toLowerCase()}'s synopsis are different.`,
+      details: [`${scene} summary: ${clip(conflict.sceneSummary)}`, `${card} synopsis: ${clip(conflict.cardSynopsis)}`],
       confirmLabel: ask.confirmLabel,
       secondaryLabel: ask.secondaryLabel,
       destructive: false,
@@ -260,7 +266,7 @@ function askTextChoice(
   });
 }
 
-async function withTextChoice(
+export async function withTextChoice(
   ask: TextChoiceAsk,
   op: (text?: CardTextChoice) => Promise<unknown>,
   text?: CardTextChoice,
@@ -339,6 +345,19 @@ export function readScene(sceneId: string): Promise<Scene> {
 // A scene's summary — attach-undo puts it back when the attach overwrote it.
 export async function readSceneSummary(sceneId: string): Promise<string> {
   return String((await api.getScene(sceneId)).metadata?.summary ?? "");
+}
+
+// Delete a manuscript container (a deck's realize-undo — the container was made for it).
+// Updates the structure store (it leaves the tree) and the board (its box goes).
+export async function deleteContainerNode(containerId: string): Promise<void> {
+  setStructure(await api.deleteStructureNode(containerId));
+  await refreshAfterMutation();
+}
+
+// Whether a container has anything under it — a deck's realize-undo asks before deleting one
+// that does.
+export function containerHoldsNodes(containerId: string): boolean {
+  return (findStructureNodeById(get(structureStore)?.root, containerId)?.children ?? []).length > 0;
 }
 
 // Delete a scene (realize-undo). `delete_scene` purges the

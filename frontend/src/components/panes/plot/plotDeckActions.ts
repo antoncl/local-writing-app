@@ -13,10 +13,14 @@ export type PlotDeckActions = {
   startRename: (deckId: string) => void;
   // Commit (a changed, non-empty title) or abandon (title null) the inline edit.
   finishRename: (deckId: string, title: string | null) => void;
-  // "New card": create an unwritten card in this deck.
+  // "New card": create an unwritten card in this deck (planned in its container when realized).
   onNewCard: (deckId: string) => void;
   // "New deck inside": create a deck nested in this one.
   onNewDeckInside: (deckId: string) => void;
+  // "Realize as <level>": make the deck a manuscript container; its cards become planned there.
+  onRealize: (deckId: string) => void;
+  // "Detach from deck" (on the realized container's box): unlink the deck; the chapter stays.
+  onDetach: (deckId: string) => void;
   // "Open": the deck in a NodeEditor pane (title, synopsis, and its parent deck in the rail).
   onOpen: (deckId: string) => void;
   // "Delete": confirmed by the board when the deck holds cards or decks; only the deck goes.

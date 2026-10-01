@@ -63,7 +63,8 @@
     createCard,
     deleteCard,
   } from "@/lib/stores/plotBoard";
-  import { createDeckOnBoard, deleteDeck, getDeckEntry, saveDeckEntry } from "@/lib/stores/decks";
+  import { createDeckOnBoard } from "@/lib/stores/decks";
+  import { deckBoardOps, newCardTarget } from "@/lib/plot/deckBoardOps";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import {
@@ -190,6 +191,7 @@
     // hit record() mid-replay; near-instant once the batched undo is fast.
     () => undoCtl.whenIdle(),
   );
+  const deckOps = deckBoardOps(undoRecorder, () => projection, (message) => editorPanes.setError(message));
 
   // The drag gestures SvelteFlow reports (ADR-0097 §8, §9): a top-level box carries its
   // contents and pins its own position, a card shows where it would land and drops as a
@@ -474,12 +476,14 @@
     startRename: (id) => (editingDeckId = id),
     finishRename: (id, title) => {
       editingDeckId = null;
-      if (title) void renameDeck(id, title);
+      if (title) void deckOps.rename(id, title);
     },
     onNewCard: (id) => void newCard(id),
     onNewDeckInside: (id) => void newDeck(id),
+    onRealize: (id) => void deckOps.realize(id),
+    onDetach: (id) => void deckOps.detach(id),
     onOpen: (id) => void editorPanes.openDeck(id),
-    onDelete: (id) => removeDeck(id),
+    onDelete: (id) => deckOps.remove(id),
   });
 
   // A plot node asked to be revealed (plotBoardReveal, #1920). Read the signal first so a
@@ -612,7 +616,7 @@
     if (creating) return;
     creating = true;
     try {
-      const id = await undoRecorder.createCard(() => createCard("New card", undefined, deckId ? { deck: deckId } : undefined));
+      const id = await undoRecorder.createCard(() => createCard("New card", undefined, deckId ? newCardTarget(projection, deckId) : undefined));
       await tick();
       revealFit = { id };
     } catch (e) {
@@ -639,40 +643,6 @@
     } finally {
       creatingDeck = false;
     }
-  }
-
-  // Rename a deck from its box: a recorded whole-deck edit (undo restores the old title).
-  async function renameDeck(id: string, title: string): Promise<void> {
-    try {
-      await undoRecorder.deckEdit(id, "rename deck", async () => saveDeckEntry({ ...(await getDeckEntry(id)), title }));
-    } catch (e) {
-      editorPanes.setError(e instanceof Error ? e.message : "Could not rename the deck.");
-    }
-  }
-
-  // Delete a deck — only the deck: its cards go loose and its child decks to the top level.
-  // Confirmed when it holds anything; recorded, so Ctrl+Z recreates it and puts them back.
-  function removeDeck(id: string): void {
-    const deck = projection?.decks.find((d) => d.id === id);
-    const holdsSomething =
-      (projection?.cards ?? []).some((c) => c.deck === id) || (projection?.decks ?? []).some((d) => d.parent === id);
-    const run = async (): Promise<void> => {
-      await undoRecorder.deleteDeck(id, () => deleteDeck(id));
-      // Close a NodeEditor pane open on this deck ("Open"): the node is gone.
-      const openPane = editorPanes.panes.find((p) => p.document?.id === id);
-      if (openPane) editorPanes.tearDown(openPane.id);
-    };
-    if (!holdsSomething) {
-      void run();
-      return;
-    }
-    confirmService.request({
-      title: "Delete deck",
-      message: `Delete deck ${deck?.title ? `“${deck.title}”` : "this deck"}? Its cards and decks move out; nothing else is deleted.`,
-      confirmLabel: "Delete deck",
-      destructive: true,
-      onConfirm: run,
-    });
   }
 
   // Board-native plotline create (ADR-0053 §3): mint an empty plotline and expand its

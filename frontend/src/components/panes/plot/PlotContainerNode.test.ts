@@ -2,9 +2,10 @@
 // PlotContainerNode RENDER guard (ADR-0048 S7 Slice 4). A container box is
 // display-only structure on the board, so it gets the same mount check as the card
 // ([[reference_component_test_harness]]). No @xyflow/svelte import → mountable here.
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@/lib/test/component";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@/lib/test/component";
 import PlotContainerNode from "./PlotContainerNode.svelte";
+import { PLOT_DECK_ACTIONS, type PlotDeckActions } from "./plotDeckActions";
 import type { PlotContainerData } from "@/lib/plot/plotBoardLayout";
 
 const data = (over: Partial<PlotContainerData> = {}): PlotContainerData => ({
@@ -42,6 +43,66 @@ describe("PlotContainerNode", () => {
     unmount();
     render(PlotContainerNode, { props: { data: data({ ...loose, count: 2 }) } });
     expect(screen.queryByText("Drag a card here to take it out of its deck")).toBeNull();
+  });
+
+  describe("a container a deck is realized as (ADR-0097 §7)", () => {
+    const acts = (over: Partial<PlotDeckActions> = {}): PlotDeckActions => ({
+      editingId: null,
+      startRename: vi.fn(),
+      finishRename: vi.fn(),
+      onNewCard: vi.fn(),
+      onNewDeckInside: vi.fn(),
+      onRealize: vi.fn(),
+      onDetach: vi.fn(),
+      onOpen: vi.fn(),
+      onDelete: vi.fn(),
+      ...over,
+    });
+    const mount = (over: Partial<PlotContainerData>, actions?: PlotDeckActions) =>
+      render(PlotContainerNode, {
+        props: { data: data(over) },
+        context: actions ? new Map([[PLOT_DECK_ACTIONS, actions]]) : undefined,
+      });
+
+    it("shows the deck menu only for a realized deck", () => {
+      mount({ deckId: "plot_d1" }, acts());
+      expect(screen.getByRole("button", { name: "Deck actions" })).toBeInTheDocument();
+    });
+
+    it("has no menu for an ordinary container, or without the board's actions", () => {
+      mount({}, acts());
+      expect(screen.queryByRole("button", { name: "Deck actions" })).toBeNull();
+    });
+
+    it("has no menu without the actions context even when a deck is realized", () => {
+      mount({ deckId: "plot_d1" });
+      expect(screen.queryByRole("button", { name: "Deck actions" })).toBeNull();
+    });
+
+    it("offers the deck's items and routes each with the DECK's id", async () => {
+      const a = acts();
+      mount({ deckId: "plot_d1" }, a);
+      await fireEvent.click(screen.getByRole("button", { name: "Deck actions" }));
+      expect(screen.getAllByRole("menuitem").map((el) => el.textContent?.trim())).toEqual([
+        "New card",
+        "New deck inside",
+        "Rename",
+        "Open deck",
+        "Detach from deck",
+        "Delete deck",
+      ]);
+      await fireEvent.click(screen.getByRole("menuitem", { name: "Detach from deck" }));
+      expect(a.onDetach).toHaveBeenCalledWith("plot_d1");
+    });
+
+    it("renames through the deck when the board starts the edit", async () => {
+      const a = acts({ editingId: "plot_d1" });
+      mount({ deckId: "plot_d1" }, a);
+      const input = screen.getByLabelText("Name") as HTMLInputElement;
+      await fireEvent.input(input, { target: { value: "Chapter One" } });
+      await fireEvent.blur(input);
+      expect(a.finishRename).toHaveBeenCalledWith("plot_d1", "Chapter One");
+    });
   });
 
   it("renders a nested (chapter) box", () => {

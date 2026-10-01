@@ -7,7 +7,7 @@
 // that knows about SvelteFlow; the drop hit-test (`boardDrop.ts`) and the box drag
 // (`boxDrag.ts`) read what this produces off the nodes.
 
-import type { BoardXY, PlotBoardCard, PlotBoardProjection } from "@/lib/types";
+import type { BoardXY, PlotBoardCard, PlotBoardDeck, PlotBoardProjection } from "@/lib/types";
 import {
   CARD_HEIGHT,
   CARD_WIDTH,
@@ -76,13 +76,17 @@ const byStory = (a: PlotBoardCard, b: PlotBoardCard): number => a.story_order - 
 export function boardBoxes(projection: PlotBoardProjection): BoxSpec[] {
   const containerById = new Map(projection.containers.map((c) => [c.id, c]));
   const deckById = new Map(projection.decks.map((d) => [d.id, d]));
+  // A realized deck (ADR-0097 §7) draws no box: its container's box stands for it.
+  const realizedAs = (deck: PlotBoardDeck): string | null =>
+    deck.realized_container != null && containerById.has(deck.realized_container) ? deck.realized_container : null;
 
   const inContainer = new Map<string, PlotBoardCard[]>();
   const inDeck = new Map<string, PlotBoardCard[]>();
   const loose: PlotBoardCard[] = [];
   for (const card of projection.cards) {
+    const home = card.scene == null && card.deck != null ? deckById.get(card.deck) : undefined;
     if (card.container != null && containerById.has(card.container)) push(inContainer, card.container, card);
-    else if (card.scene == null && card.deck != null && deckById.has(card.deck)) push(inDeck, card.deck, card);
+    else if (home && !realizedAs(home)) push(inDeck, home.id, card);
     else loose.push(card);
   }
   const boxCards = (cards: PlotBoardCard[] | undefined, order: typeof byStory): BoxCard[] =>
@@ -94,11 +98,18 @@ export function boardBoxes(projection: PlotBoardProjection): BoxSpec[] {
     if (c.parent == null || !containerById.has(c.parent)) topContainers.push(c.id);
     else push(childContainers, c.parent, c.id);
   }
+  // A deck's box goes inside its parent deck's box, or — the parent being realized — inside
+  // the parent's container box. A realized deck has no box to place.
   const childDecks = new Map<string, string[]>();
+  const containerDecks = new Map<string, string[]>();
   const topDecks: string[] = [];
   for (const d of projection.decks) {
-    if (d.parent == null || !deckById.has(d.parent)) topDecks.push(d.id);
-    else push(childDecks, d.parent, d.id);
+    if (realizedAs(d)) continue;
+    const parent = d.parent != null ? deckById.get(d.parent) : undefined;
+    const host = parent && realizedAs(parent);
+    if (host) push(containerDecks, host, d.id);
+    else if (parent) push(childDecks, parent.id, d.id);
+    else topDecks.push(d.id);
   }
 
   const deckBox = (id: string): BoxSpec => ({
@@ -115,7 +126,7 @@ export function boardBoxes(projection: PlotBoardProjection): BoxSpec[] {
     ref: id,
     header: CONTAINER_HEADER,
     cards: boxCards(inContainer.get(id), byContainerOrder),
-    children: (childContainers.get(id) ?? []).map(containerBox),
+    children: [...(childContainers.get(id) ?? []).map(containerBox), ...(containerDecks.get(id) ?? []).map(deckBox)],
   });
 
   const roots = [...topContainers.map(containerBox), ...topDecks.map(deckBox)];

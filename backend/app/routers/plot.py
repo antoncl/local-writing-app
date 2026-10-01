@@ -21,6 +21,7 @@ from app.models import (
     CreateCharacterArcRequest,
     CreatePlotlineRequest,
     CreatePlotTemplateRequest,
+    PlaceCardRequest,
     PlotBoard,
     PlotBoardProjection,
     PlotContext,
@@ -175,6 +176,13 @@ def realize_card(project: CurrentProject, entry_id: str, request: RealizeCardReq
     """Create a scene from a card and attach it (ADR-0048 §1, *realize*)."""
     with translate_errors():
         return project.realize_card(entry_id, request)
+
+
+@router.post("/api/plot/cards/{entry_id}/place", response_model=CardEntry)
+def place_card(project: CurrentProject, entry_id: str, request: PlaceCardRequest) -> CardEntry:
+    """Move a card in story time: right after or before a neighbour (ADR-0097 §4/§5)."""
+    with translate_errors():
+        return project.place_card(entry_id, request)
 
 
 @router.post("/api/plot/seed-from-manuscript", response_model=CardList)

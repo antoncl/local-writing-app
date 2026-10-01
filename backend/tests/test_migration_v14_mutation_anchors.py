@@ -565,7 +565,7 @@ class _ChainEntityTypeTests(unittest.TestCase):
     def test_ancestor_lore_entry_resolves_for_target_entry_type(self) -> None:
         ProjectService.opened_at(self.book)
 
-        self.assertEqual(read_project_version(self.book), 14)
+        self.assertEqual(read_project_version(self.book), CURRENT_VERSION)
         set_id = derive_set_id("m1")
         front, _ = _read(self.book / "mutation-sets" / f"{set_id}.md")
         self.assertEqual(front["target_entry_type"], "lore:character")
@@ -581,7 +581,7 @@ class _ChainEntityTypeTests(unittest.TestCase):
 
         ProjectService.opened_at(self.book)
 
-        self.assertEqual(read_project_version(self.book), 14)
+        self.assertEqual(read_project_version(self.book), CURRENT_VERSION)
         self.assertEqual(read_project_version(self.series), CURRENT_VERSION)
         set_id = derive_set_id("m1")
         front, _ = _read(self.book / "mutation-sets" / f"{set_id}.md")

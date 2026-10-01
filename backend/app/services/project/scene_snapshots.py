@@ -850,6 +850,10 @@ class SceneSnapshotsMixin:
         keep_placement = kind in TREE_KINDS and path.exists()
         live_parent, live_rank = self._placement_on_disk(path) if keep_placement else (None, None)
 
+        # A plot card keeps its current story rank and never a scene another card
+        # now holds (ADR-0097 §1, §5); any other node passes through untouched.
+        frozen_bytes, migrated = self._adjust_restored_plot_card(kind, node_id, path, frozen_bytes, migrated)
+
         self._capture(root, node_id, path, retention="thinned", kind=kind)
 
         if migrated is None:

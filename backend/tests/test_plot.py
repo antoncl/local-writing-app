@@ -546,13 +546,17 @@ class CardOperationTests(PlotTestCase):
 
     # ----- cardinality invariants (ADR §S5) -------------------------------
 
-    def test_many_cards_may_attach_one_scene(self) -> None:
+    def test_a_second_card_cannot_attach_a_held_scene(self) -> None:
+        # ADR-0097 §1: one card per scene — the second attach is refused, the first stays.
         scene_id = self._scene(self._chapter(), "Crowded")
-        for title in ("Beat A", "Beat B"):
-            card = self.service.create_card(CreateCardRequest(title=title))
-            self.service.save_card(card.id, SaveCardRequest(title=title, metadata={"scene": scene_id}))
+        first = self.service.create_card(CreateCardRequest(title="Beat A"))
+        self.service.save_card(first.id, SaveCardRequest(title="Beat A", metadata={"scene": scene_id}))
+        second = self.service.create_card(CreateCardRequest(title="Beat B"))
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.save_card(second.id, SaveCardRequest(title="Beat B", metadata={"scene": scene_id}))
+        self.assertEqual(ctx.exception.status_code, 409)
         attached = [c for c in self.service.list_cards().entries if c.metadata.get("scene") == scene_id]
-        self.assertEqual(len(attached), 2)  # 0..n cards per scene — no uniqueness the other way
+        self.assertEqual([c.id for c in attached], [first.id])
 
     def test_attachment_survives_a_scene_move(self) -> None:
         source, dest = self._chapter("Source"), self._chapter("Dest")
@@ -940,12 +944,14 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
         self.assertIsNotNone(self._sequence_of(projection, card_id))  # ranked despite being homeless
 
     def test_cards_on_the_same_scene_share_a_sequence(self) -> None:
-        # n cards per scene (ADR §S5) → they sit at the same reveal-order rank.
+        # A project not yet at v15 (ADR-0097 §10) can still hold two cards on one
+        # scene → they sit at the same reveal-order rank.
         root = self.service.read_structure().root.id
         chapter = self._node("Chapter 1", "manuscript:container", root)
         scene = self.service.create_scene(CreateSceneRequest(title="Opening", parent_id=chapter)).id
         a = self._card_on("a", scene)
-        b = self._card_on("b", scene)
+        b = self._card_on("b", None)
+        self.plant_duplicate_scene(b, scene)
         projection = self.service.read_plot_board_projection()
         self.assertEqual(self._sequence_of(projection, a), self._sequence_of(projection, b))
 

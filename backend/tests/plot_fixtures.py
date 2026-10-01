@@ -29,3 +29,17 @@ class PlotTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def plant_duplicate_scene(self, card_id: str, scene_id: str) -> None:
+        """Give a card a scene another card already holds by writing its file
+        directly — the pre-v15 state the migration cleans up (ADR-0097 §10), which
+        the save path itself no longer lets a test reach."""
+        card = self.service.read_card(card_id)
+        self.service._write_node_entry_file(
+            self.service._path_for_node_id(card_id, "plot"),
+            card_id,
+            card.title,
+            card.entry_type,
+            {**card.metadata, "scene": scene_id},
+            card.body,
+        )

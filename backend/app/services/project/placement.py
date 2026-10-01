@@ -40,7 +40,10 @@ TREE_KINDS = frozenset({"manuscript", "research"})
 MAX_RANK_DECIMALS = 6
 
 
-_PLACEMENT_LINE = re.compile(rb"^(?:parent|rank)[ \t]*:")
+# The revision also leaves out a card's `story_rank` (ADR-0097 §5): a story-time
+# move is not an edit an open pane must reconcile. `set_placement_in_text` keeps
+# to parent/rank (`_PLACEMENT_LINE_TEXT`) — it is not a story-rank writer.
+_PLACEMENT_LINE = re.compile(rb"^(?:parent|rank|story_rank)[ \t]*:")
 _PLACEMENT_LINE_TEXT = re.compile(r"^(?:parent|rank)[ \t]*:")
 _ENTRY_TYPE_LINE = re.compile(r"^entry_type[ \t]*:")
 
@@ -60,7 +63,8 @@ def _front_matter_span(lines: list[str]) -> int | None:
 def content_without_placement(data: bytes) -> bytes:
     """A node file's bytes with its top-level `parent:` / `rank:` lines removed —
     what the save revision hashes (ADR-0094 §6), so a move or a renumber of its
-    siblings never turns an open pane's next save into a conflict."""
+    siblings never turns an open pane's next save into a conflict. A card's
+    `story_rank:` line goes too (ADR-0097 §5), for the same reason."""
     lines = data.splitlines(keepends=True)
     if not lines or lines[0].rstrip(b"\r\n") != b"---":
         return data

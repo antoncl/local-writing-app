@@ -51,9 +51,9 @@ from app.services.ai import tokens as ai_tokens
 from app.services.ai.call_resolver import resolve_call_params
 from app.services.ai.chat import (
     expand_and_prepare_chat_blocks,
+    one_shot_system_blocks,
     record_stream_turn,
     run_chat_turn,
-    system_prompt_cache_blocks,
 )
 from app.services.ai.extraction import run_entry_patch_extraction
 from app.services.ai.history_budget import apply_history_window
@@ -431,6 +431,7 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
                     selection=request.selection,
                     commit=request.commit,
                     resolution_scene_id=request.resolution_scene_id,
+                    automatic_lore=False,
                 ),
             )
         except PreviewError as exc:
@@ -478,9 +479,10 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
         policy = "off"
 
     # Chat gets its system block via expand_and_prepare_chat_blocks (with
-    # journal expansion, which is chat-specific); generate shares only the
-    # system-prompt cache wrap so the two never drift on caching.
-    system_blocks = system_prompt_cache_blocks(system_prompt)
+    # journal expansion, which is chat-specific); a one-shot run shares the
+    # system-prompt cache wrap and adds the declared lore the render computed
+    # (ADR-0092 Amendment 1 §5: picks and *always* entries, no automatic lore).
+    system_blocks = one_shot_system_blocks(system_prompt, rendered)
 
     result = await ai_providers.achat(
         resolved.to_call(
@@ -660,6 +662,7 @@ async def ai_generate_stream(
                     selection=request.selection,
                     commit=request.commit,
                     resolution_scene_id=request.resolution_scene_id,
+                    automatic_lore=False,
                 ),
             )
         except PreviewError as exc:
@@ -701,9 +704,10 @@ async def ai_generate_stream(
         manual_in=resolved.manual_price_in_usd_per_mtok,
         manual_out=resolved.manual_price_out_usd_per_mtok,
     )
-    # Shares the exact system-block wrap with the non-streaming path so the
-    # two can't drift into caching in one mode but not the other.
-    system_blocks = system_prompt_cache_blocks(system_prompt)
+    # Shares the exact system blocks with the non-streaming path (the system
+    # prompt plus the declared lore, ADR-0092 Amendment 1 §5) so the two can't
+    # drift into caching or placing lore in one mode but not the other.
+    system_blocks = one_shot_system_blocks(system_prompt, rendered)
 
     events = ai_providers.chat_stream(
         resolved.to_call(

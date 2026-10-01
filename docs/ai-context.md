@@ -31,6 +31,10 @@ check *one* entry, or a research prompt that must stay clean, can say so with
 `no_lore()`: it sends its own picks and no always-included entries at all, and the
 door shows **lore-free** in place of *lore-enabled*.
 
+The editor's inline actions (Tighten grammar, Expand, Describe and the rest) send
+the same picks and always-included entries, but never automatic lore, even from a
+prompt that calls `auto_lore()`: noticing what you name belongs to a conversation.
+
 A prompt can also place an entry as it was at an earlier snapshot, alongside the
 entry as it is now — `use(node, snapshot=id)`. Propose's built-in **Follow a
 change** does this for the entry that changed, so you see what changed without

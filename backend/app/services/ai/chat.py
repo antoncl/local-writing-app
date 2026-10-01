@@ -61,6 +61,7 @@ class PreparedChatTurn:
 
 if TYPE_CHECKING:
     from app.services.ai.lore_selection import SelectMode
+    from app.services.ai.templates import RenderedTemplate
     from app.services.project_service import ProjectService
 
 
@@ -79,6 +80,21 @@ def system_prompt_cache_blocks(system_prompt: str) -> list[dict] | None:
     if not system_prompt:
         return None
     return [{"text": system_prompt, "tier": "stable"}]
+
+
+def one_shot_system_blocks(system_prompt: str, rendered: RenderedTemplate) -> list[dict] | None:
+    """A one-shot run's system blocks (ADR-0092 Amendment 1 §5): the system
+    prompt's stable block, then the declared lore the render computed — the
+    `use()` picks and the *always* entries, never automatic lore, because the
+    generate routes render with `automatic_lore=False` — placed stable-first
+    like a chat turn's tiers. None when there is neither a system prompt nor
+    any lore to place."""
+    blocks = list(system_prompt_cache_blocks(system_prompt) or [])
+    if rendered.send_lore_stable:
+        blocks.append({"text": rendered.send_lore_stable, "tier": "stable"})
+    if rendered.send_lore_volatile:
+        blocks.append({"text": rendered.send_lore_volatile, "tier": "volatile"})
+    return blocks or None
 
 
 def _staged_set_block(project: ProjectService, staged_set_id: str) -> str:

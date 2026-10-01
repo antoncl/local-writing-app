@@ -553,6 +553,11 @@ class PreviewRequest:
     # preview's lore is fitted by the same rule as the send. The resolver's
     # defaults when no assistant is bound.
     lore_limits: LoreLimits = LoreLimits()
+    # ADR-0092 Amendment 1 §5: False computes declared lore only (the picks and
+    # the *always* entries) even when the template called `auto_lore()`. The
+    # one-shot generate routes set it: automatic lore belongs to a conversation,
+    # which has a journal to detect into and a session to cache against.
+    automatic_lore: bool = True
 
 
 def build_preview(
@@ -671,19 +676,30 @@ def build_preview(
     if session is not None and commit:
         session.commit()
 
-    _annotate_rendered_from_env(rendered, env, project_service, scene, request.lore_limits)
+    _annotate_rendered_from_env(
+        rendered, env, project_service, scene, request.lore_limits, automatic_lore=request.automatic_lore
+    )
 
     return rendered, session_id
 
 
 def _annotate_rendered_from_env(
-    rendered: RenderedTemplate, env, project_service, scene, lore_limits: LoreLimits
+    rendered: RenderedTemplate,
+    env,
+    project_service,
+    scene,
+    lore_limits: LoreLimits,
+    *,
+    automatic_lore: bool = True,
 ) -> None:
     """Copy the env-side execution state the render's helpers (`use()`,
     `auto_lore()`, `field_contract.store()`) recorded during the template render
     onto `rendered`, and compute the send-path lore tiers when automatic lore
     was invoked, the render carries `use()` picks (ADR-0092 §7.1), or the
     project has an `always` entry and the prompt is not lore-free (Amendment 1).
+    `automatic_lore=False` (a one-shot run, Amendment 1 §5) computes the
+    declared tiers only, whatever the template invoked; `lore_invoked` still
+    records what it did.
     Split out of `build_preview` (#1544) so that function's own statement count stays
     under the complexity gate."""
     # ADR-0092 §7.1: carry the execution-derived AUTOMATIC-lore gate off the env
@@ -734,15 +750,16 @@ def _annotate_rendered_from_env(
     from app.services.ai.lore_selection import _lore_policy_ids
 
     has_picks = bool(rendered.used_node_ids or rendered.used_snapshots)
+    automatic = rendered.lore_invoked and automatic_lore
     policies = (
         _lore_policy_ids(project_service)
-        if not rendered.lore_invoked and (has_picks or not rendered.lore_free)
+        if not automatic and (has_picks or not rendered.lore_free)
         else None
     )
     has_always = bool(policies and not rendered.lore_free and policies["always"])
-    if rendered.lore_invoked or has_picks or has_always:
+    if automatic or has_picks or has_always:
         mode: SelectMode = (
-            "automatic" if rendered.lore_invoked else ("picks" if rendered.lore_free else "declared")
+            "automatic" if automatic else ("picks" if rendered.lore_free else "declared")
         )
         _apply_preview_lore_tiers(
             rendered,

@@ -652,6 +652,15 @@ export function projectionDataKey(p: PlotBoardProjection): string {
       // the Earlier/Later menu items rebuild with it.
       c.story_order,
       c.story_movable,
+      // ADR-0097 §6: where a card sits inside its chapter box. A drag inside one chapter
+      // (a planned card's new anchor, a written card's scene moved) changes ONLY these,
+      // so leaving them out kept the old order on screen until some other change
+      // rebuilt the board and everything jumped at once (#2397).
+      c.container_order,
+      c.planned_in,
+      c.planned_after,
+      // Manuscript reading rank: the manuscript edge layer and "Scene N" read it.
+      c.sequence,
     ]),
     p.plotlines.map((l) => [l.id, l.title, l.color, l.beats.map((b) => [b.beat_id, b.title, b.use_count])]),
     // ADR-0080 §5: an arc's own colour AND its bound character (a rebind changes which
@@ -664,7 +673,7 @@ export function projectionDataKey(p: PlotBoardProjection): string {
       a.character_id,
       a.beats.map((b) => [b.beat_id, b.title, b.use_count]),
     ]),
-    p.containers.map((c) => [c.id, c.title, c.parent]),
+    p.containers.map((c) => [c.id, c.title, c.parent, c.level, c.level_name]),
     // A deck's title, synopsis, parent and ownership all show on its box.
     p.decks.map((d) => [d.id, d.title, d.synopsis, d.parent, d.movable, d.realized_container, d.realize_level_name]),
   ]);

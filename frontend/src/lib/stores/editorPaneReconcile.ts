@@ -69,6 +69,7 @@ function paneDocType(kind: string, entryType?: string): DocumentRef["type"] | nu
     case "plot":
       if (entryType === "plot:card") return "plot_card";
       if (entryType === "plot:plotline") return "plotline";
+      if (entryType === "plot:deck") return "plot_deck";
       if (entryType === "plot:template") return "plot_template";
       return null;
     default:

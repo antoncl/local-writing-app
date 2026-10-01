@@ -40,11 +40,11 @@ export type PlotBoardCharacterArc = {
 };
 
 // A manuscript container (an act, a chapter — whatever the project declares) as a
-// soft, free-flow board box (ADR-0048 S7 Slice 4). `parent` is the enclosing
-// container's id, or null when its parent is the manuscript root (a top-level act),
-// so the board nests a chapter box inside its act. Only containers that hold a
-// placed card (plus their ancestors) are projected, in manuscript reading order.
-// Structure, not thread — no colour (plotline is the colour axis, orthogonal).
+// board box (ADR-0048 S7 Slice 4). `parent` is the enclosing container's id, or null
+// when its parent is the manuscript root (a top-level act), so the board nests a
+// chapter box inside its act. EVERY container is projected, in manuscript reading
+// order, empty ones included (ADR-0097 §8). Structure, not thread — no colour
+// (plotline is the colour axis, orthogonal).
 export type PlotBoardContainer = {
   id: string;
   title: string;
@@ -52,6 +52,19 @@ export type PlotBoardContainer = {
   // ADR-0094 §9: the container's level (1 at the top) and its level name.
   level?: number | null;
   level_name?: string | null;
+};
+
+// A deck as the board sees it (ADR-0097 §2, §8): a titled box of cards that exists only
+// on the plot board. `parent` is the enclosing deck's id (null = top level, also for a
+// dangling or cyclic reference); `synopsis` is its body; `movable` is whether the open
+// layer owns it (an inherited deck can be opened, not edited). Projected parents first,
+// siblings by title.
+export type PlotBoardDeck = {
+  id: string;
+  title: string;
+  synopsis: string;
+  parent: string | null;
+  movable: boolean;
 };
 
 // A card→beat link resolved for the board (ADR-0048 S7 Slice 5b; ADR-0053): a beat
@@ -122,6 +135,9 @@ export type PlotBoardCard = {
   plotline: string | null;
   scene: string | null;
   container: string | null;
+  // ADR-0097 §2: the card's home deck (null = loose; also for a deleted deck). Only an
+  // unwritten card shows in it — a written card shows in its scene's container.
+  deck: string | null;
   page_status: string | null;
   beats: PlotBoardBeat[];
   sequence: number | null;
@@ -183,6 +199,7 @@ export type PlotBoardProjection = {
   // `plotlines` — a sibling holder band, not merged into the plotline list.
   arcs: PlotBoardCharacterArc[];
   containers: PlotBoardContainer[];
+  decks: PlotBoardDeck[];
   cards: PlotBoardCard[];
   diagnostics: PlotDiagnostic[];
 };
@@ -190,22 +207,13 @@ export type PlotBoardProjection = {
 // A point on the board canvas.
 export type BoardXY = { x: number; y: number };
 
-// A container's manual size (#878): its stored width/height in board coords. A
-// container is otherwise a soft backdrop (auto-wraps its cards); a stored size is a
-// MINIMUM the box never shrinks below — content still grows it past this, but it holds
-// the extra room when content is smaller. That is the whole point: a single-card box
-// (and so its member cards' drag extent, #874) gets room to spread. Keyed by container id.
-export type BoardSize = { w: number; h: number };
-
-// The board's opaque `layout` payload: per-node position overrides keyed by node id
-// — cards and plotline nodes alike (their ids are distinct, so one map holds both).
-// A node absent from `positions` falls back to its derived slot; once dragged and
-// saved, it is pinned here. Container boxes carry no position (their origin is always
-// derived), so they never appear in `positions` — but a resized container's manual
-// size (#878) is pinned in `sizes`, keyed by container id. Absent → the box auto-wraps.
+// The board's opaque `layout` payload: the positions of the nodes the writer places by
+// hand, keyed by node id (ADR-0097 §9) — the top-level boxes (`container:<id>`,
+// `deck:<id>`, `loose`) and the plotline / arc nodes. Cards are never positioned: they
+// flow inside their box, so a card position an older board stored is ignored. A node
+// absent from `positions` falls back to its derived slot.
 export type PlotBoardLayout = {
   positions?: Record<string, BoardXY>;
-  sizes?: Record<string, BoardSize>;
 };
 
 // The board singleton as the save endpoint (`PUT /api/plot/board`) returns it

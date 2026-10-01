@@ -20,6 +20,7 @@ const card = (id: string, story_order: number, over: Partial<PlotBoardCard> = {}
   plotline: null,
   scene: null,
   container: null,
+  deck: null,
   page_status: null,
   beats: [],
   sequence: null,

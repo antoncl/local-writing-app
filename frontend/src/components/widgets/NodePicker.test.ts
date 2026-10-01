@@ -50,6 +50,46 @@ describe("NodePicker snippet picker — hide filter (ADR-0049 #682)", () => {
   });
 });
 
+// ADR-0097 §2: a card's home deck and a deck's parent are plain references to a deck, so a
+// config naming `plot:deck` offers the decks flat (a plotline stays a context_pick selector).
+describe("NodePicker plot source — decks as plain picks (ADR-0097 §2)", () => {
+  const deck = (id: string, title: string) => ({ id, title, body: "", entry_type: "plot:deck", metadata: {} });
+  const config = { sources: [{ kind: "plot", expr: { type: "plot:deck" } }], multiple: false };
+
+  it("lists the decks and picks one as an ordinary ref", async () => {
+    const onChange = vi.fn();
+    render(NodePicker, {
+      props: {
+        config,
+        // The roster also carries plotlines; only decks are offered here.
+        plotEntries: [plotline("p1", "The Heist"), deck("d1", "Mara's backstory")] as never,
+        affordance: "change",
+        onChange,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    expect(screen.queryByText("The Heist")).toBeNull();
+    await fireEvent.click(screen.getByText("Mara's backstory").closest("button")!);
+    expect(onChange.mock.calls[0][0].value).toEqual([
+      { id: "d1", kind: "plot", title: "Mara's backstory", entry_type: "plot:deck" },
+    ]);
+  });
+
+  it("offers no decks to a plotline-only config", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
+        plotEntries: [deck("d1", "Mara's backstory")] as never,
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    expect(screen.queryByText("Mara's backstory")).toBeNull();
+  });
+});
+
 describe("NodePicker snippet category — the whole prompt roster, BY DESIGN (#1688)", () => {
   it("offers invocable prompts too: hand-picking a prompt-kind view routes through this group", async () => {
     // The Category enum has no "prompt", so ViewFlowNode maps a prompt-kind

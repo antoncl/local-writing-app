@@ -9,6 +9,7 @@ import { refreshPromptEntries, clearPrompts } from "@/lib/stores/prompts";
 import { refreshPlotTemplates, clearPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshPlotlines, clearPlotlines } from "@/lib/stores/plotlines";
 import { refreshCards, clearCards } from "@/lib/stores/plotCards";
+import { refreshDecks, clearDecks } from "@/lib/stores/decks";
 import { clearPlotBoard } from "@/lib/stores/plotBoard";
 import { refreshMutationSetEntries, clearMutationSets } from "@/lib/stores/mutationSets";
 import { refreshSchema, clearSchema } from "@/lib/stores/schema";
@@ -41,6 +42,7 @@ export async function loadProjectData(): Promise<void> {
     refreshPlotTemplates(),
     refreshPlotlines(),
     refreshCards(),
+    refreshDecks(),
     refreshMutationSetEntries(),
     refreshSchema(),
     refreshReferenceIndex(),
@@ -67,6 +69,7 @@ export function clearProjectData(): void {
   clearPlotTemplates();
   clearPlotlines();
   clearCards();
+  clearDecks();
   clearPlotBoard();
   clearMutationSets();
   clearSchema();

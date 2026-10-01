@@ -10,6 +10,7 @@ import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { refreshPlotlines } from "@/lib/stores/plotlines";
+import { refreshDecks } from "@/lib/stores/decks";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
@@ -27,7 +28,7 @@ import {
   type DraftFields,
   type EditorPaneState,
 } from "@/lib/editor-core/editorPaneModel";
-import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEntry, TagEntry, ResearchNote, EntryMetadata } from "@/lib/types";
+import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEntry, DeckEntry, TagEntry, ResearchNote, EntryMetadata } from "@/lib/types";
 
 // The document kinds a pane can reload from the server, and the per-kind getter.
 // Wrapped (not bare `api.getX`) so each getter reads the `api` property live at
@@ -36,7 +37,7 @@ import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEn
 // the post-save reload path and the reconcile ladder's rung-1 re-fetch (#1621)
 // share one map — and now the generic reconcile entry point (ADR-0085 §5,
 // editorPaneReconcile.ts).
-export type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry | TagEntry | ResearchNote;
+export type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry | DeckEntry | TagEntry | ResearchNote;
 
 // Getters take the pane too (not just the id): the lore getter reads the
 // pane's `authoringLayerId` so a reload — the post-409 reconcile re-fetch, the
@@ -48,6 +49,7 @@ export const RELOAD_GETTERS: Record<string, (id: string, pane?: EditorPaneState)
   plot_template: (id) => api.getPlotTemplate(id),
   plot_card: (id) => api.getCard(id),
   plotline: (id) => api.getPlotline(id),
+  plot_deck: (id) => api.getDeck(id),
   tag: (id) => api.getTagEntry(id),
   research: (id) => api.getResearchNote(id),
 };
@@ -118,6 +120,10 @@ export async function refreshAfterSave(host: SaveRefreshHost, args: SaveRefreshA
     // colour axis on the board and the roster the ReferencePicker's `plot` source
     // draws from. Independent reads — run them together.
     await Promise.all([refreshPlotBoard(), refreshPlotlines()]);
+  } else if (documentKind === "plot_deck") {
+    // A rename / synopsis / re-parent saved from the pane moves the deck's box (and its
+    // nesting) on the board, and the roster the decks store mirrors.
+    await Promise.all([refreshPlotBoard(), refreshDecks()]);
   } else if (documentKind === "assistant") {
     await refreshAssistantEntries();
   } else if (documentKind === "tag") {

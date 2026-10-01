@@ -23,6 +23,7 @@ import { mutationSetLabel } from "@/lib/editor-core/mutationNodes";
 import { setPromptEntries } from "@/lib/stores/prompts";
 import { setPlotTemplates } from "@/lib/stores/plotTemplates";
 import { deletePlotline } from "@/lib/stores/plotlines";
+import { deleteDeck } from "@/lib/stores/decks";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { setAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTagNodes } from "@/lib/stores/tagNodes";
@@ -91,11 +92,11 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
   // fallback (its own kind); chat and assistant are listed explicitly so they
   // no longer borrow the prompt wording (#1082).
   const fileLabel =
-    ({ manuscript: "scene", lore: "entry", research: "note", view: "view", plot_template: "template", plot_card: "card", plotline: "plotline", chat: "chat", assistant: "assistant", tag: "tag" } as Record<string, string>)[
+    ({ manuscript: "scene", lore: "entry", research: "note", view: "view", plot_template: "template", plot_card: "card", plotline: "plotline", plot_deck: "deck", chat: "chat", assistant: "assistant", tag: "tag" } as Record<string, string>)[
       documentKind
     ] ?? "prompt";
   const titleLabel =
-    ({ manuscript: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card", plotline: "Delete Plotline", chat: "Delete Chat", assistant: "Delete Assistant", tag: "Delete Tag" } as Record<string, string>)[
+    ({ manuscript: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card", plotline: "Delete Plotline", plot_deck: "Delete Deck", chat: "Delete Chat", assistant: "Delete Assistant", tag: "Delete Tag" } as Record<string, string>)[
       documentKind
     ] ?? "Delete Prompt";
   const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
@@ -211,6 +212,11 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
     // source and refreshes the board so cards on the thread lose their colour
     // axis); the board-node "Delete plotline" runs the very same function.
     await deletePlotline(pane.scene.id);
+  } else if (documentKind === "plot_deck") {
+    // A deck deletes via its own endpoint (a `plot` node, not a scene). Only the deck goes —
+    // its cards fall to the loose area and its child decks to the top level — and the store
+    // refreshes the roster + board so the box disappears and they reflow.
+    await deleteDeck(pane.scene.id);
   } else if (documentKind === "assistant") {
     setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);
   } else if (documentKind === "tag") {

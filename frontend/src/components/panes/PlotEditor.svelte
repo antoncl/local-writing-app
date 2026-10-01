@@ -1,23 +1,26 @@
 <!--
-  PlotEditor — the plot board (ADR-0048 S7). A SvelteFlow canvas that renders the
-  projection: cards laid out inside their manuscript container (act/chapter) boxes,
-  coloured by plotline (Slice 4 — the free-flow, structure-container layout; the old
-  plotline swimlanes are gone). S7b displayed it read-only; S7c (#760) makes the CARD
-  layout editable — cards drag, positions persist to the board's opaque `layout`, and
-  a drag is undoable via the shared ADR-0050 caretaker (Tier-1: layout only). Container
-  boxes are non-interactive and derived (never dragged or stored). Content ops
-  (realize/attach/seed = S7d) are intentful mutations OUTSIDE the caretaker per
-  ADR-0048 binding decision 1 (an in-memory undo must never reverse a scene mint).
+  PlotEditor — the plot board (ADR-0048 S7; ADR-0097 §8). A SvelteFlow canvas that renders
+  the projection as BOXES with cards flowing inside them: a box per manuscript container
+  (every one, empty or not), a box per deck, and a "Loose cards" box. Cards are never
+  positioned — each takes its slot in its box, in the box's own order — so only the
+  top-level boxes (and the plotline / arc nodes) are placed by hand, positions persist to
+  the board's opaque `layout`, and a box drag is undoable via the shared ADR-0050
+  caretaker (Tier-1: layout only). Dragging a card between two cards in a deck or the
+  loose area is a content op (`place`), recorded through the recorder like the rest;
+  content ops (realize/attach/seed = S7d) are intentful mutations OUTSIDE the layout
+  caretaker per ADR-0048 binding decision 1 (an in-memory undo must never reverse a scene
+  mint).
 
-  The projection → nodes transform is the pure, unit-tested `buildBoardNodes`; the
-  undo logic is the pure GraphUndoController + caretaker — the canvas itself is not
-  headless-testable ([[reference_svelteflow_headless_limits]]), so every reversible
-  bit lives outside it and the custom nodes carry their own mount tests.
+  The projection → nodes transform is the pure, unit-tested `buildBoardNodes`; the drop
+  hit-test and the box drag are pure modules beside it (`boardDrop` / `boxDrag`); the undo
+  logic is the pure GraphUndoController + caretaker — the canvas itself is not
+  headless-testable ([[reference_svelteflow_headless_limits]]), so every reversible bit
+  lives outside it and the custom nodes carry their own mount tests.
 -->
 <script lang="ts">
   import { onDestroy, setContext, tick, untrack } from "svelte";
   import "@xyflow/svelte/dist/style.css";
-  import { SvelteFlow, Controls, type ColorMode, type Edge } from "@xyflow/svelte";
+  import { SvelteFlow, Controls, ViewportPortal, type ColorMode, type Edge } from "@xyflow/svelte";
   import { themePreference } from "@/lib/utils/theme";
   import {
     CARD_HEIGHT,
@@ -25,27 +28,25 @@
     PLOTLINE_WIDTH,
     boardIsEmpty,
     buildBoardNodes,
+    deckNodeId,
     estPlotNodeHeight,
     freeSpotNear,
     occupiedAfterPin,
-    containerDescendantIds,
-    containerMemberCardIds,
     overriddenNodePositions,
     projectionDataKey,
     readBoardPositions,
-    readBoardSizes,
     reconcilePlotlineUiState,
     reconcileArcUiState,
     reconcileCardUiState,
     type PlotBoardNode,
-    type PlotContainerData,
   } from "@/lib/plot/plotBoardLayout";
-  import { buildBoardEdges, EDGE_LAYERS, type EdgeLayer } from "@/lib/plot/plotBoardEdges";
+  import { BoardDragController } from "@/lib/plot/boardDragController";
+  import { buildBoardEdges, type EdgeLayer } from "@/lib/plot/plotBoardEdges";
   import type { PlotRealizeLocation } from "@/lib/plot/realizeLocations";
   import { loadEdgeLayers, saveEdgeLayers, toggleEdgeLayer } from "@/lib/plot/edgeLayerPrefs";
   import { inStoryOrder, loadBoardView, saveBoardView, type PlotBoardView } from "@/lib/plot/storyTime";
   import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
-  import { moveNodesCommand, type GraphPort } from "@/lib/graph/graphCommands";
+  import type { GraphPort } from "@/lib/graph/graphCommands";
   import { PlotUndoRecorder, defaultPlotCommandPort } from "@/lib/plot/plotCommands";
   import { keepsOwnFocus } from "@/lib/plot/boardFocus";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -62,6 +63,7 @@
     createCard,
     deleteCard,
   } from "@/lib/stores/plotBoard";
+  import { createDeckOnBoard, deleteDeck, getDeckEntry, saveDeckEntry } from "@/lib/stores/decks";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import {
@@ -79,7 +81,9 @@
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import FlowViewCenter from "./plot/FlowViewCenter.svelte";
   import PlotCardNodeFlow from "./plot/PlotCardNodeFlow.svelte";
-  import PlotContainerNodeFlow from "./plot/PlotContainerNodeFlow.svelte";
+  import PlotContainerNode from "./plot/PlotContainerNode.svelte";
+  import PlotDeckNode from "./plot/PlotDeckNode.svelte";
+  import PlotDropBar from "./plot/PlotDropBar.svelte";
   import PlotPlotlineNode from "./plot/PlotPlotlineNode.svelte";
   import PlotArcNode from "./plot/PlotArcNode.svelte";
   import PlotCausalEdge from "./plot/PlotCausalEdge.svelte";
@@ -87,7 +91,7 @@
   import PlotDiagnosticsPanel from "./plot/PlotDiagnosticsPanel.svelte";
   import PlotStoryTimeView from "./plot/PlotStoryTimeView.svelte";
   import PlotViewToggle from "./plot/PlotViewToggle.svelte";
-  import Popover from "@/components/chrome/Popover.svelte";
+  import PlotLayersMenu from "./plot/PlotLayersMenu.svelte";
   import {
     PLOT_CARD_ACTIONS,
     type PlotCardActions,
@@ -96,8 +100,9 @@
   } from "./plot/plotCardActions";
   import { PLOT_PLOTLINE_ACTIONS, type PlotPlotlineActions } from "./plot/plotPlotlineActions";
   import { PLOT_ARC_ACTIONS, type PlotArcActions } from "./plot/plotArcActions";
-  import { PLOT_CONTAINER_ACTIONS, type PlotContainerActions } from "./plot/plotContainerActions";
-  import type { BoardSize, BoardXY, PlotBoardProjection, StructureDocument } from "@/lib/types";
+  import { PLOT_DECK_ACTIONS, type PlotDeckActions } from "./plot/plotDeckActions";
+  import type { BoardXY, PlotBoardProjection, StructureDocument } from "@/lib/types";
+  import type { Box } from "@/lib/plot/boardGeometry";
 
   // The board's read model, fetched by the opener / PlotBoardPane into the store.
   // Null until the first refresh resolves. `error` distinguishes a FAILED initial
@@ -136,15 +141,10 @@
   let flowEdges = $state<Edge[]>([]);
   // Optimistic base for the next layout save, and a snapshot guard so the persist
   // effect fires only on a real change — never on the just-loaded state. The snapshot
-  // covers the WHOLE persisted layout (card/plotline positions + container sizes), so a
-  // resize (#878) triggers a save just as a drag does.
+  // covers the WHOLE persisted layout (the placed nodes' positions: top-level boxes,
+  // plotlines, arcs — ADR-0097 §9).
   let revision = $state("");
   let lastSavedLayout = $state("");
-  // Per-container manual sizes (#878), keyed by container id: seeded from the saved
-  // layout on each rebuild, updated when a container's resize handle is released.
-  // Reactive so the autosave effect re-runs on a resize, and passed to buildBoardNodes
-  // so the box (and its member cards' extent) grows to at least the stored size.
-  let containerSizes = $state<Record<string, BoardSize>>({});
   // True while a card is dragging, so the debounce waits for release (one save
   // per gesture), mirroring ViewBodyView's autosave.
   let dragging = $state(false);
@@ -155,28 +155,16 @@
   // does — so a reassigned card reflows. Keyed on data, not board_id (S7c), because a
   // reassignment keeps the same board.
   let loadedDataKey = "";
-  // Which cards carry an explicit position override (the sparse model, S7d reflow):
-  // seeded from the saved layout on each rebuild, grown as the writer drags. Plain /
-  // non-reactive — read at persist time (the effect already re-runs on flowNodes) and
-  // at drag time, never a reactive dep.
+  // Which nodes carry an explicit position override (the sparse model, S7d reflow): the
+  // top-level boxes + plotline / arc nodes the writer has placed, seeded from the saved
+  // layout on each rebuild, grown as the writer drags. Plain / non-reactive — read at
+  // persist time (the effect already re-runs on flowNodes) and at drag time, never a
+  // reactive dep.
   let overriddenIds = new Set<string>();
 
-  // The in-flight container drag (#877), or null. A container drag translates its member
-  // cards, not the box (the box is derived from its cards) — so we capture the member set
-  // + their start positions here: onnodedrag live-translates them by the box's delta, and
-  // onnodedragstop pins + records the move + rebuilds. Plain local (read only inside the
-  // drag handlers, never a reactive dep), mirroring `overriddenIds`.
-  let containerDrag: {
-    startX: number;
-    startY: number;
-    // The member CARD ids (pinned + recorded for undo on drop). Their start positions
-    // live in `translateFrom`.
-    memberCardIds: Set<string>;
-    // Every node translated live during the gesture, → its start position: the member
-    // cards PLUS the dragged container's descendant boxes (a nested act moves as one
-    // piece). Only the cards persist; the boxes re-derive on the drop rebuild.
-    translateFrom: Map<string, BoardXY>;
-  } | null = null;
+  // Screen → flow coordinates, handed up by <FlowViewCenter> (it needs the flow context);
+  // the drag controller reads it to ask which box a card is over.
+  let pointerToFlow: ((screen: BoardXY) => BoardXY) | null = null;
 
   // The board's undo history (ADR-0050): the shared caretaker via GraphUndoController,
   // its own instance per §3, replaying through a port over our rune arrays. Drags
@@ -202,6 +190,32 @@
     // hit record() mid-replay; near-instant once the batched undo is fast.
     () => undoCtl.whenIdle(),
   );
+
+  // The drag gestures SvelteFlow reports (ADR-0097 §8, §9): a top-level box carries its
+  // contents and pins its own position, a card shows where it would land and drops as a
+  // recorded `place` — see `boardDragController.ts`.
+  // The card drag's insertion bar, in flow coordinates (an overlay: `flowNodes` is untouched
+  // during the gesture).
+  let dropBar = $state<Box | null>(null);
+  const dragController = new BoardDragController({
+    get nodes() {
+      return flowNodes;
+    },
+    set nodes(next) {
+      flowNodes = next;
+    },
+    port: graphPort,
+    undo: undoCtl,
+    setDropBar: (bar) => (dropBar = bar),
+    setDragging: (on) => (dragging = on),
+    pinPosition: (id) => overriddenIds.add(id),
+    rebuild: rebuildLayoutNodes,
+    focusBoard: () => boardEl?.focus({ preventScroll: true }),
+    toFlow: (screen) => pointerToFlow?.(screen) ?? null,
+    placeCard: (id, place) => undoRecorder.cardPlace(id, place),
+    say: (message) => editorPanes.setStatus(message),
+    fail: (e) => editorPanes.setError(e instanceof Error ? e.message : "Could not move the card."),
+  });
 
   // Per-card actions handed to PlotCardNode via context (ADR-0048 S7d). Content ops
   // are intentful backend mutations OUTSIDE the layout caretaker (binding decision 1)
@@ -449,26 +463,23 @@
     onDelete: (id) => removeArc(id),
   });
 
-  // Container resize (#878). A container box carries no position (its origin is always
-  // derived), but a resize handle gives it a manual SIZE, pinned in `containerSizes`
-  // keyed by container id. A new-object assign (not a mutate) triggers the reactive
-  // autosave effect. Deliberately outside the undo caretaker (drags are Tier-1, a resize
-  // is a coarser layout tweak) — this callback is the store's only writer of `sizes`.
-  //
-  // We rebuild flowNodes right here rather than wait for a refetch: a card's drag
-  // `extent` is baked into its node by buildBoardNodes, and a resize doesn't change the
-  // projection DATA-key (sizes live in the layout, which the key excludes), so the
-  // rebuild effect won't fire — the member cards' extent would stay the pre-resize
-  // region and the box's new room would be unreachable (the #874 synergy is the whole
-  // point). Rebuild from the SAME sparse overrides the effect uses, so an un-persisted
-  // drag survives and a never-dragged card keeps deriving; the grown box then widens its
-  // cards' extent at once. onResizeEnd fires after the gesture, so this can't fight it.
-  setContext<PlotContainerActions>(PLOT_CONTAINER_ACTIONS, {
-    onResize: (containerId, size) => {
-      const sizes = { ...containerSizes, [containerId]: size };
-      containerSizes = sizes;
-      if (projection) flowNodes = buildBoardNodes(projection, overriddenNodePositions(flowNodes, overriddenIds), sizes);
+  // On-box deck actions (ADR-0097 §8's deck menu). The board owns which deck's title is
+  // being edited — a new deck opens straight into it, and the menu's "Rename" starts one —
+  // and the recorded content ops behind New card / New deck inside / Rename / Delete.
+  let editingDeckId = $state<string | null>(null);
+  setContext<PlotDeckActions>(PLOT_DECK_ACTIONS, {
+    get editingId() {
+      return editingDeckId;
     },
+    startRename: (id) => (editingDeckId = id),
+    finishRename: (id, title) => {
+      editingDeckId = null;
+      if (title) void renameDeck(id, title);
+    },
+    onNewCard: (id) => void newCard(id),
+    onNewDeckInside: (id) => void newDeck(id),
+    onOpen: (id) => void editorPanes.openDeck(id),
+    onDelete: (id) => removeDeck(id),
   });
 
   // A plot node asked to be revealed (plotBoardReveal, #1920). Read the signal first so a
@@ -477,7 +488,8 @@
   // unless the load FAILED (review of #1922), in which case the reveal is dropped too, not
   // held for a later Retry. Once the projection is in: expand a plotline / arc node, or
   // light a card, if it is on this board (a stale id — a node on another project — is
-  // simply not here), centre the viewport on it, and clear the one-shot either way.
+  // simply not here), centre the viewport on it (a deck is only centred), and clear the
+  // one-shot either way.
   $effect(() => {
     const reveal = $plotBoardReveal;
     if (!reveal) return;
@@ -491,16 +503,19 @@
     const nodeType =
       reveal.entryType === "plot:plotline" ? "plotPlotline"
       : reveal.entryType === "plot:character_arc" ? "plotArc"
+      : reveal.entryType === "plot:deck" ? "plotDeck"
       : "plotCard";
-    if (flowNodes.some((n) => n.type === nodeType && n.id === reveal.id)) {
+    // A deck's box is keyed `deck:<id>`; every other node by its own id.
+    const nodeId = reveal.entryType === "plot:deck" ? deckNodeId(reveal.id) : reveal.id;
+    if (flowNodes.some((n) => n.type === nodeType && n.id === nodeId)) {
       if (reveal.entryType === "plot:plotline") expandedPlotlineId = reveal.id;
       else if (reveal.entryType === "plot:character_arc") expandedArcId = reveal.id;
-      else {
+      else if (reveal.entryType === "plot:card") {
         revealedCardId = reveal.id;
         focusedPlotlineId = null;
         selectedDiagnosticId = null;
       }
-      revealFit = { id: reveal.id };
+      revealFit = { id: nodeId };
     }
     plotBoardReveal.set(null);
   });
@@ -554,54 +569,110 @@
     });
   }
 
-  // New card (#793): the board's direct-authoring entry point — create an unattached
-  // card that appears on the board (homeless) where the writer names + describes it
-  // inline. Deliberately does NOT open the NodeEditor (#798): staying on the board is
-  // the point; the full editor is a choice (the card's ⋮ → "Open card"). No confirm: a
-  // single card is cheap and reversible (delete). `creating` guards against a
-  // double-click minting two cards, and surfaces a create failure in the app error
-  // banner instead of a silent unhandled rejection.
-  // #2348: a new node goes where the author is LOOKING — a free spot near the view
-  // centre — and is pinned there, like a drag. Deriving it from the card count put the
-  // n-th new card n card-widths away, and a hand-arranged board had no spot for it at
-  // all. `viewCenter` is handed up by <FlowViewCenter> (it needs the flow context);
-  // null until the canvas mounts, and then placement falls back to the auto grid.
+  // #2348: a new top-level node (a plotline, a deck) goes where the author is LOOKING — a
+  // free spot near the view centre — and is pinned there, like a drag. Deriving it from a
+  // count put the n-th new node n widths away, and a hand-arranged board had no spot for it
+  // at all. `viewCenter` is handed up by <FlowViewCenter> (it needs the flow context); null
+  // until the canvas mounts, and then placement falls back to the stacked default. `size`
+  // is the node's own measure unless the caller knows better (a plotline's estimated height).
   let viewCenter: (() => BoardXY | null) | null = null;
   let canvasEl = $state<HTMLElement | null>(null);
-  async function placeNewNode(id: string, center: BoardXY | null, size: { w: number; h: number }): Promise<void> {
+  async function placeNewNode(id: string, center: BoardXY | null, size?: { w: number; h: number }): Promise<void> {
     if (!center) return;
     // The create refreshed the projection; let the rebuild land the new node first.
     await tick();
-    if (!projection || !flowNodes.some((n) => n.id === id)) return;
+    const node = flowNodes.find((n) => n.id === id);
+    if (!projection || !node) return;
     // Free space on the board AS IT WILL BE once the new node is pinned (the other
-    // unpinned cards close ranks around it) — see occupiedAfterPin.
+    // unpinned boxes close ranks around it) — see occupiedAfterPin.
     const occupied = occupiedAfterPin(
       projection,
       overriddenNodePositions(flowNodes, overriddenIds),
-      containerSizes,
       id,
       new Map(flowNodes.map((n) => [n.id, n.measured] as const)),
     );
-    const at = freeSpotNear(center, size, occupied);
+    const at = freeSpotNear(center, size ?? { w: node.width ?? CARD_WIDTH, h: node.height ?? CARD_HEIGHT }, occupied);
     overriddenIds.add(id);
     flowNodes = flowNodes.map((n) => (n.id === id ? { ...n, position: at } : n));
-    // Re-derive boxes + extents around the pinned spot; the layout autosave persists it.
+    // Re-derive the boxes around the pinned spot; the layout autosave persists it.
     rebuildLayoutNodes();
   }
 
+  // New card (#793): the board's direct-authoring entry point — create an unwritten card
+  // that appears on the board where the writer names + describes it inline. It flows into
+  // its box (ADR-0097 §8): the loose box from the toolbar, a deck's own box from the deck's
+  // "New card" (`deckId`). Deliberately does NOT open the NodeEditor (#798): staying on the
+  // board is the point; the full editor is a choice (the card's ⋮ → "Open card"). No
+  // confirm: a single card is cheap and reversible (delete). `creating` guards against a
+  // double-click minting two cards, and surfaces a create failure in the app error banner
+  // instead of a silent unhandled rejection. A flowed card can land far from the view, so
+  // the viewport is carried to it.
   let creating = $state(false);
-  async function newCard(): Promise<void> {
+  async function newCard(deckId?: string): Promise<void> {
     if (creating) return;
     creating = true;
     try {
-      const center = viewCenter?.() ?? null;
-      const id = await undoRecorder.createCard(() => createCard("New card"));
-      await placeNewNode(id, center, { w: CARD_WIDTH, h: CARD_HEIGHT });
+      const id = await undoRecorder.createCard(() => createCard("New card", undefined, deckId ? { deck: deckId } : undefined));
+      await tick();
+      revealFit = { id };
     } catch (e) {
       editorPanes.setError(e instanceof Error ? e.message : "Could not create the card.");
     } finally {
       creating = false;
     }
+  }
+
+  // New deck / New deck inside (ADR-0097 §8): mint a deck and open its title for editing.
+  // A top-level deck lands in view like any new top-level node (#2348); one made inside
+  // another (`parent`) nests in that deck's box. Recorded: undo deletes it.
+  let creatingDeck = $state(false);
+  async function newDeck(parent?: string): Promise<void> {
+    if (creatingDeck) return;
+    creatingDeck = true;
+    try {
+      const center = viewCenter?.() ?? null;
+      const id = await undoRecorder.createDeck(() => createDeckOnBoard("New deck", parent));
+      editingDeckId = id;
+      if (!parent) await placeNewNode(deckNodeId(id), center);
+    } catch (e) {
+      editorPanes.setError(e instanceof Error ? e.message : "Could not create the deck.");
+    } finally {
+      creatingDeck = false;
+    }
+  }
+
+  // Rename a deck from its box: a recorded whole-deck edit (undo restores the old title).
+  async function renameDeck(id: string, title: string): Promise<void> {
+    try {
+      await undoRecorder.deckEdit(id, "rename deck", async () => saveDeckEntry({ ...(await getDeckEntry(id)), title }));
+    } catch (e) {
+      editorPanes.setError(e instanceof Error ? e.message : "Could not rename the deck.");
+    }
+  }
+
+  // Delete a deck — only the deck: its cards go loose and its child decks to the top level.
+  // Confirmed when it holds anything; recorded, so Ctrl+Z recreates it and puts them back.
+  function removeDeck(id: string): void {
+    const deck = projection?.decks.find((d) => d.id === id);
+    const holdsSomething =
+      (projection?.cards ?? []).some((c) => c.deck === id) || (projection?.decks ?? []).some((d) => d.parent === id);
+    const run = async (): Promise<void> => {
+      await undoRecorder.deleteDeck(id, () => deleteDeck(id));
+      // Close a NodeEditor pane open on this deck ("Open"): the node is gone.
+      const openPane = editorPanes.panes.find((p) => p.document?.id === id);
+      if (openPane) editorPanes.tearDown(openPane.id);
+    };
+    if (!holdsSomething) {
+      void run();
+      return;
+    }
+    confirmService.request({
+      title: "Delete deck",
+      message: `Delete deck ${deck?.title ? `“${deck.title}”` : "this deck"}? Its cards and decks move out; nothing else is deleted.`,
+      confirmLabel: "Delete deck",
+      destructive: true,
+      onConfirm: run,
+    });
   }
 
   // Board-native plotline create (ADR-0053 §3): mint an empty plotline and expand its
@@ -723,9 +794,9 @@
   // Edge layers (ADR-0048 S7 Slice 6a): the board's other dimensions, drawn as
   // toggleable card→card edges. Which layers are on is a viewing mode → localStorage
   // (loaded once here), default empty so the board stays quiet until a writer opens
-  // one. `layersOpen` drives the toolbar popover; `layersTrigger` is its refocus
-  // anchor. Labels + hints live here (presentation); the canonical layer list and
-  // the pure edge-builder live in `lib/plot`.
+  // one. `layersOpen` drives the toolbar popover (PlotLayersMenu); `layersTrigger` is
+  // its refocus anchor. The canonical layer list and the pure edge-builder live in
+  // `lib/plot`.
   let activeLayers = $state<Set<EdgeLayer>>(loadEdgeLayers());
   let layersOpen = $state(false);
   // Board | Story time (ADR-0097 §8): a viewing mode, remembered per viewer.
@@ -735,10 +806,6 @@
     saveBoardView(view);
   }
   let layersTrigger = $state<HTMLElement | null>(null);
-  const LAYER_META: Record<EdgeLayer, { label: string; hint: string }> = {
-    manuscript: { label: "Manuscript order", hint: "The reveal-order spine — cards in the order their scenes are read." },
-    causal: { label: "Causal", hint: "The “leads to” edges you draw — one card causing another." },
-  };
 
   function toggleLayer(layer: EdgeLayer): void {
     activeLayers = toggleEdgeLayer(activeLayers, layer);
@@ -763,7 +830,8 @@
 
   const nodeTypes = {
     plotCard: PlotCardNodeFlow,
-    plotContainer: PlotContainerNodeFlow,
+    plotContainer: PlotContainerNode,
+    plotDeck: PlotDeckNode,
     plotPlotline: PlotPlotlineNode,
     plotArc: PlotArcNode,
   };
@@ -787,8 +855,8 @@
   // store, but the opener / PlotBoardPane can re-set an equal projection (same key →
   // skip, so an in-progress edit survives), while a content op changes a card field
   // (different key → rebuild, so a re-homed un-pinned card reflows into its new
-  // container). `overriddenIds` reseeds from the saved layout each rebuild — the sparse
-  // set an un-pinned card is absent from, so buildBoardNodes derives its slot.
+  // box). `overriddenIds` reseeds from the saved layout each rebuild — the sparse
+  // set an un-placed box is absent from, so buildBoardNodes derives its slot.
   // The snapshot reads the LOCAL built array, never the reactive `flowNodes` — reading
   // flowNodes back would subscribe this effect to xyflow's in-place position mutations,
   // so every drag would re-run it and snap the card back. $effect.PRE so nodes are
@@ -806,18 +874,12 @@
     loadedDataKey = key;
     const saved = readBoardPositions(projection.layout);
     overriddenIds = new Set(Object.keys(saved));
-    // Seed container sizes from a LOCAL const and pass it straight to buildBoardNodes:
-    // the assign to `containerSizes` doesn't read it back, so this effect never
-    // subscribes to its own resize writes (which would re-run and, guarded by the
-    // data-key, no-op anyway).
-    const savedSizes = readBoardSizes(projection.layout);
-    containerSizes = savedSizes;
-    const nodes = buildBoardNodes(projection, saved, savedSizes);
+    const nodes = buildBoardNodes(projection, saved);
     flowNodes = nodes;
     revision = projection.board_revision;
     // Snapshot from the local `nodes` (not reactive flowNodes) so a never-touched
     // board doesn't save on open and this effect stays subscribed to `projection` only.
-    lastSavedLayout = JSON.stringify({ positions: overriddenNodePositions(nodes, overriddenIds), sizes: savedSizes });
+    lastSavedLayout = JSON.stringify({ positions: overriddenNodePositions(nodes, overriddenIds) });
     dragging = false;
     undoCtl.reset();
   });
@@ -869,40 +931,33 @@
   // Autosave the layout: skip while dragging (coalesce the gesture) and when nothing
   // changed, else debounce a PUT. The projection/dragging guard runs FIRST so a drag
   // doesn't re-serialize the whole board every frame (ViewBodyView's pattern). Only
-  // overridden (dragged/pinned) cards persist — the sparse model — alongside the
-  // container sizes (#878; a resize updates `containerSizes`, re-running this effect).
+  // overridden (placed) top-level boxes and plotline / arc nodes persist — the sparse
+  // model; a card position an older board stored is dropped by this first write.
   // Undo/redo mutate the same positions and persist through here too; a load matches
-  // the snapshot, so it never writes. A resize is not `dragging` (that flag is the node
-  // drag), so it flushes without the coalesce wait — one save on handle release.
+  // the snapshot, so it never writes.
   $effect(() => {
     if (!projection || dragging) return;
     const positions = overriddenNodePositions(flowNodes, overriddenIds);
-    const sizes = containerSizes;
-    const serialized = JSON.stringify({ positions, sizes });
+    const serialized = JSON.stringify({ positions });
     if (serialized === lastSavedLayout) return;
-    const handle = setTimeout(() => void persist(positions, sizes, serialized), SAVE_DEBOUNCE_MS);
+    const handle = setTimeout(() => void persist(positions, serialized), SAVE_DEBOUNCE_MS);
     return () => clearTimeout(handle);
   });
 
   // Flush a pending (debounced) layout change when the pane unmounts, so closing the
-  // board right after a drag / resize doesn't lose it. Best-effort: the PUT is fired,
+  // board right after a drag doesn't lose it. Best-effort: the PUT is fired,
   // not awaited (the fetch outlives the component). Project-switch / reload flushing is
   // the deferred save-state machine (#756).
   onDestroy(() => {
     if (!projection || dragging) return;
     const positions = overriddenNodePositions(flowNodes, overriddenIds);
-    const sizes = containerSizes;
-    const serialized = JSON.stringify({ positions, sizes });
-    if (serialized !== lastSavedLayout) void persist(positions, sizes, serialized);
+    const serialized = JSON.stringify({ positions });
+    if (serialized !== lastSavedLayout) void persist(positions, serialized);
   });
 
-  async function persist(
-    positions: Record<string, BoardXY>,
-    sizes: Record<string, BoardSize>,
-    serialized: string,
-  ): Promise<void> {
+  async function persist(positions: Record<string, BoardXY>, serialized: string): Promise<void> {
     try {
-      revision = await savePlotBoardLayout({ positions, sizes }, revision);
+      revision = await savePlotBoardLayout({ positions }, revision);
       lastSavedLayout = serialized;
     } catch {
       // Leave the guard unadvanced so the next change retries. The surfaced
@@ -910,14 +965,15 @@
     }
   }
 
-  // Rebuild the board nodes in place from the current layout state (position overrides +
-  // container sizes) WITHOUT a refetch — re-deriving every container box + card extent
-  // around the live positions. Used after a container drag and on its undo/redo (#877),
-  // mirroring the #878 resize rebuild. Without the undo/redo rebuild, reversing a
-  // container move would snap the cards back but leave the boxes at the moved spot.
+  // Rebuild the board nodes in place from the current layout state (the placed boxes'
+  // position overrides) WITHOUT a refetch — re-deriving every box and card slot. Used
+  // after a box or card drag (a dropped card snaps back into the flow, the insertion bar
+  // and any drag-time loose box go) and on a box move's undo/redo (#877): reversing it
+  // restores the box's position, and the cards inside follow from it.
   function rebuildLayoutNodes(): void {
-    if (projection) flowNodes = buildBoardNodes(projection, overriddenNodePositions(flowNodes, overriddenIds), containerSizes);
+    if (projection) flowNodes = buildBoardNodes(projection, overriddenNodePositions(flowNodes, overriddenIds));
   }
+
   // The cards' page-status words and swatches (and the arcs' colours) come from
   // the schema, read at build (#1907): rebuild when it lands or changes, keeping
   // dragged positions. `untrack` so the rebuild's own reads don't re-arm it.
@@ -1002,32 +1058,7 @@
             <i class="ti ti-versions" aria-hidden="true"></i>
             Layers{activeLayers.size ? ` (${activeLayers.size})` : ""}
           </button>
-          <Popover
-            bind:open={layersOpen}
-            triggerEl={layersTrigger}
-            label="Edge layers"
-            minWidth="260px"
-            padding="6px"
-            gap="2px"
-          >
-            {#each EDGE_LAYERS as layer (layer)}
-              <button
-                class="layer-item"
-                role="menuitemcheckbox"
-                aria-checked={activeLayers.has(layer)}
-                onclick={() => toggleLayer(layer)}
-              >
-                <i
-                  class="ti layer-check {activeLayers.has(layer) ? 'ti-check' : ''}"
-                  aria-hidden="true"
-                ></i>
-                <span class="layer-text">
-                  <span class="layer-label">{LAYER_META[layer].label}</span>
-                  <span class="layer-hint">{LAYER_META[layer].hint}</span>
-                </span>
-              </button>
-            {/each}
-          </Popover>
+          <PlotLayersMenu bind:open={layersOpen} triggerEl={layersTrigger} active={activeLayers} onToggle={toggleLayer} />
         </div>
         <!-- Cross-dimension diagnostics (ADR-0048 S7): a toggle for the findings rail.
              The count is the live number of layer disagreements + gaps the projection
@@ -1052,9 +1083,13 @@
             AI review
           </button>
         {/if}
-        <button class="board-btn" onclick={newCard} disabled={creating}>
+        <button class="board-btn" onclick={() => void newCard()} disabled={creating}>
           <i class="ti ti-plus" aria-hidden="true"></i>
           New card
+        </button>
+        <button class="board-btn" onclick={() => void newDeck()} disabled={creatingDeck}>
+          <i class="ti ti-stack-2" aria-hidden="true"></i>
+          New deck
         </button>
         <button class="board-btn" onclick={seed}>
           <i class="ti ti-seedling" aria-hidden="true"></i>
@@ -1114,95 +1149,9 @@
         onnodeclick={() => {
           revealedCardId = null;
         }}
-        onnodedragstart={({ nodes }) => {
-          dragging = true;
-          containerDrag = null; // clean slate each gesture (a card drag must never see a stale one)
-          const container = nodes.find((n) => n.type === "plotContainer");
-          if (container && projection) {
-            // A container drag (#877) moves its member cards, not itself. Capture the
-            // transitive member cards (pinned on drop) + the dragged box's descendant
-            // boxes (moved live for cohesion, re-derived on drop) and their start
-            // positions. STRIP the member cards' extent for the gesture so the container
-            // lock (#874) doesn't clamp them back as they leave the old box. The dragged
-            // box itself is left to SvelteFlow, which moves the node it grabbed.
-            const rawId = (container.data as PlotContainerData).containerId;
-            const memberCardIds = new Set(containerMemberCardIds(projection, rawId));
-            const descendantBoxIds = new Set(containerDescendantIds(projection, rawId));
-            const translateFrom = new Map<string, BoardXY>();
-            for (const n of flowNodes) {
-              const isMemberCard = memberCardIds.has(n.id);
-              const isDescendantBox = n.type === "plotContainer" && descendantBoxIds.has((n.data as PlotContainerData).containerId);
-              if (isMemberCard || isDescendantBox) translateFrom.set(n.id, { ...n.position });
-            }
-            containerDrag = { startX: container.position.x, startY: container.position.y, memberCardIds, translateFrom };
-            flowNodes = flowNodes.map((n) => (memberCardIds.has(n.id) ? { ...n, extent: undefined } : n));
-          } else {
-            undoCtl.dragStart(nodes);
-          }
-        }}
-        onnodedrag={({ nodes }) => {
-          // Live-follow: translate every node in the moving set by the box's delta from
-          // its start (absolute, not incremental, so repeated frames can't drift). Only
-          // those nodes change; the dragged box keeps SvelteFlow's own position.
-          if (!containerDrag) return;
-          const container = nodes.find((n) => n.type === "plotContainer");
-          if (!container) return;
-          const dx = container.position.x - containerDrag.startX;
-          const dy = container.position.y - containerDrag.startY;
-          flowNodes = flowNodes.map((n) => {
-            const from = containerDrag!.translateFrom.get(n.id);
-            return from ? { ...n, position: { x: from.x + dx, y: from.y + dy } } : n;
-          });
-        }}
-        onnodedragstop={({ nodes }) => {
-          dragging = false;
-          // Return focus to the board (§7): the drag landed it on <body> (cards are
-          // selectable:false), so without this the very Ctrl+Z that would undo the
-          // drag wouldn't reach the caretaker.
-          boardEl?.focus({ preventScroll: true });
-          if (containerDrag) {
-            const ctx = containerDrag;
-            containerDrag = null;
-            // Diff each member CARD's start→final into ONE move command (the caretaker
-            // batches N nodes into a single undo step); pin the moved cards so they
-            // persist. Descendant boxes are NOT persisted — they re-derive on rebuild.
-            const moves: { id: string; from: BoardXY; to: BoardXY }[] = [];
-            for (const id of ctx.memberCardIds) {
-              const from = ctx.translateFrom.get(id);
-              const node = flowNodes.find((n) => n.id === id);
-              if (from && node) moves.push({ id, from, to: { ...node.position } });
-            }
-            const base = moveNodesCommand(graphPort, moves);
-            if (base) {
-              for (const m of moves) overriddenIds.add(m.id);
-              // Wrap so undo/redo ALSO re-derive the boxes + extents around the restored
-              // card positions — else reversing the move snaps the cards back but leaves
-              // the boxes (rebuilt below) at the moved spot, cards floating outside them.
-              undoCtl.record({
-                ...base,
-                undo: () => {
-                  base.undo();
-                  rebuildLayoutNodes();
-                },
-                redo: () => {
-                  base.redo();
-                  rebuildLayoutNodes();
-                },
-              });
-            }
-            // Rebuild so every box + its cards' extent re-derive from the moved positions
-            // (restoring the extent stripped at dragstart; the #878 resize pattern). Even
-            // a no-move click rebuilds, to put those extents back.
-            rebuildLayoutNodes();
-            return;
-          }
-          undoCtl.dragStop(nodes);
-          // A dragged card or plotline node becomes overridden (pinned): it now
-          // persists and keeps its spot instead of reflowing to its derived slot.
-          for (const node of nodes) {
-            if (node.type === "plotCard" || node.type === "plotPlotline" || node.type === "plotArc") overriddenIds.add(node.id);
-          }
-        }}
+        onnodedragstart={dragController.onStart}
+        onnodedrag={dragController.onDrag}
+        onnodedragstop={dragController.onStop}
         minZoom={0.2}
       >
         <!-- §G (design language): a flat --board surface, no dotted <Background/>. -->
@@ -1212,8 +1161,17 @@
              op — adding/editing a card — no longer reframes the canvas out from under the
              writer; the viewport stays where they left it. `minZoom` clamps the initial
              fit so a spread-out board can't shrink to the canvas floor and read as empty. -->
+        {#if dropBar}
+          <ViewportPortal target="front"><PlotDropBar bar={dropBar} /></ViewportPortal>
+        {/if}
         <ViewportFit trigger={projection?.board_id} options={{ padding: 0.2, maxZoom: 1, minZoom: 0.5 }} />
-        <FlowViewCenter getContainer={() => canvasEl} onReady={(fn) => (viewCenter = fn)} />
+        <FlowViewCenter
+          getContainer={() => canvasEl}
+          onReady={(center, toFlow) => {
+            viewCenter = center;
+            pointerToFlow = toFlow;
+          }}
+        />
         <!-- Centre the viewport on a revealed node (#1920). `revealFit` is a fresh object per
              reveal so the same node re-centres; the options follow the target. maxZoom 1 keeps a
              single card from filling the canvas; the padding leaves its neighbours visible. -->
@@ -1331,6 +1289,7 @@
      full board reconcile that froze the menu open for ~10s, #1100). Only one menu is ever
      open, so `:has()` matches at most one wrapper. */
   .board-canvas :global(.svelte-flow__node:has(.card-menu)),
+  .board-canvas :global(.svelte-flow__node:has(.deck-menu)),
   .board-canvas :global(.svelte-flow__node:has(.plotline-menu)),
   .board-canvas :global(.svelte-flow__node:has(.arc-menu)) {
     z-index: 1000 !important;
@@ -1388,49 +1347,11 @@
     font-size: var(--fs-sm);
   }
 
-  /* The Layers popover (Slice 6a). `layers-wrap` is the position:relative anchor
-     the in-flow Popover drops from; the rows carry their own scope here (Popover
-     owns only the shell). */
+  /* The Layers popover (Slice 6a; rows in PlotLayersMenu). `layers-wrap` is the
+     position:relative anchor the in-flow Popover drops from. */
   .layers-wrap {
     position: relative;
   }
-  .layer-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    width: 100%;
-    padding: 6px 8px;
-    text-align: left;
-    color: var(--text);
-    background: none;
-    border: none;
-    border-radius: var(--r-sm);
-    cursor: pointer;
-  }
-  .layer-item:hover {
-    background: var(--panel);
-  }
-  .layer-check {
-    flex: 0 0 auto;
-    width: 16px;
-    margin-top: 2px;
-    font-size: var(--fs-sm);
-    color: var(--accent);
-  }
-  .layer-text {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-  .layer-label {
-    font-size: var(--fs-sm);
-    color: var(--text);
-  }
-  .layer-hint {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-
   /* Edge layers (Slice 6a/6b). DERIVED edges read QUIET — thin, low-opacity, dashed,
      no arrowhead (the layout already carries reading direction). Two neutral greys
      told apart by dash density. The AUTHORED causal layer (6b) reads STRONGER: a

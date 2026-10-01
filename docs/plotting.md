@@ -21,23 +21,35 @@ structures — more on those at the end.
 
 ## What's on the board
 
-Three kinds of thing share the canvas:
+Boxes, with cards flowing inside them, and a few free-floating threads:
 
 - **Cards** — the plot points. Each holds a **title**, a **synopsis**, and a
   **page-status** badge: **On the page** (tied to a written scene), **Off the
   page** (happens, but you're not writing it as a scene), or **Unwritten** (still
   just a plan).
-- **Containers** — the faint boxes grouping cards by **act and chapter**. You
-  don't create or name these; they mirror your manuscript structure, so a card's
-  container shows *where in the book* it currently sits.
+- **Chapter and act boxes** — one for **every** act and chapter, empty ones too.
+  You don't create or name these; they mirror your manuscript structure, so a
+  written card sits in the box of the chapter its scene is in, in manuscript order.
+- **Decks** — dashed boxes you make yourself for cards that aren't in the
+  manuscript yet (see **Decks**, below).
+- **Loose cards** — a box that appears when some cards belong to no chapter or
+  deck: unwritten cards without a deck, and cards whose scene sits at the top of
+  the manuscript.
 - **Plotlines** — the threads or arcs (the romance, the heist, a character's
   descent). A card can belong to a plotline, shown by a **colour stripe** and a
   named chip. Plotlines aren't lanes — a card carries its plotline's colour
   wherever it sits.
 
+**Cards flow; only boxes are placed by hand.** A card has no spot of its own: it
+takes its place inside its box, after the card before it. Boxes size themselves to
+what they hold. You drag the **outermost boxes** (by their title bar) and the
+plotlines to wherever you like, and everything inside a box moves with it; boxes
+nested inside another box stay put. Dragging a box never moves your manuscript.
+
 ## Work with cards
 
-- **Add one:** the toolbar's **New card** button drops a fresh card ("New card").
+- **Add one:** the toolbar's **New card** button makes a fresh card ("New card"),
+  which lands in **Loose cards**; a deck's own **New card** makes one in that deck.
 - **Edit inline:** click the title to rename it, click the synopsis to write it.
 - **Card actions (⋮):** the kebab on a card opens a menu — **Open card** (its full
   editor, with fields), **Set plotline** (assign it to a thread, or
@@ -67,11 +79,36 @@ A scene belongs to at most one card. Attaching a scene that another card already
 has is refused — detach it from that card first. If one scene serves several
 story threads, keep one card and link it to a beat on each thread.
 
-**Rearranging the board is planning, not editing.** Dragging cards saves only the
-board's own layout — it never reorders your manuscript. The manuscript's reading
+**Rearranging the board is planning, not editing.** Dragging a box saves only the
+board's own layout, and dragging a card into a deck changes only the card's deck and
+its place in story time — neither reorders your manuscript. The manuscript's reading
 order is *shown* on the board (see **Layers**, below) so you can see plan against
 draft, but the two only change when you tell them to (Realize, or editing the
 manuscript directly).
+
+## Decks
+
+A **deck** is a plot-only box of cards — "Mara's backstory", "Ideas", "Act 3
+options". It has a name and a short synopsis, but no scene and no place in the
+manuscript: it's somewhere to keep cards that aren't part of the book yet.
+
+- **Make one:** the toolbar's **New deck** puts a deck in view and opens its name
+  for typing.
+- **Drag cards in:** drag an unwritten card by its grip and drop it between two
+  cards in a deck; a bar shows where it will land. It joins the deck and takes
+  that place in story time. Drop it into **Loose cards** to take it out of its
+  deck. A card that's **written** shows by its scene, so it can't be dragged into a
+  deck — detach it first. Dropping a card onto a chapter does nothing.
+- **Deck menu (⋯):** **New card**, **New deck inside**, **Rename**, **Open** (the
+  deck in its own editor: name, synopsis and its parent deck) and **Delete**. A
+  deck from an ancestor project can be opened but not changed.
+- **Nest decks:** **New deck inside** makes a child deck drawn inside its parent.
+  To move an existing deck, **Open** it and set its **Deck** field in the rail.
+  A card's own **Deck** field in its rail moves it between decks too.
+- **Delete keeps the cards.** Deleting a deck removes only the box: its cards
+  drop into **Loose cards** and its child decks move to the top level. You're
+  asked first when it holds anything, and **Undo** brings the deck back with
+  everything in it.
 
 ## Plotlines
 

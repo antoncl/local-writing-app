@@ -62,3 +62,10 @@ export type PlotlineList = { entries: PlotlineSummary[] };
 export type CharacterArcSummary = PlotFolderSummary;
 export type CharacterArcEntry = PlotFolderEntry;
 export type CharacterArcList = { entries: CharacterArcSummary[] };
+
+// A deck (ADR-0097 §2): a plot-only box of cards — name (title), synopsis (body), and
+// an optional `plot_deck` parent (metadata, an entity_ref) that nests it inside another
+// deck. The `/plot/decks` endpoint is the family discriminator, as for the siblings above.
+export type DeckSummary = PlotFolderSummary;
+export type DeckEntry = PlotFolderEntry;
+export type DeckList = { entries: DeckSummary[] };

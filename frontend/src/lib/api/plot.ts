@@ -10,6 +10,8 @@ import type {
   PlotlineList,
   CharacterArcEntry,
   CharacterArcList,
+  DeckEntry,
+  DeckList,
 } from "@/lib/types";
 import { HttpError, request } from "./core";
 
@@ -28,6 +30,13 @@ export function textChoiceConflict(error: unknown): { sceneSummary: string; card
 /** Where a story-time move puts a card: right after, or right before, another card
  *  (ADR-0097 §4). The backend accepts only the open layer's own cards as the anchor. */
 export type StoryAnchor = { after_id: string } | { before_id: string };
+
+/** Where a card shows when it is not written (ADR-0097 §4): a deck, or the loose area. */
+export type PlaceTo = { deck: string } | { loose: true };
+
+/** The body of `place`: `to` changes where the card lives and never moves it in story
+ *  time; `story` moves it in story time. At least one. A written card refuses `to`. */
+export type PlaceRequest = { to?: PlaceTo; story?: StoryAnchor };
 
 export const plotApi = {
   // Plot templates (ADR-0048 S4c) — the ADR-0049 Library's second tenant. Same
@@ -98,11 +107,17 @@ export const plotApi = {
   // restore a card under its original identity so other cards' causal_links
   // reconnect; a collision 409s. Omitted for a normal create (backend mints).
   // `storyRank` rides along with `id` only (the backend ignores it otherwise), so an
-  // undo-restored card returns to its place in story time (ADR-0097 §5).
-  createCard(title: string, id?: string, storyRank?: number | null) {
+  // undo-restored card returns to its place in story time (ADR-0097 §5). `to` creates
+  // the card in a place (ADR-0097 §4): a deck's "New card" — it lands after that
+  // place's last card in story time.
+  createCard(title: string, id?: string, storyRank?: number | null, to?: PlaceTo) {
     return request<CardEntry>("/plot/cards", {
       method: "POST",
-      body: JSON.stringify(id ? { title, id, story_rank: storyRank ?? null } : { title }),
+      body: JSON.stringify({
+        title,
+        ...(id ? { id, story_rank: storyRank ?? null } : {}),
+        ...(to ? { to } : {}),
+      }),
     });
   },
   getCard(entryId: string) {
@@ -143,11 +158,12 @@ export const plotApi = {
       body: JSON.stringify(text),
     });
   },
-  // Move a card in story time (ADR-0097 §4, story only): right after / before a neighbour.
-  placeCard(entryId: string, anchor: StoryAnchor) {
+  // Place a card (ADR-0097 §4): `to` a deck or the loose area (membership only), and/or
+  // `story` right after / before a neighbour. A written card refuses `to` (409).
+  placeCard(entryId: string, place: PlaceRequest) {
     return request<CardEntry>(`/plot/cards/${entryId}/place`, {
       method: "POST",
-      body: JSON.stringify({ story: anchor }),
+      body: JSON.stringify(place),
     });
   },
   deleteCard(entryId: string) {
@@ -233,6 +249,40 @@ export const plotApi = {
   },
   deleteCharacterArc(entryId: string) {
     return request<CharacterArcList>(`/plot/character-arcs/${entryId}`, { method: "DELETE" });
+  },
+  // Decks (ADR-0097 §2) — a plot-only box of cards, same book-local flat CRUD under its
+  // own sub-resource. `parent` nests a new deck inside another ("New deck inside");
+  // `id` is supplied only by undo to restore a deleted deck under its original id.
+  listDecks() {
+    return request<DeckList>("/plot/decks");
+  },
+  createDeck(title: string, opts: { id?: string; parent?: string } = {}) {
+    return request<DeckEntry>("/plot/decks", {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        ...(opts.id ? { id: opts.id } : {}),
+        ...(opts.parent ? { plot_deck: opts.parent } : {}),
+      }),
+    });
+  },
+  getDeck(entryId: string) {
+    return request<DeckEntry>(`/plot/decks/${entryId}`);
+  },
+  saveDeck(entry: DeckEntry, body: string) {
+    return request<DeckEntry>(`/plot/decks/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        body,
+        metadata: entry.metadata,
+        base_revision: entry.revision,
+      }),
+    });
+  },
+  // Deleting a deck deletes only the deck: its cards go loose, its child decks top level.
+  deleteDeck(entryId: string) {
+    return request<DeckList>(`/plot/decks/${entryId}`, { method: "DELETE" });
   },
   // Snapshot a Library template's beats into a new owned plot:thread holder (ADR-0048
   // §3; ADR-0053 §1/§2; ADR-0080 §5 — a character-arc-family template yields a

@@ -9,7 +9,7 @@
 
 import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
-import { type CardTextChoice, type StoryAnchor, textChoiceConflict } from "@/lib/api/plot";
+import { type CardTextChoice, type PlaceRequest, type PlaceTo, type StoryAnchor, textChoiceConflict } from "@/lib/api/plot";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { refreshStructure, setStructure } from "@/lib/stores/structure";
 import { refreshCards } from "@/lib/stores/plotCards";
@@ -125,9 +125,10 @@ export async function seedCardsFromManuscript(): Promise<string[]> {
 // the plotter's construction surface). No scene, so it projects homeless until the
 // writer attaches / realizes it. Refetches the projection, and returns the new id so
 // the caller can open the card to name it. `id` is supplied only by redo-of-create
-// (ADR-0053 §7) to restore the card's original identity.
-export async function createCard(title: string, id?: string): Promise<string> {
-  const card = await api.createCard(title, id);
+// (ADR-0053 §7) to restore the card's original identity. `to` creates it in a deck
+// (ADR-0097 §4) — a deck's "New card".
+export async function createCard(title: string, id?: string, to?: PlaceTo): Promise<string> {
+  const card = await api.createCard(title, id, undefined, to);
   await refreshAfterMutation();
   return card.id;
 }
@@ -146,7 +147,14 @@ export async function deleteCard(cardId: string, refresh = true): Promise<void> 
 // Move a card in story time (ADR-0097 §4): right after / before another card. The
 // rank lives on the backend; the refetch re-indexes every card's `story_order`.
 export async function moveCardInStoryTime(cardId: string, anchor: StoryAnchor): Promise<void> {
-  await api.placeCard(cardId, anchor);
+  await api.placeCard(cardId, { story: anchor });
+  await refreshAfterMutation();
+}
+
+// Place a card (ADR-0097 §4): into a deck or the loose area, and/or beside a neighbour in
+// story time. A drag between two cards sends both; the refetch re-derives every box.
+export async function placeCardOnBoard(cardId: string, place: PlaceRequest): Promise<void> {
+  await api.placeCard(cardId, place);
   await refreshAfterMutation();
 }
 

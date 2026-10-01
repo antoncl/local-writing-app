@@ -18,9 +18,11 @@ import {
   cardsReferencingPlotline,
   createArcCommand,
   createCardCommand,
+  createDeckCommand,
   createPlotlineCommand,
   deleteArcCommand,
   deleteCardCommand,
+  deleteDeckCommand,
   deletePlotlineCommand,
   arcEditCommand,
   plotlineEditCommand,
@@ -31,6 +33,7 @@ import { UndoCancelled } from "@/lib/stores/undoCaretaker.svelte";
 import type { CardState } from "@/lib/stores/plotBoard";
 import type { PlotlineState } from "@/lib/stores/plotlines";
 import type { ArcState } from "@/lib/stores/characterArcs";
+import type { DeckState } from "@/lib/stores/decks";
 import type { PlotBoardCard, PlotBoardProjection } from "@/lib/types";
 
 const cardState = (title: string, metadata: CardState["metadata"] = {}, body = ""): CardState => ({
@@ -48,11 +51,17 @@ const arcState = (title: string, metadata: ArcState["metadata"] = {}, body = "")
   body,
   metadata,
 });
+const deckState = (title: string, metadata: DeckState["metadata"] = {}, body = ""): DeckState => ({
+  title,
+  body,
+  metadata,
+});
 
 function fakePort() {
   const cards = new Map<string, CardState>();
   const plotlines = new Map<string, PlotlineState>();
   const arcs = new Map<string, ArcState>();
+  const decks = new Map<string, DeckState>();
   // Scene model for the realize tests: body per scene + which cards reference each.
   const scenes = new Map<string, { title: string; body: string }>();
   const sceneRefs = new Map<string, Set<string>>();
@@ -107,8 +116,27 @@ function fakePort() {
       calls.push(`recreateArc:${id}`);
       arcs.set(id, structuredClone(s));
     },
+    deleteDeck: async (id) => {
+      calls.push(`deleteDeck:${id}`);
+      decks.delete(id);
+    },
+    getDeckState: async (id) => structuredClone(decks.get(id)!),
+    restoreDeckState: async (id, s) => {
+      calls.push(`restoreDeck:${id}`);
+      decks.set(id, structuredClone(s));
+    },
+    recreateDeck: async (id, s) => {
+      calls.push(`recreateDeck:${id}`);
+      decks.set(id, structuredClone(s));
+    },
+    restoreCardDeck: async (cardId, deckId, written) => {
+      calls.push(`cardDeck:${cardId}:${deckId}:${written ? "written" : "unwritten"}`);
+    },
     refreshBoard: async () => {
       calls.push("refreshBoard");
+    },
+    refreshDeckRoster: async () => {
+      calls.push("refreshDeckRoster");
     },
     refreshRoster: async () => {
       calls.push("refreshRoster");
@@ -146,12 +174,15 @@ function fakePort() {
     moveCardInStoryTime: async (cardId, anchor) => {
       calls.push(`story:${cardId}:${JSON.stringify(anchor)}`);
     },
+    placeCard: async (cardId, place) => {
+      calls.push(`place:${cardId}:${JSON.stringify(place)}`);
+    },
     confirmSceneDelete: async () => {
       calls.push("confirm");
       return confirm.result;
     },
   };
-  return { port, cards, plotlines, arcs, scenes, sceneRefs, summaries, outcome, confirm, calls };
+  return { port, cards, plotlines, arcs, decks, scenes, sceneRefs, summaries, outcome, confirm, calls };
 }
 
 // A projection with just the fields the finders / recorder read.
@@ -163,6 +194,7 @@ function card(id: string, extra: Partial<PlotBoardCard> = {}): PlotBoardCard {
     plotline: null,
     scene: null,
     container: null,
+    deck: null,
     page_status: null,
     beats: [],
     sequence: null,
@@ -173,7 +205,7 @@ function card(id: string, extra: Partial<PlotBoardCard> = {}): PlotBoardCard {
   };
 }
 function projection(cards: PlotBoardCard[]): PlotBoardProjection {
-  return { board_id: "b", board_revision: "r", layout: {}, plotlines: [], arcs: [], containers: [], cards, diagnostics: [] };
+  return { board_id: "b", board_revision: "r", layout: {}, plotlines: [], arcs: [], containers: [], decks: [], cards, diagnostics: [] };
 }
 
 describe("referrer finders", () => {
@@ -782,5 +814,134 @@ describe("story move (ADR-0097 §4)", () => {
     await recorder.storyMove("b", { before_id: "c" }, "move in story time");
     expect(calls).toEqual([]);
     expect(recorded).toEqual([]);
+  });
+});
+
+describe("card place (ADR-0097 §4)", () => {
+  // a, b, c in story time; b lives in deck "d1", the rest are loose.
+  const board = () =>
+    projection([
+      card("a", { story_order: 0 }),
+      card("b", { story_order: 1, deck: "d1" }),
+      card("c", { story_order: 2 }),
+    ]);
+  const recorderFor = (port: PlotCommandPort, recorded: Array<{ undo: () => unknown; redo: () => unknown }>) =>
+    new PlotUndoRecorder(port, (c) => recorded.push(c), board);
+
+  it("records ONE step: undo sends the old home and old neighbour, redo replays the drop", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Array<{ undo: () => unknown; redo: () => unknown }> = [];
+    await recorderFor(port, recorded).cardPlace("c", { to: { deck: "d1" }, story: { before_id: "b" } });
+    expect(recorded).toHaveLength(1);
+    await recorded[0].undo();
+    await recorded[0].redo();
+    expect(calls).toEqual([
+      'place:c:{"to":{"deck":"d1"},"story":{"before_id":"b"}}',
+      'place:c:{"to":{"loose":true},"story":{"after_id":"b"}}',
+      'place:c:{"to":{"deck":"d1"},"story":{"before_id":"b"}}',
+    ]);
+  });
+
+  it("a card leaving a deck is restored into it", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Array<{ undo: () => unknown; redo: () => unknown }> = [];
+    await recorderFor(port, recorded).cardPlace("b", { to: { loose: true } });
+    await recorded[0].undo();
+    // Membership only: no story half in either direction.
+    expect(calls).toEqual(['place:b:{"to":{"loose":true}}', 'place:b:{"to":{"deck":"d1"}}']);
+  });
+
+  it("sends only the half that changes: a reorder inside the same deck is story-only", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Array<{ undo: () => unknown; redo: () => unknown }> = [];
+    await recorderFor(port, recorded).cardPlace("b", { to: { deck: "d1" }, story: { after_id: "c" } });
+    expect(calls).toEqual(['place:b:{"story":{"after_id":"c"}}']);
+    await recorded[0].undo();
+    expect(calls[1]).toBe('place:b:{"story":{"after_id":"a"}}');
+  });
+
+  it("a drop that changes neither home nor order sends and records nothing", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Array<{ undo: () => unknown; redo: () => unknown }> = [];
+    await recorderFor(port, recorded).cardPlace("b", { to: { deck: "d1" }, story: { after_id: "a" } });
+    expect(calls).toEqual([]);
+    expect(recorded).toEqual([]);
+  });
+});
+
+describe("deck commands (ADR-0097 §2)", () => {
+  it("create: undo deletes the deck, redo recreates it under its id", async () => {
+    const { port, decks, calls } = fakePort();
+    decks.set("d1", deckState("Backstory"));
+    const command = createDeckCommand(port, "d1", deckState("Backstory"));
+    await command.undo();
+    expect(decks.has("d1")).toBe(false);
+    await command.redo();
+    expect(decks.get("d1")).toEqual(deckState("Backstory"));
+    expect(calls).toEqual(["deleteDeck:d1", "recreateDeck:d1"]);
+  });
+
+  it("delete: undo recreates the deck, restores child decks and each member, then refreshes once", async () => {
+    const { port, calls } = fakePort();
+    const command = deleteDeckCommand(
+      port,
+      "d1",
+      deckState("Backstory", {}, "Mara's past"),
+      [
+        { id: "c1", written: false },
+        { id: "c2", written: true },
+      ],
+      [{ id: "d2", state: deckState("Childhood", { plot_deck: "d1" }) }],
+    );
+    await command.undo();
+    // The deck first (a restored reference to a missing deck would be healed away).
+    expect(calls[0]).toBe("recreateDeck:d1");
+    expect(calls.slice(1, 4).sort()).toEqual(
+      ["cardDeck:c1:d1:unwritten", "cardDeck:c2:d1:written", "restoreDeck:d2"].sort(),
+    );
+    expect(calls.slice(4).sort()).toEqual(["refreshBoard", "refreshDeckRoster"]);
+    await command.redo();
+    expect(calls.at(-1)).toBe("deleteDeck:d1");
+  });
+
+  it("deleteDeck records the deck, its members and its child decks off the projection", async () => {
+    const { port, decks, calls } = fakePort();
+    decks.set("d1", deckState("Backstory"));
+    decks.set("d2", deckState("Childhood", { plot_deck: "d1" }));
+    const proj: PlotBoardProjection = {
+      ...projection([
+        card("a", { deck: "d1" }),
+        card("w", { deck: "d1", scene: "scene_1" }),
+        card("z", { deck: "other" }),
+      ]),
+      decks: [
+        { id: "d1", title: "Backstory", synopsis: "", parent: null, movable: true },
+        { id: "d2", title: "Childhood", synopsis: "", parent: "d1", movable: true },
+      ],
+    };
+    const recorded: Array<{ undo: () => unknown; redo: () => unknown }> = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c), () => proj);
+    await recorder.deleteDeck("d1", async () => {
+      decks.delete("d1");
+    });
+    expect(recorded).toHaveLength(1);
+    await recorded[0].undo();
+    expect(calls).toContain("cardDeck:a:d1:unwritten");
+    expect(calls).toContain("cardDeck:w:d1:written");
+    expect(calls).not.toContain("cardDeck:z:d1:unwritten");
+    expect(calls).toContain("restoreDeck:d2");
+  });
+
+  it("deckEdit records a command only when the op changed the deck", async () => {
+    const { port, decks } = fakePort();
+    decks.set("d1", deckState("Backstory"));
+    const recorded: { label?: string }[] = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c), () => projection([]));
+    await recorder.deckEdit("d1", "rename deck", async () => {});
+    expect(recorded).toEqual([]);
+    await recorder.deckEdit("d1", "rename deck", async () => {
+      decks.set("d1", deckState("Mara's backstory"));
+    });
+    expect(recorded.map((c) => c.label)).toEqual(["rename deck"]);
   });
 });

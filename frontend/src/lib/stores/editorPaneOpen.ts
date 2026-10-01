@@ -399,6 +399,16 @@ export async function openPlotline(host: PaneOpenHost, entryId: string): Promise
   });
 }
 
+// Open a deck (ADR-0097 §2) as a NodeEditor document — the deck box's "Open": its title,
+// its synopsis (the body) and, in the rail, its `plot_deck` parent. Like a plotline it is
+// a book-local `plot` node, so no Library provenance / read-only lock applies; a deck
+// BACKLINK still reveals on the board (revealOnPlotBoard), not here.
+export async function openDeck(host: PaneOpenHost, entryId: string): Promise<void> {
+  return openEntryDocument(host, "plot_deck", entryId, "open deck", (id) => api.getDeck(id), {
+    body: true,
+  });
+}
+
 export async function openAssistant(host: PaneOpenHost, entryId: string): Promise<void> {
   return openEntryDocument(host, "assistant", entryId, "open assistant", (id) => api.getAssistantEntry(id));
 }
@@ -471,7 +481,7 @@ export async function openLore(host: PaneOpenHost, entryId: string): Promise<voi
 // model): a user-authored `plot:noir_card` with `parent: plot:card` opens like a card,
 // as the backend's `_read_plot_node` dispatches it. Null when the type is missing, not
 // a plot type, or the schema has not loaded — the caller throws rather than guesses.
-const PLOT_ROOTS = ["plot:template", "plot:plotline", "plot:character_arc", "plot:card"] as const;
+const PLOT_ROOTS = ["plot:template", "plot:plotline", "plot:character_arc", "plot:card", "plot:deck"] as const;
 type PlotRoot = (typeof PLOT_ROOTS)[number];
 
 function plotRootOf(entryType: string | undefined): PlotRoot | null {
@@ -546,6 +556,7 @@ export async function openNodeOfKind(
         case "plot:plotline":
         case "plot:character_arc":
         case "plot:card":
+        case "plot:deck":
           revealOnPlotBoard(nodeId, root);
           return;
         default:

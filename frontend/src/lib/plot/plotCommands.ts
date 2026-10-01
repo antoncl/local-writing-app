@@ -18,6 +18,11 @@
 //     fields (dropping a beat also adopts a primary, #863); the flip reverses all of it.
 //   • story move (ADR-0097 §4) — one `place` call; undo places the card back beside the
 //     neighbour it had, redo replays the anchor the writer chose.
+//   • card place (ADR-0097 §4) — a drag into a deck or the loose area: ONE `place` call
+//     (home + story neighbour); undo restores the old home and the old neighbour.
+//   • deck create / delete / edit (ADR-0097 §2) — the deck twins of the plotline commands.
+//     A delete frees its cards and child decks (the backend purges the references), so its
+//     undo recreates the deck under its id, then puts each member and child back.
 //   • text edit / attach / detach (ADR-0097 §3/§4) — a written card SHOWS its scene's
 //     text, so its title/synopsis move through their own endpoints, never a whole-state
 //     save (the server refuses a written card's own title/body change). The commands
@@ -46,9 +51,10 @@ import {
   readSceneSummary,
   setCardText,
   moveCardInStoryTime,
+  placeCardOnBoard,
   type CardTextOutcome,
 } from "@/lib/stores/plotBoard";
-import type { CardTextChoice, StoryAnchor } from "@/lib/api/plot";
+import type { CardTextChoice, PlaceRequest, PlaceTo, StoryAnchor } from "@/lib/api/plot";
 import { isStoryNoOp, storyRestoreAnchor } from "@/lib/plot/storyTime";
 import {
   type PlotlineState,
@@ -66,6 +72,15 @@ import {
   refreshArcRoster,
   restoreArcState,
 } from "@/lib/stores/characterArcs";
+import {
+  type DeckState,
+  deleteDeck,
+  getDeckState,
+  recreateDeck,
+  refreshDeckRoster,
+  restoreCardDeck,
+  restoreDeckState,
+} from "@/lib/stores/decks";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 
 // The backend inverses the commands replay through. Every method is async (a server
@@ -89,9 +104,17 @@ export interface PlotCommandPort {
   getArcState(id: string): Promise<ArcState>;
   restoreArcState(id: string, state: ArcState, refresh?: boolean): Promise<void>;
   recreateArc(id: string, state: ArcState, refresh?: boolean): Promise<void>;
+  // The deck twins (ADR-0097 §2) — a SEPARATE node kind, with its own roster.
+  deleteDeck(id: string, refresh?: boolean): Promise<void>;
+  getDeckState(id: string): Promise<DeckState>;
+  restoreDeckState(id: string, state: DeckState, refresh?: boolean): Promise<void>;
+  recreateDeck(id: string, state: DeckState, refresh?: boolean): Promise<void>;
+  // Put a card back in a deck after the deck's delete was undone (membership only).
+  restoreCardDeck(cardId: string, deckId: string, written: boolean, refresh?: boolean): Promise<void>;
   refreshBoard(): Promise<void>;
   refreshRoster(): Promise<void>;
   refreshArcRoster(): Promise<void>;
+  refreshDeckRoster(): Promise<void>;
   // Realize (S6b): mint a scene → returns its id; the undo/redo scene ops.
   realizeCard(cardId: string, parentId: string | null): Promise<string>;
   sceneReferents(sceneId: string): string[];
@@ -107,6 +130,8 @@ export interface PlotCommandPort {
   readSceneSummary(sceneId: string): Promise<string>;
   // Place a card right after / before another in story time (ADR-0097 §4).
   moveCardInStoryTime(cardId: string, anchor: StoryAnchor): Promise<void>;
+  // Place a card in a deck / the loose area and/or beside a neighbour (ADR-0097 §4).
+  placeCard(cardId: string, place: PlaceRequest): Promise<void>;
   // Suppressible confirm before deleting a written scene; resolves false on cancel.
   confirmSceneDelete(scene: { title: string; body: string }): Promise<boolean>;
 }
@@ -209,6 +234,22 @@ export function storyMoveCommand(
     label,
     undo: () => port.moveCardInStoryTime(id, restore),
     redo: () => port.moveCardInStoryTime(id, anchor),
+  };
+}
+
+// A card dropped into a deck or the loose area (ADR-0097 §4): `restore` is the same call
+// pointed back — the old home, and (when the move changed story time) the old neighbour.
+export function cardPlaceCommand(
+  port: PlotCommandPort,
+  id: string,
+  place: PlaceRequest,
+  restore: PlaceRequest,
+  label = "move card",
+): Command {
+  return {
+    label,
+    undo: () => port.placeCard(id, restore),
+    redo: () => port.placeCard(id, place),
   };
 }
 
@@ -385,6 +426,58 @@ export function arcEditCommand(
   };
 }
 
+export function createDeckCommand(port: PlotCommandPort, id: string, state: DeckState, label = "add deck"): Command {
+  return {
+    label,
+    undo: () => port.deleteDeck(id),
+    redo: () => port.recreateDeck(id, state),
+  };
+}
+
+// A deck's members and child decks, captured at delete time: the cards whose home it was
+// (`written` — a written card cannot be `place`d, so its home is restored another way), and
+// the decks nested directly inside it with their whole state (their parent rides in it).
+export type DeckMember = { id: string; written: boolean };
+export type DeckChild = { id: string; state: DeckState };
+
+export function deleteDeckCommand(
+  port: PlotCommandPort,
+  id: string,
+  state: DeckState,
+  members: DeckMember[],
+  children: DeckChild[],
+  label = "delete deck",
+): Command {
+  return {
+    label,
+    // The deck back under its id FIRST (a reference restored before its target exists would
+    // be dangling-healed away), then its child decks and member cards — membership only, so
+    // story time, untouched by the delete, brings the order back by itself — with the
+    // per-item refetch suppressed and ONE refresh at the end (#909).
+    undo: async () => {
+      await port.recreateDeck(id, state, false);
+      await Promise.all(children.map((c) => port.restoreDeckState(c.id, c.state, false)));
+      await Promise.all(members.map((m) => port.restoreCardDeck(m.id, id, m.written, false)));
+      await Promise.all([port.refreshDeckRoster(), port.refreshBoard()]);
+    },
+    redo: () => port.deleteDeck(id),
+  };
+}
+
+export function deckEditCommand(
+  port: PlotCommandPort,
+  id: string,
+  before: DeckState,
+  after: DeckState,
+  label: string,
+): Command {
+  return {
+    label,
+    undo: () => port.restoreDeckState(id, before),
+    redo: () => port.restoreDeckState(id, after),
+  };
+}
+
 // Seed mints one card per un-carded scene — undo deletes them all, redo recreates
 // them under their ids. One command (the caretaker treats it as one step), not a
 // per-card transaction: the whole batch reverses or replays together.
@@ -443,9 +536,12 @@ export function realizeCommand(
 // "a drag that went nowhere records no command" rule).
 
 // Whole-state equality (a no-op edit records nothing). One helper for every node
-// kind — a CardState / PlotlineState / ArcState is a JSON-serializable
+// kind — a CardState / PlotlineState / ArcState / DeckState is a JSON-serializable
 // {title, body, metadata}.
-function statesEqual(a: CardState | PlotlineState | ArcState, b: CardState | PlotlineState | ArcState): boolean {
+function statesEqual(
+  a: CardState | PlotlineState | ArcState | DeckState,
+  b: CardState | PlotlineState | ArcState | DeckState,
+): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -537,6 +633,28 @@ export class PlotUndoRecorder {
     if (restore) this.#record(storyMoveCommand(this.#port, cardId, anchor, restore, label));
   }
 
+  /** Place a card in a deck or the loose area, and/or beside a neighbour in story time
+   *  (ADR-0097 §4), recorded as ONE step. The old home and the old neighbour are read off
+   *  the projection BEFORE the move so undo can put them back; whichever half would change
+   *  nothing is not sent, and a drop that changes neither records nothing. */
+  async cardPlace(cardId: string, place: PlaceRequest, label = "move card"): Promise<void> {
+    await this.#whenIdle();
+    const cards = this.#getProjection()?.cards ?? [];
+    const card = cards.find((c) => c.id === cardId);
+    const homeNow: PlaceTo = card?.deck ? { deck: card.deck } : { loose: true };
+    const sameHome = !place.to || JSON.stringify(place.to) === JSON.stringify(homeNow);
+    const sameStory = !place.story || isStoryNoOp(cards, cardId, place.story);
+    if (sameHome && sameStory) return;
+    const forward: PlaceRequest = {
+      ...(sameHome ? {} : { to: place.to }),
+      ...(sameStory ? {} : { story: place.story }),
+    };
+    const anchor = forward.story ? storyRestoreAnchor(cards, cardId) : null;
+    const restore: PlaceRequest = { ...(forward.to ? { to: homeNow } : {}), ...(anchor ? { story: anchor } : {}) };
+    await this.#port.placeCard(cardId, forward);
+    if (restore.to || restore.story) this.#record(cardPlaceCommand(this.#port, cardId, forward, restore, label));
+  }
+
   /** Detach a card from its scene, recorded. The store asks which synopsis survives
    *  when it must; backing out records nothing. */
   async detach(cardId: string): Promise<void> {
@@ -583,6 +701,47 @@ export class PlotUndoRecorder {
       this.#record(arcEditCommand(this.#port, id, before, after, label));
     }
     return result;
+  }
+
+  /** A deck rename / synopsis / re-parent edit (ADR-0097 §2). Returns the op's own result
+   *  (the saved entry), mirroring `plotlineEdit`. */
+  async deckEdit<T>(id: string, label: string, op: () => Promise<T>): Promise<T> {
+    await this.#whenIdle();
+    const before = await this.#port.getDeckState(id);
+    const result = await op();
+    const after = await this.#port.getDeckState(id);
+    if (!statesEqual(before, after)) {
+      this.#record(deckEditCommand(this.#port, id, before, after, label));
+    }
+    return result;
+  }
+
+  /** Create a deck via the given forward op (returns the new id); record it. */
+  async createDeck(create: () => Promise<string>, label?: string): Promise<string> {
+    await this.#whenIdle();
+    const id = await create();
+    const state = await this.#port.getDeckState(id);
+    this.#record(createDeckCommand(this.#port, id, state, label));
+    return id;
+  }
+
+  /** Delete a deck. Called AFTER the user confirmed — captures the deck, the cards that
+   *  call it home and the decks nested directly in it (read off the projection), runs the
+   *  delete, records. */
+  async deleteDeck(id: string, del: () => Promise<void>): Promise<void> {
+    await this.#whenIdle();
+    const state = await this.#port.getDeckState(id);
+    const projection = this.#getProjection();
+    const members = (projection?.cards ?? [])
+      .filter((c) => c.deck === id)
+      .map((c) => ({ id: c.id, written: c.scene != null }));
+    const children = await Promise.all(
+      (projection?.decks ?? [])
+        .filter((d) => d.parent === id)
+        .map(async (d) => ({ id: d.id, state: await this.#port.getDeckState(d.id) })),
+    );
+    await del();
+    this.#record(deleteDeckCommand(this.#port, id, state, members, children));
   }
 
   /** Create a card via the given forward op (returns the new id); record it. */
@@ -687,9 +846,15 @@ export function defaultPlotCommandPort(): PlotCommandPort {
     getArcState,
     restoreArcState,
     recreateArc,
+    deleteDeck,
+    getDeckState,
+    restoreDeckState,
+    recreateDeck,
+    restoreCardDeck,
     refreshBoard: refreshAfterMutation,
     refreshRoster,
     refreshArcRoster,
+    refreshDeckRoster,
     realizeCard,
     sceneReferents,
     readScene,
@@ -699,6 +864,7 @@ export function defaultPlotCommandPort(): PlotCommandPort {
     setCardText,
     readSceneSummary,
     moveCardInStoryTime,
+    placeCard: placeCardOnBoard,
     // The suppressible confirm before deleting a written scene, as a Promise<boolean>:
     // confirm → true, cancel/backdrop → false (via the confirmService onCancel added
     // for this), and a suppressed prior "don't show again" resolves true immediately.

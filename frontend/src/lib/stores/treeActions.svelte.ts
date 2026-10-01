@@ -32,6 +32,7 @@ import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { plotlineEntriesStore, refreshPlotlines } from "@/lib/stores/plotlines";
+import { deckEntriesStore, refreshDecks } from "@/lib/stores/decks";
 import { refreshTodos } from "@/lib/stores/todos";
 import { refreshChatSessions } from "@/lib/stores/chats";
 import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -123,13 +124,24 @@ class TreeActions {
         existingTitles: () => get(plotlineEntriesStore).map((e) => e.title),
       });
     }
+    if (entryType === "plot:deck") {
+      return this.#mintFromDraft(entryType, patch, {
+        create: (title) => api.createDeck(title),
+        save: (entry, body) => api.saveDeck(entry, body),
+        refresh: async () => {
+          await Promise.all([refreshPlotBoard(), refreshDecks()]);
+        },
+        open: (id) => editorPanes.openDeck(id),
+        existingTitles: () => get(deckEntriesStore).map((e) => e.title),
+      });
+    }
     // A flat brainstorm draft can only create a flat node. Surface the
     // unsupported kind through run()'s error path rather than letting the
     // lore endpoint 422 on a foreign entry_type.
     await this.run(async () => {
       throw new Error(
         `Can't create a ${entryTypeName(entryType, get(metadataSchemaStore))} from a ` +
-          `brainstorm draft — only lore entries and plot cards or plotlines can be ` +
+          `brainstorm draft — only lore entries and plot cards, plotlines or decks can be ` +
           `created this way.`,
       );
     });

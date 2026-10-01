@@ -35,6 +35,9 @@ const card = (id: string, over: Partial<PlotBoardCard> = {}): PlotBoardCard => (
   scene: null,
   container: null,
   deck: null,
+  planned_in: null,
+  planned_after: null,
+  container_order: null,
   page_status: null,
   beats: [],
   sequence: null,
@@ -93,18 +96,48 @@ describe("boardBoxes: the box tree", () => {
     expect(roots.map((r) => r.nodeId)).toEqual(["deck:orphan", LOOSE_NODE_ID]);
   });
 
-  it("orders a container's cards by manuscript order, ties by story time", () => {
+  it("orders a container's cards by container order, ties by story time", () => {
     const roots = boardBoxes(
       projection({
         containers: [container("ch")],
         cards: [
-          card("late", { container: "ch", scene: "s3", sequence: 2, story_order: 0 }),
-          card("tie-b", { container: "ch", scene: "s2", sequence: 1, story_order: 5 }),
-          card("tie-a", { container: "ch", scene: "s1", sequence: 1, story_order: 3 }),
+          card("late", { container: "ch", scene: "s3", container_order: 2, story_order: 0 }),
+          card("tie-b", { container: "ch", scene: "s2", container_order: 1, story_order: 5 }),
+          card("tie-a", { container: "ch", scene: "s1", container_order: 1, story_order: 3 }),
         ],
       }),
     );
     expect(ids(byNode(roots, "container:ch"))).toEqual(["tie-a", "tie-b", "late"]);
+  });
+
+  it("sets a planned card among the written ones by its container order (ADR-0097 §6)", () => {
+    const roots = boardBoxes(
+      projection({
+        containers: [container("ch")],
+        cards: [
+          card("s2", { container: "ch", scene: "scene2", container_order: 1, story_order: 0 }),
+          card("s1", { container: "ch", scene: "scene1", container_order: 0, story_order: 1 }),
+          // Planned after scene 1 (half a step on), two of them ordered by story time.
+          card("p2", { container: "ch", planned_in: "ch", planned_after: "scene1", container_order: 0.5, story_order: 9 }),
+          card("p1", { container: "ch", planned_in: "ch", planned_after: "scene1", container_order: 0.5, story_order: 4 }),
+          // Planned before the chapter's first scene.
+          card("p0", { container: "ch", planned_in: "ch", container_order: -0.5, story_order: 7 }),
+        ],
+      }),
+    );
+    expect(ids(byNode(roots, "container:ch"))).toEqual(["p0", "s1", "p1", "p2", "s2"]);
+  });
+
+  it("shows a planned card in the chapter it is planned in, not its home deck", () => {
+    const roots = boardBoxes(
+      projection({
+        containers: [container("ch")],
+        decks: [deck("d")],
+        cards: [card("p", { container: "ch", deck: "d", planned_in: "ch", container_order: 0.5 })],
+      }),
+    );
+    expect(ids(byNode(roots, "container:ch"))).toEqual(["p"]);
+    expect(ids(byNode(roots, "deck:d"))).toEqual([]);
   });
 
   it("orders a deck's and the loose box's cards by story time", () => {

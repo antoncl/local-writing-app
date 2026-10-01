@@ -59,17 +59,20 @@ export function deckSynopsisLines(synopsis: string): string[] {
 
 const cardHeight = (card: PlotBoardCard): number => estCardHeight(card.title, card.synopsis, card.beats.length);
 
-// Manuscript order, a card with no scene position last; ties by story time.
-const byManuscript = (a: PlotBoardCard, b: PlotBoardCard): number =>
-  (a.sequence ?? Infinity) - (b.sequence ?? Infinity) || a.story_order - b.story_order;
+// A container box's order (ADR-0097 §6): a written card sits at its scene, a planned card
+// half a step after the scene it follows; ties (planned cards after the same scene) by story time.
+const byContainerOrder = (a: PlotBoardCard, b: PlotBoardCard): number =>
+  (a.container_order ?? Infinity) - (b.container_order ?? Infinity) || a.story_order - b.story_order;
 const byStory = (a: PlotBoardCard, b: PlotBoardCard): number => a.story_order - b.story_order;
 
 /** The box tree for a projection, top-level boxes in stacking order: containers in
  *  manuscript order, then top-level decks by title, then the loose box (only when it has
  *  cards). A box's children come first (containers in manuscript order, then decks by
- *  title), then its own cards: manuscript order in a container, story time in a deck or
- *  the loose box. A written card belongs to its scene's container, or — its scene at the
- *  root — the loose box; an unwritten card to its home deck, else the loose box. */
+ *  title), then its own cards: `container_order` in a container (written cards by scene,
+ *  planned ones after the scene they follow), story time in a deck or the loose box. A
+ *  written card belongs to its scene's container, a planned one to the container it is
+ *  planned in, or — its scene at the root — the loose box; an unwritten card to its home
+ *  deck, else the loose box. */
 export function boardBoxes(projection: PlotBoardProjection): BoxSpec[] {
   const containerById = new Map(projection.containers.map((c) => [c.id, c]));
   const deckById = new Map(projection.decks.map((d) => [d.id, d]));
@@ -111,7 +114,7 @@ export function boardBoxes(projection: PlotBoardProjection): BoxSpec[] {
     kind: "container",
     ref: id,
     header: CONTAINER_HEADER,
-    cards: boxCards(inContainer.get(id), byManuscript),
+    cards: boxCards(inContainer.get(id), byContainerOrder),
     children: (childContainers.get(id) ?? []).map(containerBox),
   });
 

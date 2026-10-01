@@ -7,12 +7,14 @@
 //   • a top-level BOX drag moves the box and everything inside it live; on release only the
 //     box's own position is pinned, as ONE layout undo step, and the contents re-derive;
 //   • a CARD drag shows an insertion bar (an overlay) where it would land; on release it becomes one
-//     recorded `place` call (or a notice, for a written card), and the card snaps back into
-//     the flow either way;
+//     recorded `place` call — planning it in a chapter, or homing it in a deck / the loose
+//     area — or, for a written card dropped on a chapter, a recorded move of its scene (a
+//     notice when dropped elsewhere), and the card snaps back into the flow either way;
 //   • a plotline / arc node drag is the plain Tier-1 position drag.
 
 import type { Edge } from "@xyflow/svelte";
 import type { PlaceRequest } from "@/lib/api/plot";
+import type { SceneNear } from "./sceneMove";
 import { moveNodesCommand, type GraphPort } from "@/lib/graph/graphCommands";
 import type { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
 import type { BoardXY } from "@/lib/types";
@@ -41,11 +43,13 @@ export interface BoardDragHost {
   toFlow(screen: BoardXY): BoardXY | null;
   // The recorded content op behind a card drop.
   placeCard(cardId: string, place: PlaceRequest): Promise<void>;
+  // The recorded structure move behind a written card's drop on a chapter.
+  moveScene(sceneId: string, parentId: string, near: SceneNear): Promise<void>;
   say(message: string): void;
   fail(error: unknown): void;
 }
 
-type CardDrag = { id: string; written: boolean; barKey: string; target: DropTarget | null };
+type CardDrag = { id: string; written: boolean; sceneId: string | null; barKey: string; target: DropTarget | null };
 
 function pointerOf(event: MouseEvent | TouchEvent): BoardXY | null {
   const at = "touches" in event ? (event.touches[0] ?? event.changedTouches[0]) : event;
@@ -72,7 +76,8 @@ export class BoardDragController {
     if (box) {
       this.#box = startBoxDrag(host.nodes, box);
     } else if (card) {
-      this.#card = { id: card.id, written: (card.data as PlotCardData).attached, barKey: "", target: null };
+      const { attached, sceneId } = card.data as PlotCardData;
+      this.#card = { id: card.id, written: attached, sceneId, barKey: "", target: null };
     } else {
       host.undo.dragStart(nodes);
     }
@@ -93,7 +98,8 @@ export class BoardDragController {
     const target = hitTestDrop(dropBoxesFrom(host.nodes, card.id), at);
     card.target = target;
     // The bar shows only where a release would do something.
-    const bar = planDrop(target, card).kind === "place" ? target!.bar : null;
+    const kind = planDrop(target, card).kind;
+    const bar = kind === "place" || kind === "move" ? target!.bar : null;
     const key = bar ? `${bar.x},${bar.y},${bar.h}` : "";
     if (key === card.barKey) return;
     card.barKey = key;
@@ -152,9 +158,10 @@ export class BoardDragController {
     host.rebuild();
   }
 
-  // A card dropped into a deck or the loose area becomes one recorded `place` call; a
-  // written card is refused with a line saying why. Either way the card snaps back into the
-  // flow — the board re-derives its slot from the refetched projection.
+  // A card dropped into a deck, the loose area or a chapter becomes one recorded `place`
+  // call; a written card dropped on a chapter moves its scene there instead, and anywhere
+  // else is refused with a line saying why. Either way the card snaps back into the flow —
+  // the board re-derives its slot from the refetched projection.
   async #dropCard(drag: CardDrag): Promise<void> {
     const host = this.#host;
     const plan = planDrop(drag.target, drag);
@@ -164,6 +171,12 @@ export class BoardDragController {
     } else if (plan.kind === "place") {
       try {
         await host.placeCard(drag.id, plan.place);
+      } catch (error) {
+        host.fail(error);
+      }
+    } else if (plan.kind === "move") {
+      try {
+        await host.moveScene(plan.sceneId, plan.parentId, plan.near);
       } catch (error) {
         host.fail(error);
       }

@@ -54,7 +54,7 @@
     void refreshPlotBoard();
   });
 
-  // The manuscript containers a card can be realized into (#879) — the "Realize scene"
+  // The manuscript containers a card can be realized into (#879) — the "Write as scene"
   // location picker's roster. Derived here (this pane owns the structure store) so
   // PlotEditor stays a pure prop-driven renderer; tracks the same store the refetch
   // effect above watches, so a container added while the board is open appears at once.

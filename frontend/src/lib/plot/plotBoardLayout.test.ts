@@ -92,6 +92,9 @@ const card = (
   scene: null,
   container: null,
   deck: null,
+  planned_in: null,
+  planned_after: null,
+  container_order: null,
   page_status: null,
   beats: [],
   sequence: null,
@@ -300,6 +303,22 @@ describe("buildBoardNodes", () => {
     // is in a container or loose.
     expect(attached).toMatchObject({ synopsis: "she leaves", attached: true, color: "forest", plotlineId: "plot_a", plotlineName: "A" });
     expect(free).toMatchObject({ attached: false, color: "forest", plotlineId: "plot_a", plotlineName: "A" });
+  });
+
+  it("flags a card planned in a chapter, with no scene, as planned", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        containers: [container("chap", "Chapter 1")],
+        cards: [
+          card("plan", { container: "chap", planned_in: "chap", planned_after: "scene_0" }),
+          card("written", { container: "chap", scene: "scene_1" }),
+          card("free", {}),
+        ],
+      }),
+    );
+    expect(dataOf(nodes, "plan")).toMatchObject({ planned: true, plannedAfter: "scene_0", sceneId: null });
+    expect(dataOf(nodes, "written")).toMatchObject({ planned: false, plannedAfter: null, sceneId: "scene_1" });
+    expect((dataOf(nodes, "free") as PlotCardData).planned).toBe(false);
   });
 
   it("gives a card with no plotline a null colour", () => {

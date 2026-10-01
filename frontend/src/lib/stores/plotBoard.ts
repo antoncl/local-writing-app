@@ -11,11 +11,11 @@ import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
 import { type CardTextChoice, type PlaceRequest, type PlaceTo, type StoryAnchor, textChoiceConflict } from "@/lib/api/plot";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
-import { refreshStructure, setStructure } from "@/lib/stores/structure";
+import { refreshStructure, setStructure, structureStore } from "@/lib/stores/structure";
 import { refreshCards } from "@/lib/stores/plotCards";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
-import type { CardEntry, PlotBoardLayout, PlotBoardProjection, Scene } from "@/lib/types";
+import type { CardEntry, PlotBoardLayout, PlotBoardProjection, Scene, StructureDocument } from "@/lib/types";
 
 export const plotBoardStore = writable<PlotBoardProjection | null>(null);
 
@@ -102,10 +102,25 @@ export async function savePlotBoardLayout(layout: PlotBoardLayout, baseRevision:
 // scene until a reload (#2359). Redo re-realizes through here, so it is covered.
 // A failed tree refetch must not fail a realize that already happened (the undo
 // recorder would then never record it), so it is swallowed like refreshCards.
-export async function realizeCard(cardId: string, parentId: string | null = null): Promise<string> {
+// Returns the minted scene's id and the ids of the other planned cards the write
+// re-anchored after it (ADR-0097 §6) — undo puts them back.
+export async function realizeCard(
+  cardId: string,
+  parentId: string | null = null,
+): Promise<{ sceneId: string; reanchored: string[] }> {
   const card = await api.realizeCard(cardId, parentId);
   await Promise.all([refreshAfterMutation(), refreshStructure().catch(() => {})]);
-  return typeof card.metadata.scene === "string" ? card.metadata.scene : "";
+  return { sceneId: typeof card.metadata.scene === "string" ? card.metadata.scene : "", reanchored: card.reanchored ?? [] };
+}
+
+// The manuscript tree as loaded (synchronous), for working out a scene move's slot.
+export const currentStructure = (): StructureDocument | null => get(structureStore);
+
+// Move a manuscript node under a parent at a position (ADR-0097 §8): a written card dragged
+// onto a chapter moves its scene. The board's containers re-derive from the refetch.
+export async function moveSceneNode(nodeId: string, parentId: string, position: number): Promise<void> {
+  setStructure(await api.moveStructureNode(nodeId, parentId, position));
+  await refreshAfterMutation();
 }
 
 // Seed: one attached card per un-carded leaf scene, in manuscript order (idempotent).

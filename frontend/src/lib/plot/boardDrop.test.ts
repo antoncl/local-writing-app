@@ -14,7 +14,15 @@ import { buildBoardNodes } from "./plotBoardLayout";
 import type { PlotBoardCard, PlotBoardProjection } from "@/lib/types";
 
 const rect = (x: number, y: number, w: number, h: number) => ({ x, y, w, h });
-const dropCard = (id: string, x: number, movable = true): DropCard => ({ id, rect: rect(x, 100, 100, 80), storyMovable: movable });
+const dropCard = (id: string, x: number, movable = true, over: Partial<DropCard> = {}): DropCard => ({
+  id,
+  rect: rect(x, 100, 100, 80),
+  storyMovable: movable,
+  scene: null,
+  planned: false,
+  plannedAfter: null,
+  ...over,
+});
 const box = (id: string, kind: DropBox["kind"], depth: number, r: DropBox["rect"], cards: DropCard[] = []): DropBox => ({
   id,
   kind,
@@ -67,7 +75,7 @@ describe("hitTestDrop", () => {
     expect(hit.bar.y).toBe(500 + 32 + 20);
   });
 
-  it("returns a container as the target (the plan, not the hit-test, says it does nothing)", () => {
+  it("returns a container as a target like any other box", () => {
     const chapter = box("container:ch", "container", 0, rect(0, 0, 300, 300));
     expect(hitTestDrop([chapter], { x: 10, y: 10 })!.box.kind).toBe("container");
   });
@@ -112,10 +120,105 @@ describe("planDrop", () => {
     expect(WRITTEN_CARD_NOTICE).toBe("This card shows by its scene; detach it first.");
   });
 
-  it("does nothing onto a manuscript container, or nowhere", () => {
-    const chapter = box("container:ch", "container", 0, rect(0, 0, 400, 300));
-    expect(planDrop(hit(chapter, 100), { written: false })).toEqual({ kind: "none" });
+  it("does nothing nowhere", () => {
     expect(planDrop(null, { written: false })).toEqual({ kind: "none" });
+  });
+});
+
+describe("planDrop onto a chapter (ADR-0097 §6, §8)", () => {
+  // Written s1, planned p1 (after s1), planned p2 (after s1), written s2 — in a 700-wide box.
+  const chapter = box("container:ch", "container", 0, rect(0, 0, 700, 300), [
+    dropCard("w1", 20, true, { scene: "s1" }),
+    dropCard("p1", 130, true, { planned: true, plannedAfter: "s1" }),
+    dropCard("p2", 240, true, { planned: true, plannedAfter: "s1" }),
+    dropCard("w2", 350, true, { scene: "s2" }),
+  ]);
+  const at = (x: number) => hitTestDrop([chapter], { x, y: 140 });
+  const planned = (planned_after: string | null) => ({ planned_in: "ch", planned_after });
+
+  it("plans an unwritten card after the written card before the slot", () => {
+    // Between w1 (centre 70) and p1 (centre 180)... but the slot just before is w1.
+    expect(planDrop(at(100), { written: false })).toEqual({
+      kind: "place",
+      place: { to: planned("s1"), story: { before_id: "p1" } },
+    });
+  });
+
+  it("joins the run of the planned card just before the slot, ordered after it", () => {
+    // Right of p1's centre (180), left of p2's: after p1.
+    expect(planDrop(at(200), { written: false })).toEqual({
+      kind: "place",
+      place: { to: planned("s1"), story: { after_id: "p1" } },
+    });
+  });
+
+  it("between two planned cards takes their anchor and a story neighbour", () => {
+    // Right of p2 centre (290): after p2.
+    expect(planDrop(at(320), { written: false })).toEqual({
+      kind: "place",
+      place: { to: planned("s1"), story: { after_id: "p2" } },
+    });
+  });
+
+  it("plans after the last written card with nothing to order against", () => {
+    // Right of w2: after w2 (the last card) — a fresh anchor, nothing to order against.
+    expect(planDrop(at(480), { written: false })).toEqual({ kind: "place", place: { to: planned("s2") } });
+  });
+
+  it("is anchored on nothing at the front, ordered before a planned neighbour with no anchor", () => {
+    expect(planDrop(at(30), { written: false })).toEqual({ kind: "place", place: { to: planned(null) } });
+    const front = box("container:ch", "container", 0, rect(0, 0, 700, 300), [
+      dropCard("p0", 20, true, { planned: true, plannedAfter: null }),
+      dropCard("w1", 130, true, { scene: "s1" }),
+    ]);
+    expect(planDrop(hitTestDrop([front], { x: 30, y: 140 }), { written: false })).toEqual({
+      kind: "place",
+      place: { to: planned(null), story: { before_id: "p0" } },
+    });
+  });
+
+  it("skips a story neighbour the open layer does not own", () => {
+    const inherited = box("container:ch", "container", 0, rect(0, 0, 700, 300), [
+      dropCard("w1", 20, true, { scene: "s1" }),
+      dropCard("p1", 130, false, { planned: true, plannedAfter: "s1" }),
+    ]);
+    expect(planDrop(hitTestDrop([inherited], { x: 100, y: 140 }), { written: false })).toEqual({
+      kind: "place",
+      place: { to: planned("s1") },
+    });
+  });
+
+  it("moves a written card's scene beside the nearest written card before the slot, else after it", () => {
+    expect(planDrop(at(320), { written: true, sceneId: "sx" })).toEqual({
+      kind: "move",
+      sceneId: "sx",
+      parentId: "ch",
+      near: { after: "s1" },
+    });
+    expect(planDrop(at(30), { written: true, sceneId: "sx" })).toEqual({
+      kind: "move",
+      sceneId: "sx",
+      parentId: "ch",
+      near: { before: "s1" },
+    });
+  });
+
+  it("moves into an empty chapter (no neighbour: the end)", () => {
+    const empty = box("container:e", "container", 0, rect(0, 0, 400, 300));
+    expect(planDrop(hitTestDrop([empty], { x: 100, y: 140 }), { written: true, sceneId: "sx" })).toEqual({
+      kind: "move",
+      sceneId: "sx",
+      parentId: "e",
+      near: null,
+    });
+  });
+
+  it("still refuses a written card dropped on a deck", () => {
+    const deckBox = box("deck:d", "deck", 0, rect(0, 0, 400, 300));
+    expect(planDrop(hitTestDrop([deckBox], { x: 100, y: 140 }), { written: true, sceneId: "sx" })).toEqual({
+      kind: "refuse",
+      message: WRITTEN_CARD_NOTICE,
+    });
   });
 });
 
@@ -128,6 +231,9 @@ describe("dropBoxesFrom (over real nodes)", () => {
     scene: null,
     container: null,
     deck: null,
+    planned_in: null,
+    planned_after: null,
+    container_order: null,
     page_status: null,
     beats: [],
     sequence: null,

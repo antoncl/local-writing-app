@@ -193,9 +193,8 @@
 
   // The drag gestures SvelteFlow reports (ADR-0097 §8, §9): a top-level box carries its
   // contents and pins its own position, a card shows where it would land and drops as a
-  // recorded `place` — see `boardDragController.ts`.
-  // The card drag's insertion bar, in flow coordinates (an overlay: `flowNodes` is untouched
-  // during the gesture).
+  // recorded `place` — see `boardDragController.ts`. `dropBar`: the card drag's insertion
+  // bar, in flow coordinates (an overlay: `flowNodes` is untouched during the gesture).
   let dropBar = $state<Box | null>(null);
   const dragController = new BoardDragController({
     get nodes() {
@@ -213,6 +212,7 @@
     focusBoard: () => boardEl?.focus({ preventScroll: true }),
     toFlow: (screen) => pointerToFlow?.(screen) ?? null,
     placeCard: (id, place) => undoRecorder.cardPlace(id, place),
+    moveScene: (sceneId, parentId, near) => undoRecorder.sceneMove(sceneId, parentId, near),
     say: (message) => editorPanes.setStatus(message),
     fail: (e) => editorPanes.setError(e instanceof Error ? e.message : "Could not move the card."),
   });

@@ -55,7 +55,7 @@ export type PlotCardActions = {
   // The current lanes, for the "Set plotline" submenu. A getter on the provider so
   // the card reads them fresh from the projection.
   readonly plotlines: PlotBoardPlotline[];
-  // The manuscript containers, for the "Realize scene" location submenu (#879). A
+  // The manuscript containers, for the "Write as scene" location submenu (#879). A
   // getter so the card reads the live manuscript tree (containers can be added while
   // the board is open). Empty ⇒ realize takes the backend default (no picker shown).
   readonly locations: PlotRealizeLocation[];

@@ -14,6 +14,9 @@ const card = (id: string, over: Partial<PlotBoardCard> = {}): PlotBoardCard => (
   scene: null,
   container: null,
   deck: null,
+  planned_in: null,
+  planned_after: null,
+  container_order: null,
   page_status: null,
   beats: [],
   sequence: null,
@@ -72,6 +75,7 @@ function harness() {
     focusBoard: () => log.push("focus"),
     toFlow: (screen) => screen, // 1:1
     placeCard: vi.fn(async () => {}),
+    moveScene: vi.fn(async () => {}),
     say: vi.fn(),
     fail: vi.fn(),
   };
@@ -98,9 +102,8 @@ describe("card drag", () => {
     const count = h.bars.length;
     h.controller.onDrag({ event: h.at(c.x, c.y), nodes: [h.node("u1")] });
     expect(h.bars).toHaveLength(count);
-    // Over the chapter: nothing would happen, so no bar.
-    const chapter = h.node("container:ch");
-    h.controller.onDrag({ event: h.at(chapter.position.x + 5, chapter.position.y + 5), nodes: [h.node("u1")] });
+    // Over nowhere: nothing would happen, so no bar.
+    h.controller.onDrag({ event: h.at(-5000, -5000), nodes: [h.node("u1")] });
     expect(h.bars.at(-1)).toBeNull();
     // The bound array is the SAME array through every frame.
     expect(h.state.nodes).toBe(before);
@@ -131,12 +134,31 @@ describe("card drag", () => {
     expect(h.log).toContain("rebuild");
   });
 
-  it("does nothing when released over a manuscript container or nowhere", () => {
+  it("plans an unwritten card dropped on a chapter, after the written card before the slot", () => {
     const h = harness();
     h.controller.onStart({ nodes: [h.node("u1")] });
-    const chapter = h.node("container:ch");
-    h.controller.onDrag({ event: h.at(chapter.position.x + 5, chapter.position.y + 5), nodes: [h.node("u1")] });
+    const w = h.node("w");
+    // Right of the written card's centre: after it, in the chapter.
+    h.controller.onDrag({ event: h.at(w.position.x + (w.width ?? 0) - 5, w.position.y + 10), nodes: [h.node("u1")] });
+    expect(h.bars.at(-1)).not.toBeNull(); // a chapter is a drop target
     h.controller.onStop({ nodes: [h.node("u1")] });
+    expect(h.host.placeCard).toHaveBeenCalledWith("u1", { to: { planned_in: "ch", planned_after: "s1" } });
+    expect(h.host.moveScene).not.toHaveBeenCalled();
+  });
+
+  it("moves a written card's scene when it is dropped on a chapter", () => {
+    const h = harness();
+    h.controller.onStart({ nodes: [h.node("w")] });
+    const chapter = h.node("container:ch");
+    h.controller.onDrag({ event: h.at(chapter.position.x + 5, chapter.position.y + 5), nodes: [h.node("w")] });
+    h.controller.onStop({ nodes: [h.node("w")] });
+    expect(h.host.moveScene).toHaveBeenCalledWith("s1", "ch", null);
+    expect(h.host.placeCard).not.toHaveBeenCalled();
+    expect(h.log).toContain("rebuild");
+  });
+
+  it("does nothing when released over nowhere", () => {
+    const h = harness();
     h.controller.onStart({ nodes: [h.node("u1")] });
     h.controller.onDrag({ event: h.at(-5000, -5000), nodes: [h.node("u1")] });
     h.controller.onStop({ nodes: [h.node("u1")] });

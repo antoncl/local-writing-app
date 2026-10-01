@@ -31,8 +31,13 @@ export function textChoiceConflict(error: unknown): { sceneSummary: string; card
  *  (ADR-0097 §4). The backend accepts only the open layer's own cards as the anchor. */
 export type StoryAnchor = { after_id: string } | { before_id: string };
 
-/** Where a card shows when it is not written (ADR-0097 §4): a deck, or the loose area. */
-export type PlaceTo = { deck: string } | { loose: true };
+/** Where a card shows when it is not written (ADR-0097 §4, §6): a deck, the loose area, or
+ *  planned in a manuscript container right after a scene (null = first there). */
+export type PlaceTo = { deck: string } | { loose: true } | { planned_in: string; planned_after: string | null };
+
+/** What `realize` returns: the card, and the ids of the other planned cards the write
+ *  re-anchored after the new scene (ADR-0097 §6). */
+export type RealizeCardResult = CardEntry & { reanchored: string[] };
 
 /** The body of `place`: `to` changes where the card lives and never moves it in story
  *  time; `story` moves it in story time. At least one. A written card refuses `to`. */
@@ -173,7 +178,7 @@ export const plotApi = {
   // the scene (null → the backend's first-container fallback). 409 if the card is
   // already attached (0..1 scene per card).
   realizeCard(entryId: string, parentId: string | null = null) {
-    return request<CardEntry>(`/plot/cards/${entryId}/realize`, {
+    return request<RealizeCardResult>(`/plot/cards/${entryId}/realize`, {
       method: "POST",
       body: JSON.stringify({ parent_id: parentId }),
     });

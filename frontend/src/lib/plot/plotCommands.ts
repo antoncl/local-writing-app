@@ -18,8 +18,11 @@
 //     fields (dropping a beat also adopts a primary, #863); the flip reverses all of it.
 //   • story move (ADR-0097 §4) — one `place` call; undo places the card back beside the
 //     neighbour it had, redo replays the anchor the writer chose.
-//   • card place (ADR-0097 §4) — a drag into a deck or the loose area: ONE `place` call
-//     (home + story neighbour); undo restores the old home and the old neighbour.
+//   • card place (ADR-0097 §4, §6) — a drag into a deck, the loose area or a chapter (a
+//     plan): ONE `place` call (home + story neighbour); undo restores the old home — deck,
+//     loose or the old plan — and the old neighbour.
+//   • scene move (ADR-0097 §8) — a written card dragged onto a chapter moves its scene; undo
+//     moves it back to its old parent and position.
 //   • deck create / delete / edit (ADR-0097 §2) — the deck twins of the plotline commands.
 //     A delete frees its cards and child decks (the backend purges the references), so its
 //     undo recreates the deck under its id, then puts each member and child back.
@@ -34,7 +37,7 @@
 // PlotEditor handlers; `defaultPlotCommandPort` wires the real store ops.
 
 import { type Command, UndoCancelled } from "@/lib/stores/undoCaretaker.svelte";
-import type { PlotBoardProjection } from "@/lib/types";
+import type { PlotBoardProjection, StructureDocument } from "@/lib/types";
 import {
   type CardState,
   deleteCard,
@@ -52,10 +55,13 @@ import {
   setCardText,
   moveCardInStoryTime,
   placeCardOnBoard,
+  currentStructure,
+  moveSceneNode,
   type CardTextOutcome,
 } from "@/lib/stores/plotBoard";
 import type { CardTextChoice, PlaceRequest, PlaceTo, StoryAnchor } from "@/lib/api/plot";
 import { isStoryNoOp, storyRestoreAnchor } from "@/lib/plot/storyTime";
+import { planSceneMove, type SceneMovePlan, type SceneNear } from "@/lib/plot/sceneMove";
 import {
   type PlotlineState,
   deletePlotline,
@@ -115,8 +121,13 @@ export interface PlotCommandPort {
   refreshRoster(): Promise<void>;
   refreshArcRoster(): Promise<void>;
   refreshDeckRoster(): Promise<void>;
-  // Realize (S6b): mint a scene → returns its id; the undo/redo scene ops.
-  realizeCard(cardId: string, parentId: string | null): Promise<string>;
+  // Realize (S6b): mint a scene → its id, plus the planned cards the write re-anchored
+  // (ADR-0097 §6); the undo/redo scene ops.
+  realizeCard(cardId: string, parentId: string | null): Promise<{ sceneId: string; reanchored: string[] }>;
+  // The manuscript tree (synchronous) and a node move in it — a written card's drop on a
+  // chapter moves its scene (ADR-0097 §8).
+  structure(): StructureDocument | null;
+  moveScene(nodeId: string, parentId: string, position: number): Promise<void>;
   sceneReferents(sceneId: string): string[];
   readScene(sceneId: string): Promise<{ title: string; body: string }>;
   deleteScene(sceneId: string): Promise<void>;
@@ -250,6 +261,16 @@ export function cardPlaceCommand(
     label,
     undo: () => port.placeCard(id, restore),
     redo: () => port.placeCard(id, place),
+  };
+}
+
+// A written card's scene moved to a chapter (ADR-0097 §8): `from` is where it sat, in the
+// same parent / position terms the move API takes, so undo is the same call pointed back.
+export function sceneMoveCommand(port: PlotCommandPort, plan: SceneMovePlan, label = "move scene"): Command {
+  return {
+    label,
+    undo: () => port.moveScene(plan.nodeId, plan.from.parentId, plan.from.position),
+    redo: () => port.moveScene(plan.nodeId, plan.to.parentId, plan.to.position),
   };
 }
 
@@ -502,12 +523,20 @@ export function seedCommand(port: PlotCommandPort, created: CardRef[], label = "
 // ADR-0097 §1) — behind a suppressible confirm when the scene holds prose. Redo
 // re-mints, capturing the NEW scene id (mutable closure state) so the next undo targets
 // it. The check that the card still holds the scene reads the LIVE board at undo time.
+// A card realized from a PLAN (ADR-0097 §6) also gets its plan back on undo — `plan` — and
+// so does every planned card the write re-anchored — `reanchored`, each with the anchor it
+// had — since realize cleared and moved them.
+export type PlannedPlace = { planned_in: string; planned_after: string | null };
+export type ReanchoredCard = { id: string; planned_after: string | null };
+
 export function realizeCommand(
   port: PlotCommandPort,
   cardId: string,
   parentId: string | null,
   sceneId: string,
-  label = "realize card",
+  plan: PlannedPlace | null = null,
+  reanchored: ReanchoredCard[] = [],
+  label = "write card as scene",
 ): Command {
   let scene = sceneId;
   return {
@@ -522,9 +551,14 @@ export function realizeCommand(
         throw new UndoCancelled();
       }
       await port.deleteScene(scene); // deletes the scene + purges the card's ref (detaches)
+      if (!plan) return;
+      await port.placeCard(cardId, { to: plan });
+      for (const other of reanchored) {
+        await port.placeCard(other.id, { to: { planned_in: plan.planned_in, planned_after: other.planned_after } });
+      }
     },
     redo: async () => {
-      scene = await port.realizeCard(cardId, parentId); // re-mint; track the new scene id
+      scene = (await port.realizeCard(cardId, parentId)).sceneId; // re-mint; track the new scene id
     },
   };
 }
@@ -641,7 +675,14 @@ export class PlotUndoRecorder {
     await this.#whenIdle();
     const cards = this.#getProjection()?.cards ?? [];
     const card = cards.find((c) => c.id === cardId);
-    const homeNow: PlaceTo = card?.deck ? { deck: card.deck } : { loose: true };
+    // Where the card is NOW, as a `place` target: its plan when it has one (ADR-0097 §6),
+    // else its home deck, else the loose area.
+    const homeNow: PlaceTo =
+      card?.planned_in && !card.scene
+        ? { planned_in: card.planned_in, planned_after: card.planned_after ?? null }
+        : card?.deck
+          ? { deck: card.deck }
+          : { loose: true };
     const sameHome = !place.to || JSON.stringify(place.to) === JSON.stringify(homeNow);
     const sameStory = !place.story || isStoryNoOp(cards, cardId, place.story);
     if (sameHome && sameStory) return;
@@ -825,9 +866,28 @@ export class PlotUndoRecorder {
    *  nothing. */
   async realize(cardId: string, parentId: string | null): Promise<void> {
     await this.#whenIdle();
-    const sceneId = await this.#port.realizeCard(cardId, parentId);
+    // A planned card's plan, and every card's anchor, as they are BEFORE the write: realize
+    // clears the plan and re-anchors the cards that followed (ADR-0097 §6), undo restores both.
+    const cards = this.#getProjection()?.cards ?? [];
+    const card = cards.find((c) => c.id === cardId);
+    const plan: PlannedPlace | null =
+      card?.planned_in && !card.scene ? { planned_in: card.planned_in, planned_after: card.planned_after ?? null } : null;
+    const anchors = new Map(cards.map((c) => [c.id, c.planned_after ?? null]));
+    const { sceneId, reanchored } = await this.#port.realizeCard(cardId, parentId);
     if (!sceneId) return;
-    this.#record(realizeCommand(this.#port, cardId, parentId, sceneId));
+    const moved = reanchored.map((id) => ({ id, planned_after: anchors.get(id) ?? null }));
+    this.#record(realizeCommand(this.#port, cardId, parentId, sceneId, plan, plan ? moved : []));
+  }
+
+  /** Move a written card's scene to a chapter (ADR-0097 §8), recorded as ONE step. The slot
+   *  is worked out from the manuscript tree as it is now; a move to where the scene already
+   *  sits records (and sends) nothing. */
+  async sceneMove(sceneId: string, parentId: string, near: SceneNear, label = "move scene"): Promise<void> {
+    await this.#whenIdle();
+    const plan = planSceneMove(this.#port.structure(), sceneId, parentId, near);
+    if (!plan) return;
+    await this.#port.moveScene(plan.nodeId, plan.to.parentId, plan.to.position);
+    this.#record(sceneMoveCommand(this.#port, plan, label));
   }
 }
 
@@ -856,6 +916,8 @@ export function defaultPlotCommandPort(): PlotCommandPort {
     refreshArcRoster,
     refreshDeckRoster,
     realizeCard,
+    structure: currentStructure,
+    moveScene: moveSceneNode,
     sceneReferents,
     readScene,
     deleteScene,

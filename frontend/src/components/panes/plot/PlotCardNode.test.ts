@@ -52,6 +52,9 @@ const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
   title: "She leaves home",
   synopsis: "The heroine packs a bag and walks out.",
   attached: false,
+  planned: false,
+  sceneId: null,
+  plannedAfter: null,
   color: null,
   plotlineId: null,
   plotlineName: null,
@@ -273,11 +276,11 @@ describe("PlotCardNode — diagnostic highlight (ADR-0048 S7 lit set)", () => {
 });
 
 describe("PlotCardNode — content-op menu (S7d)", () => {
-  it("opens a menu with Open card + Realize scene for an unattached card", async () => {
+  it("opens a menu with Open card + Write as scene for an unattached card", async () => {
     renderWithActions({ attached: false }, actions());
     await fireEvent.click(screen.getByLabelText("Card actions"));
     expect(screen.getByRole("menuitem", { name: "Open card" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Realize scene" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Write as scene" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Detach scene" })).toBeNull();
   });
 
@@ -285,15 +288,36 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     renderWithActions({ attached: true }, actions());
     await fireEvent.click(screen.getByLabelText("Card actions"));
     expect(screen.getByRole("menuitem", { name: "Detach scene" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Realize scene" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Write as scene" })).toBeNull();
   });
 
   it("realizes with the backend default (null parent) when there are no containers to offer (#879)", async () => {
-    const acts = actions(); // no locations → "Realize scene" fires directly
+    const acts = actions(); // no locations → "Write as scene" fires directly
     renderWithActions({ attached: false }, acts, "card_9");
     await fireEvent.click(screen.getByLabelText("Card actions"));
-    await fireEvent.click(screen.getByRole("menuitem", { name: "Realize scene" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Write as scene" }));
     expect(acts.onRealize).toHaveBeenCalledWith("card_9", null);
+  });
+
+  it("writes a planned card where it is planned: no location submenu", async () => {
+    const acts = actions([], null, [{ id: "ch_2", title: "Chapter Two", depth: 0 }]);
+    renderWithActions({ attached: false, planned: true }, acts, "card_p");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Write as scene" }));
+    expect(screen.queryByRole("menuitem", { name: "Chapter Two" })).toBeNull();
+    expect(acts.onRealize).toHaveBeenCalledWith("card_p", null);
+  });
+
+  it("marks a planned card with the Planned pill and a dashed class", () => {
+    const { container } = renderWithActions({ planned: true }, actions());
+    expect(screen.getByText("Planned")).toBeInTheDocument();
+    expect(container.querySelector(".plot-card")!.classList.contains("planned")).toBe(true);
+  });
+
+  it("shows no Planned pill on an unplanned card", () => {
+    const { container } = renderWithActions({ planned: false }, actions());
+    expect(screen.queryByText("Planned")).toBeNull();
+    expect(container.querySelector(".plot-card")!.classList.contains("planned")).toBe(false);
   });
 
   it("realizes into a chosen manuscript location from the submenu (#879)", async () => {
@@ -303,9 +327,9 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     ]);
     renderWithActions({ attached: false }, acts, "card_r");
     await fireEvent.click(screen.getByLabelText("Card actions"));
-    // With containers present, "Realize scene" opens a location submenu rather than
+    // With containers present, "Write as scene" opens a location submenu rather than
     // firing straight away (mirrors "Set plotline").
-    await fireEvent.click(screen.getByRole("menuitem", { name: "Realize scene" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Write as scene" }));
     expect(acts.onRealize).not.toHaveBeenCalled();
     await fireEvent.click(screen.getByRole("menuitem", { name: "Chapter Two" }));
     expect(acts.onRealize).toHaveBeenCalledWith("card_r", "ch_2");

@@ -495,7 +495,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         """#1725: the plotting, ideation, and prose-enrichment prompts include the
         snippet, so each gains the "Lore" picker for free via the effective-inputs
         resolver; the mechanical text-op prompts (Rephrase/Shorten/Tighten grammar)
-        deliberately stay lore-free (a picker there is noise). "Revise entry" is an
+        deliberately carry no Lore picker (noise there). "Revise entry" is an
         ideation prompt like its revise-* siblings and belongs with them, not with
         the mechanical ops."""
         summaries = self._summaries()
@@ -517,7 +517,7 @@ class BuiltinLibraryTests(unittest.TestCase):
             self.assertIn("lore", names, f"{title} surfaces the lore picker")
         for title in ("Rephrase", "Shorten", "Tighten grammar"):
             body = self.service.read_prompt_entry(builtin_prompt_id(self.service, title)).body
-            self.assertNotIn("Relevant lore", body, f"{title} stays lore-free")
+            self.assertNotIn("Relevant lore", body, f"{title} has no lore picker")
 
     def test_follow_a_change_ships_as_the_propose_default(self) -> None:
         """ADR-0091 §4: the built-in Propose opens on by default — a

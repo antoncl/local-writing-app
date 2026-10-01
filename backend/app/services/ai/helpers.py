@@ -571,9 +571,9 @@ def _plot_context(project: ProjectService, as_of: Any, focus: Any = None) -> str
 def _register_lore_gate(
     env: SandboxedEnvironment, lore_invoked_slot: list[bool], deprecation_notices: list[str]
 ) -> None:
-    """Register `auto_lore()` and its deprecated alias `use_lore()` — split out
-    of `register_helpers` (#1544-style) so that function's own statement count
-    stays under the complexity gate.
+    """Register `auto_lore()`, its deprecated alias `use_lore()`, and `no_lore()`
+    — split out of `register_helpers` (#1544-style) so that function's own
+    statement count stays under the complexity gate.
 
     ADR-0057 §2 + ADR-0092 §7.2: the gate-only declaration. A chat prompt that
     lets the backend place lore (the normal case) calls `auto_lore()` — it
@@ -602,6 +602,21 @@ def _register_lore_gate(
         return ""
 
     env.globals["use_lore"] = _use_lore
+
+    # ADR-0092 Amendment 1 §3: `no_lore()` declares the prompt lore-free — the
+    # *always* entries are not placed and automatic lore is off. Like
+    # `auto_lore()` it only sets a per-render slot (`env.lore_free`) the preview
+    # reads back; it emits nothing. It wins over `auto_lore()` there, with a
+    # warning (the render cannot know which call ran first). `use()` picks are
+    # still placed.
+    lore_free_slot: list[bool] = [False]
+    env.lore_free = lore_free_slot  # type: ignore[attr-defined]
+
+    def _no_lore() -> str:
+        lore_free_slot[0] = True
+        return ""
+
+    env.globals["no_lore"] = _no_lore
 
 
 def _register_use(env: SandboxedEnvironment, project: ProjectService, schema: Any) -> None:

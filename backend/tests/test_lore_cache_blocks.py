@@ -130,22 +130,86 @@ class LoreCacheBlockTests(_LoreCacheFixture):
         self.assertIn('name="Premise"', stable_text)
         self.assertNotIn('name="Premise"', volatile_text)
 
-    def test_gate_off_places_no_lore(self) -> None:
-        # A chat with NEITHER the flag NOR any `use()` picks gets no lore at all,
-        # even though the always-note exists (Journey C). A chat with picks and
-        # the flag off is a DIFFERENT case (ADR-0092 §7.1) — see
-        # `test_a_pick_only_chat_places_its_picks_with_the_flag_off` below.
+    def test_gate_off_places_only_the_always_entries(self) -> None:
+        # ADR-0092 Amendment 1: a chat with automatic lore off places the
+        # `always` entries (declared by the entry's own policy) and nothing
+        # else: "Gaslamp", named in the message, is noticed lore, which stays off.
+        self._make_note("Gaslamp", body="Lit by whale oil.")
         off = self.service.create_chat_session(
-            CreateChatSessionRequest(title="Lore-free", prompt_entry_id="prompt_y")
+            CreateChatSessionRequest(title="Plain", prompt_entry_id="prompt_y")
         )
-        blocks = self._blocks(off.id, [{"role": "user", "content": "Premise please"}])
-        self.assertEqual([b["tier"] for b in blocks], ["stable"])  # only the system prompt
-        self.assertTrue(all("Premise" not in b["text"] for b in blocks))
+        prepared = expand_and_prepare_chat_blocks(
+            self.service, off.id, "SYSTEM PROMPT", [{"role": "user", "content": "Gaslamp?"}]
+        )
+        text = "".join(b["text"] for b in prepared.system_blocks or [])
+        self.assertIn('name="Premise"', text)
+        self.assertNotIn('name="Gaslamp"', text)
+        self.assertEqual(self.service.read_chat_session(off.id).journal, [])  # no detection ran
+        assert prepared.lore_fit is not None
+        self.assertEqual(prepared.lore_fit.left_out, [])
+
+    def test_a_lore_free_chat_places_no_always_entry(self) -> None:
+        # Amendment 1 §3: `no_lore()` makes the chat lore-free: no `always`
+        # entries. A chat stored with BOTH flags set sends no automatic lore
+        # either (the send treats a stored `lore_enabled` as off).
+        picked = self._make_note("Sidebar", body="A picked aside.")
+        self._make_note("Gaslamp", body="Lit by whale oil.")
+        for enabled in (False, True):
+            chat = self.service.create_chat_session(
+                CreateChatSessionRequest(title="Research", prompt_entry_id="prompt_r")
+            )
+            self.service.save_chat_session(
+                chat.id,
+                SaveChatSessionRequest(
+                    title="Research",
+                    prompt_entry_id="prompt_r",
+                    lore_enabled=enabled,
+                    lore_free=True,
+                    used_node_ids=[picked],
+                ),
+            )
+            prepared = expand_and_prepare_chat_blocks(
+                self.service, chat.id, "SYSTEM PROMPT", [{"role": "user", "content": "Gaslamp?"}]
+            )
+            text = "".join(b["text"] for b in prepared.system_blocks or [])
+            self.assertIn('name="Sidebar"', text)  # its own pick is still placed
+            self.assertNotIn('name="Premise"', text)
+            self.assertNotIn('name="Gaslamp"', text)
+            self.assertEqual(self.service.read_chat_session(chat.id).journal, [])
+
+    def test_a_lore_free_chat_with_no_picks_sends_no_lore(self) -> None:
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Research", prompt_entry_id="prompt_r")
+        )
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(title="Research", prompt_entry_id="prompt_r", lore_free=True),
+        )
+        prepared = expand_and_prepare_chat_blocks(
+            self.service, chat.id, "SYSTEM PROMPT", [{"role": "user", "content": "hi"}]
+        )
+        self.assertEqual([b["tier"] for b in prepared.system_blocks or []], ["stable"])
+        self.assertIsNone(prepared.lore_fit)
+
+    def test_a_turn_with_nothing_declared_keeps_lore_fit_none(self) -> None:
+        # No `always` entry in the project, no picks, automatic lore off: the
+        # turn still skips lore, and `lore_fit` stays None ("not lore-enabled").
+        with TemporaryDirectory() as tmp:
+            service = open_test_project(Path(tmp).resolve() / "bare", "Bare")
+            chat = service.create_chat_session(
+                CreateChatSessionRequest(title="Plain", prompt_entry_id="prompt_y")
+            )
+            prepared = expand_and_prepare_chat_blocks(
+                service, chat.id, "SYSTEM PROMPT", [{"role": "user", "content": "hi"}]
+            )
+            self.assertEqual([b["tier"] for b in prepared.system_blocks or []], ["stable"])
+            self.assertIsNone(prepared.lore_fit)
 
     def test_a_pick_only_chat_places_its_picks_with_the_flag_off(self) -> None:
-        # ADR-0092 §7.1: a chat with picks and the flag off places the picks,
-        # minus `never`, and nothing else — not the scene's own mentions, not
-        # the always-policy entry (the fixture's "Premise").
+        # ADR-0092 §7.1 + Amendment 1: a chat with picks and the flag off places
+        # the picks and the always-policy entry (the fixture's "Premise"), minus
+        # `never`, and nothing else — not the scene's own mentions, not its
+        # structural references.
         picked = self._make_note("Sidebar", body="A picked aside.")
         self._make_note("Gaslamp", body="Lit by whale oil.")
         rook = self.service.create_lore_entry(
@@ -203,7 +267,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
         text = "".join(b["text"] for b in prepared.system_blocks or [])
         self.assertIn('name="Sidebar"', text)
         self.assertNotIn('name="Gaslamp"', text)  # the scene's own mention: out
-        self.assertNotIn('name="Premise"', text)  # the always-policy entry: out
+        self.assertIn('name="Premise"', text)  # the always-policy entry: declared
         self.assertNotIn('name="Referenced Rook"', text)  # the scene's structural ref: out
         assert prepared.lore_fit is not None
         self.assertEqual(prepared.lore_fit.left_out, [])

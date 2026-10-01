@@ -83,6 +83,9 @@
     // of this flag. The Context door's System section annotates it (not a
     // call-site marker; see ADR-0076 decision 9's rejected alternative).
     loreEnabled: boolean;
+    // ADR-0092 Amendment 1 §3: the bound prompt called `no_lore()` — the Context
+    // door annotates the System row "lore-free".
+    loreFree?: boolean;
     // The chat's auto-detected context journal (ADR-0075) — the Context door's
     // "Auto-added this conversation" section; the transcript already stamps
     // per-turn `journal_added` chips, so this is the running roster.
@@ -124,6 +127,7 @@
     loreLeftOutXml = {},
     fetchLeftOutXml = async () => null,
     loreEnabled,
+    loreFree = false,
     journal,
     changedPicks,
     onOpenDoor,
@@ -407,6 +411,7 @@
           {chatSystemPrompt}
           {chatPreviewMessages}
           {loreEnabled}
+          {loreFree}
           {lockedInputDisplays}
           {journal}
           {changedPicks}

@@ -373,7 +373,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "context_policy": {
             # How the AI-context layers treat this entry. Values:
-            #   - "always":      pulled into every implicit-mode render
+            #   - "always":      sent with every prompt unless the prompt calls
+            #                    no_lore() (ADR-0092 Amendment 1); the commit
+            #                    turn carries only what the chat picked
             #   - "auto":        textual alias match (current default)
             #   - "manual_only": skipped by the matcher; explicit picker only
             #   - "never":       hidden from picker and matcher
@@ -382,7 +384,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Context policy",
             "description": (
                 "Controls when this entry is fed to the AI as context: 'always' "
-                "(every request), 'auto' (when its name or an alias is mentioned — "
+                "(sent with every prompt unless the prompt is lore-free; the step "
+                "that saves a chat's result carries only what the chat picked), "
+                "'auto' (when its name or an alias is mentioned — "
                 "the default), 'manual_only' (only when you pick it), or 'never' "
                 "(excluded everywhere)."
             ),

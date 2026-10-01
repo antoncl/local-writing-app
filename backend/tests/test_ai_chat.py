@@ -814,14 +814,16 @@ class ChatEndpointJournalTests(unittest.TestCase):
         self.assertEqual(chat.seen_revisions.get(self.honor_id), current_revision)
 
     def test_lore_gate_off_injects_no_lore(self) -> None:
-        """ADR-0057 §2 Journey C: a chat whose prompt never called
-        relevant_lore() (lore_enabled=False, the default) gets no send-time
-        detection and no lore block at all — even when the message names lore
-        entries that a lore-enabled chat would pull in."""
+        """ADR-0057 §2, narrowed by ADR-0092 Amendment 1: a chat whose prompt
+        never called auto_lore() (lore_enabled=False, the default) gets no
+        send-time detection and no AUTOMATIC lore — even when the message names
+        lore entries that a lore-enabled chat would pull in. (This fixture has
+        no `always` entry, so there is nothing declared to place either; the
+        always-entry case is in test_lore_cache_blocks.py.)"""
         from app.models import CreateChatSessionRequest
         # No lock render enabled the gate, so lore_enabled stays False.
         off_chat = self.service.create_chat_session(
-            CreateChatSessionRequest(title="Lore-free", prompt_entry_id="prompt_y")
+            CreateChatSessionRequest(title="Automatic off", prompt_entry_id="prompt_y")
         )
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \

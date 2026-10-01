@@ -29,6 +29,8 @@ export interface ChatEstimateDeps {
   mayCaptureLoreGate: () => boolean;
   /** Write the mirrored lore gate — component-owned (`chatLoreEnabled`). */
   setLoreEnabled: (v: boolean) => void;
+  /** Write the mirrored lore-free flag (`no_lore()`) — same guard, same owner. */
+  setLoreFree: (v: boolean) => void;
 }
 
 export class ChatEstimateController {
@@ -114,6 +116,7 @@ export class ChatEstimateController {
       // capture and persist a wrong gate (S2 review).
       if (this.deps.mayCaptureLoreGate()) {
         this.deps.setLoreEnabled(preview.lore_enabled ?? false);
+        this.deps.setLoreFree(preview.lore_free ?? false);
       }
       this.estimate = {
         tokens: preview.estimated_tokens ?? 0,

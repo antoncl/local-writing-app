@@ -14,7 +14,7 @@ face. The fit against the assistant's budget is `lore_budget.fit_lore_budget`.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from app.services.ai.helpers import (
     _attr_or_item,
@@ -46,6 +46,13 @@ from app.services.project.errors import ProjectServiceError
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
+
+
+# What a selection draws on (ADR-0092 §7.1 + Amendment 1): `"automatic"` is the
+# full implicit selection (detection, scene refs, `always`, hops); `"declared"`
+# is the `use()` picks plus the `always` entries, nothing inferred; `"picks"` is
+# the `use()` picks alone (a lore-free prompt).
+SelectMode = Literal["automatic", "declared", "picks"]
 
 
 # ----- `relevant_lore(scene, mode)` ---------------------------------------
@@ -137,21 +144,23 @@ def _select_lore(
     used_ids: list[str] | None = None,
     *,
     expansion: LoreExpansion = "one_hop",
-    automatic: bool = True,
+    mode: SelectMode = "automatic",
+    policies: dict[str, set[str]] | None = None,
 ) -> LoreSelection:
     """The implicit selection with provenance (ADR-0086 §1, narrowed by
-    ADR-0092 §7.1): every id is **declared** or **inferred**. When `automatic`
-    is True (the default), declared is the chat's `use()` picks, the scene's
+    ADR-0092 §7.1): every id is **declared** or **inferred**. In `"automatic"`
+    mode (the default), declared is the chat's `use()` picks, the scene's
     structural refs, and every `always`-policy entry, and inferred is the
     journal's detections (or, with no journal, the scene's own prose scan and
     the textual hop) plus the structural one-hop. An id reachable both ways is
     declared. The inferred candidates come back in fit order, and the one
     `never` chokepoint is applied here, once, to both sets.
 
-    When `automatic` is False, declared is the `use()` picks ALONE — not the
-    scene's refs, not the `always` entries — inferred is empty, and no
-    detection or expansion runs; `never` still applies to the picks (ADR-0092
-    §7.1: a pick-only send places its picks, minus `never`, and nothing else).
+    In `"declared"` mode (ADR-0092 Amendment 1), declared is the `use()` picks
+    plus every `always` entry — not the scene's refs — inferred is empty, and no
+    detection or expansion runs; `never` still applies. `"picks"` is the same
+    with the `always` entries left out (a lore-free prompt). `policies` is the
+    caller's already-made `_lore_policy_ids` scan, reused instead of rescanning.
 
     `expansion` (§2b) is the assistant's reach: `one_hop` takes both hops as
     today; `named` keeps only what was actually named — no `depth1_expansion`
@@ -164,15 +173,18 @@ def _select_lore(
     expand one hop — that stays the implicit `auto_lore()` path's job. An author
     who wants a use()'d node's neighbours loops its refs and use()s them.
     """
-    if not automatic:
-        never_ids = _never_lore_ids(project)
+    # The three context policies from ONE lore scan (not one scan per policy).
+    if policies is None:
+        policies = _lore_policy_ids(project)
+    if mode != "automatic":
+        never_ids = policies["never"]
         declared = set(used_ids or [])
+        if mode == "declared":
+            declared |= policies["always"]
         return LoreSelection(frozenset(declared - never_ids), (), frozenset(never_ids))
     scene_refs = _collect_lore_refs_from_metadata(
         _attr_or_item(scene, "metadata"), project.read_metadata_schema()
     )
-    # The three context policies from ONE lore scan (not one scan per policy).
-    policies = _lore_policy_ids(project)
     # Always-included entries (context_policy = "always") feed every implicit
     # render regardless of mention — and, with the scene's refs, seed the hops.
     roots = set(scene_refs) | policies["always"]
@@ -199,7 +211,8 @@ def _budgeted_lore_tiers(
     *,
     session: AISession,
     limits: LoreLimits,
-    automatic: bool = True,
+    mode: SelectMode = "automatic",
+    policies: dict[str, set[str]] | None = None,
 ) -> BudgetedLoreTiers:
     """The one composition the send and the preview share (ADR-0086 §4):
     select with provenance → render every candidate once → fit the inferred
@@ -207,9 +220,11 @@ def _budgeted_lore_tiers(
     kept `(id, xml)` pairs per tier, the left-out entries' elements, and the
     report. The same rule at two times is one function, not two truths.
 
-    `automatic=False` (ADR-0092 §7.1) selects the `use()` picks alone — no
-    detection, no scene refs, no `always` entries — which fits with nothing
-    left out by construction.
+    `mode="declared"` (ADR-0092 Amendment 1) selects the `use()` picks and the
+    `always` entries — no detection, no scene refs — and `"picks"` the picks
+    alone (a lore-free prompt); both fit with nothing left out by construction.
+    `policies` is the caller's one `_lore_policy_ids` scan, handed to the
+    selector so it is not made twice.
 
     Rendering once is the point: the fit decides on rendered size, the tiers
     reuse the same pairs, and a left-out entry is named from the node the
@@ -225,7 +240,13 @@ def _budgeted_lore_tiers(
     from app.services.ai.lore_block import _render_lore_entries
 
     selection = _select_lore(
-        project, scene, journal, picks.ids, expansion=limits.expansion, automatic=automatic
+        project,
+        scene,
+        journal,
+        picks.ids,
+        expansion=limits.expansion,
+        mode=mode,
+        policies=policies,
     )
     index = project.build_mutations_index() if scene is not None else None
     titles: dict[str, str] = {}

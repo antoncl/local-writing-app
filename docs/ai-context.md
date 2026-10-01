@@ -25,9 +25,11 @@ second one runs at all.
 
 The switch is the prompt's `auto_lore()` call. A prompt that calls it gets both
 halves; the Context door shows **lore-enabled · by this prompt** at the top of its
-System section. A prompt that only picks — `use()` alone — sends its picks and
-nothing else: no scene references, no always-included entries, no noticing. That is
-deliberate. A prompt built to check *one* entry should not be handed the world.
+System section. A prompt without it sends its picks and every always-included
+entry, and nothing else: no scene references, no noticing. A prompt built to
+check *one* entry, or a research prompt that must stay clean, can say so with
+`no_lore()`: it sends its own picks and no always-included entries at all, and the
+door shows **lore-free** in place of *lore-enabled*.
 
 A prompt can also place an entry as it was at an earlier snapshot, alongside the
 entry as it is now — `use(node, snapshot=id)`. Propose's built-in **Follow a
@@ -98,9 +100,11 @@ Every lore entry has a **Context policy** field with one of four values:
 
 - **Automatic (alias match)** — the default. Noticed when named, followed when
   linked, available to pickers.
-- **Always include** — in every turn that has automatic lore on, named or not.
-  Use it for the handful of entries that define your world: the premise, the
-  magic system, the tone sheet.
+- **Always include** — sent with every prompt unless the prompt calls
+  `no_lore()`, named or not, whether or not automatic lore is on. The step that
+  saves a chat's result (the commit) carries only what the chat picked. Use it for
+  the handful of entries that define your world: the premise, the magic system,
+  the tone sheet, your narration conventions.
 - **Manual only** — never noticed, never followed as a link; sent only when a
   prompt picks it or the scene references it. Good for spoilers and notes to
   yourself that a stray name shouldn't pull in.
@@ -135,7 +139,7 @@ the first send and after every turn:
   the automatic half is on.
 - **Stable lore / Volatile lore** — the two blocks with their entries. Open an entry
   to see the exact XML the model receives. Rows present with no *lore-enabled*
-  line means "picks placed, automatic off". An earlier state placed by
+  line means "picks or always-included entries placed, automatic off". An earlier state placed by
   `use(node, snapshot=id)` appears first in the list of the tier that holds it —
   the stable tier, except for the one turn after something it refers to was
   renamed — as an "as of ⟨time⟩" row; the tier row's count includes it as an
@@ -152,6 +156,7 @@ These lines cover it. None of them prints anything where you write it.
 ```jinja
 {% do use(inputs.lore) %}   {# the entries a Lore picker chose — declared #}
 {{ auto_lore() }}           {# turn the automatic half on #}
+{{ no_lore() }}             {# no always-included entries, no automatic lore #}
 {% include "Relevant lore" %}  {# a ready-made optional Lore picker, picks only #}
 {% include "Relevant manuscript and plot" %}  {# the same for scenes and plot cards #}
 ```
@@ -161,7 +166,8 @@ prose, so pick scenes sparingly.
 
 `auto_lore()` was called `use_lore()`; the old name still works until 1.0 but
 adds a warning to every estimate, so rename it when you see one. A prompt that
-calls neither sends no lore at all — the model sees only your text and the
-conversation. Details of the calls are in [Writing prompts](#guide:writing-prompts)
+calls neither sends its picks and the always-included entries; one that calls
+`no_lore()` sends only its picks. If a prompt calls both, `no_lore()` wins and
+the estimate warns. Chats started without a prompt send no lore. Details of the calls are in [Writing prompts](#guide:writing-prompts)
 and the [Prompt reference](#guide:reference); the picker input itself is its own
 guide, [Context picker](#guide:context-picker).

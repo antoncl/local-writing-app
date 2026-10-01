@@ -428,6 +428,12 @@ class AIPreviewResponse(BaseModel):
     # send path knows whether to inject lore at all. Always populated; False when
     # the template never called the helper.
     lore_enabled: bool = False
+    # ADR-0092 Amendment 1 §3: whether `no_lore()` executed during this render —
+    # the prompt is lore-free (no *always* entries, no automatic lore; its own
+    # `use()` picks are still placed). Captured at the lock render beside
+    # `lore_enabled` and persisted as the chat's `lore_free`. When a prompt
+    # calls both gates, `lore_free` wins and `lore_enabled` is False.
+    lore_free: bool = False
     # ADR-0060 §2: node ids the template selected via `use(node)`, deduped and in
     # insertion order. Captured at the lock render alongside `lore_enabled` and
     # persisted as the chat's `used_node_ids`, so the send path unions them into
@@ -757,11 +763,16 @@ class ChatSession(BaseModel):
     # ADR-0057 §2: the execution-derived lore gate. Whether this chat sees lore
     # is the prompt's own choice, expressed by whether `relevant_lore()` actually
     # ran during the chat's lock render (not a static text-scan, not a user
-    # knob). Captured once from that render (§6) and stable thereafter. Gate off
-    # → the send path injects no lore at all (Journey C: a deliberately lore-free
-    # prompt stays clean). Defaults False so a chat that never ran the helper is
-    # lore-free by construction.
+    # knob). Captured once from that render (§6) and stable thereafter. This
+    # gates AUTOMATIC lore only (ADR-0092 §7.1): with it off the send still
+    # places the chat's `use()` picks and the project's *always* entries
+    # (Amendment 1), unless `lore_free` is set. Defaults False.
     lore_enabled: bool = False
+    # ADR-0092 Amendment 1 §3: the prompt called `no_lore()` at the lock render —
+    # the chat places no *always* entries and no automatic lore (even if a
+    # `lore_enabled` is stored), only its own `use()` picks. Captured with
+    # `lore_enabled`, stable thereafter. Absent reads as False.
+    lore_free: bool = False
     # ADR-0060 §2: node ids the chat's prompt selected via `use(node)` at its lock
     # render, captured alongside `lore_enabled` and stable thereafter. The send
     # path unions these into its one deduped lore selector (`_relevant_lore`'s
@@ -907,6 +918,8 @@ class SaveChatSessionRequest(BaseModel):
     # bool sets it. Only the lock-render save (which learns it from the preview
     # response's `lore_enabled`) sends a value; thereafter it is preserved.
     lore_enabled: bool | None = None
+    # Amendment 1 §3: `lore_free`, echoed like `lore_enabled` (None = preserve).
+    lore_free: bool | None = None
     # ADR-0060 §2: the author-selected node ids, echoed like `lore_enabled`. None =
     # "leave the captured value alone" (general saves omit it); a list (even []) is
     # the new value. Only the lock-render save carries it (from the preview

@@ -152,8 +152,9 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertTrue(response.json()["lore_enabled"])
 
     def test_preview_reports_lore_disabled_when_helper_absent(self) -> None:
-        # A prompt that never calls the helper reports False — the gate stays
-        # off and the send path will inject no lore (Journey C).
+        # A prompt that never calls the helper reports False — the automatic
+        # gate stays off (the send still places picks and `always` entries,
+        # ADR-0092 Amendment 1).
         response = self.client.post(
             "/api/ai/preview",
             json={

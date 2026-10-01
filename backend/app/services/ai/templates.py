@@ -64,6 +64,11 @@ class RenderedTemplate:
     # this render — the execution-derived lore gate. Set by `build_preview` from
     # the env's invocation slot; the preview route surfaces it as `lore_enabled`.
     lore_invoked: bool = False
+    # ADR-0092 Amendment 1 §3: whether `no_lore()` executed — the prompt is
+    # lore-free (no *always* entries, no automatic lore; `use()` picks still
+    # placed). Set by `build_preview`; surfaced as `lore_free` and persisted on
+    # the chat. When both gates ran, `lore_invoked` is cleared at the source.
+    lore_free: bool = False
     # ADR-0060 §2: node ids the template selected via `use(node)`, in insertion
     # order, deduped. Set by `build_preview` from the env's `used_nodes` slot;
     # persisted on the chat (`ChatSession.used_node_ids`) and unioned into the send

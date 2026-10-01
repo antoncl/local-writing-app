@@ -593,6 +593,15 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "plot", "expr": {"type": "plot:deck"}}]},
         },
+        "realized_container": {
+            # The manuscript container a deck is realized as (ADR-0097 §7): endpoint-owned
+            # (realize / attach / detach), so hidden from the rail; at most one deck per
+            # container. While set, the deck shows the container's title and summary.
+            "name": "Realized as",
+            "type": "entity_ref",
+            "hidden": True,
+            "picker_config": {"sources": [{"kind": "manuscript", "expr": {"type": "manuscript:container"}}]},
+        },
         "scene": {
             # A single optional reference to a scene. A shared catalog field; its
             # current consumer is the card's scene attachment (ADR-0048 §1): the

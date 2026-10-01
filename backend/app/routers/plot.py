@@ -14,6 +14,7 @@ from fastapi import APIRouter
 
 from app.models import (
     AttachCardRequest,
+    AttachDeckRequest,
     CardEntry,
     CardList,
     CardTextRequest,
@@ -26,7 +27,9 @@ from app.models import (
     CreatePlotTemplateRequest,
     DeckEntry,
     DeckList,
+    DeckTextRequest,
     DetachCardRequest,
+    DetachDeckRequest,
     PlaceCardRequest,
     PlotBoard,
     PlotBoardProjection,
@@ -37,6 +40,7 @@ from app.models import (
     PlotTemplateList,
     RealizeCardRequest,
     RealizeCardResult,
+    RealizeDeckResult,
     SaveCardRequest,
     SaveCharacterArcRequest,
     SaveDeckRequest,
@@ -180,6 +184,34 @@ def save_deck(project: CurrentProject, entry_id: str, request: SaveDeckRequest) 
 def delete_deck(project: CurrentProject, entry_id: str) -> DeckList:
     with translate_errors():
         return project.delete_deck(entry_id)
+
+
+@router.put("/api/plot/decks/{entry_id}/text", response_model=DeckEntry)
+def set_deck_text(project: CurrentProject, entry_id: str, request: DeckTextRequest) -> DeckEntry:
+    """Edit the title/synopsis a deck shows: the container's when realized (ADR-0097 §3)."""
+    with translate_errors():
+        return project.set_deck_text(entry_id, request)
+
+
+@router.post("/api/plot/decks/{entry_id}/realize", response_model=RealizeDeckResult)
+def realize_deck(project: CurrentProject, entry_id: str) -> RealizeDeckResult:
+    """Create a manuscript container from a deck and plan its unwritten cards in it (ADR-0097 §7)."""
+    with translate_errors():
+        return project.realize_deck(entry_id)
+
+
+@router.post("/api/plot/decks/{entry_id}/attach", response_model=DeckEntry)
+def attach_deck(project: CurrentProject, entry_id: str, request: AttachDeckRequest) -> DeckEntry:
+    """Re-link a deck to an existing manuscript container (ADR-0097 §3, §7)."""
+    with translate_errors():
+        return project.attach_deck(entry_id, request)
+
+
+@router.post("/api/plot/decks/{entry_id}/detach", response_model=DeckEntry)
+def detach_deck(project: CurrentProject, entry_id: str, request: DetachDeckRequest) -> DeckEntry:
+    """Unbind a deck from its container; it takes the container's text back (ADR-0097 §3, §7)."""
+    with translate_errors():
+        return project.detach_deck(entry_id, request)
 
 
 @router.get("/api/plot/cards", response_model=CardList)

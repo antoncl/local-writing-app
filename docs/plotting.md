@@ -54,7 +54,14 @@ Cards and scenes are linked but independent, and you choose how tightly:
 - **Realize scene** (on a card's ⋮ menu) does the reverse: it mints a *new* scene
   from a planned card, and **Realize into…** lets you drop it under a chosen act or
   chapter. A card tied to a scene reads **On the page**.
+- **Attach scene…** (on an unattached card's ⋮ menu) binds the card to a scene that
+  already exists. The picker lists only scenes no other card holds.
 - **Detach scene** breaks the link without touching the scene itself.
+
+A card tied to a scene shows that scene's title and summary, not text of its own:
+editing the card's name or synopsis on the board edits the scene. Attach and Detach
+move text between the two. If the scene's summary and the card's synopsis are both
+filled in and different, you're asked which one to keep; otherwise nothing is lost.
 
 A scene belongs to at most one card. Attaching a scene that another card already
 has is refused — detach it from that card first. If one scene serves several

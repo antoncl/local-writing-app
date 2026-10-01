@@ -10,8 +10,11 @@ const SCHEMA = {
   entry_types: {
     "lore:character": { name: "Character", kind: "lore", fields: ["alias", "allies", "tags", "status", "bio", "beats", "follow_ups"] },
     "tag:tag": { name: "Tag", kind: "tag" },
+    "plot:card": { name: "Card", kind: "plot", fields: ["scene"] },
   },
   fields: {
+    // ADR-0097 §1: a plot card's scene link, owned by realize / attach / detach.
+    scene: { name: "Scene", type: "entity_ref", options: [], picker_config: { sources: [{ kind: "manuscript" }] } },
     alias: { name: "Alias", type: "text", options: [] },
     bio: { name: "Bio", type: "long_text", options: [] },
     // #2043: a list whose items carry prose (a repeating body section) and one
@@ -363,6 +366,12 @@ describe("buildRailRowModel", () => {
     it("readOnly (another axis: parked/reviewing/inherited) wins over the predicate", () => {
       const model = buildRailRowModel(baseCtx({ readOnly: true, scrubbed: true, stopEditable: () => true }), "alias");
       expect(model.fieldReadOnly).toBe(true);
+    });
+
+    it("ADR-0097 §1: a plot card's `scene` is read-only; the same field elsewhere is not", () => {
+      const card = baseCtx({ entryType: "plot:card", documentKind: "plot_card", metadata: { scene: "scene_1" } });
+      expect(buildRailRowModel(card, "scene").fieldReadOnly).toBe(true);
+      expect(buildRailRowModel(baseCtx({ metadata: { scene: "scene_1" } }), "scene").fieldReadOnly).toBe(false);
     });
 
     it("off the scrub axis, fieldReadOnly never consults the predicate", () => {

@@ -506,6 +506,7 @@
     // view the controller diffs against — else their flip's "current" side reads
     // as unset. Adoption routes them back out (onAdoptFields below).
     entryReview.metadata = { ...metadata, title, status };
+    entryReview.bodyFrozen = bodyFrozen;
   });
   // ADR-0096 §8: the strip's schema (to tell a `list`-typed field apart from
   // an ordinary one when a park captures `listReviews`) and whether this
@@ -601,6 +602,12 @@
   // model stamps `editable` and no other does. Fails closed. Own clones are
   // editable, and lore (which forks in place) carries no flag, so it is untouched.
   const inheritedReadOnly = $derived(readOnlyInPlace(scene));
+  // ADR-0097 §3: a WRITTEN card (bound to a scene) shows its scene's title + summary, so
+  // its own title and body are frozen. Deliberately not folded into `editorReadOnly`,
+  // which locks the rail too — the rail (plotline, beats, page status) stays editable.
+  const bodyFrozen = $derived(
+    documentKind === "plot_card" && typeof metadata.scene === "string" && metadata.scene !== "",
+  );
   // The interactive flip lens the rail renders during a lore review (slice 3b):
   // the proposed structured fields as click-to-adopt flips, wired to the
   // controller's per-field resolution. Same `compare` shape snapshot compare
@@ -1235,6 +1242,10 @@
          read-only in place. The title cannot be renamed here; clone it
          to edit. -->
     <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (inherited, read-only)`} value={title} />
+  {:else if bodyFrozen}
+    <!-- A written card shows its scene's title (ADR-0097 §3); rename it on the board
+         or in the scene. -->
+    <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (written as a scene, read-only)`} value={title} />
   {:else}
     <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
   {/if}
@@ -1265,7 +1276,7 @@
     bind:this={bodyHost}
     model={{
       scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, title, metadata,
-      metadataSchema, editorReadOnly, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
+      metadataSchema, editorReadOnly, bodyFrozen, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
       overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, resolveListMemberTitle, detailsDetached, chatTitleField, metaContent,
       stopUnit, backlinks,
       frontMatter: frontMatterMode ? frontMatter : undefined, appendix: frontMatterMode ? appendix : undefined,

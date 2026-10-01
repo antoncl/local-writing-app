@@ -17,11 +17,14 @@
 <script lang="ts">
   import { getContext, tick } from "svelte";
   import { getSwatch } from "@/lib/utils/colors";
+  import { findNodeBySceneId, isLeafNode } from "@/lib/utils/treeHelpers";
   import { CARD_DRAG_HANDLE_CLASS, type PlotCardData } from "@/lib/plot/plotBoardLayout";
   import type { PlotCardBeat } from "@/lib/types";
+  import type { NodePickerConfig, NodePickerRef } from "@/lib/pickerTypes";
   import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
   import { hasPlotBeatDrag, readPlotBeatDrag, setPlotBeatDrag } from "@/lib/plot/plotDnd";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import NodePicker from "@/components/widgets/NodePicker.svelte";
 
   // Svelte Flow passes the node's id/data/selection state as props.
   let { id, data }: { id?: string; data: PlotCardData; selected?: boolean } = $props();
@@ -78,6 +81,9 @@
   let visibleBeats = $derived<PlotCardBeat[]>(actions ? orderedBeats : orderedBeats.slice(0, BEAT_BADGE_CAP));
   let hiddenBeats = $derived<PlotCardBeat[]>(actions ? [] : orderedBeats.slice(BEAT_BADGE_CAP));
 
+  // The Attach picker browses the manuscript's scenes (ADR-0097 §4).
+  const ATTACH_PICKER: NodePickerConfig = { sources: [{ kind: "manuscript", expr: { type: "manuscript:scene" } }] };
+
   let menuOpen = $state(false);
   // Three pages: the actions, the "Set plotline" lane list, and the "Realize scene"
   // location list (#879). Beats + causal are no longer menu pages — they're drag
@@ -95,6 +101,9 @@
   $effect(() => {
     if (!menuOpen) return;
     const onDown = (e: PointerEvent) => {
+      // The Attach picker's popover is portaled to <body> (outside the card), so a press
+      // inside it is not an outside press.
+      if ((e.target as Element | null)?.closest?.(".ctx-menu")) return;
       if (rootEl && !rootEl.contains(e.target as Node)) closeMenu();
     };
     const onKey = (e: KeyboardEvent) => {
@@ -133,6 +142,19 @@
   function realizeAt(parentId: string | null) {
     closeMenu();
     if (actions && id) actions.onRealize(id, parentId);
+  }
+  // A pick in the Attach picker. The tree also lets a container be checked; only a
+  // scene is attachable, so a container pick is ignored (the picker stays open).
+  function attachPicked(detail: { value: NodePickerRef[] }) {
+    if (!actions || !id) return;
+    const root = actions.structure?.root;
+    const scene = detail.value.find((r) => {
+      const node = root ? findNodeBySceneId(root, r.id) : null; // a container ref carries the node id, so misses
+      return r.kind === "manuscript" && !!node && isLeafNode(node);
+    });
+    if (!scene) return;
+    closeMenu();
+    actions.onAttach(id, scene.id);
   }
   function setPageStatus(status: "off_page" | "unwritten") {
     closeMenu();
@@ -312,7 +334,7 @@
         bind:this={textarea}
         bind:value={draft}
         class="card-synopsis-edit nodrag nopan"
-        placeholder="Add a synopsis…"
+        placeholder={data.attached ? "No summary yet" : "Add a synopsis…"}
         onblur={commitEdit}
         onkeydown={(e) => {
           if (e.key === "Escape") cancelEdit();
@@ -325,7 +347,7 @@
         title="Click to edit the synopsis"
         onclick={startEdit}
       >
-        {data.synopsis || "Add a synopsis…"}
+        {data.synopsis || (data.attached ? "No summary yet" : "Add a synopsis…")}
       </button>
     {:else if data.synopsis}
       <p class="card-synopsis">{data.synopsis}</p>
@@ -467,6 +489,22 @@
           <button role="menuitem" class="menu-item" onclick={() => realizeAt(null)}>
             <i class="ti ti-wand" aria-hidden="true"></i> Realize scene
           </button>
+        {/if}
+        {#if !data.attached}
+          <!-- Attach an existing scene (ADR-0097 §4): the NodePicker's own trigger is the
+               item (it opens a body-portaled popover), offering only scenes no card holds. -->
+          <div class="menu-picker">
+            <NodePicker
+              hideChips
+              compact
+              config={ATTACH_PICKER}
+              value={[]}
+              label="Attach scene…"
+              structure={actions.structure}
+              excludeIds={actions.heldSceneIds}
+              onChange={attachPicked}
+            />
+          </div>
         {/if}
         <button role="menuitem" class="menu-item" onclick={() => (menuView = "plotline")}>
           <i class="ti ti-route" aria-hidden="true"></i> Set plotline
@@ -946,6 +984,9 @@
   }
   .menu-item:hover {
     background: var(--surface);
+  }
+  .menu-picker {
+    padding: 2px 4px;
   }
   .menu-item i {
     color: var(--text-3);

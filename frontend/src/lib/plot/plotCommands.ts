@@ -16,6 +16,11 @@
 //   • field/beat edit — a whole-state before/after flip (`restore(before)` /
 //     `restore(after)`). Whole-state, not per-field, because one op can touch several
 //     fields (dropping a beat also adopts a primary, #863); the flip reverses all of it.
+//   • text edit / attach / detach (ADR-0097 §3/§4) — a written card SHOWS its scene's
+//     text, so its title/synopsis move through their own endpoints, never a whole-state
+//     save (the server refuses a written card's own title/body change). The commands
+//     replay those endpoints, and attach / detach remember the text choice the writer
+//     made so redo never asks twice.
 //
 // The pure builders below take a `PlotCommandPort` (store ops behind an interface, so
 // they unit-test with a fake); `PlotUndoRecorder` wraps capture-op-record for the
@@ -35,7 +40,12 @@ import {
   refreshAfterMutation,
   restoreCardState,
   sceneReferents,
+  attachCardScene,
+  readSceneSummary,
+  setCardText,
+  type CardTextOutcome,
 } from "@/lib/stores/plotBoard";
+import type { CardTextChoice } from "@/lib/api/plot";
 import {
   type PlotlineState,
   deletePlotline,
@@ -83,10 +93,21 @@ export interface PlotCommandPort {
   sceneReferents(sceneId: string): string[];
   readScene(sceneId: string): Promise<{ title: string; body: string }>;
   deleteScene(sceneId: string): Promise<void>;
-  detachCardScene(cardId: string): Promise<void>;
+  // Attach / detach with an optional recorded text choice (null / "cancelled" per
+  // `CardTextOutcome`); the store asks the writer only when a choice is needed and
+  // none was passed.
+  attachCardScene(cardId: string, sceneId: string, text?: CardTextChoice): Promise<CardTextOutcome>;
+  detachCardScene(cardId: string, text?: CardTextChoice): Promise<CardTextOutcome>;
+  // The displayed title / synopsis edit (the scene's while the card is written).
+  setCardText(cardId: string, text: CardText): Promise<void>;
+  readSceneSummary(sceneId: string): Promise<string>;
   // Suppressible confirm before deleting a written scene; resolves false on cancel.
   confirmSceneDelete(scene: { title: string; body: string }): Promise<boolean>;
 }
+
+// The displayed title / synopsis of a card — each key optional so a command replays
+// only what its edit changed.
+export type CardText = { title?: string; synopsis?: string };
 
 // A captured card (id + whole state) — a deleted node, or a referrer restored
 // alongside it.
@@ -150,6 +171,81 @@ export function cardEditCommand(
     label,
     undo: () => port.restoreCardState(id, before),
     redo: () => port.restoreCardState(id, after),
+  };
+}
+
+// A displayed-text edit (rename / synopsis, written or not): undo and redo replay the
+// text endpoint with the before / after values of the keys the edit changed.
+export function cardTextCommand(
+  port: PlotCommandPort,
+  id: string,
+  before: CardText,
+  after: CardText,
+  label: string,
+): Command {
+  return {
+    label,
+    undo: () => port.setCardText(id, before),
+    redo: () => port.setCardText(id, after),
+  };
+}
+
+// A replay that the writer backs out of must leave the step where it was.
+function ensureNotCancelled(outcome: CardTextOutcome): CardTextChoice | null {
+  if (outcome === "cancelled") throw new UndoCancelled();
+  return outcome;
+}
+
+// Detach (ADR-0097 §3): the card leaves `sceneId` and takes its title. `before` is the
+// card's own state while it was written. Undo restores that own title + synopsis on the
+// now-unwritten card, then re-attaches with "scene" (the scene was never touched, so
+// nothing is asked). Redo detaches with the choice recorded at the original op.
+export function detachCommand(
+  port: PlotCommandPort,
+  id: string,
+  sceneId: string,
+  before: CardState,
+  choice: CardTextChoice | null,
+  label = "detach scene",
+): Command {
+  return {
+    label,
+    undo: async () => {
+      await port.setCardText(id, { title: before.title, synopsis: before.body });
+      ensureNotCancelled(await port.attachCardScene(id, sceneId, "scene"));
+    },
+    redo: async () => {
+      ensureNotCancelled(await port.detachCardScene(id, choice ?? undefined));
+    },
+  };
+}
+
+// Attach (ADR-0097 §3): `before` is the card's own state, `oldSummary` the scene's
+// summary before the attach. Undo puts the scene's summary back if the attach changed
+// it (while still written), detaches keeping the card's own synopsis, then restores the
+// card's own title + synopsis (a detach would leave it the scene's). Redo attaches with
+// the recorded choice.
+export function attachCommand(
+  port: PlotCommandPort,
+  id: string,
+  sceneId: string,
+  before: CardState,
+  oldSummary: string,
+  choice: CardTextChoice | null,
+  label = "attach scene",
+): Command {
+  return {
+    label,
+    undo: async () => {
+      if ((await port.readSceneSummary(sceneId)) !== oldSummary) {
+        await port.setCardText(id, { synopsis: oldSummary });
+      }
+      ensureNotCancelled(await port.detachCardScene(id, "card"));
+      await port.setCardText(id, { title: before.title, synopsis: before.body });
+    },
+    redo: async () => {
+      ensureNotCancelled(await port.attachCardScene(id, sceneId, choice ?? undefined));
+    },
   };
 }
 
@@ -287,11 +383,10 @@ export function seedCommand(port: PlotCommandPort, created: CardRef[], label = "
 }
 
 // Realize minted a scene FILE and attached it (S6b) — the one op with a file side
-// effect. Undo deletes that scene ONLY when the card is its sole referent (0..n cards
-// per scene), behind a suppressible confirm when the scene holds prose; a shared scene
-// is kept (this card detached). Redo re-mints — capturing the NEW scene id (mutable
-// closure state) so the next undo targets it. The sole-referent check reads the LIVE
-// board at undo time, since another card may have attached since the realize.
+// effect. Undo deletes that scene — the card is its sole referent (one card per scene,
+// ADR-0097 §1) — behind a suppressible confirm when the scene holds prose. Redo
+// re-mints, capturing the NEW scene id (mutable closure state) so the next undo targets
+// it. The check that the card still holds the scene reads the LIVE board at undo time.
 export function realizeCommand(
   port: PlotCommandPort,
   cardId: string,
@@ -305,11 +400,7 @@ export function realizeCommand(
     undo: async () => {
       const referents = port.sceneReferents(scene);
       if (!referents.includes(cardId)) return; // realize already reversed elsewhere — no-op
-      if (referents.length > 1) {
-        await port.detachCardScene(cardId); // shared scene — keep it, detach this card only
-        return;
-      }
-      const read = await port.readScene(scene); // sole referent → the scene will be deleted
+      const read = await port.readScene(scene); // the scene will be deleted
       if (read.body.trim().length > 0 && !(await port.confirmSceneDelete(read))) {
         // Declined a written scene's deletion: throw BEFORE mutating so the caretaker
         // leaves this single-command step undoable (UndoCancelled → "Undo cancelled").
@@ -365,7 +456,7 @@ export class PlotUndoRecorder {
   }
 
   /** A card metadata/synopsis/title edit (reassign, page-status, beat link/unlink,
-   *  causal link/unlink, rename, detach): capture the whole card before + after the
+   *  causal link/unlink): capture the whole card before + after the
    *  forward op; record only a real change. Returns the op's own result. */
   async cardEdit<T>(id: string, label: string, op: () => Promise<T>): Promise<T> {
     await this.#whenIdle();
@@ -389,6 +480,49 @@ export class PlotUndoRecorder {
     if (before.some((b, i) => !statesEqual(b.state, after[i].state))) {
       this.#record(cardEditManyCommand(this.#port, before, after, label));
     }
+  }
+
+  /** A card's displayed title and/or synopsis edit (ADR-0097 §3). The before values
+   *  come from the board's card data — what the card SHOWS, the scene's while written —
+   *  so one command covers written and unwritten cards. Records only a real change. */
+  async cardTextEdit(id: string, label: string, edit: CardText): Promise<void> {
+    await this.#whenIdle();
+    const shown = this.#getProjection()?.cards.find((c) => c.id === id);
+    await this.#port.setCardText(id, edit);
+    if (!shown) return;
+    const before: CardText = {};
+    const after: CardText = {};
+    if (edit.title !== undefined && edit.title !== shown.title) {
+      before.title = shown.title;
+      after.title = edit.title;
+    }
+    if (edit.synopsis !== undefined && edit.synopsis !== shown.synopsis) {
+      before.synopsis = shown.synopsis;
+      after.synopsis = edit.synopsis;
+    }
+    if (Object.keys(after).length > 0) this.#record(cardTextCommand(this.#port, id, before, after, label));
+  }
+
+  /** Detach a card from its scene, recorded. The store asks which synopsis survives
+   *  when it must; backing out records nothing. */
+  async detach(cardId: string): Promise<void> {
+    await this.#whenIdle();
+    const before = await this.#port.getCardState(cardId);
+    const scene = before.metadata.scene;
+    if (typeof scene !== "string" || !scene) return;
+    const outcome = await this.#port.detachCardScene(cardId);
+    if (outcome === "cancelled") return;
+    this.#record(detachCommand(this.#port, cardId, scene, before, outcome));
+  }
+
+  /** Attach a card to an existing scene, recorded (the Attach picker). */
+  async attach(cardId: string, sceneId: string): Promise<void> {
+    await this.#whenIdle();
+    const before = await this.#port.getCardState(cardId);
+    const oldSummary = await this.#port.readSceneSummary(sceneId);
+    const outcome = await this.#port.attachCardScene(cardId, sceneId);
+    if (outcome === "cancelled") return;
+    this.#record(attachCommand(this.#port, cardId, sceneId, before, oldSummary, outcome));
   }
 
   /** A plotline rename / recolour / beat-roster edit. Returns the op's own result
@@ -526,7 +660,10 @@ export function defaultPlotCommandPort(): PlotCommandPort {
     sceneReferents,
     readScene,
     deleteScene,
+    attachCardScene,
     detachCardScene,
+    setCardText,
+    readSceneSummary,
     // The suppressible confirm before deleting a written scene, as a Promise<boolean>:
     // confirm → true, cancel/backdrop → false (via the confirmService onCancel added
     // for this), and a suppressed prior "don't show again" resolves true immediately.

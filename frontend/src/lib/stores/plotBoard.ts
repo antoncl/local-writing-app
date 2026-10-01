@@ -9,6 +9,8 @@
 
 import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
+import { type CardTextChoice, textChoiceConflict } from "@/lib/api/plot";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { refreshStructure, setStructure } from "@/lib/stores/structure";
 import { refreshCards } from "@/lib/stores/plotCards";
 import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -88,9 +90,9 @@ export async function savePlotBoardLayout(layout: PlotBoardLayout, baseRevision:
 // Card content ops (ADR-0048 §1, S7d). These are intentful backend mutations,
 // deliberately OUTSIDE the ADR-0050 layout caretaker — an in-memory undo must
 // never reverse a scene mint (binding decision 1). Each mutates, then refetches
-// the projection so the board re-projects the changed card set. attach/detach have
-// no endpoint of their own: they are a saveCard that sets / clears `metadata.scene`
-// (get the current card first, so the save carries its live revision + metadata).
+// the projection so the board re-projects the changed card set. attach / detach /
+// the displayed-text edit are endpoints of their own (ADR-0097 §3/§4) — saveCard
+// ignores a client-sent `scene` and refuses a written card's title/body change.
 
 // Realize: mint a scene from the card and attach it. 409 if already attached.
 // Returns the minted scene's id (from the card's `metadata.scene`) so realize can be
@@ -141,26 +143,30 @@ export async function deleteCard(cardId: string, refresh = true): Promise<void> 
   if (refresh) await refreshAfterMutation();
 }
 
-// Rename a card in place (#798) — the title is intrinsic, not metadata. Fetch first
-// so the save carries the card's live revision + body + metadata unchanged. The card
-// UI drops empty titles before calling, matching the backend's non-empty requirement.
+// Rename a card in place (#798) — the title is intrinsic, not metadata. Edits the
+// DISPLAYED title (ADR-0097 §3): the scene's while the card is written. The card UI
+// drops empty titles before calling, matching the backend's non-empty requirement.
 export async function renameCard(cardId: string, title: string): Promise<void> {
-  const card = await api.getCard(cardId);
-  await api.saveCard({ ...card, title }, card.body);
-  await refreshAfterMutation();
+  await setCardText(cardId, { title });
 }
 
-// Save an in-place synopsis edit — the synopsis IS the card body. Fetch first so
-// the save carries the card's live revision + metadata unchanged.
+// Save an in-place synopsis edit — the synopsis IS the card body, or the scene's
+// summary while the card is written (ADR-0097 §3).
 export async function saveCardSynopsis(cardId: string, synopsis: string): Promise<void> {
-  const card = await api.getCard(cardId);
-  await api.saveCard({ ...card }, synopsis);
-  await refreshAfterMutation();
+  await setCardText(cardId, { synopsis });
+}
+
+// Edit the displayed title and/or synopsis in one write (the text command's undo/redo
+// replays both). A written card's title edit renames its scene, so the manuscript tree
+// is refetched too; a failed tree refetch must not fail an edit that already happened.
+export async function setCardText(cardId: string, text: { title?: string; synopsis?: string }): Promise<void> {
+  await api.setCardText(cardId, text);
+  await Promise.all([refreshAfterMutation(), refreshStructure().catch(() => {})]);
 }
 
 // The single get → mutate a clone of the card's metadata → save (body unchanged) →
-// refetch path the metadata-ref content ops share (detach, reassign — and attach
-// once a board affordance wires it). saveCard replaces metadata wholesale, so the
+// refetch path the metadata-ref content ops share (reassign, beat and causal links,
+// page status). saveCard replaces metadata wholesale, so the
 // mutator adds/removes keys on a copy. A mutator that returns `false` signals "no
 // change" — the save + refetch (and its board rebuild) are skipped, so e.g. dropping
 // an already-linked beat is a cheap no-op instead of a redundant round-trip.
@@ -185,21 +191,111 @@ export function reassignCardPlotline(cardId: string, plotlineId: string): Promis
   });
 }
 
-// Detach: clear the card's scene ref (drop the key — the save replaces metadata).
-export function detachCardScene(cardId: string): Promise<void> {
-  return mutateCardMetadata(cardId, (metadata) => {
-    delete metadata.scene;
+// ── Attach / detach (ADR-0097 §3/§4) ────────────────────────────────────────
+// Both move text between the card and its scene. When the scene's summary and the
+// card's synopsis both hold something different the backend 409s with both texts and
+// the writer picks which survives; the pick is retried through the same op. The
+// result is the choice actually used (null: none was needed) so undo / redo replay it
+// without asking again, or "cancelled" when the writer backed out (nothing changed, so
+// the caller records no undo step).
+export type CardTextOutcome = CardTextChoice | null | "cancelled";
+
+type TextChoiceAsk = {
+  title: string;
+  confirmLabel: string;
+  confirmChoice: CardTextChoice;
+  secondaryLabel: string;
+  secondaryChoice: CardTextChoice;
+};
+
+const CLIP = 200;
+const clip = (text: string): string => (text.length > CLIP ? `${text.slice(0, CLIP)}…` : text);
+
+function askTextChoice(
+  ask: TextChoiceAsk,
+  conflict: { sceneSummary: string; cardSynopsis: string },
+): Promise<CardTextChoice | null> {
+  return new Promise((resolve) => {
+    confirmService.request({
+      title: ask.title,
+      message: "The scene's summary and the card's synopsis are different.",
+      details: [`Scene summary: ${clip(conflict.sceneSummary)}`, `Card synopsis: ${clip(conflict.cardSynopsis)}`],
+      confirmLabel: ask.confirmLabel,
+      secondaryLabel: ask.secondaryLabel,
+      destructive: false,
+      onConfirm: async () => resolve(ask.confirmChoice),
+      onSecondary: () => resolve(ask.secondaryChoice),
+      onCancel: () => resolve(null),
+    });
   });
 }
 
+async function withTextChoice(
+  ask: TextChoiceAsk,
+  op: (text?: CardTextChoice) => Promise<unknown>,
+  text?: CardTextChoice,
+): Promise<CardTextOutcome> {
+  let used: CardTextChoice | null = text ?? null;
+  try {
+    await op(text);
+  } catch (error) {
+    const conflict = textChoiceConflict(error);
+    if (!conflict) throw error;
+    const chosen = await askTextChoice(ask, conflict);
+    if (!chosen) return "cancelled";
+    await op(chosen);
+    used = chosen;
+  }
+  // A scene's summary may have moved, and the card's text with it.
+  await Promise.all([refreshAfterMutation(), refreshStructure().catch(() => {})]);
+  return used;
+}
+
+// Detach: the card leaves its scene and takes the scene's title; `text` says which
+// synopsis it keeps when both differ (asked when omitted and needed).
+export function detachCardScene(cardId: string, text?: CardTextChoice): Promise<CardTextOutcome> {
+  return withTextChoice(
+    {
+      title: "Which synopsis should the card keep?",
+      confirmLabel: "Keep the card's synopsis",
+      confirmChoice: "card",
+      secondaryLabel: "Take the scene's summary",
+      secondaryChoice: "scene",
+    },
+    (choice) => api.detachCard(cardId, choice),
+    text,
+  );
+}
+
+// Attach: bind the card to an existing scene; `text` says which summary the scene
+// keeps when both differ (asked when omitted and needed).
+export function attachCardScene(cardId: string, sceneId: string, text?: CardTextChoice): Promise<CardTextOutcome> {
+  return withTextChoice(
+    {
+      title: "Which summary should the scene keep?",
+      confirmLabel: "Keep the scene's summary",
+      confirmChoice: "scene",
+      secondaryLabel: "Use the card's synopsis",
+      secondaryChoice: "card",
+    },
+    (choice) => api.attachCard(cardId, sceneId, choice),
+    text,
+  );
+}
+
 // ── Realize-undo substrate (ADR-0053 §7 / S6b) ──────────────────────────────
-// Realize mints a scene FILE; its undo deletes that scene when the card is its sole
-// referent. These helpers back the realize command's undo (see plotCommands.ts).
+// Realize mints a scene FILE; its undo deletes that scene (the card is its sole
+// referent, ADR-0097 §1). These helpers back the realize command's undo (see plotCommands.ts).
+
+// The scenes any card on the board holds — the Attach picker excludes them (a scene
+// has at most one card, ADR-0097 §1). Read off the live board store.
+export function heldSceneIds(): string[] {
+  return (get(plotBoardStore)?.cards ?? []).map((c) => c.scene).filter((id): id is string => !!id);
+}
 
 // The card ids that currently reference a scene — read synchronously off the live
-// board store (reliable, not a lagging prop). One = a sole referent (safe to delete
-// the scene); more = shared (detach this card only); the realize command reads it at
-// UNDO time, since another card may have attached since the realize.
+// board store (reliable, not a lagging prop). The realize command reads it at UNDO
+// time to tell whether the realize was already reversed elsewhere.
 export function sceneReferents(sceneId: string): string[] {
   return (get(plotBoardStore)?.cards ?? []).filter((c) => c.scene === sceneId).map((c) => c.id);
 }
@@ -210,7 +306,12 @@ export function readScene(sceneId: string): Promise<Scene> {
   return api.getScene(sceneId);
 }
 
-// Delete a scene (realize-undo of a sole-referent scene). `delete_scene` purges the
+// A scene's summary — attach-undo puts it back when the attach overwrote it.
+export async function readSceneSummary(sceneId: string): Promise<string> {
+  return String((await api.getScene(sceneId)).metadata?.summary ?? "");
+}
+
+// Delete a scene (realize-undo). `delete_scene` purges the
 // referencing card's `scene` ref backend-side, so this also detaches the card — no
 // separate detach needed. Updates the manuscript structure store (the scene leaves
 // the tree, mirroring editorPaneDelete) AND the board (the card projects homeless).
@@ -365,12 +466,24 @@ export function setCardPageStatus(cardId: string, status: "off_page" | "unwritte
 // for its current revision before saving the captured state, so a reversal can't
 // 409 on a stale base_revision the way replaying an old entry verbatim would.
 
-export type CardState = { title: string; body: string; metadata: CardEntry["metadata"] };
+export type CardState = {
+  title: string;
+  body: string;
+  metadata: CardEntry["metadata"];
+  // The card's read-only place in story time (ADR-0097 §5): never saved back, only
+  // handed to a re-create so an undone delete returns it to the same spot.
+  story_rank?: number | null;
+};
 
 // A card's authored state, deep-copied so a later live mutation can't reach back
 // into a captured snapshot the undo stack still holds.
 export function cardStateOf(card: CardEntry): CardState {
-  return { title: card.title, body: card.body, metadata: structuredClone(card.metadata) };
+  return {
+    title: card.title,
+    body: card.body,
+    metadata: structuredClone(card.metadata),
+    story_rank: card.story_rank ?? null,
+  };
 }
 
 export async function getCardState(cardId: string): Promise<CardState> {
@@ -387,13 +500,18 @@ export async function restoreCardState(cardId: string, state: CardState, refresh
   if (refresh) await refreshAfterMutation();
 }
 
-// Recreate a deleted card under its ORIGINAL id, then restore its content
-// (create-then-PUT — the create sets only title, the PUT lands metadata + body).
-// The one refetch is the restore's; the create is a plain api call to avoid a
-// redundant board rebuild between the two writes.
+// Recreate a deleted card under its ORIGINAL id and story rank, then restore its
+// content (create-then-PUT — the create sets only title, the PUT lands metadata +
+// body). The card is unwritten until the final attach, so its own text restores
+// freely; a written card is then re-bound to its scene ("scene": the scene already
+// holds the summary the card showed, so nothing is asked). The one refetch is the
+// restore's; the create is a plain api call to avoid a redundant board rebuild.
 export async function recreateCard(cardId: string, state: CardState, refresh = true): Promise<void> {
-  await api.createCard(state.title, cardId);
-  await restoreCardState(cardId, state, refresh);
+  await api.createCard(state.title, cardId, state.story_rank);
+  const { scene, ...own } = state.metadata;
+  await restoreCardState(cardId, { ...state, metadata: own }, false);
+  if (typeof scene === "string" && scene) await api.attachCard(cardId, scene, "scene");
+  if (refresh) await refreshAfterMutation();
 }
 
 // Drop the previous project's board so it can't flash on the next project's pane

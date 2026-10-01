@@ -247,6 +247,23 @@ describe("SearchPaneController.replaceOne / replace (ADR-0085 §4)", () => {
     expect(deps.reconcile).not.toHaveBeenCalled();
   });
 
+  it("counts a written card's body hit apart from skipped (ADR-0097 §3)", async () => {
+    const deps = fakeDeps();
+    const c = new SearchPaneController(run, deps);
+    c.query = "old";
+    vi.mocked(api.search).mockResolvedValue({ query: "old", hits: [] });
+    vi.mocked(api.replace).mockResolvedValue(
+      response({
+        outcomes: [{ file_id: "a", start: 0, end: 3, status: "not_replaceable", reason: "written" }],
+        replaced_nodes: 0,
+      }),
+    );
+
+    await c.replaceOne(hit("a"));
+
+    expect(c.lastReplace).toEqual({ replaced: 0, stale: 0, skipped: 0, rejected: 0, detail: null, nodes: 0, written: 1 });
+  });
+
   it("counts a not_replaceable/rejected outcome separately and carries its detail", async () => {
     const deps = fakeDeps();
     const c = new SearchPaneController(run, deps);

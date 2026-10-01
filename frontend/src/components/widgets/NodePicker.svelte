@@ -128,7 +128,8 @@
     hideChips = false,
     // Ids to drop from the candidate menu — used by ReferencePicker to
     // hide the entry that owns the field (no self-references) without the
-    // caller having to filter the in-memory data sources.
+    // caller having to filter the in-memory data sources. Manuscript scenes
+    // match on scene id (the board's Attach picker hides scenes a card holds).
     excludeIds = [],
     onChange,
     // ADR-0082 §2 / F1: present only when `config.create_missing` resolves to
@@ -339,6 +340,7 @@
     );
     const searching = isSearchActive(search);
     const sceneVisible = (n: StructureNode) => {
+      if (n.scene_id && excludeIdSet.has(n.scene_id)) return false;
       const type = (n as unknown as { entry_type?: string }).entry_type ?? n.type ?? "manuscript:scene";
       if (allowedSceneTypes.size > 0 && !allowedSceneTypes.has(type)) return false;
       if (searching) return matchesEntry({ title: n.title, tags: readTags(n.metadata) }, parsedSearch);

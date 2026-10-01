@@ -4,13 +4,16 @@
 // ([[reference_component_test_harness]] — the #724 lesson, twice). The board's
 // SvelteFlow canvas is not headless-mountable, so this card is written WITHOUT any
 // @xyflow/svelte import precisely so it can be mounted here on its own.
-import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@/lib/test/component";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { tick } from "svelte";
+import { render, screen, fireEvent, within } from "@/lib/test/component";
 import PlotCardNode from "./PlotCardNode.svelte";
 import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
 import type { PlotCardData } from "@/lib/plot/plotBoardLayout";
 import type { PlotCardBeat } from "@/lib/types";
 import { PLOT_DND_MIME } from "@/lib/plot/plotDnd";
+import { setupNodePicker, teardownNodePicker } from "@/components/widgets/NodePicker.testkit";
+import type { StructureDocument } from "@/lib/types";
 
 // `resolvedColorHex` defaults null (as an event-beat with no plotline colour would
 // resolve) — tests that care about the change-pill's colour pass it explicitly.
@@ -71,6 +74,7 @@ function actions(
   return {
     onOpen: vi.fn(),
     onRealize: vi.fn(),
+    onAttach: vi.fn(),
     onDetach: vi.fn(),
     onEditTitle: vi.fn(),
     onEditSynopsis: vi.fn(),
@@ -81,6 +85,8 @@ function actions(
     onSetPageStatus: vi.fn(),
     onDelete: vi.fn(),
     plotlines,
+    structure: null,
+    heldSceneIds: [],
     focusedPlotlineId,
     locations,
     highlightedCardIds,
@@ -716,5 +722,73 @@ describe("PlotCardNode raise on press", () => {
     const { container } = render(PlotCardNode, { props: { id: "card_7", data: data({}) } });
     await fireEvent.pointerDown(container.querySelector(".plot-card")!);
     expect(container.querySelector(".plot-card")!.classList.contains("raised")).toBe(false);
+  });
+});
+
+// ADR-0097 §4: an unattached card's menu offers "Attach scene…", a NodePicker over the
+// manuscript's scenes that no card holds; a pick calls onAttach.
+describe("PlotCardNode Attach scene", () => {
+  beforeEach(setupNodePicker);
+  afterEach(teardownNodePicker);
+
+  const structure = {
+    root: {
+      id: "root",
+      type: "root",
+      title: "The Manuscript",
+      children: [
+        {
+          id: "ch1",
+          type: "manuscript:chapter",
+          title: "Chapter One",
+          children: [
+            { id: "n1", type: "manuscript:scene", scene_id: "s1", title: "Free scene" },
+            { id: "n2", type: "manuscript:scene", scene_id: "s2", title: "Held scene" },
+          ],
+        },
+      ],
+    },
+  } as unknown as StructureDocument;
+
+  const withStructure = (): PlotCardActions => ({ ...actions(), structure, heldSceneIds: ["s2"] });
+
+  it("is offered for an unattached card, not an attached one", async () => {
+    const { unmount } = renderWithActions({ attached: false }, withStructure());
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    expect(screen.getByRole("button", { name: "Attach scene…" })).toBeInTheDocument();
+    unmount();
+    renderWithActions({ attached: true }, withStructure());
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    expect(screen.queryByRole("button", { name: "Attach scene…" })).toBeNull();
+  });
+
+  it("offers only scenes no card holds, and a pick calls onAttach with the scene id", async () => {
+    const acts = withStructure();
+    renderWithActions({ attached: false }, acts, "card_a");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("button", { name: "Attach scene…" }));
+    await tick();
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    await fireEvent.click(within(menu).getByRole("button", { name: "Expand Chapter One" }));
+    await tick();
+    expect(within(menu).queryByText("Held scene")).toBeNull();
+    await fireEvent.click(within(menu).getByText("Free scene").closest("button")!);
+    expect(acts.onAttach).toHaveBeenCalledWith("card_a", "s1");
+  });
+
+  it("ignores a container pick (only a scene is attachable)", async () => {
+    const acts = withStructure();
+    renderWithActions({ attached: false }, acts, "card_a");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("button", { name: "Attach scene…" }));
+    await tick();
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    await fireEvent.click(within(menu).getByText("Chapter One").closest("button")!);
+    expect(acts.onAttach).not.toHaveBeenCalled();
+  });
+
+  it("a written card with no summary reads \"No summary yet\"", () => {
+    renderWithActions({ attached: true, synopsis: "" }, actions());
+    expect(screen.getByText("No summary yet")).toBeInTheDocument();
   });
 });

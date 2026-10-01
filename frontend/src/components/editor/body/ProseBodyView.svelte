@@ -173,6 +173,9 @@
     // position in the resolved field order (`proseRendersAfterSections`,
     // `lib/editor-core/bodySections.ts`) — never decided in here.
     proseAfterSections?: boolean;
+    // The prose editor alone is read-only (a written card's frozen body, ADR-0097 §3);
+    // the sections / front matter around it are the host's call.
+    readOnly?: boolean;
   }
 
   let {
@@ -200,6 +203,7 @@
     frontMatter = undefined,
     appendix = undefined,
     proseAfterSections = false,
+    readOnly = false,
   }: Props = $props();
 
   // ---------- Custom TipTap extensions ----------
@@ -1242,6 +1246,10 @@
     if (!scene && loadedSceneId !== null) {
       clearEditor();
     }
+  });
+  // `emitUpdate` false: flipping editability is presentation, never a content change.
+  $effect(() => {
+    editor?.setEditable(!readOnly, false);
   });
 </script>
 

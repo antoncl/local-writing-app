@@ -65,6 +65,7 @@
   projection={$plotBoardStore}
   error={$plotBoardError}
   {locations}
+  structure={$structureStore}
   onRetry={() => void refreshPlotBoard()}
   onDiagnose={diagnosePrompt ? launchDiagnosis : undefined}
 />

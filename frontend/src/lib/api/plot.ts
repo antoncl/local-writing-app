@@ -11,7 +11,19 @@ import type {
   CharacterArcEntry,
   CharacterArcList,
 } from "@/lib/types";
-import { request } from "./core";
+import { HttpError, request } from "./core";
+
+/** Which text a card and its scene keep when both hold a different one (ADR-0097 §3). */
+export type CardTextChoice = "scene" | "card";
+
+/** The two texts a text-choice 409 reports (attach / detach with differing summary +
+ *  synopsis), or null for any other error — the caller asks, then retries with `text`. */
+export function textChoiceConflict(error: unknown): { sceneSummary: string; cardSynopsis: string } | null {
+  if (!(error instanceof HttpError) || error.status !== 409) return null;
+  const detail = error.detail as { code?: unknown; scene_summary?: unknown; card_synopsis?: unknown } | null;
+  if (!detail || typeof detail !== "object" || detail.code !== "text_choice_required") return null;
+  return { sceneSummary: String(detail.scene_summary ?? ""), cardSynopsis: String(detail.card_synopsis ?? "") };
+}
 
 export const plotApi = {
   // Plot templates (ADR-0048 S4c) — the ADR-0049 Library's second tenant. Same
@@ -67,8 +79,8 @@ export const plotApi = {
   // Plot cards + plotlines (ADR-0048 S5a/S5b) — the board's content ops, wired in
   // S7d. Cards and plotlines share the `plot/` folder + a book-local layered CRUD;
   // the endpoint path is the only family discriminator (the backend enforces an
-  // is_a family guard on each). Attach/detach have no endpoint of their own — they
-  // are a saveCard that sets / clears the `scene` ref in `metadata` (ADR §1).
+  // is_a family guard on each). Attach/detach/text have their own endpoints (ADR-0097
+  // §3/§4): a card's `scene` is owned by them, saveCard ignores a client-sent one.
   // The flat card list — the context picker's plot-card roster (ADR-0074 slice 6),
   // over which a plotline's selector expands to its current cards. The board still
   // reads its card set via the projection; this is the light list a picker needs.
@@ -81,10 +93,12 @@ export const plotApi = {
   // `id` is supplied only by undo-of-delete / redo-of-create (ADR-0053 §7), to
   // restore a card under its original identity so other cards' causal_links
   // reconnect; a collision 409s. Omitted for a normal create (backend mints).
-  createCard(title: string, id?: string) {
+  // `storyRank` rides along with `id` only (the backend ignores it otherwise), so an
+  // undo-restored card returns to its place in story time (ADR-0097 §5).
+  createCard(title: string, id?: string, storyRank?: number | null) {
     return request<CardEntry>("/plot/cards", {
       method: "POST",
-      body: JSON.stringify(id ? { title, id } : { title }),
+      body: JSON.stringify(id ? { title, id, story_rank: storyRank ?? null } : { title }),
     });
   },
   getCard(entryId: string) {
@@ -99,6 +113,30 @@ export const plotApi = {
         metadata: entry.metadata,
         base_revision: entry.revision,
       }),
+    });
+  },
+  // Bind a card to an existing scene (ADR-0097 §3/§4). 409 `text_choice_required` when
+  // the scene's summary and the card's synopsis differ and `text` is omitted.
+  attachCard(entryId: string, sceneId: string, text?: CardTextChoice) {
+    return request<CardEntry>(`/plot/cards/${entryId}/attach`, {
+      method: "POST",
+      body: JSON.stringify(text ? { scene_id: sceneId, text } : { scene_id: sceneId }),
+    });
+  },
+  // Unbind a card from its scene; `text` ("card" | "scene") picks the surviving synopsis
+  // when both differ (409 `text_choice_required` if omitted).
+  detachCard(entryId: string, text?: CardTextChoice) {
+    return request<CardEntry>(`/plot/cards/${entryId}/detach`, {
+      method: "POST",
+      body: JSON.stringify(text ? { text } : {}),
+    });
+  },
+  // Edit the DISPLAYED title/synopsis: the scene's while the card is written, the
+  // card's own otherwise (ADR-0097 §3).
+  setCardText(entryId: string, text: { title?: string; synopsis?: string }) {
+    return request<CardEntry>(`/plot/cards/${entryId}/text`, {
+      method: "PUT",
+      body: JSON.stringify(text),
     });
   },
   deleteCard(entryId: string) {

@@ -296,9 +296,9 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         # A unit of story function (ADR-0048 §1): "this happens, and it does
         # this job for the story." The synopsis is the prose body; `plotline`
         # points at its primary thread; `scene` is an optional attachment
-        # (0..1 scene per card, 0..n cards per scene — no uniqueness the other
-        # way). Claims (§4) are deferred: the closed beat roster they validate
-        # against only exists once templates are instantiated (a later slice),
+        # (0..1 scene per card, and 0..1 card per scene — ADR-0097 §1). Claims
+        # (§4) are deferred: the closed beat roster they validate against only
+        # exists once templates are instantiated (a later slice),
         # so per §4 ("widen when a workflow demands it, not before") the card
         # carries no claims field yet — it is added when a workflow first
         # exercises it, or by a writer as a schema extension. A flat Node under

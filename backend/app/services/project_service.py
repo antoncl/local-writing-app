@@ -26,6 +26,7 @@ from app.services.machine_settings import touch_recent_project
 from app.services.project.ai_invocations import AiInvocationsMixin
 from app.services.project.ai_trace import AITraceMixin
 from app.services.project.assistants import AssistantEntriesMixin
+from app.services.project.card_story_time import CardStoryTimeMixin
 from app.services.project.change_candidates import ChangeCandidatesMixin
 from app.services.project.change_propagation import ChangePropagationMixin
 from app.services.project.change_propagation_validation import (
@@ -125,6 +126,7 @@ class ProjectService(
     LayerOverridesMixin,
     NodeOpsMixin,
     PlotMixin,
+    CardStoryTimeMixin,
     PlotBoardMixin,
     PlotContextMixin,
     ProjectLifecycleMixin,

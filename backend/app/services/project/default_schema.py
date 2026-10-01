@@ -589,7 +589,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # A single optional reference to a scene. A shared catalog field; its
             # current consumer is the card's scene attachment (ADR-0048 §1): the
             # scene that realizes the card, or unset for backstory / not-yet-
-            # written material (0..1 scene per card; the reverse is unconstrained).
+            # written material (0..1 scene per card, and 0..1 card per scene —
+            # ADR-0097 §1: a second card cannot take a scene one already holds).
             # When the referenced scene is deleted the ref is cleared — blanked on
             # the referrer, whether by the delete's reference purge (same project)
             # or read-side healing (an ancestor delete). The ADR's "visible dangle"

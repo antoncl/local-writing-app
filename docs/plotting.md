@@ -56,6 +56,10 @@ Cards and scenes are linked but independent, and you choose how tightly:
   chapter. A card tied to a scene reads **On the page**.
 - **Detach scene** breaks the link without touching the scene itself.
 
+A scene belongs to at most one card. Attaching a scene that another card already
+has is refused — detach it from that card first. If one scene serves several
+story threads, keep one card and link it to a beat on each thread.
+
 **Rearranging the board is planning, not editing.** Dragging cards saves only the
 board's own layout — it never reorders your manuscript. The manuscript's reading
 order is *shown* on the board (see **Layers**, below) so you can see plan against

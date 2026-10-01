@@ -56,6 +56,7 @@ import yaml
 
 from app.services.atomic_io import atomic_write_text
 from app.services.migration_levels import migrate_layer_levels
+from app.services.migration_plot_cards import migrate_layer_plot_cards
 from app.services.migration_tree_placement import migrate_layer_tree_placement
 from app.services.migrations_mutation_anchors import migrate_layer_mutation_anchors
 from app.services.yaml_io import load_yaml
@@ -63,7 +64,7 @@ from app.services.yaml_io import load_yaml
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 14
+CURRENT_VERSION = 15
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -1152,6 +1153,12 @@ MIGRATIONS: list[MigrationStep] = [
         14,
         "convert legacy inline mutation markers into mutation_set nodes + anchors (ADR-0095 S1, #2231)",
         migrate_layer_mutation_anchors,
+    ),
+    ChainMigration(
+        15,
+        "one card per scene, a story_rank on every card, and each written card's synopsis seeded "
+        "into its scene's summary (ADR-0097 S1, #2375)",
+        migrate_layer_plot_cards,
     ),
 ]
 

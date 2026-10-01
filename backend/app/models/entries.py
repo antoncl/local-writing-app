@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.base import (
     MetadataValue,
@@ -252,16 +252,21 @@ class SavePlotBoardRequest(BaseModel):
 
 class CardSummary(_PlotFolderSummary):
     entry_type: str = "plot:card"
+    # The card's place in story time (ADR-0097 §5) — read-only, never in `metadata`.
+    story_rank: float | None = None
 
 
 class CardEntry(_PlotFolderEntry):
     """A card (ADR-0048 §1): a unit of story function — "this happens, and it
     does this job for the story." A synopsis (the body), a primary `plotline`
-    reference, and an optional `scene` reference (0..1 scene per card, 0..n cards
-    per scene). Claims (§4) are deferred to a workflow-driven slice — see the
+    reference, and an optional `scene` reference (0..1 scene per card, 0..1 card
+    per scene — ADR-0097 §1). Claims (§4) are deferred to a workflow-driven slice — see the
     `plot:card` schema comment in default_schema.py for the reasoning."""
 
     entry_type: str = "plot:card"
+    # Read-only: the card's rank in story time (ADR-0097 §5), a top-level
+    # front-matter key the backend owns — no save request carries it.
+    story_rank: float | None = None
 
 
 class CardList(BaseModel):
@@ -270,6 +275,10 @@ class CardList(BaseModel):
 
 class CreateCardRequest(_PlotFolderCreateRequest):
     entry_type: str = "plot:card"
+    # Honoured only together with a supplied `id` (undo restore puts the card back
+    # where it was in story time, ADR-0097 §5); otherwise ignored — a new card
+    # lands at the end of story time.
+    story_rank: float | None = None
 
 
 class SaveCardRequest(_PlotFolderSaveRequest):
@@ -284,6 +293,29 @@ class RealizeCardRequest(BaseModel):
     default placement. Seed-from-manuscript takes no body."""
 
     parent_id: str | None = None
+
+
+class StoryPlacement(BaseModel):
+    """Where a card lands in story time (ADR-0097 §4/§5): right after, or right
+    before, a neighbour card. A drop at the start of a box sends the box's first
+    card as `before_id`. Exactly one of the two."""
+
+    after_id: str | None = None
+    before_id: str | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_neighbour(self) -> StoryPlacement:
+        if (self.after_id is None) == (self.before_id is None):
+            raise ValueError("Send exactly one of after_id and before_id.")
+        return self
+
+
+class PlaceCardRequest(BaseModel):
+    """Body for POST /api/plot/cards/{id}/place (ADR-0097 §4): S1 carries story
+    time only; the `to` half of the endpoint (decks, planned positions) is a
+    later slice."""
+
+    story: StoryPlacement
 
 
 class PlotBoardPlotlineBeat(BaseModel):

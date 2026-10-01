@@ -108,10 +108,12 @@ class CausalInversionTests(_DiagnosticsTestCase):
         self.assertEqual(self._of_kind("causal_inversion"), [])
 
     def test_cards_on_the_same_scene_do_not_invert(self) -> None:
-        # n cards per scene share a reveal rank — simultaneous, not out of sequence.
+        # Cards on one scene (only a pre-v15 project has them, ADR-0097 §10) share a
+        # reveal rank — simultaneous, not out of sequence.
         scene = self._scene("s")
         payoff = self._card("Payoff", scene=scene)
-        self._card("Setup", scene=scene, causal=[payoff])
+        setup = self._card("Setup", causal=[payoff])
+        self.plant_duplicate_scene(setup, scene)
         self.assertEqual(self._of_kind("causal_inversion"), [])
 
 

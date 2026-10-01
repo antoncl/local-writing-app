@@ -31,6 +31,7 @@ Shared tooling resolves through the MRO (`_require_project`,
 from __future__ import annotations
 
 from collections.abc import Iterator
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -65,6 +66,12 @@ from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.beat_roster_diff import diff_beat_list
 from app.services.project.errors import ProjectServiceError
 from app.services.project.list_item_identity import ensure_list_item_identity
+from app.services.project.placement import file_lock, parse_rank
+from app.services.project.story_time import (
+    STORY_RANK_KEY,
+    story_rank_extra,
+    story_rank_value,
+)
 from app.services.tree_structure import TreeStructureService
 
 PLOT_BOARD_FILENAME = "plot-board.md"
@@ -191,6 +198,12 @@ class PlotMixin:
             # card's dangling scene is healed and its `page_status` derived here,
             # so the board projection reads what the rail would show.
             metadata = self._repair_metadata_on_read(metadata, entry_type, schema, index)
+            # A card's story rank rides on its summary, read-only (ADR-0097 §5).
+            extra = (
+                {STORY_RANK_KEY: parse_rank(front_matter.get(STORY_RANK_KEY))}
+                if entry_type == PLOT_CARD_ENTRY_TYPE
+                else {}
+            )
             entries.append(
                 summary_cls(
                     id=entry.id,
@@ -200,6 +213,7 @@ class PlotMixin:
                     metadata=metadata,
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
+                    **extra,
                 )
             )
         entries.sort(key=lambda summary: (summary.title.lower(), summary.id))
@@ -214,6 +228,7 @@ class PlotMixin:
         noun: str,
         seed_metadata: dict[str, Any] | None = None,
         node_id: str | None = None,
+        story_rank: Decimal | float | None = None,
     ) -> str:
         root = self._require_project()
         entry_type = requested_entry_type or default_entry_type
@@ -246,6 +261,9 @@ class PlotMixin:
             if node_id in self._build_node_index().by_id:
                 raise ProjectServiceError(f"{noun.capitalize()} id {node_id} already exists.", 409)
             new_id = node_id
+            # A restore may not give a card a scene another card holds (ADR-0097 §1).
+            if entry_type == PLOT_CARD_ENTRY_TYPE:
+                self._require_scene_unheld(initial_metadata.get("scene"), new_id)
         else:
             new_id = self._new_id("plot")
         self._write_node_entry_file(
@@ -255,6 +273,7 @@ class PlotMixin:
             entry_type,
             initial_metadata,
             "",
+            extra={STORY_RANK_KEY: story_rank_value(story_rank) if story_rank is not None else None},
         )
         return new_id
 
@@ -379,7 +398,19 @@ class PlotMixin:
         # (ADR-0043 Am. 2, #2016) — the same hook the other kinds use. Shared by
         # plotline/card/character_arc; base lane only (plot has no override lane).
         self.maybe_capture_session_boundary(node_id, kind="plot")
-        self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, request.body)
+        # A card's story rank is carried forward from disk, never taken from the
+        # client (ADR-0097 §5); read under the file lock so a rank written by a
+        # concurrent `place` is not dropped by this re-dump.
+        with file_lock(path):
+            self._write_node_entry_file(
+                path,
+                node_id,
+                request.title,
+                request.entry_type,
+                metadata,
+                request.body,
+                extra=story_rank_extra(self._read_front_matter_only(path)),
+            )
         self._maybe_rename_node_file(path, request.title)
         # #2260: only after the write actually lands (never on a 409/422 above)
         # — a compact structural diff per changed beat-list field, so a wrong
@@ -691,6 +722,9 @@ class PlotMixin:
         return CardList(entries=self._list_plot_folder_nodes(entry_type="plot:card", summary_cls=CardSummary))
 
     def create_card(self, request: CreateCardRequest) -> CardEntry:
+        # A new card lands at the end of story time; an undo restore (supplied id)
+        # may put it back at the rank it had (ADR-0097 §5).
+        restored_rank = parse_rank(request.story_rank) if request.id else None
         return self.read_card(
             self._create_plot_folder_node(
                 title=request.title,
@@ -698,16 +732,20 @@ class PlotMixin:
                 default_entry_type="plot:card",
                 noun="card",
                 node_id=request.id or None,
+                story_rank=restored_rank if restored_rank is not None else self._next_card_story_rank(),
             )
         )
 
     def read_card(self, entry_id: str) -> CardEntry:
-        return self._build_plot_folder_entry(
-            self._read_plot_folder_node(entry_id, expected_entry_type="plot:card", noun="card"),
-            CardEntry,
-        )
+        read = self._read_plot_folder_node(entry_id, expected_entry_type="plot:card", noun="card")
+        card = self._build_plot_folder_entry(read, CardEntry)
+        card.story_rank = parse_rank(read.front_matter.get(STORY_RANK_KEY))
+        return card
 
     def save_card(self, entry_id: str, request: SaveCardRequest) -> CardEntry:
+        # One card per scene (ADR-0097 §1). `scene` stays client-writable until the
+        # attach endpoint ships (S2), so the save enforces the rule itself.
+        self._require_card_scene_change_allowed(entry_id, request.metadata.get("scene"))
         return self.read_card(
             self._save_plot_folder_node(entry_id, request, expected_entry_type="plot:card", noun="card")
         )
@@ -776,14 +814,16 @@ class PlotMixin:
         order and mint a `plot:card` for every scene not already referenced by a
         card, attaching each to its scene (title from the scene; plotline left
         for the writer). Idempotent — a second run adds nothing, because a scene
-        already carded is skipped (0..n cards per scene, but seed adds at most
-        the one it is responsible for).
+        already carded is skipped (one card per scene, ADR-0097 §1).
         """
         carded_scene_ids = {
             card.metadata["scene"]
             for card in self.list_cards().entries
             if card.metadata.get("scene")
         }
+        # New cards join the end of story time in the order created — manuscript
+        # order here (ADR-0097 §5).
+        story_rank = self._next_card_story_rank()
         for scene_id, title in self._manuscript_scene_nodes():
             if scene_id in carded_scene_ids:
                 continue
@@ -800,7 +840,9 @@ class PlotMixin:
                 default_entry_type="plot:card",
                 noun="card",
                 seed_metadata={"scene": scene_id},
+                story_rank=story_rank,
             )
+            story_rank += 1
             carded_scene_ids.add(scene_id)
         return self.list_cards()
 

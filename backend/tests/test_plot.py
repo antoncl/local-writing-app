@@ -24,6 +24,7 @@ from plot_fixtures import PlotTestCase
 from project_fixtures import open_test_project
 
 from app.models import (
+    AttachCardRequest,
     CreateCardRequest,
     CreatePlotlineRequest,
     CreatePlotTemplateRequest,
@@ -267,7 +268,7 @@ class CardReferenceTests(PlotTestCase):
     def test_scene_reference_is_purged_from_disk_when_the_scene_is_deleted(self) -> None:
         scene_id = self._make_scene()
         card = self.service.create_card(CreateCardRequest(title="Card"))
-        self.service.save_card(card.id, SaveCardRequest(title="Card", metadata={"scene": scene_id}))
+        self.save_card_written(card.id, SaveCardRequest(title="Card", metadata={"scene": scene_id}))
         self.assertEqual(self._raw_metadata_on_disk(card.id).get("scene"), scene_id)
 
         self.service.delete_scene(scene_id)  # delete_scene purges referrers too
@@ -446,7 +447,7 @@ class CardOperationTests(PlotTestCase):
     def test_realize_on_an_attached_card_409s(self) -> None:
         scene_id = self._scene(self._chapter(), "Existing")
         card = self.service.create_card(CreateCardRequest(title="Card"))
-        self.service.save_card(card.id, SaveCardRequest(title="Card", metadata={"scene": scene_id}))
+        self.save_card_written(card.id, SaveCardRequest(title="Card", metadata={"scene": scene_id}))
         # 0..1 scene per card: realizing again would orphan the first scene.
         response = self.client.post(f"/api/plot/cards/{card.id}/realize", json={})
         self.assertEqual(response.status_code, 409, response.text)
@@ -483,7 +484,7 @@ class CardOperationTests(PlotTestCase):
         kept, fresh = self._scene(chapter_id, "Kept"), self._scene(chapter_id, "New")
         all_scenes = self._leaf_scene_ids()
         existing = self.service.create_card(CreateCardRequest(title="Hand-made"))
-        self.service.save_card(existing.id, SaveCardRequest(title="Hand-made", metadata={"scene": kept}))
+        self.save_card_written(existing.id, SaveCardRequest(title="Hand-made", metadata={"scene": kept}))
         self.service.seed_cards_from_manuscript()
         cards = self.service.list_cards().entries
         # One card per leaf scene, no duplicate for the scene that already had a
@@ -550,10 +551,10 @@ class CardOperationTests(PlotTestCase):
         # ADR-0097 §1: one card per scene — the second attach is refused, the first stays.
         scene_id = self._scene(self._chapter(), "Crowded")
         first = self.service.create_card(CreateCardRequest(title="Beat A"))
-        self.service.save_card(first.id, SaveCardRequest(title="Beat A", metadata={"scene": scene_id}))
+        self.save_card_written(first.id, SaveCardRequest(title="Beat A", metadata={"scene": scene_id}))
         second = self.service.create_card(CreateCardRequest(title="Beat B"))
         with self.assertRaises(ProjectServiceError) as ctx:
-            self.service.save_card(second.id, SaveCardRequest(title="Beat B", metadata={"scene": scene_id}))
+            self.service.attach_card(second.id, AttachCardRequest(scene_id=scene_id))
         self.assertEqual(ctx.exception.status_code, 409)
         attached = [c for c in self.service.list_cards().entries if c.metadata.get("scene") == scene_id]
         self.assertEqual([c.id for c in attached], [first.id])
@@ -562,7 +563,7 @@ class CardOperationTests(PlotTestCase):
         source, dest = self._chapter("Source"), self._chapter("Dest")
         scene_id = self._scene(source, "Wanderer")
         card = self.service.create_card(CreateCardRequest(title="Card"))
-        self.service.save_card(card.id, SaveCardRequest(title="Card", metadata={"scene": scene_id}))
+        self.save_card_written(card.id, SaveCardRequest(title="Card", metadata={"scene": scene_id}))
         self.service.move_structure_node(self._structure_node_id_for_scene(scene_id), dest, 0)
         # The ref is by id, not by path or manuscript slot, so the move is invisible to it.
         self.assertEqual(self.service.read_card(card.id).metadata.get("scene"), scene_id)
@@ -705,7 +706,7 @@ class PlotBoardProjectionTests(PlotTestCase):
         self.service.create_plotline(CreatePlotlineRequest(title="Mystery"))
         scene_id = self._scene("The Meeting")
         card = self.service.create_card(CreateCardRequest(title="They Meet"))
-        self.service.save_card(
+        self.save_card_written(
             card.id,
             SaveCardRequest(
                 title="They Meet",
@@ -718,9 +719,10 @@ class PlotBoardProjectionTests(PlotTestCase):
         lanes = {p["title"]: p for p in projection["plotlines"]}
         self.assertEqual(lanes["Romance"]["color"], "rose")
         self.assertIsNone(lanes["Mystery"]["color"])
-        # The card carries its synopsis (the body) and both resolved refs.
+        # The card carries its synopsis (the scene's summary, seeded from the body by
+        # the attach) and both resolved refs.
         projected = next(c for c in projection["cards"] if c["id"] == card.id)
-        self.assertEqual(projected["synopsis"], "She spills his coffee.\n")
+        self.assertEqual(projected["synopsis"], "She spills his coffee.")
         self.assertEqual(projected["plotline"], romance.id)
         self.assertEqual(projected["scene"], scene_id)
 
@@ -822,7 +824,7 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
     def _card_on(self, title: str, scene_id: str | None) -> str:
         card = self.service.create_card(CreateCardRequest(title=title))
         metadata = {"scene": scene_id} if scene_id else {}
-        self.service.save_card(card.id, SaveCardRequest(title=title, body="", metadata=metadata))
+        self.save_card_written(card.id, SaveCardRequest(title=title, body="", metadata=metadata))
         return card.id
 
     def _containers_by_id(self, projection) -> dict:

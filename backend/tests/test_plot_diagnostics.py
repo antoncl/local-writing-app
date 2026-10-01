@@ -61,7 +61,7 @@ class _DiagnosticsTestCase(PlotTestCase):
             metadata["beat_links"] = [{"plotline": pl, "beat_id": bid} for pl, bid in beats]
         if causal:
             metadata["causal_links"] = [{"target": t} for t in causal]
-        self.service.save_card(card.id, SaveCardRequest(title=title, body="", metadata=metadata))
+        self.save_card_written(card.id, SaveCardRequest(title=title, body="", metadata=metadata))
         return card.id
 
     def _plotline(self):

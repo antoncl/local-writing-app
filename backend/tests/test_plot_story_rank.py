@@ -18,8 +18,10 @@ from plot_fixtures import PlotTestCase
 from pydantic import ValidationError
 
 from app.models import (
+    AttachCardRequest,
     CreateCardRequest,
     CreateSceneRequest,
+    DetachCardRequest,
     PlaceCardRequest,
     SaveCardRequest,
     StoryPlacement,
@@ -51,11 +53,7 @@ class _StoryTestCase(PlotTestCase):
         return self.service.create_scene(CreateSceneRequest(title=title)).id
 
     def _attach(self, card_id: str, scene_id: str) -> None:
-        card = self.service.read_card(card_id)
-        self.service.save_card(
-            card_id,
-            SaveCardRequest(title=card.title, body=card.body, metadata={**card.metadata, "scene": scene_id}),
-        )
+        self.service.attach_card(card_id, AttachCardRequest(scene_id=scene_id))
 
     def _path(self, card_id: str) -> Path:
         return self.service._path_for_node_id(card_id, "plot")
@@ -66,7 +64,7 @@ class _StoryTestCase(PlotTestCase):
 
 
 class OneCardPerSceneTests(_StoryTestCase):
-    def test_saving_a_held_scene_onto_another_card_is_a_409(self) -> None:
+    def test_attaching_a_held_scene_to_another_card_is_a_409(self) -> None:
         scene = self._scene()
         first, second = self._card("A"), self._card("B")
         self._attach(first, scene)
@@ -82,9 +80,7 @@ class OneCardPerSceneTests(_StoryTestCase):
         scene = self._scene()
         first, second = self._card("A"), self._card("B")
         self._attach(first, scene)
-        response = self.client.put(
-            f"/api/plot/cards/{second}", json={"title": "B", "body": "", "metadata": {"scene": scene}}
-        )
+        response = self.client.post(f"/api/plot/cards/{second}/attach", json={"scene_id": scene})
         self.assertEqual(response.status_code, 409, response.text)
 
     def test_saving_a_card_whose_scene_is_unchanged_never_409s_even_with_a_duplicate_on_disk(self) -> None:
@@ -95,17 +91,18 @@ class OneCardPerSceneTests(_StoryTestCase):
         card = self.service.read_card(second)
         saved = self.service.save_card(
             second,
-            SaveCardRequest(title="B renamed", body="plan", metadata=card.metadata, base_revision=card.revision),
+            SaveCardRequest(title=card.title, body=card.body, metadata=card.metadata, base_revision=card.revision),
         )
         self.assertEqual(saved.metadata["scene"], scene)
 
-    def test_changing_a_card_to_a_free_scene_and_clearing_it_is_fine(self) -> None:
+    def test_detaching_a_card_frees_it_for_another_scene(self) -> None:
         one, two = self._scene("One"), self._scene("Two")
         card = self._card("A")
         self._attach(card, one)
-        self._attach(card, two)
-        self.service.save_card(card, SaveCardRequest(title="A", metadata={}))
+        self.service.detach_card(card, DetachCardRequest())
         self.assertFalse(self.service.read_card(card).metadata.get("scene"))
+        self._attach(card, two)
+        self.assertEqual(self.service.read_card(card).metadata["scene"], two)
 
     def test_create_with_a_supplied_id_and_a_held_scene_is_a_409(self) -> None:
         scene = self._scene()
@@ -351,7 +348,7 @@ class SnapshotRestoreTests(_StoryTestCase):
         a, b = self._card("A"), self._card("B")
         self._attach(a, scene)
         snapshot = self._snapshot(a)
-        self.service.save_card(a, SaveCardRequest(title="A", metadata={}))  # detach
+        self.service.detach_card(a, DetachCardRequest())
         self._attach(b, scene)  # B takes the scene
         with self.assertLogs("app.services.project.card_story_time", level="WARNING") as logs:
             self._restore(a, snapshot)
@@ -364,7 +361,7 @@ class SnapshotRestoreTests(_StoryTestCase):
         a = self._card("A")
         self._attach(a, scene)
         snapshot = self._snapshot(a)
-        self.service.save_card(a, SaveCardRequest(title="A", metadata={}))
+        self.service.detach_card(a, DetachCardRequest())
         self._restore(a, snapshot)
         self.assertEqual(self.service.read_card(a).metadata["scene"], scene)
 

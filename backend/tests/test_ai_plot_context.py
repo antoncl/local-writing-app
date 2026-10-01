@@ -47,7 +47,7 @@ class _PlotAiContextBase(PlotTestCase):
 
     def _card(self, title: str, *, body: str = "", **metadata: object) -> str:
         card = self.service.create_card(CreateCardRequest(title=title))
-        self.service.save_card(card.id, SaveCardRequest(title=title, body=body, metadata=dict(metadata)))
+        self.save_card_written(card.id, SaveCardRequest(title=title, body=body, metadata=dict(metadata)))
         return card.id
 
     def _plotline(self):
@@ -74,7 +74,7 @@ class PlotContextHelperTests(_PlotAiContextBase):
         self.assertIn("<plot_context", out)
         self.assertIn('completeness="whole_board"', out)
         self.assertIn(plotline.title, out)  # the plotline appears with its roster
-        self.assertIn("They Meet", out)
+        self.assertIn("Opening", out)  # a written card shows its scene's title
         self.assertIn("She spills his coffee.", out)  # the synopsis is the reasoning stand-in
         self.assertIn("<fulfils", out)  # the card names the beat it fulfils
 
@@ -88,7 +88,7 @@ class PlotContextHelperTests(_PlotAiContextBase):
         )
         self.assertIn('completeness="through_as_of"', out)
         self.assertIn("cards_withheld_ahead", out)
-        self.assertIn("Early", out)
+        self.assertIn("s0", out)  # a written card shows its scene's title
         self.assertNotIn("SECRET_FUTURE", out)  # the future card is withheld, not leaked
 
     def test_an_unknown_anchor_degrades_to_whole_board(self) -> None:
@@ -121,7 +121,7 @@ class PlotContextHelperTests(_PlotAiContextBase):
         self._card("Cause", scene=s0, plotline=plotline.id, causal_links=[{"target": effect}])
         out = self._render('{% role "system" %}{{ plot_context() }}{% endrole %}')
         self.assertIn('plotline="Romance"', out)  # the card carries its plotline title
-        self.assertIn('<leads_to card="Effect"', out)  # the causal edge, title-resolved
+        self.assertIn('<leads_to card="s1"', out)  # the causal edge, resolved to the target's shown title
         self.assertIn("GUIDANCE_TEXT", out)  # beat guidance renders as element text
         self.assertIn("</beat>", out)  # a beat with guidance is an element, not self-closing
         # The beatless "Romance" plotline is a self-closed element (ad-hoc / no beats),

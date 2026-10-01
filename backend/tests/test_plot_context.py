@@ -45,7 +45,7 @@ class PlotContextTestCase(PlotTestCase):
 
     def _card(self, title: str, *, body: str = "", **metadata: object) -> str:
         card = self.service.create_card(CreateCardRequest(title=title))
-        self.service.save_card(card.id, SaveCardRequest(title=title, body=body, metadata=dict(metadata)))
+        self.save_card_written(card.id, SaveCardRequest(title=title, body=body, metadata=dict(metadata)))
         return card.id
 
     def _plotline(self):
@@ -80,7 +80,7 @@ class WholeBoardTests(PlotContextTestCase):
 
         context = self.service.read_plot_context()
         card = next(c for c in context.cards if c.id == card_id)
-        self.assertEqual(card.synopsis, "She spills his coffee.\n")
+        self.assertEqual(card.synopsis, "She spills his coffee.")  # the scene summary the attach seeded
         self.assertEqual(card.plotline_id, plotline.id)
         self.assertEqual(card.plotline_title, "Romance")
         self.assertEqual(card.scene_id, scene)

@@ -31,12 +31,19 @@ class _CardLinkTestCase(PlotTestCase):
         return created.json()["id"]
 
     def _save_card(self, card_id: str, metadata: dict, *, title: str = "Card", body: str = "") -> dict:
+        # `scene` is endpoint-owned (ADR-0097 §1): a save ignores it, so a scene in
+        # `metadata` is attached through the attach endpoint after the save.
+        scene_id = metadata.get("scene")
         saved = self.client.put(
             f"/api/plot/cards/{card_id}",
-            json={"title": title, "body": body, "metadata": metadata},
+            json={"title": title, "body": body, "metadata": {k: v for k, v in metadata.items() if k != "scene"}},
         )
         self.assertEqual(saved.status_code, 200, saved.text)
-        return saved.json()
+        if not scene_id:
+            return saved.json()
+        attached = self.client.post(f"/api/plot/cards/{card_id}/attach", json={"scene_id": scene_id})
+        self.assertEqual(attached.status_code, 200, attached.text)
+        return attached.json()
 
     def _read_card(self, card_id: str) -> dict:
         got = self.client.get(f"/api/plot/cards/{card_id}")
@@ -255,14 +262,15 @@ class CardPageStatusTests(_CardLinkTestCase):
         self.assertNotIn("page_status", self._read_card(card)["metadata"])
 
     def test_removing_the_scene_clears_a_stale_on_page(self) -> None:
-        # Attach a scene (→ on_page), then re-save with the scene gone but the stale
-        # on_page still in the payload — the derivation clears it back to blank.
+        # Attach a scene (→ on_page), then detach it — the stored on_page goes with it.
         scene_id = self._scene()
         card = self._new_card()
         self._save_card(card, {"scene": scene_id})
         self.assertEqual(self._read_card(card)["metadata"]["page_status"], "on_page")
-        self._save_card(card, {"page_status": "on_page"})  # scene removed from the payload
+        detached = self.client.post(f"/api/plot/cards/{card}/detach", json={})
+        self.assertEqual(detached.status_code, 200, detached.text)
         self.assertNotIn("page_status", self._read_card(card)["metadata"])
+        self.assertFalse(self._read_card(card)["metadata"].get("scene"))
 
     def test_deleting_the_scene_clears_on_page_on_read(self) -> None:
         # The purge path, not a re-save: delete_scene blanks the card's scene ref but

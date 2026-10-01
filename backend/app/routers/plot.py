@@ -13,14 +13,17 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.models import (
+    AttachCardRequest,
     CardEntry,
     CardList,
+    CardTextRequest,
     CharacterArcEntry,
     CharacterArcList,
     CreateCardRequest,
     CreateCharacterArcRequest,
     CreatePlotlineRequest,
     CreatePlotTemplateRequest,
+    DetachCardRequest,
     PlaceCardRequest,
     PlotBoard,
     PlotBoardProjection,
@@ -176,6 +179,27 @@ def realize_card(project: CurrentProject, entry_id: str, request: RealizeCardReq
     """Create a scene from a card and attach it (ADR-0048 §1, *realize*)."""
     with translate_errors():
         return project.realize_card(entry_id, request)
+
+
+@router.post("/api/plot/cards/{entry_id}/attach", response_model=CardEntry)
+def attach_card(project: CurrentProject, entry_id: str, request: AttachCardRequest) -> CardEntry:
+    """Bind a card to an existing scene (ADR-0097 §1, §3, §4)."""
+    with translate_errors():
+        return project.attach_card(entry_id, request)
+
+
+@router.post("/api/plot/cards/{entry_id}/detach", response_model=CardEntry)
+def detach_card(project: CurrentProject, entry_id: str, request: DetachCardRequest) -> CardEntry:
+    """Unbind a card from its scene; it takes the scene's text back (ADR-0097 §3, §4)."""
+    with translate_errors():
+        return project.detach_card(entry_id, request)
+
+
+@router.put("/api/plot/cards/{entry_id}/text", response_model=CardEntry)
+def set_card_text(project: CurrentProject, entry_id: str, request: CardTextRequest) -> CardEntry:
+    """Edit the title/synopsis a card shows: the scene's when written (ADR-0097 §3)."""
+    with translate_errors():
+        return project.set_card_text(entry_id, request)
 
 
 @router.post("/api/plot/cards/{entry_id}/place", response_model=CardEntry)

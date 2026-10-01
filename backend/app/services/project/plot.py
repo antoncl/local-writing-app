@@ -743,9 +743,26 @@ class PlotMixin:
         return card
 
     def save_card(self, entry_id: str, request: SaveCardRequest) -> CardEntry:
-        # One card per scene (ADR-0097 §1). `scene` stays client-writable until the
-        # attach endpoint ships (S2), so the save enforces the rule itself.
-        self._require_card_scene_change_allowed(entry_id, request.metadata.get("scene"))
+        """The public card save (ADR-0097 §1, §3). `scene` is endpoint-owned — the
+        on-disk value is kept and the client's ignored, like `story_rank` — and a
+        written card's own title and body are frozen: its text is edited in the
+        scene (`PUT .../text`), so a stale client cannot write text nobody sees."""
+        current = self.read_card(entry_id)
+        scene = current.metadata.get("scene")
+        if scene and (
+            request.title != current.title or request.body.rstrip() != current.body.rstrip()
+        ):
+            raise ProjectServiceError(
+                "This card is written as a scene; edit its synopsis in the scene.", 422
+            )
+        metadata = {key: value for key, value in request.metadata.items() if key != "scene"}
+        if scene:
+            metadata["scene"] = scene
+        return self._write_card(entry_id, request.model_copy(update={"metadata": metadata}))
+
+    def _write_card(self, entry_id: str, request: SaveCardRequest) -> CardEntry:
+        # The one card write path. Internal writers that own `scene` (realize,
+        # attach, detach — `card_scene.py`) come straight here; `save_card` pins it.
         return self.read_card(
             self._save_plot_folder_node(entry_id, request, expected_entry_type="plot:card", noun="card")
         )
@@ -756,29 +773,12 @@ class PlotMixin:
 
     # ----- Card operations: realize, attach, seed (ADR-0048 §1) -----------
     #
-    # *attach* — binding a card to an existing scene — is not its own operation:
-    # it is a `save_card` that sets the `scene` entity_ref, which the board's
-    # picker will drive (S7). `_set_card_scene` below is that write, reused by
-    # both realize and seed so the ref is always schema-validated (the scene
-    # must exist) through the one save path. *realize* creates the scene first;
+    # *attach* / *detach* — binding a card to an existing scene, and back — are
+    # endpoints of their own (`card_scene.py`, ADR-0097 §4): `scene` is not
+    # client-writable through `save_card`. They and *realize* write the ref
+    # through `_write_card_fields`, so it is schema-validated (the scene must
+    # exist) through the one save path. *realize* creates the scene first;
     # *seed-from-manuscript* is the bulk inverse — a card for every scene.
-
-    def _set_card_scene(self, card: CardEntry, scene_id: str) -> CardEntry:
-        # Attach = write the card's `scene` ref through the normal save path, so
-        # the ref is schema-validated and the index / reference graph stay
-        # coherent. Attachment lives only on the card (scenes never grow planning
-        # fields — ADR binding decisions), so this is the whole of "attach".
-        metadata = {**card.metadata, "scene": scene_id}
-        return self.save_card(
-            card.id,
-            SaveCardRequest(
-                title=card.title,
-                body=card.body,
-                entry_type=card.entry_type,
-                metadata=metadata,
-                base_revision=card.revision,
-            ),
-        )
 
     def realize_card(self, entry_id: str, request: RealizeCardRequest) -> CardEntry:
         """Create a scene from a card and attach it (ADR-0048 §1, *realize*).
@@ -786,8 +786,9 @@ class PlotMixin:
         A planned card becomes a real, empty scene slotted into the manuscript
         (titled after the card; placement via `parent_id`, else the first
         container — create_scene's fallback), linked back through the card's
-        `scene` ref. The synopsis stays on the card as the plan; the new scene
-        holds the prose the writer has yet to write. 0..1 scene per card, so a
+        `scene` ref. The card's body becomes the new scene's `summary` (ADR-0097
+        §3) and stays on the card, frozen, as the plan; the scene holds the prose
+        the writer has yet to write. 0..1 scene per card, so a
         card that already has one 409s rather than orphaning the first scene.
         """
         root = self._require_project()
@@ -805,7 +806,11 @@ class PlotMixin:
             entry_id, self._build_node_index().by_id.get(entry_id), root, noun="card"
         )
         scene = self.create_scene(CreateSceneRequest(title=card.title, parent_id=request.parent_id))
-        return self._set_card_scene(card, scene.id)
+        # The card's plan becomes the new scene's summary, the one synopsis the card
+        # now shows (ADR-0097 §3).
+        if card.body.strip():
+            self._set_scene_summary(scene.id, card.body.strip())
+        return self._write_card_fields(card, metadata={**card.metadata, "scene": scene.id})
 
     def seed_cards_from_manuscript(self) -> CardList:
         """Create one attached card per manuscript scene that has none (ADR-0048 §1/§S5).
@@ -828,7 +833,7 @@ class PlotMixin:
             if scene_id in carded_scene_ids:
                 continue
             # One validated write per scene: mint the card already attached to its
-            # scene via seed_metadata, instead of create_card + _set_card_scene —
+            # scene via seed_metadata, instead of create_card + a scene write —
             # two writes per scene, each re-resolving the node index on its
             # read-back. Calling _create_plot_folder_node directly writes once and
             # skips those read-backs; the write funnel maintains the index memo in

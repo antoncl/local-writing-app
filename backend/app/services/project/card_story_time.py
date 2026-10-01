@@ -65,20 +65,6 @@ class CardStoryTimeMixin:
                 409,
             )
 
-    def _require_card_scene_change_allowed(self, entry_id: str, new_scene: object) -> None:
-        """The save-side check: only a scene that differs from what is on disk is
-        checked, so saving a card whose scene is unchanged never 409s, even when a
-        duplicate predates the rule."""
-        if not isinstance(new_scene, str) or not new_scene:
-            return
-        winner = self._build_node_index().by_id.get(entry_id)
-        if winner is None:
-            return  # the save itself answers a missing card
-        stored = self._read_front_matter_only(winner.path).get("metadata")
-        if isinstance(stored, dict) and stored.get("scene") == new_scene:
-            return
-        self._require_scene_unheld(new_scene, entry_id)
-
     # ----- story rank (ADR-0097 §5) ----------------------------------------
 
     def _own_card_ranks(self) -> list[tuple[NodeIndexEntry, float | None]]:

@@ -1,6 +1,6 @@
 # ADR-0097: A card lives in a deck, shows its scene once written, and has a place in story time
 
-- **Status:** Proposed — 2026-10-01. Text by Claude from a conversation with Anton on 2026-10-01,
+- **Status:** Accepted — 2026-10-01, Anton Lauridsen (PR #2374), with the go for S1. Text by Claude from a conversation with Anton on 2026-10-01,
   which started from his dogfooding of the plot board after #2361 made a card's synopsis
   readable. He asked for two things: a named container for cards that are not scenes ("a
   character's backstory"), and for a written card's board text and its scene's summary to stay

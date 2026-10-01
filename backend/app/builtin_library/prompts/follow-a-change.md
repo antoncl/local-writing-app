@@ -73,6 +73,10 @@ When the edits are complete, say they are ready to commit. Do not brainstorm alt
 
 You don't output the structured result yourself — when the author commits, a separate step extracts it from this conversation, and it can only use what is actually written here: a change you describe but never write out ("tighten the midpoint") has no new text to commit, so the old text stays. Keep the discussion in prose.
 
+{# How lore should read (#2371). Scoped to the replacement wording: this prompt
+   leaves untouched text exactly as it is. #}
+{% include "Lore register" %} This governs the replacement wording you write; text the change does not touch stays exactly as it is.
+
 These are the fields you can change:
 {{ field_contract.render }}
 

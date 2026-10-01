@@ -137,6 +137,37 @@ class FieldContractBuiltinsTests(unittest.TestCase):
             prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, title))
             self.assertIn("change the content, not the volume", prompt.body, title)
 
+    def test_lore_register_reaches_the_lore_prompts_only(self) -> None:
+        # #2371: lore is reference material, so the prompts that write lore carry
+        # the "Lore register" rule — rendered, so the include provably resolves.
+        # The plot prompts share the `body` field but not the rule: a card's or a
+        # plotline's body should stay full.
+        rule = "Write every field and the body like a series bible"
+        note = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Alderman Vane", entry_type="lore:note")
+        )
+        lore = {
+            "Revise entry (revise)": ("Revise entry", {"entry": note.id, "entry_type": ""}),
+            "Revise entry (create)": ("Revise entry", {"entry": "", "entry_type": "lore:character"}),
+            "Follow a change": ("Follow a change", {"entry": note.id, "entry_type": ""}),
+        }
+        plot = {
+            "Revise plot card": {"entry": self.service.create_card(CreateCardRequest(title="The Ambush")).id},
+            "Revise plotline": {"entry": self.service.create_plotline(CreatePlotlineRequest(title="Romance")).id},
+            "Revise character arc": {
+                "entry": self.service.instantiate_plot_template("builtin-plot-positive-character-change-arc").id
+            },
+        }
+        for label, (title, inputs) in lore.items():
+            self.assertIn(rule, self._render(builtin_prompt_id(self.service, title), inputs), label)
+        for title, inputs in plot.items():
+            self.assertNotIn(rule, self._render(builtin_prompt_id(self.service, title), inputs), title)
+
+    def _render(self, prompt_id: str, inputs: dict) -> str:
+        prompt = self.service.read_prompt_entry(prompt_id)
+        env = create_environment_for_project(self.service)
+        return env.from_string(prompt.body).render(inputs=inputs)
+
     def test_follow_a_change_registers_full_proposable_set(self) -> None:
         # ADR-0091 §4: the built-in Propose default registers the same full
         # proposable set as Revise entry — body included — for its dependent.

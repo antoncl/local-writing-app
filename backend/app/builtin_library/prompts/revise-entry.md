@@ -63,6 +63,8 @@ You don't output the structured result yourself — when the author commits, a s
 The {{ type_name(draft_type) }} has these fields to develop:
 {{ field_contract.render }}
 {% endif %}
+{# How lore should read — one rule for revise and create alike (#2371). #}
+{% include "Lore register" %}
 {# The scene's established lore (world rules, premise, setting, anything marked
    always-in-context) is selected and placed by the backend; auto_lore() just
    turns that on for this prompt. #}

@@ -150,6 +150,15 @@ describe("EntryProposalController", () => {
     expect(adoptBody).not.toHaveBeenCalled();
   });
 
+  it("a frozen card offers no title flip — its title is frozen with the body", () => {
+    const c = entryController("e1");
+    c.bodyFrozen = true;
+    c.metadata = { title: "Old Name" };
+    entryBrainstorm.propose("e1", patch(null, { title: "New Name" }));
+    expect(c.structuredFlips).toEqual([]);
+    expect(c.hasReview).toBe(false);
+  });
+
   it("a frozen body still lets the other flips of the patch review", () => {
     const c = entryController("e1");
     c.bodyFrozen = true;

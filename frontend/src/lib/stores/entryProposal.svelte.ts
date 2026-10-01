@@ -220,6 +220,9 @@ export class EntryProposalController {
     for (const [fieldId, proposedValue] of Object.entries(proposal.fields)) {
       const field = schema.fields[fieldId];
       if (!field || field.hidden || NON_FLIPPABLE_FIELD_IDS.has(fieldId)) continue;
+      // ADR-0097 §3: a written card's title is frozen with its body (the save refuses
+      // a change), so a proposed rename is not offered.
+      if (fieldId === "title" && this.bodyFrozen) continue;
       // ADR-0096 §7: a `list` field leaves the atomic rail flip for the
       // per-item review section — whether or not it has units (a unit-less
       // list shows nothing there and is not written either way). The one

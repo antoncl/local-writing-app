@@ -50,8 +50,8 @@ class PreparedChatTurn:
     chat it already holds instead of re-reading transcript + ledger inside
     the stream. `chat` is None for a chat-less call or a missing chat.
     `lore_fit` (ADR-0086 §5) is what the turn's lore budget kept and left
-    out; None when no implicit selection ran (chat-less, lore off, the
-    commit's `used` turn)."""
+    out; None when no implicit selection ran (chat-less, nothing declared and
+    automatic lore off, the commit's `used` turn)."""
 
     system_blocks: list[dict] | None
     session_id: str | None
@@ -60,6 +60,7 @@ class PreparedChatTurn:
     lore_fit: LoreFit | None = None
 
 if TYPE_CHECKING:
+    from app.services.ai.lore_selection import SelectMode
     from app.services.project_service import ProjectService
 
 
@@ -249,14 +250,17 @@ def _lore_cache_blocks(
     scene: Any,
     limits: LoreLimits,
     *,
-    automatic: bool = True,
+    mode: SelectMode = "automatic",
+    policies: dict[str, set[str]] | None = None,
 ) -> tuple[list[dict], dict[str, str], LoreFit]:
     """The chat's one deduped lore set, fitted to the assistant's budget and
     placed once *per volatility tier* (docs/design/context-caching.md §4).
     `_select_lore` — the single selector — computes the declared set (`use()`
     picks, scene refs, `always`) and the inferred candidates (journal, structural
-    hop) minus `never`/`manual_only` — or, with `automatic=False` (ADR-0092
-    §7.1), the declared set is the `use()` picks alone and inferred is empty;
+    hop) minus `never`/`manual_only` — or, with `mode="declared"` (ADR-0092
+    Amendment 1), the declared set is the `use()` picks plus the `always`
+    entries and inferred is empty (`"picks"`: the picks alone, for a lore-free
+    chat); `policies` is the turn's one policy scan, reused by the selector;
     every candidate is rendered once;
     `fit_lore_budget` keeps the declared set whole and as much of the inferred
     set as fits, in fit order (ADR-0086 §3); `_tier_lore_ids` splits the kept ids
@@ -309,7 +313,8 @@ def _lore_cache_blocks(
         picks,
         session=session,
         limits=limits,
-        automatic=automatic,
+        mode=mode,
+        policies=policies,
     )
     session.commit()
 
@@ -338,21 +343,24 @@ def expand_and_prepare_chat_blocks(
         stable}, {staged_change, stable}?, {stable_lore, stable}?, {volatile_lore,
         volatile}?] — the staged_change block (ADR-0055 S4) is present only when the
         chat owns a resolvable mutation set; the two lore blocks (ADR-0057 +
-        docs/design/context-caching.md) only when the chat is lore-enabled OR
-        carries `use()` picks (ADR-0092 §7.1) and the corresponding tier is
-        non-empty. Each block carries a `tier`, not a ttl;
+        docs/design/context-caching.md) only when the chat is lore-enabled, OR
+        carries `use()` picks (ADR-0092 §7.1), OR the project has an `always`
+        entry and the chat is not lore-free (Amendment 1), and the
+        corresponding tier is non-empty. Each block carries a `tier`, not a ttl;
         the adapter maps tier → ttl/breakpoint and caps the breakpoint count
       - session_id for OpenRouter provider stickiness
       - journal_added: lore IDs newly detected on THIS turn (for audit UI)
 
-    ADR-0092 §7.1: the lore gate. `chat.lore_enabled` gates AUTOMATIC lore only
-    — detection and the inferred half of the selection. The chat's own `use()`
-    picks are placed whenever there are any, flag on or off: a pick-only chat
-    (flag off, `used_node_ids` non-empty) still gets its picks tiered and
-    committed like any turn, just with nothing else (no scene refs, no
-    `always` entries, no detection, no hop). A chat with neither the flag nor
-    any picks sends no lore block at all, so a deliberately lore-free prompt
-    stays clean (Journey C).
+    ADR-0092 §7.1 + Amendment 1: the lore gate. `chat.lore_enabled` gates
+    AUTOMATIC lore only — detection and the inferred half of the selection —
+    and a lore-free chat (`chat.lore_free`, from `no_lore()`) has it off even
+    if a stale `lore_enabled` is stored. The chat's own `use()` picks and the
+    project's `always` entries are DECLARED lore, placed with the flag off:
+    such a turn gets them tiered and committed like any turn, with nothing
+    else (no scene refs, no detection, no hop). A lore-free chat gets its
+    picks alone. A turn with nothing to place (no picks, no `always` entry or
+    lore-free, automatic lore off) sends no lore block and leaves `lore_fit`
+    None.
 
     Placement (docs/design/context-caching.md §4): the backend — not the template
     — selects, dedups, and places lore. The one deduped set is split per turn
@@ -393,11 +401,26 @@ def expand_and_prepare_chat_blocks(
     # snapshot pick alone (no live pick at all) also opens placement — the
     # gate's "has picks" counts both lists.
     has_picks = bool(chat.used_node_ids or chat.used_snapshots)
+    # Amendment 1: a lore-free chat has automatic lore off whatever is stored.
+    automatic = chat.lore_enabled and not chat.lore_free
+    from app.services.ai.lore_selection import _lore_policy_ids
+
+    # The turn's one policy scan, made up front only when the declared-only
+    # path could run (automatic turns let the selector scan for itself): it
+    # says whether an `always` entry is there to place, and the selector reuses
+    # it. A lore-free chat needs it only for its picks' `never` filter.
+    policies = (
+        _lore_policy_ids(project)
+        if lore_mode == "implicit" and not automatic and (has_picks or not chat.lore_free)
+        else None
+    )
+    has_always = bool(policies and not chat.lore_free and policies["always"])
+    declared = has_picks or has_always
     # Loaded ONCE — the scene EntryRef (body + metadata) shared by detection
     # (ADR-0075 slice 3 scans its prose) and lore rendering, so a lore-enabled
     # turn does exactly one `read_scene` for its resolution scene.
-    scene = _chat_resolution_scene(project, chat) if (chat.lore_enabled or has_picks) else None
-    if chat.lore_enabled and lore_mode == "implicit":
+    scene = _chat_resolution_scene(project, chat) if (automatic or declared) else None
+    if automatic and lore_mode == "implicit":
         new_entries = _detect_and_persist_journal(
             project, chat, chat_id, messages_list, scene, system_prompt
         )
@@ -414,13 +437,14 @@ def expand_and_prepare_chat_blocks(
     if staged_xml:
         blocks.append({"text": staged_xml, "tier": "stable"})
     # Slots 2a/2b: the one deduped lore set, placed once per volatility tier
-    # (stable, then volatile). For a lore-enabled chat OR a chat with `use()`
-    # picks (ADR-0092 §7.1) — the picks-only case selects declared-only, no
-    # detection, no scene refs, no `always` entries. The provider adapter
+    # (stable, then volatile). For a lore-enabled chat, a chat with `use()`
+    # picks (ADR-0092 §7.1), or a project with an `always` entry on a chat that
+    # is not lore-free (Amendment 1) — the declared-only case selects the picks
+    # and the `always` entries, no detection, no scene refs. The provider adapter
     # caps breakpoints (Anthropic: ≤4) and assigns each tier its ttl — the shared
     # layer only orders stable-first (ADR-0060 §5).
     lore_fit: LoreFit | None = None
-    if lore_mode == "implicit" and (chat.lore_enabled or has_picks):
+    if lore_mode == "implicit" and (automatic or declared):
         lore_blocks, seen_revisions, lore_fit = _lore_cache_blocks(
             project,
             chat,
@@ -428,7 +452,8 @@ def expand_and_prepare_chat_blocks(
             journal_for_send,
             scene,
             lore_limits,
-            automatic=chat.lore_enabled,
+            mode="automatic" if automatic else ("picks" if chat.lore_free else "declared"),
+            policies=policies,
         )
         blocks.extend(lore_blocks)
         # #1635: persist the last-seen revisions if they changed, so the door's

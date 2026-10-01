@@ -47,7 +47,11 @@ from app.services.tree_structure import TreeStructureService
 
 logger = logging.getLogger(__name__)
 
+# ADR-0092 Amendment 1 §3: the one warning when a prompt calls both gates.
+LORE_FREE_CONFLICT_WARNING = "`no_lore()` and `auto_lore()` are both called; this prompt is lore-free"
+
 if TYPE_CHECKING:
+    from app.services.ai.lore_selection import SelectMode
     from app.services.ai.profiles import ModelDescriptor
     from app.services.machine_settings import MachineSettings
 
@@ -678,8 +682,9 @@ def _annotate_rendered_from_env(
     """Copy the env-side execution state the render's helpers (`use()`,
     `auto_lore()`, `field_contract.store()`) recorded during the template render
     onto `rendered`, and compute the send-path lore tiers when automatic lore
-    was invoked or the render carries `use()` picks (ADR-0092 §7.1). Split out
-    of `build_preview` (#1544) so that function's own statement count stays
+    was invoked, the render carries `use()` picks (ADR-0092 §7.1), or the
+    project has an `always` entry and the prompt is not lore-free (Amendment 1).
+    Split out of `build_preview` (#1544) so that function's own statement count stays
     under the complexity gate."""
     # ADR-0092 §7.1: carry the execution-derived AUTOMATIC-lore gate off the env
     # (set by `auto_lore()`, or its deprecated alias `use_lore()`, §7.2) onto the
@@ -687,6 +692,14 @@ def _annotate_rendered_from_env(
     # persist `lore_enabled`. The default `[False]` covers an env that never
     # registered the helper.
     rendered.lore_invoked = bool(getattr(env, "lore_invoked", [False])[0])
+    # Amendment 1 §3: `no_lore()` declares the prompt lore-free. If `auto_lore()`
+    # also ran the contradiction is settled here, at the source: lore-free wins
+    # (the safe reading), so `lore_enabled` is captured false, with one warning
+    # added after the render (it cannot know which call came first).
+    rendered.lore_free = bool(getattr(env, "lore_free", [False])[0])
+    if rendered.lore_free and rendered.lore_invoked:
+        rendered.lore_invoked = False
+        rendered.warnings.append(LORE_FREE_CONFLICT_WARNING)
     # ADR-0060 §2: carry the author-selected node ids off the env (set by `use()`)
     # onto the rendered result, so the chat can persist `used_node_ids` and the
     # send path unions them into its one lore selector.
@@ -713,14 +726,28 @@ def _annotate_rendered_from_env(
     # ADR-0060 §6, narrowed by ADR-0092 §7.1: compute the send-path lore the
     # model will receive so the cache-aware preview can surface it (templates
     # no longer emit lore). For a lore-enabled prompt OR one that merely
-    # carries `use()` picks or snapshot picks — the pick-only mirror runs with
-    # `automatic=False` (no detection, picks alone); `scene` is the same as-of
-    # anchor the send path resolves.
-    if rendered.lore_invoked or rendered.used_node_ids or rendered.used_snapshots:
+    # carries `use()` picks or snapshot picks, or a project with an `always`
+    # entry (Amendment 1) — the declared-only mirror runs with no detection:
+    # picks plus `always` entries, or picks alone for a lore-free prompt;
+    # `scene` is the same as-of anchor the send path resolves. ONE policy scan
+    # decides the gate and is handed down to the selector.
+    from app.services.ai.lore_selection import _lore_policy_ids
+
+    has_picks = bool(rendered.used_node_ids or rendered.used_snapshots)
+    policies = (
+        _lore_policy_ids(project_service)
+        if not rendered.lore_invoked and (has_picks or not rendered.lore_free)
+        else None
+    )
+    has_always = bool(policies and not rendered.lore_free and policies["always"])
+    if rendered.lore_invoked or has_picks or has_always:
+        mode: SelectMode = (
+            "automatic" if rendered.lore_invoked else ("picks" if rendered.lore_free else "declared")
+        )
         _apply_preview_lore_tiers(
             rendered,
             _preview_lore_tiers(
-                project_service, scene, rendered, lore_limits, automatic=rendered.lore_invoked
+                project_service, scene, rendered, lore_limits, mode=mode, policies=policies
             ),
         )
 
@@ -773,7 +800,8 @@ def _preview_lore_tiers(
     rendered: RenderedTemplate,
     lore_limits: LoreLimits,
     *,
-    automatic: bool = True,
+    mode: SelectMode = "automatic",
+    policies: dict[str, set[str]] | None = None,
 ) -> _PreviewLoreTiers:
     """The send-path lore the model will receive, split into (stable, volatile) XML
     plus their per-entry pairs, for the cache-aware preview (ADR-0060 §6) and the
@@ -784,10 +812,12 @@ def _preview_lore_tiers(
     it cannot touch a live chat's cache baseline. Both tiers resolve as-of `scene`,
     like the send path.
 
-    `automatic=False` (ADR-0092 §7.1) mirrors a pick-only prompt: no detection
-    runs (`preview_journal` stays empty) and the selection is the `use()` picks
-    alone, so the Context door shows their tier rows before the first send with
-    `lore_enabled` false.
+    `mode="declared"` (ADR-0092 Amendment 1) mirrors a prompt with automatic
+    lore off: no detection runs (`preview_journal` stays empty) and the
+    selection is the `use()` picks plus the `always` entries, so the Context
+    door shows their tier rows before the first send with `lore_enabled` false.
+    `"picks"` is a lore-free prompt: the picks alone. `policies` is the caller's
+    one policy scan, reused by the selector.
 
     The journal fed to selection is the send path's own turn-1 detection
     (#1477, corrected in S2 review): a real send runs `expand_context` over the
@@ -811,7 +841,7 @@ def _preview_lore_tiers(
         dict(rendered.used_node_hints or {}),
         list(rendered.used_snapshots or []),
     )
-    if automatic:
+    if mode == "automatic":
         rendered_system_text = "\n\n".join(
             m.text for m in rendered.messages if m.role == "system" and m.text.strip()
         )
@@ -828,7 +858,7 @@ def _preview_lore_tiers(
             rendered_text=without_field_contract(rendered_system_text, rendered.field_contract_stored),
         )
     else:
-        # ADR-0092 §7.1: a pick-only mirror runs no detection at all.
+        # ADR-0092 §7.1: a declared-only mirror runs no detection at all.
         preview_journal = []
     # ADR-0086 §4: the same select → render → fit → tier the send runs, against
     # a throwaway session — so the estimate is bounded by the same rule, and an
@@ -840,7 +870,8 @@ def _preview_lore_tiers(
         picks,
         session=AISession(id="preview"),
         limits=lore_limits,
-        automatic=automatic,
+        mode=mode,
+        policies=policies,
     )
     return _PreviewLoreTiers(
         _wrap_lore_block(tiers.stable_pairs()),

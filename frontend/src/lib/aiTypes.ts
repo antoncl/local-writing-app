@@ -225,6 +225,10 @@ export type AIPreviewResponse = {
   // lore gate. Captured at the lock render and persisted as the chat's
   // lore_enabled.
   lore_enabled?: boolean;
+  // ADR-0092 Amendment 1 §3: whether no_lore() executed during this render —
+  // the prompt is lore-free (no always entries, no automatic lore). Captured at
+  // the lock render and persisted as the chat's lore_free.
+  lore_free?: boolean;
   // ADR-0060 §2: node ids the template selected via use(node), captured at the
   // lock render and persisted as the chat's used_node_ids.
   used_node_ids?: string[];
@@ -555,8 +559,12 @@ export type ChatSession = {
   inputs?: Record<string, unknown>;
   journal?: ChatSessionJournalEntry[];
   // ADR-0057 §2: the execution-derived lore gate, captured at the lock render.
-  // Gate off → the send path injects no lore at all. Absent on legacy chats.
+  // Gate off → no AUTOMATIC lore (picks and always entries still place).
+  // Absent on legacy chats.
   lore_enabled?: boolean;
+  // ADR-0092 Amendment 1 §3: the prompt called no_lore() — no always entries and
+  // no automatic lore. Absent reads as false.
+  lore_free?: boolean;
   // ADR-0060 §2: node ids the chat's prompt selected via use(node) at its lock
   // render. The send path unions them into its one lore selector.
   used_node_ids?: string[];
@@ -632,6 +640,8 @@ export type SaveChatSessionRequest = {
   // ADR-0057 §2: the lore gate. Echoed on save; the backend treats an omitted
   // value as "leave the captured gate alone", so per-turn saves preserve it.
   lore_enabled?: boolean;
+  // ADR-0092 Amendment 1 §3: echoed on save like lore_enabled.
+  lore_free?: boolean;
   // ADR-0060 §2: the author-selected node ids, echoed on save like lore_enabled.
   used_node_ids?: string[];
   // ADR-0060 §5: per-node volatility priors, echoed on save like used_node_ids.

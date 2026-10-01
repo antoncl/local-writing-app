@@ -328,6 +328,10 @@ class ChatSessionsMixin:
                 if request.lore_enabled is None
                 else request.lore_enabled
             ),
+            # ADR-0092 Amendment 1 §3: `no_lore()`, preserved like `lore_enabled`.
+            lore_free=(
+                existing.lore_free if request.lore_free is None else request.lore_free
+            ),
             # ADR-0060 §2: the author-selected node ids, preserved like the lore
             # gate. None from the request = "leave the captured value alone"
             # (general saves), so only the lock-render save sets it.

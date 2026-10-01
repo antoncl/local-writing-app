@@ -16,8 +16,13 @@ tests cover the two ends of that mechanism:
 `auto_lore()` and additionally emits `USE_LORE_DEPRECATION_NOTICE` into
 `rendered.warnings`, once per render no matter how many times it is called.
 
-The send-path half (gate off → no lore block; Journey C) lives in
-`test_ai_chat.py::ChatEndpointJournalTests`.
+ADR-0092 Amendment 1 adds `no_lore()`: a prompt-level "lore-free" declaration
+(`rendered.lore_free`, persisted as `ChatSession.lore_free`). It wins over
+`auto_lore()` with one warning; the chat preview mirrors the send, so a prompt
+with neither call shows the project's `always` entries as lore rows.
+
+The send-path half (gate off → no automatic lore) lives in
+`test_ai_chat.py::ChatEndpointJournalTests` and `test_lore_cache_blocks.py`.
 """
 
 from __future__ import annotations
@@ -67,7 +72,7 @@ class BuildPreviewLoreInvokedTests(unittest.TestCase):
         self.assertTrue(rendered.lore_invoked)
 
     def test_lore_invoked_false_when_helper_absent(self) -> None:
-        # A deliberately lore-free prompt (Journey C) — the gate must stay off.
+        # A prompt that never calls the helper — the automatic gate stays off.
         rendered = self._render(f"{_SYS}A pure style pass. No lore.{_END}")
         self.assertFalse(rendered.lore_invoked)
 
@@ -121,6 +126,135 @@ class BuildPreviewLoreInvokedTests(unittest.TestCase):
         )
         self.assertTrue(rendered.lore_invoked)
         self.assertEqual(rendered.warnings, [USE_LORE_DEPRECATION_NOTICE])
+
+
+class NoLoreTests(unittest.TestCase):
+    """`no_lore()` (ADR-0092 Amendment 1 §3) and the chat preview's mirror of
+    the send: `always` entries are placed unless the prompt is lore-free."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "No Lore")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _note(self, title: str, policy: str | None = None) -> str:
+        from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+
+        created = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title=title, entry_type="lore:note")
+        )
+        existing = self.service.read_lore_entry(created.id)
+        self.service.save_lore_entry(
+            created.id,
+            SaveLoreEntryRequest(
+                title=title,
+                body=f"{title} body.",
+                base_revision=existing.revision,
+                entry_type="lore:note",
+                metadata={"context_policy": policy} if policy else {},
+            ),
+        )
+        return created.id
+
+    def _render(self, template_source: str):
+        rendered, _ = build_preview(
+            self.service,
+            PreviewRequest(
+                template_source=template_source,
+                target_scene_id="",
+                session_id=None,
+                inputs={},
+                text_before="",
+                text_after="",
+                commit=False,
+            ),
+        )
+        return rendered
+
+    @staticmethod
+    def _placed(rendered) -> list[str]:
+        return rendered.send_lore_stable_ids + rendered.send_lore_volatile_ids
+
+    def test_no_lore_sets_lore_free(self) -> None:
+        rendered = self._render(f"{_SYS}Research.{{{{ no_lore() }}}}{_END}")
+        self.assertTrue(rendered.lore_free)
+        self.assertFalse(rendered.lore_invoked)
+        self.assertEqual(rendered.warnings, [])
+
+    def test_absent_leaves_lore_free_false(self) -> None:
+        self.assertFalse(self._render(f"{_SYS}Plain.{_END}").lore_free)
+
+    def test_both_calls_clear_lore_invoked_with_exactly_one_warning(self) -> None:
+        rendered = self._render(
+            f"{_SYS}{{{{ auto_lore() }}}}{{{{ no_lore() }}}}{{{{ auto_lore() }}}}{_END}"
+        )
+        self.assertTrue(rendered.lore_free)
+        self.assertFalse(rendered.lore_invoked)
+        self.assertEqual(
+            rendered.warnings,
+            ["`no_lore()` and `auto_lore()` are both called; this prompt is lore-free"],
+        )
+
+    def test_a_prompt_with_neither_call_shows_the_always_entry(self) -> None:
+        always = self._note("Narration Conventions", "always")
+        self._note("Other")
+        rendered = self._render(f"{_SYS}Plain.{_END}")
+        self.assertFalse(rendered.lore_invoked)
+        self.assertEqual(self._placed(rendered), [always])
+
+    def test_a_no_lore_prompt_shows_no_always_entry(self) -> None:
+        self._note("Narration Conventions", "always")
+        rendered = self._render(f"{_SYS}Research.{{{{ no_lore() }}}}{_END}")
+        self.assertEqual(self._placed(rendered), [])
+        self.assertIsNone(rendered.send_lore_fit)
+
+    def test_a_pick_is_still_placed_by_a_no_lore_prompt(self) -> None:
+        self._note("Narration Conventions", "always")
+        pick = self._note("Sidebar")
+        rendered = self._render(f'{_SYS}{{{{ no_lore() }}}}{{{{ use("{pick}") }}}}{_END}')
+        self.assertEqual(self._placed(rendered), [pick])
+
+    def test_both_calls_still_place_a_pick_but_no_always_entry(self) -> None:
+        self._note("Narration Conventions", "always")
+        pick = self._note("Sidebar")
+        rendered = self._render(
+            f'{_SYS}{{{{ auto_lore() }}}}{{{{ no_lore() }}}}{{{{ use("{pick}") }}}}{_END}'
+        )
+        self.assertEqual(self._placed(rendered), [pick])
+
+    def test_no_always_entry_and_no_picks_places_nothing(self) -> None:
+        self._note("Auto note")
+        rendered = self._render(f"{_SYS}Plain.{_END}")
+        self.assertEqual(self._placed(rendered), [])
+        self.assertIsNone(rendered.send_lore_fit)
+
+
+class LoreFreePersistenceTests(unittest.TestCase):
+    """`ChatSession.lore_free` round-trips; None on a save preserves it."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Lore Free Persist")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_defaults_false_sets_and_is_preserved_by_an_omitting_save(self) -> None:
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="C", prompt_entry_id="p")
+        )
+        self.assertFalse(self.service.read_chat_session(chat.id).lore_free)
+        self.service.save_chat_session(
+            chat.id, SaveChatSessionRequest(title="C", prompt_entry_id="p", lore_free=True)
+        )
+        self.service.save_chat_session(
+            chat.id, SaveChatSessionRequest(title="Renamed", prompt_entry_id="p")
+        )
+        self.assertTrue(self.service.read_chat_session(chat.id).lore_free)
 
 
 class LoreEnabledPersistenceTests(unittest.TestCase):

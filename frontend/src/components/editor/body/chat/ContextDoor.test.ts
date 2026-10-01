@@ -96,6 +96,15 @@ describe("ContextDoor", () => {
     expect(screen.queryByText("lore-enabled")).not.toBeInTheDocument();
   });
 
+  it("ADR-0092 Amendment 1: a lore-free prompt shows the lore-free annotation, not lore-enabled", async () => {
+    render(ContextDoor, { ...baseProps, loreEnabled: false, loreFree: true });
+    expect(screen.getByText("lore-free")).toBeInTheDocument();
+    await fireEvent.click(screen.getByText("System"));
+    expect(screen.getByText(BASE)).toBeInTheDocument();
+    expect(screen.getByText(/by this prompt/)).toBeInTheDocument();
+    expect(screen.queryByText("lore-enabled")).not.toBeInTheDocument();
+  });
+
   it("#2300: once locked, shows the locked system text, not a differing live preview render", async () => {
     const LIVE = "LIVE-PREVIEW-DRIFTED";
     const liveBlock: PreviewCacheBlock = { label: "system", role: "system", tokens: 10, text: LIVE };

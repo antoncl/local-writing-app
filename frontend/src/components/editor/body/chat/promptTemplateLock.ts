@@ -11,6 +11,8 @@ import type { PromptEntrySummary, SnapshotPick } from "@/lib/types";
 export interface PromptTemplateLock {
   systemPrompt: string;
   loreEnabled: boolean;
+  // ADR-0092 Amendment 1 §3: the prompt called no_lore().
+  loreFree: boolean;
   usedNodeIds: string[];
   usedNodeHints: Record<string, string>;
   // ADR-0093 §1: `use(node, snapshot=id)` picks captured at this render.
@@ -63,6 +65,7 @@ export async function lockPromptTemplate(
         // whether the send path injects any lore; persisted with the system
         // prompt via the caller's very next persistActiveChat.
         loreEnabled: preview.lore_enabled ?? false,
+        loreFree: preview.lore_free ?? false,
         usedNodeIds: preview.used_node_ids ?? [],
         usedNodeHints: preview.used_node_hints ?? {},
         usedSnapshots: preview.used_snapshots ?? [],

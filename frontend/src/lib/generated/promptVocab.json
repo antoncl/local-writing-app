@@ -110,6 +110,12 @@
       "summary": "The scene after `x` in reading order, or `None` at the end — the mirror of `previous_scene`. `plot_context(as_of=next_scene(e) or e.id)` shows a card's board one scene further."
     },
     {
+      "name": "no_lore",
+      "kind": "helper",
+      "signature": "no_lore()",
+      "summary": "`\"\"` — declares the prompt lore-free: the always-include entries are not placed and no automatic lore runs. The prompt's own `use()` picks are still placed. If the prompt also calls `auto_lore()`, `no_lore()` wins and the estimate warns."
+    },
+    {
       "name": "original",
       "kind": "helper",
       "signature": "original(x)",

@@ -181,6 +181,10 @@
   // relevant_lore()) and echoed on every save so a per-turn persist never
   // drops it. Drives whether the backend send path injects any lore at all.
   let chatLoreEnabled = $state(false);
+  // ADR-0092 Amendment 1 §3: the prompt called no_lore() — no always entries, no
+  // automatic lore. Captured and echoed exactly like chatLoreEnabled; hydrated
+  // from the stored chat so a save never resets a lore-free chat.
+  let chatLoreFree = $state(false);
   // ADR-0060 §2: node ids the prompt selected via use(node). Captured from the
   // lock render's preview response and echoed on every save, exactly like
   // chatLoreEnabled — the backend unions them into its one lore selector.
@@ -247,6 +251,9 @@
     mayCaptureLoreGate: () => !isLocked && !chatRunning && !chatSystemPrompt,
     setLoreEnabled: (v) => {
       chatLoreEnabled = v;
+    },
+    setLoreFree: (v) => {
+      chatLoreFree = v;
     },
   });
   const NO_XML: Record<string, string> = {};
@@ -417,6 +424,7 @@
     chatSubject = "";
     chatStagedSet = "";
     chatLoreEnabled = false;
+    chatLoreFree = false;
     chatUsedNodeIds = [];
     chatUsedNodeHints = {};
     chatUsedSnapshots = [];
@@ -444,6 +452,7 @@
     chatSubject = session.subject || "";
     chatStagedSet = session.staged_set || "";
     chatLoreEnabled = session.lore_enabled ?? false;
+    chatLoreFree = session.lore_free ?? false;
     chatUsedNodeIds = session.used_node_ids ?? [];
     chatUsedNodeHints = session.used_node_hints ?? {};
     // ADR-0093 §1: hydration matters here — the save payload always sends
@@ -593,6 +602,7 @@
       // subject/staged_set — the backend preserves it when a save omits it, but
       // we always send the hydrated value so it never drifts.
       lore_enabled: chatLoreEnabled,
+      lore_free: chatLoreFree,
       used_node_ids: chatUsedNodeIds,
       used_node_hints: chatUsedNodeHints,
       used_snapshots: chatUsedSnapshots,
@@ -928,6 +938,7 @@
     const { lock } = result;
     chatSystemPrompt = lock.systemPrompt;
     chatLoreEnabled = lock.loreEnabled;
+    chatLoreFree = lock.loreFree;
     chatUsedNodeIds = lock.usedNodeIds;
     chatUsedNodeHints = lock.usedNodeHints;
     chatUsedSnapshots = lock.usedSnapshots;
@@ -1155,6 +1166,7 @@
       loreLeftOutXml={doorLoreLeftOutXml}
       {fetchLeftOutXml}
       loreEnabled={chatLoreEnabled}
+      loreFree={chatLoreFree}
       journal={activeChatJournal}
       changedPicks={activeChatChangedPicks}
       onOpenDoor={refreshChangedPicks}

@@ -18,6 +18,7 @@ function makeDeps(over: Partial<ChatEstimateDeps> = {}): ChatEstimateDeps {
     getAssistantId: () => "",
     mayCaptureLoreGate: () => true,
     setLoreEnabled: () => {},
+    setLoreFree: () => {},
     ...over,
   };
 }
@@ -139,6 +140,27 @@ describe("ChatEstimateController (#2129)", () => {
     );
     await controller2.fetch();
     expect(setLoreEnabled2).toHaveBeenCalledWith(true);
+  });
+
+  it("the lore-free flag follows the same guard as the lore gate", async () => {
+    aiPreview.mockResolvedValue({
+      messages: [],
+      warnings: [],
+      char_count: 0,
+      rendered: true,
+      lore_free: true,
+    } as never);
+    const blocked = vi.fn();
+    await new ChatEstimateController(
+      makeDeps({ mayCaptureLoreGate: () => false, setLoreFree: blocked }),
+    ).fetch();
+    expect(blocked).not.toHaveBeenCalled();
+
+    const allowed = vi.fn();
+    await new ChatEstimateController(
+      makeDeps({ mayCaptureLoreGate: () => true, setLoreFree: allowed }),
+    ).fetch();
+    expect(allowed).toHaveBeenCalledWith(true);
   });
 
   it("a thrown request leaves the previous state untouched", async () => {

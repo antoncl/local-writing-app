@@ -66,6 +66,8 @@
     chatSystemPrompt: string;
     chatPreviewMessages: PreviewMessage[] | null;
     loreEnabled: boolean;
+    // ADR-0092 Amendment 1 §3: the prompt called `no_lore()`.
+    loreFree?: boolean;
     lockedInputDisplays: { name: string; label: string; value: string }[];
     journal: ChatSessionJournalEntry[];
     // #1635: picked lore edited since the AI last saw it — listed in the
@@ -86,6 +88,7 @@
     chatSystemPrompt,
     chatPreviewMessages,
     loreEnabled,
+    loreFree = false,
     lockedInputDisplays,
     journal,
     changedPicks,
@@ -212,7 +215,7 @@
     {#if systemBlock || (chatSystemPrompt && chatSystemPrompt.trim()) || (chatPreviewMessages && chatPreviewMessages.length > 0) || chatPromptEntryId}
       <button type="button" class="ctx-row" onclick={() => drill({ kind: "section", key: "system" })}>
         <span class="ctx-row-label">System</span>
-        {#if loreEnabled}<span class="ctx-row-sub">lore-enabled</span>{/if}
+        {#if loreEnabled}<span class="ctx-row-sub">lore-enabled</span>{:else if loreFree}<span class="ctx-row-sub">lore-free</span>{/if}
         <GroupCaret size="xs" collapsed />
       </button>
     {/if}
@@ -278,8 +281,13 @@
     {#if loreEnabled}
       <div
         class="cbv-ctx-kv-line"
-        title="The template invoked auto_lore() — automatic lore is on: the send path detects and places lore, and the tiers below are where it lands. Picks placed by use() alone show as tier rows without this line."
+        title="The template invoked auto_lore() — automatic lore is on: the send path detects and places lore, and the tiers below are where it lands. Picks or always-include entries placed without automatic lore show as tier rows without this line."
       ><strong>lore-enabled</strong> · by this prompt</div>
+    {:else if loreFree}
+      <div
+        class="cbv-ctx-kv-line"
+        title="The template invoked no_lore() — this prompt is lore-free: no always-include entries and no automatic lore are placed. Only the prompt's own use() picks appear as tier rows."
+      ><strong>lore-free</strong> · by this prompt</div>
     {/if}
     {#if isLocked && chatSystemPrompt && chatSystemPrompt.trim()}
       <pre class="ctx-pre">{chatSystemPrompt}</pre>

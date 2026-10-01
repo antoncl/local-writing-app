@@ -27,6 +27,7 @@ describe("lockPromptTemplate (#2129)", () => {
       char_count: 0,
       rendered: true,
       lore_enabled: true,
+      lore_free: true,
       used_node_ids: ["lore_1"],
       used_node_hints: { lore_1: "stable" },
       used_snapshots: [{ entry_id: "lore_1", snapshot_id: "snap_1" }],
@@ -38,6 +39,7 @@ describe("lockPromptTemplate (#2129)", () => {
     if (!result.ok) return;
     expect(result.lock.systemPrompt).toBe("Be terse. Stay in character.\n\nSecond system message.");
     expect(result.lock.loreEnabled).toBe(true);
+    expect(result.lock.loreFree).toBe(true);
     expect(result.lock.usedNodeIds).toEqual(["lore_1"]);
     expect(result.lock.usedNodeHints).toEqual({ lore_1: "stable" });
     expect(result.lock.usedSnapshots).toEqual([{ entry_id: "lore_1", snapshot_id: "snap_1" }]);
@@ -59,6 +61,7 @@ describe("lockPromptTemplate (#2129)", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.lock.loreEnabled).toBe(false);
+    expect(result.lock.loreFree).toBe(false);
     expect(result.lock.usedNodeIds).toEqual([]);
     expect(result.lock.usedNodeHints).toEqual({});
     expect(result.lock.usedSnapshots).toEqual([]);

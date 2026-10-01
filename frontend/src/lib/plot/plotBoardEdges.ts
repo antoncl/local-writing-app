@@ -13,7 +13,7 @@
 //
 // Derived edges are deliberately QUIET (thin, dashed, no arrowhead — the layout
 // already carries direction); the authored causal layer (Slice 6b) reads stronger.
-// Both layers can be on at once — the Slice 7 out-of-order check reads the two together.
+// Both layers can be on at once. The late-cause check (ADR-0097 §8) reads story time.
 
 import { MarkerType, type Edge } from "@xyflow/svelte";
 import type { PlotBoardCard, PlotBoardProjection } from "@/lib/types";
@@ -42,14 +42,14 @@ export const CARD_TARGET_HANDLE = "in";
 // edge's stroke so head and line read as one stroke.
 export const CAUSAL_MARKER_COLOR = "var(--accent)";
 
-// The out-of-order causal arrowhead's colour (Slice 7): the `--warn` amber, so a
+// The late-cause causal arrowhead's colour (Slice 7): the `--warn` amber, so a
 // warning edge's head reads the same as its stroke (recoloured amber via the
 // `.causal-warn` scoped rule). A token, matching CAUSAL_MARKER_COLOR's contract.
 export const CAUSAL_WARN_COLOR = "var(--warn)";
 
 // The `data` a causal edge carries to PlotCausalEdge (Slice 7). `outOfOrder` is the
-// setup-after-payoff diagnostic — the cause is revealed AFTER its effect in reading
-// order; the titles let the edge compose a concrete why/what-to-do message without a
+// late-cause flag (ADR-0097 §8) — the cause HAPPENS after its effect in story time (a
+// cause merely told later is craft, never flagged); the titles let the edge compose a concrete why/what-to-do message without a
 // second lookup. Only causal edges carry this; the derived layers have no `data`.
 export type CausalEdgeData = {
   outOfOrder: boolean;
@@ -57,13 +57,13 @@ export type CausalEdgeData = {
   targetTitle: string;
 };
 
-// The why + what-to-do copy an out-of-order causal edge shows (Slice 7). Pure and
+// The why + what-to-do copy a late-cause edge shows (Slice 7). Pure and
 // exported so the sentence the reader actually sees is unit-testable — the edge can't
 // mount headlessly ([[reference_svelteflow_headless_limits]]), so this is the only
 // place the copy is covered. Names both cards so the warning is concrete, not a
 // generic colour (the decoration-must-explain decision).
 export function causalWarnMessage(sourceTitle: string, targetTitle: string): string {
-  return `Out of reveal order: “${sourceTitle}” leads to “${targetTitle}”, but its scene is read later — the cause lands after its effect. Move “${sourceTitle}” earlier in the manuscript, or reconsider the link.`;
+  return `Cause comes later: “${sourceTitle}” leads to “${targetTitle}”, but happens after it in story time. Move “${sourceTitle}” earlier in story time, or reconsider the link.`;
 }
 
 // Order cards along a chain: by manuscript reading order (`sequence`), with the
@@ -140,22 +140,19 @@ export function buildBoardEdges(
   // the card itself (defensive; the backend heals these) so a stale projection can
   // never emit a dangling or self edge.
   //
-  // Slice 7 cross-dimension diagnostic — setup-after-payoff: when the source's
-  // reveal-order rank is AFTER the target's (`source.sequence > target.sequence`),
-  // the cause is revealed after its effect. That edge is flagged out-of-order and
-  // recoloured `--warn`; PlotCausalEdge decorates it with a why/what-to-do marker.
-  // The check reads the cards' `sequence` directly (both dimensions live in the same
-  // projection), so it fires whenever causal edges are drawn — never gated on the
-  // manuscript layer being toggled on. Cards with no scene (null sequence) hold no
-  // reveal position, so an edge touching one is never out of order.
+  // Slice 7 cross-dimension diagnostic — the late cause (ADR-0097 §8): when the
+  // source's story-time index is AFTER the target's (`source.story_order >
+  // target.story_order`), the cause happens after its effect. That edge is flagged
+  // and recoloured `--warn`; PlotCausalEdge decorates it with a why/what-to-do marker.
+  // Every card holds a story position, so there is no exemption for unwritten cards,
+  // and the check never depends on the manuscript layer being toggled on.
   if (layers.has("causal")) {
     const byId = new Map(projection.cards.map((c) => [c.id, c]));
     for (const card of projection.cards) {
       for (const targetId of card.causal_links) {
         const target = byId.get(targetId);
         if (targetId === card.id || !target) continue;
-        const outOfOrder =
-          card.sequence != null && target.sequence != null && card.sequence > target.sequence;
+        const outOfOrder = card.story_order > target.story_order;
         const data: CausalEdgeData = {
           outOfOrder,
           sourceTitle: card.title,
@@ -169,7 +166,7 @@ export function buildBoardEdges(
           targetHandle: CARD_TARGET_HANDLE,
           // The custom edge (PlotCausalEdge) renders the same path + a hover-× to
           // remove the link; the class keeps the token stroke/arrowhead styling, and
-          // `causal-warn` swaps the stroke to `--warn` for an out-of-order edge.
+          // `causal-warn` swaps the stroke to `--warn` for a late-cause edge.
           type: "causal",
           class: outOfOrder ? "causal-edge causal-warn" : "causal-edge",
           markerEnd: {

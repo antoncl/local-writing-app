@@ -43,6 +43,7 @@
   import { buildBoardEdges, EDGE_LAYERS, type EdgeLayer } from "@/lib/plot/plotBoardEdges";
   import type { PlotRealizeLocation } from "@/lib/plot/realizeLocations";
   import { loadEdgeLayers, saveEdgeLayers, toggleEdgeLayer } from "@/lib/plot/edgeLayerPrefs";
+  import { inStoryOrder, loadBoardView, saveBoardView, type PlotBoardView } from "@/lib/plot/storyTime";
   import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
   import { moveNodesCommand, type GraphPort } from "@/lib/graph/graphCommands";
   import { PlotUndoRecorder, defaultPlotCommandPort } from "@/lib/plot/plotCommands";
@@ -84,6 +85,8 @@
   import PlotCausalEdge from "./plot/PlotCausalEdge.svelte";
   import PlotTemplatePalette from "./plot/PlotTemplatePalette.svelte";
   import PlotDiagnosticsPanel from "./plot/PlotDiagnosticsPanel.svelte";
+  import PlotStoryTimeView from "./plot/PlotStoryTimeView.svelte";
+  import PlotViewToggle from "./plot/PlotViewToggle.svelte";
   import Popover from "@/components/chrome/Popover.svelte";
   import {
     PLOT_CARD_ACTIONS,
@@ -315,6 +318,14 @@
     onSetPageStatus: (cardId, status) =>
       void undoRecorder.cardEdit(cardId, "set page status", () => setCardPageStatus(cardId, status)),
     onDelete: (cardId) => removeCard(cardId),
+    // Story time (ADR-0097 §4): the menu's Earlier / Later / Place after… and the Story
+    // time view's drag — one recorded step, the card's old neighbour captured for undo.
+    onStoryMove: (cardId, anchor) => void undoRecorder.storyMove(cardId, anchor, "move in story time"),
+    get storyAnchors() {
+      return inStoryOrder(projection?.cards ?? [])
+        .filter((c) => c.story_movable)
+        .map(({ id, title }) => ({ id, title }));
+    },
     get plotlines() {
       return projection?.plotlines ?? [];
     },
@@ -717,6 +728,12 @@
   // the pure edge-builder live in `lib/plot`.
   let activeLayers = $state<Set<EdgeLayer>>(loadEdgeLayers());
   let layersOpen = $state(false);
+  // Board | Story time (ADR-0097 §8): a viewing mode, remembered per viewer.
+  let boardView = $state<PlotBoardView>(loadBoardView());
+  function setBoardView(view: PlotBoardView): void {
+    boardView = view;
+    saveBoardView(view);
+  }
   let layersTrigger = $state<HTMLElement | null>(null);
   const LAYER_META: Record<EdgeLayer, { label: string; hint: string }> = {
     manuscript: { label: "Manuscript order", hint: "The reveal-order spine — cards in the order their scenes are read." },
@@ -961,6 +978,7 @@
       <!-- Both stay reachable on an empty board — they are how you populate one:
            New card authors one directly; Seed bulk-mints from the manuscript. -->
       <div class="toolbar-actions">
+        <PlotViewToggle view={boardView} onChange={setBoardView} />
         <button
           class="board-btn"
           class:active={paletteOpen}
@@ -1072,6 +1090,8 @@
       <div class="board-body">
     {#if isEmpty}
       <p class="board-hint muted">Nothing here yet. Seed cards from the manuscript or add one, or open Templates to start a plotline.</p>
+    {:else if boardView === "story"}
+      <PlotStoryTimeView {projection} />
     {:else}
       <div class="board-canvas" bind:this={canvasEl}>
       <SvelteFlow

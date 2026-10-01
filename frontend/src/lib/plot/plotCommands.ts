@@ -16,6 +16,8 @@
 //   • field/beat edit — a whole-state before/after flip (`restore(before)` /
 //     `restore(after)`). Whole-state, not per-field, because one op can touch several
 //     fields (dropping a beat also adopts a primary, #863); the flip reverses all of it.
+//   • story move (ADR-0097 §4) — one `place` call; undo places the card back beside the
+//     neighbour it had, redo replays the anchor the writer chose.
 //   • text edit / attach / detach (ADR-0097 §3/§4) — a written card SHOWS its scene's
 //     text, so its title/synopsis move through their own endpoints, never a whole-state
 //     save (the server refuses a written card's own title/body change). The commands
@@ -43,9 +45,11 @@ import {
   attachCardScene,
   readSceneSummary,
   setCardText,
+  moveCardInStoryTime,
   type CardTextOutcome,
 } from "@/lib/stores/plotBoard";
-import type { CardTextChoice } from "@/lib/api/plot";
+import type { CardTextChoice, StoryAnchor } from "@/lib/api/plot";
+import { isStoryNoOp, storyRestoreAnchor } from "@/lib/plot/storyTime";
 import {
   type PlotlineState,
   deletePlotline,
@@ -101,6 +105,8 @@ export interface PlotCommandPort {
   // The displayed title / synopsis edit (the scene's while the card is written).
   setCardText(cardId: string, text: CardText): Promise<void>;
   readSceneSummary(sceneId: string): Promise<string>;
+  // Place a card right after / before another in story time (ADR-0097 §4).
+  moveCardInStoryTime(cardId: string, anchor: StoryAnchor): Promise<void>;
   // Suppressible confirm before deleting a written scene; resolves false on cancel.
   confirmSceneDelete(scene: { title: string; body: string }): Promise<boolean>;
 }
@@ -187,6 +193,22 @@ export function cardTextCommand(
     label,
     undo: () => port.setCardText(id, before),
     redo: () => port.setCardText(id, after),
+  };
+}
+
+// A story-time move (ADR-0097 §4): `restore` is where the card sat before — right
+// after the card that preceded it, or before the one that followed if it was first.
+export function storyMoveCommand(
+  port: PlotCommandPort,
+  id: string,
+  anchor: StoryAnchor,
+  restore: StoryAnchor,
+  label = "move in story time",
+): Command {
+  return {
+    label,
+    undo: () => port.moveCardInStoryTime(id, restore),
+    redo: () => port.moveCardInStoryTime(id, anchor),
   };
 }
 
@@ -503,6 +525,18 @@ export class PlotUndoRecorder {
     if (Object.keys(after).length > 0) this.#record(cardTextCommand(this.#port, id, before, after, label));
   }
 
+  /** Move a card in story time, recorded as ONE step. The card's neighbour is read off
+   *  the projection BEFORE the move so undo can put it back beside it; a move to where
+   *  the card already is records (and sends) nothing. */
+  async storyMove(cardId: string, anchor: StoryAnchor, label: string): Promise<void> {
+    await this.#whenIdle();
+    const cards = this.#getProjection()?.cards ?? [];
+    if (isStoryNoOp(cards, cardId, anchor)) return;
+    const restore = storyRestoreAnchor(cards, cardId);
+    await this.#port.moveCardInStoryTime(cardId, anchor);
+    if (restore) this.#record(storyMoveCommand(this.#port, cardId, anchor, restore, label));
+  }
+
   /** Detach a card from its scene, recorded. The store asks which synopsis survives
    *  when it must; backing out records nothing. */
   async detach(cardId: string): Promise<void> {
@@ -664,6 +698,7 @@ export function defaultPlotCommandPort(): PlotCommandPort {
     detachCardScene,
     setCardText,
     readSceneSummary,
+    moveCardInStoryTime,
     // The suppressible confirm before deleting a written scene, as a Promise<boolean>:
     // confirm → true, cancel/backdrop → false (via the confirmService onCancel added
     // for this), and a suppressed prior "don't show again" resolves true immediately.

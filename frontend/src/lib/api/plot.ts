@@ -25,6 +25,10 @@ export function textChoiceConflict(error: unknown): { sceneSummary: string; card
   return { sceneSummary: String(detail.scene_summary ?? ""), cardSynopsis: String(detail.card_synopsis ?? "") };
 }
 
+/** Where a story-time move puts a card: right after, or right before, another card
+ *  (ADR-0097 §4). The backend accepts only the open layer's own cards as the anchor. */
+export type StoryAnchor = { after_id: string } | { before_id: string };
+
 export const plotApi = {
   // Plot templates (ADR-0048 S4c) — the ADR-0049 Library's second tenant. Same
   // browse/read/clone shape as prompts: list the resolved shelf, read one (with
@@ -137,6 +141,13 @@ export const plotApi = {
     return request<CardEntry>(`/plot/cards/${entryId}/text`, {
       method: "PUT",
       body: JSON.stringify(text),
+    });
+  },
+  // Move a card in story time (ADR-0097 §4, story only): right after / before a neighbour.
+  placeCard(entryId: string, anchor: StoryAnchor) {
+    return request<CardEntry>(`/plot/cards/${entryId}/place`, {
+      method: "POST",
+      body: JSON.stringify({ story: anchor }),
     });
   },
   deleteCard(entryId: string) {

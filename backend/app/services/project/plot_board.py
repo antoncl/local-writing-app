@@ -31,6 +31,7 @@ from app.models import (
 )
 from app.services.project.card_text import displayed_card_text
 from app.services.project.errors import ProjectServiceError
+from app.services.project.placement import Sibling
 from app.services.project.plot import (
     _BEAT_LINK_FIELD,
     _CAUSAL_LINK_FIELD,
@@ -40,6 +41,7 @@ from app.services.project.plot import (
     PLOT_PLOTLINE_ENTRY_TYPE,
 )
 from app.services.project.plot_diagnostics import compute_plot_diagnostics
+from app.services.project.story_time import story_time_order
 from app.services.tree_structure import StructureVisitor, TreeStructureService
 
 
@@ -228,6 +230,24 @@ class PlotBoardMixin:
         # beat catalog above.
         card_ids = {card.id for card in card_entries}
         page_status_field = self.read_metadata_schema().fields.get(_PAGE_STATUS_FIELD)
+        # Story time (ADR-0097 §5), computed once over every card: the open layer's own
+        # cards by rank, then inherited ones nearest layer first. Only an owned card is
+        # movable — `place_card` accepts exactly those.
+        owned_layer = self._metadata_schema_layer_id(self._require_project())
+        layer_ranks = self._layer_rank_map()
+        story_order = {
+            card_id: index
+            for index, card_id in enumerate(
+                story_time_order(
+                    [Sibling(c.id, c.story_rank) for c in card_entries if c.source_layer_id == owned_layer],
+                    [
+                        (Sibling(c.id, c.story_rank), layer_ranks.get(c.source_layer_id, 0))
+                        for c in card_entries
+                        if c.source_layer_id != owned_layer
+                    ],
+                )
+            )
+        }
         cards: list[PlotBoardCard] = []
         used_containers: set[str] = set()
         for card in card_entries:
@@ -252,6 +272,8 @@ class PlotBoardMixin:
                     beats=self._resolve_card_beats(card.metadata, beat_catalog),
                     sequence=scene_to_order.get(scene) if scene else None,
                     causal_links=self._resolve_card_causal(card.metadata, card_ids, card.id),
+                    story_order=story_order[card.id],
+                    story_movable=card.source_layer_id == owned_layer,
                 )
             )
         # Reading order (containers is already ordered), used-only — an empty

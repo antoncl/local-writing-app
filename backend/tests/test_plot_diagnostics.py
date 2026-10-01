@@ -64,6 +64,13 @@ class _DiagnosticsTestCase(PlotTestCase):
         self.save_card_written(card.id, SaveCardRequest(title=title, body="", metadata=metadata))
         return card.id
 
+    def _link(self, card_id: str, title: str, target: str) -> None:
+        """Add a causal link to a card already created (a card can only link to one
+        that exists, so an earlier-ranked cause links after its effect is made)."""
+        self.save_card_written(
+            card_id, SaveCardRequest(title=title, body="", metadata={"causal_links": [{"target": target}]})
+        )
+
     def _plotline(self):
         return self.service.instantiate_plot_template(_THREE_ACT)
 
@@ -75,46 +82,39 @@ class _DiagnosticsTestCase(PlotTestCase):
 
 
 class CausalInversionTests(_DiagnosticsTestCase):
-    """A card *leads to* a card revealed earlier — the payoff is read before its setup."""
+    """A card *leads to* a card that comes earlier in story time (ADR-0097 §8) —
+    the cause happens after its effect. Cards created in order rank in that order."""
 
-    def test_a_payoff_revealed_before_its_setup_is_flagged(self) -> None:
-        early, late = self._scene("early"), self._scene("late")
-        payoff = self._card("Payoff", scene=early)
-        setup = self._card("Setup", scene=late, causal=[payoff])
+    def test_a_cause_ranked_after_its_effect_is_flagged(self) -> None:
+        payoff = self._card("Payoff")
+        setup = self._card("Setup", causal=[payoff])
         findings = self._of_kind("causal_inversion")
         self.assertEqual(len(findings), 1)
         found = findings[0]
         self.assertEqual((found.edge.source, found.edge.target), (setup, payoff))
         self.assertEqual({c.id for c in found.cards}, {setup, payoff})
-        self.assertIn("sets up", found.message)
+        self.assertIn("happens after it in story time", found.message)
 
-    def test_a_causal_edge_in_reading_order_is_clean(self) -> None:
+    def test_a_cause_before_its_effect_in_story_time_is_clean(self) -> None:
+        setup = self._card("Setup")
+        payoff = self._card("Payoff")
+        self._link(setup, "Setup", payoff)
+        self.assertEqual(self._of_kind("causal_inversion"), [])
+
+    def test_a_flashback_told_late_but_happening_early_does_not_flag(self) -> None:
+        # The cause is revealed LATER in the manuscript than its effect, yet happens
+        # earlier in story time — an ordinary technique, never a finding.
         early, late = self._scene("early"), self._scene("late")
-        payoff = self._card("Payoff", scene=late)
-        self._card("Setup", scene=early, causal=[payoff])
+        cause = self._card("Flashback", scene=late)
+        effect = self._card("Effect", scene=early)
+        self._link(cause, "Flashback", effect)
         self.assertEqual(self._of_kind("causal_inversion"), [])
 
-    def test_an_off_page_setup_never_inverts(self) -> None:
-        # A setup with no scene is backstory told-late — it holds no reveal position,
-        # so there is no order to contradict. Never nag it into a scene.
-        payoff = self._card("Payoff", scene=self._scene("early"))
+    def test_unwritten_cards_flag_too(self) -> None:
+        # No scene on either end — story time gives both a position.
+        payoff = self._card("Payoff")
         self._card("Setup", causal=[payoff])
-        self.assertEqual(self._of_kind("causal_inversion"), [])
-
-    def test_an_off_page_payoff_never_inverts(self) -> None:
-        setup_scene = self._scene("late")
-        payoff = self._card("Payoff")  # off-page — no reveal position
-        self._card("Setup", scene=setup_scene, causal=[payoff])
-        self.assertEqual(self._of_kind("causal_inversion"), [])
-
-    def test_cards_on_the_same_scene_do_not_invert(self) -> None:
-        # Cards on one scene (only a pre-v15 project has them, ADR-0097 §10) share a
-        # reveal rank — simultaneous, not out of sequence.
-        scene = self._scene("s")
-        payoff = self._card("Payoff", scene=scene)
-        setup = self._card("Setup", causal=[payoff])
-        self.plant_duplicate_scene(setup, scene)
-        self.assertEqual(self._of_kind("causal_inversion"), [])
+        self.assertEqual(len(self._of_kind("causal_inversion")), 1)
 
 
 class BeatInversionTests(_DiagnosticsTestCase):
@@ -204,6 +204,17 @@ class CoherentBoardTests(_DiagnosticsTestCase):
         plotline = self._plotline()
         beats = plotline.metadata["instance_beats"]
         early, late = self._scene("early"), self._scene("late")
+        cause = self._card("A", scene=early, beats=[(plotline.id, beats[0]["id"])])
         payoff = self._card("B", scene=late, beats=[(plotline.id, beats[1]["id"])])
-        self._card("A", scene=early, beats=[(plotline.id, beats[0]["id"])], causal=[payoff])
+        self.save_card_written(
+            cause,
+            SaveCardRequest(
+                title="A",
+                body="",
+                metadata={
+                    "beat_links": [{"plotline": plotline.id, "beat_id": beats[0]["id"]}],
+                    "causal_links": [{"target": payoff}],
+                },
+            ),
+        )
         self.assertEqual(self._diagnostics(), [])

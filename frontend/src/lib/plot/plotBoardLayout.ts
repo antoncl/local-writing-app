@@ -33,6 +33,8 @@ import type {
 import { getSwatch, resolveColor, resolveColorForKind } from "@/lib/utils/colors";
 import { loreEntriesStore } from "@/lib/stores/lore";
 import { metadataSchemaStore } from "@/lib/stores/schema";
+import type { StoryAnchor } from "@/lib/api/plot";
+import { inStoryOrder, lateCausesByEffect, storySwapAnchors } from "@/lib/plot/storyTime";
 
 // A container box: its title, how many cards it (transitively) holds, and its
 // level (0 = a top-level act, 1 = a chapter inside it, 2 = a sequence inside that:
@@ -83,6 +85,14 @@ export type PlotCardData = {
   // The ids of the cards this card leads to (Slice 6b) — the authored causal links,
   // seeding the "Leads to…" picker's checked state.
   causalLinks: string[];
+  // Story time (ADR-0097 §5, §8). `storyEarlier` / `storyLater` are what the menu's
+  // "Earlier / Later in story time" would do — null (item hidden) for an inherited card
+  // or at an end. `lateCauses` names the cards that lead to this one yet happen after
+  // it: non-empty ⇒ the "Cause is later" pill.
+  storyMovable: boolean;
+  storyEarlier: StoryAnchor | null;
+  storyLater: StoryAnchor | null;
+  lateCauses: string[];
 };
 
 /** A card's page status as the board shows it (#1907): the projected value
@@ -588,6 +598,13 @@ export function buildBoardNodes(
   };
   const arcResolvedHexById = new Map(projection.arcs.map((arc) => [arc.id, resolveArcHex(arc)]));
 
+  const lateCauses = lateCausesByEffect(projection.cards);
+  const storyOrdered = inStoryOrder(projection.cards);
+  const storySwapOf = (id: string) => {
+    const { earlier, later } = storySwapAnchors(storyOrdered, id);
+    return { storyEarlier: earlier, storyLater: later };
+  };
+
   for (const card of projection.cards) {
     const line = card.plotline ? plotlineById.get(card.plotline) : undefined;
     // Container lock (#873): confine the card's drag to its innermost container box
@@ -630,6 +647,9 @@ export function buildBoardNodes(
               : (getSwatch(beat.plotline_color)?.hex ?? null), // event-beat: the plotline swatch
         })),
         causalLinks: card.causal_links,
+        storyMovable: card.story_movable,
+        ...storySwapOf(card.id),
+        lateCauses: lateCauses.get(card.id) ?? [],
       },
     });
   }
@@ -811,6 +831,10 @@ export function projectionDataKey(p: PlotBoardProjection): string {
       // rehydrated the moment either changes.
       c.beats.map((b) => [b.plotline_id, b.beat_id, b.title, b.plotline_color, b.holder_kind, b.character_id]),
       c.causal_links,
+      // Story time (ADR-0097 §5): a move re-indexes cards, so the late-cause pills and
+      // the Earlier/Later menu items rebuild with it.
+      c.story_order,
+      c.story_movable,
     ]),
     p.plotlines.map((l) => [l.id, l.title, l.color, l.beats.map((b) => [b.beat_id, b.title, b.use_count])]),
     // ADR-0080 §5: an arc's own colour AND its bound character (a rebind changes which

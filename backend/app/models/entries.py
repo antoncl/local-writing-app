@@ -469,7 +469,12 @@ class PlotBoardCard(BaseModel):
     `causal_links` (Slice 6b) are the ids of the cards this card *leads to* — the
     author-drawn causal edges, each a live card id (self-references and dead / gone
     targets dropped, the display side of `_heal_causal_links`). The board's causal
-    edge layer draws one directed edge per id."""
+    edge layer draws one directed edge per id.
+
+    `story_order` (ADR-0097 §5) is the card's 0-based index in story time over every
+    projected card — the open layer's own cards by rank, then inherited ones, nearest
+    layer first. `story_movable` is whether the open layer owns the card, i.e. whether
+    `place` would accept it."""
 
     id: str
     title: str
@@ -481,6 +486,8 @@ class PlotBoardCard(BaseModel):
     beats: list[PlotBoardBeat] = Field(default_factory=list)
     sequence: int | None = None
     causal_links: list[str] = Field(default_factory=list)
+    story_order: int = 0
+    story_movable: bool = True
 
 
 class PlotDiagnosticEdge(BaseModel):
@@ -511,9 +518,9 @@ class PlotDiagnostic(BaseModel):
     never asked to become a scene and a merely-unwritten beat tail is never a gap.
 
     `kind` is one of:
-      - `causal_inversion` — a card sets up (`causal_links`) a card revealed *earlier*:
-        the payoff is read before its setup. `cards` = [setup, payoff]; `edge` = that
-        causal edge (both cards on-page, or there is no reveal order to invert).
+      - `causal_inversion` — a card leads to (`causal_links`) a card that comes
+        *earlier in story time* (ADR-0097 §8): the cause happens after its effect.
+        `cards` = [cause, effect]; `edge` = that causal edge.
       - `beat_inversion` — within one plotline, a later beat is *fully* revealed before
         an earlier beat *begins* (strict — braided beats do not flag). `cards` = the
         cards involved; `plotline_id` + `beat_ids` name the two beats.

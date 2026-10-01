@@ -31,7 +31,7 @@
   // first, the softer "a beat is missing" hint last. `warn` = a real layer disagreement
   // (amber); a gap is a quieter, muted cue.
   const GROUPS = [
-    { kind: "causal_inversion", label: "Out of sequence", icon: "ti-alert-triangle", tone: "warn" },
+    { kind: "causal_inversion", label: "Cause comes later", icon: "ti-alert-triangle", tone: "warn" },
     { kind: "beat_inversion", label: "Beats out of order", icon: "ti-alert-triangle", tone: "warn" },
     { kind: "beat_gap", label: "Missing beats", icon: "ti-flag", tone: "muted" },
   ] as const;

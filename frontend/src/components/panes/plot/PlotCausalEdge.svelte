@@ -6,8 +6,8 @@
   which positions + portals it) that removes the link — the visible counterpart to the
   beat badge's ×. Select-edge + Delete still works too (the edge stays deletable).
 
-  Slice 7 cross-dimension diagnostic: when `data.outOfOrder` (the cause is revealed AFTER
-  its effect in reading order — flagged in `buildBoardEdges`), the edge also wears an amber
+  Slice 7 cross-dimension diagnostic: when `data.outOfOrder` (the cause happens AFTER
+  its effect in story time, a "late cause" — flagged in `buildBoardEdges`), the edge also wears an amber
   ⚠ whose tooltip states WHY it's a problem and WHAT to do, per the decoration-must-explain
   decision. The stroke recolour to `--warn` is the scoped `.causal-warn` rule in PlotEditor.
 

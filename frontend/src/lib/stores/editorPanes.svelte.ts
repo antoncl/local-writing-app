@@ -56,6 +56,7 @@ import {
   openPlotTemplate as runOpenPlotTemplate,
   openPlotCard as runOpenPlotCard,
   openPlotline as runOpenPlotline,
+  openDeck as runOpenDeck,
   openAssistant as runOpenAssistant,
   openView as runOpenView,
   createAndOpenView as runCreateAndOpenView,
@@ -98,6 +99,7 @@ import type {
   LoreEntry,
   MetadataSchema,
   PlotlineEntry,
+  DeckEntry,
   PlotTemplate,
   PromptContextStrategy,
   PromptEntry,
@@ -707,6 +709,10 @@ class EditorPanesController {
         // description (body) round-trip via the plotline endpoint. The on-node
         // inline editor is the default surface; this is the roomier alternative.
         savedDocument = await api.savePlotline(draftDocument as PlotlineEntry, pane.draftMarkdown);
+      } else if (documentKind === "plot_deck") {
+        // A book-local deck (ADR-0097 §2): name (title) + synopsis (body) + its `plot_deck`
+        // parent (metadata) round-trip via the deck endpoint.
+        savedDocument = await api.saveDeck(draftDocument as DeckEntry, pane.draftMarkdown);
       } else if (documentKind === "assistant") {
         savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
       } else if (documentKind === "tag") {
@@ -963,6 +969,10 @@ class EditorPanesController {
 
   openPlotline(entryId: string): Promise<void> {
     return runOpenPlotline(this, entryId);
+  }
+
+  openDeck(entryId: string): Promise<void> {
+    return runOpenDeck(this, entryId);
   }
 
   openAssistant(entryId: string): Promise<void> {

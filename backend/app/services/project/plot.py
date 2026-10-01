@@ -723,18 +723,22 @@ class PlotMixin:
 
     def create_card(self, request: CreateCardRequest) -> CardEntry:
         # A new card lands at the end of story time; an undo restore (supplied id)
-        # may put it back at the rank it had (ADR-0097 §5).
+        # may put it back at the rank it had (ADR-0097 §5). Created `to` a deck it
+        # takes that home deck and lands right after the deck's last card (§4).
         restored_rank = parse_rank(request.story_rank) if request.id else None
-        return self.read_card(
-            self._create_plot_folder_node(
-                title=request.title,
-                requested_entry_type=request.entry_type,
-                default_entry_type="plot:card",
-                noun="card",
-                node_id=request.id or None,
-                story_rank=restored_rank if restored_rank is not None else self._next_card_story_rank(),
-            )
+        seed_metadata, after_id = self._create_card_placement(request.to)
+        new_id = self._create_plot_folder_node(
+            title=request.title,
+            requested_entry_type=request.entry_type,
+            default_entry_type="plot:card",
+            noun="card",
+            seed_metadata=seed_metadata,
+            node_id=request.id or None,
+            story_rank=restored_rank if restored_rank is not None else self._next_card_story_rank(),
         )
+        if after_id is not None and restored_rank is None:
+            self._land_after_deck_card(new_id, after_id)
+        return self.read_card(new_id)
 
     def read_card(self, entry_id: str) -> CardEntry:
         read = self._read_plot_folder_node(entry_id, expected_entry_type="plot:card", noun="card")

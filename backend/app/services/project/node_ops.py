@@ -19,6 +19,7 @@ from app.models import (
     CardEntry,
     CharacterArcEntry,
     ChatSession,
+    DeckEntry,
     LoreEntry,
     PlotlineEntry,
     PlotTemplate,
@@ -73,6 +74,7 @@ class NodeOpsMixin:
         | CardEntry
         | PlotlineEntry
         | CharacterArcEntry
+        | DeckEntry
         | PlotTemplate
         | TagEntry
     ):
@@ -119,7 +121,7 @@ class NodeOpsMixin:
 
     def _read_plot_node(
         self, node_id: str, entry_type: str
-    ) -> CardEntry | PlotlineEntry | CharacterArcEntry | PlotTemplate:
+    ) -> CardEntry | PlotlineEntry | CharacterArcEntry | DeckEntry | PlotTemplate:
         """Sub-dispatch a `plot`-kind node to its per-family reader.
 
         Plot nodes read through their own readers, not read_lore_entry. A card
@@ -141,6 +143,8 @@ class NodeOpsMixin:
             return self.read_plotline(node_id)
         if "plot:character_arc" in ancestry:
             return self.read_character_arc(node_id)
+        if "plot:deck" in ancestry:
+            return self.read_deck(node_id)
         if "plot:template" in ancestry:
             return self.read_plot_template(node_id)
         raise ProjectServiceError(

@@ -9,11 +9,11 @@ import type { AssistantEntry } from "./assistantTypes";
 import type { ViewNode } from "./viewTypes";
 import type { TagEntry } from "./tagTypes";
 import type { PlotTemplate } from "./plotTemplateTypes";
-import type { CardEntry, PlotlineEntry } from "./plotCardTypes";
+import type { CardEntry, DeckEntry, PlotlineEntry } from "./plotCardTypes";
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotTemplate | CardEntry | PlotlineEntry | TagEntry;
+export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotTemplate | CardEntry | PlotlineEntry | DeckEntry | TagEntry;
 
-// Document-kind discriminator: schema kinds plus synthetic editor shapes (chat / snippet / structure_node / plot_card / plotline).
+// Document-kind discriminator: schema kinds plus synthetic editor shapes (chat / snippet / structure_node / plot_card / plotline / plot_deck).
 export type DocumentKind =
   | "manuscript"
   | "lore"
@@ -27,5 +27,6 @@ export type DocumentKind =
   | "plot_template"
   | "plot_card"
   | "plotline"
+  | "plot_deck"
   | "view"
   | "tag";

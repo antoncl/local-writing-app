@@ -119,19 +119,23 @@ class EntryRef:
         if kind == "tag":
             return self._project.read_tag_entry(node_id)
         if kind == "plot":
-            # A plot node — card, plotline, or character arc — is a first-class
-            # Node a prompt can pull in (revise-plot-card / revise-plotline /
-            # revise-character-arc). The arc is a plot:thread SIBLING of the
-            # plotline (ADR-0080), so it needs its own branch. Board and template
-            # are not revisable subjects, so they stay unresolved.
-            if idx_entry.entry_type == "plot:plotline":
-                return self._project.read_plotline(node_id)
-            if idx_entry.entry_type == "plot:card":
-                return self._project.read_card(node_id)
-            if idx_entry.entry_type == "plot:character_arc":
-                return self._project.read_character_arc(node_id)
-            return _MISSING
+            return self._read_plot_by_type(node_id, idx_entry.entry_type)
         return _MISSING
+
+    def _read_plot_by_type(self, node_id: str, entry_type: str) -> Any:
+        # A plot node — card, plotline, or character arc — is a first-class
+        # Node a prompt can pull in (revise-plot-card / revise-plotline /
+        # revise-character-arc). The arc is a plot:thread SIBLING of the
+        # plotline (ADR-0080), so it needs its own branch. Board and template
+        # are not revisable subjects, so they stay unresolved.
+        readers = {
+            "plot:plotline": self._project.read_plotline,
+            "plot:card": self._project.read_card,
+            "plot:character_arc": self._project.read_character_arc,
+            "plot:deck": self._project.read_deck,
+        }
+        reader = readers.get(entry_type)
+        return reader(node_id) if reader is not None else _MISSING
 
     @property
     def title(self) -> str:

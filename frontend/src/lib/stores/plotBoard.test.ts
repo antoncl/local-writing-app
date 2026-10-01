@@ -46,6 +46,7 @@ const projection = (): PlotBoardProjection => ({
   plotlines: [],
   arcs: [],
   containers: [],
+  decks: [],
   cards: [],
   diagnostics: [],
 });
@@ -181,10 +182,18 @@ describe("card content ops", () => {
     const create = vi.spyOn(api, "createCard").mockResolvedValue(card());
     const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
     const id = await createCard("New card");
-    // `id` is undefined for a plain create (mint fresh); supplied only by redo (§7).
-    expect(create).toHaveBeenCalledWith("New card", undefined);
+    // `id` is undefined for a plain create (mint fresh); supplied only by redo (§7); a
+    // deck's "New card" supplies the place (ADR-0097 §4).
+    expect(create).toHaveBeenCalledWith("New card", undefined, undefined, undefined);
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(id).toBe("c1");
+  });
+
+  it("createCard in a deck sends the place", async () => {
+    const create = vi.spyOn(api, "createCard").mockResolvedValue(card());
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await createCard("New card", undefined, { deck: "d1" });
+    expect(create).toHaveBeenCalledWith("New card", undefined, undefined, { deck: "d1" });
   });
 
   it("createCard forces a fresh fetch, not coalescing with a pre-create read-refresh", async () => {
@@ -193,7 +202,7 @@ describe("card content ops", () => {
     const withCard: PlotBoardProjection = {
       ...projection(),
       cards: [
-        { id: "c1", title: "New card", synopsis: "", plotline: null, scene: null, container: null, page_status: null, beats: [], sequence: null, causal_links: [], story_order: 0, story_movable: true },
+        { id: "c1", title: "New card", synopsis: "", plotline: null, scene: null, container: null, deck: null, page_status: null, beats: [], sequence: null, causal_links: [], story_order: 0, story_movable: true },
       ],
     };
     const fetchSpy = vi

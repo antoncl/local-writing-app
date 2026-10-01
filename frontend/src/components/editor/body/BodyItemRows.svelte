@@ -15,7 +15,7 @@
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { groupMemberEmptyHint } from "@/lib/utils/pickerEmptyHint";
   import { assistantEntriesStore } from "@/lib/stores/assistants";
-  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
+  import { plotNodeEntriesStore } from "@/lib/stores/plotlines";
   import { tagById } from "@/lib/stores/tagNodes";
   import type { GroupMember } from "@/lib/schemaTypes";
   import type {
@@ -192,7 +192,7 @@
       loreEntries: deps.loreEntries,
       promptEntries: deps.promptEntries,
       assistantEntries: $assistantEntriesStore,
-      plotEntries: $plotlineEntriesStore,
+      plotEntries: $plotNodeEntriesStore,
       tagById: $tagById,
     }),
   );

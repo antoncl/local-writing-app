@@ -15,9 +15,10 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from app.models import CardEntry, CardSummary, PlaceCardRequest
+from app.models import CardEntry, CardSummary, PlaceCardRequest, PlaceTo, StoryPlacement
 from app.services.atomic_io import atomic_write_bytes
 from app.services.migrations import MigratableDocument
+from app.services.project.decks import DECK_FIELD
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import NodeIndexEntry
 from app.services.project.placement import (
@@ -102,17 +103,12 @@ class CardStoryTimeMixin:
             note_placement_write(path, before, path.stat().st_mtime_ns)
         self._maintain_index_after_write(path)
 
-    def place_card(self, entry_id: str, request: PlaceCardRequest) -> CardEntry:
-        """Move a card in story time: right after or right before a neighbour
-        (ADR-0097 §4, story only). Ranks are the open layer's; an inherited card
-        cannot be moved, nor anchored on."""
-        root = self._require_project()
-        card = self.read_card(entry_id)
-        winner = self._build_node_index().by_id.get(entry_id)
-        self._reject_inherited_book_local(entry_id, winner, root, noun="card")
-        own = self._own_card_ranks()
+    def _story_move_writes(
+        self, entry_id: str, story: StoryPlacement, own: list[tuple[NodeIndexEntry, float | None]]
+    ) -> list[tuple[Path, Decimal | float | None]]:
+        """The rank writes that put `entry_id` next to `story`'s neighbour among the
+        open layer's own cards `own`, validated and planned but not yet written."""
         paths = {entry.id: entry.path for entry, _ in own}
-        story = request.story
         anchor_id = story.after_id if story.after_id is not None else story.before_id
         if anchor_id == entry_id:
             raise ProjectServiceError("A card cannot be placed next to itself.", 422)
@@ -125,9 +121,67 @@ class CardStoryTimeMixin:
         position = others.index(anchor_id) + (1 if story.after_id is not None else 0)
         # `plan_placement` orders its writes so every intermediate state still reads
         # in the right order (a renumber writes the last member first).
-        for node_id, rank in plan_placement(group, entry_id, position):
-            self._write_story_rank(paths[node_id], rank)
+        return [(paths[node_id], rank) for node_id, rank in plan_placement(group, entry_id, position)]
+
+    def _write_card_home_deck(self, card: CardEntry, to: PlaceTo) -> None:
+        """Set (or clear, `{loose}`) the card's home deck through the internal card
+        write — never the public save — and only when it changes."""
+        if to.deck:
+            self._require_deck(to.deck)
+        metadata = {key: value for key, value in card.metadata.items() if key != DECK_FIELD}
+        if to.deck:
+            metadata[DECK_FIELD] = to.deck
+        if metadata != card.metadata:
+            self._write_card_fields(card, metadata=metadata)
+
+    def place_card(self, entry_id: str, request: PlaceCardRequest) -> CardEntry:
+        """Place a card (ADR-0097 §4): `to` sets its home deck (or the loose area) and
+        never moves it in story time; `story` puts it right after or right before a
+        neighbour in story time. Ranks are the open layer's; an inherited card
+        cannot be moved, nor anchored on. A written card shows by its scene, so any
+        `to` is refused."""
+        root = self._require_project()
+        card = self.read_card(entry_id)
+        winner = self._build_node_index().by_id.get(entry_id)
+        self._reject_inherited_book_local(entry_id, winner, root, noun="card")
+        if request.to is not None and card.metadata.get("scene"):
+            raise ProjectServiceError("This card shows by its scene; detach it first.", 409)
+        # Everything refusable is checked before the first write.
+        if request.to is not None and request.to.deck:
+            self._require_deck(request.to.deck)
+        writes = (
+            self._story_move_writes(entry_id, request.story, self._own_card_ranks())
+            if request.story is not None
+            else []
+        )
+        if request.to is not None:
+            self._write_card_home_deck(card, request.to)
+        for path, rank in writes:
+            self._write_story_rank(path, rank)
         return self.read_card(card.id)
+
+    def _create_card_placement(self, to: PlaceTo | None) -> tuple[dict[str, Any] | None, str | None]:
+        """For a card created `to` a deck: its seed metadata and the card it lands
+        right after in story time — the deck's last own card (None when the deck has
+        none; the new card then stays at the end of story time). `{loose}` and absent
+        mean no deck and the end of story time."""
+        if to is None or not to.deck:
+            return None, None
+        self._require_deck(to.deck)
+        own = self._own_card_ranks()
+        paths = {entry.id: entry.path for entry, _ in own}
+        last_in_deck = None
+        for sibling in own_story_group([Sibling(entry.id, rank) for entry, rank in own]):
+            metadata = self._read_front_matter_only(paths[sibling.id]).get("metadata")
+            if isinstance(metadata, dict) and metadata.get(DECK_FIELD) == to.deck:
+                last_in_deck = sibling.id
+        return {DECK_FIELD: to.deck}, last_in_deck
+
+    def _land_after_deck_card(self, card_id: str, after_id: str) -> None:
+        """Move a just-created card to right after `after_id` in story time."""
+        writes = self._story_move_writes(card_id, StoryPlacement(after_id=after_id), self._own_card_ranks())
+        for path, rank in writes:
+            self._write_story_rank(path, rank)
 
     # ----- snapshot restore (ADR-0097 §1, §5) ------------------------------
     #

@@ -28,7 +28,7 @@
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { tagById, tagTitleById } from "@/lib/stores/tagNodes";
   import { assistantEntriesStore } from "@/lib/stores/assistants";
-  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
+  import { plotNodeEntriesStore } from "@/lib/stores/plotlines";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { buildRailRowModel, isFlipped, isFlipResolve, isListIndex, isMutated, isRowEmpty, isSectionIndex, type RailRowContext } from "@/lib/rail/fieldRowModel";
@@ -465,7 +465,7 @@
       loreEntries,
       promptEntries,
       assistantEntries: $assistantEntriesStore,
-      plotEntries: $plotlineEntriesStore,
+      plotEntries: $plotNodeEntriesStore,
       tagById: $tagById,
     }),
   );

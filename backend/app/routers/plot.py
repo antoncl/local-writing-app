@@ -21,8 +21,11 @@ from app.models import (
     CharacterArcList,
     CreateCardRequest,
     CreateCharacterArcRequest,
+    CreateDeckRequest,
     CreatePlotlineRequest,
     CreatePlotTemplateRequest,
+    DeckEntry,
+    DeckList,
     DetachCardRequest,
     PlaceCardRequest,
     PlotBoard,
@@ -35,6 +38,7 @@ from app.models import (
     RealizeCardRequest,
     SaveCardRequest,
     SaveCharacterArcRequest,
+    SaveDeckRequest,
     SavePlotBoardRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
@@ -142,6 +146,39 @@ def save_character_arc(project: CurrentProject, entry_id: str, request: SaveChar
 def delete_character_arc(project: CurrentProject, entry_id: str) -> CharacterArcList:
     with translate_errors():
         return project.delete_character_arc(entry_id)
+
+
+# Decks (ADR-0097 §2): titled boxes of cards, nested by the `plot_deck` reference.
+
+
+@router.get("/api/plot/decks", response_model=DeckList)
+def list_decks(project: CurrentProject) -> DeckList:
+    with translate_errors():
+        return project.list_decks()
+
+
+@router.post("/api/plot/decks", response_model=DeckEntry)
+def create_deck(project: CurrentProject, request: CreateDeckRequest) -> DeckEntry:
+    with translate_errors():
+        return project.create_deck(request)
+
+
+@router.get("/api/plot/decks/{entry_id}", response_model=DeckEntry)
+def get_deck(project: CurrentProject, entry_id: str) -> DeckEntry:
+    with translate_errors():
+        return project.read_deck(entry_id)
+
+
+@router.put("/api/plot/decks/{entry_id}", response_model=DeckEntry)
+def save_deck(project: CurrentProject, entry_id: str, request: SaveDeckRequest) -> DeckEntry:
+    with translate_errors():
+        return project.save_deck(entry_id, request)
+
+
+@router.delete("/api/plot/decks/{entry_id}", response_model=DeckList)
+def delete_deck(project: CurrentProject, entry_id: str) -> DeckList:
+    with translate_errors():
+        return project.delete_deck(entry_id)
 
 
 @router.get("/api/plot/cards", response_model=CardList)

@@ -43,7 +43,7 @@
   import { assistantEntriesStore } from "@/lib/stores/assistants";
   // Plotlines read from the store too (#742), same reasoning as assistants (#257):
   // a `plot:plotline` ref resolves anywhere without the caller threading the roster.
-  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
+  import { plotNodeEntriesStore } from "@/lib/stores/plotlines";
   // Tag nodes read from the store too (ADR-0082 slice 1), same reasoning: a ref
   // pointing at a tag resolves anywhere without the caller threading the roster.
   import { canonicalIdIn, liveTags, tagById, refreshTagNodes, resolveOrCreateTag } from "@/lib/stores/tagNodes";
@@ -177,7 +177,7 @@
       loreEntries,
       promptEntries,
       assistantEntries: $assistantEntriesStore,
-      plotEntries: $plotlineEntriesStore,
+      plotEntries: $plotNodeEntriesStore,
       tagById: $tagById,
     }),
   );
@@ -335,7 +335,7 @@
     researchStructure,
     loreEntries,
     promptEntries,
-    plotEntries: $plotlineEntriesStore,
+    plotEntries: $plotNodeEntriesStore,
     assistantEntries: $assistantEntriesStore,
     tagEntries: $liveTags,
   });
@@ -461,7 +461,7 @@
         researchStructure={researchStructure}
         loreEntries={loreEntries}
         promptEntries={promptEntries}
-        plotEntries={$plotlineEntriesStore}
+        plotEntries={$plotNodeEntriesStore}
         assistantEntries={$assistantEntriesStore}
         tagEntries={$liveTags}
         onChange={handlePickerChange}

@@ -33,6 +33,7 @@ const DOCUMENT_LABELS: Record<string, string> = {
   snippet: "Snippet",
   plot_card: "Card",
   plotline: "Plotline",
+  plot_deck: "Deck",
   plot_template: "Template",
   tag: "Tag",
 };

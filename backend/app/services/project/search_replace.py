@@ -53,6 +53,7 @@ from pydantic import BaseModel
 from app.models import (
     CardEntry,
     CharacterArcEntry,
+    DeckEntry,
     LoreEntry,
     PlotlineEntry,
     PlotTemplate,
@@ -65,6 +66,7 @@ from app.models import (
     ResearchNote,
     SaveCardRequest,
     SaveCharacterArcRequest,
+    SaveDeckRequest,
     SaveLoreEntryRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
@@ -176,6 +178,17 @@ def _plotline_to_request(read: PlotlineEntry, new_body: str) -> SavePlotlineRequ
 def _character_arc_to_request(read: CharacterArcEntry, new_body: str) -> SaveCharacterArcRequest:
     # Dropped: computed_metadata, source_layer_id/label — read-only/derived.
     return SaveCharacterArcRequest(
+        title=read.title,
+        body=new_body,
+        base_revision=read.revision,
+        entry_type=read.entry_type,
+        metadata=read.metadata,
+    )
+
+
+def _deck_to_request(read: DeckEntry, new_body: str) -> SaveDeckRequest:
+    # Dropped: computed_metadata, source_layer_id/label — read-only/derived.
+    return SaveDeckRequest(
         title=read.title,
         body=new_body,
         base_revision=read.revision,
@@ -344,6 +357,7 @@ class SearchReplaceMixin:
                 "plot:character_arc": _ReplaceDispatch(
                     self.read_character_arc, self.save_character_arc, _character_arc_to_request
                 ),
+                "plot:deck": _ReplaceDispatch(self.read_deck, self.save_deck, _deck_to_request),
                 "plot:template": _ReplaceDispatch(
                     self.read_plot_template, self.save_plot_template, _plot_template_to_request
                 ),

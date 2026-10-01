@@ -38,13 +38,13 @@ export type {
   PlotBoardPlotline,
   PlotBoardPlotlineBeat,
   PlotBoardCharacterArc,
+  PlotBoardDeck,
   PlotBoardLayout,
   PlotBoard,
   PlotDiagnostic,
   PlotDiagnosticCard,
   PlotDiagnosticEdge,
   BoardXY,
-  BoardSize,
 } from "./plotBoardTypes";
 export type {
   CardEntry,
@@ -56,6 +56,9 @@ export type {
   CharacterArcEntry,
   CharacterArcSummary,
   CharacterArcList,
+  DeckEntry,
+  DeckSummary,
+  DeckList,
 } from "./plotCardTypes";
 
 // Machine-settings wire types live in ./machineTypes (#763.5) — extracted to

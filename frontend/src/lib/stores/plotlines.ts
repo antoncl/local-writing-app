@@ -5,17 +5,27 @@
 // card's plotline picker needs whether or not the board pane is open. Server-
 // mirrored slice, same shape as the prompts/templates stores.
 
-import { writable } from "svelte/store";
+import { derived, writable } from "svelte/store";
 import { api } from "@/lib/api";
 import { refreshPlotBoard, refreshAfterMutation, openPlotBoardPane } from "@/lib/stores/plotBoard";
 import { refreshCharacterArcs } from "@/lib/stores/characterArcs";
+import { deckEntriesStore } from "@/lib/stores/decks";
 import type { CharacterArcEntry, PlotlineEntry, PlotlineSummary } from "@/lib/types";
 
 export const plotlineEntriesStore = writable<PlotlineSummary[]>([]);
 
+// Every plot node a reference can point at that is not a card: the plotlines plus the decks
+// (ADR-0097 §2 — a card's home deck, a deck's parent). The reference pickers and resolvers
+// read this one roster, so a `plot_deck` chip shows its deck's title rather than a missing
+// ref; a plotline-only consumer keeps reading `plotlineEntriesStore`.
+export const plotNodeEntriesStore = derived([plotlineEntriesStore, deckEntriesStore], ([lines, decks]) => [
+  ...lines,
+  ...decks,
+]);
+
 // The plot entry types the board can reveal per node. A template is not a board
 // node (it opens as a document), so it is deliberately absent.
-export type PlotBoardRevealKind = "plot:plotline" | "plot:character_arc" | "plot:card";
+export type PlotBoardRevealKind = "plot:plotline" | "plot:character_arc" | "plot:card" | "plot:deck";
 export type PlotBoardReveal = { id: string; entryType: PlotBoardRevealKind };
 
 // A one-shot cross-pane signal (ADR-0053 §3; #1920): a plot node asks to be REVEALED

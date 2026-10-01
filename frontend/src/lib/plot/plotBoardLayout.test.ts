@@ -7,14 +7,10 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   boardIsEmpty,
   buildBoardNodes,
-  containerDescendantIds,
-  containerMemberCardIds,
   movableNodePositions,
-  containerExtent,
   overriddenNodePositions,
   projectionDataKey,
   readBoardPositions,
-  readBoardSizes,
   reconcilePlotlineUiState,
   reconcileArcUiState,
   reconcileCardUiState,
@@ -51,6 +47,7 @@ function projection(over: Partial<PlotBoardProjection> = {}): PlotBoardProjectio
     plotlines: [],
     arcs: [],
     containers: [],
+    decks: [],
     cards: [],
     diagnostics: [],
     ...over,
@@ -94,6 +91,7 @@ const card = (
   plotline: null,
   scene: null,
   container: null,
+  deck: null,
   page_status: null,
   beats: [],
   sequence: null,
@@ -239,10 +237,11 @@ describe("buildBoardNodes", () => {
     expect(direct.position.y + CARD_HEIGHT).toBeLessThan(act.position.y + act.height!);
   });
 
-  it("floats a homeless card (no container) outside every box", () => {
-    const nodes = buildBoardNodes(projection({ cards: [card("loose", { container: null })] }));
-    expect(containerNodes(nodes)).toEqual([]);
-    expect(cardNodes(nodes).map((n) => n.id)).toEqual(["loose"]);
+  it("flows a card with no container or deck into the Loose cards box", () => {
+    const nodes = buildBoardNodes(projection({ cards: [card("orphan", { container: null })] }));
+    expect(containerNodes(nodes).map((n) => n.id)).toEqual(["loose"]);
+    expect(dataOf(nodes, "loose")).toMatchObject({ boxKind: "loose", title: "Loose cards", cardIds: ["orphan"], count: 1 });
+    expect(cardNodes(nodes).map((n) => n.id)).toEqual(["orphan"]);
   });
 
   it("carries story time onto the card: swap anchors, movability and the late causes (ADR-0097 §8)", () => {
@@ -265,9 +264,9 @@ describe("buildBoardNodes", () => {
     expect(dataOf(nodes, "x")).toMatchObject({ storyMovable: false, storyEarlier: null, storyLater: null });
   });
 
-  it("treats a card pointing at an unknown container as homeless (defensive)", () => {
+  it("treats a card pointing at an unknown container as loose (defensive)", () => {
     const nodes = buildBoardNodes(projection({ cards: [card("c1", { container: "gone" })] }));
-    expect(containerNodes(nodes)).toEqual([]);
+    expect(containerNodes(nodes).map((n) => n.id)).toEqual(["loose"]);
     expect(cardNodes(nodes)).toHaveLength(1);
   });
 
@@ -291,16 +290,16 @@ describe("buildBoardNodes", () => {
         containers: [container("chap", "Chapter 1")],
         cards: [
           card("attached", { plotline: "plot_a", synopsis: "she leaves", scene: "scene_1", container: "chap" }),
-          card("loose", { plotline: "plot_a", scene: null, container: null }),
+          card("free", { plotline: "plot_a", scene: null, container: null }),
         ],
       }),
     );
     const attached = dataOf(nodes, "attached") as PlotCardData;
-    const loose = dataOf(nodes, "loose") as PlotCardData;
+    const free = dataOf(nodes, "free") as PlotCardData;
     // Colour + the plotline's id/name (#863) come from the plotline whether the card
-    // is in a container or homeless.
+    // is in a container or loose.
     expect(attached).toMatchObject({ synopsis: "she leaves", attached: true, color: "forest", plotlineId: "plot_a", plotlineName: "A" });
-    expect(loose).toMatchObject({ attached: false, color: "forest", plotlineId: "plot_a", plotlineName: "A" });
+    expect(free).toMatchObject({ attached: false, color: "forest", plotlineId: "plot_a", plotlineName: "A" });
   });
 
   it("gives a card with no plotline a null colour", () => {
@@ -333,75 +332,24 @@ describe("buildBoardNodes", () => {
     expect(box.dragHandle).toBe(".plot-container-drag-handle");
   });
 
-  it("applies a saved override and lets the soft box follow the moved card", () => {
+  it("honours a stored top-level box position and carries its cards with it", () => {
     const proj = projection({
       containers: [container("chap", "Chapter 1")],
-      cards: [card("moved", { container: "chap" })],
+      cards: [card("c1", { container: "chap" })],
     });
-    const nodes = buildBoardNodes(proj, { moved: { x: 500, y: 500 } });
-    expect(cardNodes(nodes)[0].position).toEqual({ x: 500, y: 500 });
-    // The chapter box re-wraps the card at its pinned spot (pad + header offset).
-    expect(containerNodes(nodes)[0].position).toEqual({ x: 500 - CONTAINER_PAD, y: 500 - CONTAINER_PAD - CONTAINER_HEADER });
-  });
-});
-
-describe("manual container size (#878)", () => {
-  const chapProj = () =>
-    projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] });
-  const CONTENT_W = CARD_WIDTH + 2 * CONTAINER_PAD;
-  const CONTENT_H = CARD_HEIGHT + 2 * CONTAINER_PAD + CONTAINER_HEADER;
-
-  it("grows a container to a stored manual size and reports the auto-wrap size as the resize floor", () => {
-    const nodes = buildBoardNodes(chapProj(), {}, { chap: { w: 800, h: 600 } });
-    const box = containerNodes(nodes)[0];
-    expect(box.width).toBe(800);
-    expect(box.height).toBe(600);
-    // A resize changes SIZE, never the derived top-left origin (#877 is separate).
-    expect(box.position).toEqual({ x: 0, y: 0 });
-    const d = box.data as PlotContainerData;
-    // data.minWidth/minHeight = the pre-grow content size, the floor the handle can't cross.
-    expect(d.minWidth).toBe(CONTENT_W);
-    expect(d.minHeight).toBe(CONTENT_H);
-    // The raw container id (the node id is `container:chap`) the resize callback keys by.
-    expect(d.containerId).toBe("chap");
+    const nodes = buildBoardNodes(proj, { "container:chap": { x: 500, y: 500 } });
+    expect(containerNodes(nodes)[0].position).toEqual({ x: 500, y: 500 });
+    // The card takes its slot inside the moved box (pad + header offset).
+    expect(cardNodes(nodes)[0].position).toEqual({ x: 500 + CONTAINER_PAD, y: 500 + CONTAINER_HEADER + CONTAINER_PAD });
   });
 
-  it("ignores a stored size smaller than the content (min-not-override: never below content)", () => {
-    const nodes = buildBoardNodes(chapProj(), {}, { chap: { w: 10, h: 10 } });
-    const box = containerNodes(nodes)[0];
-    expect(box.width).toBe(CONTENT_W);
-    expect(box.height).toBe(CONTENT_H);
-  });
-
-  it("grows the act box to wrap a manually enlarged chapter", () => {
-    const nodes = buildBoardNodes(
-      projection({
-        containers: [container("act", "Act I"), container("chap", "Chapter 1", "act")],
-        cards: [card("c1", { container: "chap" })],
-      }),
-      {},
-      { chap: { w: 900, h: 700 } },
-    );
-    const act = nodes.find((n) => n.id === "container:act")!;
-    const chap = nodes.find((n) => n.id === "container:chap")!;
-    expect(chap.width).toBe(900);
-    // The act must still enclose the grown chapter (rectOfBox reads the post-grow box).
-    expect(act.width!).toBeGreaterThanOrEqual(chap.position.x + chap.width!);
-    expect(act.height!).toBeGreaterThanOrEqual(chap.position.y + chap.height!);
-  });
-
-  it("widens a member card's drag extent when its container is resized (#874 synergy)", () => {
-    const grown = buildBoardNodes(chapProj(), {}, { chap: { w: 800, h: 600 } });
-    const box = containerNodes(grown)[0];
-    // The lock follows the GROWN box — the point of resize: a pinned single-card box
-    // gets room for its card to move.
-    expect(cardNodes(grown)[0].extent).toEqual(
-      containerExtent({ x: box.position.x, y: box.position.y, w: box.width!, h: box.height! }),
-    );
-    // Strictly more horizontal travel than the un-resized (pinned) box.
-    const tight = cardNodes(buildBoardNodes(chapProj()))[0].extent as [[number, number], [number, number]];
-    const wide = cardNodes(grown)[0].extent as [[number, number], [number, number]];
-    expect(wide[1][0] - wide[0][0]).toBeGreaterThan(tight[1][0] - tight[0][0]);
+  it("ignores a stored card position: a card always flows in its box", () => {
+    const proj = projection({
+      containers: [container("chap", "Chapter 1")],
+      cards: [card("c1", { container: "chap" })],
+    });
+    const flowed = cardNodes(buildBoardNodes(proj))[0].position;
+    expect(cardNodes(buildBoardNodes(proj, { c1: { x: 500, y: 500 } }))[0].position).toEqual(flowed);
   });
 });
 
@@ -477,128 +425,45 @@ describe("readBoardPositions", () => {
   });
 });
 
-describe("readBoardSizes (#878)", () => {
-  it("reads well-formed per-container sizes out of the opaque layout", () => {
-    expect(readBoardSizes({ sizes: { a: { w: 300, h: 200 }, b: { w: 50, h: 60 } } })).toEqual({
-      a: { w: 300, h: 200 },
-      b: { w: 50, h: 60 },
-    });
-  });
-
-  it("degrades to no sizes for a missing / malformed layout (the board must render)", () => {
-    expect(readBoardSizes({})).toEqual({});
-    expect(readBoardSizes({ sizes: null } as unknown as Record<string, unknown>)).toEqual({});
-  });
-
-  it("drops non-finite or non-positive dimensions, keeping valid siblings", () => {
-    // A zero/negative/NaN size can't be a valid box; a bad entry must not sink the board.
-    expect(
-      readBoardSizes({
-        sizes: { nan: { w: NaN, h: 10 }, zero: { w: 0, h: 10 }, neg: { w: -5, h: 10 }, ok: { w: 12, h: 34 } },
-      } as unknown as Record<string, unknown>),
-    ).toEqual({ ok: { w: 12, h: 34 } });
-  });
-});
-
-describe("containerMemberCardIds (#877 — a container drag translates these)", () => {
-  const nested = () =>
-    projection({
-      containers: [
-        container("act1", "Act I"),
-        container("chap1", "Chapter 1", "act1"),
-        container("chap2", "Chapter 2", "act1"),
-        container("act2", "Act II"),
-      ],
-      cards: [
-        card("inChap1", { container: "chap1" }),
-        card("inChap2", { container: "chap2" }),
-        card("inAct1", { container: "act1" }), // a card directly in the act, not a chapter
-        card("inAct2", { container: "act2" }),
-        card("loose", { container: null }),
-      ],
-    });
-
-  it("returns every card TRANSITIVELY inside an act (its chapters' cards + its direct cards)", () => {
-    expect(new Set(containerMemberCardIds(nested(), "act1"))).toEqual(new Set(["inChap1", "inChap2", "inAct1"]));
-  });
-
-  it("returns only a chapter's own cards, not its siblings' or the act's direct card", () => {
-    expect(containerMemberCardIds(nested(), "chap1")).toEqual(["inChap1"]);
-  });
-
-  it("excludes homeless cards and cards of other acts", () => {
-    const members = containerMemberCardIds(nested(), "act1");
-    expect(members).not.toContain("loose");
-    expect(members).not.toContain("inAct2");
-  });
-
-  it("returns none for an unknown container id (defensive)", () => {
-    expect(containerMemberCardIds(nested(), "ghost")).toEqual([]);
-  });
-
-  it("skips a card pointing at an unknown container", () => {
-    const proj = projection({ containers: [container("act1", "Act I")], cards: [card("c1", { container: "gone" })] });
-    expect(containerMemberCardIds(proj, "act1")).toEqual([]);
-  });
-});
-
-describe("containerDescendantIds (#877 — a container drag moves these boxes live)", () => {
-  const tree = () =>
-    projection({
-      containers: [
-        container("act1", "Act I"),
-        container("chap1", "Chapter 1", "act1"),
-        container("chap2", "Chapter 2", "act1"),
-        container("act2", "Act II"),
-      ],
-    });
-
-  it("returns an act's chapter boxes (strict descendants, excluding the act itself)", () => {
-    expect(new Set(containerDescendantIds(tree(), "act1"))).toEqual(new Set(["chap1", "chap2"]));
-  });
-
-  it("returns none for a leaf chapter or another act", () => {
-    expect(containerDescendantIds(tree(), "chap1")).toEqual([]);
-    expect(containerDescendantIds(tree(), "act2")).toEqual([]);
-  });
-});
-
 describe("movableNodePositions", () => {
-  it("serializes only card positions raw (unrounded), excluding container boxes", () => {
+  it("serializes the placed nodes raw (unrounded): top-level boxes, never cards or nested boxes", () => {
     const nodes = buildBoardNodes(
-      projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
-      { c1: { x: 12.4, y: 7.6 } },
+      projection({
+        containers: [container("act", "Act I"), container("chap", "Chapter 1", "act")],
+        cards: [card("c1", { container: "chap" })],
+      }),
+      { "container:act": { x: 12.4, y: 7.6 } },
     );
     const positions = movableNodePositions(nodes);
     // Raw, not rounded — the persist threshold must match moveNodesCommand's raw
     // drag record, else a sub-pixel move records an undo step that saves nothing.
-    expect(positions).toEqual({ c1: { x: 12.4, y: 7.6 } });
-    // No `container:chap` key — container boxes are derived, never stored.
-    expect(Object.keys(positions)).toEqual(["c1"]);
+    expect(positions).toEqual({ "container:act": { x: 12.4, y: 7.6 } });
+    // No card and no nested chapter box: they flow, so nothing of theirs is stored.
+    expect(Object.keys(positions)).toEqual(["container:act"]);
   });
 
   it("round-trips through readBoardPositions", () => {
     const nodes = buildBoardNodes(
       projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
-      { c1: { x: 5, y: 6 } },
+      { "container:chap": { x: 5, y: 6 } },
     );
     const serialized = { positions: movableNodePositions(nodes) };
-    expect(readBoardPositions(serialized)).toEqual({ c1: { x: 5, y: 6 } });
+    expect(readBoardPositions(serialized)).toEqual({ "container:chap": { x: 5, y: 6 } });
   });
 });
 
 describe("overriddenNodePositions (sparse persist)", () => {
   const proj = () =>
     projection({
-      containers: [container("chap", "Chapter 1")],
-      cards: [card("c1", { container: "chap" }), card("c2", { container: "chap" })],
+      containers: [container("a", "Act I"), container("b", "Act II")],
+      cards: [card("c1", { container: "a" }), card("c2", { container: "b" })],
     });
 
-  it("keeps only the cards in the override set", () => {
+  it("keeps only the boxes in the override set", () => {
     const nodes = buildBoardNodes(proj());
-    // Only c1 is pinned; c2 derives from its container and must not be persisted.
-    expect(overriddenNodePositions(nodes, new Set(["c1"]))).toHaveProperty("c1");
-    expect(overriddenNodePositions(nodes, new Set(["c1"]))).not.toHaveProperty("c2");
+    // Only act I is placed; act II derives its slot in the stack and must not be persisted.
+    expect(overriddenNodePositions(nodes, new Set(["container:a"]))).toHaveProperty(["container:a"]);
+    expect(overriddenNodePositions(nodes, new Set(["container:a"]))).not.toHaveProperty(["container:b"]);
   });
 
   it("is empty when nothing is overridden (a never-dragged board saves nothing)", () => {
@@ -654,84 +519,6 @@ describe("projectionDataKey (rebuild-on-data-change)", () => {
       cards: [card("c1", { plotline: "p1", synopsis: "different", container: "chap" })],
     });
     expect(projectionDataKey(edited)).not.toBe(projectionDataKey(base()));
-  });
-});
-
-describe("container lock (#873)", () => {
-  // The extent is the box's INNER content region (inside the side padding, below the
-  // header band) in absolute coords — xyflow clamps the card's drag into it and
-  // subtracts the card's own size, so we do NOT pre-shrink here.
-  it("containerExtent returns the box's inner content region", () => {
-    expect(containerExtent({ x: 500, y: 300, w: 1000, h: 400 })).toEqual([
-      [500 + CONTAINER_PAD, 300 + CONTAINER_HEADER + CONTAINER_PAD],
-      [500 + 1000 - CONTAINER_PAD, 300 + 400 - CONTAINER_PAD],
-    ]);
-  });
-
-  it("gives a chapter card the chapter box's extent (nested, not the act's)", () => {
-    const nodes = buildBoardNodes(
-      projection({
-        containers: [container("act", "Act I"), container("chap", "Chapter 1", "act")],
-        cards: [card("c1", { container: "chap" })],
-      }),
-    );
-    const chapBox = containerNodes(nodes).find((n) => n.id === "container:chap")!;
-    const cardNode = cardNodes(nodes)[0];
-    expect(cardNode.extent).toEqual(
-      containerExtent({ x: chapBox.position.x, y: chapBox.position.y, w: chapBox.width!, h: chapBox.height! }),
-    );
-  });
-
-  it("clamps the extent to the innermost box even for a card directly in an act", () => {
-    const nodes = buildBoardNodes(
-      projection({ containers: [container("act", "Act I")], cards: [card("c1", { container: "act", scene: "s1" })] }),
-    );
-    const actBox = containerNodes(nodes)[0];
-    expect(cardNodes(nodes)[0].extent).toEqual(
-      containerExtent({ x: actBox.position.x, y: actBox.position.y, w: actBox.width!, h: actBox.height! }),
-    );
-  });
-
-  it("leaves a homeless card free (no extent → no lock)", () => {
-    const nodes = buildBoardNodes(projection({ cards: [card("loose", { container: null })] }));
-    expect(cardNodes(nodes)[0].extent).toBeUndefined();
-  });
-
-  it("treats a card pointing at an unknown container as homeless (no extent)", () => {
-    const nodes = buildBoardNodes(projection({ cards: [card("ghost", { container: "gone" })] }));
-    expect(cardNodes(nodes)[0].extent).toBeUndefined();
-  });
-
-  it("pins a single-card box: the extent leaves exactly the card's own footprint", () => {
-    // A chapter with one card — its box hugs the card, so the content region is the
-    // card's own footprint: xyflow subtracts CARD_WIDTH/HEIGHT → min == max → pinned.
-    const nodes = buildBoardNodes(
-      projection({ containers: [container("chap", "Chapter 1")], cards: [card("solo", { container: "chap" })] }),
-    );
-    const [[minX, minY], [maxX, maxY]] = cardNodes(nodes)[0].extent as [[number, number], [number, number]];
-    expect(maxX - minX).toBe(CARD_WIDTH); // exactly the card's width of travel, all consumed by the size subtraction
-    expect(maxY - minY).toBe(CARD_HEIGHT);
-  });
-
-  it("a multi-card box gives real drag room spanning its cards (the feature's point)", () => {
-    // Two cards in a chapter → the box wraps both, so the extent spans the sibling
-    // row: after xyflow subtracts CARD_WIDTH the card can travel CARD_GAP_X + a card
-    // width. Guards against a too-tight extent (clamping to one card, or off-by-PAD)
-    // that would pin every card — which the single-card test alone wouldn't catch.
-    const nodes = buildBoardNodes(
-      projection({
-        containers: [container("chap", "Chapter 1")],
-        cards: [card("a", { container: "chap" }), card("b", { container: "chap" })],
-      }),
-    );
-    const extents = cardNodes(nodes).map((n) => n.extent as [[number, number], [number, number]]);
-    // Both cards clamp to the SAME chapter box.
-    expect(extents[0]).toEqual(extents[1]);
-    const [[minX], [maxX]] = extents[0];
-    // The extent spans two cards + the inter-card gap (well beyond the single-card
-    // pin, so there is genuine horizontal travel once the card size is subtracted).
-    expect(maxX - minX).toBe(2 * CARD_WIDTH + CARD_GAP_X);
-    expect(maxX - minX).toBeGreaterThan(CARD_WIDTH);
   });
 });
 
@@ -1076,34 +863,37 @@ describe("card placement (#2348)", () => {
     expect(box.position.y + box.height!).toBeGreaterThanOrEqual(first.y + STEP_Y + CARD_HEIGHT);
   });
 
-  it("a pinned card gives up its slot, so the others close ranks", () => {
-    const saved = { c0: { x: 5000, y: 5000 } };
-    const nodes = buildBoardNodes(projection({ cards: loose(3) }), saved);
-    expect(posOf(nodes, "c0")).toEqual({ x: 5000, y: 5000 });
-    // c1 takes the first slot c0 no longer holds.
-    const unpinnedFirst = buildBoardNodes(projection({ cards: loose(1) }));
-    expect(posOf(nodes, "c1")).toEqual(posOf(unpinnedFirst, "c0"));
-    expect(posOf(nodes, "c2").x).toBe(posOf(nodes, "c1").x + STEP_X);
+  it("a placed top-level box gives up its slot in the stack, so the others close ranks", () => {
+    const containers = [container("a", "Act I"), container("b", "Act II"), container("c", "Act III")];
+    const cards = [card("ca", { container: "a" }), card("cb", { container: "b" }), card("cc", { container: "c" })];
+    const nodes = buildBoardNodes(projection({ containers, cards }), { "container:a": { x: 5000, y: 5000 } });
+    expect(posOf(nodes, "container:a")).toEqual({ x: 5000, y: 5000 });
+    // Act II takes the first slot Act I no longer holds.
+    const without = buildBoardNodes(projection({ containers: containers.slice(1), cards: cards.slice(1) }));
+    expect(posOf(nodes, "container:b")).toEqual(posOf(without, "container:b"));
   });
 
-  it("puts the plotline band below a multi-row loose grid", () => {
+  it("puts the plotline band below the stacked boxes", () => {
     const nodes = buildBoardNodes(projection({ cards: loose(CARDS_PER_ROW + 1), plotlines: [line("p1", "Heist")] }));
     const lowestCard = Math.max(...cardNodes(nodes).map((n) => n.position.y + CARD_HEIGHT));
     expect(plotlineNodes(nodes)[0].position.y).toBeGreaterThan(lowestCard);
   });
 
-  // The collision the real app showed: a new card, while unpinned, holds the first
-  // auto slot and pushes an older unpinned card to the second; reading free space
-  // from THAT layout freed slot 0, the new card was pinned there, and the older card
-  // slid straight back onto it. Free space must be read after the pin.
-  it("reads free space from the layout after the pin, so an unpinned card can't slide back under the new one", () => {
-    // Projection order puts the new card first, so unpinned it takes slot 0.
-    const cards = [card("new"), card("old")];
-    const slot0 = posOf(buildBoardNodes(projection({ cards: [card("only")] })), "only");
-    const naive = buildBoardNodes(projection({ cards })).filter((n) => n.id !== "new");
-    expect(naive.find((n) => n.id === "old")!.position).not.toEqual(slot0); // "old" sits in slot 1 here
-    const occupied = occupiedAfterPin(projection({ cards }), {}, {}, "new");
-    expect(occupied).toContainEqual({ x: slot0.x, y: slot0.y, w: CARD_WIDTH, h: CARD_HEIGHT });
+  // The collision the real app showed: a new node, while unpinned, holds the first slot of
+  // the stack and pushes an older unpinned one to the second; reading free space from THAT
+  // layout freed slot 0, the new node was pinned there, and the older one slid straight
+  // back onto it. Free space must be read after the pin.
+  it("reads free space from the layout after the pin, so an unpinned box can't slide back under the new one", () => {
+    // Deck order is by title: "new" stacks first, so unpinned it takes slot 0.
+    const decks = [
+      { id: "new", title: "A new deck", synopsis: "", parent: null, movable: true },
+      { id: "old", title: "B old deck", synopsis: "", parent: null, movable: true },
+    ];
+    const slot0 = posOf(buildBoardNodes(projection({ decks: decks.slice(1) })), "deck:old");
+    const naive = buildBoardNodes(projection({ decks })).filter((n) => n.id !== "deck:new");
+    expect(naive.find((n) => n.id === "deck:old")!.position).not.toEqual(slot0); // "old" sits in slot 1 here
+    const occupied = occupiedAfterPin(projection({ decks }), {}, "deck:new");
+    expect(occupied).toContainEqual(expect.objectContaining({ x: slot0.x, y: slot0.y }));
     const center = { x: slot0.x + CARD_WIDTH / 2, y: slot0.y + CARD_HEIGHT / 2 };
     expect(freeSpotNear(center, { w: CARD_WIDTH, h: CARD_HEIGHT }, occupied)).not.toEqual(slot0);
   });

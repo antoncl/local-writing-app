@@ -17,6 +17,7 @@ vi.mock("@/lib/stores/prompts", () => ({ refreshPromptEntries: vi.fn(async () =>
 vi.mock("@/lib/stores/plotTemplates", () => ({ refreshPlotTemplates: vi.fn(async () => {}), clearPlotTemplates: vi.fn() }));
 vi.mock("@/lib/stores/plotlines", () => ({ refreshPlotlines: vi.fn(async () => {}), clearPlotlines: vi.fn() }));
 vi.mock("@/lib/stores/plotCards", () => ({ refreshCards: vi.fn(async () => {}), clearCards: vi.fn() }));
+vi.mock("@/lib/stores/decks", () => ({ refreshDecks: vi.fn(async () => {}), clearDecks: vi.fn() }));
 vi.mock("@/lib/stores/plotBoard", () => ({ clearPlotBoard: vi.fn() }));
 vi.mock("@/lib/stores/mutationSets", () => ({ refreshMutationSetEntries: vi.fn(async () => {}), clearMutationSets: vi.fn() }));
 vi.mock("@/lib/stores/schema", () => ({ refreshSchema: vi.fn(async () => {}), clearSchema: vi.fn() }));

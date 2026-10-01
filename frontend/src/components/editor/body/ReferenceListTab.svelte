@@ -29,7 +29,7 @@
   import { buildPeekTarget } from "@/lib/utils/peekTarget";
   import { peekAnchor } from "@/lib/actions/peekAnchor";
   import { listItemKey } from "@/lib/editor-core/keyedList";
-  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
+  import { plotNodeEntriesStore } from "@/lib/stores/plotlines";
   import { liveTags } from "@/lib/stores/tagNodes";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { rememberScrollOnScroll } from "@/lib/editor-core/scrollMemory";
@@ -161,7 +161,7 @@
       loreEntries: deps.loreEntries,
       promptEntries: deps.promptEntries,
       assistantEntries: deps.assistantEntries,
-      plotEntries: $plotlineEntriesStore,
+      plotEntries: $plotNodeEntriesStore,
       tagTitleById: deps.tagTitleById,
     }),
   );
@@ -368,7 +368,7 @@
     researchStructure: deps.researchStructure,
     loreEntries: deps.loreEntries,
     promptEntries: deps.promptEntries,
-    plotEntries: $plotlineEntriesStore,
+    plotEntries: $plotNodeEntriesStore,
     assistantEntries: deps.assistantEntries,
     tagEntries: $liveTags,
   });
@@ -473,7 +473,7 @@
             researchStructure={deps.researchStructure}
             loreEntries={deps.loreEntries}
             promptEntries={deps.promptEntries}
-            plotEntries={$plotlineEntriesStore}
+            plotEntries={$plotNodeEntriesStore}
             assistantEntries={deps.assistantEntries}
             tagEntries={$liveTags}
             onChange={handlePickerChange}

@@ -1039,7 +1039,17 @@
     }
 
     // Plot is no longer a flat leaf group — plotlines render as tri-state card
-    // containers through the selector PickTree (ADR-0074 slice 6), above.
+    // containers through the selector PickTree (ADR-0074 slice 6), above. The exception
+    // is a plain reference to a DECK (ADR-0097 §2: a card's home deck, a deck's parent):
+    // a deck is not a selector, so a config that names `plot:deck` offers the decks flat.
+    if (allowedKinds.includes("plot") && !allowSelectors && (membership.entryTypes.plot ?? []).includes("plot:deck")) {
+      const items = dropExcluded(
+        plotEntries
+          .filter((e) => e.entry_type === "plot:deck")
+          .map((e) => ({ id: e.id, kind: "plot" as const, title: e.title, entry_type: e.entry_type })),
+      );
+      if (items.length > 0 || keepEmptyForCreate("plot")) groups.push({ id: "decks", label: "Decks", items });
+    }
 
     return groups;
   });

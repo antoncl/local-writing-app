@@ -12,7 +12,7 @@
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { EntryProposalController, bodyAdopter } from "@/lib/stores/entryProposal.svelte";
   import { refreshTagNodes, resolveAdoptedTagFields, tagById } from "@/lib/stores/tagNodes";
-  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
+  import { plotNodeEntriesStore } from "@/lib/stores/plotlines";
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
@@ -806,7 +806,7 @@
       loreEntries,
       promptEntries,
       assistantEntries,
-      plotEntries: $plotlineEntriesStore,
+      plotEntries: $plotNodeEntriesStore,
       tagById: $tagById,
     }),
   );
@@ -970,11 +970,11 @@
   // The plot document kinds are synthetic shapes whose schema `kind` is "plot", not
   // their documentKind — so the kind-filter below finds nothing and the type select
   // falls back to the raw entry_type id ("plot:template_instance") instead of a name.
-  // List just the node's own type: the plot classes (card / template / plotline) are
+  // List just the node's own type: the plot classes (card / template / plotline / deck) are
   // distinct, so a cross-class reclassify is never offered (the #720 call, now
   // generalized past plot_template). A plotline is edited on its board node by default,
   // but can also be opened in a full pane (ADR-0053 §3, the escape hatch) — same rule.
-  const OWN_TYPE_ONLY = new Set(["plot_template", "plot_card", "plotline"]);
+  const OWN_TYPE_ONLY = new Set(["plot_template", "plot_card", "plotline", "plot_deck"]);
   let documentEntryTypes = $derived(
     OWN_TYPE_ONLY.has(documentKind)
       ? Object.entries(metadataSchema?.entry_types ?? {}).filter(([typeId]) => typeId === entryType)

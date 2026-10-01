@@ -32,6 +32,7 @@ const projection = (): PlotBoardProjection => ({
   plotlines: [],
   arcs: [],
   containers: [],
+  decks: [],
   cards: [],
   diagnostics: [],
 });

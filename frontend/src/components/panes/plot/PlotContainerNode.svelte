@@ -1,10 +1,10 @@
 <!--
-  PlotContainerNode — a soft, free-flow container box on the plot board (ADR-0048
-  S7 Slice 4), one per level (ADR-0094 §9). A non-interactive backdrop the cards float over: it shows the
-  container's title and its card count, sized by plotBoardLayout to wrap its member
-  cards (a chapter box nests inside its act box via `level`). No @xyflow/svelte imports
-  (same reason as PlotCardNode) — drawn by Svelte Flow via the `plotContainer` node type
-  and mountable in happy-dom. It DOES read the structure + schema stores to resolve the
+  PlotContainerNode — a manuscript container's box on the plot board (ADR-0048 S7
+  Slice 4), one per level (ADR-0094 §9), and the "Loose cards" box (ADR-0097 §8). A
+  non-interactive backdrop the cards flow inside: it shows the title and its card count,
+  sized by plotBoardLayout to its contents (a chapter box nests inside its act box via
+  `level`). No @xyflow/svelte imports (same reason as PlotCardNode) — drawn by Svelte Flow
+  via the `plotContainer` node type and mountable in happy-dom. It DOES read the structure + schema stores to resolve the
   container's live display title (with its reorder-live number), falling back to the raw
   projection title; the stores have inert defaults, so it stays happy-dom-mountable.
 
@@ -26,6 +26,8 @@
   // boxes (act, chapter, sequence) stay tellable apart without any fill.
   let isAct = $derived(data.level === 0);
   let isDeep = $derived(data.level >= 2);
+  // The loose box holds what belongs to no chapter or deck: dashed like a deck, no manuscript.
+  let isLoose = $derived(data.boxKind === "loose");
 
   // A board column IS a manuscript act/chapter, so resolve its label through the
   // shared display-title resolver — the reorder-live {number} shows here the same
@@ -39,7 +41,7 @@
   });
 </script>
 
-<div class="plot-container" class:act={isAct} class:deep={isDeep} data-level={data.level}>
+<div class="plot-container" class:act={isAct} class:deep={isDeep} class:loose={isLoose} data-level={data.level}>
   <!-- The header is the drag handle (#877): SvelteFlow's `dragHandle` targets this
        class, so the box moves ONLY when grabbed here — a window-titlebar affordance —
        and the transparent interior stays inert (card drags + edges pass through). -->
@@ -47,6 +49,9 @@
     <span class="container-title" title={displayTitle}>{displayTitle}</span>
     <span class="container-count">{data.count}</span>
   </div>
+  {#if isLoose && data.count === 0}
+    <p class="loose-hint">Drag a card here to take it out of its deck</p>
+  {/if}
 </div>
 
 <style>
@@ -71,8 +76,12 @@
   .plot-container.act {
     border-color: var(--border-strong);
   }
-  .plot-container.deep {
+  .plot-container.deep,
+  .plot-container.loose {
     border-style: dashed;
+  }
+  .plot-container.loose .container-title {
+    color: var(--text-3);
   }
   .container-head {
     box-sizing: border-box;
@@ -102,8 +111,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .plot-container.act .container-title {
+  .plot-container.act:not(.loose) .container-title {
     color: var(--text);
+  }
+  .loose-hint {
+    margin: 0;
+    padding: 0 12px;
+    font-size: var(--fs-sm);
+    color: var(--text-3);
   }
   .container-count {
     flex: none;

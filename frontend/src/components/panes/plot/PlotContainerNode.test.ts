@@ -11,11 +11,14 @@ const data = (over: Partial<PlotContainerData> = {}): PlotContainerData => ({
   title: "Act I",
   count: 4,
   level: 0,
-  // Carried by the plotContainer node type for the resize handle on the flow wrapper
-  // (#878); the presentational node under test ignores them.
   containerId: "node_act",
-  minWidth: 250,
-  minHeight: 170,
+  // What every box node carries (ADR-0097 §8); the presentational node ignores them.
+  boxKind: "container",
+  depth: 0,
+  topLevel: true,
+  headerH: 32,
+  cardIds: [],
+  memberIds: [],
   ...over,
 });
 
@@ -24,6 +27,21 @@ describe("PlotContainerNode", () => {
     render(PlotContainerNode, { props: { data: data() } });
     expect(screen.getByText("Act I")).toBeInTheDocument();
     expect(screen.getByText("4")).toBeInTheDocument();
+  });
+
+  it("renders the Loose cards box under its own title", () => {
+    render(PlotContainerNode, { props: { data: data({ title: "Loose cards", boxKind: "loose", containerId: "", count: 3 }) } });
+    expect(screen.getByText("Loose cards")).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
+  });
+
+  it("hints at what the empty Loose cards box is for, and only while it is empty", () => {
+    const loose = { title: "Loose cards", boxKind: "loose" as const, containerId: "" };
+    const { unmount } = render(PlotContainerNode, { props: { data: data({ ...loose, count: 0 }) } });
+    expect(screen.getByText("Drag a card here to take it out of its deck")).toBeInTheDocument();
+    unmount();
+    render(PlotContainerNode, { props: { data: data({ ...loose, count: 2 }) } });
+    expect(screen.queryByText("Drag a card here to take it out of its deck")).toBeNull();
   });
 
   it("renders a nested (chapter) box", () => {

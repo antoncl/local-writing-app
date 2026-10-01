@@ -802,7 +802,7 @@ class PlotBoardProjectionTests(PlotTestCase):
 class PlotBoardContainerProjectionTests(PlotTestCase):
     """The board projection's manuscript-structure join (ADR-0048 S7 Slice 4): a
     card lays out inside its scene's INNERMOST container, and the projection carries
-    the used containers (plus ancestors) in manuscript reading order so the board
+    every container in manuscript reading order (ADR-0097 §8) so the board
     can nest a chapter box inside its act. Membership is derived from the scene —
     a homeless card (no scene, or a scene under the root) has no container."""
 
@@ -863,19 +863,19 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
         # Pre-order (reading order): each act immediately followed by its chapter.
         self.assertEqual(ids, [act1, chapter1, act2, chapter2])
 
-    def test_only_containers_that_hold_a_carded_scene_are_projected(self) -> None:
+    def test_every_container_is_projected_carded_or_empty(self) -> None:
         root = self.service.read_structure().root.id
         act = self._node("Act I", "manuscript:container", root)
         carded = self._node("Carded", "manuscript:container", act)
         empty = self._node("Empty", "manuscript:container", act)
-        # `empty` even holds a scene — but no card points at it, so it is not a
-        # board concern and must not be projected.
+        # `empty` holds a scene no card points at — it still draws a box, so a card
+        # can be dropped into it (ADR-0097 §8).
         self.service.create_scene(CreateSceneRequest(title="lonely", parent_id=empty))
         scene = self.service.create_scene(CreateSceneRequest(title="carded scene", parent_id=carded)).id
         self._card_on("card", scene)
 
         ids = {c.id for c in self.service.read_plot_board_projection().containers}
-        self.assertEqual(ids, {act, carded})  # the ancestor act rides along; the empty chapter does not
+        self.assertEqual(ids, {act, carded, empty})
 
     def test_a_scene_less_card_is_homeless(self) -> None:
         card_id = self._card_on("Floating", None)
@@ -901,10 +901,10 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
 
         projection = self.service.read_plot_board_projection()
         projected = next(c for c in projection.cards if c.id == card_id)
-        # delete_scene purges the card's ref (§S5) → no scene → no container, and
-        # the now-empty chapter drops out of the projection.
+        # delete_scene purges the card's ref (§S5) → no scene → no container; the
+        # now-empty chapter still draws its box (ADR-0097 §8).
         self.assertIsNone(projected.container)
-        self.assertEqual(projection.containers, [])
+        self.assertEqual([c.id for c in projection.containers], [chapter])
 
     def _sequence_of(self, projection, card_id: str) -> int | None:
         return next(c for c in projection.cards if c.id == card_id).sequence

@@ -64,6 +64,7 @@ const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
   pageStatusIsDefault: true,
   beats: [],
   causalLinks: [],
+  leadsTo: [],
   storyMovable: true,
   storyEarlier: null,
   storyLater: null,
@@ -101,6 +102,7 @@ function actions(
     highlightedCardIds,
     raisedCardId,
     onRaise: vi.fn(),
+    onUnlinkCausal: vi.fn(),
   };
 }
 
@@ -820,6 +822,24 @@ describe("PlotCardNode Attach scene", () => {
   it("a written card with no summary reads \"No summary yet\"", () => {
     renderWithActions({ attached: true, synopsis: "" }, actions());
     expect(screen.getByText("No summary yet")).toBeInTheDocument();
+  });
+
+  describe("Leads to… (#2402)", () => {
+    it("shows only with outgoing links", async () => {
+      renderWithActions({}, actions(), "card_a");
+      await fireEvent.click(screen.getByLabelText("Card actions"));
+      expect(screen.queryByRole("menuitem", { name: /Leads to/ })).toBeNull();
+    });
+
+    it("lists the targets and removing one calls onUnlinkCausal(card, target)", async () => {
+      const acts = actions();
+      renderWithActions({ leadsTo: [{ id: "b", title: "The ledger" }, { id: "c", title: "The fire" }] }, acts, "card_a");
+      await fireEvent.click(screen.getByLabelText("Card actions"));
+      await fireEvent.click(screen.getByRole("menuitem", { name: /Leads to/ }));
+      expect(screen.getByText("The fire")).toBeTruthy();
+      await fireEvent.click(screen.getByLabelText("Remove link to The ledger"));
+      expect(acts.onUnlinkCausal).toHaveBeenCalledWith("card_a", "b");
+    });
   });
 
   describe("story time (ADR-0097 §8)", () => {

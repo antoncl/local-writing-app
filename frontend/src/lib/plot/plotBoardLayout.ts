@@ -121,6 +121,10 @@ export type PlotCardData = {
   // The ids of the cards this card leads to (Slice 6b) — the authored causal links,
   // seeding the "Leads to…" picker's checked state.
   causalLinks: string[];
+  // The same links with the target cards' titles (#2402), for the menu's "Leads to…"
+  // page — the removal fallback when the edge's × is out of reach. Derived from titles +
+  // causal_links (both already in `projectionDataKey`).
+  leadsTo: { id: string; title: string }[];
   // Story time (ADR-0097 §5, §8). `storyEarlier` / `storyLater` are what the menu's
   // "Earlier / Later in story time" would do — null (item hidden) for an inherited card
   // or at an end. `lateCauses` names the cards that lead to this one yet happen after
@@ -509,6 +513,10 @@ export function buildBoardNodes(projection: PlotBoardProjection, saved: Record<s
                 : (getSwatch(beat.plotline_color)?.hex ?? null), // event-beat: the plotline swatch
           })),
           causalLinks: card.causal_links,
+          leadsTo: card.causal_links.flatMap((tid) => {
+            const target = cardById.get(tid);
+            return target ? [{ id: tid, title: target.title }] : [];
+          }),
           storyMovable: card.story_movable,
           ...storySwapOf(card.id),
           lateCauses: lateCauses.get(card.id) ?? [],

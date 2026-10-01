@@ -66,8 +66,8 @@ const byContainerOrder = (a: PlotBoardCard, b: PlotBoardCard): number =>
 const byStory = (a: PlotBoardCard, b: PlotBoardCard): number => a.story_order - b.story_order;
 
 /** The box tree for a projection, top-level boxes in stacking order: containers in
- *  manuscript order, then top-level decks by title, then the loose box (only when it has
- *  cards). A box's children come first (containers in manuscript order, then decks by
+ *  manuscript order, then top-level decks by title, then the loose box (when a card could
+ *  land in it). A box's children come first (containers in manuscript order, then decks by
  *  title), then its own cards: `container_order` in a container (written cards by scene,
  *  planned ones after the scene they follow), story time in a deck or the loose box. A
  *  written card belongs to its scene's container, a planned one to the container it is
@@ -130,9 +130,10 @@ export function boardBoxes(projection: PlotBoardProjection): BoxSpec[] {
   });
 
   const roots = [...topContainers.map(containerBox), ...topDecks.map(deckBox)];
-  // Drawn when it holds cards, and whenever a deck exists: it is where a card dragged out of
-  // a deck goes, so it must already be there when a drag starts (never added mid-gesture).
-  if (loose.length > 0 || projection.decks.length > 0) {
+  // Drawn whenever a card could be dropped into it: it holds cards, a deck exists, or some
+  // card is unwritten (a planned card can be taken out of its chapter, #2399). It must
+  // already be there when a drag starts — never added mid-gesture (#1100).
+  if (loose.length > 0 || projection.decks.length > 0 || projection.cards.some((c) => c.scene == null)) {
     roots.push({ nodeId: LOOSE_NODE_ID, kind: "loose", ref: "", header: CONTAINER_HEADER, cards: boxCards(loose, byStory), children: [] });
   }
   return roots;

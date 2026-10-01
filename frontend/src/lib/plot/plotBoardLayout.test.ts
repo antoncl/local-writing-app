@@ -267,6 +267,19 @@ describe("buildBoardNodes", () => {
     expect(dataOf(nodes, "x")).toMatchObject({ storyMovable: false, storyEarlier: null, storyLater: null });
   });
 
+  it("carries each card's causal targets, with titles, on its data (#2402)", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        cards: [
+          card("a", { title: "A", story_order: 0, causal_links: ["b", "gone"] }),
+          card("b", { title: "B", story_order: 1 }),
+        ],
+      }),
+    );
+    expect(dataOf(nodes, "a")).toMatchObject({ leadsTo: [{ id: "b", title: "B" }] });
+    expect(dataOf(nodes, "b")).toMatchObject({ leadsTo: [] });
+  });
+
   it("treats a card pointing at an unknown container as loose (defensive)", () => {
     const nodes = buildBoardNodes(projection({ cards: [card("c1", { container: "gone" })] }));
     expect(containerNodes(nodes).map((n) => n.id)).toEqual(["loose"]);
@@ -449,7 +462,8 @@ describe("movableNodePositions", () => {
     const nodes = buildBoardNodes(
       projection({
         containers: [container("act", "Act I"), container("chap", "Chapter 1", "act")],
-        cards: [card("c1", { container: "chap" })],
+        // A written card: no unwritten card, so no loose box (#2399) to store either.
+        cards: [card("c1", { container: "chap", scene: "s1" })],
       }),
       { "container:act": { x: 12.4, y: 7.6 } },
     );
@@ -463,7 +477,7 @@ describe("movableNodePositions", () => {
 
   it("round-trips through readBoardPositions", () => {
     const nodes = buildBoardNodes(
-      projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
+      projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap", scene: "s1" })] }),
       { "container:chap": { x: 5, y: 6 } },
     );
     const serialized = { positions: movableNodePositions(nodes) };

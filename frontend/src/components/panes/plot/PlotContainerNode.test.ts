@@ -39,10 +39,10 @@ describe("PlotContainerNode", () => {
   it("hints at what the empty Loose cards box is for, and only while it is empty", () => {
     const loose = { title: "Loose cards", boxKind: "loose" as const, containerId: "" };
     const { unmount } = render(PlotContainerNode, { props: { data: data({ ...loose, count: 0 }) } });
-    expect(screen.getByText("Drag a card here to take it out of its deck")).toBeInTheDocument();
+    expect(screen.getByText("Drag a card here to take it out of its deck or chapter")).toBeInTheDocument();
     unmount();
     render(PlotContainerNode, { props: { data: data({ ...loose, count: 2 }) } });
-    expect(screen.queryByText("Drag a card here to take it out of its deck")).toBeNull();
+    expect(screen.queryByText("Drag a card here to take it out of its deck or chapter")).toBeNull();
   });
 
   describe("a container a deck is realized as (ADR-0097 §7)", () => {

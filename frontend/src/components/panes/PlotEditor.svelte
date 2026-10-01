@@ -334,6 +334,7 @@
     onSetPageStatus: (cardId, status) =>
       void undoRecorder.cardEdit(cardId, "set page status", () => setCardPageStatus(cardId, status)),
     onDelete: (cardId) => removeCard(cardId),
+    onUnlinkCausal: (source, target) => unlinkCausal(source, target),
     // Story time (ADR-0097 §4): the menu's Earlier / Later / Place after… and the Story
     // time view's drag — one recorded step, the card's old neighbour captured for undo.
     onStoryMove: (cardId, anchor) => void undoRecorder.storyMove(cardId, anchor, "move in story time"),
@@ -808,10 +809,9 @@
   // Authored causal edges render via PlotCausalEdge (a hover-× to remove the link);
   // derived edges keep the default renderer.
   const edgeTypes = { causal: PlotCausalEdge };
-  setContext<PlotEdgeActions>(PLOT_EDGE_ACTIONS, {
-    onUnlinkCausal: (source, target) =>
-      void undoRecorder.cardEdit(source, "unlink causal", () => unlinkCardCausal(source, target)),
-  });
+  const unlinkCausal = (source: string, target: string) =>
+    void undoRecorder.cardEdit(source, "unlink causal", () => unlinkCardCausal(source, target));
+  setContext<PlotEdgeActions>(PLOT_EDGE_ACTIONS, { onUnlinkCausal: unlinkCausal });
   // Svelte Flow ships light-only chrome; drive its theme from the app's.
   let colorMode = $derived($themePreference as ColorMode);
 
@@ -1276,6 +1276,16 @@
   .board-canvas :global(.svelte-flow__node:has(.plot-plotline.expanded)),
   .board-canvas :global(.svelte-flow__node:has(.plot-arc.expanded)) {
     z-index: 900 !important;
+  }
+  /* The causal edges' midpoint chips (late-cause warning, remove ×) portal into
+     `.svelte-flow__edge-labels`, a sibling of `.svelte-flow__nodes` inside the viewport
+     (itself a stacking context via its transform). `.svelte-flow__nodes` creates no
+     context, so a z-index here competes directly with the nodes' inline z-indexes: above
+     cards (50) so a chip is never buried under one, below a raised card (800) and open
+     menus (1000). The container is pointer-events:none (inherited), so only the chips
+     catch clicks. #2402 */
+  .board-canvas :global(.svelte-flow__edge-labels) {
+    z-index: 60;
   }
   .board-hint {
     padding: 16px;

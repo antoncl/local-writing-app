@@ -78,6 +78,9 @@ export type PlotCardActions = {
   // front by clicking any visible part of it. Ephemeral display state, never saved.
   readonly raisedCardId: string | null;
   onRaise: (cardId: string) => void;
+  // Remove one authored causal link (#2402) — the card menu's "Leads to…" page, the
+  // fallback for the edge's × when a card covers it. Same undo step as the edge's ×.
+  onUnlinkCausal: (source: string, target: string) => void;
 };
 
 // Symbol key so the context can't collide with a string-keyed one.

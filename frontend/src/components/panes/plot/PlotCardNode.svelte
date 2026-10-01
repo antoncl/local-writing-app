@@ -87,10 +87,10 @@
   const ATTACH_PICKER: NodePickerConfig = { sources: [{ kind: "manuscript", expr: { type: "manuscript:scene" } }] };
 
   let menuOpen = $state(false);
-  // Four pages: the actions, the "Set plotline" lane list, the "Write as scene"
+  // Five pages: the actions, the "Set plotline" lane list, the "Write as scene"
   // location list (#879), and "Place after…" — the story-time anchor list (ADR-0097 §8).
   // Beats + causal are no longer menu pages — they're drag gestures now (#824).
-  let menuView = $state<"main" | "plotline" | "location" | "place">("main");
+  let menuView = $state<"main" | "plotline" | "location" | "place" | "leads">("main");
 
   let editing = $state(false);
   let draft = $state("");
@@ -147,6 +147,12 @@
   function run(op: ((cardId: string) => void) | undefined) {
     closeMenu();
     if (op && id) op(id);
+  }
+  // Remove one outgoing causal link (#2402). Stays on the page so several can go; an
+  // emptied list drops back to the main page (the item hides with no links left).
+  function unlinkCausal(targetId: string) {
+    if (actions && id) actions.onUnlinkCausal(id, targetId);
+    if (data.leadsTo.length <= 1) menuView = "main";
   }
   function setPlotline(plotlineId: string) {
     closeMenu();
@@ -552,6 +558,13 @@
             </button>
           {/if}
         {/if}
+        {#if data.leadsTo.length}
+          <!-- The causal links' removal fallback (#2402): the edge's × can sit under a card. -->
+          <button role="menuitem" class="menu-item" onclick={() => (menuView = "leads")}>
+            <i class="ti ti-arrow-forward-up" aria-hidden="true"></i> Leads to…
+            <span class="chevron" aria-hidden="true"><GroupCaret size="xs" collapsed /></span>
+          </button>
+        {/if}
         <button role="menuitem" class="menu-item" onclick={() => (menuView = "plotline")}>
           <i class="ti ti-route" aria-hidden="true"></i> Set plotline
           <span class="chevron" aria-hidden="true"><GroupCaret size="xs" collapsed /></span>
@@ -589,6 +602,26 @@
             </button>
           {:else}
             <span class="menu-empty">No matching cards</span>
+          {/each}
+        </div>
+      {:else if menuView === "leads"}
+        <button class="menu-item menu-back" onclick={() => (menuView = "main")}>
+          <i class="ti ti-chevron-left" aria-hidden="true"></i> Leads to…
+        </button>
+        <div class="menu-scroll" role="group" aria-label="Causal links">
+          {#each data.leadsTo as link (link.id)}
+            <div class="menu-link-row">
+              <span class="menu-link-title">{link.title || "Untitled card"}</span>
+              <button
+                class="menu-link-remove"
+                aria-label={`Remove link to ${link.title || "Untitled card"}`}
+                onclick={() => unlinkCausal(link.id)}
+              >
+                <i class="ti ti-x" aria-hidden="true"></i>
+              </button>
+            </div>
+          {:else}
+            <span class="menu-empty">No links</span>
           {/each}
         </div>
       {:else if menuView === "location"}
@@ -1131,6 +1164,33 @@
     background: var(--inset);
     border: 1px solid var(--border);
     border-radius: var(--r-sm);
+  }
+  /* "Leads to…" rows (#2402): the target's title, then a quiet remove button. */
+  .menu-link-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 8px;
+    font-size: var(--fs-sm);
+  }
+  .menu-link-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .menu-link-remove {
+    padding: 2px 4px;
+    border: none;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+  }
+  .menu-link-remove:hover {
+    background: var(--surface);
+    color: var(--danger);
   }
   .menu-empty {
     padding: 6px 8px;

@@ -130,7 +130,7 @@
     {/if}
   </div>
   {#if isLoose && data.count === 0}
-    <p class="loose-hint">Drag a card here to take it out of its deck</p>
+    <p class="loose-hint">Drag a card here to take it out of its deck or chapter</p>
   {/if}
   {#if menuOpen && deckId && actions}
     <div class="deck-menu nodrag nopan" role="menu" aria-label="Deck actions">

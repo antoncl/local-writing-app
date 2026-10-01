@@ -10,7 +10,12 @@ import { isTagFlipField, tagFlipItemsFor, type TagFlipItem } from "@/components/
 import { isTagListField } from "@/lib/utils/pickerCreate";
 import { fieldIconClass } from "@/lib/utils/fieldIcons";
 import { resolveColor } from "@/lib/utils/colors";
-import { effectiveFieldLabel, isMetadataValuePresent, metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
+import {
+  effectiveFieldLabel,
+  entryTypeIsA,
+  isMetadataValuePresent,
+  metadataValueDisplayString,
+} from "@/lib/utils/schemaTypeHelpers";
 import { fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { countWords } from "@/lib/utils/wordCount";
@@ -174,6 +179,9 @@ function holdsDerivedState(ctx: RailRowContext, fieldId: string): boolean {
 
 function fieldReadOnly(ctx: RailRowContext, fieldId: string): boolean {
   if (ctx.readOnly) return true;
+  // ADR-0097 §1: a card's `scene` is owned by realize / attach / detach (the server
+  // ignores a saved one), so the rail shows it as a read-only link.
+  if (fieldId === "scene" && entryTypeIsA(ctx.schema, ctx.entryType, "plot:card")) return true;
   if ((fieldId === "ai_temperature" && ctx.temperatureUnsupported) || holdsDerivedState(ctx, fieldId)) return true;
   // ADR-0095 §8: `editorReadOnly` (`ctx.readOnly`) no longer folds `scrubbed`
   // in — a scrub stop is per-field now, so a row that ISN'T one a mutation

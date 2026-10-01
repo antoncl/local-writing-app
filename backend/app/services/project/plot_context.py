@@ -45,6 +45,7 @@ from app.models import (
     PlotContextCard,
     PlotContextPlotline,
 )
+from app.services.project.card_text import displayed_card_text
 
 # The shared card-beat catalog entry + the thread holder-kinds (ADR-0080 §5): the AI
 # context builds the same `_ThreadCatalogEntry` the board projection does, so both feed
@@ -85,7 +86,7 @@ class PlotContextMixin:
         No anchor (or one that names no reveal position — an unknown id or a
         scene-less card) ⇒ the whole board, nothing withheld."""
         board = self.read_plot_board()
-        _containers, _scene_to_container, scene_to_order = self._board_container_map()
+        _containers, _scene_to_container, scene_to_order, scene_text = self._board_container_map()
         cards = self.list_cards().entries
 
         anchor_scene_id, anchor_rank = self._resolve_context_anchor(as_of, cards, scene_to_order)
@@ -113,7 +114,9 @@ class PlotContextMixin:
         beat_catalog = {**plotline_catalog, **arc_catalog}
         page_status_field = self.read_metadata_schema().fields.get(_PAGE_STATUS_FIELD)
         context_cards = [
-            self._context_card(card, scene_to_order, plotline_titles, beat_catalog, admitted_ids, page_status_field)
+            self._context_card(
+                card, scene_to_order, scene_text, plotline_titles, beat_catalog, admitted_ids, page_status_field
+            )
             for card in admitted
         ]
 
@@ -268,6 +271,7 @@ class PlotContextMixin:
         self,
         card: Any,
         scene_to_order: dict[str, int],
+        scene_text: dict[str, tuple[str, str]],
         plotline_titles: dict[str, str],
         beat_catalog: dict[str, _ThreadCatalogEntry],
         admitted_ids: set[str],
@@ -281,10 +285,11 @@ class PlotContextMixin:
         via `_resolve_card_causal` so a withheld card never leaks through an edge."""
         scene = card.metadata.get(_SCENE_FIELD) or None
         plotline_id = card.metadata.get(_PLOTLINE_FIELD) or None
+        title, synopsis = displayed_card_text(card.title, card.body, scene, scene_text)
         return PlotContextCard(
             id=card.id,
-            title=card.title,
-            synopsis=card.body,
+            title=title,
+            synopsis=synopsis,
             plotline_id=plotline_id,
             plotline_title=plotline_titles.get(plotline_id) if plotline_id else None,
             scene_id=scene,

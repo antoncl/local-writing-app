@@ -1138,6 +1138,25 @@
           {/if}
         </div>
       {/if}
+{#if editorPane.document?.type === "plot_card"}
+        <!-- ADR-0097 §3: a written card shows its scene's text; its own title + body are
+             frozen in the editor. Say so, and offer the scene. -->
+        {@const writtenSceneId = editorPane.scene?.metadata?.scene}
+        {#if typeof writtenSceneId === "string" && writtenSceneId}
+          {@const writtenTitle = (structure && findNodeBySceneId(structure.root, writtenSceneId)?.title) || "Untitled"}
+          <div class="ancestor-banner">
+            <span>Written as “{writtenTitle}”. The board shows the scene's summary; this is the card's synopsis from before.</span>
+            <button
+              class="fork-button"
+              type="button"
+              aria-label="Open scene"
+              onclick={() => run(() => editorPanes.openScene(writtenSceneId))}
+            >
+              Open scene
+            </button>
+          </div>
+        {/if}
+      {/if}
 <!-- Key the bind:this off the stable snippet param `id`, NOT `editorPane.id`:
            Svelte re-evaluates a bind:this target on teardown, and `editorPane`
            (= editorPaneById(id)) is already undefined once the pane is closed —

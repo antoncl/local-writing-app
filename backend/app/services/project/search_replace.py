@@ -269,6 +269,10 @@ class SearchReplaceMixin:
             return outcomes + [_not_replaceable(hit, "kind") for hit in body_hits], False
         if not body_hits:
             return outcomes, False
+        # A written card's own body is frozen — the scene's summary is what it shows
+        # (ADR-0097 §3) — so there is nothing here to replace.
+        if entry.entry_type == "plot:card" and self.read_card(file_id).metadata.get("scene"):
+            return outcomes + [_not_replaceable(hit, "written") for hit in body_hits], False
 
         body_outcomes, wrote = self._replace_body_hits(file_id, body_hits, replacement, dispatch)
         return outcomes + body_outcomes, wrote

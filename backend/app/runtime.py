@@ -66,4 +66,5 @@ def translate_errors():
     try:
         yield
     except ProjectServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        detail = {"message": exc.message, **exc.detail} if exc.detail else exc.message
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc

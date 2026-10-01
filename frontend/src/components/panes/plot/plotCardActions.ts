@@ -7,7 +7,7 @@
 // Content ops (realize/detach/set-plotline) are intentful backend mutations OUTSIDE
 // the ADR-0050 layout caretaker (binding decision 1) — they never join the Ctrl+Z
 // history.
-import type { PlotBoardPlotline } from "@/lib/types";
+import type { PlotBoardPlotline, StructureDocument } from "@/lib/types";
 import type { PlotRealizeLocation } from "@/lib/plot/realizeLocations";
 
 export type PlotCardActions = {
@@ -18,7 +18,10 @@ export type PlotCardActions = {
   // the backend's first-container default (offered when the project has no
   // containers to choose from).
   onRealize: (cardId: string, parentId: string | null) => void;
-  // Clear the card's scene ref (attached cards only).
+  // Bind the card to an existing scene picked in the Attach picker (unattached cards
+  // only, ADR-0097 §4). May ask the writer which summary survives.
+  onAttach: (cardId: string, sceneId: string) => void;
+  // Release the card's scene (attached cards only); the card takes the scene's title.
   onDetach: (cardId: string) => void;
   // Persist an in-place title (name) edit. Empty titles are dropped by the card.
   onEditTitle: (cardId: string, title: string) => void;
@@ -49,6 +52,10 @@ export type PlotCardActions = {
   // getter so the card reads the live manuscript tree (containers can be added while
   // the board is open). Empty ⇒ realize takes the backend default (no picker shown).
   readonly locations: PlotRealizeLocation[];
+  // The manuscript the Attach picker browses, and the scenes it leaves out (a scene
+  // holds at most one card, ADR-0097 §1). Getters so the picker reads them live.
+  readonly structure: StructureDocument | null;
+  readonly heldSceneIds: string[];
   // The focused plotline (ADR-0053 §6, S5b), or null. A card dims when a thread is
   // focused and this card is neither on it (its primary plotline) nor fulfilling one
   // of its beats. A getter so the card tracks it reactively (the `plotlines` idiom).

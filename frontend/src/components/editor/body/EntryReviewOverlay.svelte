@@ -57,7 +57,7 @@
          plus the structured rail flips and the A/S/B judge axis. -->
     <EntryRevisionReview
       currentBody={review.currentBody()}
-      proposedBody={review.proposal?.body ?? null}
+      proposedBody={review.bodyFrozen ? null : (review.proposal?.body ?? null)}
       fields={review.fields}
       listReviews={review.listReviews}
       listsAdoptable={review.listsWritable}

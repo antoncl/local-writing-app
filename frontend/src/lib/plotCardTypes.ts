@@ -40,10 +40,11 @@ type PlotFolderEntry = {
 };
 
 // A card (ADR-0048 §1): a unit of story function. The `plotline` and `scene`
-// refs ride inside `metadata` (single entity_refs); attach/detach is a save that
-// sets/clears `metadata.scene`, realize is its own endpoint.
-export type CardSummary = PlotFolderSummary;
-export type CardEntry = PlotFolderEntry;
+// refs ride inside `metadata` (single entity_refs); attach, detach, realize and the
+// displayed-text edit are endpoints of their own (ADR-0097 §3/§4). `story_rank` is the
+// card's read-only place in story time (§5), outside `metadata`.
+export type CardSummary = PlotFolderSummary & { story_rank?: number | null };
+export type CardEntry = PlotFolderEntry & { story_rank?: number | null };
 export type CardList = { entries: CardSummary[] };
 
 // A plotline (ADR-0048 §2): a story thread — name (title), color (metadata),

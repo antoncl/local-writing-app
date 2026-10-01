@@ -9,9 +9,14 @@ working for main.py and the test-suite.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class ProjectServiceError(Exception):
-    def __init__(self, message: str, status_code: int = 400) -> None:
+    def __init__(self, message: str, status_code: int = 400, detail: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
+        # A structured answer the client branches on (e.g. `{"code": ...}`); the
+        # route emits it as `{"message": message, **detail}`, else the bare string.
+        self.detail = detail

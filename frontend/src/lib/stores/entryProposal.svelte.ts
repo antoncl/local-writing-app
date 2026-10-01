@@ -143,6 +143,10 @@ export class EntryProposalController {
   // overridden at all (the save would 422). The sections still show; no unit
   // settles, Accept all leaves lists alone, and commit never writes one.
   listsWritable = $state(true);
+  // True for a card bound to a scene (ADR-0097 §3): its own body is frozen (the scene's
+  // summary is what it shows) and the save refuses a change, so a proposed body is
+  // neither shown as a flip nor adoptable.
+  bodyFrozen = $state(false);
 
   // Wired by the host — the write side of a commit (see the module note).
   // May return a promise (#1797): a tag-vocabulary flip's adopted value can
@@ -216,6 +220,9 @@ export class EntryProposalController {
     for (const [fieldId, proposedValue] of Object.entries(proposal.fields)) {
       const field = schema.fields[fieldId];
       if (!field || field.hidden || NON_FLIPPABLE_FIELD_IDS.has(fieldId)) continue;
+      // ADR-0097 §3: a written card's title is frozen with its body (the save refuses
+      // a change), so a proposed rename is not offered.
+      if (fieldId === "title" && this.bodyFrozen) continue;
       // ADR-0096 §7: a `list` field leaves the atomic rail flip for the
       // per-item review section — whether or not it has units (a unit-less
       // list shows nothing there and is not written either way). The one
@@ -331,7 +338,7 @@ export class EntryProposalController {
    *  (ADR-0096 §7 — a proposal touching only beats still opens the review). */
   hasReview = $derived(
     !!this.proposal &&
-      (this.proposal.body != null ||
+      ((this.proposal.body != null && !this.bodyFrozen) ||
         this.fields.length > 0 ||
         this.structuredFlips.length > 0 ||
         Object.keys(this.listReviews).length > 0),
@@ -425,7 +432,7 @@ export class EntryProposalController {
   acceptAll(): void {
     const proposal = this.proposal;
     if (!proposal) return;
-    if (proposal.body !== null) this.resolvedBody = proposal.body;
+    if (proposal.body !== null && !this.bodyFrozen) this.resolvedBody = proposal.body;
     const text: Record<string, string | null> = {};
     for (const flip of this.fields) text[flip.fieldId] = flip.proposedValue;
     this.resolvedText = text;
@@ -524,7 +531,7 @@ export class EntryProposalController {
       const composed = composeList(review.field, review.L, review.O, review.pairing, resolution);
       if (!listRendersSame(review.field, composed, review.L)) fields[fieldId] = composed;
     }
-    const body = this.resolvedBody;
+    const body = this.bodyFrozen ? null : this.resolvedBody;
     const hasFields = Object.keys(fields).length > 0;
     if (hasFields || body !== null) {
       if (hasFields) {

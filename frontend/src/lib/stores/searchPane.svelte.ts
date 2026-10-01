@@ -66,6 +66,10 @@ export type LastReplace = {
   rejected: number;
   detail: string | null;
   nodes: number;
+  // Hits on a written plot card's body (`not_replaceable/written`, ADR-0097 §3) —
+  // counted apart from `skipped` so the summary can point at the scene's summary.
+  // Absent when zero.
+  written?: number;
 };
 
 export class SearchPaneController {
@@ -261,6 +265,7 @@ export class SearchPaneController {
         let stale = 0;
         let skipped = 0;
         let rejected = 0;
+        let written = 0;
         let detail: string | null = null;
         for (const outcome of res.outcomes) {
           if (outcome.status === "replaced") replaced += 1;
@@ -268,9 +273,18 @@ export class SearchPaneController {
           else if (outcome.reason === "rejected") {
             rejected += 1;
             if (detail === null && outcome.detail) detail = outcome.detail;
-          } else skipped += 1;
+          } else if (outcome.reason === "written") written += 1;
+          else skipped += 1;
         }
-        this.lastReplace = { replaced, stale, skipped, rejected, detail, nodes: res.replaced_nodes };
+        this.lastReplace = {
+          replaced,
+          stale,
+          skipped,
+          rejected,
+          detail,
+          nodes: res.replaced_nodes,
+          ...(written > 0 ? { written } : {}),
+        };
         await this.fire();
       });
     } finally {

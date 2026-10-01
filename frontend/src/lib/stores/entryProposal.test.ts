@@ -134,6 +134,38 @@ describe("EntryProposalController", () => {
     expect(structuredOnly.hasReview).toBe(true);
   });
 
+  // ADR-0097 §3: a written card's own body is frozen (the save refuses a change), so a
+  // proposed body is neither a reviewable change nor adoptable by Accept all / commit.
+  it("a frozen body is not reviewable, not adopted by acceptAll, and never written by commit", async () => {
+    const c = entryController("e1");
+    c.bodyFrozen = true;
+    entryBrainstorm.propose("e1", patch("a new synopsis", {}));
+    expect(c.hasReview).toBe(false); // the body was the only change
+    c.acceptAll();
+    expect(c.resolvedBody).toBeNull();
+    c.setBodyResolution("a new synopsis"); // even a stray resolution is not written
+    const adoptBody = vi.fn();
+    c.onAdoptBody = adoptBody;
+    expect(await c.commit()).toBe(true);
+    expect(adoptBody).not.toHaveBeenCalled();
+  });
+
+  it("a frozen card offers no title flip — its title is frozen with the body", () => {
+    const c = entryController("e1");
+    c.bodyFrozen = true;
+    c.metadata = { title: "Old Name" };
+    entryBrainstorm.propose("e1", patch(null, { title: "New Name" }));
+    expect(c.structuredFlips).toEqual([]);
+    expect(c.hasReview).toBe(false);
+  });
+
+  it("a frozen body still lets the other flips of the patch review", () => {
+    const c = entryController("e1");
+    c.bodyFrozen = true;
+    entryBrainstorm.propose("e1", patch("a new synopsis", { allegiance: "Crown" }));
+    expect(c.hasReview).toBe(true);
+  });
+
   it("reacts to the live-metadata feed — the flip's current value tracks the buffer", () => {
     const c = entryController("e1");
     c.metadata = { bio: "first" };

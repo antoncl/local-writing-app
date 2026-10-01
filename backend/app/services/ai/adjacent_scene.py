@@ -33,7 +33,7 @@ def adjacent_scene(
     if ref is None:
         return None
     try:
-        _containers, _scene_to_container, scene_to_order = project._board_container_map()
+        _containers, _scene_to_container, scene_to_order, _scene_text = project._board_container_map()
     except Exception:  # noqa: BLE001 — a missing/malformed tree must not 500 a render
         return None
     order = sorted(scene_to_order, key=scene_to_order.__getitem__)

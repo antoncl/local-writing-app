@@ -9,7 +9,10 @@ import {
   type CardRef,
   type PlotCommandPort,
   PlotUndoRecorder,
+  attachCommand,
   cardEditCommand,
+  cardTextCommand,
+  detachCommand,
   cardEditManyCommand,
   cardsReferencingCard,
   cardsReferencingPlotline,
@@ -53,6 +56,13 @@ function fakePort() {
   // Scene model for the realize tests: body per scene + which cards reference each.
   const scenes = new Map<string, { title: string; body: string }>();
   const sceneRefs = new Map<string, Set<string>>();
+  // Scene summaries, and what the next attach / detach reports back (null = no text
+  // choice was needed; "cancelled" = the writer backed out of the ask).
+  const summaries = new Map<string, string>();
+  const outcome: { attach: "scene" | "card" | null | "cancelled"; detach: "scene" | "card" | null | "cancelled" } = {
+    attach: null,
+    detach: null,
+  };
   let sceneCounter = 0;
   // What the (mocked) suppressible confirm resolves; flip per test.
   const confirm = { result: true };
@@ -120,16 +130,25 @@ function fakePort() {
       scenes.delete(sceneId);
       sceneRefs.delete(sceneId);
     },
-    detachCardScene: async (cardId) => {
-      calls.push(`detach:${cardId}`);
-      for (const refs of sceneRefs.values()) refs.delete(cardId);
+    attachCardScene: async (cardId, sceneId, text) => {
+      calls.push(`attach:${cardId}:${sceneId}:${text ?? "-"}`);
+      return outcome.attach === null && text ? text : outcome.attach;
     },
+    detachCardScene: async (cardId, text) => {
+      calls.push(`detach:${cardId}:${text ?? "-"}`);
+      for (const refs of sceneRefs.values()) refs.delete(cardId);
+      return outcome.detach === null && text ? text : outcome.detach;
+    },
+    setCardText: async (cardId, text) => {
+      calls.push(`text:${cardId}:${JSON.stringify(text)}`);
+    },
+    readSceneSummary: async (sceneId) => summaries.get(sceneId) ?? "",
     confirmSceneDelete: async () => {
       calls.push("confirm");
       return confirm.result;
     },
   };
-  return { port, cards, plotlines, arcs, scenes, sceneRefs, confirm, calls };
+  return { port, cards, plotlines, arcs, scenes, sceneRefs, summaries, outcome, confirm, calls };
 }
 
 // A projection with just the fields the finders / recorder read.
@@ -383,13 +402,12 @@ describe("realize command (S6b)", () => {
     expect(scenes.has("sc1")).toBe(true);
   });
 
-  it("undo of a SHARED scene keeps it and detaches only this card", async () => {
+  it("undo always deletes the scene — the card is its one referent (ADR-0097 §1)", async () => {
     const { port, scenes, sceneRefs, calls } = fakePort();
-    scenes.set("sc1", { title: "S", body: "prose" });
-    sceneRefs.set("sc1", new Set(["c1", "c2"])); // another card attached since realize
+    scenes.set("sc1", { title: "S", body: "" });
+    sceneRefs.set("sc1", new Set(["c1"]));
     await realizeCommand(port, "c1", null, "sc1").undo();
-    expect(calls).toEqual(["detach:c1"]); // no confirm, no delete — the scene is shared
-    expect(scenes.has("sc1")).toBe(true);
+    expect(calls).toEqual(["deleteScene:sc1"]); // never a detach
   });
 
   it("undo is a no-op when this card no longer references the scene", async () => {
@@ -598,5 +616,126 @@ describe("PlotUndoRecorder", () => {
     gate.release!();
     await done;
     expect(opRan).toBe(true); // ran once idle
+  });
+});
+
+// ── Text edit / attach / detach (ADR-0097 §3/§4) ─────────────────────────────
+
+describe("card text command", () => {
+  it("undo and redo replay the text endpoint with the before / after values", async () => {
+    const { port, calls } = fakePort();
+    const cmd = cardTextCommand(port, "c1", { title: "Old" }, { title: "New" }, "rename card");
+    await cmd.undo();
+    await cmd.redo();
+    expect(calls).toEqual(['text:c1:{"title":"Old"}', 'text:c1:{"title":"New"}']);
+  });
+
+  it("cardTextEdit records the DISPLAYED before text, and nothing for a no-op", async () => {
+    const { port, calls } = fakePort();
+    const recorded: { label?: string }[] = [];
+    // The board shows the scene's text for a written card: that is the "before".
+    const proj = projection([card("c1", { title: "Scene title", synopsis: "Scene summary", scene: "sc1" })]);
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c), () => proj);
+    await recorder.cardTextEdit("c1", "edit synopsis", { synopsis: "Scene summary" }); // same → no step
+    expect(recorded).toEqual([]);
+    await recorder.cardTextEdit("c1", "edit synopsis", { synopsis: "Better" });
+    expect(recorded.map((c) => c.label)).toEqual(["edit synopsis"]);
+    await (recorded[0] as { undo: () => Promise<void> }).undo();
+    expect(calls.at(-1)).toBe('text:c1:{"synopsis":"Scene summary"}');
+  });
+});
+
+describe("detach command", () => {
+  const before: CardState = { title: "Own title", body: "Own synopsis", metadata: { scene: "sc1" } };
+
+  it("undo restores the card's own text while unwritten, then re-attaches with 'scene'", async () => {
+    const { port, calls } = fakePort();
+    await detachCommand(port, "c1", "sc1", before, "card").undo();
+    expect(calls).toEqual(['text:c1:{"title":"Own title","synopsis":"Own synopsis"}', "attach:c1:sc1:scene"]);
+  });
+
+  it("redo detaches with the recorded choice (no second ask)", async () => {
+    const { port, calls } = fakePort();
+    await detachCommand(port, "c1", "sc1", before, "card").redo();
+    expect(calls).toEqual(["detach:c1:card"]);
+  });
+
+  it("redo with no choice recorded passes none", async () => {
+    const { port, calls } = fakePort();
+    await detachCommand(port, "c1", "sc1", before, null).redo();
+    expect(calls).toEqual(["detach:c1:-"]);
+  });
+
+  it("a replay the writer cancels throws UndoCancelled", async () => {
+    const { port, outcome } = fakePort();
+    outcome.detach = "cancelled";
+    await expect(detachCommand(port, "c1", "sc1", before, null).redo()).rejects.toBeInstanceOf(UndoCancelled);
+  });
+
+  it("the recorder records the choice made, and nothing when cancelled", async () => {
+    const { port, cards, outcome } = fakePort();
+    cards.set("c1", cardState("Own title", { scene: "sc1" }, "Own synopsis"));
+    const recorded: { label?: string; redo: () => Promise<void> }[] = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c as never), () => projection([]));
+    outcome.detach = "cancelled";
+    await recorder.detach("c1");
+    expect(recorded).toEqual([]);
+    outcome.detach = "scene";
+    await recorder.detach("c1");
+    expect(recorded.map((c) => c.label)).toEqual(["detach scene"]);
+  });
+});
+
+describe("attach command", () => {
+  const before: CardState = { title: "Own title", body: "Own synopsis", metadata: {} };
+
+  it("undo puts the scene's old summary back (while written), then detaches keeping the card's synopsis", async () => {
+    const { port, summaries, calls } = fakePort();
+    summaries.set("sc1", "Own synopsis"); // the attach overwrote the scene's "Old summary"
+    await attachCommand(port, "c1", "sc1", before, "Old summary", "card").undo();
+    expect(calls).toEqual([
+      'text:c1:{"synopsis":"Old summary"}',
+      "detach:c1:card",
+      'text:c1:{"title":"Own title","synopsis":"Own synopsis"}',
+    ]);
+  });
+
+  it("undo leaves the scene's summary alone when the attach did not change it", async () => {
+    const { port, summaries, calls } = fakePort();
+    summaries.set("sc1", "Same");
+    await attachCommand(port, "c1", "sc1", before, "Same", "scene").undo();
+    expect(calls[0]).toBe("detach:c1:card");
+  });
+
+  it("redo attaches with the recorded choice", async () => {
+    const { port, calls } = fakePort();
+    await attachCommand(port, "c1", "sc1", before, "Old", "scene").redo();
+    expect(calls).toEqual(["attach:c1:sc1:scene"]);
+  });
+
+  it("the recorder reads the scene's summary first, and records nothing when cancelled", async () => {
+    const { port, cards, summaries, outcome, calls } = fakePort();
+    cards.set("c1", cardState("Own title", {}, "Own synopsis"));
+    summaries.set("sc1", "Old summary");
+    const recorded: { label?: string }[] = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c), () => projection([]));
+    outcome.attach = "cancelled";
+    await recorder.attach("c1", "sc1");
+    expect(recorded).toEqual([]);
+    outcome.attach = "card";
+    await recorder.attach("c1", "sc1");
+    expect(recorded.map((c) => c.label)).toEqual(["attach scene"]);
+    expect(calls).toEqual(["attach:c1:sc1:-", "attach:c1:sc1:-"]);
+  });
+});
+
+describe("delete undo of a written card", () => {
+  it("recreates the card through the port with its state (story rank included)", async () => {
+    const { port, cards, calls } = fakePort();
+    const state: CardState = { title: "T", body: "B", metadata: { scene: "sc1" }, story_rank: 3 };
+    cards.set("c1", state);
+    await deleteCardCommand(port, "c1", state, []).undo();
+    expect(calls).toContain("recreateCard:c1");
+    expect(cards.get("c1")?.story_rank).toBe(3);
   });
 });

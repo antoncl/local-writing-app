@@ -410,7 +410,7 @@ ReplaceStatus = Literal["replaced", "stale", "not_replaceable"]
 class ReplaceOutcome(BaseModel):
     """One hit's fate (ADR-0085 §4): `reason` names why a `not_replaceable` or
     `stale` hit didn't write — `"inherited" | "metadata" | "kind" | "unknown" |
-    "overlap" | "rejected"` for `not_replaceable`, `"changed"` for `stale`.
+    "overlap" | "rejected" | "written"` for `not_replaceable`, `"changed"` for `stale`.
     `detail` carries the save's own human message when `reason == "rejected"`
     (e.g. a 422 from `validate_scene_markdown`), else `None`. `revision` is the
     node's new save revision after a `replaced` write, else `None`."""

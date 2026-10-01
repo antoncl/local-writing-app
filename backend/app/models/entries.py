@@ -318,6 +318,32 @@ class PlaceCardRequest(BaseModel):
     story: StoryPlacement
 
 
+class AttachCardRequest(BaseModel):
+    """Body for POST /api/plot/cards/{id}/attach (ADR-0097 §3/§4). `text` is sent
+    only when both texts are non-empty and differ and the writer has chosen: keep
+    the `scene`'s summary, or use the `card`'s synopsis."""
+
+    scene_id: str
+    text: Literal["scene", "card"] | None = None
+
+
+class DetachCardRequest(BaseModel):
+    """Body for POST /api/plot/cards/{id}/detach (ADR-0097 §3/§4). `text` is the
+    writer's choice when the card's old synopsis and the summary both exist and
+    differ: keep the `card`'s, or take the `scene`'s summary."""
+
+    text: Literal["card", "scene"] | None = None
+
+
+class CardTextRequest(BaseModel):
+    """Body for PUT /api/plot/cards/{id}/text (ADR-0097 §3): the displayed title
+    and/or synopsis. Written to the scene while the card is written, else to the
+    card. An absent field is left alone."""
+
+    title: str | None = None
+    synopsis: str | None = None
+
+
 class PlotBoardPlotlineBeat(BaseModel):
     """A beat on a plotline node as the board renders it (ADR-0053 §3): its stable
     `beat_id` (the card→beat link target), `title`, and `use_count` — how many story

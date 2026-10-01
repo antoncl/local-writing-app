@@ -89,6 +89,9 @@
     metadata: EntryMetadata;
     metadataSchema: MetadataSchema | null;
     editorReadOnly: boolean;
+    // A written card's own body is frozen (ADR-0097 §3) — the prose editor alone,
+    // not the rail or the body sections.
+    bodyFrozen: boolean;
     inheritedReadOnly: boolean;
     reviewing: boolean;
     scrubbed: boolean;
@@ -517,6 +520,7 @@
     bind:characterCostUsd
     scene={model.scene}
     documentKind={model.documentKind}
+    readOnly={model.bodyFrozen}
     loreEntries={deps.loreEntries}
     promptEntries={deps.promptEntries}
     availableScenes={deps.availableScenes}

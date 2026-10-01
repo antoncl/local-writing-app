@@ -68,6 +68,7 @@
     rejected: number;
     detail: string | null;
     nodes: number;
+    written?: number;
   }): string {
     const parts: string[] = [];
     if (counts.replaced > 0) {
@@ -75,6 +76,9 @@
     }
     if (counts.stale > 0) parts.push(`${counts.stale} changed since the search`);
     if (counts.skipped > 0) parts.push(`${counts.skipped} not replaceable`);
+    if (counts.written) {
+      parts.push(`${counts.written} not replaceable: written as a scene — edit the scene's summary instead`);
+    }
     if (counts.rejected > 0) {
       parts.push(counts.detail ? `${counts.rejected} rejected: ${counts.detail}` : `${counts.rejected} rejected`);
     }

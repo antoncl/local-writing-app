@@ -4,7 +4,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
+import { HttpError } from "@/lib/api/core";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
 import {
+  attachCardScene,
+  heldSceneIds,
   clearPlotBoard,
   createCard,
   detachCardScene,
@@ -219,35 +223,116 @@ describe("card content ops", () => {
     expect(created).toEqual(["c2"]);
   });
 
-  it("detachCardScene saves the card with the scene ref dropped", async () => {
-    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", scene: "scene9" }));
-    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
-    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
-    await detachCardScene("c1");
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
-  });
-
-  it("renameCard saves the new title with body + metadata untouched, then refetches", async () => {
-    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1" }));
-    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+  it("renameCard edits the displayed title through the text endpoint, then refetches", async () => {
+    const text = vi.spyOn(api, "setCardText").mockResolvedValue(card());
+    const save = vi.spyOn(api, "saveCard");
     const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    vi.spyOn(api, "getStructure").mockResolvedValue({ root: { id: "root", title: "Book" } } as unknown as StructureDocument);
     await renameCard("c1", "Renamed");
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0][0].title).toBe("Renamed");
-    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
-    expect(save.mock.calls[0][1]).toBe(""); // body unchanged
+    expect(text).toHaveBeenCalledWith("c1", { title: "Renamed" });
+    expect(save).not.toHaveBeenCalled(); // a written card's title is not a card save
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("saveCardSynopsis saves the new body, metadata untouched", async () => {
-    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1" }));
-    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+  it("saveCardSynopsis edits the displayed synopsis through the text endpoint", async () => {
+    const text = vi.spyOn(api, "setCardText").mockResolvedValue(card());
     vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    vi.spyOn(api, "getStructure").mockResolvedValue({ root: { id: "root", title: "Book" } } as unknown as StructureDocument);
     await saveCardSynopsis("c1", "a fresh synopsis");
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0][1]).toBe("a fresh synopsis");
-    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
+    expect(text).toHaveBeenCalledWith("c1", { synopsis: "a fresh synopsis" });
+  });
+
+  // ── Attach / detach and the text choice (ADR-0097 §3/§4) ──────────────────
+
+  describe("attach / detach text choice", () => {
+    const differ = () =>
+      new HttpError("differ", 409, {
+        message: "differ",
+        code: "text_choice_required",
+        scene_summary: "Scene says",
+        card_synopsis: "Card says",
+      });
+
+    beforeEach(() => {
+      vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+      vi.spyOn(api, "getStructure").mockResolvedValue({ root: { id: "root", title: "Book" } } as unknown as StructureDocument);
+    });
+    afterEach(() => confirmService.dismiss());
+
+    it("detach needing no choice asks nothing and reports null", async () => {
+      const detach = vi.spyOn(api, "detachCard").mockResolvedValue(card());
+      expect(await detachCardScene("c1")).toBeNull();
+      expect(detach).toHaveBeenCalledWith("c1", undefined);
+      expect(confirmService.active).toBeNull();
+    });
+
+    it("a supplied choice (undo / redo replay) is passed through and reported back", async () => {
+      const detach = vi.spyOn(api, "detachCard").mockResolvedValue(card());
+      expect(await detachCardScene("c1", "card")).toBe("card");
+      expect(detach).toHaveBeenCalledWith("c1", "card");
+    });
+
+    it("on the 409 it asks with both texts, and the primary button keeps the card's synopsis", async () => {
+      const detach = vi
+        .spyOn(api, "detachCard")
+        .mockRejectedValueOnce(differ())
+        .mockResolvedValueOnce(card());
+      const pending = detachCardScene("c1");
+      await vi.waitFor(() => expect(confirmService.active).not.toBeNull());
+      const ask = confirmService.active!;
+      expect(ask.title).toBe("Which synopsis should the card keep?");
+      expect(ask.confirmLabel).toBe("Keep the card's synopsis");
+      expect(ask.secondaryLabel).toBe("Take the scene's summary");
+      expect(ask.details?.join(" ")).toContain("Scene says");
+      expect(ask.details?.join(" ")).toContain("Card says");
+      await confirmService.resolve();
+      expect(await pending).toBe("card");
+      expect(detach).toHaveBeenLastCalledWith("c1", "card");
+    });
+
+    it("the secondary button picks the other text", async () => {
+      const detach = vi
+        .spyOn(api, "detachCard")
+        .mockRejectedValueOnce(differ())
+        .mockResolvedValueOnce(card());
+      const pending = detachCardScene("c1");
+      await vi.waitFor(() => expect(confirmService.active).not.toBeNull());
+      await confirmService.resolveSecondary();
+      expect(await pending).toBe("scene");
+      expect(detach).toHaveBeenLastCalledWith("c1", "scene");
+    });
+
+    it("attach asks which summary the scene keeps; confirm → scene, secondary → card", async () => {
+      const attach = vi
+        .spyOn(api, "attachCard")
+        .mockRejectedValueOnce(differ())
+        .mockResolvedValueOnce(card());
+      const pending = attachCardScene("c1", "sc1");
+      await vi.waitFor(() => expect(confirmService.active).not.toBeNull());
+      const ask = confirmService.active!;
+      expect(ask.title).toBe("Which summary should the scene keep?");
+      expect(ask.confirmLabel).toBe("Keep the scene's summary");
+      expect(ask.secondaryLabel).toBe("Use the card's synopsis");
+      await confirmService.resolve();
+      expect(await pending).toBe("scene");
+      expect(attach).toHaveBeenLastCalledWith("c1", "sc1", "scene");
+    });
+
+    it("cancelling aborts: 'cancelled', no retry, no board refetch", async () => {
+      const detach = vi.spyOn(api, "detachCard").mockRejectedValue(differ());
+      const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+      const pending = detachCardScene("c1");
+      await vi.waitFor(() => expect(confirmService.active).not.toBeNull());
+      confirmService.dismiss();
+      expect(await pending).toBe("cancelled");
+      expect(detach).toHaveBeenCalledTimes(1);
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it("any other failure propagates", async () => {
+      vi.spyOn(api, "attachCard").mockRejectedValue(new HttpError("held", 409, "Another card holds it."));
+      await expect(attachCardScene("c1", "sc1")).rejects.toThrow("held");
+    });
   });
 
   it("reassignCardPlotline sets the plotline ref, then refetches", async () => {
@@ -373,7 +458,17 @@ describe("card content ops", () => {
 
   it("getCardState reads the card's whole authored state", async () => {
     vi.spyOn(api, "getCard").mockResolvedValue({ ...card({ plotline: "p1" }), body: "A synopsis." });
-    expect(await getCardState("c1")).toEqual({ title: "The letter", body: "A synopsis.", metadata: { plotline: "p1" } });
+    expect(await getCardState("c1")).toEqual({
+      title: "The letter",
+      body: "A synopsis.",
+      metadata: { plotline: "p1" },
+      story_rank: null,
+    });
+  });
+
+  it("getCardState carries the card's story rank (ADR-0097 §5)", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue({ ...card(), story_rank: 4 });
+    expect((await getCardState("c1")).story_rank).toBe(4);
   });
 
   it("restoreCardState fetches fresh (for the live revision) then saves the captured state", async () => {
@@ -396,12 +491,35 @@ describe("card content ops", () => {
     vi.spyOn(api, "getCard").mockResolvedValue(card());
     const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
     vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
-    await recreateCard("c1", { title: "Restored", body: "Back.", metadata: { plotline: "p1" } });
-    expect(create).toHaveBeenCalledWith("Restored", "c1"); // id supplied → same identity
+    await recreateCard("c1", { title: "Restored", body: "Back.", metadata: { plotline: "p1" }, story_rank: 7 });
+    expect(create).toHaveBeenCalledWith("Restored", "c1", 7); // id + story rank → same identity and place
     expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
     expect(save.mock.calls[0][1]).toBe("Back.");
   });
 
+  it("recreateCard of a WRITTEN card restores its own text unwritten, then re-attaches with 'scene'", async () => {
+    vi.spyOn(api, "createCard").mockResolvedValue(card());
+    vi.spyOn(api, "getCard").mockResolvedValue(card());
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    const attach = vi.spyOn(api, "attachCard").mockResolvedValue(card({ scene: "sc1" }));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await recreateCard("c1", { title: "T", body: "B", metadata: { plotline: "p1", scene: "sc1" } });
+    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" }); // no scene while text restores
+    expect(attach).toHaveBeenCalledWith("c1", "sc1", "scene");
+    expect(save.mock.invocationCallOrder[0]).toBeLessThan(attach.mock.invocationCallOrder[0]);
+  });
+
+  it("heldSceneIds lists every scene a card on the board holds", () => {
+    plotBoardStore.set({
+      ...projection(),
+      cards: [
+        { id: "a", scene: "sc1" },
+        { id: "b", scene: null },
+        { id: "c", scene: "sc3" },
+      ] as PlotBoardProjection["cards"],
+    });
+    expect(heldSceneIds()).toEqual(["sc1", "sc3"]);
+  });
   it("restore/recreate/deleteCard with refresh:false skip the board refetch (batched undo, #909)", async () => {
     vi.spyOn(api, "getCard").mockResolvedValue(card());
     vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));

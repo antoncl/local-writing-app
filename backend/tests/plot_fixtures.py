@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
 from app.main import app
+from app.models import AttachCardRequest, CardEntry, SaveCardRequest
 
 
 class PlotTestCase(unittest.TestCase):
@@ -29,6 +30,17 @@ class PlotTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def save_card_written(self, card_id: str, request: SaveCardRequest) -> CardEntry:
+        """What `save_card` with a `scene` in its metadata used to do: save the card,
+        then attach the scene through the endpoint that owns it now (ADR-0097 §1).
+        The card's body wins a text conflict, so it becomes the scene's summary."""
+        scene_id = request.metadata.get("scene")
+        metadata = {key: value for key, value in request.metadata.items() if key != "scene"}
+        saved = self.service.save_card(card_id, request.model_copy(update={"metadata": metadata}))
+        if not scene_id:
+            return saved
+        return self.service.attach_card(card_id, AttachCardRequest(scene_id=str(scene_id), text="card"))
 
     def plant_duplicate_scene(self, card_id: str, scene_id: str) -> None:
         """Give a card a scene another card already holds by writing its file

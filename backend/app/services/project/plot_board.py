@@ -29,6 +29,7 @@ from app.models import (
     SavePlotBoardRequest,
     StructureNode,
 )
+from app.services.project.card_text import displayed_card_text
 from app.services.project.errors import ProjectServiceError
 from app.services.project.plot import (
     _BEAT_LINK_FIELD,
@@ -55,6 +56,8 @@ class _PlotBoardLayout(StructureVisitor):
         self.containers: dict[str, PlotBoardContainer] = {}
         self.scene_to_container: dict[str, str] = {}
         self.scene_to_order: dict[str, int] = {}
+        # scene_id -> (title, summary): what a written card displays (ADR-0097 §3).
+        self.scene_text: dict[str, tuple[str, str]] = {}
 
     def visit_node(
         self, node: StructureNode, ancestors: tuple[StructureNode, ...]
@@ -68,6 +71,7 @@ class _PlotBoardLayout(StructureVisitor):
                 # Rank by encounter order (pre-order == reading order); a scene
                 # under the root is homeless but still ranked.
                 self.scene_to_order[node.scene_id] = len(self.scene_to_order)
+                self.scene_text[node.scene_id] = (node.title, str((node.metadata or {}).get("summary") or ""))
                 if parent_container is not None:
                     self.scene_to_container[node.scene_id] = parent_container
         elif node.id not in self.containers:
@@ -213,7 +217,7 @@ class PlotBoardMixin:
                 character_id=character_id, character_name=character_name, character_initial=character_initial,
                 beats=self._plotline_board_beats(arc.metadata, use_counts.get(arc.id)),
             ))
-        containers, scene_to_container, scene_to_order = self._board_container_map()
+        containers, scene_to_container, scene_to_order, scene_text = self._board_container_map()
         # Resolve card→beat badges against the live plotlines AND arcs once per
         # projection (Slice 5b; ADR-0053; ADR-0080 §5): a titled, subtype-tagged
         # badge per link via map lookup, built from the lists already fetched above,
@@ -235,11 +239,12 @@ class PlotBoardMixin:
             while cursor is not None and cursor not in used_containers:
                 used_containers.add(cursor)
                 cursor = containers[cursor].parent
+            title, synopsis = displayed_card_text(card.title, card.body, scene, scene_text)
             cards.append(
                 PlotBoardCard(
                     id=card.id,
-                    title=card.title,
-                    synopsis=card.body,
+                    title=title,
+                    synopsis=synopsis,
                     plotline=card.metadata.get("plotline") or None,
                     scene=scene,
                     container=container,
@@ -268,9 +273,10 @@ class PlotBoardMixin:
 
     def _board_container_map(
         self,
-    ) -> tuple[dict[str, PlotBoardContainer], dict[str, str], dict[str, int]]:
+    ) -> tuple[dict[str, PlotBoardContainer], dict[str, str], dict[str, int], dict[str, tuple[str, str]]]:
         """Walk the manuscript once → (containers-by-id in reading order,
-        scene_id → innermost-container-id, scene_id → reading-order rank).
+        scene_id → innermost-container-id, scene_id → reading-order rank,
+        scene_id → (title, summary), the text a written card displays — ADR-0097 §3).
 
         A *container* is a non-leaf structure node other than the root — an act, a
         chapter, whatever container types the project declares (`_is_leaf_node`
@@ -296,7 +302,7 @@ class PlotBoardMixin:
             skip_root=True,
             is_leaf=self._is_leaf_node,
         )
-        return layout.containers, layout.scene_to_container, layout.scene_to_order
+        return layout.containers, layout.scene_to_container, layout.scene_to_order, layout.scene_text
 
     def _board_page_status(self, metadata: dict[str, Any], field: MetadataFieldDefinition | None) -> str | None:
         """The card's page status as the board shows it (ADR-0048 S7 Slice 5b):

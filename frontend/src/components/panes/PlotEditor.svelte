@@ -50,8 +50,6 @@
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import {
     savePlotBoardLayout,
-    detachCardScene,
-    saveCardSynopsis,
     reassignCardPlotline,
     linkCardBeat,
     unlinkCardBeat,
@@ -61,7 +59,6 @@
     setCardPageStatus,
     seedCardsFromManuscript,
     createCard,
-    renameCard,
     deleteCard,
   } from "@/lib/stores/plotBoard";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -97,7 +94,7 @@
   import { PLOT_PLOTLINE_ACTIONS, type PlotPlotlineActions } from "./plot/plotPlotlineActions";
   import { PLOT_ARC_ACTIONS, type PlotArcActions } from "./plot/plotArcActions";
   import { PLOT_CONTAINER_ACTIONS, type PlotContainerActions } from "./plot/plotContainerActions";
-  import type { BoardSize, BoardXY, PlotBoardProjection } from "@/lib/types";
+  import type { BoardSize, BoardXY, PlotBoardProjection, StructureDocument } from "@/lib/types";
 
   // The board's read model, fetched by the opener / PlotBoardPane into the store.
   // Null until the first refresh resolves. `error` distinguishes a FAILED initial
@@ -109,6 +106,7 @@
     error = null,
     onRetry,
     locations = [],
+    structure = null,
     onDiagnose,
   }: {
     projection: PlotBoardProjection | null;
@@ -117,6 +115,9 @@
     // The manuscript containers a card can be realized into (#879), derived from
     // the structure store by PlotBoardPane so this stays a pure prop-driven renderer.
     locations?: PlotRealizeLocation[];
+    // The manuscript tree the Attach scene picker browses (ADR-0097 §4); like
+    // `locations`, handed down by PlotBoardPane.
+    structure?: StructureDocument | null;
     // Launch the whole-board AI diagnostic chat (ADR-0048 S7b). Owned by
     // PlotBoardPane (it resolves the prompt + calls chatSessions) so this stays a
     // pure renderer; absent ⇒ the toolbar hides the "AI review" button.
@@ -281,14 +282,15 @@
     // redo re-mints. The card's location submenu chooses `parentId` (#879); null defers
     // to the backend's first-container default (a project with no containers to offer).
     onRealize: (cardId, parentId) => void undoRecorder.realize(cardId, parentId),
-    // Every other card op is a whole-card before/after edit recorded onto the shared
-    // caretaker (§7). Detach only toggles the `scene` ref (no file touched), so it IS
-    // undoable as a plain field edit. Each store helper still refetches the projection,
-    // so the board re-projects the changed card.
-    onDetach: (cardId) => void undoRecorder.cardEdit(cardId, "detach scene", () => detachCardScene(cardId)),
-    onEditTitle: (cardId, title) => void undoRecorder.cardEdit(cardId, "rename card", () => renameCard(cardId, title)),
-    onEditSynopsis: (cardId, synopsis) =>
-      void undoRecorder.cardEdit(cardId, "edit synopsis", () => saveCardSynopsis(cardId, synopsis)),
+    // Attach / detach / the title + synopsis edit (ADR-0097 §3/§4) are their own
+    // recorded commands: a written card shows its scene's text, so they replay the text
+    // endpoints (and the text choice made) rather than a whole-card save. Every other
+    // card op is a whole-card before/after edit recorded onto the shared caretaker (§7).
+    // Each store helper still refetches the projection, so the board re-projects.
+    onAttach: (cardId, sceneId) => void undoRecorder.attach(cardId, sceneId),
+    onDetach: (cardId) => void undoRecorder.detach(cardId),
+    onEditTitle: (cardId, title) => void undoRecorder.cardTextEdit(cardId, "rename card", { title }),
+    onEditSynopsis: (cardId, synopsis) => void undoRecorder.cardTextEdit(cardId, "edit synopsis", { synopsis }),
     // Reassign the card's plotline ("" → Unassigned). A content op → the projection's
     // data-key changes → the board rebuilds and the card re-colours. A getter so the
     // submenu reads the current plotlines fresh from the projection (the designerContext
@@ -320,6 +322,14 @@
     // the card reads the live tree — a container added while the board is open shows up.
     get locations() {
       return locations;
+    },
+    // The Attach picker's manuscript, and the scenes it must not offer: one card per
+    // scene (ADR-0097 §1), so any scene a card on this board already holds is out.
+    get structure() {
+      return structure;
+    },
+    get heldSceneIds() {
+      return (projection?.cards ?? []).flatMap((c) => (c.scene ? [c.scene] : []));
     },
     // The focused plotline (S5b) — a card that is neither on this thread nor fulfilling
     // one of its beats dims. A getter so the card tracks it reactively.

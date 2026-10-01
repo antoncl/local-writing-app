@@ -267,6 +267,19 @@ describe("buildBoardNodes", () => {
     expect(dataOf(nodes, "x")).toMatchObject({ storyMovable: false, storyEarlier: null, storyLater: null });
   });
 
+  it("carries each card's causal targets, with titles, on its data (#2402)", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        cards: [
+          card("a", { title: "A", story_order: 0, causal_links: ["b", "gone"] }),
+          card("b", { title: "B", story_order: 1 }),
+        ],
+      }),
+    );
+    expect(dataOf(nodes, "a")).toMatchObject({ leadsTo: [{ id: "b", title: "B" }] });
+    expect(dataOf(nodes, "b")).toMatchObject({ leadsTo: [] });
+  });
+
   it("treats a card pointing at an unknown container as loose (defensive)", () => {
     const nodes = buildBoardNodes(projection({ cards: [card("c1", { container: "gone" })] }));
     expect(containerNodes(nodes).map((n) => n.id)).toEqual(["loose"]);

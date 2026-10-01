@@ -513,6 +513,22 @@ describe("projectionDataKey (rebuild-on-data-change)", () => {
     expect(projectionDataKey(rehomed)).not.toBe(projectionDataKey(base()));
   });
 
+  // #2397: a drag inside ONE chapter changes only where the card sits in it — the key
+  // must still change, or the board keeps the old order until some other edit.
+  it.each([
+    ["container_order", { container_order: 3.5 }],
+    ["planned_in", { planned_in: "chap" }],
+    ["planned_after", { planned_after: "scene_9" }],
+    ["sequence", { sequence: 4 }],
+  ])("changes when only a card's %s changes (→ re-sort within its box)", (_field, overrides) => {
+    const moved = projection({
+      plotlines: [line("p1", "Main", "blue")],
+      containers: [container("chap", "Chapter 1")],
+      cards: [card("c1", { plotline: "p1", synopsis: "s", container: "chap", ...overrides })],
+    });
+    expect(projectionDataKey(moved)).not.toBe(projectionDataKey(base()));
+  });
+
   it("changes when a card is reassigned to another plotline (→ recolour)", () => {
     const reassigned = projection({
       plotlines: [line("p1", "Main", "blue"), line("p2", "Sub", "pink")],

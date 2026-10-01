@@ -38,6 +38,9 @@
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", card.title); // Firefox starts no drag without data
+      // Drag the whole card's picture, not just the grip it started on.
+      const cardEl = (e.currentTarget as HTMLElement | null)?.closest("li");
+      if (cardEl) e.dataTransfer.setDragImage(cardEl, 16, 16);
     }
   }
   function endDrag() {
@@ -133,14 +136,26 @@
           class:ins-after={insert?.id === card.id && insert.side === "after"}
           style={accent ? `--card-accent: ${accent}` : undefined}
           data-card-id={card.id}
-          draggable={card.story_movable}
-          ondragstart={(e) => onDragStart(e, card)}
           ondragend={endDrag}
           ondragover={(e) => onDragOver(e, card)}
           ondragleave={(e) => onDragLeave(e, card)}
           ondrop={(e) => onDrop(e, card)}
         >
           <div class="story-head">
+            {#if card.story_movable}
+              <!-- The card drags by this grip only, as on the board (#876), so the title
+                   and menu stay plain clicks. -->
+              <span
+                class="story-grip"
+                draggable="true"
+                title="Drag to reorder in story time"
+                aria-hidden="true"
+                data-grip-for={card.id}
+                ondragstart={(e) => onDragStart(e, card)}
+              >
+                <i class="ti ti-grip-vertical"></i>
+              </span>
+            {/if}
             <button class="story-title" title="Open card" onclick={() => actions?.onOpen(card.id)}>
               {card.title || "Untitled card"}
             </button>
@@ -245,8 +260,24 @@
     box-shadow: var(--elev-1);
     color: var(--text);
   }
-  .story-card[draggable="true"] {
+  /* The board card's grip (PlotCardNode `.card-drag-handle`), at story-card size. */
+  .story-grip {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    margin-left: -4px;
+    padding: 1px 2px 0;
+    color: var(--text-3);
+    font-size: var(--fs-lg);
+    line-height: 1;
     cursor: grab;
+    transition: color 120ms ease;
+  }
+  .story-card:hover .story-grip {
+    color: var(--text);
+  }
+  .story-grip:active {
+    cursor: grabbing;
   }
   /* The plotline stripe down the left edge, as the board's card draws it. */
   .story-card.accented {

@@ -3,3 +3,6 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+
+# Vendored tokenizer vocabulary: hash-pinned bytes, never diffed or eol-normalised.
+*.tiktoken binary

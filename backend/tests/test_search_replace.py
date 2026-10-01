@@ -21,6 +21,7 @@ from app.main import app
 from app.models import (
     CreateCardRequest,
     CreateCharacterArcRequest,
+    CreateDeckRequest,
     CreatePlotlineRequest,
     CreatePlotTemplateRequest,
     CreatePromptEntryRequest,
@@ -32,6 +33,7 @@ from app.models import (
     ReplaceRequest,
     SaveCardRequest,
     SaveCharacterArcRequest,
+    SaveDeckRequest,
     SaveLoreEntryRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
@@ -487,6 +489,20 @@ class EveryReplaceableKindRoundTripsTests(SearchReplaceTestCase):
 
         after = self.service.read_plotline(plotline.id)
         self.assertEqual(after.body, "Aetherion plotline body\n")
+        self.assertEqual(after.title, before.title)
+        self.assertEqual(after.metadata, before.metadata)
+
+    def test_deck_round_trips(self) -> None:
+        deck = self.service.create_deck(CreateDeckRequest(title="Deck A"))
+        self.service.save_deck(
+            deck.id, SaveDeckRequest(title="Deck A", body="Aetheria deck body", base_revision=deck.revision)
+        )
+        before = self.service.read_deck(deck.id)
+
+        self._replace_only_hit(deck.id)
+
+        after = self.service.read_deck(deck.id)
+        self.assertEqual(after.body, "Aetherion deck body\n")
         self.assertEqual(after.title, before.title)
         self.assertEqual(after.metadata, before.metadata)
 

@@ -585,6 +585,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "plot", "expr": {"type": "plot:plotline"}}]},
         },
+        "plot_deck": {
+            # A single reference to a `plot:deck` (ADR-0097 §2): a card's home deck,
+            # or a deck's parent deck. The `plot_` prefix because a field id is
+            # shared by every entry type. Absent = loose / top level.
+            "name": "Deck",
+            "type": "entity_ref",
+            "picker_config": {"sources": [{"kind": "plot", "expr": {"type": "plot:deck"}}]},
+        },
         "scene": {
             # A single optional reference to a scene. A shared catalog field; its
             # current consumer is the card's scene attachment (ADR-0048 §1): the

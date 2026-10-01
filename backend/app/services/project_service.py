@@ -36,6 +36,7 @@ from app.services.project.change_propagation_validation import (
 from app.services.project.chats import ChatSessionsMixin
 from app.services.project.client_errors import ErrorLogMixin
 from app.services.project.computed_metadata import ComputedMetadataMixin
+from app.services.project.decks import DeckMixin
 from app.services.project.embedded_todos import EmbeddedTodosMixin
 
 # Re-exported so the historic import path
@@ -129,6 +130,7 @@ class ProjectService(
     PlotMixin,
     CardStoryTimeMixin,
     CardSceneMixin,
+    DeckMixin,
     PlotBoardMixin,
     PlotContextMixin,
     ProjectLifecycleMixin,

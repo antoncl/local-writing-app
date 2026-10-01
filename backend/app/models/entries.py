@@ -228,6 +228,33 @@ class SaveCharacterArcRequest(_PlotFolderSaveRequest):
     entry_type: str = "plot:character_arc"
 
 
+class DeckSummary(_PlotFolderSummary):
+    entry_type: str = "plot:deck"
+
+
+class DeckEntry(_PlotFolderEntry):
+    """A deck (ADR-0097 §2): a titled box of cards on the plot board. The body is its
+    synopsis; its `plot_deck` metadata (an entity_ref to a `plot:deck`) nests it inside
+    a parent deck, absent = top level. Deleting one deletes only the deck — the
+    reference purge frees its cards and child decks."""
+
+    entry_type: str = "plot:deck"
+
+
+class DeckList(BaseModel):
+    entries: list[DeckSummary] = Field(default_factory=list)
+
+
+class CreateDeckRequest(_PlotFolderCreateRequest):
+    entry_type: str = "plot:deck"
+    # The parent deck's id: "New deck inside" as one write. Empty = top level.
+    plot_deck: str = ""
+
+
+class SaveDeckRequest(_PlotFolderSaveRequest):
+    entry_type: str = "plot:deck"
+
+
 class PlotBoard(BaseModel):
     """The plot board (ADR-0048 §3): a per-project layout singleton.
 
@@ -273,8 +300,25 @@ class CardList(BaseModel):
     entries: list[CardSummary] = Field(default_factory=list)
 
 
+class PlaceTo(BaseModel):
+    """Where an unwritten card shows (ADR-0097 §4): a deck (`{deck: id}`) or the
+    loose area (`{loose: true}`). Exactly one."""
+
+    deck: str | None = None
+    loose: bool | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_place(self) -> PlaceTo:
+        if bool(self.deck) == bool(self.loose):
+            raise ValueError("Send exactly one of deck and loose: true.")
+        return self
+
+
 class CreateCardRequest(_PlotFolderCreateRequest):
     entry_type: str = "plot:card"
+    # Create in a place (ADR-0097 §4): the card gets this home deck and lands right
+    # after the last card of that place in story time. Absent = end of story time.
+    to: PlaceTo | None = None
     # Honoured only together with a supplied `id` (undo restore puts the card back
     # where it was in story time, ADR-0097 §5); otherwise ignored — a new card
     # lands at the end of story time.
@@ -311,11 +355,18 @@ class StoryPlacement(BaseModel):
 
 
 class PlaceCardRequest(BaseModel):
-    """Body for POST /api/plot/cards/{id}/place (ADR-0097 §4): S1 carries story
-    time only; the `to` half of the endpoint (decks, planned positions) is a
-    later slice."""
+    """Body for POST /api/plot/cards/{id}/place (ADR-0097 §4): `to` sets the home
+    deck (or none) and never moves the card in story time; `story` moves it in
+    story time. At least one of the two. (Planned positions are a later slice.)"""
 
-    story: StoryPlacement
+    to: PlaceTo | None = None
+    story: StoryPlacement | None = None
+
+    @model_validator(mode="after")
+    def _something_to_do(self) -> PlaceCardRequest:
+        if self.to is None and self.story is None:
+            raise ValueError("Send to, story, or both.")
+        return self
 
 
 class AttachCardRequest(BaseModel):
@@ -384,16 +435,28 @@ class PlotBoardCharacterArc(BaseModel):
     beats: list[PlotBoardPlotlineBeat] = Field(default_factory=list)
 
 
+class PlotBoardDeck(BaseModel):
+    """A deck as the board renders it (ADR-0097 §2, §8): its title, its synopsis (the
+    body), its parent deck (`plot_deck`, None = top level — also for a dangling or
+    cyclic reference), and whether the open layer owns it (`movable`)."""
+
+    id: str
+    title: str
+    synopsis: str = ""
+    parent: str | None = None
+    movable: bool = True
+
+
 class PlotBoardContainer(BaseModel):
     """A manuscript container (an act, a chapter — whatever container types the
     project declares) as the board renders it (ADR-0048 S7 Slice 4): a soft,
     free-flow box that holds the cards whose scenes live under it. `parent` is
     the enclosing container's id, or None when its parent is the manuscript root
-    (a top-level act) — so the board can nest a chapter box inside its act. Only
-    containers that transitively hold a placed card (plus their ancestors) are
-    projected, in manuscript reading order; an empty container is not a board
-    concern. Structure, not thread: a container carries no colour (plotline is
-    the colour axis, orthogonal to this structural one)."""
+    (a top-level act) — so the board can nest a chapter box inside its act. EVERY
+    container is projected, in manuscript reading order, held cards or not
+    (ADR-0097 §8: an empty chapter is a place a card can be dropped). Structure,
+    not thread: a container carries no colour (plotline is the colour axis,
+    orthogonal to this structural one)."""
 
     id: str
     title: str
@@ -471,6 +534,9 @@ class PlotBoardCard(BaseModel):
     targets dropped, the display side of `_heal_causal_links`). The board's causal
     edge layer draws one directed edge per id.
 
+    `deck` (ADR-0097 §2) is the card's home deck id, or None (loose; a dangling
+    reference heals to None).
+
     `story_order` (ADR-0097 §5) is the card's 0-based index in story time over every
     projected card — the open layer's own cards by rank, then inherited ones, nearest
     layer first. `story_movable` is whether the open layer owns the card, i.e. whether
@@ -482,6 +548,7 @@ class PlotBoardCard(BaseModel):
     plotline: str | None = None
     scene: str | None = None
     container: str | None = None
+    deck: str | None = None
     page_status: str | None = None
     beats: list[PlotBoardBeat] = Field(default_factory=list)
     sequence: int | None = None
@@ -555,6 +622,8 @@ class PlotBoardProjection(BaseModel):
     # `plotlines` — a sibling holder band, not merged into the plotline list.
     arcs: list[PlotBoardCharacterArc] = Field(default_factory=list)
     containers: list[PlotBoardContainer] = Field(default_factory=list)
+    # ADR-0097 §8: the decks, parents before children, siblings by title.
+    decks: list[PlotBoardDeck] = Field(default_factory=list)
     cards: list[PlotBoardCard] = Field(default_factory=list)
     # Cross-dimension findings (ADR-0048 S7) — a derived facet of the board, computed
     # over the fields above (no extra I/O) and refreshed with every projection read, so

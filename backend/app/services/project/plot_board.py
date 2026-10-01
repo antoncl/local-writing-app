@@ -22,6 +22,7 @@ from app.models import (
     PlotBoardCard,
     PlotBoardCharacterArc,
     PlotBoardContainer,
+    PlotBoardDeck,
     PlotBoardPlotline,
     PlotBoardPlotlineBeat,
     PlotBoardProjection,
@@ -30,6 +31,7 @@ from app.models import (
     StructureNode,
 )
 from app.services.project.card_text import displayed_card_text
+from app.services.project.decks import DECK_FIELD, deck_board_order
 from app.services.project.errors import ProjectServiceError
 from app.services.project.placement import Sibling
 from app.services.project.plot import (
@@ -248,17 +250,22 @@ class PlotBoardMixin:
                 )
             )
         }
+        decks = [
+            PlotBoardDeck(
+                id=deck.id,
+                title=deck.title,
+                synopsis=deck.body,
+                parent=parent,
+                movable=deck.source_layer_id == owned_layer,
+            )
+            for deck, parent in deck_board_order(self.list_decks().entries)
+        ]
+        deck_ids = {deck.id for deck in decks}
         cards: list[PlotBoardCard] = []
-        used_containers: set[str] = set()
         for card in card_entries:
             scene = card.metadata.get("scene") or None
             container = scene_to_container.get(scene) if scene else None
-            # Mark the card's container and every ancestor used, so a nesting box
-            # (a "part" between act and chapter) is projected even with no direct card.
-            cursor = container
-            while cursor is not None and cursor not in used_containers:
-                used_containers.add(cursor)
-                cursor = containers[cursor].parent
+            home_deck = card.metadata.get(DECK_FIELD)
             title, synopsis = displayed_card_text(card.title, card.body, scene, scene_text)
             cards.append(
                 PlotBoardCard(
@@ -268,6 +275,7 @@ class PlotBoardMixin:
                     plotline=card.metadata.get("plotline") or None,
                     scene=scene,
                     container=container,
+                    deck=home_deck if home_deck in deck_ids else None,
                     page_status=self._board_page_status(card.metadata, page_status_field),
                     beats=self._resolve_card_beats(card.metadata, beat_catalog),
                     sequence=scene_to_order.get(scene) if scene else None,
@@ -276,16 +284,14 @@ class PlotBoardMixin:
                     story_movable=card.source_layer_id == owned_layer,
                 )
             )
-        # Reading order (containers is already ordered), used-only — an empty
-        # container is not a board concern.
-        board_containers = [c for cid, c in containers.items() if cid in used_containers]
         projection = PlotBoardProjection(
             board_id=board.id,
             board_revision=board.revision,
             layout=board.layout,
             plotlines=plotlines,
             arcs=arcs,
-            containers=board_containers,
+            containers=list(containers.values()),  # every container, reading order (ADR-0097 §8)
+            decks=decks,
             cards=cards,
         )
         # Cross-dimension findings (ADR-0048 S7) derive purely from the projection just

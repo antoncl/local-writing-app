@@ -17,6 +17,9 @@ seeing it, so a "what's next / what's missing" question never leaks unwritten-ah
 scenes and railroads the writer. A scene-less card (off-page / unwritten) holds no
 reveal position, so it is never a spoiler and is always admitted.
 
+The cards come out in story order (`plot_story_order`): placed cards by reading
+position, each unplaced card positioned by its causal links.
+
 Plotlines are the writer's own scaffolding, not manuscript content, so they are
 never gated; the full beat roster is always present so the AI can name a beat no
 card fulfils yet — the gaps. Character arcs are carried the same way (ADR-0080 §5):
@@ -59,6 +62,7 @@ from app.services.project.plot import (
     PLOT_PLOTLINE_ENTRY_TYPE,
 )
 from app.services.project.plot_board import _ThreadCatalogEntry
+from app.services.project.plot_story_order import story_order
 
 # On-disk metadata field keys this mixin reads a card / plotline's metadata by — the
 # same schema field-name literals plot.py reads them by; named here for legibility.
@@ -113,12 +117,14 @@ class PlotContextMixin:
         # change-beats resolve (plotline + arc ids are disjoint node ids).
         beat_catalog = {**plotline_catalog, **arc_catalog}
         page_status_field = self.read_metadata_schema().fields.get(_PAGE_STATUS_FIELD)
-        context_cards = [
-            self._context_card(
-                card, scene_to_order, scene_text, plotline_titles, beat_catalog, admitted_ids, page_status_field
-            )
-            for card in admitted
-        ]
+        context_cards = story_order(
+            [
+                self._context_card(
+                    card, scene_to_order, scene_text, plotline_titles, beat_catalog, admitted_ids, page_status_field
+                )
+                for card in admitted
+            ]
+        )
 
         return PlotContext(
             board_id=board.id,

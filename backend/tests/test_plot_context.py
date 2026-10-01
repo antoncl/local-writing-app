@@ -301,6 +301,75 @@ class CausalEdgeTests(PlotContextTestCase):
         self.assertEqual(card.causal_out, [])  # the edge to the hidden card is dropped
 
 
+class StoryOrderTests(PlotContextTestCase):
+    """#2387: the board lists cards in story order, not by title. Placed cards keep
+    their reading order; an unplaced card is positioned by its causal links."""
+
+    def _titles(self) -> list[str]:
+        return [c.title for c in self.service.read_plot_context().cards]
+
+    def _linked(self, title: str, target: str | None = None, *, scene: str | None = None) -> str:
+        links = [{"target": target}] if target else []
+        if scene:
+            return self._card(title, scene=scene, causal_links=links)
+        return self._card(title, causal_links=links)
+
+    def test_unplaced_cards_join_the_manuscript_order_through_their_links(self) -> None:
+        # The reported board: five written scenes and two cards not yet in the
+        # manuscript, one mid-story and one at the end. Title order would be
+        # Breaking, The Covering, The Man, The Note, The Water Line, The bath, Three Clocks.
+        chapter = self._chapter()
+        scenes = {
+            t: self._scene(t, chapter)
+            for t in ("The Water Line", "The Man", "Three Clocks", "The Covering", "The bath")
+        }
+        breaking = self._linked("Breaking and entering")
+        bath = self._linked("The bath", breaking, scene=scenes["The bath"])
+        covering = self._linked("The Covering", bath, scene=scenes["The Covering"])
+        note = self._linked("The Note", covering)
+        clocks = self._linked("Three Clocks", note, scene=scenes["Three Clocks"])
+        man = self._linked("The Man", clocks, scene=scenes["The Man"])
+        self._linked("The Water Line", man, scene=scenes["The Water Line"])
+        self.assertEqual(
+            self._titles(),
+            [
+                "The Water Line",
+                "The Man",
+                "Three Clocks",
+                "The Note",
+                "The Covering",
+                "The bath",
+                "Breaking and entering",
+            ],
+        )
+
+    def test_a_chain_with_no_incoming_link_goes_before_the_card_it_leads_to(self) -> None:
+        chapter = self._chapter()
+        s0, s1 = self._scene("Alpha", chapter), self._scene("Omega", chapter)
+        self._linked("Alpha", scene=s0)
+        omega = self._linked("Omega", scene=s1)
+        second = self._linked("B second", omega)
+        self._linked("A first", second)
+        self.assertEqual(self._titles(), ["Alpha", "A first", "B second", "Omega"])
+
+    def test_contradictory_links_follow_the_card_that_leads_here(self) -> None:
+        # Follows a later card but leads to an earlier one: placed after the card
+        # that leads to it, so the backwards link stays visible to a diagnosis.
+        chapter = self._chapter()
+        s0, s1 = self._scene("Early", chapter), self._scene("Late", chapter)
+        early = self._linked("Early", scene=s0)
+        stray = self._linked("Aa stray", early)  # titled to sort first
+        self._linked("Late", stray, scene=s1)
+        self.assertEqual(self._titles(), ["Early", "Late", "Aa stray"])
+
+    def test_an_unlinked_unplaced_card_goes_last(self) -> None:
+        chapter = self._chapter()
+        s0 = self._scene("Written", chapter)
+        self._linked("Aardvark")  # alphabetically first, but has no position
+        self._linked("Written", scene=s0)
+        self.assertEqual(self._titles(), ["Written", "Aardvark"])
+
+
 class ContextEndpointTests(PlotContextTestCase):
     def test_endpoint_returns_the_gated_context(self) -> None:
         chapter = self._chapter()

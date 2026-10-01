@@ -143,18 +143,26 @@ def _render_character_arc(arc) -> list[str]:
     return [f"    <character_arc {attrs}>", *body, "    </character_arc>"]
 
 
-def _render_card(card, card_titles: dict[str, str]) -> list[str]:
+def _render_card(card, card_titles: dict[str, str], focus: str | None) -> list[str]:
     """One `<card>` element: its attrs (plotline / reading order / page status), the
-    synopsis, the beats it fulfils, and the cards it leads to (titles over ids)."""
+    synopsis, the beats it fulfils, and the cards it leads to (titles over ids).
+
+    `reading_order` counts from 1, as a writer counts scenes. The `focus` card — the
+    one a prompt is working on — is marked, and its synopsis is left out: the prompt
+    prints that card in full itself, and printing it twice costs tokens and blurs
+    which copy is the one under work."""
     attrs = f"title={quoteattr(card.title)}"
     if card.plotline_title:
         attrs += f" plotline={quoteattr(card.plotline_title)}"
     if card.sequence is not None:
-        attrs += f" reading_order={quoteattr(str(card.sequence))}"
+        attrs += f" reading_order={quoteattr(str(card.sequence + 1))}"
     if card.page_status:
         attrs += f" page_status={quoteattr(card.page_status)}"
+    is_focus = focus is not None and card.id == focus
+    if is_focus:
+        attrs += ' focus="true"'
     lines = [f"    <card {attrs}>"]
-    if card.synopsis.strip():
+    if card.synopsis.strip() and not is_focus:
         lines.append(f"      <synopsis>{escape(card.synopsis.strip())}</synopsis>")
     for beat in card.beats:
         if beat.holder_kind == _CHARACTER_ARC_HOLDER:
@@ -172,9 +180,10 @@ def _render_card(card, card_titles: dict[str, str]) -> list[str]:
     return lines
 
 
-def render_plot_context(packet: PlotContext | None) -> str:
+def render_plot_context(packet: PlotContext | None, focus: str | None = None) -> str:
     """Render the packet's `<plotlines>`, `<character_arcs>` (ADR-0080 §5, beside
-    the plotlines), and `<cards>` blocks, each omitted when empty."""
+    the plotlines), and `<cards>` blocks, each omitted when empty. `focus` is the id
+    of the card a prompt is working on, marked on the board (see `_render_card`)."""
     if packet is None:
         return ""
     card_titles = {card.id: card.title for card in packet.cards}
@@ -195,7 +204,7 @@ def render_plot_context(packet: PlotContext | None) -> str:
     if packet.cards:
         lines.append("  <cards>")
         for card in packet.cards:
-            lines.extend(_render_card(card, card_titles))
+            lines.extend(_render_card(card, card_titles, focus))
         lines.append("  </cards>")
 
     lines.append("</plot_context>")

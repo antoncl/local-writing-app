@@ -78,7 +78,9 @@ export default defineConfig({
         command: frozenBin ? `"${frozenBin}"` : `${python} -m app.server`,
         cwd: frozenBin ? undefined : backendDir,
         url: baseURL,
-        env: { LWA_HOST: "127.0.0.1", LWA_PORT: String(port), ...configEnv },
+        // LWA_NO_BROWSER: the server opens the default browser on start, which on a
+        // dev machine is the developer's own active browser (#2383).
+        env: { LWA_HOST: "127.0.0.1", LWA_PORT: String(port), LWA_NO_BROWSER: "1", ...configEnv },
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,
         stdout: "pipe",

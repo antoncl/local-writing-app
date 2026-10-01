@@ -119,6 +119,10 @@ that deliberately does **not** call `relevant_lore()`. The gate is off. No lore 
 template or the backend. The pass sees only what the author put in front of it. *(Today: impossible —
 `expand_context` auto-injects lore into it regardless.)*
 
+> **Superseded by ADR-0092 Amendment 1 (2026-10-01):** a prompt that does not call the
+> automatic-lore call now receives the *always* entries. A prompt stays lore-free by declaring it
+> with `no_lore()`, not by leaving the call out.
+
 ## Decision
 
 ### 1. `relevant_lore()` is the one selector; its result is dedupped by id
@@ -224,6 +228,10 @@ realistic prompts either use lore or do not.
   Journey C — a prompt deliberately written lore-free would still receive the always-notes — and, by
   keeping the render channel's own `always` union, it reintroduces exactly the two-selector reconciliation
   this ADR removes.
+  > **Superseded in part by ADR-0092 Amendment 1 (2026-10-01):** *always* entries are placed
+  > without automatic lore, and Journey C is kept by an explicit `no_lore()`. The second objection
+  > still holds and is met: the one selector (`_select_lore`) places them in both modes, so there is
+  > no second channel to reconcile.
 - **Static detection — scan the template text for `relevant_lore(` and store a flag.** Rejected: the
   reachability problem (§Anti-goals). A conditional or an `{% include %}`d snippet makes the source text
   a wrong predictor of what runs. Observing execution dissolves the guess.

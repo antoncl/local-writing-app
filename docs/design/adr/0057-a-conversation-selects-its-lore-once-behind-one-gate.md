@@ -119,7 +119,7 @@ that deliberately does **not** call `relevant_lore()`. The gate is off. No lore 
 template or the backend. The pass sees only what the author put in front of it. *(Today: impossible —
 `expand_context` auto-injects lore into it regardless.)*
 
-> **Superseded by ADR-0092 Amendment 1 (draft, 2026-10-01):** a prompt that does not call the
+> **Superseded by ADR-0092 Amendment 1 (2026-10-01):** a prompt that does not call the
 > automatic-lore call now receives the *always* entries. A prompt stays lore-free by declaring it
 > with `no_lore()`, not by leaving the call out.
 
@@ -228,7 +228,7 @@ realistic prompts either use lore or do not.
   Journey C — a prompt deliberately written lore-free would still receive the always-notes — and, by
   keeping the render channel's own `always` union, it reintroduces exactly the two-selector reconciliation
   this ADR removes.
-  > **Superseded in part by ADR-0092 Amendment 1 (draft, 2026-10-01):** *always* entries are placed
+  > **Superseded in part by ADR-0092 Amendment 1 (2026-10-01):** *always* entries are placed
   > without automatic lore, and Journey C is kept by an explicit `no_lore()`. The second objection
   > still holds and is met: the one selector (`_select_lore`) places them in both modes, so there is
   > no second channel to reconcile.

@@ -171,7 +171,7 @@ a prompt author would look, and neither should be needed to say "just this entry
 
 ### 7.1 `use()` places; it does not set the slot
 
-> **Qualified by Amendment 1 (draft):** *always* entries are placed whether or not automatic
+> **Qualified by Amendment 1 (2026-10-01):** *always* entries are placed whether or not automatic
 > lore runs, unless the prompt calls `no_lore()`. The first bullet's "not the *always*
 > entries" is withdrawn, and the third bullet's signal "tier rows present, annotation absent"
 > now means picks or *always* entries placed. Scene references stay as written.
@@ -260,7 +260,7 @@ are recorded here so its ADR starts from them rather than from a guess:
 
 ## Anti-goals
 
-> **Qualified by Amendment 1 (draft):** not calling `auto_lore()` now gives a prompt its picks
+> **Qualified by Amendment 1 (2026-10-01):** not calling `auto_lore()` now gives a prompt its picks
 > *and* the *always* entries. A prompt gets its picks alone by calling `no_lore()`.
 
 - **Not a change to detection.** The surfaces, the matcher and the parity gate are ADR-0075's
@@ -276,7 +276,7 @@ are recorded here so its ADR starts from them rather than from a guess:
 
 ## Why / rejected alternatives
 
-> **Reversed in part by Amendment 1 (draft):** the rejection of keeping *always* entries on a
+> **Reversed in part by Amendment 1 (2026-10-01):** the rejection of keeping *always* entries on a
 > pick-only send is withdrawn; it stands for the scene's references. The "declared only"
 > switch rejected below now exists as `no_lore()`, because not calling `auto_lore()` no longer
 > keeps a prompt free of lore.
@@ -338,7 +338,7 @@ it.
 
 ## The journey that defines done
 
-> **Qualified by Amendment 1 (draft):** in steps 1 and 5, the project's *always* entries are
+> **Qualified by Amendment 1 (2026-10-01):** in steps 1 and 5, the project's *always* entries are
 > placed beside the pick unless the prompt calls `no_lore()`; Amendment 1 has its own journey.
 
 1. The writer presses Propose on The Implant's review item. A conversation opens from
@@ -373,7 +373,7 @@ gathering, a bounded forward step, and a place a cold thread can start from.
 
 ## Amendment 1 — *always* entries travel without automatic lore; a prompt can say it is lore-free
 
-- **Status:** Draft — awaiting review (2026-10-01). Issue: #2393.
+- **Status:** **Accepted** — 2026-10-01 (Anton). Issue: #2393. Slices S1 and S2 to follow.
 - **Supersedes by reference:** ADR-0057 §2 Journey C ("the prompt that must stay clean") and
   that ADR's rejected alternative "Backend force-attaches `always` on every send". A lore-free
   prompt stays possible, but it is declared, not inferred from what the prompt leaves out.

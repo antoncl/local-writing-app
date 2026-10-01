@@ -433,7 +433,8 @@ def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, 
         # on the resolved type wins over the shared field def's name — the same
         # resolution the rail UI (`effectiveFieldLabel`) uses, so the model sees a
         # field by the name the author sees (e.g. `title` = "Name" on lore,
-        # "Title" on scene) instead of always the global "Title".
+        # "Title" on scene) instead of always the global "Title". The description
+        # resolves the same way: a per-type `description` wins over the shared one.
         override = definition.field_overrides.get(field_id)
         descriptor: dict[str, Any] = {
             "id": field_id,
@@ -443,7 +444,7 @@ def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, 
             # Author help text (#1004): what the field is FOR, so the model
             # proposes on-target values. Always present (None when unset) so the
             # template can test `f.description` without hitting StrictUndefined.
-            "description": field.description,
+            "description": override.description if override and override.description else field.description,
             # The field's section label (#784), so a template can reason about
             # fields BY their group — `{% for f in fields(e) if f.group == "GMO" %}`
             # renders an applied struct (Goal/Motivation/Obstacle) as one block.

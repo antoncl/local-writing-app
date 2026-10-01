@@ -154,6 +154,12 @@ body guidance would require extending `FieldOverride` with a `description` aspec
 that is a possible follow-up, deliberately **out of scope** here — the single
 built-in description already fixes the dump.
 
+> **Amendment 2026-10-01 (#2389):** `FieldOverride` now carries a `description` aspect
+> beside `label` and `hidden`, resolved down the parent chain like the others and fed to
+> the model (`fields()` and the extraction body clause) and the rail tooltip.
+> `plot:card` and `manuscript:scene` use it to override body's description (a card's body
+> is a synopsis; a scene's is the prose itself).
+
 ### E. A field declares whether the AI may author it: `ai_proposable`
 
 Add one property to the field definition (`MetadataFieldDefinition`,

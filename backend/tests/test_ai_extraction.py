@@ -254,6 +254,25 @@ class ExtractionEnvelopeTests(unittest.TestCase):
         self.assertIn("do not restate", envelope.lower())
         self.assertNotIn("complete revised markdown body", envelope)
 
+    def test_body_clause_uses_the_entry_types_body_description(self) -> None:
+        # A plot card's body is a synopsis: its per-type description steers the
+        # clause; a lore entry keeps the shared one.
+        card = render_extraction_envelope(
+            self.service,
+            entry_type="plot:card",
+            creating=True,
+            stored=self._stored("plot:card"),
+        )
+        self.assertIn("three to six sentences", card)
+        lore = render_extraction_envelope(
+            self.service,
+            entry_type="lore:character",
+            creating=True,
+            stored=self._stored("lore:character"),
+        )
+        self.assertNotIn("three to six sentences", lore)
+        self.assertIn("do not restate", lore.lower())
+
     def test_body_ai_proposable_false_suppresses_body_clause(self) -> None:
         # ADR-0059 §E: a layer can mark the body off-limits to AI authorship.
         # There is no type-level gate left INSIDE the envelope (ADR-0067 §4 —

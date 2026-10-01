@@ -511,6 +511,20 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         by_id = {f["id"]: f for f in roster}
         self.assertEqual(by_id["title"]["label"], "Name")  # lore override wins
 
+    def test_fields_applies_per_type_description_override(self) -> None:
+        # The roster resolves a field's description the way it resolves its
+        # label: the type's own `field_overrides[...].description` wins.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data["fields"]["bio"]["description"] = "Shared bio help."
+        data["entry_types"]["lore:character"]["field_overrides"] = {
+            "bio": {"description": "On a character: their backstory."}
+        }
+        self.service._write_yaml(schema_path, data)
+        schema = self.service.read_metadata_schema()
+        by_id = {f["id"]: f for f in _fields(self.service, schema, self.hero.id)}
+        self.assertEqual(by_id["bio"]["description"], "On a character: their backstory.")
+
     def test_fields_carries_field_description(self) -> None:
         # #1004: a field's author description rides in the roster so the
         # brainstorm/extraction model sees what the field is FOR. Present as None

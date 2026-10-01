@@ -319,6 +319,32 @@ class FieldOverrideTests(unittest.TestCase):
         scene = self.service.read_metadata_schema().entry_types["manuscript:scene"]
         self.assertNotIn("title", scene.field_overrides)
 
+    def test_description_merges_down_the_parent_chain(self) -> None:
+        # Parent relabels `tags`; the child only describes it — the child sees both.
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "entry_types": {
+                    "lore:base": {"field_overrides": {"tags": {"label": "Labels"}}},
+                    "lore:character": {"field_overrides": {"tags": {"description": "Who they are"}}},
+                },
+            },
+        )
+        character = self.service.read_metadata_schema().entry_types["lore:character"]
+        self.assertEqual(character.field_overrides["tags"].label, "Labels")
+        self.assertEqual(character.field_overrides["tags"].description, "Who they are")
+        self.assertIsNone(character.own_field_overrides["tags"].label)
+
+    def test_plot_card_and_scene_describe_their_body_by_default(self) -> None:
+        schema = self.service.read_metadata_schema()
+        card = schema.entry_types["plot:card"].field_overrides["body"].description
+        self.assertIn("three to six sentences", card or "")
+        scene = schema.entry_types["manuscript:scene"].field_overrides["body"].description
+        self.assertIn("The scene's prose", scene or "")
+        # Other types keep the shared description.
+        self.assertNotIn("body", schema.entry_types["lore:character"].field_overrides)
+
     def test_hidden_false_override_can_unhide_a_def_hidden_field(self) -> None:
         # `id` is hidden at the def level; a per-type hidden:false overrides it.
         self.service._write_yaml(
@@ -350,6 +376,24 @@ class FieldOverrideTests(unittest.TestCase):
         )
         character = self.service.read_metadata_schema().entry_types["lore:character"]
         self.assertNotIn("aliases", character.field_overrides)
+
+    def test_set_description_round_trips_via_the_endpoint(self) -> None:
+        layer = self._project_layer_id()
+        self.service.set_metadata_field_override(
+            SetFieldOverrideRequest(
+                layer_id=layer, entry_type_id="lore:character", field_key="aliases", description="  Other names  "
+            )
+        )
+        character = self.service.read_metadata_schema().entry_types["lore:character"]
+        self.assertEqual(character.field_overrides["aliases"].description, "Other names")
+        # Clearing the only aspect drops the entry and leaves no type stub.
+        self.service.set_metadata_field_override(
+            SetFieldOverrideRequest(layer_id=layer, entry_type_id="lore:character", field_key="aliases")
+        )
+        character = self.service.read_metadata_schema().entry_types["lore:character"]
+        self.assertNotIn("aliases", character.field_overrides)
+        layer_yaml = self.service._read_yaml(self.root / "metadata.schema.yaml")
+        self.assertNotIn("lore:character", layer_yaml.get("entry_types", {}))
 
     def test_clearing_last_override_leaves_no_empty_stub(self) -> None:
         # Set then clear the only override on a built-in type: the type must not

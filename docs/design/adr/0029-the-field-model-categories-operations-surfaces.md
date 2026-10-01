@@ -98,6 +98,7 @@ The operations a field can be subject to, and which categories permit each:
 | **read** (display the value) | ✓ | ✓ | ✓ |
 | **edit value** (author the instance value) | ✓ widget | ✓ identity control | — app-produced |
 | **relabel** (per-type label) | ✓ | ✓ | ✓ |
+| **describe** (per-type description, #2389) | ✓ | ✓ | ✓ |
 | **hide** (per-type visibility) | ✓ | —¹ | ✓ |
 | **reorder** (via `display_order`) | ✓ | —¹ | ✓ |
 | **add / remove on a type** (any type, per §A) | ✓ | — always present | ✓ from catalog |
@@ -153,7 +154,7 @@ Being app-produced governs authoring, not presentation:
 
 ### F. Presentation resolution is one function, parameterized by the anchor type
 
-`effectiveFieldLabel` / `effectiveFieldHidden` already merge a per-type override over the
+`effectiveFieldLabel` / `effectiveFieldDescription` / `effectiveFieldHidden` already merge a per-type override over the
 base def (child wins per aspect). Make **both the rail and the Views picker** consult them;
 the only difference is *which type* they resolve against:
 
@@ -182,7 +183,7 @@ is a separate schema concern, unchanged. Resolves #118 point 4; unblocks #113 §
 ### H. Own-field overrides; the def editor and the override are two scopes
 
 Every field row — **own and inherited alike** — exposes the per-type override controls
-(relabel / hide), because presentation is per-type regardless of where the def is owned. Own
+(relabel / describe / hide), because presentation is per-type regardless of where the def is owned. Own
 rows *additionally* expose the **global def editor** (name / type / options / icon), a
 different scope: it edits the field's definition everywhere, not this type's presentation of
 it. Both can sit on one own row. Resolves #118 point 5 (relabel/hide no longer
@@ -190,8 +191,8 @@ inherited-rows-only).
 
 ### I. Overrides compose per-aspect; the UI writes the type's *own* overlay, not the resolved
 
-The resolver already merges overrides per-aspect (child wins on `label` and `hidden`
-independently). The aspect-freeze bug (#118 point 6) is entirely UI-side: the override
+The resolver already merges overrides per-aspect (child wins on `label`, `description`
+and `hidden` independently). The aspect-freeze bug (#118 point 6) is entirely UI-side: the override
 editor reads the **resolved** (parent-merged) value of the aspect it isn't editing and PUTs
 it, freezing the inherited value into the child layer. Fix: ship the type's **own
 (pre-merge) `field_overrides`** in the schema payload — `own_field_overrides`, the exact

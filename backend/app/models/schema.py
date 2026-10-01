@@ -380,14 +380,17 @@ class GroupApplication(BaseModel):
 
 class FieldOverride(BaseModel):
     """Per-entry_type overlay on a field's presentation (#116). Lets a type
-    relabel or hide a field it carries — own or inherited — without touching
-    the shared field definition. `label` renames (e.g. `title` → "Name" on
-    lore, "Title" on scene); `hidden` toggles the field out of the per-node
-    rail and the Views picker. Both optional: an absent aspect falls back to
-    the field def. Stored per layer on the type; merged down the parent chain
-    (child wins) by the schema resolver, same as `display_order`."""
+    relabel, describe or hide a field it carries — own or inherited — without
+    touching the shared field definition. `label` renames (e.g. `title` → "Name"
+    on lore, "Title" on scene); `description` is a type-specific account of
+    what the field means on that type (fed to the model and the rail tooltip);
+    `hidden` toggles the field out of the per-node rail and the Views picker.
+    All optional: an absent aspect falls back to the field def. Stored per
+    layer on the type; merged down the parent chain (child wins) by the schema
+    resolver, same as `display_order`."""
 
     label: str | None = None
+    description: str | None = None
     hidden: bool | None = None
 
 
@@ -655,12 +658,13 @@ class SetFieldOrderRequest(BaseModel):
 
 class SetFieldOverrideRequest(BaseModel):
     """Set / clear a per-type field presentation override (#116). `field_key`
-    must be a member of the type's resolved fields. `label` / `hidden` are
-    each tri-state: a value sets it, `null` clears that aspect. When both
-    resolve to empty the override entry is dropped from the layer."""
+    must be a member of the type's resolved fields. `label` / `description` /
+    `hidden` are each tri-state: a value sets it, `null` clears that aspect.
+    When all resolve to empty the override entry is dropped from the layer."""
 
     layer_id: str = Field(min_length=1)
     entry_type_id: str = Field(min_length=1)
     field_key: str = Field(min_length=1)
     label: str | None = None
+    description: str | None = None
     hidden: bool | None = None

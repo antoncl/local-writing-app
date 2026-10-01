@@ -116,7 +116,9 @@ A few more options round out a field, and none of them are technical:
 
 - **Description** — a sentence on what the field is for. Worth writing: it reminds
   *you* later, and it's given to the AI when it brainstorms or drafts the Entry,
-  so a clear description leads to better suggestions.
+  so a clear description leads to better suggestions. A type can also give a shared
+  field its own description (the info button beside the field in the type editor), so
+  the same field can mean something slightly different on a Scene than on a Card.
 - **AI may write this field** — a toggle for whether the AI is allowed to fill the
   field in for you. Turn it off for anything you'd rather own by hand.
 - **Section** — an optional heading that groups related fields together in the

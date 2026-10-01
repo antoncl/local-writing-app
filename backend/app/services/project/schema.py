@@ -652,9 +652,9 @@ class MetadataSchemaMixin:
         return self.read_metadata_schema()
 
     def set_metadata_field_override(self, request: SetFieldOverrideRequest) -> MetadataSchema:
-        """Set / clear a per-type field presentation override (#116): relabel or
-        hide a field this type carries (own or inherited) without touching the
-        shared field def. Pure-presentation overlay on the layer, parallel to
+        """Set / clear a per-type field presentation override (#116): relabel,
+        describe or hide a field this type carries (own or inherited) without
+        touching the shared field def. Pure-presentation overlay on the layer, parallel to
         `display_order`; the request is the field's COMPLETE desired overlay at
         this layer (empty aspects clear, an empty overlay drops the entry).
         `hidden: false` is meaningful — it un-hides a field the def hides by
@@ -678,9 +678,12 @@ class MetadataSchemaMixin:
                 f"Field {field_key} is not defined for entry_type {entry_type_id}.", 422
             )
         label = request.label.strip() if isinstance(request.label, str) else None
+        description = request.description.strip() if isinstance(request.description, str) else None
         overlay: dict[str, Any] = {}
         if label:
             overlay["label"] = label
+        if description:
+            overlay["description"] = description
         if request.hidden is not None:
             overlay["hidden"] = bool(request.hidden)
         # The request is the complete overlay, so an aspect it leaves empty is
@@ -689,7 +692,8 @@ class MetadataSchemaMixin:
         # declaration; a parent type's override is not this layer's to clear).
         above = self._schema_above_layer(root, layer_path).entry_types.get(entry_type_id)
         above_override = above.own_field_overrides.get(field_key) if above is not None else None
-        spell_clears(overlay, {"label", "hidden"} - set(overlay), None, above_override, ("label", "hidden"))
+        aspects = ("label", "description", "hidden")
+        spell_clears(overlay, set(aspects) - set(overlay), None, above_override, aspects)
 
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
         self._write_field_override_to_layer(layer_data, entry_type_id, field_key, overlay)

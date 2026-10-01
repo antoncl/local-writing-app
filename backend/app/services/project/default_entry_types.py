@@ -89,6 +89,15 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
             "dynamics",
             "body",
         ],
+        "field_overrides": {
+            "body": {
+                "description": (
+                    "The scene's prose: the story text itself, written in the "
+                    "manuscript's narration. Not a summary or notes about the scene; the "
+                    "gist belongs in the summary field."
+                )
+            }
+        },
     },
     "lore:base": {
         # Abstract base for every lore kind — carries the fields every
@@ -309,6 +318,19 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "parent": "plot:base",
         "fields": ["plotline", "scene", "page_status", "beat_links", "causal_links", "follow_ups"],
         "has_body": True,
+        # The card's body is a synopsis, not the scene's prose — say so to the
+        # model and in the rail tooltip.
+        "field_overrides": {
+            "body": {
+                "description": (
+                    "The card's synopsis: a brief outline of what happens — who wants "
+                    "what, what they do about it, what turns, and the job the card does "
+                    "for the story. Not the scene itself: no staging, prose, dialogue or "
+                    "beat-by-beat direction. A short paragraph of about three to six "
+                    "sentences."
+                )
+            }
+        },
     },
     "plot:template": {
         # A diagnostic story-structure lens (ADR-0048 S4b), shipped read-only

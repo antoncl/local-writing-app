@@ -154,6 +154,20 @@ export function effectiveFieldLabel(
   return schema?.fields?.[fieldKey]?.name ?? fieldKey;
 }
 
+// A field's effective description (rail tooltip), resolved against an ANCHOR
+// entry type like `effectiveFieldLabel`: a non-blank per-type
+// `field_overrides[key].description` wins over the shared field def's.
+export function effectiveFieldDescription(
+  schema: MetadataSchema | null,
+  entryTypeId: string | null | undefined,
+  fieldKey: string,
+): string | undefined {
+  const override = entryTypeId ? schema?.entry_types?.[entryTypeId]?.field_overrides?.[fieldKey] : undefined;
+  const description = override?.description;
+  if (typeof description === "string" && description.trim()) return description;
+  return schema?.fields?.[fieldKey]?.description || undefined;
+}
+
 // Whether a field is hidden, resolved against an ANCHOR entry type (#116,
 // ADR-0029 §F — see `effectiveFieldLabel` for the anchor convention). A
 // per-type `field_overrides[key].hidden` (true OR false) wins over the field

@@ -206,6 +206,7 @@
           field={model.field}
           fieldId={model.fieldId}
           fieldLabel={model.fieldLabel}
+          description={model.description}
           value={model.statusValue}
           empty={model.empty}
           editing={model.editing}
@@ -245,6 +246,7 @@
         field={model.field}
         fieldId={model.fieldId}
         fieldLabel={model.fieldLabel}
+        description={model.description}
         value={model.value}
         readOnly={model.fieldReadOnly}
         editing={model.editing}
@@ -308,6 +310,7 @@
         field={model.field}
         fieldId={model.fieldId}
         fieldLabel={model.fieldLabel}
+        description={model.description}
         value={model.value}
         empty={model.empty}
         editing={model.editing}

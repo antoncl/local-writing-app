@@ -119,13 +119,22 @@ class LayerClearsInheritedAttributeTests(unittest.TestCase):
             UpsertMetadataGroupRequest(layer_id=self._layer_id(layer), group_id="cast", group=definition)
         )
 
-    def _set_override(self, layer: Path, field_key: str, *, label: str | None, hidden: bool | None) -> None:
+    def _set_override(
+        self,
+        layer: Path,
+        field_key: str,
+        *,
+        label: str | None,
+        hidden: bool | None,
+        description: str | None = None,
+    ) -> None:
         self.service.set_metadata_field_override(
             SetFieldOverrideRequest(
                 layer_id=self._layer_id(layer),
                 entry_type_id="lore:character",
                 field_key=field_key,
                 label=label,
+                description=description,
                 hidden=hidden,
             )
         )
@@ -334,6 +343,22 @@ class LayerClearsInheritedAttributeTests(unittest.TestCase):
         self._set_override(self.root, "footage", label=None, hidden=None)
         stored = self.service._read_yaml(self.root / "metadata.schema.yaml").get("entry_types", {})
         self.assertNotIn("footage", stored.get("lore:character", {}).get("field_overrides", {}))
+
+    def test_the_book_clears_the_ancestor_s_override_description(self) -> None:
+        # The base declares a per-type description on `footage`; the book's
+        # clear (the describe box saved blank) spells `description: None`.
+        base_path = self.base / "metadata.schema.yaml"
+        data = self.service._read_yaml(base_path)
+        data["entry_types"]["lore:character"]["field_overrides"]["footage"] = {"description": "Reels shot"}
+        self.service._write_yaml(base_path, data)
+        override = self.service.read_metadata_schema().entry_types["lore:character"].field_overrides["footage"]
+        self.assertEqual(override.description, "Reels shot")
+
+        self._set_override(self.root, "footage", label=None, hidden=None, description=None)
+        stored = self._stored(self.root, "lore:character", "entry_types")["field_overrides"]["footage"]
+        self.assertEqual(stored, {"description": None})
+        override = self.service.read_metadata_schema().entry_types["lore:character"].field_overrides["footage"]
+        self.assertIsNone(override.description)
 
 
 if __name__ == "__main__":

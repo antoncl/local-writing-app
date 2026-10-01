@@ -354,3 +354,93 @@ describe("SchemaTypeEditor '+ Existing field' (#2180)", () => {
     expect(screen.queryByRole("button", { name: "Add existing field" })).toBeNull();
   });
 });
+
+describe("SchemaTypeEditor per-type field description override (#2389)", () => {
+  const fieldDef: MetadataFieldDefinition = {
+    name: "Summary",
+    type: "text",
+    options: [],
+    description: "Shared help",
+  };
+  function mountWithOverride(own: Record<string, unknown>, resolved: Record<string, unknown>) {
+    metadataSchemaStore.set({
+      version: 1,
+      entry_types: {
+        "lore:character": {
+          name: "Character",
+          kind: "lore",
+          fields: ["summary"],
+          own_fields: ["summary"],
+          field_overrides: resolved,
+          own_field_overrides: own,
+        },
+      },
+      fields: { summary: fieldDef },
+    } as unknown as MetadataSchema);
+    const onSetFieldOverride = vi.fn();
+    render(SchemaTypeEditor, {
+      props: {
+        schemaTypeKind: "lore" as const,
+        initialName: "Character",
+        initialTypeId: "lore:character",
+        selectedSchemaTypeId: "lore:character",
+        schemaTypeLayerId: "layer-a",
+        typeOwnFieldEntries: [["summary", fieldDef]] as [string, MetadataFieldDefinition][],
+        typeFieldSections: [{ group: null, entries: [["summary", fieldDef]] as [string, MetadataFieldDefinition][] }],
+        onSaveType: vi.fn(),
+        onSetFieldOverride,
+      },
+    });
+    return onSetFieldOverride;
+  }
+
+  it("Describe opens a textarea prefilled with the type's description; Save sends it with label + hidden kept", async () => {
+    const own = { label: "Gist", hidden: true, description: "Old" };
+    const onSetFieldOverride = mountWithOverride({ summary: own }, { summary: own });
+    await fireEvent.click(screen.getByTestId("field-describe-summary"));
+    const box = screen.getByRole("textbox", { name: "Description of Summary on this type" }) as HTMLTextAreaElement;
+    expect(box.value).toBe("Old");
+    expect(box.placeholder).toBe("Shared help");
+    await fireEvent.input(box, { target: { value: "  New text  " } });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSetFieldOverride).toHaveBeenCalledWith("summary", {
+      label: "Gist",
+      description: "New text",
+      hidden: true,
+    });
+  });
+
+  it("saving a blank description clears it", async () => {
+    const own = { description: "Old" };
+    const onSetFieldOverride = mountWithOverride({ summary: own }, { summary: own });
+    await fireEvent.click(screen.getByTestId("field-describe-summary"));
+    const box = screen.getByRole("textbox", { name: "Description of Summary on this type" });
+    await fireEvent.input(box, { target: { value: "   " } });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSetFieldOverride).toHaveBeenCalledWith("summary", { label: null, description: null, hidden: null });
+  });
+
+  it("saving an inherited description untouched does not copy it into this layer", async () => {
+    // Resolved from a parent type (or a built-in), none of this layer's own.
+    const onSetFieldOverride = mountWithOverride({}, { summary: { description: "Inherited" } });
+    await fireEvent.click(screen.getByTestId("field-describe-summary"));
+    const box = screen.getByRole("textbox", { name: "Description of Summary on this type" }) as HTMLTextAreaElement;
+    expect(box.value).toBe("Inherited");
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSetFieldOverride).not.toHaveBeenCalled();
+  });
+
+  it("a rename preserves an existing description", async () => {
+    const own = { description: "Keep me" };
+    const onSetFieldOverride = mountWithOverride({ summary: own }, { summary: own });
+    await fireEvent.click(screen.getByRole("button", { name: "Rename Summary for this type" }));
+    const input = screen.getByRole("textbox", { name: "New label for Summary" });
+    await fireEvent.input(input, { target: { value: "Gist" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSetFieldOverride).toHaveBeenCalledWith("summary", {
+      label: "Gist",
+      description: "Keep me",
+      hidden: null,
+    });
+  });
+});

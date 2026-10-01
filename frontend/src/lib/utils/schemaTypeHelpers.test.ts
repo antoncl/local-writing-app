@@ -6,6 +6,7 @@ import {
   buildNodeTypeTree,
   coerceStringList,
   computedSpecFor,
+  effectiveFieldDescription,
   entryTypeAncestryDistance,
   isMetadataValuePresent,
   kindEntryTypeFqns,
@@ -461,5 +462,29 @@ describe("summaryFieldChoices (#2008)", () => {
       { id: "role", label: "Role" },
       { id: "age", label: "Years" },
     ]);
+  });
+});
+
+describe("effectiveFieldDescription (#2389)", () => {
+  const schema = {
+    version: 1,
+    entry_types: {
+      "plot:card": { name: "Card", kind: "plot", field_overrides: { body: { description: "Synopsis" } } },
+      "plot:blank": { name: "Blank", kind: "plot", field_overrides: { body: { description: "  " } } },
+      "lore:note": { name: "Note", kind: "lore" },
+    },
+    fields: { body: { name: "Body", type: "long_text", description: "Shared" } },
+  } as unknown as MetadataSchema;
+
+  it("a per-type description wins", () => {
+    expect(effectiveFieldDescription(schema, "plot:card", "body")).toBe("Synopsis");
+  });
+  it("a blank override falls back to the shared description", () => {
+    expect(effectiveFieldDescription(schema, "plot:blank", "body")).toBe("Shared");
+  });
+  it("no override falls back to the shared description, or undefined", () => {
+    expect(effectiveFieldDescription(schema, "lore:note", "body")).toBe("Shared");
+    expect(effectiveFieldDescription(schema, null, "body")).toBe("Shared");
+    expect(effectiveFieldDescription(schema, "lore:note", "missing")).toBeUndefined();
   });
 });

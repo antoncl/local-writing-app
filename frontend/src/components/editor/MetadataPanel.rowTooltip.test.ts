@@ -76,3 +76,22 @@ describe("MetadataPanel — the description is the name's and the control's tool
     expect(row.textContent).not.toContain("(none)");
   });
 });
+
+describe("MetadataPanel — a per-type description overrides the shared tooltip (#2389)", () => {
+  it("the name and the control show the type's own description", () => {
+    const typed = {
+      ...SCHEMA,
+      entry_types: {
+        "lore:note": {
+          ...SCHEMA.entry_types["lore:note"],
+          field_overrides: { reach: { description: "On a note, reach means this." } },
+        },
+      },
+    } as unknown as MetadataSchema;
+    metadataSchemaStore.set(typed);
+    mount({});
+    const row = rowFor("Lore reach");
+    expect(screen.getByText("Lore reach").getAttribute("title")).toBe("On a note, reach means this.");
+    expect(row.querySelector(".fr-rest-hit")?.getAttribute("title")).toBe("On a note, reach means this.");
+  });
+});

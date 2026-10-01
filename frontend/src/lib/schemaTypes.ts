@@ -51,8 +51,8 @@ export type EntryTypeDefinition = {
   // fields in the effective schema.
   group_applications?: GroupApplication[];
   // Per-field presentation overrides (#116), keyed by field id. Relabel / hide
-  // a field for this type without touching the shared field def. Resolved down
-  // the parent chain by the backend. Read effective label/hidden via the
+  // or describe a field for this type without touching the shared field def.
+  // Resolved down the parent chain by the backend. Read effective label/description/hidden via the
   // schemaFields helpers, never off the map directly.
   field_overrides?: Record<string, FieldOverride>;
   // The type's OWN (pre-merge) overrides — mirrors `own_fields` / `own_color`
@@ -72,11 +72,13 @@ export type EntryTypeDefinition = {
 };
 
 // Per-type presentation overlay on a field (#116). `label` renames it for the
-// type; `hidden` toggles it out of the rail / picker. Absent aspect → fall
-// back to the field def. `hidden: false` is meaningful — it un-hides a field
-// the def hides by default (e.g. `id`).
+// type; `description` is a type-specific description (rail tooltip + the model's
+// field help); `hidden` toggles it out of the rail / picker. Absent aspect →
+// fall back to the field def. `hidden: false` is meaningful — it un-hides a
+// field the def hides by default (e.g. `id`).
 export type FieldOverride = {
   label?: string | null;
+  description?: string | null;
   hidden?: boolean | null;
 };
 

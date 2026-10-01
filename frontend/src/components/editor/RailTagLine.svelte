@@ -42,6 +42,8 @@
     field: MetadataFieldDefinition;
     fieldId: string;
     fieldLabel: string;
+    /** The type-resolved field description, shown as the line's tooltip. */
+    description?: string;
     value: MetadataValue;
     readOnly?: boolean;
     editing: boolean;
@@ -57,6 +59,7 @@
     field,
     fieldId,
     fieldLabel,
+    description = undefined,
     value,
     readOnly = false,
     editing,
@@ -397,7 +400,7 @@
     class="fr-rest-hit tag-line-hit"
     data-testid="rail-tag-line"
     aria-label={ariaLabel}
-    title={field.description || (isEmpty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}`)}
+    title={description || (isEmpty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}`)}
     onclick={(e) => {
       // #2065: opening the line unmounts this button, and the anchor's
       // teardown does not close a card it opened — so a card raised by hover

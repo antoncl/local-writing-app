@@ -962,10 +962,13 @@
       setStatus("Reordered fields");
     });
   }
-  // Per-type field presentation override (#116): relabel / hide a field for the
-  // selected type. Unlike reorder, this can materialise a project-layer entry
-  // for a built-in type, so refresh the overview (sources) fully.
-  async function setFieldOverride(fieldId: string, override: { label: string | null; hidden: boolean | null }) {
+  // Per-type field presentation override (#116): relabel / describe / hide a
+  // field for the selected type. Unlike reorder, this can materialise a
+  // project-layer entry for a built-in type, so refresh the overview (sources) fully.
+  async function setFieldOverride(
+    fieldId: string,
+    override: { label: string | null; description: string | null; hidden: boolean | null },
+  ) {
     if (!selectedSchemaTypeId) return;
     const layerId = schemaTypeLayerId || projectSchemaLayerId();
     await run(async () => {

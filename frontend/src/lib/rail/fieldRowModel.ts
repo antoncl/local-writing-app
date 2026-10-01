@@ -11,6 +11,7 @@ import { isTagListField } from "@/lib/utils/pickerCreate";
 import { fieldIconClass } from "@/lib/utils/fieldIcons";
 import { resolveColor } from "@/lib/utils/colors";
 import {
+  effectiveFieldDescription,
   effectiveFieldLabel,
   entryTypeIsA,
   isMetadataValuePresent,
@@ -521,7 +522,7 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
     fieldId,
     fieldLabel,
     iconClass: fieldIconClass(field),
-    description: field.description || undefined,
+    description: effectiveFieldDescription(ctx.schema, ctx.entryType, fieldId),
 
     inherited: isInherited(ctx, fieldId),
     layerInherited,

@@ -101,14 +101,14 @@ export const schemaApi = {
       body: JSON.stringify({ layer_id: layerId, entry_type_id: entryTypeId, field_order: fieldOrder }),
     });
   },
-  // Per-type field presentation override (#116): relabel / hide a field for
-  // one entry type. `label`/`hidden` are the complete desired overlay — pass
-  // null to clear an aspect; both empty drops the override.
+  // Per-type field presentation override (#116): relabel / describe / hide a
+  // field for one entry type. `label`/`description`/`hidden` are the complete
+  // desired overlay — pass null to clear an aspect; all empty drops the override.
   setEntryTypeFieldOverride(
     layerId: string,
     entryTypeId: string,
     fieldKey: string,
-    override: { label?: string | null; hidden?: boolean | null },
+    override: { label?: string | null; description?: string | null; hidden?: boolean | null },
   ) {
     return request<MetadataSchema>("/metadata/schema/entry-types/field-override", {
       method: "PUT",
@@ -117,6 +117,7 @@ export const schemaApi = {
         entry_type_id: entryTypeId,
         field_key: fieldKey,
         label: override.label ?? null,
+        description: override.description ?? null,
         hidden: override.hidden ?? null,
       }),
     });

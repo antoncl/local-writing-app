@@ -237,7 +237,7 @@ class MetadataSchemaInheritanceMixin:
         """Field presentation overrides (#116): inherit the parent's, then layer
         this type's on top per aspect (child wins). Parallel to display_order —
         pure presentation, membership untouched. A child that only sets `hidden`
-        keeps the parent's `label`, and vice versa."""
+        keeps the parent's `label` and `description`, and so on per aspect."""
         parent_overrides: dict[str, Any] = {}
         if isinstance(parent_def, dict) and isinstance(parent_def.get("field_overrides"), dict):
             parent_overrides = parent_def["field_overrides"]
@@ -255,7 +255,7 @@ class MetadataSchemaInheritanceMixin:
             if not isinstance(value, dict):
                 continue
             combined = dict(merged_overrides.get(key, {}))
-            for aspect in ("label", "hidden"):
+            for aspect in ("label", "description", "hidden"):
                 if value.get(aspect) is not None:
                     combined[aspect] = value[aspect]
             merged_overrides[key] = combined

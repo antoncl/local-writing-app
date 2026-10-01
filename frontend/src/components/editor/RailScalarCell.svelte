@@ -53,6 +53,8 @@
     field: MetadataFieldDefinition;
     fieldId: string;
     fieldLabel: string;
+    /** The type-resolved field description, shown as the control's tooltip. */
+    description?: string;
     /** The value the row displays/edits (MetadataPanel's displayValue, or the status string for `status`). */
     value: MetadataValue;
     empty: boolean;
@@ -82,7 +84,7 @@
   }
 
   let {
-    field, fieldId, fieldLabel, value, empty, editing, closesOnPick, onOpen, onClose, onChange,
+    field, fieldId, fieldLabel, description = undefined, value, empty, editing, closesOnPick, onOpen, onClose, onChange,
     resolveRef = undefined, refDeps = {}, onNavigate = undefined, emptyHint = null,
   }: Props = $props();
 
@@ -206,7 +208,7 @@
         type="button"
         class="fr-rest-hit"
         aria-label={`Edit ${fieldLabel}: ${restText}`}
-        title={field.description || `Edit ${fieldLabel}`}
+        title={description || `Edit ${fieldLabel}`}
         onclick={(e) => { peekAt = null; onOpen(fieldId, e.currentTarget.closest(".field-row") as HTMLElement); }}
         use:peekAnchor={{ onOpen: (anchor) => { peekAt = anchor; }, onClose: () => { peekAt = null; } }}
       ></button>
@@ -215,7 +217,7 @@
         type="button"
         class="fr-rest-hit"
         aria-label={empty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}: ${restText}`}
-        title={field.description || (empty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}`)}
+        title={description || (empty ? `Set ${fieldLabel}` : `Edit ${fieldLabel}`)}
         onclick={(e) => onOpen(fieldId, e.currentTarget.closest(".field-row") as HTMLElement)}
       ></button>
     {/if}

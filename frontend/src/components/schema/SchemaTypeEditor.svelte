@@ -132,7 +132,10 @@
     // Per-type field presentation override (#116): relabel / hide a field for
     // this type. `label`/`hidden` are the complete desired overlay (null clears
     // an aspect). Parent persists + refreshes.
-    onSetFieldOverride?: (fieldId: string, override: { label: string | null; hidden: boolean | null }) => void;
+    onSetFieldOverride?: (
+      fieldId: string,
+      override: { label: string | null; description: string | null; hidden: boolean | null },
+    ) => void;
   }
 
   let {
@@ -382,8 +385,13 @@
   // freeze an inherited aspect into this layer when only the other is edited. ---
   let overrideRenamingId = $state<string | null>(null);
   let overrideRenameValue = $state("");
+  let overrideDescribingId = $state<string | null>(null);
+  let overrideDescribeValue = $state("");
+  let overrideDescribeInitial = "";
 
-  function currentOverride(fieldId: string): { label?: string | null; hidden?: boolean | null } | undefined {
+  function currentOverride(
+    fieldId: string,
+  ): { label?: string | null; description?: string | null; hidden?: boolean | null } | undefined {
     return selectedSchemaTypeId
       ? metadataSchema?.entry_types[selectedSchemaTypeId]?.own_field_overrides?.[fieldId]
       : undefined;
@@ -401,8 +409,44 @@
     // Clearing back to the field def's own name drops the label override.
     const defName = metadataSchema?.fields?.[fieldId]?.name ?? fieldId;
     const label = trimmed && trimmed !== defName ? trimmed : null;
-    onSetFieldOverride(fieldId, { label, hidden: currentOverride(fieldId)?.hidden ?? null });
+    onSetFieldOverride(fieldId, {
+      label,
+      description: currentOverride(fieldId)?.description ?? null,
+      hidden: currentOverride(fieldId)?.hidden ?? null,
+    });
     cancelRename();
+  }
+  function startDescribe(fieldId: string) {
+    overrideDescribingId = fieldId;
+    // Prefill with this type's own (resolved) description only; the shared one
+    // shows as the placeholder.
+    const own = selectedSchemaTypeId
+      ? metadataSchema?.entry_types[selectedSchemaTypeId]?.field_overrides?.[fieldId]?.description
+      : undefined;
+    overrideDescribeValue = own ?? "";
+    overrideDescribeInitial = overrideDescribeValue;
+  }
+  function cancelDescribe() {
+    overrideDescribingId = null;
+    overrideDescribeValue = "";
+  }
+  function submitDescribe(fieldId: string) {
+    const trimmed = overrideDescribeValue.trim();
+    // The prefill may be inherited (a parent type's or a built-in description);
+    // saving it untouched must not freeze it into this layer.
+    if (trimmed === overrideDescribeInitial.trim()) {
+      cancelDescribe();
+      return;
+    }
+    // Clearing back to the field def's own description drops the override.
+    const defDescription = (metadataSchema?.fields?.[fieldId]?.description ?? "").trim();
+    const description = trimmed && trimmed !== defDescription ? trimmed : null;
+    onSetFieldOverride(fieldId, {
+      label: currentOverride(fieldId)?.label ?? null,
+      description,
+      hidden: currentOverride(fieldId)?.hidden ?? null,
+    });
+    cancelDescribe();
   }
   function toggleHide(fieldId: string) {
     const next = !effectiveFieldHidden(metadataSchema, selectedSchemaTypeId, fieldId);
@@ -411,6 +455,7 @@
     const defHidden = Boolean(metadataSchema?.fields?.[fieldId]?.hidden);
     onSetFieldOverride(fieldId, {
       label: currentOverride(fieldId)?.label ?? null,
+      description: currentOverride(fieldId)?.description ?? null,
       hidden: next === defHidden ? null : next,
     });
   }
@@ -546,6 +591,9 @@
           <i class={hidden ? "ti ti-eye-off" : "ti ti-eye"} aria-hidden="true"></i>
         </button>
       {/if}
+      <button class="sfr-ovr" type="button" title="Describe on this type" aria-label="Describe on this type" data-testid={`field-describe-${fieldId}`} onclick={() => startDescribe(fieldId)}>
+        <i class="ti ti-info-circle" aria-hidden="true"></i>
+      </button>
       <button class="sfr-ovr" type="button" title={`Rename “${field.name}” for this type`} aria-label={`Rename ${field.name} for this type`} onclick={() => startRename(fieldId)}>
         <i class="ti ti-pencil" aria-hidden="true"></i>
       </button>
@@ -563,6 +611,21 @@
           />
           <button class="sfi-done" type="button" onclick={() => submitRename(fieldId)}>Save</button>
           <button class="sfi-cancel" type="button" onclick={cancelRename}>Cancel</button>
+        </div>
+      {/if}
+      {#if overrideDescribingId === fieldId}
+        <div class="sfr-rename">
+          <textarea
+            class="sfr-rename-input"
+            rows="3"
+            aria-label={`Description of ${field.name} on this type`}
+            value={overrideDescribeValue}
+            placeholder={field.description ?? ""}
+            oninput={(event) => (overrideDescribeValue = event.currentTarget.value)}
+            onkeydown={(event) => { if (event.key === "Escape") cancelDescribe(); }}
+          ></textarea>
+          <button class="sfi-done" type="button" onclick={() => submitDescribe(fieldId)}>Save</button>
+          <button class="sfi-cancel" type="button" onclick={cancelDescribe}>Cancel</button>
         </div>
       {/if}
     {/snippet}

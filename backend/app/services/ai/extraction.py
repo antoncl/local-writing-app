@@ -58,11 +58,16 @@ RETRY_CUE = (
 )
 
 
-def _body_description(project_service: ProjectService) -> str | None:
+def _body_description(project_service: ProjectService, stored: list[dict[str, Any]]) -> str | None:
     """The `body` intrinsic field's author description (ADR-0059 §A) — used
     ONLY for the body clause's wording when body IS offered. Whether body is
     offered at all is the registered set's call (see `render_extraction_envelope`),
-    never a type-level check here."""
+    never a type-level check here. The stored `body` descriptor comes from
+    `fields()`, which has already resolved the type's own description over the
+    shared one, so it is read from there; the shared field's is the fallback."""
+    for f in stored:
+        if isinstance(f, dict) and f.get("id") == "body" and f.get("description"):
+            return f["description"]
     schema = project_service.read_metadata_schema()
     body_field = schema.fields.get("body")
     return getattr(body_field, "description", None) if body_field else None
@@ -109,7 +114,7 @@ def render_extraction_envelope(
     stored_ids = {f.get("id") for f in stored if isinstance(f, dict)}
     body_allowed = "body" in stored_ids
     title_allowed = "title" in stored_ids
-    body_description = _body_description(project_service) if body_allowed else None
+    body_description = _body_description(project_service, stored) if body_allowed else None
 
     fc = FieldContract()
     title_label: str | None = None

@@ -167,7 +167,7 @@ fields:
 An absent key inherits; `null` clears. The same spelling drops any inherited
 optional attribute — a field's `default`, `description`, `icon`, `group`,
 `picker_config`, …; an entry type's `color` and `icon`; a group's `icon`; a
-per-type field override's `label` / `hidden` — and the editors write it for
+per-type field override's `label` / `description` / `hidden` — and the editors write it for
 you when you clear a value a project above declared. (A group's `icon` has
 no editor control yet; write the null by hand.) The clear is a layer's
 alone: an entry type that clears its `color` still takes its parent type's.

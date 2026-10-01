@@ -316,19 +316,17 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "icon": "cards",
         "kind": "plot",
         "parent": "plot:base",
-        "fields": ["plotline", "plot_deck", "scene", "page_status", "beat_links", "causal_links", "follow_ups"],
-        "has_body": True,
-    },
-    "plot:deck": {
-        # A deck (ADR-0097 §2): a titled box of cards on the plot board. The body
-        # is its synopsis; `plot_deck` nests it inside a parent deck. A flat Node
-        # under `plot/`, layered like the card. (Realizing a deck as a manuscript
-        # container is a later slice, which declares its own field then.)
-        "name": "Deck",
-        "icon": "folder",
-        "kind": "plot",
-        "parent": "plot:base",
-        "fields": ["plot_deck"],
+        "fields": [
+            "plotline",
+            "plot_deck",
+            "scene",
+            "planned_in",
+            "planned_after",
+            "page_status",
+            "beat_links",
+            "causal_links",
+            "follow_ups",
+        ],
         "has_body": True,
         # The card's body is a synopsis, not the scene's prose — say so to the
         # model and in the rail tooltip.
@@ -343,6 +341,18 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
                 )
             }
         },
+    },
+    "plot:deck": {
+        # A deck (ADR-0097 §2): a titled box of cards on the plot board. The body
+        # is its synopsis; `plot_deck` nests it inside a parent deck. A flat Node
+        # under `plot/`, layered like the card. (Realizing a deck as a manuscript
+        # container is a later slice, which declares its own field then.)
+        "name": "Deck",
+        "icon": "folder",
+        "kind": "plot",
+        "parent": "plot:base",
+        "fields": ["plot_deck"],
+        "has_body": True,
     },
     "plot:template": {
         # A diagnostic story-structure lens (ADR-0048 S4b), shipped read-only

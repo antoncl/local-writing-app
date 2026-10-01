@@ -87,7 +87,7 @@
   const ATTACH_PICKER: NodePickerConfig = { sources: [{ kind: "manuscript", expr: { type: "manuscript:scene" } }] };
 
   let menuOpen = $state(false);
-  // Four pages: the actions, the "Set plotline" lane list, the "Realize scene"
+  // Four pages: the actions, the "Set plotline" lane list, the "Write as scene"
   // location list (#879), and "Place after…" — the story-time anchor list (ADR-0097 §8).
   // Beats + causal are no longer menu pages — they're drag gestures now (#824).
   let menuView = $state<"main" | "plotline" | "location" | "place">("main");
@@ -282,6 +282,7 @@
   <article
     class="plot-card"
     class:accented={accent}
+    class:planned={data.planned}
     class:drag-over={dragOver}
     class:lit={lit}
     class:dimmed={dimmed && !dragOver}
@@ -452,6 +453,10 @@
         </div>
       {/if}
       <div class="card-marks">
+        {#if data.planned}
+          <!-- Planned in a chapter, no scene yet (ADR-0097 §6): the card is dashed too. -->
+          <span class="planned-pill">Planned</span>
+        {/if}
         {#if data.lateCauses.length}
           <!-- The late-cause flag (ADR-0097 §8): a cause that happens after this card in
                story time. The title names the cause card(s); the pill carries the words. -->
@@ -497,17 +502,18 @@
           <button role="menuitem" class="menu-item" onclick={() => run(actions.onDetach)}>
             <i class="ti ti-unlink" aria-hidden="true"></i> Detach scene
           </button>
-        {:else if actions.locations.length}
-          <!-- Realize into a chosen act/chapter (#879): the location list is a submenu,
-               mirroring "Set plotline". Without containers to offer we fall through to a
-               direct realize (the backend's first-container default). -->
+        {:else if actions.locations.length && !data.planned}
+          <!-- Write into a chosen act/chapter (#879): the location list is a submenu,
+               mirroring "Set plotline". A PLANNED card skips it — it is written where it
+               is planned (ADR-0097 §6) — and without containers to offer we fall through
+               to a direct write (the backend's first-container default). -->
           <button role="menuitem" class="menu-item" onclick={() => (menuView = "location")}>
-            <i class="ti ti-wand" aria-hidden="true"></i> Realize scene
+            <i class="ti ti-wand" aria-hidden="true"></i> Write as scene
             <span class="chevron" aria-hidden="true"><GroupCaret size="xs" collapsed /></span>
           </button>
         {:else}
           <button role="menuitem" class="menu-item" onclick={() => realizeAt(null)}>
-            <i class="ti ti-wand" aria-hidden="true"></i> Realize scene
+            <i class="ti ti-wand" aria-hidden="true"></i> Write as scene
           </button>
         {/if}
         {#if !data.attached}
@@ -587,7 +593,7 @@
         </div>
       {:else if menuView === "location"}
         <button class="menu-item menu-back" onclick={() => (menuView = "main")}>
-          <i class="ti ti-chevron-left" aria-hidden="true"></i> Realize into…
+          <i class="ti ti-chevron-left" aria-hidden="true"></i> Write into…
         </button>
         <div class="menu-scroll" role="group" aria-label="Realize location">
           {#each actions.locations as loc (loc.id)}
@@ -666,6 +672,10 @@
   .plot-card.accented {
     box-shadow: inset 4px 0 0 0 var(--card-accent), var(--elev-1);
     background: color-mix(in srgb, var(--card-accent) 8%, var(--panel));
+  }
+  /* A planned card (ADR-0097 §6): a place in a chapter, not yet a scene — dashed. */
+  .plot-card.planned {
+    border-style: dashed;
   }
   /* Accept-highlight while a beat is dragged over the card (#824). */
   .plot-card.drag-over {
@@ -1007,6 +1017,14 @@
     color: var(--warn);
     background: var(--warn-soft);
     border: 1px solid var(--warn-border);
+    border-radius: 999px;
+  }
+  .planned-pill {
+    flex: none;
+    padding: 0 7px;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    border: 1px solid var(--border-strong);
     border-radius: 999px;
   }
   .card-plotline {

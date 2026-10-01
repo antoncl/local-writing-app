@@ -18,7 +18,12 @@ from typing import Any
 from app.models import CardEntry, CardSummary, PlaceCardRequest, PlaceTo, StoryPlacement
 from app.services.atomic_io import atomic_write_bytes
 from app.services.migrations import MigratableDocument
-from app.services.project.decks import DECK_FIELD
+from app.services.project.decks import (
+    DECK_FIELD,
+    PLANNED_AFTER_FIELD,
+    PLANNED_IN_FIELD,
+    without_planned,
+)
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import NodeIndexEntry
 from app.services.project.placement import (
@@ -37,6 +42,7 @@ from app.services.project.story_time import (
     set_story_rank_in_text,
     story_rank_value,
 )
+from app.services.tree_structure import TreeStructureService
 
 logger = logging.getLogger(__name__)
 
@@ -123,20 +129,41 @@ class CardStoryTimeMixin:
         # in the right order (a renumber writes the last member first).
         return [(paths[node_id], rank) for node_id, rank in plan_placement(group, entry_id, position)]
 
-    def _write_card_home_deck(self, card: CardEntry, to: PlaceTo) -> None:
-        """Set (or clear, `{loose}`) the card's home deck through the internal card
-        write — never the public save — and only when it changes."""
+    def _require_planned_target(self, to: PlaceTo) -> None:
+        """422 unless `to.planned_in` is a manuscript container and `to.planned_after`
+        (when given) a scene. The anchor need not sit in the container: the board
+        shows such a card first there (ADR-0097 §6)."""
+        document = self.read_structure()
+        container = TreeStructureService.find_node(document, to.planned_in)
+        if container is None or self._is_leaf_node(container):
+            raise ProjectServiceError(f"{to.planned_in} is not a manuscript container.", 422)
+        if to.planned_after and to.planned_after not in {
+            scene_id for scene_id, _title in self._manuscript_scene_nodes()
+        }:
+            raise ProjectServiceError(f"{to.planned_after} is not a scene of this manuscript.", 422)
+
+    def _write_card_place(self, card: CardEntry, to: PlaceTo) -> None:
+        """Set where the card shows through the internal card write — never the public
+        save — and only when it changes. A deck / loose `to` sets (or clears) the home
+        deck and takes the card out of any container; a planned `to` plans it there
+        and keeps its home deck, where it returns to."""
         if to.deck:
             self._require_deck(to.deck)
-        metadata = {key: value for key, value in card.metadata.items() if key != DECK_FIELD}
-        if to.deck:
-            metadata[DECK_FIELD] = to.deck
+        if to.planned_in:
+            metadata = without_planned(card.metadata)
+            metadata[PLANNED_IN_FIELD] = to.planned_in
+            if to.planned_after:
+                metadata[PLANNED_AFTER_FIELD] = to.planned_after
+        else:
+            metadata = {key: value for key, value in without_planned(card.metadata).items() if key != DECK_FIELD}
+            if to.deck:
+                metadata[DECK_FIELD] = to.deck
         if metadata != card.metadata:
             self._write_card_fields(card, metadata=metadata)
 
     def place_card(self, entry_id: str, request: PlaceCardRequest) -> CardEntry:
-        """Place a card (ADR-0097 §4): `to` sets its home deck (or the loose area) and
-        never moves it in story time; `story` puts it right after or right before a
+        """Place a card (ADR-0097 §4, §6): `to` sets its home deck (or the loose area),
+        or plans it in a manuscript container, and never moves it in story time; `story` puts it right after or right before a
         neighbour in story time. Ranks are the open layer's; an inherited card
         cannot be moved, nor anchored on. A written card shows by its scene, so any
         `to` is refused."""
@@ -149,13 +176,15 @@ class CardStoryTimeMixin:
         # Everything refusable is checked before the first write.
         if request.to is not None and request.to.deck:
             self._require_deck(request.to.deck)
+        if request.to is not None and request.to.planned_in:
+            self._require_planned_target(request.to)
         writes = (
             self._story_move_writes(entry_id, request.story, self._own_card_ranks())
             if request.story is not None
             else []
         )
         if request.to is not None:
-            self._write_card_home_deck(card, request.to)
+            self._write_card_place(card, request.to)
         for path, rank in writes:
             self._write_story_rank(path, rank)
         return self.read_card(card.id)
@@ -164,7 +193,14 @@ class CardStoryTimeMixin:
         """For a card created `to` a deck: its seed metadata and the card it lands
         right after in story time — the deck's last own card (None when the deck has
         none; the new card then stays at the end of story time). `{loose}` and absent
-        mean no deck and the end of story time."""
+        mean no deck and the end of story time. `{planned_in}` creates the card
+        planned there (ADR-0097 §4), at the end of story time."""
+        if to is not None and to.planned_in:
+            self._require_planned_target(to)
+            seed: dict[str, Any] = {PLANNED_IN_FIELD: to.planned_in}
+            if to.planned_after:
+                seed[PLANNED_AFTER_FIELD] = to.planned_after
+            return seed, None
         if to is None or not to.deck:
             return None, None
         self._require_deck(to.deck)
@@ -182,6 +218,41 @@ class CardStoryTimeMixin:
         writes = self._story_move_writes(card_id, StoryPlacement(after_id=after_id), self._own_card_ranks())
         for path, rank in writes:
             self._write_story_rank(path, rank)
+
+    # ----- writing a planned card (ADR-0097 §6) ----------------------------
+
+    def _slot_scene_after(self, scene_id: str, container_id: str, after_id: str | None) -> None:
+        """Move `scene_id` to right after `after_id` among `container_id`'s children —
+        first when `after_id` is absent or no longer a child. `position` counts with
+        the moved node removed, so the new scene's own slot is left out."""
+        container = TreeStructureService.find_node(self.read_structure(), container_id)
+        children = [child.id for child in container.children if child.id != scene_id] if container else []
+        position = children.index(after_id) + 1 if after_id in children else 0
+        self.move_structure_node(scene_id, container_id, position)
+
+    def _reanchor_planned_cards(self, card: CardEntry, scene_id: str) -> list[str]:
+        """After `card` is written as `scene_id`: every other own planned card in the
+        same container after the same scene (absent = first) and LATER in story time
+        is planned after the new scene instead, so writing cards one by one never
+        reverses the order the writer set. Returns the ids moved."""
+        container = card.metadata.get(PLANNED_IN_FIELD)
+        anchor = card.metadata.get(PLANNED_AFTER_FIELD)
+        own = self._own_card_ranks()
+        paths = {entry.id: entry.path for entry, _ in own}
+        group = [s.id for s in own_story_group([Sibling(entry.id, rank) for entry, rank in own])]
+        if card.id not in group:
+            return []
+        moved: list[str] = []
+        for other_id in group[group.index(card.id) + 1 :]:
+            raw = self._read_front_matter_only(paths[other_id]).get("metadata")
+            if not isinstance(raw, dict) or raw.get(PLANNED_IN_FIELD) != container:
+                continue
+            other = self.read_card(other_id)
+            if other.metadata.get("scene") or other.metadata.get(PLANNED_AFTER_FIELD) != anchor:
+                continue
+            self._write_card_fields(other, metadata={**other.metadata, PLANNED_AFTER_FIELD: scene_id})
+            moved.append(other_id)
+        return moved
 
     # ----- snapshot restore (ADR-0097 §1, §5) ------------------------------
     #

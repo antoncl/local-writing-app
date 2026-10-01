@@ -157,17 +157,19 @@ describe("card content ops", () => {
   });
 
   it("realizeCard mints/attaches, refetches, and returns the minted scene id (S6b)", async () => {
-    const realize = vi.spyOn(api, "realizeCard").mockResolvedValue(card({ scene: "sc9" }));
+    const realize = vi.spyOn(api, "realizeCard").mockResolvedValue({ ...card({ scene: "sc9" }), reanchored: ["c2"] });
     const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
     const doc = { root: { id: "root", title: "Book" } } as unknown as StructureDocument;
     const structure = vi.spyOn(api, "getStructure").mockResolvedValue(doc);
-    const sceneId = await realizeCard("c1", "chap1");
+    const realized = await realizeCard("c1", "chap1");
     expect(realize).toHaveBeenCalledWith("c1", "chap1");
     expect(refresh).toHaveBeenCalledTimes(1);
     // #2359: the minted scene joins the manuscript tree without a reload.
     expect(structure).toHaveBeenCalledTimes(1);
     expect(get(structureStore)).toBe(doc);
-    expect(sceneId).toBe("sc9"); // the undo command needs this to delete the right scene
+    // The undo command needs the scene id to delete the right scene, and the cards the
+    // write re-anchored (ADR-0097 §6) to put their anchors back.
+    expect(realized).toEqual({ sceneId: "sc9", reanchored: ["c2"] });
   });
 
   it("deleteCard deletes via the endpoint, then refetches the projection (#860)", async () => {
@@ -202,7 +204,7 @@ describe("card content ops", () => {
     const withCard: PlotBoardProjection = {
       ...projection(),
       cards: [
-        { id: "c1", title: "New card", synopsis: "", plotline: null, scene: null, container: null, deck: null, page_status: null, beats: [], sequence: null, causal_links: [], story_order: 0, story_movable: true },
+        { id: "c1", title: "New card", synopsis: "", plotline: null, scene: null, container: null, deck: null, planned_in: null, planned_after: null, container_order: null, page_status: null, beats: [], sequence: null, causal_links: [], story_order: 0, story_movable: true },
       ],
     };
     const fetchSpy = vi

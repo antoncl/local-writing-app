@@ -19,6 +19,7 @@ from app.models import (
     SaveCardRequest,
     SaveSceneRequest,
 )
+from app.services.project.decks import without_planned
 from app.services.project.errors import ProjectServiceError
 
 _SCENE_FIELD = "scene"
@@ -110,7 +111,9 @@ class CardSceneMixin:
                 raise _text_choice_required(summary, synopsis)
             if request.text == "card":
                 self._set_scene_summary(request.scene_id, synopsis)
-        return self._write_card_fields(card, metadata={**card.metadata, _SCENE_FIELD: request.scene_id})
+        return self._write_card_fields(
+            card, metadata={**without_planned(card.metadata), _SCENE_FIELD: request.scene_id}
+        )
 
     def detach_card(self, entry_id: str, request: DetachCardRequest) -> CardEntry:
         """Unbind a card from its scene (ADR-0097 §3, §4). The card takes the

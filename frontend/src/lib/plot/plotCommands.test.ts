@@ -34,7 +34,7 @@ import type { CardState } from "@/lib/stores/plotBoard";
 import type { PlotlineState } from "@/lib/stores/plotlines";
 import type { ArcState } from "@/lib/stores/characterArcs";
 import type { DeckState } from "@/lib/stores/decks";
-import type { PlotBoardCard, PlotBoardProjection } from "@/lib/types";
+import type { PlotBoardCard, PlotBoardProjection, StructureDocument, StructureNode } from "@/lib/types";
 
 const cardState = (title: string, metadata: CardState["metadata"] = {}, body = ""): CardState => ({
   title,
@@ -73,6 +73,9 @@ function fakePort() {
     detach: null,
   };
   let sceneCounter = 0;
+  // The planned cards the next realize re-anchors, and the manuscript tree scene moves read.
+  const realized: { reanchored: string[] } = { reanchored: [] };
+  const manuscript: { doc: StructureDocument | null } = { doc: null };
   // What the (mocked) suppressible confirm resolves; flip per test.
   const confirm = { result: true };
   const calls: string[] = [];
@@ -149,7 +152,11 @@ function fakePort() {
       calls.push(`realize:${cardId}->${id}`);
       scenes.set(id, { title: `Scene for ${cardId}`, body: "" });
       sceneRefs.set(id, new Set([cardId]));
-      return id;
+      return { sceneId: id, reanchored: realized.reanchored };
+    },
+    structure: () => manuscript.doc,
+    moveScene: async (nodeId, parentId, position) => {
+      calls.push(`move:${nodeId}:${parentId}:${position}`);
     },
     sceneReferents: (sceneId) => [...(sceneRefs.get(sceneId) ?? [])],
     readScene: async (sceneId) => structuredClone(scenes.get(sceneId)!),
@@ -182,7 +189,7 @@ function fakePort() {
       return confirm.result;
     },
   };
-  return { port, cards, plotlines, arcs, decks, scenes, sceneRefs, summaries, outcome, confirm, calls };
+  return { port, cards, plotlines, arcs, decks, scenes, sceneRefs, summaries, outcome, confirm, calls, realized, manuscript };
 }
 
 // A projection with just the fields the finders / recorder read.
@@ -195,6 +202,9 @@ function card(id: string, extra: Partial<PlotBoardCard> = {}): PlotBoardCard {
     scene: null,
     container: null,
     deck: null,
+    planned_in: null,
+    planned_after: null,
+    container_order: null,
     page_status: null,
     beats: [],
     sequence: null,
@@ -630,7 +640,7 @@ describe("PlotUndoRecorder", () => {
     const { port } = fakePort();
     const recorded: unknown[] = [];
     // A port whose realizeCard yields no scene id (the 409 / error case).
-    const noScenePort = { ...port, realizeCard: async () => "" };
+    const noScenePort = { ...port, realizeCard: async () => ({ sceneId: "", reanchored: [] }) };
     const recorder = new PlotUndoRecorder(noScenePort, (c) => recorded.push(c), () => null);
     await recorder.realize("c1", null);
     expect(recorded).toEqual([]);
@@ -943,5 +953,103 @@ describe("deck commands (ADR-0097 §2)", () => {
       decks.set("d1", deckState("Mara's backstory"));
     });
     expect(recorded.map((c) => c.label)).toEqual(["rename deck"]);
+  });
+});
+
+describe("planned cards (ADR-0097 §6)", () => {
+  type Rec = Array<{ undo: () => unknown; redo: () => unknown }>;
+  const plan = (planned_in: string, planned_after: string | null) => ({ planned_in, planned_after });
+  const recorderFor = (port: PlotCommandPort, recorded: Rec, cards: PlotBoardCard[]) =>
+    new PlotUndoRecorder(port, (c) => recorded.push(c), () => projection(cards));
+
+  it("a plan drop undoes back to the deck the card came from", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Rec = [];
+    await recorderFor(port, recorded, [card("a", { deck: "d1" })]).cardPlace("a", { to: plan("ch", "s1") });
+    await recorded[0].undo();
+    await recorded[0].redo();
+    expect(calls).toEqual([
+      'place:a:{"to":{"planned_in":"ch","planned_after":"s1"}}',
+      'place:a:{"to":{"deck":"d1"}}',
+      'place:a:{"to":{"planned_in":"ch","planned_after":"s1"}}',
+    ]);
+  });
+
+  it("a plan drop undoes back to the loose area", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Rec = [];
+    await recorderFor(port, recorded, [card("a")]).cardPlace("a", { to: plan("ch", null) });
+    await recorded[0].undo();
+    expect(calls[1]).toBe('place:a:{"to":{"loose":true}}');
+  });
+
+  it("re-planning undoes back to the previous plan, and re-dropping in place records nothing", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Rec = [];
+    const cards = [card("a", { planned_in: "ch1", planned_after: "s1", container: "ch1" })];
+    await recorderFor(port, recorded, cards).cardPlace("a", { to: plan("ch2", null) });
+    await recorded[0].undo();
+    expect(calls[1]).toBe('place:a:{"to":{"planned_in":"ch1","planned_after":"s1"}}');
+    await recorderFor(port, [], cards).cardPlace("a", { to: plan("ch1", "s1") });
+    expect(calls).toHaveLength(2);
+  });
+
+  const node = (id: string, children: StructureNode[] = []): StructureNode =>
+    ({ id: `n_${id}`, scene_id: id, type: "x", title: id, children }) as StructureNode;
+  const tree = (): StructureDocument =>
+    ({
+      root: { id: "root", type: "root", title: "Book", children: [
+        { id: "ch1", type: "c", title: "One", children: [node("s1"), node("s2")] },
+        { id: "ch2", type: "c", title: "Two", children: [node("s3")] },
+      ] },
+    }) as unknown as StructureDocument;
+
+  it("a scene move undoes to its old parent and position, redo replays it", async () => {
+    const { port, calls, manuscript } = fakePort();
+    manuscript.doc = tree();
+    const recorded: Rec = [];
+    await recorderFor(port, recorded, []).sceneMove("s1", "ch2", { after: "s3" });
+    await recorded[0].undo();
+    await recorded[0].redo();
+    expect(calls).toEqual(["move:n_s1:ch2:1", "move:n_s1:ch1:0", "move:n_s1:ch2:1"]);
+  });
+
+  it("a scene move to where the scene already sits records nothing", async () => {
+    const { port, calls, manuscript } = fakePort();
+    manuscript.doc = tree();
+    const recorded: Rec = [];
+    await recorderFor(port, recorded, []).sceneMove("s1", "ch1", { before: "s2" });
+    expect(calls).toEqual([]);
+    expect(recorded).toEqual([]);
+  });
+
+  it("writing a planned card: undo deletes the scene, restores the plan and the re-anchored cards", async () => {
+    const { port, calls, scenes, realized } = fakePort();
+    realized.reanchored = ["b"];
+    const recorded: Rec = [];
+    const cards = [
+      card("a", { planned_in: "ch", planned_after: "s0", container: "ch" }),
+      card("b", { planned_in: "ch", planned_after: "s0", container: "ch" }),
+    ];
+    await recorderFor(port, recorded, cards).realize("a", null);
+    expect(scenes.has("scene_1")).toBe(true);
+    await recorded[0].undo();
+    expect(calls).toEqual([
+      "realize:a->scene_1",
+      "deleteScene:scene_1",
+      'place:a:{"to":{"planned_in":"ch","planned_after":"s0"}}',
+      'place:b:{"to":{"planned_in":"ch","planned_after":"s0"}}',
+    ]);
+    // Redo realizes again (the backend re-anchors again).
+    await recorded[0].redo();
+    expect(calls.at(-1)).toBe("realize:a->scene_2");
+  });
+
+  it("writing an unplanned card restores no plan on undo", async () => {
+    const { port, calls } = fakePort();
+    const recorded: Rec = [];
+    await recorderFor(port, recorded, [card("a")]).realize("a", "ch");
+    await recorded[0].undo();
+    expect(calls).toEqual(["realize:a->scene_1", "deleteScene:scene_1"]);
   });
 });

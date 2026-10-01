@@ -63,9 +63,10 @@ Cards and scenes are linked but independent, and you choose how tightly:
   yet, each attached to its scene. It's safe to run repeatedly — already-carded
   scenes are skipped — so it's the quick way to get an existing draft onto the
   board.
-- **Realize scene** (on a card's ⋮ menu) does the reverse: it mints a *new* scene
-  from a planned card, and **Realize into…** lets you drop it under a chosen act or
-  chapter. A card tied to a scene reads **On the page**.
+- **Write as scene** (on a card's ⋮ menu) does the reverse: it mints a *new* scene
+  from an unwritten card, and **Write into…** lets you drop it under a chosen act or
+  chapter. A card you've planned in a chapter (see below) skips the choice and is
+  written right where it is planned. A card tied to a scene reads **On the page**.
 - **Attach scene…** (on an unattached card's ⋮ menu) binds the card to a scene that
   already exists. The picker lists only scenes no other card holds.
 - **Detach scene** breaks the link without touching the scene itself.
@@ -83,8 +84,35 @@ story threads, keep one card and link it to a beat on each thread.
 board's own layout, and dragging a card into a deck changes only the card's deck and
 its place in story time — neither reorders your manuscript. The manuscript's reading
 order is *shown* on the board (see **Layers**, below) so you can see plan against
-draft, but the two only change when you tell them to (Realize, or editing the
-manuscript directly).
+draft, but the two only change when you tell them to (Write as scene, dragging a
+written card's scene to another chapter, or editing the manuscript directly).
+
+## Planning a card in a chapter
+
+You can give an unwritten card a place in the manuscript before the scene exists.
+Drag it by its grip onto a chapter's box and drop it where it belongs among the
+chapter's cards; a bar shows where it will land. The card now reads **Planned**,
+drawn with a dashed edge: it sits in that chapter, after the scene of the written
+card before it, but it is still only a plan. It isn't in your manuscript and has no
+scene.
+
+- **It stays a plan until you write it.** Choose **Write as scene** on its ⋮ menu and
+  the scene is created in that chapter, right after the scene the card was planned
+  after. The card then reads **On the page** and shows the scene's title and summary.
+- **Writing cards one after another keeps their order.** If you planned three cards
+  in a row after the same scene, writing the first leaves the other two planned right
+  after the new scene, still in the order you set. Write the next, and so on.
+- **Move a plan** by dragging it again, to another place in the chapter, to another
+  chapter, or back into a deck or **Loose cards** (which takes the plan away).
+  **Undo** puts it back where it was planned, or where it came from.
+- **Undo a Write as scene** deletes the new scene (you're asked first if it holds
+  prose) and restores the plan, and the plans that had been moved after it.
+
+A card that's already written can be dragged onto a chapter too. That is a real
+move: its **scene** moves in the manuscript, into that chapter, next to the scene of
+the written card before the drop (or before the first one, at the front). The same
+works inside a chapter to reorder its scenes. **Undo** moves the scene back to its
+old chapter and place.
 
 ## Decks
 
@@ -98,7 +126,8 @@ manuscript: it's somewhere to keep cards that aren't part of the book yet.
   cards in a deck; a bar shows where it will land. It joins the deck and takes
   that place in story time. Drop it into **Loose cards** to take it out of its
   deck. A card that's **written** shows by its scene, so it can't be dragged into a
-  deck — detach it first. Dropping a card onto a chapter does nothing.
+  deck — detach it first. Dropping a card onto a chapter is a different thing; see
+  **Planning a card in a chapter**, below.
 - **Deck menu (⋯):** **New card**, **New deck inside**, **Rename**, **Open** (the
   deck in its own editor: name, synopsis and its parent deck) and **Delete**. A
   deck from an ancestor project can be opened but not changed.

@@ -301,16 +301,22 @@ class CardList(BaseModel):
 
 
 class PlaceTo(BaseModel):
-    """Where an unwritten card shows (ADR-0097 §4): a deck (`{deck: id}`) or the
-    loose area (`{loose: true}`). Exactly one."""
+    """Where an unwritten card shows (ADR-0097 §4): a deck (`{deck: id}`), the
+    loose area (`{loose: true}`), or planned in a manuscript container
+    (`{planned_in: id, planned_after: id | null}`, `place` only). Exactly one of
+    the three; `planned_after` rides only with `planned_in`."""
 
     deck: str | None = None
     loose: bool | None = None
+    planned_in: str | None = None
+    planned_after: str | None = None
 
     @model_validator(mode="after")
     def _exactly_one_place(self) -> PlaceTo:
-        if bool(self.deck) == bool(self.loose):
-            raise ValueError("Send exactly one of deck and loose: true.")
+        if bool(self.deck) + bool(self.loose) + bool(self.planned_in) != 1:
+            raise ValueError("Send exactly one of deck, loose: true and planned_in.")
+        if self.planned_after and not self.planned_in:
+            raise ValueError("planned_after needs planned_in.")
         return self
 
 
@@ -339,6 +345,14 @@ class RealizeCardRequest(BaseModel):
     parent_id: str | None = None
 
 
+class RealizeCardResult(CardEntry):
+    """Response of `realize`: the realized card, plus `reanchored` — the ids of the
+    other planned cards moved to follow the new scene (ADR-0097 §6), so the board
+    can undo them with the rest of the write. Empty unless the card was planned."""
+
+    reanchored: list[str] = Field(default_factory=list)
+
+
 class StoryPlacement(BaseModel):
     """Where a card lands in story time (ADR-0097 §4/§5): right after, or right
     before, a neighbour card. A drop at the start of a box sends the box's first
@@ -357,7 +371,7 @@ class StoryPlacement(BaseModel):
 class PlaceCardRequest(BaseModel):
     """Body for POST /api/plot/cards/{id}/place (ADR-0097 §4): `to` sets the home
     deck (or none) and never moves the card in story time; `story` moves it in
-    story time. At least one of the two. (Planned positions are a later slice.)"""
+    story time. At least one of the two."""
 
     to: PlaceTo | None = None
     story: StoryPlacement | None = None
@@ -540,7 +554,14 @@ class PlotBoardCard(BaseModel):
     `story_order` (ADR-0097 §5) is the card's 0-based index in story time over every
     projected card — the open layer's own cards by rank, then inherited ones, nearest
     layer first. `story_movable` is whether the open layer owns the card, i.e. whether
-    `place` would accept it."""
+    `place` would accept it.
+
+    `planned_in` / `planned_after` (§6) are a planned card's healed refs; its
+    `container` is `planned_in`. `container_order` is the card's sort key inside its
+    container box — the box orders by `(container_order, story_order)`: a written card
+    sits at its scene's reading index, a planned card half a step after its anchor
+    scene (or before the container's first scene when it has no live anchor), and an
+    unplanned unwritten card has none."""
 
     id: str
     title: str
@@ -549,6 +570,9 @@ class PlotBoardCard(BaseModel):
     scene: str | None = None
     container: str | None = None
     deck: str | None = None
+    planned_in: str | None = None
+    planned_after: str | None = None
+    container_order: float | None = None
     page_status: str | None = None
     beats: list[PlotBoardBeat] = Field(default_factory=list)
     sequence: int | None = None

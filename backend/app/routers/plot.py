@@ -36,6 +36,7 @@ from app.models import (
     PlotTemplate,
     PlotTemplateList,
     RealizeCardRequest,
+    RealizeCardResult,
     SaveCardRequest,
     SaveCharacterArcRequest,
     SaveDeckRequest,
@@ -211,8 +212,8 @@ def delete_card(project: CurrentProject, entry_id: str) -> CardList:
         return project.delete_card(entry_id)
 
 
-@router.post("/api/plot/cards/{entry_id}/realize", response_model=CardEntry)
-def realize_card(project: CurrentProject, entry_id: str, request: RealizeCardRequest) -> CardEntry:
+@router.post("/api/plot/cards/{entry_id}/realize", response_model=RealizeCardResult)
+def realize_card(project: CurrentProject, entry_id: str, request: RealizeCardRequest) -> RealizeCardResult:
     """Create a scene from a card and attach it (ADR-0048 §1, *realize*)."""
     with translate_errors():
         return project.realize_card(entry_id, request)

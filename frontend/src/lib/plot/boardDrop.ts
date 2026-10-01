@@ -6,12 +6,29 @@
 // it the pointer in flow coordinates.
 
 import type { StoryAnchor, PlaceRequest } from "@/lib/api/plot";
+import type { SceneNear } from "./sceneMove";
 import type { BoardXY } from "@/lib/types";
 import { CARD_GAP_X, CARD_HEIGHT, CARD_WIDTH, CONTAINER_PAD, type Box } from "./boardGeometry";
-import { isBoxNode, type PlotBoardNode, type PlotBoxData, type PlotContainerData, type PlotDeckData } from "./plotBoardLayout";
+import {
+  isBoxNode,
+  type PlotBoardNode,
+  type PlotBoxData,
+  type PlotCardData,
+  type PlotContainerData,
+  type PlotDeckData,
+} from "./plotBoardLayout";
 import type { BoxKind } from "./boxLayout";
 
-export type DropCard = { id: string; rect: Box; storyMovable: boolean };
+// `scene` is the card's scene (null = unwritten); `planned` / `plannedAfter` say where a
+// planned card sits in its chapter (ADR-0097 §6) — what a drop into a chapter anchors on.
+export type DropCard = {
+  id: string;
+  rect: Box;
+  storyMovable: boolean;
+  scene: string | null;
+  planned: boolean;
+  plannedAfter: string | null;
+};
 export type DropBox = {
   id: string;
   kind: BoxKind;
@@ -52,10 +69,14 @@ export function dropBoxesFrom(nodes: readonly PlotBoardNode[], draggedId: string
     for (const cardId of data.cardIds) {
       const card = byId.get(cardId);
       if (!card || card.id === draggedId) continue;
+      const cardData = card.data as Partial<PlotCardData>;
       cards.push({
         id: card.id,
         rect: { x: card.position.x, y: card.position.y, w: card.width ?? CARD_WIDTH, h: card.height ?? CARD_HEIGHT },
-        storyMovable: (card.data as { storyMovable?: boolean }).storyMovable === true,
+        storyMovable: cardData.storyMovable === true,
+        scene: cardData.sceneId ?? null,
+        planned: cardData.planned === true,
+        plannedAfter: cardData.plannedAfter ?? null,
       });
     }
     boxes.push({
@@ -121,17 +142,55 @@ export const WRITTEN_CARD_NOTICE = "This card shows by its scene; detach it firs
 export type DropPlan =
   | { kind: "none" }
   | { kind: "refuse"; message: string }
-  | { kind: "place"; place: PlaceRequest };
+  | { kind: "place"; place: PlaceRequest }
+  // A written card dropped on a chapter: its scene moves there (ADR-0097 §8), next to the
+  // scene of the nearest written card before (`after`) or after (`before`) the slot.
+  | { kind: "move"; sceneId: string; parentId: string; near: SceneNear };
+
+/** Where a card dropped at `index` in a chapter box is PLANNED (ADR-0097 §6): after the
+ *  scene of the nearest written card before the slot — or, when the card just before is
+ *  itself planned, after ITS scene, so the card joins that run; null at the front. `story`
+ *  orders it among the planned cards of that run — the neighbour planned card when it has
+ *  the same anchor (and the open layer owns it). */
+function plannedPlace(container: string, cards: readonly DropCard[], index: number): PlaceRequest {
+  const prev = cards[index - 1];
+  const next = cards[index];
+  let after: string | null = null;
+  if (prev?.planned) after = prev.plannedAfter;
+  else for (let i = index - 1; i >= 0 && !after; i--) after = cards[i].scene;
+  const to = { planned_in: container, planned_after: after };
+  let story: StoryAnchor | undefined;
+  if (prev?.planned && prev.storyMovable) story = { after_id: prev.id };
+  else if (next?.planned && next.storyMovable && next.plannedAfter === after) story = { before_id: next.id };
+  return story ? { to, story } : { to };
+}
+
+/** The scene the moved scene goes next to: right after the nearest written card before the
+ *  slot, else right before the nearest written card after it; null when the box holds none. */
+function sceneNearAt(cards: readonly DropCard[], index: number): SceneNear {
+  for (let i = index - 1; i >= 0; i--) if (cards[i].scene) return { after: cards[i].scene! };
+  for (let i = index; i < cards.length; i++) if (cards[i].scene) return { before: cards[i].scene! };
+  return null;
+}
 
 /** What releasing the card there does. Into a deck or the loose area, an unwritten card
  *  takes that home and its slot in story time; a written card shows by its scene, so it is
- *  refused with a line saying so. Onto a manuscript container, or nowhere, nothing —
- *  planning a card in a chapter is a later slice. */
-export function planDrop(target: DropTarget | null, card: { written: boolean }): DropPlan {
-  if (!target || target.box.kind === "container") return { kind: "none" };
+ *  refused with a line saying so. Onto a manuscript chapter, an unwritten card is PLANNED
+ *  there and a written card's scene moves there. Nowhere, nothing. */
+export function planDrop(target: DropTarget | null, card: { written: boolean; sceneId?: string | null }): DropPlan {
+  if (!target) return { kind: "none" };
+  const { box, index } = target;
+  if (box.kind === "container") {
+    if (card.written) {
+      return card.sceneId
+        ? { kind: "move", sceneId: card.sceneId, parentId: box.ref, near: sceneNearAt(box.cards, index) }
+        : { kind: "none" };
+    }
+    return { kind: "place", place: plannedPlace(box.ref, box.cards, index) };
+  }
   if (card.written) return { kind: "refuse", message: WRITTEN_CARD_NOTICE };
-  const to = target.box.kind === "deck" ? { deck: target.box.ref } : { loose: true as const };
-  const story = storyAnchorAt(target.box.cards, target.index);
+  const to = box.kind === "deck" ? { deck: box.ref } : { loose: true as const };
+  const story = storyAnchorAt(box.cards, index);
   return { kind: "place", place: story ? { to, story } : { to } };
 }
 

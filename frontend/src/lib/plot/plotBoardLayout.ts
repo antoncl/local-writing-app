@@ -87,6 +87,12 @@ export type PlotCardData = {
   title: string;
   synopsis: string;
   attached: boolean;
+  // Planned in a chapter without a scene (ADR-0097 §6): drawn dashed, with a "Planned" pill.
+  planned: boolean;
+  // The card's scene id (null = unwritten) and, for a planned card, the scene it follows in
+  // its chapter — what a drop onto a chapter anchors on (ADR-0097 §6, §8).
+  sceneId: string | null;
+  plannedAfter: string | null;
   color: string | null;
   // The owning plotline's id + name (#863). id lets the card's "Set plotline" menu
   // mark the current selection; name is shown on the card so the plotline is legible
@@ -468,6 +474,9 @@ export function buildBoardNodes(projection: PlotBoardProjection, saved: Record<s
           title: card.title,
           synopsis: card.synopsis,
           attached: card.scene != null,
+          planned: card.planned_in != null && card.scene == null,
+          sceneId: card.scene,
+          plannedAfter: card.planned_in != null && card.scene == null ? card.planned_after : null,
           color: line?.color ?? null,
           plotlineId: line?.id ?? null,
           plotlineName: line?.title ?? null,

@@ -57,6 +57,7 @@ from app.models import (
     PlotTemplateSpec,
     PlotTemplateSummary,
     RealizeCardRequest,
+    RealizeCardResult,
     SaveCardRequest,
     SaveCharacterArcRequest,
     SavePlotlineRequest,
@@ -64,6 +65,11 @@ from app.models import (
 )
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.beat_roster_diff import diff_beat_list
+from app.services.project.decks import (
+    PLANNED_AFTER_FIELD,
+    PLANNED_IN_FIELD,
+    without_planned,
+)
 from app.services.project.errors import ProjectServiceError
 from app.services.project.list_item_identity import ensure_list_item_identity
 from app.services.project.placement import file_lock, parse_rank
@@ -759,9 +765,12 @@ class PlotMixin:
             raise ProjectServiceError(
                 "This card is written as a scene; edit its synopsis in the scene.", 422
             )
-        metadata = {key: value for key, value in request.metadata.items() if key != "scene"}
-        if scene:
-            metadata["scene"] = scene
+        # `planned_in` / `planned_after` (§6) are endpoint-owned the same way.
+        owned = ("scene", PLANNED_IN_FIELD, PLANNED_AFTER_FIELD)
+        metadata = {key: value for key, value in request.metadata.items() if key not in owned}
+        for key in owned:
+            if current.metadata.get(key):
+                metadata[key] = current.metadata[key]
         return self._write_card(entry_id, request.model_copy(update={"metadata": metadata}))
 
     def _write_card(self, entry_id: str, request: SaveCardRequest) -> CardEntry:
@@ -784,7 +793,7 @@ class PlotMixin:
     # exist) through the one save path. *realize* creates the scene first;
     # *seed-from-manuscript* is the bulk inverse — a card for every scene.
 
-    def realize_card(self, entry_id: str, request: RealizeCardRequest) -> CardEntry:
+    def realize_card(self, entry_id: str, request: RealizeCardRequest) -> RealizeCardResult:
         """Create a scene from a card and attach it (ADR-0048 §1, *realize*).
 
         A planned card becomes a real, empty scene slotted into the manuscript
@@ -794,6 +803,11 @@ class PlotMixin:
         §3) and stays on the card, frozen, as the plan; the scene holds the prose
         the writer has yet to write. 0..1 scene per card, so a
         card that already has one 409s rather than orphaning the first scene.
+
+        A card planned in a container (§6) ignores `parent_id`: its scene lands in
+        `planned_in`, right after `planned_after`, the planned fields clear, and the
+        later planned cards after that same scene are re-anchored after the new one
+        (`reanchored` names them).
         """
         root = self._require_project()
         card = self.read_card(entry_id)
@@ -809,12 +823,17 @@ class PlotMixin:
         self._reject_inherited_book_local(
             entry_id, self._build_node_index().by_id.get(entry_id), root, noun="card"
         )
-        scene = self.create_scene(CreateSceneRequest(title=card.title, parent_id=request.parent_id))
+        planned_in = card.metadata.get(PLANNED_IN_FIELD)
+        scene = self.create_scene(CreateSceneRequest(title=card.title, parent_id=planned_in or request.parent_id))
+        if planned_in:
+            self._slot_scene_after(scene.id, planned_in, card.metadata.get(PLANNED_AFTER_FIELD))
         # The card's plan becomes the new scene's summary, the one synopsis the card
         # now shows (ADR-0097 §3).
         if card.body.strip():
             self._set_scene_summary(scene.id, card.body.strip())
-        return self._write_card_fields(card, metadata={**card.metadata, "scene": scene.id})
+        written = self._write_card_fields(card, metadata={**without_planned(card.metadata), "scene": scene.id})
+        reanchored = self._reanchor_planned_cards(card, scene.id) if planned_in else []
+        return RealizeCardResult(**written.model_dump(), reanchored=reanchored)
 
     def seed_cards_from_manuscript(self) -> CardList:
         """Create one attached card per manuscript scene that has none (ADR-0048 §1/§S5).

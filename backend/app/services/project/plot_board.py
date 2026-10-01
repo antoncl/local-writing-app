@@ -31,7 +31,12 @@ from app.models import (
     StructureNode,
 )
 from app.services.project.card_text import displayed_card_text
-from app.services.project.decks import DECK_FIELD, deck_board_order
+from app.services.project.decks import (
+    DECK_FIELD,
+    PLANNED_AFTER_FIELD,
+    PLANNED_IN_FIELD,
+    deck_board_order,
+)
 from app.services.project.errors import ProjectServiceError
 from app.services.project.placement import Sibling
 from app.services.project.plot import (
@@ -62,6 +67,10 @@ class _PlotBoardLayout(StructureVisitor):
         self.scene_to_order: dict[str, int] = {}
         # scene_id -> (title, summary): what a written card displays (ADR-0097 §3).
         self.scene_text: dict[str, tuple[str, str]] = {}
+        # container_id -> reading index its first scene has (or would have): the
+        # scenes ranked so far when the container is met, so a planned card with no
+        # live anchor sorts just before it (ADR-0097 §6).
+        self.container_start: dict[str, int] = {}
 
     def visit_node(
         self, node: StructureNode, ancestors: tuple[StructureNode, ...]
@@ -79,6 +88,7 @@ class _PlotBoardLayout(StructureVisitor):
                 if parent_container is not None:
                     self.scene_to_container[node.scene_id] = parent_container
         elif node.id not in self.containers:
+            self.container_start[node.id] = len(self.scene_to_order)
             self.containers[node.id] = PlotBoardContainer(
                 id=node.id,
                 title=node.title,
@@ -221,7 +231,10 @@ class PlotBoardMixin:
                 character_id=character_id, character_name=character_name, character_initial=character_initial,
                 beats=self._plotline_board_beats(arc.metadata, use_counts.get(arc.id)),
             ))
-        containers, scene_to_container, scene_to_order, scene_text = self._board_container_map()
+        layout = self._board_layout()
+        containers, scene_to_container, scene_to_order, scene_text = (
+            layout.containers, layout.scene_to_container, layout.scene_to_order, layout.scene_text
+        )
         # Resolve card→beat badges against the live plotlines AND arcs once per
         # projection (Slice 5b; ADR-0053; ADR-0080 §5): a titled, subtype-tagged
         # badge per link via map lookup, built from the lists already fetched above,
@@ -265,6 +278,12 @@ class PlotBoardMixin:
         for card in card_entries:
             scene = card.metadata.get("scene") or None
             container = scene_to_container.get(scene) if scene else None
+            # Healed refs (a deleted container / scene reads as unset), the container
+            # kept only while it is still a manuscript container.
+            planned_in = card.metadata.get(PLANNED_IN_FIELD) or None
+            planned_after = card.metadata.get(PLANNED_AFTER_FIELD) or None
+            if not scene and planned_in in containers:
+                container = planned_in
             home_deck = card.metadata.get(DECK_FIELD)
             title, synopsis = displayed_card_text(card.title, card.body, scene, scene_text)
             cards.append(
@@ -276,6 +295,9 @@ class PlotBoardMixin:
                     scene=scene,
                     container=container,
                     deck=home_deck if home_deck in deck_ids else None,
+                    planned_in=None if scene else planned_in,
+                    planned_after=None if scene else planned_after,
+                    container_order=self._card_container_order(scene, planned_in, planned_after, layout),
                     page_status=self._board_page_status(card.metadata, page_status_field),
                     beats=self._resolve_card_beats(card.metadata, beat_catalog),
                     sequence=scene_to_order.get(scene) if scene else None,
@@ -323,6 +345,12 @@ class PlotBoardMixin:
         `containers` is insertion-ordered by a pre-order walk, i.e. manuscript
         reading order, which the board relies on to lay acts/chapters out in order.
         """
+        layout = self._board_layout()
+        return layout.containers, layout.scene_to_container, layout.scene_to_order, layout.scene_text
+
+    def _board_layout(self) -> _PlotBoardLayout:
+        """The one structure walk behind `_board_container_map`, whole — the
+        projection also reads where each container starts (ADR-0097 §6)."""
         layout = _PlotBoardLayout(self._is_leaf_node)
         TreeStructureService.walk(
             self.read_structure().root,
@@ -330,7 +358,23 @@ class PlotBoardMixin:
             skip_root=True,
             is_leaf=self._is_leaf_node,
         )
-        return layout.containers, layout.scene_to_container, layout.scene_to_order, layout.scene_text
+        return layout
+
+    @staticmethod
+    def _card_container_order(
+        scene: str | None, planned_in: str | None, planned_after: str | None, layout: _PlotBoardLayout
+    ) -> float | None:
+        """A card's sort key inside its container box (ADR-0097 §6): a written card's
+        scene reading index; a planned card half a step after its anchor scene when
+        that is still a direct child of `planned_in`, else half a step before the
+        container's first scene, so it shows first, never lost; None for any other."""
+        if scene:
+            return layout.scene_to_order.get(scene)
+        if not planned_in or planned_in not in layout.container_start:
+            return None
+        if planned_after and layout.scene_to_container.get(planned_after) == planned_in:
+            return layout.scene_to_order[planned_after] + 0.5
+        return layout.container_start[planned_in] - 0.5
 
     def _board_page_status(self, metadata: dict[str, Any], field: MetadataFieldDefinition | None) -> str | None:
         """The card's page status as the board shows it (ADR-0048 S7 Slice 5b):

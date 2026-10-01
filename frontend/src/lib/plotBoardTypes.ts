@@ -138,6 +138,13 @@ export type PlotBoardCard = {
   // ADR-0097 §2: the card's home deck (null = loose; also for a deleted deck). Only an
   // unwritten card shows in it — a written card shows in its scene's container.
   deck: string | null;
+  // ADR-0097 §6: an unwritten card PLANNED in a manuscript container — the container, and
+  // the scene it follows there (null = first). Its `container` is `planned_in`.
+  // `container_order` is its sort key inside a container box (a written card's is its
+  // scene's reading index); the box orders by (container_order, story_order).
+  planned_in: string | null;
+  planned_after: string | null;
+  container_order: number | null;
   page_status: string | null;
   beats: PlotBoardBeat[];
   sequence: number | null;

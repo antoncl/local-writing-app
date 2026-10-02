@@ -56,8 +56,11 @@ concurrent work there. → `docs/development/worktrees.md`
 - **The one carve-out:** work depending on *unmerged* work forks the
   dependency's branch, explicitly, and says so in the PR. **One work lane** —
   sequence dependent work rather than running it in parallel.
-- **Everything lands via a PR.** The `master gates` ruleset requires the three
-  checks and blocks direct and force pushes. No fast path for a one-line fix.
+- **Everything lands via a PR.** The `master gates` ruleset requires four checks
+  (`backend`, `backend-windows`, `frontend`, `e2e`) on a branch **up to date with
+  master**, and blocks direct and force pushes. No fast path for a one-line fix.
+  When master moves under an open PR, bring the PR up to date (sync with the base
+  branch) and let CI rerun before merge. → `docs/development/quality-gates.md`
 - **Check `git branch --show-current` immediately before committing**, not just
   at session start.
 - **Stage explicit paths.** Never `git add <dir>` / `-A` / `.`; check

@@ -44,7 +44,7 @@ export function estCardHeight(title: string, synopsis: string, beatCount: number
 }
 // The minimum / default card height: what an empty, beat-less card measures.
 export const CARD_HEIGHT = estCardHeight("", "", 0);
-export const CARD_GAP_X = 24; // between cards in a row
+export const CARD_GAP_X = 64; // between cards in a row — room for the links between neighbours (#2411)
 export const PLOTLINE_WIDTH = 240; // a plotline node is a touch wider than a card
 // A plot holder node (plotline or arc) is variable-height — SvelteFlow sizes it to its
 // content, and a collapsed beat roster runs one row per beat — so the arc band clears the
@@ -62,19 +62,20 @@ export const CONTAINER_HEADER = 32; // the title-bar band at the top of a box
 export const CONTAINER_GAP = 24; // between sibling boxes / rows / acts
 export const DECK_SYNOPSIS_LINE_H = 18; // one line of a deck's synopsis under its title
 export const DECK_SYNOPSIS_MAX_LINES = 2; // a deck's box shows the first two lines
-// Auto-laid-out cards wrap into a grid this many cards wide (#2348) — a single
-// unwrapped row put the n-th loose card n card-widths away (card 40 ≈ 9400px).
+// A deck's or the loose box's cards wrap into a grid this many cards wide (#2348) — a single
+// unwrapped row put the n-th loose card n card-widths away (card 40 ≈ 9400px). A manuscript
+// container's cards run in one row instead (#2411): one row per chapter, read left to right.
 export const CARDS_PER_ROW = 5;
 export const CARD_STEP_X = CARD_WIDTH + CARD_GAP_X;
-// Auto-laid-out cards wrap into rows of CARDS_PER_ROW; a row is as tall as its tallest
+// Auto-laid-out cards wrap into rows of `perRow`; a row is as tall as its tallest
 // card. Given the cards' heights in order, returns each card's slot relative to the
 // grid's top-left plus the grid's total height (including the trailing gap to what
 // follows).
-export const layoutGrid = (heights: number[]): { offsets: BoardXY[]; height: number } => {
+export const layoutGrid = (heights: number[], perRow = CARDS_PER_ROW): { offsets: BoardXY[]; height: number } => {
   const offsets: BoardXY[] = [];
   let y = 0;
-  for (let start = 0; start < heights.length; start += CARDS_PER_ROW) {
-    const row = heights.slice(start, start + CARDS_PER_ROW);
+  for (let start = 0; start < heights.length; start += perRow) {
+    const row = heights.slice(start, start + perRow);
     row.forEach((_, j) => offsets.push({ x: j * CARD_STEP_X, y }));
     y += Math.max(...row) + CONTAINER_GAP;
   }

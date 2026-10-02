@@ -249,12 +249,27 @@ jobs:
           python -m pip install -r backend/requirements.lock
           python -m pip install -e backend --no-deps
 
+      # The browser comes from a cache keyed on the locked Playwright version, and no
+      # apt step runs (#2396). `--with-deps` installed font and mesa packages from the
+      # Ubuntu mirror on every run; twice that mirror crawled at ~50 KB/s and failed
+      # the gate before a test ran. The ubuntu runner image already carries the libs
+      # headless Chromium needs (it ships Chrome); the fonts only matter for CJK/Thai
+      # text, which the smoke never renders. A cache miss downloads only the browser,
+      # from Playwright's CDN, still bounded so a stall fails fast.
+      - name: Locked Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('./frontend/package-lock.json').packages['node_modules/@playwright/test'].version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
       - name: Install Playwright browser (chromium)
-        # A browser + apt-deps download — the same silent-stall class as npm ci
-        # above; bound it so a stalled fetch fails fast, not at the job timeout.
         timeout-minutes: 8
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       # Playwright starts the backend (python -m app.server) as its webServer.
       - name: Browser E2E smoke (built bundle + source backend)

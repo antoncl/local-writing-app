@@ -222,14 +222,57 @@ jobs:
       # seam the unit/component/integration layers structurally can't reach —
       # same-origin serving, the `/api` base, a bundle that actually boots.
       # Playwright owns the binary's lifecycle via its webServer (E2E_FROZEN_BIN).
+      #
+      # The browser comes from a cache keyed on OS, arch and the locked Playwright
+      # version, and `--with-deps` is gone (#2407, as gates.yml did in #2396): it
+      # apt-installed fonts and mesa packages on every Linux build, and a crawling
+      # Ubuntu mirror could fail a release before a test ran. Linux instead installs
+      # system packages ONLY when the browser binary reports a missing shared
+      # library — the arm64 runner image is leaner than x64, so that is checked,
+      # not assumed.
+      - name: Locked Playwright version
+        id: playwright
+        shell: bash
+        run: echo "version=$(node -p "require('./frontend/package-lock.json').packages['node_modules/@playwright/test'].version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+
       - name: Install Playwright browser (chromium)
+        timeout-minutes: 8
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+        run: npx playwright install chromium
+
+      - name: Install the browser's missing system libraries (Linux, only if any)
+        if: runner.os == 'Linux'
+        timeout-minutes: 8
+        working-directory: frontend
+        shell: bash
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+        run: |
+          set -euo pipefail
+          missing=""
+          while IFS= read -r bin; do
+            missing+="$(ldd "$bin" | grep 'not found' || true)"
+          done < <(find "$PLAYWRIGHT_BROWSERS_PATH" -type f \( -name chrome -o -name chrome-headless-shell \))
+          if [ -n "$missing" ]; then
+            echo "Missing libraries:"; echo "$missing"
+            npx playwright install-deps chromium
+          else
+            echo "All of the browser's shared libraries are present; no apt step."
+          fi
 
       - name: Smoke — browser E2E against the frozen binary
         working-directory: frontend
         run: npx playwright test
         env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
           E2E_FROZEN_BIN: ${{ runner.os == 'Windows' && '../dist/local-writing-app/local-writing-app.exe' || '../dist/local-writing-app/local-writing-app' }}
 
       - name: Upload Playwright report on failure

@@ -58,13 +58,20 @@ and to the local hazards below (a worktree importing the primary tree's code; a
 concurrent session writing into the shared tree mid-run). It runs the two guards
 **repo-wide**, not just over staged files.
 
-Three jobs: `backend` and `frontend` on Linux, plus `backend-windows`. This is a
+Four required jobs: `backend` and `frontend` on Linux, `backend-windows`, and
+`e2e` (the Playwright smoke over the built bundle, #1352). This is a
 Windows-first app and the bugs that bite are platform ones (junctions, cp1252,
 path separators, CRLF) — but a Windows-only gate hides POSIX bugs, so both run.
 The repo is public, so runner minutes are free; optimise for signal, not cost.
 
 The checks are **required**: the `master gates` ruleset blocks merging a red PR,
-blocks direct pushes to master, and blocks force-push and deletion. Still:
+blocks direct pushes to master, and blocks force-push and deletion. It also
+requires the PR branch to be **up to date with master** (strict status checks,
+on since 2026-10-02). Without it, a PR's checks test the branch as it forked, not
+the merge result: on 2026-10-01 two PRs that each passed (#2389, #2391) merged
+into a red master, because git's textual merge attached one PR's
+`field_overrides` block to the other's new entry type. The cost is a rebase or
+"Update branch" plus a CI rerun whenever master moved under an open PR. Still:
 **never report "green" without opening the run.** `gh pr checks` can report a
 full green table for an *earlier* commit — filter runs by `head_sha` and check
 per-job status.

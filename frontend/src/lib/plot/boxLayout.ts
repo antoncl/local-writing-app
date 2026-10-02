@@ -169,7 +169,8 @@ const MIN_CONTENT_W = CARD_WIDTH;
 
 /** Lay the tree out. A top-level box with a stored position goes there; the rest stack
  *  top-to-bottom from the origin (a stored box leaves no hole in the stack). Inside a box:
- *  nested boxes stack first, then the box's own cards wrap into a grid. Sizes follow the
+ *  nested boxes stack first, then the box's own cards: one row in a container, a wrapping grid
+ *  in a deck or the loose box. Sizes follow the
  *  contents — nothing is stored — and a box with no cards or boxes keeps room for one card. */
 export function layoutBoxes(roots: BoxSpec[], saved: Record<string, BoardXY> = {}): BoxLayout {
   const boxes: PlacedBox[] = [];
@@ -198,9 +199,11 @@ export function layoutBoxes(roots: BoxSpec[], saved: Record<string, BoardXY> = {
       placed.count += inner.count;
     }
     if (spec.cards.length > 0) {
-      const grid = layoutGrid(spec.cards.map((c) => c.height));
+      // One row per manuscript container (#2411); a deck or the loose box wraps.
+      const perRow = spec.kind === "container" ? spec.cards.length : CARDS_PER_ROW;
+      const grid = layoutGrid(spec.cards.map((c) => c.height), perRow);
       spec.cards.forEach((card, i) => cardAt.set(card.id, { x: contentX + grid.offsets[i].x, y: y + grid.offsets[i].y }));
-      contentW = Math.max(contentW, Math.min(spec.cards.length, CARDS_PER_ROW) * CARD_STEP_X - (CARD_STEP_X - CARD_WIDTH));
+      contentW = Math.max(contentW, Math.min(spec.cards.length, perRow) * CARD_STEP_X - (CARD_STEP_X - CARD_WIDTH));
       y += grid.height - CONTAINER_GAP; // the grid's trailing gap is not content
       placed.memberIds.push(...placed.cardIds);
     } else if (spec.children.length > 0) {

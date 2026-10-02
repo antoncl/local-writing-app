@@ -903,13 +903,15 @@ describe("card placement (#2348)", () => {
     expect(widest).toBe(first.x + (CARDS_PER_ROW - 1) * STEP_X);
   });
 
-  it("wraps a container's own cards the same way, and the box grows to hold them", () => {
-    const cards = Array.from({ length: CARDS_PER_ROW + 2 }, (_, i) => card(`k${i}`, { container: "ch" }));
+  it("runs a container's own cards in one row (#2411), and the box grows to hold them", () => {
+    const n = CARDS_PER_ROW + 2;
+    const cards = Array.from({ length: n }, (_, i) => card(`k${i}`, { container: "ch" }));
     const nodes = buildBoardNodes(projection({ containers: [container("ch", "Chapter 1")], cards }));
     const first = posOf(nodes, "k0");
-    expect(posOf(nodes, `k${CARDS_PER_ROW}`)).toEqual({ x: first.x, y: first.y + STEP_Y });
+    for (let i = 1; i < n; i++) expect(posOf(nodes, `k${i}`)).toEqual({ x: first.x + i * STEP_X, y: first.y });
     const box = containerNodes(nodes)[0];
-    expect(box.position.y + box.height!).toBeGreaterThanOrEqual(first.y + STEP_Y + CARD_HEIGHT);
+    expect(box.position.x + box.width!).toBeGreaterThanOrEqual(first.x + (n - 1) * STEP_X + CARD_WIDTH);
+    expect(box.position.y + box.height!).toBeLessThan(first.y + STEP_Y + CARD_HEIGHT);
   });
 
   it("a placed top-level box gives up its slot in the stack, so the others close ranks", () => {

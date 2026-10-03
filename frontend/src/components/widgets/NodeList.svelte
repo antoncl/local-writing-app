@@ -4,7 +4,9 @@
   //
   // Intentionally thin. Owns only:
   //   1. An optional SearchInput rendered at the top (bind:searchValue,
-  //      passes through to consumer for matching/filtering).
+  //      passes through to consumer for matching/filtering), in a head
+  //      that stays pinned while the rows scroll (#2417) — along with an
+  //      optional `header` snippet (a view's parameter strip).
   //   2. The default slot — caller composes NodeRows however. Grouping
   //      happens via NodeRow recursion: a group header IS a NodeRow,
   //      its `children` slot may embed another NodeList for the
@@ -56,6 +58,9 @@
     // exposed here so consumers can opt into debounced search without
     // breaking the abstraction.
     searchDebounceMs?: number;
+    // Controls pinned with the search above the rows (ViewNodeList's
+    // parameter strip). Rendered above the search.
+    header?: Snippet;
     // Caller-declared. NodeList renders the `whenEmpty` snippet (or its
     // default message) when this is true. Differentiating "no items"
     // vs "no matches" is the caller's job — they can swap the snippet's
@@ -73,6 +78,7 @@
     searchPlaceholder = null,
     searchValue = $bindable(""),
     searchDebounceMs = 0,
+    header,
     isEmpty = false,
     children,
     whenEmpty,
@@ -98,13 +104,18 @@
 </script>
 
 <div class="node-list">
-  {#if searchPlaceholder !== null}
-    <div class="node-list-search">
-      <SearchInput
-        bind:value={searchValue}
-        placeholder={searchPlaceholder}
-        debounceMs={searchDebounceMs}
-      />
+  {#if header || searchPlaceholder !== null}
+    <div class="node-list-head">
+      {@render header?.()}
+      {#if searchPlaceholder !== null}
+        <div class="node-list-search">
+          <SearchInput
+            bind:value={searchValue}
+            placeholder={searchPlaceholder}
+            debounceMs={searchDebounceMs}
+          />
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -132,8 +143,33 @@
     width: 100%;
   }
 
-  .node-list-search {
-    margin-bottom: 2px;
+  /* Pinned to the top of the pane's scroll area while the rows scroll
+     under it (#2417). Opaque, so a row never shows through — and it reaches
+     up over the pane's padding band (`--pane-pad`, .pane-content), so rows
+     don't scroll through a strip above the search. */
+  .node-list-head {
+    --pad: var(--pane-pad, 0px);
+    position: sticky;
+    top: calc(-1 * var(--pad));
+    margin-top: calc(-1 * var(--pad));
+    padding-top: var(--pad);
+    /* An opaque strip under the search, so a row scrolling under the head
+       doesn't butt against the input; the negative margin keeps the resting
+       space above the first row what it was (search margin 2px + gap). */
+    padding-bottom: 6px;
+    margin-bottom: -4px;
+    z-index: 2;
+    display: grid;
+    gap: 6px;
+    background: var(--panel);
+  }
+  .node-list-head:empty {
+    display: none;
+  }
+  /* Only the pane's own list reaches over its padding: a list nested in a row
+     (or in a scroll box inside one) sticks to its own scroller's edge. */
+  .node-list > :not(.node-list-head) {
+    --pane-pad: 0px;
   }
 
   .node-list-empty {

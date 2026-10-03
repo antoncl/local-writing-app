@@ -514,17 +514,19 @@
   }
 </script>
 
-{#if view}
-  <!-- The runtime parameter strip (ADR-0032 §D): one control per declared formal,
-       seeded by its default and overridable at runtime — a saved view's search box,
-       generalized. The SAME `ParamStrip` the designer preview uses (#275) — every
-       parameterized surface shares one implementation (§D rejects per-pane strips).
-       It renders nothing when the view declares no parameters. -->
-  <ParamStrip spec={view.spec} schema={view.schema} bind:overrides={paramOverrides} />
-{/if}
-
 <div class="tree-keys" use:treeKeyboard>
   <NodeList {mode} {density} {searchPlaceholder} bind:searchValue {searchDebounceMs} {isEmpty} {whenEmpty}>
+    {#snippet header()}
+      {#if view}
+        <!-- The runtime parameter strip (ADR-0032 §D): one control per declared formal,
+             seeded by its default and overridable at runtime — a saved view's search box,
+             generalized. The SAME `ParamStrip` the designer preview uses (#275) — every
+             parameterized surface shares one implementation (§D rejects per-pane strips).
+             It renders nothing when the view declares no parameters, and is pinned with
+             the search while the rows scroll (#2417). -->
+        <ParamStrip spec={view.spec} schema={view.schema} bind:overrides={paramOverrides} />
+      {/if}
+    {/snippet}
     <ViewNodeTree
       groups={effectiveGroups}
       depth={0}

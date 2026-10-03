@@ -518,8 +518,11 @@ h3 {
    scroll) and .pin-button (tab-bar affordances) survive as shared utilities. */
 
 .pane-content {
+  /* Named so a pinned list head can cover the padding band it would otherwise
+     stick below (NodeList, #2417). */
+  --pane-pad: 14px;
   min-height: 0;
-  padding: 14px;
+  padding: var(--pane-pad);
   overflow: auto;
 }
 

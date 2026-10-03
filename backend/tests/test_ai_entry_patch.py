@@ -1006,7 +1006,7 @@ class SceneSummaryPromptTests(unittest.TestCase):
         self.assertTrue(inputs["entry"].required)
         self.assertEqual(inputs["entry"].type, "context_pick")
         sources = (inputs["entry"].target or {}).get("sources") or [{}]
-        self.assertEqual(sources[0].get("kind"), "scene")
+        self.assertEqual(sources[0].get("kind"), "manuscript")
 
     def test_shipped_prompt_resolves_as_general(self) -> None:
         prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Summarize scene"))

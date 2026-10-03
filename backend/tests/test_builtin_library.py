@@ -25,6 +25,7 @@ from project_fixtures import open_test_project
 from app.models import SavePromptEntryRequest
 from app.services.project import node_index_snapshot as snapshot
 from app.services.project.errors import ProjectServiceError
+from app.services.project.node_families import NODE_KINDS
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project_service import ProjectService
 
@@ -105,6 +106,20 @@ class BuiltinLibraryTests(unittest.TestCase):
         own_layer_id = self.service._metadata_schema_layer_id(self.root)
         for lib_id in self.library_ids:
             self.assertNotEqual(entries[lib_id].source_layer_id, own_layer_id)
+
+    def test_library_context_inputs_source_real_node_kinds(self) -> None:
+        """#2414: a context_pick source's `kind` is a node kind. Three built-ins said
+        `scene`, which no picker section answers to, so their picker offered nothing."""
+        for summary in self._summaries().values():
+            if not summary.is_library:
+                continue
+            for spec in self.service.read_prompt_entry(summary.id).inputs:
+                if spec.type != "context_pick":
+                    continue
+                target = spec.target if isinstance(spec.target, dict) else spec.target.model_dump()
+                for source in target.get("sources") or []:
+                    if "kind" in source:
+                        self.assertIn(source["kind"], NODE_KINDS, f"{summary.title} › {spec.name}")
 
     def test_library_does_not_clutter_the_project_folder(self) -> None:
         """The core anti-requirement: shipped material is present but no file is

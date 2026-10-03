@@ -123,6 +123,20 @@ Notes are compiled per release from what closed since the previous tag. Recipe:
   gh issue list --state closed --milestone "X.Y.Z"
   ```
 
+- **After you upgrade** comes next, before any other section, when anything closed
+  since vPREV carries the `upgrade-note` label. That label marks a change a user
+  has to act on themselves, where a migration is the wrong tool (e.g. a fixed
+  Library prompt: projects that cloned it keep their own copy, which is theirs to
+  fix, #2414). Copy each issue's **Upgrade note** section into it, one bullet per
+  issue:
+
+  ```
+  gh issue list --state closed --label upgrade-note --search "closed:>=<date-of-vPREV>"
+  ```
+
+  When fixing such an issue, add the label and an `## Upgrade note` section to
+  the issue body saying who is affected and the steps to take, written for the
+  user.
 - Group the notable changes into thematic sections (features, fixes, internals),
   most user-facing first. Reference issues/PRs by number.
 - Note-worthy vs. internal-only is a judgement call: user-visible behaviour and

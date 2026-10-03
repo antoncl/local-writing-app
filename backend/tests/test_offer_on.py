@@ -109,7 +109,7 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         self.assertFalse(inputs["as_of"].required)
         self.assertEqual(inputs["as_of"].type, "context_pick")
         kinds = [s.get("kind") for s in (inputs["as_of"].target or {}).get("sources", [])]
-        self.assertIn("scene", kinds)
+        self.assertIn("manuscript", kinds)
 
     def test_clone_carries_offer_on_and_a_save_round_trips_it(self) -> None:
         clone = self.service.fork_prompt_entry(self.impersonate_id)

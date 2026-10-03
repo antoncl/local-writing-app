@@ -9,6 +9,7 @@
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
+  import { loreEntryRef } from "@/lib/utils/pickerSources";
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import {
@@ -213,6 +214,12 @@
     return swatch?.hex ?? null;
   }
 
+  // Dragged onto a chat's context picker (#2413): the popover's own lore ref, except an
+  // entry the picker hides (context_policy "never") isn't draggable.
+  function dragRefFor(entry: LoreEntrySummary) {
+    return entry.metadata?.context_policy === "never" ? null : loreEntryRef(entry);
+  }
+
   function metadataSearchText(value: unknown): string {
     if (value === null || value === undefined) return "";
     if (Array.isArray(value)) return value.map(metadataSearchText).join(" ");
@@ -227,6 +234,7 @@
   mode={appearance?.mode ?? paneViews.defaultModeFor("lore")}
   density={appearance?.density ?? undefined}
   frameParents
+  dragRef={dragRefFor}
   searchPlaceholder="Search entries, #tags, aliases"
   bind:searchValue={searchQuery}
   filter={loreSearchFilter}
@@ -282,6 +290,9 @@
     onmousedown={(event) => event.stopPropagation()}
     groupHeader={ctx.collapsible}
     dataNodeId={entry.id}
+    draggable={!!ctx.nodeDrag}
+    ondragstart={ctx.nodeDrag?.onDragStart}
+    ondragend={ctx.nodeDrag?.onDragEnd}
   >
     {#snippet leading()}
       <!-- A real-node parent (a Nest tree header that IS a lore entry) stays a

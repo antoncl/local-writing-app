@@ -21,6 +21,8 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import ViewNodeTree from "@/components/widgets/ViewNodeTree.svelte";
   import { getSwatch } from "@/lib/utils/colors";
+  import { clearNodeDrag, setNodeDrag } from "@/lib/nodeDrag";
+  import type { NodePickerRef } from "@/lib/types";
   import type { EvalNode, ViewAnnotation, ViewGroup } from "@/lib/views/evaluateView";
   import { groupBucketValue } from "@/lib/views/evaluateView";
   import type { GroupValue } from "@/lib/views/groupTree";
@@ -41,6 +43,7 @@
     onRename,
     onReorder,
     onGroupDrop,
+    dragRef,
     isContainer,
     drag,
     rename,
@@ -60,6 +63,7 @@
     onRename?: (node: T, nextTitle: string) => void;
     onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void;
     onGroupDrop?: (moved: T, groupValue: GroupValue) => void;
+    dragRef?: (node: T) => NodePickerRef | null;
     isContainer?: (node: T) => boolean;
     // Editing controllers are null on a read-only, non-reorderable list (#268):
     // `drag` iff `onReorder`/`onGroupDrop`, `rename` iff `onReorder`/`onRename`,
@@ -114,6 +118,7 @@
       dragging: drag?.dragged?.id === node.id,
       dropPosition: drag && drag.overId === node.id ? drag.position : null,
       reorder: onReorder ? reorderHandlers(group, node) : undefined,
+      nodeDrag: nodeDragHandlers(node),
       editing: rename?.editingId === node.id,
       editValue: rename?.editValue ?? "",
       onEditInput: (value: string) => rename?.onInput(value),
@@ -123,6 +128,14 @@
       addMenuOpen: add?.key === node.id,
       toggleAddMenu: (event: MouseEvent) => add?.toggle(node.id, node.id, event),
     };
+  }
+
+  // Row-as-drag-source for dropping onto a context picker (#2413), only for a node the
+  // consumer names a ref for. Bubbles from the reorder handle, so one gesture does both.
+  function nodeDragHandlers(node: T) {
+    const ref = dragRef?.(node);
+    if (!ref) return undefined;
+    return { onDragStart: (event: DragEvent) => setNodeDrag(event, ref), onDragEnd: clearNodeDrag };
   }
 
   // Drag-gesture handlers for one row (wrapper-owned; see treeDrag.svelte.ts).
@@ -243,6 +256,7 @@
           {onRename}
           {onReorder}
           {onGroupDrop}
+          {dragRef}
           {isContainer}
           {drag}
           {rename}
@@ -284,6 +298,7 @@
         {onRename}
         {onReorder}
         {onGroupDrop}
+        {dragRef}
         {isContainer}
         {drag}
         {rename}
@@ -328,7 +343,8 @@
             {onDblClick}
             {onRename}
             {onReorder}
-        {onGroupDrop}
+            {onGroupDrop}
+            {dragRef}
             {isContainer}
             {drag}
             {rename}

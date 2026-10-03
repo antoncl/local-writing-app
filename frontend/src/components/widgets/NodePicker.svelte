@@ -40,8 +40,9 @@
     stripeForType,
     stripeForNode,
   } from "@/lib/utils/pickerStripes";
-  import { pickerMembership } from "@/lib/utils/pickerSources";
-  import { descendantTypeFqns, entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
+  import { allowedTypeSet as allowedTypesFor, loreEntryRef, pickerMembership } from "@/lib/utils/pickerSources";
+  import { entryTypeIsA } from "@/lib/utils/schemaTypeHelpers";
+  import { currentNodeDrag, dropPick, readNodeDrag, type DropPickOptions } from "@/lib/nodeDrag";
   import { findStructureNodeById, isLeafNode } from "@/lib/utils/treeHelpers";
   import { createTargetFor, hasTitleMatch } from "@/lib/utils/pickerCreate";
   import { buildSelectorRoster, isSelectorRef, membersForSelector, resolveSelector } from "@/lib/views/pickerSelectors";
@@ -148,6 +149,10 @@
     // for a field/group-member host — undefined (the default, every
     // context_pick caller) keeps the original prompt-author wording.
     emptyHint = null,
+    // #2413: accept a node row dragged from a list (manuscript/research/lore) as a
+    // pick, by the same rules as the popover. Opt-in — only the chat's context_pick
+    // inputs turn it on.
+    acceptDrops = false,
   }: {
     config?: NodePickerConfig;
     value?: NodePickerRef[];
@@ -168,6 +173,7 @@
     onCreate?: (title: string, entryType: string) => void;
     creating?: boolean;
     emptyHint?: NodePickerEmptyHint | null;
+    acceptDrops?: boolean;
   } = $props();
 
   const affordanceVerb = $derived(affordance === "change" ? "Change" : "Add");
@@ -236,8 +242,32 @@
     onChange?.({ value: [...value, ...members.filter((ref) => !isPicked(ref))] });
   }
 
-  function loreEntryRef(entry: LoreEntrySummary): NodePickerRef {
-    return { id: entry.id, kind: "lore", title: entry.title, entry_type: entry.entry_type };
+  // Node-drop target (#2413): the pick a dragged row would make, by `dropPick`'s rules.
+  let dropReady = $state(false);
+  const dropOptions = $derived<DropPickOptions>({
+    membership,
+    schema: metadataSchema ?? null,
+    excludeIds,
+    multiple: allowMultiple,
+    structure,
+  });
+  function onNodeDragOver(event: DragEvent) {
+    const ref = acceptDrops ? currentNodeDrag(event) : null;
+    if (!ref || !dropPick(value, ref, dropOptions)) {
+      dropReady = false;
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    dropReady = true;
+  }
+  function onNodeDrop(event: DragEvent) {
+    dropReady = false;
+    const ref = acceptDrops ? readNodeDrag(event) : null;
+    const next = ref ? dropPick(value, ref, dropOptions) : null;
+    if (!next) return;
+    event.preventDefault();
+    onChange?.({ value: next });
   }
 
   function remove(key: string) {
@@ -415,9 +445,7 @@
     return fqns.length === 1 ? leaf(fqns[0]) : { union: fqns.map(leaf) };
   }
   function allowedTypeSet(kind: string): Set<string> {
-    const fqns = membership.entryTypes[kind] ?? [];
-    const fam = new Set(membership.families[kind] ?? []);
-    return new Set(fqns.flatMap((f) => (fam.has(f) ? [f, ...descendantTypeFqns(metadataSchema ?? null, f)] : [f])));
+    return allowedTypesFor(membership, metadataSchema ?? null, kind);
   }
   function viewSelectorSpec(kind: string, spec: ViewSpec): ViewSpec {
     const typeExpr = typeScopeExpr(kind);
@@ -1203,7 +1231,15 @@
 
 <svelte:document onmousedown={handleDocumentClick} onkeydown={handleKeydown} />
 
-<div class="ctx-picker" class:compact>
+<div
+  class="ctx-picker"
+  class:compact
+  class:drop-ready={dropReady}
+  role="group"
+  ondragover={acceptDrops ? onNodeDragOver : undefined}
+  ondragleave={acceptDrops ? () => (dropReady = false) : undefined}
+  ondrop={acceptDrops ? onNodeDrop : undefined}
+>
   <!-- PR 2: chips + trigger live in one bordered "context bar" so the
        relationship reads as a single object instead of a button with
        chips drifting above it. Empty bar persists with just the
@@ -1310,6 +1346,11 @@
     flex-direction: column;
     min-width: 0;
     color: var(--text);
+  }
+  /* A dragged node row the input would accept (#2413). */
+  .ctx-picker.drop-ready {
+    outline: 1px dashed var(--accent);
+    outline-offset: 2px;
   }
 
   /* --- Context bar (PR 2: chips + trigger in one bordered well) ---- */

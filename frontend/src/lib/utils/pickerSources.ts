@@ -7,7 +7,8 @@
 // existing filtering + the checkbox tree work against the stored shape. Mirrors
 // the backend reducer in models.py (`_sources_membership`/`_membership_to_sources`).
 
-import type { NodePickerConfig, ViewExpr, ViewRef, ViewSource, ViewSpec } from "@/lib/types";
+import type { LoreEntrySummary, MetadataSchema, NodePickerConfig, NodePickerRef, ViewExpr, ViewRef, ViewSource, ViewSpec } from "@/lib/types";
+import { descendantTypeFqns } from "@/lib/utils/schemaTypeHelpers";
 
 /** A picker source that references a saved view node, vs. an inline ViewSpec.
  * ViewSpec always carries a `kind`; ViewRef carries only `view`. */
@@ -76,6 +77,24 @@ export function pickerMembership(config: NodePickerConfig | null | undefined): {
     }
   }
   return { kinds, entryTypes, families };
+}
+
+/** The concrete entry_types a kind's scope admits: each scoped fqn, with a FAMILY
+ * fqn widened to its schema descendants (ADR-0074 Amendment 4). Empty = no type
+ * constraint. The one reading the picker's browse filters and a node drop share. */
+export function allowedTypeSet(
+  membership: ReturnType<typeof pickerMembership>,
+  schema: MetadataSchema | null,
+  kind: string,
+): Set<string> {
+  const fqns = membership.entryTypes[kind] ?? [];
+  const fam = new Set(membership.families[kind] ?? []);
+  return new Set(fqns.flatMap((f) => (fam.has(f) ? [f, ...descendantTypeFqns(schema, f)] : [f])));
+}
+
+/** The ref picking a lore entry writes — shared by the popover and a node drag. */
+export function loreEntryRef(entry: LoreEntrySummary): NodePickerRef {
+  return { id: entry.id, kind: "lore", title: entry.title, entry_type: entry.entry_type };
 }
 
 /** A source the checkbox tree can regenerate from `{kinds, entryTypes, families}`

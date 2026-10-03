@@ -65,6 +65,12 @@
       onDragOver: (event: DragEvent) => void;
       onDrop: (event: DragEvent) => void;
     };
+    // Present only when the list wires `dragRef` and names a ref for this node (#2413):
+    // the snippet sets `draggable` and spreads these onto its NodeRow.
+    nodeDrag?: {
+      onDragStart: (event: DragEvent) => void;
+      onDragEnd: () => void;
+    };
     // Inline rename (4c-iii). The wrapper owns the edit state; the snippet renders
     // the styled `<input>` when `editing`, feeding `editValue`/`onEditInput` and
     // calling `commitRename` (blur) / `cancelRename`. `beginRename` starts an edit
@@ -116,6 +122,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import ViewNodeTree from "@/components/widgets/ViewNodeTree.svelte";
+  import type { NodePickerRef } from "@/lib/types";
   import ParamStrip from "@/components/editor/body/view/ParamStrip.svelte";
   import { TreeDrag } from "@/components/widgets/treeDrag.svelte";
   import { TreeRename } from "@/components/widgets/treeRename.svelte";
@@ -152,6 +159,7 @@
     onRename,
     onReorder,
     onGroupDrop,
+    dragRef,
     isContainer,
     addMenu,
     collapsed = $bindable(new SvelteSet<string>()),
@@ -209,6 +217,10 @@
     // is the only way to reach an EMPTY bucket. Wire it and bucket headers
     // become drop targets; omit it and they stay inert.
     onGroupDrop?: (moved: T, groupValue: GroupValue) => void | Promise<void>;
+    // Make rows draggable onto a chat's context picker (#2413): the picker ref this
+    // node picks as, or null for a row that isn't draggable. Independent of — and
+    // coexists with — the reorder drag; the row snippet spreads `ctx.nodeDrag`.
+    dragRef?: (node: T) => NodePickerRef | null;
     // Domain classification for drag: does this node accept an "into" drop (i.e.
     // it's a container, even an empty one)? The wrapper owns the drop-zone
     // mechanics; the consumer names what can contain. Absent ⇒ falls back to
@@ -524,6 +536,7 @@
       {onRename}
       {onReorder}
       {onGroupDrop}
+      {dragRef}
       {isContainer}
       {drag}
       {rename}

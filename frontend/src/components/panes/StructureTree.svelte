@@ -76,7 +76,8 @@
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import { applyDisplayTemplate } from "@/lib/utils/nodeTitle";
   import type { EvalNode } from "@/lib/views/evaluateView";
-  import type { ViewSpec } from "@/lib/types";
+  import type { NodePickerRef, ViewSpec } from "@/lib/types";
+  import { refForNode } from "@/lib/utils/manuscriptPickTree";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { CollapseState } from "@/lib/stores/collapseState.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -197,6 +198,18 @@
     return out;
   });
   const isLeafRow = (node: EvalNode) => !levelById.has(node.id);
+
+  // The picker ref a row picks as when dragged onto a chat's context picker (#2413) —
+  // the same ref the picker's own tree/list builds: manuscript scenes by scene_id and
+  // containers by node id (refForNode); research notes by scene_id (leaves only —
+  // topics hold no body to inject).
+  function dragRefFor(node: EvalNode): NodePickerRef | null {
+    const found = structure ? findStructureNodeById(structure.root, node.id) : null;
+    if (!found) return null;
+    if (config.kind === "manuscript") return isLeafRow(node) && !found.scene_id ? null : refForNode(found);
+    if (!isLeafRow(node) || !found.scene_id) return null;
+    return { id: found.scene_id, kind: "research", title: found.title, entry_type: found.type };
+  }
 
   // A container is labelled by its level name ("Act", "Chapter"); a leaf by its type.
   function nodeLabel(node: EvalNode): string {
@@ -382,6 +395,7 @@
   collapsed={collapse.collapsed}
   onReorder={config.supportsDrag ? handleReorder : undefined}
   isContainer={(node) => !isLeafRow(node)}
+  dragRef={dragRefFor}
   onRename={domainRename}
   onDblClick={handleGroupDblClick}
   {row}
@@ -468,6 +482,9 @@
       onmousedown={(event) => event.stopPropagation()}
       ondragover={ctx.reorder?.onDragOver}
       ondrop={ctx.reorder?.onDrop}
+      draggable={!!ctx.nodeDrag}
+      ondragstart={ctx.nodeDrag?.onDragStart}
+      ondragend={ctx.nodeDrag?.onDragEnd}
     >
       {#snippet leading()}
         {#if ctx.reorder}
@@ -513,6 +530,9 @@
       onmousedown={(event) => event.stopPropagation()}
       ondragover={ctx.reorder?.onDragOver}
       ondrop={ctx.reorder?.onDrop}
+      draggable={!!ctx.nodeDrag}
+      ondragstart={ctx.nodeDrag?.onDragStart}
+      ondragend={ctx.nodeDrag?.onDragEnd}
     >
       {#snippet leading()}
         {#if ctx.reorder}

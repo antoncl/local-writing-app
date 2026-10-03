@@ -215,13 +215,17 @@ export function sceneCountForRef(document: StructureDocument, ref: NodePickerRef
   return countScenes(node);
 }
 
-function findById(node: StructureNode, id: string): StructureNode | null {
-  if (node.id === id) return node;
+function findBy(node: StructureNode, match: (n: StructureNode) => boolean): StructureNode | null {
+  if (match(node)) return node;
   for (const child of node.children ?? []) {
-    const found = findById(child, id);
+    const found = findBy(child, match);
     if (found) return found;
   }
   return null;
+}
+
+function findById(node: StructureNode, id: string): StructureNode | null {
+  return findBy(node, (n) => n.id === id);
 }
 
 function pathTo(root: StructureNode, id: string): StructureNode[] | null {
@@ -312,4 +316,22 @@ export function togglePickAt(
   if (state === "implied" && ancestor !== null) return split(document, value, ancestor, node);
   if (isScene(node)) return [...value, refForNode(node)];
   return absorb(value, node);
+}
+
+/** The value after DROPPING manuscript `ref` onto the picker, or null when it is
+ * already picked or covered by a picked ancestor container — a drop adds, it never
+ * unpicks. Resolved against the live structure (a scene ref carries its scene_id,
+ * a container ref its node id) and picked by `togglePickAt`, so a container drop
+ * absorbs exactly as ticking it in the picker does. */
+export function dropPickAt(
+  document: StructureDocument,
+  value: NodePickerRef[],
+  ref: NodePickerRef,
+): NodePickerRef[] | null {
+  const found = findBy(document.root, (n) => (isScene(n) ? n.scene_id : n.id) === ref.id);
+  if (found === null) return null;
+  const sets = pickSets(document, value);
+  const state = stateFor(found, sets, coveringAncestor(document, found, sets) !== null);
+  if (state === "on" || state === "implied") return null;
+  return togglePickAt(document, value, found.id);
 }

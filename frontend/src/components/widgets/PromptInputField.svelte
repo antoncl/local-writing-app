@@ -201,6 +201,7 @@
   <NodePicker
     config={(input.target ?? {}) as NodePickerConfig}
     allowSelectors
+    acceptDrops
     value={decodePickerValue(value)}
     label={input.label || input.name || "Context"}
     structure={structure}

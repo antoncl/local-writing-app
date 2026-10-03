@@ -11,7 +11,7 @@ inputs:
   hidden: false
   target:
     sources:
-    - kind: scene
+    - kind: manuscript
       expr:
         type: manuscript:scene
     - kind: plot

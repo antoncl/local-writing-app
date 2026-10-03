@@ -51,7 +51,7 @@ class RelevantManuscriptPlotTests(_PlotAiContextBase):
         self.assertEqual(picker.type, "context_pick")
         self.assertFalse(picker.required)
         kinds = {source["kind"] for source in picker.target["sources"]}
-        self.assertEqual(kinds, {"scene", "plot"})
+        self.assertEqual(kinds, {"manuscript", "plot"})
 
     def test_the_plot_prompts_wire_it_and_surface_the_picker(self) -> None:
         summaries = {e.id: e for e in self.service.list_prompt_entries().entries}

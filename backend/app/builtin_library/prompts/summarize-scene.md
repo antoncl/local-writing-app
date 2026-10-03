@@ -11,7 +11,7 @@ inputs:
   required: true
   target:
     sources:
-    - kind: scene
+    - kind: manuscript
       expr:
         type: manuscript:scene
     multiple: false

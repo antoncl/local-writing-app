@@ -196,7 +196,13 @@ export class AiSuggestionController {
       | { type: "text"; text: string; marks: { type: string; attrs: { suggestionId: string } }[] }
       | { type: "hardBreak" };
     const marks = [{ type: "aiSuggestion", attrs: { suggestionId } }];
+    // A line break at either end would become a hardBreak outside the suggestion's
+    // range (which spans marked text only) — left behind by Discard, and one per
+    // render while a paragraph break is half-streamed (#2431). Spaces stay: a
+    // continuation mid-sentence needs its leading one.
     const paragraphs = fullText
+      .replace(/^[^\S\n]*\n\s*/, "")
+      .replace(/\s*\n[^\S\n]*$/, "")
       .split(/\n{2,}/)
       .map((para) => {
         const content: Inline[] = [];

@@ -130,13 +130,16 @@
     color: var(--toolbar-accent);
   }
 
+  /* The toolbar surface never flips with the theme, so its text takes the
+     --toolbar-* family, never a theme token — a theme *border* token goes dark
+     in dark mode and vanishes on this surface (#2430). */
   .ai-toolbar-discard {
-    color: var(--danger-border);
+    color: var(--toolbar-danger-text);
   }
 
   .ai-toolbar-meta {
     padding: 0 8px 0 6px;
-    color: var(--border);
+    color: var(--toolbar-text-muted);
     font-style: italic;
     border-left: 1px solid var(--toolbar-divider);
     margin-left: 2px;

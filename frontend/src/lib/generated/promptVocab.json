@@ -23,7 +23,7 @@
       "name": "scene",
       "kind": "variable",
       "signature": "scene",
-      "summary": "The prompt's scene node (`manuscript:scene`) or `None`. `scene.title`, `scene.body`, `scene.<field>` (e.g. `scene.pov`, `scene.summary`); entity-ref fields auto-resolve to nodes."
+      "summary": "The prompt's scene node (`manuscript:scene`) or `None`. `scene.title`, `scene.body` (story text — the app's markers are removed), `scene.<field>` (e.g. `scene.pov`, `scene.summary`); entity-ref fields auto-resolve to nodes."
     },
     {
       "name": "selection",
@@ -89,7 +89,7 @@
       "name": "full_text",
       "kind": "helper",
       "signature": "full_text()",
-      "summary": "`str` — every scene's prose in reading order. Heavy — the whole-manuscript escape hatch. For one scene, use the prompt's target `scene` (`scene.body`); `use()` selects **lore**, not scene prose."
+      "summary": "`str` — every scene's prose in reading order, as story text (the app's markers removed). Heavy — the whole-manuscript escape hatch. For one scene, use the prompt's target `scene` (`scene.body`); `use()` selects **lore**, not scene prose."
     },
     {
       "name": "is_a",
@@ -149,7 +149,7 @@
       "name": "prose",
       "kind": "helper",
       "signature": "prose(text)",
-      "summary": "`str` — the story text of a body, with the app's markers (mutation anchors, roleplay beat markers and their private interiority, todo anchors) removed. Quote other scenes through it: `last_words(prose(previous_scene(scene).body), 300)`."
+      "summary": "`str` — `text` with the app's markers (mutation anchors, roleplay beat markers and their private interiority, todo anchors) removed. A node's `.body` is already story text, so `prose()` is for other strings."
     },
     {
       "name": "resolved_narration",

@@ -23,7 +23,7 @@ thing.
 
 | Name | Type / shape |
 | --- | --- |
-| `scene` | The prompt's scene node (`manuscript:scene`) or `None`. `scene.title`, `scene.body`, `scene.<field>` (e.g. `scene.pov`, `scene.summary`); entity-ref fields auto-resolve to nodes. |
+| `scene` | The prompt's scene node (`manuscript:scene`) or `None`. `scene.title`, `scene.body` (story text — the app's markers are removed), `scene.<field>` (e.g. `scene.pov`, `scene.summary`); entity-ref fields auto-resolve to nodes. |
 | `project` | The project node. `project.<field>` reads an authored project field (e.g. `project.spelling`); `project.metadata` is the whole map; intrinsics (`title`, `root_path`) win a name collision. |
 | `inputs` | The prompt's declared inputs, by name. `inputs.<name>` — a `context_pick` resolves to a `list` of nodes (or use `entry(inputs.pick)` for the first); a `text`/`select` to a string; a number to a number. |
 | `selection` | `str` — the selected prose (revise/inline dispositions), else `""`. |
@@ -49,7 +49,7 @@ If a node's fields are organised into a named group, you can read a member strai
 | `lore_as_of("start")` | `""` — shows every lore entry placed for the prompt's scene as it stood when the scene opened: earlier scenes' changes applied, none of this scene's own. By default lore is shown as it stands at the END of the scene. A draft uses this so it does not already know how the scene ends. Only `"start"` is accepted; anything else is an error. It applies to one-shot runs and the preview; in a chat it has no effect yet. Use it as `{% do lore_as_of("start") %}`. |
 | `no_lore()` | `""` — declares the prompt lore-free: the always-include entries are not placed and no automatic lore runs. The prompt's own `use()` picks are still placed. If the prompt also calls `auto_lore()`, `no_lore()` wins and the estimate warns. |
 | `full_outline()` | The manuscript's outline: a nested list of nodes with `.title`, `.summary`, `.level` (a container's level name, such as "Act" or "Chapter"; empty for a scene), `.children`. |
-| `full_text()` | `str` — every scene's prose in reading order. Heavy — the whole-manuscript escape hatch. For one scene, use the prompt's target `scene` (`scene.body`); `use()` selects **lore**, not scene prose. |
+| `full_text()` | `str` — every scene's prose in reading order, as story text (the app's markers removed). Heavy — the whole-manuscript escape hatch. For one scene, use the prompt's target `scene` (`scene.body`); `use()` selects **lore**, not scene prose. |
 | `story_so_far(scene)` | `str` — an XML recap of prior scenes' summaries (scenes **1 → n-1**, reading order). A derived, per-scene-deterministic block: it is emitted (not selected) and caches in the stable prefix. |
 | `character_turns(scene, character)` | Reconstructs the scene as **alternating chat turns** for the Roleplay sub-type (focus character → `assistant`, others → `user` prefixed `[Name]:`, narration → plain `user`). Emits its own role boundaries — use it **outside** any `{% role %}` block. |
 | `roleplay_beats(scene)` | `str` — the roleplay scene laid out **beat by beat** for a finalize/cleanup prompt: each beat's speaker, its observable text, and (decoded) its private interiority. POV-agnostic; the finalize prompt decides whose interiority survives via `pov(scene)`. A scene with no beat markers returns its body unchanged. |
@@ -58,7 +58,7 @@ If a node's fields are organised into a named group, you can read a member strai
 | `previous_scene(x)` | The scene before `x` in reading order (crossing chapter and act boundaries), or `None` at the start. `x` is a scene or a plot card; a card counts as the scene it is attached to, so an unattached card has no neighbours. The result is a node — `previous_scene(scene).summary`. |
 | `next_scene(x)` | The scene after `x` in reading order, or `None` at the end — the mirror of `previous_scene`. `plot_context(as_of=next_scene(e) or e.id)` shows a card's board one scene further. |
 | `last_words(text, n)` | `str` — the trailing `n` words of a string (pure helper). |
-| `prose(text)` | `str` — the story text of a body, with the app's markers (mutation anchors, roleplay beat markers and their private interiority, todo anchors) removed. Quote other scenes through it: `last_words(prose(previous_scene(scene).body), 300)`. |
+| `prose(text)` | `str` — `text` with the app's markers (mutation anchors, roleplay beat markers and their private interiority, todo anchors) removed. A node's `.body` is already story text, so `prose()` is for other strings. |
 | `stop(message)` | Ends the run before anything is sent and shows `message` to the user. Typical use: `{% if not scene.summary %}{{ stop("This scene has no summary yet.") }}{% endif %}`. |
 
 ### Field contract

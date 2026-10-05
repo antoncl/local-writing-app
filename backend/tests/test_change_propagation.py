@@ -509,6 +509,24 @@ class ChangePropagationTests(unittest.TestCase):
         element = self.service.render_baseline_element(self.marek, message.baseline_snapshot_id)
         self.assertIn("<rank>Captain</rank>", element.xml)
 
+    def test_render_baseline_element_body_is_story_text(self) -> None:
+        # #2427: the before element is an entry as the AI sees one — no markers.
+        self.service.save_lore_entry(
+            self.marek,
+            SaveLoreEntryRequest(
+                title="Marek Vell",
+                body="Keeper <!-- note:x --> of the gate.",
+                entry_type="lore:character",
+                metadata={"rank": "Captain", "aliases": ["the Captain"], "posting": self.barracks},
+            ),
+        )
+        response = self.service.propagate_change(
+            self.marek, PropagateRequest(kept=[self.city_guard])
+        )
+        element = self.service.render_baseline_element(self.marek, response.snapshot.id)
+        self.assertIn("Keeper  of the gate.", element.xml)
+        self.assertNotIn("<!--", element.xml)
+
     def test_render_baseline_element_unknown_snapshot_is_404(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.render_baseline_element(self.marek, "not-a-real-snapshot")

@@ -106,6 +106,13 @@ class PlotContextHelperTests(_PlotAiContextBase):
         out = self._render('{% role "system" %}{{ plot_context() }}{% endrole %}')
         self.assertIn(f'reading_order="{rank + 1}"', out)
 
+    def test_a_card_synopsis_is_story_text_without_markers(self) -> None:
+        # #2427: a body rendered for the model carries no app marker.
+        self._card("Marked", body="Visible <!-- todo:id=t1 -->plan<!-- /todo --> text.")
+        out = self._render('{% role "system" %}{{ plot_context() }}{% endrole %}')
+        self.assertIn("Visible plan text.", out)
+        self.assertNotIn("<!--", out)
+
     def test_the_focus_card_is_marked_and_its_synopsis_left_out(self) -> None:
         focal = self._card("Focal", body="FOCAL_SYNOPSIS text.")
         self._card("Other", body="OTHER_SYNOPSIS text.")

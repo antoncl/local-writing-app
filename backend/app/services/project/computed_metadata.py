@@ -21,6 +21,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.models import MetadataSchema, StructureDocument, StructureNode
+from app.services.body_text import HTML_COMMENT
 from app.services.tree_structure import StructureVisitor, TreeStructureService
 
 WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?")
@@ -189,7 +190,7 @@ class ComputedMetadataMixin:
                 continue
             function = field.computed.get("function")
             if function == "word_count":
-                without_comments = re.sub(r"<!--[\s\S]*?-->", " ", body)
+                without_comments = HTML_COMMENT.sub(" ", body)
                 computed[field_id] = len(WORD_PATTERN.findall(without_comments))
             elif function == "counter" and node_id and entry_type:
                 if structure is None:

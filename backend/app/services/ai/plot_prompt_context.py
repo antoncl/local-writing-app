@@ -30,6 +30,7 @@ from __future__ import annotations
 from xml.sax.saxutils import escape, quoteattr
 
 from app.models import PlotContext
+from app.services.body_text import story_text
 
 # The character-arc holder kind (ADR-0080 §5), as a stable wire-string literal —
 # NOT imported from the project layer, matching how `entries.py` hardcodes
@@ -63,6 +64,7 @@ def _plotline_premise_block(plotline) -> list[str]:
     of its craft guidance, so the model knows what it is writing before how."""
     lines: list[str] = []
     for tag, text in (("genre", plotline.genre), ("description", plotline.description)):
+        text = story_text(text)
         if text.strip():
             lines.append(f"      <{tag}>{escape(text.strip())}</{tag}>")
     return lines
@@ -135,8 +137,9 @@ def _render_character_arc(arc) -> list[str]:
     if arc.source_template_name:
         attrs += f" structure={quoteattr(arc.source_template_name)}"
     body: list[str] = []
-    if arc.description.strip():
-        body.append(f"      <description>{escape(arc.description.strip())}</description>")
+    description = story_text(arc.description)
+    if description.strip():
+        body.append(f"      <description>{escape(description.strip())}</description>")
     body.extend(_thread_guidance_and_beats(arc))
     if not body:
         return [f"    <character_arc {attrs} />"]
@@ -164,8 +167,9 @@ def _render_card(card, card_titles: dict[str, str], focus: str | None) -> list[s
     if is_focus:
         attrs += ' focus="true"'
     lines = [f"    <card {attrs}>"]
-    if card.synopsis.strip() and not (is_focus and card.scene_id is None):
-        lines.append(f"      <synopsis>{escape(card.synopsis.strip())}</synopsis>")
+    synopsis = story_text(card.synopsis)
+    if synopsis.strip() and not (is_focus and card.scene_id is None):
+        lines.append(f"      <synopsis>{escape(synopsis.strip())}</synopsis>")
     for beat in card.beats:
         if beat.holder_kind == _CHARACTER_ARC_HOLDER:
             attrs = f"beat={quoteattr(beat.title)} arc={quoteattr(beat.plotline_title)}"

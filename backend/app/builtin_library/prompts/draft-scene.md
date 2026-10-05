@@ -65,7 +65,7 @@ The point-of-view character is **{{ narration.character.title }}**.
 ## Where the previous scene left off
 The last lines of the previous scene, as written. Pick up from here, and match its voice.
 
-{{ last_words(prose(previous.body), 300) }}
+{{ last_words(previous.body, 300) }}
 
 {% endif %}
 {% if following and following.summary %}

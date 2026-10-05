@@ -104,6 +104,12 @@
       "summary": "`str` — the trailing `n` words of a string (pure helper)."
     },
     {
+      "name": "lore_as_of",
+      "kind": "helper",
+      "signature": "lore_as_of(\"start\")",
+      "summary": "`\"\"` — shows every lore entry placed for the prompt's scene as it stood when the scene opened: earlier scenes' changes applied, none of this scene's own. By default lore is shown as it stands at the END of the scene. A draft uses this so it does not already know how the scene ends. Only `\"start\"` is accepted; anything else is an error. It applies to one-shot runs and the preview; in a chat it has no effect yet. Use it as `{% do lore_as_of(\"start\") %}`."
+    },
+    {
       "name": "next_scene",
       "kind": "helper",
       "signature": "next_scene(x)",
@@ -156,6 +162,12 @@
       "kind": "helper",
       "signature": "roleplay_beats(scene)",
       "summary": "`str` — the roleplay scene laid out **beat by beat** for a finalize/cleanup prompt: each beat's speaker, its observable text, and (decoded) its private interiority. POV-agnostic; the finalize prompt decides whose interiority survives via `pov(scene)`. A scene with no beat markers returns its body unchanged."
+    },
+    {
+      "name": "scene_mutations",
+      "kind": "helper",
+      "signature": "scene_mutations(scene)",
+      "summary": "A list of the changes placed in a scene's body, in the order they appear — a change to a lore entry (`kind` `\"change\"`) or the end of an earlier one (`kind` `\"end\"`). Empty for no scene or a scene with none; a change whose mutation set is unknown or has no valid target is left out. Each item has `anchor_id` (the marker's own id), `kind`, `target` (the entry's title), `entity` (the entry itself, for `use(c.entity)`; empty if it can't be read), `changes` (one line per field — `Rank: Lieutenant → Captain`, `Allies: + Mara`, `Allies: − Tomas`; the \"before\" is the value just before this change, and is left out when empty) and `text` (the whole item on one line: `Honor — Rank: Lieutenant → Captain`, or `Honor — no longer: Rank: Captain` for an end, which shows only the value the change set)."
     },
     {
       "name": "stop",

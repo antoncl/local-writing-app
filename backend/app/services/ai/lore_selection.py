@@ -224,7 +224,8 @@ def _budgeted_lore_tiers(
     `always` entries — no detection, no scene refs — and `"picks"` the picks
     alone (a lore-free prompt); both fit with nothing left out by construction.
     `policies` is the caller's one `_lore_policy_ids` scan, handed to the
-    selector so it is not made twice.
+    selector so it is not made twice. `picks.position` (#2422) is where in `scene` the
+    entries resolve — None = end of scene.
 
     Rendering once is the point: the fit decides on rendered size, the tiers
     reuse the same pairs, and a left-out entry is named from the node the
@@ -251,7 +252,9 @@ def _budgeted_lore_tiers(
     index = project.build_mutations_index() if scene is not None else None
     titles: dict[str, str] = {}
     rendered = dict(
-        _render_lore_entries(project, selection.ids, scene=scene, index=index, titles=titles)
+        _render_lore_entries(
+            project, selection.ids, scene=scene, position=picks.position, index=index, titles=titles
+        )
     )
     fitted = fit_lore_budget(selection, rendered, limits.budget_tokens, titles=titles)
     # #2212: stamp the reach this send used onto the report, so a left-out-only

@@ -135,11 +135,14 @@ class BeforeElement:
 class LorePicks:
     """The chat's declared picks handed to the selector (ADR-0060 §2/§5 +
     ADR-0093 §1): the plain `use(node)` ids, their volatility hints, and the
-    `use(node, snapshot=id)` pairs (entry_id, snapshot_id)."""
+    `use(node, snapshot=id)` pairs (entry_id, snapshot_id). `position` (#2422)
+    is where in the scene the lore resolves — None = end of scene,
+    `START_OF_SCENE` for `lore_as_of("start")`."""
 
     ids: list[str]
     hints: dict[str, str]
     snapshots: list[tuple[str, str]]
+    position: int | None = None
 
 
 @dataclass(frozen=True)

@@ -714,6 +714,10 @@ def _annotate_rendered_from_env(
     # (the safe reading), so `lore_enabled` is captured false, with one warning
     # added after the render (it cannot know which call came first).
     rendered.lore_free = bool(getattr(env, "lore_free", [False])[0])
+    # #2422: where `lore_as_of("start")` resolves the scene's lore. Carried for
+    # every run — a one-shot places declared lore (`use()` picks, `always`
+    # entries) and resolves it at the same point as an automatic one.
+    rendered.lore_position = getattr(env, "lore_position", [None])[0]
     if rendered.lore_free and rendered.lore_invoked:
         rendered.lore_invoked = False
         rendered.warnings.append(LORE_FREE_CONFLICT_WARNING)
@@ -858,6 +862,7 @@ def _preview_lore_tiers(
         list(rendered.used_node_ids or []),
         dict(rendered.used_node_hints or {}),
         list(rendered.used_snapshots or []),
+        rendered.lore_position,
     )
     if mode == "automatic":
         rendered_system_text = "\n\n".join(

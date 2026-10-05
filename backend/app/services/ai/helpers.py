@@ -40,6 +40,7 @@ from app.services.ai.field_contract import FieldContract
 from app.services.ai.plot_prompt_context import render_plot_context
 from app.services.ai.sessions import AISession
 from app.services.error_log import append_error_line
+from app.services.project.lore_mutations import START_OF_SCENE
 from app.services.project.metadata_refs import iter_ref_occurrences, occurrence_targets
 from app.services.project.narration import resolved_narration as _resolve_narration_gate
 from app.services.tree_structure import TreeStructureService
@@ -650,6 +651,37 @@ def _register_lore_gate(
     env.globals["no_lore"] = _no_lore
 
 
+def _register_lore_as_of(env: SandboxedEnvironment) -> None:
+    """Register `lore_as_of("start")` (#2422): every lore entry the run places for
+    the target scene resolves at the START of that scene (earlier scenes'
+    mutations live, none of its own) — a draft must not see the outcome of the
+    changes it is about to write. Prints nothing; sets a per-render slot the
+    preview reads back (`RenderedTemplate.lore_position`); None = end of scene."""
+    lore_position_slot: list[int | None] = [None]
+    env.lore_position = lore_position_slot  # type: ignore[attr-defined]
+
+    def _lore_as_of(when: Any = None) -> str:
+        if when != "start":
+            raise TemplateError(f'lore_as_of() takes "start", not {when!r}')
+        lore_position_slot[0] = START_OF_SCENE
+        return ""
+
+    env.globals["lore_as_of"] = _lore_as_of
+
+
+def _register_scene_mutations(
+    env: SandboxedEnvironment, project: ProjectService, schema: Any, mutations_index: Any
+) -> None:
+    """Register `scene_mutations(scene)` (#2422): the anchors placed in a scene's
+    body, in body order. The logic lives in `scene_mutations.py`, imported here
+    at call time because that module imports this one."""
+    from app.services.ai.scene_mutations import scene_mutations
+
+    env.globals["scene_mutations"] = lambda scene: scene_mutations(
+        project, schema, _scene_id_of(scene), mutations_index()
+    )
+
+
 def _register_use(env: SandboxedEnvironment, project: ProjectService, schema: Any) -> None:
     """Register `use(node)` / `use(node, "stable"|"volatile")` /
     `use(node, snapshot=id)` — split out of `register_helpers` (like
@@ -794,6 +826,8 @@ def register_helpers(
     )
 
     _register_lore_gate(env, lore_invoked_slot, deprecation_notices)
+    _register_lore_as_of(env)
+    _register_scene_mutations(env, project, schema, _mutations_index)
     _register_stop(env)
     _register_use(env, project, schema)
 

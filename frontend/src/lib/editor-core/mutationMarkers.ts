@@ -10,7 +10,9 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 // Ids are `mut_` + 12 hex from createMutationId, but legacy anchors derived
 // server-side (`<unit id>_<digest>`) and the Math.random fallback can differ,
 // so the id alphabet is wider than the minted shape. The ⟦ ⟧ delimiters bound it.
-export const MUTATION_MARKER_PATTERN = /⟦(mut_[A-Za-z0-9_-]+)⟧/g;
+// The brief shows each marker in backticks, and a model may echo them — so an
+// optional backtick either side is part of the marker and goes with it.
+export const MUTATION_MARKER_PATTERN = /`?⟦(mut_[A-Za-z0-9_-]+)⟧`?/g;
 
 export interface MarkerPlacement {
   /** Null when the range held no markers — nothing to dispatch. */

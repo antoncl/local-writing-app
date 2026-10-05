@@ -128,6 +128,16 @@ describe("accepting a draft with mutation markers (#2424)", () => {
     );
   });
 
+  it("takes backticks the model echoed from the brief along with the marker", () => {
+    const { editor, ctrl } = setup([
+      para(text("Beats: "), pill()),
+      para(text(`He knelt \`⟦${A}⟧\` before her.`, true)),
+    ]);
+    ctrl.accept();
+    expect(plain(editor)).toBe("Beats: |He knelt # before her.");
+    expect(nodesOf(editor, "mutation")).toHaveLength(1);
+  });
+
   it("a duplicate marker for one id leaves a single pill, at the first", () => {
     const { editor, ctrl } = setup([
       para(text("Beats: "), pill()),

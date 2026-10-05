@@ -374,6 +374,9 @@ class PreviewErrorInfo(BaseModel):
                             (missing, or ambiguous within the project); `message`
                             is the loader's human text and `line` is set when the
                             include is in the top-level body.
+      - "stopped"         → the prompt called `stop(message)` to end the run
+                            before anything is sent; `message` is the author's
+                            text verbatim and `line` is never set.
       - "other"           → anything else (catch-all).
     """
 

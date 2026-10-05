@@ -184,8 +184,10 @@ export type PreviewErrorInfo = {
   // "include"   — an {% include %} name didn't resolve to one snippet
   //               (missing, or ambiguous within the project); line set when the
   //               include is in the top-level body.
+  // "stopped"   — the prompt called stop(message); message is the author's text,
+  //               verbatim, for the user (not a template fault).
   // "other"     — catch-all.
-  kind: "undefined" | "syntax" | "scene_not_found" | "include" | "other";
+  kind: "undefined" | "syntax" | "scene_not_found" | "include" | "stopped" | "other";
   line?: number | null;
   col?: number | null;
   undefined_name?: string | null;

@@ -152,6 +152,12 @@
       "summary": "`str` — the roleplay scene laid out **beat by beat** for a finalize/cleanup prompt: each beat's speaker, its observable text, and (decoded) its private interiority. POV-agnostic; the finalize prompt decides whose interiority survives via `pov(scene)`. A scene with no beat markers returns its body unchanged."
     },
     {
+      "name": "stop",
+      "kind": "helper",
+      "signature": "stop(message)",
+      "summary": "Ends the run before anything is sent and shows `message` to the user. Typical use: `{% if not scene.summary %}{{ stop(\"This scene has no summary yet.\") }}{% endif %}`."
+    },
+    {
       "name": "story_so_far",
       "kind": "helper",
       "signature": "story_so_far(scene)",

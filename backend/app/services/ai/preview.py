@@ -27,6 +27,7 @@ from app.services.ai.call_resolver import ResolvedCall
 from app.services.ai.entry_ref import ProjectInfoRef
 from app.services.ai.helpers import (
     EntryRef,
+    TemplateStop,
     _coerce_entry_ref,
     create_environment_for_project,
 )
@@ -941,6 +942,12 @@ def _raise_preview_error_from_template(
         kind = "include"
         message = exc.message or f'The include "{exc.name}" could not be resolved.'
         line = line or _include_line(source, exc.name)
+    elif isinstance(exc, TemplateStop):
+        # `stop(message)`: the author ended the run on purpose. The message is
+        # theirs, verbatim; no line, so the send routes return it as plain text.
+        kind = "stopped"
+        message = exc.message or "This prompt stopped the run."
+        line = None
     elif isinstance(exc, UndefinedError):
         kind = "undefined"
         undefined_name, obj_type = _extract_undefined_ref(exc.message or "")

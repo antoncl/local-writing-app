@@ -41,6 +41,7 @@ LIBRARY_TITLES = {
     "Tighten grammar",
     "Describe",
     "Show, don't tell",
+    "Draft scene",
 }
 
 # The six built-in revise prompts, offered on any manuscript prose selection.
@@ -816,6 +817,114 @@ class InheritedAncestorPromptCloneTests(unittest.TestCase):
             ),
         )
         self.assertEqual(saved.body.rstrip(), "edited")
+
+
+class DraftScenePromptTests(unittest.TestCase):
+    """#2421: the built-in Draft scene prompt, rendered through the preview path
+    against a small manuscript (act → three scenes) with a lore character."""
+
+    def setUp(self) -> None:
+        from app.models import CreateLoreEntryRequest, CreateStructureNodeRequest
+
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Draft Scene Tests")
+        self.prompt = self.service.read_prompt_entry(
+            builtin_prompt_id(self.service, "Draft scene")
+        )
+        self.honor = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Honor Harrington", entry_type="lore:character")
+        )
+        structure = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
+        )
+        self.act = next(c for c in structure.root.children if c.type == "manuscript:container")
+        self.scene_ids = []
+        for title in ("Opening", "Middle", "Ending"):
+            created = self.service.create_structure_node(
+                CreateStructureNodeRequest(
+                    title=title, entry_type="manuscript:scene", parent_id=self.act.id
+                )
+            )
+            act = next(c for c in created.root.children if c.id == self.act.id)
+            self.scene_ids.append(act.children[-1].scene_id)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _set(
+        self, scene_id: str, *, body: str = "", kind: str = "scene", **metadata: object
+    ) -> None:
+        from app.models import SaveSceneRequest
+
+        existing = self.service.read_scene(scene_id)
+        self.service.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=existing.title,
+                body=body,
+                base_revision=existing.revision,
+                status="draft",
+                entry_type=f"manuscript:{kind}",
+                metadata=metadata,
+            ),
+        )
+
+    def _preview(self, scene_id: str, inputs: dict | None = None):
+        from app.services.ai.preview import PreviewRequest, build_preview
+
+        rendered, _ = build_preview(
+            self.service,
+            PreviewRequest(
+                template_source=self.prompt.body,
+                target_scene_id=scene_id,
+                session_id=None,
+                inputs=inputs or {},
+                text_before="",
+                text_after="",
+                commit=False,
+            ),
+        )
+        return "\n".join(m.text for m in rendered.messages)
+
+    def test_draft_scene_is_a_library_prompt(self) -> None:
+        entries = {e.id: e for e in self.service.list_prompt_entries().entries}
+        self.assertTrue(entries[self.prompt.id].is_library)
+
+    def test_draft_scene_stops_when_the_scene_has_no_summary(self) -> None:
+        from app.services.ai.preview import PreviewError
+
+        with self.assertRaises(PreviewError) as ctx:
+            self._preview(self.scene_ids[0])
+        self.assertEqual(ctx.exception.kind, "stopped")
+        self.assertIn("summary", str(ctx.exception))
+        self.assertIsNone(ctx.exception.line)
+
+    def test_draft_scene_renders_summary_previous_prose_and_next_summary(self) -> None:
+        self._set(self.scene_ids[0], body="She crossed the bridge at dusk and never looked back.",
+                  summary="Honor leaves the station.")
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        self._set(self.scene_ids[2], summary="The fleet jumps to Manticore.")
+        text = self._preview(self.scene_ids[1])
+        self.assertIn("Honor meets the admiral.", text)
+        self.assertIn("never looked back.", text)
+        self.assertIn("The fleet jumps to Manticore.", text)
+        self.assertIn("Honor leaves the station.", text)  # story so far
+
+    def test_draft_scene_without_previous_prose_keeps_the_story_so_far(self) -> None:
+        self._set(self.scene_ids[0], body="She crossed the bridge at dusk.",
+                  summary="Honor leaves the station.")
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        text = self._preview(self.scene_ids[1], {"include_previous_scene": False})
+        self.assertNotIn("crossed the bridge", text)
+        self.assertNotIn("Where the previous scene left off", text)
+        self.assertIn("Honor leaves the station.", text)
+
+    def test_draft_scene_names_the_pov_character_inherited_from_the_act(self) -> None:
+        self._set(self.act.scene_id, kind="container", pov_mode="third_limited", pov=self.honor.id)
+        self._set(self.scene_ids[0], summary="Honor leaves the station.")
+        text = self._preview(self.scene_ids[0])
+        self.assertIn("The point-of-view character is **Honor Harrington**", text)
 
 
 if __name__ == "__main__":

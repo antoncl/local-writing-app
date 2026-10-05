@@ -164,3 +164,34 @@ describe("inline stream render throttle (#2428)", () => {
     expect(docText(editor)).toBe("");
   });
 });
+
+describe("line breaks at the ends of a suggestion (#2431)", () => {
+  const nodeTypes = (editor: Editor) => {
+    const types: string[] = [];
+    editor.state.doc.descendants((node) => {
+      types.push(node.type.name);
+    });
+    return types;
+  };
+
+  it("discard leaves no break behind when a render ended mid paragraph-break", async () => {
+    const { editor, ctrl } = setup();
+    const before = editor.getJSON();
+    // The first delta renders at once and ends in a single newline — the half of
+    // a paragraph break that used to become an unmarked hardBreak.
+    fakeStream([{ type: "delta", text: "One.\n" }, { type: "delta", text: "\nTwo.\n\n\n" }, DONE]);
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    ctrl.revert();
+    expect(nodeTypes(editor)).not.toContain("hardBreak");
+    expect(editor.getJSON()).toEqual(before);
+  });
+
+  it("a model's trailing blank lines do not survive an accept", async () => {
+    const { editor, ctrl } = setup();
+    fakeStream([{ type: "delta", text: "\nThe rain.\n\n\n" }, DONE]);
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    ctrl.accept();
+    expect(nodeTypes(editor)).not.toContain("hardBreak");
+    expect(docText(editor)).toBe("The rain.");
+  });
+});

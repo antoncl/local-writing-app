@@ -20,6 +20,7 @@ import {
 import { fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { countWords } from "@/lib/utils/wordCount";
+import { formatCostEur } from "@/lib/utils/money";
 import { listHasProseItems } from "@/lib/editor-core/bodySections";
 import { itemMemberDetail, keyedListKeyMember, listItemKey } from "@/lib/editor-core/keyedList";
 import type {
@@ -503,9 +504,15 @@ export function buildRailRowModel(ctx: RailRowContext, fieldId: string): RailRow
       : undefined;
 
   const computedRaw = isComputed ? ctx.computedFieldString(fieldId) : "";
-  const computedText = isComputed
-    ? (field.options ?? []).find((option) => option.value === computedRaw)?.label ?? computedRaw
-    : "";
+  // An AI cost arrives as the backend's raw USD float; show it in EUR like every
+  // other cost (#2432).
+  const costUsd =
+    field.computed?.function === "cost" && computedRaw.trim() !== "" ? Number(computedRaw) : NaN;
+  const computedText = !isComputed
+    ? ""
+    : Number.isFinite(costUsd)
+      ? formatCostEur(costUsd)
+      : (field.options ?? []).find((option) => option.value === computedRaw)?.label ?? computedRaw;
 
   const statusValue = isStatus
     ? isMutated(ctx, "status")

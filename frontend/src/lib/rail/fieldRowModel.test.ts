@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { buildRailRowModel, type RailRowContext } from "./fieldRowModel";
 import type { MetadataSchema } from "@/lib/types";
+import { formatCostEur } from "@/lib/utils/money";
 
 const SCHEMA = {
   version: 1,
@@ -17,6 +18,9 @@ const SCHEMA = {
     scene: { name: "Scene", type: "entity_ref", options: [], picker_config: { sources: [{ kind: "manuscript" }] } },
     alias: { name: "Alias", type: "text", options: [] },
     bio: { name: "Bio", type: "long_text", options: [] },
+    // #2432: computed fields — a cost (raw USD from the backend) and a plain one.
+    cost: { name: "AI cost", type: "computed", options: [], computed: { function: "cost", scope: "scene" } },
+    word_count: { name: "Word Count", type: "computed", options: [], computed: { source: "body", function: "word_count" } },
     // #2043: a list whose items carry prose (a repeating body section) and one
     // whose items are scalars (a fact list that stays in the rail).
     beats: {
@@ -106,6 +110,18 @@ function baseCtx(overrides: Partial<RailRowContext> = {}): RailRowContext {
 }
 
 describe("buildRailRowModel", () => {
+  it("an AI cost shows in EUR, not as the backend's raw USD float (#2432)", () => {
+    const raw = "0.21920969999999998";
+    const model = buildRailRowModel(baseCtx({ computedFieldString: () => raw }), "cost");
+    expect(model.computedText).toBe(formatCostEur(Number(raw)));
+    expect(model.computedText).not.toContain("999");
+  });
+
+  it("any other computed field still shows its value as is", () => {
+    const model = buildRailRowModel(baseCtx({ computedFieldString: () => "1027" }), "word_count");
+    expect(model.computedText).toBe("1027");
+  });
+
   it("a scalar field with a value is scalar and not empty", () => {
     const model = buildRailRowModel(baseCtx({ metadata: { alias: "The Painted" } }), "alias");
     expect(model.scalar).toBe(true);

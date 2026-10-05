@@ -929,6 +929,73 @@ class DraftScenePromptTests(unittest.TestCase):
         text = self._preview(self.scene_ids[0])
         self.assertIn("The point-of-view character is **Honor Harrington**", text)
 
+    def test_draft_scene_lists_the_scenes_anchored_changes_as_its_brief(self) -> None:
+        from mutation_helpers import save_scenes_with_mutations
+
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        ids = save_scenes_with_mutations(
+            self.service,
+            {
+                self.scene_ids[1]: "Beats. "
+                f"<!-- mutate:entity={self.honor.id};field=title;value=Dame%20Honor;id=m1 -->",
+            },
+        )
+        _set_id, anchor_id = ids["m1"]
+        text = self._preview(self.scene_ids[1])
+        self.assertIn("### Changes this scene makes", text)
+        self.assertIn(f"- `⟦{anchor_id}⟧` Honor Harrington — Title: Honor Harrington → Dame Honor", text)
+        self.assertIn("apart from the change markers", text)
+
+    def test_draft_scene_places_pov_and_targets_as_picks_at_the_scenes_start(self) -> None:
+        from mutation_helpers import save_scenes_with_mutations
+
+        from app.models import CreateLoreEntryRequest
+        from app.services.ai.chat import one_shot_system_blocks
+        from app.services.ai.preview import PreviewRequest, build_preview
+
+        self._set(self.act.scene_id, kind="container", pov_mode="third_limited", pov=self.honor.id)
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        admiral = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Admiral Courvosier", entry_type="lore:character")
+        ).id
+        save_scenes_with_mutations(
+            self.service,
+            {
+                self.scene_ids[1]: "Beats. "
+                f"<!-- mutate:entity={admiral};field=title;value=Fallen%20Admiral;id=m1 -->",
+            },
+        )
+        for automatic_lore in (False, True):
+            rendered, _ = build_preview(
+                self.service,
+                PreviewRequest(
+                    template_source=self.prompt.body,
+                    target_scene_id=self.scene_ids[1],
+                    session_id=None,
+                    inputs={},
+                    text_before="",
+                    text_after="",
+                    commit=False,
+                    automatic_lore=automatic_lore,
+                ),
+            )
+            sent = "\n".join(b["text"] for b in one_shot_system_blocks("Sys.", rendered) or [])
+            self.assertIn('name="Honor Harrington"', sent)  # the POV character
+            self.assertIn('name="Admiral Courvosier"', sent)  # the mutation target ...
+            self.assertNotIn("Fallen Admiral", sent)  # ... as it stands at the scene's start
+            # Draft scene runs no automatic lore, so the estimate shows none.
+            self.assertFalse(rendered.lore_invoked)
+            self.assertEqual(
+                set(rendered.send_lore_stable_ids + rendered.send_lore_volatile_ids),
+                {self.honor.id, admiral},
+            )
+
+    def test_draft_scene_without_anchors_has_no_changes_section(self) -> None:
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        text = self._preview(self.scene_ids[1])
+        self.assertNotIn("Changes this scene makes", text)
+        self.assertNotIn("⟦", text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,13 +34,15 @@ context_strategy:
 {% set narration = resolved_narration(scene) %}
 {% set previous = previous_scene(scene) %}
 {% set following = next_scene(scene) %}
+{% set changes = scene_mutations(scene) %}
+{% do lore_as_of("start") %}
 {% role "system" %}
 You write the first draft of one scene of a novel, from the author's summary of it. A first draft gets the scene onto the page: every event in the summary, in order, dramatized as it happens — action, dialogue, and the point-of-view character's perception — not reported after the fact. It does not need to be polished.
 
 - Write only this scene. Stop when its last event has happened; do not carry on into what comes next, and do not end on a reflective or summarizing paragraph.
 - Do not invent major events the summary does not call for, and do not bring in named characters the context does not give you.
 - Keep dialogue tags plain.
-- Return only the prose of the scene: no title, no headings, no Markdown, no preamble or comment.
+- Return only the prose of the scene: no title, no headings, no Markdown, no preamble or comment — apart from the change markers, when the brief lists any.
 
 {% include "Prose generation settings" %}
 {% if narration.character %}
@@ -51,7 +53,9 @@ The point-of-view character is **{{ narration.character.title }}**.
 {% include "Author directions in brackets" %}
 {% endrole %}
 {% role "user" %}
-{{ auto_lore() }}
+{% if narration.character %}{% do use(narration.character) %}{% endif %}
+{% for c in changes if c.entity %}{% do use(c.entity) %}{% endfor %}
+{% include "Relevant lore" %}
 {% if story_so_far(scene) %}
 ## The story so far
 {{ story_so_far(scene) }}
@@ -77,6 +81,13 @@ What happens next, so this scene can lead into it. Do not write any of it.
 
 ### Scene dynamics
 {{ scene.metadata.dynamics }}
+{% endif %}
+{% if changes %}
+
+### Changes this scene makes
+These happen during the scene, in this order. Make each one happen in the story, and at the moment it happens write its marker exactly as shown — on its own, nothing else inside the brackets. The reader never sees the markers.
+{% for c in changes %}- `⟦{{ c.anchor_id }}⟧` {{ c.text }}
+{% endfor %}
 {% endif %}
 {% if inputs.note is defined and inputs.note %}
 

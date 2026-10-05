@@ -69,6 +69,10 @@ class RenderedTemplate:
     # placed). Set by `build_preview`; surfaced as `lore_free` and persisted on
     # the chat. When both gates ran, `lore_invoked` is cleared at the source.
     lore_free: bool = False
+    # #2422: where in the target scene `lore_as_of("start")` resolves lore —
+    # `START_OF_SCENE`; None (the default) = end of scene. Set by `build_preview`
+    # from the env's slot, so the preview and the one-shot send render alike.
+    lore_position: int | None = None
     # ADR-0060 §2: node ids the template selected via `use(node)`, in insertion
     # order, deduped. Set by `build_preview` from the env's `used_nodes` slot;
     # persisted on the chat (`ChatSession.used_node_ids`) and unioned into the send

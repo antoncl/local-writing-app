@@ -82,6 +82,12 @@ TEXT_APPEND_FIELD_TYPES = frozenset({"text", "long_text"})
 # offset; every other surface resolves at end-of-scene (ADR-0003).
 END_OF_SCENE: int | None = None
 
+# Sentinel position: resolve at the START of the scene — earlier scenes' records
+# are live, none of the target scene's own are. A record is live in its own scene
+# iff `offset <= position`, so 0 would wrongly count an anchor at offset 0; -1
+# sits before every possible offset.
+START_OF_SCENE = -1
+
 # Node-intrinsic fields a mutation may target that are not schema fields: the
 # entry's own title/body. Free text, so no value constraints to validate.
 INTRINSIC_MUTABLE_FIELDS = frozenset({"title", "body"})

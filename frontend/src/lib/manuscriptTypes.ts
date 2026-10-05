@@ -73,6 +73,15 @@ export type Scene = {
   source_layer_label?: string;
 };
 
+// POST /scenes/{id}/finalize (#2435): the finalized scene plus what the rewrite
+// didn't carry itself — mutation pills appended at the end (by label) and todos
+// moved to scene-level todos.
+export type FinalizeSceneResponse = {
+  scene: Scene;
+  appended_changes: string[];
+  moved_todos: number;
+};
+
 
 // A lore entry whose whole body is a single fenced code block (#1628) — a paste
 // artifact that renders prose as monospaced source. Reported as a flag, not a

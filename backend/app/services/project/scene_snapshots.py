@@ -43,11 +43,20 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
-from app.models import SaveSceneRequest, Snapshot, SnapshotDetail, SnapshotList, Witness
+from app.models import (
+    FinalizeSceneResponse,
+    SaveSceneRequest,
+    Snapshot,
+    SnapshotDetail,
+    SnapshotList,
+    Witness,
+)
 from app.models.snapshots import UNREADABLE_WITNESS_VERSION
 from app.services import migrations
 from app.services.atomic_io import atomic_write_bytes
 from app.services.project.errors import ProjectServiceError
+from app.services.project.finalize_keep import keep_scene_todos, label_unplaced_changes
+from app.services.project.finalize_placement import place_pills
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project.overrides import OVERRIDES_FOLDER, LayerOverride
 from app.services.project.placement import (
@@ -960,7 +969,7 @@ class SceneSnapshotsMixin:
 
     def finalize_scene(
         self, scene_id: str, body: str, dynamic_context: list[str] | None = None
-    ) -> Scene:
+    ) -> FinalizeSceneResponse:
         """Project a roleplay scene to its finished prose (ADR-0070 S3), in place.
 
         Like `restore_snapshot`, this captures FIRST and overwrites second, in one
@@ -977,6 +986,10 @@ class SceneSnapshotsMixin:
         (title, status, entry_type, metadata — including `pov`) is preserved. The
         write goes through `save_scene`, so front matter, the manuscript title,
         the node index and TODO anchors update exactly as an ordinary save.
+
+        The scene's mutation pills and todos survive (#2435): `body` carries
+        `⟦id⟧` markers the pills are restored from (unplaced ones are appended),
+        and embedded / anchored todos are moved to scene-level todos.
         """
         root = self._require_project()
         path = self._path_for_node_id(scene_id, "manuscript")
@@ -984,7 +997,9 @@ class SceneSnapshotsMixin:
         current = self.read_scene(node_id)
         # Safety net BEFORE the destructive projection (see docstring).
         self._capture(root, node_id, path, retention="kept", dynamic_context=dynamic_context)
-        return self.save_scene(
+        body, unplaced = place_pills(current.body, body)
+        moved = keep_scene_todos(self, node_id, current.body, body)
+        saved = self.save_scene(
             scene_id,
             SaveSceneRequest(
                 title=current.title,
@@ -994,6 +1009,11 @@ class SceneSnapshotsMixin:
                 metadata=current.metadata,
                 dynamic_context=dynamic_context,
             ),
+        )
+        return FinalizeSceneResponse(
+            scene=saved,
+            appended_changes=label_unplaced_changes(self, current.body, unplaced),
+            moved_todos=moved,
         )
 
     def _atomic_write_bytes(self, path: Path, data: bytes) -> None:

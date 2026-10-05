@@ -91,7 +91,7 @@ class StoryTextTests(_HelperFixtureBase):
         beats = _roleplay_beats(self.service, ref)
         self.assertIn("[Honor Harrington] She spoke.", beats)
         self.assertIn("[Honor Harrington — interiority]", beats)
-        self.assertIn("[Narration] Dawn broke.", beats)
+        self.assertIn("[Narration] Dawn ⟦a1⟧broke.", beats)  # the pill shows as its marker (#2435)
         self.assertNotIn("<!--", beats)
 
         turns = _character_turns(self.service, None, ref, self.honor["id"])

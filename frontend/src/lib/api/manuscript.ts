@@ -1,4 +1,5 @@
 import type {
+  FinalizeSceneResponse,
   Scene,
   Snapshot,
   SnapshotDetail,
@@ -128,7 +129,7 @@ export const manuscriptApi = {
    *  the ordinary generate path, so the finalize prompt stays author-
    *  customizable; this only commits the reviewed result. */
   finalizeScene(sceneId: string, body: string, dynamicContext?: string[]) {
-    return request<Scene>(`/scenes/${encodeURIComponent(sceneId)}/finalize`, {
+    return request<FinalizeSceneResponse>(`/scenes/${encodeURIComponent(sceneId)}/finalize`, {
       method: "POST",
       body: JSON.stringify({ body, ...(dynamicContext ? { dynamic_context: dynamicContext } : {}) }),
     });

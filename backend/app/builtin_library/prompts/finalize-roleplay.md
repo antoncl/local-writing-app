@@ -21,6 +21,7 @@ Rewrite the whole scene as clean, finished narrative prose:
 {% endif %}
 - Leave none of the beat scaffolding behind — no interiority notes, no attribution labels, no markers. Just the finished prose.
 - Keep the events, the dialogue, and their order. This is a cleanup and a point-of-view projection, not a new draft.
+- Markers like `⟦mut_…⟧` mark changes placed in the scene. Keep each one exactly as written, once, at the same point in the story — they are not shown to the reader.
 
 {% include "Prose generation settings" %}
 Return only the finished prose.

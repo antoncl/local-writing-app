@@ -138,6 +138,23 @@ describe("accepting a draft with mutation markers (#2424)", () => {
     expect(nodesOf(editor, "mutation")).toHaveLength(1);
   });
 
+  it("moves a pill whose id is legacy-derived, not minted with mut_ (#2435 parity)", () => {
+    const legacy = "unit7_1a2b3c";
+    const { editor, ctrl } = setup([
+      para(text("Beats: "), pill(legacy)),
+      para(text(`He knelt ⟦${legacy}⟧ before her.`, true)),
+    ]);
+    ctrl.accept();
+    expect(plain(editor)).toBe("Beats: |He knelt # before her.");
+    expect(nodesOf(editor, "mutation")).toHaveLength(1);
+  });
+
+  it("leaves an unknown non-mut_ bracket in the text", () => {
+    const { editor, ctrl } = setup([para(text("Beats.")), para(text("A ⟦note⟧ stays.", true))]);
+    ctrl.accept();
+    expect(plain(editor)).toBe("Beats.|A ⟦note⟧ stays.");
+  });
+
   it("a duplicate marker for one id leaves a single pill, at the first", () => {
     const { editor, ctrl } = setup([
       para(text("Beats: "), pill()),

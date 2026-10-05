@@ -149,6 +149,28 @@ class RoleplayBeatsTests(unittest.TestCase):
         # Bill has no interiority marker, so no interiority line for him.
         self.assertNotIn("[bill — interiority]", out)
 
+    def test_pills_appear_as_markers_at_their_positions(self) -> None:
+        """#2435: an anchor inside a beat, one alone between beats, and a close
+        all survive as `⟦id⟧`; no comment text reaches the model."""
+        anchor = "<!-- mutate:set=mutation_set_abc;id=mut_in1 -->"
+        alone = "<!-- mutate:set=mutation_set_abc;id=mut_alone -->"
+        close = "<!-- mutate:close;ref=mut_in1;id=mut_close -->"
+        body = (
+            f"<!-- character:id=annie;internal=Steady%20now. -->She {anchor}fired.<!-- /character -->"
+            f"{alone}"
+            f"<!-- character:id=bill -->He grins.{close}<!-- /character -->"
+        )
+        out = _roleplay_beats(self._NoLore(), {"body": body})
+        self.assertIn("[annie] She ⟦mut_in1⟧fired.", out)
+        self.assertIn("[Narration] ⟦mut_alone⟧", out)
+        self.assertIn("[bill] He grins.⟦mut_close⟧", out)
+        self.assertIn("[annie — interiority] Steady now.", out)
+        self.assertNotIn("<!--", out)
+
+    def test_scene_without_beat_markers_still_shows_pills(self) -> None:
+        body = "Plain <!-- mutate:set=mutation_set_abc;id=mut_in1 -->prose."
+        self.assertEqual(_roleplay_beats(self._NoLore(), {"body": body}), "Plain ⟦mut_in1⟧prose.")
+
     def test_scene_without_beats_returns_body_unchanged(self) -> None:
         self.assertEqual(
             _roleplay_beats(self._NoLore(), {"body": "Just plain narration."}),

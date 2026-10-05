@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from app.models import (
     CreateSceneRequest,
     FinalizeSceneRequest,
+    FinalizeSceneResponse,
     SaveSceneRequest,
     Scene,
     StructureDocument,
@@ -42,13 +43,16 @@ def save_scene(project: CurrentProject, scene_id: str, request: SaveSceneRequest
         return project.save_scene(scene_id, request)
 
 
-@router.post("/api/scenes/{scene_id}/finalize", response_model=Scene)
-def finalize_scene(project: CurrentProject, scene_id: str, request: FinalizeSceneRequest) -> Scene:
+@router.post("/api/scenes/{scene_id}/finalize", response_model=FinalizeSceneResponse)
+def finalize_scene(
+    project: CurrentProject, scene_id: str, request: FinalizeSceneRequest
+) -> FinalizeSceneResponse:
     """Commit the roleplay finalize/cleanup projection (ADR-0070 S3): snapshot
     the scene (`kept`), then replace its body with the AI-produced clean prose.
     The AI generation itself runs beforehand through the ordinary generate
     endpoint (so the finalize prompt stays author-customizable); this route is
-    only the destructive, snapshot-guarded write."""
+    only the destructive, snapshot-guarded write. Mutation pills come back from
+    the `⟦id⟧` markers in `body`; todos move to scene-level todos (#2435)."""
     with translate_errors():
         return project.finalize_scene(scene_id, request.body, request.dynamic_context)
 

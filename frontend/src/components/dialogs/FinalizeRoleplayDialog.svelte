@@ -16,7 +16,7 @@
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { finalizePromptRoster, type PromptResolutionContext } from "@/lib/editor-core/promptResolution";
   import { formatCostEur } from "@/lib/utils/money";
-  import type { EditableDocument, LoreEntrySummary, PromptEntrySummary, Scene } from "@/lib/types";
+  import type { EditableDocument, FinalizeSceneResponse, LoreEntrySummary, PromptEntrySummary } from "@/lib/types";
 
   let {
     promptEntries = [],
@@ -32,7 +32,7 @@
     // projection reads it — the finalize source and the safety-net snapshot must
     // see the author's latest words, not the ~6s-stale disk copy.
     onFlush?: (sceneId: string) => Promise<void>;
-    onFinalized?: (scene: Scene) => void;
+    onFinalized?: (result: FinalizeSceneResponse) => void;
   } = $props();
 
   type Phase = "pick" | "generating" | "preview" | "applying";
@@ -149,8 +149,7 @@
     if (!scene) return;
     phase = "applying";
     try {
-      const result = await api.finalizeScene(scene.id, generated);
-      onFinalized?.(result);
+      onFinalized?.(await api.finalizeScene(scene.id, generated));
       close();
     } catch (e) {
       error = (e as Error).message;

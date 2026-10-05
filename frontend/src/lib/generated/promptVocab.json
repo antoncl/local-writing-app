@@ -161,7 +161,7 @@
       "name": "roleplay_beats",
       "kind": "helper",
       "signature": "roleplay_beats(scene)",
-      "summary": "`str` — the roleplay scene laid out **beat by beat** for a finalize/cleanup prompt: each beat's speaker, its observable text, and (decoded) its private interiority. POV-agnostic; the finalize prompt decides whose interiority survives via `pov(scene)`. A scene with no beat markers returns its body unchanged."
+      "summary": "`str` — the roleplay scene laid out **beat by beat** for a finalize/cleanup prompt: each beat's speaker, its observable text, and (decoded) its private interiority. POV-agnostic; the finalize prompt decides whose interiority survives via `pov(scene)`. A scene with no beat markers returns its body unchanged. Mutation pills (anchor and close comments) appear as their `⟦id⟧` markers at the point they sit."
     },
     {
       "name": "scene_mutations",

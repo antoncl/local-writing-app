@@ -411,7 +411,7 @@ class RestoreTests(SnapshotTestCase):
         self._save("A beat. <!-- character:id=annie;internal=x -->She fired.<!-- /character -->")
         result = self.service.finalize_scene(self.scene_id, "She fired, and did not look back.")
 
-        self.assertEqual(result.body.strip(), "She fired, and did not look back.")
+        self.assertEqual(result.scene.body.strip(), "She fired, and did not look back.")
         self.assertEqual(
             self.service.read_scene(self.scene_id).body.strip(),
             "She fired, and did not look back.",

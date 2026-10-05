@@ -43,6 +43,7 @@ from app.services.body_text import story_text
 from app.services.error_log import append_error_line
 from app.services.project.lore_mutations import START_OF_SCENE
 from app.services.project.metadata_refs import iter_ref_occurrences, occurrence_targets
+from app.services.project.mutation_anchors import anchors_as_markers
 from app.services.project.narration import resolved_narration as _resolve_narration_gate
 from app.services.tree_structure import TreeStructureService
 
@@ -1436,17 +1437,20 @@ def _roleplay_beats(project: ProjectService, scene: Any) -> str:
     Unlike `character_turns`, this is POV-agnostic and not a chat thread: it emits
     one readable block naming every character's beats and interiority, and the
     finalize prompt decides whose interiority survives via `pov(scene)`. A scene
-    with no markers (not roleplayed) returns its body unchanged.
+    with no markers (not roleplayed) returns its body unchanged. Mutation pills
+    (anchor + close comments) appear as `⟦id⟧` markers at their positions, so a
+    finalize can carry them through (#2435).
     """
     body = _scene_body_text(scene)
     segments = _split_body_by_character_markers(body)
     if not any(seg[0] for seg in segments):
-        return story_text(body)
+        return story_text(anchors_as_markers(body))
     ids = {seg[0] for seg in segments if seg[0]}
     titles = _character_titles(project, ids)
     lines: list[str] = []
     for char_id, text, internal in segments:
-        text = story_text(text).strip()
+        # Pills become `⟦id⟧` markers BEFORE the strip, so finalize can place them.
+        text = story_text(anchors_as_markers(text)).strip()
         if not char_id:
             if text:
                 lines.append(f"[Narration] {text}")

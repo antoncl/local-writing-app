@@ -901,13 +901,16 @@ class DraftScenePromptTests(unittest.TestCase):
         self.assertIsNone(ctx.exception.line)
 
     def test_draft_scene_renders_summary_previous_prose_and_next_summary(self) -> None:
-        self._set(self.scene_ids[0], body="She crossed the bridge at dusk and never looked back.",
+        self._set(self.scene_ids[0],
+                  body="She crossed the bridge at dusk\n<!-- mutate:set=ms_1;id=a1 -->\n"
+                       "and never looked back.",
                   summary="Honor leaves the station.")
         self._set(self.scene_ids[1], summary="Honor meets the admiral.")
         self._set(self.scene_ids[2], summary="The fleet jumps to Manticore.")
         text = self._preview(self.scene_ids[1])
         self.assertIn("Honor meets the admiral.", text)
         self.assertIn("never looked back.", text)
+        self.assertNotIn("mutate:", text)  # markers are not story text
         self.assertIn("The fleet jumps to Manticore.", text)
         self.assertIn("Honor leaves the station.", text)  # story so far
 

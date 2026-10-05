@@ -122,6 +122,21 @@ def last_words(text: Any, n: Any) -> str:
     return " ".join(words[-n_int:])
 
 
+# Every marker the app keeps in a body is an HTML comment: mutation anchors
+# (`<!-- mutate:… -->`), roleplay beats (`<!-- character:id=…;internal=… -->`),
+# todo anchors. None of it is story text.
+_HTML_COMMENT = re.compile(r"<!--[\s\S]*?-->")
+
+
+def prose(text: Any) -> str:
+    """The story text of a body — `text` with the app's markers (HTML
+    comments) removed, so a prompt can quote prose without leaking anchors or
+    a roleplay beat's private interiority (#2421)."""
+    if text is None:
+        return ""
+    return _HTML_COMMENT.sub("", str(text))
+
+
 def _coerce_entry_ref(
     project: ProjectService, schema: Any, value: Any
 ) -> EntryRef | None:
@@ -766,6 +781,7 @@ def register_helpers(
     env.globals["field_contract"] = field_contract
 
     env.globals["last_words"] = last_words
+    env.globals["prose"] = prose
     env.globals["pov"] = lambda scene: _pov(project, schema, scene)
     env.globals["resolved_narration"] = lambda scene: _resolved_narration(project, schema, scene)
     env.globals["story_so_far"] = lambda scene: _story_so_far(project, scene)

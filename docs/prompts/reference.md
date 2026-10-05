@@ -56,6 +56,7 @@ If a node's fields are organised into a named group, you can read a member strai
 | `previous_scene(x)` | The scene before `x` in reading order (crossing chapter and act boundaries), or `None` at the start. `x` is a scene or a plot card; a card counts as the scene it is attached to, so an unattached card has no neighbours. The result is a node — `previous_scene(scene).summary`. |
 | `next_scene(x)` | The scene after `x` in reading order, or `None` at the end — the mirror of `previous_scene`. `plot_context(as_of=next_scene(e) or e.id)` shows a card's board one scene further. |
 | `last_words(text, n)` | `str` — the trailing `n` words of a string (pure helper). |
+| `prose(text)` | `str` — the story text of a body, with the app's markers (mutation anchors, roleplay beat markers and their private interiority, todo anchors) removed. Quote other scenes through it: `last_words(prose(previous_scene(scene).body), 300)`. |
 | `stop(message)` | Ends the run before anything is sent and shows `message` to the user. Typical use: `{% if not scene.summary %}{{ stop("This scene has no summary yet.") }}{% endif %}`. |
 
 ### Field contract

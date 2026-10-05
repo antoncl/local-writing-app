@@ -874,6 +874,16 @@ class FinalizeSceneRequest(BaseModel):
     dynamic_context: list[str] | None = None
 
 
+class FinalizeSceneResponse(BaseModel):
+    """The finalized scene, plus what the rewrite didn't carry itself (#2435):
+    `appended_changes` labels the mutation pills it didn't place (appended at the
+    end of the body), `moved_todos` counts the todos moved to scene-level todos."""
+
+    scene: Scene
+    appended_changes: list[str] = Field(default_factory=list)
+    moved_todos: int = 0
+
+
 class LoreEntrySummary(BaseModel):
     id: str
     title: str

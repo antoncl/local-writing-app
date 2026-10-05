@@ -75,3 +75,22 @@ def derive_anchor_id(scene_id: str, unit_id: str, occurrence: int = 1) -> str:
     key = f"{scene_id}:{unit_id}" if occurrence <= 1 else f"{scene_id}:{unit_id}:{occurrence}"
     digest = hashlib.sha1(key.encode()).hexdigest()[:6]  # noqa: S324
     return f"{unit_id}_{digest}"
+
+
+def pill_comments(text: str) -> list[tuple[str, str]]:
+    """Every anchor and close comment in `text` as `(id, comment)`, in text
+    order — the pills a rewrite must not lose."""
+    found = [(m.start(), m.group("id"), m.group(0)) for m in MUTATION_ANCHOR_PATTERN.finditer(text)]
+    found += [(m.start(), m.group("id"), m.group(0)) for m in MUTATION_ANCHOR_CLOSE_PATTERN.finditer(text)]
+    return [(pill_id, comment) for _, pill_id, comment in sorted(found)]
+
+
+def anchors_as_markers(text: str) -> str:
+    """Replace every anchor and close comment with `⟦<id>⟧` — the visible stand-in
+    a model is shown for a pill (the editor's `mutationMarkers.ts` shape), so the
+    pill's position survives a rewrite and nothing else of the comment reaches it."""
+
+    def marker(match: re.Match[str]) -> str:
+        return f"⟦{match.group('id')}⟧"
+
+    return MUTATION_ANCHOR_CLOSE_PATTERN.sub(marker, MUTATION_ANCHOR_PATTERN.sub(marker, text))

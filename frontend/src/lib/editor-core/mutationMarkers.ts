@@ -7,12 +7,14 @@
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
-// Ids are `mut_` + 12 hex from createMutationId, but legacy anchors derived
-// server-side (`<unit id>_<digest>`) and the Math.random fallback can differ,
-// so the id alphabet is wider than the minted shape. The ⟦ ⟧ delimiters bound it.
-// The brief shows each marker in backticks, and a model may echo them — so an
-// optional backtick either side is part of the marker and goes with it.
-export const MUTATION_MARKER_PATTERN = /`?⟦(mut_[A-Za-z0-9_-]+)⟧`?/g;
+// Same rule as the server's finalize placement (`finalize_placement.py`, #2435):
+// any `⟦id⟧` naming a pill in the doc places it; an unknown `mut_` id is a stray
+// marker and is removed; any other unknown `⟦…⟧` is ordinary text and stays.
+// Ids are `mut_` + 12 hex when minted here, but legacy-derived anchor ids
+// (`<unit id>_<digest>`) need not be, so the id alphabet is wider. The brief
+// shows each marker in backticks, and a model may echo them — so an optional
+// backtick either side is part of the marker and goes with it.
+export const MUTATION_MARKER_PATTERN = /`?⟦([A-Za-z0-9_-]+)⟧`?/g;
 
 export interface MarkerPlacement {
   /** Null when the range held no markers — nothing to dispatch. */
@@ -24,7 +26,7 @@ export interface MarkerPlacement {
 }
 
 export function hasMutationMarker(text: string): boolean {
-  return text.includes("⟦mut_");
+  return text.includes("⟦");
 }
 
 interface MarkerHit {
@@ -84,10 +86,12 @@ export function placeMutationMarkers(
       moved.push(hit.id);
       ops.push({ from: hit.from, to: hit.to, insert: pill.node });
       ops.push({ from: pill.pos, to: pill.pos + pill.node.nodeSize, insert: null });
-    } else {
+    } else if (pill || hit.id.startsWith("mut_")) {
+      // A repeated marker for a placed pill, or a stray `mut_` marker: remove it.
       if (!pill && !unknown.includes(hit.id)) unknown.push(hit.id);
       ops.push({ from: hit.from, to: hit.to, insert: null });
     }
+    // Any other unknown `⟦…⟧` is the author's or the model's own text: leave it.
   }
 
   const tr = state.tr;

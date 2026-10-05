@@ -34,6 +34,7 @@
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
   import ConflictDiffModal from "@/components/dialogs/ConflictDiffModal.svelte";
   import FinalizeRoleplayDialog from "@/components/dialogs/FinalizeRoleplayDialog.svelte";
+  import { finalizeNotice } from "@/lib/finalizeNotice";
   import AIPolicyModal from "@/components/dialogs/AIPolicyModal.svelte";
   import ValidateModal from "@/components/dialogs/ValidateModal.svelte";
   import PromoteAction from "@/components/dialogs/PromoteAction.svelte";
@@ -1318,7 +1319,11 @@
     {loreEntries}
     availableScenes={flattenStructureScenes(structure?.root)}
     onFlush={(id) => editorPanes.flushSceneIfDirty(id)}
-    onFinalized={(restored) => editorPanes.reconcileSceneFromServer(restored)}
+    onFinalized={(result) => {
+      editorPanes.reconcileSceneFromServer(result.scene);
+      const notice = finalizeNotice(result);
+      if (notice) editorPanes.setStatus(notice);
+    }}
   />
   {#if $mutationSetEditorStore}
     <MutationSetEditor

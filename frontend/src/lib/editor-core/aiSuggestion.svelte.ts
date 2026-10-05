@@ -66,6 +66,9 @@ export interface AiSuggestionDeps {
   }) => void;
 }
 
+// Coalescing window for streamed-suggestion renders (#2428).
+const RENDER_WINDOW_MS = 100;
+
 export class AiSuggestionController {
   // Reactive state the host's markup binds to. v1 supports a single pending
   // suggestion at a time.
@@ -86,6 +89,10 @@ export class AiSuggestionController {
   // held between stream-done and accept so it can be stamped onto the beat's
   // character mark. Null when the run carried no interiority.
   #pendingInternal: string | null = null;
+  // Streaming-render throttle (#2428): at most one render per window while deltas
+  // arrive. A setTimeout, not rAF - a hidden pane gets no frames. Cleared by
+  // reset() / revert() / the stream's `finally`, so it can't fire on a dead suggestion.
+  #renderTimer: ReturnType<typeof setTimeout> | null = null;
 
   #deps: AiSuggestionDeps;
 
@@ -95,6 +102,7 @@ export class AiSuggestionController {
 
   // Drop any pending suggestion state — called when the host changes documents.
   reset(): void {
+    this.#cancelRenderTimer();
     this.suggestionId = null;
     this.meta = null;
     this.#suggestionOriginal = null;
@@ -102,6 +110,11 @@ export class AiSuggestionController {
     this.#pendingInternal = null;
     this.error = null;
     this.toolbarPosition = { x: 0, y: 0, visible: false };
+  }
+
+  #cancelRenderTimer(): void {
+    if (this.#renderTimer !== null) clearTimeout(this.#renderTimer);
+    this.#renderTimer = null;
   }
 
   // ---------- AI inline suggestion ----------
@@ -179,7 +192,10 @@ export class AiSuggestionController {
   #renderStreamingSuggestion(startPos: number, fullText: string, suggestionId: string): void {
     const editor = this.#deps.getEditor();
     if (!editor) return;
-    type Inline = { type: "text"; text: string } | { type: "hardBreak" };
+    type Inline =
+      | { type: "text"; text: string; marks: { type: string; attrs: { suggestionId: string } }[] }
+      | { type: "hardBreak" };
+    const marks = [{ type: "aiSuggestion", attrs: { suggestionId } }];
     const paragraphs = fullText
       .split(/\n{2,}/)
       .map((para) => {
@@ -187,7 +203,7 @@ export class AiSuggestionController {
         const lines = para.split(/\n/);
         lines.forEach((line, i) => {
           if (i > 0) content.push({ type: "hardBreak" });
-          if (line) content.push({ type: "text", text: line });
+          if (line) content.push({ type: "text", text: line, marks });
         });
         return { type: "paragraph", content };
       })
@@ -196,18 +212,13 @@ export class AiSuggestionController {
     const existing = this.#findSuggestionRange(suggestionId);
     const from = existing ? existing.from : startPos;
     const to = existing ? existing.to : startPos;
+    // One transaction: the mark rides on the inserted text nodes, and the caret
+    // ends after the inserted text.
     editor
       .chain()
       .setTextSelection({ from, to })
       .deleteRange({ from, to })
       .insertContent(paragraphs)
-      .run();
-    const endPos = editor.state.selection.from;
-    editor
-      .chain()
-      .setTextSelection({ from, to: endPos })
-      .setMark("aiSuggestion", { suggestionId })
-      .setTextSelection(endPos)
       .run();
     this.updateToolbarPosition();
   }
@@ -290,6 +301,7 @@ export class AiSuggestionController {
   }
 
   revert(): void {
+    this.#cancelRenderTimer();
     const editor = this.#deps.getEditor();
     if (!editor || !this.suggestionId) return;
     const range = this.#findSuggestionRange(this.suggestionId);
@@ -443,6 +455,33 @@ export class AiSuggestionController {
     } | null = null;
     let streamErrored = false;
 
+    // Throttled render (#2428). The render replaces the whole suggestion with the
+    // latest text, so dropping intermediate states is safe. The first delta renders
+    // at once; later ones within RENDER_WINDOW_MS coalesce into one timer render.
+    // Never renders once the suggestion is gone (revert/reset/error).
+    let pendingVisible: string | null = null;
+    const renderPending = () => {
+      const visible = pendingVisible;
+      pendingVisible = null;
+      if (visible === null || this.suggestionId !== suggestionId) return false;
+      this.#renderStreamingSuggestion(startPos, visible, suggestionId);
+      return true;
+    };
+    const tick = () => {
+      this.#renderTimer = null;
+      if (renderPending()) this.#renderTimer = setTimeout(tick, RENDER_WINDOW_MS);
+    };
+    const scheduleRender = (visible: string) => {
+      pendingVisible = visible;
+      if (this.#renderTimer !== null) return;
+      renderPending();
+      this.#renderTimer = setTimeout(tick, RENDER_WINDOW_MS);
+    };
+    const flushRender = () => {
+      this.#cancelRenderTimer();
+      renderPending();
+    };
+
     const ensureStreamingStarted = () => {
       if (streamingActive || !editor) return;
       if (destination === "selection") {
@@ -481,7 +520,7 @@ export class AiSuggestionController {
           if (streamErrored) break;
           if (!editor) break;
           const visible = carriesInteriority ? visibleExternal(accumulated) : accumulated;
-          this.#renderStreamingSuggestion(startPos, visible, suggestionId);
+          scheduleRender(visible);
         } else if (ev.type === "done") {
           lastMeta = {
             provider: ev.provider,
@@ -494,6 +533,8 @@ export class AiSuggestionController {
         } else if (ev.type === "error") {
           this.error = ev.error || "Unknown error";
           streamErrored = true;
+          this.#cancelRenderTimer();
+          pendingVisible = null;
           if (streamingActive && editor) {
             const range = this.#findSuggestionRange(suggestionId);
             if (range) {
@@ -517,6 +558,7 @@ export class AiSuggestionController {
           }
         }
       }
+      if (!streamErrored) flushRender();
       if (!streamErrored) {
         // Split the completed output into the visible beat and its private
         // interiority (ADR-0070). Non-roleplay runs carry no interiority, so
@@ -544,8 +586,10 @@ export class AiSuggestionController {
         }
       }
     } catch (e) {
+      flushRender(); // keep what streamed so far on screen, as per-delta rendering did
       this.error = (e as Error).message;
     } finally {
+      this.#cancelRenderTimer();
       this.generating = false;
       this.updateToolbarPosition();
     }

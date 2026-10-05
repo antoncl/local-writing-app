@@ -261,6 +261,8 @@
 
   const visibleTags = $derived(tags.slice(0, visibleCount));
   const hiddenTagCount = $derived(tags.length - visibleCount);
+  // The "+n" pill's hover text: the tags it stands for, in order (#2419).
+  const hiddenTagList = $derived(tags.slice(visibleCount).join(", "));
   // Colored-chip CSS vars for one tag (empty when the tag has no hue). The tint
   // reads on both themes; the hue itself carries the border + text.
   function tagStyle(tag: string): string {
@@ -274,7 +276,7 @@
      clickable <button> or the static <span>. The tag line binds its width for
      the width-aware pack; the empty probe pill carries the pill's resolved
      font/padding for canvas measurement (no per-tag mirror DOM). -->
-{#snippet textBody()}<span class="node-row-text" class:has-tags={tags.length > 0}><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if tags.length > 0}<span class="node-row-tags" bind:clientWidth={tagsAreaWidth}>{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span><span class="node-row-tag node-row-tag-probe" aria-hidden="true" bind:this={fontProbeEl}></span>{/if}</span>{/snippet}
+{#snippet textBody()}<span class="node-row-text" class:has-tags={tags.length > 0}><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if tags.length > 0}<span class="node-row-tags" bind:clientWidth={tagsAreaWidth}>{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow" title={hiddenTagList} aria-label={`${hiddenTagCount} more ${hiddenTagCount === 1 ? "tag" : "tags"}: ${hiddenTagList}`}>+{hiddenTagCount}</span>{/if}</span><span class="node-row-tag node-row-tag-probe" aria-hidden="true" bind:this={fontProbeEl}></span>{/if}</span>{/snippet}
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- Whitespace between conditional blocks is intentionally absent in

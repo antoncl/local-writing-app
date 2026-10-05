@@ -103,6 +103,7 @@
   import { resolveColor } from "@/lib/utils/colors";
   import { summaryValues, type SummaryValue } from "@/lib/utils/summaryFields";
   import { applyScrollWhenLaidOut, rememberScrollOnScroll, scrollRestorePlan } from "@/lib/editor-core/scrollMemory";
+  import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
   import type {
     DocumentKind,
@@ -324,6 +325,7 @@
       };
     },
     onRequestInputsDialog: (payload) => onRequestInputsDialog?.(payload),
+    onNotice: (message) => editorPanes.setStatus(message),
     onOpenChat: (payload) => onOpenChat?.(payload),
   });
 

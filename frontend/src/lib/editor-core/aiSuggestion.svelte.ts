@@ -31,6 +31,11 @@ import {
   type InlineHost,
   type OutputRun,
 } from "@/lib/editor-core/outputHandlers";
+import {
+  hasMutationMarker,
+  markerNotice,
+  placeMutationMarkers,
+} from "@/lib/editor-core/mutationMarkers";
 import { splitInteriority, visibleExternal } from "@/lib/editor-core/interiority";
 import type {
   ChatUsage,
@@ -51,6 +56,8 @@ export interface AiSuggestionDeps {
   addCharacterCost: (characterId: string, cost: number) => void;
   // Outbound callbacks (forwarded from ProseBodyView's props).
   onRequestInputsDialog: (payload: { entry: PromptEntrySummary }) => void;
+  // Short user-facing note (e.g. "Placed 3 changes in the draft.").
+  onNotice?: (message: string) => void;
   onOpenChat: (payload: {
     entry: PromptEntrySummary;
     inputs: Record<string, unknown>;
@@ -209,7 +216,18 @@ export class AiSuggestionController {
     const editor = this.#deps.getEditor();
     if (!editor || !this.suggestionId) return;
     const promptCtx = this.#deps.getPromptCtx();
-    const range = this.#findSuggestionRange(this.suggestionId);
+    let range = this.#findSuggestionRange(this.suggestionId);
+    if (range && hasMutationMarker(editor.state.doc.textBetween(range.from, range.to, "\n", " "))) {
+      // #2424: move each mutation pill to its `⟦id⟧` marker (one transaction), then
+      // re-find the range — the marker text changed its length.
+      const placement = placeMutationMarkers(editor.state, range);
+      if (placement.tr) {
+        editor.view.dispatch(placement.tr);
+        range = this.#findSuggestionRange(this.suggestionId);
+        const notice = markerNotice(placement.moved.length, placement.unknown.length);
+        if (notice) this.#deps.onNotice?.(notice);
+      }
+    }
     const lastEntry = findPromptEntry(promptCtx, this.#lastInvokedEntryId);
     // The prompt's type may DECLARE an accept-time mark-stamp (#954): roleplay
     // stamps the `character` mark from its `character` input. Read off the declared

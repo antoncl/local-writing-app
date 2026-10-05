@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from app.services.body_text import story_text
 from app.services.project.metadata_refs import ref_members
 
 if TYPE_CHECKING:
@@ -153,6 +154,13 @@ class EntryRef:
 
     @property
     def body(self) -> str:
+        """Story text — the body with the app's markers removed (#2427)."""
+        return story_text(self._raw_body())
+
+    def _raw_body(self) -> str:
+        # The body as stored, markers and all. Private on purpose (the sandbox
+        # hides `_` names): only the roleplay helpers, which decode the beat
+        # markers themselves, read it.
         entry = self._load()
         if entry is None:
             return ""

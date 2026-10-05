@@ -39,6 +39,7 @@ from app.services.ai.entry_ref import EntryRef
 from app.services.ai.field_contract import FieldContract
 from app.services.ai.plot_prompt_context import render_plot_context
 from app.services.ai.sessions import AISession
+from app.services.body_text import story_text
 from app.services.error_log import append_error_line
 from app.services.project.lore_mutations import START_OF_SCENE
 from app.services.project.metadata_refs import iter_ref_occurrences, occurrence_targets
@@ -123,19 +124,11 @@ def last_words(text: Any, n: Any) -> str:
     return " ".join(words[-n_int:])
 
 
-# Every marker the app keeps in a body is an HTML comment: mutation anchors
-# (`<!-- mutate:… -->`), roleplay beats (`<!-- character:id=…;internal=… -->`),
-# todo anchors. None of it is story text.
-_HTML_COMMENT = re.compile(r"<!--[\s\S]*?-->")
-
-
 def prose(text: Any) -> str:
-    """The story text of a body — `text` with the app's markers (HTML
-    comments) removed, so a prompt can quote prose without leaking anchors or
-    a roleplay beat's private interiority (#2421)."""
-    if text is None:
-        return ""
-    return _HTML_COMMENT.sub("", str(text))
+    """The story text of a string — `text` with the app's markers (HTML
+    comments) removed (#2421). A body read through `.body` already is; this is
+    for any other string a prompt quotes."""
+    return story_text(text)
 
 
 def _coerce_entry_ref(
@@ -1213,7 +1206,7 @@ def _collect_scene_text(
             sink.append(
                 _SceneText(
                     title=str(_attr_or_item(scene, "title") or ""),
-                    body=str(_attr_or_item(scene, "body") or ""),
+                    body=story_text(_attr_or_item(scene, "body")),
                     scene_id=scene_id,
                     entry_type=str(_attr_or_item(scene, "entry_type") or ""),
                 )
@@ -1310,7 +1303,7 @@ def _character_turns(
     # user-narration message. Empty body → nothing to emit.
     if not any(seg[0] for seg in segments):
         if body.strip():
-            return _role_block("user", body)
+            return _role_block("user", story_text(body))
         return ""
 
     # Resolve all character lore ids to titles for the [Name]: prefix.
@@ -1345,6 +1338,8 @@ def _scene_body_text(scene: Any) -> str:
     """
     if scene is None:
         return ""
+    if isinstance(scene, EntryRef):
+        return scene._raw_body()
     attr = getattr(scene, "body", None)
     if isinstance(attr, str):
         return attr
@@ -1394,6 +1389,9 @@ def _thread_parts(
         buffer = []
 
     for char_id, text, internal in segments:
+        # Beat text is story text: a mutate / todo anchor inside it never
+        # reaches the model. The interiority was decoded by the splitter.
+        text = story_text(text)
         if char_id and char_id == focus_id:
             role = "assistant"
             content = _with_interiority(text, internal)
@@ -1443,12 +1441,12 @@ def _roleplay_beats(project: ProjectService, scene: Any) -> str:
     body = _scene_body_text(scene)
     segments = _split_body_by_character_markers(body)
     if not any(seg[0] for seg in segments):
-        return body
+        return story_text(body)
     ids = {seg[0] for seg in segments if seg[0]}
     titles = _character_titles(project, ids)
     lines: list[str] = []
     for char_id, text, internal in segments:
-        text = text.strip()
+        text = story_text(text).strip()
         if not char_id:
             if text:
                 lines.append(f"[Narration] {text}")

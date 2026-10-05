@@ -26,6 +26,7 @@ from app.services.ai.helpers import (
     _scene_id_of,
     _xml_safe_tag,
 )
+from app.services.body_text import story_text
 from app.services.project.field_values import display_value
 from app.services.project.lore_mutation_items import item_key
 from app.services.project.metadata_refs import keyed_list_key, ref_members
@@ -182,9 +183,9 @@ def _effective_body(entry: Any, overrides: dict[str, str | list[str]]) -> str:
     """Body for the XML block: a live `body` mutation, else base body, else a
     (possibly mutated) summary."""
     if "body" in overrides:
-        body = str(overrides["body"]).strip()
+        body = story_text(overrides["body"]).strip()
     else:
-        body = str(_attr_or_item(entry, "body") or "").strip()
+        body = story_text(_attr_or_item(entry, "body")).strip()
     if not body:
         summary = overrides["summary"] if "summary" in overrides else _get_field(entry, "summary")
         if isinstance(summary, str) and summary.strip():

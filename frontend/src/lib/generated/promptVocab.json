@@ -140,6 +140,12 @@
       "summary": "The scene before `x` in reading order (crossing chapter and act boundaries), or `None` at the start. `x` is a scene or a plot card; a card counts as the scene it is attached to, so an unattached card has no neighbours. The result is a node — `previous_scene(scene).summary`."
     },
     {
+      "name": "prose",
+      "kind": "helper",
+      "signature": "prose(text)",
+      "summary": "`str` — the story text of a body, with the app's markers (mutation anchors, roleplay beat markers and their private interiority, todo anchors) removed. Quote other scenes through it: `last_words(prose(previous_scene(scene).body), 300)`."
+    },
+    {
       "name": "resolved_narration",
       "kind": "helper",
       "signature": "resolved_narration(scene)",
@@ -150,6 +156,12 @@
       "kind": "helper",
       "signature": "roleplay_beats(scene)",
       "summary": "`str` — the roleplay scene laid out **beat by beat** for a finalize/cleanup prompt: each beat's speaker, its observable text, and (decoded) its private interiority. POV-agnostic; the finalize prompt decides whose interiority survives via `pov(scene)`. A scene with no beat markers returns its body unchanged."
+    },
+    {
+      "name": "stop",
+      "kind": "helper",
+      "signature": "stop(message)",
+      "summary": "Ends the run before anything is sent and shows `message` to the user. Typical use: `{% if not scene.summary %}{{ stop(\"This scene has no summary yet.\") }}{% endif %}`."
     },
     {
       "name": "story_so_far",

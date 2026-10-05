@@ -174,6 +174,18 @@ class GenerateEndpointTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
 
+    def test_stop_helper_returns_422_with_the_plain_message(self) -> None:
+        self._allow_cloud()
+        response = self.client.post(
+            "/api/ai/generate",
+            json={
+                "template_source": '{% role "user" %}{{ stop("x") }}{% endrole %}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"], "x")
+
     def test_missing_target_returns_404(self) -> None:
         self._allow_cloud()
         response = self.client.post(

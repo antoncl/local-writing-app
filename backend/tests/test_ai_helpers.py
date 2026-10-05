@@ -17,6 +17,7 @@ from app.services.ai.entry_ref import ProjectInfoRef
 from app.services.ai.helpers import (
     create_environment_for_project,
     last_words,
+    prose,
 )
 from app.services.ai.lore_block import (
     _format_lore_block,
@@ -54,6 +55,19 @@ class LastWordsTests(unittest.TestCase):
 
     def test_n_non_integer_returns_empty(self) -> None:
         self.assertEqual(last_words("hi there", "lots"), "")
+
+
+class ProseTests(unittest.TestCase):
+    def test_removes_mutation_anchors(self) -> None:
+        body = "He knelt.\n<!-- mutate:set=mutation_set_1;id=a1 -->\nShe wept."
+        self.assertEqual(prose(body), "He knelt.\n\nShe wept.")
+
+    def test_keeps_a_roleplay_beat_but_drops_its_interiority(self) -> None:
+        body = "<!-- character:id=c1;internal=c2VjcmV0 -->Hello.<!-- /character -->"
+        self.assertEqual(prose(body), "Hello.")
+
+    def test_none_returns_empty(self) -> None:
+        self.assertEqual(prose(None), "")
 
 
 class _HelperFixtureBase(unittest.TestCase):

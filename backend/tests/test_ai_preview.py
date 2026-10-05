@@ -549,6 +549,23 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["role"], "user")
 
+    def test_stop_helper_reports_a_stopped_error_with_the_authors_message(self) -> None:
+        """`stop("x")` ends the run: kind "stopped", the message verbatim (no
+        class-name prefix), and no line (so the send routes return plain text)."""
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "user" %}{{ stop("Write a summary first.") }}{% endrole %}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body["rendered"])
+        self.assertEqual(body["error"]["kind"], "stopped")
+        self.assertEqual(body["error"]["message"], "Write a summary first.")
+        self.assertIsNone(body["error"]["line"])
+
     def test_template_syntax_error_returns_line_info_on_error(self) -> None:
         # Open `{{` with nothing after it — Jinja parse fails with lineno.
         # The endpoint returns 200 with error.kind="syntax" and error.line

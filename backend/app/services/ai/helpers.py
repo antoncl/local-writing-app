@@ -27,6 +27,7 @@ from xml.sax.saxutils import escape as xml_escape
 from xml.sax.saxutils import quoteattr
 
 from jinja2 import Undefined, pass_context
+from jinja2.exceptions import TemplateError
 from jinja2.sandbox import SandboxedEnvironment
 
 from app.services.ai.adjacent_scene import adjacent_scene
@@ -119,6 +120,21 @@ def last_words(text: Any, n: Any) -> str:
     if len(words) <= n_int:
         return text_str
     return " ".join(words[-n_int:])
+
+
+# Every marker the app keeps in a body is an HTML comment: mutation anchors
+# (`<!-- mutate:… -->`), roleplay beats (`<!-- character:id=…;internal=… -->`),
+# todo anchors. None of it is story text.
+_HTML_COMMENT = re.compile(r"<!--[\s\S]*?-->")
+
+
+def prose(text: Any) -> str:
+    """The story text of a body — `text` with the app's markers (HTML
+    comments) removed, so a prompt can quote prose without leaking anchors or
+    a roleplay beat's private interiority (#2421)."""
+    if text is None:
+        return ""
+    return _HTML_COMMENT.sub("", str(text))
 
 
 def _coerce_entry_ref(
@@ -568,6 +584,21 @@ def _plot_context(project: ProjectService, as_of: Any, focus: Any = None) -> str
         return ""
 
 
+class TemplateStop(TemplateError):
+    """Raised by `stop(message)`: the prompt ends the run before anything is
+    sent, with `message` shown to the user (preview maps it to kind "stopped")."""
+
+
+def _register_stop(env: SandboxedEnvironment) -> None:
+    """Register `stop(message)` — a prompt's guard clause, e.g.
+    `{% if not scene.summary %}{{ stop("Write a summary first.") }}{% endif %}`."""
+
+    def _stop(message: Any = "") -> str:
+        raise TemplateStop(str(message))
+
+    env.globals["stop"] = _stop
+
+
 def _register_lore_gate(
     env: SandboxedEnvironment, lore_invoked_slot: list[bool], deprecation_notices: list[str]
 ) -> None:
@@ -750,6 +781,7 @@ def register_helpers(
     env.globals["field_contract"] = field_contract
 
     env.globals["last_words"] = last_words
+    env.globals["prose"] = prose
     env.globals["pov"] = lambda scene: _pov(project, schema, scene)
     env.globals["resolved_narration"] = lambda scene: _resolved_narration(project, schema, scene)
     env.globals["story_so_far"] = lambda scene: _story_so_far(project, scene)
@@ -762,6 +794,7 @@ def register_helpers(
     )
 
     _register_lore_gate(env, lore_invoked_slot, deprecation_notices)
+    _register_stop(env)
     _register_use(env, project, schema)
 
     # ADR-0060 §3: one scene-anchored constructor. `entry(x)` resolves x **as of

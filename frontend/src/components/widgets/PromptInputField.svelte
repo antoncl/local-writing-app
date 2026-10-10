@@ -16,7 +16,7 @@
   // trees/lists, but these two are global stores every host would thread
   // identically (#1462).
   import { assistantEntriesStore } from "@/lib/stores/assistants";
-  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
+  import { plotNodeEntriesStore } from "@/lib/stores/plotlines";
   import { liveTags } from "@/lib/stores/tagNodes";
   import { decodePickerValue, isListShapedInputType } from "@/lib/utils/promptInputs";
   import { coerceStringList } from "@/lib/utils/schemaTypeHelpers";
@@ -208,7 +208,7 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    plotEntries={$plotlineEntriesStore}
+    plotEntries={$plotNodeEntriesStore}
     assistantEntries={$assistantEntriesStore}
     tagEntries={$liveTags}
     onChange={(detail) => onChange(JSON.stringify(detail.value))}

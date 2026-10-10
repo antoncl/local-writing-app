@@ -264,6 +264,59 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     expect(screen.getByText("The Heist")).toBeInTheDocument();
     expect(screen.queryByText("A card")).toBeNull();
   });
+
+  // #2439: a card with no plotline (an off-page backstory card in a deck, a loose
+  // idea) had no row anywhere on the Plot axis. Decks and "Loose cards" reach them.
+  it("offers cards without a plotline under their deck and under Loose cards", async () => {
+    const onChange = vi.fn();
+    cardEntriesStore.set([
+      plotCard("c1", "Break-in", "p1"),
+      { ...(plotCard("c2", "Mara's childhood", null) as object), metadata: { plot_deck: "d1" } } as never,
+      plotCard("c3", "Stray idea", null),
+    ]);
+    render(NodePicker, {
+      props: {
+        allowSelectors: true,
+        config: { sources: [{ kind: "plot", expr: { descendants_of: "plot:card" } }], multiple: true },
+        plotEntries: [plotline("p1", "The Heist"), { ...plotline("d1", "Backstory"), entry_type: "plot:deck" }],
+        affordance: "add",
+        onChange,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    const plot = (await screen.findAllByRole("group", { name: "Plot" }))[0];
+    await expandGroup(plot, "Backstory");
+    await expandGroup(plot, "Loose cards");
+    expect(within(plot).getByText("Mara's childhood")).toBeInTheDocument();
+    // Loose = neither plotline nor deck: the deck card and plotline card stay out.
+    expect(within(plot).getAllByText("Stray idea")).toHaveLength(1);
+    expect(within(plot).getAllByText("Mara's childhood")).toHaveLength(1);
+    expect(within(plot).queryAllByText("Break-in")).toHaveLength(0); // The Heist still collapsed
+
+    await fireEvent.click(within(plot).getByText("Mara's childhood").closest("button")!);
+    await tick();
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value).toEqual([expect.objectContaining({ id: "c2", kind: "plot" })]);
+  });
+
+  it("drops the Loose cards bucket when every card has a plotline or deck", async () => {
+    cardEntriesStore.set([plotCard("c1", "Break-in", "p1")]);
+    render(NodePicker, {
+      props: {
+        allowSelectors: true,
+        config: { sources: [{ kind: "plot", expr: { descendants_of: "plot:card" } }] },
+        plotEntries: [plotline("p1", "The Heist")],
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    expect(screen.getByText("The Heist")).toBeInTheDocument();
+    expect(screen.queryByText("Loose cards")).toBeNull();
+  });
 });
 
 // #1461 (ADR-0074 slice 1): manuscript sources store kind "manuscript", so the

@@ -17,6 +17,8 @@
   // would make this component a second place to maintain that list.
   import type { Snippet } from "svelte";
   import SplitHandle from "@/components/widgets/SplitHandle.svelte";
+  import UndoRedoControls from "@/components/UndoRedoControls.svelte";
+  import type { RailUndoController } from "@/lib/rail/railUndoController.svelte";
   import {
     editorRailLayout as layout,
     RAIL_WIDTH_MIN,
@@ -32,6 +34,7 @@
     detached = false,
     onDetach,
     onReattach,
+    undo,
   }: {
     /** Bindable so the collapse/expand affordance lives with the rail while the
      *  shell reconciles it with per-body-shape defaults (chat opens collapsed). */
@@ -48,6 +51,8 @@
     onDetach?: () => void;
     /** Fold the detached pane back into the rail. */
     onReattach?: () => void;
+    /** The rail's metadata undo history (#2438) — its buttons sit in the head. */
+    undo?: RailUndoController;
   } = $props();
 
   const side = $derived(layout.side);
@@ -125,6 +130,19 @@
     />
     <div class="rail-head">
       <span class="rail-head-label">Details</span>
+      {#if undo}
+        <!-- #2438 / ADR-0050 §7: the rail history's visible control. -->
+        <UndoRedoControls
+          canUndo={undo.canUndo}
+          canRedo={undo.canRedo}
+          undoTitle={undo.undoTitle}
+          redoTitle={undo.redoTitle}
+          announcement={undo.announcement}
+          onUndo={() => void undo.undo()}
+          onRedo={() => void undo.redo()}
+          scope="details"
+        />
+      {/if}
       <button
         class="rail-icon-btn"
         type="button"

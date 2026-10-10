@@ -118,7 +118,7 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
     expect(document.activeElement).toBe(input);
 
     await fireEvent.input(input, { target: { value: "X" } });
-    expect(onMetadataChange).toHaveBeenCalledWith(expect.objectContaining({ alias: "X" }));
+    expect(onMetadataChange).toHaveBeenCalledWith(expect.objectContaining({ alias: "X" }), expect.stringMatching(/^alias#/));
   });
 
   it("the hit's name carries the value for assistive tech — the inert display is out of the a11y tree", () => {
@@ -181,7 +181,7 @@ describe("MetadataPanel — scalars read at rest, edit on click (#1884 slice 4)"
     await fireEvent.click(screen.getByRole("button", { name: "Tone" }));
     await fireEvent.click(screen.getByRole("option", { name: "Cool" }));
 
-    expect(onMetadataChange).toHaveBeenCalledWith(expect.objectContaining({ tone: "cool" }));
+    expect(onMetadataChange).toHaveBeenCalledWith(expect.objectContaining({ tone: "cool" }), expect.stringMatching(/^tone#/));
     expect(rowFor("Tone").classList.contains("editing")).toBe(false);
   });
 

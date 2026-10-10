@@ -70,8 +70,9 @@ describe("MetadataPanel — clearing a list field asks first (#2437)", () => {
       message: "Remove all 2 values from Tags?",
       details: ["Alpha", "Beta"],
       destructive: true,
-      cannotBeUndone: true,
     });
+    // #2438: the rail undo can reverse it within the session.
+    expect(request?.cannotBeUndone).toBeFalsy();
     // Always asks: no "don't show this again" escape hatch.
     expect(request?.dontShowAgainKey).toBeUndefined();
 

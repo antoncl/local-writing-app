@@ -12,6 +12,8 @@
   // `metaContent` comment.
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
+  import { tick, untrack } from "svelte";
+  import type { RailUndoController } from "@/lib/rail/railUndoController.svelte";
   import type { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import type { MutationUnitGroup } from "@/lib/editor-core/mutationUnits";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
@@ -58,6 +60,9 @@
     backlinks: Backlink[];
     title: string;
     hostPaneId: string | null;
+    // #2438: this pane's rail undo history — its chord handler rides the
+    // wrapper around MetadataPanel below.
+    railUndo?: RailUndoController;
   }
 
   interface RailContentDeps {
@@ -73,7 +78,8 @@
   interface RailContentCallbacks {
     entryTypeChange: (next: string) => void;
     statusChange: (next: string) => void;
-    metadataChange: (next: EntryMetadata) => void;
+    // `session` (#2438): one field-edit session's id, so its writes undo as one step.
+    metadataChange: (next: EntryMetadata, session?: string) => void;
     customData: () => void;
     navigate: (target: NavigateTarget) => void;
     resetField: (fieldId: string) => void;
@@ -104,6 +110,25 @@
   }
 
   let { model, deps, on, part = "rail" }: Props = $props();
+
+  // #2438: keep Ctrl+Z reachable right after a rail change. Removing a tag chip
+  // or clearing a field often removes the very button that had focus, dropping
+  // focus to <body> where the rail's chord handler can't hear it — so after a
+  // recorded change, an orphaned focus comes back to this wrapper.
+  // Only a NEW record acts: `model` is rebuilt on every NodeEditor render, so
+  // this effect re-runs on unrelated changes too, and must not pull focus then.
+  let wrapperEl = $state<HTMLElement>();
+  // Seeded from the current count: a remount (rail ↔ front matter) is not a record.
+  let seenRecorded = untrack(() => model.railUndo?.recorded ?? 0);
+  $effect(() => {
+    const recorded = model.railUndo?.recorded ?? 0;
+    if (recorded === seenRecorded) return;
+    seenRecorded = recorded;
+    void tick().then(() => {
+      const active = document.activeElement;
+      if (wrapperEl && (active === null || active === document.body)) wrapperEl.focus({ preventScroll: true });
+    });
+  });
 </script>
 
 {#snippet trailing()}
@@ -134,6 +159,15 @@
        pinned back. -->
   <div class="rail-appendix" data-testid="rail-appendix">{@render trailing()}</div>
 {:else if model.metadataSchema}
+  <!-- #2438: the rail's undo-chord scope. tabindex=-1 = script-focusable only
+       (the refocus above), never a tab stop. -->
+  <div
+    class="rail-undo-scope"
+    bind:this={wrapperEl}
+    tabindex="-1"
+    role="presentation"
+    onkeydown={(e) => model.railUndo?.handleKeydown(e)}
+  >
   <MetadataPanel
     layout={part === "facts" ? "front-matter" : "rail"}
     entryType={model.entryType}
@@ -163,7 +197,7 @@
     onGoToList={(fieldId) => on.goToList(fieldId)}
     onEntryTypeChange={(next) => on.entryTypeChange(next)}
     onStatusChange={(next) => on.statusChange(next)}
-    onMetadataChange={(next) => on.metadataChange(next)}
+    onMetadataChange={(next, session) => on.metadataChange(next, session)}
     onCustomData={() => on.customData()}
     onNavigate={(payload) => on.navigate(payload)}
     onResetField={model.documentKind === "lore" || model.documentKind === "prompt" ? on.resetField : undefined}
@@ -173,6 +207,7 @@
     onStopFieldEdit={model.scrubbed ? on.stopFieldEdit : undefined}
     trailing={part === "rail" ? trailing : undefined}
   />
+  </div>
   <!-- #2037: in the rail the trailing sections render INSIDE MetadataPanel,
        between its known rows and the empty-field fold, so "N more fields" is
        the last entry in the rail rather than sitting above Backlinks. As
@@ -184,5 +219,9 @@
      back from the prose column's serif. */
   .rail-appendix {
     font-family: var(--sans);
+  }
+  /* A focus target for the undo chord, not a visible box. */
+  .rail-undo-scope:focus {
+    outline: none;
   }
 </style>

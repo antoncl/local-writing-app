@@ -104,6 +104,8 @@ describe("setEditorPaneAuthoringLayer (#2189)", () => {
 
     expect(editorPanes.titleReloadsByPane.editor_1?.title).toBe(entry.title);
     expect(editorPanes.metadataReloadsByPane.editor_1?.metadata).toEqual(entry.metadata);
+    // #2438: a genuine reload from disk drops the rail undo history.
+    expect(editorPanes.metadataReloadsByPane.editor_1?.keepsHistory).toBeFalsy();
     expect(editorPanes.titleReloadsByPane.editor_1?.token).toBeGreaterThanOrEqual(tokenBefore);
     expect(editorPanes.metadataReloadsByPane.editor_1?.token).toBe(editorPanes.titleReloadsByPane.editor_1?.token);
   });

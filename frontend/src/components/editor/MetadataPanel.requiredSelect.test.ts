@@ -55,7 +55,7 @@ describe("MetadataPanel — required-select stays sparse (#1421)", () => {
   it("writes a non-default pick", async () => {
     const { onMetadataChange } = mount({});
     await pick("Always");
-    expect(onMetadataChange).toHaveBeenCalledWith({ ctx: "always" });
+    expect(onMetadataChange).toHaveBeenCalledWith({ ctx: "always" }, expect.stringMatching(/^ctx#/));
   });
 
   it("pops the key when the default is picked (revert to sparse)", async () => {

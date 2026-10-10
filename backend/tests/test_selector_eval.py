@@ -155,6 +155,34 @@ def test_field_overlap_on_list_value_matches_plotline():
     assert _run(expr, nodes) == ["c1"]
 
 
+def test_plot_picker_deck_and_loose_card_selectors():
+    # #2439: the context picker's Plot axis stores these two shapes beside the
+    # plotline one (frontend lib/plot/plotPickerSelectors) — a deck's cards, and
+    # the "Loose cards" with neither a plotline nor a deck.
+    nodes = [
+        SelectorNode("on_line", "plot:card", frozenset(), {"plotline": "pl_1"}),
+        SelectorNode("in_deck", "plot:card", frozenset(), {"plot_deck": "deck_1"}),
+        SelectorNode("both", "plot:card", frozenset(), {"plotline": "pl_1", "plot_deck": "deck_1"}),
+        SelectorNode("loose", "plot:card", frozenset(), {}),
+        SelectorNode("deck_1", "plot:deck", frozenset(), {}),
+    ]
+    deck = {
+        "intersect": [
+            {"type": "plot:card"},
+            {"field": {"key": "plot_deck", "op": "overlap", "value": "deck_1"}},
+        ]
+    }
+    loose = {
+        "intersect": [
+            {"type": "plot:card"},
+            {"field": {"key": "plotline", "op": "unset"}},
+            {"field": {"key": "plot_deck", "op": "unset"}},
+        ]
+    }
+    assert _run(deck, nodes) == ["in_deck", "both"]
+    assert _run(loose, nodes) == ["loose"]
+
+
 def test_field_set_and_unset():
     nodes = [
         SelectorNode("a", "lore:note", frozenset(), {"pov": "Bob"}),

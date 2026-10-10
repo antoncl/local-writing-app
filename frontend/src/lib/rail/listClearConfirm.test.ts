@@ -18,6 +18,21 @@ describe("listClearPrompt", () => {
     expect(listClearPrompt("Tags", ["tag_a"], labelOf)?.message).toBe("Remove 1 value from Tags?");
   });
 
+  it("says 'replace with inherited' when the clear reverts a cascade override", () => {
+    expect(listClearPrompt("Tags", ["tag_a", "tag_b"], labelOf, true)).toEqual({
+      title: "Reset Tags",
+      message: "Replace the 2 values set here with the inherited Tags?",
+      details: ["Mara", "Backstory"],
+    });
+  });
+
+  it("caps the listed members", () => {
+    const many = Array.from({ length: 13 }, (_, i) => `m${i}`);
+    const details = listClearPrompt("Kin", many, labelOf)!.details;
+    expect(details).toHaveLength(11);
+    expect(details.at(-1)).toBe("…and 3 more");
+  });
+
   it("does not ask for a scalar or an empty list", () => {
     expect(listClearPrompt("Status", "draft", labelOf)).toBeNull();
     expect(listClearPrompt("Tags", [], labelOf)).toBeNull();

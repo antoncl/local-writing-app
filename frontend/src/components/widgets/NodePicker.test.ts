@@ -301,6 +301,43 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     expect(detail.value).toEqual([expect.objectContaining({ id: "c2", kind: "plot" })]);
   });
 
+  it("checking Loose cards stores one live selector over cards with no plotline and no deck", async () => {
+    const onChange = vi.fn();
+    cardEntriesStore.set([plotCard("c3", "Stray idea", null)]);
+    render(NodePicker, {
+      props: {
+        allowSelectors: true,
+        config: { sources: [{ kind: "plot", expr: { descendants_of: "plot:card" } }] },
+        plotEntries: [],
+        affordance: "add",
+        onChange,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    const plot = (await screen.findAllByRole("group", { name: "Plot" }))[0];
+    await fireEvent.click(within(plot).getByText("Loose cards").closest("button")!);
+    await tick();
+
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value).toHaveLength(1);
+    expect(detail.value[0]).toMatchObject({
+      id: "plotcards:loose",
+      kind: "plot",
+      selector: {
+        kind: "plot",
+        expr: {
+          intersect: [
+            { type: "plot:card" },
+            { field: { key: "plotline", op: "unset" } },
+            { field: { key: "plot_deck", op: "unset" } },
+          ],
+        },
+      },
+    });
+  });
+
   it("drops the Loose cards bucket when every card has a plotline or deck", async () => {
     cardEntriesStore.set([plotCard("c1", "Break-in", "p1")]);
     render(NodePicker, {

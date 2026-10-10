@@ -443,6 +443,7 @@
       model.fieldLabel,
       model.value,
       (id) => $tagTitleById.get(id) ?? listMemberResolver(id)?.title ?? null,
+      model.cascadeOverridden,
     );
     if (!prompt) {
       clearField(fieldId);

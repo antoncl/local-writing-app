@@ -47,6 +47,7 @@
   import { createTargetFor, hasTitleMatch } from "@/lib/utils/pickerCreate";
   import { buildSelectorRoster, isSelectorRef, membersForSelector, resolveSelector } from "@/lib/views/pickerSelectors";
   import { walkViewExpr } from "@/lib/views/walkViewExpr";
+  import { LOOSE_CARDS_REF_ID, plotPickerSelectorRefs } from "@/lib/plot/plotPickerSelectors";
   import {
     flattenSelectors,
     memberCountForRef,
@@ -528,37 +529,16 @@
     return groups;
   });
 
-  // Plotlines: the ADR-0074 6th container shape (ADR-0048 plot). A plotline is a
-  // selector over the cards whose scalar `metadata.plotline` points at it (`overlap`
-  // on a single-valued field is whole-value equality), constrained to `plot:card`.
-  // Mirrors tagSpecFor's intersect; the type constraint lives IN the stored spec, so
-  // a plotline expands to cards only — at invocation too. The plot roster is cards
-  // (buildSelectorRoster), so this resolves to that plotline's current cards, live.
-  function plotlineSpecFor(plotlineId: string): ViewSpec {
-    const expr = {
-      intersect: [{ type: "plot:card" }, { field: { key: "plotline", op: "overlap", value: plotlineId } }],
-    };
-    return { kind: "plot", expr } as ViewSpec;
-  }
-  // One container per plotline whenever the config allows the `plot` kind. Unlike
-  // tags, an empty plotline is NOT dropped — a plotline is a real authored container
-  // (like an act with no scenes yet), not incidental vocabulary.
+  // The Plot axis: the ADR-0074 6th container shape (ADR-0048 plot) — one live
+  // card selector per plotline, per deck, plus "Loose cards" for the rest (#2439;
+  // lib/plot/plotPickerSelectors). The plot roster is cards (buildSelectorRoster),
+  // so each resolves to its current cards, live. Plotlines and decks stay even
+  // when empty (authored containers); an empty loose bucket is dropped.
   const plotlineGroups = $derived.by<SelectorGroup[]>(() => {
     if (!allowSelectors || !allowedKinds.includes("plot")) return []; // selector axis — context_pick only (#1940)
-    // Only actual plotlines become containers — a stray non-plotline node in the
-    // roster must not be promoted (the roster is a plotline list, but guard it).
-    return plotEntries
-      .filter((p) => p.entry_type === "plot:plotline")
-      .map((p) => {
-        const ref: NodePickerRef = {
-          id: `plotline:${p.id}`,
-          kind: "plot",
-          title: p.title,
-          entry_type: "plot:plotline",
-          selector: plotlineSpecFor(p.id),
-        };
-        return { ref, members: membersForSelector(ref, selectorRoster) };
-      });
+    return plotPickerSelectorRefs(plotEntries)
+      .map((ref) => ({ ref, members: membersForSelector(ref, selectorRoster) }))
+      .filter((g) => g.ref.id !== LOOSE_CARDS_REF_ID || g.members.length > 0);
   });
 
   // Every selector group, for the picked-chip live counts.

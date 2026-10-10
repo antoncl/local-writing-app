@@ -33,6 +33,8 @@
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { buildRailRowModel, isFlipped, isFlipResolve, isListIndex, isMutated, isRowEmpty, isSectionIndex, type RailRowContext } from "@/lib/rail/fieldRowModel";
   import { stopTargetableFieldIds } from "@/lib/editor-core/stopFieldEditable";
+  import { listClearPrompt } from "@/lib/rail/listClearConfirm";
+  import { confirmService } from "@/lib/stores/confirmService.svelte";
 
   interface Props {
     entryType: string;
@@ -430,6 +432,31 @@
     onMetadataChange?.(next);
   }
 
+  // #2437: the user-facing clear (the reset mark, "Reset to inherited", a
+  // picker emptied to none). A non-empty list drops every member at once and
+  // rail edits aren't undoable (#2438), so it always asks first; anything else
+  // clears straight away. The internal required-select pop in `writeField`
+  // calls `clearField` directly — it never loses data, so it never asks.
+  function requestClearField(fieldId: string) {
+    const model = rowModel(fieldId);
+    const prompt = listClearPrompt(
+      model.fieldLabel,
+      model.value,
+      (id) => $tagTitleById.get(id) ?? listMemberResolver(id)?.title ?? null,
+    );
+    if (!prompt) {
+      clearField(fieldId);
+      return;
+    }
+    confirmService.request({
+      ...prompt,
+      confirmLabel: "Clear",
+      destructive: true,
+      cannotBeUndone: true,
+      onConfirm: async () => clearField(fieldId),
+    });
+  }
+
   // Persist a single field edit. A required select (one that declares a default,
   // #1421) that lands back on its default pops the key instead of writing it, so
   // front matter stays sparse — the value resolves to the same default at
@@ -589,7 +616,7 @@
   const callbacks: RailRowCallbacks = {
     open: openField,
     close: closeField,
-    clear: clearField,
+    clear: requestClearField,
     write: writeField,
     toggleExpanded: (fieldId) => railSectionCollapse.toggle(`field:${fieldId}`, FOLD_DEFAULT),
     // ADR-0095 §8 decision 6: `status` routes through `onStopFieldEdit` at a

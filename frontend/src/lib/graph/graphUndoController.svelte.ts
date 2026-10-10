@@ -12,8 +12,7 @@
 // during a replay). A surface uses only the recorders its gestures need — the
 // plot board (S7c) records only drags; connect/config stay for edge-and-config
 // canvases like the view designer.
-import { UndoCaretaker, UndoCancelled, type Command } from "@/lib/stores/undoCaretaker.svelte";
-import { undoChordOf } from "@/lib/utils/undoChord";
+import { SurfaceUndo } from "@/lib/stores/surfaceUndo.svelte";
 import {
   addNodeCommand,
   configCommands,
@@ -33,11 +32,10 @@ type ConnectionLike = {
   targetHandle?: string | null;
 };
 
-export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
-  // Reassigned wholesale on reset — one caretaker per loaded view (§3:
-  // per-surface history; a fresh instance keeps one document's history from
-  // bleeding into the next).
-  #caretaker = $state(new UndoCaretaker());
+// The shared caretaker glue (history, §7 control state + announcement, busy-
+// gated undo/redo, the §3 chord) lives in `SurfaceUndo`; this adds the canvas
+// gesture recorders.
+export class GraphUndoController<N extends NodeLike, E extends EdgeLike> extends SurfaceUndo {
   readonly #port: GraphPort<N, E>;
   /** Pre-drag positions of the dragged set, captured on dragstart so the
    *  whole gesture records as ONE command on release (#187). */
@@ -49,76 +47,38 @@ export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
    *  make undo delete a live wire). */
   #preConnectIds: Set<string> | null = null;
 
-  /** What the `aria-live` region reads out (§7). */
-  announcement = $state("");
-
   constructor(port: GraphPort<N, E>) {
+    super();
     this.#port = port;
-  }
-
-  get canUndo(): boolean {
-    return this.#caretaker.canUndo;
-  }
-  get canRedo(): boolean {
-    return this.#caretaker.canRedo;
-  }
-  /** True while an async inverse call is in flight (ADR-0053 §7) — a
-   *  backend-backed surface folds this into its control's disabled state so a
-   *  second reversal can't start mid-flight. Layout-only surfaces never set it. */
-  get busy(): boolean {
-    return this.#caretaker.busy;
-  }
-  /** Resolves once no undo/redo is in flight (ADR-0053 §7). A backend-backed
-   *  surface's committer awaits this before a fresh content op so the op queues
-   *  behind an in-flight reversal instead of racing `record()`. */
-  whenIdle(): Promise<void> {
-    return this.#caretaker.whenIdle();
-  }
-  /** Button tooltips: "Undo <label>" when a step is peekable. */
-  get undoTitle(): string {
-    const label = this.#caretaker.undoLabel;
-    return label ? `Undo ${label}` : "Undo";
-  }
-  get redoTitle(): string {
-    const label = this.#caretaker.redoLabel;
-    return label ? `Redo ${label}` : "Redo";
   }
 
   /** Drop the history — a new document hydrated, or a kind re-anchor reset
    *  the graph (old-kind history would restore nodes whose types/fields no
-   *  longer exist). In-flight gesture captures die with it. */
-  reset(): void {
-    this.#caretaker = new UndoCaretaker();
+   *  longer exist). In-flight gesture captures die with it. A backend-backed
+   *  surface (the plot board, ADR-0053 §7) records its own async content
+   *  commands through the inherited `record()` — one stack, one Ctrl+Z. */
+  override reset(): void {
+    super.reset();
     this.#dragStart = null;
     this.#preConnectIds = null;
   }
 
-  /** Record a command the surface built itself — the escape hatch for ops that
-   *  don't reduce to the graph-port vocabulary (add/delete/connect/config/move).
-   *  A backend-backed surface (the plot board, ADR-0053 §7) builds its own
-   *  async content commands and records them here so they share the one
-   *  caretaker — one stack, one Ctrl+Z, one button, no second surface. The
-   *  caretaker stays domain-agnostic; the command carries its own inverse. */
-  record(command: Command): void {
-    this.#caretaker.record(command);
-  }
-
   /** The palette created a node (record AFTER appending — §1 self-report). */
   recordAdd(node: N): void {
-    this.#caretaker.record(addNodeCommand(this.#port, node));
+    this.record(addNodeCommand(this.#port, node));
   }
 
   /** A deletion — the ✕ button's node + incident edges, or the delete key's
    *  whole selection. One transaction; the node returns with its id (§6). */
   recordDelete(nodes: N[], edges: E[]): void {
     if (nodes.length === 0 && edges.length === 0) return;
-    for (const c of deleteCommands(this.#port, nodes, edges)) this.#caretaker.record(c);
+    for (const c of deleteCommands(this.#port, nodes, edges)) this.record(c);
   }
 
   /** A config edit plus the incident edges its validity sweep dropped. */
   recordConfig(id: string, before: unknown, after: unknown, droppedEdges: E[]): void {
     const port = this.#port as GraphPort<N & { data: { cfg: unknown } }, E>;
-    for (const c of configCommands(port, id, before, after, droppedEdges)) this.#caretaker.record(c);
+    for (const c of configCommands(port, id, before, after, droppedEdges)) this.record(c);
   }
 
   /** `onbeforeconnect` hook: snapshot the edge ids before SvelteFlow appends,
@@ -148,7 +108,7 @@ export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
     const added = after.filter((e) => e.id === appended.id);
     const removed = before.filter((e) => !afterIds.has(e.id));
     if (added.length > 0 || removed.length > 0) {
-      this.#caretaker.record(connectCommand(this.#port, added, removed));
+      this.record(connectCommand(this.#port, added, removed));
     }
   }
 
@@ -168,58 +128,6 @@ export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
         .filter((n) => start.has(n.id))
         .map((n) => ({ id: n.id, from: start.get(n.id)!, to: { ...n.position } })),
     );
-    if (command) this.#caretaker.record(command);
+    if (command) this.record(command);
   }
-
-  /** Async so a backend-backed inverse completes before the announcement (§7);
-   *  a no-op for sync layout surfaces (the awaited closures resolve at once).
-   *  Short-circuits while busy so a mashed chord doesn't announce a misleading
-   *  "Nothing to undo" over an in-flight step. A closure that throws
-   *  `UndoCancelled` (a declined destructive reversal, S6b) is announced as
-   *  cancelled, not surfaced as an error — the caretaker left the step undoable. */
-  async undo(): Promise<void> {
-    if (this.#caretaker.busy) return;
-    try {
-      const step = await this.#caretaker.undo();
-      this.#announce(step === null ? "Nothing to undo" : `Undid ${step.label || "change"}`);
-    } catch (error) {
-      if (error instanceof UndoCancelled) return void this.#announce("Undo cancelled");
-      throw error;
-    }
-  }
-
-  async redo(): Promise<void> {
-    if (this.#caretaker.busy) return;
-    try {
-      const step = await this.#caretaker.redo();
-      this.#announce(step === null ? "Nothing to redo" : `Redid ${step.label || "change"}`);
-    } catch (error) {
-      if (error instanceof UndoCancelled) return void this.#announce("Redo cancelled");
-      throw error;
-    }
-  }
-
-  /** A repeat of the same message toggles a trailing no-break space —
-   *  identical text re-assigned is not re-announced by screen readers. */
-  #announce(text: string): void {
-    this.announcement = this.announcement === text ? `${text} ` : text;
-  }
-
-  /**
-   * The surface-scoped chord handler (§3) — attached to the surface's own
-   * section (`.view-designer`, `.plot-board`), riding bubbling from whatever
-   * inside has focus, never `svelte:window`, so one canvas's Ctrl+Z can't reach
-   * another's caretaker. Chords inside a text input stay with the input's native
-   * undo. Ctrl+Z → undo; Ctrl+Y and Ctrl+Shift+Z → redo (TipTap's redo — §3
-   * uniformity).
-   */
-  handleKeydown = (event: KeyboardEvent): void => {
-    const chord = undoChordOf(event);
-    if (!chord) return;
-    event.preventDefault();
-    event.stopPropagation();
-    // Fire-and-forget: the chord is handled (preventDefault above); the async
-    // reversal settles on its own and the caretaker's busy gate absorbs a mash.
-    void (chord === "undo" ? this.undo() : this.redo());
-  };
 }

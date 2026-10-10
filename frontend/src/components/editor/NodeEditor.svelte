@@ -60,7 +60,7 @@
     defaultAssistantId?: string;
     // host-agnostic — App.svelte derives this from its structure tree.
     availableScenes?: { id: string; title: string }[];
-    metadataReload?: { token: number; metadata: EntryMetadata; status?: string; entryType: string } | null;
+    metadataReload?: { token: number; metadata: EntryMetadata; status?: string; entryType: string; keepsHistory?: boolean } | null;
     titleReload?: { token: number; title: string } | null;
     dirty?: boolean;
     // True for ~2s after a save (#314): drives the layer picker's "Saved to …"
@@ -736,7 +736,7 @@
       status = metadataReload.status || defaultStatus();
       entryType = metadataReload.entryType || defaultEntryType();
       metadata = cloneMetadata(metadataReload.metadata);
-      railUndo.reset();
+      if (!metadataReload.keepsHistory) railUndo.reset();
     }
   });
   // When a NEW entry opens (different id), sync the shell-owned fields

@@ -12,7 +12,7 @@
   // `metaContent` comment.
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import type { RailUndoController } from "@/lib/rail/railUndoController.svelte";
   import type { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import type { MutationUnitGroup } from "@/lib/editor-core/mutationUnits";
@@ -115,9 +115,15 @@
   // or clearing a field often removes the very button that had focus, dropping
   // focus to <body> where the rail's chord handler can't hear it — so after a
   // recorded change, an orphaned focus comes back to this wrapper.
+  // Only a NEW record acts: `model` is rebuilt on every NodeEditor render, so
+  // this effect re-runs on unrelated changes too, and must not pull focus then.
   let wrapperEl = $state<HTMLElement>();
+  // Seeded from the current count: a remount (rail ↔ front matter) is not a record.
+  let seenRecorded = untrack(() => model.railUndo?.recorded ?? 0);
   $effect(() => {
-    if (!model.railUndo?.recorded) return;
+    const recorded = model.railUndo?.recorded ?? 0;
+    if (recorded === seenRecorded) return;
+    seenRecorded = recorded;
     void tick().then(() => {
       const active = document.activeElement;
       if (wrapperEl && (active === null || active === document.body)) wrapperEl.focus({ preventScroll: true });

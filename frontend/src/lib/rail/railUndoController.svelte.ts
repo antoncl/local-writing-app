@@ -14,11 +14,15 @@
 // rail passes a session id with each write, and consecutive commands sharing it
 // collapse through the caretaker's transaction mechanism.
 //
+// The caretaker glue (control state, announcement, busy-gated undo/redo, the
+// rail-scoped chord) is the shared `SurfaceUndo`; this adds the recorders and
+// the lock.
+//
 // Out of scope by design: the title (its input has native undo), the body (its
 // own TipTap/CodeMirror history), stop edits (they write the mutation set),
 // layer-override resets (a server save), entry-type changes, AI-review adoption.
-import { UndoCaretaker, type Command } from "@/lib/stores/undoCaretaker.svelte";
-import { undoChordOf } from "@/lib/utils/undoChord";
+import { SurfaceUndo } from "@/lib/stores/surfaceUndo.svelte";
+import type { Command } from "@/lib/stores/undoCaretaker.svelte";
 import type { EntryMetadata, MetadataValue } from "@/lib/types";
 
 export type RailUndoPort = {
@@ -42,39 +46,31 @@ function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-export class RailUndoController {
-  #caretaker = $state(new UndoCaretaker());
+export class RailUndoController extends SurfaceUndo {
   readonly #port: RailUndoPort;
 
-  /** What the `aria-live` region reads out (§7). */
-  announcement = $state("");
   /** Bumped on every record, so the rail host can keep the chord reachable
    *  when the clicked control vanished with the change (focus fell to body). */
   recorded = $state(0);
 
   constructor(port: RailUndoPort) {
+    super();
     this.#port = port;
   }
 
-  get canUndo(): boolean {
-    return !this.#port.locked() && this.#caretaker.canUndo;
-  }
-  get canRedo(): boolean {
-    return !this.#port.locked() && this.#caretaker.canRedo;
-  }
-  get undoTitle(): string {
-    const label = this.#caretaker.undoLabel;
-    return label ? `Undo ${label}` : "Undo";
-  }
-  get redoTitle(): string {
-    const label = this.#caretaker.redoLabel;
-    return label ? `Redo ${label}` : "Redo";
+  protected override locked(): boolean {
+    return this.#port.locked();
   }
 
   /** Drop the history — a different node, or the node reloaded from disk. */
-  reset(): void {
-    this.#caretaker = new UndoCaretaker();
+  override reset(): void {
+    super.reset();
     this.announcement = "";
+  }
+
+  override record(command: Command): void {
+    super.record(command);
+    this.recorded += 1;
   }
 
   /** A rail metadata write: `before` is the metadata just replaced, `next` the
@@ -99,7 +95,7 @@ export class RailUndoController {
       }
       this.#port.applyMetadata(current);
     };
-    this.#record({
+    this.record({
       label,
       transaction: session ? `rail:${session}` : undefined,
       undo: () => write("before"),
@@ -110,42 +106,10 @@ export class RailUndoController {
   /** A status change from the rail's status control. */
   recordStatus(before: string, next: string): void {
     if (before === next) return;
-    this.#record({
+    this.record({
       label: "Status change",
       undo: () => this.#port.applyStatus(before),
       redo: () => this.#port.applyStatus(next),
     });
   }
-
-  #record(command: Command): void {
-    this.#caretaker.record(command);
-    this.recorded += 1;
-  }
-
-  async undo(): Promise<void> {
-    if (this.#port.locked() || this.#caretaker.busy) return;
-    const step = await this.#caretaker.undo();
-    this.#announce(step === null ? "Nothing to undo" : `Undid ${step.label || "change"}`);
-  }
-
-  async redo(): Promise<void> {
-    if (this.#port.locked() || this.#caretaker.busy) return;
-    const step = await this.#caretaker.redo();
-    this.#announce(step === null ? "Nothing to redo" : `Redid ${step.label || "change"}`);
-  }
-
-  #announce(text: string): void {
-    this.announcement = this.announcement === text ? `${text} ` : text;
-  }
-
-  /** The rail-scoped chord handler (§3): attached to the rail's own wrapper,
-   *  never `svelte:window`, so a chord in the body or another pane can't reach
-   *  this history. Inside a text input the input's native undo keeps it. */
-  handleKeydown = (event: KeyboardEvent): void => {
-    const chord = undoChordOf(event);
-    if (!chord) return;
-    event.preventDefault();
-    event.stopPropagation();
-    void (chord === "undo" ? this.undo() : this.redo());
-  };
 }

@@ -113,7 +113,15 @@ import type {
 // Signal that tells a pane's MetadataPanel/title to re-seed from a refreshed
 // server baseline (token forces the reactive re-read even when the value is
 // structurally equal).
-export type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
+// `keepsHistory` (#2438): the reload is the pane's own save stamping minted ids
+// back, not new content from disk — the editor keeps its rail undo history.
+export type MetadataReloadSignal = {
+  token: number;
+  metadata: EntryMetadata;
+  status: string;
+  entryType: string;
+  keepsHistory?: boolean;
+};
 
 // ADR-0096 §1/§2 (#2255's generalisation): every list field of `entryType`
 // that declares an identity member, mapped to that member's key — the map
@@ -792,6 +800,9 @@ class EditorPanesController {
             metadata: cloneMetadata(stampedPane.draftMetadata),
             status: stampedPane.draftStatus,
             entryType: stampedPane.draftEntryType,
+            // The author's own save, only gaining minted ids — not a reload
+            // from disk, so the rail's undo history survives it (#2438).
+            keepsHistory: true,
           },
         };
       }

@@ -80,6 +80,9 @@ describe("plotline pane save adopts minted beat ids (#2255)", () => {
     const reload = editorPanes.metadataReloadsByPane.editor_1;
     expect(reload?.token).toBe(tokenBefore);
     expect(reload?.metadata).toEqual(pane.draftMetadata);
+    // #2438: the pane's own save stamping ids back is not a reload from disk —
+    // the editor keeps its rail undo history across it.
+    expect(reload?.keepsHistory).toBe(true);
   });
 
   it("a second save sends the adopted id, so nothing is re-minted", async () => {

@@ -1,5 +1,5 @@
 // #2437: clearing a list-valued rail field (tags, a ref list) drops every
-// member at once, and rail metadata edits are not undoable (#2438) — so the
+// member at once, and the rail's undo (#2438) lasts only the session — so the
 // reset gesture on a non-empty list always asks first, naming what goes.
 // Scalar fields keep the one-click reset: one value is cheap to retype.
 //

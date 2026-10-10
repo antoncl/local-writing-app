@@ -35,6 +35,7 @@
   import { referenceIndexStore, referrerFieldIndexStore } from "@/lib/stores/references";
   import { backlinksFor } from "@/lib/views/backlinks";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
+  import { RailUndoController } from "@/lib/rail/railUndoController.svelte";
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
   import { stopEditingEngaged } from "@/lib/editor-core/stopFieldEditable";
   import { scrubRefreshAction } from "@/lib/editor-core/scrubRefreshAction";
@@ -450,9 +451,19 @@
   }
 
   function updateStatus(value: string) {
+    railUndo.recordStatus(status, value);
     status = value;
     emitChange();
   }
+
+  // #2438: the rail's per-pane undo history (lib/rail/railUndoController).
+  // Replays write state directly + autosave; reset where metadata is reseeded.
+  const railUndo = new RailUndoController({
+    getMetadata: () => metadata, applyMetadata: (next) => { metadata = next; emitChange(); },
+    getStatus: () => status, applyStatus: (next) => { status = next; emitChange(); },
+    fieldLabel: (id) => effectiveFieldLabel(metadataSchema, entryType, id),
+    locked: () => scrubbed || editorReadOnly,
+  });
 
   function updateEntryType(value: string) {
     entryType = value;
@@ -725,6 +736,7 @@
       status = metadataReload.status || defaultStatus();
       entryType = metadataReload.entryType || defaultEntryType();
       metadata = cloneMetadata(metadataReload.metadata);
+      railUndo.reset();
     }
   });
   // When a NEW entry opens (different id), sync the shell-owned fields
@@ -740,6 +752,7 @@
       status = documentStatus(scene);
       entryType = nextEntryType;
       metadata = cloneMetadata(scene.metadata ?? {});
+      railUndo.reset();
       // Read body shape from the FRESHLY-resolved entry-type (not the
       // `bodyShape` reactive, which hasn't recomputed yet — and reading
       // it would introduce a cyclical reactive dependency, since
@@ -766,6 +779,7 @@
       status = defaultStatus();
       entryType = defaultEntryType();
       metadata = {};
+      railUndo.reset();
       liveWordCount = 0;
     }
   });
@@ -1125,13 +1139,13 @@
       metadataSchema, entryType, status, metadata, documentKind, documentLabel,
       documentEntryTypes, metadataFieldIds, scene, createLayerId, overriddenFieldsForPanel,
       scrubbed, scrub, stopUnit, compare: snapshotCompare ?? entryCompare, editorReadOnly, bodyShape,
-      resolvedCascade, backlinks, title, hostPaneId,
+      resolvedCascade, backlinks, title, hostPaneId, railUndo,
     }}
     deps={{ loreEntries, promptEntries, structure, researchStructure, implicitContextMatcher, sectionRegistry, computedFieldString }}
     on={{
       entryTypeChange: (next) => updateEntryType(next),
       statusChange: (next) => updateStatus(next),
-      metadataChange: (next) => { metadata = next; emitChange(); },
+      metadataChange: (next, session) => { railUndo.recordMetadata(metadata, next, session); metadata = next; emitChange(); },
       customData: () => onCustomData?.({ entryType, kind: documentKind }),
       navigate: (payload) => onNavigate?.(payload),
       resetField: (fieldId) => onResetField?.(fieldId),
@@ -1302,6 +1316,7 @@
       bind:open={railOpen}
       label={`${documentLabel} details`}
       content={metaContent}
+      undo={railUndo}
       detached={detailsDetached}
       onDetach={canDetachDetails ? detachDetails : undefined}
       onReattach={reattachDetails}

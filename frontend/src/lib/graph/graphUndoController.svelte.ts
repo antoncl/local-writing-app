@@ -13,6 +13,7 @@
 // plot board (S7c) records only drags; connect/config stay for edge-and-config
 // canvases like the view designer.
 import { UndoCaretaker, UndoCancelled, type Command } from "@/lib/stores/undoCaretaker.svelte";
+import { undoChordOf } from "@/lib/utils/undoChord";
 import {
   addNodeCommand,
   configCommands,
@@ -213,26 +214,12 @@ export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
    * uniformity).
    */
   handleKeydown = (event: KeyboardEvent): void => {
-    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
-    const key = event.key.toLowerCase();
-    if (key !== "z" && key !== "y") return;
-    if (isEditableTarget(event.target)) return;
+    const chord = undoChordOf(event);
+    if (!chord) return;
     event.preventDefault();
     event.stopPropagation();
     // Fire-and-forget: the chord is handled (preventDefault above); the async
     // reversal settles on its own and the caretaker's busy gate absorbs a mash.
-    if (key === "z" && !event.shiftKey) void this.undo();
-    else void this.redo();
+    void (chord === "undo" ? this.undo() : this.redo());
   };
-}
-
-// Deliberately NOT `<select>`: a select has no native undo, so swallowing the
-// chord there would dead-zone Ctrl+Z at the exact moment an author wants to
-// revert the option they just picked.
-function isEditableTarget(t: EventTarget | null): boolean {
-  return (
-    t instanceof HTMLInputElement ||
-    t instanceof HTMLTextAreaElement ||
-    (t instanceof HTMLElement && t.isContentEditable)
-  );
 }

@@ -139,7 +139,9 @@
     // its createEventDispatcher). NodeEditor (legacy parent) passes these.
     onEntryTypeChange?: (entryType: string) => void;
     onStatusChange?: (status: string) => void;
-    onMetadataChange?: (metadata: EntryMetadata) => void;
+    // `session` (#2438): set while the field is open for editing, so every
+    // write of one edit session (each keystroke of a text field) undoes as one step.
+    onMetadataChange?: (metadata: EntryMetadata, session?: string) => void;
     onCustomData?: () => void;
     onNavigate?: (target: NavigateTarget) => void;
     // Clear-to-inherit (#517): drop a field's layer override so it reverts to the
@@ -433,10 +435,12 @@
   }
 
   // #2437: the user-facing clear (the reset mark, "Reset to inherited", a
-  // picker emptied to none). A non-empty list drops every member at once and
-  // rail edits aren't undoable (#2438), so it always asks first; anything else
-  // clears straight away. The internal required-select pop in `writeField`
-  // calls `clearField` directly — it never loses data, so it never asks.
+  // picker emptied to none). A non-empty list drops every member at once, and
+  // the rail's undo (#2438) lasts only the session — a clear noticed tomorrow is
+  // still lost — so it always asks first; anything else clears straight away.
+  // Not flagged "cannot be undone": within the session it can. The internal
+  // required-select pop in `writeField` calls `clearField` directly — it never
+  // loses data, so it never asks.
   function requestClearField(fieldId: string) {
     const model = rowModel(fieldId);
     const prompt = listClearPrompt(
@@ -453,7 +457,6 @@
       ...prompt,
       confirmLabel: "Clear",
       destructive: true,
-      cannotBeUndone: true,
       onConfirm: async () => clearField(fieldId),
     });
   }
@@ -474,7 +477,7 @@
       clearField(fieldId);
       return;
     }
-    onMetadataChange?.({ ...metadata, [fieldId]: v });
+    onMetadataChange?.({ ...metadata, [fieldId]: v }, openFieldId === fieldId ? `${fieldId}#${editSession}` : undefined);
   }
 
   function updateAssistantProvider(provider: string, tier: string, model: string) {
@@ -513,7 +516,10 @@
   // persisted, resets with the node.
   let openFieldId = $state<string | null>(null);
   let openRowEl: HTMLElement | null = null;
+  // #2438: bumped per open, naming the edit session `writeField` tags its writes with.
+  let editSession = 0;
   async function openField(fieldId: string, rowEl: HTMLElement) {
+    editSession += 1;
     openFieldId = fieldId;
     openRowEl = rowEl;
     await tick();

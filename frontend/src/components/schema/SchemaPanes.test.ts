@@ -10,6 +10,7 @@ import { render, screen, fireEvent } from "@/lib/test/component";
 import SchemaPanes from "./SchemaPanes.svelte";
 import RegionBody from "@/components/workspace/RegionBody.svelte";
 import { clearSchema, setSchemaOverview } from "@/lib/stores/schema";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
 import type { MetadataSchema, MetadataSchemaOverview } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({
@@ -62,7 +63,7 @@ describe("SchemaPanes move field to another layer (#2442)", () => {
     vi.clearAllMocks();
   });
 
-  it("re-points the open editor (label, picker, and next save) at the new layer", async () => {
+  function mountPanes() {
     render(SchemaPanes, {
       props: {
         isProjectOpen: true,
@@ -76,6 +77,10 @@ describe("SchemaPanes move field to another layer (#2442)", () => {
     });
     render(RegionBody, { props: { id: "schema" } });
     render(RegionBody, { props: { id: "schema_type" } });
+  }
+
+  it("re-points the open editor (label, picker, and next save) at the new layer", async () => {
+    mountPanes();
 
     // Open the field the way a user does: click it in the Types tree.
     const fieldRow = await screen.findByLabelText(/^Field truth/);
@@ -98,5 +103,28 @@ describe("SchemaPanes move field to another layer (#2442)", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Done" }));
     await vi.waitFor(() => expect(api.upsertMetadataField).toHaveBeenCalled());
     expect(vi.mocked(api.upsertMetadataField).mock.calls[0][0]).toBe(SERIES);
+  });
+
+  it("follows a downward move once the warning is confirmed", async () => {
+    setSchemaOverview(overviewWithTruthOn(SERIES));
+    vi.mocked(api.getMetadataSchemaOverview).mockResolvedValue(overviewWithTruthOn(PROJECT));
+    mountPanes();
+
+    const fieldRow = await screen.findByLabelText(/^Field truth/);
+    await fireEvent.click(fieldRow.querySelector("button") ?? fieldRow);
+    await vi.waitFor(() => expect(document.querySelector(".sfi-move-hint strong")?.textContent).toBe("Series"));
+
+    const picker = screen.getByLabelText("Move to layer") as HTMLSelectElement;
+    await fireEvent.change(picker, { target: { value: PROJECT } });
+    await fireEvent.click(screen.getByRole("button", { name: "Move" }));
+    // A move to a nearer layer warns first and does nothing until confirmed.
+    expect(confirmService.active?.title).toBe("Move field to a nearer layer?");
+    expect(api.moveMetadataField).not.toHaveBeenCalled();
+    await confirmService.resolve();
+
+    await vi.waitFor(() => expect(document.querySelector(".sfi-move-hint strong")?.textContent).toBe("Project"));
+    await fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await vi.waitFor(() => expect(api.upsertMetadataField).toHaveBeenCalled());
+    expect(vi.mocked(api.upsertMetadataField).mock.calls[0][0]).toBe(PROJECT);
   });
 });

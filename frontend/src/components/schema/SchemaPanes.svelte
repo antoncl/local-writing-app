@@ -896,6 +896,12 @@
   async function doMoveSchemaField(fieldId: string, targetLayerId: string, entryType: string) {
     setMetadataSchema(await api.moveMetadataField(fieldId, targetLayerId, entryType));
     await refreshMetadataSchema();
+    // The editor stays open on this field, so its layer must follow the move:
+    // it labels "currently on …" and is the write target for the next save
+    // (#2442). Read the home layer back from the server, not the request.
+    if (selectedSchemaFieldId === fieldId) {
+      schemaFieldLayerId = get(metadataSchemaOverviewStore)?.field_sources[fieldId]?.layer_id ?? targetLayerId;
+    }
     setValidation(await api.validateProject());
     const layerLabel = metadataSchemaLayers.find((layer) => layer.id === targetLayerId)?.label ?? targetLayerId;
     setStatus(`Moved field to ${layerLabel}`);

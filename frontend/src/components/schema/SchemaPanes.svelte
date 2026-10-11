@@ -187,6 +187,13 @@
     openDetailTypesPane();
   }
 
+  // The layer whose schema declares this field; a built-in edits as an overlay
+  // on the project layer. Reads the store live, like the sync below.
+  function fieldHomeLayerId(fieldId: string) {
+    const source = get(metadataSchemaOverviewStore)?.field_sources[fieldId];
+    return source?.built_in ? projectSchemaLayerId() : (source?.layer_id ?? projectSchemaLayerId());
+  }
+
   // Re-point the schema-authoring editor's selection at still-valid targets
   // after the schema store changes. Authoring state (not server-mirrored).
   // Reads the store live (`get`) — callers invoke it right after a store set,
@@ -198,7 +205,12 @@
     if (!schema.entry_types[schemaFieldEntryType]) {
       schemaFieldEntryType = schema.entry_types["manuscript:scene"] ? "manuscript:scene" : Object.keys(schema.entry_types)[0] ?? "manuscript:scene";
     }
-    if (!schemaFieldLayerId || !layers.some((layer) => layer.id === schemaFieldLayerId)) {
+    // An open field's layer is where the server says it lives, so a refresh
+    // after a move re-points the editor's label and save target (#2442).
+    const openFieldId = selectedSchemaFieldId;
+    if (openFieldId && get(metadataSchemaOverviewStore)?.field_sources[openFieldId]) {
+      schemaFieldLayerId = fieldHomeLayerId(openFieldId);
+    } else if (!schemaFieldLayerId || !layers.some((layer) => layer.id === schemaFieldLayerId)) {
       schemaFieldLayerId = projectSchemaLayerId();
     }
     if (!schemaTypeLayerId || !layers.some((layer) => layer.id === schemaTypeLayerId)) {
@@ -257,7 +269,7 @@
       : (entryTypeIdsForField(fieldId, schemaFieldKind)[0] ?? defaultSchemaEntryType(schemaFieldKind));
     selectedSchemaFieldId = fieldId;
     schemaFieldReadonly = Boolean(metadataSchemaOverview?.field_sources[fieldId]?.built_in);
-    schemaFieldLayerId = metadataSchemaOverview?.field_sources[fieldId]?.built_in ? projectSchemaLayerId() : (metadataSchemaOverview?.field_sources[fieldId]?.layer_id ?? projectSchemaLayerId());
+    schemaFieldLayerId = fieldHomeLayerId(fieldId);
     schemaFieldEntryType = targetEntryTypeId;
     expandedSchemaFieldId = fieldId;
   }

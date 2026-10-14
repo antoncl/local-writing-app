@@ -28,6 +28,7 @@ from app.models import (
     CreateLoreEntryRequest,
     CreatePlotlineRequest,
     CreateStructureNodeRequest,
+    SaveSceneRequest,
 )
 from app.services.ai.helpers import create_environment_for_project
 
@@ -77,6 +78,28 @@ class FieldContractBuiltinsTests(unittest.TestCase):
             builtin_prompt_id(self.service, "Summarize scene"), {"entry": self._scene_id()}
         )
         self.assertEqual([f["id"] for f in stored], ["summary"])
+
+    def _summarize(self, scene_id: str) -> None:
+        """Give the scene a summary — Draft scene stops without one."""
+        existing = self.service.read_scene(scene_id)
+        self.service.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=existing.title,
+                body=existing.body,
+                base_revision=existing.revision,
+                status="draft",
+                entry_type="manuscript:scene",
+                metadata={"summary": "Honor leaves the station."},
+            ),
+        )
+
+    # --- draft-scene (#2456): only the scene's prose body ---
+    def test_draft_scene_registers_only_body(self) -> None:
+        scene_id = self._scene_id()
+        self._summarize(scene_id)
+        stored = self._stored(builtin_prompt_id(self.service, "Draft scene"), {"entry": scene_id})
+        self.assertEqual([f["id"] for f in stored], ["body"])
 
     # --- revise-entry: the FULL proposable set, including body, both branches ---
     def test_revise_entry_create_registers_full_proposable_set(self) -> None:

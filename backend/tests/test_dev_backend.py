@@ -50,3 +50,78 @@ def test_explicit_config_dir_override_is_respected(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("LWA_CONFIG_DIR", str(Path("deliberate") / "override"))
     env = dev_backend.env_for_server("nonce")
     assert env["LWA_CONFIG_DIR"] == str(Path("deliberate") / "override")
+
+
+class _FakeProcess:
+    def __init__(self, log: list[str], name: str) -> None:
+        self.log, self.name = log, name
+
+    def terminate(self) -> None:
+        self.log.append(f"terminate {self.name}")
+
+    def join(self) -> None:
+        self.log.append(f"join {self.name}")
+
+    def start(self) -> None:
+        self.log.append(f"start {self.name}")
+
+
+def test_reload_restart_terminates_the_old_server_and_starts_a_new_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # #2471: uvicorn's Windows restart sent a console Ctrl+C that never arrived,
+    # so `join()` hung and the old server kept serving stale code. The wrapper's
+    # restart terminates instead — it must stop the old child before starting
+    # the new one, and hand uvicorn's own config/target/sockets to the new one.
+    from uvicorn.supervisors.basereload import BaseReload
+
+    # Loading the wrapper patches BaseReload on Windows; undo it after the test.
+    monkeypatch.setattr(BaseReload, "restart", BaseReload.restart)
+    dev_uvicorn = _load_script("dev_uvicorn")
+    log: list[str] = []
+    calls: list[dict] = []
+
+    def fake_get_subprocess(**kwargs):
+        calls.append(kwargs)
+        return _FakeProcess(log, "new")
+
+    monkeypatch.setattr(dev_uvicorn, "get_subprocess", fake_get_subprocess)
+    reloader = type("Reloader", (), {})()
+    reloader.process = _FakeProcess(log, "old")
+    reloader.config, reloader.target, reloader.sockets = "cfg", "tgt", ["sock"]
+
+    dev_uvicorn.restart_by_terminate(reloader)
+
+    assert log == ["terminate old", "join old", "start new"]
+    assert calls == [{"config": "cfg", "target": "tgt", "sockets": ["sock"]}]
+    assert reloader.process.name == "new"
+
+
+def test_the_uvicorn_internals_the_restart_relies_on_are_still_there() -> None:
+    # The wrapper reaches into uvicorn (pinned in requirements.lock); an upgrade
+    # that moves these must fail here, not hang a dev server again.
+    import inspect
+
+    from uvicorn._subprocess import get_subprocess
+    from uvicorn.supervisors.basereload import BaseReload
+
+    assert {"config", "target", "sockets"} <= set(inspect.signature(get_subprocess).parameters)
+    assert callable(BaseReload.restart)
+
+
+def test_the_wrapper_replaces_the_restart_on_windows_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    # POSIX keeps uvicorn's own restart (SIGTERM via terminate() already works).
+    from uvicorn.supervisors.basereload import BaseReload
+
+    monkeypatch.setattr(BaseReload, "restart", BaseReload.restart)
+    dev_uvicorn = _load_script("dev_uvicorn")
+    patched = BaseReload.restart is dev_uvicorn.restart_by_terminate
+    assert patched == (sys.platform == "win32")
+
+
+def test_the_launcher_runs_uvicorn_through_the_wrapper() -> None:
+    source = (Path(__file__).resolve().parents[2] / "scripts" / "dev_backend.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"dev_uvicorn.py"' in source
+    assert '"-m", "uvicorn"' not in source

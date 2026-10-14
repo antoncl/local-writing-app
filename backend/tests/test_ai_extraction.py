@@ -170,6 +170,26 @@ class ExtractionEnvelopeTests(unittest.TestCase):
         # #2456: a drafted empty body is not condensed to its current (zero) length.
         self.assertIn("a body that is empty now takes the length the conversation wrote", envelope)
 
+    def test_a_manuscript_body_clause_keeps_the_change_markers(self) -> None:
+        # #2456: found in the browser — a 9B model dropped the chat's `⟦id⟧`
+        # markers when transcribing a scene, so every pill landed at the end.
+        schema = self.service.read_metadata_schema()
+        stored = [
+            f for f in _fields(self.service, schema, "manuscript:scene")
+            if f["proposable"] and f["id"] == "body"
+        ]
+        envelope = render_extraction_envelope(
+            self.service, entry_type="manuscript:scene", creating=False, stored=stored
+        )
+        self.assertIn("Keep every change marker in the prose", envelope)
+        lore = render_extraction_envelope(
+            self.service,
+            entry_type="lore:character",
+            creating=False,
+            stored=self._stored("lore:character"),
+        )
+        self.assertNotIn("change marker", lore)
+
     def test_revise_envelope_anchors_length_to_the_current_entry(self) -> None:
         # #1899: a token cap is a ceiling, not a target — a revise should hold
         # the body and each field to about their CURRENT length (grounded by

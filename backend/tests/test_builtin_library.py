@@ -1012,6 +1012,30 @@ class DraftScenePromptTests(unittest.TestCase):
         self._set(self.scene_ids[1], summary="Honor meets the admiral.")
         self.assertNotIn("The scene as it is written now", self._preview(self.scene_ids[1]))
 
+    def test_a_scene_holding_only_its_pills_counts_as_empty(self) -> None:
+        # Found in the browser: the pills' comments strip to bare whitespace,
+        # which must not read as prose to redraft.
+        from mutation_helpers import save_scenes_with_mutations
+
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        save_scenes_with_mutations(
+            self.service,
+            {
+                self.scene_ids[1]:
+                f"<!-- mutate:entity={self.honor.id};field=title;value=Dame%20Honor;id=m1 -->\n\n"
+                f"<!-- mutate:entity={self.honor.id};field=title;value=Lady%20Honor;id=m2 -->",
+            },
+        )
+        text = self._preview(self.scene_ids[1])
+        self.assertIn("Changes this scene makes", text)
+        self.assertNotIn("The scene as it is written now", text)
+
+    def test_the_author_directions_end_before_the_story_so_far(self) -> None:
+        # Found in the browser: the snippet's last line ran into the heading.
+        self._set(self.scene_ids[0], summary="Honor leaves the station.")
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        self.assertIn("\n\n## The story so far", self._preview(self.scene_ids[1]))
+
     def test_draft_scene_without_anchors_has_no_changes_section(self) -> None:
         self._set(self.scene_ids[1], summary="Honor meets the admiral.")
         text = self._preview(self.scene_ids[1])

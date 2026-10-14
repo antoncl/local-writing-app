@@ -70,6 +70,8 @@ The point-of-view character is **{{ narration.character.title }}**.
 {% endif %}
 {% include "Project settings" %}
 {% include "Author directions in brackets" %}
+
+
 {% if narration.character %}{% do use(narration.character) %}{% endif %}
 {% for c in changes if c.entity %}{% do use(c.entity) %}{% endfor %}
 {% include "Relevant lore" %}
@@ -106,12 +108,12 @@ These happen during the scene, in this order. Make each one happen in the story,
 {% for c in changes %}- `⟦{{ c.anchor_id }}⟧` {{ c.text }}
 {% endfor %}
 {% endif %}
-{% if e.body %}
+{% if e.body | trim %}
 
 ### The scene as it is written now
 Redraft it to the summary: keep what already works, and rewrite what doesn't.
 
-{{ e.body }}
+{{ e.body | trim }}
 {% endif %}
 
 Draft the scene, about {{ inputs.length | default(1200) }} words.

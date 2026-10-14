@@ -74,6 +74,37 @@ def _body_description(project_service: ProjectService, stored: list[dict[str, An
     return getattr(body_field, "description", None) if body_field else None
 
 
+def _body_clause(body_description: str | None, *, entry_type: str, creating: bool) -> str:
+    """The envelope's `"body"` line: what the body is, and when to include it."""
+    clause = f'- "body": {body_description + " " if body_description else ""}'
+    clause += (
+        "Write the body for the new entry on that basis, at the length its "
+        "description calls for."
+        if creating
+        else (
+            # #2456: "or wrote" — a draft of an empty body (Draft scene) is
+            # written in the conversation, not revised there.
+            'Include a "body" item ONLY if the conversation actually revised '
+            "or wrote the body; then give its complete text at about the length "
+            "the body has now — a revision changes the content, not the volume, "
+            "unless the author asked for more or less; a body that is empty now "
+            "takes the length the conversation wrote. OMIT the \"body\" item "
+            "entirely if the body was not discussed or changed — never "
+            "reconstruct it from nothing."
+        )
+    )
+    if entry_type.partition(":")[0] == "manuscript":
+        # #2456: a manuscript body's `⟦id⟧` change markers are where its
+        # mutation pills go (`_place_scene_pills`). A model transcribing
+        # "story text" drops them as noise — seen with a 9B model.
+        clause += (
+            " Keep every change marker in the prose — a `⟦…⟧` on its own — "
+            "exactly as and where the conversation wrote it; it is not story "
+            "text, but it marks where a change happens."
+        )
+    return clause
+
+
 def render_extraction_envelope(
     project_service: ProjectService,
     *,
@@ -171,24 +202,7 @@ def render_extraction_envelope(
         "conversation.",
     ]
     if body_allowed:
-        clause = f'- "body": {body_description + " " if body_description else ""}'
-        clause += (
-            "Write the body for the new entry on that basis, at the length its "
-            "description calls for."
-            if creating
-            else (
-                # #2456: "or wrote" — a draft of an empty body (Draft scene) is
-                # written in the conversation, not revised there.
-                'Include a "body" item ONLY if the conversation actually revised '
-                "or wrote the body; then give its complete text at about the length "
-                "the body has now — a revision changes the content, not the volume, "
-                "unless the author asked for more or less; a body that is empty now "
-                "takes the length the conversation wrote. OMIT the \"body\" item "
-                "entirely if the body was not discussed or changed — never "
-                "reconstruct it from nothing."
-            )
-        )
-        lines.append(clause)
+        lines.append(_body_clause(body_description, entry_type=entry_type, creating=creating))
     fields_clause = "- Other fields: "
     if creating:
         if title_allowed:

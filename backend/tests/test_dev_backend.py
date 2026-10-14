@@ -97,6 +97,18 @@ def test_reload_restart_terminates_the_old_server_and_starts_a_new_one(
     assert reloader.process.name == "new"
 
 
+def test_the_uvicorn_internals_the_restart_relies_on_are_still_there() -> None:
+    # The wrapper reaches into uvicorn (pinned in requirements.lock); an upgrade
+    # that moves these must fail here, not hang a dev server again.
+    import inspect
+
+    from uvicorn._subprocess import get_subprocess
+    from uvicorn.supervisors.basereload import BaseReload
+
+    assert {"config", "target", "sockets"} <= set(inspect.signature(get_subprocess).parameters)
+    assert callable(BaseReload.restart)
+
+
 def test_the_wrapper_replaces_the_restart_on_windows_only(monkeypatch: pytest.MonkeyPatch) -> None:
     # POSIX keeps uvicorn's own restart (SIGTERM via terminate() already works).
     from uvicorn.supervisors.basereload import BaseReload

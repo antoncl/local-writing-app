@@ -1,6 +1,7 @@
 <!--
   ProseAIToolbar — floating inline toolbar shown over an AI continuation/revision
-  in ProseBodyView. Pure presentation: it shows the generating spinner, an error
+  in ProseBodyView. Pure presentation: it shows the generating spinner (with a
+  Cancel), an error
   with a Dismiss, or the accept/retry/discard controls + usage-cost meta for a
   ready suggestion.
 
@@ -23,9 +24,10 @@
     onRetry: () => void;
     onDiscard: () => void;
     onDismissError: () => void;
+    onCancel: () => void;
   }
 
-  let { position, generating, suggestionId, error, meta, onAccept, onRetry, onDiscard, onDismissError }: Props = $props();
+  let { position, generating, suggestionId, error, meta, onAccept, onRetry, onDiscard, onDismissError, onCancel }: Props = $props();
 </script>
 
 {#if position.visible && (generating || suggestionId || error)}
@@ -39,6 +41,16 @@
     {#if generating}
       <span class="ai-toolbar-spinner" aria-hidden="true">⟳</span>
       <span class="ai-toolbar-status">Generating…</span>
+      <button
+        type="button"
+        class="ai-toolbar-btn"
+        data-testid="ai-cancel"
+        aria-label="Cancel generation"
+        title="Cancel (Esc)"
+        onmousedown={(e) => { e.preventDefault(); onCancel(); }}
+      >
+        Cancel
+      </button>
     {:else if error && !suggestionId}
       <span class="ai-toolbar-status">⚠ {error}</span>
       <button type="button" class="ai-toolbar-btn" onmousedown={(e) => { e.preventDefault(); onDismissError(); }} title="Dismiss">

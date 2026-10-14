@@ -168,6 +168,52 @@ describe("inline stream render throttle (#2428)", () => {
   });
 });
 
+describe("cancelling a running stream (#2464)", () => {
+  // A stream that yields two deltas, then waits for the abort the way a real fetch does.
+  function abortableStream() {
+    vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* (_payload, signal) {
+      yield { type: "delta", text: "alpha " } as never;
+      yield { type: "delta", text: "beta " } as never;
+      await new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      });
+    });
+  }
+
+  it("removes a cursor insert, with no error", async () => {
+    const { editor, ctrl } = setup("Before.");
+    editor.commands.setTextSelection(1 + "Before.".length);
+    abortableStream();
+    const run = ctrl.runPromptEntryWithInputs(ENTRY, {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(docText(editor)).toContain("alpha");
+    ctrl.cancelGeneration();
+    await run;
+    expect(docText(editor)).toBe("Before.");
+    expect(ctrl.error).toBeNull();
+    expect(ctrl.suggestionId).toBeNull();
+    expect(ctrl.generating).toBe(false);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(docText(editor)).toBe("Before.");
+  });
+
+  it("puts a revised selection back, with no error", async () => {
+    const { editor, ctrl } = setup("Keep this text.");
+    editor.commands.setTextSelection({ from: 1, to: 1 + "Keep this text.".length });
+    abortableStream();
+    const entry = { ...(ENTRY as object), context_strategy: { output: { handler: "inline", destination: "selection" } } } as never;
+    const run = ctrl.runPromptEntryWithInputs(entry, {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(docText(editor)).toContain("alpha");
+    ctrl.cancelGeneration();
+    await run;
+    expect(docText(editor)).toBe("Keep this text.");
+    expect(ctrl.error).toBeNull();
+    expect(ctrl.suggestionId).toBeNull();
+    expect(ctrl.generating).toBe(false);
+  });
+});
+
 describe("line breaks at the ends of a suggestion (#2431)", () => {
   const nodeTypes = (editor: Editor) => {
     const types: string[] = [];

@@ -79,13 +79,19 @@ function setup(kind: DocumentKind, doc: { id: string; title: string; entry_type:
 
 const reply = (edits: unknown[] = []) =>
   ({ ok: true, content: "", provider: "p", model: "m", latency_ms: 1, truncated: false, cost_usd: 0.01, edits }) as never;
-const LORE_DOC = { id: "lore_1", title: "Irene", entry_type: "lore:character" };
+// A line-edit run rides the streaming route (#2464): a delta, then the `done` line.
+const fakeStream = (done: unknown) =>
+  vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
+    yield { type: "delta", text: "{}" } as never;
+    yield { type: "done", ...(done as object) } as never;
+  });
+const LORE_DOC ={ id: "lore_1", title: "Irene", entry_type: "lore:character" };
 const SCENE_DOC = { id: "scene_1", title: "Opening", entry_type: "manuscript:scene" };
 
 describe("inline prompts on a lore document (#2475)", () => {
   it("runs a lore-offered prompt with no dialog, entry seeded, no target scene", async () => {
     const { ctrl, dialogs } = setup("lore", LORE_DOC);
-    const spy = vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    const spy = fakeStream(reply());
     await ctrl.runPromptEntry(LORE_P);
     expect(dialogs).toEqual([]);
     const req = spy.mock.calls[0][0];
@@ -98,7 +104,7 @@ describe("inline prompts on a lore document (#2475)", () => {
 
   it("refuses a scene-only prompt with a notice", async () => {
     const { ctrl, notices } = setup("lore", LORE_DOC);
-    const spy = vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    const spy = fakeStream(reply());
     await ctrl.runPromptEntry(SCENE_P);
     expect(spy).not.toHaveBeenCalled();
     expect(notices).toHaveLength(1);
@@ -106,7 +112,7 @@ describe("inline prompts on a lore document (#2475)", () => {
 
   it("files telemetry under no scene", async () => {
     const { editor, ctrl } = setup("lore", LORE_DOC);
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply([{ find: "cat", replace: "dog", reason: "r" }]));
+    fakeStream(reply([{ find: "cat", replace: "dog", reason: "r" }]));
     await ctrl.runPromptEntry(LORE_P);
     acceptLineEdit(editor.view, lineEditState(editor.state).edits[0].id);
     expect(api.aiAppendInvocation).toHaveBeenCalledTimes(1);
@@ -117,7 +123,7 @@ describe("inline prompts on a lore document (#2475)", () => {
 describe("inline prompts on a scene are unchanged (#2475)", () => {
   it("sends the scene id and runs a no-input prompt directly", async () => {
     const { ctrl, dialogs } = setup("manuscript", SCENE_DOC);
-    const spy = vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    const spy = fakeStream(reply());
     await ctrl.runPromptEntry(SCENE_P);
     expect(dialogs).toEqual([]);
     expect(spy.mock.calls[0][0].target_scene_id).toBe("scene_1");
@@ -126,7 +132,7 @@ describe("inline prompts on a scene are unchanged (#2475)", () => {
 
   it("still opens the dialog for a prompt with a visible input", async () => {
     const { ctrl, dialogs } = setup("manuscript", SCENE_DOC);
-    const spy = vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    const spy = fakeStream(reply());
     await ctrl.runPromptEntry(VISIBLE_P);
     expect(spy).not.toHaveBeenCalled();
     expect(dialogs).toHaveLength(1);

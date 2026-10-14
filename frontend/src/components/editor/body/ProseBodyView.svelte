@@ -1016,6 +1016,12 @@
     }
 
     if (event.key === "Escape") {
+      // Esc stops a running generation (#2464); otherwise it dismisses the menus.
+      if (aiSuggestion.generating) {
+        event.preventDefault();
+        aiSuggestion.cancelGeneration();
+        return true;
+      }
       hideSelectionMenu();
       closeSlashMenu();
     }
@@ -1268,6 +1274,7 @@
     onRetry={() => aiSuggestion.retry()}
     onDiscard={() => aiSuggestion.revert()}
     onDismissError={() => aiSuggestion.dismissError()}
+    onCancel={() => aiSuggestion.cancelGeneration()}
   />
   <ProseSelectionToolbar
     menu={selectionMenu}

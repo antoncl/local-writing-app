@@ -49,6 +49,7 @@ describe("createWizard.submit — AI policy routing (#746 §7)", () => {
   it("first run: a concrete policy becomes the app-wide default, project left to inherit", async () => {
     createWizard.defaultProjectsFolder = ""; // no root yet ⇒ first run
     createWizard.start();
+    createWizard.chooseCreate();
     createWizard.rootFolderDraft = "C:/root";
     createWizard.title = "First Book";
     createWizard.pickedFolder = "C:/root";
@@ -79,6 +80,7 @@ describe("createWizard.submit — AI policy routing (#746 §7)", () => {
   it("first run with inherit stated writes no app policy — inherit is absence", async () => {
     createWizard.defaultProjectsFolder = ""; // first run
     createWizard.start();
+    createWizard.chooseCreate();
     createWizard.rootFolderDraft = "C:/root";
     createWizard.title = "Quiet Book";
     createWizard.pickedFolder = "C:/root";

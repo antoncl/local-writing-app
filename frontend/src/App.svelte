@@ -260,12 +260,15 @@
     // dir + error sink and routes its chosen path into projectSession.
     projectChooser.onError = (message) => { error = message; };
     projectChooser.onOpenProject = (path) => void projectSession.openProjectAt(path);
-    projectChooser.getStartPath = () => projectPath;
+    // No project open yet (first run, #2467): start at the machine projects
+    // folder — the only place the open picker accepts a project from (#441).
+    projectChooser.getStartPath = () => projectPath || createWizard.defaultProjectsFolder;
     // The create-project wizard (#318) owns new-project creation now. It writes
     // the machine root itself (step 1, first run) and hands projectSession the
     // resolved path/title/declaration on Create.
     createWizard.onError = (message) => { error = message; };
     createWizard.getStartPath = () => projectPath;
+    createWizard.onOpenProject = (path) => projectSession.openProjectAt(path);
     createWizard.onSaveRootFolder = (folder) => projectSession.saveDefaultProjectsFolder(folder);
     createWizard.onCreateProject = (path, title, inherits, aiPolicy, nodeMetadata, description) =>
       projectSession.createProjectAt(path, title, inherits, aiPolicy, nodeMetadata, description);
@@ -278,9 +281,7 @@
       projectSession.saveProviderCredential(field, value);
     // First-run AI policy is the app-wide default (#746) — machine-global like
     // the credentials/assistants above; the new book inherits it.
-    createWizard.onSaveAppPolicy = async (policy) => {
-      await projectSession.saveAiPolicy(policy);
-    };
+    createWizard.onSaveAppPolicy = (policy) => projectSession.saveAiPolicy(policy);
     // Machine-layer writes live in one module shared with Settings (#2444).
     createWizard.onReorderAssistants = async (orderedIds) => {
       await run(() => reorderMachineAssistants(orderedIds));

@@ -880,7 +880,8 @@ class DraftScenePromptTests(unittest.TestCase):
                 template_source=self.prompt.body,
                 target_scene_id=scene_id,
                 session_id=None,
-                inputs=inputs or {},
+                # #2456: a scene conversation — the scene is its `entry` pick.
+                inputs={"entry": scene_id, **(inputs or {})},
                 text_before="",
                 text_after="",
                 commit=False,
@@ -973,7 +974,7 @@ class DraftScenePromptTests(unittest.TestCase):
                     template_source=self.prompt.body,
                     target_scene_id=self.scene_ids[1],
                     session_id=None,
-                    inputs={},
+                    inputs={"entry": self.scene_ids[1]},
                     text_before="",
                     text_after="",
                     commit=False,
@@ -990,6 +991,26 @@ class DraftScenePromptTests(unittest.TestCase):
                 set(rendered.send_lore_stable_ids + rendered.send_lore_volatile_ids),
                 {self.honor.id, admiral},
             )
+
+    def test_draft_scene_is_a_scene_conversation_that_commits_the_body(self) -> None:
+        # #2456: offered on scenes, committing the body behind a visual diff —
+        # not a cursor insert on the Continue shelf.
+        entry = {e.id: e for e in self.service.list_prompt_entries().entries}[self.prompt.id]
+        self.assertEqual(entry.offer_on, ["manuscript:scene"])
+        self.assertEqual(entry.computed_metadata["disposition"], "Revise entities")
+        output = self.prompt.context_strategy.output
+        self.assertEqual((output.handler, output.commit.review), ("extract_to_node", "visual_diff"))
+
+    def test_draft_scene_shows_existing_prose_to_redraft(self) -> None:
+        self._set(self.scene_ids[1], body="Honor waited in the anteroom.",
+                  summary="Honor meets the admiral.")
+        text = self._preview(self.scene_ids[1])
+        self.assertIn("### The scene as it is written now", text)
+        self.assertIn("Honor waited in the anteroom.", text)
+
+    def test_draft_scene_of_an_empty_scene_shows_no_existing_prose(self) -> None:
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        self.assertNotIn("The scene as it is written now", self._preview(self.scene_ids[1]))
 
     def test_draft_scene_without_anchors_has_no_changes_section(self) -> None:
         self._set(self.scene_ids[1], summary="Honor meets the admiral.")

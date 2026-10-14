@@ -43,6 +43,7 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         "Revise plot card": ["plot:card"],
         "Revise plotline": ["plot:plotline"],
         "Revise character arc": ["plot:character_arc"],
+        "Draft scene": ["manuscript:scene"],
         "Summarize scene": ["manuscript:scene"],
         "Impersonate": ["lore:character"],
         # ADR-0091 §4: the Propose default, offered on the same lore:base

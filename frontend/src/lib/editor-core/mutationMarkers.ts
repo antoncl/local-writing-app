@@ -1,6 +1,8 @@
-// Mutation markers in an accepted AI draft (#2424). The built-in Draft scene
-// prompt briefs the scene's mutation pills and asks the model to write
-// `⟦<anchor id>⟧` at the point each change happens. On accept, each existing
+// Mutation markers in an accepted inline AI draft (#2424). A prompt can brief the
+// scene's mutation pills (`scene_mutations`) and ask the model to write
+// `⟦<anchor id>⟧` at the point each change happens. (The built-in Draft scene
+// now commits through a conversation instead, #2456 — its markers are placed
+// server-side, in the extraction.) On accept, each existing
 // pill MOVES to its marker — one transaction that inserts the same node (same
 // attrs, so MutationPasteReconciler keeps the id) and deletes the original, so
 // the doc never holds two copies. Never mints ids: this is a move, not an insert.

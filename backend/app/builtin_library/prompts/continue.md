@@ -25,7 +25,7 @@ context_strategy:
 {% set before = prose(text_before) %}
 {% set after = prose(text_after) %}
 {% if not before.strip() %}
-{{ stop("Continue picks up from the prose before the cursor — put the cursor after some text. To start an empty scene from its summary, use Draft scene.") }}
+{{ stop("Continue picks up from the prose before the cursor — put the cursor after some text. To draft an empty scene from its summary, start Draft scene from the scene's conversations.") }}
 {% endif %}
 {% set narration = resolved_narration(scene) if scene else none %}
 {% role "system" %}

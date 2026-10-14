@@ -35,6 +35,7 @@ import {
   type InlineHost,
   type OutputRun,
 } from "@/lib/editor-core/outputHandlers";
+import { editorCallback } from "@/lib/editor-core/editorCallback";
 import { placeLineEdits } from "@/lib/editor-core/lineEdits";
 import {
   acceptAllLineEdits,
@@ -548,9 +549,10 @@ export class AiSuggestionController {
 
   // Follow the open edit list: keep the remaining count and the revised range
   // current as the writer resolves edits or types, and close the list when the
-  // last edit is gone.
+  // last edit is gone. It writes $state, so it goes through editorCallback
+  // (#2461): a transaction can fire inside a block teardown's reaction.
   #watchLineEdits(editor: Editor): void {
-    const onTransaction = ({ transaction }: { transaction: Transaction }) => {
+    const onTransaction = editorCallback(({ transaction }: { transaction: Transaction }) => {
       if (transaction.docChanged && this.#lineEditRange) {
         this.#lineEditRange = {
           from: transaction.mapping.map(this.#lineEditRange.from, 1),
@@ -572,7 +574,7 @@ export class AiSuggestionController {
       this.meta = null;
       this.#closeLineEdits();
       this.toolbarPosition = { x: 0, y: 0, visible: false };
-    };
+    });
     editor.on("transaction", onTransaction);
     this.#stopWatchingLineEdits = () => editor.off("transaction", onTransaction);
   }

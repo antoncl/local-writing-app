@@ -4,8 +4,11 @@
   Purely a view: the host owns the menu state, builds + filters the command
   list, positions the popover, and runs commands. This renders the command
   list (grouped) or the table-size grid and calls back on hover / activation.
-  The onmousedown handlers preventDefault so clicking a command never blurs
-  the editor (the host's commands read the live selection).
+  The root's onmousedown preventDefaults, so no click anywhere on the menu —
+  a command, a group label, the scrollbar — blurs the editor: the host's
+  commands read the live selection, and its keymap drives the menu (#2454).
+  Rows are one line; the highlighted command's description shows in a footer,
+  and the highlight is kept scrolled into view for keyboard navigation.
 -->
 <script lang="ts">
   import {
@@ -27,10 +30,38 @@
 
   let { menu, filterText, commands, onRunCommand, onInsertTable, onHoverCommand, onHoverGrid }: Props =
     $props();
+
+  let list: HTMLDivElement | undefined = $state();
+  let activeCommand = $derived(commands[menu.selectedIndex]);
+
+  // Keep the highlighted row visible — on a highlight move AND on a filter
+  // change that re-renders the rows under the same index. Adjusts only the
+  // list's scrollTop: scrollIntoView would also scroll the editor frame
+  // behind the menu (the WorkspaceTabStrip trap).
+  $effect(() => {
+    const index = menu.selectedIndex;
+    void commands;
+    if (!menu.visible || menu.mode !== "commands" || !list) return;
+    const row = list.querySelector<HTMLElement>(`[data-index="${index}"]`);
+    if (!row) return;
+    // A group's first row brings its group label into view with it.
+    const label = row.previousElementSibling?.classList.contains("slash-group") ? row.previousElementSibling : null;
+    const top = ((label as HTMLElement | null) ?? row).offsetTop - list.offsetTop;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (top + row.offsetHeight > list.scrollTop + list.clientHeight) {
+      list.scrollTop = top + row.offsetHeight - list.clientHeight;
+    }
+  });
 </script>
 
 {#if menu.visible}
-  <div class:table-mode={menu.mode === "table-grid"} class="slash-menu" style={`left: ${menu.x}px; top: ${menu.y}px;`}>
+  <div
+    class:table-mode={menu.mode === "table-grid"}
+    class="slash-menu"
+    style={`left: ${menu.x}px; top: ${menu.y}px;`}
+    role="presentation"
+    onmousedown={(e) => e.preventDefault()}
+  >
     {#if menu.mode === "table-grid"}
       <div class="table-grid">
         {#each Array(TABLE_GRID_MAX_ROWS) as _, rowIndex}
@@ -41,10 +72,7 @@
                 type="button"
                 aria-label={`${rowIndex + 1} rows by ${colIndex + 1} columns`}
                 onmouseenter={() => onHoverGrid(rowIndex + 1, colIndex + 1)}
-                onmousedown={(e) => {
-                  e.preventDefault();
-                  onInsertTable(rowIndex + 1, colIndex + 1);
-                }}
+                onmousedown={() => onInsertTable(rowIndex + 1, colIndex + 1)}
               ></button>
             {/each}
           </div>
@@ -58,23 +86,25 @@
       {#if commands.length === 0}
         <div class="slash-empty">No commands match "<code>{filterText}</code>"</div>
       {/if}
-      {#each commands as command, index}
-        {#if index === 0 || commands[index - 1].group !== command.group}
-          <div class="slash-group">{command.group}</div>
-        {/if}
-        <button
-          class:active={index === menu.selectedIndex}
-          type="button"
-          onmouseenter={() => onHoverCommand(index)}
-          onmousedown={(e) => {
-            e.preventDefault();
-            onRunCommand(command);
-          }}
-        >
-          <strong>{command.label}</strong>
-          <span>{command.description}</span>
-        </button>
-      {/each}
+      <div class="slash-list" bind:this={list}>
+        {#each commands as command, index}
+          {#if index === 0 || commands[index - 1].group !== command.group}
+            <div class="slash-group">{command.group}</div>
+          {/if}
+          <button
+            class:active={index === menu.selectedIndex}
+            type="button"
+            data-index={index}
+            onmouseenter={() => onHoverCommand(index)}
+            onmousedown={() => onRunCommand(command)}
+          >
+            {command.label}
+          </button>
+        {/each}
+      </div>
+      {#if activeCommand}
+        <div class="slash-hint">{activeCommand.description}</div>
+      {/if}
     {/if}
   </div>
 {/if}
@@ -83,11 +113,11 @@
   .slash-menu {
     position: absolute;
     z-index: 25;
-    display: grid;
-    width: min(380px, calc(100% - 32px));
+    display: flex;
+    flex-direction: column;
+    width: min(320px, calc(100% - 32px));
     max-height: min(420px, calc(100% - 32px));
-    overflow: auto;
-    padding: 8px;
+    padding: 6px;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
@@ -97,6 +127,25 @@
   .slash-menu.table-mode {
     width: max-content;
     padding: 4px;
+  }
+
+  /* The list scrolls on its own and never hands the wheel on to the editor's
+     scroll frame (#2454); the hint footer stays put below it. */
+  .slash-list {
+    display: grid;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .slash-hint {
+    flex: none;
+    margin-top: 4px;
+    padding: 6px 8px 2px;
+    border-top: 1px solid var(--border);
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    line-height: 1.35;
   }
 
   .slash-group {
@@ -137,31 +186,22 @@
     color: var(--text-2);
   }
 
-  .slash-menu button {
-    display: grid;
-    gap: 3px;
+  .slash-list button {
     width: 100%;
-    min-height: 58px;
-    padding: 9px 10px;
+    padding: 5px 10px;
     border-color: transparent;
     background: transparent;
-    text-align: left;
-  }
-
-  .slash-menu button.active,
-  .slash-menu button:hover {
-    background: var(--accent-soft);
-  }
-
-  .slash-menu button strong {
     color: var(--text);
     font-size: var(--fs-md);
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .slash-menu button span {
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    line-height: 1.35;
+  .slash-list button.active,
+  .slash-list button:hover {
+    background: var(--accent-soft);
   }
 
   .slash-menu .table-grid {

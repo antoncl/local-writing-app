@@ -73,6 +73,7 @@
   import {
     TABLE_GRID_MAX_ROWS,
     TABLE_GRID_MAX_COLS,
+    slashJumpIndex,
     type SlashCommand,
     type SlashMenuState,
     slashCommandsForKind,
@@ -681,55 +682,14 @@
     }
   }
 
-  // Every prose body gets the formatting commands; a `scope: "manuscript"`
-  // command is a scene verb (scene break, mutate, the cursor prompts — roleplay
-  // only makes sense in a scene) and is dropped for other kinds by
-  // slashCommandsForKind (#1893).
+  // The "/" menu is the act-at-cursor surface — inserts and AI prompts, not
+  // formatting: headings, lists and quotes live in the formatting menus and the
+  // markdown input rules (#2454). A `scope: "manuscript"` command is a scene
+  // verb (scene break, mutate, the cursor prompts — roleplay only makes sense
+  // in a scene) and is dropped for other kinds by slashCommandsForKind (#1893).
   function getSlashCommands(): SlashCommand[] {
     if (!editor) return [];
     return [
-      {
-        group: "Structure",
-        label: "Paragraph",
-        description: "Return this line to plain prose.",
-        run: () => editor?.chain().focus().setParagraph().run(),
-      },
-      {
-        group: "Structure",
-        label: "Heading 1",
-        description: "Create a top-level heading.",
-        run: () => editor?.chain().focus().setHeading({ level: 1 }).run(),
-      },
-      {
-        group: "Structure",
-        label: "Heading 2",
-        description: "Create a section heading.",
-        run: () => editor?.chain().focus().setHeading({ level: 2 }).run(),
-      },
-      {
-        group: "Structure",
-        label: "Heading 3",
-        description: "Create a smaller section heading.",
-        run: () => editor?.chain().focus().setHeading({ level: 3 }).run(),
-      },
-      {
-        group: "Formatting",
-        label: "Bullet List",
-        description: "Start a simple unordered list.",
-        run: () => editor?.chain().focus().toggleBulletList().run(),
-      },
-      {
-        group: "Formatting",
-        label: "Numbered List",
-        description: "Start an ordered list.",
-        run: () => editor?.chain().focus().toggleOrderedList().run(),
-      },
-      {
-        group: "Formatting",
-        label: "Quote",
-        description: "Format this paragraph as a block quote.",
-        run: () => editor?.chain().focus().toggleBlockquote().run(),
-      },
       {
         group: "Insert",
         label: "Scene break",
@@ -920,8 +880,10 @@
     // Body Sections keyboard bridge (#2009): checked first, so an arrow at the
     // body's own edge hands off to the first section instead of any other
     // handler intercepting it. Only `next` is ever wired for the body — it
-    // has no previous neighbour by construction (index 0).
-    if (neighbours && handleSectionArrow(view, event, neighbours())) return true;
+    // has no previous neighbour by construction (index 0). An open slash menu
+    // owns the arrows: the "/" line is usually the body's only line, so the
+    // bridge would otherwise steal every ArrowUp/Down out of the menu (#2454).
+    if (neighbours && !slashMenu.visible && handleSectionArrow(view, event, neighbours())) return true;
 
     // Ctrl+J runs the default cursor prompt — a scene verb; the rest of the
     // keys (slash menu, Tab, Escape) belong to every prose body (#1893).
@@ -1003,6 +965,12 @@
           ...slashMenu,
           selectedIndex: (slashMenu.selectedIndex - 1 + count) % count,
         };
+        return true;
+      }
+      const jumped = slashJumpIndex(event, slashMenu.selectedIndex, count);
+      if (jumped !== null) {
+        event.preventDefault();
+        slashMenu = { ...slashMenu, selectedIndex: jumped };
         return true;
       }
       if (event.key === "Enter" && activeSlashCommand) {

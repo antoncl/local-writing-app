@@ -15,6 +15,7 @@ from app.services.migrations import (
     MigratableDocument,
     RootMigration,
     _lift_plot_template_genre,
+    _offer_inline_prompts_on_scenes,
     migrate_document,
     migrate_project,
     read_project_version,
@@ -411,6 +412,56 @@ class PlotTemplateGenreMigrationTests(unittest.TestCase):
             }
         )
         self.assertIs(_lift_plot_template_genre(doc), doc)
+
+
+class InlinePromptOfferOnMigrationTests(unittest.TestCase):
+    """v15→v16 (#2475): inline prompts honour `offer_on`; a project-owned one
+    without it keeps today's scene-only scope. Pure per-document transform."""
+
+    @staticmethod
+    def _prompt(handler: str | None, **extra: object) -> MigratableDocument:
+        front_matter: dict = {"id": "prompt_x", "title": "P", "entry_type": "prompt:general", **extra}
+        if handler is not None:
+            front_matter["context_strategy"] = {"output": {"handler": handler}}
+        return MigratableDocument(front_matter, "{{ selection }}")
+
+    def test_offers_inline_and_inline_edits_prompts_on_scenes(self) -> None:
+        for handler in ("inline", "inline_edits"):
+            with self.subTest(handler=handler):
+                doc = self._prompt(handler)
+                out = _offer_inline_prompts_on_scenes(doc)
+                self.assertIsNot(out, doc)
+                self.assertEqual(out.front_matter["offer_on"], ["manuscript:scene"])
+                self.assertEqual(out.body, doc.body)
+                self.assertEqual(out.front_matter["context_strategy"], doc.front_matter["context_strategy"])
+
+    def test_empty_offer_on_is_filled(self) -> None:
+        out = _offer_inline_prompts_on_scenes(self._prompt("inline", offer_on=[]))
+        self.assertEqual(out.front_matter["offer_on"], ["manuscript:scene"])
+
+    def test_leaves_a_declared_offer_on_alone(self) -> None:
+        doc = self._prompt("inline_edits", offer_on=["lore:base"])
+        self.assertIs(_offer_inline_prompts_on_scenes(doc), doc)
+
+    def test_leaves_other_handlers_alone(self) -> None:
+        for handler in ("conversation", "extract_to_node", "finalize_scene", None):
+            with self.subTest(handler=handler):
+                doc = self._prompt(handler)
+                self.assertIs(_offer_inline_prompts_on_scenes(doc), doc)
+
+    def test_leaves_snippets_and_non_prompts_alone(self) -> None:
+        snippet = MigratableDocument(
+            {"id": "s", "entry_type": "prompt:snippet", "context_strategy": {"output": {"handler": "inline"}}}, ""
+        )
+        self.assertIs(_offer_inline_prompts_on_scenes(snippet), snippet)
+        note = MigratableDocument(
+            {"id": "n", "entry_type": "lore:note", "context_strategy": {"output": {"handler": "inline"}}}, ""
+        )
+        self.assertIs(_offer_inline_prompts_on_scenes(note), note)
+
+    def test_is_idempotent(self) -> None:
+        once = _offer_inline_prompts_on_scenes(self._prompt("inline"))
+        self.assertIs(_offer_inline_prompts_on_scenes(once), once)
 
 
 class ResearchStructureMigrationTests(unittest.TestCase):

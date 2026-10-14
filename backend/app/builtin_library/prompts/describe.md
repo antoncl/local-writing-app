@@ -2,6 +2,8 @@
 id: prompt_de9faf834c
 title: Describe
 entry_type: prompt:general
+offer_on:
+- manuscript:scene
 inputs:
 - name: senses
   type: multi_select

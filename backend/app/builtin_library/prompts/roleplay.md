@@ -2,6 +2,8 @@
 id: prompt_5d33fdb02d
 title: Roleplay
 entry_type: prompt:general
+offer_on:
+- manuscript:scene
 inputs:
 - name: character
   type: context_pick

@@ -83,19 +83,18 @@ export type ReviseEntry = { id: string; title: string };
 export type BodyToolbarOptions<T extends ReviseEntry> = {
   hasText: boolean;
   inTable: boolean;
-  /** A scene, not another prose body (a lore entry) — Revise and TODO are
-   *  scene concerns: a prompt run is refused outside a scene, and the
-   *  embedded-TODO index scans scenes. */
+  /** A scene, not another prose body (a lore entry) — TODO is a scene concern:
+   *  the embedded-TODO index scans scenes. */
   isScene: boolean;
-  /** The selection surface's prompt entries; ignored unless isScene. */
+  /** The selection prompts offered on the open document (`offer_on`, #2475) —
+   *  Revise shows on any prose body that has some. */
   reviseEntries: T[];
   runPrompt: (entry: T) => void | Promise<void>;
   markTodo: () => void;
 };
 
 /** ProseBodyView's floating selection toolbar (#1223): the shared formatting
- *  core plus Revise (one button, or a menu over ≥2 entries) and TODO — both
- *  scene-only — built onto the same marks/style/table parts the rail's
+ *  core plus Revise (one button, or a menu over ≥2 entries) and TODO (scene-only) — built onto the same marks/style/table parts the rail's
  *  long_text fields use. Extracted from ProseBodyView so the component keeps
  *  only the ~6-line call site that computes `isScene`/`reviseEntries` and
  *  wires `runPrompt`/`markTodo`. */
@@ -105,7 +104,7 @@ export function bodyToolbarActions<T extends ReviseEntry>(editor: Editor, option
   const actions: ToolbarAction[] = [];
   if (hasText && style) {
     const reviseAction: ToolbarAction | null =
-      !isScene || reviseEntries.length === 0
+      reviseEntries.length === 0
         ? null
         : reviseEntries.length === 1
           ? {

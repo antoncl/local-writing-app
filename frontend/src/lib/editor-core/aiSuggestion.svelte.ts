@@ -24,7 +24,9 @@ import {
   promptOnAccept,
   characterIdFromInputValue,
   resolutionSceneIdFromInputs,
+  promptOffersOn,
 } from "@/lib/editor-core/promptResolution";
+import { seedConversationInputs } from "@/components/editor/body/chat/chatInputs";
 import {
   inlineHandler,
   inlineEditsHandler,
@@ -72,7 +74,10 @@ export interface AiSuggestionDeps {
   onInvocationCost: (cost: number) => void;
   addCharacterCost: (characterId: string, cost: number) => void;
   // Outbound callbacks (forwarded from ProseBodyView's props).
-  onRequestInputsDialog: (payload: { entry: PromptEntrySummary }) => void;
+  onRequestInputsDialog: (payload: {
+    entry: PromptEntrySummary;
+    prefilledDrafts?: Record<string, string>;
+  }) => void;
   // Short user-facing note (e.g. "Placed 3 changes in the draft.").
   onNotice?: (message: string) => void;
   onOpenChat: (payload: {
@@ -81,6 +86,14 @@ export interface AiSuggestionDeps {
     sceneId: string | null;
     assistantId: string;
   }) => void;
+}
+
+// The dialog's draft strings for seeded natural-valued inputs: strings pass
+// through, list shapes stringify (the encoding every input widget stores).
+function draftsFromInputs(inputs: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(inputs).map(([name, value]) => [name, typeof value === "string" ? value : JSON.stringify(value)]),
+  );
 }
 
 // Coalescing window for streamed-suggestion renders (#2428).
@@ -333,7 +346,8 @@ export class AiSuggestionController {
       .aiAppendInvocation({
         prompt_entry_id: entry?.id ?? this.#lastInvokedEntryId ?? "",
         prompt_entry_type: entry?.entry_type ?? "",
-        scene_id: scene.id,
+        // A non-scene document (a lore entry) files under no scene.
+        scene_id: this.#sceneIdForWire(scene),
         character_id: characterId ?? "",
         provider: meta.provider ?? "",
         model: meta.model ?? "",
@@ -402,7 +416,11 @@ export class AiSuggestionController {
   ): Promise<void> {
     const editor = this.#deps.getEditor();
     const scene = this.#deps.getScene();
-    if (!editor || !scene || this.generating || this.#deps.getDocumentKind() !== "manuscript") return;
+    if (!editor || !scene || this.generating) return;
+    if (!promptOffersOn(this.#deps.getPromptCtx(), entry, scene.entry_type)) {
+      this.#deps.onNotice?.(`"${entry.title}" isn't offered on this document.`);
+      return;
+    }
     if (this.lineEdits) {
       // The floating toolbar is hidden while line edits are pending, so `error`
       // would never show: say it as a notice instead.
@@ -414,11 +432,33 @@ export class AiSuggestionController {
       return;
     }
     const declared = effectivePromptInputs(entry);
-    if (declared.length > 0 && !prefilledInputs) {
-      this.#deps.onRequestInputsDialog({ entry });
+    if (prefilledInputs) {
+      await this.runPromptEntryWithInputs(entry, prefilledInputs, assistantId);
       return;
     }
-    await this.runPromptEntryWithInputs(entry, prefilledInputs ?? {}, assistantId);
+    // A non-scene document seeds the prompt's `entry` input with itself, so a
+    // prompt whose only input is that (hidden) subject runs without a dialog.
+    const seeded = this.#subjectSeed(entry, scene);
+    if (declared.some((input) => !input.hidden)) {
+      this.#deps.onRequestInputsDialog({
+        entry,
+        ...(Object.keys(seeded).length > 0 ? { prefilledDrafts: draftsFromInputs(seeded) } : {}),
+      });
+      return;
+    }
+    await this.runPromptEntryWithInputs(entry, seeded, assistantId);
+  }
+
+  // The wire id of the open document: the scene id for a manuscript scene, ""
+  // for any other prose body (the backend renders `scene` as absent).
+  #sceneIdForWire(scene: EditableDocument): string {
+    return this.#deps.getDocumentKind() === "manuscript" ? scene.id : "";
+  }
+
+  #subjectSeed(entry: PromptEntrySummary, scene: EditableDocument): Record<string, unknown> {
+    if (this.#deps.getDocumentKind() === "manuscript") return {};
+    if (!effectivePromptInputs(entry).some((input) => input.name === "entry")) return {};
+    return seedConversationInputs(entry, scene.id, scene.title, scene.entry_type, null);
   }
 
   async runPromptEntryWithInputs(
@@ -500,7 +540,7 @@ export class AiSuggestionController {
     try {
       const res = await api.aiGenerate({
         template_source: entry.body,
-        target_scene_id: scene.id,
+        target_scene_id: this.#sceneIdForWire(scene),
         session_id: scene.id,
         inputs,
         resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
@@ -746,7 +786,7 @@ export class AiSuggestionController {
     try {
       for await (const ev of api.aiGenerateStream({
         template_source: entry.body,
-        target_scene_id: scene.id,
+        target_scene_id: this.#sceneIdForWire(scene),
         session_id: scene.id,
         inputs,
         resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),

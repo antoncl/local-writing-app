@@ -64,7 +64,7 @@ from app.services.yaml_io import load_yaml
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 15
+CURRENT_VERSION = 16
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -251,6 +251,27 @@ def _lift_plot_template_genre(doc: MigratableDocument) -> MigratableDocument:
     return MigratableDocument(
         {**front_matter, "template": new_template, "metadata": new_metadata}, doc.body
     )
+
+
+def _offer_inline_prompts_on_scenes(doc: MigratableDocument) -> MigratableDocument:
+    """v15→v16: inline prompts (output handler `inline` / `inline_edits`) now honour
+    `offer_on` like conversation prompts do, and an empty `offer_on` means offered
+    nowhere (#2475). Until now an inline prompt ran only on manuscript scenes, so
+    give every one without an `offer_on` that same scope explicitly. A no-op for
+    snippets, non-prompts, other handlers, and any prompt that already declares
+    `offer_on` — which also makes it idempotent."""
+    front_matter = doc.front_matter
+    entry_type = front_matter.get("entry_type")
+    if not isinstance(entry_type, str) or not entry_type.startswith("prompt:"):
+        return doc
+    if entry_type == "prompt:snippet":
+        return doc
+    strategy = front_matter.get("context_strategy")
+    output = strategy.get("output") if isinstance(strategy, dict) else None
+    handler = output.get("handler") if isinstance(output, dict) else None
+    if handler not in ("inline", "inline_edits") or front_matter.get("offer_on"):
+        return doc
+    return MigratableDocument({**front_matter, "offer_on": ["manuscript:scene"]}, doc.body)
 
 
 def _migrate_invocations_to_csv(root: Path) -> None:
@@ -1159,6 +1180,12 @@ MIGRATIONS: list[MigrationStep] = [
         "one card per scene, a story_rank on every card, and each written card's synopsis seeded "
         "into its scene's summary (ADR-0097 S1, #2375)",
         migrate_layer_plot_cards,
+    ),
+    DocumentMigration(
+        16,
+        "offer project-owned inline prompts on manuscript scenes: inline prompts now honour "
+        "offer_on, and empty means nowhere (#2475)",
+        _offer_inline_prompts_on_scenes,
     ),
 ]
 

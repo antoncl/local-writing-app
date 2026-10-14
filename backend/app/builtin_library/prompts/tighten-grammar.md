@@ -2,6 +2,8 @@
 id: prompt_4511b25021
 title: Tighten grammar
 entry_type: prompt:general
+offer_on:
+- manuscript:scene
 context_strategy:
   output:
     handler: inline_edits

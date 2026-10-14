@@ -23,6 +23,7 @@ const ENTRY = {
   title: "Line edit",
   body: "x",
   entry_type: "prompt:general",
+  offer_on: ["manuscript:scene"],
   context_strategy: { output: { handler: "inline_edits" } },
 } as never;
 
@@ -39,9 +40,9 @@ function setup() {
   const ctrl = new AiSuggestionController({
     getEditor: () => editor,
     getEditorFrame: () => undefined,
-    getScene: () => ({ id: sceneId.current }) as never,
+    getScene: () => ({ id: sceneId.current, entry_type: "manuscript:scene" }) as never,
     getDocumentKind: () => "manuscript",
-    getPromptCtx: () => ({ promptEntries: [ENTRY] }) as never,
+    getPromptCtx: () => ({ metadataSchema: { entry_types: {}, fields: {} }, promptEntries: [ENTRY] }) as never,
     onInvocationCost: (c) => costs.push(c),
     addCharacterCost: () => {},
     onRequestInputsDialog: () => {},

@@ -96,7 +96,7 @@
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import {
     type PromptResolutionContext,
-    promptEntriesForSurface,
+    inlinePromptsOfferedOn,
     promptEntryDescription,
     defaultPromptForSurface,
     resolvePromptPositionalArgs,
@@ -753,10 +753,9 @@
           }
         },
       },
-      ...promptEntriesForSurface(promptCtx, "cursor")
+      ...inlinePromptsOfferedOn(promptCtx, "cursor", scene?.entry_type)
         .map((entry) => ({
           group: "AI",
-          scope: "manuscript" as const,
           label: entry.title,
           description: promptEntryDescription(promptCtx, entry),
           // Colon-free token from the title, NOT the entry_type: since the FQN
@@ -859,13 +858,13 @@
 
   // Builds the unified menu (#1223): the shared formatting core (marks, style,
   // table — lib/editor-core/formattingToolbarActions.ts, shared with the
-  // rail's long_text fields, #1893) plus Revise and To-do for a SCENE only —
-  // a prompt run is refused outside a scene, and the embedded-todo index
-  // scans scenes.
+  // rail's long_text fields, #1893) plus Revise (the selection
+  // prompts offered on this document, #2475) and To-do for a SCENE only — the
+  // embedded-todo index scans scenes.
   function getSelectionToolbarActions(hasText: boolean, inTable: boolean): ToolbarAction[] {
     if (!editor) return [];
     const isScene = documentKind === "manuscript";
-    const reviseEntries = promptEntriesForSurface(promptCtx, "selection");
+    const reviseEntries = inlinePromptsOfferedOn(promptCtx, "selection", scene?.entry_type);
     return bodyToolbarActions(editor, {
       hasText,
       inTable,
@@ -896,23 +895,22 @@
     // bridge would otherwise steal every ArrowUp/Down out of the menu (#2454).
     if (neighbours && !slashMenu.visible && handleSectionArrow(view, event, neighbours())) return true;
 
-    // Ctrl+J runs the default cursor prompt — a scene verb; the rest of the
-    // keys (slash menu, Tab, Escape) belong to every prose body (#1893).
+    // Ctrl+J runs the default cursor prompt offered on this document; the rest
+    // of the keys (slash menu, Tab, Escape) belong to every prose body (#1893).
     if (
-      documentKind === "manuscript" &&
       event.key.toLowerCase() === "j" &&
       (event.ctrlKey || event.metaKey) &&
       !event.altKey &&
       !event.shiftKey
     ) {
       event.preventDefault();
-      const entry = defaultPromptForSurface(promptCtx, "cursor");
+      const entry = defaultPromptForSurface(promptCtx, "cursor", scene?.entry_type);
       if (entry) void aiSuggestion.runPromptEntry(entry);
       return true;
     }
     if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey) {
       event.preventDefault();
-      const entry = defaultPromptForSurface(promptCtx, "selection");
+      const entry = defaultPromptForSurface(promptCtx, "selection", scene?.entry_type);
       if (entry) void aiSuggestion.runPromptEntry(entry);
       return true;
     }

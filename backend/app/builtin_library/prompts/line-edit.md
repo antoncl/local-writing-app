@@ -2,6 +2,8 @@
 id: prompt_e67a8720e3
 title: Line edit
 entry_type: prompt:general
+offer_on:
+- manuscript:scene
 context_strategy:
   output:
     handler: inline_edits

@@ -11,6 +11,8 @@ import {
   hidePromptEntries,
   inheritedInputsFrom,
   inputValuesFromDrafts,
+  defaultPromptForSurface,
+  inlinePromptsOfferedOn,
   isFinalizePrompt,
   promptEntriesForSurface,
   promptEntriesOfferedOn,
@@ -793,5 +795,40 @@ describe("inputValuesFromDrafts (#2129/#2130 — the shared coerce+expand loop)"
   it("returns {} for a prompt with no drafts filled in", () => {
     const declared = [{ name: "note", type: "text" } as PromptInputDefinition];
     expect(inputValuesFromDrafts(declared, {}, buildSelectorRoster({}))).toEqual({});
+  });
+});
+
+describe("inline rosters honour offer_on (#2475)", () => {
+  const isaSchema = {
+    entry_types: {
+      "manuscript:scene": {},
+      "lore:base": {},
+      "lore:character": { parent: "lore:base" },
+    },
+    fields: {},
+  } as unknown as MetadataSchema;
+  const inline = (id: string, offerOn: string[] | undefined, handler = "inline") =>
+    ({
+      ...prompt(id, "prompt:general", { output: { handler } } as PromptContextStrategy),
+      offer_on: offerOn,
+    }) as PromptEntrySummary;
+  const sceneP = inline("scene-only", ["manuscript:scene"]);
+  const loreP = inline("lore-edit", ["lore:base"], "inline_edits");
+  const nowhereP = inline("nowhere", undefined);
+  const c = ctx({ metadataSchema: isaSchema, promptEntries: [sceneP, loreP, nowhereP] });
+
+  it("a scene sees only scene-offered prompts; a lore subtype matches lore:base is-a", () => {
+    expect(inlinePromptsOfferedOn(c, "cursor", "manuscript:scene").map((e) => e.id)).toEqual(["scene-only"]);
+    expect(inlinePromptsOfferedOn(c, "selection", "lore:character").map((e) => e.id)).toEqual(["lore-edit"]);
+  });
+
+  it("empty offer_on is offered nowhere, and an unknown document type sees nothing", () => {
+    expect(inlinePromptsOfferedOn(c, "cursor", "lore:base").map((e) => e.id)).not.toContain("nowhere");
+    expect(inlinePromptsOfferedOn(c, "cursor", undefined)).toEqual([]);
+  });
+
+  it("defaultPromptForSurface takes the first of the filtered roster", () => {
+    expect(defaultPromptForSurface(c, "selection", "lore:character")?.id).toBe("lore-edit");
+    expect(defaultPromptForSurface(c, "selection", "research:note")).toBeNull();
   });
 });

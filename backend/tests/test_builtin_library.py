@@ -396,6 +396,46 @@ class BuiltinLibraryTests(unittest.TestCase):
             self.assertNotIn("{#", joined, title)  # the snippet's usage comment never leaks
             self.assertEqual(out.messages[-1].text.strip(), "The room was cold.", title)
 
+    def test_line_edit_entry_prompt_runs_on_lore_without_a_scene(self) -> None:
+        """#2475: the lore-entry line edit is an edit-list revise prompt offered on
+        lore, and renders from its `entry` input alone — no scene, no prose settings."""
+        from app.models import CreateLoreEntryRequest
+        from app.services.ai.helpers import create_environment_for_project
+        from app.services.ai.templates import render_template
+
+        entry = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Line edit (entry)"))
+        self.assertTrue(entry.is_library)
+        self.assertEqual(entry.context_strategy.output.handler, "inline_edits")
+        self.assertEqual(entry.offer_on, ["lore:base"])
+        self.assertEqual(entry.computed_metadata["disposition"], "Revise prose")
+        self.assertNotIn("Prose generation settings", entry.body)
+        lore = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Ravenmoor", entry_type="lore:note", body="A cold town.")
+        )
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            entry.body,
+            context={"scene": None, "selection": "The town is cold.", "inputs": {"entry": lore.id}},
+            env=env,
+        )
+        joined = "\n".join(m.text for m in out.messages)
+        self.assertIn('{"edits": [{"find"', joined)
+        self.assertIn("Square brackets", joined)
+        self.assertEqual(out.messages[-1].text.strip(), "The town is cold.")
+
+    def test_every_inline_builtin_declares_an_offer_on(self) -> None:
+        """#2475: an empty `offer_on` means offered nowhere, so no shipped inline
+        prompt may leave it empty."""
+        checked = 0
+        for summary in self._summaries().values():
+            entry = self.service.read_prompt_entry(summary.id)
+            strategy = entry.context_strategy
+            if strategy is None or strategy.output.handler not in ("inline", "inline_edits"):
+                continue
+            checked += 1
+            self.assertTrue(entry.offer_on, f"{entry.title} declares no offer_on")
+        self.assertGreater(checked, 0)
+
     def test_describe_prompt_renders_selection_senses_and_snippet(self) -> None:
         """The Describe prompt exercises the whole lane end to end: the new
         multi_select input renders as a list, the shared snippet resolves, and the

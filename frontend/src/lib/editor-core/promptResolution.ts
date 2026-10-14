@@ -431,11 +431,23 @@ export function visiblePromptFor(
   return bestTitleMatch(sameSurface, entry.title) ?? entry;
 }
 
+// The inline roster for the OPEN document (#2475): the surface's prompts whose
+// `offer_on` admits the document's `entryType` — the same opt-in rule as a
+// conversation prompt (empty `offer_on` = offered nowhere).
+export function inlinePromptsOfferedOn(
+  ctx: PromptResolutionContext,
+  surface: "cursor" | "selection",
+  entryType: string | null | undefined,
+): PromptEntrySummary[] {
+  return promptEntriesForSurface(ctx, surface).filter((entry) => promptOffersOn(ctx, entry, entryType));
+}
+
 export function defaultPromptForSurface(
   ctx: PromptResolutionContext,
   surface: "cursor" | "selection",
+  entryType: string | null | undefined,
 ): PromptEntrySummary | null {
-  return promptEntriesForSurface(ctx, surface)[0] ?? null;
+  return inlinePromptsOfferedOn(ctx, surface, entryType)[0] ?? null;
 }
 
 // Resolve a positional-string token against a context_pick input.

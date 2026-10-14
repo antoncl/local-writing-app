@@ -2,6 +2,8 @@
 id: prompt_4655b40593
 title: Show, don't tell
 entry_type: prompt:general
+offer_on:
+- manuscript:scene
 context_strategy:
   output:
     handler: inline_edits

@@ -183,13 +183,26 @@ describe("bodyToolbarActions (ProseBodyView's toolbar, #1893 seam extraction)", 
     expect(runPrompt).toHaveBeenCalledWith(entryB);
   });
 
-  it("isScene false: no Revise, no TODO", () => {
+  it("isScene false: Revise shows for an offered prompt (#2475), but no TODO", () => {
     const { editor } = makeEditor();
     const actions = bodyToolbarActions(editor, {
       hasText: true,
       inTable: false,
       isScene: false,
       reviseEntries: [entryA],
+      runPrompt: vi.fn(),
+      markTodo: vi.fn(),
+    });
+    expect(actionIds(actions)).toEqual(["bold", "italic", "strike", `ai-revise:${entryA.id}`, "style"]);
+  });
+
+  it("isScene false with nothing offered: no Revise, no TODO", () => {
+    const { editor } = makeEditor();
+    const actions = bodyToolbarActions(editor, {
+      hasText: true,
+      inTable: false,
+      isScene: false,
+      reviseEntries: [],
       runPrompt: vi.fn(),
       markTodo: vi.fn(),
     });

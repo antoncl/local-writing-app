@@ -85,8 +85,8 @@ class PlotCardsMigrationTests(unittest.TestCase):
     def _migrate(self) -> None:
         migrate_layer_plot_cards(self.root, ChainContext())
 
-    def test_current_version_is_15(self) -> None:
-        self.assertEqual(CURRENT_VERSION, 15)
+    def test_current_version_includes_this_step(self) -> None:
+        self.assertGreaterEqual(CURRENT_VERSION, 15)
 
     def test_a_scene_held_twice_stays_with_the_smaller_id(self) -> None:
         self._migrate()

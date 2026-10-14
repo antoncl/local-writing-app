@@ -2,6 +2,8 @@
 id: prompt_d026628591
 title: Rephrase
 entry_type: prompt:general
+offer_on:
+- manuscript:scene
 context_strategy:
   output:
     handler: inline

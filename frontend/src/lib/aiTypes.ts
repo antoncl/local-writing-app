@@ -376,6 +376,10 @@ export type AIGenerateRequest = {
   text_before?: string;
   text_after?: string;
   selection?: string;
+  // The ids of the mutation pills (anchor / close) before the selection, in
+  // document order, so `lore_as_of("selection")` reads the lore as it stands
+  // where the selection starts. Omitted = no selection; [] = nothing precedes it.
+  markers_before_selection?: string[];
   commit?: boolean;
   // Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
   // overrides target_scene_id for effective-state resolution.

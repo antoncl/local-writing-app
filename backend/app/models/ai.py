@@ -631,6 +631,11 @@ class AIGenerateRequest(BaseModel):
     text_before: str = ""
     text_after: str = ""
     selection: str = ""
+    # #2491: the ids of the mutation pills (anchor / close) that sit before the
+    # selection, in document order. `lore_as_of("selection")` uses them to read
+    # the lore as it stands where the selection starts. None = the caller didn't
+    # say (no selection); [] = nothing precedes the selection.
+    markers_before_selection: list[str] | None = None
     commit: bool = False
     # Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
     # the frontend resolves the input value here. Overrides target_scene_id.

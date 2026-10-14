@@ -106,8 +106,8 @@
     {
       "name": "lore_as_of",
       "kind": "helper",
-      "signature": "lore_as_of(\"start\")",
-      "summary": "`\"\"` — shows every lore entry placed for the prompt's scene as it stood when the scene opened: earlier scenes' changes applied, none of this scene's own. By default lore is shown as it stands at the END of the scene. A draft uses this so it does not already know how the scene ends. Only `\"start\"` is accepted; anything else is an error. It applies to one-shot runs and the preview; in a chat it has no effect yet. Use it as `{% do lore_as_of(\"start\") %}`."
+      "signature": "lore_as_of(\"start\"|\"selection\")",
+      "summary": "`\"\"` — shows every lore entry placed for the prompt's scene as it stood at an earlier point, not at the END of the scene (the default). `\"start\"`: when the scene opened — earlier scenes' changes applied, none of this scene's own; a draft uses this so it does not already know how the scene ends. `\"selection\"`: where the selection starts — earlier scenes' changes plus this scene's changes that come before the selection; for a run with no selection, as the scene opened. A check uses this so a change later in the scene does not read as a contradiction. Anything else is an error. It applies to one-shot runs and the preview; in a chat it has no effect yet. Use it as `{% do lore_as_of(\"start\") %}` or `{% do lore_as_of(\"selection\") %}`."
     },
     {
       "name": "lore_named_in",

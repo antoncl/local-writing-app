@@ -44,6 +44,7 @@ from app.services.ai.selector_eval import (
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
 from app.services.project.errors import ProjectServiceError
+from app.services.project.lore_mutations import SELECTION_START
 from app.services.tree_structure import TreeStructureService
 
 logger = logging.getLogger(__name__)
@@ -559,6 +560,10 @@ class PreviewRequest:
     # one-shot generate routes set it: automatic lore belongs to a conversation,
     # which has a journal to detect into and a session to cache against.
     automatic_lore: bool = True
+    # #2491: ids of the mutation pills before the selection, document order —
+    # `lore_as_of("selection")` resolves the scene's lore at the last one saved.
+    # None = the run named no selection (resolves as the scene opened).
+    markers_before_selection: list[str] | None = None
 
 
 def build_preview(
@@ -678,7 +683,13 @@ def build_preview(
         session.commit()
 
     _annotate_rendered_from_env(
-        rendered, env, project_service, scene, request.lore_limits, automatic_lore=request.automatic_lore
+        rendered,
+        env,
+        project_service,
+        scene,
+        request.lore_limits,
+        automatic_lore=request.automatic_lore,
+        markers_before_selection=request.markers_before_selection,
     )
 
     return rendered, session_id
@@ -692,6 +703,7 @@ def _annotate_rendered_from_env(
     lore_limits: LoreLimits,
     *,
     automatic_lore: bool = True,
+    markers_before_selection: list[str] | None = None,
 ) -> None:
     """Copy the env-side execution state the render's helpers (`use()`,
     `auto_lore()`, `field_contract.store()`) recorded during the template render
@@ -717,7 +729,12 @@ def _annotate_rendered_from_env(
     # #2422: where `lore_as_of("start")` resolves the scene's lore. Carried for
     # every run — a one-shot places declared lore (`use()` picks, `always`
     # entries) and resolves it at the same point as an automatic one.
-    rendered.lore_position = getattr(env, "lore_position", [None])[0]
+    position = getattr(env, "lore_position", [None])[0]
+    if position == SELECTION_START:  # `lore_as_of("selection")` (#2491)
+        position = project_service.position_before_selection(
+            scene.id if scene is not None else "", markers_before_selection
+        )
+    rendered.lore_position = position
     if rendered.lore_free and rendered.lore_invoked:
         rendered.lore_invoked = False
         rendered.warnings.append(LORE_FREE_CONFLICT_WARNING)

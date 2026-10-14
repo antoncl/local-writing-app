@@ -18,9 +18,14 @@ context_strategy:
   and the scene's own links (its POV, location, ...). Anything picked in the
   "Relevant lore" picker is checked too. With nothing named and nothing picked
   there is nothing to check against, so the run stops and says so.
+
+  Each entry is checked as it stands where the selection starts
+  (`lore_as_of("selection")`): a change later in the scene must not read as a
+  contradiction of the text before it.
 #}
 {% set named = lore_named_in(selection) %}
 {% do use(named) %}
+{% do lore_as_of("selection") %}
 {% if not named and not (inputs is defined and inputs.lore is defined and inputs.lore) %}
 {{ stop("Nothing in the selection names a lore entry, and none was picked.") }}
 {% endif %}

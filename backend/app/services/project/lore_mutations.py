@@ -78,8 +78,9 @@ COLLECTION_FIELD_TYPES = frozenset({"multi_select", "entity_ref_list"})
 TEXT_APPEND_FIELD_TYPES = frozenset({"text", "long_text"})
 
 # Sentinel position: resolve at end of scene (every in-scene marker counts as
-# live). Only the inline handler's `selection` destination passes a real cursor
-# offset; every other surface resolves at end-of-scene (ADR-0003).
+# live). The default for every surface; a real offset comes from the inline
+# handler's `selection` destination, or from `lore_as_of("selection")`
+# (`position_before_selection`) (ADR-0003, ADR-0098).
 END_OF_SCENE: int | None = None
 
 # Sentinel position: resolve at the START of the scene — earlier scenes' records
@@ -87,6 +88,10 @@ END_OF_SCENE: int | None = None
 # iff `offset <= position`, so 0 would wrongly count an anchor at offset 0; -1
 # sits before every possible offset.
 START_OF_SCENE = -1
+
+# Slot value `lore_as_of("selection")` leaves for the preview, which resolves it
+# to a real offset from the request's marker ids (`position_before_selection`).
+SELECTION_START = "selection"
 
 # Node-intrinsic fields a mutation may target that are not schema fields: the
 # entry's own title/body. Free text, so no value constraints to validate.
@@ -259,6 +264,29 @@ class LoreMutationsMixin(MarkerMixin):
                 line=line,
             ),
         )
+
+    def position_before_selection(self, scene_id: str, marker_ids: list[str] | None) -> int:
+        """The position `lore_as_of("selection")` resolves the scene's lore at
+        (ADR-0098 §7): the offset, in the scene's SAVED body, of the last of
+        `marker_ids` (the anchor / close ids before the selection, document
+        order) that exists there. An anchor is live iff its offset <= position
+        and a close takes effect iff position >= its offset, so that marker and
+        every earlier one count and every later one does not. Ids not on disk
+        (a pill not yet saved) are skipped; none found, an empty list, or no list
+        at all (`None`, a run without a selection) = `START_OF_SCENE`."""
+        if not marker_ids or not scene_id:
+            return START_OF_SCENE
+        body = self._scene_body_for_scan(self._build_node_index(), scene_id)
+        if body is None:
+            return START_OF_SCENE
+        offsets: dict[str, int] = {}
+        for pattern in (MUTATION_ANCHOR_PATTERN, MUTATION_ANCHOR_CLOSE_PATTERN):
+            for match in pattern.finditer(body):
+                offsets.setdefault(match.group("id"), match.start())
+        for marker_id in reversed(marker_ids):
+            if marker_id in offsets:
+                return offsets[marker_id]
+        return START_OF_SCENE
 
     def _mutation_set_views(self, index: NodeIndex) -> dict[str, _SetView]:
         """Every `mutation_set` node belonging to the OPEN project layer, one

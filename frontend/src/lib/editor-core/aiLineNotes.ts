@@ -10,6 +10,7 @@ import type { AIStreamEvent } from "@/lib/api/core";
 import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
 import type { InlineGathered, OutputRun } from "@/lib/editor-core/outputHandlers";
 import { placeLineNotes, type PlacedNote } from "@/lib/editor-core/lineEdits";
+import { markerIdsBefore } from "@/lib/editor-core/markersBefore";
 import type { CheckedEntry } from "@/lib/types";
 
 export type NotesDone = Extract<AIStreamEvent, { type: "done" }>;
@@ -70,6 +71,8 @@ export async function fetchLineNotes(args: NotesRunArgs): Promise<NotesOutcome> 
       text_before: textBefore,
       text_after: textAfter,
       ...(selectionText !== undefined ? { selection: selectionText } : {}),
+      // Lore is read where the selection starts, so the pills before it ride along (#2491).
+      markers_before_selection: markerIdsBefore(editor.state.doc, from),
       ...(assistantId ? { assistant_id: assistantId } : {}),
       commit: false,
       response_format: "notes",

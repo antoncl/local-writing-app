@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// LineEditReviewBar (#2460): the bottom review bar for a Line edit's pending edits.
+// LineEditReviewBar (#2460): the review bar (a pane footer row) for a Line edit's pending edits.
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import LineEditReviewBar from "./LineEditReviewBar.svelte";
@@ -34,6 +34,19 @@ describe("LineEditReviewBar", () => {
     expect(reason.textContent).toBe(REASON);
     expect(reason.getAttribute("title")).toBe(REASON);
     expect(screen.getByTestId("line-edit-meta").textContent).toContain("claude-x");
+  });
+
+  it("groups its controls so a narrow pane wraps whole groups onto a second row", () => {
+    mount();
+    const bar = screen.getByTestId("line-edit-review-bar");
+    const groups = [...bar.querySelectorAll(".ler-group")].map((g) => [...g.querySelectorAll("button, .ler-count")].map((n) => n.getAttribute("data-testid")));
+    expect(groups).toEqual([
+      ["line-edit-count", "line-edit-prev", "line-edit-next"],
+      ["line-edit-accept", "line-edit-reject"],
+      ["line-edit-accept-all", "line-edit-reject-all", "line-edit-retry"],
+    ]);
+    // the reason sits between the first two groups and is the flexible part
+    expect(screen.getByTestId("line-edit-reason").previousElementSibling).toBe(bar.querySelectorAll(".ler-group")[0]);
   });
 
   it("every control calls through, and names its shortcut where there is one", async () => {

@@ -104,6 +104,28 @@ describe("LineEditSuggestions", () => {
     expect(lineEditState(editor.state).currentId).toBe(second.id);
   });
 
+  it("stepping scrolls the current edit's own span into view, not its paragraph", () => {
+    const editor = setup();
+    const [, second] = lineEditState(editor.state).edits;
+    const scrolled: Element[] = [];
+    const proto = Element.prototype as unknown as { scrollIntoView?: (o?: unknown) => void };
+    const original = proto.scrollIntoView;
+    const calls: unknown[] = [];
+    proto.scrollIntoView = function (this: Element, opts?: unknown) {
+      scrolled.push(this);
+      calls.push(opts);
+    };
+    try {
+      stepLineEdit(editor.view, 1);
+    } finally {
+      proto.scrollIntoView = original;
+    }
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0].getAttribute("data-line-edit-id")).toBe(String(second.id));
+    expect(scrolled[0].tagName).not.toBe("P");
+    expect(calls[0]).toEqual({ block: "nearest", inline: "nearest" });
+  });
+
   it("after resolving the current edit, the next by position is current; wraps; none when empty", () => {
     const editor = setup();
     const [first, second] = lineEditState(editor.state).edits;

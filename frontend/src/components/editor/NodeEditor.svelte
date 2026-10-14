@@ -6,6 +6,8 @@
   import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
   import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
   import FootDock from "@/components/editor/FootDock.svelte";
+  import LineEditReviewBar from "@/components/editor/body/LineEditReviewBar.svelte";
+  import type { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
   import EditorRail from "@/components/editor/EditorRail.svelte";
   import { editorRailLayout } from "@/lib/stores/editorRailLayout.svelte";
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
@@ -366,7 +368,8 @@
   // Per-character cost map for this scene, summed from the persisted
   // ai_invocations log. ProseBodyView owns the state; the footer reads it.
   let characterCostUsd: Record<string, number> = $state({});
-
+  // The prose body's suggestion controller (bound up from ProseBodyView): the Line edit review bar's source (#2460).
+  let lineEditReview: AiSuggestionController | null = $state.raw(null);
   let lastMetadataReloadToken = $state(0);
   let lastTitleReloadToken = $state(0);
   let backlinks: Backlink[] = $state([]);
@@ -1308,7 +1311,7 @@
       navigate: (payload) => onNavigate?.(payload),
     }}
     bind:rawBody bind:offerOnDraft bind:contextStrategyDraft bind:liveWordCount bind:editorEmpty
-    bind:hasInteriorityBeats bind:interiorityRevealed bind:lastInvocationCostUsd bind:sceneSessionCostUsd bind:characterCostUsd
+    bind:hasInteriorityBeats bind:interiorityRevealed bind:lastInvocationCostUsd bind:sceneSessionCostUsd bind:characterCostUsd bind:lineEditReview
   />
 
   {#if scene && metadataSchema && !railIsPane}
@@ -1329,6 +1332,15 @@
        body: the read-only compare overlay is prose. -->
   {#if (documentKind === "manuscript" || documentKind === "lore") && scene && bodyShape === "prose"}
     <FootDock {snapshots} {scrub} {documentKind} writesLabel={snapshotWritesLabel} {stopEditable} />
+  {/if}
+
+  <!-- Line edit review (#2460): a pane footer row, NOT inside the prose scroll frame, so it never covers text. -->
+  {#if lineEditReview?.lineEdits}
+    <LineEditReviewBar lineEdits={lineEditReview.lineEdits} meta={lineEditReview.meta} generating={lineEditReview.generating}
+      onPrev={() => lineEditReview?.prevLineEdit()} onNext={() => lineEditReview?.nextLineEdit()}
+      onAccept={() => lineEditReview?.acceptCurrentLineEdit()} onReject={() => lineEditReview?.rejectCurrentLineEdit()}
+      onAcceptAll={() => lineEditReview?.acceptAllLineEdits()} onRejectAll={() => lineEditReview?.rejectAllLineEdits()}
+      onRetry={() => lineEditReview?.retry()} />
   {/if}
 
   <footer class="status">

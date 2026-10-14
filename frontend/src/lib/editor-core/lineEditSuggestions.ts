@@ -86,14 +86,24 @@ function resolve(view: EditorView, ids: number[], accepted: boolean): void {
   view.dispatch(tr);
 }
 
-/** Bring the current edit into view without moving the caret or taking focus. */
+/** Bring the current edit itself into view (not its paragraph - a tall one could
+ *  leave the edit off screen) without moving the caret or taking focus. */
 function revealCurrent(view: EditorView): void {
   const edit = currentLineEdit(view.state);
   if (!edit) return;
+  const span = view.dom.querySelector<HTMLElement>(`[data-line-edit-id="${edit.id}"]`);
+  if (span?.scrollIntoView) {
+    span.scrollIntoView({ block: "nearest", inline: "nearest" });
+    return;
+  }
+  // No decorated span in the DOM: scroll the frame by the edit's coordinates.
   try {
-    const { node } = view.domAtPos(edit.from);
-    const el = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
-    el?.scrollIntoView?.({ block: "nearest" });
+    const scroller = view.dom.closest<HTMLElement>(".editor-wrap");
+    if (!scroller) return;
+    const box = scroller.getBoundingClientRect();
+    const at = view.coordsAtPos(edit.from);
+    if (at.top < box.top) scroller.scrollTop += at.top - box.top;
+    else if (at.bottom > box.bottom) scroller.scrollTop += at.bottom - box.bottom;
   } catch {
     /* a position outside the rendered doc: nothing to reveal */
   }

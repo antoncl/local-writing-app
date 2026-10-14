@@ -128,13 +128,15 @@ describe("line edits (#2460)", () => {
     expect(ctrl.lineEdits).toBeNull();
   });
 
-  it("refuses another run while edits are pending", async () => {
-    const { ctrl } = setup();
+  it("refuses another run while edits are pending, with a visible notice (not a hidden error)", async () => {
+    const { ctrl, notices } = setup();
     const spy = vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
     await ctrl.runPromptEntry(ENTRY, {});
+    expect(notices).toEqual([]);
     await ctrl.runPromptEntry(ENTRY, {});
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(ctrl.error).toMatch(/Accept or revert/);
+    expect(notices).toEqual(["Finish reviewing the line edits first — accept or reject them, or Reject all."]);
+    expect(ctrl.error).toBeNull();
   });
 
   it("records one invocation when the last edit is resolved after an accept", async () => {

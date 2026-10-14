@@ -91,7 +91,6 @@
   import ProseSlashMenu from "./ProseSlashMenu.svelte";
   import ProseSelectionToolbar from "./ProseSelectionToolbar.svelte";
   import ProseAIToolbar from "./ProseAIToolbar.svelte";
-  import LineEditReviewBar from "./LineEditReviewBar.svelte";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
@@ -146,6 +145,9 @@
     sceneSessionCostUsd?: number;
     // per-character mini-chips next to the session chip.
     characterCostUsd?: Record<string, number>;
+    // The suggestion controller, bound out so the pane shell can mount the Line
+    // edit review bar as a footer row (outside this scroll frame, #2460).
+    lineEditReview?: AiSuggestionController | null;
     // Outbound events as callback props (#14: runes — replaces the dispatcher).
     // NodeEditor (the funnel) passes these.
     onBodyChange?: () => void;
@@ -198,6 +200,7 @@
     lastInvocationCostUsd = $bindable(null),
     sceneSessionCostUsd = $bindable(0),
     characterCostUsd = $bindable({}),
+    lineEditReview = $bindable(null),
     onBodyChange,
     onFocus,
     onOpenChat,
@@ -331,6 +334,11 @@
     onRequestInputsDialog: (payload) => onRequestInputsDialog?.(payload),
     onNotice: (message) => editorPanes.setStatus(message),
     onOpenChat: (payload) => onOpenChat?.(payload),
+  });
+
+  $effect(() => {
+    lineEditReview = aiSuggestion;
+    return () => { lineEditReview = null; };
   });
 
   let slashFilterText = $state("");
@@ -1326,18 +1334,6 @@
          with its clearance. -->
     <div class="prose-appendix prose-column" data-testid="prose-appendix">{@render appendix()}</div>
   {/if}
-  <LineEditReviewBar
-    lineEdits={aiSuggestion.lineEdits}
-    meta={aiSuggestion.meta}
-    generating={aiSuggestion.generating}
-    onPrev={() => aiSuggestion.prevLineEdit()}
-    onNext={() => aiSuggestion.nextLineEdit()}
-    onAccept={() => aiSuggestion.acceptCurrentLineEdit()}
-    onReject={() => aiSuggestion.rejectCurrentLineEdit()}
-    onAcceptAll={() => aiSuggestion.acceptAllLineEdits()}
-    onRejectAll={() => aiSuggestion.rejectAllLineEdits()}
-    onRetry={() => aiSuggestion.retry()}
-  />
 </div>
 
 <MutationDialogs

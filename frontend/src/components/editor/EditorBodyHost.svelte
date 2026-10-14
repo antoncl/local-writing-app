@@ -30,6 +30,7 @@
   import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
   import ReviewItemsPanel from "@/components/editor/ReviewItemsPanel.svelte";
+  import type { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
@@ -177,6 +178,8 @@
     lastInvocationCostUsd?: number | null;
     sceneSessionCostUsd?: number;
     characterCostUsd?: Record<string, number>;
+    // The prose body's suggestion controller, passed through to the shell (#2460).
+    lineEditReview?: AiSuggestionController | null;
   }
 
   let {
@@ -193,6 +196,7 @@
     lastInvocationCostUsd = $bindable(null),
     sceneSessionCostUsd = $bindable(0),
     characterCostUsd = $bindable({}),
+    lineEditReview = $bindable(null),
   }: Props = $props();
 
   // #2010/#2100: the active tab's list field ids — plural since ADR-0089
@@ -518,6 +522,7 @@
     bind:lastInvocationCostUsd
     bind:sceneSessionCostUsd
     bind:characterCostUsd
+    bind:lineEditReview
     scene={model.scene}
     documentKind={model.documentKind}
     readOnly={model.bodyFrozen}

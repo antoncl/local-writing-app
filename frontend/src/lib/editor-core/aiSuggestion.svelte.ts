@@ -403,7 +403,13 @@ export class AiSuggestionController {
     const editor = this.#deps.getEditor();
     const scene = this.#deps.getScene();
     if (!editor || !scene || this.generating || this.#deps.getDocumentKind() !== "manuscript") return;
-    if (this.suggestionId || this.lineEdits) {
+    if (this.lineEdits) {
+      // The floating toolbar is hidden while line edits are pending, so `error`
+      // would never show: say it as a notice instead.
+      this.#deps.onNotice?.("Finish reviewing the line edits first — accept or reject them, or Reject all.");
+      return;
+    }
+    if (this.suggestionId) {
       this.error = "Accept or revert the pending suggestion before generating another.";
       return;
     }

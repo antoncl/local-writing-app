@@ -91,7 +91,9 @@ Then `preview_start {url: "<Vite's Local: URL>"}` and verify with `read_page`,
   (`dev_backend.py`; `vite.config.js` in `--mode claude` without `PORT`). A
   hand-picked backend port silently shares on Windows (#364); a hand-picked
   frontend port collides with another session's, which opens the *other*
-  tree's UI and — storage being per origin — its last-opened project.
+  tree's UI and — storage being per origin — its last-opened project. The one
+  exception: if a derived port is already taken (a hash collision with a
+  sibling — the start fails loudly), rerun that server with `PORT=<free port>`.
 - Read the startup lines rather than assuming isolation: `dev_backend: verified
   <path> is serving 127.0.0.1:<port>` names the checkout actually being served,
   and Vite's `Local:` line names the frontend's port.

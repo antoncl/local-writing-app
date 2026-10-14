@@ -289,19 +289,26 @@ export const LineEditSuggestions = Extension.create({
             if (cur) {
               // Wide: at the edit, so the margin card shares its line. Narrow: at the
               // end of the paragraph, so the block card sits below it. Side 2 keeps it
-              // after the new-text widget at the same position.
-              const at = wide ? cur.to : state.doc.resolve(cur.to).end();
+              // after the new-text widget at the same position. A table cell is
+              // position: relative, so a margin card there would anchor to the cell
+              // and cover it: an edit inside a table always gets the block card.
+              const $to = state.doc.resolve(cur.to);
+              const inCell = Array.from({ length: $to.depth + 1 }, (_, d) => $to.node(d)).some(
+                (node) => node.type.spec.tableRole === "cell" || node.type.spec.tableRole === "header_cell",
+              );
+              const margin = wide && !inCell;
+              const at = margin ? cur.to : $to.end();
               decos.push(
                 Decoration.widget(
                   at,
                   (view) =>
-                    buildLineEditCard(cur.reason, wide, {
+                    buildLineEditCard(cur.reason, margin, {
                       prev: () => stepLineEdit(view, -1),
                       next: () => stepLineEdit(view, 1),
                       accept: () => acceptCurrentLineEdit(view),
                       reject: () => rejectCurrentLineEdit(view),
                     }),
-                  { side: 2, key: `line-edit-card-${cur.id}-${at}-${wide}-${cur.reason}`, stopEvent: () => true },
+                  { side: 2, key: `line-edit-card-${cur.id}-${at}-${margin}-${cur.reason}`, stopEvent: () => true },
                 ),
               );
             }

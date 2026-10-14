@@ -994,7 +994,7 @@ button.row-action-add.active {
 }
 /* PM appends a trailing <br> after a last-child widget; after a block card it
    would be an empty line. */
-.editor-body .line-edit-card ~ .ProseMirror-trailingBreak {
+.editor-body .line-edit-card:not(.line-edit-card-wide) ~ .ProseMirror-trailingBreak {
   display: none;
 }
 /* Inline-level on purpose: an absolute box keeps the static vertical position

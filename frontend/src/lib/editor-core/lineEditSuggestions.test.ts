@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // #2460: the review plugin keeps placed edits in state (document untouched),
 // decorates them, and resolves them one at a time or all at once.
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import { proseStarterKit } from "./proseStarterKit";
 import {
@@ -19,6 +19,7 @@ import {
   stepLineEdit,
 } from "./lineEditSuggestions";
 import { placeLineEdits } from "./lineEdits";
+import { tableExtensions } from "./alignedTable";
 
 const editors: Editor[] = [];
 afterEach(() => {
@@ -346,5 +347,80 @@ describe("LineEditSuggestions", () => {
     const { edits } = lineEditState(editor.state);
     expect(edits).toHaveLength(2);
     expect(editor.state.doc.textBetween(edits[0].from, edits[0].to)).toBe("cat");
+  });
+});
+
+describe("decision card placement", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("finds the scroll frame lazily and flips wide/narrow from the room right of the column", () => {
+    // The plugin view is created before the editor is attached to the page, so
+    // the frame must be looked up when the observer fires, not up front.
+    const callbacks: Array<() => void> = [];
+    const observed: Element[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          callbacks.push(cb);
+        }
+        observe(el: Element) {
+          observed.push(el);
+        }
+        disconnect() {}
+      },
+    );
+    const host = document.createElement("div");
+    const editor = new Editor({
+      element: host,
+      extensions: [proseStarterKit(), LineEditSuggestions],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: TEXT }] }] },
+    });
+    editors.push(editor);
+    const frame = document.createElement("div");
+    frame.className = "editor-wrap";
+    frame.append(host);
+    document.body.append(frame);
+    Object.defineProperty(frame, "clientWidth", { value: 1000 });
+    frame.getBoundingClientRect = () => ({ left: 0 }) as DOMRect;
+    let domRight = 700;
+    editor.view.dom.getBoundingClientRect = () => ({ right: domRight }) as DOMRect;
+
+    callbacks.forEach((cb) => cb());
+    expect(observed).toContain(frame);
+    expect(lineEditState(editor.state).wide).toBe(true);
+
+    domRight = 900;
+    callbacks.forEach((cb) => cb());
+    expect(lineEditState(editor.state).wide).toBe(false);
+  });
+
+  it("an edit inside a table cell gets the block card even when there is margin room", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const cell = (text: string) => ({
+      type: "tableCell",
+      content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+    });
+    const editor = new Editor({
+      element: host,
+      extensions: [proseStarterKit(), ...tableExtensions, LineEditSuggestions],
+      content: {
+        type: "doc",
+        content: [{ type: "table", content: [{ type: "tableRow", content: [cell(TEXT), cell("x")] }] }],
+      },
+    });
+    editors.push(editor);
+    const { placed } = placeLineEdits(editor.state.doc, 0, editor.state.doc.content.size, [
+      { find: "cat", replace: "dog", reason: "livelier" },
+    ]);
+    installLineEdits(editor.view, placed);
+    setLineEditCardWide(editor.view, true);
+    const card = editor.view.dom.querySelector("[data-testid=line-edit-card]");
+    expect(card).not.toBeNull();
+    expect(card!.classList.contains("line-edit-card-wide")).toBe(false);
+    expect(card!.closest("td")).not.toBeNull();
   });
 });

@@ -1005,7 +1005,9 @@ button.row-action-add.active {
   vertical-align: top;
   position: absolute;
   left: calc(100% - 32px);
-  width: 232px;
+  /* Adapts to the gutter (#2478): the plugin's ResizeObserver sets it, 180–232px. */
+  width: var(--line-edit-card-w, 232px);
+  max-width: none;
   margin: 0;
   z-index: 1;
 }

@@ -15,6 +15,7 @@ import {
   rejectCurrentLineEdit,
   rejectLineEdit,
   setCurrentLineEdit,
+  marginCardWidth,
   setLineEditCardWide,
   stepLineEdit,
 } from "./lineEditSuggestions";
@@ -391,10 +392,70 @@ describe("decision card placement", () => {
     callbacks.forEach((cb) => cb());
     expect(observed).toContain(frame);
     expect(lineEditState(editor.state).wide).toBe(true);
+    expect(editor.view.dom.style.getPropertyValue("--line-edit-card-w")).toBe("232px");
 
-    domRight = 900;
+    // #2478: a gutter narrower than the full card still gets a margin card, sized to it.
+    domRight = 816; // room 184
+    callbacks.forEach((cb) => cb());
+    expect(lineEditState(editor.state).wide).toBe(true);
+    expect(editor.view.dom.style.getPropertyValue("--line-edit-card-w")).toBe("204px");
+
+    domRight = 900; // room 100: below the minimum card
     callbacks.forEach((cb) => cb());
     expect(lineEditState(editor.state).wide).toBe(false);
+  });
+
+  it("the margin card's width follows the room, from 180 to 232px (#2478)", () => {
+    expect(marginCardWidth(400)).toBe(232);
+    expect(marginCardWidth(184)).toBe(204);
+    expect(marginCardWidth(160)).toBe(180);
+    expect(marginCardWidth(159)).toBeNull();
+  });
+
+  describe("revealing the current edit with its card (#2478)", () => {
+    // A scroll frame 300px tall at viewport y=100; rects are stubbed (happy-dom
+    // has no layout), positions given as the viewport y's the reveal reads.
+    function framed(spanTop: number, cardTop: number, cardHeight: number) {
+      const frame = document.createElement("div");
+      frame.className = "editor-wrap";
+      const host = document.createElement("div");
+      frame.append(host);
+      document.body.append(frame);
+      const editor = new Editor({
+        element: host,
+        extensions: [proseStarterKit(), LineEditSuggestions],
+        content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: TEXT }] }] },
+      });
+      editors.push(editor);
+      frame.getBoundingClientRect = () => ({ top: 100, bottom: 400, height: 300 }) as DOMRect;
+      const rect = (top: number, height: number) => () => ({ top, bottom: top + height, height }) as DOMRect;
+      // Stub before install so the install-time reveal reads these rects.
+      const origQuery = editor.view.dom.querySelector.bind(editor.view.dom);
+      editor.view.dom.querySelector = ((sel: string) => {
+        const el = origQuery(sel) as HTMLElement | null;
+        if (!el) return el;
+        if (sel.startsWith("[data-line-edit-id")) el.getBoundingClientRect = rect(spanTop, 20);
+        if (sel === ".line-edit-card") el.getBoundingClientRect = rect(cardTop, cardHeight);
+        return el;
+      }) as typeof editor.view.dom.querySelector;
+      const { placed } = placeLineEdits(editor.state.doc, 0, editor.state.doc.content.size, [
+        { find: "cat", replace: "dog", reason: "livelier" },
+      ]);
+      installLineEdits(editor.view, placed);
+      return frame;
+    }
+
+    it("on install, scrolls so a card below the fold comes into view with its edit", () => {
+      // Edit at 300, card 360-420: the card overruns the frame bottom (400) by 20.
+      const frame = framed(300, 360, 60);
+      expect(frame.scrollTop).toBe(20);
+    });
+
+    it("when edit and card don't both fit, the edit wins", () => {
+      // Edit at 450 (below the fold); card 700-760: together 310px > the 300px frame.
+      const frame = framed(450, 700, 60);
+      expect(frame.scrollTop).toBe(70); // edit bottom 470 brought to the frame bottom 400
+    });
   });
 
   it("an edit inside a table cell gets the block card even when there is margin room", () => {

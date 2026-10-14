@@ -48,8 +48,15 @@ function resolve(view: EditorView, ids: number[], accepted: boolean): void {
   const tr = view.state.tr;
   if (accepted) {
     // Descending, so each replace leaves the positions of the ones before it intact.
+    // The new text takes the marks of the replaced range, not the stored marks.
     for (const edit of [...targets].sort((a, b) => b.from - a.from)) {
-      tr.insertText(edit.replace, edit.from, edit.to);
+      if (!edit.replace) {
+        tr.delete(edit.from, edit.to);
+        continue;
+      }
+      const $from = tr.doc.resolve(edit.from);
+      const marks = $from.marksAcross(tr.doc.resolve(edit.to)) ?? $from.marks();
+      tr.replaceWith(edit.from, edit.to, view.state.schema.text(edit.replace, marks));
     }
   }
   tr.setMeta(pluginKey, { type: "resolve", ids, accepted } satisfies LineEditMeta);

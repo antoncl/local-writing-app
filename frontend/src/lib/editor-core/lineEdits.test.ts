@@ -77,6 +77,31 @@ describe("placeLineEdits", () => {
     expect(placed.map((p) => p.find)).toEqual(["one", "three"]);
   });
 
+  it("matches a straight-quoted find against curly quotes, and keeps the document's own text", () => {
+    const doc = docOf([text("She said “hello” and it’s fine.")]);
+    const { placed, dropped } = placeLineEdits(doc, ...whole(doc), [edit("said \"hello\" and it's", "x")]);
+    expect(dropped).toBe(0);
+    expect(doc.textBetween(placed[0].from, placed[0].to)).toBe("said “hello” and it’s");
+    expect(placed[0].find).toBe("said “hello” and it’s");
+  });
+
+  it("matches a hyphen find against an em or en dash", () => {
+    const doc = docOf([text("wait—what, 1–2?")]);
+    const { placed } = placeLineEdits(doc, ...whole(doc), [edit("wait-what", "x"), edit("1-2", "y")]);
+    expect(placed.map((p) => p.find)).toEqual(["wait—what", "1–2"]);
+  });
+
+  it("matches a plain space against a non-breaking space", () => {
+    const doc = docOf([text("ten pages and two")]);
+    const { placed } = placeLineEdits(doc, ...whole(doc), [edit("ten pages", "x"), edit("and two", "y")]);
+    expect(placed.map((p) => p.find)).toEqual(["ten pages", "and two"]);
+  });
+
+  it("counts uniqueness on the normalized text", () => {
+    const doc = docOf([text("“hi” and \"hi\"")]);
+    expect(placeLineEdits(doc, ...whole(doc), [edit("\"hi\"", "x")])).toMatchObject({ placed: [], dropped: 1 });
+  });
+
   it("a hard break is a sentinel: a find can't span it", () => {
     const doc = docOf([text("line one"), { type: "hardBreak" }, text("line two")]);
     expect(placeLineEdits(doc, ...whole(doc), [edit("one line", "x")]).dropped).toBe(1);

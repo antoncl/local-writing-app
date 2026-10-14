@@ -111,6 +111,9 @@ export class AiSuggestionController {
   // writer's edits, for Retry) and the unsubscribe of the listener that tracks it.
   #lineEditRange: { from: number; to: number } | null = null;
   #stopWatchingLineEdits: (() => void) | null = null;
+  // Bumped by reset(): a line-edits reply that arrives after it belongs to a
+  // document the writer has left, and is discarded.
+  #runEpoch = 0;
 
   #deps: AiSuggestionDeps;
 
@@ -126,6 +129,16 @@ export class AiSuggestionController {
     this.#suggestionOriginal = null;
     this.#anchorPos = null;
     this.#pendingInternal = null;
+    this.#runEpoch += 1;
+    const editor = this.#deps.getEditor();
+    // Leave no orphaned edit decorations behind on the editor we're leaving. The
+    // watcher goes first so this reject isn't booked as a resolved list (its
+    // telemetry would land on whichever scene is current by now).
+    this.#stopWatchingLineEdits?.();
+    this.#stopWatchingLineEdits = null;
+    if (editor && !editor.isDestroyed && lineEditState(editor.state).edits.length > 0) {
+      rejectAllLineEdits(editor.view);
+    }
     this.#closeLineEdits();
     this.error = null;
     this.toolbarPosition = { x: 0, y: 0, visible: false };
@@ -472,6 +485,7 @@ export class AiSuggestionController {
     if (!editor) return;
     const { from, to, selectionText, textBefore, textAfter } = gathered;
     const { entry, inputs, assistantId, scene } = run;
+    const epoch = this.#runEpoch;
     try {
       const res = await api.aiGenerate({
         template_source: entry.body,
@@ -486,6 +500,8 @@ export class AiSuggestionController {
         commit: false,
         response_format: "line_edits",
       });
+      // The writer switched documents mid-call: this reply isn't theirs to see.
+      if (epoch !== this.#runEpoch || this.#deps.getScene()?.id !== scene.id) return;
       if (!res.ok) {
         this.error = res.error || "Unknown error";
         return;
@@ -542,8 +558,9 @@ export class AiSuggestionController {
       }
       const { edits, accepted } = lineEditState(editor.state);
       if (edits.length > 0) {
-        this.lineEdits = { remaining: edits.length };
-        this.updateToolbarPosition();
+        const changed = this.lineEdits?.remaining !== edits.length;
+        if (changed) this.lineEdits = { remaining: edits.length };
+        if (changed || transaction.docChanged || transaction.selectionSet) this.updateToolbarPosition();
         return;
       }
       // Resolved or dropped to nothing. Telemetry once, and only if the writer

@@ -67,6 +67,33 @@ describe("LineEditSuggestions", () => {
     expect(editor.state.doc.textBetween(edits[0].from, edits[0].to)).toBe(" on the mat");
   });
 
+  it("accept ignores stored marks and takes the replaced text's marks", () => {
+    const editor = setup();
+    const bold = editor.state.schema.marks.bold.create();
+    editor.view.dispatch(editor.state.tr.setStoredMarks([bold]));
+    const [first] = lineEditState(editor.state).edits;
+    acceptLineEdit(editor.view, first.id);
+    expect(docText(editor)).toBe("The dog sat on the mat.");
+    expect(editor.getJSON().content?.[0].content).toEqual([
+      { type: "text", text: "The dog sat on the mat." },
+    ]);
+  });
+
+  it("accept keeps the marks of the text it replaces", () => {
+    const editor = setup();
+    // make "cat" italic, then accept the edit over it
+    const [first] = lineEditState(editor.state).edits;
+    const italic = editor.state.schema.marks.italic.create();
+    editor.view.dispatch(editor.state.tr.addMark(first.from, first.to, italic));
+    acceptLineEdit(editor.view, lineEditState(editor.state).edits[0].id);
+    const marks: string[] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.isText && node.text?.includes("dog")) marks.push(...node.marks.map((m) => m.type.name));
+    });
+    expect(marks).toEqual(["italic"]);
+    expect(docText(editor)).toBe("The dog sat on the mat.");
+  });
+
   it("the widget's accept button applies its edit", () => {
     const editor = setup();
     const btn = editor.view.dom.querySelector('[data-testid="line-edit-accept"]') as HTMLElement;

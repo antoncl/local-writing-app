@@ -976,7 +976,7 @@ button.row-action-add.active {
 }
 .editor-body .line-edit-btn:hover {
   background: var(--inset);
-  color: var(--text-1);
+  color: var(--text);
 }
 
 /* Spans of body text attributed to a specific character (roleplay

@@ -35,10 +35,11 @@ function setup() {
   editors.push(editor);
   const notices: string[] = [];
   const costs: number[] = [];
+  const sceneId = { current: "scene_1" };
   const ctrl = new AiSuggestionController({
     getEditor: () => editor,
     getEditorFrame: () => undefined,
-    getScene: () => ({ id: "scene_1" }) as never,
+    getScene: () => ({ id: sceneId.current }) as never,
     getDocumentKind: () => "manuscript",
     getPromptCtx: () => ({ promptEntries: [ENTRY] }) as never,
     onInvocationCost: (c) => costs.push(c),
@@ -48,7 +49,7 @@ function setup() {
     onOpenChat: () => {},
   });
   editor.commands.setTextSelection({ from: 1, to: editor.state.doc.content.size - 1 });
-  return { editor, ctrl, notices, costs };
+  return { editor, ctrl, notices, costs, sceneId };
 }
 
 const reply = (over: Record<string, unknown> = {}) =>
@@ -167,6 +168,57 @@ describe("line edits (#2460)", () => {
     ctrl.acceptAllLineEdits();
     expect(editor.state.doc.textContent).toBe("The dog sat on the rug.");
     expect(api.aiAppendInvocation).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards a reply that lands after reset() (document switch)", async () => {
+    const { editor, ctrl, costs } = setup();
+    let resolveReply!: (r: never) => void;
+    const spy = vi.spyOn(api, "aiGenerate").mockReturnValue(new Promise((r) => (resolveReply = r)) as never);
+    const run = ctrl.runPromptEntryWithInputs(ENTRY, {});
+    await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+    ctrl.reset();
+    resolveReply(reply());
+    await run;
+    expect(lineEditState(editor.state).edits).toHaveLength(0);
+    expect(ctrl.lineEdits).toBeNull();
+    expect(ctrl.error).toBeNull();
+    expect(costs).toEqual([]);
+    expect(ctrl.generating).toBe(false);
+  });
+
+  it("discards a reply that lands after the scene changed", async () => {
+    const { editor, ctrl, costs, sceneId } = setup();
+    vi.spyOn(api, "aiGenerate").mockImplementation(async () => {
+      sceneId.current = "scene_2";
+      return reply();
+    });
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    expect(lineEditState(editor.state).edits).toHaveLength(0);
+    expect(ctrl.lineEdits).toBeNull();
+    expect(ctrl.error).toBeNull();
+    expect(costs).toEqual([]);
+    expect(ctrl.generating).toBe(false);
+  });
+
+  it("reset() removes the pending edits from the editor", async () => {
+    const { editor, ctrl } = setup();
+    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    expect(lineEditState(editor.state).edits).toHaveLength(2);
+    ctrl.reset();
+    expect(lineEditState(editor.state).edits).toHaveLength(0);
+    expect(editor.view.dom.querySelectorAll(".line-edit-old")).toHaveLength(0);
+    expect(ctrl.lineEdits).toBeNull();
+    expect(editor.state.doc.textContent).toBe(TEXT);
+  });
+
+  it("reset() with a destroyed editor does not throw", async () => {
+    const { editor, ctrl } = setup();
+    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    editor.destroy();
+    expect(() => ctrl.reset()).not.toThrow();
+    expect(ctrl.lineEdits).toBeNull();
   });
 
   it("retry rejects what is left and asks again on the same text", async () => {

@@ -23,6 +23,16 @@ export type PlacementResult = {
 /** Stands in for an inline leaf (hard break, pill) so a `find` can't span it. */
 const LEAF = "￼";
 
+/** Typographic characters a model tends to flatten to ASCII. Strictly 1:1 (no
+ *  ellipsis), so `posOf` indices stay valid on the normalized text. */
+const TYPOGRAPHIC: Record<string, string> = {
+  "“": '"', "”": '"', "„": '"', "‟": '"', "″": '"',
+  "‘": "'", "’": "'", "‚": "'", "‛": "'", "′": "'",
+  "—": "-", "–": "-", "‒": "-", "―": "-",
+  " ": " ", " ": " ",
+};
+const normalize = (s: string) => s.split("").map((c) => TYPOGRAPHIC[c] ?? c).join("");
+
 /** One text block's visible text within [from, to], with each character's
  *  document position. */
 type BlockText = { text: string; posOf: number[] };
@@ -77,9 +87,11 @@ export function placeLineEdits(doc: PMNode, from: number, to: number, edits: Lin
       dropped += 1;
       continue;
     }
+    // Matched on typographic-normalized text (1:1, so indices line up with `text`).
+    const find = normalize(edit.find);
     const hits: { block: BlockText; at: number }[] = [];
     for (const block of blocks) {
-      for (const at of occurrences(block.text, edit.find)) hits.push({ block, at });
+      for (const at of occurrences(normalize(block.text), find)) hits.push({ block, at });
     }
     if (hits.length !== 1) {
       dropped += 1;
@@ -87,13 +99,15 @@ export function placeLineEdits(doc: PMNode, from: number, to: number, edits: Lin
     }
     const { block, at } = hits[0];
     const start = block.posOf[at];
-    const end = block.posOf[at + edit.find.length - 1] + 1;
+    const end = block.posOf[at + find.length - 1] + 1;
     // Model order wins: a later edit overlapping an already-placed one is dropped.
     if (placed.some((p) => start < p.to && p.from < end)) {
       dropped += 1;
       continue;
     }
-    placed.push({ from: start, to: end, find: edit.find, replace: edit.replace, reason: edit.reason });
+    // `find` becomes the document's own text for the range: the review plugin re-checks it.
+    const docFind = block.text.slice(at, at + find.length);
+    placed.push({ from: start, to: end, find: docFind, replace: edit.replace, reason: edit.reason });
   }
   placed.sort((a, b) => a.from - b.from);
   return { placed, dropped };

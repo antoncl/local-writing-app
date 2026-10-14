@@ -29,11 +29,14 @@ const ENTRY = {
   context_strategy: { output: { handler: "inline" } },
 } as never;
 
-function setup() {
+function setup(text = "") {
   const editor = new Editor({
     element: document.createElement("div"),
     extensions: [proseStarterKit(), AISuggestion],
-    content: { type: "doc", content: [{ type: "paragraph" }] },
+    content: {
+      type: "doc",
+      content: [{ type: "paragraph", ...(text ? { content: [{ type: "text", text }] } : {}) }],
+    },
   });
   editors.push(editor);
   const ctrl = new AiSuggestionController({
@@ -193,5 +196,27 @@ describe("line breaks at the ends of a suggestion (#2431)", () => {
     ctrl.accept();
     expect(nodeTypes(editor)).not.toContain("hardBreak");
     expect(docText(editor)).toBe("The rain.");
+  });
+});
+
+describe("a cursor insert is spaced from the words around it (#2459)", () => {
+  it("a continuation right after a word gets a space, and discard takes it back", async () => {
+    const { editor, ctrl } = setup("at dusk and");
+    editor.commands.setTextSelection(1 + "at dusk and".length);
+    fakeStream([{ type: "delta", text: "the" }, { type: "delta", text: " admiral" }, DONE]);
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    expect(docText(editor)).toBe("at dusk and the admiral");
+    expect(markedText(editor)).toEqual({ marked: " the admiral", unmarked: "at dusk and" });
+    ctrl.revert();
+    expect(docText(editor)).toBe("at dusk and");
+  });
+
+  it("an insert right before a word gets a space after it", async () => {
+    const { editor, ctrl } = setup("The end.");
+    editor.commands.setTextSelection(1);
+    fakeStream([{ type: "delta", text: "Night fell." }, DONE]);
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    ctrl.accept();
+    expect(docText(editor)).toBe("Night fell. The end.");
   });
 });

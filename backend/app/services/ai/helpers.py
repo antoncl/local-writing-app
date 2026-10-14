@@ -41,7 +41,6 @@ from app.services.ai.plot_prompt_context import render_plot_context
 from app.services.ai.sessions import AISession
 from app.services.body_text import story_text
 from app.services.error_log import append_error_line
-from app.services.machine_settings import palette as machine_palette
 from app.services.project.lore_mutations import START_OF_SCENE
 from app.services.project.metadata_refs import iter_ref_occurrences, occurrence_targets
 from app.services.project.mutation_anchors import anchors_as_markers
@@ -471,13 +470,6 @@ def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, 
             # pre-filtered on it (retires the old `is_proposable_field` gate).
             "proposable": is_proposable_field(field_id, field, schema),
         }
-        # #2484: the palette IS a colour field's value space (the mirror of
-        # metadata_values' nearest-swatch snap at commit). Listing the swatch
-        # ids lets `_describe_field` render "; one of: …", so the model picks a
-        # real swatch — including a user's customised palette — instead of a
-        # name the snap would silently drop.
-        if field.type == "color":
-            descriptor["options"] = [s.id for s in machine_palette()]
         # ADR-0082 §2 / #1799: a proposable tag-vocabulary field carries its
         # live vocabulary titles alongside the descriptor, so `field_contract`'s
         # "prefer tags that already exist" guidance (`_describe_field`) is

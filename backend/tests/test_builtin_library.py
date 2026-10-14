@@ -57,7 +57,7 @@ REVISE_TITLES = [
 
 # The revise prompts that refine existing text and so answer with an edit list
 # (#2474); the rest of REVISE_TITLES generate and replace the selection.
-EDIT_LIST_REVISE_TITLES = ("Shorten", "Show, don't tell")
+EDIT_LIST_REVISE_TITLES = ("Shorten", "Show, don't tell", "Tighten grammar")
 
 
 class BuiltinLibraryTests(unittest.TestCase):

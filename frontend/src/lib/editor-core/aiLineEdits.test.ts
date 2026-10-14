@@ -97,6 +97,8 @@ describe("line edits (#2460)", () => {
       selection: TEXT,
       target_scene_id: "scene_1",
       commit: false,
+      // Every selection run names the pills before it (#2491); none here.
+      markers_before_selection: [],
     });
     expect(editor.state.doc.textContent).toBe(TEXT);
     expect(lineEditState(editor.state).edits).toHaveLength(2);

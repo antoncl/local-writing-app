@@ -29,6 +29,7 @@ import {
 } from "@/lib/editor-core/promptResolution";
 import { seedConversationInputs } from "@/components/editor/body/chat/chatInputs";
 import {
+  gatheredRequestFields,
   outputHandlerFor,
   type InlineDestination,
   type InlineGathered,
@@ -693,7 +694,7 @@ export class AiSuggestionController {
   async #runLineEdits(gathered: InlineGathered, run: OutputRun): Promise<void> {
     const editor = this.#deps.getEditor();
     if (!editor) return;
-    const { from, to, selectionText, textBefore, textAfter } = gathered;
+    const { from, to, selectionText } = gathered;
     const { entry, inputs, assistantId, scene } = run;
     const epoch = this.#runEpoch;
     const abort = new AbortController();
@@ -711,9 +712,7 @@ export class AiSuggestionController {
         session_id: scene.id,
         inputs,
         resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
-        text_before: textBefore,
-        text_after: textAfter,
-        ...(selectionText !== undefined ? { selection: selectionText } : {}),
+        ...gatheredRequestFields(gathered),
         ...(assistantId ? { assistant_id: assistantId } : {}),
         commit: false,
         response_format: "line_edits",
@@ -893,7 +892,7 @@ export class AiSuggestionController {
   async #streamInline(gathered: InlineGathered, run: OutputRun): Promise<void> {
     const editor = this.#deps.getEditor();
     if (!editor) return;
-    const { from, to, selectionText, textBefore, textAfter, destination } = gathered;
+    const { from, to, selectionText, destination } = gathered;
     const { entry, inputs, assistantId, scene } = run;
 
     // A beat-marking prompt (roleplay, via on_accept) may deliver two parts —
@@ -1009,9 +1008,7 @@ export class AiSuggestionController {
         session_id: scene.id,
         inputs,
         resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
-        text_before: textBefore,
-        text_after: textAfter,
-        ...(selectionText !== undefined ? { selection: selectionText } : {}),
+        ...gatheredRequestFields(gathered),
         ...(assistantId ? { assistant_id: assistantId } : {}),
         commit: false,
       }, signal)) {

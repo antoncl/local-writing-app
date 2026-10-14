@@ -78,9 +78,10 @@ COLLECTION_FIELD_TYPES = frozenset({"multi_select", "entity_ref_list"})
 TEXT_APPEND_FIELD_TYPES = frozenset({"text", "long_text"})
 
 # Sentinel position: resolve at end of scene (every in-scene marker counts as
-# live). The default for every surface; a real offset comes from the inline
-# handler's `selection` destination, or from `lore_as_of("selection")`
-# (`position_before_selection`) (ADR-0003, ADR-0098).
+# live). The default for every surface. A real offset comes from a pill click or
+# the /mutate dialog (`?pos=` on the live-mutations / effective endpoints), and on
+# the AI path only from `lore_as_of("selection")` (`position_before_selection`)
+# (ADR-0003, ADR-0098).
 END_OF_SCENE: int | None = None
 
 # Sentinel position: resolve at the START of the scene — earlier scenes' records

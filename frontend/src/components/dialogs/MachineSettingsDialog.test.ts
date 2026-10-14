@@ -14,6 +14,7 @@ vi.mock("@/lib/api", () => ({
     updateApplyStatus: vi.fn(),
     checkOllamaHost: vi.fn(),
     revealLogs: vi.fn(async () => ({ config_dir: "C:/appdata" })),
+    listMachineAssistantEntries: vi.fn(async () => ({ entries: [] })),
   },
 }));
 
@@ -22,7 +23,6 @@ import type { MachineSettingsDraft, MachineSettingsView, OllamaHostHealth, Updat
 import type { AIHealthResponse } from "@/lib/aiTypes";
 import { api } from "@/lib/api";
 import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
-
 // The app-wide AI policy (#746) is deliberately NOT part of the batched draft:
 // widening AI permission must be its own explicit gesture, never a side effect
 // of the dialog's Save (decisions_ai_permission_fails_closed). These tests pin
@@ -234,6 +234,29 @@ describe("MachineSettingsDialog — running app version (ADR-0072 S2)", () => {
   it("fetches and shows the running version once the dialog is open", async () => {
     mount("off");
     expect(await screen.findByText("Version 9.9.9")).toBeInTheDocument();
+  });
+});
+
+describe("MachineSettingsDialog — assistants tab (#2444)", () => {
+  // No schema is set on purpose: with no project open the schema store is
+  // empty, and the roster must still render.
+  it("lists the machine roster's assistants without a project open", async () => {
+    (api.listMachineAssistantEntries as Mock).mockResolvedValue({
+      entries: [
+        {
+          id: "assistant_m1",
+          title: "Machine Muse",
+          entry_type: "assistant:assistant",
+          metadata: { ai_provider: "anthropic", ai_model: "claude-x" },
+          computed_metadata: { listed: "listed", position: 0 },
+        },
+      ],
+    });
+    mount("cloud-allowed");
+    await fireEvent.click(screen.getByRole("tab", { name: "Assistants" }));
+    expect(screen.getByTestId("machine-assistants")).toBeInTheDocument();
+    expect(await screen.findByText("Machine Muse")).toBeInTheDocument();
+    expect(screen.getByTestId("machine-assistant-hire")).toBeInTheDocument();
   });
 });
 

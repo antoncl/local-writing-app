@@ -179,7 +179,28 @@ class _AssistantOrderMerger(LayerVisitor):
 
 class AssistantEntriesMixin:
     def list_assistant_entries(self) -> AssistantEntryList:
-        index = self._build_assistant_index()
+        return self._assistant_roster(self._build_assistant_index(), self.merged_assistant_order())
+
+    def list_machine_assistant_entries(self) -> AssistantEntryList:
+        """The machine layer's own roster (#2444), whether or not a project is open.
+
+        The merged roster answers "what does the open project see"; Machine
+        Settings needs "what does the machine layer hold, in its own order" —
+        exactly what the merged roster is when no project is open. So this is
+        that degenerate case, taken on purpose: machine files only, folded by the
+        machine `.order.yaml` alone, so `listed` reflects the machine layer's
+        opinion and no project's curation leaks in.
+        """
+        index = NodeIndex()
+        self._collect_machine_layer_assistants(index, duplicate_relative_to=Path("/"))
+        index.resolve()
+        merger = _AssistantOrderMerger(self._read_assistants_order)
+        machine_layer = self.machine_layer()
+        if machine_layer is not None:
+            merger.visit_layer(machine_layer)
+        return self._assistant_roster(index, merger.merged)
+
+    def _assistant_roster(self, index: NodeIndex, merged: MergedAssistantOrder) -> AssistantEntryList:
         entries: list[AssistantEntrySummary] = []
         for entry in index.by_id.values():
             if entry.kind != "assistant":
@@ -206,7 +227,7 @@ class AssistantEntriesMixin:
         # *encodes* precedence, so a layer term would fight the user's single
         # drag-ordered list rather than refine it. The grouping that relied on
         # it moves with #333.
-        merged = self.merged_assistant_order()
+        #
         # An excluded assistant is UNLISTED, not gone (#333). #332 filtered it out
         # of the roster entirely, which made `excluded` a visibility mechanism as
         # well as an inheritance one — and left anything so removed with no path

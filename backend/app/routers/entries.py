@@ -93,6 +93,13 @@ def list_assistant_entries(project: CurrentProject) -> AssistantEntryList:
         return project.list_assistant_entries()
 
 
+# Declared before `/api/assistants/{entry_id}` so "machine" is not read as an id.
+@router.get("/api/assistants/machine", response_model=AssistantEntryList)
+def list_machine_assistant_entries(project: CurrentProject) -> AssistantEntryList:
+    with translate_errors():
+        return project.list_machine_assistant_entries()
+
+
 @router.post("/api/assistants", response_model=AssistantEntry)
 def create_assistant_entry(project: CurrentProject, request: CreateAssistantEntryRequest) -> AssistantEntry:
     with translate_errors():

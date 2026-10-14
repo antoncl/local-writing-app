@@ -502,6 +502,30 @@ class AssistantReorderTests(unittest.TestCase):
         ids = [e["id"] for e in response.json()["entries"]]
         self.assertEqual(ids, ["charlie", "alpha", "bravo"])
 
+    def test_machine_roster_ignores_the_open_projects_files_and_curation(self) -> None:
+        # #2444: Machine Settings reads the machine layer's OWN roster. Give the
+        # open project an assistant of its own and an opinion that contradicts
+        # the machine's (charlie first, alpha un-listed) — neither may leak in.
+        local = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Local", layer_id=None)
+        )
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["bravo", "alpha"]},
+        )
+        self.client.post("/api/assistants/order", json={"ordered_ids": ["charlie", local.id]})
+        self.client.post("/api/assistants/unlist", json={"entry_id": "alpha"})
+
+        response = self.client.get("/api/assistants/machine")
+        self.assertEqual(response.status_code, 200, response.text)
+        entries = response.json()["entries"]
+        self.assertEqual([e["id"] for e in entries], ["bravo", "alpha", "charlie"])
+        listed = {e["id"]: e["computed_metadata"]["listed"] for e in entries}
+        self.assertEqual(listed, {"bravo": "listed", "alpha": "listed", "charlie": "unlisted"})
+        # The merged roster still reflects the project's view, untouched.
+        merged = [e["id"] for e in self.client.get("/api/assistants").json()["entries"]]
+        self.assertEqual(merged[:2], ["charlie", local.id])
+
     def test_reorder_with_unknown_id_returns_422(self) -> None:
         # Still 422, but on a narrower rule since #332: the id must exist
         # *somewhere in the roster*, not in this layer's own files. See

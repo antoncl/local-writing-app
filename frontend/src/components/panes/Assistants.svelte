@@ -19,7 +19,8 @@
   // (#333): drag no longer inspects the expr's shape at all.
   import { defaultView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
-  import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
+  import { isInherited } from "@/lib/utils/provenance";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import type { ViewSpec } from "@/lib/types";
@@ -40,13 +41,20 @@
     // local layer's opinion (#332/#333), and the backend resolves that.
     onSetOrder,
     onUnlist,
+    // Presentation only (#2444): "machine" is the Machine Settings roster, whose
+    // List/Un-list is the machine layer's own opinion rather than a project's.
+    // The callers decide which layer they write; this only picks the wording.
+    scope = "project",
   }: {
     entries: AssistantEntrySummary[];
     viewSpec?: ViewSpec;
     onOpenEntry: (entryId: string) => void;
     onSetOrder: (orderedIds: string[]) => Promise<void>;
     onUnlist: (entryId: string) => Promise<void>;
+    scope?: "project" | "machine";
   } = $props();
+
+  const rosterName = $derived(scope === "machine" ? "the machine roster (every project)" : "this project's roster");
 
   const schema = $derived($metadataSchemaStore);
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
@@ -188,10 +196,16 @@
   function assistantSubtitle(entry: AssistantEntrySummary): string {
     const provider = entry.metadata?.ai_provider;
     const model = entry.metadata?.ai_model;
-    if (provider && model) return `${provider} · ${model}`;
-    if (model) return String(model);
-    if (provider) return String(provider);
-    return "";
+    let detail = "";
+    if (provider && model) detail = `${provider} · ${model}`;
+    else if (model) detail = String(model);
+    else if (provider) detail = String(provider);
+    // Provenance for an inherited assistant — any ancestor layer, not just the
+    // machine's (#2444). Meaningless in the machine scope (everything is its own).
+    if (scope === "project" && isInherited({ source_layer_id: entry.source_layer_id }, $projectLayerIdStore)) {
+      return `from ${entry.source_layer_label || "an ancestor layer"} · ${detail}`.replace(/ · $/, "");
+    }
+    return detail;
   }
 </script>
 
@@ -210,7 +224,11 @@
 >
   {#snippet whenEmpty()}
     {#if entries.length === 0}
-      <p class="muted">No assistants defined yet. Click + to create one.</p>
+      {#if scope === "machine"}
+        <p class="muted">No machine assistants yet. Hire one below.</p>
+      {:else}
+        <p class="muted">No assistants defined yet. Click + to create one.</p>
+      {/if}
     {:else}
       <p class="muted">No assistants match your search.</p>
     {/if}
@@ -298,10 +316,10 @@
         <button
           class="assistant-curate"
           type="button"
-          title={isAssistantListed(entry) ? "Remove from this project's roster" : "Add to this project's roster"}
+          title={isAssistantListed(entry) ? `Remove from ${rosterName}` : `Add to ${rosterName}`}
           aria-label={isAssistantListed(entry)
-            ? `Remove ${entry.title} from this project's roster`
-            : `Add ${entry.title} to this project's roster`}
+            ? `Remove ${entry.title} from ${rosterName}`
+            : `Add ${entry.title} to ${rosterName}`}
           onmousedown={(event) => event.stopPropagation()}
           onclick={(event) => {
             // The row itself opens the assistant; this must not.

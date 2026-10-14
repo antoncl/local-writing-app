@@ -20,6 +20,7 @@
   import ProjectsFolderPicker from "@/components/widgets/ProjectsFolderPicker.svelte";
   import ProviderSubscriptions from "@/components/widgets/ProviderSubscriptions.svelte";
   import PaletteEditor from "@/components/widgets/PaletteEditor.svelte";
+  import MachineAssistantsSection from "@/components/widgets/MachineAssistantsSection.svelte";
   import { applyProsePresentation } from "@/lib/utils/prose-presentation";
 
   // Live-preview the display prefs as the user edits — the master text scaler is
@@ -244,9 +245,10 @@
   // (prose display), Palette (reusable colours), Storage (the projects root).
   // Writing and Palette are separate tabs so neither runs tall — the palette
   // alone can be dozens of swatches.
-  type SettingsTab = "ai" | "writing" | "palette" | "storage" | "updates";
+  type SettingsTab = "ai" | "assistants" | "writing" | "palette" | "storage" | "updates";
   const TABS: { key: SettingsTab; label: string }[] = [
     { key: "ai", label: "AI" },
+    { key: "assistants", label: "Assistants" },
     { key: "writing", label: "Writing" },
     { key: "palette", label: "Palette" },
     { key: "storage", label: "Storage" },
@@ -370,7 +372,7 @@
           {#if health}
             <section class="health-check">
               <h3>Connection</h3>
-              <p class="muted">Pings the default assistant (the topmost) to confirm its provider answers. To test a specific assistant, use its Test button in the Assistants pane.</p>
+              <p class="muted">Pings the default assistant (the topmost) to confirm its provider answers. To test a specific assistant, use its Test button in the Assistants tab.</p>
               <div class="button-row">
                 <button
                   type="button"
@@ -410,6 +412,8 @@
               <p class="ai-health-result ok">✓ Prices updated{#if pricesCleared > 0} · cleared {pricesCleared} manual {pricesCleared === 1 ? "price" : "prices"}{/if}.</p>
             {/if}
           </section>
+        {:else if activeTab === "assistants"}
+          <MachineAssistantsSection policy={settings?.ai_policy ?? "off"} />
         {:else if activeTab === "writing"}
           <section class="writing-surface">
             <h3>Writing surface</h3>

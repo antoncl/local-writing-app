@@ -76,8 +76,8 @@ def family_from_id(model_id: str) -> str:
 
 
 # Model families whose API rejects a `temperature` parameter — sampling was
-# removed on the newest Anthropic families (Opus 4.7/4.8/5, Sonnet 5, Fable 5,
-# Mythos 5). This lives here, provider-neutral, because the *same* model is
+# removed on the newest Anthropic families (Opus 4.7/4.8/5, Sonnet 5, Haiku 5,
+# Fable 5, Mythos 5). This lives here, provider-neutral, because the *same* model is
 # reachable through more than one provider: OpenRouter serves it as
 # `anthropic/claude-opus-4-8`. `family_supports_temperature` strips any leading
 # `provider/` route segment before matching, so the rule catches the model on
@@ -88,6 +88,7 @@ NO_TEMPERATURE_FAMILIES: tuple[str, ...] = (
     "claude-opus-4-8",
     "claude-opus-5",
     "claude-sonnet-5",
+    "claude-haiku-5",
     "claude-fable-5",
     "claude-mythos-5",
 )

@@ -192,6 +192,7 @@ def test_family_rule_flags_the_no_sampling_families():
     # The newest families 400 on temperature — native id.
     assert not family_supports_temperature("claude-opus-4-8")
     assert not family_supports_temperature("claude-sonnet-5")
+    assert not family_supports_temperature("claude-haiku-5-5")  # #2445
     # 4.6 and older (incl. Haiku 4.5) still accept it.
     assert family_supports_temperature("claude-sonnet-4-6")
     assert family_supports_temperature("claude-haiku-4-5-20251001")

@@ -174,6 +174,20 @@ describe("listHasProseItems / buildBodyListSections (#2043)", () => {
     expect(section.factMembers).toEqual([]);
   });
 
+  it("#2483: `scalar` follows item_scalar — true for the item_type sugar, false for a group-shaped list", () => {
+    const notes = field({
+      name: "Notes",
+      type: "list",
+      item_scalar: true,
+      item_members: [{ key: "value", name: "Value", type: "long_text" }],
+    });
+    const s = schema({ notes, beats: BEATS }, ["notes", "beats"]);
+    expect(buildBodyListSections(s, "character").map((x) => [x.id, x.scalar])).toEqual([
+      ["notes", true],
+      ["beats", false],
+    ]);
+  });
+
   it("skips hidden and non-qualifying lists and keeps schema order", () => {
     const s = schema(
       {

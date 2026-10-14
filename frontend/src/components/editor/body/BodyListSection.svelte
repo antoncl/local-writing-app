@@ -6,8 +6,6 @@
   // stacked MetadataLongTextEditors). Storage is unchanged: every write is a
   // whole-array `on.change`, mirroring ListValueEditor's own add/remove/
   // reorder recipe (index-based, `reorderByPosition`/`dropPositionFromEvent`).
-  // A scalar section (`item_type` sugar, #2483) holds bare values in a flat
-  // array instead of records; the item helpers below absorb that difference.
   import { tick } from "svelte";
   import type { Editor } from "@tiptap/core";
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
@@ -99,12 +97,8 @@
     on.change(copy);
   }
   function clearMember(index: number, key: string) {
+    // Fact members only (BodyItemRows) — a scalar section has none.
     const copy = items.slice();
-    if (model.section.scalar) {
-      copy[index] = "";
-      on.change(copy);
-      return;
-    }
     const record = { ...recordOf(copy[index]) };
     delete record[key];
     copy[index] = record;

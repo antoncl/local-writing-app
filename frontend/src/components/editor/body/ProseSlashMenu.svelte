@@ -34,10 +34,23 @@
   let list: HTMLDivElement | undefined = $state();
   let activeCommand = $derived(commands[menu.selectedIndex]);
 
+  // Keep the highlighted row visible — on a highlight move AND on a filter
+  // change that re-renders the rows under the same index. Adjusts only the
+  // list's scrollTop: scrollIntoView would also scroll the editor frame
+  // behind the menu (the WorkspaceTabStrip trap).
   $effect(() => {
     const index = menu.selectedIndex;
+    void commands;
     if (!menu.visible || menu.mode !== "commands" || !list) return;
-    list.querySelector<HTMLElement>(`[data-index="${index}"]`)?.scrollIntoView({ block: "nearest" });
+    const row = list.querySelector<HTMLElement>(`[data-index="${index}"]`);
+    if (!row) return;
+    // A group's first row brings its group label into view with it.
+    const label = row.previousElementSibling?.classList.contains("slash-group") ? row.previousElementSibling : null;
+    const top = ((label as HTMLElement | null) ?? row).offsetTop - list.offsetTop;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (top + row.offsetHeight > list.scrollTop + list.clientHeight) {
+      list.scrollTop = top + row.offsetHeight - list.clientHeight;
+    }
   });
 </script>
 

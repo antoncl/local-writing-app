@@ -73,7 +73,7 @@
   import {
     TABLE_GRID_MAX_ROWS,
     TABLE_GRID_MAX_COLS,
-    SLASH_PAGE_STEP,
+    slashJumpIndex,
     type SlashCommand,
     type SlashMenuState,
     slashCommandsForKind,
@@ -967,15 +967,10 @@
         };
         return true;
       }
-      // Page/Home/End jump without wrapping, so a long prompt list is
-      // walkable from the keyboard (#2454).
-      const jump = { PageDown: SLASH_PAGE_STEP, PageUp: -SLASH_PAGE_STEP, Home: -count, End: count }[event.key];
-      if (jump !== undefined && count > 0) {
+      const jumped = slashJumpIndex(event, slashMenu.selectedIndex, count);
+      if (jumped !== null) {
         event.preventDefault();
-        slashMenu = {
-          ...slashMenu,
-          selectedIndex: Math.min(count - 1, Math.max(0, slashMenu.selectedIndex + jump)),
-        };
+        slashMenu = { ...slashMenu, selectedIndex: jumped };
         return true;
       }
       if (event.key === "Enter" && activeSlashCommand) {

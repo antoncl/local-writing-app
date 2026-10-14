@@ -4,14 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import LineEditReviewBar from "./LineEditReviewBar.svelte";
 
-const REASON = "A livelier verb that keeps the rhythm of the sentence and then some more words";
-
-function mount(lineEdits: { remaining: number; index: number; currentReason: string } | null = { remaining: 3, index: 2, currentReason: REASON }) {
+function mount(lineEdits: { remaining: number; index: number } | null = { remaining: 3, index: 2 }) {
   const fns = {
-    onPrev: vi.fn(),
-    onNext: vi.fn(),
-    onAccept: vi.fn(),
-    onReject: vi.fn(),
     onAcceptAll: vi.fn(),
     onRejectAll: vi.fn(),
     onRetry: vi.fn(),
@@ -27,13 +21,13 @@ describe("LineEditReviewBar", () => {
     expect(screen.queryByTestId("line-edit-review-bar")).toBeNull();
   });
 
-  it("shows Edit N of M, the current reason (full text in title) and the model", () => {
+  it("shows Edit N of M and the model, but no per-edit controls or reason (those are the margin card)", () => {
     mount();
     expect(screen.getByTestId("line-edit-count").textContent).toBe("Edit 2 of 3");
-    const reason = screen.getByTestId("line-edit-reason");
-    expect(reason.textContent).toBe(REASON);
-    expect(reason.getAttribute("title")).toBe(REASON);
     expect(screen.getByTestId("line-edit-meta").textContent).toContain("claude-x");
+    for (const gone of ["line-edit-prev", "line-edit-next", "line-edit-accept", "line-edit-reject", "line-edit-reason"]) {
+      expect(screen.queryByTestId(gone)).toBeNull();
+    }
   });
 
   it("groups its controls so a narrow pane wraps whole groups onto a second row", () => {
@@ -41,21 +35,14 @@ describe("LineEditReviewBar", () => {
     const bar = screen.getByTestId("line-edit-review-bar");
     const groups = [...bar.querySelectorAll(".ler-group")].map((g) => [...g.querySelectorAll("button, .ler-count")].map((n) => n.getAttribute("data-testid")));
     expect(groups).toEqual([
-      ["line-edit-count", "line-edit-prev", "line-edit-next"],
-      ["line-edit-accept", "line-edit-reject"],
+      ["line-edit-count"],
       ["line-edit-accept-all", "line-edit-reject-all", "line-edit-retry"],
     ]);
-    // the reason sits between the first two groups and is the flexible part
-    expect(screen.getByTestId("line-edit-reason").previousElementSibling).toBe(bar.querySelectorAll(".ler-group")[0]);
   });
 
-  it("every control calls through, and names its shortcut where there is one", async () => {
+  it("every control calls through", async () => {
     const { fns } = mount();
     const wiring: [string, keyof typeof fns][] = [
-      ["line-edit-prev", "onPrev"],
-      ["line-edit-next", "onNext"],
-      ["line-edit-accept", "onAccept"],
-      ["line-edit-reject", "onReject"],
       ["line-edit-accept-all", "onAcceptAll"],
       ["line-edit-reject-all", "onRejectAll"],
       ["line-edit-retry", "onRetry"],
@@ -64,7 +51,5 @@ describe("LineEditReviewBar", () => {
       await fireEvent.click(screen.getByTestId(testid));
       expect(fns[fn]).toHaveBeenCalledTimes(1);
     }
-    expect(screen.getByTestId("line-edit-accept").getAttribute("title")).toContain("Alt+Enter");
-    expect(screen.getByTestId("line-edit-next").getAttribute("aria-label")).toBe("Next edit");
   });
 });

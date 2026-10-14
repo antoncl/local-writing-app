@@ -1337,8 +1337,6 @@
   <!-- Line edit review (#2460): a pane footer row, NOT inside the prose scroll frame, so it never covers text. -->
   {#if lineEditReview?.lineEdits}
     <LineEditReviewBar lineEdits={lineEditReview.lineEdits} meta={lineEditReview.meta} generating={lineEditReview.generating}
-      onPrev={() => lineEditReview?.prevLineEdit()} onNext={() => lineEditReview?.nextLineEdit()}
-      onAccept={() => lineEditReview?.acceptCurrentLineEdit()} onReject={() => lineEditReview?.rejectCurrentLineEdit()}
       onAcceptAll={() => lineEditReview?.acceptAllLineEdits()} onRejectAll={() => lineEditReview?.rejectAllLineEdits()}
       onRetry={() => lineEditReview?.retry()} />
   {/if}

@@ -15,6 +15,7 @@ import {
   rejectCurrentLineEdit,
   rejectLineEdit,
   setCurrentLineEdit,
+  setLineEditCardWide,
   stepLineEdit,
 } from "./lineEditSuggestions";
 import { placeLineEdits } from "./lineEdits";
@@ -55,10 +56,89 @@ describe("LineEditSuggestions", () => {
     const old = dom.querySelectorAll(".line-edit-old");
     expect(old).toHaveLength(2);
     expect(old[0].getAttribute("title")).toBe("livelier");
-    // one new-text span (the pure cut has none), and no inline buttons at all
+    // one new-text span (the pure cut has none); the only buttons are the current edit's card
     expect(dom.querySelectorAll(".line-edit-new")).toHaveLength(1);
     expect(dom.querySelector(".line-edit-new")?.textContent).toBe("dog");
-    expect(dom.querySelectorAll("button")).toHaveLength(0);
+    expect(dom.querySelectorAll("button")).toHaveLength(4);
+    expect(dom.querySelectorAll("button")).toHaveLength(dom.querySelectorAll(".line-edit-card button").length);
+  });
+
+  describe("decision card", () => {
+    const cards = (editor: Editor) => editor.view.dom.querySelectorAll('[data-testid="line-edit-card"]');
+    const reasonOf = (editor: Editor) => editor.view.dom.querySelector('[data-testid="line-edit-card-reason"]')?.textContent;
+    const click = (editor: Editor, id: string) =>
+      (editor.view.dom.querySelector(`[data-testid="${id}"]`) as HTMLElement).click();
+
+    it("renders once, for the current edit, with its reason and shortcut titles", () => {
+      const editor = setup();
+      expect(cards(editor)).toHaveLength(1);
+      expect(reasonOf(editor)).toBe("livelier");
+      expect(editor.view.dom.querySelector('[data-testid="line-edit-card-accept"]')?.getAttribute("title")).toContain("Alt+Enter");
+      expect(editor.view.dom.querySelector('[data-testid="line-edit-card-reject"]')?.getAttribute("title")).toContain("Alt+Backspace");
+      expect(editor.view.dom.querySelector('[data-testid="line-edit-card-prev"]')?.getAttribute("aria-label")).toBe("Previous edit");
+    });
+
+    it("follows the current edit: step, accept advancing, selecting another edit", () => {
+      const editor = setup();
+      const [first, second] = lineEditState(editor.state).edits;
+      stepLineEdit(editor.view, 1);
+      expect(cards(editor)).toHaveLength(1);
+      expect(reasonOf(editor)).toBe("cut");
+      setCurrentLineEdit(editor.view, first.id);
+      expect(reasonOf(editor)).toBe("livelier");
+      acceptCurrentLineEdit(editor.view);
+      expect(lineEditState(editor.state).currentId).toBe(second.id);
+      expect(cards(editor)).toHaveLength(1);
+      expect(reasonOf(editor)).toBe("cut");
+    });
+
+    it("disappears when no edits remain", () => {
+      const editor = setup();
+      rejectAllLineEdits(editor.view);
+      expect(cards(editor)).toHaveLength(0);
+    });
+
+    it("buttons call through; accept is one undo step", () => {
+      const editor = setup();
+      click(editor, "line-edit-card-next");
+      expect(reasonOf(editor)).toBe("cut");
+      click(editor, "line-edit-card-prev");
+      expect(reasonOf(editor)).toBe("livelier");
+      click(editor, "line-edit-card-accept");
+      expect(docText(editor)).toBe("The dog sat on the mat.");
+      expect(reasonOf(editor)).toBe("cut");
+      click(editor, "line-edit-card-reject");
+      expect(docText(editor)).toBe("The dog sat on the mat.");
+      expect(cards(editor)).toHaveLength(0);
+      editor.commands.undo();
+      expect(docText(editor)).toBe(TEXT);
+    });
+
+    it("keeps editor focus on mousedown, and sits at the paragraph end in narrow mode", () => {
+      const editor = setup();
+      const card = cards(editor)[0] as HTMLElement;
+      expect(card.classList.contains("line-edit-card-wide")).toBe(false);
+      expect(card.parentElement?.tagName).toBe("P");
+      // last in the paragraph (PM's own trailing <br> may follow a widget)
+      expect(card.nextSibling === null || (card.nextSibling as HTMLElement).className === "ProseMirror-trailingBreak").toBe(true);
+      const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      card.querySelector("button")!.dispatchEvent(down);
+      expect(down.defaultPrevented).toBe(true);
+    });
+
+    it("wide mode puts the same card at the edit itself, right after its new text; one card either way", () => {
+      const editor = setup();
+      setLineEditCardWide(editor.view, true);
+      const found = cards(editor);
+      expect(found).toHaveLength(1);
+      const card = found[0] as HTMLElement;
+      expect(card.classList.contains("line-edit-card-wide")).toBe(true);
+      expect((card.previousSibling as HTMLElement).className).toContain("line-edit-new");
+      expect(reasonOf(editor)).toBe("livelier");
+      setLineEditCardWide(editor.view, false);
+      expect(cards(editor)).toHaveLength(1);
+      expect(cards(editor)[0].classList.contains("line-edit-card-wide")).toBe(false);
+    });
   });
 
   it("collapses the selection to the end of the revised range on install", () => {

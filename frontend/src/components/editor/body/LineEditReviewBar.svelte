@@ -1,6 +1,8 @@
 <!--
   LineEditReviewBar (#2460) - the review controls for a Line edit's pending
-  edits. NodeEditor mounts it as a footer row of the editor pane, between the
+  edits - the batch controls only; the current edit's own Accept / Reject /
+  prev / next / reason are a card beside the edit (editor-core/lineEditCard.ts).
+  NodeEditor mounts it as a footer row of the editor pane, between the
   foot dock and the status line - OUTSIDE the scroll frame, so the frame just
   gets shorter while it is shown and the bar never covers text. In a narrow
   pane its groups wrap onto a second row instead of clipping.
@@ -15,13 +17,9 @@
   import type { AiSuggestionMeta } from "@/lib/editor-core/aiToolbar";
 
   interface Props {
-    lineEdits: { remaining: number; index: number; currentReason: string } | null;
+    lineEdits: { remaining: number; index: number } | null;
     meta: AiSuggestionMeta | null;
     generating?: boolean;
-    onPrev: () => void;
-    onNext: () => void;
-    onAccept: () => void;
-    onReject: () => void;
     onAcceptAll: () => void;
     onRejectAll: () => void;
     onRetry: () => void;
@@ -29,7 +27,7 @@
 
   let {
     lineEdits, meta, generating = false,
-    onPrev, onNext, onAccept, onReject, onAcceptAll, onRejectAll, onRetry,
+    onAcceptAll, onRejectAll, onRetry,
   }: Props = $props();
 
   const keepFocus = (e: MouseEvent) => e.preventDefault();
@@ -39,13 +37,6 @@
   <div class="line-edit-review-bar" data-testid="line-edit-review-bar" role="toolbar" aria-label="Review line edits">
     <span class="ler-group">
       <span class="ler-count" data-testid="line-edit-count">Edit {lineEdits.index} of {lineEdits.remaining}</span>
-      <button type="button" class="ler-btn" data-testid="line-edit-prev" aria-label="Previous edit" title="Previous edit (Alt+Up)" onmousedown={keepFocus} onclick={onPrev}>‹</button>
-      <button type="button" class="ler-btn" data-testid="line-edit-next" aria-label="Next edit" title="Next edit (Alt+Down)" onmousedown={keepFocus} onclick={onNext}>›</button>
-    </span>
-    <span class="ler-reason" data-testid="line-edit-reason" title={lineEdits.currentReason}>{lineEdits.currentReason}</span>
-    <span class="ler-group">
-      <button type="button" class="ler-btn ler-accept" data-testid="line-edit-accept" title="Accept this edit (Alt+Enter)" onmousedown={keepFocus} onclick={onAccept}>Accept</button>
-      <button type="button" class="ler-btn ler-reject" data-testid="line-edit-reject" title="Reject this edit (Alt+Backspace)" onmousedown={keepFocus} onclick={onReject}>Reject</button>
     </span>
     <span class="ler-group">
       <button type="button" class="ler-btn" data-testid="line-edit-accept-all" title="Accept every remaining edit" onmousedown={keepFocus} onclick={onAcceptAll}>Accept all</button>
@@ -89,18 +80,6 @@
     padding-right: 4px;
   }
 
-  /* Takes the remaining width; the basis stops it collapsing to nothing before
-     the groups wrap onto the next row. */
-  .ler-reason {
-    flex: 1 1 120px;
-    min-width: 0;
-    padding: 0 8px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text-2);
-  }
-
   .ler-btn {
     flex: none;
     background: transparent;
@@ -121,15 +100,6 @@
   .ler-btn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
-  }
-
-  .ler-accept {
-    color: var(--accent);
-    font-weight: 500;
-  }
-
-  .ler-reject {
-    color: var(--danger);
   }
 
   .ler-meta {

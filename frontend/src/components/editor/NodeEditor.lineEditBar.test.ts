@@ -71,14 +71,16 @@ describe("NodeEditor - Line edit review bar placement", () => {
     await vi.waitFor(() => expect(screen.queryByTestId("line-edit-review-bar")).toBeNull());
   });
 
-  it("the bar's controls act on the prose body's controller", async () => {
+  it("the bar's batch controls act on the prose body's controller", async () => {
     await mountEditor();
-    const accept = vi.spyOn(controller(), "acceptCurrentLineEdit").mockImplementation(() => {});
+    const acceptAll = vi.spyOn(controller(), "acceptAllLineEdits").mockImplementation(() => {});
     const rejectAll = vi.spyOn(controller(), "rejectAllLineEdits").mockImplementation(() => {});
     controller().lineEdits = { remaining: 1, index: 1, currentReason: "r" };
-    await fireEvent.click(await screen.findByTestId("line-edit-accept"));
+    await fireEvent.click(await screen.findByTestId("line-edit-accept-all"));
     await fireEvent.click(screen.getByTestId("line-edit-reject-all"));
-    expect(accept).toHaveBeenCalledTimes(1);
+    expect(acceptAll).toHaveBeenCalledTimes(1);
     expect(rejectAll).toHaveBeenCalledTimes(1);
+    // the per-edit controls moved to the margin card
+    expect(screen.queryByTestId("line-edit-accept")).toBeNull();
   });
 });

@@ -4,8 +4,8 @@
  *  original text stays untouched until an edit is accepted. Each edit shows as
  *  its old text struck through (muted) and the new text right after it,
  *  underlined; no buttons in the text. One edit is the CURRENT one (stronger
- *  tint): clicking an edit selects it, and the review bar / Alt-keys step
- *  through them and accept or reject the current one. Positions are mapped
+ *  tint): clicking an edit selects it, and its decision card (lineEditCard.ts) /
+ *  the Alt-keys step through them and accept or reject the current one. Positions are mapped
  *  through every transaction, and an edit is dropped once the writer edits
  *  inside it (its range no longer holds the text the model quoted). */
 import { Extension } from "@tiptap/core";
@@ -13,6 +13,7 @@ import type { EditorState } from "@tiptap/pm/state";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { PlacedEdit } from "./lineEdits";
+import { buildLineEditCard } from "./lineEditCard";
 
 export type LineEditSuggestion = PlacedEdit & { id: number };
 
@@ -22,19 +23,26 @@ export type LineEditState = {
   accepted: number;
   /** The edit the review bar and keys act on; null only when `edits` is empty. */
   currentId: number | null;
+  /** Room for the decision card in the margin right of the prose column (set by
+   *  the layout observer); else it is a block under the paragraph. */
+  wide: boolean;
 };
+
+// Margin the card needs between the prose column's right edge and the frame's.
+const CARD_ROOM_PX = 212;
 
 type LineEditMeta =
   | { type: "install"; edits: PlacedEdit[] }
   | { type: "resolve"; ids: number[]; accepted: boolean }
-  | { type: "current"; id: number };
+  | { type: "current"; id: number }
+  | { type: "layout"; wide: boolean };
 
 export const LINE_EDIT_OLD_CLASS = "line-edit-old";
 export const LINE_EDIT_NEW_CLASS = "line-edit-new";
 export const LINE_EDIT_CURRENT_CLASS = "line-edit-current";
 
 const pluginKey = new PluginKey<LineEditState>("line-edit-suggestions");
-const EMPTY: LineEditState = { edits: [], accepted: 0, currentId: null };
+const EMPTY: LineEditState = { edits: [], accepted: 0, currentId: null, wide: false };
 
 // Text of a range the way `find` was matched: leaves as the placement sentinel.
 const rangeText = (state: EditorState, from: number, to: number) => state.doc.textBetween(from, to, "\n", "￼");
@@ -52,6 +60,33 @@ export function lineEditState(state: EditorState): LineEditState {
 export function currentLineEdit(state: EditorState): LineEditSuggestion | undefined {
   const { edits, currentId } = lineEditState(state);
   return edits.find((e) => e.id === currentId);
+}
+
+/** Margin card (wide) or block under the paragraph (narrow). */
+export function setLineEditCardWide(view: EditorView, wide: boolean): void {
+  if (wide === lineEditState(view.state).wide) return;
+  view.dispatch(view.state.tr.setMeta(pluginKey, { type: "layout", wide } satisfies LineEditMeta).setMeta("addToHistory", false));
+}
+
+/** Keep `wide` in step with the room right of the prose column: the frame
+ *  resizing, or the column's own width changing, can flip it. The plugin view
+ *  is created before TipTap attaches `view.dom` to the page, so the frame is
+ *  looked up on each measure (the first one fires once the editor is laid out)
+ *  and observed from the moment it is found. */
+function observeCardRoom(view: EditorView): () => void {
+  if (typeof ResizeObserver === "undefined") return () => {};
+  let frame: HTMLElement | null = null;
+  const observer = new ResizeObserver(() => {
+    if (!frame) {
+      frame = view.dom.closest<HTMLElement>(".editor-wrap");
+      if (!frame) return;
+      observer.observe(frame);
+    }
+    const room = frame.getBoundingClientRect().left + frame.clientWidth - view.dom.getBoundingClientRect().right;
+    setLineEditCardWide(view, room >= CARD_ROOM_PX);
+  });
+  observer.observe(view.dom);
+  return () => observer.disconnect();
 }
 
 /** `collapseTo`: put the caret there (the end of the revised range), so the
@@ -171,9 +206,10 @@ export const LineEditSuggestions = Extension.create({
           init: () => EMPTY,
           apply: (tr, old, _oldState, newState) => {
             const meta = tr.getMeta(pluginKey) as LineEditMeta | undefined;
+            if (meta?.type === "layout") return { ...old, wide: meta.wide };
             if (meta?.type === "install") {
               const edits = meta.edits.map((e) => ({ ...e, id: nextId++ }));
-              return { edits, accepted: 0, currentId: nextByPosition(edits, 0) };
+              return { edits, accepted: 0, currentId: nextByPosition(edits, 0), wide: old.wide };
             }
             if (old.edits.length === 0) return old;
             let edits = old.edits;
@@ -198,9 +234,10 @@ export const LineEditSuggestions = Extension.create({
               const was = old.edits.find((e) => e.id === old.currentId);
               currentId = nextByPosition(edits, was ? tr.mapping.map(was.from, 1) : 0);
             }
-            return { edits, accepted, currentId };
+            return { edits, accepted, currentId, wide: old.wide };
           },
         },
+        view: (view) => ({ destroy: observeCardRoom(view) }),
         props: {
           // A click on the struck-through old text selects that edit (the new
           // text's widget handles its own mousedown).
@@ -227,7 +264,7 @@ export const LineEditSuggestions = Extension.create({
             return true;
           },
           decorations: (state) => {
-            const { edits, currentId } = lineEditState(state);
+            const { edits, currentId, wide } = lineEditState(state);
             if (edits.length === 0) return DecorationSet.empty;
             const decos: Decoration[] = [];
             for (const edit of edits) {
@@ -246,6 +283,26 @@ export const LineEditSuggestions = Extension.create({
                   key: `line-edit-${edit.id}-${edit.to}-${edit.replace}-${current}`,
                   stopEvent: () => true,
                 }),
+              );
+            }
+            const cur = edits.find((e) => e.id === currentId);
+            if (cur) {
+              // Wide: at the edit, so the margin card shares its line. Narrow: at the
+              // end of the paragraph, so the block card sits below it. Side 2 keeps it
+              // after the new-text widget at the same position.
+              const at = wide ? cur.to : state.doc.resolve(cur.to).end();
+              decos.push(
+                Decoration.widget(
+                  at,
+                  (view) =>
+                    buildLineEditCard(cur.reason, wide, {
+                      prev: () => stepLineEdit(view, -1),
+                      next: () => stepLineEdit(view, 1),
+                      accept: () => acceptCurrentLineEdit(view),
+                      reject: () => rejectCurrentLineEdit(view),
+                    }),
+                  { side: 2, key: `line-edit-card-${cur.id}-${at}-${wide}-${cur.reason}`, stopEvent: () => true },
+                ),
               );
             }
             return DecorationSet.create(state.doc, decos);

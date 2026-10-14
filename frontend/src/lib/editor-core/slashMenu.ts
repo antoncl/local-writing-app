@@ -5,6 +5,8 @@
 
 export const TABLE_GRID_MAX_ROWS = 8;
 export const TABLE_GRID_MAX_COLS = 8;
+/** Rows a PageUp/PageDown moves the slash-menu highlight (#2454). */
+export const SLASH_PAGE_STEP = 5;
 
 export type SlashMenuState = {
   visible: boolean;
@@ -23,7 +25,7 @@ export type SlashCommand = {
   autocompleteTo?: string;
   /** A scene verb (scene break, mutate, the cursor prompts — roleplay only
    *  makes sense in a scene): offered in a manuscript body only. Unscoped
-   *  commands are formatting and belong to every prose body (#1893). */
+   *  commands (e.g. Table) belong to every prose body (#1893). */
   scope?: "manuscript";
   run: (args?: string[]) => void | Promise<void>;
 };

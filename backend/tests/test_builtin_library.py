@@ -42,6 +42,7 @@ LIBRARY_TITLES = {
     "Describe",
     "Show, don't tell",
     "Draft scene",
+    "Continue",
 }
 
 # The six built-in revise prompts, offered on any manuscript prose selection.
@@ -995,6 +996,112 @@ class DraftScenePromptTests(unittest.TestCase):
         text = self._preview(self.scene_ids[1])
         self.assertNotIn("Changes this scene makes", text)
         self.assertNotIn("⟦", text)
+
+
+class ContinuePromptTests(unittest.TestCase):
+    """#2457: the built-in Continue prompt picks the prose up at the cursor,
+    rendered through the preview path against an act with two scenes."""
+
+    def setUp(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Continue Tests")
+        self.prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Continue"))
+        structure = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:container")
+        )
+        act = next(c for c in structure.root.children if c.type == "manuscript:container")
+        self.scene_ids = []
+        for title in ("Opening", "Middle"):
+            created = self.service.create_structure_node(
+                CreateStructureNodeRequest(
+                    title=title, entry_type="manuscript:scene", parent_id=act.id
+                )
+            )
+            parent = next(c for c in created.root.children if c.id == act.id)
+            self.scene_ids.append(parent.children[-1].scene_id)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _summarize(self, scene_id: str, summary: str) -> None:
+        from app.models import SaveSceneRequest
+
+        existing = self.service.read_scene(scene_id)
+        self.service.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=existing.title,
+                body=existing.body,
+                base_revision=existing.revision,
+                status="draft",
+                entry_type="manuscript:scene",
+                metadata={"summary": summary},
+            ),
+        )
+
+    def _preview(self, text_before: str, text_after: str = "", inputs: dict | None = None):
+        from app.services.ai.preview import PreviewRequest, build_preview
+
+        rendered, _ = build_preview(
+            self.service,
+            PreviewRequest(
+                template_source=self.prompt.body,
+                target_scene_id=self.scene_ids[1],
+                session_id=None,
+                inputs=inputs or {},
+                text_before=text_before,
+                text_after=text_after,
+                commit=False,
+            ),
+        )
+        return "\n".join(m.text for m in rendered.messages)
+
+    def test_continue_is_a_library_prompt_on_the_continue_shelf(self) -> None:
+        entries = {e.id: e for e in self.service.list_prompt_entries().entries}
+        self.assertTrue(entries[self.prompt.id].is_library)
+        self.assertEqual(entries[self.prompt.id].computed_metadata["disposition"], "Continue")
+
+    def test_continue_stops_without_prose_before_the_cursor(self) -> None:
+        from app.services.ai.preview import PreviewError
+
+        with self.assertRaises(PreviewError) as ctx:
+            self._preview("<!-- mutate:set=ms_1;id=a1 -->\n  ")
+        self.assertEqual(ctx.exception.kind, "stopped")
+        self.assertIn("Draft scene", str(ctx.exception))
+
+    def test_continue_quotes_the_text_around_the_cursor_as_story_text(self) -> None:
+        text = self._preview(
+            "She crossed the bridge\n<!-- mutate:set=ms_1;id=a1 -->\nat dusk and",
+            "The admiral was waiting.",
+        )
+        self.assertIn("at dusk and", text)
+        self.assertNotIn("mutate:", text)  # markers are not story text
+        self.assertIn("## The text after the cursor", text)
+        self.assertIn("The admiral was waiting.", text)
+
+    def test_continue_without_text_after_has_no_after_section(self) -> None:
+        text = self._preview("She crossed the bridge at dusk.")
+        self.assertNotIn("The text after the cursor", text)
+
+    def test_continue_gives_the_scene_and_story_so_far_and_the_direction(self) -> None:
+        self._summarize(self.scene_ids[0], "Honor leaves the station.")
+        self._summarize(self.scene_ids[1], "Honor meets the admiral.")
+        text = self._preview(
+            "She crossed the bridge at dusk.", inputs={"note": "Make it rain.", "length": 150}
+        )
+        self.assertIn("Honor leaves the station.", text)  # story so far
+        self.assertIn("Honor meets the admiral.", text)  # this scene
+        self.assertIn("## Direction\nMake it rain.", text)
+        self.assertIn("about 150 words", text)
+
+    def test_continue_keeps_only_the_tail_of_a_long_text_before(self) -> None:
+        before = " ".join(f"w{i}" for i in range(1000))
+        text = self._preview(before)
+        self.assertIn("w999", text)
+        self.assertNotIn("w100 ", text)
 
 
 if __name__ == "__main__":

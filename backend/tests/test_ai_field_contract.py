@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import re
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
+from project_fixtures import open_test_project
+
+from app.models import CreateLoreEntryRequest, Swatch
 from app.services.ai.field_contract import FieldContract, without_field_contract
+from app.services.ai.helpers import _fields
+from app.services.color_snap import nearest_swatch_id
+from app.services.machine_settings import DEFAULT_PALETTE
+from app.services.project.default_schema import DEFAULT_METADATA_SCHEMA
 
 
 def _scalar(**over):
@@ -126,6 +136,38 @@ class WithoutFieldContractTests(unittest.TestCase):
         rendered = "Some prose naming Nimitz."
         self.assertEqual(without_field_contract(rendered, []), rendered)
 
+
+class ColorFieldContractTests(unittest.TestCase):
+    """#2484 — the AI is asked for a colour as a hex code, which the commit
+    snaps to the nearest palette swatch (`nearest_swatch_id`, #696); a guessed
+    swatch name the palette lacks would be dropped instead."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(root, "Color Contract")
+        self.hero = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_color_contract_line_asks_for_a_hex_code(self) -> None:
+        schema = self.service.read_metadata_schema()
+        color = {f["id"]: f for f in _fields(self.service, schema, self.hero.id)}["color"]
+        fc = FieldContract()
+        fc.store(color)
+        self.assertIn("hex code", fc.render)
+        # No swatch-name roster: the snap maps any hex onto the palette.
+        self.assertEqual(color["options"], [])
+        self.assertNotIn("one of:", fc.render)
+
+    def test_builtin_color_description_example_snaps_to_a_swatch(self) -> None:
+        description = DEFAULT_METADATA_SCHEMA["fields"]["color"]["description"]
+        examples = re.findall(r"#[0-9a-fA-F]{6}\b", description)
+        self.assertTrue(examples)
+        palette = [Swatch(**entry) for entry in DEFAULT_PALETTE]
+        for example in examples:
+            self.assertIsNotNone(nearest_swatch_id(example, palette))
 
 if __name__ == "__main__":
     unittest.main()

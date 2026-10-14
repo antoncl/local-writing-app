@@ -417,10 +417,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # every entry kind can opt in to per-entry tinting without
             # the user having to add a schema field.
             "name": "Color",
+            # #2484: the AI is asked for a hex code, not a swatch name — a
+            # hex always snaps to the nearest swatch at commit
+            # (`nearest_swatch_id`, against the user's own palette), while a
+            # guessed name the palette lacks is dropped.
             "description": (
-                "A palette swatch name for tinting this entry in lists and the "
-                "manuscript tree (e.g. 'moss', 'amber', 'slate') — not a hex code, "
-                "and not a description of a color."
+                "The color that tints this entry in lists and the manuscript tree, "
+                "as a hex code (e.g. #5b7fa6). It is matched to the nearest swatch "
+                "in the palette."
             ),
             "type": "color",
         },

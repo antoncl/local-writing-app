@@ -113,6 +113,9 @@ export type BodyListSection = {
   proseMembers: GroupMember[];
   /** Every other member (never the title, never prose) — the item's rail rows. */
   factMembers: GroupMember[];
+  /** True for the `item_type` sugar — items are bare scalars in a flat array,
+   *  not records (#2483). The one member is keyed "value" by the resolver. */
+  scalar: boolean;
 };
 
 export function buildBodyListSections(
@@ -136,6 +139,7 @@ export function buildBodyListSections(
       titleKey: title?.key ?? null,
       proseMembers: members.filter((m) => m.type === "long_text"),
       factMembers: members.filter((m) => m.type !== "long_text" && m !== title),
+      scalar: field!.item_scalar === true,
     });
   }
   return sections;

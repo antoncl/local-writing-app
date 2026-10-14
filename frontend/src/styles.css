@@ -1044,6 +1044,29 @@ button.row-action-add.active {
 .editor-body .lec-reject {
   color: var(--danger);
 }
+
+/* Lore-check notes (ADR-0098): quieter still than an edit. The quoted passage
+   gets a dotted underline - no strike-through, nothing proposed - and the CURRENT
+   note a faint tint, like the current edit. Overlapping notes stack. Their card
+   (editor-core/lineNoteCard.ts) reuses the edit card's geometry above. */
+.editor-body .line-note-quote {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 3px;
+  border-radius: 2px;
+}
+.editor-body .line-note-current {
+  background: var(--accent-soft);
+}
+.editor-body .lnc-problem {
+  overflow-wrap: anywhere;
+}
+.editor-body .lnc-entry {
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
 /* Spans of body text attributed to a specific character (roleplay
    prompts). The inline style on the span sets `--character-color` from
    the lore id hash; this rule paints the underline and a faint wash so

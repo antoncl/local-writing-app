@@ -443,7 +443,13 @@ export function defaultPromptForSurface(
   surface: "cursor" | "selection",
   entryType: string | null | undefined,
 ): PromptEntrySummary | null {
-  return inlinePromptsOfferedOn(ctx, surface, entryType)[0] ?? null;
+  // Ctrl+Shift+J revises: a notes prompt (a check) is in the Revise list but is
+  // never the default for a selection (ADR-0098).
+  const offered = inlinePromptsOfferedOn(ctx, surface, entryType);
+  if (surface === "selection") {
+    return offered.find((entry) => outputHandlerFor(entry.context_strategy?.output)?.key !== "inline_notes") ?? null;
+  }
+  return offered[0] ?? null;
 }
 
 // Resolve a positional-string token against a context_pick input.

@@ -50,7 +50,7 @@ import type {
   PromptOutput,
 } from "@/lib/types";
 
-export type OutputHandlerKey = "inline" | "inline_edits" | "extract_to_node" | "finalize_scene";
+export type OutputHandlerKey = "inline" | "inline_edits" | "inline_notes" | "extract_to_node" | "finalize_scene";
 
 // The closed handler vocabulary as a value — the mirror of the backend's
 // PROMPT_OUTPUT_HANDLER_KEYS (services/project/prompt_disposition.py, which
@@ -58,7 +58,7 @@ export type OutputHandlerKey = "inline" | "inline_edits" | "extract_to_node" | "
 // spec/prompt-disposition-labels.json; promptNodes.test.ts asserts this list
 // against it, so adding a handler without updating the backend mapping fails
 // a test instead of silently shelving the new prompts under Snippets.
-export const OUTPUT_HANDLER_KEYS = ["inline", "inline_edits", "extract_to_node", "finalize_scene"] as const satisfies readonly OutputHandlerKey[];
+export const OUTPUT_HANDLER_KEYS = ["inline", "inline_edits", "inline_notes", "extract_to_node", "finalize_scene"] as const satisfies readonly OutputHandlerKey[];
 
 // The roleplay finalize/cleanup projection (ADR-0070 S3). A recognized output
 // behaviour (mirrors the backend's PROMPT_OUTPUT_HANDLER_KEYS) but a SCENE
@@ -67,7 +67,7 @@ export const OUTPUT_HANDLER_KEYS = ["inline", "inline_edits", "extract_to_node",
 // `surfaceForStrategy`).
 export const FINALIZE_OUTPUT_HANDLER = "finalize_scene";
 export type OutputSource = "scan" | "transcript";
-export type OutputReview = "inline_mark" | "patch_diff" | "edit_list";
+export type OutputReview = "inline_mark" | "patch_diff" | "edit_list" | "note_list";
 export type OutputActivation = "inline" | "conversation";
 // Where an inline handler writes. cursor vs selection is a DESTINATION sub-choice
 // (was append_to_body vs replace_selection), not two separate handlers (ADR-0065 §3).
@@ -124,6 +124,7 @@ export interface InlineHost {
   setError(message: string, anchor?: number): void;
   streamInline(gathered: InlineGathered): Promise<void>;
   runLineEdits(gathered: InlineGathered): Promise<void>;
+  runLineNotes(gathered: InlineGathered): Promise<void>;
 }
 
 // The revise gather shared by `inline` (selection destination) and `inline_edits`:
@@ -192,6 +193,21 @@ export const inlineEditsHandler: OutputHandler<InlineHost, InlineGathered> = {
   apply: (gathered, host) => host.runLineEdits(gathered),
 };
 
+// ── inline_notes ────────────────────────────────────────────────────────────
+
+// A check that answers with notes (ADR-0098): a problem per quoted passage of the
+// selection, never a replacement. Same gather as the revise handlers; reviewed
+// note-by-note, and the document is never written.
+export const inlineNotesHandler: OutputHandler<InlineHost, InlineGathered> = {
+  key: "inline_notes",
+  source: "scan",
+  review: "note_list",
+  activation: "inline",
+  surface: () => "selection",
+  produce: (host) => gatherSelection(host),
+  apply: (gathered, host) => host.runLineNotes(gathered),
+};
+
 // ── extract_to_node ─────────────────────────────────────────────────────────
 
 // What the extract handler needs from the chat pane (the ChatCommitController).
@@ -225,6 +241,7 @@ export const extractHandler: OutputHandler<ExtractHost, AIEntryPatch> = {
 const _REGISTRY: Partial<Record<OutputHandlerKey, OutputHandler>> = {
   inline: inlineHandler as OutputHandler,
   inline_edits: inlineEditsHandler as OutputHandler,
+  inline_notes: inlineNotesHandler as OutputHandler,
   extract_to_node: extractHandler as OutputHandler,
 };
 

@@ -743,6 +743,18 @@ def _register_use(env: SandboxedEnvironment, project: ProjectService, schema: An
     env.globals["use"] = _use
 
 
+def _register_lore_named_in(env: SandboxedEnvironment, project: ProjectService) -> None:
+    """Register `lore_named_in(text)` (ADR-0098): the lore a passage names, plus
+    what those link to and the target scene's own references - for a check
+    prompt to `use()`. The logic lives in `lore_selection.py`, imported here at
+    call time because that module imports this one."""
+    from app.services.ai.lore_selection import lore_named_in
+
+    env.globals["lore_named_in"] = pass_context(
+        lambda ctx, text: lore_named_in(project, ctx.get("scene"), str(text or ""))
+    )
+
+
 def register_helpers(
     env: SandboxedEnvironment,
     project: ProjectService,
@@ -825,6 +837,7 @@ def register_helpers(
     _register_scene_mutations(env, project, schema, _mutations_index)
     _register_stop(env)
     _register_use(env, project, schema)
+    _register_lore_named_in(env, project)
 
     # ADR-0060 §3: one scene-anchored constructor. `entry(x)` resolves x **as of
     # the prompt's ambient `scene`** (the single ADR-0012 anchor) when there is

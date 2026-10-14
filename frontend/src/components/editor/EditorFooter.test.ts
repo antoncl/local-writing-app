@@ -51,4 +51,28 @@ describe("EditorFooter", () => {
     await fireEvent.click(screen.getByRole("button", { name: /accept all/i }));
     expect(controller.acceptAllLineEdits).toHaveBeenCalled();
   });
+
+  it("renders the note bar (not the edit bar) while lore-check notes are pending, and routes its buttons", async () => {
+    const controller = {
+      lineEdits: null,
+      lineNotes: null as { remaining: number; index: number; checkedAgainst: { id: string; name: string }[] } | null,
+      meta: null,
+      generating: false,
+      dismissAllLineNotes: vi.fn(),
+      retry: vi.fn(),
+    };
+    const { rerender } = render(EditorFooter, { props: props({ lineEditReview: controller }) });
+    expect(screen.queryByTestId("line-note-review-bar")).toBeNull();
+
+    controller.lineNotes = { remaining: 2, index: 1, checkedAgainst: [{ id: "lore_1", name: "Mira" }] };
+    await rerender(props({ lineEditReview: { ...controller } }));
+    expect(screen.getByTestId("line-note-count").textContent).toBe("Note 1 of 2");
+    expect(screen.getByTestId("line-note-checked").textContent).toContain("Mira");
+    expect(screen.queryByTestId("line-edit-review-bar")).toBeNull();
+
+    await fireEvent.click(screen.getByTestId("line-note-dismiss-all"));
+    expect(controller.dismissAllLineNotes).toHaveBeenCalled();
+    await fireEvent.click(screen.getByTestId("line-note-retry"));
+    expect(controller.retry).toHaveBeenCalled();
+  });
 });

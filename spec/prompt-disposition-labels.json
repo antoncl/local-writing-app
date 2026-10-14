@@ -6,5 +6,5 @@
   "dispositions": ["Continue", "Revise prose", "Chat", "Revise entities", "Snippets"],
   "chat_label": "Chat",
   "revise_entities_label": "Revise entities",
-  "handlers": ["inline", "inline_edits", "extract_to_node", "finalize_scene"]
+  "handlers": ["inline", "inline_edits", "inline_notes", "extract_to_node", "finalize_scene"]
 }

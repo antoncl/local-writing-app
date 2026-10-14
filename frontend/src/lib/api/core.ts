@@ -10,7 +10,7 @@
 // The network primitives live here; the domain method objects that call them
 // live in the sibling modules under lib/api/ and are composed into `api` in
 // lib/api.ts.
-import type { ChatSessionJournalEntry, ChatUsage, HistoryFit, LineEdit, LoreFit } from "@/lib/types";
+import type { ChatSessionJournalEntry, ChatUsage, CheckedEntry, HistoryFit, LineEdit, LineNote, LoreFit } from "@/lib/types";
 
 // Backend base URL. Defaults to a same-origin relative path (ADR-0072 §1): in
 // the packaged product the backend serves this bundle, so `/api` reaches it
@@ -209,6 +209,11 @@ export type AIStreamEvent =
       // #2464: a `response_format: "line_edits"` run reads its edit list server-side
       // and reports it here (`ok: false` + `error` when the reply was unusable).
       edits?: LineEdit[] | null;
+      // ADR-0098: a `response_format: "notes"` run reports its notes, how many the
+      // backend dropped, and the lore entries the check ran against.
+      notes?: LineNote[] | null;
+      notes_dropped?: number;
+      checked_against?: CheckedEntry[];
       ok?: boolean;
       error?: string;
     }

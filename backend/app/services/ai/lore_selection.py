@@ -744,3 +744,33 @@ def _scene_prose_ids(
     for text in texts:
         found |= _scan_matcher_ids(matcher, text)
     return found
+
+
+# ----- `lore_named_in(text)` ----------------------------------------------
+
+
+def lore_named_in(project: ProjectService, scene: Any, text: str) -> list[str]:
+    """The lore ids a passage names, for a check prompt to `use()` (ADR-0098):
+    the entries whose title or an alias occurs in `text`, then what those link
+    to through their reference fields, then the target scene's own references
+    (its POV, location, ...). Sorted within each group, de-duplicated.
+
+    Detection is the automatic matcher (`auto` policy only, so `manual_only`
+    and `never` entries are never *named*); the links are one hop and honor
+    `manual_only` like the automatic structural hop (#1024); the scene's own
+    references are explicit, so only `never` removes them."""
+    policies = _lore_policy_ids(project)
+    named = sorted(_scan_matcher_ids(_build_scene_matcher(project, scene), text))
+    schema = project.read_metadata_schema()
+    linked: set[str] = set()
+    for entry_id in named:
+        entry = _safe_read_node(project, entry_id)
+        if entry is not None:
+            linked |= _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"), schema)
+    own = _collect_lore_refs_from_metadata(_attr_or_item(scene, "metadata"), schema)
+    ids = [
+        *named,
+        *sorted(linked - policies["manual_only"] - policies["never"]),
+        *sorted(own - policies["never"]),
+    ]
+    return list(dict.fromkeys(ids))

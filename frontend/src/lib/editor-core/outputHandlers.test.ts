@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Editor } from "@tiptap/core";
 import type { AIEntryPatch } from "@/lib/types";
 
 import {
   inlineHandler,
   inlineEditsHandler,
+  inlineNotesHandler,
   extractHandler,
   inlineDestinationFor,
   outputHandlerFor,
@@ -44,6 +45,7 @@ function makeInlineHost(
     setError: (message, anchor) => errors.push({ message, anchor }),
     streamInline: async () => {},
     runLineEdits: async () => {},
+    runLineNotes: async () => {},
   };
 }
 
@@ -106,6 +108,25 @@ describe("the handlers' declarative bundles", () => {
 
   it("routes the inline_edits handler by its key", () => {
     expect(outputHandlerFor({ handler: "inline_edits" })?.key).toBe("inline_edits");
+  });
+
+  it("inline_notes is the scan / note_list / inline bundle, routed by its key, on the selection", () => {
+    expect(inlineNotesHandler).toMatchObject({
+      key: "inline_notes",
+      source: "scan",
+      review: "note_list",
+      activation: "inline",
+    });
+    expect(outputHandlerFor({ handler: "inline_notes" })).toBe(inlineNotesHandler);
+    expect(inlineNotesHandler.surface({ handler: "inline_notes", destination: "cursor" })).toBe("selection");
+  });
+
+  it("inline_notes applies through the host's runLineNotes, not runLineEdits", async () => {
+    const host = { runLineNotes: vi.fn(async () => {}), runLineEdits: vi.fn(async () => {}) } as unknown as InlineHost;
+    const gathered = { destination: "selection", from: 1, to: 2, textBefore: "", textAfter: "" } as InlineGathered;
+    await inlineNotesHandler.apply(gathered, host);
+    expect(host.runLineNotes).toHaveBeenCalledWith(gathered);
+    expect(host.runLineEdits).not.toHaveBeenCalled();
   });
 
   it("extract_to_node is the transcript / patch_diff / conversation bundle", () => {
@@ -176,6 +197,9 @@ describe("inlineHandler.apply", () => {
       runLineEdits: async () => {
         throw new Error("inline must stream, not run line edits");
       },
+      runLineNotes: async () => {
+        throw new Error("inline must stream, not run a check");
+      },
     };
     const gathered: InlineGathered = {
       destination: "cursor",
@@ -210,6 +234,9 @@ describe("inlineEditsHandler.apply (#2465)", () => {
       },
       runLineEdits: async (g) => {
         seen.push(g);
+      },
+      runLineNotes: async () => {
+        throw new Error("line edits must not run a check");
       },
     };
     const gathered: InlineGathered = { destination: "selection", from: 1, to: 4, textBefore: "", textAfter: "", selectionText: "abc" };

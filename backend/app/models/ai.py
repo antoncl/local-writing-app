@@ -612,6 +612,15 @@ class LineEdit(BaseModel):
     reason: str = ""
 
 
+class LineNote(BaseModel):
+    """One lore-check note (#2490, ADR-0098): the exact passage text, what is
+    wrong with it, and the id of the lore entry it contradicts."""
+
+    quote: str
+    problem: str
+    entry: str
+
+
 class AIGenerateRequest(BaseModel):
     template_source: str = Field(min_length=1)
     # Empty when the open document is not a manuscript scene (e.g. a lore entry,
@@ -631,8 +640,10 @@ class AIGenerateRequest(BaseModel):
     assistant_id: str | None = None
     max_tokens: int | None = None
     # #2460: "line_edits" asks for a list of `{find, replace, reason}` edits
-    # instead of replacement prose. Only the non-streaming route serves it.
-    response_format: Literal["text", "line_edits"] = "text"
+    # instead of replacement prose; "notes" (#2490) asks for `{quote, problem,
+    # entry}` lore-check notes. Both routes serve line_edits; only the streaming
+    # route serves notes.
+    response_format: Literal["text", "line_edits", "notes"] = "text"
 
 
 class AIGenerateResponse(BaseModel):

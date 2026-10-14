@@ -5,6 +5,7 @@
   // `> :global(*)` column pinning still reaches them.
   import FootDock from "@/components/editor/FootDock.svelte";
   import LineEditReviewBar from "@/components/editor/body/LineEditReviewBar.svelte";
+  import LineNoteReviewBar from "@/components/editor/body/LineNoteReviewBar.svelte";
   import type { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
   import type { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import type { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
@@ -45,8 +46,17 @@
   <FootDock {snapshots} {scrub} {documentKind} writesLabel={snapshotWritesLabel} {stopEditable} />
 {/if}
 
-<!-- Line edit review (#2460): a pane footer row, NOT inside the prose scroll frame, so it never covers text. -->
-{#if lineEditReview?.lineEdits}
+<!-- Line edit review (#2460): a pane footer row, NOT inside the prose scroll frame, so it never covers text.
+     A lore check's notes (ADR-0098) take the same row; one review is open per editor. -->
+{#if lineEditReview?.lineNotes}
+  <LineNoteReviewBar
+    lineNotes={lineEditReview.lineNotes}
+    meta={lineEditReview.meta}
+    generating={lineEditReview.generating}
+    onDismissAll={() => lineEditReview?.dismissAllLineNotes()}
+    onRetry={() => lineEditReview?.retry()}
+  />
+{:else if lineEditReview?.lineEdits}
   <LineEditReviewBar
     lineEdits={lineEditReview.lineEdits}
     meta={lineEditReview.meta}

@@ -62,6 +62,11 @@ class DispositionMappingTests(unittest.TestCase):
         self.assertEqual(prompt_disposition(_strategy("inline_edits"), is_snippet=False), "Revise prose")
         self.assertEqual(prompt_runnable("Revise prose", []), "")
 
+    def test_inline_notes_always_revises_prose(self) -> None:
+        # #2490: a lore check targets the selection too, so no destination is needed.
+        self.assertEqual(prompt_disposition(_strategy("inline_notes"), is_snippet=False), "Revise prose")
+        self.assertEqual(prompt_runnable("Revise prose", []), "")
+
     def test_conversation_splits_on_commit(self) -> None:
         # No strategy at all (every new prompt, ADR-0065 Amendment 2) → plain Chat.
         self.assertEqual(prompt_disposition(None, is_snippet=False), "Chat")

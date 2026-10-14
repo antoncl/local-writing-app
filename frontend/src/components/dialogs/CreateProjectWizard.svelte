@@ -106,6 +106,17 @@
             <div class="wizard-error" role="alert">{wizard.rootError}</div>
           {/if}
         {:else if wizard.currentStep.id === "location"}
+          {#if wizard.firstRun}
+            <p class="muted">
+              Already have a project?
+              <button
+                type="button"
+                class="open-existing"
+                data-testid="wizard-open-existing"
+                on:click={() => wizard.openExistingInstead()}>Open an existing project…</button
+              >
+            </p>
+          {/if}
           <label>
             Project name
             <input
@@ -588,6 +599,16 @@
 
   /* The inline hire draft + "+ Hire" launcher use the shared .inline-form* /
      .inline-add-btn primitives in styles.css (#619). */
+
+  .open-existing {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+  }
 
   .assistant-rows {
     list-style: none;

@@ -109,6 +109,8 @@ you can default; skipping should never be the attractive option"):
 ```
 1. Root folder            (first-run / no root configured — unconditional when shown)
 2. Location + inheritance  → declares the chain; everything downstream resolves against it
+                              (first run only: an "Open an existing project…" link leaves the wizard
+                              for the Open Project Folder picker, #2467)
 3. AI policy = the GATE    → resolved from the chain, or asked when nothing to inherit
      ├─ if AI on & no provider yet → provider credentials / Ollama  (conditional substrate)
      └─ if AI on                   → assistant reorder + inline hire

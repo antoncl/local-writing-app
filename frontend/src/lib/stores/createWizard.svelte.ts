@@ -121,6 +121,9 @@ class CreateWizard {
   // policy belongs: the app-wide default (first run) or the new project
   // (subsequent). See `submit()`.
   #firstRun = $state(false);
+  get firstRun(): boolean {
+    return this.#firstRun;
+  }
   // Locale defaults are seeded into the review overrides once per location
   // (#1415). Reset on `reset()` and whenever the ancestry changes
   // (`#loadCandidates`), so a new chain re-seeds; kept across Back/forward within
@@ -130,6 +133,8 @@ class CreateWizard {
   // ---- Injected host hooks (set in App.onMount) ----
   onError: (message: string) => void = () => {};
   onSaveRootFolder: (folder: string) => Promise<void> = async () => {};
+  // First-run escape hatch (#2467): hand off to the app's Open Project Folder picker.
+  onOpenExisting: () => void = () => {};
   // aiPolicy is applied to the freshly-created (now open) project by the host,
   // right after create; undefined leaves no stated policy (inherit).
   // `nodeMetadata` is the review pane's overrides (only the fields the author
@@ -350,6 +355,13 @@ class CreateWizard {
 
   close() {
     this.open = false;
+  }
+
+  // First run only (#2467): a writer with a project already on disk leaves the
+  // create flow for the same picker the TopBar's "Open folder…" uses.
+  openExistingInstead() {
+    this.close();
+    this.onOpenExisting();
   }
 
   // ---- Step navigation ----

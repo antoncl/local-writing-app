@@ -37,7 +37,9 @@ The wizard has a few steps; you can go **Back** at any point:
    Under **Inherit from**, a brand-new project will usually say *"Nothing to
    inherit from here — this project stands alone."* That's exactly right for your
    first book; inheritance is for later, when you build a series or a shared
-   universe.
+   universe. If you already have a project on disk, the first-time wizard also
+   offers **Open an existing project…** here, which closes it and lets you pick
+   that folder instead.
 3. **AI** — leave this **Off** for now (you can turn it on any time). We'll come
    back to it below.
 4. **Review** and **Describe** — glance over the defaults, add an optional

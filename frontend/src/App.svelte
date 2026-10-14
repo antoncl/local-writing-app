@@ -266,6 +266,7 @@
     // resolved path/title/declaration on Create.
     createWizard.onError = (message) => { error = message; };
     createWizard.getStartPath = () => projectPath;
+    createWizard.onOpenExisting = () => projectChooser.openForOpenProject();
     createWizard.onSaveRootFolder = (folder) => projectSession.saveDefaultProjectsFolder(folder);
     createWizard.onCreateProject = (path, title, inherits, aiPolicy, nodeMetadata, description) =>
       projectSession.createProjectAt(path, title, inherits, aiPolicy, nodeMetadata, description);

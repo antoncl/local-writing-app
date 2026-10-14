@@ -51,3 +51,32 @@ describe("CreateProjectWizard AI step", () => {
     expect(screen.queryByText("Book A Local")).toBeNull();
   });
 });
+
+// #2467: a first-run writer with an existing project needs a way out of create.
+describe("CreateProjectWizard open-existing link", () => {
+  it("shows on the first-run location step and calls through", async () => {
+    const onOpenExisting = vi.fn();
+    createWizard.onOpenExisting = onOpenExisting;
+    createWizard.defaultProjectsFolder = "";
+    createWizard.start();
+    createWizard.rootFolderDraft = "C:/projects";
+    createWizard.onSaveRootFolder = async () => {
+      createWizard.defaultProjectsFolder = "C:/projects";
+    };
+    for (let i = 0; i < 2 && createWizard.currentStep.id !== "location"; i++) await createWizard.next();
+    expect(createWizard.currentStep.id).toBe("location");
+
+    render(CreateProjectWizard);
+    (await screen.findByTestId("wizard-open-existing")).click();
+    expect(onOpenExisting).toHaveBeenCalledTimes(1);
+    expect(createWizard.open).toBe(false);
+  });
+
+  it("is absent when the wizard is not on first run", async () => {
+    createWizard.defaultProjectsFolder = "C:/projects";
+    createWizard.start();
+    expect(createWizard.currentStep.id).toBe("location");
+    render(CreateProjectWizard);
+    expect(screen.queryByTestId("wizard-open-existing")).toBeNull();
+  });
+});
